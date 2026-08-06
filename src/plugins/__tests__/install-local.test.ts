@@ -12,6 +12,7 @@ import {
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
+import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
 
 function manifestSha(manifest: unknown): string {
   return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
@@ -372,6 +373,62 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(restoredRegistry.plugins.some((entry) => entry.id === "test-plugin")).toBe(true);
     expect(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"))
       .toBe(oldReceipt);
+  });
+
+  it("does not restore a predecessor after committed local publication failure", async () => {
+    const service = makeService();
+    await service.installLocal(sourceDir, preparedActivationOptionsForTest);
+    await writeFile(
+      join(sourceDir, "plugin.json"),
+      JSON.stringify({
+        id: "test-plugin",
+        name: "Test Plugin",
+        version: "2.0.0",
+        description: "committed candidate",
+        publisher: "tests",
+        entry: "dist/hostPlugin.js",
+      }),
+      "utf-8",
+    );
+    const publicationCause = new Error("local projection publish failed");
+
+    const failure = await service.installLocal(sourceDir, {
+      activatePreparedArtifact: async (prepared) => {
+        const retirement = Promise.resolve();
+        const committed = Object.freeze({
+          result: await prepared.durableCommit(),
+          retirement,
+          completion: retirement,
+          retirementDeferred: false,
+        });
+        throw new CommittedPluginGenerationPublicationError(
+          "test-plugin",
+          "g2",
+          publicationCause,
+          { retired: retirement } as never,
+          committed,
+        );
+      },
+    }).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(CommittedPluginGenerationPublicationError);
+    expect(failure).toMatchObject({ publicationCause, committed: { result: "test-plugin/plugin.json" } });
+    expect(JSON.parse(await readFile(join(pluginsDir, "test-plugin", "plugin.json"), "utf8")))
+      .toMatchObject({ version: "2.0.0" });
+    expect(JSON.parse(await readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf8")))
+      .toMatchObject({ version: "2.0.0" });
+    const registry = JSON.parse(await readFile(registryPath, "utf8")) as {
+      plugins: Array<{ pendingUpdate?: unknown; pendingCleanup?: unknown }>;
+    };
+    expect(registry.plugins[0]?.pendingUpdate).toBeUndefined();
+    expect(registry.plugins[0]?.pendingCleanup).toBeUndefined();
+    const rollbackBackups = await readdir(
+      join(pluginsDir, ".cache", "local-install-rollback"),
+    ).catch((error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return [];
+      throw error;
+    });
+    expect(rollbackBackups).toEqual([]);
   });
 
   it("retains a replacement backup when a transient restore fault requires retry", async () => {

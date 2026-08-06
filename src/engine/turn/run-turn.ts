@@ -9,14 +9,13 @@
 import { randomUUID } from "node:crypto";
 import type { LoopContext } from "./loop-context.js";
 import type { TurnCallbacks, TurnResult, TurnStopReason } from "./types.js";
-import type { ChatInputOrigin } from "../../shared/chat-origin.js";
+import type { ChatInputOrigin, RemoteControllerAuthority } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { MessageMeta } from "../llm/types.js";
 import { queryLoop } from "./query-loop.js";
 import { initialToolTrustOrigin, summarizePermissionUserIntent,
 } from "./trust-origin.js";
-import { estimateRequestInputProjection, projectNextTurnInputTokens,
-} from "../request-input-projection.js";
+import { projectNextTurnInputTokens } from "../request-input-projection.js";
 import { markStaleToolResults } from "../auto-compact.js";
 import { normalizeAiSdkUsageForCost } from "../llm/pricing.js";
 import { stripLeadingSlash } from "../../shared/slash-sanitizer.js";
@@ -31,6 +30,9 @@ import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import type { A2AAgentCausalContext } from "../a2a-agent-message-envelope.js";
 import { createRequestAnchor } from "../../tools/pipeline/rationale-control.js";
+import { providerMatchesActiveChatRuntime } from "./provider.js";
+import { aggregateSubscriptionUsage } from "./subscription-usage-telemetry.js";
+import type { MemoryCaptureTaintReason } from "../../memory/memory-capture-service.js";
 
 const log = createLogger("lvis");
 
@@ -38,6 +40,7 @@ function commitsHostInjectedMessages(stopReason: TurnStopReason | undefined,
 ): boolean {
   return stopReason === "end_turn" || stopReason === "input-required";
 }
+
 
 export async function runTurn(
   self: LoopContext,
@@ -75,6 +78,8 @@ export async function runTurn(
     spawnDepth?: number;
       /** Internal provenance label prepended to ApprovalGate reasons. */
       approvalReasonPrefix?: string;
+      /** Host-owned remote-controller authority, independent of changing tool taint. */
+      remoteControllerAuthority?: RemoteControllerAuthority;
       /** DLP-masked durable child messages joined to this turn after the prompt gate. */
       initialGuidance?: string;
       /** Host-owned causal hop inherited from durable A2A guidance. */
@@ -98,8 +103,15 @@ export async function runTurn(
     );
     }
     const inputOrigin: ChatInputOrigin = options.inputOrigin;
+    const isRemoteControllerTurn = options.remoteControllerAuthority !== undefined;
     const turnInput = isUserKeyboardOrigin(inputOrigin) ? input : stripLeadingSlash(input);
     const attachmentParts = options.attachments ?? [];
+    const memoryCaptureTaint = new Set<MemoryCaptureTaintReason>();
+    if (!isUserKeyboardOrigin(inputOrigin)) memoryCaptureTaint.add("non-keyboard-origin");
+    if (attachmentParts.length > 0) memoryCaptureTaint.add("attachment");
+    if (options.initialGuidance) memoryCaptureTaint.add("initial-guidance");
+    if (options.a2aCausalContext) memoryCaptureTaint.add("a2a-causal-context");
+    if (options.originSource) memoryCaptureTaint.add("overlay-origin");
     const toolTrustOrigin = attachmentParts.length > 0
       ? "file-content"
       : initialToolTrustOrigin(inputOrigin, turnInput);
@@ -123,7 +135,20 @@ export async function runTurn(
 
     self.tracer.step("REQUEST_ENTRY", { inputLen: turnInput.length, inputOrigin,
   });
-    if (!self.provider) {
+    let activeChatRuntime = self.deps.settingsService.get("llm").activeChatRuntime;
+    if (!providerMatchesActiveChatRuntime(self.provider, activeChatRuntime)) {
+      try {
+        // Settings IPC updates both loops synchronously before persistence, but
+        // this execution-boundary retry closes any stale instance that reached
+        // the loop through a non-IPC construction or an earlier failed refresh.
+        self.refreshProvider();
+      } catch {
+        // refreshProvider clears the old provider before building. Treat a
+        // rebuild failure as unconfigured rather than retaining an API client.
+      }
+      activeChatRuntime = self.deps.settingsService.get("llm").activeChatRuntime;
+    }
+    if (!providerMatchesActiveChatRuntime(self.provider, activeChatRuntime)) {
       const err = t("be_conversationLoop.llmProviderNotConfigured");
       callbacks?.onError?.(err);
       throw new Error(err);
@@ -185,7 +210,7 @@ export async function runTurn(
     // command-route short-circuit). OBSERVE-ONLY — the dispatch result is
     // discarded. The once-per-session guard keeps "SessionStart" semantics even
     // though runTurn runs every turn.
-    if (self.sessionStartFiredFor !== effectiveSessionId) {
+    if (!isRemoteControllerTurn && self.sessionStartFiredFor !== effectiveSessionId) {
       self.sessionStartFiredFor = effectiveSessionId;
       await self.fireLifecycleEvent(
         "SessionStart",
@@ -200,18 +225,19 @@ export async function runTurn(
     // (or a fail-closed timeout/error/bad-json/spawn-error) the turn is refused
     // and queryLoop NEVER runs. With NO matching trusted hook the dispatch
     // returns `allow` and the turn proceeds byte-identically to today.
-    const promptGateInput = options?.initialGuidance
-      ? `${turnInput}\n\n${options.initialGuidance}`
-      : turnInput;
-    const promptGate = await self.fireUserPromptSubmit(
-      {
-        inputText: promptGateInput,
-        inputOrigin,
-        route: routeResult.route,
-        classification: classification.type,
-      },
-      effectiveSessionId,
-    );
+    const promptGate = isRemoteControllerTurn
+      ? { decision: "allow" as const, reason: "Remote-controller pre-approval prompt hook disabled" }
+      : await self.fireUserPromptSubmit(
+          {
+            inputText: options?.initialGuidance
+              ? `${turnInput}\n\n${options.initialGuidance}`
+              : turnInput,
+            inputOrigin,
+            route: routeResult.route,
+            classification: classification.type,
+          },
+          effectiveSessionId,
+        );
     if (promptGate.decision === "deny") {
       // Refuse the turn. Mirror handleCommand's blocked return: surface the
       // refusal text to the renderer, append nothing to history (the prompt
@@ -385,6 +411,11 @@ export async function runTurn(
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
     // build() 호출 전에 setToolScope 수행.
     const scope = self.resolveToolScope(input);
+    const subscriptionRuntime = self.provider?.subscriptionRuntime;
+    const isSubscriptionRuntime = subscriptionRuntime !== undefined;
+    const subscriptionAuditRoute = subscriptionRuntime
+      ? `subscription:${subscriptionRuntime.provider}/${subscriptionRuntime.model || "default"}`
+      : undefined;
     const initialToolSchemas = self.rebuildToolSchemas(scope);
 
     // ─── Token Preflight (same-session checkpoint compaction) ───
@@ -400,6 +431,7 @@ export async function runTurn(
           options?.rolePrompt,
           initialToolSchemas,
           effectiveSessionId,
+          input,
         ),
         turnSignal,
         callbacks,
@@ -411,6 +443,7 @@ export async function runTurn(
       options?.originSource ?? null,
       options?.rolePrompt,
       effectiveSessionId,
+      input,
     );
     // §4.5.2 step 6 — PROMPT_ASSEMBLE
     self.tracer.step("PROMPT_ASSEMBLE", {
@@ -438,12 +471,15 @@ export async function runTurn(
           sessionIdOverride: options?.sessionIdOverride,
           spawnDepth: options?.spawnDepth,
           approvalReasonPrefix: options?.approvalReasonPrefix,
+          remoteControllerAuthority: options?.remoteControllerAuthority,
           inputOrigin,
           a2aCausalContext: options?.a2aCausalContext,
           toolTrustOrigin,
           ...(requestAnchor ? { requestAnchor } : {}),
           permissionUserIntent,
           rolePrompt: options?.rolePrompt,
+          onMemoryCaptureTaint: (reason) => memoryCaptureTaint.add(reason),
+          memoryQuery: input,
         },
       ),
     );
@@ -472,7 +508,7 @@ export async function runTurn(
     const postTurnToolExposure = self.buildToolExposureMetrics(
       scope,
       result.finalToolSchemas,
-      estimateRequestInputProjection({
+      self.projectProviderRequestInput({
         systemPrompt,
         messages: self.history.getMessages(),
         toolSchemas: result.finalToolSchemas,
@@ -509,18 +545,31 @@ export async function runTurn(
         sessionId: self.sessionId,
         ...self.getSessionProjectContext(),
         messages: self.history.getMessages(),
-        input,
+        // Only the original textual user input can ever be capture evidence.
+        // The assistant output, attachments, tool results, and staged guidance
+        // are excluded by the host gate below.
+        input: turnInput,
+        inputOrigin,
+        memoryCaptureTaint: [...memoryCaptureTaint],
         output: result.text,
+        stopReason: result.stopReason,
         toolCalls: result.toolCalls.map((tc) => ({
           name: tc.name,
           isError: false,
         })),
-        tokenUsage: result.usage,
-        usageByModel: result.usageByModel,
         toolExposure: postTurnToolExposure,
-        route: routeResult.route,
-        vendorProvider: result.vendorProvider,
-        vendorModel: result.vendorModel,
+        route: subscriptionAuditRoute ?? routeResult.route,
+        ...(isSubscriptionRuntime && result.subscriptionUsage.length > 0
+          ? { subscriptionUsage: result.subscriptionUsage }
+          : {}),
+        ...(!isSubscriptionRuntime
+          ? {
+              tokenUsage: result.usage,
+              usageByModel: result.usageByModel,
+              vendorProvider: result.vendorProvider,
+              vendorModel: result.vendorModel,
+            }
+          : {}),
       });
       // PostTurnHookChain owns the durable transcript projection: mark-stale
       // compaction plus marker-stripped assistant output. Keep in-memory history
@@ -578,20 +627,26 @@ export async function runTurn(
       // child loops with `postTurnHookChain: undefined`, which would
       // otherwise log every sub-agent LLM turn as the bare `"llm"` route
       // and lose vendor/model granularity in `~/.lvis/audit.jsonl`.
-      const auditRoute = result.usage
-        ? `${result.vendorProvider}/${result.vendorModel}`
-        : routeResult.route;
-      const auditTokenUsage = normalizeAiSdkUsageForCost(
-        result.usage,
-        result.vendorProvider,
-      );
-      const auditUsageByModel = result.usageByModel?.map((segment) => ({
-        ...segment,
-        tokenUsage: normalizeAiSdkUsageForCost(
-          segment.tokenUsage,
-          segment.vendorProvider,
-        ),
-      }));
+      const auditRoute = subscriptionAuditRoute
+        ?? (result.usage && result.vendorProvider && result.vendorModel
+          ? `${result.vendorProvider}/${result.vendorModel}`
+          : routeResult.route);
+      const auditVendorProvider = isSubscriptionRuntime ? undefined : result.vendorProvider;
+      const auditTokenUsage = auditVendorProvider
+        ? normalizeAiSdkUsageForCost(
+          result.usage,
+          auditVendorProvider,
+        )
+        : undefined;
+      const auditUsageByModel = isSubscriptionRuntime
+        ? undefined
+        : result.usageByModel?.map((segment) => ({
+          ...segment,
+          tokenUsage: normalizeAiSdkUsageForCost(
+            segment.tokenUsage,
+            segment.vendorProvider,
+          ),
+        }));
       self.auditLogger.logTurn({
         sessionId: self.sessionId,
         input,
@@ -602,6 +657,9 @@ export async function runTurn(
         })),
         tokenUsage: auditTokenUsage,
         usageByModel: auditUsageByModel,
+        ...(isSubscriptionRuntime && result.subscriptionUsage.length > 0
+          ? { subscriptionUsage: result.subscriptionUsage }
+          : {}),
         toolExposure: postTurnToolExposure,
         route: auditRoute,
       });
@@ -632,8 +690,12 @@ export async function runTurn(
       result.stopReason !== "stream-error" &&
       typeof result.text === "string" &&
       result.text.trim().length > 0;
+    const billableTurnUsage = isSubscriptionRuntime ? undefined : result.usage;
+    const billableUsageByModel = isSubscriptionRuntime ? [] : result.usageByModel;
+    const subscriptionTurnUsage = isSubscriptionRuntime ? result.subscriptionUsage : [];
+    const subscriptionTotals = aggregateSubscriptionUsage(subscriptionTurnUsage);
     log.info(
-      `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text?.trim().length ?? 0} usage=${result.usage ? `in=${result.usage.inputTokens} out=${result.usage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
+      `turn_summary: emit decision — stopReason="${result.stopReason}" textLen=${result.text?.trim().length ?? 0} usage=${billableTurnUsage ? `in=${billableTurnUsage.inputTokens} out=${billableTurnUsage.outputTokens}` : "MISSING"} → willEmit=${willEmitSummary}`,
     );
     if (willEmitSummary) {
       // tokensIn = turn-end projected context input. It is calibrated from
@@ -646,7 +708,7 @@ export async function runTurn(
       //   `result.usage` 는 turn-aggregate (queryLoop:1098 turnUsage), 그러므로
       //   여기서 단순 산수만 하면 정확. 이전 badge 버그는 last-round raw 와
       //   turn-aggregate cache 를 빼느라 음수 → 0 으로 잘리던 mismatch.
-      const postTurnProjection = estimateRequestInputProjection({
+      const postTurnProjection = self.projectProviderRequestInput({
         systemPrompt,
         messages: self.history.getMessages(),
         toolSchemas: result.finalToolSchemas,
@@ -660,25 +722,28 @@ export async function runTurn(
       });
       self.lastContextInputTokens = turnTokensIn;
       self.lastContextInputProjectionTokens = postTurnProjection.totalTokens;
-      turnTokensOut = result.usage?.outputTokens ?? 0;
-      const turnCacheRead = result.usage?.cacheReadTokens ?? 0;
-      const turnCacheWrite = result.usage?.cacheWriteTokens ?? 0;
-      const turnFreshInput = Math.max(
-        0,
-        (result.usage?.inputTokens ?? 0) - turnCacheRead - turnCacheWrite,
-      );
+      turnTokensOut = billableTurnUsage?.outputTokens
+        ?? (subscriptionTotals.outputTokens + subscriptionTotals.reasoningOutputTokens);
+      const turnCacheRead = billableTurnUsage?.cacheReadTokens ?? subscriptionTotals.cacheReadTokens;
+      const turnCacheWrite = billableTurnUsage?.cacheWriteTokens ?? subscriptionTotals.cacheWriteTokens;
+      const turnFreshInput = isSubscriptionRuntime
+        ? subscriptionTotals.inputTokens
+        : Math.max(
+          0,
+          (billableTurnUsage?.inputTokens ?? 0) - turnCacheRead - turnCacheWrite,
+        );
       const breakdown =
         turnToolBreakdown.size > 0
           ? Object.fromEntries(turnToolBreakdown.entries())
           : undefined;
       const uniqueUsageModelKeys = new Set(
-        result.usageByModel?.map(
+        billableUsageByModel.map(
           (segment) => `${segment.vendorProvider}\u0000${segment.vendorModel}`,
-        ) ?? [],
+        ),
       );
       const singleUsageModel =
-        uniqueUsageModelKeys.size === 1 && result.usageByModel?.[0]
-          ? result.usageByModel[0]
+        uniqueUsageModelKeys.size === 1 && billableUsageByModel[0]
+          ? billableUsageByModel[0]
           : undefined;
       const turnSummaryPayload = {
         turnDurationMs: Math.max(0, Date.now() - turnStartedAt),
@@ -695,8 +760,11 @@ export async function runTurn(
               vendorModel: singleUsageModel.vendorModel,
             }
           : {}),
-        ...(result.usageByModel.length > 0
-          ? { usageByModel: result.usageByModel }
+        ...(billableUsageByModel.length > 0
+          ? { usageByModel: billableUsageByModel }
+          : {}),
+        ...(subscriptionTurnUsage.length > 0
+          ? { subscriptionUsage: subscriptionTurnUsage }
           : {}),
         ...(breakdown ? { breakdown } : {}),
       };

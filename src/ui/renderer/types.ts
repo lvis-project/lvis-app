@@ -16,7 +16,29 @@ import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defau
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
 import type { BundleId } from "../../shared/theme-bundles.js";
 import type { LlmModelListCache } from "../../shared/llm-model-list.js";
+import type {
+  CodexSubscriptionActionResult,
+  CodexSubscriptionDeviceCodeResult,
+  CodexSubscriptionModelsResult,
+} from "../../shared/codex-subscription.js";
+import type {
+  AcpSubscriptionActionResult,
+  AcpSubscriptionProviderId,
+} from "../../shared/acp-subscription.js";
+import type {
+  ActiveChatRuntime,
+  SubscriptionLoginMethod,
+  SubscriptionRuntimeActionResult,
+  SubscriptionRuntimeErrorCode,
+  SubscriptionRuntimeId,
+  SubscriptionRuntimeModelsResult,
+  SubscriptionUsageSource,
+  SubscriptionRuntimeStatusUpdatedEvent,
+} from "../../shared/subscription-runtime.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
+import type { TailnetSharingOwnerApi } from "../../shared/tailnet-sharing.js";
+import type { TelegramConnectionOwnerApi } from "../../shared/telegram-connection.js";
+import type { AwayAuthorityOwnerApi } from "../../shared/away-authority-arm.js";
 import type { RolePreset } from "../../data/role-presets.js";
 import type { PermissionEvaluationContext as PermissionEvaluationContextShape } from "../../permissions/evaluation-context.js";
 import type { ApprovalPurposeSuggestion } from "../../shared/permission-review-status.js";
@@ -80,6 +102,13 @@ export type MarketplaceItem = {
   installPolicy?: "admin" | "user";
   pluginType?: MarketplacePackageType;
   packageAsset?: MarketplacePackageAsset;
+  /** Display-only compatibility result: update LVIS before installing. */
+  upgradeRequired?: {
+    code: "upgrade_required";
+    /** Omitted only when Marketplace cannot provide a trusted exact minimum. */
+    minAppVersion?: string;
+    message: string;
+  };
   mcpAuth?: {
     mode: "none" | "api-key" | "sso" | "oauth";
     transport?: "stdio" | "http";
@@ -203,16 +232,18 @@ export type LLMVendorSettingsRenderer = {
   thinkingBudgetTokens: number;
 };
 
+/** How eligible user input is proposed for long-term memory. */
+export type MemoryCaptureMode = "off" | "review" | "auto";
+
 export type AppSettings = {
   llm: {
     provider: string;
+    activeChatRuntime?: ActiveChatRuntime;
     marketplaceProviderPresetId?: string;
     vendors: Record<string, LLMVendorSettingsRenderer>;
     streamSmoothing: "none" | "word" | "char";
     fallbackChain: Array<{ provider: string; model: string }>;
     modelListCache?: LlmModelListCache;
-    /** Manual-mode Chromium host-resolver map (persisted /etc/hosts-style text). */
-    hostResolverMap?: string;
   };
   chat: { systemPrompt: string; autoCompact: boolean };
   webSearch: { provider: string };
@@ -296,6 +327,9 @@ export type AppSettings = {
   /** Experimental feature flags — all default false. */
   features?: {
     idlePreferenceRefresh?: boolean;
+    idleMemoryConsolidation?: boolean;
+    /** Default off: model-reviewed memory capture needs an explicit opt-in. */
+    memoryCaptureMode?: MemoryCaptureMode;
     /** Idle parents may start a gated turn for queued background sub-agent messages. Default false. */
     subAgentAutonomousWake?: boolean;
     /** #893 — `true` after the user has dismissed the first-boot onboarding. */
@@ -356,6 +390,32 @@ export type UsageTotals = {
 export type UsagePerX = UsageTotals & { vendor: string; model: string };
 export type UsageTrendPt = UsageTotals & { date: string };
 export type UsageConv = UsageTotals & { sessionId: string; turns: number; firstInput?: string };
+
+/** Token-only telemetry for authenticated subscription runtimes. */
+type SubscriptionUsageTotals = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
+  reasoningOutputTokens: number;
+  totalTokens: number;
+  segments: number;
+};
+type SubscriptionUsagePerX = SubscriptionUsageTotals & {
+  provider: SubscriptionRuntimeId;
+  model: string;
+};
+type SubscriptionUsageTrendPt = SubscriptionUsageTotals & { date: string };
+type SubscriptionUsageSummaryShape = {
+  today: SubscriptionUsageTotals;
+  thisWeek: SubscriptionUsageTotals;
+  thisMonth: SubscriptionUsageTotals;
+  perRuntime: SubscriptionUsagePerX[];
+  perModel: SubscriptionUsagePerX[];
+  trend: SubscriptionUsageTrendPt[];
+  sources: Record<SubscriptionUsageSource, SubscriptionUsageTotals>;
+};
+
 export type UsageSummaryShape = {
   today: UsageTotals;
   thisWeek: UsageTotals;
@@ -364,6 +424,8 @@ export type UsageSummaryShape = {
   perModel: UsagePerX[];
   trend: UsageTrendPt[];
   topConversations: UsageConv[];
+  /** Kept separate from API-key usage and all cost calculations. */
+  subscription?: SubscriptionUsageSummaryShape;
   generatedAt: string;
 };
 
@@ -422,8 +484,57 @@ export type ProjectQueryOptions = {
   includeUnscoped?: boolean;
 };
 
+/** Host-owned metadata attached to a managed long-term memory. */
+type MemoryEntry = {
+  filename: string;
+  title: string;
+  content: string;
+  updatedAt?: string;
+  projectRoot?: string;
+  projectName?: string;
+  id?: string;
+  kind?: "preference" | "constraint" | "fact" | "goal" | "reference" | "note";
+  state?: "candidate" | "active";
+  source?: "user" | "assistant" | "import";
+  createdAt?: string;
+  confirmedAt?: string;
+  expiresAt?: string;
+  pinned?: boolean;
+};
+
+/** A review-only memory always has an immutable id and remains outside prompts. */
+export type MemoryCandidate = MemoryEntry & { id: string; state: "candidate" };
+
+type MemoryMutationResult =
+  | { ok: true; entry?: MemoryEntry }
+  | { ok: false; error: string };
+
+type LongTermMemoryConsolidationScopeResult = {
+  status: "updated" | "up-to-date" | "empty";
+  sourceCount: number;
+  consolidatedAt?: string;
+};
+
+type LongTermMemoryConsolidationResult =
+  | { ok: true; global: LongTermMemoryConsolidationScopeResult; project?: LongTermMemoryConsolidationScopeResult }
+  | { ok: false; error: string };
+
 export type PluginMarketplaceActionResult =
-  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; rolledBackTo?: string; version?: string }
+  | {
+      ok: true;
+      pluginId: string;
+      installed?: true;
+      uninstalled?: true;
+      rolledBackTo?: string;
+      version?: string;
+      /**
+       * The install replaced nothing — the marketplace carries the same
+       * version, receipt, and artifact already on disk. For a repair attempt
+       * this is the difference between "reinstalled" and "there was nothing to
+       * reinstall but the broken bundle".
+       */
+      unchanged?: true;
+    }
   | { ok: false; error: string; message?: string };
 
 export type PluginMarketplaceInstallOptions = {
@@ -458,6 +569,9 @@ export type LvisApi = {
     task: (taskHandle: string) => Promise<RemoteA2AStatusResult>;
     action: RemoteA2AActionCall;
   };
+  tailnetSharing: TailnetSharingOwnerApi;
+  telegramConnection: TelegramConnectionOwnerApi;
+  awayAuthority: AwayAuthorityOwnerApi;
   /**
    * Deterministic file:// URL of the bundled `plugin-ui-shell.html`. Same
    * stability guarantee as `pluginPreloadUrl` — read directly from the host
@@ -471,11 +585,10 @@ export type LvisApi = {
   }) => Promise<{ ok: boolean; error?: string }>;
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
-  /** Save the manual host-resolver map and relaunch the app to apply it. */
-  applyHostMap: (
-    hostResolverMap: string,
-  ) => Promise<{ ok: boolean; error?: string; message?: string }>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
+  onSubscriptionRuntimeStatusUpdated: (
+    handler: (event: SubscriptionRuntimeStatusUpdatedEvent) => void,
+  ) => () => void;
   listPersonaPromptSummaries: () => Promise<{ prompts: Array<Pick<RolePreset, "id" | "name">> }>;
   listPersonaPrompts: () => Promise<{ prompts: RolePreset[] }>;
   savePersonaPrompt: (prompt: { id: string; name: string; systemPromptAdd: string }) => Promise<
@@ -491,6 +604,34 @@ export type LvisApi = {
   hasApiKey: (vendor?: string) => Promise<boolean>;
   deleteApiKey: (vendor: string) => Promise<{ ok: true }>;
   listLlmModels: (request: LlmModelListRequest) => Promise<LlmModelListResult>;
+  codexSubscriptionStatus: () => Promise<CodexSubscriptionActionResult>;
+  codexSubscriptionStartBrowserLogin: () => Promise<CodexSubscriptionActionResult>;
+  codexSubscriptionStartDeviceCodeLogin: () => Promise<CodexSubscriptionDeviceCodeResult>;
+  codexSubscriptionCancelLogin: () => Promise<CodexSubscriptionActionResult>;
+  codexSubscriptionLogout: () => Promise<CodexSubscriptionActionResult>;
+  codexSubscriptionListModels: () => Promise<CodexSubscriptionModelsResult>;
+  subscriptionRuntimeStatus: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionChooseRuntime: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionForgetRuntime: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionVerifyRuntime: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionStartLogin: (provider: SubscriptionRuntimeId, method: SubscriptionLoginMethod) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionOpenLoginBrowser: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionCancelLogin: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionLogout: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionListModels: (provider: SubscriptionRuntimeId) => Promise<SubscriptionRuntimeModelsResult>;
+  subscriptionUseForChat: (provider: SubscriptionRuntimeId, model?: string) => Promise<SubscriptionRuntimeActionResult>;
+  subscriptionUseApiForChat: () => Promise<
+    | { ok: true }
+    | { ok: false; error: SubscriptionRuntimeErrorCode }
+  >;
+  acpSubscriptionStatus: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionChooseRuntime: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionForgetRuntime: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionVerify: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionStartLogin: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionOpenLoginBrowser: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionCancelLogin: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
+  acpSubscriptionLogout: (provider: AcpSubscriptionProviderId) => Promise<AcpSubscriptionActionResult>;
   installMarketplaceProviderPreset: (
     preset: MarketplaceInstalledProviderPreset,
   ) => Promise<SettingsUpdateResult>;
@@ -738,8 +879,11 @@ export type LvisApi = {
   starredAdd: (entry: { sessionId?: string; messageIndex: number; role: string; text: string }) => Promise<{ ok: boolean; entry?: { id: string; sessionId: string; messageIndex: number; role: string; text: string; starredAt: string } }>;
   starredRemove: (opts: { id?: string; sessionId?: string; messageIndex?: number }) => Promise<{ ok: boolean }>;
   memoryListEntries: (opts?: ProjectQueryOptions) => Promise<Array<{ filename: string; title: string; content: string; updatedAt?: string; projectRoot?: string; projectName?: string }>>;
+  memoryListCandidates: (opts?: ProjectQueryOptions) => Promise<MemoryCandidate[]>;
   memorySaveEntry: (t: string, c: string, opts?: ProjectQueryOptions) => Promise<unknown>;
-  memoryDeleteEntry: (f: string) => Promise<void>;
+  memoryDeleteEntry: (f: string, opts?: ProjectQueryOptions) => Promise<MemoryMutationResult>;
+  memoryActivateCandidate: (id: string, opts?: ProjectQueryOptions) => Promise<MemoryMutationResult>;
+  memoryDeleteCandidate: (id: string, opts?: ProjectQueryOptions) => Promise<MemoryMutationResult>;
   memorySearchEntries: (q: string, opts?: ProjectQueryOptions) => Promise<Array<{ filename?: string; title: string; content?: string; excerpt: string; updatedAt: string; projectRoot?: string; projectName?: string }>>;
   memoryGetIndex: (opts?: ProjectQueryOptions) => Promise<string>;
   memoryUpdateIndexIfUnchanged: (expectedContent: string, nextContent: string) => Promise<boolean>;
@@ -760,6 +904,7 @@ export type LvisApi = {
     | { ok: false; error: string }
   >;
   listMarketplacePlugins: () => Promise<MarketplaceItem[]>;
+  memoryRefreshLongTerm: () => Promise<LongTermMemoryConsolidationResult>;
   listAgentProfiles: () => Promise<{ agents: AssistantAgentSummary[] }>;
   listSkills: () => Promise<{ skills: AssistantSkillSummary[] }>;
   installAgentFromMarketplace: (slug: string) => Promise<
@@ -1246,9 +1391,19 @@ export type ApprovalRequest = {
   target?: { filePath?: string };
   isReadOnly?: boolean;
   mode?: "default" | "ask_all" | "plan" | "full_auto";
+  /**
+   * Host-owned id of the conversation that raised this approval. Sub-agents
+   * and side chats block on modals the user is not currently looking at, so
+   * the dialog and the queue name the asking conversation. Main-process
+   * value only — the renderer displays it and never supplies it.
+   */
+  sessionId?: string;
   /** Confused-deputy nonce issued by the main process; renderer echoes verbatim. */
   nonce?: string;
-  /** HMAC over (id, nonce, toolName, args) — echoed verbatim for confused-deputy defense. */
+  /**
+   * HMAC over (id, nonce, toolName, sessionId, args) — echoed verbatim for
+   * confused-deputy defense.
+   */
   hmac?: string;
   /**
    * Permission policy — present when `kind === "out-of-allowed-dir"`. Carries
@@ -1870,6 +2025,12 @@ export interface LvisAttachApi {
     bytes?: number;
     mimeType?: string;
     dataUrl?: string;
+    error?: string;
+  }>;
+  discardClipboardImage: (filePath: string) => Promise<{
+    ok: boolean;
+    /** The app revoked this rejected image's capability without pathname deletion. */
+    retained?: true;
     error?: string;
   }>;
   openExternal: (filePath: string) => Promise<{ ok: boolean; error?: string }>;

@@ -238,6 +238,8 @@ export function buildLvisNamespaceExtras() {
       ipcRenderer.invoke(CHANNELS.attach.readImage, filePath),
     saveClipboardImage: (base64: string) =>
       ipcRenderer.invoke(CHANNELS.attach.saveClipboardImage, { base64 }),
+    discardClipboardImage: (filePath: string) =>
+      ipcRenderer.invoke(CHANNELS.attach.discardClipboardImage, filePath),
     openExternal: (filePath: string) =>
       ipcRenderer.invoke(CHANNELS.attach.openExternal, filePath),
   },

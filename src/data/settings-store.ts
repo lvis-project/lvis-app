@@ -37,6 +37,7 @@ import { isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
 import {
   type LlmModelListCache,
 } from "../shared/llm-model-list.js";
+import type { ActiveChatRuntime } from "../shared/subscription-runtime.js";
 import {
   isMarketplaceProviderPresetId,
   marketplaceProviderPresetSecretKey,
@@ -57,6 +58,7 @@ import {
   marketplaceProviderPresetSecretInvalidationIds,
   mergeLlmPatch,
   normalizeA2ARemote,
+  normalizeActiveChatRuntime,
   normalizeAppearance,
   normalizeDiagnostics,
   normalizeFeatureFlags,
@@ -78,10 +80,11 @@ export type { ShortcutSettings, ShortcutSettingsPatch };
 
 /**
  * Single source of truth for the settings file path. Both `SettingsService`
- * (writer) and the pre-`whenReady` manual host-resolver reader derive the
- * settings path from this helper so the two can never drift onto different
- * files. `userDataPath` is `app.getPath("userData")` (e.g. on macOS
- * `~/Library/Application Support/LVIS`).
+ * (writer) and the pre-`whenReady` synchronous readers (e.g.
+ * `readPersistedAppModeSync`) derive the settings path from this helper so the
+ * two can never drift onto different files. `userDataPath` is
+ * `app.getPath("userData")` (e.g. on macOS `~/Library/Application
+ * Support/LVIS`).
  */
 export function settingsFilePath(userDataPath: string): string {
   return resolve(userDataPath, "lvis-settings.json");
@@ -107,6 +110,12 @@ export function settingsFilePath(userDataPath: string): string {
  *   the policy. Stale on-disk keys are dropped on next write.
  */
 export interface LLMSettings {
+  /**
+   * Selects the execution boundary for new chat turns. API credentials and
+   * their provider/model configuration remain under `provider` and `vendors`
+   * even while a subscription runtime is active.
+   */
+  activeChatRuntime: ActiveChatRuntime;
   provider: LLMVendor;
   /**
    * Marketplace custom provider preset selected in the provider picker.
@@ -124,18 +133,6 @@ export interface LLMSettings {
    * settings remount or offline restart.
    */
   modelListCache: LlmModelListCache;
-  /**
-   * Chromium host-resolver map. Persisted as /etc/hosts-style
-   * text (one "IP hostname" entry per line; blank lines and # comments
-   * ignored). Applied via Chromium `host-resolver-rules` command-line switch
-   * on next launch.
-   *
-   * Stored under the top-level `llm` namespace in the app settings file
-   * (`<userData>/lvis-settings.json`, where `<userData>` is
-   * `app.getPath("userData")`) to keep host-routing paired with the LLM
-   * endpoint it affects.
-   */
-  hostResolverMap?: string;
 }
 
 /**
@@ -144,13 +141,13 @@ export interface LLMSettings {
  * marketplace provider block.
  */
 export interface LLMSettingsPatch {
+  activeChatRuntime?: ActiveChatRuntime;
   provider?: LLMVendor;
   marketplaceProviderPresetId?: string;
   vendors?: Partial<Record<LLMVendor, Partial<LLMVendorSettings>>>;
   streamSmoothing?: "none" | "word" | "char";
   fallbackChain?: Array<{ provider: LLMVendor; model: string }>;
   modelListCache?: LlmModelListCache;
-  hostResolverMap?: string;
 }
 
 export interface ChatSettings {
@@ -195,6 +192,8 @@ export interface AuditSettings {
   auditRetentionDays: number;
 }
 
+export type MemoryCaptureMode = "off" | "review" | "auto";
+
 /**
  * Experimental feature flags — UI-toggleable, persisted to settings.json.
  * All fields default to false (opt-in). Safe to add new fields without
@@ -206,6 +205,19 @@ export interface FeatureFlags {
    * configured LLM to refresh user-preferences.md. Default false: manual only.
    */
   idlePreferenceRefresh?: boolean;
+  /**
+   * When true, idle IDLE_SCAN may send eligible active global and current
+   * explicit-project raw memories to the configured LLM to update a derived
+   * long-term overview. Default false: manual consolidation remains available.
+   */
+  idleMemoryConsolidation?: boolean;
+  /**
+   * Controls LLM-reviewed capture of durable memories from trusted keyboard
+   * turns. `off` makes no background reviewer call; `review` writes only a
+   * candidate; `auto` lets a host-validated high-confidence proposal become
+   * active. Explicitly saved user notes remain user-owned exact text.
+   */
+  memoryCaptureMode?: MemoryCaptureMode;
   /**
    * When true, a queued background sub-agent Message may start a new parent
    * turn while that exact parent session is loaded and idle. Default false:
@@ -1049,7 +1061,11 @@ export class SettingsService {
   }
 
   async replaceLlm(llm: LLMSettings): Promise<AppSettings> {
-    this.settings.llm = structuredClone(llm);
+    const replacement = structuredClone(llm);
+    this.settings.llm = {
+      ...replacement,
+      activeChatRuntime: normalizeActiveChatRuntime(replacement.activeChatRuntime),
+    };
     await this.saveSettings();
     return this.getAll();
   }
@@ -1101,6 +1117,15 @@ export class SettingsService {
 
   async deleteSecret(key: string): Promise<void> {
     await this.secretStore.delete(key);
+  }
+
+  /**
+   * Whether a secret written now would actually be encrypted at rest. A
+   * surface that stores a user credential must check this before offering to,
+   * rather than discovering it as a failure after the user has committed.
+   */
+  isSecretStorageEncrypted(): boolean {
+    return this.secretStore.canStoreEncrypted();
   }
 
   async deletePluginSecrets(pluginId: string, keys: Iterable<string>): Promise<number> {

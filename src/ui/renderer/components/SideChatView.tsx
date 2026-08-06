@@ -26,10 +26,31 @@ import { Textarea } from "../../../components/ui/textarea.js";
 import { TranscriptRenderer } from "./TranscriptRenderer.js";
 import { useSideChat } from "../hooks/use-side-chat.js";
 import type { LvisApi } from "../types.js";
+import { useOptionalChatContext } from "../context/ChatContext.js";
 
 export function SideChatView({ api }: { api: LvisApi }) {
   const { t } = useTranslation();
   const { entries, turnSummaryByTurnStart, isStreaming, sessionId, send, newSession, abort } = useSideChat(api);
+  const chatContext = useOptionalChatContext();
+  const subscriptionPending = chatContext?.subscriptionRuntimePolicy
+    ? chatContext.subscriptionRuntimePolicy.chatPending
+    : chatContext?.subscriptionPendingProvider !== undefined;
+  const settingsPending = chatContext?.settingsLoaded === false;
+  const subscriptionUnavailable = chatContext?.subscriptionRuntimePolicy
+    ? chatContext.subscriptionRuntimePolicy.chatUnavailable
+    : chatContext?.subscriptionUnavailableProvider !== undefined;
+  // Side chat is a second ConversationLoop, not a second credential policy.
+  // Read the app-level readiness contract so it cannot bypass a selected
+  // subscription login that is still checking, signed out, or unsupported.
+  const missingRuntimeCredential = chatContext?.hasApiKey === false;
+  const composerBlocked = settingsPending || subscriptionPending || subscriptionUnavailable || missingRuntimeCredential;
+  const composerStatus = settingsPending || subscriptionPending
+    ? t("subscriptionProvidersSection.statusChecking")
+    : subscriptionUnavailable
+      ? t("formatIpcError.subscriptionChatUnavailable")
+      : missingRuntimeCredential
+        ? t("chatView.noApiKeyTitle")
+        : null;
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -45,7 +66,7 @@ export function SideChatView({ api }: { api: LvisApi }) {
 
   const submit = () => {
     const text = draft.trim();
-    if (!text || isStreaming) return;
+    if (!text || isStreaming || composerBlocked) return;
     setDraft("");
     void send(text);
   };
@@ -100,11 +121,29 @@ export function SideChatView({ api }: { api: LvisApi }) {
             streaming={isStreaming}
             currentSessionId={sessionId ?? "side-chat"}
             turnSummaryByTurnStart={turnSummaryByTurnStart}
+            showTokenCostBadge={chatContext?.usageAvailable !== false}
           />
         )}
       </div>
 
       <div className="shrink-0 border-t p-2">
+        {composerStatus ? (
+          <div
+            className="mb-1.5 flex items-center justify-between gap-2 rounded border border-border-subtle bg-muted/(--opacity-subtle) px-2 py-1 text-[11px] text-muted-foreground"
+            data-testid="side-chat-runtime-status"
+          >
+            <span>{composerStatus}</span>
+            {chatContext?.onOpenSettings ? (
+              <button
+                type="button"
+                className="shrink-0 text-[11px] font-medium text-primary hover:underline"
+                onClick={() => chatContext.onOpenSettings("llm")}
+              >
+                {t("chatView.openSettingsButton")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
         <div className="flex items-end gap-1.5">
           <Textarea
             value={draft}
@@ -138,7 +177,7 @@ export function SideChatView({ api }: { api: LvisApi }) {
               size="icon"
               className="h-8 w-8 shrink-0"
               onClick={submit}
-              disabled={draft.trim().length === 0}
+              disabled={composerBlocked || draft.trim().length === 0}
               data-testid="side-chat-send"
               aria-label={t("chatPreviewRail.sideChat.send")}
             >

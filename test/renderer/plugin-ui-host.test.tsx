@@ -8,6 +8,7 @@
  *      including the cold-boot path where did-attach is missed by the host.
  *   3. Falls back to error text when asset URLs are missing.
  *   4. Shows error text when registration fails.
+ *   5. Ignores failed child-frame navigations without retiring the guest.
  *
  * JSDOM has no real Electron webview — tests assert JSX shape and event
  * handling only, not actual Electron IPC or preload execution.
@@ -57,6 +58,12 @@ function fireDidAttach(webview: Element, webContentsId: number) {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (webview as any).getWebContentsId = () => webContentsId;
   webview.dispatchEvent(new Event("did-attach"));
+}
+
+function fireDidFailLoad(webview: Element, isMainFrame: boolean) {
+  const event = new Event("did-fail-load");
+  Object.defineProperty(event, "isMainFrame", { value: isMainFrame });
+  webview.dispatchEvent(event);
 }
 
 afterEach(() => {
@@ -194,6 +201,43 @@ describe("PluginUiHostView — webview attach flow", () => {
     // After failed registration: error text replaces the webview.
     expect(container.querySelector("webview")).toBeNull();
     expect(container.textContent).toMatch(/unknown-plugin-id/);
+  });
+
+  it("keeps the guest alive when only a child-frame navigation fails", () => {
+    vi.stubGlobal("lvisApi", {
+      pluginShellUrl: SHELL_URL,
+      pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    const container = mountHost(VIEW);
+    const webview = container.querySelector("webview");
+    expect(webview).not.toBeNull();
+
+    act(() => {
+      fireDidFailLoad(webview!, false);
+    });
+
+    expect(container.querySelector("webview")).toBe(webview);
+  });
+
+  it("shows an error and retires the guest when its main frame fails", () => {
+    vi.stubGlobal("lvisApi", {
+      pluginShellUrl: SHELL_URL,
+      pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    const container = mountHost(VIEW);
+    const webview = container.querySelector("webview");
+    expect(webview).not.toBeNull();
+
+    act(() => {
+      fireDidFailLoad(webview!, true);
+    });
+
+    expect(container.querySelector("webview")).toBeNull();
+    expect(container.textContent ?? "").not.toBe("");
   });
 
   it("falls back to error text when lvisApi.pluginShellUrl is missing", () => {

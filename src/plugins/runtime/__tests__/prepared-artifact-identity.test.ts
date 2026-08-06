@@ -31,6 +31,7 @@ async function writePreparedPlugin(
   manifestId: string,
   installId: string,
   entrySource?: (toolName: string) => string,
+  manifestOverrides: Partial<PluginManifest> = {},
 ): Promise<{
   pluginRoot: string;
   manifest: PluginManifest;
@@ -56,6 +57,7 @@ async function writePreparedPlugin(
       inputSchema: { type: "object", properties: {} },
       _meta: { ui: { visibility: ["model"] } },
     }],
+    ...manifestOverrides,
   };
   await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
   await writeFile(
@@ -89,6 +91,63 @@ async function writePreparedPlugin(
 }
 
 describe("prepared artifact install identity", () => {
+  it("prepares host-managed runtime config before starting a marketplace candidate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "lvis-prepared-python-runtime-"));
+    roots.push(root);
+    const pluginId = "python-candidate";
+    const installId = "catalog-python-candidate";
+    const pythonExecutable = join(root, "managed-python");
+    const prepared = await writePreparedPlugin(
+      root,
+      pluginId,
+      installId,
+      (toolName) => `export default async function createPlugin(context) {
+  if (context.config.pythonExecutable !== ${JSON.stringify(pythonExecutable)}) {
+    throw new Error("python runtime was not prepared before candidate factory");
+  }
+  return { handlers: { ${toolName}: async () => "pong" } };
+}
+`,
+      { python: { managedBy: "lvis-app" } },
+    );
+    const preparePluginStart: NonNullable<PluginRuntimeOptions["preparePluginStart"]> =
+      vi.fn(async ({ pluginId: preparedPluginId, manifestPath, pluginRoot }) => {
+        expect(preparedPluginId).toBe(pluginId);
+        expect(manifestPath).toBe(join(prepared.pluginRoot, "plugin.json"));
+        expect(pluginRoot).toBe(prepared.pluginRoot);
+        return { configOverride: { pythonExecutable } };
+      });
+    const runtime = makeTestPluginRuntime(
+      {
+        rootDir: root,
+        registryPath: join(root, "plugins", "registry.json"),
+        pluginsRoot: join(root, "plugins"),
+      },
+      {
+        installReceiptCacheRoot: join(root, "cache"),
+        preparePluginStart,
+      },
+    );
+    runtime.setConfigOverride(pluginId, {
+      pythonExecutable: join(root, "incumbent-python"),
+      retained: "incumbent",
+    });
+
+    const activated = await runtime.activatePreparedArtifact({
+      installId,
+      ...prepared,
+      durableCommit: async () => "committed",
+    });
+    await activated.retirement;
+
+    expect(preparePluginStart).toHaveBeenCalledOnce();
+    expect(runtime.getConfigOverride(pluginId)).toEqual({
+      pythonExecutable,
+      retained: "incumbent",
+    });
+    await expect(runtime.call("python_candidate_ping")).resolves.toBe("pong");
+  });
+
   it("passes fresh provenance into production-shaped HostApi creation and publishes it after commit", async () => {
     const root = await mkdtemp(join(tmpdir(), "lvis-prepared-identity-"));
     roots.push(root);
@@ -97,6 +156,13 @@ describe("prepared artifact install identity", () => {
     const prepared = await writePreparedPlugin(root, canonicalId, installId);
     const observedInstallIds: Array<string | null> = [];
     const observedRegistryEntries: unknown[] = [];
+    const observedAccessGrants: unknown[] = [];
+    const approvedPluginAccess = {
+      plugins: [{
+        pluginId: "work-assistant",
+        events: ["work_assistant.snapshot.requested"],
+      }],
+    };
     const createHostApi: PluginRuntimeOptions["createHostApi"] = (
       pluginId,
       manifest,
@@ -104,9 +170,11 @@ describe("prepared artifact install identity", () => {
       _incarnation,
       candidateInstallId,
       candidateRegistryEntry,
+      candidateApprovedPluginAccess,
     ) => {
       observedInstallIds.push(candidateInstallId);
       observedRegistryEntries.push(candidateRegistryEntry);
+      observedAccessGrants.push(candidateApprovedPluginAccess);
       return createNoopHostApiForTests(pluginId, manifest, dataDir);
     };
     const runtime = makeTestPluginRuntime(
@@ -125,6 +193,7 @@ describe("prepared artifact install identity", () => {
     const activated = await runtime.activatePreparedArtifact({
       installId,
       ...prepared,
+      approvedPluginAccess,
       durableCommit,
     });
     await activated.retirement;
@@ -133,6 +202,7 @@ describe("prepared artifact install identity", () => {
     expect(durableCommit).toHaveBeenCalledOnce();
     expect(observedInstallIds).toEqual([installId]);
     expect(observedRegistryEntries).toEqual([prepared.registryEntry]);
+    expect(observedAccessGrants).toEqual([approvedPluginAccess]);
     expect(runtime.resolvePluginInstallId(canonicalId)).toBe(installId);
     await expect(runtime.call("manifest_fresh_ping")).resolves.toBe("pong");
   });
@@ -263,14 +333,25 @@ describe("prepared artifact install identity", () => {
       roots.push(root);
       const pluginId = `retry-${phase.label.replaceAll(" ", "-")}`;
       const installId = `catalog-${phase.label.replaceAll(" ", "-")}`;
+      const incumbentConfig = {
+        pythonExecutable: join(root, "incumbent-python"),
+        retained: "incumbent",
+      };
+      const candidatePythonExecutable = join(root, "candidate-python");
       const runtime = makeTestPluginRuntime(
         {
           rootDir: root,
           registryPath: join(root, "plugins", "registry.json"),
           pluginsRoot: join(root, "plugins"),
         },
-        { installReceiptCacheRoot: join(root, "cache") },
+        {
+          installReceiptCacheRoot: join(root, "cache"),
+          preparePluginStart: async () => ({
+            configOverride: { pythonExecutable: candidatePythonExecutable },
+          }),
+        },
       );
+      runtime.setConfigOverride(pluginId, incumbentConfig);
       const failure = new Error(`${phase.label} failure`);
       const publicationSpy = phase.failsPublication
         ? vi.spyOn(runtime, "prepareRuntimeGeneration").mockImplementation(
@@ -296,6 +377,7 @@ describe("prepared artifact install identity", () => {
       publicationSpy?.mockRestore();
 
       expect(runtime.listPluginIds()).not.toContain(pluginId);
+      expect(runtime.getConfigOverride(pluginId)).toEqual(incumbentConfig);
       if (phase.entrySource) expect(failedCommit).not.toHaveBeenCalled();
       else expect(failedCommit).toHaveBeenCalledOnce();
 
@@ -311,6 +393,10 @@ describe("prepared artifact install identity", () => {
       expect(activated.result).toBe("retry-commit");
       expect(retryCommit).toHaveBeenCalledOnce();
       expect(runtime.resolvePluginInstallId(pluginId)).toBe(installId);
+      expect(runtime.getConfigOverride(pluginId)).toEqual({
+        pythonExecutable: candidatePythonExecutable,
+        retained: "incumbent",
+      });
       await expect(runtime.call(`${pluginId.replaceAll("-", "_")}_ping`)).resolves.toBe("pong");
     });
   }

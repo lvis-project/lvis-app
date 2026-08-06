@@ -89,5 +89,5 @@ bun run start
 
 - 한국어 문서 허브: [README.md](./README.md)
 - 아키텍처: [../architecture/README.md](../architecture/README.md)
-- 플러그인 개발: [../guides/plugin-development.md](../guides/plugin-development.md)
+- 플러그인 개발: [현재 English guide](../guides/plugin-development.md)
 - 프로덕션 릴리스 체크리스트: [../references/production-release-checklist.md](../references/production-release-checklist.md)

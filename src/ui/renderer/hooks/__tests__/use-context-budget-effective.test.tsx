@@ -7,6 +7,7 @@ import "../../../../../test/renderer/setup.js";
  */
 import { describe, expect, it } from "vitest";
 import { renderHook } from "@testing-library/react";
+import { estimateOutgoingUserMessageTokens } from "../../../../shared/multimodal-token-estimate.js";
 import { useContextBudget } from "../use-context-budget.js";
 
 describe("useContextBudget — effectiveBudget (Issue #912)", () => {
@@ -60,6 +61,29 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
     expect(result.current.usedTokens).toBe(42_000);
   });
 
+  it("adds the canonical composed draft estimate without recreating attachment policy", () => {
+    const attachments = [
+      { type: "text" as const, text: "<resource>서버 리소스 본문</resource>" },
+      {
+        type: "image" as const,
+        image: "data:image/png;base64,abc",
+        mimeType: "image/png",
+        width: 2048,
+        height: 512,
+      },
+    ];
+    const draftTokenEstimate = estimateOutgoingUserMessageTokens("한글 초안", attachments);
+    const { result } = renderHook(() =>
+      useContextBudget({
+        entries: [{ kind: "context_usage", tokensIn: 42_000, source: "compact-estimate" }],
+        llmVendor: "azure-foundry",
+        llmModel: "gpt-5.4-mini",
+        draftTokenEstimate,
+      }),
+    );
+
+    expect(result.current.usedTokens).toBe(42_000 + draftTokenEstimate);
+  });
   it("uses tpmLimit when smaller than contextBudget (nano)", () => {
     // gpt-5.4-nano: contextWindow=400K, tpmDefault=200K → effectiveBudget=200K
     const { result } = renderHook(() =>
@@ -100,5 +124,28 @@ describe("useContextBudget — effectiveBudget (Issue #912)", () => {
     );
     // unknown model has no tpmDefault — fall through to contextBudget.
     expect(result.current.effectiveBudget).toBe(result.current.contextBudget);
+  });
+
+  it("does not project API context or TPM limits when the runtime has no verified usage contract", () => {
+    const { result } = renderHook(() =>
+      useContextBudget({
+        entries: [],
+        // These deliberately stale API values must be ignored.
+        llmVendor: "openai",
+        llmModel: "gpt-5.4-nano",
+        draftTokenEstimate: 99_999,
+        enabled: false,
+      }),
+    );
+
+    expect(result.current).toMatchObject({
+      usedTokens: 0,
+      contextBudget: 0,
+      effectiveBudget: 0,
+      contextOverflowPct: 0,
+      isTpmOverflow: false,
+    });
+    expect(result.current.tpmLimit).toBeUndefined();
+    expect(result.current.tpmPct).toBeUndefined();
   });
 });

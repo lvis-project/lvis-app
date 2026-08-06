@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { LoopContext } from "./loop-context.js";
 import type { ToolUseBlock } from "../../tools/executor.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
+import type { RemoteControllerAuthority } from "../../shared/chat-origin.js";
 import { REQUEST_PLUGIN_TOOL } from "./plugin-expansion.js";
 import { TOOL_SEARCH_TOOL } from "./tool-search.js";
 
@@ -23,14 +24,30 @@ export async function gateCrossAgentInterceptedMetaTools(
   approvalReasonPrefix: string | undefined,
   trustOrigin: ToolTrustOrigin,
   sessionId: string,
+  remoteControllerAuthority?: RemoteControllerAuthority,
 ): Promise<InterceptedMetaGateResult> {
-  if (!approvalReasonPrefix) return { approved: toolUses, denied: [] };
+  if (!approvalReasonPrefix && !remoteControllerAuthority) {
+    return { approved: toolUses, denied: [] };
+  }
 
   const approved: ToolUseBlock[] = [];
   const denied: InterceptedMetaGateResult["denied"] = [];
   for (const toolUse of toolUses) {
     if (toolUse.name !== REQUEST_PLUGIN_TOOL && toolUse.name !== TOOL_SEARCH_TOOL) {
       approved.push(toolUse);
+      continue;
+    }
+
+    // These meta commands mutate the active tool/session surface while
+    // bypassing the ordinary ToolExecutor. A P1 Tailnet controller cannot
+    // create a cross-turn capability; retain a narrow send/read/write model
+    // until an actor-scoped continuation protocol exists.
+    if (remoteControllerAuthority !== undefined) {
+      denied.push({
+        toolUseId: toolUse.id,
+        toolName: toolUse.name,
+        content: `remote-controller-meta-disabled: ${toolUse.name}`,
+      });
       continue;
     }
 
@@ -51,6 +68,8 @@ export async function gateCrossAgentInterceptedMetaTools(
           kind: "tool",
           toolName: toolUse.name,
           toolCategory: "meta",
+          // Same conversation this gate already audits under.
+          sessionId,
           args: toolUse.input,
           reason: `${approvalReasonPrefix} cross-agent message requested ${toolUse.name}`,
           source: "builtin",
@@ -58,6 +77,14 @@ export async function gateCrossAgentInterceptedMetaTools(
           isReadOnly: false,
           mode: "ask_all",
           trustOrigin,
+          // This ask parks the turn like any other, so the turn's Stop has to
+          // be able to end it rather than leave it on the gate's own timer.
+          // Read from the loop rather than threaded in: this is the same
+          // controller `runTurn` installed and the same signal it handed the
+          // executor, and the caller has no third one to offer.
+          ...(self.currentAbortController === null
+            ? {}
+            : { abortSignal: self.currentAbortController.signal }),
         });
         allowed = isApprovalChoiceAllowed(decision.choice);
       } catch {

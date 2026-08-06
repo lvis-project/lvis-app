@@ -2,10 +2,11 @@ import { describe, it, expect } from "vitest";
 import { costTier, estimateTokens, estimateTurnCost, formatCostBadge } from "../cost-estimator.js";
 
 describe("cost-estimator", () => {
-  it("estimateTokens matches the engine heuristic (ceil/4 + 1)", () => {
-    expect(estimateTokens("")).toBe(0);
+  it("re-exports the shared engine heuristic, including Korean weighting", () => {
+    expect(estimateTokens("")).toBe(1);
     expect(estimateTokens("abcd")).toBe(2);
     expect(estimateTokens("abcde")).toBe(3);
+    expect(estimateTokens("안녕".repeat(100))).toBe(66);
   });
 
   it("estimateTurnCost sums history + draft against the pricing table", () => {

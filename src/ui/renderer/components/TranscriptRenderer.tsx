@@ -46,6 +46,7 @@ export type TurnSummary = {
   vendorProvider?: LLMVendor;
   vendorModel?: string;
   usageByModel?: Extract<ChatEntry, { kind: "turn_summary" }>["usageByModel"];
+  subscriptionUsage?: Extract<ChatEntry, { kind: "turn_summary" }>["subscriptionUsage"];
 };
 
 /**
@@ -110,6 +111,12 @@ export interface SharedTranscriptProps {
   /** Final TurnActionBar vendor fallback when a turn_summary has no vendor. */
   activeVendor?: LLMVendor;
 
+  /**
+   * False when the active runtime has no API-key billing contract. A validated
+   * subscription telemetry segment still renders its token-only badge.
+   */
+  showTokenCostBadge?: boolean;
+
   /** When true, WorkGroup render decisions are traced via debugLog. */
   debugStreamEnabled?: boolean;
 
@@ -145,6 +152,7 @@ export function TranscriptRenderer({
   actions,
   viewMode = null,
   activeVendor,
+  showTokenCostBadge = true,
   debugStreamEnabled = false,
   workGroupsForceOpen = false,
 }: SharedTranscriptProps): React.ReactElement {
@@ -570,7 +578,8 @@ export function TranscriptRenderer({
       const turnStartIdx = finalTurnStartMap.get(i) ?? 0;
       const summary = summaryByTurnStart?.get(turnStartIdx);
       const summaryVendor = summary?.vendorProvider;
-      const summaryPricing = summary?.vendorProvider && summary.vendorModel
+      const hasSubscriptionUsage = (summary?.subscriptionUsage?.length ?? 0) > 0;
+      const summaryPricing = !hasSubscriptionUsage && summary?.vendorProvider && summary.vendorModel
         ? lookupBillablePricingOptional(summary.vendorProvider, summary.vendorModel)
         : undefined;
       // Mutating actions are gated on BOTH (a) not being in a read-only
@@ -596,9 +605,9 @@ export function TranscriptRenderer({
               source omits the action callbacks. */}
           <TurnActionBar
             timestamp={entry.kind === "assistant" ? entry.createdAt : undefined}
-            turnSummary={summary}
+            turnSummary={showTokenCostBadge || hasSubscriptionUsage ? summary : undefined}
             pricing={summaryPricing}
-            vendor={summaryVendor ?? activeVendor}
+            vendor={hasSubscriptionUsage ? undefined : summaryVendor ?? activeVendor}
             isStarred={!!isEntryStarred(idx)}
             copyText={detectFromStream(entry.text || "").cleanedText || undefined}
             actions={barActions}
@@ -647,6 +656,7 @@ export function TranscriptRenderer({
     searchMatches,
     searchOpen,
     setEditingEntryIdx,
+    showTokenCostBadge,
     streaming,
     summaryByTurnStart,
     viewMode,

@@ -784,7 +784,15 @@ test("evidence workflow separates secret-free unsigned candidate execution from 
     "dpkg-deb --field",
     "rpm -qp",
     "readelf --file-header",
-    "actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4",
+    // Pinned to one reviewed commit, not a tag — the forbidden list below
+    // rejects `actions/attest@v4` precisely so this cannot drift to a
+    // mutable ref. attest is the provenance signer, so bumping it is a
+    // decision rather than housekeeping: this literal and the `uses:` in
+    // a2a-p4-5-packaged-evidence.yml MUST move in the same commit. They
+    // did not in 0b328df6 (a batch Dependabot merge), and this test sat
+    // red for twelve days because it runs under `node --test` rather than
+    // the vitest gate.
+    "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4",
     "gh attestation verify",
     "node scripts/write-installer-provenance.mjs",
     "--source-digest \"$REQUESTED_HEAD\"",
@@ -795,6 +803,21 @@ test("evidence workflow separates secret-free unsigned candidate execution from 
     "LVIS_WINDOWS_PUBLISHER_SUBJECT",
     "LVIS_WINDOWS_SIGNER_THUMBPRINT",
   ]) assert.ok(workflow.includes(required), `missing workflow invariant: ${required}`);
+
+  // `includes` proves one occurrence, not every one. attest runs five times
+  // in this workflow, so a single step drifting to another commit would slip
+  // past the membership check above while four correct pins kept it green.
+  // Assert the whole population instead: every `actions/attest@` reference
+  // must be the one reviewed pin.
+  const attestRefs = workflow.match(/actions\/attest@\S+/g) ?? [];
+  assert.ok(attestRefs.length > 0, "workflow no longer attests anything");
+  for (const ref of attestRefs) {
+    assert.equal(
+      ref,
+      "actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6",
+      `unreviewed attest pin: ${ref}`,
+    );
+  }
 
   for (const forbidden of [
     "workflow_dispatch:",
@@ -880,7 +903,7 @@ test("evidence workflow separates secret-free unsigned candidate execution from 
   for (const existingBehavior of [
     "skip_code_sign:",
     "publish-release:",
-    "softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1",
+    "softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2",
   ]) {
     assert.ok(releaseWorkflow.includes(existingBehavior), `existing installer workflow behavior changed: ${existingBehavior}`);
   }

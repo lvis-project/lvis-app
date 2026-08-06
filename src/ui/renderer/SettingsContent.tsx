@@ -16,6 +16,7 @@ import {
   Store,
   Info,
   Rocket,
+  Network,
   ChevronLeft,
   ChevronRight,
   X,
@@ -28,6 +29,7 @@ import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
 import { PermissionsTab } from "./tabs/PermissionsTab.js";
 import { AuditTab } from "./tabs/AuditTab.js";
+import { RemoteSurfacesTab } from "./tabs/RemoteSurfacesTab.js";
 import { UsageDashboard } from "./components/UsageDashboard.js";
 import { LlmTab } from "./tabs/LlmTab.js";
 import { AppearanceTab } from "./tabs/AppearanceTab.js";
@@ -67,6 +69,12 @@ const SETTINGS_NAV: { group: string; items: SettingsNavItem[] }[] = [
       { value: "chat", icon: MessageSquare, labelKey: "settingsContent.tabChat" },
       { value: "web", icon: Globe, labelKey: "settingsContent.tabWeb" },
       { value: "startup", icon: Rocket, labelKey: "settingsContent.tabStartup" },
+    ],
+  },
+  {
+    group: "settingsContent.groupConnections",
+    items: [
+      { value: "remote-surfaces", icon: Network, labelKey: "settingsContent.tabRemoteSurfaces" },
     ],
   },
   {
@@ -569,9 +577,6 @@ export function SettingsContent({
               setFallbackChain={s.setFallbackChain}
               fallbackOpen={s.fallbackOpen}
               setFallbackOpen={s.setFallbackOpen}
-              hostResolverMap={s.hostResolverMap}
-              setHostResolverMap={s.setHostResolverMap}
-              loadedHostResolverMap={s.loadedHostResolverMap}
               onSaved={onSaved}
               onImmediateChange={llmSave.schedule}
               onSave={() => {
@@ -595,6 +600,10 @@ export function SettingsContent({
               setStreamSmoothing={s.setStreamSmoothing}
               idlePreferenceRefresh={s.idlePreferenceRefresh}
               setIdlePreferenceRefresh={s.setIdlePreferenceRefresh}
+              idleMemoryConsolidation={s.idleMemoryConsolidation}
+              setIdleMemoryConsolidation={s.setIdleMemoryConsolidation}
+              memoryCaptureMode={s.memoryCaptureMode}
+              setMemoryCaptureMode={s.setMemoryCaptureMode}
               subAgentAutonomousWake={s.subAgentAutonomousWake}
               setSubAgentAutonomousWake={s.setSubAgentAutonomousWake}
               piiRedactEnabled={s.piiRedactEnabled}
@@ -632,6 +641,7 @@ export function SettingsContent({
 
           <TabsContent value="startup" className={tabContentCls}><StartupTab /></TabsContent>
           <TabsContent value="permissions" className={tabContentCls}><PermissionsTab /></TabsContent>
+          <TabsContent value="remote-surfaces" className={tabContentCls}><RemoteSurfacesTab api={api} /></TabsContent>
           <TabsContent value="roles" className={tabContentCls}><RolesTab api={api} /></TabsContent>
           <TabsContent value="usage" className={tabContentCls}>
             <UsageDashboard

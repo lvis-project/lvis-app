@@ -51,6 +51,9 @@ export function initialToolTrustOrigin(inputOrigin: ChatInputOrigin, turnInput: 
   }
   // Every STAGED origin (plugin overlay trigger, MCP App `ui/message`, MCP server
   // prompt) keeps its OWN provenance through the tool layer — none is the user's
+  if (inputOrigin === "surface-user" || inputOrigin === "tailnet-surface" || inputOrigin === "platform-bridge") {
+    return inputOrigin;
+  }
   // keyboard. Resolved from the registry rather than an if/else chain: the chain's
   // default was `llm-tool-arg`, the UNTAINTED bucket, so a newly registered origin
   // that nobody remembered to branch on would have been laundered into "ordinary

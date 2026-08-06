@@ -12,6 +12,7 @@ import type {
   RuntimePlugin,
 } from "../types.js";
 import type { PluginDeploymentGuard } from "../deployment-guard.js";
+import { pluginArtifactGenerationId } from "../plugin-artifact-identity.js";
 import { installReceiptPath } from "../plugin-install-receipt.js";
 import type {
   PluginRuntimeGenerationAccess,
@@ -50,6 +51,8 @@ import type {
   ManifestLoadPlan,
   ManifestSnapshot,
   PluginLifecycleHookScope,
+  PluginStartPreparationOutcome,
+  PluginStartPreparationReturn,
   SinglePluginStartResult,
 } from "./types.js";
 import { PerfStatsTracker } from "./perf-stats.js";
@@ -109,6 +112,7 @@ export abstract class PluginRuntimeState {
     candidateRegistryEntry?: Readonly<
       Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
     >,
+    candidateApprovedPluginAccess?: PluginAccessSpec | null,
   ) => PluginHostApi;
   protected readonly deploymentGuard?: PluginDeploymentGuard;
   protected readonly installReceiptCacheRoot?: string;
@@ -120,7 +124,7 @@ export abstract class PluginRuntimeState {
     pluginId: string,
     enabled: boolean,
   ) => Promise<void> | void;
-  protected readonly preparePluginStart?: (context: PluginStartPreparationContext) => Promise<void> | void | null | undefined;
+  protected readonly preparePluginStart?: (context: PluginStartPreparationContext) => PluginStartPreparationReturn;
   protected plugins = new Map<string, LoadedPlugin>();
   protected methodMap = new Map<string, { pluginId: string; handler: PluginToolHandler }>();
   protected readonly perf = new PerfStatsTracker();
@@ -156,8 +160,13 @@ export abstract class PluginRuntimeState {
    */
   protected readonly inactivePluginIds = new Set<string>();
   protected readonly preparation: PreparationTracker;
+  /** Loaded or requested consumers waiting for a preparing capability provider. */
+  protected readonly capabilityBlockedPluginIds = new Set<string>();
   protected readonly pendingRestarts = new Map<string, Promise<RestartPluginResult>>();
-  protected readonly pendingRestartPreparations = new Map<string, Promise<void>>();
+  protected readonly pendingRestartPreparations = new Map<
+    string,
+    Promise<PluginStartPreparationOutcome>
+  >();
   /**
    * Hash-only authenticated session state. The principal hash includes a
    * per-login nonce so a later login to the same account cannot revive grants
@@ -212,7 +221,30 @@ export abstract class PluginRuntimeState {
   protected generationLifecycle: PluginRuntimeGenerationLifecycle | undefined;
   protected readonly pinnedGenerations =
     new AsyncLocalStorage<ReadonlyMap<string, string>>();
+  /**
+   * Cross-plugin capability admission has one short linearization boundary.
+   * Candidate import, factory execution, and startup intentionally happen
+   * outside this queue; only the final generation-pointer commit uses it.
+   */
+  private capabilityDependencyCommitTail: Promise<void> = Promise.resolve();
   protected loaded = false;
+
+  protected async withCapabilityDependencyCommit<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.capabilityDependencyCommitTail;
+    let release!: () => void;
+    const next = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.capabilityDependencyCommitTail = previous.then(() => next);
+    await previous;
+    try {
+      return await operation();
+    } finally {
+      release();
+    }
+  }
 
   protected createPendingRestartCancellation(): PendingRestartCancellation {
     return createPendingRestartCancellation();
@@ -261,6 +293,8 @@ export abstract class PluginRuntimeState {
     this.preparePluginStart = options.preparePluginStart;
     this.preparation = new PreparationTracker({
       preparePluginStart: options.preparePluginStart,
+      applyConfigOverride: (pluginId, configOverride) =>
+        this.mergeConfigOverride(pluginId, configOverride),
       instantiateAndStartSinglePlugin: (plan, manifest, approvedPluginAccess, opts) =>
         this.instantiateAndStartSinglePlugin(plan, manifest, approvedPluginAccess, opts),
       markFailed: (pluginId, stub) => this.markFailed(pluginId, stub),
@@ -392,6 +426,7 @@ export abstract class PluginRuntimeState {
     candidateRegistryEntry?: Readonly<
       Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
     >,
+    candidateApprovedPluginAccess?: PluginAccessSpec | null,
   ): {
     hostApi: PluginHostApi;
     disposers: Array<() => void>;
@@ -465,6 +500,7 @@ export abstract class PluginRuntimeState {
         incarnation,
         installPluginId,
         candidateRegistryEntry,
+        candidateApprovedPluginAccess,
       );
       const hostApi = hostEffects ? hostEffects.wrapHostApi(rawHostApi) : rawHostApi;
       // Defence-in-depth: PluginHostApi.storage is required but partial hostApi
@@ -985,6 +1021,9 @@ export abstract class PluginRuntimeState {
 
   waitForPluginReady(pluginId: string): Promise<void> {
     const canonicalId = this.resolveKnownPluginId(pluginId);
+    if (this.preparation.isPreparing(canonicalId)) {
+      return this.preparation.waitForReady(canonicalId);
+    }
     if (this.plugins.has(canonicalId)) return Promise.resolve();
     return this.preparation.waitForReady(canonicalId);
   }
@@ -1032,6 +1071,7 @@ export abstract class PluginRuntimeState {
     this.failedPluginStubs.clear();
     this.loadFailureInfo.clear();
     this.disabledPluginIds.clear();
+    this.capabilityBlockedPluginIds.clear();
     this.preparation.clear();
     this.pendingRestarts.clear();
     this.pendingRestartPreparations.clear();
@@ -1190,7 +1230,10 @@ export abstract class PluginRuntimeState {
   protected throwIfToolOwnerNotReady(toolName: string): void {
     const pluginId = this.knownToolOwners.get(toolName);
     if (!pluginId) return;
-    if (this.preparation.isPreparing(pluginId)) {
+    if (
+      this.preparation.isPreparing(pluginId)
+      || this.capabilityBlockedPluginIds.has(pluginId)
+    ) {
       throw new Error(
         `Plugin '${pluginId}' is still installing its runtime dependencies. ` +
         `Try again after the plugin is ready.`,
@@ -1293,11 +1336,7 @@ export abstract class PluginRuntimeState {
       installReceiptPath(this.installReceiptCacheRoot, receiptPluginId),
       "utf8",
     );
-    const artifactGenerationId = createHash("sha256")
-      .update(manifestRaw)
-      .update("\0")
-      .update(receiptRaw)
-      .digest("hex");
+    const artifactGenerationId = pluginArtifactGenerationId(manifestRaw, receiptRaw);
     const generationId = createHash("sha256")
       .update(artifactGenerationId)
       .update("\0")

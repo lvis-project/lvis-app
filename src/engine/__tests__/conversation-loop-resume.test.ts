@@ -18,6 +18,7 @@ import type { ConversationLoopDeps } from "../conversation-loop.js";
 import type { GenericMessage } from "../llm/types.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
+import { t } from "../../i18n/index.js";
 import {
   makeConversationLoopDeps,
   makeConversationLoopLongHistory,
@@ -36,6 +37,33 @@ const resumeDeps = (overrides: Partial<ConversationLoopDeps> = {}) =>
     memoryManager: resumeMemory(),
     ...overrides,
   });
+
+type CaptureExplicit = NonNullable<ConversationLoopDeps["memoryCaptureService"]>["captureExplicit"];
+
+function createRememberCommandLoop(captureExplicit: CaptureExplicit, args = "retain this rollout preference") {
+  const saveMemory = vi.fn();
+  const memoryManager = {
+    ...resumeMemory(),
+    saveMemory,
+  } as unknown as ConversationLoopDeps["memoryManager"];
+  const routeEngine = {
+    route: vi.fn().mockReturnValue({ route: "command", command: "remember", args }),
+  } as unknown as ConversationLoopDeps["routeEngine"];
+  const inputClassifier = {
+    classify: vi.fn().mockReturnValue({ type: "command" }),
+  } as unknown as ConversationLoopDeps["inputClassifier"];
+  const memoryCaptureService: NonNullable<ConversationLoopDeps["memoryCaptureService"]> = { captureExplicit };
+  const provider = {
+    vendor: "openai" as const,
+    streamTurn: async function* () { /* command route only */ },
+  };
+  const loop = new ConversationLoop(resumeDeps({ memoryManager, memoryCaptureService, routeEngine, inputClassifier }));
+  (loop as unknown as { provider: typeof provider }).provider = provider;
+  return {
+    loop,
+    saveMemory,
+  };
+}
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
@@ -107,13 +135,35 @@ describe("ConversationLoop.resetAndResume", () => {
     expect(loop.getSessionId()).toBe("test-session-id");
   });
 
+  it("advances the session epoch for A → B → A, even when the session id repeats", () => {
+    const history: GenericMessage[] = [{ role: "user", content: "resume me" }];
+    const loop = new ConversationLoop(resumeDeps({
+      memoryManager: {
+        ...resumeMemory(history),
+        saveSession: vi.fn(async () => {}),
+      } as unknown as ConversationLoopDeps["memoryManager"],
+    }));
+    const initialEpoch = loop.getSessionEpoch();
+
+    expect(initialEpoch).toBe(0);
+
+    expect(loop.loadSession("test-session-id")).toBe(true);
+    expect(loop.getSessionEpoch()).toBe(initialEpoch + 1);
+
+    loop.newConversation();
+    expect(loop.getSessionEpoch()).toBe(initialEpoch + 2);
+
+    expect(loop.loadSession("test-session-id")).toBe(true);
+    expect(loop.getSessionEpoch()).toBe(initialEpoch + 3);
+  });
+
   it("clears prior carried-forward plugin scope when loading or creating a session", () => {
     const history: GenericMessage[] = [{ role: "user", content: "resume me" }];
     const loop = new ConversationLoop(resumeDeps({
       memoryManager: {
         ...resumeMemory(history),
         saveSession: vi.fn(async () => {}),
-      },
+      } as unknown as ConversationLoopDeps["memoryManager"],
     }));
     const state = loop as unknown as { lastTurnScope: Set<string> | null };
 
@@ -458,6 +508,60 @@ describe("ConversationLoop command routing", () => {
 
     expect(result.text).toContain("사용자 기억");
     expect(listMemoryEntries).toHaveBeenCalledOnce();
+  });
+
+  it("/remember sends the user text to captureExplicit without raw direct persistence", async () => {
+    const captureExplicit = vi.fn<CaptureExplicit>(async () => ({
+      status: "saved",
+      entry: {
+        filename: "reviewed-rollout.md",
+        title: "Reviewed rollout preference",
+        content: "# Reviewed rollout preference\n\nUse a staged rollout.\n",
+      },
+    }));
+    const { loop, saveMemory } = createRememberCommandLoop(captureExplicit);
+
+    const result = await loop.runTurn("/remember retain this rollout preference", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    expect(captureExplicit).toHaveBeenCalledWith({
+      title: "retain this rollout preference",
+      content: "retain this rollout preference",
+    });
+    expect(saveMemory).not.toHaveBeenCalled();
+    expect(result.text).toBe(t("be_conversationLoop.cmdRememberSaved", { title: "Reviewed rollout preference" }));
+  });
+
+  it("/remember returns not-saved when captureExplicit skips review", async () => {
+    const captureExplicit = vi.fn<CaptureExplicit>(async () => ({
+      status: "skipped",
+      reason: "invalid-review",
+    }));
+    const { loop, saveMemory } = createRememberCommandLoop(captureExplicit);
+
+    const result = await loop.runTurn("/remember retain this rollout preference", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    expect(captureExplicit).toHaveBeenCalledOnce();
+    expect(saveMemory).not.toHaveBeenCalled();
+    expect(result.text).toBe(t("be_conversationLoop.cmdRememberNotSaved"));
+  });
+
+  it("/remember returns not-saved when captureExplicit throws", async () => {
+    const captureExplicit = vi.fn<CaptureExplicit>(async () => {
+      throw new Error("reviewer unavailable");
+    });
+    const { loop, saveMemory } = createRememberCommandLoop(captureExplicit);
+
+    const result = await loop.runTurn("/remember retain this rollout preference", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    expect(captureExplicit).toHaveBeenCalledOnce();
+    expect(saveMemory).not.toHaveBeenCalled();
+    expect(result.text).toBe(t("be_conversationLoop.cmdRememberNotSaved"));
   });
 
   it("/permission hooks accept restores a boot-quarantined hook through the user-keyboard command path", async () => {

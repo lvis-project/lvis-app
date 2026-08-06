@@ -5,8 +5,7 @@
  * bootstrap assigns `services` (and thus before `SettingsService` is in
  * memory). To size the window correctly and prime `window.__lvisInitialAppMode`
  * on that first creation, the persisted `system.appMode` must be read straight
- * from the settings file synchronously — mirroring `manual-host-resolver.ts`,
- * which reads `llm.hostResolverMap` the same way before `app.whenReady()`.
+ * from the settings file synchronously.
  *
  * Reads from `settingsFilePath(userDataPath)` — the exact path
  * `SettingsService` writes to — so a mode saved via the UI is the one restored

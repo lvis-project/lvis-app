@@ -45,7 +45,11 @@ import {
 } from "./zip-entry-path.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import type { PublicKeyInput } from "./envelope-verifier.js";
-import type { PluginAccessSpec, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
+import {
+  type PluginAccessSpec,
+  type PluginMarketplaceItem,
+  type PluginRegistryEntryInstallSource,
+} from "./types.js";
 import { stripLegacyPluginToolGrants } from "./registry.js";
 import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
 import {
@@ -63,7 +67,20 @@ import {
   type MarketplaceArtifactLimits,
 } from "./marketplace-artifact-limits.js";
 import { withMarketplaceArtifactResourceSlot } from "./marketplace-artifact-resource-gate.js";
+import { getLvisAppVersion } from "../shared/app-version.js";
+import { assertPluginCandidateAppCompatible } from "./update-condition.js";
+import {
+  isCommittedPluginGenerationPublicationError,
+  type CommittedPluginGenerationPublicationError,
+} from "./committed-generation-publication-error.js";
 export { assertSafeArtifactSlug, SAFE_ARTIFACT_SLUG_RE } from "./plugin-id.js";
+
+/** Shared last-line defense for every marketplace artifact consumer. */
+export function assertMarketplaceAppUpgradeNotRequired(
+  plugin: Pick<PluginMarketplaceItem, "version" | "requires" | "upgradeRequired">,
+): void {
+  assertPluginCandidateAppCompatible(plugin, getLvisAppVersion());
+}
 const log = createLogger("plugin-artifact-store");
 
 /**
@@ -149,6 +166,10 @@ export interface CoordinatedArtifactCommit<T> {
   result: T;
   /** Predecessor resources must drain before recovery backup cleanup. */
   retirement?: Promise<void>;
+  /** Host lifecycle completion propagated for admitted self-updates. */
+  completion?: Promise<void>;
+  /** The caller owns the predecessor lease and must not await retirement inline. */
+  retirementDeferred?: boolean;
 }
 
 export interface RequiredMarketplaceRootTextFile {
@@ -215,6 +236,7 @@ export class PluginArtifactStore {
   private readonly publicKeys: Record<string, PublicKeyInput>;
   private readonly tarballCacheBase: string | null;
   private readonly artifactLimits: Readonly<MarketplaceArtifactLimits>;
+  private readonly deferredCommitCleanups = new Set<Promise<void>>();
 
   constructor(options: ArtifactStoreOptions) {
     this.installRoot = options.installRoot;
@@ -368,6 +390,7 @@ export class PluginArtifactStore {
     onProgress?: (event: InstallerProgressEvent) => void,
     signal?: AbortSignal,
   ): Promise<VerifiedArtifact> {
+    assertMarketplaceAppUpgradeNotRequired(plugin);
     const slug = assertSafeArtifactSlug(plugin.slug ?? plugin.id);
     if (!isVerifiedMarketplaceFetcher(this.fetcher)) {
       throw new Error(
@@ -553,29 +576,28 @@ export class PluginArtifactStore {
           throw commitErr;
         }
       };
-      const coordinated = options.coordinateCommit
-        ? await options.coordinateCommit(Object.freeze({
-            pluginRoot: stageDir,
-            files: Object.freeze([...files]),
-            durableCommit,
-          }))
-        : { result: await durableCommit() };
+      let committedPublicationError: CommittedPluginGenerationPublicationError | undefined;
+      let coordinated: CoordinatedArtifactCommit<T>;
+      try {
+        coordinated = options.coordinateCommit
+          ? await options.coordinateCommit(Object.freeze({
+              pluginRoot: stageDir,
+              files: Object.freeze([...files]),
+              durableCommit,
+            }))
+          : { result: await durableCommit() };
+      } catch (error) {
+        if (!isCommittedPluginGenerationPublicationError(error) || !error.committed) {
+          throw error;
+        }
+        committedPublicationError = error;
+        coordinated = error.committed as CoordinatedArtifactCommit<T>;
+      }
       if (!durableCommitCompleted) {
         throw new Error(`artifact commit coordinator returned before durable commit: ${safeSlug}`);
       }
-      let predecessorRetired = true;
-      if (coordinated.retirement) {
-        try {
-          await coordinated.retirement;
-        } catch (error) {
-          predecessorRetired = false;
-          log.error(
-            { safeSlug, oldDir, err: error },
-            "predecessor generation retirement failed; retaining recovery backup",
-          );
-        }
-      }
-      if (hadOldDir && predecessorRetired) {
+      const cleanupCommittedBackup = async (): Promise<void> => {
+        if (!hadOldDir) return;
         let cleanupResolved = false;
         try {
           await retryOnTransientFsLock(() => this.removeCommittedBackup(oldDir));
@@ -604,7 +626,35 @@ export class PluginArtifactStore {
             log.warn({ safeSlug, oldDir, err }, "obsolete artifact cleanup ownership remains for boot retry");
           });
         }
+      };
+      let predecessorRetired = true;
+      if (coordinated.retirement) {
+        if (coordinated.retirementDeferred) {
+          predecessorRetired = false;
+          const deferredCleanup = coordinated.retirement.then(cleanupCommittedBackup);
+          this.deferredCommitCleanups.add(deferredCleanup);
+          void deferredCleanup.finally(() => {
+            this.deferredCommitCleanups.delete(deferredCleanup);
+          }).catch((error) => {
+            log.error(
+              { safeSlug, oldDir, err: error },
+              "deferred predecessor retirement failed; retaining recovery backup",
+            );
+          });
+        } else {
+          try {
+            await coordinated.retirement;
+          } catch (error) {
+            predecessorRetired = false;
+            log.error(
+              { safeSlug, oldDir, err: error },
+              "predecessor generation retirement failed; retaining recovery backup",
+            );
+          }
+        }
       }
+      if (predecessorRetired) await cleanupCommittedBackup();
+      if (committedPublicationError) throw committedPublicationError;
       return { files, result: coordinated.result, predecessorRetired };
     } catch (err) {
       if (existsSync(stageDir)) {

@@ -18,6 +18,7 @@ import type { BrowserWindow } from "electron";
 import { mkdirSync } from "node:fs";
 import { installPluginPartitionPolicy } from "../../main/html-preview-partition.js";
 import { isAppUpdateInstallRequested } from "../../main/app-update-install-intent.js";
+import { isAppShutdownStarted } from "../../main/app-state.js";
 import { pluginPartitionName } from "../../shared/plugin-partition.js";
 import { onEvent as onHostEvent } from "../types.js";
 import { AuditLogger } from "../../audit/audit-logger.js";
@@ -56,6 +57,7 @@ import { buildAppPreferenceReader } from "./plugin-runtime/app-preference.js";
 import { createHostApiFactory } from "./plugin-runtime/host-api-factory.js";
 import { createLifecycleCallbacks } from "./plugin-runtime/lifecycle.js";
 import { createRegistryEntryCache } from "./plugin-runtime/registry-cache.js";
+import { PluginRuntimePreStartPhase } from "./plugin-runtime/pre-start-phase.js";
 const log = createLogger("lvis");
 
 // ── C5 re-exports — preserve this module path's public export contract. ──────
@@ -227,6 +229,8 @@ export interface InitPluginRuntimeOutput {
   setBundleLifecycleHandler: (handler: PluginBundleLifecycleHandler) => void;
   /** Idempotent cold-start entrypoint used after bundle lifecycle wiring. */
   startPlugins: () => Promise<void>;
+  /** Admit one durable managed operation while the boot runtime is unsealed. */
+  admitPreStartOperation: <T>(operation: () => Promise<T>) => Promise<T>;
 }
 
 /**
@@ -307,8 +311,9 @@ export async function initPluginRuntime(
     })();
     return pluginShutdownPromise;
   };
-  app.prependOnceListener("before-quit", (event) => {
+  app.once("before-quit", (event) => {
     if (isAppUpdateInstallRequested()) return;
+    if (isAppShutdownStarted()) return;
     if (pluginShutdownHandlers.length === 0 || pluginShutdownRan) return;
     event.preventDefault();
     void (async () => {
@@ -418,7 +423,6 @@ export async function initPluginRuntime(
   });
   const { preparePluginStart, onDisable, onActiveStateChange, onEnable } =
     createLifecycleCallbacks({
-      getPluginRuntime: () => pluginRuntime,
       lateBinding,
       getMainWindow,
       mainWindow,
@@ -487,21 +491,23 @@ export async function initPluginRuntime(
   // starts (startAll fires onEnable, whose closures use it).
   loopbackManager = new PluginLoopbackManager(pluginRuntime, toolRegistry);
 
-  let pluginsStarted = false;
-  const startPlugins = async (): Promise<void> => {
-    if (pluginsStarted) return;
-    pluginsStarted = true;
+  const preStartPhase = new PluginRuntimePreStartPhase();
+  const startPluginsOnce = async (): Promise<void> => {
+    // Managed pre-start sync may have committed registry rows after the cache
+    // was first constructed. Refresh from the final durable snapshot before
+    // startAll creates HostApi instances and trust decisions for those rows.
+    if (input.deferStart) await refreshRegistryEntryCache();
     await pluginRuntime.startAll();
     log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
 
-    // Pre-register the per-partition `setPreloads(...)` policy for every
+    // Pre-register the per-partition session preload policy for every
     // loaded plugin (#498). Electron's `<webview partition="persist:plugin:..."
   // preload="...">` honors `preload=` only when sandbox=no; with sandbox=yes
   // the preload script must be registered on the partition's Session via
-  // `session.setPreloads()`. The previous attach-time hook in main.ts
+  // `session.registerPreloadScript()`. The previous attach-time hook in main.ts
   // tries to read `contents.session.partition` to decide which partition
   // got attached, but that property is undocumented and returns
-  // `undefined` on current Electron — so the hook never fires `setPreloads`
+  // `undefined` on current Electron — so the hook never registers the preload
   // and plugin webviews load without the `lvisPlugin` contextBridge,
   // surfacing as "lvisPlugin bridge missing" in the shell. Pre-registering
   // by walking the loaded-plugin set sidesteps the partition-name read
@@ -510,6 +516,7 @@ export async function initPluginRuntime(
       installLoadedPluginPartitionPolicy(pluginId);
     }
   };
+  const startPlugins = (): Promise<void> => preStartPhase.start(startPluginsOnce);
   if (!input.deferStart) await startPlugins();
   // Cover plugins added AFTER startAll() — deep-link install
   // (`lvis://install/<slug>` → `addPlugin`), dev hot-reload watcher
@@ -570,6 +577,7 @@ export async function initPluginRuntime(
       bundleLifecycle = handler;
     },
     startPlugins,
+    admitPreStartOperation: (operation) => preStartPhase.admit(operation),
   };
 }
 

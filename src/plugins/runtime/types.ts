@@ -66,3 +66,13 @@ export type ManifestSnapshot = {
  * runtime domain — not part of the public runtime export surface.
  */
 export type SinglePluginStartResult = "started" | "deferred" | "failed" | "cancelled";
+
+export type PluginStartPreparationOutcome =
+  | { configOverride?: Record<string, unknown> }
+  | void
+  | null
+  | undefined;
+
+export type PluginStartPreparationReturn =
+  | PluginStartPreparationOutcome
+  | Promise<PluginStartPreparationOutcome>;

@@ -18,6 +18,7 @@ import { estimateRequestInputProjection } from "../request-input-projection.js";
 import {
   makeConversationLoopDeps as makeDeps,
   makeConversationLoopMemoryManager as makeMemoryManager,
+  makeConversationLoopMemoryReviewer as makeMemoryReviewer,
   makeConversationLoopSettings as makeSettings,
   makeConversationTurnProvider as makeTurnProvider,
 } from "./conversation-loop-test-helpers.js";
@@ -139,7 +140,10 @@ describe("runPreflightGuard — estimate-based trigger", () => {
     expect(estimated).toBeGreaterThanOrEqual(threshold);
 
     const mem = makeMemoryManager(history);
-    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    const memoryReviewer = makeMemoryReviewer();
+    const loop = new ConversationLoop(
+      makeDeps({ settingsService: settings, memoryManager: mem, memoryReviewer }),
+    );
     loop.resetAndResume("sess-1");
 
     const fakeProvider = makeTurnProvider();
@@ -158,8 +162,52 @@ describe("runPreflightGuard — estimate-based trigger", () => {
 
     // compactWithBoundary must have been called (estimate exceeded threshold).
     expect(compactWithBoundary).toHaveBeenCalled();
+    expect(compactWithBoundary).toHaveBeenCalledWith(expect.objectContaining({
+      memoryReviewer,
+      preflightTokens: threshold,
+    }));
+    const compactArgs = vi.mocked(compactWithBoundary).mock.calls[0]?.[0];
+    expect(compactArgs).not.toHaveProperty("llm");
+    expect(compactArgs).not.toHaveProperty("model");
     // onCompactOccurred emitted from applyBoundaryToSession.
     expect(compactOccurredCb).toHaveBeenCalled();
+  });
+
+  it("uses the provider-native projection for initial preflight", async () => {
+    const settings = makeSettings(true, "claude-sonnet-4-5", "claude");
+    const threshold = getModelPreflightThreshold("claude", "claude-sonnet-4-5");
+    const history: GenericMessage[] = [{ role: "user", content: "short history" }];
+    const mem = makeMemoryManager(history);
+    const loop = new ConversationLoop(makeDeps({ settingsService: settings, memoryManager: mem }));
+    loop.resetAndResume("provider-projection-preflight");
+    const projection = {
+      totalTokens: threshold + 1,
+      systemPromptTokens: 0,
+      messageTokens: threshold + 1,
+      toolSchemaTokens: 0,
+    };
+    const projectRequestInput = vi.fn(() => projection);
+    const provider = { ...makeTurnProvider(), projectRequestInput };
+    (loop as unknown as { provider: typeof provider }).provider = provider;
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce(makeSyntheticNoopResult(history));
+    const compactStarted = vi.fn();
+
+    await loop.runTurn(
+      "small current input",
+      { onCompactStarted: compactStarted },
+      undefined,
+      { inputOrigin: "user-keyboard" },
+    );
+
+    expect(projectRequestInput).toHaveBeenCalledWith(expect.objectContaining({
+      systemPrompt: expect.any(String),
+      messages: expect.any(Array),
+      toolSchemas: expect.any(Array),
+    }));
+    expect(compactWithBoundary).toHaveBeenCalled();
+    expect(compactStarted).toHaveBeenCalledWith(expect.objectContaining({
+      estimatedBefore: threshold + 1,
+    }));
   });
 
   it("persists post-compact context SOT on the boundary and clears preserved stale turn summaries", async () => {

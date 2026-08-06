@@ -66,6 +66,23 @@ describe("PermissionManager (B1 persistence)", () => {
     vi.clearAllMocks();
   });
 
+  it("auto-allows local builtin memory writes only after hard policy gates", () => {
+    expect(pm.checkDetailed("memory_write", "builtin", "write")).toMatchObject({
+      decision: "allow", reason: "builtin-local-memory-auto-allow", layer: 6,
+    });
+
+    pm.setRules([{ pattern: "memory_write", action: "deny" }]);
+    expect(pm.checkDetailed("memory_write", "builtin", "write")).toMatchObject({ decision: "deny", layer: 1 });
+
+    pm.setRules([]);
+    pm.setMode("strict");
+    expect(pm.checkDetailed("memory_write", "builtin", "write")).toMatchObject({ decision: "ask", layer: 2 });
+
+    pm.setMode("default");
+    expect(pm.checkDetailed("memory_write", "builtin", "write", "overlay:meeting-detection"))
+      .toMatchObject({ decision: "ask", layer: 2 });
+  });
+
   // ── addAlwaysAllowedPersist ──────────────────────
 
   it("addAlwaysAllowedPersist writes rule to the store and updates in-memory", async () => {
@@ -338,6 +355,118 @@ describe("PermissionManager (B1 persistence)", () => {
   });
 });
 
+
+describe("PermissionManager — Tailnet controller P1 policy", () => {
+  const authority = Object.freeze({
+    kind: "tailnet-controller" as const,
+    actorId: "tailnet:controller-digest" as `tailnet:${string}`,
+  });
+  let pm: PermissionManager;
+
+  beforeEach(() => {
+    mockStore.rules = [];
+    mockStore.mode = "default";
+    _mockLock = Promise.resolve();
+    pm = new PermissionManager("/tmp/test-tailnet-permissions.json");
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("forces even a declared read through a local one-shot modal despite allow mode and a remembered grant", async () => {
+    pm.setMode("allow");
+    pm.setRules([{ pattern: "read_file", action: "allow" }]);
+    await pm.addAlwaysAllowedPersist("read_file", "read");
+
+    expect(pm.checkDetailed("read_file", "builtin", "read", null, {
+      remoteControllerAuthority: authority,
+    })).toMatchObject({
+      decision: "ask",
+      layer: 2,
+      forceModal: true,
+      reason: "Remote controller request requires local allow-once approval",
+    });
+  });
+
+  it("keeps the P1 deferred and capability-expansion deny list closed even in strict mode", () => {
+    pm.setMode("strict");
+
+    for (const [toolName, category] of [
+      ["routine_schedule", "write"],
+      ["bash", "shell"],
+      ["bash_output", "read"],
+      ["powershell", "shell"],
+      ["request_plugin", "read"],
+      ["tool_search", "read"],
+      ["skill_load", "write"],
+    ] as const) {
+      expect(pm.checkDetailed(toolName, "builtin", category, null, {
+        remoteControllerAuthority: authority,
+      })).toMatchObject({ decision: "deny", layer: 2 });
+    }
+
+    expect(pm.checkDetailed("agent_spawn", "builtin", "meta", null, {
+      decisionOverride: "ask",
+      remoteControllerAuthority: authority,
+    })).toMatchObject({
+      decision: "deny",
+      layer: 2,
+      reason: "Remote controller meta operations are not enabled",
+    });
+  });
+
+  it("preserves an explicit local deny above the Tailnet one-shot lane", () => {
+    pm.setRules([{ pattern: "read_file", action: "deny" }]);
+
+    expect(pm.checkDetailed("read_file", "builtin", "read", null, {
+      remoteControllerAuthority: authority,
+    })).toMatchObject({ decision: "deny", layer: 1 });
+  });
+});
+describe("PermissionManager — platform bridge remote policy", () => {
+  const bridgeBinding = Object.freeze({
+    bridgeId: "11111111-1111-4111-8111-111111111111",
+    bridgeEpoch: 1,
+    routeId: "22222222-2222-4222-8222-222222222222",
+    routeEpoch: 2,
+    scope: "33333333-3333-4333-8333-333333333333",
+  });
+  const bridgeGuard = Object.freeze({ isCurrent: vi.fn(() => true) });
+  const authority = Object.freeze({
+    kind: "platform-bridge" as const,
+    actorId: `bridge:${"a".repeat(64)}`,
+    bridgeBinding,
+    bridgeGuard,
+  });
+  let pm: PermissionManager;
+
+  beforeEach(() => {
+    mockStore.rules = [];
+    mockStore.mode = "default";
+    _mockLock = Promise.resolve();
+    pm = new PermissionManager("/tmp/test-platform-bridge-permissions.json");
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("forces a verified external-platform read through local allow-once even in allow mode", async () => {
+    pm.setMode("allow");
+    pm.setRules([{ pattern: "read_file", action: "allow" }]);
+    await pm.addAlwaysAllowedPersist("read_file", "read");
+
+    expect(pm.checkDetailed("read_file", "builtin", "read", null, {
+      remoteControllerAuthority: authority,
+    })).toMatchObject({
+      decision: "ask",
+      layer: 2,
+      forceModal: true,
+      reason: "Remote controller request requires local allow-once approval",
+    });
+  });
+});
 describe("PermissionManager — overlay-trigger origin override", () => {
   // Background: a user who once clicks "allow-always" on a write tool
   // (e.g. task_add) effectively delegated all future calls to that

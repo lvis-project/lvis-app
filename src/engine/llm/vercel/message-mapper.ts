@@ -22,6 +22,7 @@
 import type { ModelMessage } from "ai";
 import type { GenericMessage, LLMVendor } from "../types.js";
 import { createLogger } from "../../../lib/logger.js";
+import { normalizeLocalUserContentParts } from "../../../main/subscription-attachment-input.js";
 const log = createLogger("message-mapper");
 
 type AssistantPart =
@@ -52,9 +53,11 @@ export function genericToModelMessages(
           content: [{ type: "text", text: msg.content }],
         });
       } else {
+        const content = normalizeLocalUserContentParts(msg.content);
+        if (!content) continue;
         out.push({
           role: "user",
-          content: msg.content.map((p) => {
+          content: content.map((p) => {
             if (p.type === "text") return { type: "text" as const, text: p.text };
             if (p.type === "image") {
               // mimeType is optional on UserContentPart for image (the SDK

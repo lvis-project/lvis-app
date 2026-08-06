@@ -13,16 +13,7 @@ import {
 } from "../../../components/ui/select.js";
 import { Slider } from "../../../components/ui/slider.js";
 import { Switch } from "../../../components/ui/switch.js";
-import { Textarea } from "../../../components/ui/textarea.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "../../../components/ui/dialog.js";
 import { ChevronDown, ChevronUp, Loader2, RefreshCw, Store } from "lucide-react";
 import {
   REASONING_EFFORT_STEPS,
@@ -32,7 +23,6 @@ import {
   visibleVendorsFor,
   type VendorOption,
 } from "../constants.js";
-import { parseHostResolverMap } from "../../../shared/host-resolver-map.js";
 import {
   canUseLlmVendorWithoutApiKey,
   isLLMVendor,
@@ -58,7 +48,7 @@ import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { SettingsHelpPopover } from "../components/SettingsHelpPopover.js";
 import { useTranslation } from "../../../i18n/react.js";
-import { formatIpcError } from "../format-ipc-error.js";
+import { SubscriptionProvidersController } from "./SubscriptionProvidersController.js";
 
 export interface FallbackEntry {
   provider: string;
@@ -253,17 +243,6 @@ export interface LlmTabProps {
   setFallbackChain: (updater: FallbackEntry[] | ((c: FallbackEntry[]) => FallbackEntry[])) => void;
   fallbackOpen: boolean;
   setFallbackOpen: (updater: boolean | ((o: boolean) => boolean)) => void;
-  /** Manual-mode host-resolver map (persisted /etc/hosts-style text). */
-  hostResolverMap: string;
-  setHostResolverMap: (v: string) => void;
-  /**
-   * The host-resolver map value as last hydrated from persisted settings.
-   * Used to detect whether the textarea has actually changed — the Apply
-   * (Save and Restart) button is only enabled when the current draft differs
-   * from this, so an unchanged Apply click can never trigger a needless
-   * relaunch (requirement D).
-   */
-  loadedHostResolverMap: string;
   onSaved: () => void;
   /**
    * Called after the user changes an immediate-apply control (vendor /
@@ -576,9 +555,6 @@ export function LlmTab(props: LlmTabProps) {
     setFallbackChain,
     fallbackOpen,
     setFallbackOpen,
-    hostResolverMap,
-    setHostResolverMap,
-    loadedHostResolverMap,
     onSaved,
     onImmediateChange,
     onSave,
@@ -835,49 +811,6 @@ export function LlmTab(props: LlmTabProps) {
     }
   }, [fallbackOpen, fallbackProviderKey, requestModelList, settingsLoaded]);
 
-  // Relaunch confirmation dialog state for host map changes.
-  const [relaunchConfirmOpen, setRelaunchConfirmOpen] = useState(false);
-  const [relaunchPending, setRelaunchPending] = useState(false);
-  const [relaunchError, setRelaunchError] = useState<string | null>(null);
-
-  const handleHostMapApply = useCallback(() => {
-    setRelaunchError(null);
-    setRelaunchConfirmOpen(true);
-  }, []);
-
-  const handleRelaunchConfirm = useCallback(async () => {
-    setRelaunchPending(true);
-    setRelaunchError(null);
-    try {
-      const result = await api.applyHostMap(hostResolverMap);
-      if (!result.ok) {
-        // The handler resolved with a structured rejection (unauthorized
-        // frame or invalid payload) rather than
-        // throwing. The relaunch never happened — surface the specific,
-        // localized reason (formatIpcError maps the IPC error code to a
-        // ko/en message) and keep the dialog open so the user can cancel;
-        // closing silently would falsely imply the change applied.
-        setRelaunchError(
-          formatIpcError(result.error, result.message) ||
-            t("llmTab.relaunchConfirmError"),
-        );
-        setRelaunchPending(false);
-        return;
-      }
-      // On success the main process calls app.relaunch() + app.exit(0), so
-      // this renderer terminates here — no further cleanup runs. We keep the
-      // dialog open until then so the user never sees it close without a
-      // restart actually happening.
-    } catch {
-      // Persisting the host map (or scheduling the relaunch) failed. Surface
-      // it inline and keep the dialog open so the user can retry or cancel —
-      // closing silently would falsely imply the change applied. Awaiting +
-      // catching here also prevents an unhandled promise rejection.
-      setRelaunchError(t("llmTab.relaunchConfirmError"));
-      setRelaunchPending(false);
-    }
-  }, [api, hostResolverMap, t]);
-
   const displayVendor = selectedMarketplaceProviderPreset
     ? marketplaceProviderPresetSecretId(selectedMarketplaceProviderPreset.providerId)
     : vendor;
@@ -905,14 +838,6 @@ export function LlmTab(props: LlmTabProps) {
       setVendor,
     ],
   );
-  // Requirement D — only allow Apply when the host map has ACTUALLY changed
-  // from the last-persisted value. `loadedHostResolverMap` is the value
-  // hydrated from settings; comparing against it means an unchanged textarea
-  // leaves the Apply (Save and Restart) button disabled, so an unchanged
-  // click can never trigger a needless relaunch.
-  const hostMapChanged = hostResolverMap !== loadedHostResolverMap;
-  const hostMapEntryCount = parseHostResolverMap(hostResolverMap).length;
-
   return (
     <div className="min-w-0 space-y-6">
       <SettingsPageHeader
@@ -943,52 +868,6 @@ export function LlmTab(props: LlmTabProps) {
           </div>
         </dl>
       </SettingsSection>
-
-      {/* Relaunch confirmation dialog — shown before applying host map changes */}
-      <Dialog
-        open={relaunchConfirmOpen}
-        onOpenChange={(open) => {
-          if (relaunchPending) return;
-          if (!open) setRelaunchError(null);
-          setRelaunchConfirmOpen(open);
-        }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t("llmTab.relaunchConfirmTitle")}</DialogTitle>
-            <DialogDescription>{t("llmTab.relaunchConfirmBody")}</DialogDescription>
-          </DialogHeader>
-          {relaunchError && (
-            <p
-              role="alert"
-              className="rounded-md bg-destructive/(--opacity-subtle) px-3 py-2 text-sm text-destructive"
-              data-testid="llm-tab:relaunch-error"
-            >
-              {relaunchError}
-            </p>
-          )}
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setRelaunchError(null);
-                setRelaunchConfirmOpen(false);
-              }}
-              disabled={relaunchPending}
-            >
-              {t("llmTab.relaunchConfirmCancel")}
-            </Button>
-            <Button
-              variant="destructive"
-              onClick={() => void handleRelaunchConfirm()}
-              disabled={relaunchPending}
-              data-testid="llm-tab:relaunch-confirm"
-            >
-              {relaunchPending ? t("llmTab.saving") : t("llmTab.relaunchConfirmOk")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Provider configuration — API keys and endpoint settings are edited
           directly here. */}
@@ -1248,46 +1127,7 @@ export function LlmTab(props: LlmTabProps) {
         </div>
       </SettingsSection>
 
-      {/* Section — Host Resolver Map.
-          A dedicated Apply button triggers the relaunch confirm dialog because
-          host-resolver-rules cannot be changed at runtime. */}
-      <SettingsSection
-        title={t("llmTab.hostResolverMapTitle")}
-        id="llm-host-resolver"
-      >
-        <div className="space-y-2" data-testid="llm-tab:host-resolver-section">
-          <p className="text-[11px] text-muted-foreground">
-            {t("llmTab.hostResolverMapDesc")}
-          </p>
-          <Textarea
-            data-testid="llm-host-resolver-map-input"
-            value={hostResolverMap}
-            onChange={(e) => setHostResolverMap(e.target.value)}
-            placeholder={t("llmTab.hostResolverMapPlaceholder")}
-            rows={5}
-            className="font-mono text-xs"
-            aria-label={t("llmTab.hostResolverMapTitle")}
-          />
-          {hostMapEntryCount > 0 && (
-            <p className="text-[11px] text-muted-foreground">
-              {hostMapEntryCount === 1
-                ? t("llmTab.entryCountSingular", { count: hostMapEntryCount })
-                : t("llmTab.entryCountPlural", { count: hostMapEntryCount })}
-            </p>
-          )}
-          <div className="flex justify-end">
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={handleHostMapApply}
-              disabled={saving || !settingsLoaded || !hostMapChanged}
-              data-testid="llm-tab:apply-host-map"
-            >
-              {t("llmTab.hostResolverMapApply")}
-            </Button>
-          </div>
-        </div>
-      </SettingsSection>
+      <SubscriptionProvidersController api={api} />
 
       {/* Section B — Extended Thinking / Reasoning */}
       <SettingsSection

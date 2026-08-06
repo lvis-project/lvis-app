@@ -55,6 +55,7 @@ vi.mock("electron", () => ({
     getPath: vi.fn(() => "/tmp/lvis-test"),
     isPackaged: false,
     prependOnceListener: harness.appPrependOnceListener,
+    once: vi.fn(),
   },
   BrowserWindow: Object.assign(vi.fn(), {
     getAllWindows: vi.fn(() => []),

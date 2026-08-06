@@ -35,6 +35,7 @@ import type { IpcDeps } from "../../types.js";
 import { fixtureSecret } from "../../../audit/__tests__/secret-fixtures.js";
 
 let tmp: string;
+let auditLogger: AuditLogger;
 const REJECT_EVENT = { senderFrame: { url: "https://evil.example.com" } };
 // A plugin UI shell is a file:// frame (so it passes the base validateSender)
 // but must be rejected by validateHostRendererSender at these host channels.
@@ -48,7 +49,7 @@ const PLUGIN_SHELL_EVENT = {
 const ACCEPT_EVENT = { senderFrame: { url: "file:///C:/app/resources/index.html" } };
 
 function makeDeps(overrides?: { includeCrashDumps?: boolean }): IpcDeps {
-  const auditLogger = new AuditLogger(join(tmp, "audit"));
+  auditLogger = new AuditLogger(join(tmp, "audit"));
   const diagnostics = {
     includeCrashDumps: overrides?.includeCrashDumps ?? false,
     logRetentionDays: 7,
@@ -79,7 +80,8 @@ beforeEach(() => {
   registerDiagnosticsHandlers(makeDeps());
 });
 
-afterEach(() => {
+afterEach(async () => {
+  await auditLogger.close();
   delete process.env.LVIS_HOME;
   if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
 });

@@ -1,0 +1,404 @@
+/**
+ * The platform-owned conversation event contract.
+ *
+ * A conversation turn has exactly one semantic event source. Electron, the
+ * loopback API, a future CLI/Web client, Tailnet, and chat-platform bridges
+ * are adapters over this contract; they must not publish their own raw wire
+ * frames as an alternative source of truth.
+ *
+ * This module intentionally distinguishes an event's portable semantic fields
+ * from `ownerDetail`. `ownerDetail` is only for a trusted owner-surface
+ * adapter (the current Electron compatibility adapter). A remote/shared
+ * adapter must use `projectSharedConversationEvent()` and its own share grant
+ * rather than serializing an event wholesale. The projection is derived from
+ * this one timeline, not a second "safe hub".
+ */
+import type { McpUiPayload } from "../mcp/types.js";
+import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
+import type {
+  ApprovalPurposeSuggestion,
+  PermissionReviewRiskLevel,
+  PermissionReviewStatus,
+} from "../shared/permission-review-status.js";
+import type { ToolCategory, ToolSource } from "../tools/types.js";
+import type { FallbackStatus } from "./llm/vercel/fallback-chain.js";
+import type { TurnCallbacks } from "./turn/types.js";
+import {
+  createConversationEventHub,
+  type ConversationEventHub,
+  type ConversationEventHubOptions,
+  type ConversationEventReplay,
+  type ConversationEventSubscriptionOptions,
+} from "./conversation-event-hub.js";
+
+/** Version of the semantic platform event contract. */
+export const PLATFORM_CONVERSATION_PROTOCOL_VERSION = 1 as const;
+
+export type PlatformConversationProtocolVersion =
+  typeof PLATFORM_CONVERSATION_PROTOCOL_VERSION;
+
+/**
+ * A renderer-independent reference to one tool invocation. The portable part
+ * deliberately contains no tool arguments, result body, execution plan, or
+ * MCP UI resource URI.
+ */
+export interface ConversationToolReference {
+  readonly name: string;
+  readonly groupId: string;
+  readonly toolUseId: string;
+  readonly displayOrder: number;
+  readonly source?: ToolSource;
+  readonly category?: ToolCategory;
+  readonly pluginId?: string;
+  readonly mcpServerId?: string;
+}
+
+/** Owner-only material needed by the current rich desktop tool card. */
+export interface ConversationToolStartOwnerDetail {
+  readonly input: Record<string, unknown>;
+}
+
+/** Owner-only material needed by the current rich desktop tool card. */
+export interface ConversationToolEndOwnerDetail {
+  readonly result: string;
+  readonly executionPlan?: HostShellExecutionPlanAuditProjection;
+  readonly uiPayload?: McpUiPayload;
+}
+
+export interface ConversationAssistantRound {
+  readonly roundIndex: number;
+  readonly text: string;
+  readonly stopReason: "end_turn" | "tool_use" | "max_tokens";
+  readonly hasToolCalls: boolean;
+  /** Reasoning is intentionally owner-only by default. */
+  readonly ownerDetail: { readonly thought: string };
+}
+
+export interface ConversationPermissionReview {
+  readonly status: PermissionReviewStatus;
+  readonly tool: ConversationToolReference;
+  readonly verdictLevel?: PermissionReviewRiskLevel;
+  /** Reason and generated approval purpose are owner-only review context. */
+  readonly ownerDetail: {
+    readonly reason?: string;
+    readonly approvalPurpose?: ApprovalPurposeSuggestion;
+  };
+}
+
+export type ConversationUsageReport = Parameters<
+  NonNullable<TurnCallbacks["onTurnSummary"]>
+>[0];
+
+/**
+ * Versioned semantic events emitted by a main conversation turn.
+ *
+ * The union is intentionally closed at this boundary. Adding a new producer
+ * event means deciding its owner detail and the (separate) shared projection,
+ * instead of silently exposing an arbitrary `(channel, payload)` object.
+ */
+export type PlatformConversationEvent =
+  | { readonly kind: "turn.started" }
+  | { readonly kind: "assistant.reasoning.delta"; readonly ownerDetail: { readonly text: string } }
+  | { readonly kind: "assistant.text.delta"; readonly text: string }
+  | { readonly kind: "assistant.round.completed"; readonly round: ConversationAssistantRound }
+  | {
+    readonly kind: "tool.started";
+    readonly tool: ConversationToolReference;
+    readonly ownerDetail: ConversationToolStartOwnerDetail;
+  }
+  | {
+    readonly kind: "tool.completed";
+    readonly tool: ConversationToolReference;
+    readonly isError: boolean;
+    readonly durationMs: number;
+    readonly ownerDetail: ConversationToolEndOwnerDetail;
+  }
+  | { readonly kind: "permission.reviewed"; readonly review: ConversationPermissionReview }
+  | {
+    readonly kind: "turn.error";
+    readonly ownerDetail: {
+      readonly message: string;
+      readonly systemNotice?: "context-error" | "stream-error";
+    };
+  }
+  | { readonly kind: "permission.mode.changed"; readonly mode: "default" | "strict" | "auto" | "allow" }
+  | {
+    readonly kind: "compaction.started";
+    readonly triggerSource: Parameters<NonNullable<TurnCallbacks["onCompactStarted"]>>[0]["triggerSource"];
+    readonly estimatedBefore: number;
+    readonly preflight: number;
+  }
+  | { readonly kind: "compaction.recovery.exhausted" }
+  | {
+    readonly kind: "compaction.completed";
+    readonly removedMessages: number;
+    readonly freedTokens: number;
+    readonly estimatedAfter: number;
+    readonly trigger?: "auto-compact" | "manual";
+    readonly compactNum?: number;
+    readonly compactStatus?: import("../shared/compact-status.js").CompressionStatus;
+    /** Summary and filesystem path can contain user/private material. */
+    readonly ownerDetail: { readonly summary?: string; readonly truncatedDir?: string };
+  }
+  | { readonly kind: "usage.reported"; readonly ownerDetail: ConversationUsageReport }
+  | { readonly kind: "model.status"; readonly ownerDetail: { readonly status: FallbackStatus } }
+  | { readonly kind: "model.fallback"; readonly from: string; readonly to: string }
+  | { readonly kind: "guidance.applied"; readonly text: string }
+  | { readonly kind: "guidance.dropped"; readonly text: string }
+  | { readonly kind: "suggestions.updated"; readonly replies: readonly string[] }
+  | { readonly kind: "turn.completed"; readonly route?: "command" }
+  | {
+    readonly kind: "privacy.redacted";
+    readonly count: number;
+    readonly byKind: Readonly<Record<string, number>>;
+  };
+
+/** Context attached by the host when one producer emits an event. */
+export interface PlatformConversationEventInput {
+  /** Opaque, host-owned conversation/session identity. */
+  readonly conversationId: string;
+  /** Opaque, host-owned turn identity. Omitted for standalone mutations. */
+  readonly turnId?: string;
+  readonly event: PlatformConversationEvent;
+  /** Semantic events are live-only unless an explicitly safe projector retains them. */
+  readonly replay?: boolean;
+}
+
+/** The envelope every surface adapter receives from the common timeline. */
+export interface PlatformConversationEventEnvelope {
+  readonly version: PlatformConversationProtocolVersion;
+  readonly eventId: string;
+  readonly conversationId: string;
+  readonly cursor: number;
+  readonly turnId?: string;
+  readonly emittedAt: number;
+  readonly event: PlatformConversationEvent;
+}
+
+export type PlatformConversationEventListener = (
+  event: PlatformConversationEventEnvelope,
+) => void;
+
+export interface PlatformConversationSubscriptionOptions {
+  readonly conversationId?: string;
+  readonly afterCursor?: number;
+  readonly replay?: "none" | "available";
+}
+
+export interface PlatformConversationReplay {
+  readonly conversationId: string;
+  readonly afterCursor: number | null;
+  readonly oldestRetainedCursor: number | null;
+  readonly latestCursor: number;
+  readonly snapshotRequired: boolean;
+  readonly events: readonly PlatformConversationEventEnvelope[];
+}
+
+export interface PlatformConversationSubscription {
+  readonly replay: PlatformConversationReplay | undefined;
+  unsubscribe(): void;
+}
+
+/** One host-owned, ordered semantic timeline for all conversation surfaces. */
+export interface PlatformConversationTimeline {
+  publish(input: PlatformConversationEventInput): PlatformConversationEventEnvelope;
+  subscribe(
+    listener: PlatformConversationEventListener,
+    options?: PlatformConversationSubscriptionOptions,
+  ): PlatformConversationSubscription;
+  read(
+    conversationId: string,
+    options?: { readonly afterCursor?: number },
+  ): PlatformConversationReplay;
+  subscriberCount(): number;
+}
+
+/**
+ * Callback accepted by streamed-turn producers. It is intentionally semantic,
+ * not an IPC/SSE channel plus arbitrary payload.
+ */
+export type PlatformConversationEventSink = (
+  event: PlatformConversationEvent,
+) => void;
+
+/**
+ * Host-owned correlation id for the current desktop compatibility adapter.
+ *
+ * The semantic protocol treats this as an opaque turn id. Keeping its legacy
+ * numeric-stream mapping here means command producers do not depend on the
+ * Electron/SSE adapter merely to allocate an event context.
+ */
+export function createPlatformTurnId(streamId: number): string {
+  if (!Number.isSafeInteger(streamId) || streamId < 0) {
+    throw new RangeError("streamId must be a non-negative safe integer.");
+  }
+  return `local-stream/${streamId}`;
+}
+
+/**
+ * Temporary rich-owner transport shape. It is intentionally kept out of the
+ * semantic producer contract; Electron IPC and the existing loopback SSE API
+ * receive it only through a compatibility adapter.
+ */
+export type LegacyChatStreamSink = (channel: string, payload: unknown) => void;
+
+const TIMELINE_CHANNEL = "platform.conversation.event";
+
+/** Create an isolated semantic timeline backed by the bounded in-memory hub. */
+export function createPlatformConversationTimeline(
+  options: ConversationEventHubOptions = {},
+): PlatformConversationTimeline {
+  const hub = createConversationEventHub(options);
+
+  const publish = (
+    input: PlatformConversationEventInput,
+  ): PlatformConversationEventEnvelope => {
+    const envelope = hub.publish({
+      sessionId: input.conversationId,
+      channel: TIMELINE_CHANNEL,
+      payload: input.event,
+      ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
+      // Owner-detail events are not a reconnect protocol. A later shared
+      // projector owns bounded safe snapshots and replay; defaulting this to
+      // false prevents a future adapter from accidentally replaying raw data.
+      replay: input.replay ?? false,
+    });
+    return toPlatformEnvelope(envelope);
+  };
+
+  const read = (
+    conversationId: string,
+    options: { readonly afterCursor?: number } = {},
+  ): PlatformConversationReplay => toPlatformReplay(hub.read(conversationId, options));
+
+  const subscribe = (
+    listener: PlatformConversationEventListener,
+    options: PlatformConversationSubscriptionOptions = {},
+  ): PlatformConversationSubscription => {
+    const subscription = hub.subscribe(
+      (envelope) => {
+        // The hub is private to this timeline. Keeping this guard makes a
+        // future internal hub reuse fail closed rather than delivering an
+        // arbitrary generic payload to a platform adapter.
+        if (envelope.channel !== TIMELINE_CHANNEL) return;
+        listener(toPlatformEnvelope(envelope));
+      },
+      toHubSubscriptionOptions(options),
+    );
+    return {
+      replay: subscription.replay === undefined
+        ? undefined
+        : toPlatformReplay(subscription.replay),
+      unsubscribe: subscription.unsubscribe,
+    };
+  };
+
+  return { publish, subscribe, read, subscriberCount: () => hub.subscriberCount() };
+}
+
+/**
+ * Bind a producer to the host-owned conversation and turn identity. Publishing
+ * is best-effort to preserve the existing display-stream invariant: an adapter
+ * serialization issue must never abort the provider turn.
+ */
+export function createPlatformConversationEventSink(
+  timeline: PlatformConversationTimeline,
+  context: { readonly conversationId: string; readonly turnId?: string },
+): PlatformConversationEventSink {
+  return (event) => {
+    try {
+      timeline.publish({
+        conversationId: context.conversationId,
+        ...(context.turnId === undefined ? {} : { turnId: context.turnId }),
+        event,
+      });
+    } catch {
+      // Match the historical display sink: a malformed/uncloneable rich owner
+      // detail cannot change model execution or block another surface.
+    }
+  };
+}
+
+/**
+ * Future shared surfaces use only this explicit whitelist projection. This is
+ * a pure transform over the one canonical event; it is not another event hub
+ * and does not imply that the caller is authorized to receive the result.
+ */
+export type SharedConversationProjectionEvent =
+  | { readonly kind: "turn.started" }
+  | { readonly kind: "assistant.text.delta"; readonly text: string }
+  | { readonly kind: "tool.state"; readonly state: "running" | "completed" | "failed" }
+  | { readonly kind: "approval.waiting-local" }
+  | { readonly kind: "compaction.started" }
+  | { readonly kind: "compaction.completed" }
+  | { readonly kind: "turn.failed" }
+  | { readonly kind: "turn.completed" };
+
+export function projectSharedConversationEvent(
+  event: PlatformConversationEvent,
+): SharedConversationProjectionEvent | undefined {
+  switch (event.kind) {
+    case "turn.started":
+      return { kind: "turn.started" };
+    case "assistant.text.delta":
+      return { kind: "assistant.text.delta", text: event.text };
+    case "tool.started":
+      return { kind: "tool.state", state: "running" };
+    case "tool.completed":
+      return { kind: "tool.state", state: event.isError ? "failed" : "completed" };
+    case "permission.reviewed":
+      return event.review.status === "needs_approval"
+        ? { kind: "approval.waiting-local" }
+        : undefined;
+    case "compaction.started":
+      return { kind: "compaction.started" };
+    case "compaction.completed":
+      return { kind: "compaction.completed" };
+    case "turn.error":
+      return { kind: "turn.failed" };
+    case "turn.completed":
+      return { kind: "turn.completed" };
+    default:
+      return undefined;
+  }
+}
+
+function toHubSubscriptionOptions(
+  options: PlatformConversationSubscriptionOptions,
+): ConversationEventSubscriptionOptions {
+  return {
+    ...(options.conversationId === undefined
+      ? {}
+      : { sessionId: options.conversationId }),
+    ...(options.afterCursor === undefined ? {} : { afterCursor: options.afterCursor }),
+    ...(options.replay === undefined ? {} : { replay: options.replay }),
+  };
+}
+
+function toPlatformEnvelope(
+  envelope: ReturnType<ConversationEventHub["publish"]>,
+): PlatformConversationEventEnvelope {
+  if (envelope.channel !== TIMELINE_CHANNEL) {
+    throw new TypeError("Conversation timeline received an unexpected channel.");
+  }
+  return {
+    version: PLATFORM_CONVERSATION_PROTOCOL_VERSION,
+    eventId: envelope.eventId,
+    conversationId: envelope.sessionId,
+    cursor: envelope.cursor,
+    ...(envelope.turnId === undefined ? {} : { turnId: envelope.turnId }),
+    emittedAt: envelope.emittedAt,
+    event: envelope.payload as PlatformConversationEvent,
+  };
+}
+
+function toPlatformReplay(replay: ConversationEventReplay): PlatformConversationReplay {
+  return {
+    conversationId: replay.sessionId,
+    afterCursor: replay.afterCursor,
+    oldestRetainedCursor: replay.oldestRetainedCursor,
+    latestCursor: replay.latestCursor,
+    snapshotRequired: replay.snapshotRequired,
+    events: replay.events.map((event) => toPlatformEnvelope(event)),
+  };
+}

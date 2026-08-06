@@ -33,23 +33,19 @@ import { CHANNELS } from "../../contract/app-contract.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { sendToWebContents } from "../safe-send.js";
 import { createLogger } from "../../lib/logger.js";
+import { createLegacyChatStreamEventSink } from "../../api/platform-conversation-legacy-adapter.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import {
   runStreamedTurn,
   STREAM_TURN_OPTIONS,
-  type ChatStreamSink,
+  type ConversationStreamEventSink,
 } from "../handlers/chat-stream.js";
 import { isSafeSessionId, validateUserContentParts } from "../handlers/chat.js";
 import type { IpcDeps } from "../types.js";
 
 const log = createLogger("sidechat");
-
-const SIDECHAT_CHANNELS = {
-  stream: CHANNELS.sidechat.stream,
-  fallback: CHANNELS.sidechat.fallback,
-} as const;
 
 export function registerSideChatHandlers(deps: IpcDeps): void {
   const { sideChatConversationLoop, auditLogger, getMainWindow } = deps;
@@ -90,7 +86,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
   let activeSideStreamTurn: Promise<TurnResult> | null = null;
   let nextSideStreamId = 0;
 
-  const buildSink = (wc: WebContents | undefined): ChatStreamSink =>
+  const buildSink = (wc: WebContents | undefined): ((channel: string, payload: unknown) => void) =>
     (channel, payload) => sendToWebContents(wc, channel, payload, log);
 
   // Abort + await any in-flight side turn before mutating the shared side loop
@@ -118,19 +114,24 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
     }
     const attachments = validateUserContentParts(p.attachments);
     const win = getMainWindow();
-    const sink = buildSink(win?.webContents);
     const streamId = ++nextSideStreamId;
+    const sink: ConversationStreamEventSink = createLegacyChatStreamEventSink(
+      buildSink(win?.webContents),
+      {
+        streamId,
+        streamChannel: CHANNELS.sidechat.stream,
+        fallbackChannel: CHANNELS.sidechat.fallback,
+      },
+    );
     const turnPromise = (async () => {
       return runStreamedTurn(
         loop,
         p.input as string,
         sink,
-        streamId,
         {
           ...STREAM_TURN_OPTIONS,
           ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
-        SIDECHAT_CHANNELS,
       );
     })().finally(() => {
       if (activeSideStreamTurn === turnPromise) activeSideStreamTurn = null;

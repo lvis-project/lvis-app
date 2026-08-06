@@ -13,6 +13,11 @@
 import {
   type LLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
+import { serializeUserContentForEstimation } from "../../shared/multimodal-token-estimate.js";
+import type {
+  SubscriptionChatRuntimeSelection,
+  SubscriptionUsageTelemetry,
+} from "../../shared/subscription-runtime.js";
 import type { ToolResultImage } from "../../tools/types.js";
 import type { ProviderErrorDiagnostics } from "./provider-error-diagnostics.js";
 export type { LLMVendor };
@@ -150,6 +155,8 @@ export interface MessageMeta {
      * the same granularity the provider bills.
      */
     usageByModel?: TokenUsageByModel[];
+    /** Non-billable subscription telemetry; never enters API-key pricing. */
+    subscriptionUsage?: SubscriptionUsageTelemetry[];
     breakdown?: Record<string, { count: number; ms: number }>;
   };
   /**
@@ -230,20 +237,7 @@ export function userContentText(
 export function serializeMessageForEstimation(message: GenericMessage): string {
   switch (message.role) {
     case "user": {
-      const contentForEstimation =
-        typeof message.content === "string"
-          ? message.content
-          : message.content
-              .map((p) =>
-                p.type === "text"
-                  ? p.text
-                  : `[${p.type}:${p.type === "image" ? (p.mimeType ?? "image") : p.mimeType}]`,
-              )
-              .join("\n");
-      return JSON.stringify({
-        role: message.role,
-        content: contentForEstimation,
-      });
+      return serializeUserContentForEstimation(message.content);
     }
     case "assistant":
       return JSON.stringify({
@@ -298,6 +292,8 @@ export type StreamEvent =
       type: "message_complete";
       stopReason: "end_turn" | "tool_use" | "max_tokens";
       usage?: TokenUsage;
+      /** Separate non-billable subscription telemetry for this provider round. */
+      subscriptionUsage?: SubscriptionUsageTelemetry;
       thinkingBlocks?: ThinkingBlock[];
     }
   | {
@@ -336,12 +332,19 @@ export type StreamSmoothing = "none" | "word" | "char";
  * (GPT-5+, Claude 4+) deprecate fine-grained sampling — the vendor SDK
  * defaults are the policy. Re-introducing any of these requires a
  * documented architectural reason.
+ *
+ * `outputTokenLimit` below is deliberately not a sampling control: it is a
+ * host-owned ceiling used only by bounded background one-shot generation.
+ * API-key transports map it to their native request limit, while the engine
+ * enforces the same ceiling for transports that cannot do so natively.
  */
 export interface StreamTurnParams {
   model: string;
   systemPrompt: string;
   messages: GenericMessage[];
   tools?: ToolSchema[];
+  /** Host-owned bounded output ceiling for background one-shot calls only. */
+  outputTokenLimit?: number;
   /** Client-side stream smoothing (word/char chunking via Vercel smoothStream). */
   streamSmoothing?: StreamSmoothing;
   /** Enable extended thinking / reasoning (Claude Sonnet 4.5+, Opus 4+). */
@@ -361,8 +364,47 @@ export interface StreamTurnParams {
   abortSignal?: AbortSignal;
 }
 
+/**
+ * Provider-owned request projection input. Most API-key providers use the
+ * engine's generic wire estimator; transports with a distinct native envelope
+ * may return their own projection through LLMProvider.
+ */
+export interface ProviderRequestInputProjectionParams {
+  systemPrompt: string;
+  messages: GenericMessage[];
+  toolSchemas: ToolSchema[];
+  continuationPrefill?: boolean;
+  enableThinking?: boolean;
+  thinkingBudgetTokens?: number;
+}
+
+/** Cross-provider context-pressure projection; it is never billing usage. */
+export interface ProviderRequestInputProjection {
+  totalTokens: number;
+  systemPromptTokens: number;
+  messageTokens: number;
+  toolSchemaTokens: number;
+}
+
 export interface LLMProvider {
   readonly vendor: LLMVendor;
+  /**
+   * Host-owned marker for a subscription-authenticated runtime.
+   *
+   * The marker identifies the credential/runtime selection only. Once the
+   * factory returns a provider, it follows the same host prompt, tool,
+   * approval, persistence, and compaction contracts as an API-key provider.
+   * Subscription usage is intentionally kept out of API-key pricing.
+   */
+  readonly subscriptionRuntime?: SubscriptionChatRuntimeSelection;
+  /**
+   * Optional transport-native input projection. Returning undefined preserves
+   * the engine's generic estimator instead of widening provider failures into
+   * preflight/compaction control flow.
+   */
+  projectRequestInput?(
+    input: ProviderRequestInputProjectionParams,
+  ): ProviderRequestInputProjection | undefined;
   streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent>;
 }
 

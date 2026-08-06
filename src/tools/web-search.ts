@@ -95,8 +95,8 @@ export function parseSerperResponse(data: unknown): NormalizedSearchResult[] {
  * Deps are injected by the boot assembler so the definition itself stays free
  * of boot wiring:
  * - `settingsService` resolves the configured provider + its secret key.
- * - `networkFetch` is the Electron network-stack fetch (honors host-resolver
- *   rules) rather than the global `fetch`.
+ * - `networkFetch` is the Electron network-stack fetch (Chromium network stack:
+ *   system proxy/PAC, OS certificate store) rather than the global `fetch`.
  */
 export function createWebSearchTool(
   settingsService: SettingsService,

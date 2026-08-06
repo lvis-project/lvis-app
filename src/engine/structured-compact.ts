@@ -6,9 +6,9 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { GenericMessage, LLMProvider, StreamEvent } from "./llm/types.js";
+import type { GenericMessage } from "./llm/types.js";
 import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
-import { estimateTokens, estimateMessagesTokens } from "./auto-compact.js";
+import { estimateTokens, estimateMessageTokensForWire, estimateMessagesTokens } from "./auto-compact.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { createLogger } from "../lib/logger.js";
 import {
@@ -186,10 +186,28 @@ const LEDGER_RESULT_MAX = 200;
 /** Recent user turns that must survive compaction verbatim. */
 export const DEFAULT_PRESERVE_RECENT_TURNS = 5;
 
+/**
+ * The only capability structured compaction needs from the common Memory
+ * Reviewer lane. Keeping this recap-only prevents callers from substituting a
+ * direct provider transport.
+ */
+export interface CompactRecapReviewer {
+  review(
+    task: "recap",
+    prompt: string,
+    options?: {
+      systemPrompt?: string;
+      signal?: AbortSignal;
+    },
+  ): Promise<string>;
+}
+
 export interface CompactWithBoundaryArgs {
   messages: GenericMessage[];
-  llm: LLMProvider;
-  model: string;
+  /**
+   * Required common no-tool reviewer path for recap generation.
+   */
+  memoryReviewer: CompactRecapReviewer;
 
   preserveRecentTokens: number;
   /**
@@ -356,7 +374,7 @@ async function dropOldestUntilUnderBudget(
   // re-ran `estimateMessagesTokens(surviving)` after every shift (O(N²)
   // serialization cost on 200+ message histories while holding `isCompacting`
   // lock). Maintain a running total instead — O(N).
-  const perMessageTokens = toCompact.map((m) => estimateTokens(serializeMessageForEstimation(m)));
+  const perMessageTokens = toCompact.map(estimateMessageTokensForWire);
   let currentTotal = perMessageTokens.reduce((a, b) => a + b, 0);
   if (currentTotal <= budget) {
     return { messages: toCompact, droppedCount: 0, truncatedDir: "" };
@@ -404,8 +422,7 @@ export async function compactWithBoundary(
 ): Promise<CompactWithBoundaryResult> {
   const {
     messages,
-    llm,
-    model,
+    memoryReviewer,
     preserveRecentTokens,
     preserveRecentTurns = DEFAULT_PRESERVE_RECENT_TURNS,
     compactNum,
@@ -476,8 +493,7 @@ export async function compactWithBoundary(
   let lastRawText = "";
   for (let attempt = 0; attempt <= MAX_PARSE_RETRY; attempt++) {
     const text = await callSummaryLLM({
-      llm,
-      model,
+      memoryReviewer,
       conversationText,
       compactNum,
       abortSignal,
@@ -687,7 +703,7 @@ function splitForBoundary(
   let preservedTokens = 0;
   if (preserveRecentTokens > 0) {
     for (let i = messages.length - 1; i >= 0; i--) {
-      const msgTokens = estimateTokens(serializeMessageForEstimation(messages[i]));
+      const msgTokens = estimateMessageTokensForWire(messages[i]);
       if (preservedTokens + msgTokens > preserveRecentTokens) break;
       preservedTokens += msgTokens;
       preserveStart = i;
@@ -817,10 +833,9 @@ function renderConversation(messages: GenericMessage[]): string {
   return lines.join("\n");
 }
 
-/** SUMMARY_TEMPLATE LLM 호출. 동일 vendor 동급 모델. */
+/** SUMMARY_TEMPLATE를 공통 no-tool Memory Reviewer recap lane으로 전달한다. */
 async function callSummaryLLM(args: {
-  llm: LLMProvider;
-  model: string;
+  memoryReviewer: CompactRecapReviewer;
   conversationText: string;
   compactNum: number;
   abortSignal?: AbortSignal;
@@ -836,26 +851,10 @@ async function callSummaryLLM(args: {
     (_match, key) => templateValues[key] ?? _match,
   );
 
-  let text = "";
-  for await (const ev of args.llm.streamTurn({
-    model: args.model,
+  return (await args.memoryReviewer.review("recap", filledPrompt, {
     systemPrompt: t("be_structuredCompact.callSummarySystemPrompt"),
-    messages: [{ role: "user", content: filledPrompt }],
-    tools: [],
-    ...(args.abortSignal !== undefined && { abortSignal: args.abortSignal }),
-  }) as AsyncIterable<StreamEvent>) {
-    if (args.abortSignal?.aborted) {
-      throw new Error("LLM compact aborted by signal");
-    }
-    if (ev.type === "text_delta" && ev.text) {
-      text += ev.text;
-    } else if (ev.type === "message_complete") {
-      break;
-    } else if (ev.type === "error") {
-      throw new Error(`LLM compact error: ${ev.error}`);
-    }
-  }
-  return text.trim();
+    ...(args.abortSignal !== undefined && { signal: args.abortSignal }),
+  })).trim();
 }
 
 /** skill route 도구 출력 + `meta.lock=true` 메시지의 압축 면제 — 정확한 paths/IDs 수집. */

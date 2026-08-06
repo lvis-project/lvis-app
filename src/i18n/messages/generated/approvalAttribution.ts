@@ -1,0 +1,11 @@
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/ToolApprovalDialog.tsx, src/ui/renderer/components/ApprovalQueueStatus.tsx. Do not edit by hand.
+export const en = {
+  "approvalAttribution.rowConversation": "Conversation",
+  "approvalAttribution.unattributed": "No conversation (host request)",
+  "approvalAttribution.queueConversation": "Conversation {sessionId}",
+} as const;
+export const ko: Record<keyof typeof en, string> = {
+  "approvalAttribution.rowConversation": "대화",
+  "approvalAttribution.unattributed": "대화 없음 (호스트 요청)",
+  "approvalAttribution.queueConversation": "대화 {sessionId}",
+};

@@ -128,4 +128,46 @@ describe("TokenCostBadge — cost parity with shared computeCost", () => {
     );
     expect(container.firstChild).toBeNull();
   });
+
+  it("renders subscription telemetry as a provenance-only token badge without cost toggling", () => {
+    render(
+      <TooltipProvider>
+        <TokenCostBadge
+          tokensIn={999_999}
+          freshInputTokens={999_999}
+          tokensOut={999_999}
+          pricing={sonnet}
+          vendor="claude"
+          subscriptionUsage={[
+            {
+              provider: "codex",
+              model: "gpt-5.4",
+              source: "provider-reported",
+              billable: false,
+              inputTokens: 150,
+              outputTokens: 50,
+              totalTokens: 200,
+            },
+            {
+              provider: "kimi-code",
+              model: "default",
+              source: "local-estimate",
+              billable: false,
+              inputTokens: 75,
+              outputTokens: 25,
+              totalTokens: 100,
+            },
+          ]}
+        />
+      </TooltipProvider>,
+    );
+
+    const badge = screen.getByTestId("token-cost-badge");
+    expect(badge.getAttribute("data-usage-kind")).toBe("subscription");
+    expect(badge.textContent).toContain("300");
+    expect(badge.textContent).toContain("보고됨");
+    expect(badge.textContent).toContain("추정");
+    expect(badge.querySelector("button")).toBeNull();
+    expect(screen.queryByText(/^≈ \$/)).toBeNull();
+  });
 });

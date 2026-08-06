@@ -17,8 +17,11 @@ import type { GenericMessage } from "../llm/types.js";
 import {
   makeConversationLoopDeps as makeDeps,
   makeConversationLoopMemoryManager as makeMemoryManager,
+  makeConversationLoopMemoryReviewer as makeMemoryReviewer,
   makeConversationTurnProvider as makeProviderStub,
 } from "./conversation-loop-test-helpers.js";
+import { getModelPreflightThreshold } from "../auto-compact.js";
+import { getPreflightThreshold } from "../../shared/context-budget.js";
 
 vi.mock("../structured-compact.js", () => ({
   DEFAULT_PRESERVE_RECENT_TURNS: 5,
@@ -59,6 +62,136 @@ describe("manualCompact — /compact deadlock guidance (M3 scenarios)", () => {
     const result = await loop.manualCompact();
     expect(result.compacted).toBe(false);
     expect(result.summary).toBe("컴팩트 불필요: 메시지 수가 충분히 적습니다.");
+  });
+
+  it("uses the provider-native projection for manual compact estimates", async () => {
+    const history: GenericMessage[] = [
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ];
+    const loop = new ConversationLoop(makeDeps({ memoryManager: makeMemoryManager(history) }));
+    loop.resetAndResume("manual-provider-projection");
+    const projection = {
+      totalTokens: 12_345,
+      systemPromptTokens: 0,
+      messageTokens: 12_345,
+      toolSchemaTokens: 0,
+    };
+    const projectRequestInput = vi.fn(() => projection);
+    const provider = { ...makeProviderStub(), projectRequestInput };
+    (loop as unknown as { provider: typeof provider }).provider = provider;
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce({
+      status: CompressionStatus.NOOP,
+      boundary: null,
+      newHistory: history,
+      removedCount: 0,
+      estimatedAfter: 0,
+      truncatedCount: 0,
+    });
+    const started = vi.fn();
+
+    await loop.manualCompact({ onCompactStarted: started });
+
+    expect(projectRequestInput).toHaveBeenCalledWith(expect.objectContaining({
+      systemPrompt: expect.any(String),
+      messages: expect.any(Array),
+      toolSchemas: expect.any(Array),
+    }));
+    expect(started).toHaveBeenCalledWith(expect.objectContaining({
+      estimatedBefore: 12_345,
+    }));
+  });
+
+  it("routes subscription-runtime history through the common Memory Reviewer", async () => {
+    const history: GenericMessage[] = [
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ];
+    const memoryReviewer = makeMemoryReviewer();
+    const loop = new ConversationLoop(
+      makeDeps({ memoryManager: makeMemoryManager(history), memoryReviewer }),
+    );
+    loop.resetAndResume("sess-1");
+    const provider = {
+      ...makeProviderStub(),
+      // The fixture's inactive API-key provider remains Claude. The Codex
+      // subscription model must supply the compact threshold instead.
+      subscriptionRuntime: {
+        kind: "subscription" as const,
+        provider: "codex" as const,
+        model: "gpt-5.4-nano",
+      },
+    };
+    (loop as unknown as { provider: typeof provider }).provider = provider;
+
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce({
+      status: CompressionStatus.SUMMARIZED,
+      boundary: {
+        id: "subscription-boundary",
+        compactNum: 1,
+        summary: { goal: "", constraints: "", progress: "", decisions: "", files: [], nextSteps: "", criticalContext: "", currentPlan: "", verificationState: "", openBlockers: "", unsafePendingActions: "", lastToolBoundary: "" },
+        toolBoundaryLedger: [],
+        pinnedArtifacts: [],
+        createdAt: new Date().toISOString(),
+      } as never,
+      newHistory: history.slice(-2),
+      removedCount: 2,
+      estimatedAfter: 100,
+      truncatedCount: 0,
+    });
+
+    const result = await loop.manualCompact();
+
+    expect(result).toMatchObject({ compacted: true, removedMessageCount: 2 });
+    expect(compactWithBoundary).toHaveBeenCalledWith(expect.objectContaining({
+      memoryReviewer,
+      preflightTokens: getModelPreflightThreshold("openai", "gpt-5.4-nano"),
+    }));
+    const compactArgs = vi.mocked(compactWithBoundary).mock.calls[0]?.[0];
+    expect(compactArgs).not.toHaveProperty("llm");
+    expect(compactArgs).not.toHaveProperty("model");
+  });
+
+  it("uses an independent conservative budget for ACP subscriptions without model metadata", async () => {
+    const history: GenericMessage[] = [
+      { role: "user", content: "question" },
+      { role: "assistant", content: "answer" },
+    ];
+    // The helper leaves the inactive API-key provider at Claude. ACP must not
+    // inherit its context window when the subscription exposes no model ID.
+    const memoryReviewer = makeMemoryReviewer();
+    const loop = new ConversationLoop(
+      makeDeps({ memoryManager: makeMemoryManager(history), memoryReviewer }),
+    );
+    loop.resetAndResume("sess-1");
+    const provider = {
+      ...makeProviderStub(),
+      subscriptionRuntime: { kind: "subscription" as const, provider: "kimi-code" as const },
+    };
+    (loop as unknown as { provider: typeof provider }).provider = provider;
+    vi.mocked(compactWithBoundary).mockResolvedValueOnce({
+      status: CompressionStatus.NOOP,
+      boundary: null,
+      newHistory: history,
+      removedCount: 0,
+      estimatedAfter: 0,
+      truncatedCount: 0,
+    });
+
+    const started = vi.fn();
+    await loop.manualCompact({ onCompactStarted: started });
+
+    const expectedPreflight = getPreflightThreshold(64_000);
+    expect(started).toHaveBeenCalledWith(expect.objectContaining({
+      preflight: expectedPreflight,
+    }));
+    expect(compactWithBoundary).toHaveBeenCalledWith(expect.objectContaining({
+      memoryReviewer,
+      preflightTokens: expectedPreflight,
+    }));
+    const compactArgs = vi.mocked(compactWithBoundary).mock.calls[0]?.[0];
+    expect(compactArgs).not.toHaveProperty("llm");
+    expect(compactArgs).not.toHaveProperty("model");
   });
 
   it("M3-C: successful compact returns compacted=true with removedMessageCount", async () => {

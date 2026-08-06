@@ -204,6 +204,7 @@ export function newConversation(
     // orphan the OLD session's Map entry.
     self.deps.pluginRuntime?.clearSessionActivated?.(self.sessionId);
     self.sessionId = createDlpSafeUuid();
+    self.sessionEpoch += 1;
     self.sessionKind = kind;
     self.sessionRoutineId = null;
     self.sessionRoutineTitle = null;
@@ -215,6 +216,7 @@ export function newConversation(
     self.history.clear();
     self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     self.lastRoundProviderInputTokens = 0;
+    self.lastReportedSubscriptionContextWindow = null;
     self.lastRoundInputProjection = null;
     self.lastContextInputTokens = 0;
     self.lastContextInputProjectionTokens = 0;
@@ -273,6 +275,7 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     // orphan the OLD session's Map entry.
     self.deps.pluginRuntime?.clearSessionActivated?.(self.sessionId);
     self.sessionId = sessionId;
+    self.sessionEpoch += 1;
     // #811 m2 — switched-into session ⇒ SessionStart re-fires on its next turn.
     self.sessionStartFiredFor = null;
     const sessionMeta = self.deps.memoryManager.loadSessionMetadata(sessionId);
@@ -290,6 +293,7 @@ export function loadSession(self: ConversationLoop, sessionId: string): boolean 
     self.history.restore(normalized.messages);
     self.cumulativeUsage = { inputTokens: 0, outputTokens: 0 };
     self.lastRoundProviderInputTokens = 0;
+    self.lastReportedSubscriptionContextWindow = null;
     self.lastRoundInputProjection = null;
     self.lastContextInputTokens = latestPersistedContextTokens(normalized.messages);
     self.lastContextInputProjectionTokens = 0;
@@ -332,6 +336,7 @@ export function resetAndResume(self: ConversationLoop, sessionId: string): {
       outputTokens: 0,
     };
     self.lastRoundProviderInputTokens = 0;
+    self.lastReportedSubscriptionContextWindow = null;
     self.lastRoundInputProjection = null;
     self.rateLimitRecoveryAttempted = false;
 

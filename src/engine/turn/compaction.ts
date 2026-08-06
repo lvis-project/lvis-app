@@ -16,13 +16,117 @@ import type {
 import { compactWithBoundary, DEFAULT_PRESERVE_RECENT_TURNS, renderBoundaryAsPreamble } from "../structured-compact.js";
 import { CompressionStatus } from "../../shared/compact-status.js";
 import { estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext } from "../auto-compact.js";
-import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { compactedHistoryWithContextCarrier, contentTruncatedHistoryWithContextCarrier } from "./context-carrier.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
+import { getPreflightThreshold, getUsableContext } from "../../shared/context-budget.js";
+import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
 
 const log = createLogger("lvis");
+
+// ACP runtimes do not expose a trustworthy model-context descriptor. Keep a
+// conservative independent budget rather than accidentally inheriting an
+// inactive API-key provider's potentially much larger context window.
+const SUBSCRIPTION_FALLBACK_CONTEXT_WINDOW = 64_000;
+const SUBSCRIPTION_FALLBACK_PREFLIGHT = getPreflightThreshold(
+  SUBSCRIPTION_FALLBACK_CONTEXT_WINDOW,
+);
+const SUBSCRIPTION_FALLBACK_USABLE_CONTEXT = getUsableContext(
+  SUBSCRIPTION_FALLBACK_CONTEXT_WINDOW,
+);
+
+interface RuntimeContextBudget {
+  readonly model: string;
+  readonly preflight: number;
+  readonly usableContext: number;
+  readonly identity: string;
+}
+
+function safeReportedContextBudget(
+  contextWindow: number | undefined,
+): Pick<RuntimeContextBudget, "preflight" | "usableContext"> | undefined {
+  if (typeof contextWindow !== "number" || !Number.isSafeInteger(contextWindow) || contextWindow <= 0) return undefined;
+  const usableContext = getUsableContext(contextWindow);
+  const preflight = getPreflightThreshold(contextWindow);
+  // A malformed tiny provider window must not turn the preflight guard off.
+  return usableContext > 0 && preflight > 0 ? { preflight, usableContext } : undefined;
+}
+
+/**
+ * A Codex sub-agent may carry a profile-model candidate paired with the active
+ * Codex selection as its same-runtime fallback. The engine's provider marker
+ * cannot receive the asynchronous live-catalog resolution result, so both
+ * valid and stale candidates deliberately use the 64K subscription budget for
+ * the whole child loop. This prevents candidate pricing metadata from ever
+ * deferring compaction beyond the verified parent model's unknown capacity.
+ */
+function hasPendingCodexProfileFallback(
+  self: ConversationLoop,
+  subscriptionRuntime: SubscriptionChatRuntimeSelection,
+): boolean {
+  if (subscriptionRuntime.provider !== "codex" || subscriptionRuntime.model === undefined) return false;
+  const activeChatRuntime = self.deps.settingsService.get("llm").activeChatRuntime;
+  return activeChatRuntime?.kind === "subscription"
+    && activeChatRuntime.provider === "codex"
+    && activeChatRuntime.model !== subscriptionRuntime.model;
+}
+
+export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeContextBudget {
+  const subscriptionRuntime = self.provider?.subscriptionRuntime;
+  if (subscriptionRuntime) {
+    const model = subscriptionRuntime.model ?? "default";
+    if (subscriptionRuntime.provider === "codex" && subscriptionRuntime.model) {
+      if (hasPendingCodexProfileFallback(self, subscriptionRuntime)) {
+        return {
+          model,
+          preflight: SUBSCRIPTION_FALLBACK_PREFLIGHT,
+          usableContext: SUBSCRIPTION_FALLBACK_USABLE_CONTEXT,
+          identity: `subscription:codex/${model}`,
+        };
+      }
+      // Codex catalog model IDs are OpenAI model IDs, but remain isolated from
+      // the user's inactive API-key configuration and pricing accounting.
+      const catalogPreflight = getModelPreflightThreshold("openai", model);
+      const catalogUsableContext = getModelUsableContext("openai", model);
+      const reported = self.lastReportedSubscriptionContextWindow;
+      const reportedBudget = safeReportedContextBudget(
+        reported?.provider === "codex" && reported.model === model
+          ? reported.contextWindow
+          : undefined,
+      );
+      // A matching terminal Codex report may make the catalog budget more
+      // conservative, never larger. Invalid/tiny reports retain the catalog
+      // threshold so a malformed external value cannot disable preflight.
+      return {
+        model,
+        preflight: reportedBudget
+          ? Math.min(catalogPreflight, reportedBudget.preflight)
+          : catalogPreflight,
+        usableContext: reportedBudget
+          ? Math.min(catalogUsableContext, reportedBudget.usableContext)
+          : catalogUsableContext,
+        identity: `subscription:codex/${model}`,
+      };
+    }
+    return {
+      model,
+      preflight: SUBSCRIPTION_FALLBACK_PREFLIGHT,
+      usableContext: SUBSCRIPTION_FALLBACK_USABLE_CONTEXT,
+      identity: `subscription:${subscriptionRuntime.provider}/${model}`,
+    };
+  }
+
+  const llmSettings = self.deps.settingsService.get("llm");
+  const provider = llmSettings.provider;
+  const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
+  return {
+    model,
+    preflight: getModelPreflightThreshold(provider, model),
+    usableContext: getModelUsableContext(provider, model),
+    identity: `${provider}/${model}`,
+  };
+}
 
 
 
@@ -52,10 +156,20 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
       };
     }
 
-    const llmSettings = self.deps.settingsService.get("llm");
-    const provider = llmSettings.provider;
-    const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
-    const preflight = getModelPreflightThreshold(provider, model);
+    const memoryReviewer = self.deps.memoryReviewer;
+    if (!memoryReviewer) {
+      log.warn("manualCompact skipped: common Memory Reviewer is unavailable");
+      return {
+        compacted: false,
+        compactedAt: null,
+        summary: t("be_conversationLoop.manualCompactFailed", {
+          message: "Memory reviewer is unavailable",
+        }),
+        removedMessageCount: 0,
+      };
+    }
+
+    const { preflight } = contextBudgetForCurrentRuntime(self);
     const preserveRecentTokens = Math.max(1_000, Math.floor(preflight * 0.4));
 
     self.isCompacting = true;
@@ -64,11 +178,7 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
       const scope = self.resolveToolScope("");
       const toolSchemas = self.rebuildToolSchemas(scope);
       const projectionContext = self.createRequestProjectionContext(scope, null, undefined, toolSchemas);
-      const requestProjection = estimateRequestInputProjection({
-        systemPrompt: projectionContext.systemPrompt,
-        messages: messagesBefore,
-        toolSchemas,
-      });
+      const requestProjection = projectionContext.estimateCurrent();
       // Mirror runPreflightGuard's pre-compact UX hint so slash-`/compact`
 
       // potentially long-running LLM summarization.
@@ -86,8 +196,7 @@ export async function manualCompact(self: ConversationLoop, callbacks?: Pick<Tur
       const tokensBefore = requestProjection.totalTokens;
       const result = await compactWithBoundary({
         messages: messagesBefore,
-        llm: self.provider,
-        model,
+        memoryReviewer,
         preserveRecentTokens,
         preserveRecentTurns: DEFAULT_PRESERVE_RECENT_TURNS,
         compactNum: self.compactNum + 1,
@@ -200,10 +309,7 @@ export async function applyBoundaryToSession(
           self.compactNum,
           messagesBefore,
         );
-        const llmSettings = self.deps.settingsService.get("llm");
-        const provider = llmSettings.provider;
-        const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
-        const usable = getModelUsableContext(provider, model);
+        const { usableContext: usable } = contextBudgetForCurrentRuntime(self);
         const ctxUsageAtTrigger = usable > 0 ? Math.min(1.0, estimatedBefore / usable) : 0;
         const checkpointEntry: import("../../memory/memory-manager.js").Checkpoint = {
           id: crypto.randomUUID(),
@@ -278,10 +384,7 @@ export async function applyBoundaryToSession(
     // Same-session checkpoint chain.
     // ctxUsageAtTrigger 분모는 *usable context window* (LVIS reservation 적용).
     try {
-      const llmSettings = self.deps.settingsService.get("llm");
-      const provider = llmSettings.provider;
-      const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
-      const usable = getModelUsableContext(provider, model);
+      const { usableContext: usable } = contextBudgetForCurrentRuntime(self);
       const ctxUsageAtTrigger = usable > 0 ? Math.min(1.0, estimatedBefore / usable) : 0;
       const checkpointEntry: import("../../memory/memory-manager.js").Checkpoint = {
         id: crypto.randomUUID(),
@@ -366,18 +469,17 @@ export async function runPreflightGuard(
     }
     if (!self.provider) return false;
 
-    const llmSettings = self.deps.settingsService.get("llm");
-    const provider = llmSettings.provider;
-    const model = getLlmVendorSettings(llmSettings.vendors, provider).model;
-    const preflight = getModelPreflightThreshold(provider, model);
+    const memoryReviewer = self.deps.memoryReviewer;
+    if (!memoryReviewer) {
+      log.warn("preflight: compact skipped because common Memory Reviewer is unavailable");
+      return false;
+    }
+
+    const { preflight, identity } = contextBudgetForCurrentRuntime(self);
     if (!forceRecover && !forceRateLimit && preflight <= 0) return false;
 
     const messagesBefore = self.history.getMessages();
-    const requestProjection = estimateRequestInputProjection({
-      systemPrompt: projectionContext.systemPrompt,
-      messages: messagesBefore,
-      toolSchemas: projectionContext.toolSchemas,
-    });
+    const requestProjection = projectionContext.estimateCurrent();
     const estimated = requestProjection.totalTokens;
     // Two-signal preflight: local request projection can drift from provider
     // tokenization. Pair it with the latest provider-calibrated context-fill
@@ -409,7 +511,7 @@ export async function runPreflightGuard(
     });
     try {
       log.info(
-        `preflight: TRIGGER — source=${triggerSource} estimated=${estimated} contextTokensIn=${contextTokensIn} preflight=${preflight} (model=${provider}/${model}) → LLM compact #${self.compactNum + 1}`,
+        `preflight: TRIGGER — source=${triggerSource} estimated=${estimated} contextTokensIn=${contextTokensIn} preflight=${preflight} (model=${identity}) → LLM compact #${self.compactNum + 1}`,
       );
       // Adaptive token-budget preserve — usagePct 가 높을수록 줄인다. 별도 invariant 로
       // compactWithBoundary 가 최근 5 user turn (+ 현재 pending user question)
@@ -447,8 +549,7 @@ export async function runPreflightGuard(
       const tokensBefore = estimated;
       const compactResult = await compactWithBoundary({
         messages: messagesBefore,
-        llm: self.provider,
-        model,
+        memoryReviewer,
         preserveRecentTokens,
         preserveRecentTurns: DEFAULT_PRESERVE_RECENT_TURNS,
         compactNum: self.compactNum + 1,

@@ -4,6 +4,7 @@
 
 
 import { createLogger } from "../lib/logger.js";
+import { areExternalTurnHooksAllowed } from "../shared/turn-extension-policy.js";
 import { t } from "../i18n/index.js";
 const log = createLogger("hook");
 
@@ -61,6 +62,14 @@ export class HookRunner {
 
 
   async runPreHooks(ctx: HookContext): Promise<HookResult> {
+    if (!areExternalTurnHooksAllowed()) {
+      return {
+        action: "allow",
+        updatedInput: { ...ctx.toolInput },
+        feedback: undefined,
+      };
+    }
+
     let currentInput = { ...ctx.toolInput };
     const feedbacks: string[] = [];
 
@@ -98,6 +107,8 @@ export class HookRunner {
 
 
   async runPostHooks(ctx: PostHookContext): Promise<string | undefined> {
+    if (!areExternalTurnHooksAllowed()) return undefined;
+
     const feedbacks: string[] = [];
 
     for (const hook of this.postHooks) {

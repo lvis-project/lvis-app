@@ -46,8 +46,26 @@ export async function handleCommand(
       case "remember": {
         if (!args.trim()) { result = t("be_conversationLoop.cmdRememberUsage"); break; }
         const title = args.slice(0, 40).replace(/\n/g, " ");
-        await self.deps.memoryManager.saveMemory(title, args, self.getSessionProjectContext?.());
-        result = t("be_conversationLoop.cmdRememberSaved", { title });
+        const memoryCaptureService = self.deps.memoryCaptureService;
+        if (!memoryCaptureService) {
+          result = t("be_conversationLoop.cmdRememberNotSaved");
+          break;
+        }
+        try {
+          const capture = await memoryCaptureService.captureExplicit({
+            title,
+            content: args,
+            ...(self.getSessionMemoryProjectContext?.()
+              ?? self.getSessionProjectContext?.()
+              ?? {}),
+          });
+          result = capture.status === "saved"
+            ? t("be_conversationLoop.cmdRememberSaved", { title: capture.entry.title })
+            : t("be_conversationLoop.cmdRememberNotSaved");
+        } catch {
+          // A reviewer failure must never silently fall back to raw persistence.
+          result = t("be_conversationLoop.cmdRememberNotSaved");
+        }
         break;
       }
       case "memory": {

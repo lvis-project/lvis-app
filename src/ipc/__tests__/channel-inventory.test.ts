@@ -106,6 +106,12 @@ vi.mock("electron", () => {
 import { registerIpcHandlers } from "../index.js";
 import { setIsPackaged, _resetForTest } from "../../boot/dev-flags.js";
 import type { AppServices } from "../../boot/types.js";
+import {
+  CHANNELS,
+  CHANNEL_GESTURE,
+  isPublicChannel,
+  PUBLIC_CHANNELS,
+} from "../../contract/app-contract.js";
 
 // Every top-level service field of AppServices. The mock proxy enumerates
 // these so `{ ...services }` inside registerIpcHandlers carries a live nested
@@ -116,6 +122,8 @@ const SERVICE_KEYS: (string | symbol)[] = [
   "pluginRuntime",
   "pluginMarketplace",
   "settingsService",
+  "memoryConsolidationService",
+  "memoryMaintenanceCoordinator",
   "memoryManager",
   "inputClassifier",
   "routeEngine",
@@ -189,6 +197,14 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
     // before the snapshot diff even matters.
     expect(unique.length).toBeGreaterThan(50);
   });
+  it("keeps subscription status invalidation internal and outbound-only", () => {
+    const event = CHANNELS.settings.subscriptionRuntimeStatusUpdated;
+    expect(event).toBe("lvis:settings:subscription:status-updated");
+    expect(channels).not.toContain(event);
+    expect(PUBLIC_CHANNELS).not.toContain(event);
+    expect(isPublicChannel(event)).toBe(false);
+    expect(CHANNEL_GESTURE[event]).toBeUndefined();
+  });
 
   it("locks the sorted unique channel list", () => {
     const sorted = [...new Set(channels)].sort();
@@ -205,12 +221,16 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:app:info",
         "lvis:approval:respond",
         "lvis:ask-user-question:respond",
+        "lvis:attach:discardClipboardImage",
         "lvis:attach:openExternal",
         "lvis:attach:openFile",
         "lvis:attach:readImage",
         "lvis:attach:saveClipboardImage",
         "lvis:audit:search",
         "lvis:audit:stats",
+        "lvis:away-authority:arm",
+        "lvis:away-authority:disarm",
+        "lvis:away-authority:status",
         "lvis:bootstrap:retry",
         "lvis:chat:abort",
         "lvis:chat:branch-from-checkpoint",
@@ -269,6 +289,9 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:mcp:ui-resource",
         "lvis:memory:agents-md:get",
         "lvis:memory:agents-md:update",
+        "lvis:memory:candidates:activate",
+        "lvis:memory:candidates:delete",
+        "lvis:memory:candidates:list",
         "lvis:memory:entries:delete",
         "lvis:memory:entries:list",
         "lvis:memory:entries:save",
@@ -276,6 +299,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:memory:index:get",
         "lvis:memory:index:sections:update",
         "lvis:memory:index:update-if-unchanged",
+        "lvis:memory:long-term:refresh",
         "lvis:memory:sessions:list",
         "lvis:memory:sessions:search",
         "lvis:memory:user-prefs:get",
@@ -349,7 +373,20 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:runtime:env",
         "lvis:session-todo:clear",
         "lvis:session-todo:list",
-        "lvis:settings:apply-host-map",
+        "lvis:settings:acp-subscription:cancel-login",
+        "lvis:settings:acp-subscription:choose-runtime",
+        "lvis:settings:acp-subscription:forget-runtime",
+        "lvis:settings:acp-subscription:logout",
+        "lvis:settings:acp-subscription:open-login-browser",
+        "lvis:settings:acp-subscription:start-login",
+        "lvis:settings:acp-subscription:status",
+        "lvis:settings:acp-subscription:verify",
+        "lvis:settings:codex-subscription:cancel-login",
+        "lvis:settings:codex-subscription:list-models",
+        "lvis:settings:codex-subscription:logout",
+        "lvis:settings:codex-subscription:start-browser-login",
+        "lvis:settings:codex-subscription:start-device-code-login",
+        "lvis:settings:codex-subscription:status",
         "lvis:settings:delete-api-key",
         "lvis:settings:delete-web-api-key",
         "lvis:settings:get",
@@ -363,6 +400,17 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:settings:marketplace:uninstall-provider-preset",
         "lvis:settings:set-api-key",
         "lvis:settings:set-web-api-key",
+        "lvis:settings:subscription:cancel-login",
+        "lvis:settings:subscription:choose-runtime",
+        "lvis:settings:subscription:forget-runtime",
+        "lvis:settings:subscription:list-models",
+        "lvis:settings:subscription:logout",
+        "lvis:settings:subscription:open-login-browser",
+        "lvis:settings:subscription:start-login",
+        "lvis:settings:subscription:status",
+        "lvis:settings:subscription:use-api-for-chat",
+        "lvis:settings:subscription:use-for-chat",
+        "lvis:settings:subscription:verify",
         "lvis:settings:update",
         "lvis:shell:open-external",
         "lvis:sidechat:abort",
@@ -376,6 +424,21 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:starred:add",
         "lvis:starred:list",
         "lvis:starred:remove",
+        "lvis:tailnet-sharing:activate-pairing",
+        "lvis:tailnet-sharing:create-current-conversation-share",
+        "lvis:tailnet-sharing:create-invitation",
+        "lvis:tailnet-sharing:revoke-pairing",
+        "lvis:tailnet-sharing:revoke-share",
+        "lvis:tailnet-sharing:snapshot",
+        "lvis:telegram-connection:approve-current-conversation",
+        "lvis:telegram-connection:connect",
+        "lvis:telegram-connection:create-pairing-code",
+        "lvis:telegram-connection:disconnect",
+        "lvis:telegram-connection:pause",
+        "lvis:telegram-connection:resume",
+        "lvis:telegram-connection:revoke-approval",
+        "lvis:telegram-connection:revoke-pairing",
+        "lvis:telegram-connection:snapshot",
         "lvis:telemetry:consent-answer",
         "lvis:terminal:input",
         "lvis:terminal:kill",

@@ -29,6 +29,7 @@ import { toPluginDoctorViewKey } from "../utils/plugin-doctor-view.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import { sortWithPinnedFirst } from "../utils/pinned-sort.js";
 import type { SidebarTab } from "../hooks/use-sidebar-tab.js";
+import type { SubscriptionRuntimeUiPolicy } from "../utils/subscription-runtime-ui-policy.js";
 import {
   useNativeContextMenu,
   type NativeContextMenuHandlers,
@@ -58,6 +59,12 @@ export interface SidebarProps {
   pluginAuthStatuses?: ReadonlyMap<string, { kind: string }>;
   /** Whether the user has an API key configured — drives the settings warning. */
   hasApiKey: boolean | null;
+  /** Canonical subscription readiness policy; legacy booleans are fallback-only. */
+  subscriptionRuntimePolicy?: SubscriptionRuntimeUiPolicy;
+  /** Selected subscription runtime needs sign-in or verification. */
+  subscriptionUnavailable?: boolean;
+  /** Selected subscription runtime is still checking whether chat is available. */
+  subscriptionPending?: boolean;
   onOpenSettings: () => void;
   onNewChat: () => void;
   streaming: boolean;
@@ -1002,8 +1009,11 @@ export function Sidebar({
   pluginViews,
   failedPluginCards = [],
   pluginAuthStatuses,
+  subscriptionRuntimePolicy,
   hasApiKey,
   onOpenSettings,
+  subscriptionUnavailable = false,
+  subscriptionPending = false,
   onNewChat,
   onNewChatForProject,
   streaming,
@@ -1063,6 +1073,12 @@ export function Sidebar({
   const compact = collapsed;
   const hasPluginEntries = pluginViews.length > 0 || failedPluginCards.length > 0;
   // On darwin the OS traffic lights (x:18,y:16) sit just left of the cluster
+  // Subscription readiness is distinct from API-key presence: when a login
+  // runtime is selected, never describe its verification state as an API-key
+  // problem or invite the user to configure an unrelated credential.
+  const runtimeUnavailable = subscriptionRuntimePolicy ? subscriptionRuntimePolicy.chatUnavailable : subscriptionUnavailable;
+  const runtimePending = subscriptionRuntimePolicy ? subscriptionRuntimePolicy.chatPending : subscriptionPending;
+  const settingsNeedsApiKey = hasApiKey === false && !runtimeUnavailable && !runtimePending;
   // strip. The aside's top inset is tuned so the strip's buttons land on the
   // lights' line. Win/Linux + non-Electron have no OS lights to align against.
   const darwinTopClearance = isDarwinPlatform();
@@ -1371,7 +1387,7 @@ export function Sidebar({
         <NavItem
           viewKey="settings"
           label={t("mainToolbar.settings")}
-          icon={<KeyRound className={`h-4 w-4 ${hasApiKey === false ? "text-destructive" : ""}`} />}
+          icon={<KeyRound className={settingsNeedsApiKey || runtimeUnavailable ? "h-4 w-4 text-destructive" : "h-4 w-4"} />}
           // Active when settings render inline (work mode). Marketplace stays
           // false — it's an overlay launcher that never sets activeView.
           isActive={activeView === "settings"}
@@ -1381,7 +1397,15 @@ export function Sidebar({
           data-testid="sidebar-settings"
           data-tour-anchor="settings-entry"
           trailingSlot={
-            hasApiKey === false && !compact ? (
+            runtimePending && !compact ? (
+              <span className="text-[10px] text-muted-foreground">
+                {t("subscriptionProvidersSection.statusChecking")}
+              </span>
+            ) : runtimeUnavailable && !compact ? (
+              <span className="text-[10px] text-destructive">
+                {t("formatIpcError.subscriptionChatUnavailable")}
+              </span>
+            ) : settingsNeedsApiKey && !compact ? (
               <span className="text-[10px] text-destructive">
                 {t("mainToolbar.apiKeyRequired")}
               </span>

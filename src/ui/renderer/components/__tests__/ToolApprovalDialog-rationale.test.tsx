@@ -96,6 +96,10 @@ describe("ToolApprovalDialog rationale card", () => {
     expect(screen.queryByText("/untrusted/raw-target")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tool-approval-input")).not.toBeInTheDocument();
     expect(container.querySelector("details")).toBeNull();
+    const dialog = screen.getByTestId("tool-approval-dialog");
+    expect(dialog).not.toHaveAttribute("data-approval-request-id");
+    expect(dialog).not.toHaveAttribute("data-approval-tool-name");
+    expect(dialog).not.toHaveAttribute("data-approval-args");
 
     expect(screen.queryByText("항상 허용")).not.toBeInTheDocument();
     expect(screen.queryByText("항상 거부")).not.toBeInTheDocument();
