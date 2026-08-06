@@ -10,6 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   LAYER1_DENIAL_ESCALATION_THRESHOLD,
+  LAYER1_DENIAL_MAX_ESCALATIONS_PER_SCOPE,
   LAYER1_DENIAL_TRACKED_IDENTITY_LIMIT,
   Layer1DenialRecurrenceTracker,
   type Layer1DenialIdentity,
@@ -116,7 +117,7 @@ describe("Layer1DenialRecurrenceTracker — identity cannot be farmed", () => {
     expect(sibling).toEqual({ tracked: true, count: 1, escalate: false });
   });
 
-  it("does not accumulate denials across different conversations", () => {
+  it("does not accumulate denials across different session scopes", () => {
     const tracker = new Layer1DenialRecurrenceTracker();
 
     denyRepeatedly(
@@ -177,6 +178,68 @@ describe("Layer1DenialRecurrenceTracker — one ask per identity", () => {
       count: LAYER1_DENIAL_ESCALATION_THRESHOLD + 1,
       escalate: false,
     });
+  });
+});
+
+describe("Layer1DenialRecurrenceTracker — per-scope escalation budget", () => {
+  /** Drive one fresh identity all the way to its escalation attempt. */
+  function escalateFreshIdentity(
+    tracker: Layer1DenialRecurrenceTracker,
+    sessionId: string,
+    tag: string,
+  ): boolean {
+    const records = denyRepeatedly(
+      tracker,
+      { ...BASE, sessionId, canonicalPath: `/home/ken/notes/${tag}.md` },
+      LAYER1_DENIAL_ESCALATION_THRESHOLD,
+    );
+    return escalationFlags(records).some(Boolean);
+  }
+
+  it("stops asking once a scope has spent its budget, however many new paths appear", () => {
+    const tracker = new Layer1DenialRecurrenceTracker();
+
+    // Each round is a brand-new identity, so the per-identity rule alone would
+    // let every one of them raise its own modal.
+    const raised = Array.from(
+      { length: LAYER1_DENIAL_MAX_ESCALATIONS_PER_SCOPE + 4 },
+      (_unused, index) => escalateFreshIdentity(tracker, "sess-1", `path-${index}`),
+    );
+
+    expect(raised.filter(Boolean).length).toBe(
+      LAYER1_DENIAL_MAX_ESCALATIONS_PER_SCOPE,
+    );
+    // And the ones past the budget are the later ones, not an arbitrary subset.
+    expect(raised.slice(LAYER1_DENIAL_MAX_ESCALATIONS_PER_SCOPE)).toEqual(
+      raised.slice(LAYER1_DENIAL_MAX_ESCALATIONS_PER_SCOPE).map(() => false),
+    );
+  });
+
+  it("does not let one scope spend another scope's budget", () => {
+    const tracker = new Layer1DenialRecurrenceTracker();
+    for (let i = 0; i < LAYER1_DENIAL_MAX_ESCALATIONS_PER_SCOPE + 2; i += 1) {
+      escalateFreshIdentity(tracker, "sess-noisy", `noisy-${i}`);
+    }
+
+    // A different lane has touched nothing and must still get its first ask.
+    expect(escalateFreshIdentity(tracker, "sess-quiet", "quiet-0")).toBe(true);
+  });
+
+  it("keeps denying normally after the budget is spent", () => {
+    const tracker = new Layer1DenialRecurrenceTracker();
+    for (let i = 0; i < LAYER1_DENIAL_MAX_ESCALATIONS_PER_SCOPE; i += 1) {
+      escalateFreshIdentity(tracker, "sess-1", `spent-${i}`);
+    }
+
+    const beyond = denyRepeatedly(
+      tracker,
+      { ...BASE, sessionId: "sess-1", canonicalPath: "/home/ken/notes/after.md" },
+      LAYER1_DENIAL_ESCALATION_THRESHOLD + 2,
+    );
+
+    // Still counted, still tracked — just never escalated again.
+    expect(escalationFlags(beyond)).toEqual(beyond.map(() => false));
+    expect(beyond.every((record) => record.tracked === true)).toBe(true);
   });
 });
 

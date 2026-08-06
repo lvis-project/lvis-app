@@ -27,14 +27,17 @@
  *
  * ## Why the identity is what it is
  *
- * The counter's identity is `(conversation, grant subject, canonical refused
+ * The counter's identity is `(session scope, grant subject, canonical refused
  * path)`.
  *
- *  - `sessionId` — the conversation. A grant is asked for inside a conversation
- *    and the sinks that receive it are per-conversation, so a counter that
- *    crossed conversations would let evidence gathered in one turn justify a
- *    prompt in another. An absent `sessionId` is untrackable and never
- *    escalates.
+ *  - `sessionId` — the executor-supplied session scope the denial happened in.
+ *    On the main conversation lane that IS the conversation. On the plugin
+ *    surface it is the synthetic per-lane id `pluginInvocationSessionId` builds
+ *    (`plugin-<origin>-<caller-or-owner>`), which is stable for the process
+ *    rather than per-chat. Either reading is safe here because this component
+ *    can only ever SPLIT counters that would otherwise merge, so including it
+ *    can only reduce the number of asks. An absent `sessionId` is untrackable
+ *    and never escalates.
  *  - `grantSubject` — WHO would receive the grant. This is the same subject
  *    `createPluginSurfacePermissionScope` already keys its session-grant map
  *    with (`pluginPermissionGrantSubject`: owner plugin, else caller plugin,
@@ -42,6 +45,15 @@
  *    subject is the anti-farming property: N denials spread across N plugins
  *    are N counters against N different sinks and can never sum to one ask.
  *    An absent subject is untrackable and never escalates.
+ *
+ *    Note the deliberate asymmetry with the scope above:
+ *    `pluginInvocationSessionId` prefers the CALLER plugin while
+ *    `pluginPermissionGrantSubject` prefers the OWNER. For a wrapper (plugin B
+ *    calling plugin A's tool) that makes the counter strictly NARROWER than the
+ *    sink — two callers of A hold separate counters that both drain into A's
+ *    store. Narrower is the safe direction: it takes more distinct evidence to
+ *    earn one ask than the resulting grant's own granularity, and where the
+ *    grant lands is pre-existing behaviour this module does not change.
  *  - `canonicalPath` — the exact path that was refused, already canonicalized
  *    and case-folded by the caller. NOT the parent directory the escalation
  *    would offer to add: keying on the offered parent would let refusals of
@@ -57,13 +69,24 @@
  *
  * ## Why it cannot be used to nag a user into granting
  *
- * An identity escalates AT MOST ONCE per conversation. `recordDenial` marks it
- * the moment it returns `escalate: true`, so a caller that is refused cannot
- * come back for a second, third, or hundredth prompt by failing three more
- * times. After the single ask, the identity is back to the ordinary deny
- * permanently. The user always has the explicit `/permission dir allow` and the
- * Permissions tab if they change their mind — those are the paths for a
- * deliberate grant, and this one is only for interrupting a silent loop.
+ * This module hands the headless lane a capability it did not have — the
+ * ability to put a modal in front of the user — so it is bounded twice.
+ *
+ * An identity escalates AT MOST ONCE. `recordDenial` marks it the moment it
+ * returns `escalate: true`, so a caller that is refused cannot come back for a
+ * second, third, or hundredth prompt by failing three more times. After the
+ * single ask, the identity is back to the ordinary deny permanently.
+ *
+ * And a session scope raises at most
+ * {@link LAYER1_DENIAL_MAX_ESCALATIONS_PER_SCOPE} escalations in total, because
+ * "one ask per identity" alone still lets a caller cycle through distinct paths
+ * to raise one modal after another. The per-identity rule bounds repetition;
+ * this one bounds variety. A caller that spends the budget goes back to the
+ * ordinary deny for everything, forever.
+ *
+ * The user always has the explicit `/permission dir allow` and the Permissions
+ * tab if they change their mind — those are the paths for a deliberate grant,
+ * and this one is only for interrupting a silent loop.
  *
  * In-memory by design, like every other short-lived permission state here:
  * a process restart forgets the counts, which can only ever mean fewer asks.
@@ -100,9 +123,31 @@ export const LAYER1_DENIAL_ESCALATION_THRESHOLD = 3;
  */
 export const LAYER1_DENIAL_TRACKED_IDENTITY_LIMIT = 512;
 
+/**
+ * Most escalations one session scope may raise, for the tracker's whole life.
+ *
+ * "One ask per identity" bounds a caller repeating itself, but not a caller
+ * varying itself: three calls each on a hundred different paths are a hundred
+ * distinct identities and, without this, a hundred modals. A stuck caller is
+ * normally stuck on one place, so a handful of asks is all a legitimate one
+ * ever needs; past that the honest reading is not "it needs another directory"
+ * but "the user has been asked enough".
+ *
+ * Deliberately per scope rather than per tracker: the plugin surface runs every
+ * plugin through one executor, so a single global budget would let one noisy
+ * plugin spend the budget a different plugin legitimately needed. The map this
+ * counts in cannot outgrow {@link LAYER1_DENIAL_TRACKED_IDENTITY_LIMIT}, since
+ * only a scope with a tracked identity can ever reach it.
+ */
+export const LAYER1_DENIAL_MAX_ESCALATIONS_PER_SCOPE = 3;
+
 /** The three fields that decide whether two denials are "the same denial". */
 export interface Layer1DenialIdentity {
-  /** Conversation the denial happened in. `undefined` is untrackable. */
+  /**
+   * Session scope the denial happened in — the conversation on the main lane,
+   * a stable per-lane id on the plugin surface (see the module doc).
+   * `undefined` is untrackable.
+   */
   readonly sessionId: string | undefined;
   /**
    * Subject that would receive a grant — the value
@@ -116,7 +161,7 @@ export interface Layer1DenialIdentity {
 
 export type Layer1DenialRecord =
   /**
-   * This denial has no usable identity (no conversation, no grant subject, no
+   * This denial has no usable identity (no session scope, no grant subject, no
    * path) or the tracker is at its identity ceiling. It is counted nowhere and
    * can never escalate.
    */
@@ -126,9 +171,9 @@ export type Layer1DenialRecord =
       /** Denials recorded for this identity, including the current one. */
       readonly count: number;
       /**
-       * `true` on exactly ONE call per identity per conversation: the call that
-       * reached {@link LAYER1_DENIAL_ESCALATION_THRESHOLD}. Reading it is what
-       * spends it.
+       * `true` on at most ONE call per identity: the call that reached
+       * {@link LAYER1_DENIAL_ESCALATION_THRESHOLD} while its session scope
+       * still had escalation budget left. Reading it is what spends it.
        */
       readonly escalate: boolean;
     };
@@ -153,12 +198,14 @@ function identityKey(
  * Counts recurring Layer-1 denials and decides the single escalation moment.
  *
  * One instance per `ToolExecutor`, held for the executor's lifetime. The plugin
- * surface has one executor for every plugin, which is exactly why the subject
- * is part of the identity rather than implied by the instance.
+ * surface runs EVERY plugin through a single executor, which is exactly why the
+ * subject is part of the identity rather than implied by the instance.
  */
 export class Layer1DenialRecurrenceTracker {
   private readonly counts = new Map<string, number>();
   private readonly escalated = new Set<string>();
+  /** Escalations already raised per session scope, against the budget. */
+  private readonly escalationsByScope = new Map<string, number>();
 
   /**
    * Record one denial and answer whether it is the escalation moment.
@@ -186,6 +233,16 @@ export class Layer1DenialRecurrenceTracker {
     if (count < LAYER1_DENIAL_ESCALATION_THRESHOLD || this.escalated.has(key)) {
       return { tracked: true, count, escalate: false };
     }
+    // Budget checked last, and NOT recorded as an escalation for this identity:
+    // the identity earned its ask and was refused one for a reason that has
+    // nothing to do with it. Spending is monotonic, so it will keep being
+    // refused — the distinction only keeps `escalated` meaning exactly "has
+    // already put a modal in front of the user".
+    const raised = this.escalationsByScope.get(sessionId) ?? 0;
+    if (raised >= LAYER1_DENIAL_MAX_ESCALATIONS_PER_SCOPE) {
+      return { tracked: true, count, escalate: false };
+    }
+    this.escalationsByScope.set(sessionId, raised + 1);
     this.escalated.add(key);
     return { tracked: true, count, escalate: true };
   }
