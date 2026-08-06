@@ -57,10 +57,10 @@ export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) 
       /* Inset to the composer's optical column (`mx-3`, matching the composer
          card below) and rounded, so the queue reads as a card STACKED ON the
          composer rather than a full-bleed band floating against the window
-         edge. That grouping is the point: this strip is about the composer's
-         pending input, whereas SessionTodoPanel above is session-scoped and
-         keeps the full-bleed band. Dashed border = "not committed yet", the
-         same language the todo strip uses. */
+         edge. SessionTodoPanel above carries the same inset-card treatment —
+         the three surfaces (todo · queue · composer) share one optical column.
+         Dashed border = "not committed yet", the same language the todo strip
+         uses; the hue is what separates them (info here, warning there). */
       className="mx-3 mb-1 overflow-hidden rounded-lg border border-dashed border-info/(--opacity-medium) bg-info/(--opacity-faint) text-xs"
       data-testid="message-queue-panel"
     >
