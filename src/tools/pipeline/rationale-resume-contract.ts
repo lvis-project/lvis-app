@@ -1,5 +1,6 @@
 import { canonicalStringify } from "../../permissions/user-approval-store.js";
 import type { RiskVerdict } from "../../permissions/reviewer/risk-classifier.js";
+import { maxVerdict } from "../../permissions/reviewer/risk-classifier.js";
 import { redactHomePathsInText } from "../../audit/dlp-filter.js";
 import {
   createRationaleApprovalDisplay,
@@ -250,14 +251,7 @@ export function validateRationaleUiAuditProjection(
     ) {
       return false;
     }
-    const rank: Record<RiskVerdict["level"], number> = {
-      low: 0,
-      medium: 1,
-      high: 2,
-    };
-    const expectedEffective =
-      rank[reevaluated.level] > rank[initial.level] ? reevaluated : initial;
-    if (!equal(effective, expectedEffective)) return false;
+    if (!equal(effective, maxVerdict(initial, reevaluated))) return false;
 
     if (value.rationaleStatus === "ready") {
       const readyOk = value.generationOutcome === "accepted-rationale" &&
