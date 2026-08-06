@@ -55,6 +55,20 @@ export function useChatScroll({
   const scrollFollowSignature = useMemo(() => bottomFollowSignature(entries), [entries]);
   const [showJumpToBottom, setShowJumpToBottom] = useState(false);
 
+  // Latest committed render inputs, read by the otherwise-stable
+  // `saveScrollPosition`. They live in a ref instead of that callback's
+  // dependency list on purpose: a per-append identity change would re-run the
+  // scroll-listener effect below, and its eager `onScroll()` measures the
+  // viewport *after* the new entry has already grown `scrollHeight` while
+  // `scrollTop` still points at the old bottom. That reads as "user scrolled
+  // away", unpins the viewport, and cancels the pending pin before the
+  // bottom-follow effect gets to run — the transcript stops following as soon
+  // as any entry taller than CHAT_BOTTOM_THRESHOLD_PX is appended.
+  const scrollSnapshotInputsRef = useRef({ sessionId: currentSessionId, entryCount: entries.length });
+  useLayoutEffect(() => {
+    scrollSnapshotInputsRef.current = { sessionId: currentSessionId, entryCount: entries.length };
+  });
+
   const isNearBottom = useCallback(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport) return true;
@@ -66,15 +80,16 @@ export function useChatScroll({
     options: { preserveAwayFromBottom?: boolean } = {},
   ) => {
     if (!viewport) return;
+    const { sessionId, entryCount } = scrollSnapshotInputsRef.current;
     const snapshot: SavedChatScrollPosition = {
-      sessionId: currentSessionId ?? null,
+      sessionId: sessionId ?? null,
       top: viewport.scrollTop,
       bottomGap: Math.max(0, viewport.scrollHeight - viewport.scrollTop - viewport.clientHeight),
-      entryCount: entries.length,
+      entryCount,
       updatedAt: Date.now(),
     };
     commitScrollSnapshot(snapshot, options);
-  }, [currentSessionId, entries.length, scrollViewportRef]);
+  }, [scrollViewportRef]);
 
   const restoredSessionScrollRef = useRef<string | null>(null);
 
@@ -187,6 +202,11 @@ export function useChatScroll({
     setShowJumpToBottom(false);
   }, [currentSessionId]);
 
+  // Mount-scoped: every dependency is stable, so the listener is attached once
+  // for the lifetime of the transcript viewport (ChatTranscript renders its
+  // ScrollArea unconditionally). The eager `onScroll()` is a one-shot seed of
+  // the pinned/jump-button state — it must never re-run mid-conversation, see
+  // the note on `scrollSnapshotInputsRef`.
   useEffect(() => {
     const viewport = scrollViewportRef.current;
     if (!viewport) return;
