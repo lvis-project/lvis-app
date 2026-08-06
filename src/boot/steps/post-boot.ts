@@ -15,7 +15,10 @@ import type {
   MarketplaceFetcher,
 } from "../../plugins/marketplace.js";
 import { MARKETPLACE } from "../../shared/ipc-channels.js";
-import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
+import {
+  normalizeDismissedAnnouncementIds,
+  type MarketplaceAnnouncementPayload,
+} from "../../shared/marketplace-announcements.js";
 import type { PluginPaths } from "../../plugins/plugin-paths.js";
 import { PluginUpdateDetector, isUpdateCheckEnabled } from "../../plugins/update-detector.js";
 import { createUpdateCheckRunner } from "./update-check-runner.js";
@@ -287,16 +290,6 @@ export function wireAnnouncementCheck(input: AnnouncementCheckInput): void {
   let lastBroadcastKey = "";
   let nextWebContentsId = 0;
   const webContentsIds = new WeakMap<object, number>();
-  const normalizeDismissedAnnouncementIds = (ids: unknown): number[] => {
-    if (!Array.isArray(ids)) return [];
-    const validIds = new Set<number>();
-    for (const id of ids) {
-      if (typeof id === "number" && Number.isSafeInteger(id)) {
-        validIds.add(id);
-      }
-    }
-    return Array.from(validIds).sort((a, b) => a - b);
-  };
   const sortNewestFirst = (items: MarketplaceAnnouncement[]) =>
     [...items].sort((a, b) => {
       const aCreatedAt = Date.parse(a.createdAt);
