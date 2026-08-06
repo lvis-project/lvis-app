@@ -396,6 +396,7 @@ export function ChatComposerDock({
           activePresetId={activePresetId}
           onSelectPreset={onSelectPreset}
           isBusy={streaming}
+          hasDraft={question.trim().length > 0 || attachments.length > 0}
           isSendDisabled={
             composerSendDisabled || (question.trim().length === 0 && attachments.length === 0)
           }
