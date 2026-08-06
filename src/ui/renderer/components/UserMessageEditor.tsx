@@ -25,7 +25,10 @@ export function UserMessageEditor({
        focus ring. The Textarea inside stays chromeless — its default
        `border border-input` plus its own focus ring drew a second box inside
        this one. */
-    <div className="ml-auto w-full max-w-[75%] rounded-lg border border-message-user-border bg-message-user p-2 text-body-sm text-message-user-foreground transition-colors focus-within:border-message-user-action focus-within:ring-1 focus-within:ring-message-user-action motion-reduce:transition-none">
+    <div
+      data-testid="user-message-editor"
+      className="ml-auto w-full max-w-[75%] rounded-lg border border-message-user-border bg-message-user p-2 text-body-sm text-message-user-foreground transition-colors focus-within:border-message-user-action focus-within:ring-1 focus-within:ring-message-user-action motion-reduce:transition-none"
+    >
       <Textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
@@ -34,7 +37,7 @@ export function UserMessageEditor({
       />
       <div className="mt-1 flex justify-end gap-1">
         <Button size="sm" variant="ghost" className="h-6 text-caption text-message-user-action hover:bg-message-user-action/(--opacity-subtle) hover:text-message-user-action focus-visible:ring-message-user-action focus-visible:ring-offset-message-user" onClick={onCancel} disabled={busy}>{t("userMessageEditor.cancelButton")}</Button>
-        <Button size="sm" className="h-6 text-caption focus-visible:ring-message-user-action focus-visible:ring-offset-message-user" onClick={() => onSave(draft)} disabled={busy || !draft.trim()}>{t("userMessageEditor.saveAndResendButton")}</Button>
+        <Button size="sm" data-testid="user-message-editor-save" className="h-6 text-caption focus-visible:ring-message-user-action focus-visible:ring-offset-message-user" onClick={() => onSave(draft)} disabled={busy || !draft.trim()}>{t("userMessageEditor.saveAndResendButton")}</Button>
       </div>
     </div>
   );
