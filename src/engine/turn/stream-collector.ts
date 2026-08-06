@@ -40,6 +40,8 @@ export interface StreamCollectParams {
     streamSmoothing: "none" | "word" | "char";
     enableThinking: boolean;
     thinkingBudgetTokens?: number;
+    /** Per-vendor output ceiling; see LLMVendorSettings.outputTokenLimit. */
+    outputTokenLimit?: number;
   };
   abortSignal?: AbortSignal;
   /**
@@ -145,6 +147,11 @@ export async function collectRoundStream(
         ? {}
         : { thinkingBudgetTokens: llmSettings.thinkingBudgetTokens }),
       ...(continuationPrefill ? { continuationPrefill: true } : {}),
+      // Unset by default — see LLMVendorSettings.outputTokenLimit. Only a user
+      // who configured a ceiling changes anything here.
+      ...(llmSettings.outputTokenLimit === undefined
+        ? {}
+        : { outputTokenLimit: llmSettings.outputTokenLimit }),
       abortSignal,
     }) as AsyncIterable<StreamEvent>) {
       if (abortSignal?.aborted) return { kind: "interrupted", text };
