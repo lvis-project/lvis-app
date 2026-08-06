@@ -1705,6 +1705,7 @@ export const deMessages: Record<string, string> = {
   "outOfAllowedDirCard.adjacencyAckLabel": "Ich verstehe die oben genannten Warnungen und möchte fortfahren.",
   "outOfAllowedDirCard.adjacencyWarningTitle": "Warnung – Nachbarschaftswarnung",
   "outOfAllowedDirCard.allowAlwaysButton": "Verzeichnis dauerhaft hinzufügen",
+  "outOfAllowedDirCard.recurringDenialNotice": "Genau dieser Pfad wurde in dieser Unterhaltung bereits {count}-mal blockiert, daher werden Sie gefragt, statt dass es erneut fehlschlägt. Es wurde noch nichts erlaubt, und eine Ablehnung lässt Ihre aktuellen Berechtigungen genau so, wie sie sind.",
   "outOfAllowedDirCard.allowOnceButton": "Nur einmal",
   "outOfAllowedDirCard.allowOnceTitle": "Nur während der aktuellen Nachricht zulassen. In der nächsten Nachricht werden Sie erneut gefragt.",
   "outOfAllowedDirCard.allowSessionBlockedTitle": "Bitte bestätigen Sie zuerst die Warnung zur Nachbarschaft sensibler Pfade.",

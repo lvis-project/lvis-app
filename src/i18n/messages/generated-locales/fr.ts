@@ -1708,6 +1708,7 @@ export const frMessages: Record<string, string> = {
   "outOfAllowedDirCard.adjacencyAckLabel": "Je comprends les avertissements ci-dessus et je souhaite continuer.",
   "outOfAllowedDirCard.adjacencyWarningTitle": "Avertissement – ​​alerte de contiguïté",
   "outOfAllowedDirCard.allowAlwaysButton": "Ajouter un répertoire de manière permanente",
+  "outOfAllowedDirCard.recurringDenialNotice": "Ce chemin exact a déjà été bloqué {count} fois dans cette conversation ; la question vous est donc posée au lieu d'échouer à nouveau. Rien n'a encore été autorisé, et refuser laisse vos autorisations actuelles exactement telles quelles.",
   "outOfAllowedDirCard.allowOnceButton": "Une seule fois",
   "outOfAllowedDirCard.allowOnceTitle": "Autoriser uniquement pendant le message en cours. Il vous sera demandé à nouveau lors du prochain message.",
   "outOfAllowedDirCard.allowSessionBlockedTitle": "Veuillez d'abord reconnaître l'avertissement de contiguïté de chemin sensible.",

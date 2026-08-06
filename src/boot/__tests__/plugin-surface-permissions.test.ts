@@ -83,4 +83,44 @@ describe("createPluginSurfacePermissionScope", () => {
       "/grant/session",
     ]);
   });
+
+  it("labels each context with the same subject its session grants are keyed by", () => {
+    const scope = createPluginSurfacePermissionScope({
+      readPersistedDirectories: () => [],
+    });
+
+    const indexer = scope.createPermissionContext({
+      origin: "plugin",
+      ownerPluginId: "local-indexer",
+      callerPluginId: "work-assistant",
+    }, { headless: true, trustOrigin: "plugin-emitted" });
+    const meeting = scope.createPermissionContext({
+      origin: "plugin",
+      ownerPluginId: "meeting",
+    }, { headless: true, trustOrigin: "plugin-emitted" });
+
+    // Without this the recurring-denial counter has no subject to key on and
+    // never escalates — or worse, credits two plugins to one counter.
+    expect(indexer.directoryGrantSubject).toBe("local-indexer");
+    expect(meeting.directoryGrantSubject).toBe("meeting");
+    expect(indexer.directoryGrantSubject).not.toBe(meeting.directoryGrantSubject);
+  });
+
+  it("does not let a supplied base choose whose grant subject it is", () => {
+    const scope = createPluginSurfacePermissionScope({
+      readPersistedDirectories: () => [],
+    });
+
+    const context = scope.createPermissionContext({
+      origin: "plugin",
+      ownerPluginId: "meeting",
+    }, {
+      headless: true,
+      trustOrigin: "plugin-emitted",
+      // A base that tries to impersonate another plugin's counter.
+      directoryGrantSubject: "local-indexer",
+    } as never);
+
+    expect(context.directoryGrantSubject).toBe("meeting");
+  });
 });

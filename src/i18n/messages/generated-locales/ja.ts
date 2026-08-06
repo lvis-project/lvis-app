@@ -1724,6 +1724,7 @@ export const jaMessages: Record<string, string> = {
   "outOfAllowedDirCard.adjacencyAckLabel": "上記の警告を理解し、続行したいと考えています。",
   "outOfAllowedDirCard.adjacencyWarningTitle": "警告 - 隣接アラート",
   "outOfAllowedDirCard.allowAlwaysButton": "ディレクトリを永続的に追加する",
+  "outOfAllowedDirCard.recurringDenialNotice": "このパスはこの会話ですでに{count}回ブロックされているため、再び失敗させる代わりに確認しています。まだ何も許可されておらず、拒否しても現在の権限はそのまま維持されます。",
   "outOfAllowedDirCard.allowOnceButton": "一度だけ",
   "outOfAllowedDirCard.allowOnceTitle": "現在のメッセージ中のみ許可します。次のメッセージで再度尋ねられます。",
   "outOfAllowedDirCard.allowSessionBlockedTitle": "まず、機密性の高いパス隣接に関する警告を確認してください。",

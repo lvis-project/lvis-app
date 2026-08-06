@@ -88,6 +88,23 @@ export interface ToolPermissionContext {
   userIntent?: string;
   onTurnDirectoryGrant?: (approvedDirectory: string) => void;
   onSessionDirectoryGrant?: (approvedDirectory: string) => void;
+  /**
+   * Host-set identity of WHO would receive a Layer-1 directory grant on this
+   * surface — the same subject the surface keys its own session-grant store
+   * with (`pluginPermissionGrantSubject`).
+   *
+   * Its only consumer is the recurring-denial counter behind the headless
+   * out-of-allowed-dir escalation
+   * ({@link ../permissions/layer1-denial-recurrence.js}): making the counter's
+   * subject identical to the grant sink's subject is what stops denials from
+   * different callers summing into one prompt. A surface that does not supply
+   * it never escalates, which is the fail-closed direction.
+   *
+   * Host-set only. Every surface that builds a permission context assigns it
+   * AFTER spreading any caller-supplied base, so nothing downstream of the
+   * host can choose whose counter it is credited to.
+   */
+  directoryGrantSubject?: string;
 }
 
 /**

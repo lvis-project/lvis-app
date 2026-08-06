@@ -1721,6 +1721,7 @@ export const esMessages: Record<string, string> = {
   "outOfAllowedDirCard.adjacencyAckLabel": "Entiendo las advertencias anteriores y quiero continuar.",
   "outOfAllowedDirCard.adjacencyWarningTitle": "Advertencia: alerta de adyacencia",
   "outOfAllowedDirCard.allowAlwaysButton": "Agregar directorio permanentemente",
+  "outOfAllowedDirCard.recurringDenialNotice": "Esta ruta exacta ya se ha bloqueado {count} veces en esta conversación, por lo que se le pregunta en lugar de volver a fallar. Todavía no se ha permitido nada, y denegar deja sus permisos actuales exactamente como están.",
   "outOfAllowedDirCard.allowOnceButton": "una sola vez",
   "outOfAllowedDirCard.allowOnceTitle": "Permitir solo durante el mensaje actual. Se le preguntará nuevamente en el siguiente mensaje.",
   "outOfAllowedDirCard.allowSessionBlockedTitle": "Primero, reconozca la advertencia de adyacencia de ruta sensible.",

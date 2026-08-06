@@ -17,6 +17,7 @@ import { tryUserApprovalMemorySkip as tryUserApprovalMemorySkipImpl } from "./pi
 import {
   PluginOperationGrantCoordinator,
 } from "../permissions/plugin-operation-grant.js";
+import type { Layer1DenialRecurrenceTracker } from "../permissions/layer1-denial-recurrence.js";
 import type { PluginRuntimeGenerationAccess } from "../plugins/plugin-host-generation.js";
 import type { GovernedRiskFloor } from "./plugin-operation-governance.js";
 import type { PluginOperationInvocationContext } from "./plugin-operation-governance.js";
@@ -44,6 +45,13 @@ export interface InvocationRunnerServices {
   readonly pluginOperationGrants: PluginOperationGrantCoordinator;
   readonly pluginGenerationAccessProvider: () => PluginRuntimeGenerationAccess | undefined;
   readonly pluginOperationIdentityProvider: PluginOperationIdentityProvider;
+  /**
+   * Counts recurring headless Layer-1 denials. Non-optional and owned by the
+   * executor: an absent tracker would have to mean either "never escalate" or
+   * "always escalate", and a security surface should not have a field whose
+   * absence is a policy.
+   */
+  readonly layer1DenialRecurrence: Layer1DenialRecurrenceTracker;
 }
 
 export function currentApprovalMode(
