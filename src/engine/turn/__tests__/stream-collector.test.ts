@@ -18,6 +18,20 @@ class ScriptedProvider implements LLMProvider {
   }
 }
 
+
+class SubscriptionCapturingProvider implements LLMProvider {
+  readonly vendor = "openai" as const;
+  readonly subscriptionRuntime = { kind: "subscription", provider: "codex" } as const;
+  lastParams: StreamTurnParams | null = null;
+
+  constructor(private readonly events: readonly StreamEvent[]) {}
+
+  async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    this.lastParams = params;
+    yield* this.events;
+  }
+}
+
 async function collect(events: readonly StreamEvent[]) {
   return collectRoundStream({
     provider: new ScriptedProvider(events),
@@ -30,6 +44,30 @@ async function collect(events: readonly StreamEvent[]) {
 }
 
 describe("collectRoundStream tool call IDs", () => {
+  it("forwards thinking controls to a marked subscription runtime", async () => {
+    const provider = new SubscriptionCapturingProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+
+    await collectRoundStream({
+      provider,
+      model: "subscription-model",
+      systemPrompt: "subscription-system",
+      messages: [],
+      toolSchemas: [],
+      llmSettings: {
+        streamSmoothing: "none",
+        enableThinking: true,
+        thinkingBudgetTokens: 10_000,
+      },
+    });
+
+    expect(provider.lastParams).toMatchObject({
+      enableThinking: true,
+      thinkingBudgetTokens: 10_000,
+    });
+  });
+
   it.each([
     ["empty", ""],
     ["over UTF-8 byte limit", "😀".repeat(65)],
@@ -56,6 +94,37 @@ describe("collectRoundStream tool call IDs", () => {
     });
     expect(JSON.stringify(result)).not.toContain("raw-secret");
     expect(result).not.toHaveProperty("toolCalls");
+  });
+
+  it("accepts a valid tool event from a subscription runtime", async () => {
+    const provider = new SubscriptionCapturingProvider([
+      {
+        type: "tool_call",
+        id: "subscription-tool",
+        name: "read_file",
+        input: { path: "src/index.ts" },
+      },
+      { type: "message_complete", stopReason: "tool_use" },
+    ]);
+
+    const result = await collectRoundStream({
+      provider,
+      model: "subscription-model",
+      systemPrompt: "subscription-system",
+      messages: [],
+      toolSchemas: [],
+      llmSettings: LLM_SETTINGS,
+    });
+
+    expect(result).toMatchObject({
+      kind: "ok",
+      stopReason: "tool_use",
+      toolCalls: [{
+        id: "subscription-tool",
+        name: "read_file",
+        input: { path: "src/index.ts" },
+      }],
+    });
   });
 
   it("accepts a distinct ID at exactly 256 UTF-8 bytes", async () => {

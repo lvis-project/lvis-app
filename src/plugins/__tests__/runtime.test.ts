@@ -979,6 +979,25 @@ describe("PluginRuntime.disable", () => {
     expect(() =>
       runtime.assertPluginEventAccess("calendar", "email.action.needed"),
     ).toThrow(/not allowed/i);
+    expect(() =>
+      runtime.assertPluginEventAccess(
+        "calendar",
+        "work_assistant.snapshot.requested",
+        {
+          plugins: [{
+            pluginId: "work-assistant",
+            events: ["work_assistant.snapshot.requested"],
+          }],
+        },
+      ),
+    ).not.toThrow();
+    expect(() =>
+      runtime.assertPluginEventAccess(
+        "ms-graph",
+        "work_assistant.snapshot.requested",
+        null,
+      ),
+    ).toThrow(/not allowed/i);
   });
 
   it("allows work-assistant to subscribe to granted calendar events (P4 detector grants)", async () => {
@@ -2784,6 +2803,74 @@ export default async function createPlugin() {
     expect(await runtime.call("p_restart_prepare_fails_ping")).toBe(
       "hi-p-restart-prepare-fails-1",
     );
+  });
+
+  it("restartPlugin applies a preparation config overlay before creating the replacement", async () => {
+    const pluginId = "p-restart-config-overlay";
+    const pluginDir = join(installedDir, pluginId);
+    const methodName = "p_restart_config_overlay_ping";
+    await mkdir(pluginDir, { recursive: true });
+    await writeFile(
+      join(pluginDir, "entry.mjs"),
+      `export default async function createPlugin(context) {
+  return {
+    handlers: {
+      "${methodName}": async () => context.config.pythonExecutable ?? "missing",
+    },
+    start: async () => {},
+    stop: async () => {},
+  };
+}
+`,
+      "utf-8",
+    );
+    const manifestPath = join(pluginDir, "plugin.json");
+    await writeFile(
+      manifestPath,
+      JSON.stringify({
+        id: pluginId,
+        name: pluginId,
+        version: "1.0.0",
+        entry: "entry.mjs",
+        tools: [
+          {
+            name: methodName,
+            description: `${methodName} tool`,
+            inputSchema: { type: "object", properties: {} },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
+        description: "Restart configuration fixture.",
+        publisher: "Test fixture",
+      }),
+      "utf-8",
+    );
+    await writeFile(
+      registryPath,
+      JSON.stringify({
+        version: 1,
+        plugins: [{ id: pluginId, manifestPath, enabled: true }],
+      }),
+      "utf-8",
+    );
+
+    let prepareRestart = false;
+    const runtime = makeRuntimeWithPreparation(({ pluginId: preparingId }) => {
+      if (!prepareRestart || preparingId !== pluginId) return undefined;
+      return Promise.resolve({
+        configOverride: { pythonExecutable: "/managed/python" },
+      });
+    });
+    await runtime.startAll();
+    await expect(runtime.call(methodName)).resolves.toBe("missing");
+
+    prepareRestart = true;
+    await expect(runtime.restartPlugin(pluginId)).resolves.toBe("started");
+
+    await expect(runtime.call(methodName)).resolves.toBe("/managed/python");
+    expect(runtime.getConfigOverride(pluginId)).toEqual({
+      pythonExecutable: "/managed/python",
+    });
   });
 
   it("removePlugin does not wait for an invalidated restart preparation", async () => {

@@ -11,6 +11,7 @@ import {
 import { join } from "node:path";
 import AdmZip from "adm-zip";
 import { expect, test, type Page } from "@playwright/test";
+import { canonicalStringify } from "../../../src/shared/canonical-json.js";
 import { mergeEvidenceFile } from "../evidence-file.js";
 import {
   approvePendingPlugin,
@@ -25,11 +26,12 @@ import {
   teardownSeededElectron,
   type SeededElectronContext,
 } from "./seeded-electron.js";
-import { openSettingsWindow } from "./settings-window.js";
+import { closeSettingsWindow, openSettingsWindow } from "./settings-window.js";
 
 const E2E_ENABLED = process.env.M4_E2E === "1";
 const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
 const PUBLISHER_KEY = process.env.MARKETPLACE_PUBLISHER_KEY ?? "";
+const REVIEWER_KEY = process.env.MARKETPLACE_REVIEWER_KEY ?? "";
 const ADMIN_KEY = process.env.MARKETPLACE_ADMIN_KEY ?? "";
 const EP_BUNDLE_PATH = process.env.EP_API_BUNDLE_PATH ?? "";
 const EVIDENCE_PATH = process.env.BUNDLE_E2E_EVIDENCE_PATH ?? "";
@@ -37,6 +39,17 @@ const EP_PLUGIN_ID = "ep-api";
 const ATTENDANCE_SKILL_ID = "attendance";
 const TEST_DATE = "2026-07-24";
 const TEST_START_TIME = "09:15";
+const EP_AUTOLOAD_APPROVALS = [
+  {
+    toolName: "ep_approval_read",
+    argsIdentity: canonicalStringify({ operation: "count" }),
+  },
+  {
+    toolName: "ep_profile_read",
+    argsIdentity: canonicalStringify({ operation: "current" }),
+  },
+] as const;
+const MAX_EP_AUTOLOAD_APPROVALS_AHEAD_OF_GRANT = EP_AUTOLOAD_APPROVALS.length;
 
 type BundleSnapshot = {
   ok: true;
@@ -276,8 +289,28 @@ async function runtimeCounts(page: Page): Promise<RuntimeCounts> {
   });
 }
 
+async function pluginGuestId(page: Page): Promise<number | null> {
+  return page.locator("webview").evaluate((node) => {
+    try {
+      const webContentsId = (node as HTMLElement & {
+        getWebContentsId?: () => number;
+      }).getWebContentsId?.();
+      if (
+        typeof webContentsId === "number" &&
+        Number.isInteger(webContentsId) &&
+        webContentsId > 0
+      ) {
+        return webContentsId;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  });
+}
+
 async function activateEpWebview(ctx: SeededElectronContext): Promise<number> {
-  const viewKey = await ctx.page.evaluate(async () => {
+  const viewKey = await ctx.page.evaluate(async (pluginId) => {
     const views = await (globalThis as unknown as {
       lvisApi: {
         listPluginUiExtensions(): Promise<Array<{
@@ -287,12 +320,12 @@ async function activateEpWebview(ctx: SeededElectronContext): Promise<number> {
       };
     }).lvisApi.listPluginUiExtensions();
     const ep = views.find((view) =>
-      view.pluginId === EP_PLUGIN_ID &&
+      view.pluginId === pluginId &&
       view.extension.id === "lge-control" &&
       view.extension.slot === "sidebar"
     );
     return ep ? `plugin:${ep.pluginId}:${ep.extension.id}` : null;
-  });
+  }, EP_PLUGIN_ID);
   expect(viewKey).toBe("plugin:ep-api:lge-control");
   await ctx.app.evaluate(({ BrowserWindow }, key) => {
     const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
@@ -300,22 +333,10 @@ async function activateEpWebview(ctx: SeededElectronContext): Promise<number> {
   }, viewKey!);
   await expect(ctx.page.locator("webview")).toHaveCount(1, { timeout: 15_000 });
   await expect.poll(
-    () => ctx.app.evaluate(({ webContents }) => {
-      const guest = webContents.getAllWebContents().find((candidate) =>
-        candidate.getType() === "webview" &&
-        /plugin-ui-shell\.html$/i.test(candidate.getURL())
-      );
-      return guest?.id ?? null;
-    }),
+    () => pluginGuestId(ctx.page),
     { timeout: 15_000 },
   ).not.toBeNull();
-  const guestId = await ctx.app.evaluate(({ webContents }) => {
-    const guest = webContents.getAllWebContents().find((candidate) =>
-      candidate.getType() === "webview" &&
-      /plugin-ui-shell\.html$/i.test(candidate.getURL())
-    );
-    return guest?.id ?? null;
-  });
+  const guestId = await pluginGuestId(ctx.page);
   if (guestId === null) throw new Error("EP plugin webview guest is missing");
   await expect.poll(
     () => ctx.app.evaluate(({ webContents }, id) =>
@@ -325,6 +346,23 @@ async function activateEpWebview(ctx: SeededElectronContext): Promise<number> {
       ), guestId),
     { timeout: 15_000 },
   ).toBe(true);
+
+  // A session `frame` preload may be evaluated for child frames too. The
+  // bridge is deliberately limited to the registered top-level plugin shell;
+  // an iframe controlled by the plugin must not receive host IPC methods.
+  const childFrameBridgeType = await executeInGuest<string>(ctx, guestId, `
+    new Promise((resolve) => {
+      const frame = document.createElement("iframe");
+      frame.srcdoc = "<!doctype html><title>untrusted child</title>";
+      frame.addEventListener("load", () => {
+        const result = typeof frame.contentWindow?.lvisPlugin;
+        frame.remove();
+        resolve(result);
+      }, { once: true });
+      document.body.appendChild(frame);
+    })
+  `);
+  expect(childFrameBridgeType).toBe("undefined");
   return guestId;
 }
 
@@ -378,7 +416,10 @@ async function invokeGuestTool<T>(
     guestId,
     startGuestToolCallSource(toolName, args, options.operationGrantToken),
   )).toBe("started");
-  const approvalDialog = page.getByTestId("tool-approval-dialog");
+  // Radix keeps a closing dialog in the DOM for its exit animation. Scope the
+  // locator to an *open* dialog for this invocation's tool, so a just-closed
+  // prior approval cannot be mistaken for this request.
+  const approvalDialog = openApprovalDialogForTool(page, toolName, args);
   const terminalOrApproval = async () => {
     const result = await readGuestToolCall<T>(ctx, guestId);
     if (result.state !== "pending") return "terminal" as const;
@@ -389,12 +430,16 @@ async function invokeGuestTool<T>(
   await expect.poll(terminalOrApproval, { timeout: 10_000 }).not.toBe("pending");
   if (await terminalOrApproval() === "approval") {
     if (options.approval === "forbid") {
-      const deny = page.getByTestId("deny-button");
+      const deny = approvalDialog.getByTestId("deny-button");
       if (await deny.isVisible().catch(() => false)) await deny.click();
       throw new Error(`${toolName} reached a forbidden approval`);
     }
+    const requestId = await approvalRequestId(approvalDialog);
     await approveVisibleToolDialog(
       page,
+      toolName,
+      args,
+      requestId,
       options.approvalReason ?? `Allow the exact EP E2E invocation of ${toolName}.`,
     );
   }
@@ -426,14 +471,95 @@ async function readGuestGrant(
   return executeInGuest(ctx, guestId, "globalThis.__epAttendanceGrant");
 }
 
-async function approveVisibleToolDialog(page: Page, reason: string): Promise<void> {
-  const dialog = page.getByTestId("tool-approval-dialog");
+function openApprovalDialog(page: Page) {
+  return page.locator('[data-testid="tool-approval-dialog"][data-state="open"]');
+}
+
+function openApprovalDialogForRequestId(page: Page, requestId: string) {
+  return page.locator(
+    `[data-testid="tool-approval-dialog"][data-state="open"][data-approval-request-id=${JSON.stringify(requestId)}]`,
+  );
+}
+
+function openApprovalDialogForTool(
+  page: Page,
+  expectedToolName: string,
+  expectedArgs: Record<string, unknown>,
+) {
+  return page.locator(
+    `[data-testid="tool-approval-dialog"][data-state="open"][data-approval-tool-name=${JSON.stringify(expectedToolName)}][data-approval-args=${JSON.stringify(canonicalStringify(expectedArgs))}]`,
+  );
+}
+
+async function approvalRequestId(dialog: ReturnType<typeof openApprovalDialog>): Promise<string> {
+  const requestId = await dialog.getAttribute("data-approval-request-id");
+  if (!requestId) throw new Error("Open approval is missing its request identity");
+  return requestId;
+}
+
+async function denyEpAutoloadApprovalsAheadOfGrant(
+  page: Page,
+  expectedToolName: string,
+  expectedArgs: Record<string, unknown>,
+): Promise<string> {
+  // The exact EP control shell restores its authenticated count and profile
+  // views after session restoration. Their generated read approvals can precede
+  // the explicit operation grant below. Decline only those exact background
+  // requests, then require the requested grant to become the open FIFO head.
+  const expectedArgsIdentity = canonicalStringify(expectedArgs);
+  for (let dismissed = 0; dismissed < MAX_EP_AUTOLOAD_APPROVALS_AHEAD_OF_GRANT; dismissed += 1) {
+    const dialog = openApprovalDialog(page);
+    await expect(dialog).toHaveCount(1, { timeout: 10_000 });
+    await expect(dialog).toBeVisible({ timeout: 10_000 });
+    const actualToolName = await dialog.getAttribute("data-approval-tool-name");
+    const actualArgsIdentity = await dialog.getAttribute("data-approval-args");
+    const requestId = await approvalRequestId(dialog);
+    if (actualToolName === expectedToolName && actualArgsIdentity === expectedArgsIdentity) {
+      return requestId;
+    }
+    const isKnownAutoloadApproval = EP_AUTOLOAD_APPROVALS.some(
+      ({ toolName, argsIdentity }) => (
+        actualToolName === toolName && actualArgsIdentity === argsIdentity
+      ),
+    );
+    if (!isKnownAutoloadApproval) {
+      throw new Error(
+        `Unexpected approval ahead of ${expectedToolName}: ${actualToolName ?? "<missing tool name>"}`,
+      );
+    }
+
+    // The FIFO renderer can reuse the open Dialog DOM for its next head. Bind
+    // the denial and post-click wait to this immutable request ID instead of
+    // waiting for the reusable element (or another same-name request) to hide.
+    const exactDialog = openApprovalDialogForRequestId(page, requestId);
+    await expect(exactDialog).toHaveCount(1);
+    const deny = exactDialog.getByTestId("deny-button");
+    await expect(deny).toBeEnabled();
+    await deny.click();
+    await expect(exactDialog).toHaveCount(0, { timeout: 10_000 });
+  }
+
+  const expectedDialog = openApprovalDialogForTool(page, expectedToolName, expectedArgs);
+  await expect(expectedDialog).toBeVisible({ timeout: 10_000 });
+  return approvalRequestId(expectedDialog);
+}
+
+async function approveVisibleToolDialog(
+  page: Page,
+  expectedToolName: string,
+  expectedArgs: Record<string, unknown>,
+  expectedRequestId: string,
+  reason: string,
+): Promise<void> {
+  const dialog = openApprovalDialogForRequestId(page, expectedRequestId);
   await expect(dialog).toBeVisible({ timeout: 10_000 });
-  const justification = page.getByTestId("nl-justification-input");
+  await expect(dialog).toHaveAttribute("data-approval-tool-name", expectedToolName);
+  await expect(dialog).toHaveAttribute("data-approval-args", canonicalStringify(expectedArgs));
+  const justification = dialog.getByTestId("nl-justification-input");
   if (await justification.isVisible().catch(() => false)) {
     await justification.fill(reason);
   }
-  const approve = page.getByTestId("approve-button");
+  const approve = dialog.getByTestId("approve-button");
   await expect(approve).toBeEnabled();
   await approve.click();
 }
@@ -444,8 +570,10 @@ test.skip(!builtMainExists(), "build the Electron app before running this spec")
 test("exact EP attendance bundle reads, confirms one write, verifies readback, and retires", async ({}, testInfo) => {
   testInfo.setTimeout(180_000);
   requireExactLoopbackMarketplaceOrigin(BASE_URL);
-  if (!PUBLISHER_KEY || !ADMIN_KEY) {
-    throw new Error("MARKETPLACE_PUBLISHER_KEY and MARKETPLACE_ADMIN_KEY are required");
+  if (!PUBLISHER_KEY || !REVIEWER_KEY || !ADMIN_KEY) {
+    throw new Error(
+      "MARKETPLACE_PUBLISHER_KEY, MARKETPLACE_ADMIN_KEY, and MARKETPLACE_REVIEWER_KEY are required",
+    );
   }
   const bundle = inspectExactEpBundle();
   const fake = await startFakeAttendanceProvider();
@@ -454,7 +582,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
     await publishPlugin(BASE_URL, ADMIN_KEY, EP_PLUGIN_ID, bundle.version, bundle.bytes);
     const approval = await approvePendingPlugin(
       BASE_URL,
-      ADMIN_KEY,
+      REVIEWER_KEY,
       EP_PLUGIN_ID,
       bundle.version,
     );
@@ -479,6 +607,28 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       },
     });
 
+    const marketplace = await openSettingsWindow(ctx.app, ctx.page, "marketplace");
+    const installAction = marketplace.getByTestId(`marketplace:action:${EP_PLUGIN_ID}`);
+    await expect(installAction).toBeVisible();
+    await installAction.click();
+
+    const dialog = marketplace.getByRole("dialog");
+    await expect(dialog.getByTestId("plugin-install-consent")).toBeVisible();
+    await expect(dialog.getByTestId("plugin-install-network-access"))
+      .toContainText("attendance.lge.com");
+    const consent = dialog.getByRole("checkbox", {
+      name: "I understand this grants administrator privileges.",
+    });
+    const installWithAdminAccess = dialog.getByRole("button", {
+      name: "Install with admin access",
+    });
+    await expect(consent).not.toBeChecked();
+    await expect(installWithAdminAccess).toBeDisabled();
+    await consent.check();
+    await expect(consent).toBeChecked();
+    await expect(installWithAdminAccess).toBeEnabled();
+    await installWithAdminAccess.click();
+
     await expect.poll(
       async () => (await ctx!.page.evaluate(async () => {
         const api = globalThis as unknown as {
@@ -492,6 +642,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       version: bundle.version,
       runtimeLoaded: true,
     });
+    await closeSettingsWindow(ctx.app, marketplace);
 
     const pluginDataDir = join(ctx.lvisHome, "plugins", EP_PLUGIN_ID, "data");
     mkdirSync(pluginDataDir, { recursive: true, mode: 0o700 });
@@ -547,14 +698,14 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
       matchingPreToolUse: [],
     });
     const installedCounts = await runtimeCounts(ctx.page);
-    const trustRows = await ctx.page.evaluate(async () => {
+    const trustRows = await ctx.page.evaluate(async (pluginId) => {
       const api = globalThis as unknown as {
         lvisApi: {
           listPluginContributionTrust(id: string): Promise<{ ok: boolean; rows: unknown[] }>;
         };
       };
-      return api.lvisApi.listPluginContributionTrust(EP_PLUGIN_ID);
-    });
+      return api.lvisApi.listPluginContributionTrust(pluginId);
+    }, EP_PLUGIN_ID);
     expect(trustRows).toMatchObject({ ok: true, rows: [] });
 
     const guestId = await activateEpWebview(ctx);
@@ -630,14 +781,27 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
     expect(fake.requests.filter((entry) => entry.method === "POST")).toHaveLength(0);
 
     await startGuestGrant(ctx, guestId, writeArgs);
+    const grantApprovalRequestId = await denyEpAutoloadApprovalsAheadOfGrant(
+      ctx.page,
+      "ep_attendance_write",
+      writeArgs,
+    );
     await approveVisibleToolDialog(
       ctx.page,
+      "ep_attendance_write",
+      writeArgs,
+      grantApprovalRequestId,
       "Confirm the exact EP attendance clock write against the loopback fixture.",
     );
     await expect.poll(
-      () => readGuestGrant(ctx!, guestId),
+      async () => {
+        const result = await readGuestGrant(ctx!, guestId);
+        return result.state === "rejected"
+          ? `rejected: ${result.error ?? "unknown error"}`
+          : result.state;
+      },
       { timeout: 10_000 },
-    ).toMatchObject({ state: "fulfilled" });
+    ).toBe("fulfilled");
     const grant = await readGuestGrant(ctx, guestId);
     if (grant.state !== "fulfilled") throw new Error("operation grant was not issued");
     expect(grant.value.operationGrantToken).toBeTruthy();
@@ -768,7 +932,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
         marketplace: {
           target: "loopback:8765",
           approvalState: approval.approval_state,
-          installMode: "host-managed-bootstrap",
+          installMode: "user-consented-marketplace-install",
           pluginYankedBeforeUninstall: true,
           productionWriteExecuted: false,
         },

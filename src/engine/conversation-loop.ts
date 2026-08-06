@@ -11,6 +11,7 @@ import type { LifecycleHookEvent } from "../hooks/script-hook-types.js";
 import {
   estimateRequestInputProjection,
   type RequestInputProjection,
+  type RequestInputProjectionInput,
 } from "./request-input-projection.js";
 
 import type {
@@ -23,13 +24,18 @@ import type { ReadableToolResult } from "../tools/tool-result-chunk.js";
 import type { SessionKind } from "../memory/memory-manager.js";
 import type { ActiveRolePrompt } from "../data/role-presets.js";
 import { AuditLogger } from "../audit/audit-logger.js";
-import type { ChatInputOrigin } from "../shared/chat-origin.js";
+import type { ChatInputOrigin, RemoteControllerAuthority } from "../shared/chat-origin.js";
+import {
+  resolveTurnExtensionPolicy,
+  turnExtensionPolicyContext,
+} from "../shared/turn-extension-policy.js";
 import type { AiProviderPingResult } from "../shared/ai-provider-ping.js";
 import { isToolResultStubContent } from "../shared/tool-result-stub.js";
 import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { createTracer, type ConversationTracer } from "../observability/conversation-trace.js";
 import { t } from "../i18n/index.js";
 import { buildProvider, generateText, pingProvider, resolveVendorName, AI_PROVIDER_PING_TIMEOUT_MS } from "./turn/provider.js";
+import type { GenerateTextOptions } from "./turn/provider.js";
 import { fireLifecycleEvent, fireUserPromptSubmit } from "./turn/lifecycle-hooks.js";
 import {
   resolveToolScope,
@@ -97,6 +103,8 @@ export class ConversationLoop {
   readonly auditLogger: AuditLogger;
   provider: LLMProvider | null = null;
   sessionId: string = createDlpSafeUuid();
+  /** Monotonic host generation; increments on every active-session replacement. */
+  sessionEpoch = 0;
   sessionKind: SessionKind = "main";
   sessionRoutineId: string | null = null;
   sessionRoutineTitle: string | null = null;
@@ -118,6 +126,12 @@ export class ConversationLoop {
 
 
   lastRoundProviderInputTokens = 0;
+  /** Latest exact Codex context window, kept only for the matching runtime model. */
+  lastReportedSubscriptionContextWindow: {
+    readonly provider: "codex";
+    readonly model: string;
+    readonly contextWindow: number;
+  } | null = null;
   /**
    * Engine request-input projection for the exact request submitted to the
    * latest provider round. Includes system prompt, provider-wire messages, and
@@ -339,6 +353,10 @@ export class ConversationLoop {
 
 
   refreshProvider(): void {
+    // Clear before rebuilding so a factory/configuration exception can never
+    // leave an API-key transport usable after subscription activation.
+    this.provider = null;
+    this.lastReportedSubscriptionContextWindow = null;
     this.provider = buildProvider(this.deps);
   }
 
@@ -353,8 +371,9 @@ export class ConversationLoop {
     prompt: string,
     systemPrompt = t("be_conversationLoop.generateTextSystemPrompt"),
     abortSignal?: AbortSignal,
+    options?: GenerateTextOptions,
   ): Promise<string> {
-    return generateText(this.provider, this.deps.settingsService, prompt, systemPrompt, abortSignal);
+    return generateText(this.provider, this.deps.settingsService, prompt, systemPrompt, abortSignal, options);
   }
 
   /**
@@ -376,13 +395,14 @@ export class ConversationLoop {
     originSource: string | null,
     rolePrompt?: ActiveRolePrompt,
     overlaySessionId = this.sessionId,
+    memoryQuery = "",
   ): string {
     this.deps.systemPromptBuilder.setToolScope?.(scope);
     this.deps.systemPromptBuilder.setOriginSource?.(originSource);
     this.deps.systemPromptBuilder.setActiveSessionId?.(overlaySessionId);
     this.deps.systemPromptBuilder.setActiveRolePrompt?.(rolePrompt ?? null);
     try {
-      return this.deps.systemPromptBuilder.build();
+      return this.deps.systemPromptBuilder.build({ memoryQuery });
     } finally {
       this.deps.systemPromptBuilder.setOriginSource?.(null);
       this.deps.systemPromptBuilder.setActiveSessionId?.(null);
@@ -390,11 +410,15 @@ export class ConversationLoop {
     }
   }
 
+  projectProviderRequestInput(input: RequestInputProjectionInput): RequestInputProjection {
+    return estimateRequestInputProjection(input, this.provider ?? undefined);
+  }
+
   estimateCurrentRequestProjection(params: {
     systemPrompt: string;
     toolSchemas: ToolSchema[];
   }): RequestInputProjection {
-    return estimateRequestInputProjection({
+    return this.projectProviderRequestInput({
       systemPrompt: params.systemPrompt,
       messages: this.history.getMessages(),
       toolSchemas: params.toolSchemas,
@@ -407,12 +431,14 @@ export class ConversationLoop {
     rolePrompt: ActiveRolePrompt | undefined,
     toolSchemas: ToolSchema[],
     overlaySessionId = this.sessionId,
+    memoryQuery = "",
   ): RequestProjectionContext {
     const buildSystemPrompt = () => this.buildSystemPromptForScope(
       scope,
       originSource,
       rolePrompt,
       overlaySessionId,
+      memoryQuery,
     );
     return {
       systemPrompt: buildSystemPrompt(),
@@ -544,6 +570,11 @@ export class ConversationLoop {
 
   getSessionId(): string {
     return this.sessionId;
+  }
+
+  /** Changes even when a user leaves and later returns to the same session id. */
+  getSessionEpoch(): number {
+    return this.sessionEpoch;
   }
 
   getSessionKind(): SessionKind {
@@ -796,6 +827,8 @@ export class ConversationLoop {
       spawnDepth?: number;
       /** Internal provenance label prepended to ApprovalGate reasons. */
       approvalReasonPrefix?: string;
+      /** Host-owned remote-controller authority, never parsed from chat input. */
+      remoteControllerAuthority?: RemoteControllerAuthority;
       /** DLP-masked durable child messages joined to this turn after the prompt gate. */
       initialGuidance?: string;
       /** Host-owned causal hop inherited from durable A2A guidance. */
@@ -813,7 +846,10 @@ export class ConversationLoop {
       displayText?: string;
     },
   ): Promise<TurnResult> {
-    return runTurn(this, input, callbacks, abortSignal, options);
+    return turnExtensionPolicyContext.run(
+      resolveTurnExtensionPolicy(options?.remoteControllerAuthority),
+      () => runTurn(this, input, callbacks, abortSignal, options),
+    );
   }
 
   rebuildToolSchemas(scope: ToolScope): ToolSchema[] {

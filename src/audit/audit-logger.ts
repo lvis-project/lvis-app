@@ -42,7 +42,11 @@ import {
 } from "./hmac-chain.js";
 import type { PermissionAuditEntry, PermissionAuditEntryInput } from "./audit-schema.js";
 import { lvisHome } from "../shared/lvis-home.js";
-import { iterateJsonlLines } from "./jsonl-reader.js";
+import {
+  normalizeSubscriptionUsageTelemetry,
+  type SubscriptionUsageTelemetry,
+} from "../shared/subscription-runtime.js";
+import { iterateJsonlLines, withAuditSnapshotLock } from "./jsonl-reader.js";
 
 const MAX_PERMISSION_AUDIT_LINE_BYTES = 1024 * 1024;
 
@@ -342,6 +346,8 @@ export interface AuditEntry {
       cacheWriteTokens?: number;
     };
   }>;
+  /** Non-billable subscription telemetry, persisted separately from API usage. */
+  subscriptionUsage?: SubscriptionUsageTelemetry[];
   toolExposure?: {
     loadedToolCount: number;
     loadedToolSourceCounts: { builtin: number; plugin: number; mcp: number };
@@ -435,6 +441,11 @@ function normalizePositiveInteger(value: number | undefined, fallback: number): 
   return value;
 }
 
+function archiveDateStampFromFileName(fileName: string): string | undefined {
+  const match = /\.jsonl\.(\d{8})(?:\d{9})?(?:\.[0-9a-f-]{36})?\.gz$/i.exec(fileName);
+  return match?.[1];
+}
+
 interface PlainWriterState {
   tail: Promise<void>;
   pendingWrites: number;
@@ -443,7 +454,6 @@ interface PlainWriterState {
 
 export class AuditLogger {
   private readonly auditDir: string;
-  private readonly logFile: string;
   /**
    * Permission policy — separate file for the discriminated-union HMAC-chained
    * audit channel. Format `<date>.permission-audit.jsonl`. Kept distinct from the
@@ -452,25 +462,7 @@ export class AuditLogger {
    */
   private permissionAuditLogFile: string;
   private permissionAuditDate: string;
-  /**
-   * Permission policy — DEDICATED shadow reconciliation channel. Format
-   * `<date>.permission-shadow.jsonl`. The host-classifies-risk shadow path
-   * (category + effect shadow) writes here, NOT to the canonical telemetry
-   * channel (`<date>.jsonl`), so high-volume per-invocation shadow records
-   * cannot accelerate the telemetry file's size-rotation and evict real
-   * turn/tool_call/approval telemetry. Mirrors the existing channel-separation
-   * convention (`*.permission-audit.jsonl`, `*.sandbox.jsonl`). This is a PLAIN,
-   * non-HMAC channel — it is NOT tamper-evident / audit-grade.
-   */
-  private readonly permissionShadowLogFile: string;
-  /**
-   * OS-sandbox activation telemetry channel. Format `<date>.sandbox-gate.jsonl`.
-   * One record per boot ({@link logSandboxGate}). Kept separate from the
-   * canonical telemetry channel for the same reason as the shadow channel —
-   * channel-separation keeps the per-shape readers simple. Plain JSONL, NOT
-   * HMAC-chained.
-   */
-  private readonly sandboxGateLogFile: string;
+
   /** Permission policy — HMAC chain state. Wired via `setupPermissionAuditChain`. Null = uninitialized chain. */
   private permissionAuditSecret: string | null = null;
   private permissionAuditChainBootstrapped = false;
@@ -496,11 +488,8 @@ export class AuditLogger {
 
     this.now = options.now ?? (() => new Date());
     const date = this.currentUtcDate();
-    this.logFile = join(this.auditDir, `${date}.jsonl`);
     this.permissionAuditDate = date;
     this.permissionAuditLogFile = join(this.auditDir, `${date}.permission-audit.jsonl`);
-    this.permissionShadowLogFile = join(this.auditDir, `${date}.permission-shadow.jsonl`);
-    this.sandboxGateLogFile = join(this.auditDir, `${date}.sandbox-gate.jsonl`);
     this.maxPendingWrites = normalizePositiveInteger(
       options.maxPendingWrites,
       DEFAULT_MAX_PENDING_WRITES,
@@ -513,6 +502,19 @@ export class AuditLogger {
 
   private currentUtcDate(): string {
     return this.now().toISOString().slice(0, 10);
+  }
+
+  private telemetryPath(date = this.currentUtcDate()): string {
+    return join(this.auditDir, `${date}.jsonl`);
+  }
+
+
+  private permissionShadowPath(date = this.currentUtcDate()): string {
+    return join(this.auditDir, `${date}.permission-shadow.jsonl`);
+  }
+
+  private sandboxGatePath(date = this.currentUtcDate()): string {
+    return join(this.auditDir, `${date}.sandbox-gate.jsonl`);
   }
 
   private permissionAuditPath(date: string): string {
@@ -567,7 +569,7 @@ export class AuditLogger {
   log(entry: AuditEntry): void {
     try {
       const line = JSON.stringify(entry) + "\n";
-      this.enqueuePlainWrite(this.logFile, line);
+      this.enqueuePlainWrite(this.telemetryPath(), line);
     } catch {
       // Audit failures must not block app behavior.
     }
@@ -584,7 +586,7 @@ export class AuditLogger {
   logShadow(entry: AuditEntry): void {
     try {
       const line = JSON.stringify(entry) + "\n";
-      this.enqueuePlainWrite(this.permissionShadowLogFile, line);
+      this.enqueuePlainWrite(this.permissionShadowPath(), line);
     } catch {
       // Shadow logging must never break a tool invocation.
     }
@@ -592,7 +594,7 @@ export class AuditLogger {
 
   /** Permission policy — accessor for the dedicated shadow channel file (tests). */
   getPermissionShadowLogFile(): string {
-    return this.permissionShadowLogFile;
+    return this.permissionShadowPath();
   }
 
   /**
@@ -607,12 +609,12 @@ export class AuditLogger {
   logSandboxGate(event: Omit<SandboxGateAuditEntry, "timestamp" | "type">): void {
     try {
       const entry: SandboxGateAuditEntry = {
-        timestamp: new Date().toISOString(),
+        timestamp: this.now().toISOString(),
         type: "sandbox_gate",
         ...event,
       };
       const line = JSON.stringify(entry) + "\n";
-      this.enqueuePlainWrite(this.sandboxGateLogFile, line);
+      this.enqueuePlainWrite(this.sandboxGatePath(), line);
     } catch {
       // Activation telemetry must never break boot.
     }
@@ -704,7 +706,7 @@ export class AuditLogger {
 
   /** Accessor for the dedicated sandbox-gate telemetry channel file (tests). */
   getSandboxGateLogFile(): string {
-    return this.sandboxGateLogFile;
+    return this.sandboxGatePath();
   }
 
   /**
@@ -719,8 +721,9 @@ export class AuditLogger {
    */
   isShadowChannelWritable(): boolean {
     try {
-      const probeTarget = existsSync(this.permissionShadowLogFile)
-        ? this.permissionShadowLogFile
+      const shadowLogFile = this.permissionShadowPath();
+      const probeTarget = existsSync(shadowLogFile)
+        ? shadowLogFile
         : this.auditDir;
       accessSync(probeTarget, fsConstants.W_OK);
       return true;
@@ -1048,13 +1051,17 @@ export class AuditLogger {
    * Rotate + prune audit files.
    *
    * - Any .jsonl file whose size >= maxBytes OR whose date prefix is older
-   *   than rotationAgeDays is compressed to `<name>.YYYYMMDD.gz` and removed.
+   *   than rotationAgeDays is compressed to a collision-safe timestamp/UUID gzip archive and removed.
    * - Any .jsonl.*.gz archive whose embedded date is older than retentionDays
    *   is deleted.
    *
    * Uses withFileLock on each candidate file to prevent concurrent write races.
    */
   async rotateAndPrune(opts: AuditRotationOptions = {}): Promise<void> {
+    await withAuditSnapshotLock(this.auditDir, async () => this.rotateAndPruneUnlocked(opts));
+  }
+
+  private async rotateAndPruneUnlocked(opts: AuditRotationOptions): Promise<void> {
     await this.flush();
     const {
       maxBytes = 10 * 1024 * 1024,
@@ -1062,10 +1069,11 @@ export class AuditLogger {
       rotationAgeDays = 7,
     } = opts;
 
-    const now = Date.now();
+    const currentTime = this.now();
+    const now = currentTime.getTime();
     const rotationAgeMs = rotationAgeDays * 86_400_000;
     const retentionAgeMs = retentionDays * 86_400_000;
-    const archiveDateStr = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    const archiveDateStamp = currentTime.toISOString().replace(/\D/g, "");
 
     let entries: string[];
     try {
@@ -1115,7 +1123,7 @@ export class AuditLogger {
 
       // Don't rotate a file that is today's active log based on size alone
       // unless it actually exceeds the limit (age check already handles old dates)
-      const archivePath = `${filePath}.${archiveDateStr}.gz`;
+      const archivePath = `${filePath}.${archiveDateStamp}.${randomUUID()}.gz`;
 
       try {
         await withFileLock(filePath, async () => {
@@ -1127,7 +1135,7 @@ export class AuditLogger {
           await pipeline(
             createReadStream(filePath),
             createGzip(),
-            createWriteStream(archivePath, { mode: 0o600 }),
+            createWriteStream(archivePath, { flags: "wx", mode: 0o600 }),
           );
           await chmod(archivePath, 0o600);
           // Remove original after successful compression
@@ -1139,7 +1147,7 @@ export class AuditLogger {
       }
     }
 
-    // --- Prune stale archives (.jsonl.YYYYMMDD.gz) ---
+    // --- Prune stale legacy and timestamp/UUID .jsonl gzip archives ---
     // Re-read directory after potential rotations
     let entries2: string[];
     try {
@@ -1148,12 +1156,10 @@ export class AuditLogger {
       return;
     }
 
-    const archiveFiles = entries2.filter((f) => /\.jsonl\.\d{8}\.gz$/.test(f));
-    for (const fname of archiveFiles) {
-      // Extract archive date from filename suffix
-      const m = fname.match(/\.(\d{8})\.gz$/);
-      if (!m) continue;
-      const ds = m[1]; // "20260412"
+    const archiveFiles = entries2
+      .map((name) => ({ name, archiveDate: archiveDateStampFromFileName(name) }))
+      .filter((entry): entry is { name: string; archiveDate: string } => entry.archiveDate !== undefined);
+    for (const { name: fname, archiveDate: ds } of archiveFiles) {
       const archiveDate = new Date(
         `${ds.slice(0, 4)}-${ds.slice(4, 6)}-${ds.slice(6, 8)}`,
       ).getTime();
@@ -1287,6 +1293,8 @@ export class AuditLogger {
         cacheWriteTokens?: number;
       };
     }>;
+    /** Non-billable subscription telemetry; sanitized again before write. */
+    subscriptionUsage?: SubscriptionUsageTelemetry[];
     toolExposure?: {
       loadedToolCount: number;
       loadedToolSourceCounts: { builtin: number; plugin: number; mcp: number };
@@ -1304,8 +1312,11 @@ export class AuditLogger {
     };
     route: string;
   }): void {
+    const subscriptionUsage = params.subscriptionUsage
+      ?.map((segment) => normalizeSubscriptionUsageTelemetry(segment))
+      .filter((segment): segment is SubscriptionUsageTelemetry => segment !== undefined);
     this.log({
-      timestamp: new Date().toISOString(),
+      timestamp: this.now().toISOString(),
       sessionId: params.sessionId,
       type: "turn",
       input: params.input.slice(0, 500),
@@ -1313,6 +1324,7 @@ export class AuditLogger {
       toolCalls: params.toolCalls,
       tokenUsage: params.tokenUsage,
       usageByModel: params.usageByModel,
+      ...(subscriptionUsage && subscriptionUsage.length > 0 ? { subscriptionUsage } : {}),
       toolExposure: params.toolExposure,
       route: params.route,
     });

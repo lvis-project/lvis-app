@@ -1,8 +1,8 @@
 # Plugin Development Guide
 
 This guide describes how to build LVIS plugins against the current host
-runtime. Korean source history is preserved at
-[docs/ko/guides/plugin-development.md](../ko/guides/plugin-development.md).
+runtime. Korean source history is preserved in the
+[Korean historical reference](../ko/guides/plugin-development.md).
 
 ## Plugin Model
 
@@ -107,6 +107,12 @@ use secret fields and should not be copied into logs, audit output, or docs.
 Marketplace installation should verify package metadata, manifest validity, and
 managed-plugin policy. Managed plugins cannot be removed or downgraded by normal
 user-installed plugin paths.
+
+The catalog is the authority for a managed plugin, in both directions: boot sync
+installs and updates them without asking, and removes one the marketplace has
+stopped publishing. Removal needs the plugin to be confirmed gone by its own
+catalog endpoint, so an unreachable or degraded marketplace leaves installs
+untouched.
 
 Local development install paths are useful during plugin authoring, but
 production install flows should go through the marketplace or an approved local

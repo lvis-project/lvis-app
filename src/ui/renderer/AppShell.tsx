@@ -44,6 +44,9 @@ export function AppShell({
   activeView,
   streaming,
   hasApiKey,
+  subscriptionUnavailable,
+  subscriptionPending,
+  subscriptionRuntimePolicy,
   onToggleAppMode,
   onOpenDevTools,
   appUpdate,
@@ -126,6 +129,9 @@ export function AppShell({
   activeView: string;
   streaming: boolean;
   hasApiKey: MainToolbarProps["hasApiKey"];
+  subscriptionUnavailable?: boolean;
+  subscriptionPending?: boolean;
+  subscriptionRuntimePolicy?: SidebarProps["subscriptionRuntimePolicy"];
   onToggleAppMode: MainToolbarProps["onToggleAppMode"];
   onOpenDevTools: () => void;
   appUpdate: ReturnType<typeof useAppUpdate>;
@@ -231,6 +237,9 @@ export function AppShell({
           return loaded;
         }}
         hasApiKey={hasApiKey}
+        subscriptionUnavailable={subscriptionUnavailable}
+        subscriptionPending={subscriptionPending}
+        subscriptionRuntimePolicy={subscriptionRuntimePolicy}
         onOpenSettings={() => onOpenSettings()}
         onNewChat={onNewChat}
         onNewChatForProject={onNewChatForProject}

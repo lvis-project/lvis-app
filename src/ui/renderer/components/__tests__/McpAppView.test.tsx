@@ -181,7 +181,7 @@ describe("McpAppView — MAJOR-1 per-server partition as a createElement PROP", 
     expect(node.getAttribute("src")?.startsWith("lvis-mcp-app://")).toBe(true);
     expect(node.getAttribute("src")).not.toContain("data:text/html");
     // No preload ATTRIBUTE: it is silently ignored under sandbox=yes and stripped
-    // by the will-attach guards. The relay preload rides session.setPreloads().
+    // by the will-attach guards. The relay preload is session-registered.
     expect(node.getAttribute("preload")).toBeNull();
   });
 

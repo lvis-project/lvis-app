@@ -12,7 +12,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
-    hasApiKey, onOpenSettings,
+    hasApiKey, settingsLoaded, onOpenSettings,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet,
     searchIdx, searchHighlight, searchChangeQuery, searchToggleCase,
     searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
@@ -20,14 +20,14 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     tpmLimit, tpmPct, isTpmOverflow,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
-    enableThinkingChat, toggleThinking,
+    enableThinkingChat, reasoningAvailable, toggleThinking, usageAvailable, subscriptionRuntimePolicy, subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider, subscriptionUnavailableProvider, subscriptionPendingProvider,
     costEstimate, costBadgeClass, activePricing, activeVendor,
   } = parts;
 
   return useMemo<ChatContextValue>(() => ({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
-    hasApiKey, onOpenSettings,
+    hasApiKey, settingsLoaded, onOpenSettings,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet,
     searchIdx, searchHighlight, searchChangeQuery, searchToggleCase,
     searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
@@ -35,12 +35,12 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     tpmLimit, tpmPct, isTpmOverflow,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
-    enableThinkingChat, toggleThinking,
+    enableThinkingChat, reasoningAvailable, toggleThinking, usageAvailable, subscriptionRuntimePolicy, subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider, subscriptionUnavailableProvider, subscriptionPendingProvider,
     costEstimate, costBadgeClass, activePricing, activeVendor,
   }), [
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
-    hasApiKey, onOpenSettings,
+    hasApiKey, settingsLoaded, onOpenSettings,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet,
     searchIdx, searchHighlight, searchChangeQuery, searchToggleCase,
     searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
@@ -48,7 +48,7 @@ export function useChatContextValue(parts: ChatContextValue): ChatContextValue {
     tpmLimit, tpmPct, isTpmOverflow,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
-    enableThinkingChat, toggleThinking,
+    enableThinkingChat, reasoningAvailable, toggleThinking, usageAvailable, subscriptionRuntimePolicy, subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider, subscriptionUnavailableProvider, subscriptionPendingProvider,
     costEstimate, costBadgeClass, activePricing, activeVendor,
   ]);
 }

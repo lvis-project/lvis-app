@@ -8,6 +8,7 @@ import type { LLMProvider, StreamEvent, StreamTurnParams,
 import { ToolRegistry } from "../../tools/registry.js";
 import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { makeConversationLoopMemoryManager } from "../../engine/__tests__/conversation-loop-test-helpers.js";
 
 class RecordingProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -18,18 +19,6 @@ class RecordingProvider implements LLMProvider {
     yield { type: "text_delta", text: "routine done" };
     yield { type: "message_complete", stopReason: "end_turn" };
   }
-}
-
-function memoryManagerStub() {
-  return {
-    getAgentsMd: () => "",
-    getMemoryIndex: () => "",
-    getUserPreferences: () => "",
-    getMemoryContext: () => "",
-    saveSession: () => Promise.resolve(),
-    listSessions: () => [],
-    saveSessionMetadata: () => Promise.resolve(),
-  };
 }
 
 describe("createRoutineConversationLoop — tool-level deferral", () => {
@@ -60,7 +49,7 @@ describe("createRoutineConversationLoop — tool-level deferral", () => {
         inputClassifier,
       routeEngine,
       toolRegistry,
-      memoryManager: memoryManagerStub(),
+      memoryManager: makeConversationLoopMemoryManager(),
       pluginRuntime: {
         listPluginCards: () => [],
       },

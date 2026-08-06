@@ -5,6 +5,18 @@ import type { PluginContributionDeclaration, PluginManifest } from "./types.js";
 import { verifyInstallReceiptRaw } from "./plugin-install-receipt.js";
 import { canonicalZipEntryPathIdentity } from "./zip-entry-path.js";
 
+/**
+ * Closed on purpose, and doing security work without looking like it.
+ *
+ * A plugin may extend what the agent can DO. It may never extend who may TALK
+ * to it. Adding a channel-shaped member here — a transport, a chat surface, a
+ * remote controller — would let an installed plugin open an ingress the host's
+ * own ingress core never sees, which is where every sender check, envelope
+ * bound, leading-slash rejection, and durable receipt lives.
+ *
+ * The union being closed is the entire enforcement. There is no separate
+ * allowlist to fall back on, so widening it is not an incremental change.
+ */
 type PluginContributionKind = "skill" | "hook" | "mcpServer";
 type PluginArchiveMemberKind = "file" | "directory" | "symlink" | "hardlink" | "device" | "other";
 

@@ -210,6 +210,17 @@ Key boundaries:
   staging succeeds. Direct and bundle uninstall stage the live directory plus
   all recovery/cleanup-owned paths before deleting the row; unresolved recovery
   backups are never handled by the orphan tombstone sweeper.
+- managed boot synchronization uses one boot-local promise tail. Recovery
+  journals and retirement state are bound first; compatible managed artifacts
+  then commit durable bytes, receipt, and registry state without candidate
+  publication or execution. Admitting runtime start synchronously seals the
+  tail before awaiting it, so later managed commits reject before mutation and
+  `startAll` runs exactly once against the final committed snapshot. Renderer
+  retry is missing-only: any registry row or owned artifact counts as installed,
+  regardless of enabled or runtime-start state. Only a truly structural missing
+  repair may use the generic generation lifecycle to activate the new artifact
+  before reporting retry success. A failed runtime start remains sealed and is
+  never retried or reported as started implicitly.
 - a plugin artifact may declare plugin-owned `skills`, `hooks`, and `mcpServers`
   as `{id,path}` entries. IDs are local to the tuple `(plugin id, plugin version,
   contribution kind)` and paths are normalized relative to the verified plugin
@@ -371,9 +382,10 @@ Security-sensitive areas are intentionally centralized:
 - `src/boot` for startup wiring and policy initialization;
 - tool executor and sandbox helpers for runtime enforcement.
 
-Changes spanning these areas require cross-cutting review. Documentation-only
-mirrors under `docs/ko` are excluded from naming-process gates because they
-preserve historical source text; production paths remain covered.
+Changes spanning these areas merit proportionate cross-cutting review. That
+review is advisory, never a merge gate. Documentation-only mirrors under `docs/ko`
+are excluded from naming-process gates because they preserve historical source
+text; production paths remain covered.
 
 ## Documentation Language Policy
 

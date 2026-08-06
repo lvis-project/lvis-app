@@ -5,6 +5,10 @@ import type {
 } from "../shared/permission-review-status.js";
 import type { LLMVendor } from "../shared/llm-vendor-defaults.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
+import {
+  normalizeSubscriptionUsageTelemetry,
+  type SubscriptionUsageTelemetry,
+} from "../shared/subscription-runtime.js";
 import { t } from "../i18n/index.js";
 
 export type TokenUsageSegment = {
@@ -138,6 +142,8 @@ export type StreamEvent = {
   vendorModel?: string;
   /** Per provider request usage segments for request-granular cost math. */
   usageByModel?: TokenUsageSegment[];
+  /** Non-billable subscription-runtime usage, kept separate from API pricing. */
+  subscriptionUsage?: SubscriptionUsageTelemetry[];
   breakdown?: Record<string, { count: number; ms: number }>;
 };
 
@@ -307,6 +313,8 @@ export type ChatEntry =
       vendorModel?: string;
       /** Per provider request usage segments for request-granular cost math. */
       usageByModel?: TokenUsageSegment[];
+      /** Non-billable subscription-runtime usage, with its explicit provenance. */
+      subscriptionUsage?: SubscriptionUsageTelemetry[];
       /** Per-tool aggregate (`{ count, ms }` per tool name). Omitted when no tools ran. */
       breakdown?: Record<string, { count: number; ms: number }>;
     };
@@ -315,6 +323,22 @@ type ReasoningEntry = Extract<ChatEntry, { kind: "reasoning" }>;
 type AssistantEntry = Extract<ChatEntry, { kind: "assistant" }>;
 type ToolGroupEntry = Extract<ChatEntry, { kind: "tool_group" }>;
 type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
+
+/**
+ * Copies only renderer-safe subscription telemetry from an IPC or persisted
+ * payload. Individual malformed segments are discarded rather than exposing
+ * raw runtime data through the transcript.
+ */
+export function normalizeSubscriptionUsageList(
+  value: unknown,
+): SubscriptionUsageTelemetry[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const normalized = value.flatMap((segment) => {
+    const telemetry = normalizeSubscriptionUsageTelemetry(segment);
+    return telemetry ? [telemetry] : [];
+  });
+  return normalized.length > 0 ? normalized : undefined;
+}
 
 function isTurnStartEntry(entry: ChatEntry | undefined): boolean {
   return entry?.kind === "user" || entry?.kind === "imported_trigger";

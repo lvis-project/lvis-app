@@ -6,17 +6,19 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 179
+ * Fragments: 189
  */
 import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
 import { en as en_appearanceTab } from "./appearanceTab.js";
+import { en as en_approvalAttribution } from "./approvalAttribution.js";
 import { en as en_approvalQueueStatus } from "./approvalQueueStatus.js";
 import { en as en_askUserQuestionCard } from "./askUserQuestionCard.js";
 import { en as en_assistantCard } from "./assistantCard.js";
 import { en as en_attachmentChip } from "./attachmentChip.js";
 import { en as en_auditPanel } from "./auditPanel.js";
 import { en as en_auditTab } from "./auditTab.js";
+import { en as en_awayAuthority } from "./awayAuthority.js";
 import { en as en_be_agentList } from "./be_agentList.js";
 import { en as en_be_agentModeMap } from "./be_agentModeMap.js";
 import { en as en_be_agentSpawn } from "./be_agentSpawn.js";
@@ -69,6 +71,7 @@ import { en as en_be_streamCollector } from "./be_streamCollector.js";
 import { en as en_be_structuredCompact } from "./be_structuredCompact.js";
 import { en as en_be_subagentRunner } from "./be_subagentRunner.js";
 import { en as en_be_systemPromptBuilder } from "./be_systemPromptBuilder.js";
+import { en as en_be_telegramBridge } from "./be_telegramBridge.js";
 import { en as en_be_todoSessionWrite } from "./be_todoSessionWrite.js";
 import { en as en_be_toolSearch } from "./be_toolSearch.js";
 import { en as en_be_tools } from "./be_tools.js";
@@ -85,6 +88,7 @@ import { en as en_chatView } from "./chatView.js";
 import { en as en_checkpointDivider } from "./checkpointDivider.js";
 import { en as en_cherryBlossom } from "./cherryBlossom.js";
 import { en as en_clipboardPaste } from "./clipboardPaste.js";
+import { en as en_codexSubscriptionCard } from "./codexSubscriptionCard.js";
 import { en as en_commandActions } from "./commandActions.js";
 import { en as en_commandPopover } from "./commandPopover.js";
 import { en as en_commandPopoverPanel } from "./commandPopoverPanel.js";
@@ -145,6 +149,7 @@ import { en as en_postTourFirstTask } from "./postTourFirstTask.js";
 import { en as en_privacyTab } from "./privacyTab.js";
 import { en as en_reasoningCard } from "./reasoningCard.js";
 import { en as en_remoteA2aActionButton } from "./remoteA2aActionButton.js";
+import { en as en_remoteSurfacesTab } from "./remoteSurfacesTab.js";
 import { en as en_rolesTab } from "./rolesTab.js";
 import { en as en_rosePine } from "./rosePine.js";
 import { en as en_routinePanel } from "./routinePanel.js";
@@ -162,9 +167,12 @@ import { en as en_spotlightTour } from "./spotlightTour.js";
 import { en as en_starredView } from "./starredView.js";
 import { en as en_statusBar } from "./statusBar.js";
 import { en as en_subAgentCard } from "./subAgentCard.js";
+import { en as en_subscriptionProvidersSection } from "./subscriptionProvidersSection.js";
 import { en as en_suggestedRepliesChipRow } from "./suggestedRepliesChipRow.js";
 import { en as en_suggestedRepliesGhost } from "./suggestedRepliesGhost.js";
 import { en as en_summaryToast } from "./summaryToast.js";
+import { en as en_tailnetAccessTab } from "./tailnetAccessTab.js";
+import { en as en_telegramConnection } from "./telegramConnection.js";
 import { en as en_tokenCostBadge } from "./tokenCostBadge.js";
 import { en as en_tokenProgressRing } from "./tokenProgressRing.js";
 import { en as en_tokyoNight } from "./tokyoNight.js";
@@ -194,12 +202,14 @@ export const generatedEn: Record<string, string> = {
   ...en_actionPanel,
   ...en_app,
   ...en_appearanceTab,
+  ...en_approvalAttribution,
   ...en_approvalQueueStatus,
   ...en_askUserQuestionCard,
   ...en_assistantCard,
   ...en_attachmentChip,
   ...en_auditPanel,
   ...en_auditTab,
+  ...en_awayAuthority,
   ...en_be_agentList,
   ...en_be_agentModeMap,
   ...en_be_agentSpawn,
@@ -252,6 +262,7 @@ export const generatedEn: Record<string, string> = {
   ...en_be_structuredCompact,
   ...en_be_subagentRunner,
   ...en_be_systemPromptBuilder,
+  ...en_be_telegramBridge,
   ...en_be_todoSessionWrite,
   ...en_be_toolSearch,
   ...en_be_tools,
@@ -268,6 +279,7 @@ export const generatedEn: Record<string, string> = {
   ...en_checkpointDivider,
   ...en_cherryBlossom,
   ...en_clipboardPaste,
+  ...en_codexSubscriptionCard,
   ...en_commandActions,
   ...en_commandPopover,
   ...en_commandPopoverPanel,
@@ -328,6 +340,7 @@ export const generatedEn: Record<string, string> = {
   ...en_privacyTab,
   ...en_reasoningCard,
   ...en_remoteA2aActionButton,
+  ...en_remoteSurfacesTab,
   ...en_rolesTab,
   ...en_rosePine,
   ...en_routinePanel,
@@ -345,9 +358,12 @@ export const generatedEn: Record<string, string> = {
   ...en_starredView,
   ...en_statusBar,
   ...en_subAgentCard,
+  ...en_subscriptionProvidersSection,
   ...en_suggestedRepliesChipRow,
   ...en_suggestedRepliesGhost,
   ...en_summaryToast,
+  ...en_tailnetAccessTab,
+  ...en_telegramConnection,
   ...en_tokenCostBadge,
   ...en_tokenProgressRing,
   ...en_tokyoNight,

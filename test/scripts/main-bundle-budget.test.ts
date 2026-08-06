@@ -7,6 +7,8 @@ import {
   assertMainBundleBudget,
   createMainBundleManifest,
   formatMainBundleBudget,
+  findUnexpectedMainBundleRootScripts,
+  isSafeMainBundleManifestPath,
 } from "../../scripts/lib/main-bundle-budget.mjs";
 
 const syntheticMetafile = {
@@ -167,6 +169,72 @@ describe("main bundle budget", () => {
         { path: "main.js", bytes: 100 },
       ],
     });
+  });
+
+  it("creates the same manifest when esbuild reports paths relative to its working directory", () => {
+    const metafile = {
+      outputs: {
+        "dist/main.js": { bytes: 100 },
+        "dist/chunks/shared.js": { bytes: 50 },
+      },
+    };
+    expect(createMainBundleManifest(metafile, {
+      outdir: "/repo/dist",
+      absWorkingDir: "/repo",
+    })).toEqual({
+      schemaVersion: 1,
+      entry: "main.js",
+      files: [
+        { path: "chunks/shared.js", bytes: 50 },
+        { path: "main.js", bytes: 100 },
+      ],
+    });
+  });
+  it("permits only intentional root main-process entrypoints in package manifests", () => {
+    expect(isSafeMainBundleManifestPath("main.js")).toBe(true);
+    expect(isSafeMainBundleManifestPath("subscription-grok-tool-policy-hook.js")).toBe(true);
+    expect(isSafeMainBundleManifestPath("subscription-tool-mcp-server.js")).toBe(true);
+    expect(isSafeMainBundleManifestPath("chunks/shared-AB12cd.js")).toBe(true);
+
+    expect(isSafeMainBundleManifestPath("unexpected-root.js")).toBe(false);
+    expect(isSafeMainBundleManifestPath("main.mjs")).toBe(false);
+    expect(isSafeMainBundleManifestPath("nested/entry.js")).toBe(false);
+    expect(isSafeMainBundleManifestPath("chunks/../main.js")).toBe(false);
+  });
+
+  it("finds stale packaged root scripts outside the main bundle manifest", () => {
+    const manifestPaths = [
+      "main.js",
+      "subscription-grok-tool-policy-hook.js",
+      "subscription-tool-mcp-server.js",
+    ];
+
+    const unexpected = findUnexpectedMainBundleRootScripts(
+      [
+        "main.js",
+        "subscription-grok-tool-policy-hook.js",
+        "subscription-tool-mcp-server.js",
+        "stale-helper.js",
+        "stale-helper.JS",
+        "chunks/shared.js",
+        "nested/helper.js",
+        "main.mjs",
+      ],
+      manifestPaths,
+    );
+    expect(unexpected).toEqual([
+      "stale-helper.js",
+      "stale-helper.JS",
+    ]);
+
+    const packageFootprint = readFileSync(resolve("scripts/check-package-footprint.mjs"), "utf8");
+    expect(packageFootprint).toContain("findUnexpectedMainBundleRootScripts(");
+  });
+
+  it("pins logical esbuild paths so checkout layout cannot change the bundle budget", () => {
+    const buildSource = readFileSync(resolve("scripts/build-main-esbuild.mjs"), "utf8");
+    expect(buildSource).toContain("absWorkingDir: repoRoot,");
+    expect(buildSource).toContain("preserveSymlinks: true,");
   });
 
   it("keeps window creation ahead of asynchronous boot loading", () => {

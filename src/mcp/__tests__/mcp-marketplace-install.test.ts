@@ -25,6 +25,10 @@ import type { McpRuntimeSpec, PluginMarketplaceItem } from "../../plugins/types.
 import { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
 
+vi.mock("../../shared/app-version.js", () => ({
+  getLvisAppVersion: () => "0.5.9",
+}));
+
 function makeTmpDir(): string {
   return mkdtempSync(join(process.cwd(), ".mcp-install-"));
 }
@@ -510,6 +514,35 @@ describe("installMcpFromMarketplace", () => {
     }
   });
 
+  it("returns update-required before starting MCP artifact work", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStubStore(tmp);
+      const fetcher = makeStubFetcher({
+        id: "weather",
+        name: "weather",
+        description: "",
+        packageSpec: "",
+        packageName: "",
+        tools: [],
+        pluginType: "mcp",
+        upgradeRequired: {
+          code: "upgrade_required",
+          minAppVersion: "1.2.3",
+          message: "LVIS 1.2.3+ is required to install this version. Update LVIS and try again.",
+        },
+      });
+      await expect(installMcpFromMarketplace("weather", {
+        fetcher,
+        store,
+        registerConfig: makeRegisterConfig(),
+      })).rejects.toMatchObject({ required: "1.2.3", current: "0.5.9" });
+      expect(store.withVerifiedArtifactTransaction).not.toHaveBeenCalled();
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("end-to-end: downloads, extracts, reads runtime, materializes config", async () => {
     const tmp = makeTmpDir();
     try {
@@ -819,7 +852,6 @@ describe("installMcpFromMarketplace", () => {
         description: "",
         packageSpec: "remote-docs@1.0.0",
         packageName: "remote-docs",
-        tools: [],
         version: "1.0.0",
         pluginType: "mcp",
       });

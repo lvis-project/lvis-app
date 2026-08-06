@@ -207,6 +207,12 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
           category: "tool",
           toolName: "skill_load",
           toolCategory: "meta",
+          // Attribute the modal to the conversation loading the skill. The
+          // missing-session case is still rejected further down, after the
+          // user has decided — do not change that ordering here.
+          ...(typeof ctx.metadata?.sessionId === "string" && ctx.metadata.sessionId
+            ? { sessionId: ctx.metadata.sessionId }
+            : {}),
           args: { skillName: skill.name },
           reason: t("be_skillLoad.approvalReason", { name: skill.name }),
           source: "builtin",

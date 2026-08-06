@@ -19,6 +19,7 @@ import {
   isOpenAIReasoningModel,
   supportsReasoningEffortNone,
 } from "../adapter.js";
+import { MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT } from "../../output-token-limit.js";
 import { TOOL_SEARCH_TOOL_NAME } from "../../../../tools/registry.js";
 
 
@@ -1219,9 +1220,12 @@ describe("VercelUnifiedProvider — sampling params removed (CTRL simplification
   // These tests lock down the removal: the streamText call MUST NOT carry
   // temperature or seed for ANY vendor/model combination, so re-introduction
   // would surface here immediately.
+  // A host-owned `outputTokenLimit` is intentionally distinct from those
+  // removed user controls and is covered by a dedicated bounded-call case.
   const runAndCaptureStreamTextArgs = async (
     vendor: "openai" | "copilot",
     model: string,
+    outputTokenLimit?: number,
   ): Promise<Record<string, unknown>> => {
     vi.resetModules();
     const streamTextSpy = vi.fn(() => ({
@@ -1253,6 +1257,7 @@ describe("VercelUnifiedProvider — sampling params removed (CTRL simplification
         model,
         systemPrompt: "sys",
         messages: [{ role: "user", content: "hi" }],
+        ...(outputTokenLimit === undefined ? {} : { outputTokenLimit }),
       }),
     );
 
@@ -1266,6 +1271,7 @@ describe("VercelUnifiedProvider — sampling params removed (CTRL simplification
     const args = await runAndCaptureStreamTextArgs("openai", "gpt-5.4-mini");
     expect("temperature" in args).toBe(false);
     expect("seed" in args).toBe(false);
+    expect("maxOutputTokens" in args).toBe(false);
   });
 
   it("OpenAI + reasoning model (o3-mini): no temperature/seed in request", async () => {
@@ -1287,6 +1293,14 @@ describe("VercelUnifiedProvider — sampling params removed (CTRL simplification
     const args = await runAndCaptureStreamTextArgs("copilot", "gpt-5-mini");
     expect("temperature" in args).toBe(false);
     expect("seed" in args).toBe(false);
+  });
+
+  it("maps and clamps a host-owned outputTokenLimit to AI SDK maxOutputTokens", async () => {
+    const args = await runAndCaptureStreamTextArgs(
+      "openai", "gpt-4.1", MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT * 2,
+    );
+    expect(args.maxOutputTokens).toBe(MAX_BACKGROUND_OUTPUT_TOKEN_LIMIT);
+    expect("outputTokenLimit" in args).toBe(false);
   });
 });
 

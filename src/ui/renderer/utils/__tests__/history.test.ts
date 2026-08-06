@@ -403,6 +403,47 @@ describe("historyToEntries", () => {
       }
     });
 
+    it("replays normalized non-billable subscription usage without API pricing fields", () => {
+      const entries = historyToEntries([
+        { index: 0, role: "user", content: "q" },
+        {
+          index: 1,
+          role: "assistant",
+          content: "a",
+          turnSummary: {
+            turnDurationMs: 100,
+            toolCount: 0,
+            cumulativeToolMs: 0,
+            tokensIn: 900,
+            freshInputTokens: 700,
+            tokensOut: 50,
+            subscriptionUsage: [{
+              provider: "kimi-code",
+              model: "default",
+              source: "local-estimate",
+              billable: false,
+              inputTokens: 700,
+              outputTokens: 50,
+              totalTokens: 750,
+            }],
+          },
+        },
+      ]);
+
+      const summary = entries.find((entry) => entry.kind === "turn_summary");
+      expect(summary).toMatchObject({
+        kind: "turn_summary",
+        subscriptionUsage: [{
+          provider: "kimi-code",
+          source: "local-estimate",
+          billable: false,
+          totalTokens: 750,
+        }],
+      });
+      expect(summary?.kind === "turn_summary" ? summary.vendorProvider : undefined).toBeUndefined();
+      expect(summary?.kind === "turn_summary" ? summary.usageByModel : undefined).toBeUndefined();
+    });
+
     it("does NOT emit a turn_summary entry when meta.turnSummary is absent (legacy)", () => {
       const entries = historyToEntries([
         { index: 0, role: "user", content: "q" },

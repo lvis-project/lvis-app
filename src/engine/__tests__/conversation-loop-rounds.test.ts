@@ -19,6 +19,7 @@ import { SkillOverlay } from "../../main/skill-overlay.js";
 import { SkillStore } from "../../main/skill-store.js";
 import { createSkillLoadTool } from "../../tools/skill-load.js";
 import { MCP_RESOURCE_FENCE_OPEN } from "../../shared/mcp-resource-bounds.js";
+import type { SubscriptionRuntimeId } from "../../shared/subscription-runtime.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -36,13 +37,27 @@ class RecordingPromptProvider implements LLMProvider {
   private index = 0;
   readonly systemPrompts: string[] = [];
   readonly messages: GenericMessage[][] = [];
+  readonly params: StreamTurnParams[] = [];
 
   constructor(private readonly turns: StreamEvent[][]) {}
 
   async *streamTurn(input: StreamTurnParams): AsyncIterable<StreamEvent> {
     this.systemPrompts.push(input.systemPrompt);
     this.messages.push(input.messages);
+    this.params.push(input);
     yield* this.turns[this.index++] ?? [];
+  }
+}
+
+class SubscriptionRecordingPromptProvider extends RecordingPromptProvider {
+  readonly subscriptionRuntime: Readonly<{
+    kind: "subscription";
+    provider: SubscriptionRuntimeId;
+  }>;
+
+  constructor(turns: StreamEvent[][], provider: SubscriptionRuntimeId = "codex") {
+    super(turns);
+    this.subscriptionRuntime = { kind: "subscription", provider };
   }
 }
 
@@ -105,6 +120,87 @@ describe("ConversationLoop queryLoop", () => {
     });
     expect(setActiveRolePrompt).toHaveBeenLastCalledWith(null);
   });
+  it("routes subscription turns through the ordinary prompt, history, and tool schemas", async () => {
+    const secret = "subscription-turn-secret";
+    const provider = new SubscriptionRecordingPromptProvider([
+      [
+        { type: "tool_call", id: "subscription-list", name: "list_directory", input: { path: "src" } },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "answer" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const build = vi.fn(() => "PROJECT_SECRET_SYSTEM_PROMPT");
+    const execute = vi.fn(async () => ({ output: "src", isError: false }));
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(createDynamicTool({
+      name: "list_directory",
+      description: "List files",
+      source: "builtin",
+      category: "read",
+      jsonSchema: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+      isReadOnly: () => true,
+      execute,
+    }));
+    const settings = {
+      ...fakeLlmSettings(),
+      activeChatRuntime: { kind: "subscription" as const, provider: "codex" as const },
+    };
+    // These values belong to the inactive API-key OpenAI configuration. The
+    // common query loop must not serialize them into a login-backed runtime.
+    settings.vendors.openai.enableThinking = true;
+    settings.vendors.openai.thinkingBudgetTokens = 32_000;
+
+    const loop = new ConversationLoop({
+      settingsService: {
+        get: () => settings,
+        getSecret: () => "test-key",
+      },
+      systemPromptBuilder: { build },
+      inputClassifier: new InputClassifier(),
+      routeEngine: new RouteEngine(),
+      toolRegistry,
+      memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      disableSessionPersistence: true,
+    } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+    (loop as { provider: LLMProvider | null }).provider = provider;
+    loop.getHistory().append({
+      role: "user",
+      content: [
+        { type: "text", text: "prior ordinary text" },
+        { type: "file", data: secret, mimeType: "application/secret" },
+      ],
+    });
+    build.mockClear();
+
+    const result = await loop.runTurn("ordinary user text", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    expect(build).toHaveBeenCalled();
+    expect(provider.systemPrompts).toEqual([
+      "PROJECT_SECRET_SYSTEM_PROMPT",
+      "PROJECT_SECRET_SYSTEM_PROMPT",
+    ]);
+    expect(provider.params[0]?.model).toBe("default");
+    expect(JSON.stringify(provider.params[0]?.tools)).toContain("list_directory");
+    expect(provider.params[0]?.enableThinking).toBe(false);
+    expect(provider.params[0]).not.toHaveProperty("thinkingBudgetTokens");
+    expect(JSON.stringify(provider.messages[0])).toContain(secret);
+    expect(JSON.stringify(provider.messages[0])).toContain("ordinary user text");
+    expect(execute).toHaveBeenCalledWith({ path: "src" }, expect.anything());
+    expect(result).toMatchObject({
+      text: "answer",
+      toolCalls: [{ name: "list_directory", input: { path: "src" }, result: "src" }],
+    });
+  });
+
 
   it("persists persona prompt identity on the user message for retry replay", async () => {
     const toolRegistry = new ToolRegistry();
@@ -1150,6 +1246,57 @@ describe("ConversationLoop queryLoop", () => {
     const round2 = provider.messages[1];
     expect(round2.at(-1)).toEqual({ role: "assistant", content: "Part one " });
   });
+
+  it.each(["codex", "kimi-code", "grok-build"] as const)(
+    "does not stitch a %s subscription max_tokens response without a native prefill protocol",
+    async (subscriptionProvider) => {
+      const toolRegistry = new ToolRegistry();
+      const provider = new SubscriptionRecordingPromptProvider([
+        [
+          { type: "text_delta", text: "Subscription part one " },
+          { type: "message_complete", stopReason: "max_tokens" },
+        ],
+        // If the shared engine incorrectly continues, this synthetic second
+        // round would expose the unsafe host-stitching regression.
+        [
+          { type: "text_delta", text: "and two." },
+          { type: "message_complete", stopReason: "end_turn" },
+        ],
+      ], subscriptionProvider);
+      const loop = new ConversationLoop({
+        settingsService: {
+          // A stale API-key setting that supports vLLM prefill must never
+          // enable it for a subscription runtime.
+          get: () => ({
+            ...fakeLlmSettings({ provider: "openai-compatible" }),
+            activeChatRuntime: { kind: "subscription", provider: subscriptionProvider },
+          }),
+          getSecret: () => "test-key",
+        },
+        systemPromptBuilder: { build: () => "system" },
+        inputClassifier: new InputClassifier(),
+        routeEngine: new RouteEngine(),
+        toolRegistry,
+        memoryManager: { saveSession: () => {}, listSessions: () => [] },
+      } as unknown as ConstructorParameters<typeof ConversationLoop>[0]);
+      (loop as { provider: LLMProvider | null }).provider = provider;
+
+      const result = await loop.runTurn(
+        "write a long answer",
+        undefined,
+        undefined,
+        { inputOrigin: "user-keyboard" },
+      );
+
+      expect(result).toMatchObject({
+        stopReason: "max_tokens",
+        text: "Subscription part one",
+      });
+      expect(provider.params).toHaveLength(1);
+      expect(provider.params[0]?.model).toBe("default");
+      expect(provider.params[0]?.continuationPrefill).toBeUndefined();
+    },
+  );
 
   it("fires onAssistantRound exactly once (terminal) across a 2-round continued turn", async () => {
     const toolRegistry = new ToolRegistry();

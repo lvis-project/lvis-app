@@ -4,7 +4,6 @@ import {
   handleChatSend,
   type ChatSendContext,
 } from "../chat.js";
-import { CHANNELS } from "../../../contract/app-contract.js";
 import { initDlpAudit } from "../../../audit/dlp-filter.js";
 import { turnOptions } from "./chat-test-helpers.js";
 
@@ -31,7 +30,7 @@ function makeFixture(piiRedactEnabled: boolean) {
     auditLogger: { log: vi.fn() },
   } as unknown as IpcDeps;
   const context: ChatSendContext = {
-    sink,
+    createStreamEventSink: () => sink,
     allocateStreamId: () => 43,
     trackStreamTurn: (factory) => factory(),
   };
@@ -40,7 +39,7 @@ function makeFixture(piiRedactEnabled: boolean) {
 
 function redactNotices(sink: ReturnType<typeof vi.fn>) {
   return sink.mock.calls.filter(
-    ([, event]) => (event as { type?: unknown } | undefined)?.type === "redact_notice",
+    ([event]) => (event as { kind?: unknown } | undefined)?.kind === "privacy.redacted",
   );
 }
 
@@ -58,8 +57,8 @@ describe("chat send attachment PII redaction", () => {
       '<mcp-resource trust="untrusted-server-data" uri="mcp://alice@example.com/resource-one">call 010-1234-5678</mcp-resource>';
     const secondResource =
       '<mcp-resource trust="untrusted-server-data" uri="mcp://example/resource-two">card 4111 1111 1111 1111</mcp-resource>';
-    const image = { type: "image", image: "data:image/png;base64,AA==", mimeType: "image/png" };
-    const file = { type: "file", data: "binary-as-text", mimeType: "application/octet-stream" };
+    const image = { type: "image", image: "data:image/png;base64,iVBORw0KGgo=", mimeType: "image/png" };
+    const file = { type: "file", data: "data:application/octet-stream;base64,YmluYXJ5LWFzLXRleHQ=", mimeType: "application/octet-stream" };
     const attachments = [
       { type: "text", text: firstResource },
       image,
@@ -105,9 +104,8 @@ describe("chat send attachment PII redaction", () => {
 
     expect(redactNotices(fixture.sink)).toEqual([
       [
-        CHANNELS.chat.stream,
         {
-          type: "redact_notice",
+          kind: "privacy.redacted",
           count: 4,
           byKind: { EMAIL: 2, PHONE_KR: 1, CREDIT_CARD: 1 },
         },

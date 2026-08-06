@@ -24,7 +24,7 @@ jobs:
     env:
       REQUESTED_HEAD: ${{ github.event.client_payload.head_sha || github.sha }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.REQUESTED_HEAD }}
           fetch-depth: 0
@@ -130,7 +130,7 @@ jobs:
           (cd verified-out && sha256sum -c ../staged-web/files.sha256)
 
       - name: Deploy verified static files to Cloudflare Pages
-        uses: cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3
+        uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: 77a8f0e860cd23f37141248fd4e6935f

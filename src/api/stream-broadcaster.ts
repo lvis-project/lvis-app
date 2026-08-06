@@ -1,11 +1,11 @@
 /**
- * stream-broadcaster.ts — #1409 fan-out for chat stream frames.
+ * stream-broadcaster.ts — legacy frame fan-out for isolated A2A flows.
  *
- * A tiny synchronous multiplexer that turns the single {@link ChatStreamSink}
- * the C10 streaming core (`runStreamedTurn`) publishes to into a fan-out over N
- * display-side subscribers. The local API's SSE endpoint (a later commit's
- * `/v1/events`) subscribes here so browser/CLI consumers receive the SAME
- * `(channel, payload)` frames the renderer's IPC sink receives — byte-identical.
+ * A tiny synchronous multiplexer for the remaining consumers that still own
+ * their legacy `(channel, payload)` frames (currently the isolated A2A
+ * receiver). Main-conversation Electron and loopback SSE traffic use
+ * `PlatformConversationTimeline` plus its one-way compatibility adapter;
+ * this module is not a second conversation-event source.
  *
  * Semantics:
  *   - `sink(channel, payload)` forwards synchronously to every CURRENT
@@ -17,7 +17,15 @@
  *     unsubscribing DURING a broadcast is safe: `sink` iterates over a snapshot
  *     of the subscriber set taken at the start of the fan-out.
  */
-import type { ChatStreamSink } from "../ipc/handlers/chat-stream.js";
+import type { LegacyChatStreamSink } from "../engine/conversation-platform-protocol.js";
+
+type ChatStreamSink = LegacyChatStreamSink;
+
+/** A legacy `(channel, payload)` event source, including existing SSE transports. */
+export interface StreamEventSource {
+  subscribe(fn: LegacyChatStreamSink): () => void;
+  subscriberCount(): number;
+}
 
 /** A fan-out over chat stream frames — one inbound sink, N display subscribers. */
 export interface StreamBroadcaster {

@@ -32,10 +32,9 @@
  *     `cookies.flushStore()` to force the auth cookie to disk before teardown.
  */
 import { BrowserWindow, session as electronSession, type WebContents } from "electron";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { existsSync } from "node:fs";
 import { registerWindowEventListeners } from "./window-event-listeners.js";
+import { runtimeAssetPath } from "./main-paths.js";
 import { getCommonChromeOptions } from "./window-chrome.js";
 import { markAsWindowControlOwned } from "../ipc/window-control-registry.js";
 import { markAsLinkOwned } from "./link-window-registry.js";
@@ -101,7 +100,7 @@ function buildLinkWindowShellHtml(opts: {
 }
 
 function linkShellPreloadPath(): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "../preload.cjs");
+  return runtimeAssetPath("preload.cjs");
 }
 
 export interface OpenLinkWindowOptions {

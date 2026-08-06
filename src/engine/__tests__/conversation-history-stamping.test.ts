@@ -1,6 +1,8 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { ConversationHistory } from "../conversation-history.js";
 import type { GenericMessage } from "../llm/types.js";
+import { genericToModelMessages } from "../llm/vercel/message-mapper.js";
+import { MAX_LOCAL_USER_CONTENT_PARTS } from "../../main/subscription-attachment-input.js";
 
 describe("ConversationHistory createdAt stamping", () => {
   beforeEach(() => {
@@ -130,5 +132,58 @@ describe("ConversationHistory.restore preserves original createdAt", () => {
     // Legacy messages — undefined stays undefined. UI renders nothing
     // rather than fake the load time.
     expect(h.getMessages()[0].meta?.createdAt).toBeUndefined();
+  });
+});
+
+describe("ConversationHistory.restore attachment boundary", () => {
+  it("strips restored remote attachments before resume, retry, or checkpoint history reaches a provider", () => {
+    const localImage = "data:image/png;base64,iVBORw0KGgo=";
+    const localFile = "data:text/plain;base64,SGVsbG8=";
+    const history = new ConversationHistory();
+    history.restore([{
+      role: "user",
+      content: [
+        { type: "text", text: "retain this" },
+        { type: "image", image: "https://attacker.example/restored.png", mimeType: "image/png" },
+        { type: "file", data: "https://attacker.example/restored.txt", mimeType: "text/plain" },
+        { type: "image", image: localImage, mimeType: "image/png" },
+        { type: "file", data: localFile, mimeType: "text/plain" },
+      ],
+    }]);
+
+    const restored = history.getMessages();
+    expect(restored).toEqual([{
+      role: "user",
+      content: [
+        { type: "text", text: "retain this" },
+        { type: "image", image: localImage, mimeType: "image/png" },
+        { type: "file", data: localFile, mimeType: "text/plain" },
+      ],
+    }]);
+
+    const mapped = genericToModelMessages(restored);
+    expect(mapped).toEqual([{
+      role: "user",
+      content: [
+        { type: "text", text: "retain this" },
+        { type: "image", image: localImage, mediaType: "image/png" },
+        { type: "file", data: localFile, mediaType: "text/plain" },
+      ],
+    }]);
+    expect(JSON.stringify(mapped)).not.toContain("attacker.example");
+  });
+
+  it("drops an oversized multipart history row before retry or checkpoint replay", () => {
+    const history = new ConversationHistory();
+    history.restore([{
+      role: "user",
+      content: Array.from(
+        { length: MAX_LOCAL_USER_CONTENT_PARTS + 1 },
+        () => ({ type: "text" as const, text: "bounded" }),
+      ),
+    }]);
+
+    expect(history.getMessages()).toEqual([]);
+    expect(genericToModelMessages(history.getMessages())).toEqual([]);
   });
 });

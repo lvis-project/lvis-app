@@ -42,8 +42,8 @@ export {
  *
  * NOTE: groups whose channels already had a SOT const in
  * `src/shared/ipc-channels.ts` (permissions, work-board, routines, ui,
- * marketplace announcements, overlay, suggested-replies, settings.updated /
- * settings.applyHostMap) are re-exported above rather than duplicated here.
+ * marketplace announcements, overlay, suggested-replies, settings.updated)
+ * are re-exported above rather than duplicated here.
  */
 export const CHANNELS = {
   chat: {
@@ -83,6 +83,9 @@ export const CHANNELS = {
     entriesList: "lvis:memory:entries:list",
     entriesSave: "lvis:memory:entries:save",
     entriesDelete: "lvis:memory:entries:delete",
+    candidatesList: "lvis:memory:candidates:list",
+    candidateActivate: "lvis:memory:candidates:activate",
+    candidateDelete: "lvis:memory:candidates:delete",
     entriesSearch: "lvis:memory:entries:search",
     indexGet: "lvis:memory:index:get",
     indexUpdateIfUnchanged: "lvis:memory:index:update-if-unchanged",
@@ -94,6 +97,7 @@ export const CHANNELS = {
     userPrefsGet: "lvis:memory:user-prefs:get",
     userPrefsUpdate: "lvis:memory:user-prefs:update",
     userPrefsRefresh: "lvis:memory:user-prefs:refresh",
+    longTermRefresh: "lvis:memory:long-term:refresh",
   },
   starred: {
     list: "lvis:starred:list",
@@ -152,6 +156,47 @@ export const CHANNELS = {
     status: "lvis:a2a-remote:status",
     task: "lvis:a2a-remote:task",
     action: "lvis:a2a-remote:action",
+  },
+  // Local-owner-only Tailnet pairing/share administration. These are INTERNAL:
+  // never add them to PUBLIC_CHANNELS or EXTERNAL_MUTATION_CHANNELS. A pairing
+  // invite is not access, and every mutation requires a fresh local keyboard
+  // intent in addition to the host-renderer sender guard.
+  tailnetSharing: {
+    snapshot: "lvis:tailnet-sharing:snapshot",
+    createInvitation: "lvis:tailnet-sharing:create-invitation",
+    activatePairing: "lvis:tailnet-sharing:activate-pairing",
+    createCurrentConversationShare: "lvis:tailnet-sharing:create-current-conversation-share",
+    revokeShare: "lvis:tailnet-sharing:revoke-share",
+    revokePairing: "lvis:tailnet-sharing:revoke-pairing",
+    // Main → renderer only. Carries no data; consumers pull a fresh safe snapshot.
+    changed: "lvis:tailnet-sharing:changed",
+  },
+  // Local-owner-only Telegram private-DM connection administration. These are
+  // INTERNAL for the same reasons as tailnetSharing, and additionally because
+  // Telegram is an external cloud recipient: connecting is an egress decision
+  // the local owner makes at the keyboard, never something a caller can drive.
+  telegramConnection: {
+    snapshot: "lvis:telegram-connection:snapshot",
+    connect: "lvis:telegram-connection:connect",
+    disconnect: "lvis:telegram-connection:disconnect",
+    pause: "lvis:telegram-connection:pause",
+    resume: "lvis:telegram-connection:resume",
+    createPairingCode: "lvis:telegram-connection:create-pairing-code",
+    revokePairing: "lvis:telegram-connection:revoke-pairing",
+    approveCurrentConversation: "lvis:telegram-connection:approve-current-conversation",
+    revokeApproval: "lvis:telegram-connection:revoke-approval",
+    // Main → renderer only. Carries no data; consumers pull a fresh safe snapshot.
+    changed: "lvis:telegram-connection:changed",
+  },
+  // Local-owner-only arming of the desk-armed away answerer. INTERNAL for the
+  // same reasons as the two above, and additionally because arming is the one
+  // gesture that lets an approval be answered while nobody is watching: it is a
+  // decision the owner makes at this keyboard, in advance, and nothing reachable
+  // from a message may create, extend, or widen it.
+  awayAuthority: {
+    status: "lvis:away-authority:status",
+    arm: "lvis:away-authority:arm",
+    disarm: "lvis:away-authority:disarm",
   },
   marketplace: {
     ping: "lvis:marketplace:ping",
@@ -331,6 +376,33 @@ export const CHANNELS = {
     hasApiKey: "lvis:settings:has-api-key",
     deleteApiKey: "lvis:settings:delete-api-key",
     listLlmModels: "lvis:settings:list-llm-models",
+    codexSubscriptionStatus: "lvis:settings:codex-subscription:status",
+    codexSubscriptionStartBrowserLogin: "lvis:settings:codex-subscription:start-browser-login",
+    codexSubscriptionStartDeviceCodeLogin: "lvis:settings:codex-subscription:start-device-code-login",
+    codexSubscriptionCancelLogin: "lvis:settings:codex-subscription:cancel-login",
+    codexSubscriptionLogout: "lvis:settings:codex-subscription:logout",
+    codexSubscriptionListModels: "lvis:settings:codex-subscription:list-models",
+    subscriptionRuntimeStatus: "lvis:settings:subscription:status",
+    // Main → host renderer safe status invalidation; never carries a status payload.
+    subscriptionRuntimeStatusUpdated: "lvis:settings:subscription:status-updated",
+    subscriptionChooseRuntime: "lvis:settings:subscription:choose-runtime",
+    subscriptionForgetRuntime: "lvis:settings:subscription:forget-runtime",
+    subscriptionVerifyRuntime: "lvis:settings:subscription:verify",
+    subscriptionStartLogin: "lvis:settings:subscription:start-login",
+    subscriptionOpenLoginBrowser: "lvis:settings:subscription:open-login-browser",
+    subscriptionCancelLogin: "lvis:settings:subscription:cancel-login",
+    subscriptionLogout: "lvis:settings:subscription:logout",
+    subscriptionListModels: "lvis:settings:subscription:list-models",
+    subscriptionUseForChat: "lvis:settings:subscription:use-for-chat",
+    subscriptionUseApiForChat: "lvis:settings:subscription:use-api-for-chat",
+    acpSubscriptionStatus: "lvis:settings:acp-subscription:status",
+    acpSubscriptionChooseRuntime: "lvis:settings:acp-subscription:choose-runtime",
+    acpSubscriptionForgetRuntime: "lvis:settings:acp-subscription:forget-runtime",
+    acpSubscriptionVerify: "lvis:settings:acp-subscription:verify",
+    acpSubscriptionStartLogin: "lvis:settings:acp-subscription:start-login",
+    acpSubscriptionOpenLoginBrowser: "lvis:settings:acp-subscription:open-login-browser",
+    acpSubscriptionCancelLogin: "lvis:settings:acp-subscription:cancel-login",
+    acpSubscriptionLogout: "lvis:settings:acp-subscription:logout",
     marketplaceInstallProviderPreset: "lvis:settings:marketplace:install-provider-preset",
     marketplaceUninstallProviderPreset: "lvis:settings:marketplace:uninstall-provider-preset",
     marketplaceSetApiKey: "lvis:settings:marketplace:set-api-key",
@@ -461,6 +533,7 @@ export const CHANNELS = {
     openFile: "lvis:attach:openFile",
     readImage: "lvis:attach:readImage",
     saveClipboardImage: "lvis:attach:saveClipboardImage",
+    discardClipboardImage: "lvis:attach:discardClipboardImage",
     openExternal: "lvis:attach:openExternal",
   },
   preview: {
@@ -591,6 +664,31 @@ export const CHANNEL_GESTURE: Record<string, "required" | "none"> = {
   [PERMISSIONS.userApprovalRecord]: "required",
   [PERMISSIONS.userApprovalRevoke]: "required",
   [PERMISSIONS.sandboxWindowsInstall]: "required",
+  // Local-owner Tailnet sharing: all mutations are host-renderer-only and
+  // require a current keyboard intent. The snapshot and change hint carry no
+  // externally callable mutation capability, so they are deliberately omitted.
+  [CHANNELS.tailnetSharing.createInvitation]: "required",
+  [CHANNELS.tailnetSharing.activatePairing]: "required",
+  [CHANNELS.tailnetSharing.createCurrentConversationShare]: "required",
+  [CHANNELS.tailnetSharing.revokeShare]: "required",
+  [CHANNELS.tailnetSharing.revokePairing]: "required",
+  // Local-owner Telegram connection: same rule. Saving a bot token, starting
+  // the outbound connection, minting a pairing code, and sharing the open
+  // conversation are each an owner decision made at this keyboard.
+  [CHANNELS.telegramConnection.connect]: "required",
+  [CHANNELS.telegramConnection.disconnect]: "required",
+  [CHANNELS.telegramConnection.pause]: "required",
+  [CHANNELS.telegramConnection.resume]: "required",
+  [CHANNELS.telegramConnection.createPairingCode]: "required",
+  [CHANNELS.telegramConnection.revokePairing]: "required",
+  [CHANNELS.telegramConnection.approveCurrentConversation]: "required",
+  [CHANNELS.telegramConnection.revokeApproval]: "required",
+  // Away authority: arming is the gesture, so it needs the gesture. Disarming
+  // is listed too — not because withdrawing authority is dangerous, but because
+  // a caller that could disarm without a keyboard could disarm the owner's
+  // grant out from under them and time the gap.
+  [CHANNELS.awayAuthority.arm]: "required",
+  [CHANNELS.awayAuthority.disarm]: "required",
 };
 
 // ─── Approval-mediated external mutation ─────────────────────────────────────

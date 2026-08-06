@@ -2,8 +2,9 @@
  * Settings domain IPC handlers.
  * Covers: lvis:settings:*, lvis:shell:open-external, lvis:telemetry:consent-answer
  */
-import { app, ipcMain } from "electron";
+import { dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 import { validateExternalUrl } from "../../shared/external-url.js";
+import { canonicalStringify } from "../../shared/canonical-json.js";
 import { SETTINGS } from "../../shared/ipc-channels.js";
 import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
@@ -29,6 +30,181 @@ import {
 import type { LlmModelListRequest } from "../../shared/llm-model-list.js";
 import type { IpcDeps } from "../types.js";
 import type { LLMSettings, ShortcutSettings } from "../../data/settings-store.js";
+import type {
+  CodexSubscriptionActionResult,
+  CodexSubscriptionDeviceCodeResult,
+  CodexSubscriptionErrorCode,
+  CodexSubscriptionModelsResult,
+  CodexSubscriptionStatus,
+} from "../../shared/codex-subscription.js";
+import {
+  isAcpSubscriptionProviderId,
+  type AcpSubscriptionActionResult,
+  type AcpSubscriptionErrorCode,
+  type AcpSubscriptionProviderId,
+  type AcpSubscriptionStatus,
+} from "../../shared/acp-subscription.js";
+import {
+  MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH,
+  isSubscriptionRuntimeId,
+  subscriptionRuntimeDescriptor,
+  type SubscriptionLoginMethod,
+  type SubscriptionRuntimeActionResult,
+  type SubscriptionRuntimeErrorCode,
+  type SubscriptionRuntimeId,
+  type SubscriptionRuntimeModelsResult,
+  type SubscriptionRuntimeStatus,
+  type SubscriptionRuntimeStatusUpdatedEvent,
+} from "../../shared/subscription-runtime.js";
+import {
+  getSubscriptionRuntimeService,
+  subscriptionRuntimeErrorCode,
+  SubscriptionRuntimeServiceError,
+  type SubscriptionRuntimeService,
+} from "../../main/subscription-runtime-service.js";
+
+let subscriptionRuntimeStatusRevision = 0;
+
+function codexStatusFromSubscription(status: SubscriptionRuntimeStatus | undefined): CodexSubscriptionStatus {
+  if (!status) {
+    return {
+      runtime: "ready",
+      connection: "signed-out",
+      planType: null,
+      pendingLogin: null,
+      pendingDeviceCode: null,
+    };
+  }
+  return {
+    runtime: status.runtime === "unavailable" ? "unavailable" : "ready",
+    connection: status.connection === "connected" || status.connection === "pending"
+      ? status.connection
+      : "signed-out",
+    planType: status.planType,
+    pendingLogin: status.pendingLogin === "browser" || status.pendingLogin === "device-code"
+      ? status.pendingLogin
+      : null,
+    pendingDeviceCode: status.pendingDeviceCode,
+  };
+}
+
+function acpStatusFromSubscription(
+  provider: AcpSubscriptionProviderId,
+  status: SubscriptionRuntimeStatus | undefined,
+): AcpSubscriptionStatus {
+  return {
+    provider,
+    runtime: status?.runtime ?? "not-configured",
+    connection: status?.connection ?? "unknown",
+    pendingLogin: status?.pendingLogin === "device-code" ? "device-code" : null,
+    pendingDeviceCode: status?.pendingDeviceCode ?? null,
+    canOpenVerificationUrl: status?.canOpenVerificationUrl ?? false,
+    version: status?.version ?? null,
+    // The legacy ACP status must remain a safe projection of the common
+    // runtime contract. Do not expose the ACP initialize payload here:
+    // the common status already reflects host-verified attachment/file flows.
+    promptCapabilities: {
+      image: status?.capabilities.images === true,
+      embeddedContext: status?.capabilities.files === true,
+    },
+  };
+}
+
+function legacyCodexErrorCode(code: SubscriptionRuntimeErrorCode): CodexSubscriptionErrorCode {
+  switch (code) {
+    case "subscription-runtime-unavailable":
+      return "codex-runtime-unavailable";
+    case "subscription-login-in-progress":
+      return "codex-login-in-progress";
+    case "subscription-login-failed":
+      return "codex-login-failed";
+    default:
+      return "codex-operation-failed";
+  }
+}
+
+function legacyAcpErrorCode(code: SubscriptionRuntimeErrorCode): AcpSubscriptionErrorCode {
+  switch (code) {
+    case "subscription-provider-not-supported":
+      return "acp-provider-not-supported";
+    case "subscription-runtime-not-configured":
+      return "acp-runtime-not-configured";
+    case "subscription-runtime-unavailable":
+      return "acp-runtime-unavailable";
+    case "subscription-login-in-progress":
+      return "acp-login-in-progress";
+    case "subscription-login-failed":
+      return "acp-login-failed";
+    case "subscription-verification-url-unavailable":
+      return "acp-verification-url-unavailable";
+    case "subscription-logout-not-supported":
+      return "acp-logout-not-supported";
+    default:
+      return "acp-operation-failed";
+  }
+}
+
+function legacyCodexActionResult(result: SubscriptionRuntimeActionResult): CodexSubscriptionActionResult {
+  if (result.ok) return { ok: true, status: codexStatusFromSubscription(result.status) };
+  return {
+    ok: false,
+    error: legacyCodexErrorCode(result.error),
+    status: codexStatusFromSubscription(result.status),
+  };
+}
+
+function legacyCodexDeviceCodeResult(
+  result: SubscriptionRuntimeActionResult,
+): CodexSubscriptionDeviceCodeResult {
+  const status = codexStatusFromSubscription(result.status);
+  if (!result.ok) {
+    return { ok: false, error: legacyCodexErrorCode(result.error), status };
+  }
+  if (!result.status.pendingDeviceCode) {
+    return { ok: false, error: "codex-login-failed", status };
+  }
+  return { ok: true, status, userCode: result.status.pendingDeviceCode };
+}
+
+function legacyCodexModelsResult(result: SubscriptionRuntimeModelsResult): CodexSubscriptionModelsResult {
+  if (!result.ok) {
+    return {
+      ok: false,
+      error: legacyCodexErrorCode(result.error),
+      status: codexStatusFromSubscription(result.status),
+    };
+  }
+  return {
+    ok: true,
+    status: codexStatusFromSubscription(result.status),
+    models: result.models.map((model) => ({ ...model, inputModalities: [] })),
+  };
+}
+
+function legacyAcpActionResult(
+  provider: AcpSubscriptionProviderId,
+  result: SubscriptionRuntimeActionResult,
+): AcpSubscriptionActionResult {
+  if (result.ok) return { ok: true, status: acpStatusFromSubscription(provider, result.status) };
+  return {
+    ok: false,
+    error: legacyAcpErrorCode(result.error),
+    ...(result.status ? { status: acpStatusFromSubscription(provider, result.status) } : {}),
+  };
+}
+
+function normalizeSubscriptionLoginMethod(value: unknown): SubscriptionLoginMethod | null {
+  return value === "browser" || value === "device-code" ? value : null;
+}
+
+function normalizeSubscriptionModel(value: unknown): string | undefined | null {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") return null;
+  const model = value.trim();
+  return model && model.length <= MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH && !/[\u0000-\u001f\u007f]/.test(model)
+    ? model
+    : null;
+}
 
 /** Authoritative remote route lineage is main-only and never projected to the renderer. */
 function rendererSettingsSnapshot(snapshot: ReturnType<IpcDeps["settingsService"]["getAll"]>) {
@@ -38,17 +214,29 @@ function rendererSettingsSnapshot(snapshot: ReturnType<IpcDeps["settingsService"
 }
 
 /** Minor-1: extracted helper — 6 handlers share identical 5-line broadcast. */
-async function broadcastSettingsSnapshot(deps: IpcDeps): Promise<void> {
+async function broadcastSettingsSnapshot(
+  deps: IpcDeps,
+  shouldBroadcast: () => boolean = () => true,
+): Promise<void> {
   const snapshot = deps.settingsService.getAll();
+  const snapshotSignature = canonicalStringify(snapshot);
   // Keep the main-process UI locale in sync with the persisted language so
   // dialogs/menus/notifications shown after a language switch use it too.
   // Optional-chain `appearance` — a partial snapshot (e.g. a test double or a
   // pre-migration settings file) must not crash the broadcast. setLocale
   // coerces undefined to the English default.
   const nextLocale = normalizeLocale(snapshot.appearance?.language);
-  if (await tryLoadLocaleMessages(nextLocale)) {
-    setLocale(nextLocale);
+  const localeLoaded = await tryLoadLocaleMessages(nextLocale);
+  // Locale loading yields. Suppress stale snapshots (and their locale side
+  // effect) if any settings mutation or a caller-specific ownership hand-off
+  // occurred while it was in flight.
+  if (
+    !shouldBroadcast()
+    || snapshotSignature !== canonicalStringify(deps.settingsService.getAll())
+  ) {
+    return;
   }
+  if (localeLoaded) setLocale(nextLocale);
   for (const win of deps.getAppWindows?.() ?? []) {
     sendToWindow(win, SETTINGS.updated, rendererSettingsSnapshot(snapshot));
   }
@@ -108,6 +296,34 @@ function activeLlmIdentity(llm: LLMSettings): string {
   });
 }
 
+
+function sameLlmSettings(left: LLMSettings, right: LLMSettings): boolean {
+  return canonicalStringify(left) === canonicalStringify(right);
+}
+
+/** Keep main and side-chat provider instances on the same persisted settings. */
+function refreshChatRuntimeProviders(
+  deps: Pick<IpcDeps, "conversationLoop" | "sideChatConversationLoop">,
+): void {
+  // Refresh each binding even if another one fails. ConversationLoop clears
+  // its provider before rebuilding, so this leaves no stale API-key transport
+  // live under a subscription selection.
+  let failed = false;
+  let firstError: unknown;
+  try {
+    deps.conversationLoop.refreshProvider();
+  } catch (error) {
+    failed = true;
+    firstError = error;
+  }
+  try {
+    deps.sideChatConversationLoop?.refreshProvider();
+  } catch (error) {
+    failed = true;
+    firstError ??= error;
+  }
+  if (failed) throw firstError;
+}
 async function finishProviderPresetMarketplaceMutation(
   deps: IpcDeps,
   prevLlm: LLMSettings,
@@ -125,7 +341,7 @@ async function finishProviderPresetMarketplaceMutation(
       };
     }
   }
-  deps.conversationLoop.refreshProvider();
+  refreshChatRuntimeProviders(deps);
   deps.refreshActiveLlmWildcard?.();
   if (vendorBaseUrlSignature(prevLlm) !== vendorBaseUrlSignature(newLlm)) {
     deps.refreshSandboxNetworkConfig?.();
@@ -223,6 +439,263 @@ function llmSecretKeyForDeleteInput(deps: IpcDeps, vendor: unknown): string | un
 
 export function registerSettingsHandlers(deps: IpcDeps): void {
   const { settingsService, conversationLoop, auditLogger } = deps;
+  let activeChatRuntimeTransitionRevision = 0;
+  // Handler-start ownership prevents a slow verify/model lookup from applying
+  // an older subscription choice after a newer provider/API selection.
+  let activeChatRuntimeSelectionIntentRevision = 0;
+  const publishSubscriptionRuntimeStatusUpdated = (provider: SubscriptionRuntimeId): void => {
+    const event: SubscriptionRuntimeStatusUpdatedEvent = {
+      provider,
+      revision: ++subscriptionRuntimeStatusRevision,
+    };
+    for (const win of deps.getAppWindows?.() ?? []) {
+      sendToWindow(win, CHANNELS.settings.subscriptionRuntimeStatusUpdated, event);
+    }
+  };
+
+  const auditSubscriptionMutation = (
+    action: string,
+    provider: SubscriptionRuntimeId | "api" | "invalid",
+    outcome: "succeeded" | "failed" | "cancelled" | "rejected",
+    error?: SubscriptionRuntimeErrorCode,
+  ): void => {
+    auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: "subscription-runtime",
+      type: outcome === "succeeded" || outcome === "cancelled" ? "info" : "warn",
+      input: JSON.stringify({ action, provider, outcome, ...(error ? { error } : {}) }),
+    });
+  };
+  const openSubscriptionExternal = async (url: string): Promise<void> => {
+    const validated = validateExternalUrl(url);
+    if (!validated.ok) {
+      throw new SubscriptionRuntimeServiceError("subscription-verification-url-unavailable");
+    }
+    await shell.openExternal(validated.url);
+  };
+  const getSubscriptionRuntime = (): Promise<SubscriptionRuntimeService> =>
+    getSubscriptionRuntimeService(openSubscriptionExternal, {
+      audit: (event) => {
+        auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId: "subscription-runtime",
+          type: "warn",
+          input: JSON.stringify({
+            provider: event.provider,
+            outcome: event.outcome,
+            ...(event.requestKind ? { requestKind: event.requestKind } : {}),
+          }),
+        });
+      },
+    });
+  const runSubscriptionAction = async (
+    provider: SubscriptionRuntimeId,
+    operation: (
+      runtime: SubscriptionRuntimeService,
+      runtimeId: SubscriptionRuntimeId,
+    ) => Promise<SubscriptionRuntimeStatus>,
+  ): Promise<SubscriptionRuntimeActionResult> => {
+    let runtime: SubscriptionRuntimeService | null = null;
+    try {
+      runtime = await getSubscriptionRuntime();
+      return { ok: true, status: await operation(runtime, provider) };
+    } catch (error) {
+      const status = runtime?.getCachedStatus(provider);
+      return {
+        ok: false,
+        error: subscriptionRuntimeErrorCode(error),
+        ...(status ? { status } : {}),
+      };
+    }
+  };
+  const runSubscriptionMutation = async (
+    provider: SubscriptionRuntimeId,
+    operation: (
+      runtime: SubscriptionRuntimeService,
+      runtimeId: SubscriptionRuntimeId,
+    ) => Promise<SubscriptionRuntimeStatus>,
+  ): Promise<SubscriptionRuntimeActionResult> => {
+    const result = await runSubscriptionAction(provider, operation);
+    publishSubscriptionRuntimeStatusUpdated(provider);
+    return result;
+  };
+  const runSubscriptionModels = async (
+    provider: SubscriptionRuntimeId,
+  ): Promise<SubscriptionRuntimeModelsResult> => {
+    let runtime: SubscriptionRuntimeService | null = null;
+    try {
+      runtime = await getSubscriptionRuntime();
+      const result = await runtime.listModels(provider);
+      return { ok: true, ...result };
+    } catch (error) {
+      const status = runtime?.getCachedStatus(provider);
+      return {
+        ok: false,
+        error: subscriptionRuntimeErrorCode(error),
+        ...(status ? { status } : {}),
+      };
+    }
+  };
+  const sameActiveChatRuntime = (
+    left: LLMSettings["activeChatRuntime"],
+    right: LLMSettings["activeChatRuntime"],
+  ): boolean => {
+    if (left.kind !== right.kind) return false;
+    if (left.kind === "api") return true;
+    return right.kind === "subscription"
+      && left.provider === right.provider
+      && left.model === right.model;
+  };
+  const rollbackActiveChatRuntime = async (
+    previousActiveChatRuntime: LLMSettings["activeChatRuntime"],
+    failedActiveChatRuntime: LLMSettings["activeChatRuntime"],
+    transitionRevision: number,
+  ): Promise<boolean> => {
+    // Only the request that still owns the active selection may undo it. This
+    // preserves unrelated LLM updates and a newer multi-window selection.
+    if (
+      transitionRevision !== activeChatRuntimeTransitionRevision
+      || !sameActiveChatRuntime(settingsService.get("llm").activeChatRuntime, failedActiveChatRuntime)
+    ) {
+      return false;
+    }
+    const persistRestoration = settingsService.patch({
+      llm: { activeChatRuntime: previousActiveChatRuntime },
+    });
+    // SettingsService mutates memory before its first await. Restore every
+    // executable binding in that same synchronous turn; waiting for disk here
+    // would leave the failed API/subscription provider reachable meanwhile.
+    try {
+      refreshChatRuntimeProviders(deps);
+    } catch {
+      // Each loop was still cleared/rebuilt independently above.
+    }
+    try {
+      deps.rewireReviewerAgent?.();
+    } catch {
+      // The restored selection remains authoritative; preserve the original
+      // selection error instead of masking it with a best-effort rewire error.
+    }
+    try {
+      deps.refreshActiveLlmWildcard?.();
+    } catch {
+      // See reviewer rewire above.
+    }
+    try {
+      await persistRestoration;
+    } catch {
+      return false;
+    }
+    const ownsRestoration = (): boolean => (
+      transitionRevision === activeChatRuntimeTransitionRevision
+      && sameActiveChatRuntime(
+        settingsService.get("llm").activeChatRuntime,
+        previousActiveChatRuntime,
+      )
+    );
+    if (!ownsRestoration()) return false;
+
+    await broadcastSettingsSnapshot(deps, ownsRestoration);
+    return ownsRestoration();
+  };
+  const setActiveChatRuntime = async (
+    activeChatRuntime: LLMSettings["activeChatRuntime"],
+  ): Promise<void> => {
+    const previousLlm = settingsService.get("llm");
+    const previousSubscriptionProvider = previousLlm.activeChatRuntime?.kind === "subscription"
+      ? previousLlm.activeChatRuntime.provider
+      : null;
+    const nextSubscriptionProvider = activeChatRuntime?.kind === "subscription"
+      ? activeChatRuntime.provider
+      : null;
+    if (!sameActiveChatRuntime(previousLlm.activeChatRuntime, activeChatRuntime)) {
+      // A provider selection is an authentication-boundary change. Abort both
+      // interactive loops before exposing the new selection so a prior API
+      // tool round cannot issue another request after subscription activation.
+      const reason = new Error("active chat runtime changed");
+      conversationLoop.abortCurrentTurn?.(reason);
+      deps.sideChatConversationLoop?.abortCurrentTurn?.(reason);
+    }
+    const persistSelection = settingsService.patch({ llm: { activeChatRuntime } });
+    const transitionRevision = ++activeChatRuntimeTransitionRevision;
+    const ownsTransition = (): boolean => (
+      transitionRevision === activeChatRuntimeTransitionRevision
+      && sameActiveChatRuntime(settingsService.get("llm").activeChatRuntime, activeChatRuntime)
+    );
+
+    try {
+      // SettingsService has synchronously applied the new active runtime at
+      // this point. Bind all execution consumers before awaiting disk so no
+      // API-key provider can be observed while subscription is active.
+      refreshChatRuntimeProviders(deps);
+      deps.rewireReviewerAgent?.();
+      deps.refreshActiveLlmWildcard?.();
+      await persistSelection;
+    } catch {
+      // If a synchronous binding failed, wait for the in-flight write to settle
+      // before issuing the guarded restoration. This prevents an older write
+      // from racing the rollback on disk.
+      await persistSelection.catch(() => undefined);
+      let restored = false;
+      try {
+        restored = await rollbackActiveChatRuntime(
+          previousLlm.activeChatRuntime,
+          activeChatRuntime,
+          transitionRevision,
+        );
+      } catch {
+        // The renderer must never be told that the new runtime became active
+        // when its exact persisted predecessor could not be restored.
+      }
+      if (restored && previousSubscriptionProvider) {
+        publishSubscriptionRuntimeStatusUpdated(previousSubscriptionProvider);
+      }
+      throw new SubscriptionRuntimeServiceError("subscription-operation-failed");
+    }
+    // A newer multi-window selection may have persisted while this write
+    // awaited disk. It owns all following broadcast/status effects; its
+    // executable bindings were already applied synchronously by its own call.
+    if (!ownsTransition()) return;
+
+    await broadcastSettingsSnapshot(deps, ownsTransition);
+    if (!ownsTransition()) return;
+    if (previousSubscriptionProvider && previousSubscriptionProvider !== nextSubscriptionProvider) {
+      publishSubscriptionRuntimeStatusUpdated(previousSubscriptionProvider);
+    }
+    if (nextSubscriptionProvider) {
+      publishSubscriptionRuntimeStatusUpdated(nextSubscriptionProvider);
+    }
+  };
+  const hostAcpSubscriptionHandler = (
+    channel: string,
+    action: string,
+    operation: (
+      runtime: SubscriptionRuntimeService,
+      provider: AcpSubscriptionProviderId,
+    ) => Promise<SubscriptionRuntimeStatus>,
+    notifyStatusUpdated = true,
+  ) => async (e: IpcMainInvokeEvent, providerValue: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, channel, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!isAcpSubscriptionProviderId(providerValue)) {
+      auditSubscriptionMutation(action, "invalid", "rejected", "subscription-provider-not-supported");
+      return { ok: false as const, error: "acp-provider-not-supported" as const };
+    }
+    const run = notifyStatusUpdated ? runSubscriptionMutation : runSubscriptionAction;
+    const result = await run(
+      providerValue,
+      (runtime, runtimeId) => operation(runtime, runtimeId as AcpSubscriptionProviderId),
+    );
+    auditSubscriptionMutation(
+      action,
+      providerValue,
+      result.ok ? "succeeded" : "failed",
+      result.ok ? undefined : result.error,
+    );
+    return legacyAcpActionResult(providerValue, result);
+  };
 
   // read-only — no sender guard needed
   ipcMain.handle(CHANNELS.settings.get, () => rendererSettingsSnapshot(settingsService.getAll()));
@@ -234,14 +707,11 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     }
     const llmPatch = (partial as Record<string, unknown> | null | undefined)
       ?.llm as Record<string, unknown> | undefined;
-    if (
-      llmPatch &&
-      Object.prototype.hasOwnProperty.call(llmPatch, "hostResolverMap")
-    ) {
+    if (llmPatch && Object.prototype.hasOwnProperty.call(llmPatch, "activeChatRuntime")) {
+      auditSubscriptionMutation("direct-settings-update", "invalid", "rejected", "subscription-operation-failed");
       return {
         ok: false,
-        error: "host-map-requires-apply-host-map",
-        message: "hostResolverMap must be changed via applyHostMap",
+        error: "active-chat-runtime-requires-subscription-selection",
       };
     }
     // LOW: validate vendors["azure-foundry"].baseUrl at write time so an invalid
@@ -285,7 +755,11 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       settingsService.get("shortcuts"),
       settingsService.get("system"),
     );
-    const result = await settingsService.patch(partial);
+    const persistSettings = settingsService.patch(partial);
+    // SettingsService applies its merge before awaiting disk persistence. Capture
+    // this request's exact LLM snapshot before another renderer can supersede it.
+    const appliedLlm = settingsService.get("llm");
+    const result = await persistSettings;
     // E4 (security M1 drift) — reconcile the OS-level global shortcut + login
     // item when the shortcut/startup fields actually changed. Defined as a
     // closure and invoked on BOTH the success path AND the reviewer-rewire
@@ -314,38 +788,48 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       const launchState = reconcileStartupLaunch(launchInput);
       notifyStartupLaunchFailureIfNeeded(launchInput, launchState);
     };
-    const newLlm = settingsService.get("llm");
+    const newLlm = appliedLlm;
+    const ownsAppliedLlm = sameLlmSettings(settingsService.get("llm"), appliedLlm);
     const newActiveLlmIdentity = activeLlmIdentity(newLlm);
     const newBaseUrl = newLlm.vendors?.["azure-foundry"]?.baseUrl ?? null;
     const newAllowPrivate =
       settingsService.get("marketplace").cloudAllowPrivateNetwork ?? false;
-    if (prevBaseUrl !== newBaseUrl || prevActiveLlmIdentity !== newActiveLlmIdentity) {
+    if (
+      ownsAppliedLlm
+      && (prevBaseUrl !== newBaseUrl || prevActiveLlmIdentity !== newActiveLlmIdentity)
+    ) {
       try {
         deps.rewireReviewerAgent?.();
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        try {
-          await settingsService.replaceLlm(prevLlm);
-        } catch (rollbackErr) {
-          const rollbackMessage =
-            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
-          return {
-            ok: false,
-            error: "reviewer-rewire-failed",
-            message: `${message}; rollback failed: ${rollbackMessage}`,
-          };
-        }
-        try {
-          deps.rewireReviewerAgent?.();
-        } catch {
-          // The active LLM settings have been rolled back. Keep the IPC error
-          // focused on the original failing rewire; a second failure leaves the
-          // app on the same fail-closed reviewer path it had before the patch.
+        // A nested/parallel renderer mutation may have taken ownership while
+        // reviewer construction ran. Restore the full predecessor only when
+        // this request's captured snapshot is still current; otherwise a full
+        // replacement would discard the newer window's LLM settings.
+        if (sameLlmSettings(settingsService.get("llm"), newLlm)) {
+          try {
+            await settingsService.replaceLlm(prevLlm);
+          } catch (rollbackErr) {
+            const rollbackMessage =
+              rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr);
+            return {
+              ok: false,
+              error: "reviewer-rewire-failed",
+              message: `${message}; rollback failed: ${rollbackMessage}`,
+            };
+          }
+          try {
+            deps.rewireReviewerAgent?.();
+          } catch {
+            // The active LLM settings have been rolled back. Keep the IPC error
+            // focused on the original failing rewire; a second failure leaves the
+            // app on the same fail-closed reviewer path it had before the patch.
+          }
         }
         if (prevAllowPrivate !== newAllowPrivate) {
           deps.refreshMarketplaceFetcherConfig?.();
         }
-        conversationLoop.refreshProvider();
+        refreshChatRuntimeProviders(deps);
         deps.refreshActiveLlmWildcard?.();
         // security M1 drift — the shortcuts/system fields were already persisted
         // by `patch`; reconcile the OS state to disk even though the reviewer
@@ -359,7 +843,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (prevAllowPrivate !== newAllowPrivate) {
       deps.refreshMarketplaceFetcherConfig?.();
     }
-    conversationLoop.refreshProvider();
+    refreshChatRuntimeProviders(deps);
     // #893 — vendor/baseUrl may have changed; re-sync the plugin wildcard so
     // `hostApi.config.get("hostApiKey")` stays consistent with the active vendor.
     deps.refreshActiveLlmWildcard?.();
@@ -435,7 +919,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       };
     }
     await settingsService.setSecret(secretKey, apiKey);
-    conversationLoop.refreshProvider();
+    refreshChatRuntimeProviders(deps);
     // MAJOR-2: rewire reviewer when provider key changes so cacheScope refreshes.
     deps.rewireReviewerAgent?.();
     // #893 — refresh plugin wildcard with the new key for the active vendor.
@@ -462,7 +946,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
       };
     }
     await settingsService.deleteSecret(secretKey);
-    conversationLoop.refreshProvider();
+    refreshChatRuntimeProviders(deps);
     // MAJOR-2: rewire reviewer when provider key is removed so cacheScope refreshes.
     deps.rewireReviewerAgent?.();
     // #893 — refresh plugin wildcard so the now-missing key is cleared.
@@ -506,6 +990,383 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     });
   });
 
+  // ─── Common subscription runtimes ───────────────────────────────────
+  // All providers pass through this host-only boundary. The renderer can name
+  // only a static provider id; executable paths, verification URLs, credentials,
+  // and raw runtime output remain main-owned.
+  ipcMain.handle(CHANNELS.settings.subscriptionRuntimeStatus, async (e, providerValue: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionRuntimeStatus, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!isSubscriptionRuntimeId(providerValue)) {
+      return { ok: false as const, error: "subscription-provider-not-supported" as const };
+    }
+    return runSubscriptionAction(providerValue, (runtime, provider) => runtime.getStatus(provider));
+  });
+  ipcMain.handle(CHANNELS.settings.subscriptionChooseRuntime, async (e, providerValue: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionChooseRuntime, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!isSubscriptionRuntimeId(providerValue)) {
+      auditSubscriptionMutation("choose-runtime", "invalid", "rejected", "subscription-provider-not-supported");
+      return { ok: false as const, error: "subscription-provider-not-supported" as const };
+    }
+    if (!subscriptionRuntimeDescriptor(providerValue).requiresExecutable) {
+      auditSubscriptionMutation("choose-runtime", providerValue, "rejected", "subscription-provider-not-supported");
+      return { ok: false as const, error: "subscription-provider-not-supported" as const };
+    }
+    const selected = await dialog.showOpenDialog({
+      title: providerValue === "kimi-code" ? "Select Kimi Code executable" : "Select Grok Build executable",
+      properties: ["openFile", "dontAddToRecent"],
+      ...(process.platform === "win32"
+        ? { filters: [{ name: "Executable", extensions: ["exe"] }] }
+        : {}),
+    });
+    const executable = selected.filePaths[0];
+    const result = selected.canceled || !executable
+      ? await runSubscriptionMutation(providerValue, (runtime, provider) => runtime.getStatus(provider))
+      : await runSubscriptionMutation(providerValue, (runtime, provider) => runtime.chooseExecutable(provider, executable));
+    auditSubscriptionMutation(
+      "choose-runtime",
+      providerValue,
+      (selected.canceled || !executable) && result.ok ? "cancelled" : result.ok ? "succeeded" : "failed",
+      result.ok ? undefined : result.error,
+    );
+    return result;
+  });
+  ipcMain.handle(CHANNELS.settings.subscriptionForgetRuntime, async (e, providerValue: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionForgetRuntime, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!isSubscriptionRuntimeId(providerValue)) {
+      auditSubscriptionMutation("forget-runtime", "invalid", "rejected", "subscription-provider-not-supported");
+      return { ok: false as const, error: "subscription-provider-not-supported" as const };
+    }
+    const result = await runSubscriptionMutation(providerValue, (runtime, provider) => runtime.forgetExecutable(provider));
+    auditSubscriptionMutation("forget-runtime", providerValue, result.ok ? "succeeded" : "failed", result.ok ? undefined : result.error);
+    return result;
+  });
+  ipcMain.handle(CHANNELS.settings.subscriptionVerifyRuntime, async (e, providerValue: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionVerifyRuntime, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!isSubscriptionRuntimeId(providerValue)) {
+      auditSubscriptionMutation("verify-runtime", "invalid", "rejected", "subscription-provider-not-supported");
+      return { ok: false as const, error: "subscription-provider-not-supported" as const };
+    }
+    const result = await runSubscriptionMutation(providerValue, (runtime, provider) => runtime.verify(provider));
+    auditSubscriptionMutation("verify-runtime", providerValue, result.ok ? "succeeded" : "failed", result.ok ? undefined : result.error);
+    return result;
+  });
+  ipcMain.handle(
+    CHANNELS.settings.subscriptionStartLogin,
+    async (e, providerValue: unknown, methodValue: unknown) => {
+      if (!validateHostRendererSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionStartLogin, e);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (!isSubscriptionRuntimeId(providerValue)) {
+        auditSubscriptionMutation("start-login", "invalid", "rejected", "subscription-provider-not-supported");
+        return { ok: false as const, error: "subscription-provider-not-supported" as const };
+      }
+      const method = normalizeSubscriptionLoginMethod(methodValue);
+      if (!method || !subscriptionRuntimeDescriptor(providerValue).loginMethods.includes(method)) {
+        auditSubscriptionMutation("start-login", providerValue, "rejected", "subscription-provider-not-supported");
+        return { ok: false as const, error: "subscription-provider-not-supported" as const };
+      }
+      const result = await runSubscriptionMutation(
+        providerValue,
+        (runtime, provider) => runtime.startLogin(provider, method),
+      );
+      auditSubscriptionMutation("start-login", providerValue, result.ok ? "succeeded" : "failed", result.ok ? undefined : result.error);
+      return result;
+    },
+  );
+  ipcMain.handle(CHANNELS.settings.subscriptionOpenLoginBrowser, async (e, providerValue: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionOpenLoginBrowser, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!isSubscriptionRuntimeId(providerValue)) {
+      auditSubscriptionMutation("open-login-browser", "invalid", "rejected", "subscription-provider-not-supported");
+      return { ok: false as const, error: "subscription-provider-not-supported" as const };
+    }
+    const result = await runSubscriptionMutation(
+      providerValue,
+      (runtime, provider) => runtime.openPendingVerificationUrl(provider, openSubscriptionExternal),
+    );
+    auditSubscriptionMutation("open-login-browser", providerValue, result.ok ? "succeeded" : "failed", result.ok ? undefined : result.error);
+    return result;
+  });
+  ipcMain.handle(CHANNELS.settings.subscriptionCancelLogin, async (e, providerValue: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionCancelLogin, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!isSubscriptionRuntimeId(providerValue)) {
+      auditSubscriptionMutation("cancel-login", "invalid", "rejected", "subscription-provider-not-supported");
+      return { ok: false as const, error: "subscription-provider-not-supported" as const };
+    }
+    const result = await runSubscriptionMutation(providerValue, (runtime, provider) => runtime.cancelLogin(provider));
+    auditSubscriptionMutation("cancel-login", providerValue, result.ok ? "succeeded" : "failed", result.ok ? undefined : result.error);
+    return result;
+  });
+  ipcMain.handle(CHANNELS.settings.subscriptionLogout, async (e, providerValue: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionLogout, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!isSubscriptionRuntimeId(providerValue)) {
+      auditSubscriptionMutation("logout", "invalid", "rejected", "subscription-provider-not-supported");
+      return { ok: false as const, error: "subscription-provider-not-supported" as const };
+    }
+    if (!subscriptionRuntimeDescriptor(providerValue).supportsManagedLogout) {
+      auditSubscriptionMutation("logout", providerValue, "rejected", "subscription-logout-not-supported");
+      return { ok: false as const, error: "subscription-logout-not-supported" as const };
+    }
+    if (providerValue === "grok-build") {
+      const confirmation = await dialog.showMessageBox({
+        type: "warning",
+        buttons: ["Cancel", "Sign out"],
+        defaultId: 0,
+        cancelId: 0,
+        message: "Sign out of Grok Build?",
+        detail: "This clears only LVIS's isolated Grok Build session. Other provider sessions are unchanged.",
+      });
+      if (confirmation.response !== 1) {
+        const status = await runSubscriptionMutation(providerValue, (runtime, provider) => runtime.getStatus(provider));
+        auditSubscriptionMutation("logout", providerValue, status.ok ? "cancelled" : "failed", status.ok ? undefined : status.error);
+        return status;
+      }
+    }
+    const result = await runSubscriptionMutation(providerValue, (runtime, provider) => runtime.logout(provider));
+    auditSubscriptionMutation("logout", providerValue, result.ok ? "succeeded" : "failed", result.ok ? undefined : result.error);
+    return result;
+  });
+  ipcMain.handle(CHANNELS.settings.subscriptionListModels, async (e, providerValue: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionListModels, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    if (!isSubscriptionRuntimeId(providerValue)) {
+      return { ok: false as const, error: "subscription-provider-not-supported" as const };
+    }
+    return runSubscriptionModels(providerValue);
+  });
+  ipcMain.handle(
+    CHANNELS.settings.subscriptionUseForChat,
+    async (e, providerValue: unknown, modelValue: unknown) => {
+      if (!validateHostRendererSender(e)) {
+        auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionUseForChat, e);
+        return UNAUTHORIZED_FRAME;
+      }
+      if (!isSubscriptionRuntimeId(providerValue)) {
+        auditSubscriptionMutation("use-for-chat", "invalid", "rejected", "subscription-provider-not-supported");
+        return { ok: false as const, error: "subscription-provider-not-supported" as const };
+      }
+      const model = normalizeSubscriptionModel(modelValue);
+      const descriptor = subscriptionRuntimeDescriptor(providerValue);
+      if (model === null || (model !== undefined && !descriptor.supportsModelSelection)) {
+        auditSubscriptionMutation("use-for-chat", providerValue, "rejected", "subscription-chat-unavailable");
+        return { ok: false as const, error: "subscription-chat-unavailable" as const };
+      }
+      const selectionIntentRevision = ++activeChatRuntimeSelectionIntentRevision;
+      const verified = await runSubscriptionMutation(providerValue, (runtime, provider) => runtime.verify(provider));
+      if (!verified.ok) {
+        auditSubscriptionMutation("use-for-chat", providerValue, "failed", verified.error);
+        return verified;
+      }
+      let status = verified.status;
+      if (model !== undefined) {
+        const models = await runSubscriptionModels(providerValue);
+        if (!models.ok) {
+          const failure: SubscriptionRuntimeActionResult = {
+            ok: false,
+            error: models.error,
+            ...(models.status ? { status: models.status } : {}),
+          };
+          auditSubscriptionMutation("use-for-chat", providerValue, "failed", failure.error);
+          return failure;
+        }
+        if (!models.models.some((candidate) => candidate.id === model)) {
+          const failure: SubscriptionRuntimeActionResult = {
+            ok: false,
+            error: "subscription-chat-unavailable",
+            status: models.status,
+          };
+          auditSubscriptionMutation("use-for-chat", providerValue, "rejected", failure.error);
+          return failure;
+        }
+        status = models.status;
+      }
+      if (status.capabilities?.chat !== true) {
+        const failure: SubscriptionRuntimeActionResult = {
+          ok: false,
+          error: "subscription-chat-unavailable",
+          status,
+        };
+        auditSubscriptionMutation("use-for-chat", providerValue, "failed", failure.error);
+        return failure;
+      }
+      if (selectionIntentRevision !== activeChatRuntimeSelectionIntentRevision) {
+        // Another chat selection began while this runtime was verifying or
+        // listing models. It must not revive this older selection afterwards.
+        const failure: SubscriptionRuntimeActionResult = {
+          ok: false,
+          error: "subscription-operation-failed",
+          status,
+        };
+        auditSubscriptionMutation("use-for-chat", providerValue, "cancelled", failure.error);
+        return failure;
+      }
+      try {
+        await setActiveChatRuntime({
+          kind: "subscription",
+          provider: providerValue,
+          ...(model ? { model } : {}),
+        });
+        auditSubscriptionMutation("use-for-chat", providerValue, "succeeded");
+        return { ok: true as const, status };
+      } catch (error) {
+        const failure: SubscriptionRuntimeActionResult = {
+          ok: false,
+          error: subscriptionRuntimeErrorCode(error),
+          status,
+        };
+        auditSubscriptionMutation("use-for-chat", providerValue, "failed", failure.error);
+        return failure;
+      }
+    },
+  );
+  ipcMain.handle(CHANNELS.settings.subscriptionUseApiForChat, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.subscriptionUseApiForChat, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    // API and subscription selections share one handler-start intent order.
+    ++activeChatRuntimeSelectionIntentRevision;
+    try {
+      await setActiveChatRuntime({ kind: "api" });
+      auditSubscriptionMutation("use-api-for-chat", "api", "succeeded");
+      return { ok: true as const };
+    } catch (error) {
+      const code = subscriptionRuntimeErrorCode(error);
+      auditSubscriptionMutation("use-api-for-chat", "api", "failed", code);
+      return { ok: false as const, error: code };
+    }
+  });
+
+  // ─── Legacy compatibility adapters ─────────────────────────────────
+  // Older renderer bundles retain these names, but never get a second client
+  // or a bypass around common safety verification and URL validation.
+  const hostCodexSubscriptionHandler = (
+    channel: string,
+    action: string,
+    operation: (runtime: SubscriptionRuntimeService) => Promise<SubscriptionRuntimeStatus>,
+    notifyStatusUpdated = true,
+  ) => async (e: IpcMainInvokeEvent) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, channel, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const run = notifyStatusUpdated ? runSubscriptionMutation : runSubscriptionAction;
+    const result = await run("codex", (runtime) => operation(runtime));
+    auditSubscriptionMutation(action, "codex", result.ok ? "succeeded" : "failed", result.ok ? undefined : result.error);
+    return legacyCodexActionResult(result);
+  };
+  ipcMain.handle(
+    CHANNELS.settings.codexSubscriptionStatus,
+    hostCodexSubscriptionHandler(CHANNELS.settings.codexSubscriptionStatus, "legacy-status", (runtime) => runtime.getStatus("codex"), false),
+  );
+  ipcMain.handle(
+    CHANNELS.settings.codexSubscriptionStartBrowserLogin,
+    hostCodexSubscriptionHandler(CHANNELS.settings.codexSubscriptionStartBrowserLogin, "legacy-start-login", (runtime) => runtime.startLogin("codex", "browser")),
+  );
+  ipcMain.handle(CHANNELS.settings.codexSubscriptionStartDeviceCodeLogin, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.codexSubscriptionStartDeviceCodeLogin, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const result = await runSubscriptionMutation("codex", (runtime) => runtime.startLogin("codex", "device-code"));
+    auditSubscriptionMutation("legacy-start-login", "codex", result.ok ? "succeeded" : "failed", result.ok ? undefined : result.error);
+    return legacyCodexDeviceCodeResult(result);
+  });
+  ipcMain.handle(
+    CHANNELS.settings.codexSubscriptionCancelLogin,
+    hostCodexSubscriptionHandler(CHANNELS.settings.codexSubscriptionCancelLogin, "legacy-cancel-login", (runtime) => runtime.cancelLogin("codex")),
+  );
+  ipcMain.handle(
+    CHANNELS.settings.codexSubscriptionLogout,
+    hostCodexSubscriptionHandler(CHANNELS.settings.codexSubscriptionLogout, "legacy-logout", (runtime) => runtime.logout("codex")),
+  );
+  ipcMain.handle(CHANNELS.settings.codexSubscriptionListModels, async (e) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.settings.codexSubscriptionListModels, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    return legacyCodexModelsResult(await runSubscriptionModels("codex"));
+  });
+  ipcMain.handle(
+    CHANNELS.settings.acpSubscriptionStatus,
+    hostAcpSubscriptionHandler(CHANNELS.settings.acpSubscriptionStatus, "legacy-status", (runtime, provider) => runtime.getStatus(provider), false),
+  );
+  ipcMain.handle(
+    CHANNELS.settings.acpSubscriptionChooseRuntime,
+    hostAcpSubscriptionHandler(CHANNELS.settings.acpSubscriptionChooseRuntime, "legacy-choose-runtime", async (runtime, provider) => {
+      const selected = await dialog.showOpenDialog({
+        title: provider === "kimi-code" ? "Select Kimi Code executable" : "Select Grok Build executable",
+        properties: ["openFile", "dontAddToRecent"],
+        ...(process.platform === "win32"
+          ? { filters: [{ name: "Executable", extensions: ["exe"] }] }
+          : {}),
+      });
+      const executable = selected.filePaths[0];
+      return selected.canceled || !executable
+        ? runtime.getStatus(provider)
+        : runtime.chooseExecutable(provider, executable);
+    }),
+  );
+  ipcMain.handle(
+    CHANNELS.settings.acpSubscriptionForgetRuntime,
+    hostAcpSubscriptionHandler(CHANNELS.settings.acpSubscriptionForgetRuntime, "legacy-forget-runtime", (runtime, provider) => runtime.forgetExecutable(provider)),
+  );
+  ipcMain.handle(
+    CHANNELS.settings.acpSubscriptionVerify,
+    hostAcpSubscriptionHandler(CHANNELS.settings.acpSubscriptionVerify, "legacy-verify-runtime", (runtime, provider) => runtime.verify(provider)),
+  );
+  ipcMain.handle(
+    CHANNELS.settings.acpSubscriptionStartLogin,
+    hostAcpSubscriptionHandler(CHANNELS.settings.acpSubscriptionStartLogin, "legacy-start-login", (runtime, provider) => runtime.startLogin(provider, "device-code")),
+  );
+  ipcMain.handle(
+    CHANNELS.settings.acpSubscriptionOpenLoginBrowser,
+    hostAcpSubscriptionHandler(CHANNELS.settings.acpSubscriptionOpenLoginBrowser, "legacy-open-login-browser", (runtime, provider) => runtime.openPendingVerificationUrl(provider, openSubscriptionExternal)),
+  );
+  ipcMain.handle(
+    CHANNELS.settings.acpSubscriptionCancelLogin,
+    hostAcpSubscriptionHandler(CHANNELS.settings.acpSubscriptionCancelLogin, "legacy-cancel-login", (runtime, provider) => runtime.cancelLogin(provider)),
+  );
+  ipcMain.handle(
+    CHANNELS.settings.acpSubscriptionLogout,
+    hostAcpSubscriptionHandler(CHANNELS.settings.acpSubscriptionLogout, "legacy-logout", async (runtime, provider) => {
+      if (provider === "grok-build") {
+        const confirmation = await dialog.showMessageBox({
+          type: "warning",
+          buttons: ["Cancel", "Sign out"],
+          defaultId: 0,
+          cancelId: 0,
+          message: "Sign out of Grok Build?",
+          detail: "This clears only LVIS's isolated Grok Build session. Other provider sessions are unchanged.",
+        });
+        if (confirmation.response !== 1) return runtime.getStatus(provider);
+      }
+      return runtime.logout(provider);
+    }),
+  );
   // ─── Marketplace API Key ──────────────────────
   ipcMain.handle(CHANNELS.settings.marketplaceSetApiKey, async (e, apiKey: string) => {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceSetApiKey, e); return UNAUTHORIZED_FRAME; }
@@ -556,36 +1417,6 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteWebApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`web.apiKey.${provider}`);
     await broadcastSettingsSnapshot(deps);
-    return { ok: true };
-  });
-
-  // ─── Manual host-resolver map (requires relaunch) ─────────────────
-  //
-  // Chromium's `host-resolver-rules` command-line switch is frozen once
-  // the network service starts (`app.whenReady()`). Updating it therefore
-  // requires saving the new map then calling `app.relaunch()` + `app.exit()`
-  // so the next process reads the updated settings and installs the switch
-  // before any network service initialisation.
-  //
-  // The UI shows a confirm dialog before calling this IPC, so the user has
-  // already acknowledged the restart. The main process reacts immediately.
-  ipcMain.handle(SETTINGS.applyHostMap, async (e, hostResolverMap: unknown) => {
-    // Sensitive + relaunch-triggering channel: use the stricter host-renderer
-    // validator (fails closed on empty frame URLs, rejects plugin-ui-shell
-    // frames) rather than the base `validateSender`.
-    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, SETTINGS.applyHostMap, e); return UNAUTHORIZED_FRAME; }
-    // Payload guard — the renderer should only ever send a string, but reject
-    // a malformed payload before it reaches the settings store.
-    if (typeof hostResolverMap !== "string") {
-      return { ok: false, error: "invalid-host-map", message: "hostResolverMap must be a string" };
-    }
-    // Persist the new map before relaunch so the next boot reads it.
-    await settingsService.patch({ llm: { hostResolverMap } });
-    await broadcastSettingsSnapshot(deps);
-    // Arm and execute the relaunch. `app.relaunch()` queues the new process
-    // then `app.exit(0)` terminates the current one.
-    app.relaunch();
-    app.exit(0);
     return { ok: true };
   });
 

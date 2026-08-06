@@ -36,13 +36,13 @@ test('idle: unified InputActionBar 가 TokenRing + Send 를 표시하고 가이�
   const guideBtn = mainWindow.locator('[data-testid="composer-guide-ghost"]');
   await expect(guideBtn).toHaveCount(0);
 
-  // Send 버튼 (idle 라벨 = "전송")
+  // 통합 turn control — idle 이면 send 아이콘 (라벨은 aria-label/title 로만)
   const sendBtn = mainWindow.locator('[data-testid="composer-send-button"]');
   await expect(sendBtn).toBeVisible();
 });
 
 test('idle: cancel button + immediate-inject hint 모두 미노출 (busy 일 때만)', async ({ mainWindow }) => {
-  // esc 취소 버튼은 busy 시만
+  // 정지는 별도 버튼이 아니라 같은 turn control 이 busy + 빈 draft 일 때 갖는 상태.
   const cancelBtn = mainWindow.locator('[data-testid="composer-cancel-button"]');
   await expect(cancelBtn).toHaveCount(0);
   // ⌘⏎ 즉시 주입 hint 도 busy 시만

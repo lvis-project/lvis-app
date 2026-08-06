@@ -34,6 +34,11 @@
     },
     {
       "type": "duplicates",
+      "file": "src/main/acp-subscription-session-client.ts",
+      "name": "MAX_ACP_SUBSCRIPTION_IMAGE_BYTES,MAX_ACP_SUBSCRIPTION_IMAGE_TOTAL_BYTES"
+    },
+    {
+      "type": "duplicates",
       "file": "src/shared/llm-vendor-defaults.ts",
       "name": "BUILT_IN_LLM_VENDOR_IDS,DEFAULT_VISIBLE_LLM_VENDOR_IDS"
     },
@@ -136,6 +141,16 @@
       "type": "exports",
       "file": "scripts/lib/electron-native-modules.mjs",
       "name": "withElectronNativeRebuildLock"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/lib/main-bundle-budget.mjs",
+      "name": "isMainBundleRootScriptPath"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/lib/main-bundle-budget.mjs",
+      "name": "MAIN_BUNDLE_ROOT_FILES"
     },
     {
       "type": "exports",
@@ -324,6 +339,11 @@
     },
     {
       "type": "exports",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PLATFORM_CONVERSATION_PROTOCOL_VERSION"
+    },
+    {
+      "type": "exports",
       "file": "src/engine/turn/knowledge-cap.ts",
       "name": "KNOWLEDGE_DEPTH_CAP"
     },
@@ -459,6 +479,26 @@
     },
     {
       "type": "exports",
+      "file": "src/main/acp-subscription-runtime-config.ts",
+      "name": "GROK_BUILD_GOVERNED_AGENT_FILE_NAME"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/acp-subscription-runtime-config.ts",
+      "name": "GROK_BUILD_MCP_TOOLSET_SENTINEL"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/acp-subscription-runtime-config.ts",
+      "name": "validateAcpSubscriptionMcpServerConfig"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/acp-subscription-session-client.ts",
+      "name": "buildAcpSubscriptionSessionNewParams"
+    },
+    {
+      "type": "exports",
       "file": "src/main/ask-user-question-gate.ts",
       "name": "IPC_ASK_USER_QUESTION_REQUEST"
     },
@@ -509,11 +549,6 @@
     },
     {
       "type": "exports",
-      "file": "src/main/managed-child-processes.ts",
-      "name": "spawnManaged"
-    },
-    {
-      "type": "exports",
       "file": "src/main/project-root-authorization.ts",
       "name": "DEFAULT_PROJECT_NAME"
     },
@@ -534,8 +569,38 @@
     },
     {
       "type": "exports",
-      "file": "src/main/uv-runtime.ts",
-      "name": "currentUvTarget"
+      "file": "src/main/subscription-attachment-input.ts",
+      "name": "isSubscriptionPromptAttachment"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-attachment-input.ts",
+      "name": "normalizeInlineLocalDataUrl"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-grok-tool-policy-hook.ts",
+      "name": "runGrokPreToolPolicyHook"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-llm-provider.ts",
+      "name": "SUBSCRIPTION_ATTACHMENT_INPUT_TOO_LARGE"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-tool-mcp-server.ts",
+      "name": "createSubscriptionToolMcpServer"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-tool-mcp-server.ts",
+      "name": "isSubscriptionToolMcpServerEntrypoint"
+    },
+    {
+      "type": "exports",
+      "file": "src/main/subscription-tool-mcp-server.ts",
+      "name": "runSubscriptionToolMcpServer"
     },
     {
       "type": "exports",
@@ -756,6 +821,11 @@
       "type": "exports",
       "file": "src/shared/a2a.ts",
       "name": "A2A_TASK_STATE_WORKING"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/composer-image-input.ts",
+      "name": "composerImageMimeForExtension"
     },
     {
       "type": "exports",
@@ -1399,6 +1469,41 @@
     },
     {
       "type": "types",
+      "file": "src/api/tailnet-attachment-staging-store.ts",
+      "name": "TailnetAttachmentClaim"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-attachment-staging-store.ts",
+      "name": "TailnetAttachmentStageInput"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-attachment-staging-store.ts",
+      "name": "TailnetAttachmentStageResult"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-surface-server.ts",
+      "name": "TailnetControllerOptions"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-surface-server.ts",
+      "name": "TailnetObserverEvent"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-surface-server.ts",
+      "name": "TailnetObserverSnapshot"
+    },
+    {
+      "type": "types",
+      "file": "src/api/tailnet-web-session-store.ts",
+      "name": "TailnetWebIssuedSession"
+    },
+    {
+      "type": "types",
       "file": "src/audit/audit-logger.ts",
       "name": "PluginInstallEscalationAudit"
     },
@@ -1624,13 +1729,98 @@
     },
     {
       "type": "types",
-      "file": "src/engine/llm/provider-error-diagnostics.ts",
-      "name": "ProviderRateLimitDiagnostics"
+      "file": "src/engine/conversation-event-hub.ts",
+      "name": "ConversationEventInput"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-event-hub.ts",
+      "name": "ConversationEventListener"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-event-hub.ts",
+      "name": "ConversationEventPayload"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-event-hub.ts",
+      "name": "ConversationEventProtocolVersion"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-event-hub.ts",
+      "name": "ConversationEventSubscription"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationAssistantRound"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationPermissionReview"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationToolEndOwnerDetail"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationToolReference"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationToolStartOwnerDetail"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "ConversationUsageReport"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationEventInput"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationEventListener"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationProtocolVersion"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationReplay"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationSubscription"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/conversation-platform-protocol.ts",
+      "name": "PlatformConversationSubscriptionOptions"
     },
     {
       "type": "types",
       "file": "src/engine/llm/types.ts",
       "name": "StreamSmoothing"
+    },
+    {
+      "type": "types",
+      "file": "src/engine/shared-conversation-projection.ts",
+      "name": "SharedConversationReplay"
     },
     {
       "type": "types",
@@ -1854,6 +2044,51 @@
     },
     {
       "type": "types",
+      "file": "src/main/codex-conversation-runtime.ts",
+      "name": "CodexConversationDynamicToolDefinition"
+    },
+    {
+      "type": "types",
+      "file": "src/main/codex-conversation-runtime.ts",
+      "name": "CodexConversationDynamicToolFunction"
+    },
+    {
+      "type": "types",
+      "file": "src/main/codex-conversation-runtime.ts",
+      "name": "CodexConversationDynamicToolHandler"
+    },
+    {
+      "type": "types",
+      "file": "src/main/codex-conversation-runtime.ts",
+      "name": "CodexConversationDynamicToolNamespace"
+    },
+    {
+      "type": "types",
+      "file": "src/main/codex-conversation-runtime.ts",
+      "name": "CodexConversationJsonValue"
+    },
+    {
+      "type": "types",
+      "file": "src/main/conversation-command-port.ts",
+      "name": "ConversationCommand"
+    },
+    {
+      "type": "types",
+      "file": "src/main/conversation-command-port.ts",
+      "name": "ConversationCommandResult"
+    },
+    {
+      "type": "types",
+      "file": "src/main/conversation-command-port.ts",
+      "name": "ConversationCommandSubmission"
+    },
+    {
+      "type": "types",
+      "file": "src/main/conversation-command-port.ts",
+      "name": "HostOwnedPublicTurn"
+    },
+    {
+      "type": "types",
       "file": "src/main/crash-reporter.ts",
       "name": "SentryLike"
     },
@@ -1904,6 +2139,51 @@
     },
     {
       "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeDeliveryChannel"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeDeliveryChannelState"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeDeliveryEnqueueResult"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeDeliveryTransport"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeDeliveryTransportSendOptions"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-delivery.ts",
+      "name": "PlatformBridgeOutboundStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-inbound.ts",
+      "name": "PlatformBridgeInboundAuthorizer"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-inbound.ts",
+      "name": "PlatformBridgeReceiptStore"
+    },
+    {
+      "type": "types",
+      "file": "src/main/platform-bridge-inbound.ts",
+      "name": "PlatformBridgeWebhookVerifier"
+    },
+    {
+      "type": "types",
       "file": "src/main/python-runtime.ts",
       "name": "BootstrapPhase"
     },
@@ -1946,6 +2226,16 @@
       "type": "types",
       "file": "src/main/skill-approvals-store.ts",
       "name": "SkillApprovalsFile"
+    },
+    {
+      "type": "types",
+      "file": "src/main/tailnet-pairing-share-store.ts",
+      "name": "TailnetOwnerPairingSummary"
+    },
+    {
+      "type": "types",
+      "file": "src/main/tailnet-pairing-share-store.ts",
+      "name": "TailnetOwnerShareSummary"
     },
     {
       "type": "types",
@@ -2474,6 +2764,11 @@
     },
     {
       "type": "types",
+      "file": "src/shared/chat-origin.ts",
+      "name": "PlatformBridgeAuthority"
+    },
+    {
+      "type": "types",
       "file": "src/shared/llm-model-list.ts",
       "name": "LlmModelListError"
     },
@@ -2566,6 +2861,26 @@
       "type": "types",
       "file": "src/shared/routines-types.ts",
       "name": "RoutinePluginScope"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/tailnet-sharing.ts",
+      "name": "TailnetSharingFailure"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/tailnet-sharing.ts",
+      "name": "TailnetSharingInvitationSummary"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/tailnet-sharing.ts",
+      "name": "TailnetSharingPairingSummary"
+    },
+    {
+      "type": "types",
+      "file": "src/shared/tailnet-sharing.ts",
+      "name": "TailnetSharingShareSummary"
     },
     {
       "type": "types",
@@ -2801,6 +3116,11 @@
       "type": "types",
       "file": "src/ui/renderer/preview/workspace-tabs.ts",
       "name": "WorkspaceTabMode"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/tabs/SubscriptionProvidersSection.tsx",
+      "name": "SubscriptionProviderCapabilities"
     },
     {
       "type": "types",

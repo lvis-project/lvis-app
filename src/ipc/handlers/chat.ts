@@ -4,16 +4,21 @@
  * Pure `handle*` functions holding the logic behind the PUBLIC chat channels
  * (`chat send`, `chat sessions`, `chat get-history`, `chat session-history`).
  * They import NOTHING from the electron transport — the `ipcMain.handle`
- * wrapper + `validateSender` trust boundary stay in `domains/chat.ts`, and all
- * renderer fan-out flows through the injected {@link ChatStreamSink}.
+ * wrapper + `validateSender` trust boundary stay in `domains/chat.ts`, and turn
+ * output flows through an injected semantic event sink.
  *
  * Shared pure helpers (session-id validation, persona-prompt resolution,
  * payload narrowing) also live here so the transport layer (`domains/chat.ts`)
  * and any future in-process api/cli/sdk consume a single definition rather than
  * re-deriving them.
  */
-import type { ChatInputOrigin, ChatSendPayload } from "../../shared/chat-origin.js";
-import { isChatSendInputOrigin } from "../../shared/chat-origin.js";
+import type { ChatInputOrigin, ChatSendPayload, RemoteControllerAuthority } from "../../shared/chat-origin.js";
+import {
+  isChatSendInputOrigin,
+  isRemoteControllerAuthorityCurrent,
+  isUserKeyboardOrigin,
+} from "../../shared/chat-origin.js";
+import { normalizeLocalUserContentParts } from "../../main/subscription-attachment-input.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import { PERSONA_PROMPT_ID_ALLOWLIST } from "../../main/persona-prompt-store.js";
 import { redactForLLM } from "../../audit/dlp-filter.js";
@@ -22,7 +27,6 @@ import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ParentMailboxEntry } from "../../engine/subagent-message-mailbox.js";
 import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
-import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import type { SessionKind } from "../../memory/memory-manager.js";
@@ -31,7 +35,7 @@ import { isDefaultWorkspaceRoot } from "../../main/default-workspace-root.js";
 import {
   runStreamedTurn,
   STREAM_TURN_OPTIONS,
-  type ChatStreamSink,
+  type ConversationStreamEventSink,
 } from "./chat-stream.js";
 
 const log = createLogger("chat");
@@ -248,43 +252,15 @@ export async function resolvePersonaRolePrompt(
 export function validateUserContentParts(
   raw: unknown,
 ): import("../../engine/llm/types.js").UserContentPart[] | undefined {
-  if (raw === undefined || raw === null) return undefined;
-  if (!Array.isArray(raw)) return undefined;
-  const out: import("../../engine/llm/types.js").UserContentPart[] = [];
-  for (const item of raw) {
-    if (typeof item !== "object" || item === null) continue;
-    const t = (item as { type?: unknown }).type;
-    if (t === "text") {
-      const text = (item as { text?: unknown }).text;
-      if (typeof text !== "string") continue;
-      out.push({ type: "text", text });
-      continue;
-    }
-    if (t === "image") {
-      const image = (item as { image?: unknown }).image;
-      const mimeType = (item as { mimeType?: unknown }).mimeType;
-      if (typeof image !== "string") continue;
-      out.push({
-        type: "image",
-        image,
-        ...(typeof mimeType === "string" ? { mimeType } : {}),
-      });
-      continue;
-    }
-    if (t === "file") {
-      const data = (item as { data?: unknown }).data;
-      const mimeType = (item as { mimeType?: unknown }).mimeType;
-      if (typeof data !== "string" || typeof mimeType !== "string") continue;
-      out.push({ type: "file", data, mimeType });
-      continue;
-    }
-    // Unknown tag → drop
-  }
-  return out.length > 0 ? out : undefined;
+  return normalizeLocalUserContentParts(raw);
 }
 
 export function parseChatSendPayload(
   payload: unknown,
+  options: Readonly<{
+    /** Only a host-minted Tailnet controller may treat a staged-looking body as text. */
+    allowStagedEnvelopeAsRawText?: boolean;
+  }> = {},
 ): { ok: true; payload: ChatSendPayload } | { ok: false; error: string } {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
     return { ok: false, error: "invalid-payload" };
@@ -318,12 +294,15 @@ export function parseChatSendPayload(
     }
   } else {
     // …and the binding holds in REVERSE: a send that carries SOME staged
-    // envelope may not claim a non-staged origin. Without this, `user-keyboard`
-    // plus a staged envelope is accepted, which would strip the force-ask gate,
-    // the untrusted framing, and the transcript marker from actor-authored text
-    // — the exact laundering the envelope exists to prevent. Enforced HERE so
-    // the guarantee does not rest on renderer discipline.
-    if (parseStagedEnvelope(candidate.input)) {
+    // envelope may not claim a non-staged origin. Without this, a desktop
+    // `user-keyboard` send plus a staged envelope is accepted, which would
+    // strip the force-ask gate, untrusted framing, and transcript marker from
+    // actor-authored text. A host-minted Tailnet controller is the sole
+    // exception: it deliberately submits arbitrary remote text under its
+    // distinct `tailnet-surface` origin. That body still cannot promote itself
+    // to a staged provenance because chat-stream only parses an envelope after
+    // receiving a host-minted staged-origin claim.
+    if (!options.allowStagedEnvelopeAsRawText && parseStagedEnvelope(candidate.input)) {
       // Its OWN code: "missing envelope" would be the opposite of what happened,
       // and this rejection also catches an ordinary user typing or pasting text
       // that happens to start with a provenance header.
@@ -357,7 +336,7 @@ export interface SanitizedOutgoingTurnContent {
  */
 export function sanitizeOutgoingTurnContent(
   settingsService: IpcDeps["settingsService"],
-  sink: ChatStreamSink,
+  sink: ConversationStreamEventSink,
   input: string,
   attachments: UserContentPart[] | undefined,
 ): SanitizedOutgoingTurnContent {
@@ -399,8 +378,8 @@ export function sanitizeOutgoingTurnContent(
     // `redactForLLM` writes one count-only audit row per hit-bearing text span.
     // The stream/UI surface is deliberately turn-level: one notice, no raw text
     // or resource URI in this warning.
-    sink(CHANNELS.chat.stream, {
-      type: "redact_notice",
+    sink({
+      kind: "privacy.redacted",
       count: totalCount,
       byKind: counts,
     });
@@ -416,7 +395,7 @@ export function sanitizeOutgoingTurnContent(
  */
 export function sanitizeOutgoingInput(
   settingsService: IpcDeps["settingsService"],
-  sink: ChatStreamSink,
+  sink: ConversationStreamEventSink,
   input: string,
 ): string {
   return sanitizeOutgoingTurnContent(settingsService, sink, input, undefined).input;
@@ -427,7 +406,11 @@ export function sanitizeOutgoingInput(
  * internal edit-resend / continue-last-user / retry-effort paths call one
  * definition.
  */
-export async function markMainActiveAfterTurn(deps: IpcDeps, input: string): Promise<void> {
+export async function markMainActiveAfterTurn(
+  deps: IpcDeps,
+  input: string,
+  inputOrigin: ChatInputOrigin = "user-keyboard",
+): Promise<void> {
   const { conversationLoop, memoryManager } = deps;
   if (conversationLoop.getSessionKind() !== "main") return;
   if (conversationLoop.getHistory().length > 0) {
@@ -461,33 +444,49 @@ export async function markMainActiveAfterTurn(deps: IpcDeps, input: string): Pro
     await memoryManager.markMainActiveResume(conversationLoop.getSessionId());
     return;
   }
-  if (input.trim() === "/new") {
+  if (input.trim() === "/new" && isUserKeyboardOrigin(inputOrigin)) {
     await memoryManager.markMainActiveFresh();
   }
 }
 
 /** Injected stream-turn plumbing shared with the registrar's other turn paths. */
 export interface ChatSendContext {
-  /** IPC (or api/cli) sink that publishes stream + fallback frames. */
-  sink: ChatStreamSink;
-  /** Allocates the next per-turn stream correlation id (registrar-owned state). */
+  /** Semantic event sink factory bound to the host-owned platform timeline. */
+  createStreamEventSink: (streamId: number) => ConversationStreamEventSink;
+  /** Allocates the next host-runtime-owned stream correlation id. */
   allocateStreamId: () => number;
-  /** Tracks the in-flight turn so abort / branch see a single active promise. */
-  trackStreamTurn: (factory: () => Promise<TurnResult>) => Promise<TurnResult>;
+  /** Tracks the host-runtime-owned active turn for every attached surface. */
+  trackStreamTurn: (factory: () => Promise<ChatSendResult>) => Promise<ChatSendResult>;
+  /** Host-owned remote-controller authority; external payloads cannot supply it. */
+  remoteControllerAuthority?: RemoteControllerAuthority;
+  /** Host-owned cancellation signal for a registered public remote turn. */
+  abortSignal?: AbortSignal;
 }
+
+export type ChatSendResult = TurnResult | { ok: false; error: string };
 
 /** PUBLIC `lvis:chat:send` — parse + sanitize + stream one conversation turn. */
 export async function handleChatSend(
   deps: IpcDeps,
   payload: unknown,
   ctx: ChatSendContext,
-): Promise<TurnResult | { ok: false; error: string }> {
+): Promise<ChatSendResult> {
   const { conversationLoop, settingsService, auditLogger, personaPromptStore } = deps;
+  if (!isRemoteControllerAuthorityCurrent(ctx.remoteControllerAuthority)) {
+    return { ok: false, error: "remote-controller-revoked" };
+  }
   const expectedSessionId = conversationLoop.getSessionId();
-  const parsed = parseChatSendPayload(payload);
+  const parsed = parseChatSendPayload(payload, {
+    allowStagedEnvelopeAsRawText: ctx.remoteControllerAuthority !== undefined,
+  });
   if (!parsed.ok) return { ok: false, error: parsed.error };
   const { input, attachments, inputOrigin, userActivation, personaPromptId } = parsed.payload;
   const personaPrompt = await resolvePersonaRolePrompt(personaPromptStore, personaPromptId);
+  // Persona resolution is asynchronous. A remote route may be revoked while it
+  // is pending, so do not let a previously-admitted command continue.
+  if (!isRemoteControllerAuthorityCurrent(ctx.remoteControllerAuthority)) {
+    return { ok: false, error: "remote-controller-revoked" };
+  }
   if (conversationLoop.getSessionId() !== expectedSessionId) {
     return { ok: false, error: "session-mismatch" };
   }
@@ -510,22 +509,35 @@ export async function handleChatSend(
   // sees garbage.
   const validated = validateUserContentParts(attachments);
   const streamId = ctx.allocateStreamId();
+  const sink = ctx.createStreamEventSink(streamId);
   return ctx.trackStreamTurn(async () => {
+    // `trackStreamTurn` deliberately defers its factory after acquiring the
+    // lease. This is the effect-entry fence for a revoked remote authority.
+    if (!isRemoteControllerAuthorityCurrent(ctx.remoteControllerAuthority)) {
+      return { ok: false, error: "remote-controller-revoked" };
+    }
     // The mailbox snapshot belongs to the same lease as the receiving turn.
     // Taking it before trackStreamTurn allowed session mutation (new/resume/
     // fork) to switch the loop while durable child guidance was being read.
     const mailboxTurn = inputOrigin === "user-keyboard" || inputOrigin === "queue-auto"
       ? await prepareParentMailboxTurn(deps)
       : null;
+    if (!isRemoteControllerAuthorityCurrent(ctx.remoteControllerAuthority)) {
+      return { ok: false, error: "remote-controller-revoked" };
+    }
     // Redaction is inside the accepted turn lease: an overlapping send rejected
     // as `streaming-active` must not create a notice or DLP audit record for a
     // turn that never reaches the provider.
-    const sanitized = sanitizeOutgoingTurnContent(settingsService, ctx.sink, input, validated);
+    const sanitized = sanitizeOutgoingTurnContent(settingsService, sink, input, validated);
+    // Keep the last guard recheck adjacent to the model/loop effect. There is
+    // intentionally no await between this check and `runStreamedTurn`.
+    if (!isRemoteControllerAuthorityCurrent(ctx.remoteControllerAuthority)) {
+      return { ok: false, error: "remote-controller-revoked" };
+    }
     const result = await runStreamedTurn(
       conversationLoop,
       sanitized.input,
-      ctx.sink,
-      streamId,
+      sink,
       {
         ...STREAM_TURN_OPTIONS,
         attachments: sanitized.attachments,
@@ -540,10 +552,14 @@ export async function handleChatSend(
               approvalReasonPrefix: mailboxTurn.approvalReasonPrefix,
             }
           : {}),
+        ...(ctx.remoteControllerAuthority
+          ? { remoteControllerAuthority: ctx.remoteControllerAuthority }
+          : {}),
+        ...(ctx.abortSignal === undefined ? {} : { abortSignal: ctx.abortSignal }),
       },
     );
     await acknowledgeParentMailboxAfterTurn(deps, mailboxTurn, result);
-    await markMainActiveAfterTurn(deps, sanitized.input);
+    await markMainActiveAfterTurn(deps, sanitized.input, inputOrigin);
     return result;
   });
 }

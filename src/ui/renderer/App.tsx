@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { estimateTokens } from "../../shared/token-estimate.js";
 import { useTranslation } from "../../i18n/react.js";
-import { composeOutgoing as composeOutgoingUtil } from "./utils/compose.js";
+import { composeOutgoing as composeOutgoingUtil, type ComposedOutgoing } from "./utils/compose.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { AppProviders } from "./AppProviders.js";
 import { AppDialogs } from "./AppDialogs.js";
@@ -28,7 +27,7 @@ import { MainContent } from "./MainContent.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
-import { estimateMultimodalTokenOverhead } from "../../shared/multimodal-token-estimate.js";
+import { estimateOutgoingUserMessageTokens } from "../../shared/multimodal-token-estimate.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useSearch } from "./hooks/use-search.js";
@@ -101,6 +100,12 @@ export function App() {
     upsertPersistent: statusUpsertPersistent,
     removePersistent: statusRemovePersistent,
   } = useStatusBar({ api });
+
+  // Composer attachment warnings share the existing App-owned StatusBar queue.
+  // No second toast store or renderer-global channel is introduced for this flow.
+  const handleAttachmentWarning = useCallback((message: string) => {
+    statusPushToast({ severity: "warning", message, ttlMs: 8000 });
+  }, [statusPushToast]);
 
   // App auto-update badge — surfaces main-process electron-updater events as a
   // permanent badge next to the Home button. User-gated: download/install only
@@ -389,44 +394,66 @@ export function App() {
     llmModel,
     enableThinkingChat,
     llmReadyWithoutApiKey,
+    subscriptionRuntimePolicy,
     refresh: refreshLlmSettings,
+    settingsLoaded,
     toggleThinking,
   } = useSettings(api);
+  const {
+    activeSubscriptionRuntime,
+    subscriptionSelected: subscriptionRuntimeSelected,
+    chatReady: subscriptionChatReady,
+  } = subscriptionRuntimePolicy;
+  const chatReadyWithoutApiKey = subscriptionRuntimeSelected
+    ? subscriptionChatReady === true
+    : llmReadyWithoutApiKey;
+  // Until the authoritative runtime snapshot lands, the initial API-vendor
+  // defaults are not a safe source for billing or context UI. Hide those
+  // projections just as send and attachment ingress already fail closed.
+  const apiUsageProjectionAvailable = settingsLoaded && !subscriptionRuntimeSelected;
   const effectiveLlmReady = useMemo(
-    () => effectiveHasApiKey === null
-      ? (llmReadyWithoutApiKey ? true : null)
-      : effectiveHasApiKey || llmReadyWithoutApiKey,
-    [effectiveHasApiKey, llmReadyWithoutApiKey],
-  );
-  const draftAttachmentTokens = useMemo(
     () => {
-      const imageOverhead = estimateMultimodalTokenOverhead(attachments
-        .filter((attachment) => attachment.kind === "image")
-        .map((attachment) => ({
-          type: "image",
-          mimeType: attachment.mimeType,
-          width: attachment.width,
-          height: attachment.height,
-          bytes: attachment.bytes,
-        })));
-      // A resource attachment is TEXT the turn will carry, and it is the only draft
-      // attachment whose size the composer does not otherwise show. Counting only
-      // images left the overflow indicator green on a turn up to eight reads heavier
-      // than it displayed — the number exists to tell a user the request is about to be
-      // large, and this is the largest thing they can add.
-      const resourceTokens = attachments.reduce(
-        (total, attachment) =>
-          attachment.kind === "resource" ? total + estimateTokens(attachment.text) : total,
-        0,
-      );
-      return imageOverhead + resourceTokens;
+      // A selected subscription runtime is the sole authority for readiness.
+      // Never revive a failed/pending subscription selection with a stale API key.
+      // A pending readiness probe is deliberately non-sendable: it has not yet
+      // established an authenticated chat session.
+      if (subscriptionRuntimeSelected) return subscriptionChatReady === true;
+      return effectiveHasApiKey === null
+        ? (chatReadyWithoutApiKey ? true : null)
+        : effectiveHasApiKey || chatReadyWithoutApiKey;
     },
-    [attachments],
+    [effectiveHasApiKey, chatReadyWithoutApiKey, subscriptionChatReady, subscriptionRuntimeSelected],
+  );
+  const subscriptionUnavailableProvider = subscriptionRuntimePolicy.unavailableProvider;
+  const subscriptionPendingProvider = subscriptionRuntimePolicy.pendingProvider;
+  const subscriptionImageAttachmentProvider = subscriptionRuntimePolicy.imageAttachmentProvider;
+  const subscriptionFileAttachmentProvider = subscriptionRuntimePolicy.fileAttachmentProvider;
+  const composeOutgoing = useCallback(
+    (raw: string) => composeOutgoingUtil({ raw, activePreset, attachments }),
+    [activePreset, attachments],
+  );
+  // This is the same trimmed draft the send path composes. Both pre-send
+  // surfaces consume it, so pasted text, file paths, resource text parts, and
+  // images cannot drift from the actual user payload.
+  const composedDraft = useMemo<ComposedOutgoing>(() => {
+    const trimmedQuestion = question.trim();
+    return trimmedQuestion.length > 0
+      ? composeOutgoing(trimmedQuestion)
+      : { text: "", attachments: [] };
+  }, [question, composeOutgoing]);
+  const draftTokenEstimate = useMemo(
+    () => estimateOutgoingUserMessageTokens(composedDraft.text, composedDraft.attachments),
+    [composedDraft],
   );
 
   const { usedTokens, contextBudget, effectiveBudget, contextOverflowPct, tpmLimit, tpmPct, isTpmOverflow } =
-    useContextBudget({ entries, llmVendor, llmModel, draftText: question, draftExtraTokens: draftAttachmentTokens });
-
+    useContextBudget({
+      entries,
+      llmVendor: subscriptionRuntimeSelected ? undefined : llmVendor,
+      llmModel: subscriptionRuntimeSelected ? undefined : llmModel,
+      draftTokenEstimate,
+      enabled: apiUsageProjectionAvailable,
+    });
   // Plugin/built-in view routing + host-managed plugin auth lifecycle (the 4
   // auth-gate refs + action guard + pluginAuthErrors + the two drain effects +
   // the uninstalled-plugin fallback), extracted as ONE unit. appMode is the sole
@@ -619,11 +646,6 @@ export function App() {
     });
   }, [api, checkApiKey, refreshLlmSettings]);
 
-  const composeOutgoing = useCallback(
-    (raw: string) => composeOutgoingUtil({ raw, activePreset, attachments }),
-    [activePreset, attachments],
-  );
-
   // Composer send pipeline. Owns handleAsk (+ its turnRequestRef guard) and
   // writes handleAskRef.current each render so the forward-ref cycle with
   // use-routine-overlay's handlePluginPrimaryAction stays live. See
@@ -633,7 +655,10 @@ export function App() {
     appendUserEntry, dropUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
-    llmVendor, llmModel, llmReadyWithoutApiKey, onOpenSettings, setQuestion, handleAskRef,
+    llmVendor, llmModel, llmReadyWithoutApiKey: chatReadyWithoutApiKey,
+    settingsReady: settingsLoaded,
+    subscriptionRuntimePolicy,
+    onOpenSettings, setQuestion, handleAskRef,
   });
 
   // Run a server-declared MCP prompt. The host fetches it and returns the text
@@ -708,13 +733,20 @@ export function App() {
   );
 
   const { costEstimate, costBadgeClass } =
-    useCostEstimate({ entries, question, llmVendor, llmModel, maxOutputTokens, composeOutgoing });
+    useCostEstimate({
+      entries,
+      draft: composedDraft,
+      llmVendor: subscriptionRuntimeSelected ? undefined : llmVendor,
+      llmModel: subscriptionRuntimeSelected ? undefined : llmModel,
+      maxOutputTokens,
+      enabled: apiUsageProjectionAvailable,
+    });
   // Strict variant — `undefined` means "model not in catalog" so the cost
   // toggle in TokenCostBadge stays disabled rather than showing $0 from
   // FALLBACK_PRICING.
   const activePricing = useMemo(
-    () => lookupBillablePricingOptional(llmVendor, llmModel),
-    [llmVendor, llmModel],
+    () => apiUsageProjectionAvailable ? lookupBillablePricingOptional(llmVendor, llmModel) : undefined,
+    [apiUsageProjectionAvailable, llmVendor, llmModel],
   );
 
   const handleNewChat = useCallback(async (project?: { projectRoot?: string; projectName?: string }) => {
@@ -787,19 +819,30 @@ export function App() {
 
   // ChatView context bundle — avoids drilling ~40 props through the tree.
   // `effectiveLlmReady` combines the provider-key probe with explicit
-  // keyless-compatible provider readiness.
+  // keyless-compatible provider readiness and a subscription runtime that has
+  // explicitly verified chat support.
   const chatContextValue = useChatContextValue({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, currentSessionId, hasApiKey: effectiveLlmReady, onOpenSettings,
+    question, setQuestion, chatEndRef, currentSessionId, hasApiKey: effectiveLlmReady, settingsLoaded, onOpenSettings,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
     contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
     tpmLimit, tpmPct, isTpmOverflow,
+    usageAvailable: apiUsageProjectionAvailable,
     rolePresets, activePreset, activePresetId, setActivePresetId,
+    subscriptionRuntimePolicy,
+    subscriptionImageAttachmentProvider,
+    subscriptionFileAttachmentProvider,
+    subscriptionUnavailableProvider,
+    subscriptionPendingProvider,
     attachments, setAttachments, attachmentNCounter,
-    enableThinkingChat, toggleThinking, costEstimate, costBadgeClass,
+    // Until the persisted runtime selection has loaded, API-vendor defaults are
+    // not a safe authority for a setting that a selected subscription runtime
+    // does not expose. Keep this control fail-closed with send/attachment UX.
+    enableThinkingChat, reasoningAvailable: settingsLoaded && activeSubscriptionRuntime === null,
+    toggleThinking, costEstimate, costBadgeClass,
     activePricing,
-    activeVendor: llmVendor,
+    activeVendor: apiUsageProjectionAvailable ? llmVendor : undefined,
   });
 
   // Issue #260 — when a notification toast is clicked, dispatch the click via
@@ -849,6 +892,9 @@ export function App() {
         activeView={activeView}
         streaming={streaming}
         hasApiKey={effectiveLlmReady}
+        subscriptionUnavailable={subscriptionUnavailableProvider !== undefined}
+        subscriptionPending={subscriptionPendingProvider !== undefined}
+        subscriptionRuntimePolicy={subscriptionRuntimePolicy}
         onToggleAppMode={setAppMode}
         onOpenDevTools={() => setDevToolsOpen((v) => !v)}
         appUpdate={appUpdate}
@@ -990,6 +1036,7 @@ export function App() {
               onToastDismiss: (toast) => statusRemoveToast(toast.id),
             }}
             actionPanelOpen={actionPanelOpen}
+            onAttachmentWarning={handleAttachmentWarning}
             onActionPanelOpenChange={setActionPanelOpen}
             sidePanelOpen={sidePanelOpen}
             onSidePanelOpenChange={setSidePanelOpen}

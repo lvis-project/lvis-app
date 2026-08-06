@@ -26,7 +26,14 @@ const manifestPath = resolve(outdir, "bundle-manifest.json");
 const watchMode = process.argv.includes("--watch");
 
 const buildOptions = {
-  entryPoints: { main: resolve(repoRoot, "src", "main.ts") },
+  // esbuild uses the caller's cwd for the module-label comments it emits. Pin
+  // it to this repository so the byte-budget is independent of invocation cwd.
+  absWorkingDir: repoRoot,
+  entryPoints: {
+    main: resolve(repoRoot, "src", "main.ts"),
+    "subscription-grok-tool-policy-hook": resolve(repoRoot, "src", "main", "subscription-grok-tool-policy-hook.ts"),
+    "subscription-tool-mcp-server": resolve(repoRoot, "src", "main", "subscription-tool-mcp-server.ts"),
+  },
   outdir,
   entryNames: "[name]",
   chunkNames: "chunks/[name]-[hash]",
@@ -34,9 +41,19 @@ const buildOptions = {
   format: "esm",
   splitting: true,
   metafile: true,
+  // A worktree may link node_modules to another checkout. Keep the logical
+  // import path so generated wrapper labels stay independent of that target.
+  preserveSymlinks: true,
   platform: "node",
   target: ["node22"],
   legalComments: "none",
+  // Keep emitted public names stable for runtime diagnostics, while letting
+  // esbuild fold equivalent syntax and eliminate unreachable branches. The
+  // main bundle budget measures shipped bytes, so this is a production-safe
+  // optimization rather than a budget increase.
+  minifySyntax: true,
+  // Whitespace minification preserves emitted identifiers and runtime behavior.
+  minifyWhitespace: true,
   external: [
     "electron",
     "electron-updater",
@@ -144,7 +161,10 @@ if (watchMode) {
     requiredAsyncEntryPoint: resolve(repoRoot, "src", "boot.ts"),
   });
   assertMainBundleBudget(bundleMeasurement, MAIN_BUNDLE_BUDGETS);
-  const bundleManifest = createMainBundleManifest(result.metafile, { outdir });
+  const bundleManifest = createMainBundleManifest(result.metafile, {
+    outdir,
+    absWorkingDir: repoRoot,
+  });
   writeFileSync(manifestPath, `${JSON.stringify(bundleManifest, null, 2)}\n`, "utf8");
   process.stdout.write(`${formatMainBundleBudget(bundleMeasurement)}\n`);
 

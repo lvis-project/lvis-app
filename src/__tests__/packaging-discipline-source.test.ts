@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -49,7 +49,7 @@ describe("installer smoke and packaging discipline", () => {
       "lvis-app",
       "lvis-marketplace",
       "lvis-plugin-sdk",
-      "lvis-plugin-lge-api",
+      "lvis-plugin-ep",
     ];
 
     for (const name of checkoutNames) {
@@ -146,7 +146,7 @@ describe("installer smoke and packaging discipline", () => {
     expect(deploy).toContain("EXPECTED_BUNDLE_SHA256");
     expect(deploy).toContain("sha256sum -c bundle.sha256");
     expect(deploy).toContain(
-      "cloudflare/wrangler-action@9acf94ace14e7dc412b076f2c5c20b8ce93c79cd # v3",
+      "cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0 # v4.0.0",
     );
     expect(deploy).toContain('wranglerVersion: "4.114.0"');
     expect(deploy).not.toContain("actions/checkout");
@@ -258,7 +258,7 @@ describe("installer smoke and packaging discipline", () => {
     expect(agents).toContain("packaged-app smoke");
   });
 
-  it("locks cross-cutting review and Markdown gate contracts", () => {
+  it("keeps cross-cutting change detection advisory", () => {
     const agents = readRepoFile("AGENTS.md");
     const claude = readRepoFile("CLAUDE.md");
     const contributing = readRepoFile("CONTRIBUTING.md");
@@ -268,120 +268,39 @@ describe("installer smoke and packaging discipline", () => {
       .filter((name) => /\.ya?ml$/.test(name))
       .filter((name) => {
         const source = readRepoFile(`.github/workflows/${name}`);
-        return source.includes("statuses: write")
-          || source.includes("STATUS_CONTEXT: Sensitive Area Cluster Check");
+        return /statuses:\s*write|\/statuses\//.test(source);
       })
       .sort();
     const clusterScope = readRepoFile("scripts/check-cluster-scope.mjs");
-    const clusterAttestation = readRepoFile(
-      "scripts/check-cluster-review-attestation.mjs",
-    );
     const sensitivePathHelper = readRepoFile("scripts/check-cluster-sensitive-paths.mjs");
 
-    expect(agents).toContain("## Cross-Cutting Review Gate");
-    expect(agents).toContain("architect, critic, and security");
-    expect(agents).toContain("current PR HEAD SHA");
-    expect(agents).toContain("blocking findings");
-    expect(agents).toContain("`cluster-review-passed`");
-    expect(agents).toContain("consistent current-HEAD row and marker per role");
-    expect(agents).toContain("Pull-request write is scoped only");
-    expect(agents).toContain("status write is scoped only to the fixed");
-    expect(agents).toContain("`Sensitive Area Cluster Check` context");
-    expect(agents).toContain("sole workflow allowed");
-    expect(agents).toContain("any PR edit");
-    expect(pullRequestTemplate).toContain("PR edit");
+    expect(agents).toContain("## Cross-Cutting Change Advisory");
+    expect(agents).toContain("never requires an external reviewer, collaborator");
+    expect(agents).toContain("Owner self-review and automated review are valid evidence.");
+    expect(agents).toContain("does not write commit");
+    expect(agents).toContain("never blocks merge.");
+    expect(agents).not.toContain("## Cross-Cutting Review Gate");
+    expect(agents).not.toContain("cluster-review-passed");
+    expect(agents).not.toContain("visible role row and hidden marker");
+
+    expect(pullRequestTemplate).toContain("## Sensitive-Area Advisory");
+    expect(pullRequestTemplate).toContain("This is not a merge gate");
+    expect(pullRequestTemplate).toContain("external reviewer");
+    expect(pullRequestTemplate).not.toContain("## Cross-Cutting Review Gate");
+    expect(pullRequestTemplate).not.toContain("cluster-review:");
+    expect(pullRequestTemplate).not.toContain("cluster-review-passed");
 
     expect(clusterWorkflow).toContain("pull_request_target:");
-    expect(clusterWorkflow).toContain("branches: [main]");
-    expect(clusterWorkflow).toContain(
-      "types: [opened, reopened, synchronize, edited, labeled, unlabeled]",
-    );
     expect(clusterWorkflow).toContain("contents: read");
-    expect(clusterWorkflow).toContain("pull-requests: write");
-    expect(clusterWorkflow).toContain("statuses: write");
-    expect(clusterWorkflow).not.toContain("pull-requests: read");
-    expect(clusterWorkflow).not.toContain("issues: read");
-    expect(clusterWorkflow).not.toContain("issues: write");
-    expect(clusterWorkflow).toContain("PR-label DELETE returned 403");
-    expect(clusterWorkflow).toContain("cancel-in-progress: false");
-    expect(clusterWorkflow).not.toContain("cancel-in-progress: true");
-    expect(clusterWorkflow).toContain("name: Trusted Cluster Policy Evaluation");
-    expect(clusterWorkflow).not.toContain("    name: Sensitive Area Cluster Check");
-    expect(clusterStatusOwners).toEqual(["cluster-detector.yml"]);
-    expect(clusterWorkflow).toContain("STATUS_CONTEXT: Sensitive Area Cluster Check");
-    expect(clusterWorkflow).toContain("-f state=pending");
-    expect(clusterWorkflow).toContain(
-      "issues/${PR_NUMBER}/labels/cluster-review-passed",
-    );
-    expect(clusterWorkflow).toContain("github.event.action == 'edited'");
-    expect(clusterWorkflow).not.toContain("github.event.changes");
+    expect(clusterWorkflow).toContain("pull-requests: read");
+    expect(clusterWorkflow).toContain("::warning::Sensitive-area cluster advisory");
+    expect(clusterWorkflow).not.toContain("pull-requests: write");
+    expect(clusterWorkflow).not.toContain("statuses: write");
+    expect(clusterWorkflow).not.toContain("cluster-review-passed");
+    expect(clusterStatusOwners).toEqual([]);
+    expect(existsSync(resolve(root, "scripts/check-cluster-review-attestation.mjs"))).toBe(false);
+    expect(existsSync(resolve(root, "test/scripts/check-cluster-review-attestation.test.ts"))).toBe(false);
 
-    const pendingIndex = clusterWorkflow.indexOf("Publish pending cluster status");
-    const invalidationIndex = clusterWorkflow.indexOf(
-      "Invalidate retained cluster review label",
-    );
-    const snapshotIndex = clusterWorkflow.indexOf("Capture live pull request snapshot");
-    const checkoutIndex = clusterWorkflow.indexOf("Checkout trusted cluster policy");
-    const finalizerIndex = clusterWorkflow.indexOf("Finalize cluster policy status");
-    expect(invalidationIndex).toBeGreaterThan(pendingIndex);
-    expect(snapshotIndex).toBeGreaterThan(invalidationIndex);
-    expect(checkoutIndex).toBeGreaterThan(snapshotIndex);
-    expect(finalizerIndex).toBeGreaterThan(checkoutIndex);
-    expect(clusterWorkflow.match(/Finalize cluster policy status/g)).toHaveLength(1);
-    expect(clusterWorkflow).not.toContain("Revalidate live pull request snapshot");
-    expect(clusterWorkflow).not.toContain("Publish final cluster status");
-
-    expect(clusterWorkflow).toContain(
-      "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7",
-    );
-    expect(clusterWorkflow).not.toContain("actions/checkout@v7");
-    expect(clusterWorkflow).toContain("path: .cluster-policy");
-    expect(clusterWorkflow).toContain("persist-credentials: false");
-    expect(clusterWorkflow).toContain(
-      "ref: ${{ steps.pr-snapshot.outputs.base_sha }}",
-    );
-    expect(clusterWorkflow).toContain("git -C .cluster-policy rev-parse HEAD");
-    expect(clusterWorkflow).toContain(
-      'if [ "$CHECKED_OUT_SHA" != "$EXPECTED_BASE_SHA" ]',
-    );
-    expect(clusterWorkflow).toContain(
-      'if [ "$LIVE_HEAD_SHA" != "$EVENT_HEAD_SHA" ]',
-    );
-
-    const finalizer = clusterWorkflow.slice(finalizerIndex);
-    const finalSnapshotFetchIndex = finalizer.indexOf(
-      'gh api "repos/${REPO}/pulls/${PR_NUMBER}"',
-    );
-    const finalDigestIndex = finalizer.indexOf("FINAL_DIGEST=");
-    const finalAttestationIndex = finalizer.indexOf(
-      "node .cluster-policy/scripts/check-cluster-review-attestation.mjs",
-    );
-    const finalPostIndex = finalizer.indexOf(
-      'gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}"',
-    );
-    expect(finalDigestIndex).toBeGreaterThan(finalSnapshotFetchIndex);
-    expect(finalAttestationIndex).toBeGreaterThan(finalDigestIndex);
-    expect(finalPostIndex).toBeGreaterThan(finalAttestationIndex);
-    expect(finalizer).toContain("if: always()");
-    expect(finalizer).toContain("PRIOR_JOB_STATUS: ${{ job.status }}");
-    expect(finalizer).toContain("STATUS_STATE=failure");
-    expect(finalizer).toContain("STATUS_STATE=success");
-    expect(finalizer).toContain(
-      'if ! gh api --method POST "repos/${REPO}/statuses/${HEAD_SHA}"',
-    );
-    expect(finalizer).toContain("exit 1");
-    expect(clusterWorkflow).not.toContain("node scripts/");
-    expect(clusterWorkflow).not.toContain("CLAUDE.md");
-    expect(clusterWorkflow).not.toContain("|| true");
-    expect(clusterWorkflow).toContain(
-      ".cluster-policy/scripts/check-cluster-scope.mjs",
-    );
-    expect(clusterWorkflow).toContain(
-      ".cluster-policy/scripts/check-cluster-review-attestation.mjs",
-    );
-    expect(clusterWorkflow).toContain("Enforce cluster review gate");
-    expect(clusterWorkflow).not.toContain("steps.exempt-check.outputs.exempt");
-    expect(clusterWorkflow).not.toContain("Post violation comment");
     expect(clusterScope).toContain(
       'import { hasSensitiveClusterPath } from "./check-cluster-sensitive-paths.mjs"',
     );
@@ -395,43 +314,10 @@ describe("installer smoke and packaging discipline", () => {
     expect(clusterScope).toContain("pull-request-pages-saturated");
     expect(clusterScope).toContain('state: "closed"');
     expect(clusterScope).not.toContain("--limit 100");
-    expect(clusterAttestation).toContain("fresh-review-label-required");
-    expect(clusterAttestation).toContain("isInsideMarkdownFence");
-    expect(clusterAttestation).toContain("RAW_HTML_TOKEN_PATTERN");
-    expect(clusterAttestation).toContain("hasRawHtmlTokenBefore");
-    expect(clusterAttestation).toContain('candidate.suffix.includes("`")');
-    expect(clusterAttestation).toContain(
-      "hasRawHtmlTokenBefore(body, sectionStart)",
-    );
-    expect(clusterAttestation).toContain(
-      "hasRawHtmlTokenBefore(body, tableIndex)",
-    );
     expect(sensitivePathHelper).toContain("parseNulDelimitedGitPaths");
     expect(sensitivePathHelper).toContain(
       'return !path.startsWith(`${dir}/__tests__/`)',
     );
-
-    for (const role of ["architect", "critic", "security"]) {
-      expect(pullRequestTemplate).toContain(
-        `<!-- cluster-review:${role}:<40-char-head-sha>:GO -->`,
-      );
-    }
-    expect(pullRequestTemplate).toContain("## Cross-Cutting Review Gate");
-    expect(pullRequestTemplate).toContain("Reviewed HEAD: `<40-char-head-sha>`");
-    expect(pullRequestTemplate).toContain(
-      "| Architect | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |",
-    );
-    expect(pullRequestTemplate).toContain(
-      "| Critic | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |",
-    );
-    expect(pullRequestTemplate).toContain(
-      "| Security | `<HEAD_SHA>` | `GO` / `NO-GO` | None, or links/details |",
-    );
-    expect(pullRequestTemplate).toContain("same current HEAD SHA and verdict");
-    expect(pullRequestTemplate).toContain("exactly `None`");
-    expect(pullRequestTemplate).toContain("only on a fresh");
-    expect(pullRequestTemplate).toContain("removing and reapplying the label");
-    expect(pullRequestTemplate).toContain("Blocking findings");
     expect(claude).toContain("[`AGENTS.md`](./AGENTS.md)");
     expect(claude).toContain("duplicates no");
 
@@ -472,10 +358,6 @@ describe("installer smoke and packaging discipline", () => {
     expect(agents).toContain("DLP handling");
     expect(agents).toContain("fail-closed defaults");
     expect(agents).toContain("active recipient's own permission and approval");
-    expect(agents).toContain("visible role row and hidden marker");
-    expect(agents).toContain("findings exactly `None`");
-    expect(agents).toContain("Only a fresh application");
-    expect(agents).toContain("any PR edit");
     expect(agents).toContain("Do not bypass hooks");
     expect(agents).toContain("Never push directly to `main`");
     expect(agents).toContain("same-PR field-addition");

@@ -428,10 +428,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const marketplace = settingsService.get("marketplace");
     await runManagedBootstrap({
       pluginMarketplace,
-      pluginRuntime,
       ensurePluginStateReadyForInstall: ensureInstallStateReady,
       mainWindow: getMainWindow(),
       marketplace,
+      mode: "repair-missing-only",
+      activatePreparedArtifact: (prepared) =>
+        pluginRuntime.activatePreparedArtifact(prepared),
     });
     return { ok: true } as const;
   });
@@ -448,7 +450,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       throw new Error("expectedVersion must be a string when provided");
     }
     const expectedVersion = typeof expectedVersionValue === "string" ? expectedVersionValue.trim() || undefined : undefined;
-    let result: { pluginId: string; installed: true } | null = null;
+    let result: { pluginId: string; installed: true; unchanged?: true } | null = null;
     // IPC is pure transport — actor decisions live inside
     // PluginMarketplaceService.install (catalog → admin escalation).
     // deployment-guard §7.3: "IPC 핸들러에서 actor를 직접 받지 말 것 —

@@ -13,9 +13,16 @@
  *     (pre-stream failure). Mid-stream recovery is not attempted because we
  *     cannot replay partial output deterministically.
  */
-import type { LLMProvider, StreamEvent, StreamTurnParams } from "../types.js";
+import type {
+  LLMProvider,
+  ProviderRequestInputProjection,
+  ProviderRequestInputProjectionParams,
+  StreamEvent,
+  StreamTurnParams,
+} from "../types.js";
 import type { LLMVendor } from "../types.js";
 import type { ProviderConfig } from "../types.js";
+import type { SubscriptionChatRuntimeSelection } from "../../../shared/subscription-runtime.js";
 import { createProvider as defaultCreateProvider } from "../provider-factory.js";
 import { createLogger } from "../../../lib/logger.js";
 const log = createLogger("fallback-chain");
@@ -48,6 +55,23 @@ export interface FallbackStatus {
 const MIN_RETRY_WINDOW_MS = 1_000;
 const MAX_ATTEMPTS_PER_PROVIDER = 5;
 
+type ErrorStreamEvent = Extract<StreamEvent, { type: "error" }>;
+
+/**
+ * Retains a retryable pre-stream event while it travels through the retry
+ * loop. The normal primary/fallback path still throws after exhaustion, but
+ * a subscription-only primary returns this original event to the engine so
+ * provider-as-oracle schema recovery and TPM recovery keep their structured
+ * diagnostics. The subscription adapter owns the renderer-safe `error`
+ * string; this class never creates or widens an error surface.
+ */
+class RetryableStreamEventError extends Error {
+  constructor(readonly event: ErrorStreamEvent) {
+    super(event.error);
+    this.name = "RetryableStreamEventError";
+  }
+}
+
 /** Error categories that must NOT trigger fallback (config bugs → fail fast). */
 function isNonRetryable(err: unknown): boolean {
   // User cancellation — sacred, never fallback.
@@ -62,6 +86,29 @@ function isNonRetryable(err: unknown): boolean {
   return false;
 }
 
+function isNonRetryableStreamEvent(event: ErrorStreamEvent): boolean {
+  // Error events carry richer provider diagnostics than a thrown Error. Keep
+  // deterministic request failures on their first attempt so the query loop
+  // can apply its bounded schema-drop/context recovery rather than burning
+  // the transient retry budget first. A 429 remains explicitly retryable.
+  const classification = event.classification ?? event.providerError?.classification;
+  const diagnosticClassification = event.providerError?.classification;
+  if (
+    classification === "api-key"
+    || classification === "model"
+    || classification === "context-length"
+    || diagnosticClassification === "api-key"
+    || diagnosticClassification === "model"
+    || diagnosticClassification === "context-length"
+  ) {
+    return true;
+  }
+  const diagnostics = event.providerError;
+  if (diagnostics?.isRetryable === false) return true;
+  const status = diagnostics?.statusCode;
+  return status !== undefined && status !== 429 && status >= 400 && status < 500;
+}
+
 /**
  * Collect events from the primary provider's stream. If the first event is
  * an `error` with a retryable classification, throw so the caller can fallback.
@@ -74,14 +121,14 @@ async function* attemptStream(
   let firstEvent = true;
   for await (const ev of provider.streamTurn(params)) {
     if (firstEvent && ev.type === "error") {
-      // classification "api-key" or "model" = non-retryable
-      const cls = (ev as { type: "error"; classification?: string }).classification ?? "";
-      if (cls === "api-key" || cls === "model") {
+      if (isNonRetryableStreamEvent(ev)) {
         yield ev;
         return;
       }
-      // Retryable error event (network / rate-limit / unknown) — throw to trigger retry/fallback.
-      throw Object.assign(new Error(ev.error), { _lvisRetryable: true });
+      // Retryable error event (network / rate-limit / unknown) — retain the
+      // complete structured event across retries. The terminal subscription
+      // path returns it without exposing any new provider text.
+      throw new RetryableStreamEventError(ev);
     }
     firstEvent = false;
     yield ev;
@@ -175,6 +222,7 @@ export type ProviderFactory = (config: ProviderConfig) => LLMProvider;
  */
 export class FallbackProvider implements LLMProvider {
   readonly vendor: LLMVendor;
+  readonly subscriptionRuntime?: SubscriptionChatRuntimeSelection;
   constructor(
     private readonly primary: LLMProvider,
     private readonly chain: FallbackEntry[],
@@ -182,13 +230,22 @@ export class FallbackProvider implements LLMProvider {
     private readonly factory?: ProviderFactory,
   ) {
     this.vendor = primary.vendor;
+    this.subscriptionRuntime = primary.subscriptionRuntime;
   }
 
   withCallbacks(callbacks: FallbackCallbacks): LLMProvider {
     return {
       vendor: this.vendor,
+      ...(this.subscriptionRuntime ? { subscriptionRuntime: this.subscriptionRuntime } : {}),
+      projectRequestInput: (input) => this.projectRequestInput(input),
       streamTurn: (params) => this.streamTurnWithCallbacks(params, callbacks),
     };
+  }
+
+  projectRequestInput(
+    input: ProviderRequestInputProjectionParams,
+  ): ProviderRequestInputProjection | undefined {
+    return this.primary.projectRequestInput?.(input);
   }
 
   streamTurnWithCallbacks(
@@ -273,6 +330,15 @@ export async function* streamWithFallback(
       callbacks?.onFallback?.(label, nextLabel);
       callbacks?.onStatus?.({ phase: "fallback", from: label, to: nextLabel, reason });
     }
+  }
+  // A subscription provider is deliberately wrapped with an empty chain: it
+  // may retry its own connected runtime, but must never construct an API-key
+  // fallback. Preserve the original structured event for the ordinary query
+  // loop after that bounded retry budget is exhausted. API-key chains retain
+  // their existing throw-on-exhaustion contract.
+  if (primary.subscriptionRuntime && lastErr instanceof RetryableStreamEventError) {
+    yield lastErr.event;
+    return;
   }
   throw lastErr;
 }

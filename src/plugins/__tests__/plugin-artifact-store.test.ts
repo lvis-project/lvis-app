@@ -21,6 +21,7 @@ import { existsSync, rmSync } from "node:fs";
 import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { ArtifactRollbackError, assertSafeArtifactSlug } from "../plugin-artifact-store.js";
+import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
 import { TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import { makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
@@ -315,6 +316,55 @@ describe("PluginArtifactStore — extractZip", () => {
       releaseRetirement();
       await expect(installing).resolves.toMatchObject({ result: "committed", predecessorRetired: true });
       expect((await readdir(installRoot)).filter((name) => name.startsWith(".acme.old-"))).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it("retains recovery ownership when committed publication and predecessor retirement both fail", async () => {
+    const tmp = makeTmpDir();
+    try {
+      const store = makeStore(tmp);
+      const installRoot = resolve(tmp, "installed");
+      const installDir = store.installDirFor("acme");
+      await mkdir(installDir, { recursive: true });
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+      const zip = new AdmZip();
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      const publicationCause = new Error("projection publish failed");
+      const retirementCause = new Error("predecessor retirement failed");
+      const retirement = Promise.reject(retirementCause);
+      void retirement.catch(() => undefined);
+      const onCommittedBackupResolved = vi.fn(async () => undefined);
+
+      const failure = await store.extractZipWithCommit("acme", zip.toBuffer(), async () => "committed", {
+        coordinateCommit: async ({ durableCommit }) => {
+          const committed = Object.freeze({
+            result: await durableCommit(),
+            retirement,
+            completion: retirement,
+            retirementDeferred: false,
+          });
+          throw new CommittedPluginGenerationPublicationError(
+            "acme",
+            "g2",
+            publicationCause,
+            { retired: retirement } as never,
+            committed,
+          );
+        },
+        onCommittedBackupResolved,
+      }).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(CommittedPluginGenerationPublicationError);
+      expect(failure).toMatchObject({ publicationCause, committed: { result: "committed" } });
+      await expect((failure as CommittedPluginGenerationPublicationError<string>).committed?.retirement)
+        .rejects.toBe(retirementCause);
+      expect(JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf8")))
+        .toMatchObject({ version: "new" });
+      expect((await readdir(installRoot)).filter((name) => name.startsWith(".acme.old-")))
+        .toHaveLength(1);
+      expect(onCommittedBackupResolved).not.toHaveBeenCalled();
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

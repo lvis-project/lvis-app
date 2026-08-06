@@ -1,10 +1,17 @@
-
-
-
-
-
+/**
+ * MessageQueuePanel — the queued-turn strip that sits directly above the
+ * composer, next to SessionTodoPanel.
+ *
+ * Colour contract: the panel's hue is `info`, and every foreground it paints
+ * comes from a foreground token (`text-info`, `text-info-foreground`,
+ * `text-foreground`, `text-muted-foreground`). It must never reach for
+ * `text-accent` / `border-accent` — `--accent` is a SURFACE token (a pale
+ * tint in the light bundles), so using it as a text or border colour makes the
+ * control vanish against the panel. That is exactly how the per-row "즉시"
+ * action and the selected-row outline disappeared.
+ */
 import { useSyncExternalStore, useState, useMemo, useCallback, useEffect, useRef } from "react";
-import { ChevronDown, ChevronRight, MessageSquarePlus, ArrowUp, X, Pencil } from "lucide-react";
+import { ChevronDown, ChevronRight, MessageSquarePlus, ArrowUp, Check, X, Pencil } from "lucide-react";
 import { Badge } from "../../../components/ui/badge.js";
 import type { MessageQueueStore, MessageQueueItem } from "../state/message-queue-store.js";
 import { useTranslation } from "../../../i18n/react.js";
@@ -47,31 +54,40 @@ export function MessageQueuePanel({ store, onSendNow }: MessageQueuePanelProps) 
 
   return (
     <div
-      className="border-x border-y border-dashed border-info/(--opacity-medium) bg-info/(--opacity-faint)"
+      /* Full-bleed band across <main>, like SessionTodoPanel above it: dock
+         strips are BANDS and the composer is the inset card. That split is a
+         deliberate system decision, pinned for the todo strip by
+         session-todo-in-chat.spec.ts — do not inset this one either, or the
+         two siblings stop agreeing. Dashed border = "not committed yet", the
+         shared language; the hue is what separates them (info here, warning
+         there). */
+      className="border-x border-y border-dashed border-info/(--opacity-medium) bg-info/(--opacity-faint) text-xs"
       data-testid="message-queue-panel"
     >
       <button
         type="button"
         onClick={() => setExpanded((e) => !e)}
-        className="flex w-full items-center gap-2 px-4 py-2 text-left hover:bg-info/(--opacity-subtle)"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors hover:bg-info/(--opacity-subtle) motion-reduce:transition-none"
         aria-expanded={expanded}
       >
         {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
         ) : (
-          <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          <ChevronRight className="h-3 w-3 shrink-0 text-muted-foreground" />
         )}
-        <MessageSquarePlus className="h-3.5 w-3.5 text-info" />
-        <span className="text-sm font-medium">{t("messageQueuePanel.panelTitle")}</span>
-        <Badge className="bg-info text-[10px] font-semibold text-background">{items.length}</Badge>
+        <MessageSquarePlus className="h-3 w-3 shrink-0 text-info" />
+        <span className="font-medium">{t("messageQueuePanel.panelTitle")}</span>
+        <Badge variant="outline" className="px-1 py-0 text-[10px] font-semibold text-info">
+          {items.length}
+        </Badge>
         {selectedCount > 0 && (
-          <span className="text-xs text-muted-foreground">
-            · <span className="text-accent">{t("messageQueuePanel.selectedCount", { count: selectedCount })}</span>
+          <span className="min-w-0 truncate text-muted-foreground">
+            · <span className="font-medium text-foreground">{t("messageQueuePanel.selectedCount", { count: selectedCount })}</span>
             <span className="ml-1 text-[10px]">{t("messageQueuePanel.cmdEnterHint")}</span>
           </span>
         )}
         {!expanded && (
-          <span className="ml-2 truncate text-xs text-muted-foreground">
+          <span className="ml-2 min-w-0 truncate text-muted-foreground">
             · {t("messageQueuePanel.collapsedHint")}
           </span>
         )}
@@ -166,10 +182,10 @@ function MessageQueueRow({
     <li
       ref={rowRef}
       className={
-        "flex items-center gap-2 rounded border px-2 py-1 transition-colors focus:outline-none focus:ring-1 focus:ring-info/(--opacity-strong) " +
+        "flex items-center gap-2 rounded border px-2 py-1 transition-colors focus:outline-none focus:ring-1 focus:ring-info/(--opacity-strong) motion-reduce:transition-none " +
         (item.selected
-          ? "border-accent bg-accent/(--opacity-subtle)"
-          : "border-transparent hover:border-border")
+          ? "border-info/(--opacity-medium) bg-info/(--opacity-subtle)"
+          : "border-transparent hover:border-info/(--opacity-muted) hover:bg-info/(--opacity-subtle)")
       }
       data-testid="message-queue-row"
       data-selected={item.selected ? "true" : "false"}
@@ -198,15 +214,15 @@ function MessageQueueRow({
         onClick={onToggle}
         disabled={editing}
         className={
-          "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border " +
+          "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors motion-reduce:transition-none " +
           (item.selected
-            ? "border-accent bg-accent text-[9px] text-background"
-            : "border-muted-foreground")
+            ? "border-info bg-info text-info-foreground"
+            : "border-muted-foreground hover:border-info")
         }
         aria-label={item.selected ? t("messageQueuePanel.deselectAriaLabel") : t("messageQueuePanel.selectAriaLabel")}
         aria-pressed={item.selected}
       >
-        {item.selected ? "✓" : null}
+        {item.selected ? <Check className="h-2.5 w-2.5" strokeWidth={3} /> : null}
       </button>
       {editing ? (
         <input
@@ -225,13 +241,13 @@ function MessageQueueRow({
             }
           }}
           data-testid="message-queue-row-edit"
-          className="flex-1 rounded border border-accent/(--opacity-half) bg-background px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+          className="min-w-0 flex-1 rounded border border-input-bar-border bg-background px-1.5 py-0.5 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-input-bar-focus"
           maxLength={8000}
           aria-label={t("messageQueuePanel.editInputAriaLabel")}
         />
       ) : (
         <span
-          className="flex-1 cursor-text truncate text-xs text-foreground"
+          className="min-w-0 flex-1 cursor-text truncate text-xs text-foreground"
           onDoubleClick={enterEdit}
           title={t("messageQueuePanel.doubleClickToEditTitle")}
           data-testid="message-queue-row-text"
@@ -240,36 +256,47 @@ function MessageQueueRow({
         </span>
       )}
       {!editing && (
-        <>
+        /* One action cluster, uniform 20px hit targets and a single gap so the
+           three verbs read as a row rather than three differently-sized chips.
+           "즉시" keeps its label — it is the only destructive-adjacent action
+           whose meaning an icon alone does not carry. */
+        <div className="flex shrink-0 items-center gap-0.5">
           <button
             type="button"
             onClick={enterEdit}
-            className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-border hover:bg-muted hover:text-foreground"
+            className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground motion-reduce:transition-none"
             aria-label={t("messageQueuePanel.editButtonAriaLabel")}
             title={t("messageQueuePanel.editButtonTitle")}
             data-testid="message-queue-row-edit-button"
           >
-            <Pencil className="h-2.5 w-2.5" />
+            <Pencil className="h-3 w-3" />
           </button>
           <button
             type="button"
             onClick={onSendNow}
-            className="inline-flex h-5 items-center gap-1 rounded border border-transparent px-1.5 text-[10px] text-accent hover:border-accent hover:bg-accent/(--opacity-subtle)"
+            /* `text-info` at 10px only reaches 4.1:1 on the panel — under AA.
+               The label rests in the readable foreground and the panel's hue
+               carries the hover/focus state instead, where it is decoration
+               rather than the thing you have to read. */
+            className="inline-flex h-5 items-center gap-0.5 rounded border border-transparent px-1.5 text-[10px] font-medium text-foreground transition-colors hover:border-info/(--opacity-medium) hover:bg-info/(--opacity-subtle) hover:text-info motion-reduce:transition-none"
             aria-label={t("messageQueuePanel.sendNowAriaLabel")}
             title={t("messageQueuePanel.sendNowTitle")}
+            data-testid="message-queue-row-send-now-button"
           >
-            <ArrowUp className="h-2.5 w-2.5" /> {t("messageQueuePanel.sendNowLabel")}
+            <ArrowUp className="h-2.5 w-2.5" />
+            {t("messageQueuePanel.sendNowLabel")}
           </button>
           <button
             type="button"
             onClick={onRemove}
-            className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground hover:border-destructive/(--opacity-medium) hover:bg-destructive/(--opacity-subtle) hover:text-destructive"
+            className="inline-flex h-5 w-5 items-center justify-center rounded border border-transparent text-muted-foreground transition-colors hover:border-destructive/(--opacity-medium) hover:bg-destructive/(--opacity-subtle) hover:text-destructive motion-reduce:transition-none"
             aria-label={t("messageQueuePanel.removeAriaLabel")}
             title={t("messageQueuePanel.removeTitle")}
+            data-testid="message-queue-row-remove-button"
           >
             <X className="h-3 w-3" />
           </button>
-        </>
+        </div>
       )}
     </li>
   );

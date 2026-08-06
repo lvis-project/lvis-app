@@ -549,15 +549,23 @@ export function ToolApprovalDialog({
     isRationaleApproval,
   ]);
 
-  // The primary Approve button grants for the scope selected in the radio
+  // Host-constrained approvals must not offer a durable choice that the
+  // approval gate will reject. The one-shot pair is used for operations such
+  // as governed plugin writes and host-shell execution permits.
+  const isHostConstrainedToOneShot =
+    request?.allowedChoices?.length === 2 &&
+    request.allowedChoices.includes("allow-once") &&
+    request.allowedChoices.includes("deny-once");
 
+  // The primary Approve button grants for the scope selected in the radio.
   // HIGH verdict forces session (no persistent grant for HIGH-risk actions).
   // This is the durable choice that the memory store records.
   const approvalIsOneShot =
     isRationaleApproval ||
     isMcpElicitation ||
     isExternalOriginAgentAction ||
-    isRemoteA2AAction;
+    isRemoteA2AAction ||
+    isHostConstrainedToOneShot;
   const primaryApproveChoice: ApprovalChoice =
     approvalIsOneShot
       ? "allow-once"
@@ -626,6 +634,11 @@ export function ToolApprovalDialog({
         size="lg"
         className="flex min-w-0 flex-col gap-0 overflow-hidden p-0"
         data-testid="tool-approval-dialog"
+        data-approval-request-id={isRationaleApproval ? undefined : request.id}
+        data-approval-tool-name={isRationaleApproval ? undefined : request.toolName}
+        data-approval-args={
+          isRationaleApproval ? undefined : canonicalStringifyForRenderer(request.args)
+        }
         onInteractOutside={(e) => {
           if (request.requireExplicit) {
             e.preventDefault();
@@ -665,6 +678,15 @@ export function ToolApprovalDialog({
                     {tHook("toolApprovalDialog.pendingCount", { count: pendingCount - 1 })}
                   </Badge>
                 )}
+              </div>
+              {/* Attribution — sub-agents and side chats raise this modal from a
+                  conversation the user is not looking at. Host-owned id only;
+                  never conversation content. */}
+              <div className="mt-1 flex min-w-0 items-baseline gap-1.5 text-[11px] text-muted-foreground">
+                <span className="shrink-0">{tHook("approvalAttribution.rowConversation")}</span>
+                <code className="min-w-0 truncate font-mono" data-testid="approval-conversation">
+                  {request.sessionId ?? tHook("approvalAttribution.unattributed")}
+                </code>
               </div>
             </div>
           </div>
@@ -918,6 +940,7 @@ export function ToolApprovalDialog({
               variant="outline"
               onClick={() => onDecide("deny-once")}
               title={tHook("toolApprovalDialog.shortcutD")}
+              data-testid="deny-button"
             >
               {tHook("toolApprovalDialog.denyOnce")}
             </Button>

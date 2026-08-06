@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { approvalQueueReducer } from "../../../lib/approval-queue-reducer.js";
 import type { ApprovalChoice, ApprovalDecision, ApprovalRequest } from "../types.js";
 
@@ -9,20 +9,32 @@ export type ApprovalDecisionExtras = Pick<ApprovalDecision, "elicitationContent"
  *
  * Owns: FIFO approval queue state (via approvalQueueReducer), the
  * window.lvis.approval.onRequest subscription, and the decide handler which
- * shifts the queue before responding so the next pending request surfaces
- * immediately. Mirrors the prior behavior in App (renderer.tsx) §C4.
+ * keeps the current head visible until the main process acknowledges its
+ * response. That makes every surfaced request actionable and preserves FIFO.
  */
 export function useApproval() {
   const [queue, setQueue] = useState<ApprovalRequest[]>([]);
   const queueRef = useRef<ApprovalRequest[]>([]);
-  // In-flight guard — prevents double-click from dropping the pending item
-  // between shift() and respond(). See Copilot HIGH #2.
-  const inFlightRef = useRef<boolean>(false);
+  // In-flight guard — prevents double-clicks and prevents the next queue item
+  // from becoming actionable until the current response is acknowledged.
+  const inFlightRequestIdRef = useRef<string | null>(null);
   // Guard late setQueue from async `respond()` callbacks resolving after
   // unmount.
   const aliveRef = useRef(true);
-  useEffect(() => {
+  // A queued request becomes clickable as soon as its dialog is committed.
+  // Synchronize the imperative head-of-queue ref before paint so a fast
+  // click cannot observe the previous (or empty) queue.
+  useLayoutEffect(() => {
     queueRef.current = queue;
+    if (
+      inFlightRequestIdRef.current !== null &&
+      queue[0]?.id !== inFlightRequestIdRef.current
+    ) {
+      // The acknowledged head has been shifted. The newly surfaced request
+      // can now be decided without allowing a duplicate response for the
+      // prior head during the commit boundary.
+      inFlightRequestIdRef.current = null;
+    }
   }, [queue]);
 
   useEffect(() => {
@@ -50,14 +62,13 @@ export function useApproval() {
   /**
    * Decide the currently-pending approval request.
    *
-   * On `respond()` rejection we only log — we do NOT re-push the request onto
-   * the queue. The main process has likely already emitted a response (or the
-   * request is no longer actionable), and re-pushing causes a double-display
-   * bug where the user sees the same modal twice. See Fix 5 (PR #97).
+   * On `respond()` rejection we only log — we do NOT re-push the request.
+   * The main process may already have emitted a response (or the request is
+   * no longer actionable), and re-pushing causes a double-display bug.
    */
   const decide = useCallback(
     async (choice: ApprovalChoice, pattern?: string, extras?: ApprovalDecisionExtras) => {
-      if (inFlightRef.current) return;
+      if (inFlightRequestIdRef.current !== null) return;
       const current = queueRef.current[0];
       if (!current) return;
       // Assert preload availability explicitly. If the user landed on this
@@ -68,9 +79,8 @@ export function useApproval() {
         console.error("[use-approval] decide: window.lvis is undefined — preload missing");
         return;
       }
-      inFlightRef.current = true;
+      inFlightRequestIdRef.current = current.id;
 
-      setQueue((q) => approvalQueueReducer(q, { type: "shift" }));
       try {
         await window.lvis.approval.respond({
           requestId: current.id,
@@ -90,7 +100,14 @@ export function useApproval() {
         // Log only — do NOT re-push. See JSDoc above.
         console.warn("[lvis] approval.respond failed:", (err as Error).message);
       } finally {
-        inFlightRef.current = false;
+        // Keep the decided head mounted until the IPC request settles. If a
+        // new request arrives meanwhile, showing it before this guard releases
+        // would make its click look successful while being ignored.
+        if (aliveRef.current) {
+          setQueue((q) => approvalQueueReducer(q, { type: "shift" }));
+        } else {
+          inFlightRequestIdRef.current = null;
+        }
       }
     },
     [],

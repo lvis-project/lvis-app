@@ -644,7 +644,12 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
 
     expect(result[0].is_error).toBeUndefined();
     expect(approvalGate.requestAndWait).toHaveBeenCalledWith(
-      expect.objectContaining({ trustOrigin: "plugin-emitted" }),
+      // The Layer 3 ask carries the conversation it is blocking, so the modal
+      // and every audit row can name it.
+      expect.objectContaining({
+        trustOrigin: "plugin-emitted",
+        sessionId: "sess-origin",
+      }),
     );
     expect(appendPermissionAuditEntry).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -2090,6 +2095,59 @@ describe("ToolExecutor — D4 ordered approval/execution (§4.5.3)", () => {
     expect(results.map((result) => result.tool_use_id)).toEqual(["pa", "pb"]);
     expect(results.map((result) => result.content)).toEqual(["A", "B"]);
   });
+
+  it("hands the turn's abort signal to the approval gate and reports a stop as a stop", async () => {
+    const executeSpy = vi.fn(async () => "should-not-run");
+    const registry = new ToolRegistry();
+    registry.register(makeGenericTool("tool_stop_probe", executeSpy));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.checkDetailed = () => ({
+      decision: "ask",
+      reason: "stop-while-parked probe",
+      layer: 5,
+    });
+
+    const turn = new AbortController();
+    let signalGivenToGate: AbortSignal | undefined;
+    const approvalGate = {
+      requestAndWait: vi.fn((req: { id: string; abortSignal?: AbortSignal }) => {
+        signalGivenToGate = req.abortSignal;
+        // The owner presses Stop while the modal is up.
+        queueMicrotask(() => turn.abort(new Error("user cancelled turn")));
+        return new Promise<{ requestId: string; choice: "deny-once" }>((resolve) => {
+          const denyOnce = () => resolve({ requestId: req.id, choice: "deny-once" });
+          // Stands in for the real gate, which answers deny-once when the turn
+          // it is blocking ends. With no signal it would instead sit on its own
+          // five-minute timer; answer the way that timer eventually does, so a
+          // regression in the wiring is reported by the assertions below rather
+          // than by hanging the suite.
+          if (req.abortSignal === undefined) denyOnce();
+          else req.abortSignal.addEventListener("abort", denyOnce, { once: true });
+        });
+      }),
+    };
+    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
+
+    const results = await executor.executeAll(
+      [{ id: "tu-stop-probe", name: "tool_stop_probe", input: { value: "a" } }],
+      {
+        sessionId: "sess-stop-probe",
+        abortSignal: turn.signal,
+        permissionContext: userPermissionContext(),
+      },
+    );
+
+    // Without this the gate has nothing to observe, and the turn's Stop waits
+    // out the gate's own timer while holding the conversation's lease.
+    expect(signalGivenToGate).toBe(turn.signal);
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    // deny-once is the right permission answer to a stopped turn and the wrong
+    // transcript entry: the owner stopped the turn, they did not refuse this
+    // call. "취소" is the cancelled-tool text; the denial text is different.
+    expect(results[0].content).toContain("취소");
+  });
 });
 
 // ─── C1 regression — ask_user_question must NOT double-modal ──
@@ -2563,10 +2621,14 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       kind?: string;
       outOfAllowedDir?: { candidatePath?: string; suggestedParent?: string };
       trustOrigin?: string;
+      sessionId?: string;
     }>(wc);
     expect(sent.kind).toBe("out-of-allowed-dir");
     expect(sent.outOfAllowedDir?.candidatePath).toContain("file.txt");
     expect(sent.trustOrigin).toBe("user-keyboard");
+    // The directory-confirm ask reaches the renderer attributed to the
+    // conversation that triggered it, through the real signing gate.
+    expect(sent.sessionId).toBe("sess-l1-out");
 
     // Renderer denies — tool must not execute.
     gate.resolve(sent.id, {
@@ -2580,6 +2642,53 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
     expect(executeSpy).not.toHaveBeenCalled();
     expect(results[0].is_error).toBe(true);
     expect(results[0].content).toContain("디렉토리 정책 차단");
+  });
+
+  it("out-of-allowed-dir confirm nobody answers ends when the turn is stopped", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+
+    const wc = makeMockWebContents();
+    // A one-second wait rather than the five-minute default: a Stop that only
+    // works because the gate's own timer fired is not a Stop, and this is what
+    // makes that difference visible in the assertions below instead of as a
+    // suite hang.
+    const gate = new ApprovalGate(wc as never, undefined, 1_000);
+    const executor = new ToolExecutor(registry, undefined, undefined, undefined, gate);
+    const turn = new AbortController();
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-l1-stop",
+        name: "read_file",
+        input: { path: "/var/tmp/parked-area/notes.md" },
+      }],
+      {
+        sessionId: "sess-l1-stop",
+        abortSignal: turn.signal,
+        permissionContext: userPermissionContext(),
+      },
+    );
+
+    await waitForApprovalPayload<{ id: string }>(wc);
+    expect(gate.pendingCount).toBe(1);
+
+    // Nobody answers the directory confirm; the owner presses Stop instead.
+    turn.abort(new Error("user cancelled turn"));
+    // Checked here rather than after the await: the gate let go of the request
+    // as the abort was raised. Without the turn signal reaching it, the entry
+    // would still be sitting here waiting out the gate's own timer, which is
+    // the lockout — and the executor would still eventually produce a result,
+    // so only this moment can tell the two apart.
+    expect(gate.pendingCount).toBe(0);
+
+    const results = await callPromise;
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(results[0].is_error).toBe(true);
+    // The cancelled-tool text. A gate that waited out its own timer would land
+    // on the directory-policy denial text the test above asserts instead.
+    expect(results[0].content).toContain("취소");
   });
 
   it("user grants out-of-allowed-dir → tool proceeds to Step 3", async () => {
@@ -4472,5 +4581,421 @@ describe("ToolExecutor — host-classifies-risk enforcement scope", () => {
     // Plugin-declared categories are untrusted, so with the flag on the
     // inspector's host-derived "network" (from the URL arg) is enforced.
     expect(await enforcedCategoryFor("plugin")).toBe("network");
+  });
+});
+
+describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
+  const authority = Object.freeze({
+    kind: "tailnet-controller" as const,
+    actorId: "tailnet:controller-digest" as `tailnet:${string}`,
+  });
+
+  function buildReadExecutor(choice: import("../../permissions/approval-gate.js").ApprovalChoice) {
+    const executed = vi.fn(async () => "ran");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "tailnet_read_probe",
+      description: "Tailnet local approval regression probe.",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object" },
+      execute: async () => ({ output: await executed(), isError: false }),
+    }));
+    const permissions = new PermissionManager("/tmp/nonexistent-tailnet-executor-permissions.json");
+    permissions.setMode("allow");
+    const requestAndWait = vi.fn(async (request: { id: string }) => ({
+      requestId: request.id,
+      choice,
+    }));
+    return {
+      executed,
+      requestAndWait,
+      executor: new ToolExecutor(
+        registry,
+        undefined,
+        permissions,
+        undefined,
+        { requestAndWait } as never,
+      ),
+    };
+  }
+
+  const tailnetContext = () => userPermissionContext({
+    trustOrigin: "tailnet-surface",
+    remoteControllerAuthority: authority,
+  });
+
+  const platformBridgeContext = () => userPermissionContext({
+    trustOrigin: "platform-bridge",
+    remoteControllerAuthority: Object.freeze({
+      kind: "platform-bridge" as const,
+      actorId: "bridge-actor-digest",
+      bridgeBinding: Object.freeze({
+        bridgeId: "44444444-4444-4444-8444-444444444444",
+        bridgeEpoch: 1,
+        routeId: "55555555-5555-4555-8555-555555555555",
+        routeEpoch: 1,
+        scope: "66666666-6666-4666-8666-666666666666",
+      }),
+      bridgeGuard: { isCurrent: () => true },
+    }),
+  });
+
+
+  const pairedShare = Object.freeze({
+    pairingId: "11111111-1111-4111-8111-111111111111",
+    pairingEpoch: 1,
+    shareId: "22222222-2222-4222-8222-222222222222",
+    shareEpoch: 1,
+    scope: "33333333-3333-4333-8333-333333333333",
+  });
+
+  const pairedTailnetContext = (pairedShareGuard: { isCurrent: () => boolean }) => userPermissionContext({
+    trustOrigin: "tailnet-surface",
+    remoteControllerAuthority: Object.freeze({
+      ...authority,
+      pairedShare,
+      pairedShareGuard,
+    }),
+  });
+  it("does not let allow mode or a forged durable approval response execute a declared read", async () => {
+    const { executor, executed, requestAndWait } = buildReadExecutor("allow-session");
+
+    const result = await executor.executeAll(
+      [{ id: "tailnet-read-durable-response", name: "tailnet_read_probe", input: {} }],
+      { sessionId: "tailnet-read-durable-response", permissionContext: tailnetContext() },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+      allowedChoices: ["allow-once", "deny-once"],
+      durableApprovalRecordAllowed: false,
+      forceExplicit: true,
+      isReadOnly: false,
+      trustOrigin: "tailnet-surface",
+    }));
+    expect(executed).not.toHaveBeenCalled();
+    expect(result[0]).toMatchObject({ is_error: true });
+  });
+
+  // The approval also records WHICH controller's turn raised it, as a marker the
+  // host sets from the authority it already holds. Sub-agent provenance travels
+  // in the free-text `reason` today; a fact recovered from a display string is
+  // not evidence of where a request came from, so the marker is never read from
+  // there — see the local-turn case below.
+  it("marks the approval with the controller the host admitted", async () => {
+    const { executor, requestAndWait } = buildReadExecutor("allow-once");
+
+    await executor.executeAll(
+      [{ id: "tailnet-origin-marker", name: "tailnet_read_probe", input: {} }],
+      { sessionId: "tailnet-origin-marker", permissionContext: tailnetContext() },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+      remoteControllerOrigin: "tailnet-controller",
+    }));
+  });
+
+  it("hands the gate a live authority, not only the marker naming it", async () => {
+    const { executor, requestAndWait } = buildReadExecutor("allow-once");
+
+    await executor.executeAll(
+      [{ id: "bridge-authority", name: "tailnet_read_probe", input: {} }],
+      { sessionId: "bridge-authority", permissionContext: platformBridgeContext() },
+    );
+
+    const [request] = requestAndWait.mock.calls[0] as unknown as [{
+      remoteControllerOrigin?: string;
+      remoteControllerAuthority?: { kind: string };
+      scopeTargetFilePaths?: readonly string[];
+    }];
+    // The marker alone is not enough for anything that has to know the
+    // controller is STILL current: a string cannot go stale. Away Authority
+    // reads both and refuses when they disagree, so a producer that sets only
+    // the marker leaves it permanently unable to answer while every gate-level
+    // unit test still passes.
+    expect(request.remoteControllerOrigin).toBe("platform-bridge");
+    expect(request.remoteControllerAuthority?.kind).toBe("platform-bridge");
+    // The scope list rides with them, from the same context. It is what
+    // bounds an away answer to the armed directories, and a producer that
+    // omitted it would leave every away-answerable call unbounded — or,
+    // after the refusal added alongside this, silently unanswerable.
+    expect(request.scopeTargetFilePaths).toEqual([]);
+  });
+
+  it("marks a bridged turn as the bridge rather than as remote-in-general", async () => {
+    const { executor, requestAndWait } = buildReadExecutor("allow-once");
+
+    await executor.executeAll(
+      [{ id: "bridge-origin-marker", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "bridge-origin-marker",
+        permissionContext: platformBridgeContext(),
+      },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledWith(expect.objectContaining({
+      remoteControllerOrigin: "platform-bridge",
+    }));
+  });
+
+  it("marks the directory-confirm modal a remote turn triggers", async () => {
+    // A directory grant is an approval too. It is raised by a different
+    // emitter, so the marker has to be set there as well — otherwise its
+    // absence would mean "the desk asked" on one surface and "nobody wired it"
+    // on the other.
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const wc = makeMockWebContents();
+    const auditLogger = { log: vi.fn() };
+    const gate = new ApprovalGate(
+      wc as never,
+      undefined,
+      5_000,
+      auditLogger as never,
+    );
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      undefined,
+      undefined,
+      gate,
+    );
+
+    const callPromise = executor.executeAll(
+      [{
+        id: "tu-remote-dir",
+        name: "read_file",
+        input: { path: "/var/tmp/some-random-area/file.txt" },
+      }],
+      { sessionId: "sess-remote-dir", permissionContext: tailnetContext() },
+    );
+    const sent = await waitForApprovalPayload<{
+      id: string;
+      nonce: string;
+      hmac: string;
+      kind?: string;
+    }>(wc);
+    // The row asserted below belongs to the directory ask, not to a later
+    // Layer 3 tool ask — the denial ends the invocation here.
+    expect(sent.kind).toBe("out-of-allowed-dir");
+    gate.resolve(sent.id, {
+      requestId: sent.id,
+      choice: "deny-once",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+    await callPromise;
+
+    expect(auditLogger.log).toHaveBeenCalledWith(expect.objectContaining({
+      input: expect.stringContaining(
+        "remoteControllerOrigin=tailnet-controller",
+      ),
+    }));
+  });
+
+  it("leaves a local turn unmarked even when its reason names a controller", async () => {
+    const { executor, requestAndWait } = buildReadExecutor("allow-once");
+
+    await executor.executeAll(
+      [{ id: "subagent-origin-marker", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "subagent-origin-marker",
+        approvalReasonPrefix: "[Sub-Agent: tailnet-controller]",
+        permissionContext: userPermissionContext(),
+      },
+    );
+
+    const request = requestAndWait.mock.calls[0]?.[0] as unknown as {
+      reason: string;
+    };
+    // Non-vacuous: attribution really is sitting in the reason string, spelled
+    // exactly like a controller — which is the reason the marker may not be
+    // recovered from it.
+    expect(request.reason).toContain("[Sub-Agent: tailnet-controller]");
+    expect(request).not.toHaveProperty("remoteControllerOrigin");
+  });
+
+  it("tells the remote surface it is waiting, instead of going silent for the whole timeout", async () => {
+    const { executor, requestAndWait } = buildReadExecutor("allow-once");
+    const permissionReviewEvents: { status: string }[] = [];
+
+    await executor.executeAll(
+      [{ id: "tailnet-read-waiting", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "tailnet-read-waiting",
+        permissionContext: tailnetContext(),
+        callbacks: {
+          onPermissionReview: (event: { status: string }) => permissionReviewEvents.push(event),
+        },
+      } as never,
+    );
+
+    // The layer-2 remote verdict carries no reviewer, so the reviewer-dispatch
+    // path never emits. Without an explicit emit the paired surface sees
+    // `working` and then, minutes later, a failure — indistinguishable from a
+    // dead bridge. `needs_approval` is the only status the platform projector
+    // turns into `approval.waiting-local`.
+    expect(permissionReviewEvents.map((event) => event.status)).toContain("needs_approval");
+    // Non-vacuous: the wait really did reach the gate.
+    expect(requestAndWait).toHaveBeenCalledOnce();
+  });
+
+  it("accepts only allow-once and asks again for the next remote tool invocation", async () => {
+    const { executor, executed, requestAndWait } = buildReadExecutor("allow-once");
+
+    for (const id of ["tailnet-read-once-1", "tailnet-read-once-2"]) {
+      const result = await executor.executeAll(
+        [{ id, name: "tailnet_read_probe", input: {} }],
+        { sessionId: id, permissionContext: tailnetContext() },
+      );
+      expect(result[0].is_error).toBeUndefined();
+    }
+
+    expect(executed).toHaveBeenCalledTimes(2);
+    expect(requestAndWait).toHaveBeenCalledTimes(2);
+  });
+
+
+  it("fails closed before a local approval when a paired share is already revoked", async () => {
+    const { executor, executed, requestAndWait } = buildReadExecutor("allow-once");
+    const pairedShareGuard = { isCurrent: vi.fn(() => false) };
+
+    const result = await executor.executeAll(
+      [{ id: "paired-revoked-start", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "paired-revoked-start",
+        permissionContext: pairedTailnetContext(pairedShareGuard),
+      },
+    );
+
+    expect(requestAndWait).not.toHaveBeenCalled();
+    expect(executed).not.toHaveBeenCalled();
+    expect(pairedShareGuard.isCurrent).toHaveBeenCalledTimes(1);
+    expect(result[0]).toMatchObject({ is_error: true });
+  });
+
+  it("rechecks a paired share immediately after the local approval returns", async () => {
+    const { executor, executed, requestAndWait } = buildReadExecutor("allow-once");
+    let current = true;
+    const pairedShareGuard = { isCurrent: vi.fn(() => current) };
+    requestAndWait.mockImplementation(async (request: { id: string }) => {
+      current = false;
+      return { requestId: request.id, choice: "allow-once" as const };
+    });
+
+    const result = await executor.executeAll(
+      [{ id: "paired-revoked-after-approval", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "paired-revoked-after-approval",
+        permissionContext: pairedTailnetContext(pairedShareGuard),
+      },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledOnce();
+    expect(executed).not.toHaveBeenCalled();
+    expect(pairedShareGuard.isCurrent).toHaveBeenCalledTimes(2);
+    expect(result[0]).toMatchObject({ is_error: true });
+  });
+
+  it("rechecks a paired share at the final no-await tool boundary", async () => {
+    const { executor, executed, requestAndWait } = buildReadExecutor("allow-once");
+    let checks = 0;
+    const pairedShareGuard = {
+      isCurrent: vi.fn(() => {
+        checks += 1;
+        return checks < 3;
+      }),
+    };
+
+    const result = await executor.executeAll(
+      [{ id: "paired-revoked-final-boundary", name: "tailnet_read_probe", input: {} }],
+      {
+        sessionId: "paired-revoked-final-boundary",
+        permissionContext: pairedTailnetContext(pairedShareGuard),
+      },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledOnce();
+    expect(executed).not.toHaveBeenCalled();
+    expect(pairedShareGuard.isCurrent).toHaveBeenCalledTimes(3);
+    expect(result[0]).toMatchObject({
+      content: "remote-controller-revoked",
+      is_error: true,
+    });
+  });
+  it("keeps P1-blocked tools closed when a test-only executor omits PermissionManager", async () => {
+    const executed = vi.fn(async () => "ran");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "routine_schedule",
+      description: "Tailnet P1 fallback regression probe.",
+      source: "builtin",
+      category: "write",
+      jsonSchema: { type: "object" },
+      execute: async () => ({ output: await executed(), isError: false }),
+    }));
+    const requestAndWait = vi.fn();
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      undefined,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tailnet-unwired-routine", name: "routine_schedule", input: {} }],
+      { sessionId: "tailnet-unwired-routine", permissionContext: tailnetContext() },
+    );
+
+    expect(requestAndWait).not.toHaveBeenCalled();
+    expect(executed).not.toHaveBeenCalled();
+    expect(result[0]).toMatchObject({ is_error: true });
+  });
+
+  it("does not create a directory grant prompt for a P1-blocked remote tool", async () => {
+    const executed = vi.fn(async () => "ran");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "routine_schedule",
+      description: "P1 path-policy ordering regression probe.",
+      source: "builtin",
+      category: "write",
+      pathFields: ["path"],
+      jsonSchema: {
+        type: "object",
+        properties: { path: { type: "string" } },
+        required: ["path"],
+      },
+      execute: async () => ({ output: await executed(), isError: false }),
+    }));
+    const dir = mkdtempSync(join(tmpdir(), "lvis-tailnet-p1-path-"));
+    try {
+      const permissions = new PermissionManager(join(dir, "permissions.json"));
+      permissions.setMode("allow");
+      const requestAndWait = vi.fn(async (request: { id: string }) => ({
+        requestId: request.id,
+        choice: "allow-once" as const,
+      }));
+      const executor = new ToolExecutor(
+        registry,
+        undefined,
+        permissions,
+        undefined,
+        { requestAndWait } as never,
+      );
+      const result = await executor.executeAll(
+        [{ id: "tailnet-p1-dir", name: "routine_schedule", input: { path: join(dir, "outside.txt") } }],
+        { sessionId: "tailnet-p1-dir", permissionContext: tailnetContext() },
+      );
+
+      expect(requestAndWait).not.toHaveBeenCalled();
+      expect(executed).not.toHaveBeenCalled();
+      expect(result[0]).toMatchObject({ is_error: true });
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

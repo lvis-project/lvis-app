@@ -17,6 +17,17 @@ import {
 } from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
+import type {
+  RemoteControllerAuthority,
+  RemoteControllerOrigin,
+} from "../shared/chat-origin.js";
+import {
+  AwayAuthority,
+  parseAwayAuthorityGrant,
+  type AwayAuthorityArmInput,
+  type AwayAuthorityCandidate,
+  type AwayAuthoritySnapshot,
+} from "./away-authority.js";
 import {
   parseRationaleApprovalDisplay,
   type RationaleApprovalDisplay,
@@ -193,17 +204,101 @@ export interface ApprovalRequest {
    */
   approvalCacheKey?: string;
   /**
+   * Host-owned attribution: the conversation (session) whose turn raised this
+   * approval. Side chats and sub-agents block on approval modals while the
+   * user is looking at a different conversation, so the dialog and the audit
+   * trail both need to name the asking conversation.
+   *
+   * It is set by the host tool path from the session id it already carries;
+   * it is never derived from provider output and never accepted from the
+   * renderer. Absent only for approval surfaces that genuinely have no
+   * conversation (boot-time and plugin agent-action asks).
+   *
+   * Part of the {@link signApprovalRequest} preimage — see that function for
+   * why absence is signed as an explicit null.
+   */
+  sessionId?: string;
+  /**
    * Confused-deputy defense — random nonce bound to this request.
    * The renderer MUST echo this value back unchanged in the
    * {@link ApprovalDecision}. Paired with {@link hmac} for integrity.
    */
   nonce?: string;
   /**
-   * HMAC-SHA256(sessionKey, `${id}|${nonce}|${toolName}|${canonicalArgs}`)
-   * — hex encoded. The main process re-derives this from the stored pending
-   * entry on receipt of the decision and rejects on mismatch.
+   * Hex-encoded {@link signApprovalRequest} digest over the request's
+   * `(id, nonce, toolName, sessionId, args)`. The main process re-derives this
+   * from the stored pending entry on receipt of the decision and rejects on
+   * mismatch.
    */
   hmac?: string;
+}
+
+/** Audit attribution for an approval surface that has no conversation. */
+export const UNATTRIBUTED_APPROVAL_SESSION_ID = "unattributed-approval";
+
+/** Fields bound into an approval request's integrity signature. */
+export interface ApprovalSignatureFields {
+  id: string;
+  nonce: string;
+  toolName: string;
+  /** Conversation attribution; `undefined` is signed as an explicit null. */
+  sessionId: string | undefined;
+  args: unknown;
+}
+
+/**
+ * Single authority for the approval integrity signature. Both the emit path
+ * and the {@link ApprovalGate.resolve} verification derive from this function,
+ * so the signed field set cannot drift between them.
+ *
+ * The preimage used to be the delimiter-joined
+ * `${id}|${nonce}|${toolName}|${canonicalStringify(args)}`, which left the
+ * asking conversation out of the signature entirely. It is now a single
+ * canonical JSON object: every field is length-delimited by the encoder (so no
+ * field can impersonate another by embedding the `|` separator) and the
+ * conversation attribution is signed rather than merely carried alongside the
+ * request.
+ *
+ * `sessionId` is encoded as an explicit `null` when the request carries no
+ * attribution — `canonicalStringify` drops `undefined` keys, which would make
+ * an unattributed request share a preimage with one whose attribution was
+ * stripped. There is no legacy preimage: the signing key is 32 random bytes
+ * minted per {@link ApprovalGate}, so every signature is created and verified
+ * inside one gate lifetime and no mixed-version window can exist.
+ *
+ * `remoteControllerOrigin` deliberately does NOT belong here either, for a
+ * different reason than the answerer below: it IS known at emit time, so
+ * signing it would be possible. It would just not be worth anything. This
+ * signature authenticates the round trip through the renderer — the host mints
+ * it, the renderer echoes it back, and {@link ApprovalGate.resolve} compares the
+ * echo against the pending entry. A field the renderer is never sent has no
+ * echoed copy to authenticate; its only copy lives in the pending entry, which
+ * no renderer can reach, so a signature over it would compare the host's own
+ * value to itself. The property that makes the marker trustworthy is that only
+ * the host can set it, not that it is tamper-evident in a transit it never
+ * makes. Adding it would enlarge the preimage while proving nothing, and would
+ * invite the reading that an unsigned host-only field is therefore untrusted.
+ *
+ * {@link ApprovalAnswerer} deliberately does NOT belong here. The signature is
+ * minted when the request is emitted, and who answers is not known until the
+ * answer arrives; signing that field would mean either freezing it to a guess
+ * at emit time or re-signing the request at answer time, and a signature the
+ * host re-issues over its own later choice proves nothing. The answerer is
+ * host-derived at the point the answer is received instead — see
+ * {@link ApprovalGate.resolve}.
+ */
+export function signApprovalRequest(
+  sessionKey: Buffer,
+  fields: ApprovalSignatureFields,
+): string {
+  const preimage = canonicalStringify({
+    id: fields.id,
+    nonce: fields.nonce,
+    toolName: fields.toolName,
+    sessionId: fields.sessionId ?? null,
+    args: fields.args,
+  });
+  return createHmac("sha256", sessionKey).update(preimage).digest("hex");
 }
 
 /**
@@ -222,10 +317,78 @@ export type ApprovalRequestInput = Omit<
   readonly executionPlan?: HostShellExecutionPlanAuditProjection;
   readonly forceExplicit?: true;
   /**
+   * Host-only memory capability for this request. One-shot approval routes set
+   * this false so a renderer cannot turn a per-invocation decision into a
+   * user-approval-store record. It is retained only in pending state.
+   */
+  readonly durableApprovalRecordAllowed?: boolean;
+  /**
    * Host-only binding for an explicit plain-shell fallback permit. It is retained only
    * in the pending entry and never serialized to the renderer or audit payload.
    */
   readonly hostShellExecutionPermitBinding?: HostShellExecutionPermitBinding;
+  /**
+   * Host-only marker: a remote controller's turn raised this approval, and
+   * which controller it was.
+   *
+   * Set by the host from the invocation context's `RemoteControllerAuthority`
+   * via the single {@link remoteControllerOriginOf} projection — that authority
+   * object is the only non-forgeable evidence a remote controller is behind the
+   * turn. It is deliberately NOT a field of {@link ApprovalRequest}: the
+   * renderer neither supplies it nor receives it, so there is no copy of it for
+   * a compromised renderer to author or to alter in transit.
+   *
+   * It is never recovered from `reason` either. `reason` is localizable free
+   * text a caller composes for a human to read; a value anything can write into
+   * a display string is not a fact about where the request came from.
+   *
+   * Absent means the host saw no remote-controller authority, which is what a
+   * desk-originated approval looks like.
+   */
+  readonly remoteControllerOrigin?: RemoteControllerOrigin;
+  /**
+   * Host-only: the live authority object the marker above was projected from.
+   *
+   * The marker records what was true when the request was built; this is the
+   * thing that can still be asked. {@link AwayAuthority} re-checks it at the
+   * moment it answers, so a share revoked while the turn was in flight is not
+   * answered by a grant that was valid when the turn started. Nothing else in
+   * the gate reads it, and like the marker it never reaches the renderer, the
+   * audit payload, or pending state.
+   */
+  readonly remoteControllerAuthority?: RemoteControllerAuthority;
+  /**
+   * Host-only: EVERY path this call would touch, for scope checks that must not
+   * be satisfied by the single path the modal happens to display.
+   *
+   * `target.filePath` is a display field and is the FIRST extracted path only.
+   * A tool declaring more than one path field — `move_file` names a source and
+   * a destination — would pass a check that read the display value while the
+   * other path went anywhere. Like the other host-only fields it is destructured
+   * out before the renderer payload is built.
+   */
+  readonly scopeTargetFilePaths?: readonly string[];
+  /**
+   * Host-only: the abort signal of the turn this ask belongs to.
+   *
+   * Without it a parked approval observes nothing but its own five-minute
+   * timer. The owner's Stop aborts the turn's controller and then waits that
+   * timer out, still holding the conversation's execution lease, which is what
+   * makes an unanswerable approval a lockout rather than a stalled tool call.
+   *
+   * It is the same signal the caller already tests immediately before asking,
+   * so this is the closing half of an existing check rather than a new
+   * mechanism: that test covers "already aborted", this covers "aborted while
+   * parked". The other interactive gates on the turn path take it already —
+   * `AskUserQuestionGate.ask` directly, and the rationale flow through
+   * {@link ApprovalGate.cancelPendingRationale} — so a wait that ignores the
+   * turn's abort is the outlier here, not the precedent.
+   *
+   * Like the fields above it, it never reaches the renderer, the pending
+   * entry, or an audit payload. Absent means the caller has no turn to be
+   * stopped, and the request then behaves exactly as it did without it.
+   */
+  readonly abortSignal?: AbortSignal;
 };
 
 export type ApprovalChoice =
@@ -381,6 +544,20 @@ interface PendingEntry {
   timer: ReturnType<typeof setTimeout>;
   /** Permission origin captured with the approval prompt. */
   trustOrigin: string;
+  /**
+   * Conversation attribution captured with the prompt, so the decided /
+   * timeout / cancelled audit rows name the same conversation the requested
+   * row did even though the request object is long gone by then.
+   */
+  sessionId?: string;
+  /**
+   * Remote-controller origin captured with the prompt. Host-only, exactly as it
+   * is on {@link ApprovalRequestInput} — it is retained here and never sent
+   * anywhere, so the rows written long after the request object is gone
+   * (decided, timeout, cancelled) can still state where the blocked turn came
+   * from.
+   */
+  remoteControllerOrigin?: RemoteControllerOrigin;
   toolName: string;
   category: "tool" | "agent-action";
   kind?: ApprovalKind;
@@ -397,6 +574,8 @@ interface PendingEntry {
    * agent-action) do not propagate a cache key.
    */
   approvalCacheKey?: string;
+  /** Host-owned permission to create a user-approval-store record. */
+  durableApprovalRecordAllowed: boolean;
   executionPlan?: HostShellExecutionPlanAuditProjection;
   hostShellExecutionPermitBinding?: HostShellExecutionPermitBinding;
   /** Confused-deputy nonce issued for this request (echoed back verbatim) */
@@ -405,7 +584,115 @@ interface PendingEntry {
   expectedHmac: string;
 }
 
-function formatApprovalAuditFields(fields: {
+/**
+ * Audit vocabulary for who answered an approval, and the closed set of
+ * answerers itself: {@link ApprovalAnswerer} is `keyof` this table, so the type
+ * cannot gain a member without that member also declaring the token it writes
+ * to the audit row. This table is the single authority; there is no path that
+ * widens one without the other.
+ *
+ * The dimension exists because an audit that cannot name the answerer cannot
+ * support a review of what happened while nobody was watching. It was recorded
+ * while `desk` was still the only answerer, which is what made adding the
+ * second one a one-line change here rather than a retrofit across every row.
+ */
+const APPROVAL_ANSWERER_AUDIT_TOKENS = {
+  /** The app window: a renderer response to the approval modal. */
+  desk: "desk",
+  /**
+   * The desk-armed {@link AwayAuthority}: no window was involved, and the
+   * authorization is a local gesture the owner made in advance. Distinct from
+   * `desk` precisely so a reviewer can partition "the owner decided this call"
+   * from "the owner pre-authorized a class of calls and this was one".
+   */
+  "away-authority": "away-authority",
+} as const;
+
+/**
+ * Who answered an approval.
+ *
+ * Host-derived at answer time from the code path that received the answer. It
+ * is never read out of the {@link ApprovalDecision} payload, out of the request,
+ * out of a provider's output, or inferred from the localizable free-text
+ * `reason` — a value any of those can influence is not attribution.
+ */
+export type ApprovalAnswerer = keyof typeof APPROVAL_ANSWERER_AUDIT_TOKENS;
+
+/** Audit token for a value that is not a known {@link ApprovalAnswerer}. */
+const UNRECOGNIZED_APPROVAL_ANSWERER = "unrecognized-answerer";
+
+/**
+ * Render an answerer for the audit row, failing closed on anything the host
+ * does not recognise.
+ *
+ * The type already closes the set; this check exists at runtime because this is
+ * the boundary where the value becomes a durable record. A future caller with
+ * an `as never` cast, or an unchecked value crossing a boundary, must not be
+ * able to file an answer under a name the host never defined. Such a value
+ * renders as {@link UNRECOGNIZED_APPROVAL_ANSWERER} rather than `desk`: an
+ * unrecognised answerer is an audit anomaly to investigate, and recording it as
+ * the default would erase the one fact the reviewer came for.
+ *
+ * The raw value is deliberately not echoed. Audit rows are space-delimited
+ * `key=value` pairs, so an arbitrary string could otherwise forge the fields
+ * that follow it, such as `choice=allow-always`. `Object.hasOwn` rather than
+ * `in`, so inherited members like `toString` are not mistaken for answerers.
+ */
+export function approvalAnswererAuditToken(
+  answeredBy: ApprovalAnswerer,
+): string {
+  return Object.hasOwn(APPROVAL_ANSWERER_AUDIT_TOKENS, answeredBy)
+    ? APPROVAL_ANSWERER_AUDIT_TOKENS[answeredBy]
+    : UNRECOGNIZED_APPROVAL_ANSWERER;
+}
+
+/**
+ * Audit vocabulary for the remote controller behind an approval.
+ *
+ * A TOTAL `Record` over the authority kinds. `RemoteControllerOrigin` is owned
+ * by `shared/chat-origin.ts`, which is where the set of controllers is decided;
+ * making the table total means a new controller kind added there fails to
+ * compile here until it declares the token it writes. The set keeps its one
+ * owner and this table cannot silently fall behind it.
+ */
+const REMOTE_CONTROLLER_ORIGIN_AUDIT_TOKENS: Record<
+  RemoteControllerOrigin,
+  string
+> = {
+  "tailnet-controller": "tailnet-controller",
+  "platform-bridge": "platform-bridge",
+};
+
+/** Audit token for an approval no remote controller stands behind. */
+const LOCAL_APPROVAL_ORIGIN = "none";
+
+/** Audit token for a value that is not a known {@link RemoteControllerOrigin}. */
+const UNRECOGNIZED_REMOTE_CONTROLLER_ORIGIN = "unrecognized-remote-origin";
+
+/**
+ * Render the remote origin for the audit row.
+ *
+ * Written on every approval row, `none` included. An absent key cannot separate
+ * "the desk raised this" from "whoever wrote this row never carried the marker",
+ * and the point of a positive host-set marker is that a reviewer partitioning
+ * rows by origin does not have to assume which one an absence meant.
+ *
+ * Fail-closed rendering, as with {@link approvalAnswererAuditToken}: rows are
+ * space-delimited `key=value` pairs, so a value the host does not recognise is
+ * reported as an anomaly rather than echoed into a row where it could forge the
+ * fields that follow it. `Object.hasOwn` rather than `in`, so inherited members
+ * like `toString` are not mistaken for controllers.
+ */
+export function remoteControllerOriginAuditToken(
+  origin: RemoteControllerOrigin | undefined,
+): string {
+  if (origin === undefined) return LOCAL_APPROVAL_ORIGIN;
+  return Object.hasOwn(REMOTE_CONTROLLER_ORIGIN_AUDIT_TOKENS, origin)
+    ? REMOTE_CONTROLLER_ORIGIN_AUDIT_TOKENS[origin]
+    : UNRECOGNIZED_REMOTE_CONTROLLER_ORIGIN;
+}
+
+interface ApprovalAuditFields {
   toolName: string;
   category: "tool" | "agent-action";
   kind?: ApprovalKind;
@@ -414,7 +701,27 @@ function formatApprovalAuditFields(fields: {
   sourcePluginId?: string;
   approvalScope?: string;
   trustOrigin?: string;
-}, executionPlan?: HostShellExecutionPlanAuditProjection): string {
+  /**
+   * Host-set marker for the remote controller behind the asking turn. Unlike
+   * {@link answeredBy} it is written on every row, because every approval either
+   * came from a remote turn or did not — there is no third state for an absence
+   * to encode.
+   */
+  remoteControllerOrigin?: RemoteControllerOrigin;
+  /**
+   * Set only on a row that records an actual answer. Rows for outcomes the
+   * host reached on its own — timeout, sensitive-path hard-block, send
+   * failure, cancellation, read-only auto-approve — leave it undefined,
+   * because "nobody answered" is a different fact from "the desk answered"
+   * and the row marker already names which host outcome it was.
+   */
+  answeredBy?: ApprovalAnswerer;
+}
+
+function formatApprovalAuditFields(
+  fields: ApprovalAuditFields,
+  executionPlan?: HostShellExecutionPlanAuditProjection,
+): string {
   return [
     `toolName=${fields.toolName}`,
     `category=${fields.category}`,
@@ -424,6 +731,10 @@ function formatApprovalAuditFields(fields: {
     `sourcePluginId=${fields.sourcePluginId ?? "none"}`,
     `approvalScope=${fields.approvalScope ?? "none"}`,
     `trustOrigin=${fields.trustOrigin ?? "unknown"}`,
+    `remoteControllerOrigin=${remoteControllerOriginAuditToken(fields.remoteControllerOrigin)}`,
+    ...(fields.answeredBy === undefined
+      ? []
+      : [`answeredBy=${approvalAnswererAuditToken(fields.answeredBy)}`]),
     ...(executionPlan === undefined ? [] : [
       `executionPlan.version=${executionPlan.version}`,
       `executionPlan.identity=${executionPlan.identity}`,
@@ -500,6 +811,9 @@ function createRendererSafeRationaleApprovalRequest(
     reason: RATIONALE_HOST_OWNED_REASON,
     createdAt: request.createdAt,
     requireExplicit: true,
+    // Attribution is an opaque host-owned id, not conversation content, and a
+    // rationale card blocks a conversation the same way a tool ask does.
+    ...(request.sessionId === undefined ? {} : { sessionId: request.sessionId }),
     nonce: request.nonce,
     hmac: request.hmac,
   };
@@ -563,6 +877,14 @@ export class ApprovalGate {
    */
   private readonly sandboxCapabilityProvider: () => SandboxCapability;
 
+  /**
+   * The desk-armed second answerer. Owned by the gate rather than reachable
+   * beside it: an answerer that could be consulted anywhere else would be a
+   * second answer surface, and the whole argument for this feature is that
+   * there is exactly one and it sits below every hard gate.
+   */
+  private readonly awayAuthority = new AwayAuthority();
+
   constructor(
     webContents: WebContents,
     initialPolicy?: PolicyFile,
@@ -592,6 +914,58 @@ export class ApprovalGate {
   }
 
   /**
+   * Arm the away answerer from a desk gesture. Returns whether it took.
+   *
+   * The single entry point: the raw request is validated by
+   * `parseAwayAuthorityGrant`, which is where every bound on a legal grant
+   * lives, and a rejected request arms nothing. A caller cannot hand this
+   * method a pre-built grant, so there is no second place that decides what a
+   * legal grant is.
+   */
+  armAwayAuthority(input: AwayAuthorityArmInput): boolean {
+    const grant = parseAwayAuthorityGrant(input, Date.now());
+    if (grant === null) return false;
+    this.awayAuthority.arm(grant);
+    this.auditLogger?.log({
+      timestamp: new Date().toISOString(),
+      sessionId: grant.conversationId,
+      type: "approval",
+      // The directory count, not the directories: an audit row states what was
+      // armed, and local paths are exactly the material the rest of this
+      // feature exists to keep off a remote transport.
+      output: `[approval:away-armed] categories=${grant.categories.join(",")} directories=${grant.directories.length} budget=${grant.budget} expiresAt=${new Date(grant.expiresAt).toISOString()}`,
+    });
+    return true;
+  }
+
+  /**
+   * Retire any armed grant.
+   *
+   * Called for desk disarm and — the reason it is public rather than private to
+   * the answerer's own expiry logic — from the share lifecycle chokepoint. A
+   * revoke, re-share, pause, disconnect or re-pair mints a fresh authority that
+   * the per-call re-check would happily accept; the grant behind it was made
+   * for the share that no longer exists.
+   */
+  retireAwayAuthority(reason: "desk-disarm" | "share-lifecycle"): boolean {
+    const retired = this.awayAuthority.retireAll();
+    if (retired) {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: UNATTRIBUTED_APPROVAL_SESSION_ID,
+        type: "approval",
+        output: `[approval:away-retired] reason=${reason}`,
+      });
+    }
+    return retired;
+  }
+
+  /** Current grant state for the desk surface that displays it. */
+  awayAuthoritySnapshot(): AwayAuthoritySnapshot | null {
+    return this.awayAuthority.snapshot();
+  }
+
+  /**
    * Send an approval request to the renderer and wait for the response.
    * ConversationLoop.executeOne() awaits this and blocks the turn.
    * The requireExplicit field controls renderer dismiss behavior.
@@ -599,13 +973,38 @@ export class ApprovalGate {
   async requestAndWait(req: ApprovalRequestInput): Promise<ApprovalDecision> {
     const {
       forceExplicit = false,
+      durableApprovalRecordAllowed: requestedDurableApprovalRecordAllowed,
       hostShellExecutionPermitBinding,
       executionPlan: requestedExecutionPlan,
       sandboxCapability: requestedSandboxCapability,
+      remoteControllerOrigin,
+      remoteControllerAuthority,
+      scopeTargetFilePaths,
+      abortSignal,
       ...request
     } = req;
     // Do not forward the host-only binding to renderer or audit payloads.
     // Audit receives only its allowlist execution-plan projection.
+    //
+    // `remoteControllerOrigin` and `remoteControllerAuthority` are destructured
+    // out for the same reason: the renderer payload is built by spreading the
+    // request, so a host-only field left on it would be sent. Every audit row
+    // this method writes still states the origin, injected here in one place
+    // rather than at each row — a row that forgot it would read as
+    // desk-originated, which is the claim a reviewer must not have to
+    // second-guess. The authority object is never audited at all: it carries a
+    // live guard closure, and a row's job is to state the fact, not to hold the
+    // capability that decided it. `abortSignal` is destructured out for the
+    // first of those reasons and one more: it is a live object carrying a
+    // listener list, and the renderer payload crosses a structured clone.
+    const auditFieldsFor = (
+      fields: ApprovalAuditFields,
+      executionPlan?: HostShellExecutionPlanAuditProjection,
+    ): string =>
+      formatApprovalAuditFields(
+        { ...fields, remoteControllerOrigin },
+        executionPlan,
+      );
     const rationaleDisplay = parseValidRationaleApprovalDisplay(req);
 
     // Rationale is a host-owned, one-shot approval surface. Validate its
@@ -615,9 +1014,9 @@ export class ApprovalGate {
     if (req.kind === "rationale" && rationaleDisplay === null) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: req.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
-        output: `[approval:rationale-display-invalid] ${req.id} ${formatApprovalAuditFields(req)} -> deny-once`,
+        output: `[approval:rationale-display-invalid] ${req.id} ${auditFieldsFor(req)} -> deny-once`,
       });
       return markHostApprovalRejectedDecision({
         requestId: req.id,
@@ -637,9 +1036,9 @@ export class ApprovalGate {
       // private Plan-B binding/action context.
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: req.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
-        output: `[approval:execution-plan-invalid] ${req.id} ${formatApprovalAuditFields(request)} -> deny-once`,
+        output: `[approval:execution-plan-invalid] ${req.id} ${auditFieldsFor(request)} -> deny-once`,
       });
       return markHostApprovalRejectedDecision({
         requestId: req.id,
@@ -649,11 +1048,21 @@ export class ApprovalGate {
     }
 
     const requestedChoices = req.allowedChoices;
-    const hasOneShotHostShellApprovalContract =
-      forceExplicit === true &&
+    const hasOneShotApprovalChoiceContract =
       requestedChoices?.length === 2 &&
       requestedChoices.includes("allow-once") &&
       requestedChoices.includes("deny-once");
+    // Exact one-shot requests and rationale prompts are never eligible for a
+    // durable user-approval record.  Treat this as an invariant instead of a
+    // caller preference: a future emitter must not be able to widen a
+    // per-invocation decision by setting the host-only option to `true`.
+    const durableApprovalRecordAllowed =
+      req.kind !== "rationale" &&
+      !hasOneShotApprovalChoiceContract &&
+      requestedDurableApprovalRecordAllowed !== false;
+    const hasOneShotHostShellApprovalContract =
+      forceExplicit === true &&
+      hasOneShotApprovalChoiceContract;
     if (
       hostShellExecutionPermitBinding !== undefined &&
       (
@@ -669,9 +1078,9 @@ export class ApprovalGate {
       // spawn must never mint a receipt, even after an authenticated response.
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: req.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
-        output: `[approval:host-shell-binding-mismatch] ${req.id} ${formatApprovalAuditFields(request)} -> deny-once`,
+        output: `[approval:host-shell-binding-mismatch] ${req.id} ${auditFieldsFor(request)} -> deny-once`,
       });
       return markHostApprovalRejectedDecision({
         requestId: req.id,
@@ -700,9 +1109,9 @@ export class ApprovalGate {
       // make the user approve a different substrate.
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: req.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
-        output: `[approval:execution-plan-mismatch] ${req.id} ${formatApprovalAuditFields(request, boundExecutionPlan)} -> deny-once`,
+        output: `[approval:execution-plan-mismatch] ${req.id} ${auditFieldsFor(request, boundExecutionPlan)} -> deny-once`,
       });
       return markHostApprovalRejectedDecision({
         requestId: req.id,
@@ -783,9 +1192,9 @@ export class ApprovalGate {
       if (matchedPattern) {
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
-          sessionId: "approval-gate",
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
           type: "approval",
-          output: `[approval:sensitive-path-blocked] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
+          output: `[approval:sensitive-path-blocked] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} raw=${rawCandidate} canonical=${caseFolded} pattern=${matchedPattern} → deny-once (hard-block)`,
         });
         return markHostApprovalRejectedDecision({
           requestId: fullReq.id,
@@ -812,9 +1221,9 @@ export class ApprovalGate {
     ) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
-        output: `[approval:read-only-auto-approve] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} mode=${fullReq.mode ?? "default"} → allow-once`,
+        output: `[approval:read-only-auto-approve] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} mode=${fullReq.mode ?? "default"} → allow-once`,
       });
       return {
         requestId: fullReq.id,
@@ -827,9 +1236,9 @@ export class ApprovalGate {
     if (this.webContents.isDestroyed()) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
-        output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} — webContents already destroyed → deny-once`,
+        output: `[approval:send-failed] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} — webContents already destroyed → deny-once`,
       });
       return markHostApprovalRejectedDecision({
         requestId: fullReq.id,
@@ -840,12 +1249,119 @@ export class ApprovalGate {
     // §S8 phase: requested
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
-      sessionId: "approval-gate",
+      sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
       type: "approval",
       // Emit provenance fields needed to distinguish a host tool ask from a
       // plugin-origin agent-action request during incident replay.
-      input: `[approval:requested] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)}`,
+      input: `[approval:requested] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)}`,
     });
+
+    // ─── Turn abort ──────────────────────────────────
+    //
+    // One construction of the answer to "the turn behind this ask is over",
+    // shared by the already-aborted check just below and by the listener that
+    // covers an abort arriving while the request is parked. The row reuses the
+    // `[approval:cancelled]` marker the rationale cancel path already writes:
+    // to a reviewer both are the host retiring a request nobody answered, and
+    // `reason=` is what separates them.
+    //
+    // deny-once, and host-rejected rather than a deny the user authored — it
+    // is the fail-closed answer, and a stopped turn must not be readable as
+    // the owner refusing this particular call. No `rememberPattern`: the
+    // timeout, the other outcome the host reaches on its own, sets none, and
+    // that field's only consumers persist it as an allow/deny rule.
+    const denyForAbortedTurn = (): ApprovalDecision => {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+        type: "approval",
+        output: `[approval:cancelled] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} reason=turn-abort → deny-once`,
+      });
+      return markHostApprovalRejectedDecision({
+        requestId: fullReq.id,
+        choice: "deny-once",
+      });
+    };
+    // Above the away answer, the OS notification and the renderer send, all
+    // for one reason: none of them should happen on behalf of a turn that is
+    // already over. An away grant in particular has a finite budget, and
+    // spending a unit of it to answer a dead turn spends it on nothing.
+    if (abortSignal?.aborted) return denyForAbortedTurn();
+
+    // ─── Away Authority ──────────────────────────────
+    //
+    // The desk-armed second answerer. Its position is load-bearing: everything
+    // above it has already run and none of it is reachable from here. In
+    // particular the sensitive-path hard block, the host-shell binding match,
+    // the execution-plan mismatch check, the rationale-display validation and
+    // the destroyed-window deny have all either returned or passed, so an away
+    // answer cannot re-open any of them. It sits below the `[approval:requested]`
+    // row so every away-answered call has a requested row too, and above the OS
+    // notification and the renderer send so a call it answers never rings a
+    // phone or paints a modal nobody is there to see.
+    //
+    // It reads only the request and its own grant. No inbound message reaches
+    // this decision, which is the entire difference between this and a relay.
+    const away = this.awayAuthority.consume(
+      {
+        remoteControllerOrigin,
+        remoteControllerAuthority,
+        sessionId: fullReq.sessionId,
+        // The request's own field, strictly. Deliberately not
+        // `getRequestSnapshot`, which defaults a missing source to "builtin".
+        source: fullReq.source,
+        kind: fullReq.kind,
+        category: fullReq.category,
+        toolCategory: fullReq.toolCategory,
+        allowedChoices: fullReq.allowedChoices,
+        // The gate's derived value, not the caller's requested one.
+        durableApprovalRecordAllowed,
+        hostShellExecutionPermitBound:
+          hostShellExecutionPermitBinding !== undefined,
+        // The full set, not `target.filePath` — that is the display value and
+        // is only the first extracted path.
+        targetFilePaths: scopeTargetFilePaths ?? [],
+      } satisfies AwayAuthorityCandidate,
+      Date.now(),
+    );
+    if (away.answer) {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+        type: "approval",
+        output: `[approval:away-answered] ${fullReq.id} ${auditFieldsFor({ ...fullReq, answeredBy: "away-authority" }, executionPlanAudit)} remaining=${away.remaining} → allow-once`,
+      });
+      if (away.remaining === 0) {
+        // The grant retired itself spending its last unit. Said here because
+        // this is the only moment it can be said: from the next call on there
+        // is no grant left to explain why the away answers stopped.
+        this.auditLogger?.log({
+          timestamp: new Date().toISOString(),
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+          type: "approval",
+          output: `[approval:away-retired] reason=budget-spent`,
+        });
+      }
+      // Returning here is what makes the answer one-shot in the strongest
+      // available sense: no pending entry is created, so there is nothing for
+      // `resolve` to accept a later choice against and nothing for
+      // `getRequestSnapshot` to bind a user-approval record to.
+      //
+      // No `rememberPattern` either. Its only consumers persist it as an
+      // allow/deny pattern, and this answer must leave nothing behind.
+      return { requestId: fullReq.id, choice: "allow-once" };
+    }
+    if (away.reportable) {
+      // An armed grant saw a paired-platform ask and did not answer it. The
+      // call now falls through to a desk nobody is at, so without this row the
+      // only trace would be a timeout with no stated cause.
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+        type: "approval",
+        output: `[approval:away-declined] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} reason=${away.refusal}`,
+      });
+    }
 
     // Issue #260 — surface a system notification when an approval is about
     // to block the user. Approval is the most user-visible gate; default to
@@ -864,11 +1380,13 @@ export class ApprovalGate {
 
     // Mint nonce + HMAC, attach to outgoing request (confused-deputy defense)
     const nonce = randomBytes(16).toString("hex");
-    const canonicalArgs = canonicalStringify(fullReq.args);
-    const signingInput = `${fullReq.id}|${nonce}|${fullReq.toolName}|${canonicalArgs}`;
-    const expectedHmac = createHmac("sha256", this.sessionKey)
-      .update(signingInput)
-      .digest("hex");
+    const expectedHmac = signApprovalRequest(this.sessionKey, {
+      id: fullReq.id,
+      nonce,
+      toolName: fullReq.toolName,
+      sessionId: fullReq.sessionId,
+      args: fullReq.args,
+    });
     const signedReq: ApprovalRequest = {
       ...fullReq,
       nonce,
@@ -876,29 +1394,61 @@ export class ApprovalGate {
     };
 
     return new Promise<ApprovalDecision>((resolve, reject) => {
+      // One teardown authority for every way this request can end. `settle` is
+      // what the pending entry stores, so the renderer answer, the timeout,
+      // the rationale cancel and the shutdown sweep each detach the abort
+      // listener without any of them having to know it exists. Otherwise a
+      // turn that asks a hundred times leaves a hundred live listeners on one
+      // signal, and `AbortSignal` is an `EventTarget`, which starts warning
+      // about exactly that at eleven.
+      let detachAbortListener: (() => void) | undefined;
+      const settle = (decision: ApprovalDecision): void => {
+        detachAbortListener?.();
+        detachAbortListener = undefined;
+        resolve(decision);
+      };
       const timer = setTimeout(() => {
         this.pending.delete(fullReq.id);
         // Timeout: handle as deny-once for fail-safe behavior.
         // §S8 phase: timeout
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
-          sessionId: "approval-gate",
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
           type: "approval",
-          output: `[approval:timeout] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} → deny-once`,
+          output: `[approval:timeout] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} → deny-once`,
         });
         const timeoutDecision: ApprovalDecision = {
           requestId: fullReq.id,
           choice: "deny-once",
         };
         hostTimeoutDecisions.add(timeoutDecision);
-        resolve(timeoutDecision);
+        settle(timeoutDecision);
       }, this.timeoutMs);
 
+      if (abortSignal !== undefined) {
+        const onAbort = (): void => {
+          clearTimeout(timer);
+          // Drop the entry before resolving, so a renderer answer that crossed
+          // the abort in flight arrives as a harmless unknown-request replay
+          // instead of an answer to a turn that no longer exists.
+          this.pending.delete(fullReq.id);
+          settle(denyForAbortedTurn());
+        };
+        detachAbortListener = () =>
+          abortSignal.removeEventListener("abort", onAbort);
+        abortSignal.addEventListener("abort", onAbort, { once: true });
+      }
+
       this.pending.set(fullReq.id, {
-        resolve,
+        resolve: settle,
         reject,
         timer,
         trustOrigin: fullReq.trustOrigin ?? "unknown",
+        sessionId: fullReq.sessionId,
+        // Carried from the request, not re-derived: the pending entry outlives
+        // the request object and is the only copy the decided/timeout/cancelled
+        // rows can read.
+        remoteControllerOrigin,
         toolName: fullReq.toolName,
         category: fullReq.category,
         kind: fullReq.kind,
@@ -908,6 +1458,7 @@ export class ApprovalGate {
         sourcePluginId: fullReq.sourcePluginId,
         approvalScope: fullReq.approvalScope,
         approvalCacheKey: fullReq.approvalCacheKey,
+        durableApprovalRecordAllowed,
         ...(executionPlanAudit === undefined
           ? {}
           : { executionPlan: executionPlanAudit }),
@@ -945,7 +1496,7 @@ export class ApprovalGate {
       if (dlpHits.size > 0) {
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
-          sessionId: "approval-gate",
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
           type: "approval",
           output: `[approval:args-dlp-masked] ${fullReq.id} toolName=${fullReq.toolName} trustOrigin=${fullReq.trustOrigin ?? "unknown"} detections=${[...dlpHits].join(",")}`,
         });
@@ -959,11 +1510,11 @@ export class ApprovalGate {
         // §S8 phase: send-failed
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
-          sessionId: "approval-gate",
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
           type: "approval",
-          output: `[approval:send-failed] ${fullReq.id} ${formatApprovalAuditFields(fullReq, executionPlanAudit)} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
+          output: `[approval:send-failed] ${fullReq.id} ${auditFieldsFor(fullReq, executionPlanAudit)} error=${sendErr instanceof Error ? sendErr.message : String(sendErr)} → deny-once`,
         });
-        resolve(
+        settle(
           markHostApprovalRejectedDecision({
             requestId: fullReq.id,
             choice: "deny-once",
@@ -993,7 +1544,7 @@ export class ApprovalGate {
       this.pending.delete(requestId);
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
         output: `[approval:nonce-mismatch] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} choice=${decision.choice} nonceProvided=${decision.nonce ? "yes" : "no"} hmacProvided=${decision.hmac ? "yes" : "no"} → deny-once (forced)`,
       });
@@ -1015,7 +1566,7 @@ export class ApprovalGate {
       this.pending.delete(requestId);
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
-        sessionId: "approval-gate",
+        sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
         type: "approval",
         output: `[approval:choice-not-allowed] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} choice=${decision.choice} allowed=${entry.allowedChoices.join(",")} → deny-once (forced)`,
       });
@@ -1052,11 +1603,22 @@ export class ApprovalGate {
       );
     }
     // §S8 phase: decided
+    //
+    // `answeredBy` is host-derived: it is fixed here and never read from
+    // `decision`, so a renderer that adds an `answeredBy` field to its response
+    // payload cannot reach this row. Two host call sites reach this method —
+    // the `lvis:approval:respond` IPC handler in `src/ipc/domains/permissions.ts`
+    // and `hostApi.agentApproval.respond` in the plugin runtime — and both
+    // answer from a surface inside the app window, so `desk` describes them
+    // both today. When a second answerer exists, the plugin host-API route is
+    // the one to look at first: it is host code relaying a plugin's response
+    // rather than a user clicking the modal, so it is the site most likely to
+    // need its own answerer rather than this default.
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
-      sessionId: "approval-gate",
+      sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
       type: "approval",
-      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} choice=${resolvedDecision.choice} rememberPattern=${resolvedDecision.rememberPattern ?? "none"}`,
+      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields({ ...entry, answeredBy: "desk" }, entry.executionPlan)} choice=${resolvedDecision.choice} rememberPattern=${resolvedDecision.rememberPattern ?? "none"}`,
     });
     entry.resolve(resolvedDecision);
     return resolvedDecision;
@@ -1081,7 +1643,7 @@ export class ApprovalGate {
     this.pending.delete(requestId);
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
-      sessionId: "approval-gate",
+      sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
       type: "approval",
       output: `[approval:cancelled] ${requestId} ${formatApprovalAuditFields(entry, entry.executionPlan)} reason=${reason} → deny-once`,
     });
@@ -1113,6 +1675,7 @@ export class ApprovalGate {
     source: "builtin" | "plugin" | "mcp";
     trustOrigin: string;
     approvalCacheKey: string | undefined;
+    durableApprovalRecordAllowed: boolean;
   } | null {
     const entry = this.pending.get(requestId);
     if (!entry || entry.kind === "rationale") return null;
@@ -1125,6 +1688,7 @@ export class ApprovalGate {
       source: entry.source ?? "builtin",
       trustOrigin: entry.trustOrigin,
       approvalCacheKey: entry.approvalCacheKey,
+      durableApprovalRecordAllowed: entry.durableApprovalRecordAllowed,
     };
   }
 

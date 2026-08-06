@@ -14,6 +14,7 @@ import { mkdtempSync } from "node:fs";
 
 const runtimeTestState = vi.hoisted(() => ({
   appPrependOnceListener: vi.fn(),
+  appOnceListener: vi.fn(),
   browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void };
   }>,
   capturedRuntimeOptions: null as Record<string, unknown> | null,
@@ -49,6 +50,7 @@ vi.mock("electron", () => ({
     getPath: vi.fn(() => "/tmp/lvis-test"),
     isPackaged: false,
     prependOnceListener: runtimeTestState.appPrependOnceListener,
+    once: runtimeTestState.appOnceListener,
   },
   BrowserWindow: Object.assign(vi.fn(), {
     getAllWindows: vi.fn(() => runtimeTestState.browserWindows),
@@ -107,6 +109,7 @@ import { ApprovalOriginError } from "../../../permissions/agent-action-requester
 import { installPluginPartitionPolicy } from "../../../main/html-preview-partition.js";
 import { pluginPartitionName } from "../../../shared/plugin-partition.js";
 import { emitEvent } from "../../types.js";
+import { setAppShutdownStarted } from "../../../main/app-state.js";
 
 type TestHostApiIncarnation = {
   registerDisposer: (dispose: () => void) => void;
@@ -139,6 +142,9 @@ function invokeHostApiFactory<TArgs extends unknown[], TResult>(
 }
 
 beforeEach(() => {
+  runtimeTestState.appPrependOnceListener.mockReset();
+  runtimeTestState.appOnceListener.mockReset();
+  setAppShutdownStarted(false);
   runtimeTestState.readPluginRegistry.mockReset();
   runtimeTestState.readPluginRegistry.mockResolvedValue({
     version: 1,
@@ -372,6 +378,22 @@ describe("initPluginRuntime partition policy", () => {
     const handler = vi.fn(async () => {});
     output.pluginShutdownHandlers.push({ pluginId: "meeting", handler });
 
+    const beforeQuitFallback = runtimeTestState.appOnceListener.mock.calls
+      .find(([eventName]) => eventName === "before-quit")?.[1] as
+      | ((event: { preventDefault: () => void }) => void)
+      | undefined;
+    expect(beforeQuitFallback).toBeDefined();
+
+    // Main's cleanup listener sets this synchronously before later `once`
+    // listeners run. The boot-time fallback must therefore not bypass the
+    // service wrapper that disposes the active-LLM wildcard debounce first.
+    setAppShutdownStarted(true);
+    const event = { preventDefault: vi.fn() };
+    beforeQuitFallback?.(event);
+    expect(event.preventDefault).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+    setAppShutdownStarted(false);
+
     await Promise.all([
       output.runPluginShutdownHandlers(),
       output.runPluginShutdownHandlers(),
@@ -380,7 +402,7 @@ describe("initPluginRuntime partition policy", () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
-  it("registers plugin webview preload policy from onEnable after managed bootstrap restartAll", async () => {
+  it("registers plugin webview preload policy from onEnable after a live reload", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     runtimeTestState.runtime.listPluginIds.mockReturnValue([]);
     runtimeTestState.runtime.listPluginManifests.mockReturnValue([]);

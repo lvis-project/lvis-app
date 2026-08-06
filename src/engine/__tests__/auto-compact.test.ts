@@ -9,13 +9,15 @@ import {
   markStaleToolResults,
   evictAgedToolResultImages,
   estimateTokens,
+  estimateMessageTokensForWire,
   estimateMessagesTokens,
   countHangul,
   getModelPreflightThreshold,
   setRuntimePreflightOverride,
   getRuntimePreflightOverride,
 } from "../auto-compact.js";
-import { stubMarkedToolResults } from "../wire-serialize.js";
+import { prepareMarkedToolResultsForWire } from "../wire-serialize.js";
+import { estimateUserMessageTokens } from "../../shared/multimodal-token-estimate.js";
 import { isToolResultStubContent } from "../../shared/tool-result-stub.js";
 import type { GenericMessage } from "../llm/types.js";
 
@@ -324,7 +326,7 @@ describe("intra-turn tool-result stubbing (issue #1171)", () => {
     }
 
     // Wire form: the 14 marked become stubs; the 16 preserved stay verbatim.
-    const wire = stubMarkedToolResults(afterMark);
+    const wire = prepareMarkedToolResultsForWire(afterMark);
     const wireResults = wire.filter((m) => m.role === "tool_result");
     expect(wireResults).toHaveLength(30);
     for (let i = 0; i < 30; i++) {
@@ -397,8 +399,8 @@ describe("intra-turn tool-result stubbing (issue #1171)", () => {
     expect(layeredMarked).toHaveLength(baselineMarked.length); // both = 22 ("all but last 8")
 
     // The projected wire token count is identical to the post-turn-only path.
-    expect(estimateMessagesTokens(stubMarkedToolResults(layered.messages))).toBe(
-      estimateMessagesTokens(stubMarkedToolResults(baseline.messages)),
+    expect(estimateMessagesTokens(prepareMarkedToolResultsForWire(layered.messages))).toBe(
+      estimateMessagesTokens(prepareMarkedToolResultsForWire(baseline.messages)),
     );
   });
 });
@@ -464,6 +466,25 @@ describe("estimateTokens — chars/4 + 1 with Korean weighting (P11)", () => {
 });
 
 describe("estimateMessagesTokens — provider-wire shape", () => {
+  it("delegates user text, resource parts, and image overhead to the shared estimator", () => {
+    const content = [
+      { type: "text" as const, text: "한글 user body" },
+      { type: "text" as const, text: "<resource>server text</resource>" },
+      {
+        type: "image" as const,
+        image: "data:image/png;base64,abc",
+        mimeType: "image/png",
+        width: 2048,
+        height: 512,
+      },
+    ];
+    const message: GenericMessage = { role: "user", content };
+    const expected = estimateUserMessageTokens(content);
+
+    expect(estimateMessageTokensForWire(message)).toBe(expected);
+    expect(estimateMessagesTokens([message])).toBe(expected);
+  });
+
   it("counts compacted tool_results as serialization stubs, not verbatim memory", () => {
     const messages = synth();
     const rawEstimate = estimateMessagesTokens(messages);

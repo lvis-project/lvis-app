@@ -58,6 +58,12 @@ import {
 import { projectRootKey } from "../shared/project-identity.js";
 import { clampLogRetentionDays } from "../shared/log-retention.js";
 import { createLogger } from "../lib/logger.js";
+import {
+  MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH,
+  isSubscriptionRuntimeId,
+  subscriptionRuntimeDescriptor,
+  type ActiveChatRuntime,
+} from "../shared/subscription-runtime.js";
 import { DEFAULT_SETTINGS } from "./settings-defaults.js";
 import type {
   A2ARemoteSettings,
@@ -78,6 +84,44 @@ import type {
 } from "./settings-store.js";
 
 const log = createLogger("settings");
+
+
+function normalizeSubscriptionChatRuntimeModel(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const model = value.trim();
+  if (
+    model.length === 0 ||
+    model.length > MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH ||
+    /[\u0000-\u001f\u007f]/.test(model)
+  ) {
+    return undefined;
+  }
+  return model;
+}
+
+/**
+ * Normalizes the runtime discriminator independently from API-key provider
+ * settings. Invalid or removed subscription providers fail closed to the API
+ * boundary; the retained API vendor blocks and their secrets are untouched.
+ */
+export function normalizeActiveChatRuntime(input: unknown): ActiveChatRuntime {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return { kind: "api" };
+  }
+  const raw = input as Record<string, unknown>;
+  if (raw.kind === "api") return { kind: "api" };
+  if (raw.kind !== "subscription" || !isSubscriptionRuntimeId(raw.provider)) {
+    return { kind: "api" };
+  }
+  const model = subscriptionRuntimeDescriptor(raw.provider).supportsModelSelection
+    ? normalizeSubscriptionChatRuntimeModel(raw.model)
+    : undefined;
+  return {
+    kind: "subscription",
+    provider: raw.provider,
+    ...(model ? { model } : {}),
+  };
+}
 
 function isLlmProviderEnabled(
   vendor: LLMVendor,
@@ -334,6 +378,9 @@ export function mergeLlmPatch(
   installedProviderIds: readonly MarketplaceEligibleLLMVendor[],
   installedProviderPresets: readonly MarketplaceInstalledProviderPreset[] | undefined,
 ): LLMSettings {
+  const activeChatRuntime = "activeChatRuntime" in partial
+    ? normalizeActiveChatRuntime(partial.activeChatRuntime)
+    : normalizeActiveChatRuntime(base.activeChatRuntime);
   const vendors: LLMVendorSettingsMap = { ...base.vendors };
   if (partial.vendors) {
     for (const [vendorId, incoming] of Object.entries(partial.vendors)) {
@@ -414,6 +461,7 @@ export function mergeLlmPatch(
       model: normalizeLlmVendorModel(entry.provider, entry.model),
     }));
   return {
+    activeChatRuntime,
     provider: activeProvider,
     ...(marketplaceProviderPresetId ? { marketplaceProviderPresetId } : {}),
     vendors,
@@ -424,8 +472,12 @@ export function mergeLlmPatch(
       installedProviderIds,
       installedProviderPresets,
     ),
-    // `undefined` means "no mapping"; an explicit empty string clears the map.
-    hostResolverMap: "hostResolverMap" in partial ? partial.hostResolverMap : base.hostResolverMap,
+    // `llm.hostResolverMap` is deliberately NOT carried forward. The manual
+    // Chromium host-resolver map was removed with the private-endpoint access
+    // path, so a value still on disk from an older build is inert. Dropping it
+    // here means the next settings write erases it rather than leaving a
+    // user-authored internal-hostname mapping persisted with nothing acting on
+    // it. Do not reintroduce the key.
   };
 }
 
@@ -541,6 +593,7 @@ export function pruneLazyLlmVendorBlocks(
   vendors[provider] = getLlmVendorSettings(vendors, provider);
   const prunedLlm: LLMSettings = {
     ...llm,
+    activeChatRuntime: normalizeActiveChatRuntime(llm.activeChatRuntime),
     provider,
     fallbackChain,
     vendors,
@@ -1096,6 +1149,12 @@ export function normalizeFeatureFlags(input: unknown): FeatureFlags {
   const result: FeatureFlags = {};
   if (typeof obj.idlePreferenceRefresh === "boolean") {
     result.idlePreferenceRefresh = obj.idlePreferenceRefresh;
+  }
+  if (typeof obj.idleMemoryConsolidation === "boolean") {
+    result.idleMemoryConsolidation = obj.idleMemoryConsolidation;
+  }
+  if (obj.memoryCaptureMode === "off" || obj.memoryCaptureMode === "review" || obj.memoryCaptureMode === "auto") {
+    result.memoryCaptureMode = obj.memoryCaptureMode;
   }
   if (typeof obj.subAgentAutonomousWake === "boolean") {
     result.subAgentAutonomousWake = obj.subAgentAutonomousWake;

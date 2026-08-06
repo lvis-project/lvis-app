@@ -490,6 +490,17 @@ export class SecretDocumentStore {
     }
   }
 
+  /**
+   * Whether this machine can actually hold a secret encrypted at rest.
+   *
+   * A product surface that offers to store a user credential needs this
+   * *before* it writes anything, so it can decline instead of failing with a
+   * storage error after the fact.
+   */
+  canStoreEncrypted(): boolean {
+    return this.isEncryptionUsable();
+  }
+
   private isEncryptionUsable(): boolean {
     if (!this.encryption.isEncryptionAvailable()) return false;
     if (this.policy !== "packaged" || this.platform !== "linux") return true;
