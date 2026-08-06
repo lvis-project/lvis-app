@@ -4,7 +4,8 @@
  *
  * `isExternalOrigin` is the narrowing gate that decides whether a
  * {@link TrustOrigin} may participate in the #1409 external-mutation approval
- * bypass (see `src/ipc/handlers/permissions.ts` resolveApprovalBypass). Pin
+ * bypass (see `src/permissions/permission-mode-apply.ts`
+ * resolvePermissionModeApprovalBypass). Pin
  * the full truth table so a future TrustOrigin addition cannot silently
  * change which origins are treated as external without a test failing.
  */

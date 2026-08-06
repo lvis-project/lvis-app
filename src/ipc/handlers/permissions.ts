@@ -19,10 +19,9 @@ import { PERMISSIONS } from "../../shared/ipc-channels.js";
 import { sendToWindow } from "../safe-send.js";
 import type { IpcDeps } from "../types.js";
 import type {
-  PermissionModeApprovalBypass,
+  LoosePermissionModeApprovalBypass,
 } from "../../permissions/permission-mode-apply.js";
 import type { PermissionModeCommand } from "../../permissions/permission-slash.js";
-import { isExternalOrigin, type TrustOrigin } from "../../contract/trust-origin.js";
 
 /** PUBLIC `lvis:permission:get-mode` — current permission mode (read-only). */
 export function handleGetMode(deps: IpcDeps): { mode: string } {
@@ -35,64 +34,18 @@ export function handleGetMode(deps: IpcDeps): { mode: string } {
  * set-mode mutation. Transport-agnostic (plain string / boolean fields) so a
  * future non-renderer surface can supply its own provenance; the renderer
  * wrapper passes the fixed settings-ui / user-keyboard tuple. The core forwards
- * this verbatim to {@link applyPermissionModeCommand}'s approval bypass.
+ * this verbatim to `applyPermissionModeCommand`'s approval bypass.
  *
- * @internal Raw {@link SetPermissionModeBypass} structs must NEVER be forwarded
- * verbatim from caller-controlled values (e.g. an IPC payload or external HTTP
- * body). All narrowing from this loose shape into the strict, trust-checked
- * {@link PermissionModeApprovalBypass} happens EXCLUSIVELY inside
- * {@link resolveApprovalBypass} — that is the one auditable choke point where
- * the fail-closed trust conditions live (security-lane MINOR-3).
+ * @internal Raw structs must NEVER be forwarded verbatim from caller-controlled
+ * values (e.g. an IPC payload or external HTTP body). All narrowing from this
+ * loose shape into the strict `PermissionModeApprovalBypass` happens in
+ * `resolvePermissionModeApprovalBypass`
+ * (`src/permissions/permission-mode-apply.ts`) — the one auditable choke point
+ * where the fail-closed trust conditions live (security-lane MINOR-3). This
+ * transport alias exists so IPC signatures do not have to name a permissions
+ * type; it is the SAME type, not a second declaration.
  */
-export interface SetPermissionModeBypass {
-  source: string;
-  trustOrigin: string;
-  explicitUserAction: boolean;
-}
-
-/**
- * Narrow the transport-agnostic {@link SetPermissionModeBypass} into the strict
- * {@link PermissionModeApprovalBypass} that lets `applyPermissionModeCommand`
- * skip the in-app approval modal. This is the ONLY place the strict bypass is
- * built, so the trust conditions live in one auditable spot. Anything that does
- * not match a recognized surface returns `undefined` → the normal ApprovalGate
- * ask runs (fail-closed).
- *
- * Two accepted surfaces:
- *   - RENDERER built-in: `source ∈ {settings-ui, builtin-slash}` AND
- *     `trustOrigin === "user-keyboard"` AND `explicitUserAction`. Byte-identical
- *     to the prior inline check — the renderer path is unchanged.
- *   - #1409 EXTERNAL approval: `source === "local-api-approval"` AND
- *     `trustOrigin` is an {@link import("../../contract/trust-origin.js").ExternalOrigin}
- *     (local-api / cli) AND `explicitUserAction`. The user ALREADY consented via
- *     the in-app ApprovalGate modal built in `src/main/local-api-server.ts`
- *     BEFORE this handler ran; honoring the bypass here is what prevents a
- *     SECOND modal for the same mutation. It is never a silent bypass — the
- *     lifecycle only constructs this shape after observing a real "allow"
- *     ApprovalGate decision.
- *
- * @internal Exported ONLY as a test seam (negative-path regression coverage
- * for the trust narrowing — see `src/ipc/handlers/__tests__/permissions.test.ts`).
- * Must NEVER be called outside {@link handleSetPermissionMode}.
- */
-export function resolveApprovalBypass(
-  bypass: SetPermissionModeBypass,
-): PermissionModeApprovalBypass | undefined {
-  if (bypass.explicitUserAction !== true) return undefined;
-  if (
-    (bypass.source === "settings-ui" || bypass.source === "builtin-slash") &&
-    bypass.trustOrigin === "user-keyboard"
-  ) {
-    return { source: bypass.source, trustOrigin: "user-keyboard", explicitUserAction: true };
-  }
-  if (bypass.source === "local-api-approval") {
-    const origin = bypass.trustOrigin as TrustOrigin;
-    if (isExternalOrigin(origin)) {
-      return { source: "local-api-approval", trustOrigin: origin, explicitUserAction: true };
-    }
-  }
-  return undefined;
-}
+export type SetPermissionModeBypass = LoosePermissionModeApprovalBypass;
 
 function isParseError<T>(value: T | { ok: false; error: string }): value is { ok: false; error: string } {
   return "ok" in (value as Record<string, unknown>) && (value as { ok?: unknown }).ok === false;
@@ -138,8 +91,9 @@ export async function handleSetPermissionMode(
   }
   const pm = deps.conversationLoop.permissionManager;
   if (!pm) return { ok: false, error: "no-permission-manager", message: "permission manager not initialized" };
-  const { applyPermissionModeCommand } = await import("../../permissions/permission-mode-apply.js");
-  const approvalBypass = resolveApprovalBypass(bypass);
+  const { applyPermissionModeCommand, resolvePermissionModeApprovalBypass } =
+    await import("../../permissions/permission-mode-apply.js");
+  const approvalBypass = resolvePermissionModeApprovalBypass(bypass);
   const result = await applyPermissionModeCommand(parsed, {
     permissionManager: pm,
     approvalGate: deps.approvalGate,
