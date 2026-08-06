@@ -7,7 +7,11 @@
  *
  *   ACTION ROW (single line):
  *     LEADING:  [⌘ slash/command picker] → [persona] → [attach]
- *     TRAILING: [? shortcuts] → [thinking] → [(cancel — busy only)] → [send]
+ *     TRAILING: [? shortcuts] → [thinking] → [send / stop — one button]
+ *
+ * The turn control is a SINGLE icon button, not a send button next to a
+ * separate cancel button: it carries "stop" only while a run is in flight AND
+ * the composer is empty, and reverts to "send" the moment anything is typed.
  *
  *   STATUS SUB-ROW (bottom, compact single line):
  *     [● active] · [vendor · model] · [permission — per-mode TEXT color] · [ring]
@@ -21,7 +25,7 @@
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
 import { useCallback, useEffect, useRef, type MouseEvent, type ReactNode } from "react";
-import { Brain, HelpCircle, Paperclip, Square, User } from "lucide-react";
+import { ArrowUp, Brain, HelpCircle, Paperclip, Square, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -70,6 +74,14 @@ export interface InputActionBarProps {
   isBusy: boolean;
 
   isSendDisabled: boolean;
+  /**
+   * Whether the composer holds anything sendable (draft text or an
+   * attachment). Distinct from `!isSendDisabled`, which also folds in the
+   * runtime blocks — this one is purely "does the user have something queued
+   * up", and it is what flips the single turn-control button between send and
+   * stop.
+   */
+  hasDraft: boolean;
   /** Send click (= Enter). intent capture lives in the caller. */
   onSend: () => void;
 
@@ -149,6 +161,7 @@ export function InputActionBar({
   onSelectPreset,
   isBusy,
   isSendDisabled,
+  hasDraft,
   onSend,
   onCancel,
   enableThinkingChat,
@@ -162,6 +175,15 @@ export function InputActionBar({
 }: InputActionBarProps) {
   const { t } = useTranslation();
   const assistantMenuRequestIdRef = useRef<string | null>(null);
+  const showStop = isBusy && !hasDraft;
+  const turnControlLabel = showStop
+    ? t("bottomActionRow.cancelButton")
+    : t("bottomActionRow.sendButton");
+  // Stop is always actionable; send is not whenever `isSendDisabled` says so —
+  // which covers BOTH "nothing to send" and the runtime blocks (no API key,
+  // runtime unavailable). One flag drives the `disabled` attribute and the
+  // quiet styling together, so the two can never disagree.
+  const turnControlInert = !showStop && isSendDisabled;
   const hasAssistantContext = !!activePreset && !activePreset.isDefault;
   const assistantTitle = [
     activePreset && !activePreset.isDefault ? `Persona: ${activePreset.name}` : "",
@@ -255,34 +277,55 @@ export function InputActionBar({
           </Button>
         </div>
 
-        {/* Trailing cluster — turn controls (? · thinking · cancel · send). */}
+        {/* Trailing cluster — turn controls (? · thinking · send/stop). */}
         <div
           className="ml-auto flex min-w-0 flex-1 flex-nowrap items-center justify-end gap-1.5 overflow-hidden pr-2"
           data-testid="iab-trailing"
         >
           <ShortcutsButton />
           {/* Reasoning control moved to the status sub-row (between model and dot). */}
-          {isBusy && (
-            <button
-              type="button"
-              onClick={onCancel}
-              data-testid="composer-cancel-button"
-              className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-input-bar-border bg-input-bar-subtle text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) focus:outline-none focus-visible:ring-2 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
-              title={t("bottomActionRow.cancelButton")}
-              aria-label={t("bottomActionRow.cancelButton")}
-            >
-              <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
-            </button>
-          )}
+          {/* ONE turn-control button. The draft decides which verb it carries:
+              anything typed (or attached) means the user's next action is
+              "send", so it stays a send button even mid-run; an empty draft
+              during a run leaves "stop" as the only useful action. Idle with an
+              empty draft keeps the send glyph, disabled. ESC still cancels a
+              run regardless of what the button currently shows.
+              The label is the icon plus title/aria-label — the old
+              "전송 + ⏎ keycap" pair rendered the keycap as an empty box
+              (its background and its text both resolved to
+              `primary-foreground`, so the glyph disappeared into the chip). */}
           <Button
             type="button"
-            onClick={onSend}
-            disabled={isSendDisabled}
-            data-testid="composer-send-button"
-            className="inline-flex h-[26px] shrink-0 items-center gap-1.5 px-3 text-caption font-semibold focus-visible:ring-input-bar-focus"
+            /* Quiet whenever it cannot act: a disabled SOLID button is a
+               near-black disc at 50% opacity, which reads as a broken grey
+               blob rather than "waiting". Inert it borrows the leading
+               cluster's outline treatment, so an idle composer shows one calm
+               row of controls; it goes solid the instant the button can
+               actually do something. */
+            variant={turnControlInert ? "outline" : "default"}
+            onClick={showStop ? onCancel : onSend}
+            disabled={turnControlInert}
+            data-testid={showStop ? "composer-cancel-button" : "composer-send-button"}
+            title={turnControlLabel}
+            aria-label={turnControlLabel}
+            className={
+              "inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full p-0 transition-transform duration-(--motion-fast) ease-(--motion-ease-standard) active:scale-90 focus-visible:ring-input-bar-focus motion-reduce:transition-none motion-reduce:active:scale-100 " +
+              (turnControlInert
+                ? "border-input-bar-border bg-input-bar-subtle text-input-bar-action"
+                : "")
+            }
           >
-            <span>{t("bottomActionRow.sendButton")}</span>
-            <KbdInverse>⏎</KbdInverse>
+            {/* Keyed so the send↔stop swap is a crossfade on the SAME button,
+                not an instant glyph substitution that reads as two buttons
+                trading places. */}
+            <span
+              key={showStop ? "stop" : "send"}
+              className="lvis-turn-control-glyph inline-flex items-center justify-center"
+            >
+              {showStop
+                ? <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
+                : <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />}
+            </span>
           </Button>
         </div>
       </div>
@@ -539,15 +582,6 @@ function ShortcutRow({ keys, label }: { keys: string[]; label: string }) {
 function Kbd({ children }: { children: ReactNode }) {
   return (
     <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-border border-b-2 bg-muted px-1 font-mono text-micro text-muted-foreground">
-      {children}
-    </kbd>
-  );
-}
-
-function KbdInverse({ children }: { children: ReactNode }) {
-  // theme tokens 만 사용 (theme-snapshot.test.tsx 가 black/white 직접 참조 금지).
-  return (
-    <kbd className="inline-flex h-4 min-w-[16px] items-center justify-center rounded border border-primary-foreground/(--opacity-muted) border-b-2 bg-primary-foreground/(--opacity-soft) px-1 font-mono text-micro text-primary-foreground">
       {children}
     </kbd>
   );
