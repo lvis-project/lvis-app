@@ -2024,6 +2024,7 @@ export const frMessages: Record<string, string> = {
   "pluginConfigTab.errorDoctor": "Échec de Doctor pour le plugin",
   "pluginConfigTab.successDoctor": "{displayName} réparé",
   "pluginConfigTab.doctorDiagnosticUnresolved": "{displayName} : diagnostic terminé — aucune réparation locale possible, toujours inexécutable",
+  "pluginConfigTab.doctorNoNewerPackage": "{displayName} : la place de marché ne propose aucun paquet plus récent que celui installé ; réinstaller ne corrigera rien. Attendez un correctif de l'éditeur ou supprimez le plugin.",
   "pluginConfigTab.errorSave": "Échec de l'enregistrement",
   "pluginConfigTab.errorSaveSecret": "Échec de l'enregistrement de la valeur secrète",
   "pluginConfigTab.errorToggleEnabled": "Échec de la modification de l'état actif du plugin",

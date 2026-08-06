@@ -644,7 +644,17 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
         [preferredInstallKey, installKey],
       );
       if (!isDoctorRepairLoaded(refreshedPlugin)) {
-        showBanner("warning", t("pluginConfigTab.doctorDiagnosticUnresolved", { displayName: plugin.name }));
+        // The install reported success but replaced nothing: the marketplace
+        // carries the same version already on disk, so the reinstall could
+        // only put the broken bundle back. Saying "no local repair available"
+        // here reads as an unexplained dead end — name the actual reason, so
+        // the user knows they are waiting on a publisher, not on a retry.
+        showBanner(
+          "warning",
+          result.unchanged
+            ? t("pluginConfigTab.doctorNoNewerPackage", { displayName: plugin.name })
+            : t("pluginConfigTab.doctorDiagnosticUnresolved", { displayName: plugin.name }),
+        );
         return;
       }
       showBanner("success", t("pluginConfigTab.successDoctor", { displayName: plugin.name }));
