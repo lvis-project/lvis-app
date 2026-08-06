@@ -1,18 +1,28 @@
 /**
  * Plugin tool invocation origin-chain tracker — issue #664 P2.
  *
- * Wrapper plugins commonly look like:
+ * ── CURRENT REACH (read this before designing against the "plugin" origin) ────
+ * Only THREE producers dispatch an invocation today, and none of them is
+ * `"plugin"`: `PluginRuntime.callFromUi` ("ui"), `PluginRuntime.callFromApp`
+ * ("mcp-app"), and `createExternalToolCallSource` ("mcp-app"). All three enter
+ * from an IPC handler, so no chain is ever nested inside another. `"plugin"`
+ * survives as the least-trusted FLOOR of {@link resolveEffectiveOrigin} — the
+ * value a re-entrant producer would inherit — not as a live lane. The wrapper
+ * shape below is the case this tracker was built for; it is kept because it is
+ * the design's motivating example and the shape any re-entrant producer will
+ * take, but `hostApi.callTool` itself was removed with cross-plugin tool
+ * invocation, so the flow is not currently reachable:
  *
  *   user clicks panel button
  *     → bridge.callTool("<wrapper_signin_tool>")        // UI origin
- *       → wrapper handler runs ctx.callTool("<inner_auth_tool>") // plugin origin
+ *       → wrapper handler re-enters with "<inner_auth_tool>" // plugin origin
  *         → inner-auth handler shows OS-native sign-in window
  *
- * The user *did* approve the outer wrapper at the panel, but the inner
- * `ctx.callTool` is dispatched with `origin: "plugin"` because that is the
- * HostApi the wrapper holds. Pre-fix, the host then treated the inner call
- * as headless and routed it through the reviewer lane — silently queueing
- * the sign-in popup forever (#664 reproducer).
+ * The user *did* approve the outer wrapper at the panel, but the inner call is
+ * dispatched with `origin: "plugin"` because that is the HostApi the wrapper
+ * holds. Pre-fix, the host then treated the inner call as headless and routed
+ * it through the reviewer lane — silently queueing the sign-in popup forever
+ * (#664 reproducer).
  *
  * Constraint (#1556): this stickiness only makes the inner call *foreground*;
  * it does NOT make an app-only-visibility inner method reachable. For the inner
