@@ -179,6 +179,7 @@ export function InputActionBar({
   const turnControlLabel = showStop
     ? t("bottomActionRow.cancelButton")
     : t("bottomActionRow.sendButton");
+  const turnControlQuiet = !showStop && isSendDisabled;
   const hasAssistantContext = !!activePreset && !activePreset.isDefault;
   const assistantTitle = [
     activePreset && !activePreset.isDefault ? `Persona: ${activePreset.name}` : "",
@@ -291,16 +292,36 @@ export function InputActionBar({
               `primary-foreground`, so the glyph disappeared into the chip). */}
           <Button
             type="button"
+            /* Quiet while there is nothing to send: a disabled SOLID button is
+               a near-black disc at 50% opacity, which reads as a broken grey
+               blob rather than "waiting for input". In that state it borrows
+               the leading cluster's outline treatment, so an idle composer
+               shows one calm row of controls; it goes solid the instant the
+               button can actually do something. */
+            variant={turnControlQuiet ? "outline" : "default"}
             onClick={showStop ? onCancel : onSend}
             disabled={showStop ? false : isSendDisabled}
             data-testid={showStop ? "composer-cancel-button" : "composer-send-button"}
             title={turnControlLabel}
             aria-label={turnControlLabel}
-            className="inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full p-0 transition-transform duration-(--motion-fast) ease-(--motion-ease-standard) active:scale-90 focus-visible:ring-input-bar-focus motion-reduce:transition-none motion-reduce:active:scale-100"
+            className={
+              "inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full p-0 transition-transform duration-(--motion-fast) ease-(--motion-ease-standard) active:scale-90 focus-visible:ring-input-bar-focus motion-reduce:transition-none motion-reduce:active:scale-100 " +
+              (turnControlQuiet
+                ? "border-input-bar-border bg-input-bar-subtle text-input-bar-action"
+                : "")
+            }
           >
-            {showStop
-              ? <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
-              : <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />}
+            {/* Keyed so the send↔stop swap is a crossfade on the SAME button,
+                not an instant glyph substitution that reads as two buttons
+                trading places. */}
+            <span
+              key={showStop ? "stop" : "send"}
+              className="lvis-turn-control-glyph inline-flex items-center justify-center"
+            >
+              {showStop
+                ? <Square className="h-2.5 w-2.5 fill-current" strokeWidth={0} />
+                : <ArrowUp className="h-3.5 w-3.5" strokeWidth={2.5} />}
+            </span>
           </Button>
         </div>
       </div>
