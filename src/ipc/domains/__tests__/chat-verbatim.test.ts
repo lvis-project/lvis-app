@@ -36,7 +36,7 @@ vi.mock("../../../audit/dlp-filter.js", () => ({
   maskSensitiveData: vi.fn((s: string) => ({ masked: s, findings: [] })),
   initDlpAudit: vi.fn(),
 }));
-vi.mock("../../../engine/wire-serialize.js", () => ({ stubMarkedToolResults: vi.fn((m: unknown) => m) }));
+vi.mock("../../../engine/wire-serialize.js", () => ({ prepareMarkedToolResultsForWire: vi.fn((m: unknown) => m) }));
 vi.mock("../../../boot/dev-flags.js", () => ({ isDevModeUnlocked: vi.fn(() => false) }));
 vi.mock("../../../lib/logger.js", () => ({
   createLogger: vi.fn(() => ({ warn: vi.fn(), info: vi.fn(), error: vi.fn() })),
@@ -2164,5 +2164,47 @@ describe("lvis:chat:continue-last-user — a resource turn's row", () => {
     expect(loop.runTurn).toHaveBeenCalledTimes(1);
     const options = loop.runTurn.mock.calls[0][3] as Record<string, unknown>;
     expect(options).not.toHaveProperty("displayText");
+  });
+});
+
+describe("shared main-conversation lease on replay commands", () => {
+  it("does not truncate history or patch retry settings while another surface owns the turn", async () => {
+    const messages = [
+      { role: "user", content: "previous question" },
+      { role: "assistant", content: "previous answer" },
+    ];
+    const loop = makeConversationLoop("shared-lease-session", messages);
+    const turnEntered = new SessionMutationGate<void>();
+    let finishTurn!: (result: { text: string; toolCalls: unknown[]; stopReason: string }) => void;
+    loop.runTurn.mockImplementation(() => {
+      turnEntered.resolve(undefined);
+      return new Promise((resolve) => {
+        finishTurn = resolve;
+      });
+    });
+    const deps = await setupHandlers(loop);
+    const history = loop.getHistory();
+
+    const activeTurn = invoke(CHANNELS.chat.send, {
+      input: "from-local-api-surface",
+      inputOrigin: "user-keyboard",
+      userActivation: true,
+    }) as Promise<unknown>;
+    await turnEntered.promise;
+
+    await expect(invoke(CHANNELS.chat.editResend, 0, "replacement"))
+      .resolves.toEqual({ ok: false, error: "streaming-active" });
+    await expect(invoke(CHANNELS.chat.continueLastUser, {
+      sessionId: "shared-lease-session",
+    })).resolves.toEqual({ ok: false, error: "streaming-active" });
+    await expect(invoke(CHANNELS.chat.retryEffort, { enableThinking: true }))
+      .resolves.toEqual({ ok: false, error: "streaming-active" });
+
+    expect(history.truncate).not.toHaveBeenCalled();
+    expect(deps.settingsService.patch).not.toHaveBeenCalled();
+    expect(loop.refreshProvider).not.toHaveBeenCalled();
+
+    finishTurn({ text: "done", toolCalls: [], stopReason: "end_turn" });
+    await activeTurn;
   });
 });

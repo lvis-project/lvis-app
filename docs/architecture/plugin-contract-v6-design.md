@@ -325,7 +325,7 @@ can never see a `Tool[]`).
 | **a2 (SDK v6)** | MCP `Tool` type + `tools: string[] \| Tool[]` `oneOf` schema + `normalizeManifest` compat (legacy → pure form, removed fields dropped with a load-time notice) + the `engines.lvisHost`-style host-compat field | SDK tests; host validator native-field probes updated |
 | **a4** | Host: `normalizeManifest` wired into `parsePluginJson` (incl. the :391-403 string-loop rewrite); intra-object auth/visibility checks replace cross-field checks; ALL host readers migrated to the normalized `Tool[]` — `manifestToolsToMcpTools`/`declaredRuntimeMethods`/gate **+ `knownToolOwners` (MODEL-ONLY, §2.4a) + `buildPluginCard`**; `writesToOwnSandbox` verdict input replaced by the host-side containment derivation (self-invalidates the `toolPolicyIdentity` cache); host-compat gate enforced; `readCategory` warn only on present-but-malformed (silent on v6-absent) | full vitest + pre-push |
 | **a3** | Migrate 6 first-party manifests + template to the pure form; bump each to SDK v6. **Marketplace publication held until the a4 host is GA** (pre-a4 hosts cannot load pure manifests) | each loads + registers on an a4 host; per-surface SET-equality invariant (model-set == old `tools[]`, app-set == old `uiActions` keys); tsc/vitest green |
-| **b1+b2+b3** | Per-server partition + detached viewKey + disconnect teardown (b1 lands with b2 — the `will-attach-webview` allowlist couples them) | Playwright e2e (renderer) + cluster review (touches `src/main`, IPC trust boundary) |
+| **b1+b2+b3** | Per-server partition + detached viewKey + disconnect teardown (b1 lands with b2 — the `will-attach-webview` allowlist couples them) | Playwright e2e (renderer) + proportionate owner review advisory (touches `src/main`, IPC trust boundary) |
 | **b4** | Executor parity regression test + docs (no behavior change) | test asserts mcp==plugin traversal |
 | **R (removal)** | Delete legacy `toolSchemas`/`uiActions`/`PluginUiActionSpec` + removed-field plumbing + dormant deprecation machinery + compat branch (§3). **First-party-only assumption:** the removal gate verifies first-party + catalog manifests; a sideloaded third-party LEGACY manifest fails load post-R with the schema's clear reject error (accepted — the ecosystem is first-party at this stage) | removal gate §3.2 green; sweep §3.3 = 0; tsc/vitest/build green |
 
@@ -347,7 +347,7 @@ can never see a `Tool[]`).
   `finalInput` is untouched. The dead→live auto-LOW flip runs in `RuleBasedRiskClassifier` independently of
   `hostClassifiesRisk`, so it also reaches OFF users — R1 confirms no plugin depends on the own-sandbox-write
   round-trip (census: 0 declarations); ship-as-is, no feature flag (Q4).
-- Cluster review is REQUIRED for the (b) phase (sensitive `src/main` + IPC boundary).
+- The (b) phase should record a proportionate owner review advisory for the sensitive `src/main` + IPC boundary; it is not a merge gate.
 
 ## References (file:line + external evidence)
 

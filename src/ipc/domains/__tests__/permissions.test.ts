@@ -67,6 +67,7 @@ function makeDeps(options: {
   interactiveAutoApprove?: "off" | "low" | "medium";
   hasReviewer?: boolean;
   workspaceLifecycleAvailable?: boolean;
+  durableApprovalRecordAllowed?: boolean;
 } = {}) {
   const appWindows = [
     {
@@ -123,6 +124,7 @@ function makeDeps(options: {
         source: "user-keyboard" as const,
         trustOrigin: "user-keyboard",
         approvalCacheKey: undefined,
+        durableApprovalRecordAllowed: options.durableApprovalRecordAllowed ?? true,
       })),
     },
     auditLogger: {
@@ -971,6 +973,26 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     });
 
     expect(result).toMatchObject({ ok: true });
+  });
+
+  it("rejects a one-shot approval record at the Host boundary", async () => {
+    await setup({ durableApprovalRecordAllowed: false });
+
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-one-shot",
+      toolName: "ep_attendance_write",
+      args: '{"operation":"clock"}',
+      source: "plugin",
+      scope: "session",
+      verdictAtApproval: "medium",
+      nlJustification: null,
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: "one-shot-not-recordable",
+    });
+    expect(recordApprovalMock).not.toHaveBeenCalled();
   });
 
   it("rejects non-JSON args with args-not-json error (security-M2 No Fallback Code)", async () => {

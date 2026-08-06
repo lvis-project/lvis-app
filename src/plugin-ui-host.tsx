@@ -142,7 +142,10 @@ export function PluginUiHostView({
   // onError do not fire. Wire native DOM listeners via the ref callback
   // with stable refs so add/remove identity matches.
   const onFinishRef = useRef(() => setLoading(false));
-  const onFailRef = useRef(() => {
+  const onFailRef = useRef((event: Electron.DidFailLoadEvent) => {
+    // A plugin UI may contain child frames. A failed navigation in one of
+    // those frames must not retire the top-level guest webContents.
+    if (!event.isMainFrame) return;
     setLoading(false);
     setErrorText(t("be_pluginUiHost.webviewLoadFailed"));
   });

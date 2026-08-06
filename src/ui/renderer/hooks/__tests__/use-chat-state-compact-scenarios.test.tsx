@@ -317,6 +317,54 @@ describe("useChatState — compact lifecycle scenarios", () => {
     expect(result.current.entries.filter((entry) => entry.kind === "turn_summary")).toHaveLength(1);
   });
 
+  it("S9c: turn_summary copies only validated subscription telemetry", () => {
+    const { api, streamHandler } = makeCapturedApi();
+    const { result } = renderHook(() => useChatState(api));
+
+    dispatchEvent(streamHandler, {
+      type: "turn_summary",
+      turnDurationMs: 100,
+      toolCount: 0,
+      cumulativeToolMs: 0,
+      tokensIn: 1_000,
+      freshInputTokens: 700,
+      tokensOut: 50,
+      subscriptionUsage: [
+        {
+          provider: "codex",
+          model: "gpt-5.4",
+          source: "provider-reported",
+          billable: false,
+          inputTokens: 700,
+          outputTokens: 50,
+          totalTokens: 750,
+        },
+        {
+          provider: "codex",
+          model: "gpt-5.4",
+          source: "provider-reported",
+          billable: false,
+          inputTokens: 1,
+          outputTokens: 1,
+          totalTokens: 2,
+          rawProviderPayload: { secret: "must-not-cross-renderer-boundary" },
+        },
+      ],
+    } as unknown as StreamEvent);
+
+    const summary = result.current.entries.at(-1);
+    expect(summary).toMatchObject({
+      kind: "turn_summary",
+      subscriptionUsage: [{
+        provider: "codex",
+        source: "provider-reported",
+        billable: false,
+        totalTokens: 750,
+      }],
+    });
+    expect(summary?.kind === "turn_summary" ? summary.subscriptionUsage : []).toHaveLength(1);
+  });
+
   it("S10: manual compact NOOP clears isCompacting and surfaces the engine summary", async () => {
     const { api, streamHandler } = makeCapturedApi();
     api.chatCompact = vi.fn(async () => ({

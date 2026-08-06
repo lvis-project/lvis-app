@@ -186,6 +186,89 @@ describe("LLM model list sync", () => {
     );
   });
 
+  it("uses GitHub Models' catalog endpoint and parses its top-level array response", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(
+        JSON.stringify([
+          {
+            id: "openai/gpt-4.1",
+            name: "OpenAI GPT-4.1",
+            publisher: "OpenAI",
+            summary: "A capable general-purpose model",
+            limits: { max_input_tokens: 1_048_576 },
+            supported_input_modalities: ["text", "image"],
+            supported_output_modalities: ["text"],
+          },
+        ]),
+        { status: 200 },
+      ),
+    ) as unknown as typeof fetch;
+
+    const result = await listLlmModelsFromSettings(
+      makeSettingsService({
+        provider: "copilot",
+        baseUrl: "",
+        secret: "github-models-token",
+      }) as never,
+      { vendor: "copilot" },
+      guardedFetchOptions(fetchImpl),
+    );
+
+    expect(result).toMatchObject({
+      ok: true,
+      vendor: "copilot",
+      endpoint: "https://models.github.ai/catalog/models",
+      models: ["openai/gpt-4.1"],
+      modelEntries: [{
+        id: "openai/gpt-4.1",
+        name: "OpenAI GPT-4.1",
+        provider: "OpenAI",
+        description: "A capable general-purpose model",
+        contextLength: 1_048_576,
+        inputModalities: ["text", "image"],
+        outputModalities: ["text"],
+      }],
+    });
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://models.github.ai/catalog/models",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          Accept: "application/vnd.github+json",
+          Authorization: "Bearer github-models-token",
+          "X-GitHub-Api-Version": "2026-03-10",
+        }),
+      }),
+    );
+  });
+
+  it("does not add GitHub's API-version header to a custom Copilot endpoint", async () => {
+    const fetchImpl = vi.fn(async () =>
+      new Response(JSON.stringify({ data: [{ id: "custom/copilot" }] }), {
+        status: 200,
+      }),
+    ) as unknown as typeof fetch;
+
+    await listLlmModelsFromSettings(
+      makeSettingsService({
+        provider: "copilot",
+        baseUrl: "https://copilot-proxy.example/v1",
+        secret: "custom-copilot-token",
+      }) as never,
+      { vendor: "copilot" },
+      guardedFetchOptions(fetchImpl),
+    );
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://copilot-proxy.example/v1/models",
+      expect.objectContaining({
+        headers: expect.not.objectContaining({
+          "X-GitHub-Api-Version": expect.any(String),
+        }),
+      }),
+    );
+  });
+
   it("does not fetch model lists for manual or static discovery policies", async () => {
     const fetchImpl = vi.fn(async () =>
       new Response(JSON.stringify({ data: [{ id: "router/free" }] }), {

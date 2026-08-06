@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import type { ChildProcess, SpawnOptions } from "node:child_process";
 import type { IpcMainInvokeEvent } from "electron";
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
 
@@ -98,5 +99,29 @@ export function createInMemoryFeatureNamespace() {
   return {
     handle,
     getStored: () => structuredClone(stored),
+  };
+}
+
+export async function collectAsyncIterable<T>(
+  iterable: AsyncIterable<T>,
+): Promise<T[]> {
+  const values: T[] = [];
+  for await (const value of iterable) values.push(value);
+  return values;
+}
+
+export interface RecordedSpawnCall {
+  readonly command: string;
+  readonly args: ReadonlyArray<string>;
+  readonly options: SpawnOptions;
+}
+
+export function makeRecordedSpawn(
+  child: ChildProcess,
+  calls: RecordedSpawnCall[],
+): (command: string, args: ReadonlyArray<string>, options: SpawnOptions) => ChildProcess {
+  return (command, args, options) => {
+    calls.push({ command, args, options });
+    return child;
   };
 }

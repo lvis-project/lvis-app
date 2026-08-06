@@ -1134,3 +1134,661 @@ describe("CloudMarketplaceFetcher.updateAllowPrivateNetwork (live config)", () =
     expect(mockedFetchPublic.mock.calls[2][1].allowLoopback).toBe(false);
   });
 });
+
+describe("CloudMarketplaceFetcher app-version resolver", () => {
+  beforeEach(() => {
+    mockedFetchPublic.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("keeps the legacy catalog URL and normalizes stable build metadata", async () => {
+    mockedFetchPublic.mockResolvedValue(jsonResponse([]));
+
+    await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+    }).listPlugins();
+    const versionedFetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+      appVersion: "0.5.9+build.7",
+    });
+    await versionedFetcher.listPlugins();
+
+    expect(mockedFetchPublic.mock.calls[0]?.[0]).toBe(
+      "https://marketplace.example.com/api/v1/catalog",
+    );
+    expect(mockedFetchPublic.mock.calls[1]?.[0]).toBe(
+      "https://marketplace.example.com/api/v1/catalog?app_version=0.5.9",
+    );
+    expect(versionedFetcher.getCatalogCacheKey()).toBe("0.5.9");
+    expect(new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+      appVersion: "0.5.9-preview",
+    }).getCatalogCacheKey()).toBeNull();
+  });
+
+  it("maps a resolved artifact atomically instead of using outer pointer policy", async () => {
+    const pointerDigest = "a".repeat(64);
+    const selectedDigest = "b".repeat(64);
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      plugins: [{
+        id: 41,
+        slug: "lvis-plugin-git",
+        display_name: "Git",
+        description: "Outer presentation copy",
+        latest_stable_version: "9.9.9",
+        latest_artifact_sha256: pointerDigest,
+        package_name: "outer-package",
+        package_spec: "outer-package@9.9.9",
+        channel: "canary",
+        install_policy: "admin",
+        dependencies: ["outer-dependency"],
+        plugin_access: {
+          plugins: [{ pluginId: "outer-plugin", events: ["outer.event"] }],
+        },
+        network_access: {
+          allowed_domains: ["outer.example"],
+          reasoning: "outer pointer policy",
+        },
+        capabilities: ["outer-capability"],
+        requires: {
+          capabilities: ["outer-requires"],
+          min_app_version: "9.0.0",
+        },
+        plugin_type: "mcp",
+        runtime: {
+          transport: "http",
+          url: "https://outer.example/mcp",
+          auth: "api-key",
+          apiKeyHeader: "X-Outer-Key",
+        },
+        mcp_auth: {
+          mode: "api-key",
+          transport: "http",
+          resource: "https://outer.example/mcp",
+        },
+        app_version_resolution: "resolved",
+        resolved_artifact: {
+          version: "0.1.12",
+          artifact_sha256: selectedDigest,
+          min_app_version: "0.5.9",
+          manifest: {
+            id: "lvis-plugin-git",
+            version: "0.1.12",
+            packageName: "lvis-plugin-git",
+            installPolicy: "user",
+            dependencies: [{
+              pluginId: "selected-dependency",
+              versionRange: "^2.0.0",
+              required: true,
+            }],
+            pluginAccess: {
+              plugins: [{
+                pluginId: "selected-plugin",
+                events: ["selected.event"],
+              }],
+              agentApprovalScopes: ["agent_external_api_call"],
+            },
+            networkAccess: {
+              allowedDomains: ["selected.example"],
+              reasoning: "selected artifact policy",
+            },
+            capabilities: ["selected-capability"],
+            requires: {
+              capabilities: ["selected-requires"],
+              minAppVersion: "0.5.9",
+            },
+            runtime: {
+              transport: "http",
+              url: "https://selected.example/mcp",
+              auth: "oauth",
+              oauth: {
+                resource: "https://selected.example/mcp",
+                authorizationServers: ["https://auth.selected.example"],
+                scopes: ["git:read"],
+              },
+            },
+            mcpAuth: {
+              mode: "oauth",
+              transport: "http",
+              resource: "https://selected.example/mcp",
+              authorizationServers: ["https://auth.selected.example"],
+              scopes: ["git:read"],
+            },
+          },
+        },
+      }],
+    }));
+
+    const plugins = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).listPlugins();
+
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0]).toMatchObject({
+      id: "lvis-plugin-git",
+      version: "0.1.12",
+      artifactSha256: selectedDigest,
+      packageSpec: "lvis-plugin-git@0.1.12",
+      channel: "stable",
+      installPolicy: "user",
+      dependencies: [{
+        pluginId: "selected-dependency",
+        versionRange: "^2.0.0",
+        required: true,
+      }],
+      pluginAccess: {
+        plugins: [{
+          pluginId: "selected-plugin",
+          events: ["selected.event"],
+        }],
+        agentApprovalScopes: ["agent_external_api_call"],
+      },
+      networkAccess: {
+        allowedDomains: ["selected.example"],
+        reasoning: "selected artifact policy",
+      },
+      capabilities: ["selected-capability"],
+      requires: {
+        capabilities: ["selected-requires"],
+        minAppVersion: "0.5.9",
+      },
+      mcpRuntime: {
+        transport: "http",
+        url: "https://selected.example/mcp",
+        auth: "oauth",
+        oauth: {
+          resource: "https://selected.example/mcp",
+          authorizationServers: ["https://auth.selected.example"],
+          scopes: ["git:read"],
+        },
+      },
+      mcpAuth: {
+        mode: "oauth",
+        transport: "http",
+        resource: "https://selected.example/mcp",
+        authorizationServers: ["https://auth.selected.example"],
+        scopes: ["git:read"],
+      },
+    });
+    expect(plugins[0]?.networkAccess?.allowedDomains).not.toContain("outer.example");
+    expect(plugins[0]?.capabilities).not.toContain("outer-capability");
+    expect(plugins[0]?.mcpRuntime?.transport).toBe("http");
+    expect((plugins[0]?.mcpRuntime as { url?: string }).url).toBe(
+      "https://selected.example/mcp",
+    );
+  });
+
+  it("fails closed for malformed or inconsistent selected artifacts", async () => {
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    });
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse([{
+      slug: "bad-digest",
+      name: "Bad digest",
+      app_version_resolution: "resolved",
+      resolved_artifact: {
+        version: "1.0.0",
+        artifact_sha256: "not-a-digest",
+        manifest: { id: "bad-digest", version: "1.0.0" },
+      },
+    }]));
+    await expect(fetcher.listPlugins()).rejects.toThrow(/artifact_sha256/);
+
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse([{
+      slug: "bad-min",
+      name: "Bad min",
+      app_version_resolution: "resolved",
+      resolved_artifact: {
+        version: "1.0.0",
+        artifact_sha256: "c".repeat(64),
+        min_app_version: "0.5.9",
+        manifest: {
+          id: "bad-min",
+          version: "1.0.0",
+          requires: { minAppVersion: "0.5.8" },
+        },
+      },
+    }]));
+    await expect(fetcher.listPlugins()).rejects.toThrow(/min_app_version does not match/);
+
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse([{
+      slug: "bad-id",
+      name: "Bad id",
+      app_version_resolution: "resolved",
+      resolved_artifact: {
+        version: "1.0.0",
+        artifact_sha256: "d".repeat(64),
+        manifest: { id: "other-id", version: "1.0.0" },
+      },
+    }]));
+    await expect(fetcher.listPlugins()).rejects.toThrow(/manifest id mismatch/);
+  });
+
+  it("does not fall back to outer MCP runtime/auth when the selected manifest is incomplete", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse([{
+      slug: "missing-mcp-runtime",
+      name: "Missing MCP runtime",
+      plugin_type: "mcp",
+      runtime: {
+        transport: "http",
+        url: "https://outer.example/mcp",
+        auth: "api-key",
+      },
+      mcp_auth: {
+        mode: "api-key",
+        transport: "http",
+      },
+      app_version_resolution: "resolved",
+      resolved_artifact: {
+        version: "1.0.0",
+        artifact_sha256: "e".repeat(64),
+        manifest: {
+          id: "missing-mcp-runtime",
+          version: "1.0.0",
+        },
+      },
+    }]));
+
+    await expect(new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).listPlugins()).rejects.toThrow(/no valid runtime block/);
+  });
+
+  it("does not inherit outer MCP auth when the resolved manifest omits mcpAuth", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse([{
+      slug: "selected-runtime-no-auth",
+      name: "Selected runtime without auth metadata",
+      plugin_type: "mcp",
+      runtime: {
+        transport: "http",
+        url: "https://outer.example/mcp",
+        auth: "oauth",
+      },
+      mcp_auth: {
+        mode: "oauth",
+        transport: "http",
+        resource: "https://outer.example/mcp",
+        authorizationServers: ["https://auth.outer.example"],
+        scopes: ["outer:read"],
+      },
+      app_version_resolution: "resolved",
+      resolved_artifact: {
+        version: "1.0.0",
+        artifact_sha256: "f".repeat(64),
+        manifest: {
+          id: "selected-runtime-no-auth",
+          version: "1.0.0",
+          runtime: {
+            transport: "http",
+            url: "https://selected.example/mcp",
+            auth: "none",
+          },
+        },
+      },
+    }]));
+
+    const plugins = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).listPlugins();
+
+    expect(plugins).toHaveLength(1);
+    expect(plugins[0]?.mcpRuntime).toEqual({
+      transport: "http",
+      url: "https://selected.example/mcp",
+      auth: "none",
+    });
+    expect(plugins[0]?.mcpAuth).toEqual({
+      mode: "none",
+      transport: "http",
+    });
+    expect(plugins[0]?.mcpAuth).not.toMatchObject({
+      resource: "https://outer.example/mcp",
+    });
+  });
+
+  it("keeps update-required display rows for every installable package type", async () => {
+    const upgradeRequired = {
+      code: "upgrade_required",
+      min_app_version: "1.2.3",
+      message: "LVIS 1.2.3+ is required to install this version. Update LVIS and try again.",
+    };
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      plugins: [
+        {
+          slug: "incompatible-plugin",
+          name: "Incompatible plugin",
+          latest_stable_version: "9.9.9",
+          latest_artifact_sha256: "a".repeat(64),
+          package_spec: "outer-plugin@9.9.9",
+          package_name: "outer-plugin",
+          install_policy: "admin",
+          plugin_type: "plugin",
+          app_version_resolution: "no_compatible_version",
+          upgrade_required: upgradeRequired,
+        },
+        {
+          slug: "incompatible-mcp",
+          name: "Incompatible MCP",
+          latest_stable_version: "9.9.9",
+          package_spec: "outer-mcp@9.9.9",
+          plugin_type: "mcp",
+          app_version_resolution: "no_compatible_version",
+          upgrade_required: upgradeRequired,
+        },
+        {
+          slug: "incompatible-agent",
+          name: "Incompatible agent",
+          latest_stable_version: "9.9.9",
+          package_spec: "outer-agent@9.9.9",
+          plugin_type: "agent",
+          app_version_resolution: "no_compatible_version",
+          upgrade_required: upgradeRequired,
+        },
+        {
+          slug: "incompatible-skill",
+          name: "Incompatible skill",
+          latest_stable_version: "9.9.9",
+          package_spec: "outer-skill@9.9.9",
+          plugin_type: "skill",
+          app_version_resolution: "no_compatible_version",
+          upgrade_required: upgradeRequired,
+        },
+        {
+          id: "groq-provider",
+          display_name: "Groq",
+          description: "Provider package",
+          package_spec: "@lvis/groq-provider@1.0.0",
+          package_name: "@lvis/groq-provider",
+          plugin_type: "provider",
+          provider_id: "groq",
+          app_version_resolution: "no_compatible_version",
+        },
+      ],
+    }));
+
+    const plugins = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).listPlugins();
+
+    expect(plugins).toHaveLength(5);
+    for (const [id, pluginType] of Object.entries({
+      "incompatible-plugin": "plugin",
+      "incompatible-mcp": "mcp",
+      "incompatible-agent": "agent",
+      "incompatible-skill": "skill",
+    })) {
+      const item = plugins.find((candidate) => candidate.id === id);
+      expect(item).toMatchObject({
+        id,
+        pluginType,
+        packageSpec: "",
+        packageName: "",
+        upgradeRequired: {
+          code: "upgrade_required",
+          minAppVersion: "1.2.3",
+          message: upgradeRequired.message,
+        },
+      });
+      expect(item).not.toHaveProperty("version");
+      expect(item).not.toHaveProperty("artifactSha256");
+      expect(item).not.toHaveProperty("installPolicy");
+    }
+    expect(plugins.find((item) => item.id === "groq-provider")).toMatchObject({
+      id: "groq-provider",
+      pluginType: "provider",
+      packageAsset: { type: "provider", providerId: "groq" },
+    });
+  });
+
+  it("fails closed for versioned catalog rows without a resolver status or valid display name", async () => {
+    const installableTypes = ["plugin", "mcp", "agent", "skill"] as const;
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      plugins: [
+        ...installableTypes.map((pluginType) => ({
+          slug: `missing-resolution-${pluginType}`,
+          name: `Missing resolution ${pluginType}`,
+          plugin_type: pluginType,
+          latest_stable_version: "9.9.9",
+          latest_artifact_sha256: "a".repeat(64),
+          package_spec: `outer-${pluginType}@9.9.9`,
+          package_name: `outer-${pluginType}`,
+          install_policy: "admin",
+        })),
+        {
+          slug: "non-string-upgrade-name",
+          name: { untrusted: "name" },
+          plugin_type: "plugin",
+          app_version_resolution: "no_compatible_version",
+        },
+      ],
+    }));
+
+    await expect(new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).listPlugins()).resolves.toEqual([]);
+  });
+
+  it("keeps legacy catalog and detail mapping only without appVersion", async () => {
+    const legacyRow = {
+      slug: "legacy-plugin",
+      name: "Legacy plugin",
+      plugin_type: "plugin",
+      latest_stable_version: "1.0.0",
+      package_spec: "legacy-plugin@1.0.0",
+    };
+    mockedFetchPublic
+      .mockResolvedValueOnce(jsonResponse([legacyRow]))
+      .mockResolvedValueOnce(jsonResponse(legacyRow));
+
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    });
+    const catalog = await fetcher.listPlugins();
+    const detail = await fetcher.getPluginDetail("legacy-plugin");
+
+    expect(catalog).toMatchObject([{ id: "legacy-plugin", packageSpec: "legacy-plugin@1.0.0" }]);
+    expect(detail).toMatchObject({ id: "legacy-plugin", packageSpec: "legacy-plugin@1.0.0" });
+    expect(mockedFetchPublic.mock.calls.map(([url]) => url)).toEqual([
+      "https://marketplace.example.com/api/v1/catalog",
+      "https://marketplace.example.com/api/v1/plugins/legacy-plugin",
+    ]);
+  });
+});
+
+
+describe("CloudMarketplaceFetcher app-version resolver detail", () => {
+  beforeEach(() => {
+    mockedFetchPublic.mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("adds app_version to detail reads as well as catalog reads", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      slug: "detail-plugin",
+      name: "Detail plugin",
+      latest_stable_version: "1.0.0",
+      app_version_resolution: "resolved",
+      resolved_artifact: {
+        version: "1.0.0",
+        artifact_sha256: "a".repeat(64),
+        manifest: {
+          id: "detail-plugin",
+          version: "1.0.0",
+        },
+      },
+    }));
+
+    const detail = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com/",
+      appVersion: "0.5.9",
+    }).getPluginDetail("detail-plugin");
+
+    expect(detail?.id).toBe("detail-plugin");
+    expect(mockedFetchPublic.mock.calls[0]?.[0]).toBe(
+      "https://marketplace.example.com/api/v1/plugins/detail-plugin?app_version=0.5.9",
+    );
+  });
+
+  it("fails closed for versioned installable details without a resolver status or valid display name", async () => {
+    const installableTypes = ["plugin", "mcp", "agent", "skill"] as const;
+    const fetcher = new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    });
+
+    for (const pluginType of installableTypes) {
+      const slug = `missing-detail-resolution-${pluginType}`;
+      mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+        slug,
+        name: `Missing detail resolution ${pluginType}`,
+        plugin_type: pluginType,
+        latest_stable_version: "9.9.9",
+        package_spec: `outer-${pluginType}@9.9.9`,
+      }));
+
+      await expect(fetcher.getPluginDetail(slug)).resolves.toBeNull();
+    }
+
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      slug: "non-string-detail-upgrade-name",
+      name: { untrusted: "name" },
+      plugin_type: "plugin",
+      app_version_resolution: "no_compatible_version",
+    }));
+    await expect(fetcher.getPluginDetail("non-string-detail-upgrade-name")).resolves.toBeNull();
+  });
+
+  it("rejects a selected non-stable version before it can form a package spec", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse([{
+      slug: "pre-release",
+      name: "Pre-release",
+      app_version_resolution: "resolved",
+      resolved_artifact: {
+        version: "1.0.0-beta.1",
+        artifact_sha256: "f".repeat(64),
+        manifest: { id: "pre-release", version: "1.0.0-beta.1" },
+      },
+    }]));
+
+    await expect(new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).listPlugins()).rejects.toThrow(/stable SemVer/);
+  });
+  it("maps an explicit update-required detail without outer artifact metadata", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      slug: "incompatible-detail",
+      name: "Incompatible detail",
+      latest_stable_version: "9.9.9",
+      package_spec: "outer-package@9.9.9",
+      app_version_resolution: "no_compatible_version",
+      upgrade_required: {
+        code: "upgrade_required",
+        min_app_version: "1.2.3",
+        message: "LVIS 1.2.3+ is required to install this version. Update LVIS and try again.",
+      },
+    }));
+
+    const detail = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9+build.7",
+    }).getPluginDetail("incompatible-detail");
+
+    expect(detail).toMatchObject({
+      id: "incompatible-detail",
+      packageSpec: "",
+      packageName: "",
+      upgradeRequired: {
+        code: "upgrade_required",
+        minAppVersion: "1.2.3",
+      },
+    });
+    expect(detail).not.toHaveProperty("version");
+    expect(mockedFetchPublic.mock.calls[0]?.[0]).toBe(
+      "https://marketplace.example.com/api/v1/plugins/incompatible-detail?app_version=0.5.9",
+    );
+  });
+
+  it("maps a no-compatible-version detail without an upgrade contract to a generic display-only row", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      slug: "generic-incompatible-detail",
+      name: "Generic incompatible detail",
+      latest_stable_version: "9.9.9",
+      latest_artifact_sha256: "a".repeat(64),
+      package_spec: "outer-package@9.9.9",
+      package_name: "outer-package",
+      install_policy: "admin",
+      plugin_type: "plugin",
+      requires: { min_app_version: "9.9.9" },
+      runtime: { transport: "http", url: "https://outer.example/mcp" },
+      app_version_resolution: "no_compatible_version",
+    }));
+
+    const detail = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).getPluginDetail("generic-incompatible-detail");
+
+    expect(detail).toMatchObject({
+      id: "generic-incompatible-detail",
+      packageSpec: "",
+      packageName: "",
+      pluginType: "plugin",
+      upgradeRequired: {
+        code: "upgrade_required",
+        message: "This package is unavailable in this version of LVIS. Update LVIS and try again.",
+      },
+    });
+    expect(detail?.upgradeRequired).not.toHaveProperty("minAppVersion");
+    expect(detail).not.toHaveProperty("version");
+    expect(detail).not.toHaveProperty("artifactSha256");
+    expect(detail).not.toHaveProperty("installPolicy");
+    expect(detail).not.toHaveProperty("requires");
+    expect(detail).not.toHaveProperty("mcpRuntime");
+  });
+
+  it("fails closed when the update-required contract is malformed", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      slug: "incompatible-detail",
+      name: "Incompatible detail",
+      app_version_resolution: "no_compatible_version",
+      upgrade_required: {
+        code: "upgrade_required",
+        min_app_version: "1.2.3",
+        message: "untrusted message",
+      },
+    }));
+
+    await expect(new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).getPluginDetail("incompatible-detail")).resolves.toBeNull();
+  });
+
+  it("fails closed when the update-required contract is explicitly null", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse({
+      slug: "incompatible-detail",
+      name: "Incompatible detail",
+      app_version_resolution: "no_compatible_version",
+      upgrade_required: null,
+    }));
+
+    await expect(new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+      appVersion: "0.5.9",
+    }).getPluginDetail("incompatible-detail")).resolves.toBeNull();
+  });
+
+});

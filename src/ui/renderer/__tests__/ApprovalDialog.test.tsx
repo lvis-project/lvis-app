@@ -76,6 +76,10 @@ describe("ApprovalDialog", () => {
       expect(document.body.textContent).toContain("도구 / 출처");
       expect(document.body.textContent).toContain("읽기 판단근거");
     });
+    const dialog = document.body.querySelector('[data-testid="tool-approval-dialog"]');
+    expect(dialog?.getAttribute("data-approval-request-id")).toBe("req-1");
+    expect(dialog?.getAttribute("data-approval-tool-name")).toBe("read_file");
+    expect(dialog?.getAttribute("data-approval-args")).toBe('{"path":"/tmp/test.txt"}');
   });
 
   it("labels agent-action approval requests separately from tool execution", async () => {

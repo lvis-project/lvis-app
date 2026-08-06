@@ -30,6 +30,9 @@ export function makeConversationLoopMemoryManager(
   const sessions: Record<string, GenericMessage[]> = messages === null ? {} : { [sessionId]: messages };
   return {
     listSessions: () => Object.keys(sessions).map((id) => ({ id, modifiedAt: new Date() })),
+    getAgentsMd: () => "",
+    getMemoryIndex: () => "",
+    getUserPreferences: () => "",
     loadSession: (id: string) => sessions[id] ?? null,
     loadSessionMetadata: vi.fn(() => null),
     saveSession: vi.fn((id: string, msgs: GenericMessage[]) => {
@@ -43,8 +46,7 @@ export function makeConversationLoopMemoryManager(
     saveMemory: vi.fn(),
     deleteMemory: vi.fn(),
     searchMemoryEntries: vi.fn(),
-    getMemoryContext: vi.fn(),
-    getUserPreferences: vi.fn(),
+    getMemoryContext: () => "",
     updateUserPreferences: vi.fn(),
   } as unknown as ConversationLoopDeps["memoryManager"];
 }
@@ -58,6 +60,13 @@ export function makeConversationLoopLongHistory(count = 20): GenericMessage[] {
     });
   }
   return messages;
+}
+
+/** Supplies the boot-owned reviewer required by normal ConversationLoop fixtures. */
+export function makeConversationLoopMemoryReviewer(): NonNullable<ConversationLoopDeps["memoryReviewer"]> {
+  return {
+    review: async () => "reviewed recap",
+  };
 }
 
 export function makeConversationLoopDeps(
@@ -89,6 +98,7 @@ export function makeConversationLoopDeps(
       getModelVisibleTools: () => [],
     } as unknown as ConversationLoopDeps["toolRegistry"],
     memoryManager: makeConversationLoopMemoryManager(),
+    memoryReviewer: makeConversationLoopMemoryReviewer(),
     ...overrides,
   };
 }

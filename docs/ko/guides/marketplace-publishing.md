@@ -2,7 +2,7 @@
 
 > **상태**: Phase 2-final + git-based bootstrap 반영 (2026-04-27)
 > **대상**: enterprise prod 마켓플레이스에 플러그인 / MCP 서버를 게시하는 퍼블리셔
-> **선행 읽음**: [플러그인 개발 가이드](./plugin-development.md), [Phase 2 마켓플레이스 디자인](../blueprints/phase2-proper-marketplace-design.md)
+> **선행 읽음**: [현재 English Plugin Development Guide](../../guides/plugin-development.md), [Phase 2 마켓플레이스 디자인](../blueprints/phase2-proper-marketplace-design.md)
 > **로컬 dev 루프**: 이 문서는 prod 흐름입니다. dev 환경에서 동일 흐름을 검증하려면 [`local-marketplace-testing.md`](./local-marketplace-testing.md). 마켓플레이스 우회 시나리오는 [`local-plugin-development.md`](./local-plugin-development.md).
 
 ---
@@ -155,7 +155,7 @@ MARKETPLACE_SIGNING_PRIVATE_KEY_PROD_V2=<base64>
 
 ## 플러그인 매니페스트 작성
 
-`plugin.json` 의 전체 스키마는 [플러그인 개발 가이드 §매니페스트](./plugin-development.md#플러그인-매니페스트-pluginjson) 참조. 마켓플레이스 게시 관점에서 **반드시** 챙겨야 하는 필드:
+`plugin.json` 의 현재 계약은 [English Plugin Development Guide §Manifest Basics](../../guides/plugin-development.md#manifest-basics)와 [`plugin-manifest.schema.json`](../../../schemas/plugin-manifest.schema.json)을 참조하세요. 한국어 [`plugin-development.md`](./plugin-development.md)는 역사 보존용입니다. 마켓플레이스 게시 관점에서 **반드시** 챙겨야 하는 필드:
 
 | 필드 | 비고 |
 |------|------|
@@ -163,7 +163,7 @@ MARKETPLACE_SIGNING_PRIVATE_KEY_PROD_V2=<base64>
 | `id` | 마켓플레이스 카탈로그 키 (manifest `id` = catalog `slug`). 게시 후 변경 불가. flat (`agent-hub`) 또는 도트 (`com.example.agent-hub`) 모두 허용 |
 | `version` | semver. 서버가 `(plugin_id, version)` 유니크 + sha256 immutability 강제 — 동일 버전 + 다른 sha256 은 거절 |
 | `tools` | LLM tool 이름 배열. 다른 플러그인과 namespace 충돌 시 publish 시점 거절 |
-| `installPolicy` | `"admin"` (관리형 — 사용자 임의 제거 불가) / `"user"` (사용자 직접 설치). bootstrap 채널에서 admin policy 는 §채널-선택 표 참고 |
+| `installPolicy` | `"admin"` (관리형 — 사용자 임의 제거 불가, 대신 카탈로그와 강제 동기화되어 게시를 내리면 부팅 시 제거된다) / `"user"` (사용자 직접 설치). bootstrap 채널에서 admin policy 는 §채널-선택 표 참고 |
 | `publisher` | 사람이 읽는 식별자 — UI 카드에 표시 |
 
 ### 의존성 / pluginAccess

@@ -62,6 +62,7 @@ export function buildPluginZip(
 ): Buffer {
   const zip = new AdmZip();
   const toolName = `${slug.replace(/-/g, "_")}_read`;
+  const hookProbeToolName = `${toolName}_hook_probe`;
   const pluginJson = {
     id: slug,
     name: "Marketplace E2E Plugin",
@@ -71,34 +72,51 @@ export function buildPluginZip(
     description: "Marketplace loopback e2e test plugin",
     publisher: "lvis-community",
     requires: { minAppVersion: "0.5.2" },
-    tools: [{
-      name: toolName,
-      description: "Read the active marketplace E2E generation.",
-      inputSchema: {
-        type: "object",
-        properties: { operation: { type: "string", enum: ["get_version", "hook_probe"] } },
-        required: ["operation"],
-        additionalProperties: false,
-      },
-      _meta: {
-        ui: { visibility: ["model", "app"] },
-        "lvisai/operationPolicy": {
-          discriminant: "operation",
-          operations: {
-            get_version: {
-              kind: "read",
-              minimumRisk: "read",
-              appVisible: true,
-            },
-            hook_probe: {
-              kind: "read",
-              minimumRisk: "read",
-              appVisible: true,
+    tools: [
+      {
+        name: toolName,
+        description: "Read the active marketplace E2E generation.",
+        inputSchema: {
+          type: "object",
+          properties: { operation: { type: "string", enum: ["get_version", "hook_probe"] } },
+          required: ["operation"],
+          additionalProperties: false,
+        },
+        _meta: {
+          ui: { visibility: ["model", "app"] },
+          "lvisai/operationPolicy": {
+            discriminant: "operation",
+            operations: {
+              get_version: {
+                kind: "read",
+                minimumRisk: "read",
+                appVisible: true,
+              },
+              hook_probe: {
+                kind: "read",
+                minimumRisk: "read",
+                appVisible: true,
+              },
             },
           },
         },
       },
-    }],
+      ...(options.bundledContributions
+        ? [{
+            // This deliberately has no operation policy: governed operations
+            // must bypass effect-capable extension hooks, while this probe
+            // exercises the trusted hook lifecycle itself.
+            name: hookProbeToolName,
+            description: "Exercise the trusted marketplace E2E hook lifecycle.",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              additionalProperties: false,
+            },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          }]
+        : []),
+    ],
     ...(options.bundledContributions
       ? {
           skills: [{ id: "lifecycle", path: "skills/lifecycle" }],
@@ -108,9 +126,17 @@ export function buildPluginZip(
       : {}),
   };
   zip.addFile("plugin.json", Buffer.from(JSON.stringify(pluginJson)));
+  const serializedHandlerNames = JSON.stringify([
+    toolName,
+    ...(options.bundledContributions
+      ? [hookProbeToolName]
+      : []),
+  ]);
   zip.addFile("index.js", Buffer.from(
+    `const handlerNames = ${serializedHandlerNames};\n` +
+    `const handler = async () => ({ version: ${JSON.stringify(version)} });\n` +
     `export default async function createPlugin() {\n` +
-    `  return { handlers: { ${toolName}: async () => ({ version: ${JSON.stringify(version)} }) } };\n` +
+    `  return { handlers: Object.fromEntries(handlerNames.map((name) => [name, handler])) };\n` +
     `}\n`,
   ));
   if (options.bundledContributions) {
@@ -126,7 +152,7 @@ export function buildPluginZip(
     zip.addFile("hooks/audit.json", Buffer.from(JSON.stringify({
       hooks: {
         PreToolUse: [{
-          matcher: toolName,
+          matcher: hookProbeToolName,
           hooks: [{
             type: "command",
             command: ["node", "./deny-probe.mjs"],

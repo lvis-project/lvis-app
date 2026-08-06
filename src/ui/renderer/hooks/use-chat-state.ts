@@ -13,6 +13,7 @@ import {
   upsertPermissionReview,
   upsertStreamingAssistant,
   upsertStreamingReasoning,
+  normalizeSubscriptionUsageList,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
@@ -976,6 +977,7 @@ function parseTurnSummaryEvent(ev: Parameters<Parameters<LvisApi["onChatStream"]
   | "vendorProvider"
   | "vendorModel"
   | "usageByModel"
+  | "subscriptionUsage"
 > | null {
   if (ev.type !== "turn_summary") return null;
   const {
@@ -988,6 +990,7 @@ function parseTurnSummaryEvent(ev: Parameters<Parameters<LvisApi["onChatStream"]
     vendorProvider,
     vendorModel,
   } = ev;
+  const subscriptionUsage = normalizeSubscriptionUsageList(ev.subscriptionUsage);
   if (
     !isFiniteNonNegative(turnDurationMs) ||
     !isFiniteNonNegative(toolCount) ||
@@ -1010,6 +1013,7 @@ function parseTurnSummaryEvent(ev: Parameters<Parameters<LvisApi["onChatStream"]
     ...(parseUsageByModel(ev.usageByModel) !== undefined
       ? { usageByModel: parseUsageByModel(ev.usageByModel) }
       : {}),
+    ...(subscriptionUsage !== undefined ? { subscriptionUsage } : {}),
   };
 }
 

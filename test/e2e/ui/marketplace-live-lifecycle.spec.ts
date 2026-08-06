@@ -20,6 +20,7 @@ import { openSettingsWindow } from "./settings-window.js";
 const E2E_ENABLED = process.env.M4_E2E === "1";
 const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
 const PUBLISHER_KEY = process.env.MARKETPLACE_PUBLISHER_KEY ?? "";
+const REVIEWER_KEY = process.env.MARKETPLACE_REVIEWER_KEY ?? "";
 const ADMIN_KEY = process.env.MARKETPLACE_ADMIN_KEY ?? "";
 const EVIDENCE_PATH = process.env.BUNDLE_E2E_EVIDENCE_PATH ?? "";
 
@@ -95,8 +96,10 @@ test.skip(!builtMainExists(), "build the Electron app before running this spec")
 test("publish, approve, install, update, rollback, disable, re-enable, and uninstall atomically", async ({}, testInfo) => {
   testInfo.setTimeout(180_000);
   requireExactLoopbackMarketplaceOrigin(BASE_URL);
-  if (!PUBLISHER_KEY || !ADMIN_KEY) {
-    throw new Error("MARKETPLACE_PUBLISHER_KEY and MARKETPLACE_ADMIN_KEY are required");
+  if (!PUBLISHER_KEY || !REVIEWER_KEY || !ADMIN_KEY) {
+    throw new Error(
+      "MARKETPLACE_PUBLISHER_KEY, MARKETPLACE_ADMIN_KEY, and MARKETPLACE_REVIEWER_KEY are required",
+    );
   }
 
   const suffix = `${Date.now().toString(36)}-${process.pid.toString(36)}`;
@@ -110,7 +113,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
   await publishPlugin(BASE_URL, ADMIN_KEY, managedSlug, "1.0.0", managed);
   const hiddenBeforeApproval = await fetch(`${BASE_URL}/api/v1/plugins/${managedSlug}`);
   expect(hiddenBeforeApproval.status).toBe(404);
-  const approval = await approvePendingPlugin(BASE_URL, ADMIN_KEY, managedSlug, "1.0.0");
+  const approval = await approvePendingPlugin(BASE_URL, REVIEWER_KEY, managedSlug, "1.0.0");
   expect(approval.approval_state).toBe("approved");
   expect((await fetch(`${BASE_URL}/api/v1/plugins/${managedSlug}`)).status).toBe(200);
 
@@ -158,7 +161,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
     }, {
       pluginId: slug,
       skillLocalId: "lifecycle",
-      hookProbeToolName: `${slug.replace(/-/g, "_")}_read`,
+      hookProbeToolName: `${slug.replace(/-/g, "_")}_read_hook_probe`,
     });
     const setEnabled = (enabled: boolean) => ctx.page.evaluate(async ({ pluginId, enabled }) => {
       const api = globalThis as unknown as {
@@ -202,11 +205,12 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       };
       return api.lvisApi.getRuntimeCounts();
     });
-    const callLifecycleTool = async (
-      operation: "get_version" | "hook_probe",
+    const callPluginTool = async (
+      name: string,
+      payload: Record<string, unknown>,
       options: { approvalExpected?: boolean } = {},
     ) => {
-      const invocation = ctx.page.evaluate(async ({ name, operation }) => {
+      const invocation = ctx.page.evaluate(async ({ name, payload }) => {
         const api = globalThis as unknown as {
           lvisApi: {
             callPluginMethod(
@@ -215,8 +219,12 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
             ): Promise<Record<string, unknown>>;
           };
         };
-        return api.lvisApi.callPluginMethod(name, { operation });
-      }, { name: `${slug.replace(/-/g, "_")}_read`, operation });
+        return api.lvisApi.callPluginMethod(name, payload);
+      }, { name, payload });
+      // The approval-dialog probe below may take up to a second. Attach a
+      // temporary handler so an immediately rejected IPC call is still
+      // observed before the caller asserts its rejection.
+      void invocation.catch(() => undefined);
       const approvalDialog = ctx.page.getByTestId("tool-approval-dialog");
       const approvalVisible = await approvalDialog
         .waitFor({
@@ -239,6 +247,16 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       }
       return invocation;
     };
+    const callLifecycleTool = (
+      operation: "get_version" | "hook_probe",
+      options: { approvalExpected?: boolean } = {},
+    ) => callPluginTool(
+      `${slug.replace(/-/g, "_")}_read`,
+      { operation },
+      options,
+    );
+    const callHookProbe = () =>
+      callPluginTool(`${slug.replace(/-/g, "_")}_read_hook_probe`, {});
     const permissionAudit = () => ctx.page.evaluate(async () => {
       const api = globalThis as unknown as {
         lvisApi: {
@@ -271,6 +289,12 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       expect(snapshot.skill?.owner.fingerprint).toMatch(/^[a-f0-9]{64}$/);
       expect(snapshot.tools).toContainEqual(expect.objectContaining({
         name: `${slug.replace(/-/g, "_")}_read`,
+        source: "plugin",
+        pluginId: slug,
+        generationId: snapshot.active?.generationId,
+      }));
+      expect(snapshot.tools).toContainEqual(expect.objectContaining({
+        name: `${slug.replace(/-/g, "_")}_read_hook_probe`,
         source: "plugin",
         pluginId: slug,
         generationId: snapshot.active?.generationId,
@@ -407,6 +431,15 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       await expect(setContributionTrust("hook", "audit")).resolves.toMatchObject({ ok: true });
       await expect(setContributionTrust("mcpServer", "echo")).resolves.toMatchObject({ ok: true });
     };
+    const expectGovernedHookIsolation = async (version: string) => {
+      const result = await callLifecycleTool("hook_probe");
+      expect(result).toMatchObject({ version });
+      expect(JSON.stringify(result)).not.toContain("marketplace lifecycle hook probe");
+    };
+    const expectHookProbeDenied = async () => {
+      // A PreToolUse denial rejects the IPC call; it is not a tool result.
+      await expect(callHookProbe()).rejects.toThrow("marketplace lifecycle hook probe");
+    };
     const baselineMcpCount = (await runtimeCounts()).mcps;
     let activeMcpProbe: Awaited<ReturnType<typeof callBundledMcp>> | null = null;
 
@@ -456,7 +489,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
     expect(approvedHookSnapshot.hooks.registered).toEqual([
       expect.objectContaining({
         event: "pre",
-        matcher: `${slug.replace(/-/g, "_")}_read`,
+        matcher: `${slug.replace(/-/g, "_")}_read_hook_probe`,
         owner: expect.objectContaining({
           pluginId: slug,
           pluginVersion: "1.0.0",
@@ -467,12 +500,12 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
     expect(approvedHookSnapshot.hooks.matchingPreToolUse).toEqual([
       approvedHookSnapshot.hooks.registered[0]!.id,
     ]);
-    const hookDeniedV1 = await callLifecycleTool("hook_probe");
-    expect(hookDeniedV1).toMatchObject({ ok: false });
-    expect(JSON.stringify(hookDeniedV1)).toContain("marketplace lifecycle hook probe");
+    await expectGovernedHookIsolation("1.0.0");
+    await expectHookProbeDenied();
     transitions.push({
       state: "installed",
       version: "1.0.0",
+      governedHookIsolated: true,
       hookExecuted: true,
       mcpConnected: true,
       mcpIdentity: activeMcpProbe.identity,
@@ -504,11 +537,14 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
     await approveExecutableContributions();
     await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount + 1);
     activeMcpProbe = await callBundledMcp("2.0.0");
-    expect(await callLifecycleTool("hook_probe")).toMatchObject({ ok: false });
+    await expectGovernedHookIsolation("2.0.0");
+    await expectHookProbeDenied();
     transitions.push({
       state: "updated",
       version: "2.0.0",
       executableTrustReapproved: true,
+      governedHookIsolated: true,
+      hookExecuted: true,
       mcpIdentity: activeMcpProbe.identity,
     });
 
@@ -533,11 +569,14 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       expect.objectContaining({ kind: "hook", pluginVersion: "1.0.0", status: "approved" }),
       expect.objectContaining({ kind: "mcpServer", pluginVersion: "1.0.0", status: "approved" }),
     ]));
-    expect(await callLifecycleTool("hook_probe")).toMatchObject({ ok: false });
+    await expectGovernedHookIsolation("1.0.0");
+    await expectHookProbeDenied();
     transitions.push({
       state: "rolled-back",
       version: "1.0.0",
       executableTrustRestored: true,
+      governedHookIsolated: true,
+      hookExecuted: true,
       mcpIdentity: activeMcpProbe.identity,
     });
 
@@ -562,12 +601,15 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
     });
     expect((await contributionTrust()).rows).toEqual([]);
     await expect.poll(async () => (await runtimeCounts()).mcps).toBe(baselineMcpCount);
-    expect(await callLifecycleTool("hook_probe")).toMatchObject({ ok: false });
+    await expect(callLifecycleTool("hook_probe")).rejects.toThrow("Plugin method not found");
+    await expect(callHookProbe()).rejects.toThrow("Plugin method not found");
     transitions.push({
       state: "disabled",
       runtimeLoaded: false,
       hookRows: disabledSnapshot.hooks.registered.length,
       hookMatches: disabledSnapshot.hooks.matchingPreToolUse.length,
+      governedToolRemoved: true,
+      hookProbeToolRemoved: true,
       mcpConnected: false,
       registryOwnerRows: disabledSnapshot.tools.length,
       terminatedProcessIdentity: activeMcpProbe.process.processIdentity,
@@ -587,10 +629,12 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       expect.objectContaining({ kind: "mcpServer", status: "approved" }),
     ]));
     activeMcpProbe = await callBundledMcp("1.0.0");
-    expect(await callLifecycleTool("hook_probe")).toMatchObject({ ok: false });
+    await expectGovernedHookIsolation("1.0.0");
+    await expectHookProbeDenied();
     transitions.push({
       state: "re-enabled",
       version: "1.0.0",
+      governedHookIsolated: true,
       hookExecuted: true,
       mcpConnected: true,
       mcpIdentity: activeMcpProbe.identity,

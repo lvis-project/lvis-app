@@ -29,6 +29,7 @@
 import { createHash } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import { canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
+import { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type {
   TurnInputRequired,
   TurnStopReason,
@@ -50,6 +51,10 @@ import {
   isLLMVendor,
   isModelAvailableForVendor,
 } from "../shared/llm-vendor-defaults.js";
+import {
+  MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH,
+  type SubscriptionChatRuntimeSelection,
+} from "../shared/subscription-runtime.js";
 import {
   resolveAgentMode,
   type AgentModeConfig,
@@ -575,6 +580,7 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
   "agent_spawn",
   "agent_status",
   "agent_interrupt",
+  "memory_write",
 ]);
 
 /**
@@ -691,27 +697,52 @@ function originSessionTag(originSessionId: string): string {
  * Resolve an agent profile's `model:` frontmatter to a concrete model ID
  * for the child loop, against the parent's active vendor:
  *   1. undefined / empty   → null (child stays on the parent model)
- *   2. complexity tier      → MODEL_COMPLEXITY_MAP[vendor][tier]; null when
+ *   2. Codex subscription  → a clean explicit candidate is sent to the
+ *                             main-owned live subscription catalog; ACP keeps
+ *                             its persisted default and complexity tiers have
+ *                             no static Codex mapping, so both retain it.
+ *   3. API-key complexity   → MODEL_COMPLEXITY_MAP[vendor][tier]; null when
  *                             the vendor lacks that tier (design-intent
- *                             parent-model fallback, logged for audit)
- *   3. explicit model ID    → used only when it is a selectable option for
- *                             the active vendor (LLM_VENDOR_MODEL_OPTIONS);
- *                             otherwise null (parent-model fallback, logged)
- *                             so an ID the vendor cannot serve never reaches
- *                             the provider as a non-retryable model-not-found
- *                             that the fallback chain refuses to recover from.
+ *                             parent-model fallback, logged)
+ *   4. API-key explicit ID  → used only when it is selectable for the active
+ *                             vendor (LLM_VENDOR_MODEL_OPTIONS); otherwise
+ *                             null (parent-model fallback, logged).
  *
- * Returning null means "no override" — the caller leaves `modelOverride`
- * unset so `refreshProvider()` uses the vendor block's configured model.
- * Every non-null result is therefore a model the active vendor can serve
- * (tier-resolved or option-validated).
+ * Returning null means "no override" — the active runtime retains its
+ * persisted model. A non-null Codex subscription result is only a bounded
+ * candidate; the main-owned runtime independently revalidates its live
+ * catalog before transport.
  */
 export function resolveSubAgentModel(
   profileModel: string | undefined,
   activeVendor: string,
+  subscriptionRuntime?: SubscriptionChatRuntimeSelection,
 ): string | null {
   const trimmed = profileModel?.trim();
   if (!trimmed) return null;
+
+  if (subscriptionRuntime) {
+    if (subscriptionRuntime.provider !== "codex") return null;
+    if (isModelComplexityLevel(trimmed)) {
+      log.warn(
+        "sub-agent: parent-model fallback used — Codex subscription has no static complexity mapping for '%s'",
+        trimmed,
+      );
+      return null;
+    }
+    if (
+      trimmed.length > MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH
+      || /[\u0000-\u001f\u007f]/.test(trimmed)
+    ) {
+      log.warn(
+        "sub-agent: parent-model fallback used — invalid Codex subscription model candidate",
+      );
+      return null;
+    }
+    // The selectable Codex catalog is subscription-scoped and live in main,
+    // so never validate this candidate against the inactive API-key vendor.
+    return trimmed;
+  }
 
   if (isModelComplexityLevel(trimmed)) {
     if (!isLLMVendor(activeVendor)) return null;
@@ -1763,15 +1794,50 @@ export class SubAgentRunner {
     // hookRunner so the child plays by the same security rules.
     // History is fresh because ConversationLoop.constructor instantiates a new
     // ConversationHistory (spawn); resume re-hydrates it via loadSession.
-    // Resolve the child's model from the profile's `model:` frontmatter
-    // against the parent's active vendor. null → leave modelOverride unset
-    // so the child runs on the parent's configured model.
-    const activeVendor = this.deps.parentDeps.settingsService.get("llm").provider;
-    const resolvedModel = resolveSubAgentModel(args.profileModel, activeVendor);
+    // API keys resolve through the configured vendor catalog. Codex
+    // subscription selection has its own live catalog in main, while ACP
+    // subscriptions intentionally retain their persisted default model.
+    const llmSettings = this.deps.parentDeps.settingsService.get("llm");
+    const subscriptionRuntime = llmSettings.activeChatRuntime?.kind === "subscription"
+      ? llmSettings.activeChatRuntime
+      : undefined;
+    const resolvedModel = resolveSubAgentModel(
+      args.profileModel,
+      llmSettings.provider,
+      subscriptionRuntime,
+    );
+
+    // A builder carries mutable project/session overlay state. Never share it
+    // with a child: doing so can make the child read the parent's project
+    // memory, or leave child state behind for the next parent turn.
+    const parentPromptBuilder = this.deps.parentDeps.systemPromptBuilder;
+    const childSystemPromptBuilder = typeof parentPromptBuilder.createIsolated === "function"
+      ? parentPromptBuilder.createIsolated({
+          memoryManager: this.deps.subAgentMemoryManager,
+          toolRegistry: scopedRegistry,
+        })
+      // Test/minimal hosts that do not implement the concrete builder must
+      // still fail closed: create a fresh minimal builder, never reuse parent.
+      : new SystemPromptBuilder({
+          // Minimal test/host doubles sometimes implement persistence only.
+          // Supply empty prompt readers rather than falling back to the parent
+          // builder (which would reintroduce the cross-agent leak).
+          memoryManager: {
+            getAgentsMd: () => this.deps.subAgentMemoryManager.getAgentsMd?.() ?? "",
+            getMemoryIndex: (options) => this.deps.subAgentMemoryManager.getMemoryIndex?.(options) ?? "",
+            getPromptMemoryIndex: () => this.deps.subAgentMemoryManager.getPromptMemoryIndex?.() ?? "",
+            getUserPreferences: () => this.deps.subAgentMemoryManager.getUserPreferences?.() ?? "",
+            getMemoryContext: (options) => this.deps.subAgentMemoryManager.getMemoryContext?.(options) ?? "",
+            getProjectAgentsMd: (projectRoot) => this.deps.subAgentMemoryManager.getProjectAgentsMd?.(projectRoot)
+              ?? { projectRoot, layers: [], totalBytes: 0 },
+          } as MemoryManager,
+          toolRegistry: scopedRegistry,
+        });
 
     const childDeps: ConversationLoopDeps = {
       ...this.deps.parentDeps,
       toolRegistry: scopedRegistry,
+      systemPromptBuilder: childSystemPromptBuilder,
       // Route the child's session persistence to the ISOLATED subagent store
       // (`~/.lvis/subagent/`), never the parent's main-chat MemoryManager.
       // Reusing the parent store is what leaked orphan sub-agent JSONL into
@@ -1791,8 +1857,8 @@ export class SubAgentRunner {
       // load skills if the user grants — but its own session id will be
       // tracked separately via setActiveSessionId.
       skillOverlay: this.deps.parentDeps.skillOverlay,
-      // #1112: per-profile model override. undefined when unresolved so the
-      // child inherits the parent vendor block's model.
+      // #1112: per-profile model override. Undefined keeps the active
+      // runtime's persisted model selection.
       modelOverride: resolvedModel ?? undefined,
     };
     return { childDeps, scopedTools };

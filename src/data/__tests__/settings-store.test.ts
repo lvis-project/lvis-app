@@ -31,6 +31,7 @@ import {
 } from "../../shared/llm-vendor-defaults.js";
 import { llmModelListCacheKey } from "../../shared/llm-model-list.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
+import { MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH } from "../../shared/subscription-runtime.js";
 
 describe("SettingsService remote A2A canonical route-control origin", () => {
   let userDataPath: string;
@@ -545,6 +546,63 @@ describe("SettingsService removes plugin-specific legacy host settings", () => {
   });
 });
 
+describe("SettingsService removed manual host-resolver map", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-host-map-"));
+    mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    rmSync(userDataPath, { recursive: true, force: true });
+  });
+
+  // The manual host-resolver map was removed with the private-endpoint access
+  // path. A value written by an older build is inert, but it is a user-authored
+  // internal-hostname mapping — the load path must drop it so the next write
+  // erases it from disk rather than leaving it persisted with nothing acting
+  // on it.
+  it("drops a persisted llm.hostResolverMap on load and on the next write", async () => {
+    const settingsPath = join(userDataPath, "lvis-settings.json");
+    writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        llm: {
+          provider: "openai",
+          hostResolverMap: "10.0.0.10 internal-endpoint.example.com",
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+    // Sibling llm fields still load — the drop is selective, not the whole block.
+    expect(service.get("llm").provider).toBe("openai");
+    expect(service.get("llm")).not.toHaveProperty("hostResolverMap");
+
+    await service.patch({ llm: { streamSmoothing: "word" } });
+    expect(service.get("llm").streamSmoothing).toBe("word");
+    expect(service.get("llm")).not.toHaveProperty("hostResolverMap");
+    const onDisk = JSON.parse(readFileSync(settingsPath, "utf-8")) as { llm: Record<string, unknown> };
+    expect(onDisk.llm).not.toHaveProperty("hostResolverMap");
+    expect(JSON.stringify(onDisk)).not.toContain("internal-endpoint.example.com");
+  });
+
+  // A patch cannot reintroduce the key either — `llm` is rebuilt field by field
+  // from a fixed literal, so an unknown key never survives normalization.
+  it("ignores an attempt to write llm.hostResolverMap back", async () => {
+    const service = new SettingsService({ userDataPath });
+
+    await service.patch({ llm: { hostResolverMap: "10.0.0.11 other.example.com" } } as never);
+
+    expect(service.get("llm")).not.toHaveProperty("hostResolverMap");
+    const settingsPath = join(userDataPath, "lvis-settings.json");
+    expect(readFileSync(settingsPath, "utf-8")).not.toContain("other.example.com");
+  });
+});
+
 describe("SettingsService plugin uninstall cleanup", () => {
   let userDataPath: string;
 
@@ -626,20 +684,62 @@ describe("SettingsService role presets", () => {
     expect(service.get("chat").autoCompact).toBe(false);
   });
 
-  it("defaults idle preference refresh on and normalizes the flag to boolean only", async () => {
+  it("defaults idle preference refresh off and normalizes the flag to boolean only", async () => {
     const service = new SettingsService({ userDataPath });
-    expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
+    expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
 
     await service.patch({ features: { idlePreferenceRefresh: false } });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
 
-    // A non-boolean patch is rejected — the value stays at its current `false`,
-    // NOT silently reset to the `true` default (which would mask the rejection).
+    // A non-boolean patch is rejected — the value stays at its current `false`
+    // instead of silently changing the user's opt-in choice.
     await service.patch({ features: { idlePreferenceRefresh: "yes" } as never });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(false);
 
     await service.patch({ features: { idlePreferenceRefresh: true } });
     expect(service.get("features")?.idlePreferenceRefresh).toBe(true);
+  });
+
+  it("defaults idle long-term-memory consolidation off and accepts booleans only", async () => {
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("features")?.idleMemoryConsolidation).toBe(false);
+
+    await service.patch({ features: { idleMemoryConsolidation: false } });
+    expect(service.get("features")?.idleMemoryConsolidation).toBe(false);
+
+    // A non-boolean must not silently opt a user into provider-backed idle work.
+    await service.patch({ features: { idleMemoryConsolidation: "yes" } as never });
+    expect(service.get("features")?.idleMemoryConsolidation).toBe(false);
+
+    await service.patch({ features: { idleMemoryConsolidation: true } });
+    expect(service.get("features")?.idleMemoryConsolidation).toBe(true);
+  });
+
+  it("defaults LLM-reviewed memory capture off and accepts only the supported modes", async () => {
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("features")?.memoryCaptureMode).toBe("off");
+
+    await service.patch({ features: { memoryCaptureMode: "review" } });
+    expect(service.get("features")?.memoryCaptureMode).toBe("review");
+    await service.patch({ features: { memoryCaptureMode: "auto" } });
+    expect(service.get("features")?.memoryCaptureMode).toBe("auto");
+
+    // Invalid data must not silently alter the user's provider-backed capture choice.
+    await service.patch({ features: { memoryCaptureMode: "always" as never } });
+    expect(service.get("features")?.memoryCaptureMode).toBe("auto");
+    expect(new SettingsService({ userDataPath }).get("features")?.memoryCaptureMode).toBe("auto");
+
+    const corruptPath = mkdtempSync(join(tmpdir(), "settings-memory-capture-mode-"));
+    try {
+      writeFileSync(
+        join(corruptPath, "lvis-settings.json"),
+        JSON.stringify({ features: { memoryCaptureMode: "always" } }),
+        "utf-8",
+      );
+      expect(new SettingsService({ userDataPath: corruptPath }).get("features")?.memoryCaptureMode).toBe("off");
+    } finally {
+      rmSync(corruptPath, { recursive: true, force: true });
+    }
   });
 
   it("keeps the A2A loopback server off by default and accepts booleans only", async () => {
@@ -738,6 +838,141 @@ describe("SettingsService LLM per-vendor patching", () => {
     expect(getLlmVendorSettings(llm.vendors, "azure-foundry").model).toBe(
       "gpt-5.4-mini",
     );
+  });
+
+  it("migrates legacy API provider/model settings to the API chat runtime", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        llm: {
+          provider: "openai",
+          vendors: { openai: { model: "gpt-5-turbo" } },
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath });
+    const llm = service.get("llm");
+
+    expect(llm.activeChatRuntime).toEqual({ kind: "api" });
+    expect(llm.provider).toBe("openai");
+    expect(getLlmVendorSettings(llm.vendors, "openai").model).toBe("gpt-5-turbo");
+  });
+
+  it("keeps API configuration and secrets while selecting a subscription runtime", async () => {
+    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    await service.patch({
+      llm: {
+        provider: "openai",
+        vendors: { openai: { model: "gpt-5-turbo" } },
+      },
+    });
+    await service.setSecret("llm.apiKey.openai", "existing-api-key");
+
+    await service.patch({
+      llm: {
+        activeChatRuntime: {
+          kind: "subscription",
+          provider: "codex",
+          model: " gpt-5.4 ",
+        },
+      },
+    });
+
+    const llm = service.get("llm");
+    expect(llm.activeChatRuntime).toEqual({
+      kind: "subscription",
+      provider: "codex",
+      model: "gpt-5.4",
+    });
+    expect(llm.provider).toBe("openai");
+    expect(getLlmVendorSettings(llm.vendors, "openai").model).toBe("gpt-5-turbo");
+    expect(service.getSecret("llm.apiKey.openai")).toBe("existing-api-key");
+
+    const reloaded = new SettingsService({ userDataPath, secretPolicy: "development" });
+    expect(reloaded.get("llm").activeChatRuntime).toEqual(llm.activeChatRuntime);
+    expect(reloaded.getSecret("llm.apiKey.openai")).toBe("existing-api-key");
+  });
+
+  it("drops invalid subscription models without changing the selected runtime", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({
+      llm: {
+        activeChatRuntime: {
+          kind: "subscription",
+          provider: "kimi-code",
+          model: "x".repeat(MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH + 1),
+        },
+      },
+    });
+
+    expect(service.get("llm").activeChatRuntime).toEqual({
+      kind: "subscription",
+      provider: "kimi-code",
+    });
+  });
+
+  it.each(["kimi-code", "grok-build"] as const)(
+    "drops a legacy ACP model selection while retaining %s",
+    async (provider) => {
+      writeFileSync(
+        join(userDataPath, "lvis-settings.json"),
+        JSON.stringify({
+          llm: {
+            activeChatRuntime: {
+              kind: "subscription",
+              provider,
+              model: "legacy-provider-model",
+            },
+          },
+        }),
+        "utf-8",
+      );
+
+      const service = new SettingsService({ userDataPath });
+      expect(service.get("llm").activeChatRuntime).toEqual({
+        kind: "subscription",
+        provider,
+      });
+    },
+  );
+
+  it("fails closed unknown subscription runtime ids while preserving API settings", async () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        llm: {
+          activeChatRuntime: {
+            kind: "subscription",
+            provider: "removed-runtime",
+            model: "untrusted-model",
+          },
+          provider: "openai",
+          vendors: { openai: { model: "gpt-5-turbo" } },
+        },
+      }),
+      "utf-8",
+    );
+
+    const service = new SettingsService({ userDataPath, secretPolicy: "development" });
+    await service.setSecret("llm.apiKey.openai", "existing-api-key");
+    expect(service.get("llm").activeChatRuntime).toEqual({ kind: "api" });
+    expect(service.get("llm").provider).toBe("openai");
+    expect(getLlmVendorSettings(service.get("llm").vendors, "openai").model)
+      .toBe("gpt-5-turbo");
+
+    await service.patch({
+      llm: {
+        activeChatRuntime: {
+          kind: "subscription",
+          provider: "unknown-runtime",
+        } as never,
+      },
+    });
+
+    expect(service.get("llm").activeChatRuntime).toEqual({ kind: "api" });
+    expect(service.getSecret("llm.apiKey.openai")).toBe("existing-api-key");
   });
 
   it("prunes legacy default marketplace vendor blocks while preserving custom ones", () => {

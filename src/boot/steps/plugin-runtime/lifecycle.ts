@@ -14,7 +14,7 @@ import { t } from "../../../i18n/index.js";
 import { createLogger } from "../../../lib/logger.js";
 import { sendToWindow } from "../../../ipc/safe-send.js";
 import { declaresHostManagedPythonRuntime } from "./manifest.js";
-import type { PluginRuntime, PluginRuntimeOptions,
+import type { PluginRuntimeOptions,
 } from "../../../plugins/runtime.js";
 import type { PythonRuntimeBootstrapper } from "../../../main/python-runtime.js";
 import type { LateBindingRefs } from "../plugin-runtime.js";
@@ -24,7 +24,6 @@ const log = createLogger("lvis");
 
 /** Explicit deps for the lifecycle callbacks. Lazy bindings arrive as getters. */
 export interface LifecycleDeps {
-  getPluginRuntime: () => PluginRuntime;
   lateBinding: LateBindingRefs;
   getMainWindow?: () => BrowserWindow | null;
   mainWindow: BrowserWindow;
@@ -42,7 +41,6 @@ export function createLifecycleCallbacks(
   deps: LifecycleDeps,
 ): Pick<PluginRuntimeOptions, "preparePluginStart" | "onDisable" | "onActiveStateChange" | "onEnable"> {
   const {
-    getPluginRuntime,
     lateBinding,
     getMainWindow,
     mainWindow,
@@ -78,11 +76,9 @@ export function createLifecycleCallbacks(
           message: t("be_pluginRuntime.pluginRuntimeReady"),
           progressPct: 100,
         });
-        const pluginRuntime = getPluginRuntime();
-        pluginRuntime.mergeConfigOverride(pluginId, { pythonExecutable: runtime.pythonPath,
-        });
         log.info("plugin dependency runtime ready: %s -> %s", pluginId, runtime.pythonPath,
         );
+        return { configOverride: { pythonExecutable: runtime.pythonPath } };
       })();
     },
     onDisable: (pluginId) => {
@@ -103,11 +99,8 @@ export function createLifecycleCallbacks(
     // `도구를 찾을 수 없습니다` post-restart (see PR #760). Non-fatal:
     // a sync exception is logged but does not become `runtime reload failed`.
     onEnable: (pluginId) => {
-      // `restartAll()` is also the managed-marketplace first-sync path:
-      // ensureManagedInstalled() writes the registry, then restartAll() loads
-      // the new plugin without emitting plugin.installed. Register the
-      // partition preload here so freshly managed plugin UIs get
-      // window.lvisPlugin immediately instead of only after app restart.
+      // Register the partition preload on every live enable/reload path so the
+      // refreshed plugin UI receives window.lvisPlugin immediately.
       installLoadedPluginPartitionPolicy(pluginId);
       // legacy-removal flag-day: ALL plugins register through the loopback manager
       // (server/discover → tools/list → reverse projection from `_meta`) — the

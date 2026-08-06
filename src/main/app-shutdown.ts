@@ -12,7 +12,10 @@ import { createLogger, closeFileLogSink } from "../lib/logger.js";
 import { logger as rootPinoLogger } from "../lib/logger.js";
 import { runShutdownRoutines } from "./shutdown-routines.js";
 import { stopLocalApiServer } from "./local-api-server.js";
+import { stopTailnetObserverServer } from "./tailnet-surface-server.js";
+import { stopTelegramBridgeServer } from "./telegram-bridge-server.js";
 import { stopRemoteA2AReceiverServer } from "./a2a-remote-receiver-server.js";
+import { stopSubscriptionRuntimes } from "./subscription-runtime-service.js";
 import { unregisterAllGlobalShortcuts } from "./global-shortcuts.js";
 import { forceKillManagedChildProcesses } from "./managed-child-processes.js";
 import { killAllTerminals } from "./terminal/pty-manager.js";
@@ -81,6 +84,13 @@ export async function runAppShutdownCleanup(options: {
   const cleanupTimeoutMs = resolveShutdownCleanupTimeoutMs();
   appShutdownCleanupPromise = (async () => {
     const result = await runCleanupWithHardTimeout(async (signal) => {
+      // A subscription runtime owns long-lived child processes. Keep it alive
+      // through plugin/routine teardown in the normal path, but do not leave
+      // it behind when an earlier shutdown stage throws or observes the hard
+      // timeout signal. The fallback stop failure is deliberately contained so
+      // it cannot mask the stage failure that caused this cleanup to fail.
+      let subscriptionRuntimesStopped = false;
+      try {
       // E4 — release OS-level global shortcuts FIRST (fast, synchronous, cannot
       // throw past its own internal try/catch) so a wedged or throwing later
       // step can't leave accelerators bound after quit. Ordered ahead of
@@ -101,6 +111,17 @@ export async function runAppShutdownCleanup(options: {
       // when the gate was off this boot.
       await stopLocalApiServer();
       if (signal.aborted) return;
+      // Tailnet observer is a separate listener over the shared projection.
+      // Close its SSE streams before the host conversation runtime is disposed.
+      await stopTailnetObserverServer();
+      if (signal.aborted) return;
+
+      // Telegram is a distinct external-platform ingress/egress adapter. Its
+      // runtime guard is revoked before the shared conversation services go
+      // down, so a late webhook or queued delivery cannot outlive shutdown.
+      await stopTelegramBridgeServer();
+      if (signal.aborted) return;
+
       // Independent P4-5 listener: close it before the owning remote runtime
       // is disposed by services.shutdown(). This is a no-op when its gate was
       // OFF and is idempotent on repeated cleanup attempts.
@@ -112,6 +133,13 @@ export async function runAppShutdownCleanup(options: {
       // 5s timeout so a hung LLM call cannot block app.quit() indefinitely.
       await runShutdownRoutines(svc);
       if (signal.aborted) return;
+      // Plugin shutdown handlers and shutdown-trigger routines may make normal
+      // host LLM calls. Keep the subscription runtime live for both, then stop
+      // it immediately at the service-shutdown boundary so no later teardown
+      // can create a new text session.
+      await stopSubscriptionRuntimes();
+      subscriptionRuntimesStopped = true;
+      if (signal.aborted) return;
       await svc.shutdown?.();
       if (signal.aborted) return;
       // Kill any live interactive PTY terminals (#1444). The pty children are
@@ -119,6 +147,17 @@ export async function runAppShutdownCleanup(options: {
       // ChildProcess), so force them down here on the graceful path.
       killAllTerminals();
       await svc.pluginRuntime.stopAll();
+      } finally {
+        if (!subscriptionRuntimesStopped) {
+          try {
+            await stopSubscriptionRuntimes();
+          } catch {
+            // Preserve the original shutdown-stage failure. The failed branch
+            // below performs a managed-child force-kill as the final fallback.
+            log.warn("shutdown: subscription runtime fallback stop failed");
+          }
+        }
+      }
     }, cleanupTimeoutMs);
 
     if (result.status === "timed-out") {
@@ -147,7 +186,16 @@ export async function runAppShutdownCleanup(options: {
     }
 
     if (result.status === "failed") {
-      log.error("%s: shutdown cleanup failed: %s", options.reason, errorMessage(result.error));
+      // A failed lifecycle stage may have prevented a runtime-owned child from
+      // acknowledging its graceful stop. The normal stop ran in the cleanup
+      // finally block; this is only the last-resort descendant-safe backstop.
+      const killedChildCount = forceKillManagedChildProcesses(`${options.reason} cleanup failed`);
+      log.error(
+        { killedChildCount },
+        "%s: shutdown cleanup failed: %s",
+        options.reason,
+        errorMessage(result.error),
+      );
       await flushLogger();
       // LAST step (failed path): close the file sink after the failure
       // diagnostic has been flushed. See the timed-out branch above.

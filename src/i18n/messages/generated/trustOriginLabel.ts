@@ -7,6 +7,9 @@ export const en = {
   "trustOriginLabel.llmToolArg": "Model generated argument",
   "trustOriginLabel.fileContent": "Based on file content",
   "trustOriginLabel.unknown": "Unknown origin",
+  "trustOriginLabel.surfaceUser": "External surface input",
+  "trustOriginLabel.tailnetSurface": "Tailnet controller input",
+  "trustOriginLabel.platformBridge": "External chat platform input",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "trustOriginLabel.userKeyboard": "사용자 직접 입력",
@@ -16,4 +19,7 @@ export const ko: Record<keyof typeof en, string> = {
   "trustOriginLabel.llmToolArg": "모델 생성 인자",
   "trustOriginLabel.fileContent": "파일 내용 기반",
   "trustOriginLabel.unknown": "출처 미확인",
+  "trustOriginLabel.surfaceUser": "외부 표면 입력",
+  "trustOriginLabel.tailnetSurface": "Tailnet 컨트롤러 입력",
+  "trustOriginLabel.platformBridge": "외부 채팅 플랫폼 입력",
 };

@@ -12,6 +12,9 @@ import {
 import { t } from "../i18n/index.js";
 import { ipcUserKeyboardIntent } from "./gesture-intent.js";
 import { mcpApiSurface } from "./mcp-api-surface.js";
+import { buildTelegramConnectionApiSurface } from "./telegram-connection-api-surface.js";
+import { buildTailnetSharingApiSurface } from "./tailnet-sharing-api-surface.js";
+import { buildAwayAuthorityApiSurface } from "./away-authority-api-surface.js";
 import { PLUGIN_PRIVATE_NAMESPACES } from "../plugins/capabilities.js";
 import type {
   PermissionReviewSuggestionPayload,
@@ -30,6 +33,10 @@ import type { StreamEvent, ChatEntry } from "../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../shared/subagent-events.js";
 import type { SerializedHistoryMessage } from "../shared/chat-history.js";
 import type { TurnResult } from "../engine/conversation-loop.js";
+import {
+  isSubscriptionRuntimeStatusUpdatedEvent,
+  type SubscriptionRuntimeStatusUpdatedEvent,
+} from "../shared/subscription-runtime.js";
 
 type MemoryProjectOptions = {
   projectRoot?: string;
@@ -56,11 +63,33 @@ function invokeMemorySearch<T>(
     : ipcRenderer.invoke(channel, query, opts) as Promise<T>;
 }
 
+function invokeMemoryDelete<T>(
+  channel: string,
+  filename: string,
+  opts?: MemoryProjectOptions,
+): Promise<T> {
+  return opts === undefined
+    ? ipcRenderer.invoke(channel, filename) as Promise<T>
+    : ipcRenderer.invoke(channel, filename, opts) as Promise<T>;
+}
+
+function invokeMemoryCandidateAction<T>(
+  channel: string,
+  id: string,
+  opts?: MemoryProjectOptions,
+): Promise<T> {
+  return opts === undefined
+    ? ipcRenderer.invoke(channel, { id }) as Promise<T>
+    : ipcRenderer.invoke(channel, { id, opts }) as Promise<T>;
+}
+
 type PluginActionResult =
   | {
       ok: true;
       pluginId: string;
       installed?: true;
+      /** The install was a no-op: the marketplace had nothing but what is already on disk. */
+      unchanged?: true;
       uninstalled?: true;
       rolledBackTo?: string;
       version?: string;
@@ -84,6 +113,7 @@ export function normalizePluginActionResult(result: unknown): PluginActionResult
     ? result as {
         pluginId?: unknown;
         installed?: unknown;
+        unchanged?: unknown;
         uninstalled?: unknown;
         rolledBackTo?: unknown;
         version?: unknown;
@@ -103,6 +133,9 @@ export function normalizePluginActionResult(result: unknown): PluginActionResult
   };
   if (installed) {
     normalized.installed = true;
+  }
+  if (payload.unchanged === true) {
+    normalized.unchanged = true;
   }
   if (uninstalled) {
     normalized.uninstalled = true;
@@ -160,7 +193,6 @@ export function buildInternalApiSurface() {
   // ─── Settings ────────────────────────────────────
   getSettings: async () => ipcRenderer.invoke(CHANNELS.settings.get),
   updateSettings: async (partial: unknown) => ipcRenderer.invoke(CHANNELS.settings.update, partial),
-  applyHostMap: async (hostResolverMap: string) => ipcRenderer.invoke(SETTINGS.applyHostMap, hostResolverMap),
   remoteA2a: {
     targets: async () => ipcRenderer.invoke(CHANNELS.remoteA2a.targets),
     status: async () => ipcRenderer.invoke(CHANNELS.remoteA2a.status),
@@ -171,15 +203,65 @@ export function buildInternalApiSurface() {
     task: async (taskHandle: string) => ipcRenderer.invoke(CHANNELS.remoteA2a.task, { taskHandle }),
     action: invokeRemoteA2AAction,
   },
+  tailnetSharing: buildTailnetSharingApiSurface(),
+  telegramConnection: buildTelegramConnectionApiSurface(),
+  awayAuthority: buildAwayAuthorityApiSurface(),
   onSettingsUpdated: (handler: (settings: unknown) => void) => {
     const listener = (_event: unknown, settings: unknown) => handler(settings);
     ipcRenderer.on(SETTINGS.updated, listener);
     return () => ipcRenderer.removeListener(SETTINGS.updated, listener);
   },
+  onSubscriptionRuntimeStatusUpdated: (
+    handler: (event: SubscriptionRuntimeStatusUpdatedEvent) => void,
+  ) => {
+    const listener = (_event: unknown, payload: unknown) => {
+      if (isSubscriptionRuntimeStatusUpdatedEvent(payload)) {
+        handler(payload);
+      }
+    };
+    ipcRenderer.on(CHANNELS.settings.subscriptionRuntimeStatusUpdated, listener);
+    return () => ipcRenderer.removeListener(CHANNELS.settings.subscriptionRuntimeStatusUpdated, listener);
+  },
   setApiKey: async (vendor: string, apiKey: string) => ipcRenderer.invoke(CHANNELS.settings.setApiKey, vendor, apiKey),
   hasApiKey: async (vendor?: string) => ipcRenderer.invoke(CHANNELS.settings.hasApiKey, vendor) as Promise<boolean>,
   deleteApiKey: async (vendor: string) => ipcRenderer.invoke(CHANNELS.settings.deleteApiKey, vendor),
   listLlmModels: async (request: unknown) => ipcRenderer.invoke(CHANNELS.settings.listLlmModels, request),
+  codexSubscriptionStatus: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionStatus),
+  codexSubscriptionStartBrowserLogin: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionStartBrowserLogin),
+  codexSubscriptionStartDeviceCodeLogin: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionStartDeviceCodeLogin),
+  codexSubscriptionCancelLogin: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionCancelLogin),
+  codexSubscriptionLogout: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionLogout),
+  codexSubscriptionListModels: async () => ipcRenderer.invoke(CHANNELS.settings.codexSubscriptionListModels),
+  subscriptionRuntimeStatus: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionRuntimeStatus, provider),
+  subscriptionChooseRuntime: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionChooseRuntime, provider),
+  subscriptionForgetRuntime: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionForgetRuntime, provider),
+  subscriptionVerifyRuntime: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionVerifyRuntime, provider),
+  subscriptionStartLogin: async (provider: unknown, method: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionStartLogin, provider, method),
+  subscriptionOpenLoginBrowser: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionOpenLoginBrowser, provider),
+  subscriptionCancelLogin: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionCancelLogin, provider),
+  subscriptionLogout: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionLogout, provider),
+  subscriptionListModels: async (provider: unknown) =>
+    ipcRenderer.invoke(CHANNELS.settings.subscriptionListModels, provider),
+  subscriptionUseForChat: async (provider: unknown, model?: unknown) => model === undefined
+    ? ipcRenderer.invoke(CHANNELS.settings.subscriptionUseForChat, provider)
+    : ipcRenderer.invoke(CHANNELS.settings.subscriptionUseForChat, provider, model),
+  subscriptionUseApiForChat: async () => ipcRenderer.invoke(CHANNELS.settings.subscriptionUseApiForChat),
+  acpSubscriptionStatus: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionStatus, provider),
+  acpSubscriptionChooseRuntime: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionChooseRuntime, provider),
+  acpSubscriptionForgetRuntime: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionForgetRuntime, provider),
+  acpSubscriptionVerify: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionVerify, provider),
+  acpSubscriptionStartLogin: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionStartLogin, provider),
+  acpSubscriptionOpenLoginBrowser: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionOpenLoginBrowser, provider),
+  acpSubscriptionCancelLogin: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionCancelLogin, provider),
+  acpSubscriptionLogout: async (provider: unknown) => ipcRenderer.invoke(CHANNELS.settings.acpSubscriptionLogout, provider),
   installMarketplaceProviderPreset: async (preset: unknown) =>
     ipcRenderer.invoke(CHANNELS.settings.marketplaceInstallProviderPreset, preset),
   uninstallMarketplaceProviderPreset: async (providerId: string) =>
@@ -398,9 +480,16 @@ export function buildInternalApiSurface() {
   // ─── Memory ──────────────────────────────────────
   memoryListEntries: async (opts?: MemoryProjectOptions) =>
     invokeWithOptionalMemoryOptions(CHANNELS.memory.entriesList, opts),
+  memoryListCandidates: async (opts?: MemoryProjectOptions) =>
+    invokeWithOptionalMemoryOptions(CHANNELS.memory.candidatesList, opts),
   memorySaveEntry: async (title: string, content: string, opts?: MemoryProjectOptions) =>
     ipcRenderer.invoke(CHANNELS.memory.entriesSave, title, content, opts),
-  memoryDeleteEntry: async (filename: string) => ipcRenderer.invoke(CHANNELS.memory.entriesDelete, filename),
+  memoryDeleteEntry: async (filename: string, opts?: MemoryProjectOptions) =>
+    invokeMemoryDelete(CHANNELS.memory.entriesDelete, filename, opts),
+  memoryActivateCandidate: async (id: string, opts?: MemoryProjectOptions) =>
+    invokeMemoryCandidateAction(CHANNELS.memory.candidateActivate, id, opts),
+  memoryDeleteCandidate: async (id: string, opts?: MemoryProjectOptions) =>
+    invokeMemoryCandidateAction(CHANNELS.memory.candidateDelete, id, opts),
   memorySearchEntries: async (query: string, opts?: MemoryProjectOptions) =>
     invokeMemorySearch(CHANNELS.memory.entriesSearch, query, opts),
   memoryGetIndex: async (opts?: MemoryProjectOptions) =>
@@ -418,6 +507,7 @@ export function buildInternalApiSurface() {
   memoryGetUserPrefs: async () => ipcRenderer.invoke(CHANNELS.memory.userPrefsGet) as Promise<string>,
   memoryUpdateUserPrefs: async (content: string) => ipcRenderer.invoke(CHANNELS.memory.userPrefsUpdate, content),
   memoryRefreshUserPrefs: async () => ipcRenderer.invoke(CHANNELS.memory.userPrefsRefresh),
+  memoryRefreshLongTerm: async () => ipcRenderer.invoke(CHANNELS.memory.longTermRefresh),
 
   // ─── Plugins ─────────────────────────────────────
   listPersonaPromptSummaries: async () => ipcRenderer.invoke(CHANNELS.prompts.listSummaries),

@@ -21,6 +21,16 @@ import type { ReadyBootContext } from "./context.js";
 
 export function assembleAppServices(ctx: ReadyBootContext): AppServices {
   let shutdownPromise: Promise<void> | null = null;
+  let activeLlmWildcardDisposed = false;
+
+  // App cleanup invokes plugin shutdown handlers before `services.shutdown()`.
+  // Dispose here as well as in `shutdown()` so a pending vendor-change debounce
+  // cannot restart a plugin while its shutdown hook is running.
+  const disposeActiveLlmWildcard = (): void => {
+    if (activeLlmWildcardDisposed) return;
+    ctx.disposeRefreshActiveLlmWildcard();
+    activeLlmWildcardDisposed = true;
+  };
 
   return {
     pythonRuntime: ctx.pythonRuntime,
@@ -31,6 +41,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     a2aRemoteRuntime: ctx.a2aRemoteRuntime,
     remoteA2AActionController: ctx.remoteA2AActionController,
     memoryManager: ctx.memoryManager,
+    memoryCaptureService: ctx.memoryCaptureService,
     inputClassifier: ctx.inputClassifier,
     routeEngine: ctx.routeEngine,
     toolRegistry: ctx.toolRegistry,
@@ -52,6 +63,8 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     skillArtifactStore: ctx.skillArtifactStore,
     idleScheduler: ctx.idleScheduler,
     preferenceRefreshService: ctx.preferenceRefreshService,
+    memoryConsolidationService: ctx.memoryConsolidationService,
+    memoryMaintenanceCoordinator: ctx.memoryMaintenanceCoordinator,
     bashAstValidator: ctx.bashAstValidator,
     auditService: ctx.auditService,
     auditLogger: ctx.bootAuditLogger,
@@ -80,7 +93,10 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     telemetry: ctx.telemetry,
     pluginTelemetry: ctx.pluginTelemetry,
     autoUpdaterStop: ctx.autoUpdaterStop,
-    runPluginShutdownHandlers: ctx.runPluginShutdownHandlers,
+    runPluginShutdownHandlers: async () => {
+      disposeActiveLlmWildcard();
+      await ctx.runPluginShutdownHandlers();
+    },
     pluginPaths: ctx.pluginPaths,
     clearAuthPartitionService,
     forgetPluginAuthPartitionsService,
@@ -115,11 +131,15 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
           }
         };
 
+        // Direct callers bypass the app-level plugin-shutdown phase.
+        attempt(disposeActiveLlmWildcard);
         attempt(() => ctx.disposePluginNotifications());
         attempt(() => ctx.disposePluginEventBridge());
         attempt(() => ctx.autoUpdaterStop?.());
         attempt(() => ctx.telemetry?.stop());
         attempt(() => ctx.pluginTelemetry?.stop());
+        attempt(() => ctx.memoryMaintenanceCoordinator.stop());
+        attempt(() => ctx.memoryCaptureService.stop());
         attempt(() => ctx.preferenceRefreshService.stop());
         attempt(() => ctx.idleScheduler?.stop());
         attempt(() => ctx.a2aRemoteRuntime?.dispose());

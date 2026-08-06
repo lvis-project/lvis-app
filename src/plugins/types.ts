@@ -94,6 +94,16 @@ export interface PluginMarketplaceItem {
   /** Structured target for provider/theme/language-pack marketplace packages. */
   packageAsset?: MarketplacePackageAsset;
   /**
+   * Display-only compatibility result for an app that must update before this
+   * package can be installed. This must never carry install metadata.
+   */
+  upgradeRequired?: {
+    code: "upgrade_required";
+    /** Omitted only when Marketplace cannot provide a trusted exact minimum. */
+    minAppVersion?: string;
+    message: string;
+  };
+  /**
    * MCP runtime block — present when `pluginType === "mcp"` and the
    * server has the schema extension. The host materializes this into
    * the user's mcp-servers.json after install. The authoritative copy

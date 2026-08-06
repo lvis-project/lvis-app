@@ -1,5 +1,5 @@
 /**
- * Structured Compact tests — LLM compact interface + parser + freeze invariant + LLM call.
+ * Structured Compact tests — recap reviewer interface + parser + freeze invariant.
  * `compactWithBoundary()` 는 `ConversationLoop.runPreflightGuard` 에서 호출됨.
  */
 import { mkdtempSync, rmSync } from "node:fs";
@@ -14,8 +14,9 @@ import {
   compactWithBoundary,
   renderBoundaryAsPreamble,
   type CompactBoundary,
+  type CompactRecapReviewer,
 } from "../structured-compact.js";
-import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
+import type { GenericMessage } from "../llm/types.js";
 
 let originalLvisHome: string | undefined;
 let testLvisHome: string | null = null;
@@ -278,16 +279,19 @@ describe("freezeBoundary — Object.freeze invariant (P7)", () => {
   });
 });
 
-// ─── compactWithBoundary (LLM call) ──────────
+// ─── compactWithBoundary (recap reviewer call) ──────────
 
-function makeMockLlm(responses: string[]): LLMProvider {
+function makeMockReviewer(responses: string[]): CompactRecapReviewer {
   let idx = 0;
   return {
-    vendor: "claude",
-    async *streamTurn(): AsyncIterable<StreamEvent> {
-      const text = responses[idx++] ?? responses[responses.length - 1] ?? "";
-      yield { type: "text_delta", text } satisfies StreamEvent;
-      yield { type: "message_complete", stopReason: "end_turn" } satisfies StreamEvent;
+    review: async (task, _prompt, options) => {
+      if (task !== "recap") {
+        throw new Error(`Unexpected compact reviewer task: ${task}`);
+      }
+      if (options?.signal?.aborted) {
+        throw new Error("LLM compact aborted by signal");
+      }
+      return responses[idx++] ?? responses[responses.length - 1] ?? "";
     },
   };
 }
@@ -333,15 +337,14 @@ function makeLongHistory(turnCount: number): GenericMessage[] {
   return out;
 }
 
-describe("compactWithBoundary — LLM call integration", () => {
-  it("splits, calls LLM, parses, returns frozen boundary + new history", async () => {
-    const llm = makeMockLlm([makeFullSummaryText()]);
+describe("compactWithBoundary — recap reviewer integration", () => {
+  it("splits, calls the reviewer, parses, returns frozen boundary + new history", async () => {
+    const memoryReviewer = makeMockReviewer([makeFullSummaryText()]);
     const messages = makeLongHistory(50);
 
     const r = await compactWithBoundary({
       messages,
-      llm,
-      model: "claude-sonnet-4-6",
+      memoryReviewer,
       preserveRecentTokens: 200, // 작게 잡아서 split 발생 보장
       sessionId: "test-sess",
       preflightTokens: 100_000,
@@ -360,16 +363,41 @@ describe("compactWithBoundary — LLM call integration", () => {
     expect(r.boundary!.compactNum).toBe(1);
   });
 
+  it("uses the required common no-tool Memory Reviewer for recap", async () => {
+    let reviewCall:
+      | { task: "recap"; prompt: string; options?: { systemPrompt?: string; signal?: AbortSignal } }
+      | undefined;
+    const memoryReviewer: CompactRecapReviewer = {
+      review: async (task, prompt, options) => {
+        reviewCall = { task, prompt, options };
+        return makeFullSummaryText();
+      },
+    };
+
+    const result = await compactWithBoundary({
+      messages: makeLongHistory(50),
+      memoryReviewer,
+      preserveRecentTokens: 200,
+      sessionId: "test-sess",
+      preflightTokens: 100_000,
+      compactNum: 1,
+    });
+
+    expect(result.status).toBe("summarized");
+    expect(reviewCall?.task).toBe("recap");
+    expect(reviewCall?.prompt).toContain("[user]");
+    expect(reviewCall?.options?.systemPrompt).toContain("summary");
+  });
+
   it("returns NOOP status when nothing to compact (preserveRecentTokens covers all)", async () => {
-    const llm = makeMockLlm(["(should not be called)"]);
+    const memoryReviewer = makeMockReviewer(["(should not be called)"]);
     const messages: GenericMessage[] = [
       { role: "user", content: "hi" },
       { role: "assistant", content: "hello" },
     ];
     const r = await compactWithBoundary({
       messages,
-      llm,
-      model: "claude-sonnet-4-6",
+      memoryReviewer,
       preserveRecentTokens: 1_000_000,
       sessionId: "test-sess",
       preflightTokens: 100_000,
@@ -382,7 +410,7 @@ describe("compactWithBoundary — LLM call integration", () => {
   });
 
   it("keeps the last 5 user turns and their assistant turnSummary metadata verbatim", async () => {
-    const llm = makeMockLlm([makeFullSummaryText()]);
+    const memoryReviewer = makeMockReviewer([makeFullSummaryText()]);
     const messages: GenericMessage[] = [];
     for (let i = 1; i <= 8; i++) {
       messages.push({ role: "user", content: `질문 ${i}` });
@@ -404,8 +432,7 @@ describe("compactWithBoundary — LLM call integration", () => {
 
     const r = await compactWithBoundary({
       messages,
-      llm,
-      model: "claude-sonnet-4-6",
+      memoryReviewer,
       preserveRecentTokens: 0,
       sessionId: "test-sess-recent-turns",
       preflightTokens: 100_000,
@@ -424,7 +451,7 @@ describe("compactWithBoundary — LLM call integration", () => {
   });
 
   it("keeps the pending user question plus the previous 5 completed user turns", async () => {
-    const llm = makeMockLlm([makeFullSummaryText()]);
+    const memoryReviewer = makeMockReviewer([makeFullSummaryText()]);
     const messages: GenericMessage[] = [];
     for (let i = 1; i <= 8; i++) {
       messages.push({ role: "user", content: `이전 질문 ${i}` });
@@ -447,8 +474,7 @@ describe("compactWithBoundary — LLM call integration", () => {
 
     const r = await compactWithBoundary({
       messages,
-      llm,
-      model: "claude-sonnet-4-6",
+      memoryReviewer,
       preserveRecentTokens: 0,
       sessionId: "test-sess-pending-turn",
       preflightTokens: 100_000,
@@ -475,13 +501,12 @@ describe("compactWithBoundary — LLM call integration", () => {
 
   it("retries parse failure once, then graceful raw fallback", async () => {
     // 두 번 모두 형식 위반 → raw fallback
-    const llm = makeMockLlm(["bad response 1", "bad response 2"]);
+    const memoryReviewer = makeMockReviewer(["bad response 1", "bad response 2"]);
     const messages = makeLongHistory(50);
 
     const r = await compactWithBoundary({
       messages,
-      llm,
-      model: "claude-sonnet-4-6",
+      memoryReviewer,
       preserveRecentTokens: 200,
       sessionId: "test-sess",
       preflightTokens: 100_000,
@@ -492,13 +517,12 @@ describe("compactWithBoundary — LLM call integration", () => {
   });
 
   it("recovers when 1st attempt malformed but 2nd succeeds", async () => {
-    const llm = makeMockLlm(["malformed", makeFullSummaryText()]);
+    const memoryReviewer = makeMockReviewer(["malformed", makeFullSummaryText()]);
     const messages = makeLongHistory(50);
 
     const r = await compactWithBoundary({
       messages,
-      llm,
-      model: "claude-sonnet-4-6",
+      memoryReviewer,
       preserveRecentTokens: 200,
       sessionId: "test-sess",
       preflightTokens: 100_000,
@@ -509,7 +533,7 @@ describe("compactWithBoundary — LLM call integration", () => {
   });
 
   it("collects pinnedArtifacts from skill outputs and meta.lock=true", async () => {
-    const llm = makeMockLlm([makeFullSummaryText()]);
+    const memoryReviewer = makeMockReviewer([makeFullSummaryText()]);
     const messages: GenericMessage[] = [
       { role: "user", content: "x".repeat(500) },
       {
@@ -533,8 +557,7 @@ describe("compactWithBoundary — LLM call integration", () => {
 
     const r = await compactWithBoundary({
       messages,
-      llm,
-      model: "claude-sonnet-4-6",
+      memoryReviewer,
       preserveRecentTokens: 200,
       sessionId: "test-sess",
       preflightTokens: 100_000,
@@ -547,16 +570,17 @@ describe("compactWithBoundary — LLM call integration", () => {
     expect(hasLock).toBe(true);
   });
 
-  it("respects abortSignal mid-stream", async () => {
+  it("forwards abortSignal to the recap reviewer", async () => {
     const ctrl = new AbortController();
-    const llm: LLMProvider = {
-      vendor: "claude",
-      async *streamTurn(): AsyncIterable<StreamEvent> {
-        // 첫 chunk 후 abort 시뮬레이션
-        yield { type: "text_delta", text: "partial" } satisfies StreamEvent;
+    let receivedSignal: AbortSignal | undefined;
+    const memoryReviewer: CompactRecapReviewer = {
+      review: async (_task, _prompt, options) => {
+        receivedSignal = options?.signal;
         ctrl.abort();
-        yield { type: "text_delta", text: " more" } satisfies StreamEvent;
-        yield { type: "message_complete", stopReason: "end_turn" } satisfies StreamEvent;
+        if (receivedSignal?.aborted) {
+          throw new Error("LLM compact aborted by signal");
+        }
+        return makeFullSummaryText();
       },
     };
     const messages = makeLongHistory(50);
@@ -564,19 +588,19 @@ describe("compactWithBoundary — LLM call integration", () => {
     await expect(
       compactWithBoundary({
         messages,
-        llm,
-        model: "claude-sonnet-4-6",
+        memoryReviewer,
         preserveRecentTokens: 200,
-      sessionId: "test-sess",
-      preflightTokens: 100_000,
+        sessionId: "test-sess",
+        preflightTokens: 100_000,
         compactNum: 1,
         abortSignal: ctrl.signal,
       }),
     ).rejects.toThrow(/aborted/);
+    expect(receivedSignal).toBe(ctrl.signal);
   });
 
   it("respects tool_use/tool_result invariant on split", async () => {
-    const llm = makeMockLlm([makeFullSummaryText()]);
+    const memoryReviewer = makeMockReviewer([makeFullSummaryText()]);
     // 끝부분에 tool_use → tool_result 페어. preserveRecentTokens 가 작게 설정되어
     // tool_result 만 preserve 영역에 포함되면 split adjust 가 페어 보존하도록 뒤로 밂.
     const messages: GenericMessage[] = [];
@@ -598,8 +622,7 @@ describe("compactWithBoundary — LLM call integration", () => {
 
     const r = await compactWithBoundary({
       messages,
-      llm,
-      model: "claude-sonnet-4-6",
+      memoryReviewer,
       preserveRecentTokens: 50, // 작게 — tool_result 만 preserve 영역에 들어가도 페어 보존
       sessionId: "test-sess",
       preflightTokens: 100_000,
@@ -624,7 +647,7 @@ describe("compactWithBoundary — LLM call integration", () => {
     // 이므로 더 깊은 tool chain 에선 preserveStart 가 여전히 tool_result 일 수
     // 있음. adjustForwardToToolBoundary 후처리로 surviving[0] 이 절대 orphan
     // tool_result 가 되지 않게 보장. 이 시나리오 회귀 차단.
-    const llm = makeMockLlm([makeFullSummaryText()]);
+    const memoryReviewer = makeMockReviewer([makeFullSummaryText()]);
     const messages: GenericMessage[] = [];
     for (let i = 0; i < 15; i++) {
       messages.push({ role: "user", content: `q${i} `.repeat(20) });
@@ -647,8 +670,7 @@ describe("compactWithBoundary — LLM call integration", () => {
 
     const r = await compactWithBoundary({
       messages,
-      llm,
-      model: "claude-sonnet-4-6",
+      memoryReviewer,
       preserveRecentTokens: 100,
       sessionId: "test-sess-deep-chain",
       preflightTokens: 100_000,
@@ -667,7 +689,7 @@ describe("compactWithBoundary — LLM call integration", () => {
     // Forced archive: LLM summary 후에도 budget 초과 시 toPreserve oldest 50% 강제
     // drop. fresh preserveRecent 가 충분히 커서 post-compact 가 여전히
     // preflight × 0.8 초과하도록 fixture 구성.
-    const llm = makeMockLlm([makeFullSummaryText()]);
+    const memoryReviewer = makeMockReviewer([makeFullSummaryText()]);
     const messages: GenericMessage[] = [];
     for (let i = 0; i < 30; i++) {
       messages.push({ role: "user", content: "x".repeat(2_000) });
@@ -680,8 +702,7 @@ describe("compactWithBoundary — LLM call integration", () => {
     try {
       const r = await compactWithBoundary({
         messages,
-        llm,
-        model: "claude-sonnet-4-6",
+        memoryReviewer,
         // history ≈ 30K tokens, preserve 10K → toCompact ≈ 20K → A.5 drops to ~4.5K
         // → LLM summary → newHistory ≈ stub + 10K preserve = ~10K. 10K > 5K*0.8=4K → FORCED.
         preserveRecentTokens: 10_000,
@@ -701,7 +722,7 @@ describe("compactWithBoundary — LLM call integration", () => {
   });
 
   it("REDUCED_INSUFFICIENT_FORCED never drops the latest user message from preserve", async () => {
-    const llm = makeMockLlm([makeFullSummaryText()]);
+    const memoryReviewer = makeMockReviewer([makeFullSummaryText()]);
     const messages: GenericMessage[] = [];
     for (let i = 0; i < 30; i++) {
       messages.push({ role: "user", content: "x".repeat(2_000) });
@@ -712,8 +733,7 @@ describe("compactWithBoundary — LLM call integration", () => {
 
     const r = await compactWithBoundary({
       messages,
-      llm,
-      model: "claude-sonnet-4-6",
+      memoryReviewer,
       preserveRecentTokens: 10_000,
       sessionId: "test-sess-forced-current-user",
       preflightTokens: 5_000,

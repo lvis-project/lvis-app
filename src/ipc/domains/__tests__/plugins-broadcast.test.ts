@@ -82,6 +82,32 @@ async function setup(options: { appWindows?: ReturnType<typeof makeWindow>[] } =
       ]),
       getLiveCatalogVersion: vi.fn(async () => "1.0.0"),
       getInstalledVersion: vi.fn(async () => "1.0.0"),
+      preflightInstall: vi.fn(async (requestedPluginId: string) => ({
+        pluginId: requestedPluginId === "lvis-plugin-meeting" ? "meeting" : requestedPluginId,
+        catalogVersion: "1.0.0",
+        installed: false,
+      })),
+      revalidateInstallAdmission: vi.fn(async () => undefined),
+      ensureManagedInstalled: vi.fn(async (options: {
+        activatePreparedArtifact: (prepared: {
+          installId: string;
+          pluginRoot: string;
+          manifest: { id: string; version: string };
+          receiptRaw: string;
+          registryEntry: { installSource: "admin" };
+          durableCommit(): Promise<string>;
+        }) => Promise<unknown>;
+      }) => {
+        await options.activatePreparedArtifact({
+          installId: "meeting",
+          pluginRoot: "/staged/meeting",
+          manifest: { id: "meeting", version: "1.0.0" },
+          receiptRaw: "{}",
+          registryEntry: { installSource: "admin" },
+          durableCommit: async () => "meeting/plugin.json",
+        });
+        return { installed: ["meeting"], updated: [], failed: [] };
+      }),
       install: vi.fn(),
       uninstall: vi.fn(async (pluginId: string) => ({ pluginId, uninstalled: true })),
       getInstallFailureDiagnostics: vi.fn(() => []),
@@ -210,6 +236,20 @@ beforeEach(() => {
 });
 
 describe("plugins IPC lifecycle broadcast", () => {
+  it("live-activates a true missing managed plugin before retry returns success", async () => {
+    const { deps } = await setup();
+
+    await expect(invoke("lvis:bootstrap:retry")).resolves.toEqual({ ok: true });
+
+    expect(deps.pluginMarketplace.ensureManagedInstalled).toHaveBeenCalledWith({
+      mode: "repair-missing-only",
+      ensurePluginStateReadyForInstall: expect.any(Function),
+      activatePreparedArtifact: expect.any(Function),
+    });
+    expect(deps.pluginRuntime.activatePreparedArtifact).toHaveBeenCalledOnce();
+    expect(deps.pluginRuntime.listPluginIds()).toContain("meeting");
+  });
+
   it("broadcasts marketplace install progress and result to every app window", async () => {
     const { appWindows } = await setup();
 

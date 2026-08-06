@@ -4,6 +4,7 @@
 
 import { resolve } from "node:path";
 import type { DenyRule, ToolCategory, ToolSource, ToolTrustOrigin, TrustLevel } from "../tools/types.js";
+import type { RemoteControllerAuthority } from "../shared/chat-origin.js";
 import { trustFromSource } from "../tools/types.js";
 import { readPermissionsFile, updatePermissionsFile } from "./permissions-store.js";
 import type { ReviewerInteractiveAutoApprove } from "./permission-settings-store.js";
@@ -45,6 +46,37 @@ import { isPathAllowed } from "./allowed-directories.js";
 
 export type PermissionDecision = "allow" | "deny" | "ask";
 export type ExecutionMode = "default" | "strict" | "auto" | "allow";
+
+
+// This deliberately names one host-owned operation instead of weakening the
+// write category globally. It is evaluated only after deny rules, per-tool
+// strict mode, staged-origin protection, and global strict mode.
+const AUTO_APPROVED_LOCAL_BUILTIN_WRITES = new Set([
+  "memory_write",
+]);
+
+
+/**
+ * The first Tailnet-controller release intentionally excludes tools that either
+ * create work beyond the current turn or expand the tool/instruction surface.
+ * This is a host-owned P1 boundary; it is evaluated before any local permission
+ * memory, allow rule, reviewer, or global allow-mode decision.
+ */
+const TAILNET_CONTROLLER_P1_BLOCKED_TOOLS = new Set([
+  "bash",
+  "bash_kill",
+  "bash_output",
+  "powershell",
+  "request_plugin",
+  "routine_schedule",
+  "skill_load",
+  "tool_search",
+]);
+
+/** Shared fail-closed P1 check for the executor fallback when no manager is wired. */
+export function isTailnetControllerP1BlockedTool(toolName: string): boolean {
+  return TAILNET_CONTROLLER_P1_BLOCKED_TOOLS.has(toolName);
+}
 
 /**
  * P2 graduated grant tier. A persisted "Allow always" grant carries a tier so
@@ -205,6 +237,8 @@ export interface PermissionCheckContext {
    * authorize a later call with a broader argument scope.
    */
   approvalCacheKey?: string;
+  /** Host-owned remote-controller provenance; bypasses every remembered allow. */
+  remoteControllerAuthority?: RemoteControllerAuthority;
   /**
    * Tool-author `decisionOverride` for `meta`-category builtin tools, carried
    * from the executor so the post-computation guard owns re-elevation (V1 SOT).
@@ -1106,6 +1140,51 @@ export class PermissionManager {
       }
     }
 
+
+    // A native Tailnet controller may request a turn but never receives a
+    // reusable tool capability. This hard gate runs before local-memory
+    // exceptions, allow rules, global allow mode, reviewer auto-allow, and
+    // approval-memory lookup. Every ToolExecutor invocation — including a
+    // declared read — is an exact local one-shot decision: third-party tool
+    // declarations are not a sufficient authority boundary for remote control.
+    // Deferred and capability-expanding operations are not part of this P1.
+    //
+    // Running ABOVE the remembered-permission layers is the whole design, and
+    // the concrete failure it refuses has a name. AionUi's channel integration
+    // routes a remote message into the assistant and lets that turn inherit the
+    // owner's last local permission selection — including a mode their own copy
+    // documents as equivalent to `--dangerously-skip-permissions`. A click the
+    // owner made while sitting at the desk, for a tool they were watching, then
+    // silently covers a turn a message from elsewhere started. Placing this
+    // branch below any remembered decision reproduces exactly that, which is
+    // why "let a remote turn reuse the approval the owner already gave" is not
+    // a shortcut available to a later unattended mode: the remembering is the
+    // vulnerability, not the prompting.
+    if (context.remoteControllerAuthority !== undefined) {
+      if (resolvedCategory === "meta") {
+        // Meta tools can create or continue child/agent execution outside the
+        // original controller turn. That cross-turn authority propagation is a
+        // deliberate later protocol, not something a P1 controller may infer.
+        return {
+          decision: "deny",
+          reason: "Remote controller meta operations are not enabled",
+          layer: 2,
+        };
+      }
+      if (isTailnetControllerP1BlockedTool(toolName)) {
+        return {
+          decision: "deny",
+          reason: "Remote controller deferred or capability-expanding operations are not enabled",
+          layer: 2,
+        };
+      }
+      return {
+        decision: "ask",
+        reason: "Remote controller request requires local allow-once approval",
+        layer: 2,
+        forceModal: true,
+      };
+    }
     const toolModeOverride = this.toolModeOverrides.get(toolName);
     if (toolModeOverride === "strict") {
       return { decision: "ask", reason: t("be_permissionManager.mcpServerStrictMode"), layer: 2 };
@@ -1133,6 +1212,22 @@ export class PermissionManager {
         ...(context.headless === true && isMutating
           ? { reviewer: { route: "headless" as const } }
           : {}),
+      };
+    }
+
+    // Local durable memory is an app-owned, user-requested capability. It
+    // needs no normal approval dialog, but the hard gates above must still
+    // win so an explicit deny, strict session, or staged/untrusted origin
+    // cannot silently persist data.
+    if (
+      source === "builtin"
+      && resolvedCategory === "write"
+      && AUTO_APPROVED_LOCAL_BUILTIN_WRITES.has(toolName)
+    ) {
+      return {
+        decision: "allow",
+        reason: "builtin-local-memory-auto-allow",
+        layer: 6,
       };
     }
 

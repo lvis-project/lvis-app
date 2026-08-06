@@ -107,6 +107,10 @@ vi.mock("../services.js", () => ({
         deletePluginSecrets: vi.fn(async () => 0),
       },
       memoryManager: {},
+      // Core boot now owns a capture gateway whose reviewer is late-bound once
+      // the active conversation loop has been created. Keep the integration
+      // graph faithful to the production CoreServices contract.
+      memoryCaptureService: { setMemoryReviewer: vi.fn() },
       inputClassifier: {},
       toolRegistry: { setDenyRules: vi.fn(), size: 0 },
       routeEngine: {},
@@ -185,7 +189,9 @@ vi.mock("../plugins.js", () => ({
 }));
 
 vi.mock("../managed-marketplace.js", () => ({
-  runManagedBootstrap: vi.fn(async () => {}),
+  runManagedBootstrap: vi.fn(async () => {
+    h.rec("managedPreStartSync");
+  }),
 }));
 
 vi.mock("../steps/plugin-runtime.js", () => ({
@@ -221,10 +227,17 @@ vi.mock("../steps/plugin-runtime.js", () => ({
         discardGeneration: vi.fn(async () => {}),
         retireGeneration: vi.fn(async () => {}),
       },
-      setBundleLifecycleHandler: vi.fn(),
-      startPlugins: vi.fn(async () => {}),
+      setBundleLifecycleHandler: vi.fn(() => h.rec("lifecycleBound")),
+      startPlugins: vi.fn(async () => h.rec("startPlugins")),
+      admitPreStartOperation: vi.fn(async (operation) => operation()),
     };
   }),
+}));
+
+vi.mock("../../plugins/plugin-bundle-lifecycle.js", () => ({
+  PluginBundleLifecycle: class {
+    recoverRetirements = vi.fn(async () => h.rec("retirementsRecovered"));
+  },
 }));
 
 vi.mock("../steps/whitelist-bootstrap.js", () => ({
@@ -398,6 +411,14 @@ vi.mock("../../memory/preference-refresh-service.js", () => ({
   },
 }));
 
+
+vi.mock("../../memory/memory-consolidation-service.js", () => ({
+  MemoryConsolidationService: class {},
+  MemoryMaintenanceCoordinator: class {
+    start = vi.fn();
+    stop = vi.fn();
+  },
+}));
 vi.mock("../../engine/subagent-runner.js", () => ({
   SubAgentRunner: class {
     constructor(options: unknown) {
@@ -588,6 +609,9 @@ describe("bootstrap() integration lock", () => {
         "mcpAppModelContext",
         "mcpArtifactStore",
         "mcpManager",
+        "memoryCaptureService",
+        "memoryConsolidationService",
+        "memoryMaintenanceCoordinator",
         "memoryManager",
         "notificationService",
         "personaPromptStore",
@@ -652,6 +676,9 @@ describe("bootstrap() integration lock", () => {
     // The ConversationLoop is built before the late-bound SubAgentRunner, which
     // reuses the loop's dep set.
     assertBefore("conversationLoop", "subAgentRunner");
+    assertBefore("lifecycleBound", "retirementsRecovered");
+    assertBefore("retirementsRecovered", "managedPreStartSync");
+    assertBefore("managedPreStartSync", "startPlugins");
   });
 
   it("exposes the deferred lifecycle handles main.ts drives after boot", () => {
@@ -677,16 +704,18 @@ describe("bootstrap() integration lock", () => {
     expect(services.skillArtifactStore).toBeUndefined();
   });
 
-  it("injects dormant rationale only into interactive loop dependencies", () => {
+  it("keeps rationale interactive while wiring the subscription runtime across execution loops", () => {
     const mainDeps = h.captured["mainConversationDeps"] as {
       rationaleCoordinatorFactory?: unknown;
       closeRationaleSession?: unknown;
       pluginOperationGrants?: unknown;
       pluginOperationIdentityProvider?: unknown;
+      subscriptionProviderFactory?: unknown;
     };
     const sideDeps = h.captured["sideConversationDeps"] as {
       rationaleCoordinatorFactory?: unknown;
       closeRationaleSession?: unknown;
+      subscriptionProviderFactory?: unknown;
     };
 
     expect(typeof mainDeps.rationaleCoordinatorFactory).toBe("function");
@@ -696,6 +725,8 @@ describe("bootstrap() integration lock", () => {
     );
     expect(typeof mainDeps.closeRationaleSession).toBe("function");
     expect(typeof sideDeps.closeRationaleSession).toBe("function");
+    expect(typeof mainDeps.subscriptionProviderFactory).toBe("function");
+    expect(typeof sideDeps.subscriptionProviderFactory).toBe("function");
 
     const routineEngineOptions = h.captured["routineEngineOptions"] as {
       createConversationLoop: (input: { scope: unknown }) => unknown;
@@ -707,6 +738,7 @@ describe("bootstrap() integration lock", () => {
     >;
     expect(routineDeps["rationaleCoordinatorFactory"]).toBeUndefined();
     expect(routineDeps["closeRationaleSession"]).toBeUndefined();
+    expect(typeof routineDeps["subscriptionProviderFactory"]).toBe("function");
 
     const subAgentOptions = h.captured["subAgentOptions"] as {
       parentDeps: Record<string, unknown>;
@@ -715,6 +747,7 @@ describe("bootstrap() integration lock", () => {
       subAgentOptions.parentDeps["rationaleCoordinatorFactory"],
     ).toBeUndefined();
     expect(subAgentOptions.parentDeps["closeRationaleSession"]).toBeUndefined();
+    expect(typeof subAgentOptions.parentDeps["subscriptionProviderFactory"]).toBe("function");
     expect(subAgentOptions.parentDeps["pluginOperationGrants"]).toBe(
       mainDeps["pluginOperationGrants"],
     );

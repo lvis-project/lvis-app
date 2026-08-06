@@ -4,7 +4,7 @@
 
 import type { LLMProvider, StreamEvent, ToolCallBlock, ToolSchema, GenericMessage, TokenUsage, ThinkingBlock } from "../llm/types.js";
 import { isContextLengthError } from "../auto-compact.js";
-import { stubMarkedToolResults } from "../wire-serialize.js";
+import { prepareMarkedToolResultsForWire } from "../wire-serialize.js";
 import { classifyProviderError } from "../llm/error-classifier.js";
 import {
   extractProviderErrorDiagnostics,
@@ -13,6 +13,12 @@ import {
 } from "../llm/provider-error-diagnostics.js";
 import { t } from "../../i18n/index.js";
 import { isValidToolUseId } from "../../shared/tool-use-id.js";
+import {
+  normalizeSubscriptionUsageTelemetry,
+  type ActiveChatRuntime,
+  type SubscriptionUsageTelemetry,
+} from "../../shared/subscription-runtime.js";
+import { providerMatchesActiveChatRuntime } from "./provider.js";
 
 export interface StreamCollectParams {
   provider: LLMProvider;
@@ -33,7 +39,7 @@ export interface StreamCollectParams {
   llmSettings: {
     streamSmoothing: "none" | "word" | "char";
     enableThinking: boolean;
-    thinkingBudgetTokens: number;
+    thinkingBudgetTokens?: number;
   };
   abortSignal?: AbortSignal;
   /**
@@ -57,6 +63,8 @@ export type StreamCollectResult =
       toolCalls: ToolCallBlock[];
       stopReason: "end_turn" | "tool_use" | "max_tokens";
       usage?: TokenUsage;
+      /** Non-billable subscription telemetry for this completed remote round. */
+      subscriptionUsage?: SubscriptionUsageTelemetry;
     }
 
   | { kind: "interrupted"; text: string }
@@ -71,6 +79,23 @@ export type StreamCollectResult =
       classification: string;
       providerError: ProviderErrorDiagnostics;
     };
+
+/**
+ * Keeps the active-authentication check adjacent to the only call that starts
+ * a provider stream. This also protects independently-created routine and
+ * sub-agent loops that are not refreshed by the interactive Settings IPC.
+ */
+export function collectActiveRuntimeRoundStream(
+  params: StreamCollectParams,
+  activeChatRuntime: ActiveChatRuntime | undefined,
+  onRuntimeMismatch: () => void,
+): Promise<StreamCollectResult> {
+  if (!providerMatchesActiveChatRuntime(params.provider, activeChatRuntime)) {
+    onRuntimeMismatch();
+    return Promise.resolve({ kind: "interrupted", text: "" });
+  }
+  return collectRoundStream(params);
+}
 
 
 
@@ -102,11 +127,11 @@ export async function collectRoundStream(
   const toolCallIds = new Set<string>();
   let stopReason: "end_turn" | "tool_use" | "max_tokens" = "end_turn";
   let usage: TokenUsage | undefined;
+  let subscriptionUsage: SubscriptionUsageTelemetry | undefined;
   let sawMessageComplete = false;
 
 
-
-  const wireMessages = stubMarkedToolResults(messages);
+  const wireMessages = prepareMarkedToolResultsForWire(messages);
 
   try {
     for await (const event of provider.streamTurn({
@@ -116,7 +141,9 @@ export async function collectRoundStream(
       tools: toolSchemas.length > 0 ? toolSchemas : undefined,
       streamSmoothing: llmSettings.streamSmoothing as never,
       enableThinking: llmSettings.enableThinking,
-      thinkingBudgetTokens: llmSettings.thinkingBudgetTokens,
+      ...(llmSettings.thinkingBudgetTokens === undefined
+        ? {}
+        : { thinkingBudgetTokens: llmSettings.thinkingBudgetTokens }),
       ...(continuationPrefill ? { continuationPrefill: true } : {}),
       abortSignal,
     }) as AsyncIterable<StreamEvent>) {
@@ -169,6 +196,9 @@ export async function collectRoundStream(
             thinkingBlocks = event.thinkingBlocks;
           }
           if (event.usage) usage = event.usage;
+          if (event.subscriptionUsage) {
+            subscriptionUsage = normalizeSubscriptionUsageTelemetry(event.subscriptionUsage);
+          }
           break;
         case "error": {
           if (abortSignal?.aborted) return { kind: "interrupted", text };
@@ -178,7 +208,13 @@ export async function collectRoundStream(
 
             return { kind: "context_error", errorMessage: rawForClassification };
           }
-          const classified = classifyProviderError(rawForClassification);
+          // Subscription adapters deliberately project a fixed renderer-safe
+          // `error` string while retaining structured diagnostics only for
+          // host recovery (schema drop / TPM compaction). Never use that
+          // internal diagnostic preview to build a user-visible message.
+          const classified = classifyProviderError(
+            provider.subscriptionRuntime ? event.error : rawForClassification,
+          );
           const classification = event.providerError?.classification ?? classified.category;
           const providerError = withProviderErrorClassification(
             event.providerError ?? extractProviderErrorDiagnostics(event.error),
@@ -235,5 +271,6 @@ export async function collectRoundStream(
     toolCalls,
     stopReason,
     usage,
+    ...(subscriptionUsage ? { subscriptionUsage } : {}),
   };
 }

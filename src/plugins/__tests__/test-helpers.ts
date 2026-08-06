@@ -29,6 +29,8 @@ import type {
 } from "../plugin-host-generation.js";
 import type { ActivePluginGeneration } from "../plugin-generation-coordinator.js";
 
+type GenerationCommitScope = <T>(operation: () => Promise<T>) => Promise<T>;
+
 /** Restore owner write access before deleting immutable generation fixtures. */
 export async function makeTestTreeWritable(root: string): Promise<void> {
   await chmod(root, 0o700).catch(() => undefined);
@@ -44,16 +46,21 @@ export async function makeTestTreeWritable(root: string): Promise<void> {
  * unit fixtures honest about crossing the same mandatory coordination seam.
  */
 export const activateAndCommitPreparedPluginForTest: PreparedMarketplacePluginActivation =
-  async (prepared) => ({
-    result: await prepared.durableCommit(),
-    retirement: Promise.resolve(),
-  });
+  async (prepared) => {
+    const completion = Promise.resolve();
+    return {
+      result: await prepared.durableCommit(),
+      retirement: completion,
+      completion,
+      retirementDeferred: false,
+    };
+  };
 
 export const preparedActivationOptionsForTest = Object.freeze({
   activatePreparedArtifact: activateAndCommitPreparedPluginForTest,
 });
 export const preparedManagedActivationOptionsForTest = Object.freeze({
-  ...preparedActivationOptionsForTest,
+  mode: "pre-start-sync" as const,
   ensurePluginStateReadyForInstall: async (_pluginId: string) => undefined,
 });
 
@@ -489,26 +496,51 @@ export function bindTestPluginRuntimeGeneration(runtime: PluginRuntime): PluginR
       return { generation, release: () => undefined };
     },
     runWithLease: async <T>(_lease: unknown, operation: () => Promise<T>) => operation(),
-    replaceRuntime: async (projection: PluginRuntimeGenerationProjection) => {
-      await publish(projection);
+    replaceRuntime: async (
+      projection: PluginRuntimeGenerationProjection,
+      commitScope?: GenerationCommitScope,
+    ) => {
+      const commit = () => publish(projection);
+      await (commitScope ? commitScope(commit) : commit());
     },
     replaceRuntimeWithCommit: <T>(
       projection: PluginRuntimeGenerationProjection,
       _receiptRaw: string,
       durableCommit: () => Promise<T>,
+      commitScope?: GenerationCommitScope,
     ) => runInLifecycleQueue(projection.manifest.id, async () => {
-      const result = await durableCommit();
-      const { retirement } = await publish(projection);
-      return { result, retirement };
+      const commit = async () => {
+        const result = await durableCommit();
+        const { retirement } = await publish(projection);
+        return {
+          result,
+          retirement,
+          completion: retirement,
+          retirementDeferred: false,
+        };
+      };
+      return commitScope ? commitScope(commit) : commit();
     }),
     deactivate: (pluginId: string) => runInLifecycleQueue(pluginId, async () => {
       await deactivate(pluginId);
     }),
-    deactivateWithCommit: <T>(pluginId: string, durableCommit: () => Promise<T>) =>
+    deactivateWithCommit: <T>(
+      pluginId: string,
+      durableCommit: () => Promise<T>,
+      commitScope?: GenerationCommitScope,
+    ) =>
       runInLifecycleQueue(pluginId, async () => {
-        const result = await durableCommit();
-        const { retirement } = await deactivate(pluginId);
-        return { result, retirement };
+        const commit = async () => {
+          const result = await durableCommit();
+          const { retirement } = await deactivate(pluginId);
+          return {
+            result,
+            retirement,
+            completion: retirement,
+            retirementDeferred: false,
+          };
+        };
+        return commitScope ? commitScope(commit) : commit();
       }),
     recoverRetirements: async () => undefined,
     waitForRetirements: async () => {

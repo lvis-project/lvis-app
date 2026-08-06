@@ -127,7 +127,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       hostRoot: tmp,
       manifestPaths: [manifestA],
     });
-    await runtime.load();
+    await runtime.startAll();
 
     const cards = runtime.listPluginCards();
     expect(cards).toHaveLength(1);
@@ -145,6 +145,30 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     expect(cards[0].toolDescriptions?.["meeting_push_chunk"]).toContain(
       "오디오 청크 전송",
     );
+  });
+
+  it("does not advertise model tools before a runtime generation is published", async () => {
+    const manifestA = writePlugin(tmp, "example-not-started", {
+      name: "Not Started",
+      tools: ["not_started_ping"],
+    });
+    const runtime = new PluginRuntime({
+      hostRoot: tmp,
+      manifestPaths: [manifestA],
+    });
+
+    await runtime.load();
+
+    expect(runtime.listPluginCards()).toEqual([
+      expect.objectContaining({
+        id: "example-not-started",
+        loadStatus: "loaded",
+        runtimeLoaded: true,
+        active: false,
+        sampleTools: [],
+        tools: [],
+      }),
+    ]);
   });
 
   it("surfaces manifest sidebar UI metadata on plugin cards", async () => {
@@ -264,7 +288,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       hostRoot: tmp,
       manifestPaths: [manifestA],
     });
-    await runtime.load();
+    await runtime.startAll();
 
     const cards = runtime.listPluginCards();
     expect(cards[0].description).toBe("Test fixture.");
@@ -281,7 +305,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
       hostRoot: tmp,
       manifestPaths: [manifestA],
     });
-    await runtime.load();
+    await runtime.startAll();
 
     // Fake toolRegistry that only exposes filtered_a and filtered_c (filtered_b is denied).
     // listPluginCards feeds the MODEL-visible set (getModelVisibleTools) to the card UI —

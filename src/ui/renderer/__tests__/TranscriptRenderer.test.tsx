@@ -26,7 +26,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render } from "@testing-library/react";
 import type React from "react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
-import { TranscriptRenderer } from "../components/TranscriptRenderer.js";
+import { TranscriptRenderer, type TurnSummary } from "../components/TranscriptRenderer.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 
 // Radix Tooltip (used by WorkGroup / TurnActionBar primitives) requires a
@@ -51,6 +51,18 @@ const toolGroup = (toolUseId = "t1"): ChatEntry => ({
 // Korean labels — the jsdom vitest project pins the runtime locale to ko.
 const RETRY_TITLE = "다시 시도 (깊이: high)";
 const EDIT_TITLE = "편집"; // chatView.editButtonTitle
+
+const completedTurnSummary = (): Map<number, TurnSummary> => new Map([[
+  0,
+  {
+    turnDurationMs: 250,
+    toolCount: 0,
+    cumulativeToolMs: 0,
+    tokensIn: 120,
+    freshInputTokens: 100,
+    tokensOut: 20,
+  },
+]]);
 
 describe("TranscriptRenderer — minimal (required-only) contract", () => {
   const minimal = [user("q"), assistant("a")];
@@ -100,6 +112,52 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
       />,
     );
     expect(getByTestId("work-group").textContent).toContain("x");
+  });
+
+  it("hides token and cost estimates when the active runtime has no verified usage contract", () => {
+    const { queryByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[user("q"), assistant("a")]}
+        streaming={false}
+        currentSessionId="s1"
+        turnSummaryByTurnStart={completedTurnSummary()}
+        showTokenCostBadge={false}
+      />,
+    );
+    expect(queryByTestId("token-cost-badge")).toBeNull();
+  });
+
+  it("keeps non-billable subscription telemetry visible when API pricing is gated off", () => {
+    const summary = completedTurnSummary();
+    const current = summary.get(0);
+    if (!current) throw new Error("test turn summary missing");
+    current.subscriptionUsage = [{
+      provider: "codex",
+      model: "gpt-5.4",
+      source: "provider-reported",
+      billable: false,
+      inputTokens: 100,
+      outputTokens: 20,
+      totalTokens: 120,
+    }];
+
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[user("q"), assistant("a")]}
+        streaming={false}
+        currentSessionId="s1"
+        turnSummaryByTurnStart={summary}
+        showTokenCostBadge={false}
+      />,
+    );
+    expect(getByTestId("token-cost-badge").getAttribute("data-usage-kind")).toBe("subscription");
+  });
+
+  it("continues to show token and cost estimates by default for runtimes with a usage contract", () => {
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer entries={[user("q"), assistant("a")]} streaming={false} currentSessionId="s1" turnSummaryByTurnStart={completedTurnSummary()} />,
+    );
+    expect(getByTestId("token-cost-badge")).toBeTruthy();
   });
 });
 

@@ -43,7 +43,7 @@ function settingsOrchestrationApi(updateResult: Awaited<ReturnType<LvisApi["upda
   return api as unknown as LvisApi;
 }
 
-function makeSettingsWithVendor(vendor: string, hostResolverMap?: string): AppSettings {
+function makeSettingsWithVendor(vendor: string): AppSettings {
   const base = makeSettings();
   return {
     ...base,
@@ -58,7 +58,6 @@ function makeSettingsWithVendor(vendor: string, hostResolverMap?: string): AppSe
           thinkingBudgetTokens: 10_000,
         },
       },
-      ...(hostResolverMap !== undefined ? { hostResolverMap } : {}),
     },
   } as AppSettings;
 }
@@ -96,33 +95,6 @@ describe("useSettingsOrchestration", () => {
     await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
     // After hydration: vendor must be "openai", not "claude".
     expect(result.current.vendor).toBe("openai");
-  });
-
-  it("hydrates hostResolverMap from persisted settings on mount", async () => {
-    const expectedMap = "10.1.2.3 api.example.com\n10.4.5.6 cdn.example.com";
-    const settings = makeSettingsWithVendor("openai", expectedMap);
-    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
-    Object.assign(api, {
-      hasWebApiKey: vi.fn(async () => false),
-      hasMarketplaceApiKey: vi.fn(async () => false),
-    });
-
-    const { result } = renderHook(() => useSettingsOrchestration(api as unknown as LvisApi, vi.fn()));
-    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
-    expect(result.current.hostResolverMap).toBe(expectedMap);
-  });
-
-  it("defaults hostResolverMap to empty string when not present in settings", async () => {
-    const settings = makeSettingsWithVendor("openai");
-    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
-    Object.assign(api, {
-      hasWebApiKey: vi.fn(async () => false),
-      hasMarketplaceApiKey: vi.fn(async () => false),
-    });
-
-    const { result } = renderHook(() => useSettingsOrchestration(api as unknown as LvisApi, vi.fn()));
-    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
-    expect(result.current.hostResolverMap).toBe("");
   });
 
   it("aborts LLM key persistence when settings:update returns reviewer-rewire-failed", async () => {
@@ -258,6 +230,68 @@ describe("useSettingsOrchestration", () => {
     });
     expect(payload.llm.vendors["openai-compatible"].baseUrl)
       .not.toBe("https://future.example/v1");
+  });
+
+  it("defaults idle long-term consolidation off and persists an explicit opt-in immediately", async () => {
+    const settings = makeSettings();
+    const updated: AppSettings = {
+      ...settings,
+      features: { idleMemoryConsolidation: true },
+    };
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => updated),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const onSaved = vi.fn();
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, onSaved)
+    );
+
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    expect(result.current.idleMemoryConsolidation).toBe(false);
+
+    act(() => {
+      result.current.setIdleMemoryConsolidation(true);
+    });
+
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({
+      features: { idleMemoryConsolidation: true },
+    }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(result.current.idleMemoryConsolidation).toBe(true);
+  });
+
+  it("defaults model-reviewed memory capture off and persists an explicit mode immediately", async () => {
+    const settings = makeSettings();
+    const updated: AppSettings = {
+      ...settings,
+      features: { memoryCaptureMode: "review" },
+    };
+    const { api } = makeMockLvisApi({ settings, hasApiKey: false });
+    Object.assign(api, {
+      updateSettings: vi.fn(async () => updated),
+      hasWebApiKey: vi.fn(async () => false),
+      hasMarketplaceApiKey: vi.fn(async () => false),
+    });
+    const onSaved = vi.fn();
+    const { result } = renderHook(() =>
+      useSettingsOrchestration(api as unknown as LvisApi, onSaved)
+    );
+
+    await waitFor(() => expect(result.current.settingsLoaded).toBe(true));
+    expect(result.current.memoryCaptureMode).toBe("off");
+
+    act(() => {
+      result.current.setMemoryCaptureMode("review");
+    });
+
+    await waitFor(() => expect(api.updateSettings).toHaveBeenCalledWith({
+      features: { memoryCaptureMode: "review" },
+    }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalledTimes(1));
+    expect(result.current.memoryCaptureMode).toBe("review");
   });
 
   it("defaults autonomous sub-agent wake off and persists an opt-in immediately", async () => {

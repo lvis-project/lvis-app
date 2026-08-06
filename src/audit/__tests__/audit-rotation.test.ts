@@ -3,7 +3,8 @@
  * concurrent write + rotate race (withFileLock).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { vi } from "vitest";
@@ -14,6 +15,9 @@ vi.mock("node:os", async (importOriginal) => {
 });
 
 import { AuditLogger } from "../audit-logger.js";
+import { withAuditSnapshotLock } from "../jsonl-reader.js";
+import { readAuditEntries } from "../../engine/usage-stats.js";
+
 
 let testHome: string;
 let auditDir: string;
@@ -52,13 +56,59 @@ describe("rotateAndPrune — size-triggered rotation", () => {
     // Original .jsonl should be gone
     expect(files.some((f) => f === "2026-04-10.jsonl")).toBe(false);
     // A .gz archive should exist
-    const archive = files.find((f) => /2026-04-10\.jsonl\.\d{8}\.gz$/.test(f));
+    const archive = files.find((f) => /2026-04-10\.jsonl\.\d{17}\.[0-9a-f-]{36}\.gz$/i.test(f));
     expect(archive).toBeDefined();
     const archiveStat = statSync(join(auditDir, archive!));
     expect(archiveStat.isFile()).toBe(true);
     if (process.platform !== "win32") {
       expect(archiveStat.mode & 0o777).toBe(0o600);
     }
+  });
+
+  it("keeps every same-day rotation archive instead of overwriting prior telemetry", async () => {
+    const now = new Date("2026-07-04T12:00:00.000Z");
+    const logger = new AuditLogger(auditDir, { now: () => now });
+    writeJsonlFile("2026-07-03.jsonl", "first rotation\n");
+
+    await logger.rotateAndPrune({ maxBytes: 1, retentionDays: 30, rotationAgeDays: 365 });
+    writeJsonlFile("2026-07-03.jsonl", "second rotation\n");
+    await logger.rotateAndPrune({ maxBytes: 1, retentionDays: 30, rotationAgeDays: 365 });
+
+    const archives = listAuditFiles().filter((file) => /^2026-07-03\.jsonl\.\d{17}\.[0-9a-f-]{36}\.gz$/i.test(file));
+    expect(archives).toHaveLength(2);
+    expect(archives.map((file) => gunzipSync(readFileSync(join(auditDir, file))).toString("utf-8")).sort())
+      .toEqual(["first rotation\n", "second rotation\n"]);
+  });
+
+  it("serializes rotation and aggregate reads through one audit snapshot", async () => {
+    const now = new Date("2026-07-04T12:00:00.000Z");
+    const source = "2026-07-03.jsonl";
+    writeJsonlFile(source, '{"timestamp":"2026-07-03T15:30:00Z","sessionId":"s1","type":"turn"}\n');
+    const logger = new AuditLogger(auditDir, { now: () => now });
+    let releaseSnapshot: (() => void) | undefined;
+    let snapshotHeld: (() => void) | undefined;
+    const hold = withAuditSnapshotLock(auditDir, async () => {
+      snapshotHeld?.();
+      await new Promise<void>((resolve) => { releaseSnapshot = resolve; });
+    });
+    await new Promise<void>((resolve) => { snapshotHeld = resolve; });
+
+    const rotating = logger.rotateAndPrune({ maxBytes: 1, retentionDays: 30, rotationAgeDays: 365 });
+    let readSettled = false;
+    const reading = readAuditEntries(auditDir, 2, now).then((rows) => {
+      readSettled = true;
+      return rows;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(existsSync(join(auditDir, source))).toBe(true);
+    expect(readSettled).toBe(false);
+
+    releaseSnapshot?.();
+    await hold;
+    const [, rows] = await Promise.all([rotating, reading]);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].sessionId).toBe("s1");
   });
 
   it("does NOT rotate a file below the size threshold", async () => {
@@ -154,6 +204,18 @@ describe("rotateAndPrune — retention / age-triggered delete", () => {
 
     const files = listAuditFiles();
     expect(files.some((f) => f.includes(oldDs))).toBe(false);
+  });
+
+  it("prunes timestamp/UUID archives using their archive date", async () => {
+    const now = new Date("2026-07-04T12:00:00.000Z");
+    const oldStamp = "20260530120000000";
+    const file = `2026-01-01.jsonl.${oldStamp}.11111111-1111-4111-8111-111111111111.gz`;
+    writeJsonlFile(file, "fake-gzip-data");
+
+    const logger = new AuditLogger(auditDir, { now: () => now });
+    await logger.rotateAndPrune({ maxBytes: 10 * 1024 * 1024, retentionDays: 30 });
+
+    expect(listAuditFiles()).not.toContain(file);
   });
 
   it("retains .gz archives within retentionDays", async () => {

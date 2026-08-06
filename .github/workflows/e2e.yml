@@ -29,7 +29,7 @@ jobs:
       HOST_SHA: ${{ github.event.client_payload.host_ref || github.sha }}
     steps:
       - name: Checkout exact lvis-app input
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: lvis-app
           ref: ${{ env.HOST_SHA }}
@@ -37,7 +37,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout local-indexer input
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lvis-project/lvis-plugin-local-indexer
           path: lvis-plugin-local-indexer
@@ -47,7 +47,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout meeting input
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lvis-project/lvis-plugin-meeting
           path: lvis-plugin-meeting
@@ -57,7 +57,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout work-assistant input
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lvis-project/lvis-plugin-work-assistant
           path: lvis-plugin-work-assistant

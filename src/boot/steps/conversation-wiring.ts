@@ -31,6 +31,8 @@ import { readPermissionSettings } from "../../permissions/permission-settings-st
 import { retainedDescendantWorkspaceRoots } from "../../permissions/workspace-root-reconciler.js";
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
 import { PreferenceRefreshService } from "../../memory/preference-refresh-service.js";
+import { MemoryConsolidationService, MemoryMaintenanceCoordinator } from "../../memory/memory-consolidation-service.js";
+import { MemoryReviewerService } from "../../memory/memory-reviewer-service.js";
 import { SubAgentRunner } from "../../engine/subagent-runner.js";
 import { A2ASubAgentMessageBus } from "../../engine/a2a-subagent-message-bus.js";
 import { A2AAgentMessageBus } from "../../engine/a2a-agent-message-bus.js";
@@ -45,12 +47,77 @@ import { WORK_BOARD } from "../../shared/ipc-channels.js";
 import { fanOutToAllWindows } from "../../ipc/broadcast-helpers.js";
 import { emitEvent } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
+import { createSubscriptionLlmProvider } from "../../main/subscription-llm-provider.js";
+import {
+  SubscriptionRuntimeServiceError,
+  type SubscriptionRuntimeAuditSink,
+} from "../../main/subscription-runtime-service.js";
+import { validateExternalUrl } from "../../shared/external-url.js";
+import type { LLMProvider } from "../../engine/llm/types.js";
+import type { SubscriptionChatRuntimeSelection } from "../../shared/subscription-runtime.js";
+import type { AuditLogger } from "../../audit/audit-logger.js";
 import type { BootContext } from "../context.js";
 import type { ConversationLoop } from "../../engine/conversation-loop.js";
 import { captureRationalePolicyEpoch } from "../../tools/pipeline/rationale-policy-epoch.js";
 import type { RationaleCoordinatorFactory } from "../../engine/turn/rationale-conversation-orchestration.js";
 
 const log = createLogger("lvis");
+
+export interface SubscriptionChatLoopBindings {
+  readonly subscriptionProviderFactory: (
+    selection: SubscriptionChatRuntimeSelection,
+    fallbackSelection?: SubscriptionChatRuntimeSelection,
+  ) => LLMProvider | null;
+}
+
+/**
+ * Main-process-only subscription provider factory. It
+ * intentionally owns no runtime paths and accepts only a settings-normalized
+ * selection; the shared runtime service owns credential and transport state.
+ */
+export function createSubscriptionChatLoopBindings(input: {
+  readonly shellOpenExternal: (url: string) => Promise<void>;
+  readonly auditLogger: Pick<AuditLogger, "log">;
+}): SubscriptionChatLoopBindings {
+  const openExternal = async (url: string): Promise<void> => {
+    const validated = validateExternalUrl(url);
+    if (!validated.ok) {
+      throw new SubscriptionRuntimeServiceError("subscription-verification-url-unavailable");
+    }
+    await input.shellOpenExternal(validated.url);
+  };
+  const audit: SubscriptionRuntimeAuditSink = (event) => {
+    const requestKind = typeof event.requestKind === "string"
+      && /^[a-z-]{1,80}$/.test(event.requestKind)
+      ? event.requestKind
+      : undefined;
+    try {
+      input.auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "subscription-runtime",
+        type: "warn",
+        input: JSON.stringify({
+          provider: event.provider,
+          outcome: event.outcome,
+          ...(requestKind ? { requestKind } : {}),
+        }),
+      });
+    } catch {
+      // Audit availability must not make the provider usable or unusable.
+    }
+  };
+  return Object.freeze({
+    subscriptionProviderFactory: (
+      selection: SubscriptionChatRuntimeSelection,
+      fallbackSelection?: SubscriptionChatRuntimeSelection,
+    ) => createSubscriptionLlmProvider({
+      selection,
+      ...(fallbackSelection ? { fallbackSelection } : {}),
+      openExternal,
+      runtimeServiceOptions: { audit },
+    }),
+  });
+}
 
 export interface IsolatedConversationMemoryManagers {
   sideChatMemoryManager: MemoryManager;
@@ -115,6 +182,7 @@ export async function wireConversation(
     routeEngine,
     toolRegistry,
     memoryManager,
+    memoryCaptureService,
     permissionManager,
     approvalGate,
     hookRunner,
@@ -138,10 +206,17 @@ export async function wireConversation(
     agentProfileStore,
     getMainWindow,
     mainWindow,
+    subscriptionProviderFactory,
   } = ctx;
 
   const { sideChatMemoryManager, subAgentMemoryManager } = isolatedMemoryManagers;
 
+  // One host-owned, no-tool lane for every automatic memory transformation.
+  // The resolver is intentionally late: queued review work follows the current
+  // active login/model after a provider change rather than retaining a stale one.
+  const memoryReviewer = new MemoryReviewerService({
+    resolveActiveChatOneShot: () => lateBinding.llmCallerRef.fn,
+  });
 
   const routineLoopDeps = {
     settingsService,
@@ -150,6 +225,7 @@ export async function wireConversation(
     routeEngine,
     toolRegistry,
     memoryManager,
+    memoryReviewer,
     permissionManager,
     approvalGate,
     hookRunner,
@@ -160,6 +236,7 @@ export async function wireConversation(
     pluginOperationIdentityProvider,
     auditLogger: bootAuditLogger,
     llmFetch,
+    subscriptionProviderFactory,
   };
   const routineEngine = createRoutineEngine({
     createConversationLoop: (input) => createRoutineConversationLoop(
@@ -201,6 +278,7 @@ export async function wireConversation(
     memoryManager,
     idleScheduler,
     settingsService,
+    memoryCaptureService,
     auditLogger: bootAuditLogger,
     sessionTodoStore,
   });
@@ -226,6 +304,8 @@ export async function wireConversation(
     toolRegistry,
     supportsA2AParentDelivery: true,
     memoryManager,
+    memoryCaptureService,
+    memoryReviewer,
     permissionManager,
     routineEngine,
     idleScheduler,
@@ -252,6 +332,7 @@ export async function wireConversation(
     auditLogger: bootAuditLogger,
     rewireReviewerAgent,
     llmFetch,
+    subscriptionProviderFactory,
     ...rationaleBindings,
   });
 
@@ -278,6 +359,7 @@ export async function wireConversation(
     routeEngine,
     toolRegistry,
     permissionManager,
+    memoryReviewer,
     approvalGate,
     hookRunner,
     scriptHookManager,
@@ -289,6 +371,7 @@ export async function wireConversation(
     llmFetch,
     sideChatMemoryManager,
     getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
+    subscriptionProviderFactory,
     ...sideChatRationaleBindings,
   });
   ctx.sideChatConversationLoop = sideChatConversationLoop;
@@ -296,17 +379,33 @@ export async function wireConversation(
 
   lateBinding.conversationLoopRef.fn = conversationLoop;
   lateBinding.llmCallerRef.fn = createCallLlm(conversationLoop);
+  memoryCaptureService.setMemoryReviewer(memoryReviewer);
   lateBinding.pluginCallLlmRef.fn = createCallLlmForPlugin(conversationLoop, bootAuditLogger,
   );
   log.info("boot: plugin callLlm ready (rate-limited)");
 
   const preferenceRefreshService = new PreferenceRefreshService({
     memoryManager,
-    generateText: lateBinding.llmCallerRef.fn,
-    idleScheduler,
-    isIdleRefreshEnabled: () => settingsService.get("features")?.idlePreferenceRefresh ?? true,
+    memoryReviewer,
+    isIdleRefreshEnabled: () => settingsService.get("features")?.idlePreferenceRefresh ?? false,
   });
-  preferenceRefreshService.start();
+  const memoryConsolidationService = new MemoryConsolidationService({
+    memoryManager,
+    memoryReviewer,
+    isIdleConsolidationEnabled: () => settingsService.get("features")?.idleMemoryConsolidation ?? false,
+  });
+  // This is the only IDLE_SCAN listener for provider-backed memory maintenance.
+  // It serializes preference refresh before derived long-term consolidation.
+  const memoryMaintenanceCoordinator = new MemoryMaintenanceCoordinator({
+    memoryCaptureService,
+    idleScheduler,
+    preferenceRefreshService,
+    memoryConsolidationService,
+    getCurrentProject: () => conversationLoop.getSessionProjectIsDefault?.()
+      ? undefined
+      : conversationLoop.getSessionMemoryProjectContext?.(),
+  });
+  memoryMaintenanceCoordinator.start();
 
   // Sub-agent runs persist to an ISOLATED MemoryManager rooted at
   // `~/.lvis/subagent/` (resolved via openFeatureNamespace, the storage-
@@ -376,6 +475,7 @@ export async function wireConversation(
       routeEngine,
       toolRegistry,
       memoryManager,
+      memoryReviewer,
       permissionManager,
       approvalGate,
       bashAstValidator,
@@ -396,6 +496,7 @@ export async function wireConversation(
         : {}),
       rewireReviewerAgent,
       llmFetch,
+      subscriptionProviderFactory,
     },
     toolRegistry,
     subAgentMemoryManager,
@@ -455,6 +556,8 @@ export async function wireConversation(
   ctx.postTurnHookChain = postTurnHookChain;
   ctx.conversationLoop = conversationLoop;
   ctx.preferenceRefreshService = preferenceRefreshService;
+  ctx.memoryConsolidationService = memoryConsolidationService;
+  ctx.memoryMaintenanceCoordinator = memoryMaintenanceCoordinator;
   ctx.workBoardEngine = workBoardEngine;
   ctx.workBoardReporter = workBoardReporter;
 }

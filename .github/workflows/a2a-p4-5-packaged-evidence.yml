@@ -63,14 +63,14 @@ jobs:
       AGENT_HUB_HEAD: ${{ github.event.client_payload.agent_hub_head_sha }}
     steps:
       - name: Checkout exact candidate source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.REQUESTED_HEAD }}
           fetch-depth: 0
           persist-credentials: false
 
       - name: Checkout exact Agent Hub source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lvis-project/agent-hub
           ref: ${{ env.AGENT_HUB_HEAD }}
@@ -218,7 +218,7 @@ jobs:
       # This checkout is the immutable default-branch workflow source, not the
       # candidate artifact. The privileged job executes no candidate script.
       - name: Checkout trusted signing and verification policy
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ github.sha }}
           path: trusted-policy
@@ -226,7 +226,7 @@ jobs:
           persist-credentials: false
 
       - name: Checkout exact Agent Hub evidence input
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lvis-project/agent-hub
           ref: ${{ env.AGENT_HUB_HEAD }}
@@ -661,14 +661,14 @@ jobs:
       # Candidate-owned verifiers execute only here: this fresh job has no
       # environment, signing credential, OIDC permission, or write token.
       - name: Checkout exact unprivileged verifier source
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ env.REQUESTED_HEAD }}
           fetch-depth: 1
           persist-credentials: false
 
       - name: Checkout exact Agent Hub evidence input
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lvis-project/agent-hub
           ref: ${{ env.AGENT_HUB_HEAD }}

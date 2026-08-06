@@ -1,5 +1,6 @@
-import { createDynamicTool, type Tool } from "./base.js";
+import { createDynamicTool, type Tool, type ToolExecutionContext } from "./base.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
+import { scrubSecretsForLLM } from "../shared/dlp.js";
 
 /** Title length cap — memory titles are short labels, not prose. */
 export const MEMORY_WRITE_MAX_TITLE_CHARS = 120;
@@ -40,31 +41,45 @@ export function memoryWriteTitleHasControlChar(title: string): boolean {
 
 /** Narrow slice of MemoryManager the tool needs — keeps the dep surface minimal. */
 export type MemoryWriteStore = Pick<MemoryManager, "saveMemory">;
+/** The executor supplies cwd from the host-selected conversation project. */
+function memoryWriteProjectScope(ctx: ToolExecutionContext): { projectRoot?: string } {
+  const projectRoot = typeof ctx.cwd === "string" ? ctx.cwd.trim() : "";
+  return projectRoot ? { projectRoot } : {};
+}
+
+function hasCredentialLikeContent(title: string, content: string): boolean {
+  const combined = `${title}\n${content}`;
+  return scrubSecretsForLLM(combined) !== combined;
+}
+
 
 export interface MemoryWriteToolDeps {
   memoryManager: MemoryWriteStore;
 }
 
 /**
- * Builtin `memory_write` tool — lets the model deliberately persist a durable
- * fact into long-term memory (survives across sessions), rather than relying on
- * host-side post-turn extraction.
+ * Builtin `memory_write` tool — lets the model submit a durable fact for
+ * host-validated long-term-memory review. A successful call creates a
+ * candidate only; it never activates long-term memory directly.
  *
- * Guard model (single chokepoint + minimal in-tool checks):
- * - The tool is NOT read-only and is NOT auto-approved, so every call flows
- *   through the normal permission chokepoint where the user / auto-mode reviewer
- *   sees the exact title + content before it is persisted. That approval — plus
- *   the standard `tool_call` audit entry the executor records — is the primary
- *   defense against observed-content memory poisoning.
- * - In-tool checks only cover what the chokepoint cannot: length caps and the
- *   reserved-marker-namespace rejection (format-injection containment).
+ * Guard model (local-only candidate submission + minimal in-tool checks):
+ * - This remains a `write` tool. The permission manager grants this single
+ *   host-owned local-memory operation automatically in ordinary modes while
+ *   retaining explicit deny, strict-mode, and staged-origin gates. The executor
+ *   still records its standard `tool_call` audit entry.
+ * - In-tool checks retain the boundaries that local persistence alone cannot
+ *   provide: DLP, length caps, and reserved-marker-namespace rejection
+ *   (format-injection containment).
  * - The description draws the instruction-source boundary for the model.
  */
 export function createMemoryWriteTool(deps: MemoryWriteToolDeps): Tool {
   return createDynamicTool({
     name: "memory_write",
     description:
-      "Persist a durable fact into long-term memory that survives across sessions. " +
+      "Submit a durable fact to LVIS for host validation as a candidate long-term memory. " +
+      "A successful submission is not active memory and cannot affect future prompts until the host " +
+      "separately reviews and activates it. " +
+      "The candidate is scoped to the current host-selected project. " +
       "Use this ONLY for facts you have genuinely learned and that remain useful later: " +
       "stable user preferences, project constraints, or hard-won context not derivable " +
       "from the code, git history, or docs. `title` is a short label; `content` is the fact. " +
@@ -89,7 +104,7 @@ export function createMemoryWriteTool(deps: MemoryWriteToolDeps): Tool {
         },
       },
     },
-    execute: async (rawInput) => {
+    execute: async (rawInput, ctx) => {
       const args = (rawInput ?? {}) as Record<string, unknown>;
       const title = typeof args.title === "string" ? args.title.trim() : "";
       const content = typeof args.content === "string" ? args.content.trim() : "";
@@ -147,10 +162,27 @@ export function createMemoryWriteTool(deps: MemoryWriteToolDeps): Tool {
         };
       }
 
-      try {
-        const entry = await deps.memoryManager.saveMemory(title, content);
+      if (hasCredentialLikeContent(title, content)) {
         return {
-          output: JSON.stringify({ saved: true, filename: entry.filename, title }),
+          output: "memory_write: title/content must not contain credentials, API keys, or tokens.",
+          isError: true,
+        };
+      }
+
+      try {
+        const entry = await deps.memoryManager.saveMemory(title, content, {
+          ...memoryWriteProjectScope(ctx),
+          source: "assistant",
+          state: "candidate",
+        });
+        return {
+          output: JSON.stringify({
+            saved: true,
+            candidate: true,
+            state: "candidate",
+            filename: entry.filename,
+            title,
+          }),
           isError: false,
         };
       } catch (error) {

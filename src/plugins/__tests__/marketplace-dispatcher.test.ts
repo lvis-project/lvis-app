@@ -1,7 +1,7 @@
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdmZip from "adm-zip";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 
 import { isAbsolute, join, resolve } from "node:path";
@@ -14,14 +14,23 @@ vi.mock("../publisher-keys.js", () => ({
   getBundledPublicKeys: mockedPublisherKeys.getBundledPublicKeys,
 }));
 
-import { PluginMarketplaceService } from "../marketplace.js";
+import {
+  PluginInstalledStateUnreadableError,
+} from "../marketplace.js";
 import { ArtifactRollbackError, PluginArtifactStore } from "../plugin-artifact-store.js";
+import { PluginBundleLifecycle } from "../plugin-bundle-lifecycle.js";
+import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem, PluginRegistryEntry } from "../types.js";
 import { setCachedCatalog } from "../offline-cache.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
+import { ScriptHookManager } from "../../hooks/script-hook-manager.js";
+import { SkillStore } from "../../main/skill-store.js";
+import { createNoopHostApiForTests, PluginRuntime } from "../runtime.js";
 import {
   makeTestPluginPaths,
+  makeTestTreeWritable,
+  preparedActivationOptionsForTest,
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
@@ -96,6 +105,7 @@ describe("PluginMarketplaceService install()", () => {
   afterEach(async () => {
     delete process.env.LVIS_DEV;
     vi.restoreAllMocks();
+    await makeTestTreeWritable(testDir);
     await rm(testDir, { recursive: true, force: true });
     _resetForTest();
   });
@@ -121,6 +131,130 @@ describe("PluginMarketplaceService install()", () => {
     return { service, npmInstallMock };
   }
 
+  function makeProductionActivationRuntime() {
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+      installReceiptCacheRoot: cacheRoot,
+      createHostApi: createNoopHostApiForTests,
+    });
+    const lifecycle = new PluginBundleLifecycle({
+      pluginRuntime: runtime,
+      receiptCacheRoot: cacheRoot,
+      skillStore: new SkillStore({ userDir: join(testDir, "runtime-skills") }),
+      hookManager: new ScriptHookManager(),
+      mcpManager: {
+        bundledServerIdsForPlugin: vi.fn(() => []),
+        prepareBundledGeneration: vi.fn(async () => ({
+          predecessorServerIds: [],
+          predecessorToolNames: [],
+          records: [],
+          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+          published: false,
+        })),
+        publishBundledGeneration: vi.fn((prepared) => { prepared.published = true; }),
+        discardBundledGeneration: vi.fn(async () => undefined),
+        retirePublishedMcpReplacement: vi.fn(async () => undefined),
+        disconnectBundledGeneration: vi.fn(async () => undefined),
+      } as never,
+      loopbackManager: {
+        prepareGeneration: vi.fn(async (manifest, generationId) => ({
+          pluginId: manifest.id,
+          generationId,
+          tools: [],
+          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+          published: false,
+          disconnectPredecessor: false,
+        })),
+        prepareRemoval: vi.fn((pluginId, generationId) => ({
+          pluginId,
+          generationId,
+          tools: [],
+          registryReplacement: { publish: vi.fn(), cancel: vi.fn(), replacementTools: [] },
+          published: false,
+          disconnectPredecessor: false,
+        })),
+        publishGeneration: vi.fn((prepared) => { prepared.published = true; }),
+        postPublishGeneration: vi.fn(),
+        discardGeneration: vi.fn(async () => undefined),
+        retireGeneration: vi.fn(async () => undefined),
+      } as never,
+      revokeOperationGeneration: vi.fn(),
+    });
+    runtime.setGenerationAccess(lifecycle);
+    return { runtime, lifecycle };
+  }
+
+  it("reports an install that replaced nothing, so a repair can tell it apart", async () => {
+    // Reinstalling when the catalog carries the version already on disk swaps
+    // no bytes. The Doctor reinstalls to repair a failed plugin, so it has to
+    // distinguish "put a different bundle down" from "there was nothing but
+    // the broken one" — otherwise it reports an unexplained dead end.
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "test-plugin",
+      slug: "test-plugin",
+      name: "Test Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/test-plugin@1.2.3",
+      packageName: "@lvis/test-plugin",
+    };
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: ["ping"],
+    });
+    const downloadArtifact = vi.fn(async () => ({
+      body: zipBuffer,
+      sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+      status: 200,
+    }));
+    const fetchSignatureEnvelope = vi.fn(async () =>
+      makeEnvelope(zipBuffer, signingKey.privateKey),
+    );
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: typeof downloadArtifact;
+      fetchSignatureEnvelope: typeof fetchSignatureEnvelope;
+    } = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: vi.fn(async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      }),
+      downloadArtifact,
+      fetchSignatureEnvelope,
+      listAnnouncements: async () => [],
+    };
+
+    const { service } = makeService(fetcher);
+
+    const first = await service.install(
+      "test-plugin",
+      undefined,
+      preparedActivationOptionsForTest,
+    );
+    expect(first).toEqual({ pluginId: "test-plugin", installed: true });
+
+    const second = await service.install(
+      "test-plugin",
+      undefined,
+      preparedActivationOptionsForTest,
+    );
+    expect(second).toEqual({
+      pluginId: "test-plugin",
+      installed: true,
+      unchanged: true,
+    });
+    // Nothing was fetched the second time — that is what `unchanged` reports.
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+  });
   it("downloads and extracts a marketplace zip without using npm", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
@@ -200,6 +334,239 @@ describe("PluginMarketplaceService install()", () => {
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
   });
+
+  it("returns a self-admitted marketplace update before retirement and defers backup cleanup", async () => {
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const catalogItem = (version: string): PluginMarketplaceItem => ({
+      id: "self-update-plugin",
+      slug: "self-update-plugin",
+      name: "Self Update Plugin",
+      description: "self-admitted artifact transaction fixture",
+      version,
+      packageSpec: `@lvis/self-update-plugin@${version}`,
+      packageName: "@lvis/self-update-plugin",
+    });
+    let current = catalogItem("1.0.0");
+    const zips = new Map([
+      ["1.0.0", makePluginZip({ ...current, entry: "./dist/hostPlugin.js" })],
+      ["2.0.0", makePluginZip({ ...catalogItem("2.0.0"), entry: "./dist/hostPlugin.js" })],
+    ]);
+    const fetcher = {
+      listPlugins: async () => [current],
+      getPluginDetail: async () => current,
+      downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+      downloadArtifact: async (_id: string, version: string) => {
+        const body = zips.get(version);
+        if (!body) throw new Error(`missing fixture zip ${version}`);
+        return {
+          body,
+          sha256Header: createHash("sha256").update(body).digest("hex"),
+          status: 200,
+        };
+      },
+      fetchSignatureEnvelope: async (_id: string, version: string) => {
+        const body = zips.get(version);
+        if (!body) throw new Error(`missing fixture zip ${version}`);
+        return makeEnvelope(body, signingKey.privateKey);
+      },
+      listAnnouncements: async () => [],
+    };
+    const { service } = makeService(fetcher);
+    await service.install(current.id, undefined, preparedActivationOptionsForTest);
+    const removeCommittedBackup = vi.spyOn(
+      (service as unknown as {
+        artifactStore: { removeCommittedBackup(path: string): Promise<void> };
+      }).artifactStore,
+      "removeCommittedBackup",
+    );
+
+    current = catalogItem("2.0.0");
+    let releaseRetirement!: () => void;
+    const retirement = new Promise<void>((resolveRetirement) => {
+      releaseRetirement = resolveRetirement;
+    });
+    const update = service.install(current.id, undefined, {
+      activatePreparedArtifact: async (prepared) => ({
+        result: await prepared.durableCommit(),
+        retirement,
+        completion: retirement,
+        retirementDeferred: true,
+      }),
+    });
+
+    await expect(update).resolves.toEqual({
+      pluginId: current.id,
+      installed: true,
+    });
+    expect(JSON.parse(await readFile(join(installedDir, current.id, "plugin.json"), "utf-8")))
+      .toMatchObject({ version: "2.0.0" });
+    expect((await readdir(installedDir)).some((name) =>
+      name.startsWith(`.${current.id}.old-`)
+    )).toBe(true);
+
+    releaseRetirement();
+    await vi.waitFor(async () => {
+      expect((await readdir(installedDir)).some((name) =>
+        name.startsWith(`.${current.id}.old-`)
+      )).toBe(false);
+    });
+    expect(removeCommittedBackup).toHaveBeenCalledOnce();
+  });
+
+  it.each(["initial", "replacement"] as const)(
+    "keeps the committed marketplace candidate after %s projection publication failure",
+    async (kind) => {
+      const signingKey = freshEd25519();
+      mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+        "test-v1": signingKey.publicKey,
+      });
+      const catalogItem = (version: string): PluginMarketplaceItem => ({
+        id: `committed-publication-${kind}`,
+        slug: `committed-publication-${kind}`,
+        name: `Committed Publication ${kind}`,
+        description: "post-linearization publication failure fixture",
+        version,
+        packageSpec: `@lvis/committed-publication-${kind}@${version}`,
+        packageName: `@lvis/committed-publication-${kind}`,
+      });
+      let current = catalogItem("1.0.0");
+      const zips = new Map([
+        ["1.0.0", makePluginZip({ ...current, entry: "./dist/hostPlugin.js" })],
+        ["2.0.0", makePluginZip({ ...catalogItem("2.0.0"), entry: "./dist/hostPlugin.js" })],
+      ]);
+      const downloadArtifact = async (_id: string, version: string) => {
+        const body = zips.get(version);
+        if (!body) throw new Error(`missing fixture zip ${version}`);
+        return {
+          body,
+          sha256Header: createHash("sha256").update(body).digest("hex"),
+          status: 200,
+        };
+      };
+      const fetchSignatureEnvelope = async (_id: string, version: string) => {
+        const body = zips.get(version);
+        if (!body) throw new Error(`missing fixture zip ${version}`);
+        return makeEnvelope(body, signingKey.privateKey);
+      };
+      const fetcher: MarketplaceFetcher & {
+        downloadArtifact: typeof downloadArtifact;
+        fetchSignatureEnvelope: typeof fetchSignatureEnvelope;
+      } = {
+        listPlugins: async () => [current],
+        getPluginDetail: async () => current,
+        downloadVersion: async () => { throw new Error("unexpected legacy download"); },
+        downloadArtifact,
+        fetchSignatureEnvelope,
+        listAnnouncements: async () => [],
+      };
+      const { service } = makeService(fetcher);
+      const { runtime, lifecycle } = makeProductionActivationRuntime();
+      const activatePreparedArtifact = runtime.activatePreparedArtifact.bind(runtime);
+      if (kind === "replacement") {
+        await service.install(current.id, undefined, { activatePreparedArtifact });
+        current = catalogItem("2.0.0");
+      }
+      const store = (service as unknown as { artifactStore: PluginArtifactStore }).artifactStore;
+      const removeCommittedBackup = vi.spyOn(
+        store as unknown as { removeCommittedBackup(path: string): Promise<void> },
+        "removeCommittedBackup",
+      );
+      const failingVersion = current.version;
+      const publicationCause = new Error(`${kind} projection publish failed`);
+      const prepareRuntimeGeneration = runtime.prepareRuntimeGeneration.bind(runtime);
+      vi.spyOn(runtime, "prepareRuntimeGeneration").mockImplementation((projection, predecessor) => {
+        const prepared = prepareRuntimeGeneration(projection, predecessor);
+        return projection.manifest.version === failingVersion
+          ? { ...prepared, publish: () => { throw publicationCause; } }
+          : prepared;
+      });
+
+      const failure = await service.install(current.id, undefined, {
+        activatePreparedArtifact,
+      }).catch((error: unknown) => error);
+
+      expect(failure).toBeInstanceOf(CommittedPluginGenerationPublicationError);
+      expect(failure).toMatchObject({
+        pluginId: current.id,
+        publicationCause,
+        committed: { result: `${current.id}/plugin.json`, retirementDeferred: false },
+      });
+      expect((failure as Error).cause).toBe(publicationCause);
+      const active = lifecycle.getActive(current.id);
+      expect(active?.manifest.version).toBe(current.version);
+      await expect(lifecycle.acquire(current.id)).rejects.toThrow(
+        /dispatch blocked by publication failure/,
+      );
+      expect(JSON.parse(await readFile(join(installedDir, current.id, "plugin.json"), "utf-8")))
+        .toMatchObject({ version: current.version });
+      const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: PluginRegistryEntry[];
+      };
+      expect(registry.plugins[0]).toMatchObject({
+        id: current.id,
+        manifestPath: `${current.id}/plugin.json`,
+        manifestSha256: manifestSha({ ...current, entry: "./dist/hostPlugin.js" }),
+      });
+      expect(registry.plugins[0]?.pendingUpdate).toBeUndefined();
+      expect(registry.plugins[0]?.pendingCleanup).toBeUndefined();
+      expect(JSON.parse(await readFile(join(cacheRoot, current.id, "install-receipt.json"), "utf-8")))
+        .toMatchObject({ pluginId: current.id, version: current.version });
+      expect((await readdir(installedDir)).some((name) =>
+        name.startsWith(`.${current.id}.old-`)
+      )).toBe(false);
+      expect(removeCommittedBackup).toHaveBeenCalledOnce();
+      await expect(service.recoverInterruptedUpdates()).resolves.toEqual({
+        recovered: [],
+        unresolved: [],
+      });
+      expect(JSON.parse(await readFile(join(installedDir, current.id, "plugin.json"), "utf-8")))
+        .toMatchObject({ version: current.version });
+
+      const persistedManifest = JSON.parse(
+        await readFile(join(installedDir, current.id, "plugin.json"), "utf-8"),
+      );
+      const persistedReceipt = await readFile(
+        join(cacheRoot, current.id, "install-receipt.json"),
+        "utf-8",
+      );
+      const persistedEntry = (JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: PluginRegistryEntry[];
+      }).plugins[0]!;
+      const restarted = makeProductionActivationRuntime();
+      const restartPublicationCause = new Error("restart projection publish failed");
+      const restartPrepareRuntimeGeneration =
+        restarted.runtime.prepareRuntimeGeneration.bind(restarted.runtime);
+      vi.spyOn(restarted.runtime, "prepareRuntimeGeneration")
+        .mockImplementation((projection, predecessor) => {
+          const prepared = restartPrepareRuntimeGeneration(projection, predecessor);
+          return { ...prepared, publish: () => { throw restartPublicationCause; } };
+        });
+      const restartFailure = await restarted.runtime.activatePreparedArtifact({
+        installId: current.id,
+        pluginRoot: join(installedDir, current.id),
+        manifest: persistedManifest,
+        receiptRaw: persistedReceipt,
+        registryEntry: {
+          installSource: persistedEntry.installSource,
+          manifestSha256: persistedEntry.manifestSha256,
+        },
+        durableCommit: async () => persistedEntry.manifestPath,
+      }).catch((error: unknown) => error);
+      expect(restartFailure).toBeInstanceOf(CommittedPluginGenerationPublicationError);
+      expect(restartFailure).toMatchObject({
+        publicationCause: restartPublicationCause,
+        outcome: { state: "active" },
+        committed: { result: persistedEntry.manifestPath },
+      });
+      expect(restarted.lifecycle.getActive(current.id)?.manifest.version).toBe(current.version);
+      await expect(restarted.lifecycle.acquire(current.id)).rejects.toThrow(
+        /dispatch blocked by publication failure/,
+      );
+    },
+  );
 
   it("rejects and rolls back an artifact whose declared Skill is absent", async () => {
     const signingKey = freshEd25519();
@@ -348,7 +715,7 @@ describe("PluginMarketplaceService install()", () => {
     await replacement;
   });
 
-  it("marks a raw stale-manifest row pending before promotion and preserves its bundle graph", async () => {
+  it("fails closed on a raw stale-manifest row before download or registry mutation", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({ "test-v1": signingKey.publicKey });
     const plugin: PluginMarketplaceItem = {
@@ -369,15 +736,16 @@ describe("PluginMarketplaceService install()", () => {
       entry: "./dist/hostPlugin.js",
       tools: [],
     });
+    const downloadArtifact = vi.fn(async () => ({
+      body: zipBuffer,
+      sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+      status: 200,
+    }));
     const fetcher: MarketplaceFetcher = {
       listPlugins: async () => [plugin],
       getPluginDetail: async () => plugin,
       downloadVersion: async () => { throw new Error("unexpected legacy download"); },
-      downloadArtifact: async () => ({
-        body: zipBuffer,
-        sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
-        status: 200,
-      }),
+      downloadArtifact,
       fetchSignatureEnvelope: async () => makeEnvelope(zipBuffer, signingKey.privateKey),
       listAnnouncements: async () => [],
     };
@@ -393,38 +761,21 @@ describe("PluginMarketplaceService install()", () => {
       }],
     }));
     const { service } = makeService(fetcher);
-    const target = service as unknown as {
+    const markPending = vi.spyOn(service as unknown as {
       markMarketplaceRegistryEntryPending: (
         entry: PluginRegistryEntry | null,
         backupDir: string,
       ) => Promise<PluginRegistryEntry | null>;
-    };
-    const originalMark = target.markMarketplaceRegistryEntryPending.bind(service);
-    vi.spyOn(target, "markMarketplaceRegistryEntryPending").mockImplementation(async (...args) => {
-      const result = await originalMark(...args);
-      const pendingRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-        plugins: Array<{ id: string; pendingUpdate?: unknown; bundleRefs?: string[]; approvedPluginAccess?: unknown }>;
-      };
-      expect(pendingRegistry.plugins).toEqual([
-        expect.objectContaining({
-          id: plugin.id,
-          pendingUpdate: expect.objectContaining({ kind: "marketplace" }),
-          bundleRefs: ["bundle-root"],
-          approvedPluginAccess: expect.any(Object),
-        }),
-      ]);
-      return result;
-    });
+    }, "markMarketplaceRegistryEntryPending");
+    const originalRegistry = await readFile(registryPath, "utf-8");
 
-    await service.install(plugin.slug);
+    await expect(service.install(plugin.slug)).rejects.toBeInstanceOf(
+      PluginInstalledStateUnreadableError,
+    );
 
-    const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
-      plugins: Array<{ id: string; pendingUpdate?: unknown; bundleRefs?: string[] }>;
-    };
-    expect(registry.plugins).toEqual([
-      expect.objectContaining({ id: plugin.id, bundleRefs: ["bundle-root"] }),
-    ]);
-    expect(registry.plugins[0]?.pendingUpdate).toBeUndefined();
+    expect(downloadArtifact).not.toHaveBeenCalled();
+    expect(markPending).not.toHaveBeenCalled();
+    expect(await readFile(registryPath, "utf-8")).toBe(originalRegistry);
   });
 
   it("keeps a pending member in the bundle plan when root uninstall starts after member replacement", async () => {
@@ -821,9 +1172,16 @@ describe("PluginMarketplaceService install()", () => {
     await expect(managedRetry).resolves.toEqual({
       installed: [plugin.id],
       updated: [],
+      removed: [],
       failed: [],
     });
-    await expect(standardInstall).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    // Same version already committed by the managed retry — the standard
+    // install finds nothing to replace and says so.
+    await expect(standardInstall).resolves.toEqual({
+      pluginId: plugin.id,
+      installed: true,
+      unchanged: true,
+    });
     expect(downloadArtifact).toHaveBeenCalledTimes(1);
     const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
       plugins: Array<{ id: string; installSource: string }>;
@@ -909,7 +1267,7 @@ describe("PluginMarketplaceService install()", () => {
 
     releasePromotion();
     await expect(newerInstall).resolves.toEqual({ pluginId: newer.id, installed: true });
-    await expect(olderManagedRetry).resolves.toEqual({ installed: [], updated: [], failed: [] });
+    await expect(olderManagedRetry).resolves.toEqual({ installed: [], updated: [], removed: [], failed: [] });
     expect(downloadArtifact).toHaveBeenCalledTimes(1);
     expect(JSON.parse(await readFile(join(installedDir, newer.id, "plugin.json"), "utf-8")))
       .toMatchObject({ version: "3.0.0" });
@@ -1401,7 +1759,14 @@ describe("PluginMarketplaceService install()", () => {
     };
     await writeFile(registryPath, JSON.stringify(registry));
 
-    await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    // Idempotent touch: receipt and artifact already match the catalog, so the
+    // pending row is cleared without swapping any bytes — hence `unchanged`,
+    // which `downloads` staying at 1 independently confirms.
+    await expect(service.install(plugin.id)).resolves.toEqual({
+      pluginId: plugin.id,
+      installed: true,
+      unchanged: true,
+    });
     expect(downloads).toBe(1);
     expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] })
       .plugins[0]?.pendingUpdate).toBeUndefined();

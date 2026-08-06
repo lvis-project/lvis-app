@@ -18,10 +18,11 @@
  * once at boot.
  */
 import { createRequire } from "node:module";
-import { dirname, normalize, resolve } from "node:path";
+import { normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RENDER_HTML_PARTITION } from "../shared/render-html-preview.js";
 import { mcpAppPartitionName } from "../shared/mcp-app-partition.js";
+import { runtimeAssetPath } from "./main-paths.js";
 import { installPluginAssetProtocolHandler, PLUGIN_ASSET_SCHEME } from "./plugin-asset-protocol.js";
 import {
   installMcpAppProtocolHandler,
@@ -30,14 +31,13 @@ import {
   MCP_APP_SCHEME,
 } from "./mcp-app-protocol.js";
 
-// ESM equivalent of CommonJS `__dirname`. The original code referenced
-// `__dirname` directly, which is undefined under `"type": "module"` and
-// crashed when `installPluginPartitionPolicy` was first reached at runtime
-// (#498). Resolve once at module load.
-const __dirname = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const pluginShellHtmlPath = normalize(resolve(__dirname, "..", "plugin-ui-shell.html"));
-const pluginShellJsPath = normalize(resolve(__dirname, "..", "plugin-ui-shell.js"));
+// This module may be emitted into `dist/src/main/chunks/*.js`; asset paths
+// must stay anchored at the real `dist/src` directory rather than this chunk.
+const pluginShellHtmlPath = normalize(runtimeAssetPath("plugin-ui-shell.html"));
+const pluginShellJsPath = normalize(runtimeAssetPath("plugin-ui-shell.js"));
+const pluginPreloadPath = runtimeAssetPath("plugin-preload.cjs");
+const mcpAppPreloadPath = runtimeAssetPath("mcp-app-preload.cjs");
 
 type SessionApi = { fromPartition(partition: string): Electron.Session };
 
@@ -191,7 +191,7 @@ const installedMcpAppPartitions = new Set<string>();
  *   1. the deny-by-default declared-origin network gate,
  *   2. the `lvis-mcp-app://` handler serving the sandbox-proxy document with its
  *      per-resource CSP response header, and
- *   3. the host-owned relay preload (via `session.setPreloads`).
+ *   3. the host-owned relay preload (via `session.registerPreloadScript`).
  *
  * Called from the `lvis:mcp:ui-resource` IPC handler — the single main-side chokepoint
  * every card render (inline AND detached) passes through — BEFORE the resource is
@@ -223,7 +223,8 @@ export function installMcpAppPartitionPolicy(
   // frame inherits.
   installMcpAppProtocolHandler(partitionName, ses);
 
-  // The sandbox-proxy relay preload. As with the plugin partition, `setPreloads`
+  // The sandbox-proxy relay preload. As with the plugin partition, a
+  // session-level frame preload
   // is the ONLY path that works: the `preload=` attribute is silently ignored
   // when `webpreferences="sandbox=yes"`, and the `will-attach-webview` guards
   // strip the attribute anyway (they cannot see, and do not affect, session
@@ -232,9 +233,10 @@ export function installMcpAppPartitionPolicy(
   // `boot/steps/plugin-runtime.ts`: `webPreferences.preload` is `undefined` there).
   //
   // Host-resolved path only. An MCP server can never nominate a preload — that
-  // would be a Node escape. At runtime __dirname is `dist/src/main/`, so
-  // "../mcp-app-preload.cjs" resolves to `dist/src/mcp-app-preload.cjs`.
-  ses.setPreloads([resolve(__dirname, "..", "mcp-app-preload.cjs")]);
+  // would be a Node escape. `runtimeAssetPath` is anchored at `dist/src` even
+  // when this code executes from an esbuild chunk. The modern API runs before
+  // any guest-specified preload.
+  ses.registerPreloadScript({ type: "frame", filePath: mcpAppPreloadPath });
 }
 
 function isAllowedPluginShellFile(url: URL): boolean {
@@ -259,14 +261,12 @@ export function installPluginPartitionPolicy(
   if (installedPluginPartitions.has(partitionName)) return;
   installedPluginPartitions.add(partitionName);
 
-  // setPreloads is required for sandboxed <webview> — the preload= attribute
+  // A session-level frame preload is required for sandboxed <webview> — the preload= attribute
   // alone is silently ignored when webpreferences="sandbox=yes". Electron
   // requires the preload to be registered on the partition's Session before
-  // the webview begins loading. At runtime __dirname is `dist/src/main/`,
-  // so resolving "../plugin-preload.cjs" yields `dist/src/plugin-preload.cjs`,
-  // a sibling of the host preload.cjs.
-  const preloadPath = resolve(__dirname, "..", "plugin-preload.cjs");
-  ses.setPreloads([preloadPath]);
+  // the webview begins loading. `runtimeAssetPath` remains correct when this
+  // policy module is emitted to `dist/src/main/chunks/*.js`.
+  ses.registerPreloadScript({ type: "frame", filePath: pluginPreloadPath });
 
   ses.webRequest.onBeforeRequest((details, callback) => {
     try {

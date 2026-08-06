@@ -10,6 +10,7 @@ import type { PluginRuntime, PluginToolInvocationDelegate,
 import type { PluginMarketplaceService } from "../plugins/marketplace.js";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
+import type { MemoryCaptureService } from "../memory/memory-capture-service.js";
 import type { InputClassifier } from "../core/input-classifier.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
@@ -32,6 +33,7 @@ import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
 import type { PreferenceRefreshService } from "../memory/preference-refresh-service.js";
+import type { MemoryConsolidationService, MemoryMaintenanceCoordinator } from "../memory/memory-consolidation-service.js";
 import type { A2ARemoteRuntime } from "../main/a2a-remote-runtime.js";
 import type { RemoteA2AActionController } from "../main/remote-a2a-action-controller.js";
 import { createLogger } from "../lib/logger.js";
@@ -79,6 +81,8 @@ export interface AppServices {
   /** Main-owned renderer action boundary; renderer supplies only target id and user intent. */
   remoteA2AActionController?: RemoteA2AActionController;
   memoryManager: MemoryManager;
+  /** Host-owned LLM review gate for explicit and automatic long-term memory. */
+  memoryCaptureService?: MemoryCaptureService;
   inputClassifier: InputClassifier;
   routeEngine: RouteEngine;
   toolRegistry: ToolRegistry;
@@ -149,6 +153,8 @@ export interface AppServices {
   skillArtifactStore?: import("../plugins/plugin-artifact-store.js").PluginArtifactStore;
   idleScheduler?: IdleSchedulerService;
   preferenceRefreshService?: PreferenceRefreshService;
+  memoryConsolidationService?: MemoryConsolidationService;
+  memoryMaintenanceCoordinator?: MemoryMaintenanceCoordinator;
   bashAstValidator: BashAstValidator;
   auditService: AuditService;
   /** A3 — structured audit logger (JSONL, ~/.lvis/audit/) */
@@ -168,12 +174,11 @@ export interface AppServices {
    */
   refreshMarketplaceFetcherConfig?: () => void;
   /**
-   * #893 — Re-sync the plugin runtime's wildcard config overrides
-   * (`hostApiKey` / `hostApiVendor`) against the current active LLM
-   * vendor's apiKey. Invoked from the settings IPC handler after the
-   * vendor changes or an apiKey is set/deleted, so plugins reading
-   * `hostApi.config.get("hostApiKey")` observe the new value on their
-   * next call without an app restart.
+   * #893 — Re-sync the plugin runtime's wildcard config overrides. Only the
+   * non-secret `hostApiVendor` is projected, and only while an API provider
+   * owns generation; subscription runtime selection clears it. Invoked from
+   * settings IPC after runtime or API-vendor changes so plugins observe the
+   * correct execution identity on their next call without an app restart.
    */
   refreshActiveLlmWildcard?: () => void;
   /**

@@ -259,10 +259,9 @@ describe("useChatState", () => {
     act(() => {
       result.current.insertImportedTriggerEntry({
         sessionId: "trigger-1",
-        pluginId: "meeting",
+        source: "plugin:meeting",
         prompt: "<imported-from-overlay source=\"overlay:meeting-summary\">요약</imported-from-overlay>",
         summary: "회의 요약",
-        title: "회의",
       });
       emitChatStream({ type: "text_delta", text: "assistant reply" });
     });
@@ -610,11 +609,10 @@ describe("useCostEstimate (memo invariants)", () => {
     const { result } = renderHook(() =>
       useCostEstimate({
         entries: [],
-        question: "hello",
+        draft: { text: "hello", attachments: [] },
         llmVendor: "openai",
         llmModel: "gpt-4o-mini",
         maxOutputTokens: 1024,
-        composeOutgoing: (raw: string) => raw,
       }),
     );
     expect(result.current.costEstimate).toBeDefined();

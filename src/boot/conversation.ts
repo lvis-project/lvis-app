@@ -5,6 +5,11 @@
 import type { BrowserWindow } from "electron";
 import type { SettingsService } from "../data/settings-store.js";
 import type { MemoryManager } from "../memory/memory-manager.js";
+import type {
+  AutomaticMemoryCaptureSubmitter,
+  MemoryCaptureService,
+} from "../memory/memory-capture-service.js";
+import type { MemoryReviewerService } from "../memory/memory-reviewer-service.js";
 import type { SkillCatalogEntry } from "../main/skill-store.js";
 import type { InputClassifier } from "../core/input-classifier.js";
 import type { RouteEngine } from "../core/route-engine.js";
@@ -25,6 +30,8 @@ import { HookRunner } from "../hooks/hook-runner.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { SessionTodoStore } from "../main/session-todo-store.js";
+import type { LLMProvider } from "../engine/llm/types.js";
+import type { SubscriptionChatRuntimeSelection } from "../shared/subscription-runtime.js";
 import { isDefaultWorkspaceRoot } from "../main/default-workspace-root.js";
 import {
   defaultWorkspaceProject,
@@ -107,6 +114,7 @@ export function createPostTurnHookChain(opts: {
   memoryManager: MemoryManager;
   idleScheduler?: IdleSchedulerService;
   settingsService: SettingsService;
+  memoryCaptureService?: AutomaticMemoryCaptureSubmitter;
   /**
    * Shared AuditLogger. When provided, PostTurnHookChain
    * reuses the same instance as HostApi.logEvent so plugin + host audit
@@ -127,6 +135,7 @@ export function createPostTurnHookChain(opts: {
     auditLogger,
     idleScheduler: opts.idleScheduler,
     settingsService: opts.settingsService,
+    memoryCaptureService: opts.memoryCaptureService,
     sessionTodoStore: opts.sessionTodoStore,
   });
   return { postTurnHookChain, auditLogger };
@@ -177,6 +186,10 @@ export interface ConversationDeps {
   /** Host-owned capability; defaults false when omitted. */
   supportsA2AParentDelivery?: boolean;
   memoryManager: MemoryManager;
+  /** Main-chat explicit saves use the host's common memory-review path. */
+  memoryCaptureService?: MemoryCaptureService;
+  /** Main, routine, and side-chat recap share this host-owned reviewer lane. */
+  memoryReviewer?: Pick<MemoryReviewerService, "review">;
   permissionManager: PermissionManager;
   routineEngine: RoutineEngine;
   idleScheduler?: IdleSchedulerService;
@@ -223,6 +236,11 @@ export interface ConversationDeps {
   rewireReviewerAgent?: () => void;
   /** Main-process fetch implementation for SDK-backed LLM calls. */
   llmFetch?: typeof fetch;
+  /** Main-owned factory for a subscription-authenticated LLM provider. */
+  subscriptionProviderFactory?: (
+    selection: SubscriptionChatRuntimeSelection,
+    fallbackSelection?: SubscriptionChatRuntimeSelection,
+  ) => LLMProvider | null;
 }
 
 /**
@@ -246,6 +264,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "routeEngine"
   | "toolRegistry"
   | "memoryManager"
+  | "memoryReviewer"
   | "permissionManager"
   | "approvalGate"
   | "hookRunner"
@@ -259,6 +278,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "isDefaultProjectRoot"
   | "getDefaultProject"
   | "authorizeProject"
+  | "subscriptionProviderFactory"
 >;
 
 export function createRoutineConversationLoop(
@@ -314,6 +334,7 @@ export function createRoutineConversationLoop(
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
     memoryManager: deps.memoryManager,
+    memoryReviewer: deps.memoryReviewer,
     permissionManager: deps.permissionManager,
     approvalGate: deps.approvalGate,
     hookRunner: deps.hookRunner,
@@ -331,6 +352,7 @@ export function createRoutineConversationLoop(
     forcedActivePluginIds,
     ...(forcedActiveToolNames.size > 0 ? { forcedActiveToolNames } : {}),
     additionalDirectories: scope?.directories ?? [],
+    subscriptionProviderFactory: deps.subscriptionProviderFactory,
     headless: true,
     // postTurnHookChain / idleScheduler intentionally omitted — routine loops
     // are isolated from interactive chat side effects. The fallback persistence
@@ -368,6 +390,7 @@ export type SideChatConversationLoopDeps = Pick<
   | "toolRegistry"
   | "permissionManager"
   | "approvalGate"
+  | "memoryReviewer"
   | "hookRunner"
   | "scriptHookManager"
   | "bashAstValidator"
@@ -378,6 +401,7 @@ export type SideChatConversationLoopDeps = Pick<
   | "rationaleCoordinatorFactory"
   | "closeRationaleSession"
   | "auditLogger"
+  | "subscriptionProviderFactory"
 > & {
   /** Isolated MemoryManager rooted at `~/.lvis/side-chat/`. */
   sideChatMemoryManager: MemoryManager;
@@ -419,6 +443,7 @@ export function createSideChatConversationLoop(
     routeEngine: deps.routeEngine,
     toolRegistry: deps.toolRegistry,
     memoryManager: deps.sideChatMemoryManager,
+    memoryReviewer: deps.memoryReviewer,
     permissionManager: deps.permissionManager,
     approvalGate: deps.approvalGate,
     hookRunner: deps.hookRunner,
@@ -436,6 +461,7 @@ export function createSideChatConversationLoop(
       ? { closeRationaleSession: deps.closeRationaleSession }
       : {}),
     llmFetch: deps.llmFetch,
+    subscriptionProviderFactory: deps.subscriptionProviderFactory,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
     authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,
@@ -463,6 +489,8 @@ export function createConversationLoop(deps: ConversationDeps,
       ? { closeRationaleSession: deps.closeRationaleSession }
       : {}),
     memoryManager: deps.memoryManager,
+    memoryCaptureService: deps.memoryCaptureService,
+    memoryReviewer: deps.memoryReviewer,
     permissionManager: deps.permissionManager,
     broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,
     routineEngine: deps.routineEngine,
@@ -487,6 +515,7 @@ export function createConversationLoop(deps: ConversationDeps,
     auditLogger: deps.auditLogger,
     rewireReviewerAgent: deps.rewireReviewerAgent,
     llmFetch: deps.llmFetch,
+    subscriptionProviderFactory: deps.subscriptionProviderFactory,
   });
   loop.newConversation("main");
   return loop;
@@ -503,6 +532,28 @@ export interface CallLlmRateLimitOptions {
   maxCalls?: number;
   /** Window size in ms. Default 10 minutes. */
   windowMs?: number;
+}
+
+type CallLlmOptions = {
+  maxTokens?: number;
+  systemPrompt?: string;
+  signal?: AbortSignal;
+};
+
+/**
+ * Keeps the legacy/public `maxTokens` name at the plugin boundary while
+ * translating it into the engine's host-owned background output ceiling.
+ */
+function callLlmWithOptionalOutputLimit(
+  conversationLoop: ConversationLoop,
+  prompt: string,
+  opts?: CallLlmOptions,
+): Promise<string> {
+  return opts?.maxTokens === undefined
+    ? conversationLoop.generateText(prompt, opts?.systemPrompt, opts?.signal)
+    : conversationLoop.generateText(
+      prompt, opts?.systemPrompt, opts?.signal, { outputTokenLimit: opts.maxTokens },
+    );
 }
 
 export function createCallLlmForPlugin(
@@ -545,11 +596,7 @@ export function createCallLlmForPlugin(
       });
     } catch {}
 
-    return conversationLoop.generateText(
-      prompt,
-      opts?.systemPrompt,
-      opts?.signal,
-    );
+    return callLlmWithOptionalOutputLimit(conversationLoop, prompt, opts);
   };
 }
 
@@ -564,10 +611,6 @@ export function createCallLlm(
   opts?: { maxTokens?: number; systemPrompt?: string; signal?: AbortSignal },
 ) => Promise<string> {
   return (prompt, opts) => {
-    return conversationLoop.generateText(
-      prompt,
-      opts?.systemPrompt,
-      opts?.signal,
-    );
+    return callLlmWithOptionalOutputLimit(conversationLoop, prompt, opts);
   };
 }

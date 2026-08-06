@@ -46,16 +46,42 @@ function makeItem(id: string, minAppVersion?: string): PluginMarketplaceItem {
     publisher: "Test fixture",
     packageSpec: `@lvis/${id}@1.0.0`,
     packageName: `@lvis/${id}`,
-    tools: [],
     requires: minAppVersion ? { capabilities: [], minAppVersion } : undefined,
+  };
+}
+
+function makeUpgradeRequiredItem(id: string, minAppVersion: string): PluginMarketplaceItem {
+  return {
+    ...makeItem(id),
+    packageSpec: "",
+    packageName: "",
+    upgradeRequired: {
+      code: "upgrade_required",
+      minAppVersion,
+      message: `LVIS ${minAppVersion}+ is required to install this version. Update LVIS and try again.`,
+    },
+  };
+}
+
+function makeGenericUpgradeRequiredItem(id: string): PluginMarketplaceItem {
+  return {
+    ...makeItem(id),
+    packageSpec: "",
+    packageName: "",
+    upgradeRequired: {
+      code: "upgrade_required",
+      message: "This package is unavailable in this version of LVIS. Update LVIS and try again.",
+    },
   };
 }
 
 describe("marketplace install minAppVersion gate", () => {
   let tmpDir: string;
+  let installArtifactCalls: number;
 
   beforeEach(async () => {
     MOCK_APP_VERSION = "1.4.0";
+    installArtifactCalls = 0;
     setIsPackaged(false);
     tmpDir = mkdtempSync(join(tmpdir(), "lvis-mav-"));
     await mkdir(resolve(tmpDir, "plugins"), { recursive: true });
@@ -76,6 +102,7 @@ describe("marketplace install minAppVersion gate", () => {
       },
       "installArtifact",
     ).mockImplementation(async (plugin, _version, _onProgress, opts) => {
+      installArtifactCalls += 1;
       const manifestRelPath = `installed/${plugin.id}/plugin.json`;
       const manifestAbsPath = resolve(tmpDir, "plugins", manifestRelPath);
       await mkdir(dirname(manifestAbsPath), { recursive: true });
@@ -129,6 +156,30 @@ describe("marketplace install minAppVersion gate", () => {
       threw = e as Error;
     }
     expect(threw).not.toBeInstanceOf(IncompatibleAppVersionError);
+  });
+
+  it("returns catalog update-required before plugin installation", async () => {
+    MOCK_APP_VERSION = "0.5.9";
+    const svc = makeTestPluginMarketplaceService(
+      tmpDir,
+      new StubFetcher([makeUpgradeRequiredItem("catalog-too-new", "1.2.3")]) as never,
+    );
+    await expect(svc.install("catalog-too-new")).rejects.toMatchObject({
+      required: "1.2.3",
+      current: "0.5.9",
+    });
+  });
+
+  it("blocks a generic catalog update-required row before plugin installation", async () => {
+    const svc = makeTestPluginMarketplaceService(
+      tmpDir,
+      new StubFetcher([makeGenericUpgradeRequiredItem("catalog-version-unavailable")]) as never,
+    );
+
+    await expect(svc.install("catalog-version-unavailable", undefined, {
+      activatePreparedArtifact: vi.fn() as never,
+    })).rejects.toThrow("This package is unavailable in this version of LVIS. Update LVIS and try again.");
+    expect(installArtifactCalls).toBe(0);
   });
 
   it("blocks (throws IncompatibleAppVersionError) when minAppVersion > current app version", async () => {

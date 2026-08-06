@@ -45,8 +45,30 @@ import { readStartupLaunchState } from "./main/startup-launch.js";
 import { reconcileOsIntegrationOnBoot } from "./main/reconcile-os-integration.js";
 import { registerSettingsWindowHandlers } from "./main/settings-window.js";
 import { maybeStartLocalApiServer } from "./main/local-api-server.js";
+import { createConversationSurfaceRuntime } from "./engine/conversation-surface-runtime.js";
+import { createConversationCommandPort } from "./main/conversation-command-port.js";
 import { createA2ALoopbackRuntime } from "./main/a2a-loopback-runtime.js";
 import { maybeStartRemoteA2AReceiverServer } from "./main/a2a-remote-receiver-server.js";
+import {
+  maybeStartTailnetObserverServer,
+  resolveTailnetObserverConfig,
+} from "./main/tailnet-surface-server.js";
+import { createTailnetPairedSharingRuntime } from "./main/tailnet-paired-sharing-runtime.js";
+import {
+  maybeStartTelegramBridgeServer,
+  resolveTelegramBridgeConfig,
+  stopTelegramBridgeServer,
+} from "./main/telegram-bridge-server.js";
+import { createTelegramConnectionStore } from "./main/telegram-connection-store.js";
+import { createTelegramConnectionService } from "./main/telegram-connection-service.js";
+import { createTelegramShareChangeWatcher } from "./main/telegram-share-identity.js";
+import {
+  reconcileTelegramActorKey,
+  startTelegramConnectionActivation,
+  telegramConversationDigest,
+  telegramConversationDigestFor,
+} from "./main/telegram-connection-activation.js";
+import { createTailnetSharingOwnerService } from "./main/tailnet-sharing-owner-service.js";
 import { getLvisAppVersion } from "./shared/app-version.js";
 import { installNativeEditContextMenu } from "./main/native-edit-context-menu.js";
 import { handleLvisUri, lvisDevLog } from "./main/lvis-deep-link.js";
@@ -66,7 +88,7 @@ import {
 const log = createLogger("lvis");
 
 // Early boot environment — workspace cwd, plugin-asset protocol scheme, WSL/GPU
-// switches, app name/AppUserModelId, host resolver, and packaged-env scrub.
+// switches, app name/AppUserModelId, and packaged-env scrub.
 // MUST run before app.whenReady(); called here at module load.
 runEarlyBootEnv();
 
@@ -158,11 +180,143 @@ async function main() {
   // for validateSender + viewKey security guards added in PR #354 follow-up.
   windowManager.registerIpc(services.auditLogger);
 
+  // One host-owned source for every main-conversation surface. It outlives the
+  // opt-in Local API transport so Electron remains the canonical producer.
+  const conversationSurfaceRuntime = createConversationSurfaceRuntime();
+
+  // Commands, like events, have one host-owned entrypoint. Surface adapters
+  // receive this instance rather than recreating their own send path.
+  const conversationCommandPort = createConversationCommandPort(
+    {
+      ...services,
+      getMainWindow: () => getMainWindow(),
+      getAppWindows,
+      conversationSurfaceRuntime,
+    },
+    conversationSurfaceRuntime,
+  );
+  // Pairing/share state is created once at boot and injected into both local
+  // owner controls and the Tailnet listener. A failed OS-encrypted setup never
+  // falls back to a second runtime or a plaintext identity secret.
+  const getCurrentConversationId = () => services.conversationLoop.getSessionId();
+  let tailnetPairedSharingRuntime:
+    | Awaited<ReturnType<typeof createTailnetPairedSharingRuntime>>
+    | undefined;
+  let tailnetPairedSharingBootstrapUnavailable = false;
+  let tailnetSharingOwnerService:
+    | ReturnType<typeof createTailnetSharingOwnerService>
+    | undefined;
+  try {
+    const tailnetConfig = resolveTailnetObserverConfig();
+    if (tailnetConfig?.pairedSharingEnabled) {
+      tailnetPairedSharingRuntime = await createTailnetPairedSharingRuntime({
+        getCurrentConversationId,
+      });
+      tailnetSharingOwnerService = createTailnetSharingOwnerService({
+        runtime: tailnetPairedSharingRuntime,
+        getCurrentConversationId,
+      });
+    }
+  } catch (err) {
+    tailnetPairedSharingBootstrapUnavailable = true;
+    log.error(
+      { err },
+      "tailnet paired sharing failed to initialize; owner controls and listener stay unavailable",
+    );
+  }
+
+
+
+  // Telegram is a separately configured external-platform adapter with two
+  // mutually exclusive paths. When the launch environment configures it, that
+  // configuration wins and the owner surface is read-only; a leftover env var
+  // must never be silently overridden by stored state.
+  const telegramEnvManaged = (() => {
+    try {
+      return resolveTelegramBridgeConfig(process.env) !== null;
+    } catch {
+      // A malformed enabled configuration still means the environment owns it.
+      return true;
+    }
+  })();
+  let telegramConnectionService:
+    | ReturnType<typeof createTelegramConnectionService>
+    | undefined;
+  try {
+    const telegramStore = createTelegramConnectionStore({
+      conversationDigestFor: telegramConversationDigest,
+    });
+    await telegramStore.open();
+    telegramConnectionService = createTelegramConnectionService({
+      store: telegramStore,
+      settingsService: services.settingsService,
+      bridgeControl: {
+        start: () => startTelegramConnectionActivation({
+          store: telegramStore,
+          settingsService: services.settingsService,
+          conversationSurfaceRuntime,
+          conversationCommandPort,
+          getCurrentConversationId,
+          // A fatal poll outcome tears the activation down through the same
+          // owner-initiated path a manual disconnect uses.
+          stopBridge: () => stopTelegramBridgeServer("user"),
+          log: (message: string) => log.info(message),
+        }),
+        stop: (reason: "shutdown" | "user") => stopTelegramBridgeServer(reason),
+      },
+      // Sequenced by the service ahead of its own credential read: one keychain
+      // reset takes the bot token and the actor key together, and only the
+      // service can put the reconcile before the read that would abandon it.
+      reconcileActorKey: () => reconcileTelegramActorKey({ store: telegramStore }),
+      getCurrentConversationId,
+      conversationDigestFor: (conversationId: string) => {
+        const digest = telegramConversationDigestFor(telegramStore, conversationId);
+        // The service treats a throw here as "no digest available", which is
+        // the correct answer before a bot has been verified.
+        if (digest === null) throw new Error("telegram-conversation-digest-unavailable");
+        return digest;
+      },
+      // The same source the conversation list is built from, so the owner is
+      // never told a share points at something they cannot see.
+      conversationExists: (conversationId: string) =>
+        services.memoryManager.hasSessionTranscript(conversationId),
+      envManaged: telegramEnvManaged,
+    });
+    // Any change to the paired share retires an armed Away Authority grant.
+    //
+    // The grant is a desk gesture about the share that existed when it was
+    // made. A revoke, re-share, pause, disconnect or re-pair replaces that
+    // share with a different one, and the per-call authority re-check cannot
+    // see the difference: a re-pair mints a fresh authority that is perfectly
+    // current.
+    //
+    // The subscription is the store's single mutation chokepoint, but the raw
+    // signal is far too broad to act on: the poll offset lives in the same
+    // document and advances after every inbound message, so retiring on "the
+    // document changed" would retire the grant on the exact traffic it exists
+    // to answer. `createTelegramShareChangeWatcher` keeps the chokepoint and
+    // compares the share's identity instead.
+    telegramConnectionService.subscribe(
+      createTelegramShareChangeWatcher({
+        readOwnerSnapshot: () => telegramStore.ownerSnapshot(),
+        onShareChanged: () => {
+          services.approvalGate?.retireAwayAuthority("share-lifecycle");
+        },
+      }),
+    );
+  } catch (err) {
+    log.error({ err }, "telegram connection service failed to initialize (continuing boot)");
+  }
+
   // §4.1 IPC Bridge — 반드시 index.html 로드 전에 등록 (renderer useEffect race 방지)
   registerIpcHandlers(
     services,
     () => getMainWindow(),
     getAppWindows,
+    conversationSurfaceRuntime,
+    conversationCommandPort,
+    tailnetSharingOwnerService,
+    telegramConnectionService,
   );
   registerSettingsWindowHandlers(services.auditLogger);
 
@@ -175,6 +329,8 @@ async function main() {
       services,
       getMainWindow: () => getMainWindow(),
       getAppWindows,
+      conversationCommandPort,
+      conversationSurfaceRuntime,
       createA2ARouter: ({ approveAgentAction }) => {
         const project = services.conversationLoop.getSessionProjectContext();
         return createA2ALoopbackRuntime({
@@ -194,7 +350,52 @@ async function main() {
     log.error({ err }, "local API server failed to start (continuing boot)");
   }
 
-  // P4-5 receiver ingress has an independent immutable gate and listener. It
+  // Tailnet is a separate, default-OFF ingress. Its observer is always
+  // read-only unless the boot environment explicitly enables the narrow
+  // controller capability; it never exposes Local API/A2A or configures Serve.
+  try {
+    const observer = await maybeStartTailnetObserverServer({
+      conversationSurfaceRuntime,
+      conversationCommandPort,
+      getCurrentConversationId,
+      tailnetPairedSharingRuntime: tailnetPairedSharingBootstrapUnavailable
+        ? null : tailnetPairedSharingRuntime,
+      isConversationBusy: () => conversationSurfaceRuntime.activity.isBusy(),
+      log: (message) => log.info(message),
+    });
+    if (observer) {
+      log.info("tailnet observer listening on 127.0.0.1:" + observer.port);
+    }
+  } catch (err) {
+    log.error({ err }, "tailnet observer failed to start (continuing boot)");
+  }
+
+  // Telegram is a separately configured external-platform adapter. It remains
+  // OFF unless the owner provides the explicit boot-only route and credential
+  // configuration; it neither changes Telegram's webhook configuration nor
+  // shares Tailnet, Local API, or A2A authority.
+  try {
+    if (telegramEnvManaged) {
+      const telegram = await maybeStartTelegramBridgeServer({
+        conversationSurfaceRuntime,
+        conversationCommandPort,
+        getCurrentConversationId,
+        getCurrentConversationEpoch: () => services.conversationLoop.getSessionEpoch(),
+        log: (message) => log.info(message),
+      });
+      if (telegram) {
+        log.info("telegram bridge listening on 127.0.0.1:" + telegram.port);
+      }
+    } else if (telegramConnectionService) {
+      // Resume whatever the owner left connected. A paused or disconnected
+      // store is a no-op, so nothing reaches Telegram until they ask for it.
+      await telegramConnectionService.resumeStoredConnection();
+    }
+  } catch (err) {
+    log.error({ err }, "telegram bridge failed to start (continuing boot)");
+  }
+
+  // P4-5 receiver ingress has an independent immutable gate and listener.
   // never widens or reuses the ph3/local API route family. The app binds only
   // loopback; a separately trusted HTTPS tunnel/terminator owns public ingress.
   try {
@@ -391,7 +592,7 @@ app.on("web-contents-created", (_event, contents) => {
   //
   // BUG (#498): `contents.session.partition` is undocumented and returns
   // `undefined` on current Electron, so this guard never matches and
-  // `setPreloads` is never called → plugin webviews load without the
+  // session preload is never registered → plugin webviews load without the
   // `lvisPlugin` contextBridge → shell aborts with "lvisPlugin bridge
   // missing". The proper fix pre-registers the policy at boot for every
   // known plugin partition (see `boot/steps/plugin-runtime.ts`); the
@@ -446,13 +647,24 @@ app.on("web-contents-created", (_event, contents) => {
 });
 
 app.on("child-process-gone", (_event, details) => {
-  log.error({
+  const fields = {
     type: details.type,
     reason: details.reason,
     exitCode: details.exitCode,
     serviceName: details.serviceName ?? "",
     name: details.name ?? "",
-  }, "child process gone");
+  };
+  // A child process going away during shutdown is the shutdown working, not a
+  // fault. Logging it at error taught readers that errors here are routine,
+  // which is how a real one gets skipped — every quit produced a handful, so
+  // the level stopped carrying information.
+  //
+  // Outside shutdown the same event is a genuine crash and stays at error.
+  if (isAppShutdownStarted() || isAppShutdownCompleted()) {
+    log.info(fields, "child process gone during shutdown");
+    return;
+  }
+  log.error(fields, "child process gone");
 });
 
 app.on("window-all-closed", () => {

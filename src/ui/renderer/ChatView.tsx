@@ -107,6 +107,8 @@ export interface ChatViewProps {
   onRoutineAcknowledge?: (routineId: string, firedAt: string) => void;
   /** Toast surface rendered directly above the composer input. */
   statusBar?: StatusBarProps;
+  /** App-owned toast producer for attachment capability warnings. */
+  onAttachmentWarning?: (message: string) => void;
   /** Controlled Tool Activity (ActionPanel) open state — work mode only. */
   actionPanelOpen?: boolean;
   onActionPanelOpenChange?: (open: boolean) => void;
@@ -128,7 +130,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects }: ChatViewProps) {
+export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -142,13 +144,13 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
   const {
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId,
-    hasApiKey, onOpenSettings,
+    hasApiKey, settingsLoaded, onOpenSettings,
     searchOpen, searchMatches, searchMatchSet, searchIdx, searchHighlight,
     contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
     tpmLimit, tpmPct,
     rolePresets, activePreset, activePresetId, setActivePresetId,
     attachments, setAttachments, attachmentNCounter,
-    enableThinkingChat, toggleThinking,
+    enableThinkingChat, reasoningAvailable, toggleThinking, usageAvailable, subscriptionRuntimePolicy, subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider, subscriptionUnavailableProvider, subscriptionPendingProvider,
     costEstimate, costBadgeClass, activeVendor,
   } = useChatContext();
 
@@ -420,6 +422,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           ...(e.vendorProvider !== undefined ? { vendorProvider: e.vendorProvider } : {}),
           ...(e.vendorModel !== undefined ? { vendorModel: e.vendorModel } : {}),
           ...(e.usageByModel !== undefined ? { usageByModel: e.usageByModel } : {}),
+          ...(e.subscriptionUsage !== undefined ? { subscriptionUsage: e.subscriptionUsage } : {}),
         });
       }
     }
@@ -482,28 +485,65 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
     handleComposerSend({ inputOrigin: "user-keyboard", token: "" });
   }, [handleComposerSend]);
 
+  const runtimeImageAttachmentProvider = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.imageAttachmentProvider
+    : subscriptionImageAttachmentProvider;
+  const runtimeFileAttachmentProvider = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.fileAttachmentProvider
+    : subscriptionFileAttachmentProvider;
+  const runtimeUnavailableProvider = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.unavailableProvider
+    : subscriptionUnavailableProvider;
+  const runtimePendingProvider = subscriptionRuntimePolicy
+    ? subscriptionRuntimePolicy.pendingProvider
+    : subscriptionPendingProvider;
+  const attachmentUnavailableProvider = subscriptionRuntimePolicy?.provider
+    ?? runtimeImageAttachmentProvider
+    ?? runtimeFileAttachmentProvider
+    ?? "subscription";
+  const emitAttachmentUnavailable = useCallback(() => {
+    onAttachmentWarning?.(t("app.subscriptionAttachmentUnsupported", {
+      provider: attachmentUnavailableProvider,
+    }));
+  }, [attachmentUnavailableProvider, onAttachmentWarning, t]);
+  const emitImageAttachmentLimitExceeded = useCallback(() => {
+    onAttachmentWarning?.(t("app.subscriptionImageAttachmentLimitExceeded", {
+      provider: attachmentUnavailableProvider,
+    }));
+  }, [attachmentUnavailableProvider, onAttachmentWarning, t]);
+
   // Attach picker — native file dialog + atomic flushSync commit + 5-cap.
   const { handleAttach } = useAttachmentPicker({
     attachmentNCounter,
     setAttachments,
     setQuestion,
     composerRef,
+    imagesEnabled: subscriptionRuntimePolicy ? subscriptionRuntimePolicy.imagesEnabled : settingsLoaded !== false && runtimeImageAttachmentProvider === undefined,
+    filesEnabled: subscriptionRuntimePolicy ? subscriptionRuntimePolicy.filesEnabled : settingsLoaded !== false && runtimeFileAttachmentProvider === undefined,
+    imageAttachmentLimits: subscriptionRuntimePolicy?.imageAttachmentLimits,
+    onAttachmentUnavailable: emitAttachmentUnavailable,
+    onImageAttachmentLimitExceeded: emitImageAttachmentLimitExceeded,
   });
 
   // Token progress ring — square, hover=percent, click=detail. The former
   // sibling cost badge is gone: the cost/amount now lives INSIDE the ring's
   // click-detail popover (a single flat surface), so the action row carries
   // only the ring itself.
-  const ringSlot = useMemo(() => (
-    <TokenProgressRing
-      used={usedTokens}
-      budget={effectiveBudget}
-      contextBudget={contextBudget}
-      tpmLimit={tpmLimit}
-      costEstimate={costEstimate}
-      costClass={costBadgeClass}
-    />
-  ), [contextBudget, costBadgeClass, costEstimate, effectiveBudget, tpmLimit, usedTokens]);
+  const ringSlot = useMemo(() => {
+    // Subscription runtimes have no verified API billing/context contract.
+    // Never present the disabled projections as a misleading 0 / 0 limit.
+    if (usageAvailable === false) return null;
+    return (
+      <TokenProgressRing
+        used={usedTokens}
+        budget={effectiveBudget}
+        contextBudget={contextBudget}
+        tpmLimit={tpmLimit}
+        costEstimate={costEstimate}
+        costClass={costBadgeClass}
+      />
+    );
+  }, [contextBudget, costBadgeClass, costEstimate, effectiveBudget, tpmLimit, usageAvailable, usedTokens]);
 
   // Status sub-row (in the unified InputActionBar) — model / permission /
   // active state. Resolved from the same IPC the former window-StatusBar
@@ -563,6 +603,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
       }}
       turnSummaryByTurnStart={turnSummaryByTurnStart}
       activeVendor={activeVendor}
+      showTokenCostBadge={usageAvailable !== false}
       debugStreamEnabled={debugStreamEnabled}
     />
   );
@@ -781,7 +822,15 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         commandPopoverOpen={commandPopoverOpen}
         onCommandPopoverOpenChange={onCommandPopoverOpenChange}
         ringSlot={ringSlot}
+        onImageAttachmentUnavailable={emitAttachmentUnavailable}
+        onImageAttachmentLimitExceeded={emitImageAttachmentLimitExceeded}
         onAttach={handleAttach}
+        subscriptionRuntimePolicy={subscriptionRuntimePolicy}
+        subscriptionImageAttachmentProvider={runtimeImageAttachmentProvider}
+        subscriptionFileAttachmentProvider={runtimeFileAttachmentProvider}
+        settingsLoaded={settingsLoaded}
+        subscriptionUnavailableProvider={runtimeUnavailableProvider}
+        subscriptionPendingProvider={runtimePendingProvider}
         rolePresets={rolePresets}
         activePreset={activePreset}
         activePresetId={activePresetId}
@@ -789,6 +838,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         onBottomSend={handleBottomSend}
         onCancel={flushQueueAsUserMessage}
         enableThinkingChat={enableThinkingChat}
+        reasoningAvailable={reasoningAvailable}
         onToggleThinking={toggleThinking}
         inputStatusRow={inputStatusRow}
         appMode={appMode}

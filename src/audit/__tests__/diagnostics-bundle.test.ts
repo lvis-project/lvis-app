@@ -26,12 +26,11 @@ let crashDir: string;
 
 /** Minimal AppSettings fixture with secrets planted in every secret-bearing field. */
 function makeSettings(): AppSettings {
-  return {
+  const settings = {
     llm: {
       provider: "anthropic",
       streamSmoothing: "none",
       fallbackChain: [],
-      hostResolverMap: "10.0.0.1 secret-internal-host.corp",
       vendors: {
         anthropic: { model: "claude-x", apiKey: "sk-ant-SUPERSECRETKEY123", baseUrl: "https://api.example.com" },
       } as unknown as AppSettings["llm"]["vendors"],
@@ -59,6 +58,14 @@ function makeSettings(): AppSettings {
     pluginConfigs: {},
     features: {},
   } as AppSettings;
+  // A settings file written by an older build can still carry llm keys that
+  // no longer exist in `LLMSettings` — e.g. the removed manual host-resolver
+  // map, whose value is a user-authored internal-hostname mapping. Planting
+  // one here keeps the deny-by-default allowlist under test for keys the
+  // current type system cannot even name.
+  (settings.llm as unknown as Record<string, unknown>).hostResolverMap =
+    "10.0.0.1 secret-internal-host.corp";
+  return settings;
 }
 
 function unzipToText(buffer: Buffer): { names: string[]; allText: string } {
@@ -107,7 +114,7 @@ describe("pickRedactedSettings — deny-by-default whitelist", () => {
     expect(json).not.toContain("sentry.io"); // DSN host
     expect(json).not.toContain("telemetry.example.com"); // endpoint
     expect(json).not.toContain("crash.example.com"); // crashReportEndpoint
-    expect(json).not.toContain("secret-internal-host"); // hostResolverMap
+    expect(json).not.toContain("secret-internal-host"); // legacy/unknown llm key
     expect(json).not.toContain("secretuser"); // pinnedProjectRoots path
   });
 

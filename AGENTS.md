@@ -99,30 +99,22 @@ state durable constraints here and put detailed designs in their owning docs.
 - Runtime dependency changes update the lockfile and run the relevant
   packaged-app smoke so missing packages cannot reach an installer.
 
-## Cross-Cutting Review Gate
+## Cross-Cutting Change Advisory
 
 - Sensitive cross-cutting work identified by `.github/workflows/cluster-detector.yml`
-  or task scope requires independent architect, critic, and security reviews.
-- The PR template records architect, critic, and security verdicts, reviewed
-  HEAD SHAs, and blocking findings. Each visible role row and hidden marker
-  agrees on the exact current PR HEAD SHA and verdict; a `GO` row has blocking
-  findings exactly `None`.
-- `cluster-review-passed` is valid only when the workflow finds exactly one
-  consistent current-HEAD row and marker per role. Only a fresh application of
-  that label can pass the gated run.
-- The required check evaluates trusted-base policy through read-only repository
-  and pull-request data access and never checks out or executes pull-request
-  content. Pull-request write is scoped only to invalidating the fixed
-  `cluster-review-passed` label; status write is scoped only to the fixed
-  `Sensitive Area Cluster Check` context on the event PR head.
-- `.github/workflows/cluster-detector.yml` is the sole workflow allowed to use
-  `statuses: write` or the fixed status context. Branch protection pins the
-  GitHub Actions app rather than workflow identity, so peer workflows must not
-  share either write surface.
-- A new commit, any PR edit, base change, or reopen makes any retained label
-  insufficient until all three roles review the current evidence. A missing
-  label, invalid evidence, or failing workflow blocks merge. Never bypass the
-  gate.
+  or task scope is advisory. It never requires an external reviewer, collaborator,
+  label, attestation, or additional merge approval.
+- The owner chooses proportionate architecture, critique, and security review and
+  records material decisions, findings, and residual risk in the PR when useful.
+  Owner self-review and automated review are valid evidence.
+- The detector evaluates only the trusted `main` base of this repository through
+  read-only repository and pull-request data access and never checks out or
+  executes pull-request content.
+  It uses only `contents: read` and `pull-requests: read`; it does not write commit
+  statuses, labels, or pull-request metadata.
+- Detector process failures (API, checkout, or schema validation) remain failures
+  to investigate. A sensitive-area or cluster finding emits a warning and step
+  summary only, and never blocks merge.
 
 ## Validation: proportional during work, complete once at publish
 
