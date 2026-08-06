@@ -2296,3 +2296,71 @@ describe("SubAgentRunner workspace lifecycle", () => {
     expect(allowProjectRoot).toHaveBeenCalledWith(root);
   });
 });
+describe("spawn cancellation signal", () => {
+  it("hands the run's abort signal to the child turn", async () => {
+    // `interruptRun` reports CANCELED, but the only carrier used to be the
+    // `abortCurrentTurn()` closure — documented as a no-op when no turn is in
+    // flight. An interrupt landing during spawn setup therefore reported
+    // cancellation while the child ran its full `cappedRounds`, and the second
+    // interrupt answers "not running", so the user could not retry.
+    const toolRegistry = new ToolRegistry();
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    // Park the child turn so the run is still in flight when the interrupt
+    // lands — the whole point is the window where a turn exists but the
+    // closure-based carrier cannot reach it.
+    let releaseTurn: () => void = () => {};
+    const turnParked = new Promise<void>((resolve) => {
+      releaseTurn = resolve;
+    });
+    let sawTurn: () => void = () => {};
+    const turnStarted = new Promise<void>((resolve) => {
+      sawTurn = resolve;
+    });
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation((async () => {
+        sawTurn();
+        await turnParked;
+        return { text: "done", stopReason: "end_turn" };
+      }) as never);
+
+    try {
+      const spawned = runner.spawn(
+        {
+          title: "cancel-signal",
+          instructions: "work",
+          originSessionId: "parent-session",
+        },
+        {},
+      );
+      await turnStarted;
+
+      // Assert the linkage, not the arity: a signal that is not the run's own
+      // would satisfy "third argument is defined" and still never fire.
+      const signal = runTurnSpy.mock.calls[0]?.[2] as AbortSignal | undefined;
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal?.aborted).toBe(false);
+
+      const snapshot = runner.listRunStatuses("parent-session")[0];
+      const runId = snapshot?.spawnId ?? snapshot?.childSessionId ?? "";
+      expect(runner.interruptRun(runId, "parent-session")).toMatchObject({ ok: true });
+      expect(signal?.aborted).toBe(true);
+
+      releaseTurn();
+      await spawned;
+    } finally {
+      hasProviderSpy.mockRestore();
+      runTurnSpy.mockRestore();
+    }
+  });
+});
