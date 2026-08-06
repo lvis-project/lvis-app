@@ -183,6 +183,21 @@ describe("InputActionBar (unified bar)", () => {
     expect(send.className).not.toContain("bg-primary");
   });
 
+  it("goes quiet for a runtime block too, not just for an empty draft", () => {
+    // `isSendDisabled` also folds in the runtime blocks (no API key, runtime
+    // unavailable). The button cannot act in those states either, so it must
+    // not sit there as a disabled SOLID disc — the quiet treatment and the
+    // `disabled` attribute are driven by the same flag and cannot disagree.
+    const { getByTestId } = renderBar({
+      isBusy: false,
+      hasDraft: true,
+      isSendDisabled: true,
+    });
+    const send = getByTestId("composer-send-button") as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    expect(send.className).toContain("bg-input-bar-subtle");
+  });
+
   it("busy with an empty draft turns the one button into stop", () => {
     const onCancel = vi.fn();
     const onSend = vi.fn();

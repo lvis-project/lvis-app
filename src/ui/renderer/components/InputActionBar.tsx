@@ -179,7 +179,11 @@ export function InputActionBar({
   const turnControlLabel = showStop
     ? t("bottomActionRow.cancelButton")
     : t("bottomActionRow.sendButton");
-  const turnControlQuiet = !showStop && isSendDisabled;
+  // Stop is always actionable; send is not whenever `isSendDisabled` says so —
+  // which covers BOTH "nothing to send" and the runtime blocks (no API key,
+  // runtime unavailable). One flag drives the `disabled` attribute and the
+  // quiet styling together, so the two can never disagree.
+  const turnControlInert = !showStop && isSendDisabled;
   const hasAssistantContext = !!activePreset && !activePreset.isDefault;
   const assistantTitle = [
     activePreset && !activePreset.isDefault ? `Persona: ${activePreset.name}` : "",
@@ -292,21 +296,21 @@ export function InputActionBar({
               `primary-foreground`, so the glyph disappeared into the chip). */}
           <Button
             type="button"
-            /* Quiet while there is nothing to send: a disabled SOLID button is
-               a near-black disc at 50% opacity, which reads as a broken grey
-               blob rather than "waiting for input". In that state it borrows
-               the leading cluster's outline treatment, so an idle composer
-               shows one calm row of controls; it goes solid the instant the
-               button can actually do something. */
-            variant={turnControlQuiet ? "outline" : "default"}
+            /* Quiet whenever it cannot act: a disabled SOLID button is a
+               near-black disc at 50% opacity, which reads as a broken grey
+               blob rather than "waiting". Inert it borrows the leading
+               cluster's outline treatment, so an idle composer shows one calm
+               row of controls; it goes solid the instant the button can
+               actually do something. */
+            variant={turnControlInert ? "outline" : "default"}
             onClick={showStop ? onCancel : onSend}
-            disabled={showStop ? false : isSendDisabled}
+            disabled={turnControlInert}
             data-testid={showStop ? "composer-cancel-button" : "composer-send-button"}
             title={turnControlLabel}
             aria-label={turnControlLabel}
             className={
               "inline-flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-full p-0 transition-transform duration-(--motion-fast) ease-(--motion-ease-standard) active:scale-90 focus-visible:ring-input-bar-focus motion-reduce:transition-none motion-reduce:active:scale-100 " +
-              (turnControlQuiet
+              (turnControlInert
                 ? "border-input-bar-border bg-input-bar-subtle text-input-bar-action"
                 : "")
             }
