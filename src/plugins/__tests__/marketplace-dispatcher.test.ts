@@ -186,6 +186,75 @@ describe("PluginMarketplaceService install()", () => {
     return { runtime, lifecycle };
   }
 
+  it("reports an install that replaced nothing, so a repair can tell it apart", async () => {
+    // Reinstalling when the catalog carries the version already on disk swaps
+    // no bytes. The Doctor reinstalls to repair a failed plugin, so it has to
+    // distinguish "put a different bundle down" from "there was nothing but
+    // the broken one" — otherwise it reports an unexplained dead end.
+    const signingKey = freshEd25519();
+    mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
+      "test-v1": signingKey.publicKey,
+    });
+    const plugin: PluginMarketplaceItem = {
+      id: "test-plugin",
+      slug: "test-plugin",
+      name: "Test Plugin",
+      description: "A test plugin",
+      version: "1.2.3",
+      packageSpec: "@lvis/test-plugin@1.2.3",
+      packageName: "@lvis/test-plugin",
+    };
+    const zipBuffer = makePluginZip({
+      id: plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      entry: "./dist/hostPlugin.js",
+      tools: ["ping"],
+    });
+    const downloadArtifact = vi.fn(async () => ({
+      body: zipBuffer,
+      sha256Header: createHash("sha256").update(zipBuffer).digest("hex"),
+      status: 200,
+    }));
+    const fetchSignatureEnvelope = vi.fn(async () =>
+      makeEnvelope(zipBuffer, signingKey.privateKey),
+    );
+    const fetcher: MarketplaceFetcher & {
+      downloadArtifact: typeof downloadArtifact;
+      fetchSignatureEnvelope: typeof fetchSignatureEnvelope;
+    } = {
+      listPlugins: async () => [plugin],
+      getPluginDetail: async () => plugin,
+      downloadVersion: vi.fn(async () => {
+        throw new Error("downloadVersion should not be called for signed installs");
+      }),
+      downloadArtifact,
+      fetchSignatureEnvelope,
+      listAnnouncements: async () => [],
+    };
+
+    const { service } = makeService(fetcher);
+
+    const first = await service.install(
+      "test-plugin",
+      undefined,
+      preparedActivationOptionsForTest,
+    );
+    expect(first).toEqual({ pluginId: "test-plugin", installed: true });
+
+    const second = await service.install(
+      "test-plugin",
+      undefined,
+      preparedActivationOptionsForTest,
+    );
+    expect(second).toEqual({
+      pluginId: "test-plugin",
+      installed: true,
+      unchanged: true,
+    });
+    // Nothing was fetched the second time — that is what `unchanged` reports.
+    expect(downloadArtifact).toHaveBeenCalledTimes(1);
+  });
   it("downloads and extracts a marketplace zip without using npm", async () => {
     const signingKey = freshEd25519();
     mockedPublisherKeys.getBundledPublicKeys.mockReturnValue({
@@ -1106,7 +1175,13 @@ describe("PluginMarketplaceService install()", () => {
       removed: [],
       failed: [],
     });
-    await expect(standardInstall).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    // Same version already committed by the managed retry — the standard
+    // install finds nothing to replace and says so.
+    await expect(standardInstall).resolves.toEqual({
+      pluginId: plugin.id,
+      installed: true,
+      unchanged: true,
+    });
     expect(downloadArtifact).toHaveBeenCalledTimes(1);
     const registry = JSON.parse(await readFile(registryPath, "utf-8")) as {
       plugins: Array<{ id: string; installSource: string }>;
@@ -1684,7 +1759,14 @@ describe("PluginMarketplaceService install()", () => {
     };
     await writeFile(registryPath, JSON.stringify(registry));
 
-    await expect(service.install(plugin.id)).resolves.toEqual({ pluginId: plugin.id, installed: true });
+    // Idempotent touch: receipt and artifact already match the catalog, so the
+    // pending row is cleared without swapping any bytes — hence `unchanged`,
+    // which `downloads` staying at 1 independently confirms.
+    await expect(service.install(plugin.id)).resolves.toEqual({
+      pluginId: plugin.id,
+      installed: true,
+      unchanged: true,
+    });
     expect(downloads).toBe(1);
     expect((JSON.parse(await readFile(registryPath, "utf-8")) as { plugins: PluginRegistryEntry[] })
       .plugins[0]?.pendingUpdate).toBeUndefined();
