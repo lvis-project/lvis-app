@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { t } from "../i18n/index.js";
-import type { ExternalOrigin } from "../contract/trust-origin.js";
+import { isExternalOrigin, type ExternalOrigin, type TrustOrigin } from "../contract/trust-origin.js";
 import type { ApprovalGate } from "./approval-gate.js";
 import type { PermissionManager } from "./permission-manager.js";
 import type { PermissionModeCommand } from "./permission-slash.js";
@@ -52,6 +52,51 @@ export type PermissionModeApprovalBypass =
       explicitUserAction: true;
     };
 
+/**
+ * The transport-agnostic (plain string / boolean) shape a caller may hand in.
+ * Never trusted as-is: {@link resolvePermissionModeApprovalBypass} is the only
+ * thing that turns it into a {@link PermissionModeApprovalBypass}.
+ */
+export interface LoosePermissionModeApprovalBypass {
+  source: string;
+  trustOrigin: string;
+  explicitUserAction: boolean;
+}
+
+/**
+ * THE narrowing authority for "may this permission-mode change skip the
+ * ApprovalGate modal". Every caller — the IPC set-mode handler, the
+ * builtin-slash command path, and `applyPermissionModeCommand` itself — decides
+ * through this one function, so the fail-closed trust conditions exist exactly
+ * once.
+ *
+ * The discriminated union pins these conditions at compile time, but the type
+ * is not a runtime guarantee: callers hand-build literals and a bad cast at a
+ * JS call site can smuggle a non-external `trustOrigin` in. This re-checks at
+ * runtime for the same reason `src/api/local-api.ts` does.
+ *
+ * Anything that does not match a recognized surface returns `undefined` → the
+ * normal ApprovalGate ask runs (fail-closed).
+ */
+export function resolvePermissionModeApprovalBypass(
+  bypass: LoosePermissionModeApprovalBypass | PermissionModeApprovalBypass | undefined,
+): PermissionModeApprovalBypass | undefined {
+  if (!bypass || bypass.explicitUserAction !== true) return undefined;
+  if (
+    (bypass.source === "settings-ui" || bypass.source === "builtin-slash") &&
+    bypass.trustOrigin === "user-keyboard"
+  ) {
+    return { source: bypass.source, trustOrigin: "user-keyboard", explicitUserAction: true };
+  }
+  if (bypass.source === "local-api-approval") {
+    const origin = bypass.trustOrigin as TrustOrigin;
+    if (isExternalOrigin(origin)) {
+      return { source: "local-api-approval", trustOrigin: origin, explicitUserAction: true };
+    }
+  }
+  return undefined;
+}
+
 export async function applyPermissionModeCommand(
   cmd: PermissionModeCommand,
   deps: {
@@ -74,15 +119,9 @@ export async function applyPermissionModeCommand(
   //     a SECOND modal for a mutation the human just approved. It is NOT a
   //     silent bypass: no "local-api-approval" bypass is ever constructed unless
   //     `local-api-server.ts` observed a real ApprovalGate "allow" decision.
-  const bypass = deps.approvalBypass;
-  const hasTrustedBuiltInConfirmation =
-    bypass?.explicitUserAction === true &&
-    ((bypass.source === "settings-ui" || bypass.source === "builtin-slash"
-      ? bypass.trustOrigin === "user-keyboard"
-      : false) ||
-      bypass.source === "local-api-approval");
+  const trustedConfirmation = resolvePermissionModeApprovalBypass(deps.approvalBypass);
 
-  if (cmd.durable && !hasTrustedBuiltInConfirmation) {
+  if (cmd.durable && !trustedConfirmation) {
     if (!deps.approvalGate) {
       return {
         ok: false,
@@ -129,7 +168,7 @@ export async function applyPermissionModeCommand(
         fromMode: previous,
         toMode: cmd.mode,
         durable: cmd.durable,
-        confirmationSource: hasTrustedBuiltInConfirmation ? bypass?.source : undefined,
+        confirmationSource: trustedConfirmation?.source,
       });
     } catch (err) {
       return {
