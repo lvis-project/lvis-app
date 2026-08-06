@@ -33,3 +33,29 @@ export function isMarketplaceAnnouncementLevel(
     (MARKETPLACE_ANNOUNCEMENT_LEVELS as readonly string[]).includes(value)
   );
 }
+
+/**
+ * Normalize the persisted `settings.marketplace.dismissedAnnouncementIds` list
+ * — the single definition of "what counts as a valid dismissed id".
+ *
+ * Shared because the renderer WRITES the list (`useMarketplaceAnnouncements`
+ * dismiss) and main FILTERS every announcement push against it
+ * (`wireAnnouncementCheck`), so the two sides must agree on which entries
+ * survive and in what order. Order is load-bearing on the renderer side: the
+ * dismiss path compares the normalized next list against the normalized
+ * existing one element-by-element to decide whether to write at all, and on
+ * the main side it feeds the broadcast dedup key.
+ *
+ * Accepts anything: a non-array input yields an empty list. Keeps only safe
+ * integers, deduplicates, and sorts ascending.
+ */
+export function normalizeDismissedAnnouncementIds(ids: unknown): number[] {
+  if (!Array.isArray(ids)) return [];
+  const validIds = new Set<number>();
+  for (const id of ids) {
+    if (typeof id === "number" && Number.isSafeInteger(id)) {
+      validIds.add(id);
+    }
+  }
+  return Array.from(validIds).sort((a, b) => a - b);
+}
