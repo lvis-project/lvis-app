@@ -18,7 +18,15 @@
     "binaries": "error"
   },
   "workspaces": {
-    ".": {},
+    ".": {
+      // Electron-hosted entry points. `smoke:llm` / `smoke:app` launch these
+      // with the electron binary rather than importing them, so Knip cannot
+      // infer the reference and reports both as unused files.
+      "entry": [
+        "scripts/smoke-live-model.mjs",
+        "scripts/smoke-live-app.mjs"
+      ]
+    },
     "web": {
       // The nested web workspace owns a separate lockfile/install. Root Knip
       // still analyzes its sources and dependency declarations without

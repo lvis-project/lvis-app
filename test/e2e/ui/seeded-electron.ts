@@ -95,7 +95,7 @@ export function buildE2eBaseSettings(onboardingCompleted = true, locale: "ko" | 
  * uses the development-only plaintext encoding without weakening packaged
  * behavior when OS encryption is unavailable.
  */
-export function buildE2eSecrets(): {
+export function buildE2eSecrets(liveOpenRouterKey?: string): {
   version: 1;
   entries: Record<string, { encoding: "plain-development"; value: string }>;
 } {
@@ -104,6 +104,14 @@ export function buildE2eSecrets(): {
     entries[`llm.apiKey.${vendor}`] = {
       encoding: "plain-development",
       value: `sk-e2e-${vendor}`,
+    };
+  }
+  // Live-model opt-in only. Every other vendor keeps its fake key, so a spec
+  // that wanders off openrouter still fails offline instead of spending money.
+  if (liveOpenRouterKey) {
+    entries["llm.apiKey.openrouter"] = {
+      encoding: "plain-development",
+      value: liveOpenRouterKey,
     };
   }
   return { version: 1, entries };
