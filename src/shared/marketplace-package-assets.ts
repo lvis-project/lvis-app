@@ -403,21 +403,57 @@ export function marketplaceProviderPresetSecretKey(providerId: string): string {
   return `${MARKETPLACE_PROVIDER_PRESET_SECRET_KEY_PREFIX}${providerId}.apiKey`;
 }
 
-export function marketplaceProviderPresetIdFromSecretKey(
-  value: unknown,
-): string | undefined {
-  if (typeof value !== "string") return undefined;
-  if (!value.startsWith(MARKETPLACE_PROVIDER_PRESET_SECRET_KEY_PREFIX)) {
-    return undefined;
+/** `llm.apiKey.<vendor>` — the non-marketplace host-secret key family. */
+const LLM_API_KEY_PATTERN = /^llm\.apiKey\.[a-z]+(?:-[a-z]+)*$/;
+
+/**
+ * Per-item bound from `schemas/plugin-manifest.schema.json`
+ * (`hostSecrets.read.items.maxLength`). The marketplace branch is additionally
+ * bounded by {@link MARKETPLACE_PROVIDER_PRESET_ID_MAX_LENGTH} via
+ * {@link isMarketplaceProviderPresetId}; this caps the vendor branch too, the
+ * way AJV does.
+ */
+const HOST_SECRET_KEY_MAX_LENGTH = 111;
+
+/**
+ * THE shape gate for a `hostSecrets.read[]` entry — "is this a well-formed
+ * host-secret key a plugin is permitted to name?".
+ *
+ * One definition for both runtime enforcement points: plugin manifests
+ * (`src/plugins/runtime/manifest-validation.ts`) and signed whitelist grants
+ * (`src/plugins/whitelist/whitelist-schema.ts`), which previously carried
+ * byte-identical private copies.
+ *
+ * Deliberately validates the RAW preset-id segment. Both former copies routed
+ * this branch through a `marketplaceProviderPresetIdFromSecretKey` helper that
+ * `.trim()`ed the segment — correct when RESOLVING an id, wrong when
+ * VALIDATING a declared key. The trim made the runtime gate accept
+ * `llm.marketplaceProvider.<spaces>foo<spaces>.apiKey`, which the JSON schema
+ * rejects, i.e. the TS mirror was LOOSER than the schema it exists to mirror.
+ * That helper had no other consumer and is gone. Slicing the raw segment and
+ * asking {@link isMarketplaceProviderPresetId} is also exactly what the Tier-4
+ * cross-check in `host-api-factory.ts` does, so the declared key and the key
+ * the gate later compares are now judged by one rule.
+ */
+export function isAllowedHostSecretKey(value: unknown): value is string {
+  if (typeof value !== "string" || value.length > HOST_SECRET_KEY_MAX_LENGTH) {
+    return false;
   }
-  if (!value.endsWith(".apiKey")) return undefined;
-  return normalizeProviderId(
+  if (LLM_API_KEY_PATTERN.test(value)) return true;
+  if (
+    !value.startsWith(MARKETPLACE_PROVIDER_PRESET_SECRET_KEY_PREFIX) ||
+    !value.endsWith(".apiKey")
+  ) {
+    return false;
+  }
+  return isMarketplaceProviderPresetId(
     value.slice(
       MARKETPLACE_PROVIDER_PRESET_SECRET_KEY_PREFIX.length,
       -".apiKey".length,
     ),
   );
 }
+
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)
