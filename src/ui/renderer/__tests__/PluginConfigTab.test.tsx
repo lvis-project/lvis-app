@@ -27,10 +27,18 @@ const mockUninstall = vi.fn(async () => ({
   error: "unauthorized-frame",
   message: "제거 권한이 없습니다.",
 }));
-const mockInstall = vi.fn(async () => ({
-  ok: true as const,
-  pluginId: "meeting",
-}));
+const mockInstall = vi.fn(
+  async (): Promise<{
+    ok: true;
+    pluginId: string;
+    installed?: true;
+    /** Set when the install replaced nothing — see PluginActionResult. */
+    unchanged?: true;
+  }> => ({
+    ok: true as const,
+    pluginId: "meeting",
+  }),
+);
 
 function setRendererApi(value: Record<string, unknown>): void {
   Object.defineProperty(window, "lvisApi", {
@@ -266,6 +274,107 @@ describe("PluginConfigTab", () => {
     },
   );
 
+  it("names the cause when the reinstall had nothing newer to install", async () => {
+    // The install path reports success for a no-op: same version, same
+    // receipt, same artifact, nothing replaced. The plugin is still broken, so
+    // the generic "no local repair available" reads as an unexplained dead
+    // end — the user is actually waiting on the publisher.
+    const broken = {
+      id: "agent-hub",
+      name: "Agent Hub",
+      description: "Agent orchestration",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-agent-hub"],
+      loadStatus: "failed" as const,
+    };
+    const cards = vi.fn().mockResolvedValue([broken]);
+    mockInstall.mockResolvedValue({
+      ok: true as const,
+      pluginId: "agent-hub",
+      installed: true as const,
+      unchanged: true as const,
+    });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:agent-hub")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:agent-hub"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(
+          "Agent Hub: 마켓플레이스에 설치본보다 새로운 패키지가 없어 재설치로는 고칠 수 없습니다. 게시자의 수정본을 기다리거나 플러그인을 제거하세요.",
+        ),
+      ).toBeInTheDocument();
+    });
+    // The generic message must not also fire — they are alternatives.
+    expect(
+      screen.queryByText("Agent Hub: 진단 완료 — 로컬 복구 불가, 아직 실행할 수 없습니다."),
+    ).toBeNull();
+    expect(screen.getByTestId("plugin-config:banner")).toHaveClass("text-warning");
+  });
+
+  it("keeps the generic unresolved message when the reinstall did replace the bundle", async () => {
+    // Same failed end state, but a real reinstall happened — the marketplace
+    // did have something else and it still did not load. Naming a missing
+    // newer package here would be wrong, so this pins the two apart.
+    const broken = {
+      id: "agent-hub",
+      name: "Agent Hub",
+      description: "Agent orchestration",
+      publisher: "Test fixture",
+      sampleTools: [],
+      capabilities: [],
+      tools: [],
+      installAliases: ["lvis-plugin-agent-hub"],
+      loadStatus: "failed" as const,
+    };
+    const cards = vi.fn().mockResolvedValue([broken]);
+    mockInstall.mockResolvedValue({
+      ok: true as const,
+      pluginId: "agent-hub",
+      installed: true as const,
+    });
+    Object.defineProperty(window, "lvis", {
+      value: {
+        plugins: { cards },
+        pluginConfig: { get: mockGet, set: mockSet },
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    render(<PluginConfigTab />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("plugin-config:doctor-panel:agent-hub")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByTestId("plugin-config:doctor:agent-hub"));
+
+    await waitFor(() => {
+      expect(
+        screen.getByText("Agent Hub: 진단 완료 — 로컬 복구 불가, 아직 실행할 수 없습니다."),
+      ).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(
+        "Agent Hub: 마켓플레이스에 설치본보다 새로운 패키지가 없어 재설치로는 고칠 수 없습니다. 게시자의 수정본을 기다리거나 플러그인을 제거하세요.",
+      ),
+    ).toBeNull();
+  });
   it("keeps a card refresh failure instead of overwriting it with repair success", async () => {
     const broken = {
       id: "agent-hub",

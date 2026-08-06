@@ -795,7 +795,7 @@ export class PluginMarketplaceService {
       admission?: MarketplaceInstallAdmission;
       signal?: AbortSignal;
     },
-  ): Promise<{ pluginId: string; installed: true }> {
+  ): Promise<{ pluginId: string; installed: true; unchanged?: true }> {
     const activatePreparedArtifact = requirePreparedMarketplacePluginActivation(
       options?.activatePreparedArtifact,
       "marketplace install",
@@ -953,7 +953,7 @@ export class PluginMarketplaceService {
     activatePreparedArtifact: PreparedMarketplacePluginActivation,
     onProgress?: (event: InstallerProgressEvent) => void,
     signal?: AbortSignal,
-  ): Promise<{ pluginId: string; installed: true }> {
+  ): Promise<{ pluginId: string; installed: true; unchanged?: true }> {
     const plugin = catalogSnapshot.find((x) => x.id === pluginId || x.slug === pluginId);
     if (!plugin) {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
@@ -1039,7 +1039,12 @@ export class PluginMarketplaceService {
         await this.touchInstalledRegistryEntry(plugin.id, null, actor, plugin.pluginAccess, manifestSha256, state);
         await this.discardSupersededPendingBackup(existingEntry);
         await this.resolveObsoleteBackupOwnership(canonicalPluginId);
-        return { pluginId: plugin.id, installed: true };
+        // Nothing was downloaded or swapped — the catalog carries the same
+        // version, receipt, and artifact already on disk. Callers that install
+        // to *fix* something need to tell this apart from a real reinstall:
+        // for a plugin that failed to load, "installed" here means the
+        // marketplace has no bundle other than the broken one.
+        return { pluginId: plugin.id, installed: true, unchanged: true };
       }
       if (isSameVersion && !receiptValidation.ok) {
         log.warn(
@@ -2615,7 +2620,7 @@ export class PluginMarketplaceService {
   async installLocal(
     sourcePath: string,
     options: { activatePreparedArtifact: PreparedMarketplacePluginActivation },
-  ): Promise<{ pluginId: string; installed: true }> {
+  ): Promise<{ pluginId: string; installed: true; unchanged?: true }> {
     const activatePreparedArtifact = requirePreparedMarketplacePluginActivation(
       options?.activatePreparedArtifact,
       "local plugin install",
