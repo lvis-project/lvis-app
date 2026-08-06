@@ -27,7 +27,6 @@ import { isActiveSandboxFilesystemContainedForPluginEffects } from "../../permis
 import type { PluginToolInvocationContext } from "../../plugins/runtime.js";
 import {
   currentInvocationOrigin,
-  currentInvocationReporting,
   runWithInvocationOrigin,
 } from "../../plugins/runtime/origin-chain.js";
 import {
@@ -548,20 +547,6 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           }],
           {
             sessionId: invocationSessionId,
-            // Report to whatever surface the outer invocation is reporting to.
-            // A nested plugin call is a real tool call with real permission
-            // effects; without a sink its denials would be invisible while the
-            // audit log recorded them.
-            //
-            // Resolves to a sink ONLY when this delegate is re-entered from
-            // inside a running `runToolInvocation` (that is where the chain's
-            // sink is published). Every shipped producer — `callFromUi`,
-            // `callFromApp`, the external MCP-App source — enters from an IPC
-            // handler, i.e. from no invocation frame, so today this is
-            // `undefined` and the plugin surface reports nowhere. It becomes
-            // live the moment a re-entrant producer exists; see the origin note
-            // below, which is the same story from the permission side.
-            callbacks: currentInvocationReporting(),
             ...(pluginAuthLifecycle ? { pluginAuthLifecycle } : {}),
             permissionContext: pluginSurfacePermissionScope.createPermissionContext(context, {
               // THE approval lane for this surface, and the only input to it:
