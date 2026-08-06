@@ -274,7 +274,11 @@ function MessageQueueRow({
           <button
             type="button"
             onClick={onSendNow}
-            className="inline-flex h-5 items-center gap-0.5 rounded border border-transparent px-1.5 text-[10px] font-medium text-info transition-colors hover:border-info/(--opacity-medium) hover:bg-info/(--opacity-subtle) motion-reduce:transition-none"
+            /* `text-info` at 10px only reaches 4.1:1 on the panel — under AA.
+               The label rests in the readable foreground and the panel's hue
+               carries the hover/focus state instead, where it is decoration
+               rather than the thing you have to read. */
+            className="inline-flex h-5 items-center gap-0.5 rounded border border-transparent px-1.5 text-[10px] font-medium text-foreground transition-colors hover:border-info/(--opacity-medium) hover:bg-info/(--opacity-subtle) hover:text-info motion-reduce:transition-none"
             aria-label={t("messageQueuePanel.sendNowAriaLabel")}
             title={t("messageQueuePanel.sendNowTitle")}
             data-testid="message-queue-row-send-now-button"
