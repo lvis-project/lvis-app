@@ -187,12 +187,13 @@ export function SessionTodoPanel({
 
   return (
     <div
-      // Dashed amber tint signals "this is the assistant's running plan".
-      // Inset to the composer's optical column (`mx-3`) and rounded, matching
-      // MessageQueuePanel: both dock strips are cards stacked above the
-      // composer, so they share its column rather than running full-bleed to
-      // the window edge while the composer sits inset.
-      className="mx-3 mb-1 overflow-hidden rounded-lg border border-dashed border-warning/(--opacity-medium) bg-warning/(--opacity-faint) text-xs transition-colors motion-reduce:transition-none"
+      // The input cluster below us already draws its own `border-t bg-card`
+      // — we don't double up. Side borders + dashed amber tint signal "this
+      // is the assistant's running plan" without a redundant horizontal rule.
+      // Full-bleed across <main> is deliberate and pinned by
+      // session-todo-in-chat.spec.ts: dock strips are BANDS, the composer is
+      // the inset card. Do not inset this.
+      className="border-x border-dashed border-warning/(--opacity-medium) bg-warning/(--opacity-faint) text-xs transition-colors"
       data-testid="session-todo-panel"
       data-session-id={sessionId ?? ""}
     >
