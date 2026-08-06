@@ -523,6 +523,38 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       ) + "\n",
       "utf-8",
     );
+    // Live-model opt-in. With no key exported this is undefined and every spec
+    // stays offline on the fake seeded credentials, so the normal suite is
+    // unaffected; with one, the profile is pinned to OpenRouter and the app
+    // under test talks to a real provider.
+    const liveKey = process.env.LVIS_SMOKE_OPENROUTER_KEY?.trim();
+    if (liveKey) {
+      const settings = JSON.parse(
+        fs.readFileSync(path.join(userDataDir, "lvis-settings.json"), "utf-8"),
+      ) as { llm?: { provider?: string; vendors?: Record<string, unknown> } };
+      settings.llm = {
+        ...settings.llm,
+        provider: "openrouter",
+        vendors: {
+          ...(settings.llm?.vendors ?? {}),
+          openrouter: {
+            // Cheap router target by default. The app ships
+            // `anthropic/claude-sonnet-4.6`, but LVIS sends no
+            // `maxOutputTokens` (adapter.ts — "vendor SDK defaults govern"),
+            // so OpenRouter pre-authorizes that model's full 65536-token
+            // output and a credit-limited key is rejected 402 on every turn.
+            // Override with LVIS_SMOKE_MODEL to reproduce that.
+            model: process.env.LVIS_SMOKE_MODEL?.trim() || "openrouter/auto",
+            baseUrl: "https://openrouter.ai/api/v1",
+          },
+        },
+      };
+      fs.writeFileSync(
+        path.join(userDataDir, "lvis-settings.json"),
+        JSON.stringify(settings, null, 2) + "\n",
+        "utf-8",
+      );
+    }
     if (seedApiKey) {
       // Seed an at-rest LLM key secret so `has-api-key` is true at boot and the
       // composer is enabled. Written to the same userData dir as the settings
@@ -532,7 +564,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       // permission migration runs.
       fs.writeFileSync(
         path.join(userDataDir, "lvis-secrets.json"),
-        JSON.stringify(buildE2eSecrets(), null, 2) + "\n",
+        JSON.stringify(buildE2eSecrets(liveKey), null, 2) + "\n",
         { encoding: "utf-8", mode: 0o600 },
       );
     }
