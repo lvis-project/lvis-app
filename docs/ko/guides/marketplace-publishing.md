@@ -163,7 +163,7 @@ MARKETPLACE_SIGNING_PRIVATE_KEY_PROD_V2=<base64>
 | `id` | 마켓플레이스 카탈로그 키 (manifest `id` = catalog `slug`). 게시 후 변경 불가. flat (`agent-hub`) 또는 도트 (`com.example.agent-hub`) 모두 허용 |
 | `version` | semver. 서버가 `(plugin_id, version)` 유니크 + sha256 immutability 강제 — 동일 버전 + 다른 sha256 은 거절 |
 | `tools` | LLM tool 이름 배열. 다른 플러그인과 namespace 충돌 시 publish 시점 거절 |
-| `installPolicy` | `"admin"` (관리형 — 사용자 임의 제거 불가) / `"user"` (사용자 직접 설치). bootstrap 채널에서 admin policy 는 §채널-선택 표 참고 |
+| `installPolicy` | `"admin"` (관리형 — 사용자 임의 제거 불가, 대신 카탈로그와 강제 동기화되어 게시를 내리면 부팅 시 제거된다) / `"user"` (사용자 직접 설치). bootstrap 채널에서 admin policy 는 §채널-선택 표 참고 |
 | `publisher` | 사람이 읽는 식별자 — UI 카드에 표시 |
 
 ### 의존성 / pluginAccess

@@ -129,7 +129,7 @@
     "src/plugins/__tests__/marketplace-dispatcher.test.ts": 115,
     "src/plugins/__tests__/marketplace-guard.test.ts": 3,
     "src/plugins/__tests__/marketplace-installer.test.ts": 1,
-    "src/plugins/__tests__/marketplace-managed-bootstrap.test.ts": 15,
+    "src/plugins/__tests__/marketplace-managed-bootstrap.test.ts": 4,
     "src/plugins/__tests__/marketplace-min-app-version-guard.test.ts": 6,
     "src/plugins/__tests__/marketplace-plugin-dependencies.test.ts": 14,
     "src/plugins/__tests__/normalize-manifest.test.ts": 1,
