@@ -1201,3 +1201,212 @@ DRIFT IS REAL AND EXECUTED, not aesthetic. Copy (1) resolves before canonicalizi
 REACHABLE CONSEQUENCE (opposite direction from the one claimed, see correction): for a headless turn writing a relative path, enforcement passes Layer 1 (invocation-runner.ts:1193-1302) while the rule classifier re-resolves to <process.cwd()>/notes.md and fires "write outside allowed dirs" HIGH (risk-classifier.ts:596-598) -> the call is deferred, and the LLM reviewer prompt (risk-classifier.ts:694-699) reasons about a path the host never checked. Nothing pins the current behavior: every classifier test uses absolute paths only (risk-classifier.test.ts:152, 175, 180, 196, 255, 691...), so the divergence cannot fail a test — the "can it fail?" gap.
 
 MERGEABLE (lazily resolvable). The authority is already threaded to the drifting side and then dropped: PermissionEvaluationContext carries both `executionCwd` and the enforcement-resolved `targetFilePaths` (evaluation-context.ts:19-22), it is built from the real values (invocation-runner.ts:747-758, 1317-1321), and it is passed into dispatchReviewer (reviewer-dispatch.ts:107 and 234; ReviewerDispatchInput.evaluationContext, permission-manager.ts:278) — but buildReviewerContext (permission-manager.ts:1426-1449) never forwards it, so extractDeclaredPaths re-derives from raw. Likewise executionCwd is a live local at the risk-classification call site (invocation-runner.ts:669, 684 -> invocation-services.ts:58-67 -> risk-classification.ts:61-67). Verdict-cache identity already varies with cwd indirectly, since cacheCtx keys on allowedDirectories (permission-manager.ts:1395) which are cwd-derived — so consolidation does not open a cache-replay hole.
+
+---
+
+# Round 2 — axes the first pass did not cover
+
+Axes: ambient context carriers, error/audit paths, main-versus-renderer
+duplicate logic, config defaults and normalization.
+
+Candidates raised: 89 · verified: 43 · confirmed mergeable: 22
+
+## Two outcomes worth reading before trusting this list
+
+**`subagent-spawn-cancellation-signal-not-threaded` — FIXED.** The spawn path
+passed `undefined` where the resume path in the same file passes
+`cancellation.signal`, so `interruptRun` reported CANCELED while the child ran
+its full `cappedRounds` and the second interrupt answered "not running". One
+argument. See the cancellation-signal PR.
+
+**`approval-allowed-choices-renderer-rederivation` — FALSE POSITIVE. Do not
+implement.** It claimed `ApprovalRequest.allowedChoices` was "declared but never
+read" in the renderer. It is read: `ToolApprovalDialog.tsx:555-558` derives
+`isHostConstrainedToOneShot` from exactly that field and feeds it into
+`approvalIsOneShot`, which gates the durable buttons — with a comment stating
+the reason ("must not offer a durable choice that the approval gate will
+reject"). The claim survived an adversarial verification pass that was supposed
+to refute it. Treat every entry below as a lead to re-check, not a finding to
+act on.
+
+## Confirmed candidates
+
+
+### webview-preferred-flow-seven-wirings
+
+**Capability** — The default + accepted value-set for `webView.preferredFlow` (the host policy for opening plugin-delegated external URLs).
+
+**Wirings** — ONE declared default: `src/data/settings-defaults.ts:87` (`preferredFlow: "in-app"`). SEVEN further statements of it: (1) `src/data/settings-normalization.ts:816` `const VALID_WEBVIEW_FLOWS = ["in-app","system-browser"]` — module-private, NOT exported, so nothing else can share it; (2) `src/data/settings-normalization.ts:818-834` `normalizeWebView` validates + warn-logs + falls back to `DEFAULT_SETTINGS.webView`; (3) `src/data/settings-store.ts:1214` calls it — on the DISK-LOAD path only; (4) `src/data/settings-store.ts:808-810` the IPC patch path is a bare `this.settings.webView = { ...this.settings.webView, ...partial.webView }` with NO validation; (5) `src/boot/steps/plugin-runtime/external-url.ts:69` `?? "in-app"`; (6) `src/boot/steps/plugin-runtime/app-preference.ts:72` returns `settingsService.get("webView")?.preferredFlow` with NO fallback; (7) `src/ui/renderer/tabs/WebTab.tsx:27` `useState<WebViewPreferredFlow>("in-app")` plus `WebTab.tsx:37` `next === "in-app" || next === "system-browser"` re-spelling the value set.
+
+**Observed drift** — ALREADY DIFFERS in two ways. (a) Load validates, patch does not: `settings.update` hands its raw payload straight to `patch()` (`src/ipc/domains/settings.ts:758` → `settingsService.patch(partial)`; the handler validates only `a2aRemote`, `llm.activeChatRuntime` and the Foundry baseUrl before that call), so `updateSettings({webView:{preferredFlow:"yes"}})` persists `"yes"` to lvis-settings.json. `normalizeWebView` only coerces it on the NEXT boot — the exact 'recovery-style fallback at load instead of validating at the boundary' pattern the appearance branch's own comment (`src/data/settings-store.ts:763-768`) says is forbidden. (b) Two consumers of the same field handle a missing value differently: `external-url.ts:69` substitutes `"in-app"` while `app-preference.ts:72` hands plugins `undefined` — so `hostApi.getAppPreference("webView.preferredFlow")` and the host's actual routing decision can report different things. Contrast the structurally identical siblings: `src/shared/sidebar-tab.ts` (`DEFAULT_SIDEBAR_TAB` + `SIDEBAR_TABS` + `isSidebarTab`) and `src/shared/initial-app-mode.ts` (`DEFAULT_APP_MODE` + `normalizeAppMode`) were both extracted into shared SoT modules consumed by every layer. webView never was, and `VALID_WEBVIEW_FLOWS` being a private const is why.
+
+
+### appearance-patch-skips-bundleid-and-schemaversion
+
+**Capability** — Validation + default fallback for the persisted `appearance` block (bundleId, schemaVersion, followSystem, language, font).
+
+**Wirings** — Authority on the load path: `src/data/settings-normalization.ts:739` `normalizeAppearance` — gates `schemaVersion === 2` (line 746), coerces an unknown `bundleId` to `DEFAULT_BUNDLE_ID` via `VALID_BUNDLE_IDS` (lines 751-755), coerces `language` via `normalizeLocale` (line 762), validates `font`. Called once, from `src/data/settings-store.ts:1200` (disk load). Second wiring on the write path: `src/data/settings-store.ts:759-806` re-implements a PARTIAL subset — `nextAppearance` is built by spreading `appearanceRest` unchecked (lines 776-779), then `language` IS validated (lines 787-789) and `font` IS validated (lines 791-806). Third wiring in the renderer: `src/ui/renderer/theme/ThemeProvider.tsx` `setBundle` does `isBundleId(id) ? id : DEFAULT_BUNDLE_ID` before sending `updateSettings({appearance:{schemaVersion:2,...patch}})`.
+
+**Observed drift** — ALREADY DIFFERS — the patch path validates 2 of 5 subfields. `bundleId`, `schemaVersion` and `followSystem` ride the unchecked spread at `settings-store.ts:776-779`, while `language` and `font` get boundary validation 10 lines below under a comment that explicitly states the rule being broken ('validate at every trust boundary … instead of dropping on next load', lines 763-768, 785-786). Concrete failure: an `updateSettings({appearance:{schemaVersion:1}})` persists; on the next boot `normalizeAppearance` sees `schemaVersion !== 2` and no v1 legacy keys, falls through both branches, and returns `{...DEFAULT_SETTINGS.appearance}` — silently wiping the user's bundleId AND language. Only the RENDERER currently guards bundleId (`ThemeProvider` `isBundleId`), i.e. the guard lives on the untrusted side of the IPC boundary and not on the trusted side.
+
+
+### system-settings-normalization-duplicated-load-vs-patch
+
+**Capability** — Per-field validation + fallback for the 10-field `system` settings block.
+
+**Wirings** — Load path: `src/data/settings-normalization.ts:876-991` `normalizeSystem`, called from `src/data/settings-store.ts:1215`. Write path: `src/data/settings-store.ts:811-917` hand-re-implements the same ten fields inline (closeBehavior, appMode, localApiServer, launchAtStartup, launchMinimized, sidePanelWidth, sidebarWidth, the three split percents, sidebarActiveTab, pinnedProjectRoots), each with its own guard + warn line.
+
+**Observed drift** — ~105 lines mirrored against ~115. I diffed the guards field-by-field and they currently AGREE (same type checks, same `clampSidebarWidth` / `clampSidePanelSplitPercent` / `normalizePinnedProjectRoots` calls, same `Math.max(SIDE_PANEL_MIN_WIDTH, Math.round(x))` for sidePanelWidth) — so this is duplication risk, not present divergence. The semantic difference between the two is real and intended (load falls back to `DEFAULT_SETTINGS.system`, patch keeps the prior value), which is why I would call the fallback TARGET a legitimate boundary; what is not legitimate is that the FIELD ENUMERATION and the per-field type guards are written twice, so adding a new `system` field means remembering two sites. The repo already recognises this failure mode and fixed one instance of it: `SIDE_PANEL_SPLIT_KEYS` (`src/data/settings-normalization.ts:870-874`) was extracted with a `satisfies readonly (keyof SystemSettings)[]` precisely 'so a new split-bearing tab kind is added in exactly one place' — the other nine fields never got that treatment.
+
+
+### out-of-allowed-dir-ack-and-retype-renderer-only
+
+**Capability** — Whether a Layer-1 directory widening with adjacency warnings (.env/.git/.ssh/credentials adjacent) may be persisted, and which directory string gets persisted.
+
+**Wirings** — (1) MAIN CANONICAL GATE: src/permissions/permission-slash.ts:197-204 refuses `dispatchPermissionDirCommand({verb:"allow"})` when `validation.adjacencyWarnings.length > 0 && !cmd.acknowledgeWarnings`, returning `requiresAcknowledgement: true`. (2) MAIN, pick-root path: src/ipc/domains/workspace.ts:126-140 + :665-690 implements a main-owned one-time ack TOKEN round trip so a folder pick cannot silently widen the scope. (3) RENDERER, approval path: src/ui/renderer/components/permissions/OutOfAllowedDirCard.tsx:62-65 computes `retypeOk` / `adjacencyBlocking` / `persistEnabled` and disables allow-session (:185) and allow-always (:202) accordingly.
+
+**Observed drift** — The approval path's main side unconditionally BYPASSES main's own gate: src/tools/invocation-runner.ts:825 and :862 both hardcode `acknowledgeWarnings: true` on the allow-always and allow-session persists. Nothing on the wire carries the acknowledgement — `ApprovalDecision` (src/permissions/approval-gate.ts:234-257) has only requestId/choice/rememberPattern/elicitationContent/nonce/hmac. So on this path the adjacency gate exists ONLY in the renderer checkbox, while the other two wirings enforce it in main. Same for the re-type confirmation: src/tools/invocation-runner.ts:818-822 takes `decision.rememberPattern` verbatim as the persisted `approvedDirectory` with no check that it equals `suggestedParent`, yet the main-process comment at src/tools/invocation-runner.ts:723-725 asserts "the user must re-type the suggested path before persisting (phishing defense)" as if it were a system property. Layer-0 (sensitive path / filesystem root) IS still re-validated in main via permission-slash.ts:195, so the gap is precisely the adjacency ack + the re-type binding.
+
+
+### mcp-elicitation-schema-two-parsers
+
+**Capability** — Which MCP `elicitation/create` requestedSchema shapes the host supports, and what a filled form may contain.
+
+**Wirings** — (1) MAIN: src/mcp/mcp-elicitation-resolver.ts:37-38 (`MAX_ELICITATION_FIELDS = 12`, `ELICITATION_FIELD_NAME_RE`), :85-92 `parseEnumValues`, :93-129 `parseSupportedElicitationSchema`, :135-146 `isValidFieldValue`, :148-163 `validateElicitationContent` — decides accept vs decline at :207-215. (2) RENDERER: src/ui/renderer/components/ToolApprovalDialog.tsx:71-73 re-declares the SAME two constants as separate literals, :79-97 `scalarLabel`/`buildEnumOptions`, :107-159 `parseElicitationFields`, :208-240 `buildElicitationContent`. Load-bearing, not advisory: `isUnsupportedElicitationForm` (:436) feeds `approveDisabled` (:483-487), so the renderer's verdict decides whether the user can approve at all.
+
+**Observed drift** — Concrete divergence on `enum` members. Main's `parseEnumValues` (:85-92) accepts any JSON scalar, and `isJsonScalar` accepts the empty string. The renderer's `buildEnumOptions` (:87-97) maps each member through `scalarLabel` (:79-85), which returns `""` for an empty-string member; that member is filtered out, `options.length !== raw.length`, and the function returns `undefined` — which at :139 makes the WHOLE schema `{supported:false}`. So a schema like `{properties:{choice:{enum:["","a"]}}}` is fully valid to main but renders as "Requested form schema is not supported." (:852-857) with the approve button disabled — the request can only be denied. The duplicated literals at :71-72 have the same failure mode for any future relaxation: raising main's field cap to 16 or widening the name regex would leave the renderer refusing to render, and every such request unapprovable.
+
+
+### external-navigation-url-credential-rule
+
+**Capability** — Whether a URL is safe to hand to an external-navigation sink (in-app browser tab, webview, shell.openExternal).
+
+**Wirings** — Four. (1) RENDERER SoT: src/ui/renderer/preview/url-safety.ts:16-29 `normalizeBrowserNavigationUrl` — http(s) only AND rejects `url.username || url.password`. (2) MAIN webview policy: src/main/side-browser-webview.ts:7-15 `isHttpUrl` — http(s) AND credentials (matches). (3) MAIN `shell.openExternal` IPC: src/shared/external-url.ts:19-33 `validateExternalUrl` — protocol ONLY, no credential check; wired at src/ipc/domains/settings.ts:529-537. (4) MAIN plugin host API: src/boot/steps/plugin-runtime/external-url.ts:57-67 — protocol only, no credential check.
+
+**Observed drift** — The credential rule is present in 2 of 4 wirings, and the renderer file's own doc comment (src/ui/renderer/preview/url-safety.ts:13-14) asserts "The main process independently re-validates on the IPC / webview boundary … with the same protocol + credential rules" — true of wiring (2), false of wiring (3), which is the sink a renderer actually reaches. An UNTRUSTED URL reaches wiring (3) without ever passing wiring (1): src/ui/renderer/components/McpAppView.tsx:486 binds the MCP-app bridge's open-link adapter as `openLink: (url) => getApi().openExternalUrl(url)`, and src/ui/renderer/components/mcp-app-bridge/handlers/on-open-link.ts:26-30 forwards the app-supplied string verbatim. That handler's own doc (:5-7) describes main as "scheme-validat[ing]" — i.e. it documents the narrower rule, so the two comments disagree about what main does. `https://trusted.example@evil.tld/` is refused by the renderer's validator and accepted by shell.openExternal.
+
+
+### workspace-denial-code-three-renderer-tables
+
+**Capability** — Turning a main-process IPC denial code into the message the user sees.
+
+**Wirings** — (1) SHARED renderer table: src/ui/renderer/format-ipc-error.ts:8-250 `COMMON_IPC_ERROR_MESSAGES` + `resolveIpcErrorKey` (:275-280). (2) Local override table: src/ui/renderer/components/chat-side-panel-workspaces.tsx:371-378 `formatOpError` codeMap. (3) Local typed switch: src/ui/renderer/components/chat-side-panel-preview.tsx:209-223 `fileErrorKey`. (4) A consumer that maps nothing: src/ui/renderer/hooks/use-add-project-folder.ts:45 returns `null` on `!res.ok`, discarding the code.
+
+**Observed drift** — Main emits `path-not-allowed` and `sensitive-path` from src/ipc/domains/workspace.ts:102-106 (`directoryDenyCode`), :189, :213 and src/ipc/domains/preview.ts:46-47. Neither code exists in the shared table at format-ipc-error.ts:8-250 (`invalid-path` is there at :85; the other two are not). Only wirings (2) and (3) know them. So a Layer-0 denial reaching any other surface falls through `formatIpcError` to `"${raw}${errorSuffix}"` (:298-299) and shows the raw kebab-case code — which is exactly the leak the comment at src/ipc/domains/workspace.ts:90-95 says these codes were introduced to prevent — and via wiring (4) the "Add project folder" flow shows nothing at all for a sensitive-path refusal. Advisory/display rather than gating, but the failure is user-facing.
+
+
+### plugin-lookup-key-normalization-duplicate
+
+**Capability** — Normalizing a plugin id / package spec / display name to the key used to match a plugin against a marketplace catalog item.
+
+**Wirings** — (1) MAIN: src/plugins/marketplace.ts:119-129 `normalizePluginLookupKey`, consumed by `catalogItemMatchesPluginId` (:131-136) at :1193 to decide `stillManagedByCatalog`. (2) RENDERER: src/ui/renderer/tabs/PluginConfigTab.tsx:93-103 — a byte-identical copy of the same eight-step chain (`@scope/` strip, `@version` strip, `lvis-plugin-` strip, `plugin-` strip, non-alnum→dash, trim dashes), consumed by `findPluginDoctorMarketplaceItem` (:105-127) and `resolvePluginDoctorInstallKey` (:129-143), whose result is passed straight into a real install at :623-629 (`installMarketplacePlugin(installKey)`).
+
+**Observed drift** — None observed — the two bodies are currently identical (verified by normalized-body hashing across the whole tree; they are the only non-trivial verbatim renderer/main function duplicate). Reporting it as the shape rather than as a live bug: it is load-bearing on the renderer side (the derived key selects which catalog package gets installed) with no shared module and no test binding the two, so a one-sided edit silently changes which package the Doctor repair installs.
+
+
+### plugin-view-label-duplicate
+
+**Capability** — The display label for a plugin UI extension.
+
+**Wirings** — (1) src/ui/renderer/api-client.ts:14-16 `getPluginViewLabel` (main window renderer). (2) src/plugin-ui-host.tsx:99-101 — verbatim identical body (`displayName?.trim() || title || pluginId`) in the plugin-shell bundle.
+
+**Observed drift** — None observed; both bodies identical. Purely cosmetic (a label), so low value — noted only because the same file already documents the corrective pattern at src/plugin-ui-host.tsx:103-106 ("Partition naming moved to `shared/plugin-partition.ts` so main + renderer stay byte-identical (#498)"), i.e. the codebase already fixed the sibling case and left this one.
+
+
+### rationale-anchor-permission-context-dead-carrier
+
+**Capability** — Carry the turn's request anchor + rationale eligibility provenance to the code that authorizes one tool invocation.
+
+**Wirings** — (1) The `RationaleConversationRuntime`, built from `bounds.requestAnchor` + `currentRationaleProvenance` at query-loop.ts:961-981 and threaded as `rationaleRuntime` through `executeConversationBatch`, where it is the actual gate (`runtime?.requestAnchor` at executor-implementation.ts:402 and :441) and reaches authorization via `rationaleBatchContext`. (2) `permissionContext.requestAnchor` + `permissionContext.rationaleProvenance`, written at query-loop.ts:1214-1219 inside the `satisfies ConversationExecuteOptions` literal.
+
+**Observed drift** — Carrier (2) is dead three independent ways. (a) Neither field is declared on `ToolPermissionContext` — executor-contract.ts:67-88 is the sole declaration (all importers alias it) and lists only headless/allowedPluginIds/approvalCacheKey/additionalDirectories/getAdditionalDirectories/trustOrigin/pluginPanelUserAction/pluginOperation/expectedMcpServerId/userIntent/onTurnDirectoryGrant/onSessionDirectoryGrant. It survives `satisfies` only because the props arrive through a conditional spread, which TypeScript exempts from excess-property checking. (b) No consumer reads them: every `requestAnchor` read under src/tools is off the rationale runtime/coordinator objects (executor-implementation.ts:402,441; rationale-host-coordinator.ts:332,359,505-534; rationale-host-service.ts:114-155), never off a permission context — whereas `permissionContext.userIntent` IS read at approval-purpose.ts:64 and reviewer-dispatch.ts:108,236, so this is not a category where nothing is read. (c) The two carriers compute provenance differently — query-loop.ts:1217 hardcodes `rationaleProvenanceFor(true, toolTrustOrigin)` while the live carrier at :961-963 passes `bounds.requestAnchor !== undefined`; they coincide only because the spread's own condition implies it. The fields do survive the `{...permissionContext}` rebuild at invocation-runner.ts:669-672 and are handed to `auditWriter.auditToolCall`, which reads only `context.trustOrigin` (audit-entries.ts:51-53), so nothing leaks — they are simply inert.
+
+
+### usage-range-day-key-utc-vs-kst
+
+**Capability** — Which calendar day a usage row belongs to, and what "today" / "N days ago" mean for the lvis:usage:range date filter
+
+**Wirings** — MAIN AUTHORITY: src/engine/usage-stats.ts:153 (`const KST_OFFSET_MS = 9*60*60*1000`), :155-157 (`dateKey(d) = new Date(d.getTime()+KST_OFFSET_MS).toISOString().slice(0,10)`), :361-362 (`const d = dateKey(ts); return d >= opts.dateFrom && d <= opts.dateTo`). IPC entry: src/ipc/handlers/usage.ts:19-22 (`handleUsageRange`), src/ipc/domains/usage.ts:18. RENDERER WIRING A (drifted): src/ui/renderer/components/UsageDashboard.tsx:16-18 (`todayKey()` = `new Date().toISOString().slice(0,10)`), :20-24 (`daysAgoKey(n)` via `setUTCDate`), :26-32 (`presetToDates`), :108-118 (`api.getUsageRange(range)`). RENDERER WIRING B (correct): src/ui/renderer/components/StarredView.tsx:78-89 (`koreaDateKey` via `Intl.DateTimeFormat` timeZone `Asia/Seoul`), :195-196, :294 (`getUsageRange({ dateFrom: selectedKey, dateTo: selectedKey })`).
+
+**Observed drift** — Real and provable. Main keys every trend point and every range-filter comparison on the KST civil date; UsageDashboard produces the UTC civil date; StarredView produces the Asia/Seoul civil date. Two renderer callers of the same IPC therefore ask main different questions. Concretely: at 2026-08-06 01:00 KST (= 2026-08-05 16:00 UTC), main's `dateKey` for a turn happening right now is `2026-08-06`, but `todayKey()` returns `2026-08-05`, so `presetToDates("7d")` sends `dateTo: "2026-08-05"` and the filter `d <= opts.dateTo` excludes every turn of the current KST day — the dashboard shows zero usage for today for a 9-hour window every day, and the 7d/30d/90d windows are shifted one day. StarredView is unaffected because it feeds main a KST key. Load-bearing: the string decides which rows main returns, not how they are painted.
+
+
+### slash-load-session-lookup-two-wirings
+
+**Capability** — Resolving a `/load <partial-session-id>` prefix to a session and switching to it
+
+**Wirings** — RENDERER WIRING (the one that runs for typed input): src/ui/renderer/hooks/use-send-message.ts:166-183 — `if (trimmed === "/load" || trimmed.startsWith("/load "))`, `const listed = await api.chatSessions();` (line 172, NO options passed), `listed.sessions.find((session) => session.id.startsWith(requested))`, then `sessionLoad(match.id, ...)`. The IPC it lands on defaults the query: src/ipc/handlers/chat.ts:557-559 (`limit ... : 20`) and :567-569 (`kind ... : "main"`). MAIN WIRING: src/engine/turn/commands.ts:74-86 — `case "load"`, `const sessions = self.listSessions();` (no limit), `sessions.find((s) => s.id.startsWith(targetId))`, `self.loadSession(match.id)`; backed by src/engine/conversation-loop.ts:719-725 → `memoryManager.listSessions(undefined)`.
+
+**Observed drift** — Actual, and the two sides answer differently on the same input. The renderer searches at most the 20 most recent `kind: "main"` sessions (the IPC's silent defaults); the main dispatcher searches ALL sessions with no kind filter. `/load abc123` for a session that is 21st-most-recent, or for a routine-kind session, resolves in main's implementation and returns `app.sessionNotFound` in the renderer's. The renderer copy is load-bearing: use-send-message.ts intercepts before `api.chatSend`, so for typed composer input main's `case "load"` never runs and its broader lookup is unreachable — it stays live only for the CLI / local-api entry points (src/cli/commands.ts, src/api/local-api.ts), which is exactly the split that lets the two drift unnoticed.
+
+
+### cost-and-token-format-four-wirings
+
+**Capability** — Rendering a token count / a USD cost as a human string
+
+**Wirings** — src/lib/turn-summary-format.ts:52-57 `formatTokens` (guards `!Number.isFinite(n) || n <= 0` → "0"; M at 1 decimal) — NOTE: no non-test consumer; only its sibling `formatDuration` (:25) is imported, by src/ui/renderer/components/WorkGroup.tsx:4. src/ui/renderer/utils/cost-format.ts:3-7 `formatTokens` (M at 2 decimals, no finite guard) and :9-13 `formatCost` (3 tiers). src/ui/renderer/components/TokenCostBadge.tsx:63-67 `formatTokens` (M at 1 decimal, no finite guard) and :69-75 `formatCost` (5 tiers). src/ui/renderer/components/StarredView.tsx:100-102 `formatCost` (Intl currency, maximumFractionDigits 4). src/lib/cost-estimator.ts:80-84 `formatCostBadge` (`~$` prefix, 2 tiers), consumed by src/ui/renderer/components/TokenProgressRing.tsx:190.
+
+**Observed drift** — Actual and observable. 2,500,000 tokens renders "2.50M" in the usage dashboard (cost-format.ts) and "2.5M" in the assistant card badge (TokenCostBadge.tsx). A cost of 0.5 renders "$0.50" (cost-format), "$0.500" (TokenCostBadge), "$0.5" (StarredView), "~$0.50" (formatCostBadge) — four spellings of one number in one app. NaN/negative renders as "NaN"/"-5" in both renderer `formatTokens` copies but "0" in lib/turn-summary-format.ts, i.e. the only copy carrying the guard is the dead one. Advisory (display), not gating — reported because the axis explicitly covers "how a name/path/size is formatted" and because the guard asymmetry is real drift, not aesthetic similarity.
+
+
+### skipped-plugin-update-map-main-and-renderer-normalizers
+
+**Capability** — Normalizing / reading / matching the persisted `settings.marketplace.skippedPluginUpdates` map (which plugin updates stay hidden)
+
+**Wirings** — MAIN: src/boot/steps/post-boot.ts:234 (`RESERVED_SKIPPED_PLUGIN_UPDATE_KEYS = new Set(["__proto__","constructor","prototype"])`), :236-248 `readSkippedPluginUpdates`, :250-257 `isSkippedPluginUpdate`, :259-263 `normalizeSkippedPluginUpdateKey`. RENDERER: src/ui/renderer/hooks/use-marketplace-updates.ts:12 (`RESERVED_SKIPPED_UPDATE_KEYS` — a second literal Set with the same three members), :100-105 `normalizeSkippedPluginUpdates`, :107-114 `copySkippedPluginUpdates`, :116-129 `createSkippedPluginUpdateMap`/`putSkippedPluginUpdate`, :131-135 `normalizeSkippedPluginUpdateKey`, :137-145 `filterSkippedUpdates`.
+
+**Observed drift** — No behavioural divergence today — I diffed both key normalizers, both reserved-key sets, both null-prototype map builders and both skip predicates and they agree on every input. This is a pure two-carrier duplication of the same persisted-map contract: the producer (renderer writes the map) and the consumer (main filters the update-check against it) each own a private copy of the reserved-key denylist and the trim/empty rules, with no shared module and no cross-side test. Adding a fourth reserved key or changing the trim rule on one side silently un-hides (or permanently hides) an update on the other. Reported as drift-prone-by-construction rather than drifted.
+
+
+### dismissed-announcement-id-normalizer-duplicate
+
+**Capability** — Normalizing the persisted `settings.marketplace.dismissedAnnouncementIds` list (which marketplace banners stay dismissed)
+
+**Wirings** — MAIN: src/boot/steps/post-boot.ts:294-303 — `normalizeDismissedAnnouncementIds` (guards `!Array.isArray(ids)`, keeps `typeof id === "number" && Number.isSafeInteger(id)`, dedupes via Set, sorts ascending). RENDERER: src/ui/renderer/hooks/use-marketplace-announcements.ts:7-15 — same-named function with the same Set/`Number.isSafeInteger`/sort body, typed `Iterable<unknown>` with the Array.isArray guard hoisted to its caller (:55-57).
+
+**Observed drift** — None today — the two bodies are line-for-line equivalent (post-boot.ts:296-302 vs use-marketplace-announcements.ts:8-14 are literally identical statements). Same shape as the skipped-update pair: the renderer writes the array, main filters every announcement push against it, and each side re-derives "what counts as a valid dismissed id" independently. Neither side bounds the list length, so if a cap is ever added it has to be added twice. Lower value than the skipped-update pair because the predicate is smaller and has no denylist.
+
+
+### plugin-install-network-disclosure-predicate-shadow
+
+**Capability** — "Does this plugin's networkAccess grant need a pre-install disclosure?" — one predicate, `hasNetworkAccessDisclosure` in src/shared/network-access.ts:55-61, which is `allowedDomains.length > 0 || !!reasoning || allowPrivateNetworks === true`.
+
+**Wirings** — (1) Main deep-link consent surface: src/main/lvis-deep-link.ts:142 calls the shared predicate and src/main/lvis-deep-link.ts:154-156 prints the `allowPrivateNetworks` line. (2) Renderer routing: src/ui/renderer/tabs/MarketplaceTab.tsx:275 (`needsInstallDisclosure`) calls the SAME shared predicate to decide whether an install must go through the consent dialog. (3) Renderer dialog: src/ui/renderer/dialogs/PluginInstallDialog.tsx:30 re-declares a LOCAL `const hasNetworkAccessDisclosure = allowedDomains.length > 0 || !!reasoning;` and gates the whole disclosure panel on it at src/ui/renderer/dialogs/PluginInstallDialog.tsx:64.
+
+**Observed drift** — The local shadow drops the `allowPrivateNetworks === true` term the shared predicate has. For a plugin whose manifest declares only `networkAccess: { allowPrivateNetworks: true }` (no domains, no reasoning): MarketplaceTab.tsx:275 says disclosure IS needed and routes to the dialog (MarketplaceTab.tsx:574-576); the dialog's shadow says false and renders no panel at all — so the private-network warning block at PluginInstallDialog.tsx:90-94 is unreachable in exactly the case it was written for. The user then clicks Install and MarketplaceTab.tsx:731 sends `networkAccessAcknowledged: true`, which becomes the `networkAccessAcknowledgement` main verifies at src/plugins/marketplace.ts:195. Net: the user acknowledges a private-network grant they were never shown, while the deep-link path for the same plugin does show it.
+
+
+### policy-managed-editability-drops-admin-file-branch
+
+**Capability** — "Is the explicit-approval policy user-editable?" Main's write authority is `adminFileExists || userFile.managed === true` (src/permissions/policy-store.ts:186-195: `if (adminFile !== null) throw "Policy is managed by IT (admin-dir file exists)"` FIRST, then `if (existing?.managed === true) throw`).
+
+**Wirings** — (1) Main: src/permissions/policy-store.ts:178-196 `savePolicy`, surfaced as `{ok:false,error:"managed"}` at src/ipc/domains/permissions.ts:705-706. (2) Renderer: src/ui/renderer/tabs/PermissionsTab.tsx gates the checkbox on `policyManaged` alone — early-return at :350, `disabled={policyManaged || policyBusy}` at :746, lock glyph at :751, admin banner at :753.
+
+**Observed drift** — The renderer's predicate has only the `managed` term; main has the admin-file term too. `readPolicyFile` (src/permissions/policy-store.ts:80-95) returns the admin JSON verbatim, and `loadPolicy` case-3 returns `{...adminFile, source:"admin"}` (:137) while case-4 only escalates `managed` when `adminFields.managed === true` (:153). So an admin policy.json that omits (or false-sets) `managed` yields `managed:false` with `source:"admin"|"merged"` — the renderer renders an ENABLED, unlocked, unbannered checkbox that main unconditionally refuses. The renderer already fetches `policySource` (PermissionsTab.tsx:103, used for the banner text at :755) so the missing branch is available and simply unused. Fail-closed in main, so this is a correctness/UX drift, not an escalation.
+
+
+### plugin-config-schema-validation-only-wired-in-renderer
+
+**Capability** — "Does a plugin config value satisfy the plugin's declared `manifest.configSchema` (type / required / minimum / maximum / minLength / maxLength / pattern / enum)?"
+
+**Wirings** — (1) Main authority: src/plugins/config-schema.ts:78 `compileConfigSchemaValidator`, whose own docstring says it compiles the schema "into an AJV validator ... for runtime / IPC validation" and that "callers fall back to the existing sanitizePluginConfig path". (2) Renderer: src/ui/renderer/tabs/PluginConfigSchemaForm.tsx:37-61 `fieldError`, a hand-rolled re-implementation of minLength/maxLength/pattern/minimum/maximum.
+
+**Observed drift** — `compileConfigSchemaValidator` has ZERO production callers — the only references in the repo are its own definition and src/plugins/__tests__/config-schema.test.ts:26,276. The main-side write path src/ipc/domains/plugins.ts:960-999 (`plugins.configSet`) only calls `stripSecretFields` + `settingsService.setPluginConfig`; the plugin-facing `hostApi.config.set` (src/boot/steps/plugin-runtime/host-api-factory.ts:392-397) only checks the `format:"secret"` rule. So the entire schema constraint set is enforced nowhere in main. Worse, the surviving renderer wiring does not gate either: `fieldError`'s result is bound to a local `error` at PluginConfigSchemaForm.tsx:236 and rendered as red text at :393, while every Save button's `disabled` is `!isCleartextDirty(key) || fieldSaving[key]` (:334-336, :364-366, :385-387) — never `error`. The renderer also never checks `enum` membership or `required`-on-save (`required` at :137 only drives the asterisk at :241). One authority, two carriers, both no-ops.
+
+
+### context-fill-ring-omits-preflight-factor-and-overrides
+
+**Capability** — "How full is the context, i.e. how close is this turn to the auto-compact / preflight boundary?"
+
+**Wirings** — (1) Main: src/engine/auto-compact.ts:58-73 `getModelPreflightThreshold` = runtime slider override > `LVIS_DEV_PREFLIGHT_OVERRIDE` env > `min(getPreflightThreshold(window), floor(tpmDefault * 0.8))`, where `getPreflightThreshold` is `floor(usable * 0.8)` (src/shared/context-budget.ts:39-43). Consumed as the real trigger at src/engine/turn/compaction.ts:58 and :372. (2) Renderer: src/ui/renderer/hooks/use-context-budget.ts:56 sets the ring denominator to `getUsableContext(...)` with NO 0.8 factor, and :105-108 sets `effectiveBudget = min(usable, tpmLimit)` — again no 0.8.
+
+**Observed drift** — Four branches main has that the renderer copy lacks: the 0.8 preflight factor, the `tpmDefault * 0.8` cap, the dev env override, and the runtime slider override written via src/ipc/domains/dev.ts:35. Observable consequence: auto-compact fires when the renderer's ring reads 80%, so the `>= 0.95` red banner at src/ui/renderer/ChatView.tsx:713 is effectively unreachable before a compact, and the hook's own docstring claim (use-context-budget.ts:38 / auto-compact.ts:48-49, "hit 100% at the compact threshold") is false by a factor of 1.25. Advisory (display + warning banners only), but the number it displays is a re-derivation of a main-process decision.
+
+
+### tool-vs-turn-duration-two-rounding-rules
+
+**Capability** — "Format a millisecond duration for the transcript." src/lib/turn-summary-format.ts:1-8 explicitly states the two formatters "stay in sync on rounding rules ... so the cumulative total never visually contradicts the per-tool slices it sums."
+
+**Wirings** — (1) src/lib/turn-summary-format.ts:25-47 `formatDuration`, used by src/ui/renderer/components/WorkGroup.tsx:118 for the turn total. (2) src/ui/renderer/utils/format-duration.ts:13-20 `formatToolDuration`, used by src/ui/renderer/components/ToolGroupCard.tsx:27 and :58 for the per-tool badge.
+
+**Observed drift** — They are already out of sync in three places. (a) Hours: `formatDuration` has an `ms >= 3_600_000` branch producing `1h 03m` (:45-47); `formatToolDuration` has none, so a 1-hour tool renders `60m 0.0s`. (b) Whole seconds: `formatDuration` drops the decimal when the fractional part is < 0.05 (`1m 12s`, :38-40); `formatToolDuration` always keeps it (`1m 12.0s`). (c) Zero/negative: `formatDuration` returns `"0s"` for `ms <= 0` (:26); `formatToolDuration` returns `""` for negatives and `"<0.1s"` for 0. Off the main/renderer axis strictly speaking (both consumers are renderer components), but it is the same one-rule-two-implementations shape with confirmed divergence against an explicit in-code sync claim.
