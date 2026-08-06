@@ -10,6 +10,7 @@ import type { ScriptHookManager } from "../hooks/script-hook-manager.js";
 import { AuditLogger } from "../audit/audit-logger.js";
 import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { PermissionDirectoryLifecycle } from "../permissions/permission-slash.js";
+import { Layer1DenialRecurrenceTracker } from "../permissions/layer1-denial-recurrence.js";
 import { RateLimiter } from "./pipeline/rate-limiter.js";
 import { tryUserApprovalMemorySkip as tryUserApprovalMemorySkipImpl } from "./pipeline/approval-memory-skip.js";
 import { AuditWriter } from "./pipeline/audit-writer.js";
@@ -95,6 +96,13 @@ export class ToolExecutor {
   private readonly auditLogger: AuditLogger;
   private readonly requirePermissionAuditChain: boolean;
   private readonly rateLimiter = new RateLimiter();
+  /**
+   * One tracker per executor, for the executor's lifetime. The plugin surface
+   * runs every plugin through a SINGLE executor, which is exactly why the grant
+   * subject is part of the counter's identity rather than implied by which
+   * instance is counting.
+   */
+  private readonly layer1DenialRecurrence = new Layer1DenialRecurrenceTracker();
   private readonly bashAstValidator?: BashAstValidator;
   private readonly scriptHookManager?: ScriptHookManager;
   private readonly hostClassifiesRiskProvider: () => boolean;
@@ -566,6 +574,7 @@ export class ToolExecutor {
         pluginOperationGrants: this.pluginOperationGrants,
         pluginGenerationAccessProvider: this.pluginGenerationAccessProvider,
         pluginOperationIdentityProvider: this.pluginOperationIdentityProvider,
+        layer1DenialRecurrence: this.layer1DenialRecurrence,
       },
       toolUse,
       groupId,

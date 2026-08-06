@@ -1724,6 +1724,7 @@ export const zhMessages: Record<string, string> = {
   "outOfAllowedDirCard.adjacencyAckLabel": "我理解上述警告并想继续。",
   "outOfAllowedDirCard.adjacencyWarningTitle": "警告——邻接警报",
   "outOfAllowedDirCard.allowAlwaysButton": "永久添加目录",
+  "outOfAllowedDirCard.recurringDenialNotice": "此路径在本次对话中已被阻止 {count} 次，因此改为询问你，而不是再次失败。目前尚未授予任何权限，拒绝将使当前权限保持原样。",
   "outOfAllowedDirCard.allowOnceButton": "仅限一次",
   "outOfAllowedDirCard.allowOnceTitle": "仅在当前消息期间允许。系统将在下一条消息中再次询问您。",
   "outOfAllowedDirCard.allowSessionBlockedTitle": "请首先确认敏感路径邻接警告。",

@@ -807,7 +807,49 @@ export async function runToolInvocation(
         isDirectoryTarget,
       );
 
-      if (services.approvalGate && !headless) {
+      // ── Recurring headless Layer-1 denial → ask once ───────────────────
+      //
+      // The interactive lane below already asks every time, so there is nothing
+      // there to escalate. The headless lane does NOT ask: it queues a deferred
+      // entry and returns a tool error, and a caller that retries gets that same
+      // error forever while the user watches it repeat with no way to answer.
+      //
+      // After LAYER1_DENIAL_ESCALATION_THRESHOLD identical denials, route this
+      // one refusal into the SAME interactive directory ask below — same
+      // request kind, same evaluation context, same scope choices, same grant
+      // sinks. Nothing is granted here; the user's answer is the authorization,
+      // and a deny/abort/timeout falls straight back to the ordinary denial
+      // terminals that already exist in that block.
+      //
+      // Ordering matters and is load-bearing: `validateDirectoryAddition` above
+      // has already returned for a sensitive path or a filesystem root, so a
+      // directory the policy refuses outright can never reach the counter, let
+      // alone an escalation.
+      const denialRecord = headless
+        ? services.layer1DenialRecurrence.recordDenial({
+            sessionId,
+            grantSubject: invocationPermissionContext.directoryGrantSubject,
+            canonicalPath: outOfAllowedTarget.canonicalPath,
+          })
+        : undefined;
+      // A remote-controller turn never escalates. Its directory grants are
+      // already restricted to a one-shot local confirm, and raising a NEW
+      // prompt the desk did not expect, on behalf of a turn driven from
+      // elsewhere, widens what a remote party can make the owner look at. The
+      // ordinary deny is the smaller answer, so it is the one taken.
+      const escalatedDirectoryAsk =
+        denialRecord?.tracked === true
+        && denialRecord.escalate
+        && invocationPermissionContext.remoteControllerAuthority === undefined
+          ? { recurringDenialCount: denialRecord.count }
+          : undefined;
+      if (escalatedDirectoryAsk) {
+        log.warn(
+          `[permission-scope] headless out-of-allowed-dir denied ${escalatedDirectoryAsk.recurringDenialCount}x for tool '${toolUse.name}' — asking the user instead of failing again`,
+        );
+      }
+
+      if (services.approvalGate && (!headless || escalatedDirectoryAsk !== undefined)) {
         const approvalRequest = {
           id: randomUUID(),
           ...(requiresRemoteDirectoryOneShot
@@ -861,6 +903,11 @@ export async function runToolInvocation(
             suggestedParent,
             currentAllowed: invocationAllowedScope.directories,
             adjacencyWarnings: validation.adjacencyWarnings,
+            // Present only on an escalated ask. Display-only: it explains to
+            // the user why they are being asked now, and NOTHING reads it back
+            // to decide anything. Absent on every ordinary interactive ask, so
+            // that card is unchanged.
+            ...(escalatedDirectoryAsk ?? {}),
           },
           trustOrigin,
           // Propagate approvalCacheKey so renderer record key

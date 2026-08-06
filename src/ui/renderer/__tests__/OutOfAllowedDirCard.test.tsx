@@ -155,6 +155,64 @@ describe("OutOfAllowedDirCard", () => {
     expect(document.body.textContent).toContain("영구 허용은 이후 같은 범위의 파일 접근을 계속 허용합니다");
   });
 
+  it("shows no recurrence notice on an ordinary ask", () => {
+    render(
+      <OutOfAllowedDirCard open={true} request={makeReq()} onDecide={() => {}} />,
+    );
+    expect(document.body.querySelector('[data-testid="recurring-denial-notice"]')).toBeNull();
+    expect(document.body.textContent).not.toContain("이미");
+  });
+
+  it("explains why an escalated ask appeared, quoting the host's count", () => {
+    const base = makeReq();
+    const req = makeReq({
+      outOfAllowedDir: { ...base.outOfAllowedDir!, recurringDenialCount: 3 },
+    });
+    render(
+      <OutOfAllowedDirCard open={true} request={req} onDecide={() => {}} />,
+    );
+    const notice = document.body.querySelector('[data-testid="recurring-denial-notice"]');
+    expect(notice).not.toBeNull();
+    expect(notice?.textContent).toContain("3번 차단");
+    // The wording must say the denial still stands until the user answers.
+    expect(notice?.textContent).toContain("아직 아무것도 허용되지 않았");
+  });
+
+  it.each([[0], [-1], [Number.NaN]])(
+    "suppresses the notice for an unusable count (%s)",
+    (recurringDenialCount) => {
+      const base = makeReq();
+      const req = makeReq({
+        outOfAllowedDir: { ...base.outOfAllowedDir!, recurringDenialCount },
+      });
+      render(
+        <OutOfAllowedDirCard open={true} request={req} onDecide={() => {}} />,
+      );
+      expect(document.body.querySelector('[data-testid="recurring-denial-notice"]')).toBeNull();
+    },
+  );
+
+  it("does not relax any control when the recurrence notice is shown", () => {
+    const req = makeReq({
+      outOfAllowedDir: {
+        candidatePath: "/Users/example/work/proj/.git/config",
+        suggestedParent: "/Users/example/work/proj/.git",
+        currentAllowed: [],
+        adjacencyWarnings: ["path contains '.git' segment — secrets may be exposed if added"],
+        recurringDenialCount: 9,
+      },
+    });
+    const { getByText } = render(
+      <OutOfAllowedDirCard open={true} request={req} onDecide={() => {}} />,
+    );
+
+    // Recurrence is display-only: the re-type gate and the adjacency
+    // acknowledgement still stand exactly as they do without it.
+    expect(document.body.querySelector('[data-testid="recurring-denial-notice"]')).not.toBeNull();
+    expect((getByText("디렉토리 영구 추가") as HTMLButtonElement).disabled).toBe(true);
+    expect((getByText("이번 세션 동안 허용") as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it("wraps long path fields inside the dialog", () => {
     render(
       <OutOfAllowedDirCard open={true} request={makeReq()} onDecide={() => {}} />,
