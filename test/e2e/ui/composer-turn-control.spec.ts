@@ -84,7 +84,7 @@ test('typing turns the quiet control solid', async ({ mainWindow }) => {
   expect(after.borderWidth).toBe('0px');
 });
 
-test('message queue panel shares the composer column and paints visible actions', async ({ mainWindow }) => {
+test('message queue panel stays a full-bleed band and paints visible actions', async ({ mainWindow }) => {
   await mainWindow.evaluate(() => {
     const store = (window as unknown as { __lvis_message_queue_store__?: { add: (t: string) => void } })
       .__lvis_message_queue_store__;
@@ -98,10 +98,7 @@ test('message queue panel shares the composer column and paints visible actions'
 
   const measured = await panel.evaluate((el) => {
     const panelBox = el.getBoundingClientRect();
-    const composerBox = document
-      .querySelector('[data-testid="composer-textarea"]')
-      ?.closest('.rounded-xl')
-      ?.getBoundingClientRect();
+    const mainBox = document.querySelector('main')?.getBoundingClientRect();
     const injectEl = el.querySelector('[data-testid="message-queue-row-send-now-button"]')!;
     // The panel's own tint is 5% alpha, so the effective backdrop is the
     // nearest OPAQUE ancestor background — that is what the label competes with.
@@ -117,17 +114,18 @@ test('message queue panel shares the composer column and paints visible actions'
     return {
       left: Math.round(panelBox.left),
       right: Math.round(panelBox.right),
-      composerLeft: composerBox ? Math.round(composerBox.left) : null,
-      composerRight: composerBox ? Math.round(composerBox.right) : null,
+      mainLeft: mainBox ? Math.round(mainBox.left) : null,
+      mainRight: mainBox ? Math.round(mainBox.right) : null,
       injectWidth: Math.round(injectEl.getBoundingClientRect().width),
       injectColor: getComputedStyle(injectEl).color,
       behindPanel,
     };
   });
 
-  // The strip is a card in the composer's optical column, not a full-bleed band.
-  expect(measured.left).toBe(measured.composerLeft);
-  expect(measured.right).toBe(measured.composerRight);
+  // Dock strips are BANDS across <main>; only the composer is an inset card.
+  // The same contract is pinned for its sibling in session-todo-in-chat.spec.ts.
+  expect(measured.left).toBe(measured.mainLeft);
+  expect(measured.right).toBe(measured.mainRight);
 
   // The inject action used to be painted with `--accent`, a pale SURFACE token,
   // so it disappeared against the panel. It must render with real width and
