@@ -11,7 +11,6 @@ import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import type { InstallInFlight, InstallPhase, InstallProgressPayload } from "../hooks/use-plugin-marketplace.js";
 import type {
   LvisApi,
-  MarketplaceItem,
   PluginCardSummary,
   PluginContributionTrustRow,
   PluginMarketplaceUninstallOptions,
@@ -19,6 +18,10 @@ import type {
 import { PluginAuthSection } from "../components/PluginAuthSection.js";
 import { usePluginAuthStatuses } from "../hooks/use-plugin-auth-status.js";
 import { PluginUninstallDialog } from "../dialogs/PluginUninstallDialog.js";
+import {
+  findPluginDoctorMarketplaceItem,
+  getPluginDoctorInstallKey,
+} from "./plugin-doctor-match.js";
 import { PluginConfigSchemaForm } from "./PluginConfigSchemaForm.js";
 import { PluginPerfTab } from "./PluginPerfTab.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
@@ -84,46 +87,6 @@ function findRefreshedDoctorPlugin(
 
 function isDoctorRepairLoaded(plugin: PluginCardSummary | undefined): boolean {
   return plugin?.loadStatus === "loaded" && isRuntimeCallablePlugin(plugin);
-}
-
-function getPluginDoctorInstallKey(plugin: PluginCardSummary): string {
-  return plugin.installAliases?.[0] ?? plugin.id;
-}
-
-function normalizePluginLookupKey(value: string | null | undefined): string {
-  return (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/^@[^/]+\//, "")
-    .replace(/@[^/@]+$/, "")
-    .replace(/^lvis-plugin-/, "")
-    .replace(/^plugin-/, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
-}
-
-function findPluginDoctorMarketplaceItem(
-  plugin: PluginCardSummary,
-  marketplace: MarketplaceItem[],
-): MarketplaceItem | null {
-  const literalKeys = new Set(
-    [plugin.id, ...(plugin.installAliases ?? [])]
-      .map((value) => value.trim().toLowerCase())
-      .filter(Boolean),
-  );
-  const normalizedKeys = new Set(
-    [plugin.id, plugin.name, ...(plugin.installAliases ?? [])]
-      .map((value) => normalizePluginLookupKey(value))
-      .filter(Boolean),
-  );
-
-  return marketplace.find((item) => {
-    if (item.pluginType && item.pluginType !== "plugin") return false;
-    if (literalKeys.has(item.id.trim().toLowerCase())) return true;
-    return [item.id, item.name, item.packageSpec].some((value) =>
-      normalizedKeys.has(normalizePluginLookupKey(value)),
-    );
-  }) ?? null;
 }
 
 async function resolvePluginDoctorInstallKey(plugin: PluginCardSummary): Promise<string> {

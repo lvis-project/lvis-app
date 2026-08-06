@@ -428,3 +428,114 @@ describe("setupPluginToolExecutor production auth wiring", () => {
     ).rejects.toThrow("plugin operation session is revoked");
   });
 });
+
+/**
+ * WHICH APPROVAL LANE a plugin-surface invocation lands in — the one `headless`
+ * field the boot step hands the executor, and the only thing that decides whether
+ * a Layer-1 out-of-allowed-dir target can raise the directory modal
+ * (`requestOutOfAllowedDirectoryAccess`) or is hard-denied into the deferred queue
+ * ("headless out-of-allowed-dir requires manual directory approval").
+ *
+ * The lane follows the chain's EFFECTIVE origin, resolved by
+ * `runWithInvocationOrigin`, so it is pinned here per origin AND across a nested
+ * hop. The nested case is the one with no other coverage: it is the whole point of
+ * the AsyncLocalStorage chain, and the boot step reads it through
+ * `currentInvocationOrigin()` rather than the dispatched `context.origin`.
+ *
+ * The background lane is pinned at the other end too: a headless ConversationLoop
+ * hands `headless: true` down (rationale-host-wiring.test.ts), and Layer 1 turns
+ * that into the hard deny (tools/__tests__/executor.test.ts).
+ */
+describe("setupPluginToolExecutor approval lane by effective chain origin", () => {
+  const okResult = [{ tool_use_id: "result", content: "ok", durationMs: 1 }];
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // Take the governed ToolExecutor path, not the app-only runtime bypass —
+    // the bypass never builds a permission context at all.
+    mocks.isAppOnlyRuntimeInvocation.mockReturnValue(false);
+    mocks.resolvePluginOperationAccount.mockReturnValue(undefined);
+    mocks.observePluginAuthResult.mockReturnValue({});
+    mocks.executeAll.mockResolvedValue(okResult);
+  });
+
+  /** `headless` of the Nth executor invocation, in dispatch order. */
+  function laneOfExecutorCall(index: number): unknown {
+    const options = mocks.executeAll.mock.calls[index]?.[1] as
+      | { permissionContext?: { headless?: unknown } }
+      | undefined;
+    return options?.permissionContext?.headless;
+  }
+
+  function dispatch(
+    ctx: BootContext,
+    origin: "ui" | "mcp-app" | "plugin",
+    toolName = "governed_tool",
+  ): Promise<unknown> {
+    return ctx.lateBinding.pluginToolInvokerRef.fn!(toolName, {}, {
+      origin,
+      ownerPluginId: pluginId,
+      ownerGenerationId: activeGenerationId,
+    });
+  }
+
+  it("gives the plugin's trusted panel the foreground lane", async () => {
+    const ctx = makeContext();
+    await setupPluginToolExecutor(ctx);
+
+    await expect(dispatch(ctx, "ui")).resolves.toBe("ok");
+
+    expect(laneOfExecutorCall(0)).toBe(false);
+  });
+
+  it("gives an MCP App card the foreground lane", async () => {
+    const ctx = makeContext();
+    await setupPluginToolExecutor(ctx);
+
+    await expect(dispatch(ctx, "mcp-app")).resolves.toBe("ok");
+
+    expect(laneOfExecutorCall(0)).toBe(false);
+  });
+
+  it("keeps a plugin-origin chain with no foreground ancestor on the headless lane", async () => {
+    const ctx = makeContext();
+    await setupPluginToolExecutor(ctx);
+
+    await expect(dispatch(ctx, "plugin")).resolves.toBe("ok");
+
+    expect(laneOfExecutorCall(0)).toBe(true);
+  });
+
+  it("keeps a nested plugin-origin hop on the outer chain's foreground lane", async () => {
+    const ctx = makeContext();
+    await setupPluginToolExecutor(ctx);
+    // Stands in for a handler that re-enters the delegate while the outer
+    // invocation's async frame is still live: the inner dispatch says "plugin",
+    // and only the ambient chain can say otherwise.
+    mocks.executeAll.mockImplementationOnce(async () => {
+      await dispatch(ctx, "plugin", "inner_tool");
+      return okResult;
+    });
+
+    await expect(dispatch(ctx, "ui")).resolves.toBe("ok");
+
+    expect(mocks.executeAll).toHaveBeenCalledTimes(2);
+    expect(laneOfExecutorCall(0)).toBe(false);
+    expect(laneOfExecutorCall(1)).toBe(false);
+  });
+
+  it("does not launder a nested hop out of the headless lane", async () => {
+    const ctx = makeContext();
+    await setupPluginToolExecutor(ctx);
+    mocks.executeAll.mockImplementationOnce(async () => {
+      await dispatch(ctx, "plugin", "inner_tool");
+      return okResult;
+    });
+
+    await expect(dispatch(ctx, "plugin")).resolves.toBe("ok");
+
+    expect(mocks.executeAll).toHaveBeenCalledTimes(2);
+    expect(laneOfExecutorCall(0)).toBe(true);
+    expect(laneOfExecutorCall(1)).toBe(true);
+  });
+});

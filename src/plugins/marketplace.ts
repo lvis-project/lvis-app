@@ -62,6 +62,7 @@ import { createLogger } from "../lib/logger.js";
 import { readAgentRegistry } from "../agents/agent-registry.js";
 import { readSkillRegistry } from "../skills/skill-registry.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { normalizePluginLookupKey } from "../shared/plugin-lookup-key.js";
 import {
   buildNetworkAccessAcknowledgement,
   networkAccessGrantsEqual,
@@ -212,18 +213,6 @@ function deepFreezeValue<T>(value: T): T {
     Object.freeze(value);
   }
   return value;
-}
-
-function normalizePluginLookupKey(value: string | null | undefined): string {
-  return (value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/^@[^/]+\//, "")
-    .replace(/@[^/@]+$/, "")
-    .replace(/^lvis-plugin-/, "")
-    .replace(/^plugin-/, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
 }
 
 function catalogItemMatchesPluginId(item: PluginMarketplaceItem, pluginId: string): boolean {

@@ -27,7 +27,6 @@ import { isActiveSandboxFilesystemContainedForPluginEffects } from "../../permis
 import type { PluginToolInvocationContext } from "../../plugins/runtime.js";
 import {
   currentInvocationOrigin,
-  currentInvocationReporting,
   runWithInvocationOrigin,
 } from "../../plugins/runtime/origin-chain.js";
 import {
@@ -194,14 +193,20 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     context: PluginToolInvocationContext,
   ): Promise<unknown> => {
     // Issue #664 P2 — origin-chain propagation. Enter an AsyncLocalStorage
-    // frame so nested ctx.callTool(...) invocations from a wrapper handler
-    // inherit the outermost origin. `parentOrigin` is the explicit handoff
-    // (e.g. tests / future bridges that want to pin the chain start); the
-    // ambient chain (set by an outer invokePluginTool) takes precedence over a
-    // bare "plugin" current so a UI→wrapper→inner chain stays UI all the way
-    // down. `runWithInvocationOrigin` owns that precedence (least-trusted wins:
+    // frame so a re-entrant invocation from a plugin handler inherits the
+    // outermost origin instead of its own bare "plugin". `parentOrigin` is the
+    // explicit handoff (tests / future bridges that want to pin the chain
+    // start); the ambient chain (set by an outer invokePluginTool) takes
+    // precedence, so a UI→wrapper→inner chain stays UI all the way down.
+    // `runWithInvocationOrigin` owns that precedence (least-trusted wins:
     // mcp-app > ui > plugin), so an MCP-App-rooted chain likewise stays
     // "mcp-app" at every depth and can never be laundered into "ui".
+    //
+    // No shipped path re-enters: `hostApi.callTool` (the original wrapper case)
+    // was removed with cross-plugin tool invocation. The frame is still entered
+    // unconditionally because it is what a returning re-entrant producer would
+    // inherit — and because the origin it carries decides the approval lane
+    // below.
     return runWithInvocationOrigin(context.origin, context.parentOrigin, async () => {
       const effectiveOrigin = currentInvocationOrigin() ?? context.origin;
       const ownerPluginId = context.ownerPluginId;
@@ -542,22 +547,32 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
           }],
           {
             sessionId: invocationSessionId,
-            // Report to whatever surface the outer invocation is reporting to.
-            // A nested plugin call is a real tool call with real permission
-            // effects; before this it built options with no sink at all, so its
-            // denials were invisible while the audit log recorded them.
-            callbacks: currentInvocationReporting(),
             ...(pluginAuthLifecycle ? { pluginAuthLifecycle } : {}),
             permissionContext: pluginSurfacePermissionScope.createPermissionContext(context, {
-              // headless follows the *effective* chain origin (#664 P2):
-              // a UI-rooted chain keeps `headless: false` even after one or
-              // more `ctx.callTool` hops, so the user's outer approval is
-              // honoured and the reviewer lane is not re-engaged. An MCP-App
-              // chain is foreground too — the user is looking at the card and CAN
-              // be asked — so only a plugin/LLM-emitted chain is headless. (This
-              // is exactly the lane an app call had when it dispatched as "ui";
-              // splitting the origin changed WHO may reach the ungoverned bypass,
+              // THE approval lane for this surface, and the only input to it:
+              // `false` lets a Layer-1 out-of-allowed-dir target raise the
+              // directory modal, `true` hard-denies it into the deferred queue.
+              //
+              // It follows the *effective* chain origin (#664 P2), so a UI-rooted
+              // chain keeps `headless: false` at every depth and the user's outer
+              // approval is honoured. An MCP-App chain is foreground too — the
+              // user is looking at the card and CAN be asked. (Splitting "ui" and
+              // "mcp-app" changed WHO may reach the ungoverned app-only bypass,
               // not whether a card's governed call can prompt the user.)
+              //
+              // `"plugin"` — the least-trusted floor of `resolveEffectiveOrigin`
+              // — has had NO producer since cross-plugin tool invocation was
+              // removed (`hostApi.callTool`, 1d6183b5): the three shipped
+              // producers dispatch "ui" (`callFromUi`) or "mcp-app"
+              // (`callFromApp`, `createExternalToolCallSource`). So this reads
+              // `false` on every reachable chain today, and the `"plugin"` arm is
+              // the fail-closed default a future re-entrant producer inherits.
+              // If such a producer returns, THIS line is where its lane is
+              // decided — and "was a foreground turn running" is not the
+              // dispatched origin: it is the ambient `EffectGateContext.headless`
+              // (permissions/effect-enforcement.ts), which the executor binds
+              // around `tool.execute` from `permissionContext.headless` and which
+              // already answers exactly that question for the plugin effect gate.
               headless: effectiveOrigin === "plugin",
               trustOrigin: "plugin-emitted",
               // The user-gesture credit is the trusted PANEL's alone: an "mcp-app"
