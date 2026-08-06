@@ -14,7 +14,7 @@
  * descriptive per-field errors, fail-closed on any unknown shape.
  */
 import type { SignatureEnvelope } from "../types.js";
-import { marketplaceProviderPresetIdFromSecretKey } from "../../shared/marketplace-package-assets.js";
+import { isAllowedHostSecretKey } from "../../shared/marketplace-package-assets.js";
 
 /** Per-plugin grant entry. */
 export interface WhitelistPluginGrant {
@@ -40,16 +40,10 @@ export interface WhitelistDocument {
 /** Sidecar signature envelope. Mirrors `SignatureEnvelope` for marketplace tarballs. */
 export type WhitelistSignatureEnvelope = SignatureEnvelope;
 
-/** Accepted `hostSecrets.read[]` keys — matches manifest-validation.ts. */
-const LLM_API_KEY_PATTERN = /^llm\.apiKey\.[a-z]+(?:-[a-z]+)*$/;
-
-function isAllowedHostSecretKey(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    (LLM_API_KEY_PATTERN.test(value) ||
-      marketplaceProviderPresetIdFromSecretKey(value) !== undefined)
-  );
-}
+// Accepted `hostSecrets.read[]` keys: `isAllowedHostSecretKey`
+// (src/shared/marketplace-package-assets.ts) — the SAME predicate the manifest
+// validator applies. A signed grant and a manifest must not be able to disagree
+// about what a well-formed host-secret key is.
 
 /** ISO-8601 — accept the subset Date.parse round-trips correctly. */
 function isValidIsoTimestamp(value: unknown): value is string {
