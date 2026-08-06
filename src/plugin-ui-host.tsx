@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { t } from "./i18n/index.js";
 import { pluginPartitionName } from "./shared/plugin-partition.js";
+import { getPluginViewLabel } from "./shared/plugin-view-label.js";
 import { PageShell } from "./ui/renderer/components/PageShell.js";
 
 export type PluginUiExtensionView = {
@@ -96,14 +97,12 @@ export type PluginUiMountContext = {
   extension: PluginUiExtensionView["extension"];
 };
 
-function getPluginViewLabel(item: PluginUiExtensionView): string {
-  return item.extension.displayName?.trim() || item.extension.title || item.pluginId;
-}
-
 // Partition naming moved to `shared/plugin-partition.ts` so main + renderer
 // stay byte-identical (#498). Drift between the two would silently route a
 // webview to a partition the main process never policy-registered, killing
-// the lvisPlugin contextBridge.
+// the lvisPlugin contextBridge. The view label moved to
+// `shared/plugin-view-label.ts` for the same reason — the main-window sidebar
+// and this shell must not name the same extension differently.
 
 /**
  * Read the deterministic plugin shell + preload URLs from `window.lvisApi`.
