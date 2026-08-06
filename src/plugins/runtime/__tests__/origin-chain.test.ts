@@ -19,8 +19,6 @@ import { describe, it, expect } from "vitest";
 import {
   runWithInvocationOrigin,
   currentInvocationOrigin,
-  runWithInvocationReporting,
-  currentInvocationReporting,
 } from "../origin-chain.js";
 
 describe("runWithInvocationOrigin — issue #664 P2 UI-stickiness", () => {
@@ -113,45 +111,5 @@ describe("runWithInvocationOrigin — issue #664 P2 UI-stickiness", () => {
 
   it("outside any scope → currentInvocationOrigin returns undefined", () => {
     expect(currentInvocationOrigin()).toBeUndefined();
-  });
-});
-describe("reporting sink on the same chain", () => {
-  // The sink used to live only in the caller's execute options, so a nested
-  // ctx.callTool built its own options with none — every permission denial on
-  // a plugin-emitted call was a silent no-op in the UI. Origin and sink
-  // describe the same chain; these pin that they travel together.
-  const sink = { onToolEnd: () => {} };
-
-  it("a nested origin scope keeps the outer sink", async () => {
-    await runWithInvocationReporting(sink, async () => {
-      await runWithInvocationOrigin("plugin", undefined, async () => {
-        expect(currentInvocationReporting()).toBe(sink);
-      });
-    });
-  });
-
-  it("survives an async hop inside the handler", async () => {
-    await runWithInvocationReporting(sink, async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      await runWithInvocationOrigin("plugin", undefined, async () => {
-        await new Promise((resolve) => queueMicrotask(() => resolve(undefined)));
-        expect(currentInvocationReporting()).toBe(sink);
-      });
-    });
-  });
-
-  it("keeps the outermost sink when an inner invocation publishes its own", async () => {
-    const inner = { onToolEnd: () => {} };
-    await runWithInvocationReporting(sink, async () => {
-      await runWithInvocationReporting(inner, async () => {
-        // The user is watching the outer surface, not whatever the inner
-        // caller constructed.
-        expect(currentInvocationReporting()).toBe(sink);
-      });
-    });
-  });
-
-  it("is undefined outside any invocation", () => {
-    expect(currentInvocationReporting()).toBeUndefined();
   });
 });

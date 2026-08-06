@@ -63,7 +63,6 @@
  * precedence below, so an app-rooted chain can never be laundered into the
  * trusted-panel origin and therefore can never reach `callDeclaredAppOnlyTool`.
  */
-import type { ToolExecutorCallbacks } from "../../tools/executor-contract.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
@@ -92,17 +91,6 @@ export type InvocationOrigin = "plugin" | "ui" | "mcp-app";
 interface ChainFrame {
   /** Outermost (effective) origin observed in this chain. */
   effectiveOrigin: InvocationOrigin;
-  /**
-   * The reporting sink of the OUTERMOST invocation, so a nested
-   * `ctx.callTool` reports to the surface the user is already looking at.
-   *
-   * One frame, not two stores: origin and reporting describe the same call
-   * chain, and splitting them is how they drift. They drifted once already —
-   * the origin propagated into the plugin surface while the sink did not, so
-   * every permission denial on a plugin-emitted call was a silent no-op in the
-   * UI while the audit log recorded it faithfully.
-   */
-  reporting?: ToolExecutorCallbacks;
 }
 
 const storage = new AsyncLocalStorage<ChainFrame>();
@@ -129,33 +117,9 @@ export function runWithInvocationOrigin<T>(
   parentOrigin: InvocationOrigin | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const frame = storage.getStore();
-  const effective = resolveEffectiveOrigin(frame?.effectiveOrigin, parentOrigin, current);
-  // Carry the outer sink forward: entering an origin scope must not drop it.
-  return storage.run({ effectiveOrigin: effective, reporting: frame?.reporting }, fn);
-}
-
-/**
- * Publish `reporting` as the sink for this call chain, so nested invocations
- * that build their own execute options can find it. The outermost sink wins —
- * a nested call reports to the surface the user is actually watching, not to
- * whatever the inner caller happened to construct.
- */
-export function runWithInvocationReporting<T>(
-  reporting: ToolExecutorCallbacks | undefined,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const frame = storage.getStore();
-  if (frame?.reporting) return fn();
-  return storage.run(
-    { effectiveOrigin: frame?.effectiveOrigin ?? "plugin", reporting },
-    fn,
-  );
-}
-
-/** The sink of the current chain, if any. `undefined` outside an invocation. */
-export function currentInvocationReporting(): ToolExecutorCallbacks | undefined {
-  return storage.getStore()?.reporting;
+  const inherited = storage.getStore()?.effectiveOrigin;
+  const effective = resolveEffectiveOrigin(inherited, parentOrigin, current);
+  return storage.run({ effectiveOrigin: effective }, fn);
 }
 
 /** The ONE precedence rule (see {@link runWithInvocationOrigin}). */
