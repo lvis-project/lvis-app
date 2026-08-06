@@ -38,6 +38,14 @@ function report(message) {
   writeFileSync(STATUS_PATH, `${lines.join("\n")}\n`, "utf-8");
 }
 
+/**
+ * Remove `secret` from `text`. Belt and braces: the report path must be unable
+ * to emit the key even if a downstream tool echoes it.
+ */
+function redactSecret(text, secret) {
+  return secret ? text.split(secret).join("[redacted]") : text;
+}
+
 function fail(message) {
   report(`FAILED: ${message}`);
   app.exit(1);
@@ -70,8 +78,8 @@ app.whenReady().then(() => {
   }
   if (!apiKey) return;
 
-  // Shape, never the value.
-  report(`decrypted ${SECRET_KEY} (${apiKey.length} chars) — running suite`);
+  // The key never appears in a report — not its value, not its length.
+  report(`decrypted ${SECRET_KEY} — running suite`);
 
   const child = spawn(
     "bun",
@@ -89,7 +97,10 @@ app.whenReady().then(() => {
   child.on("exit", (code) => {
     report(`suite exited with code ${code}`);
     report("--- suite output ---");
-    report(output.trimEnd());
+    // The child's output is not trusted to be secret-free: a provider error can
+    // quote the request, and OpenRouter's 402 body carries a key-scoped URL.
+    // Redact before anything reaches the console or the status file.
+    report(redactSecret(output.trimEnd(), apiKey));
     app.exit(code ?? 1);
   });
 });
