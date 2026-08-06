@@ -16,6 +16,10 @@ import type {
 } from "../../plugins/marketplace.js";
 import { MARKETPLACE } from "../../shared/ipc-channels.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
+import {
+  isSkippedPluginUpdate,
+  readSkippedPluginUpdates,
+} from "../../shared/skipped-plugin-updates.js";
 import type { PluginPaths } from "../../plugins/plugin-paths.js";
 import { PluginUpdateDetector, isUpdateCheckEnabled } from "../../plugins/update-detector.js";
 import { createUpdateCheckRunner } from "./update-check-runner.js";
@@ -225,37 +229,6 @@ export function wireUpdateCheck(input: UpdateCheckInput): void {
   app.prependOnceListener("before-quit", () => {
     if (updateCheckTimer) clearInterval(updateCheckTimer);
   });
-}
-
-const RESERVED_SKIPPED_PLUGIN_UPDATE_KEYS = new Set(["__proto__", "constructor", "prototype"]);
-
-function readSkippedPluginUpdates(
-  input: unknown,
-): Record<string, string> {
-  const result = Object.create(null) as Record<string, string>;
-  if (!input || typeof input !== "object" || Array.isArray(input)) return result;
-  for (const [pluginId, version] of Object.entries(input)) {
-    const key = normalizeSkippedPluginUpdateKey(pluginId);
-    const value = typeof version === "string" ? version.trim() : "";
-    if (!key || !value) continue;
-    result[key] = value;
-  }
-  return result;
-}
-
-function isSkippedPluginUpdate(
-  update: { pluginId: string; latestVersion: string },
-  skipped: Record<string, string>,
-): boolean {
-  const key = normalizeSkippedPluginUpdateKey(update.pluginId);
-  const version = update.latestVersion.trim();
-  return Boolean(key && version && skipped[key] === version);
-}
-
-function normalizeSkippedPluginUpdateKey(pluginId: string): string | null {
-  const key = pluginId.trim();
-  if (!key || RESERVED_SKIPPED_PLUGIN_UPDATE_KEYS.has(key)) return null;
-  return key;
 }
 
 export interface AnnouncementCheckInput {
