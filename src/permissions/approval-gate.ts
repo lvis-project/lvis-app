@@ -7,7 +7,7 @@ import type { NotificationService } from "../main/notification-service.js";
 import type { ToolCategory } from "../tools/types.js";
 import type { RiskVerdict } from "./reviewer/risk-classifier.js";
 import {
-  detectSandboxCapability,
+  resolveReviewerSandboxCapability,
   type SandboxCapability,
 } from "./sandbox-capability.js";
 import type { PermissionEvaluationContext } from "./evaluation-context.js";
@@ -869,15 +869,6 @@ export class ApprovalGate {
   private readonly sessionKey: Buffer = randomBytes(32);
 
   /**
-   * Round-4 architect MAJOR — injectable sandbox-capability provider.
-   * Defaults to {@link detectSandboxCapability} but can be overridden
-   * at construction time (tests, future async probe). Avoids the
-   * tight module-level coupling that complicated unit testing in
-   * round 3.
-   */
-  private readonly sandboxCapabilityProvider: () => SandboxCapability;
-
-  /**
    * The desk-armed second answerer. Owned by the gate rather than reachable
    * beside it: an answerer that could be consulted anywhere else would be a
    * second answer surface, and the whole argument for this feature is that
@@ -891,13 +882,11 @@ export class ApprovalGate {
     timeoutMs = TOOL_TIMEOUT_POLICY.approvalGateUserWaitMs,
     auditLogger?: AuditLogger,
     notificationService?: NotificationService,
-    sandboxCapabilityProvider: () => SandboxCapability = detectSandboxCapability,
   ) {
     this.webContents = webContents;
     this.timeoutMs = timeoutMs;
     this.auditLogger = auditLogger;
     this.notificationService = notificationService;
-    this.sandboxCapabilityProvider = sandboxCapabilityProvider;
     this.currentPolicy = initialPolicy ?? {
       version: 1,
       requireExplicitApproval: true,
@@ -1162,9 +1151,22 @@ export class ApprovalGate {
       // inject the raw capability alongside it.
       ...(executionPlanAudit === undefined
         ? {
+            // Substrate-aware fallback: the gate does not get to answer the
+            // isolation question itself. `resolveReviewerSandboxCapability` is
+            // the authority the executor lane already uses, and it carries the
+            // NO-LEAK INVARIANT — never report `asrt` for a worker this process
+            // did not wrap. A process-global probe cannot honour that: it would
+            // claim host-shell ASRT confinement for a plugin/MCP call that runs
+            // in an unwrapped long-lived worker.
+            //
+            // `source` omitted ⇒ the substrate is unknown ⇒ no row, rather than
+            // a guessed one (fail closed; never fall back to "builtin", whose
+            // canonical-shell branch can legitimately report `asrt`).
             sandboxCapability:
               requestedSandboxCapability ??
-              (isExecutionKind ? this.sandboxCapabilityProvider() : undefined),
+              (isExecutionKind && req.source !== undefined
+                ? resolveReviewerSandboxCapability(req.source, req.toolName)
+                : undefined),
           }
         : {}),
       allowedChoices:
