@@ -103,4 +103,47 @@ describe("applyPermissionModeCommand", () => {
     );
     expect(deps.permissionManager.setModePersist).toHaveBeenCalledWith("auto");
   });
+
+  // The bypass union pins trustOrigin: ExternalOrigin for the local-api-approval
+  // variant, but callers hand-build these literals (src/engine/turn/commands.ts)
+  // so a bad cast at a JS call site can smuggle a non-external origin in. The
+  // apply path must re-check at runtime, not trust the type.
+  it("still asks the approval gate when a local-api-approval bypass carries a non-external trustOrigin", async () => {
+    const deps = makeDeps();
+    deps.approvalGate.requestAndWait.mockResolvedValueOnce({
+      requestId: "r", choice: "deny" as never,
+    } as never);
+
+    const result = await applyPermissionModeCommand(durableAuto, {
+      ...deps,
+      approvalBypass: {
+        source: "local-api-approval",
+        trustOrigin: "user-keyboard",
+        explicitUserAction: true,
+      },
+    } as never);
+
+    expect(deps.approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({ ok: false, error: "durable-mode-denied" });
+    expect(deps.permissionManager.setModePersist).not.toHaveBeenCalled();
+  });
+
+  it("does not attribute a rejected bypass in the permission audit chain", async () => {
+    const deps = makeDeps();
+
+    const result = await applyPermissionModeCommand(durableAuto, {
+      ...deps,
+      approvalBypass: {
+        source: "local-api-approval",
+        trustOrigin: "garbage-origin",
+        explicitUserAction: true,
+      },
+    } as never);
+
+    expect(result).toMatchObject({ ok: true });
+    expect(deps.approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
+    expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
+      expect.objectContaining({ decision: "mode_change", confirmationSource: undefined }),
+    );
+  });
 });

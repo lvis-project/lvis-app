@@ -2,8 +2,9 @@
  * permissions.ts (handlers) — negative-path regression guards for the trust
  * narrowing (3-agent cluster review of PR #1441, critic MAJOR-1).
  *
- * `resolveApprovalBypass` is the ONLY place a transport-agnostic
- * {@link SetPermissionModeBypass} is narrowed into the strict
+ * `resolvePermissionModeApprovalBypass`
+ * (`src/permissions/permission-mode-apply.ts`) is the ONLY place a
+ * transport-agnostic {@link SetPermissionModeBypass} is narrowed into the strict
  * {@link PermissionModeApprovalBypass} that lets `applyPermissionModeCommand`
  * skip the in-app approval modal. These tests pin down every rejected shape
  * as well as the two accepted surfaces, plus a behavior-level guard that a
@@ -14,19 +15,21 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   handleSetPermissionMode,
-  resolveApprovalBypass,
   type SetPermissionModeBypass,
 } from "../permissions.js";
+import {
+  resolvePermissionModeApprovalBypass,
+} from "../../../permissions/permission-mode-apply.js";
 import type { IpcDeps } from "../../types.js";
 
-describe("resolveApprovalBypass", () => {
+describe("resolvePermissionModeApprovalBypass", () => {
   it("rejects a local-api-approval bypass with a non-external trustOrigin (user-keyboard)", () => {
     const bypass: SetPermissionModeBypass = {
       source: "local-api-approval",
       trustOrigin: "user-keyboard",
       explicitUserAction: true,
     };
-    expect(resolveApprovalBypass(bypass)).toBeUndefined();
+    expect(resolvePermissionModeApprovalBypass(bypass)).toBeUndefined();
   });
 
   it("rejects a local-api-approval bypass with an unrecognized trustOrigin", () => {
@@ -35,7 +38,7 @@ describe("resolveApprovalBypass", () => {
       trustOrigin: "garbage-origin",
       explicitUserAction: true,
     };
-    expect(resolveApprovalBypass(bypass)).toBeUndefined();
+    expect(resolvePermissionModeApprovalBypass(bypass)).toBeUndefined();
   });
 
   it("accepts a local-api-approval bypass with the local-api external origin", () => {
@@ -44,7 +47,7 @@ describe("resolveApprovalBypass", () => {
       trustOrigin: "local-api",
       explicitUserAction: true,
     };
-    expect(resolveApprovalBypass(bypass)).toEqual({
+    expect(resolvePermissionModeApprovalBypass(bypass)).toEqual({
       source: "local-api-approval",
       trustOrigin: "local-api",
       explicitUserAction: true,
@@ -57,7 +60,7 @@ describe("resolveApprovalBypass", () => {
       trustOrigin: "cli",
       explicitUserAction: true,
     };
-    expect(resolveApprovalBypass(bypass)).toEqual({
+    expect(resolvePermissionModeApprovalBypass(bypass)).toEqual({
       source: "local-api-approval",
       trustOrigin: "cli",
       explicitUserAction: true,
@@ -70,7 +73,7 @@ describe("resolveApprovalBypass", () => {
       trustOrigin: "user-keyboard",
       explicitUserAction: true,
     };
-    expect(resolveApprovalBypass(bypass)).toEqual({
+    expect(resolvePermissionModeApprovalBypass(bypass)).toEqual({
       source: "settings-ui",
       trustOrigin: "user-keyboard",
       explicitUserAction: true,
@@ -83,7 +86,7 @@ describe("resolveApprovalBypass", () => {
       trustOrigin: "user-keyboard",
       explicitUserAction: true,
     };
-    expect(resolveApprovalBypass(bypass)).toEqual({
+    expect(resolvePermissionModeApprovalBypass(bypass)).toEqual({
       source: "builtin-slash",
       trustOrigin: "user-keyboard",
       explicitUserAction: true,
@@ -102,7 +105,7 @@ describe("resolveApprovalBypass", () => {
         trustOrigin: source === "local-api-approval" ? "local-api" : "user-keyboard",
         explicitUserAction: false,
       };
-      expect(resolveApprovalBypass(bypass)).toBeUndefined();
+      expect(resolvePermissionModeApprovalBypass(bypass)).toBeUndefined();
     }
   });
 
@@ -112,7 +115,7 @@ describe("resolveApprovalBypass", () => {
       trustOrigin: "user-keyboard",
       explicitUserAction: true,
     };
-    expect(resolveApprovalBypass(bypass)).toBeUndefined();
+    expect(resolvePermissionModeApprovalBypass(bypass)).toBeUndefined();
   });
 });
 
@@ -157,7 +160,7 @@ describe("handleSetPermissionMode — rejected bypass does not short-circuit app
       explicitUserAction: true,
     });
 
-    // The bypass was rejected by resolveApprovalBypass, so
+    // The bypass was rejected by resolvePermissionModeApprovalBypass, so
     // applyPermissionModeCommand had to go through the normal ApprovalGate
     // ask — which this test stubs to deny. The mutation must NOT apply.
     expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
