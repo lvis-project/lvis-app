@@ -2391,7 +2391,14 @@ export class SubAgentRunner {
             callbacks?.onError?.(maskSubAgentText(e));
           },
         },
-        undefined,
+        // The run's cancellation signal, exactly as the resume path passes it.
+        // The `abortCurrentTurn()` closure registered above cannot cover the
+        // window between `interruptRun` firing and this call: it is documented
+        // as a no-op when no turn is in flight, so an interrupt that lands
+        // during spawn setup was reported as CANCELED while the child went on
+        // to burn its full `cappedRounds` — and the second interrupt returns
+        // "not running", so the user could not even retry.
+        cancellation.signal,
         {
           maxRounds: cappedRounds,
           sessionIdOverride: childSessionId,
