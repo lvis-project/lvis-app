@@ -48,3 +48,37 @@ describe("MessageQueuePanel keyboard navigation", () => {
     });
   });
 });
+
+describe("MessageQueuePanel colour contract", () => {
+  // `--accent` is a SURFACE token — a pale tint in every light bundle. Painting
+  // text or a border with it made the per-row inject action and the
+  // selected-row outline invisible against the panel. Foregrounds here must
+  // come from foreground tokens.
+  it("never paints a foreground or border with the accent surface token", async () => {
+    const { store } = renderQueuePanel();
+    const first = store.getItems()[0];
+    expect(first).toBeDefined();
+    store.toggleSelect(first!.id);
+    await waitFor(() => {
+      expect(screen.getAllByTestId("message-queue-row")[0]).toHaveAttribute("data-selected", "true");
+    });
+
+    const panel = screen.getByTestId("message-queue-panel");
+    for (const el of [panel, ...panel.querySelectorAll<HTMLElement>("*")]) {
+      const classes = typeof el.className === "string" ? el.className : "";
+      expect(classes).not.toMatch(/(?:^|\s)text-accent(?:\/|\s|$)/);
+      expect(classes).not.toMatch(/(?:^|\s)border-accent(?:\/|\s|$)/);
+      expect(classes).not.toMatch(/(?:^|\s)bg-accent(?:\/|\s|$)/);
+    }
+  });
+
+  it("keeps the per-row inject action rendered, labelled and wired", () => {
+    const { onSendNow } = renderQueuePanel();
+    const injectButtons = screen.getAllByTestId("message-queue-row-send-now-button");
+    expect(injectButtons).toHaveLength(2);
+    expect(injectButtons[0]!.getAttribute("aria-label")).toBeTruthy();
+
+    fireEvent.click(injectButtons[0]!);
+    expect(onSendNow).toHaveBeenCalledTimes(1);
+  });
+});
