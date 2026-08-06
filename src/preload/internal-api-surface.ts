@@ -88,6 +88,8 @@ type PluginActionResult =
       ok: true;
       pluginId: string;
       installed?: true;
+      /** The install was a no-op: the marketplace had nothing but what is already on disk. */
+      unchanged?: true;
       uninstalled?: true;
       rolledBackTo?: string;
       version?: string;
@@ -111,6 +113,7 @@ export function normalizePluginActionResult(result: unknown): PluginActionResult
     ? result as {
         pluginId?: unknown;
         installed?: unknown;
+        unchanged?: unknown;
         uninstalled?: unknown;
         rolledBackTo?: unknown;
         version?: unknown;
@@ -130,6 +133,9 @@ export function normalizePluginActionResult(result: unknown): PluginActionResult
   };
   if (installed) {
     normalized.installed = true;
+  }
+  if (payload.unchanged === true) {
+    normalized.unchanged = true;
   }
   if (uninstalled) {
     normalized.uninstalled = true;
