@@ -42,6 +42,7 @@ import {
   canonicalizePathForMatch,
   caseFoldForMatch,
 } from "../sensitive-paths.js";
+import { isPathAllowed } from "../allowed-directories.js";
 
 /** Verdict level — discrete enum. The reviewer lane never uses scalars. */
 export type RiskLevel = "low" | "medium" | "high";
@@ -468,31 +469,33 @@ function extractDeclaredPaths(ctx: ToolInvocationContext): string[] {
 /**
  * Dir-containment check: does `path` start with any allowed dir?
  *
+ * Delegates to {@link isPathAllowed}, the ENFORCED Layer-1 predicate
+ * (`PermissionManager.checkPathScope`). The reviewer must answer
+ * "is this inside the authorized scope" exactly as enforcement does, or a
+ * verdict is computed about a containment the enforcer disagrees with.
+ *
  * Security MAJOR-3 — the inputs MUST already be canonicalized
  * ({@link canonicalizePathForMatch}). Layer 1 canonicalizes allowed dirs
  * at settings load; {@link extractDeclaredPaths} canonicalizes path-field
- * values. This function therefore performs a plain prefix compare, but
- * the canonical-form invariant is what closes the path-traversal vector.
+ * values. The compare is therefore a plain prefix compare, and the
+ * canonical-form invariant is what closes the path-traversal vector.
  */
-function isInsideAllowed(path: string, allowed: string[]): boolean {
-  for (const a of allowed) {
-    if (path === a || path.startsWith(a + "/")) return true;
-  }
-  return false;
+function isInsideAllowed(path: string, allowed: readonly string[]): boolean {
+  return isPathAllowed(path, { directories: allowed });
 }
 
 /**
  * "Deep" = path is inside an allowed dir but ≥3 levels below the
  * matched root (heuristic for "more dangerous than a leaf write").
- * Same canonical-form invariant as {@link isInsideAllowed}.
+ * Containment per entry is {@link isInsideAllowed}; only the depth
+ * measurement is local. First matching root wins (unchanged).
  */
-function isDeepInsideAllowed(path: string, allowed: string[]): boolean {
+function isDeepInsideAllowed(path: string, allowed: readonly string[]): boolean {
   for (const a of allowed) {
-    if (path === a || path.startsWith(a + "/")) {
+    if (isPathAllowed(path, { directories: [a] })) {
       const tail = path.slice(a.length).replace(/^\/+/, "");
       const segs = tail.split("/").filter((s) => s.length > 0);
-      if (segs.length >= 3) return true;
-      return false;
+      return segs.length >= 3;
     }
   }
   return false;

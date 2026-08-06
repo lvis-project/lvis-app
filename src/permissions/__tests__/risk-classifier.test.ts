@@ -153,6 +153,21 @@ describe("RuleBasedRiskClassifier", () => {
     expect(v.level).toBe("high");
   });
 
+  // The reviewer's containment must be the ENFORCED Layer-1 predicate
+  // (`isPathAllowed`), which skips empty scope entries. A private prefix
+  // compare without that guard reads `path.startsWith("" + "/")` as "contained"
+  // and suppresses this HIGH for every POSIX-absolute path.
+  // `//share/...` is used so the canonical form starts with "/" on win32 too.
+  it("an empty allowed-directory entry does not make every path contained", () => {
+    const v = rb.classify(ctx({
+      category: "write",
+      allowedDirectories: ["", "/Users/ken/work"],
+      finalInput: { path: "//attacker-share/loot/exfil.txt" },
+    }));
+    expect(v.level).toBe("high");
+    expect(v.reason).toMatch(/write outside allowed dirs/);
+  });
+
   it("write without a declared target path → HIGH", () => {
     const v = rb.classify(ctx({ category: "write", finalInput: { payload: { path: "/etc/foo" } } }));
     expect(v.level).toBe("high");
