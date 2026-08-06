@@ -1410,3 +1410,109 @@ act on.
 **Wirings** — (1) src/lib/turn-summary-format.ts:25-47 `formatDuration`, used by src/ui/renderer/components/WorkGroup.tsx:118 for the turn total. (2) src/ui/renderer/utils/format-duration.ts:13-20 `formatToolDuration`, used by src/ui/renderer/components/ToolGroupCard.tsx:27 and :58 for the per-tool badge.
 
 **Observed drift** — They are already out of sync in three places. (a) Hours: `formatDuration` has an `ms >= 3_600_000` branch producing `1h 03m` (:45-47); `formatToolDuration` has none, so a 1-hour tool renders `60m 0.0s`. (b) Whole seconds: `formatDuration` drops the decimal when the fractional part is < 0.05 (`1m 12s`, :38-40); `formatToolDuration` always keeps it (`1m 12.0s`). (c) Zero/negative: `formatDuration` returns `"0s"` for `ms <= 0` (:26); `formatToolDuration` returns `""` for negatives and `"<0.1s"` for 0. Off the main/renderer axis strictly speaking (both consumers are renderer components), but it is the same one-rule-two-implementations shape with confirmed divergence against an explicit in-code sync claim.
+
+---
+
+# Implementation pass — landed, refuted, and deferred
+
+A later pass took the survey as a list of LEADS and re-verified each candidate
+against the deciding code before touching it, per the round-2 warning. Scope was
+STRUCTURAL consolidations only: no user-observable behaviour change. Results
+below; correct the entries above by reading this section alongside them.
+
+## Landed
+
+| candidate | single authority after | PR |
+| --- | --- | --- |
+| `plugin-lookup-key-normalization-duplicate` | `src/shared/plugin-lookup-key.ts` | #1873 |
+| `private-namespace-predicate-open-coded-in-preload` | `classifySubscription`, `src/plugins/capabilities.ts` | #1874 |
+| `dismissed-announcement-id-normalizer-duplicate` | `src/shared/marketplace-announcements.ts` | #1876 |
+| `skipped-plugin-update-map-main-and-renderer-normalizers` | `src/shared/skipped-plugin-updates.ts` | #1878 |
+| `plugin-view-label-duplicate` | `src/shared/plugin-view-label.ts` | #1882 |
+
+Each survived re-verification with the survey's factual claims intact. Two
+corrections to detail, neither affecting the verdict:
+
+- `plugin-lookup-key-normalization-duplicate` — the two *matchers* around the
+  normalizer are NOT mergeable and were left alone: main compares over
+  `[id, slug, name, packageName, packageSpec]` of a `PluginMarketplaceItem`, the
+  renderer over `[id, name, packageSpec]` of a `MarketplaceItem`, plus a
+  literal-id fast path and a `pluginType` skip. Only the shared derivation moved.
+- `skipped-plugin-update-map-...` — the survey reported the two normalizers as
+  agreeing on every input, which holds, but there are two spelling differences it
+  did not name: the non-object guard (`!input` on main vs `input === null` in the
+  renderer) and the value-type check (`typeof v === "string" ? v.trim() : ""` vs
+  `if (typeof v !== "string") continue`). Both pairs are equivalent on every
+  input; the merged body keeps main's guard and the renderer's value check.
+
+## Refuted
+
+### `rationale-anchor-permission-context-dead-carrier` — REFUTED
+
+The entry claims the carrier is "dead three independent ways", specifically
+"(b) No consumer reads them". **(b) is false.**
+`src/engine/turn/__tests__/rationale-host-wiring.test.ts` — a 10-test suite named
+"RequestAnchor and rationale provenance host wiring" — uses
+`permissionContext` as its sole observation point for that wiring:
+
+- `:82-88` captures every `options.permissionContext` handed to
+  `executeConversationBatch`;
+- `:142` reads `permissionContexts[0].requestAnchor` and asserts the anchor's
+  `inputOrigin`, DLP-sanitized `sanitizedIntent` and `rationaleRoundBudget`;
+- `:194-196` and `:251-253` assert the NEGATIVE case — a `file-content`-origin
+  turn must NOT carry `requestAnchor` or `rationaleProvenance`, i.e. the
+  conditional spread itself is the thing under test.
+
+Verified by deleting the two fields from the spread at query-loop.ts:1229-1234:
+`Tests 4 failed | 41 passed` in that suite, against `Tests 10 passed (10)` on
+`origin/main`. So the fields are inert in PRODUCTION but load-bearing as the
+test's window onto anchor seeding and taint monotonicity. Removing them is not a
+structural no-op — it requires re-pointing a security-wiring suite at the live
+carrier (`prepareRationaleConversationRuntime` /
+`executeRationaleAwareConversationBatch` args), which is a judgement call about
+what that suite verifies, not a consolidation.
+
+The entry's other claims DO hold and are worth keeping:
+`ToolPermissionContext` (executor-contract.ts:68, the sole declaration) declares
+neither field; the literal survives `satisfies ConversationExecuteOptions` only
+because TypeScript exempts spread-in properties from excess-property checking;
+and the two carriers compute provenance differently (query-loop.ts:1232
+hardcodes `rationaleProvenanceFor(true, ...)` while the live carrier at :972-975
+passes `bounds.requestAnchor !== undefined`).
+
+I also attempted and FAILED to refute the "nothing forwards the whole object"
+half: `AuditWriter.fireLifecycleEvent` (audit-writer.ts:69-96) takes the context
+but passes only `context.trustOrigin` to the script-hook manager, and the
+`{...permissionContext}` rebuild at invocation-runner.ts:727-730 is consumed
+through named fields only. So the extra fields never reach a hook payload, an
+audit row, or a cache key.
+
+## Deferred as behaviour-changing — do NOT file these as structural
+
+Each is a real duplicate whose consolidation would change what a user sees or
+what is permitted, so it needs an owner decision, not a refactor:
+
+- `max-verdict-composition` — verified: authority `risk-classifier.ts:84` is
+  `LEVEL_RANK[b.level] >= LEVEL_RANK[a.level]` (ties prefer `b`, documented on
+  the line above and pinned by a test); the private copy
+  `rationale-pr1-contract.ts:110-113` is `rank[b.level] > rank[a.level]` (ties
+  prefer `a`). Merging changes the sealed `effectiveVerdict`'s reason string on
+  ties, and that string reaches the approval modal.
+- `cost-and-token-format-four-wirings` — verified: `formatTokens` in
+  `src/lib/turn-summary-format.ts:52` has NO non-test importer (the only
+  importer of that module outside its own test is `WorkGroup.tsx:4`, which takes
+  `formatDuration` alone), so the survey is right that the only copy carrying the
+  `!Number.isFinite(n) || n <= 0` guard is the dead one. Unifying the live copies
+  changes rendered strings (`2.50M` vs `2.5M`, `$0.50` vs `$0.500` vs `$0.5`).
+- `tool-vs-turn-duration-two-rounding-rules` — same shape: consolidating changes
+  the rendered badge text.
+- `plugin-install-network-disclosure-predicate-shadow` — merging makes the
+  private-network warning panel appear where it currently does not. That is the
+  correct fix, and it is a behaviour change.
+- `webview-preferred-flow-seven-wirings`,
+  `appearance-patch-skips-bundleid-and-schemaversion`,
+  `system-settings-normalization-duplicated-load-vs-patch` — the
+  *constant/value-set* half is extractable structurally, but each entry's actual
+  finding is that the IPC patch path skips validation the load path applies.
+  Extracting the constants without closing that gap moves the drift rather than
+  removing it, and closing it rejects settings writes that currently persist.

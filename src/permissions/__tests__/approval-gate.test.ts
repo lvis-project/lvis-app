@@ -25,6 +25,11 @@ import {
   buildHostShellExecutionPlan,
   getHostShellExecutionPlanAuditProjection,
 } from "../host-shell-execution-plan.js";
+import {
+  __resetActiveSandboxCapabilityForTest,
+  resolveReviewerSandboxCapability,
+  setActiveSandboxCapability,
+} from "../sandbox-capability.js";
 import { makePlatformBridgeAuthority, makeTestPolicy } from "./test-helpers.js";
 
 // ─── Mock WebContents ─────────────────────────────────
@@ -1177,47 +1182,59 @@ describe("ApprovalGate", () => {
 
   it("auto-injects sandboxCapability for tool-kind requests (round-4 test-engineer MAJOR)", () => {
     const wc = makeMockWebContents();
-    const stub = vi.fn(() => ({
-      kind: "asrt" as const,
-      confidence: "verified" as const,
-      platform: "linux" as NodeJS.Platform,
-      reason: "stubbed for test",
-    }));
-    const gate = new ApprovalGate(
-      wc as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      stub,
-    );
-    gate.requestAndWait(makeRequest({ id: "req-sandbox-inject" }));
-    expect(stub).toHaveBeenCalledOnce();
+    const gate = new ApprovalGate(wc as never);
+    gate.requestAndWait(makeRequest({ id: "req-sandbox-inject", source: "builtin" }));
     const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
     expect(sent.sandboxCapability).toEqual(
-      expect.objectContaining({
-        kind: "asrt",
-        platform: "linux",
-      }),
+      resolveReviewerSandboxCapability("builtin", sent.toolName),
     );
+  });
+
+  // NO-LEAK INVARIANT (sandbox-capability.ts): "never report `asrt` for a
+  // worker this process did not wrap". A plugin operation-grant ask runs in an
+  // unwrapped long-lived worker, so the isolation row must never claim the
+  // host-shell ASRT confinement the process itself happens to have.
+  it("never reports the process-global capability for a plugin execution ask", () => {
+    const wc = makeMockWebContents();
+    setActiveSandboxCapability({
+      kind: "asrt",
+      confidence: "verified",
+      platform: process.platform,
+      reason: "host-shell substrate confined for this test",
+      confines: { filesystem: true, process: true, network: true },
+    });
+    try {
+      const gate = new ApprovalGate(wc as never);
+      gate.requestAndWait(
+        makeRequest({
+          id: "req-plugin-write",
+          toolName: "sample_plugin_write",
+          toolCategory: "write",
+          source: "plugin",
+        }),
+      );
+      const sent = (wc.send.mock.calls[0] as unknown as [string, ApprovalRequest])[1];
+      expect(sent.sandboxCapability?.kind).toBe("none");
+      expect(sent.sandboxCapability).toEqual(
+        resolveReviewerSandboxCapability("plugin", "sample_plugin_write"),
+      );
+    } finally {
+      __resetActiveSandboxCapabilityForTest();
+    }
+  });
+
+  it("omits the isolation row when the request declares no source (fail closed)", () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    gate.requestAndWait(makeRequest({ id: "req-no-source", source: undefined }));
+    const sent = (wc.send.mock.calls[0] as unknown as [string, ApprovalRequest])[1];
+    expect(sent.source).toBeUndefined();
+    expect(sent.sandboxCapability).toBeUndefined();
   });
 
   it("preserves an explicitly-provided sandboxCapability without re-detecting (round-4 test-engineer MAJOR)", () => {
     const wc = makeMockWebContents();
-    const stub = vi.fn(() => ({
-      kind: "asrt" as const,
-      confidence: "verified" as const,
-      platform: "linux" as NodeJS.Platform,
-      reason: "should NOT be used",
-    }));
-    const gate = new ApprovalGate(
-      wc as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      stub,
-    );
+    const gate = new ApprovalGate(wc as never);
     const explicitCap = {
       kind: "none" as const,
       confidence: "verified" as const,
@@ -1230,20 +1247,18 @@ describe("ApprovalGate", () => {
         sandboxCapability: explicitCap,
       }),
     );
-    expect(stub).not.toHaveBeenCalled();
     const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
     expect(sent.sandboxCapability).toEqual(explicitCap);
   });
 
-  it("uses the REAL detectSandboxCapability when no provider is supplied (round-6 test-engineer MAJOR)", () => {
-    // Default-provider integration test — verifies that the production
-    // path (gate constructed without explicit sandboxCapabilityProvider)
-    // wires `detectSandboxCapability` correctly. A refactor that drops
-    // the default would silently break the dialog's "보안 격리" row in
-    // production but pass every stubbed unit test.
+  it("resolves the isolation row through the real substrate authority (round-6 test-engineer MAJOR)", () => {
+    // Production-path integration test — the gate must reach the REAL
+    // resolveReviewerSandboxCapability, not a stub. A refactor that drops the
+    // wiring would silently break the dialog's "보안 격리" row in production
+    // but pass every stubbed unit test.
     const wc = makeMockWebContents();
-    const gate = new ApprovalGate(wc as never); // 1-arg form — uses real default
-    gate.requestAndWait(makeRequest({ id: "req-real-default" }));
+    const gate = new ApprovalGate(wc as never);
+    gate.requestAndWait(makeRequest({ id: "req-real-default", source: "builtin" }));
     const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
     expect(sent.sandboxCapability).toBeDefined();
     expect(sent.sandboxCapability?.kind).toMatch(/^(none|asrt)$/);
@@ -1252,20 +1267,7 @@ describe("ApprovalGate", () => {
 
   it("does NOT inject sandboxCapability for toolCategory=meta requests (round-5 critic MAJOR-1)", () => {
     const wc = makeMockWebContents();
-    const stub = vi.fn(() => ({
-      kind: "asrt" as const,
-      confidence: "verified" as const,
-      platform: "linux" as NodeJS.Platform,
-      reason: "should NOT be used",
-    }));
-    const gate = new ApprovalGate(
-      wc as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      stub,
-    );
+    const gate = new ApprovalGate(wc as never);
     // Mode-change asks (permission-mode-apply.ts) and agent-action asks
     // (agent-action-requester.ts) both pass toolCategory="meta". The
     // sandbox row is meaningless on config-change cards — verify the
@@ -1278,27 +1280,13 @@ describe("ApprovalGate", () => {
         args: { fromMode: "default", toMode: "auto", durable: true },
       }),
     );
-    expect(stub).not.toHaveBeenCalled();
     const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
     expect(sent.sandboxCapability).toBeUndefined();
   });
 
   it("does NOT inject sandboxCapability for agent-action requests", () => {
     const wc = makeMockWebContents();
-    const stub = vi.fn(() => ({
-      kind: "asrt" as const,
-      confidence: "verified" as const,
-      platform: "linux" as NodeJS.Platform,
-      reason: "should NOT be used",
-    }));
-    const gate = new ApprovalGate(
-      wc as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      stub,
-    );
+    const gate = new ApprovalGate(wc as never);
     gate.requestAndWait(
       makeRequest({
         id: "req-agent-action",
@@ -1310,7 +1298,6 @@ describe("ApprovalGate", () => {
         source: "plugin",
       }),
     );
-    expect(stub).not.toHaveBeenCalled();
     const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
     expect(sent.category).toBe("agent-action");
     expect(sent.kind).toBe("agent-action");
@@ -1319,20 +1306,7 @@ describe("ApprovalGate", () => {
 
   it("does NOT inject sandboxCapability for out-of-allowed-dir kind (round-4 critic CRITICAL C2)", () => {
     const wc = makeMockWebContents();
-    const stub = vi.fn(() => ({
-      kind: "asrt" as const,
-      confidence: "verified" as const,
-      platform: "linux" as NodeJS.Platform,
-      reason: "should NOT be used",
-    }));
-    const gate = new ApprovalGate(
-      wc as never,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      stub,
-    );
+    const gate = new ApprovalGate(wc as never);
     gate.requestAndWait(
       makeRequest({
         id: "req-oad",
@@ -1346,7 +1320,6 @@ describe("ApprovalGate", () => {
         },
       }),
     );
-    expect(stub).not.toHaveBeenCalled();
     const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
     expect(sent.sandboxCapability).toBeUndefined();
   });
