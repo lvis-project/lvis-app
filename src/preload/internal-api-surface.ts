@@ -15,7 +15,7 @@ import { mcpApiSurface } from "./mcp-api-surface.js";
 import { buildTelegramConnectionApiSurface } from "./telegram-connection-api-surface.js";
 import { buildTailnetSharingApiSurface } from "./tailnet-sharing-api-surface.js";
 import { buildAwayAuthorityApiSurface } from "./away-authority-api-surface.js";
-import { PLUGIN_PRIVATE_NAMESPACES } from "../plugins/capabilities.js";
+import { classifySubscription } from "../plugins/capabilities.js";
 import type {
   PermissionReviewSuggestionPayload,
   UserApprovalHitPayload,
@@ -901,16 +901,19 @@ export function buildInternalApiSurface() {
     handler: (data: unknown) => void,
   ): (() => void) => {
     // Reject subscriptions to private-namespace events at the preload boundary.
-    // PLUGIN_PRIVATE_NAMESPACES entries are dot-separated prefixes; an event
-    // type matches when it equals a namespace or starts with "<namespace>.".
     // This prevents renderer code from subscribing to sensitive host state
     // (memory contents, secrets, audit trails, DLP decisions) even if the IPC
-    // channel delivers them. Mirrors capability enforcement in
-    // plugins/capabilities.ts.
-    const isPrivate = [...PLUGIN_PRIVATE_NAMESPACES].some(
-      (ns) => eventType === ns || eventType.startsWith(`${ns}.`),
-    );
-    if (isPrivate) {
+    // channel delivers them.
+    //
+    // "What counts as private" has exactly one definition —
+    // `classifySubscription` in plugins/capabilities.ts, the same authority the
+    // emit gate (`canEmitEvent`) and the runtime access control use. Do not
+    // re-derive it from PLUGIN_PRIVATE_NAMESPACES here: the classifier already
+    // distinguishes prefix namespaces from exact host-owned event types
+    // (PUBLIC_HOST_EVENT_TYPES was split out of PUBLIC_EVENT_NAMESPACES for
+    // exactly that reason), and a re-derivation cannot track a refinement of
+    // the private branch.
+    if (classifySubscription(eventType) === "private") {
       // Return a no-op unsubscribe — the subscription is silently rejected.
       return () => undefined;
     }
