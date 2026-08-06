@@ -56,8 +56,22 @@ export function OutOfAllowedDirCard({
 
   if (!request || !request.outOfAllowedDir) return null;
 
-  const { candidatePath, suggestedParent, currentAllowed, adjacencyWarnings } =
-    request.outOfAllowedDir;
+  const {
+    candidatePath,
+    suggestedParent,
+    currentAllowed,
+    adjacencyWarnings,
+    recurringDenialCount,
+  } = request.outOfAllowedDir;
+  // Host-set and display-only. Rendered only for a real positive count so a
+  // missing or malformed value degrades to the ordinary card rather than to a
+  // sentence claiming a recurrence that did not happen. It gates no control on
+  // this card — every button, the re-type box, and the adjacency
+  // acknowledgement behave exactly as they do on an ordinary ask.
+  const showRecurringDenialNotice =
+    typeof recurringDenialCount === "number"
+    && Number.isFinite(recurringDenialCount)
+    && recurringDenialCount > 0;
   const confirmName = deriveConfirmName(request);
   const retypeOk = retypeValue.trim() === confirmName;
   const adjacencyBlocking =
@@ -94,6 +108,17 @@ export function OutOfAllowedDirCard({
         </DialogHeader>
 
         <div className="space-y-3 py-2">
+          {showRecurringDenialNotice && (
+            <section
+              className="rounded border border-info/(--opacity-medium) bg-info/(--opacity-subtle) px-3 py-2 text-xs text-info"
+              data-testid="recurring-denial-notice"
+            >
+              {t("outOfAllowedDirCard.recurringDenialNotice", {
+                count: recurringDenialCount,
+              })}
+            </section>
+          )}
+
           {warnOrigin && (
             <section className="rounded border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-xs text-warning">
               {t("outOfAllowedDirCard.originWarning", { originLabel })}

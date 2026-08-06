@@ -133,6 +133,18 @@ export interface ApprovalRequest {
     suggestedParent: string | null;
     currentAllowed: readonly string[];
     adjacencyWarnings: readonly string[];
+    /**
+     * How many times this exact denial had already been produced when the host
+     * decided to ask instead of failing again. Present ONLY on an escalated
+     * headless ask (see the recurring-denial block in `invocation-runner`).
+     *
+     * Display-only, and deliberately so: it exists to tell the user why a
+     * prompt they did not trigger is in front of them. No host decision reads
+     * it back, and the renderer must not gate any choice on it — the buttons,
+     * the re-type confirmation, and the adjacency acknowledgement are exactly
+     * what they are on an ordinary ask.
+     */
+    recurringDenialCount?: number;
   };
   /**
    * Permission policy P2.5 §9 — trust origin classification

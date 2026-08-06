@@ -1415,6 +1415,12 @@ export type ApprovalRequest = {
     suggestedParent: string | null;
     currentAllowed: readonly string[];
     adjacencyWarnings: readonly string[];
+    /**
+     * Host-set recurrence count, present only when this ask was raised because
+     * the same headless denial kept repeating. Display-only — see the host-side
+     * declaration in `permissions/approval-gate.ts`.
+     */
+    recurringDenialCount?: number;
   };
   /** Permission policy trust-origin classification, e.g. "user" / "agent". */
   trustOrigin?: string;

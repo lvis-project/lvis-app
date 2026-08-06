@@ -3,7 +3,14 @@ import type { ToolPermissionContext } from "../tools/executor.js";
 
 export type PluginSurfacePermissionBase = Omit<
   ToolPermissionContext,
-  "additionalDirectories" | "getAdditionalDirectories" | "onTurnDirectoryGrant" | "onSessionDirectoryGrant"
+  | "additionalDirectories"
+  | "getAdditionalDirectories"
+  | "onTurnDirectoryGrant"
+  | "onSessionDirectoryGrant"
+  // Omitted for the same reason as the sinks above: the grant subject is
+  // derived here from the invocation context, and a base allowed to carry one
+  // would let the caller name whose grant counter its denials are credited to.
+  | "directoryGrantSubject"
 >;
 
 export interface PluginSurfacePermissionScope {
@@ -49,6 +56,10 @@ export function createPluginSurfacePermissionScope(
 
       return {
         ...base,
+        // Assigned after the spread: the subject the denial counter credits
+        // must be the same subject `addSessionDirectory` writes to, decided
+        // here and nowhere else.
+        directoryGrantSubject: subject,
         additionalDirectories: getAdditionalDirectories(),
         getAdditionalDirectories,
         onTurnDirectoryGrant: (directory) => {

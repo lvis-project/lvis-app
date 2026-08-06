@@ -19,6 +19,7 @@ export const en = {
   "outOfAllowedDirCard.allowSessionNoSuggestionTitle": "No suggested directory available.",
   "outOfAllowedDirCard.allowSessionButton": "Allow for this session",
   "outOfAllowedDirCard.allowAlwaysButton": "Add directory permanently",
+  "outOfAllowedDirCard.recurringDenialNotice": "This exact path has already been blocked {count} times in this conversation, so you are being asked instead of it failing again. Nothing has been allowed yet, and denying leaves your current permissions exactly as they are.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "outOfAllowedDirCard.title": "허용 디렉토리 외부 접근",
@@ -40,4 +41,5 @@ export const ko: Record<keyof typeof en, string> = {
   "outOfAllowedDirCard.allowSessionNoSuggestionTitle": "추천 추가 디렉토리가 없습니다",
   "outOfAllowedDirCard.allowSessionButton": "이번 세션 동안 허용",
   "outOfAllowedDirCard.allowAlwaysButton": "디렉토리 영구 추가",
+  "outOfAllowedDirCard.recurringDenialNotice": "이 경로는 이번 대화에서 이미 {count}번 차단되었습니다. 계속 실패하는 대신 한 번 여쭤봅니다. 아직 아무것도 허용되지 않았으며, 거부해도 현재 권한은 그대로 유지됩니다.",
 };
