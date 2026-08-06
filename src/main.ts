@@ -647,13 +647,24 @@ app.on("web-contents-created", (_event, contents) => {
 });
 
 app.on("child-process-gone", (_event, details) => {
-  log.error({
+  const fields = {
     type: details.type,
     reason: details.reason,
     exitCode: details.exitCode,
     serviceName: details.serviceName ?? "",
     name: details.name ?? "",
-  }, "child process gone");
+  };
+  // A child process going away during shutdown is the shutdown working, not a
+  // fault. Logging it at error taught readers that errors here are routine,
+  // which is how a real one gets skipped — every quit produced a handful, so
+  // the level stopped carrying information.
+  //
+  // Outside shutdown the same event is a genuine crash and stays at error.
+  if (isAppShutdownStarted() || isAppShutdownCompleted()) {
+    log.info(fields, "child process gone during shutdown");
+    return;
+  }
+  log.error(fields, "child process gone");
 });
 
 app.on("window-all-closed", () => {
