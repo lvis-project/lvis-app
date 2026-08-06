@@ -6,10 +6,17 @@ test.use({ seedRetiredKeywordsPlugin: true, seedRepositoryPlugins: false });
 /**
  * `keywords` fed a keyword-to-tool dispatch that was deleted, and the schema
  * property went with it. Bundles installed before that still declare the field,
- * and `additionalProperties: false` turns a dead field into a load failure —
- * which then blocks the update that would have replaced the bundle. The Doctor
- * that failure routes to has no repair for it: it names the field and offers
- * Remove, nothing more. So the field has to be tolerated at load.
+ * and `additionalProperties: false` turns a dead field into a load failure.
+ *
+ * That failure is normally self-healing: the boot managed sync commits a newer
+ * bundle before the runtime loads, and the Doctor classifies
+ * `manifest-validation-error` as reinstall-fixable and auto-installs the latest
+ * marketplace version (`src/shared/plugin-install-failure.ts`). Both repairs
+ * need the marketplace to serve a clean version of that plugin. When it cannot
+ * — offline boot, or a plugin published only to a network the user is not on —
+ * the reinstall fails and the documented fallback is Remove, which
+ * `deployment-guard.ts` refuses for `installSource: "admin"`. That plugin is
+ * then neither repairable nor removable, so the field has to be tolerated.
  *
  * These run end-to-end rather than against `parsePluginJson` because the claim
  * is about the running app — the manifest has to reach the runtime and the
