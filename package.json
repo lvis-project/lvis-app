@@ -80,6 +80,7 @@
     "check:test-quality": "bun run check:test-duplicates -- --fail-on-duplicates && bun run check:test-coverage",
     "test:watch": "bun run test:prepare && bun run test:vitest",
     "test:ui-e2e": "playwright test",
+    "smoke:llm": "electron scripts/smoke-live-model.mjs",
     "test:electron-smoke": "node scripts/run-electron.mjs --version",
     "test:packaged-smoke": "node scripts/smoke-packaged-app.mjs --target current",
     "test:main-flow": "tsx scripts/test-main-flow.ts",
