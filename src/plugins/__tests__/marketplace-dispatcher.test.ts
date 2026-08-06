@@ -1103,6 +1103,7 @@ describe("PluginMarketplaceService install()", () => {
     await expect(managedRetry).resolves.toEqual({
       installed: [plugin.id],
       updated: [],
+      removed: [],
       failed: [],
     });
     await expect(standardInstall).resolves.toEqual({ pluginId: plugin.id, installed: true });
@@ -1191,7 +1192,7 @@ describe("PluginMarketplaceService install()", () => {
 
     releasePromotion();
     await expect(newerInstall).resolves.toEqual({ pluginId: newer.id, installed: true });
-    await expect(olderManagedRetry).resolves.toEqual({ installed: [], updated: [], failed: [] });
+    await expect(olderManagedRetry).resolves.toEqual({ installed: [], updated: [], removed: [], failed: [] });
     expect(downloadArtifact).toHaveBeenCalledTimes(1);
     expect(JSON.parse(await readFile(join(installedDir, newer.id, "plugin.json"), "utf-8")))
       .toMatchObject({ version: "3.0.0" });
