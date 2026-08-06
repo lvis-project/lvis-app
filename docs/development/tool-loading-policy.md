@@ -7,9 +7,11 @@
 > `docs/development/tool-level-deferral-design.md`.
 >
 > Keyword routing was **retired** in SDK v12 (2026-07-24, lvis-plugin-sdk#229).
-> `manifest.keywords` is hard-rejected at manifest load
-> (`src/plugins/runtime/manifest-validation.ts`); no keyword path promotes a
-> Tool, and the only callable surface is manifest `Tool` objects. Bundled
+> No keyword path promotes a Tool, and the only callable surface is manifest
+> `Tool` objects. `manifest.keywords` is ignored at manifest load rather than
+> rejected (`src/plugins/runtime/manifest-validation.ts`): rejecting it made
+> bundles installed before the retirement unloadable, which blocked the very
+> update that would have replaced them. Bundled
 > instruction discovery belongs to `manifest.skills` and is governed by its own
 > symmetric budget — see `docs/development/skill-loading-policy.md`.
 

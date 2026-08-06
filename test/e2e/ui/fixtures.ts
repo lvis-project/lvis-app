@@ -36,10 +36,15 @@ type LaunchEnv = Record<string, string | undefined>;
 
 type E2eManifest = {
   id?: unknown;
+  name?: unknown;
+  description?: unknown;
+  publisher?: unknown;
   version?: unknown;
   pluginAccess?: unknown;
   tools?: unknown;
   hostSecrets?: { read?: unknown };
+  keywords?: unknown;
+  bogusRetiredField?: unknown;
   ui?: unknown;
   python?: unknown;
 };
@@ -243,6 +248,7 @@ async function seedE2ePlugins(
   lvisHomeForTest: string,
   enableCredentialProbe: boolean,
   seedTogglePlugin: boolean,
+  seedRetiredKeywordsPlugin: boolean,
   seedRepositoryPlugins: boolean,
 ): Promise<LaunchEnv> {
   const pluginsRoot = path.join(lvisHomeForTest, "plugins");
@@ -341,6 +347,79 @@ async function seedE2ePlugins(
     );
   }
 
+  if (seedRetiredKeywordsPlugin) {
+    // A manifest exactly as an installed bundle from before the keyword
+    // routing was deleted: a `keywords` array the host no longer defines.
+    // Written through the same path a real install uses, so the runtime sees
+    // it the way it sees anything on disk.
+    await writeSeededPlugin(
+      {
+        id: "e2e-retired-keywords",
+        name: "E2E Retired Keywords Plugin",
+        version: "0.0.0",
+        description: "Carries the retired top-level keywords field.",
+        publisher: "LVIS E2E",
+        entry: "dist/hostPlugin.js",
+        keywords: [{ keyword: "회의", skillId: "e2e_kw_missing" }],
+        tools: [
+          {
+            name: "e2e_kw_ping",
+            description: "E2E retired-keywords smoke tool",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              additionalProperties: false,
+            },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
+      },
+      `export default function createPlugin() {
+  return {
+    handlers: { e2e_kw_ping: async () => "pong" },
+    start() {},
+    stop() {}
+  };
+}
+`,
+    );
+  }
+  if (seedRetiredKeywordsPlugin) {
+    // Companion control: an unknown field that is NOT the retired one, so a
+    // test can tell "tolerates `keywords`" apart from "stopped rejecting
+    // unknown fields at all".
+    await writeSeededPlugin(
+      {
+        id: "e2e-unknown-field",
+        name: "E2E Unknown Field Plugin",
+        version: "0.0.0",
+        description: "Carries a field no host version ever defined.",
+        publisher: "LVIS E2E",
+        entry: "dist/hostPlugin.js",
+        bogusRetiredField: { nope: true },
+        tools: [
+          {
+            name: "e2e_unknown_ping",
+            description: "E2E unknown-field smoke tool",
+            inputSchema: {
+              type: "object",
+              properties: {},
+              additionalProperties: false,
+            },
+            _meta: { ui: { visibility: ["model", "app"] } },
+          },
+        ],
+      },
+      `export default function createPlugin() {
+  return {
+    handlers: { e2e_unknown_ping: async () => "pong" },
+    start() {},
+    stop() {}
+  };
+}
+`,
+    );
+  }
   if (seedRepositoryPlugins) {
     const sourceRoot = resolveE2ePluginSourceRoot(repoRoot);
     for (const repoSlug of E2E_PLUGIN_REPOS) {
@@ -456,6 +535,7 @@ export type ElectronOptions = {
   launchEnv: LaunchEnv;
   onboardingCompleted: boolean;
   seedTogglePlugin: boolean;
+  seedRetiredKeywordsPlugin: boolean;
   seedRepositoryPlugins: boolean;
   seedApiKey: boolean;
   seedLocale: "ko" | "en";
@@ -465,6 +545,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
   launchEnv: [{}, { option: true }],
   onboardingCompleted: [true, { option: true }],
   seedTogglePlugin: [false, { option: true }],
+  seedRetiredKeywordsPlugin: [false, { option: true }],
   seedRepositoryPlugins: [true, { option: true }],
   // Seed a usable LLM key so the composer is enabled (see buildE2eSecrets).
   // Specs that assert the no-key / key-toggle state override with
@@ -493,6 +574,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       launchEnv,
       onboardingCompleted,
       seedTogglePlugin,
+      seedRetiredKeywordsPlugin,
       seedRepositoryPlugins,
       seedApiKey,
       seedLocale,
@@ -541,6 +623,7 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
       lvisHomeForTest,
       launchEnv.LVIS_E2E_RESOLVE_CREDENTIAL_PROBE === "1",
       seedTogglePlugin,
+      seedRetiredKeywordsPlugin,
       seedRepositoryPlugins,
     );
     const app = await electron.launch({
