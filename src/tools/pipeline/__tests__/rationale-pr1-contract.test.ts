@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { PermissionCheckResult } from "../../../permissions/permission-manager.js";
+import { maxVerdict } from "../../../permissions/reviewer/risk-classifier.js";
 import {
   FOREGROUND_RATIONALE_PRODUCTION_ENABLED,
   InMemoryHostAnchorRoundCasStore,
@@ -429,6 +430,24 @@ describe("reviewer-owned scope reevaluation", () => {
       reevaluatedVerdict: { level: "low", reason: "attacker supplied" },
       now: NOW,
     })).toThrow(/reviewer-owned scope and verdict/);
+  });
+
+  it("composes effectiveVerdict with the reviewer authority's maxVerdict on same-level ties", () => {
+    const control = fixture();
+    const reevaluatedVerdict = { level: "medium", reason: "same level, fresh reviewer text" } as const;
+    const reevaluation = createReviewerScopeReevaluation({
+      control, outcome: "fresh", scopeAlignment: "aligned",
+      scopeReasons: ["sealed targets match the request"],
+      reevaluatedVerdict, now: NOW,
+    });
+    // The tie must resolve exactly as the owning authority resolves it
+    // (src/permissions/reviewer/risk-classifier.ts `maxVerdict`: ties prefer `b`).
+    expect(control.initialVerdict.level).toBe(reevaluation.reevaluatedVerdict.level);
+    expect(reevaluation.effectiveVerdict)
+      .toEqual(maxVerdict(control.initialVerdict, reevaluation.reevaluatedVerdict));
+    expect(reevaluation.effectiveVerdict.reason).toBe(reevaluatedVerdict.reason);
+    // Producer and verifier must both defer to that same authority.
+    expect(validateReviewerScopeReevaluation(reevaluation, control, NOW)).toBe(true);
   });
 });
 
