@@ -1,6 +1,7 @@
 import { canonicalStringify } from "../../permissions/user-approval-store.js";
 import type { ReviewerDispatchOutcome } from "../../permissions/permission-manager.js";
 import type { RiskVerdict } from "../../permissions/reviewer/risk-classifier.js";
+import { maxVerdict } from "../../permissions/reviewer/risk-classifier.js";
 import {
   RATIONALE_CONTROL_CONTRACT_VERSION,
   RATIONALE_RESPONSE_SCHEMA,
@@ -105,11 +106,6 @@ function boundedStrings(value: unknown, label: string): readonly string[] {
     result.push(item);
   }
   return seal(result, label);
-}
-
-function maxVerdict(a: RiskVerdict, b: RiskVerdict): RiskVerdict {
-  const rank: Record<RiskVerdict["level"], number> = { low: 0, medium: 1, high: 2 };
-  return rank[b.level] > rank[a.level] ? b : a;
 }
 
 export interface RationaleExecutorControlOutcome {

@@ -12,6 +12,8 @@ import { join } from "node:path";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
+import { parseWhitelistDocument } from "../../whitelist/whitelist-schema.js";
+import { isAllowedHostSecretKey } from "../../../shared/marketplace-package-assets.js";
 
 describe("manifest hostSecrets.read[] validator (#893)", () => {
   let workDir: string;
@@ -103,6 +105,72 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
       },
     });
     expect(valid, JSON.stringify(validator.errors, null, 2)).toBe(true);
+  });
+
+  // ── one predicate, and it may not be looser than the JSON schema ──
+  //
+  // The runtime gate exists as defence-in-depth against a manifest installing
+  // "a wider allowlist than the schema permits". That claim is only true if the
+  // TS predicate accepts NOTHING the vendored schema rejects.
+  it("never accepts a hostSecrets.read key the vendored JSON schema rejects", async () => {
+    const validator = await buildManifestValidator();
+    const corpus = [
+      "llm.apiKey.openai",
+      "llm.apiKey.open-router",
+      "llm.marketplaceProvider.future-router.apiKey",
+      // The pre-consolidation TS copies routed this through a helper that
+      // `.trim()`s, so they accepted padded ids the schema never allowed.
+      "llm.marketplaceProvider.  future-router  .apiKey",
+      "llm.marketplaceProvider.\tfuture-router.apiKey",
+      "llm.marketplaceProvider.\nfuture-router.apiKey",
+      "llm.marketplaceProvider.future router.apiKey",
+      // Neither TS copy enforced the schema's per-item length bound.
+      `llm.apiKey.${"a".repeat(200)}`,
+      "llm.apiKey.Claude",
+      "webApiKey.tavily",
+    ];
+    for (const key of corpus) {
+      const schemaAccepts = validator({
+        id: "host-secret-corpus",
+        name: "Host Secret Corpus Plugin",
+        version: "1.0.0",
+        description: "Host secret corpus fixture.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        hostSecrets: { read: [key] },
+      });
+      expect(isAllowedHostSecretKey(key), `key ${JSON.stringify(key)}`)
+        .toBe(schemaAccepts);
+    }
+  });
+
+  it("applies the same predicate to a signed whitelist grant as to a manifest", async () => {
+    const padded = "llm.marketplaceProvider.  future-router  .apiKey";
+    expect(isAllowedHostSecretKey(padded)).toBe(false);
+
+    const path = await writeManifest({ hostSecrets: { read: [padded] } });
+    await expect(parsePluginJson(path, makeValidator())).rejects.toThrow(
+      /hostSecrets\.read\[0\].*manifest_schema/,
+    );
+
+    expect(() =>
+      parseWhitelistDocument(
+        JSON.stringify({
+          version: 1,
+          schemaVersion: 1,
+          issuedAt: "2026-01-01T00:00:00.000Z",
+          expiresAt: "2027-01-01T00:00:00.000Z",
+          pluginGrants: {
+            "host-secrets-test": {
+              publisher: "LVIS",
+              approvedManifestSha256: "a".repeat(64),
+              hostSecrets: { read: [padded] },
+            },
+          },
+        }),
+      ),
+    ).toThrow(/hostSecrets\.read\[0\]/);
   });
 
   it("rejects malformed marketplace provider preset host secret keys", async () => {

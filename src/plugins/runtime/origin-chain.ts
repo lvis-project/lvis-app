@@ -1,18 +1,28 @@
 /**
  * Plugin tool invocation origin-chain tracker — issue #664 P2.
  *
- * Wrapper plugins commonly look like:
+ * ── CURRENT REACH (read this before designing against the "plugin" origin) ────
+ * Only THREE producers dispatch an invocation today, and none of them is
+ * `"plugin"`: `PluginRuntime.callFromUi` ("ui"), `PluginRuntime.callFromApp`
+ * ("mcp-app"), and `createExternalToolCallSource` ("mcp-app"). All three enter
+ * from an IPC handler, so no chain is ever nested inside another. `"plugin"`
+ * survives as the least-trusted FLOOR of {@link resolveEffectiveOrigin} — the
+ * value a re-entrant producer would inherit — not as a live lane. The wrapper
+ * shape below is the case this tracker was built for; it is kept because it is
+ * the design's motivating example and the shape any re-entrant producer will
+ * take, but `hostApi.callTool` itself was removed with cross-plugin tool
+ * invocation, so the flow is not currently reachable:
  *
  *   user clicks panel button
  *     → bridge.callTool("<wrapper_signin_tool>")        // UI origin
- *       → wrapper handler runs ctx.callTool("<inner_auth_tool>") // plugin origin
+ *       → wrapper handler re-enters with "<inner_auth_tool>" // plugin origin
  *         → inner-auth handler shows OS-native sign-in window
  *
- * The user *did* approve the outer wrapper at the panel, but the inner
- * `ctx.callTool` is dispatched with `origin: "plugin"` because that is the
- * HostApi the wrapper holds. Pre-fix, the host then treated the inner call
- * as headless and routed it through the reviewer lane — silently queueing
- * the sign-in popup forever (#664 reproducer).
+ * The user *did* approve the outer wrapper at the panel, but the inner call is
+ * dispatched with `origin: "plugin"` because that is the HostApi the wrapper
+ * holds. Pre-fix, the host then treated the inner call as headless and routed
+ * it through the reviewer lane — silently queueing the sign-in popup forever
+ * (#664 reproducer).
  *
  * Constraint (#1556): this stickiness only makes the inner call *foreground*;
  * it does NOT make an app-only-visibility inner method reachable. For the inner
@@ -53,7 +63,6 @@
  * precedence below, so an app-rooted chain can never be laundered into the
  * trusted-panel origin and therefore can never reach `callDeclaredAppOnlyTool`.
  */
-import type { ToolExecutorCallbacks } from "../../tools/executor-contract.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
@@ -82,17 +91,6 @@ export type InvocationOrigin = "plugin" | "ui" | "mcp-app";
 interface ChainFrame {
   /** Outermost (effective) origin observed in this chain. */
   effectiveOrigin: InvocationOrigin;
-  /**
-   * The reporting sink of the OUTERMOST invocation, so a nested
-   * `ctx.callTool` reports to the surface the user is already looking at.
-   *
-   * One frame, not two stores: origin and reporting describe the same call
-   * chain, and splitting them is how they drift. They drifted once already —
-   * the origin propagated into the plugin surface while the sink did not, so
-   * every permission denial on a plugin-emitted call was a silent no-op in the
-   * UI while the audit log recorded it faithfully.
-   */
-  reporting?: ToolExecutorCallbacks;
 }
 
 const storage = new AsyncLocalStorage<ChainFrame>();
@@ -119,33 +117,9 @@ export function runWithInvocationOrigin<T>(
   parentOrigin: InvocationOrigin | undefined,
   fn: () => Promise<T>,
 ): Promise<T> {
-  const frame = storage.getStore();
-  const effective = resolveEffectiveOrigin(frame?.effectiveOrigin, parentOrigin, current);
-  // Carry the outer sink forward: entering an origin scope must not drop it.
-  return storage.run({ effectiveOrigin: effective, reporting: frame?.reporting }, fn);
-}
-
-/**
- * Publish `reporting` as the sink for this call chain, so nested invocations
- * that build their own execute options can find it. The outermost sink wins —
- * a nested call reports to the surface the user is actually watching, not to
- * whatever the inner caller happened to construct.
- */
-export function runWithInvocationReporting<T>(
-  reporting: ToolExecutorCallbacks | undefined,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const frame = storage.getStore();
-  if (frame?.reporting) return fn();
-  return storage.run(
-    { effectiveOrigin: frame?.effectiveOrigin ?? "plugin", reporting },
-    fn,
-  );
-}
-
-/** The sink of the current chain, if any. `undefined` outside an invocation. */
-export function currentInvocationReporting(): ToolExecutorCallbacks | undefined {
-  return storage.getStore()?.reporting;
+  const inherited = storage.getStore()?.effectiveOrigin;
+  const effective = resolveEffectiveOrigin(inherited, parentOrigin, current);
+  return storage.run({ effectiveOrigin: effective }, fn);
 }
 
 /** The ONE precedence rule (see {@link runWithInvocationOrigin}). */

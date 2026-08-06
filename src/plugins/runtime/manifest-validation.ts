@@ -28,7 +28,7 @@ import { toolVisibility } from "./tool-visibility.js";
 import { createLogger } from "../../lib/logger.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import {
-  marketplaceProviderPresetIdFromSecretKey } from "../../shared/marketplace-package-assets.js";
+  isAllowedHostSecretKey } from "../../shared/marketplace-package-assets.js";
 import { resolvePluginContributionDeclarations } from "../plugin-contributions.js";
 
 // Re-exported here so manifest/plugin-loading consumers can import the
@@ -46,22 +46,14 @@ export { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE,
 export const STABLE_SEMVER_RE =
   /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
 
-/**
- * #893 — Allow-listed host secret key pattern. A plugin manifest's
- * `hostSecrets.read[]` entries MUST match one of these host-owned LLM secret
- * key shapes. Mirrors the JSON-schema constraint as defence-in-depth so a
- * plugin manifest cannot install a wider allowlist than the schema permits.
- */
-const LLM_API_KEY_PATTERN = /^llm\.apiKey\.[a-z]+(?:-[a-z]+)*$/;
+// #893 — the allow-listed host-secret key shapes a manifest's
+// `hostSecrets.read[]` may name have ONE definition,
+// `isAllowedHostSecretKey` (src/shared/marketplace-package-assets.ts), shared
+// with the signed-whitelist grant validator. It mirrors the JSON-schema
+// constraint as defence-in-depth so a plugin manifest cannot install a wider
+// allowlist than the schema permits — a claim that only holds while there is a
+// single definition, so do NOT re-derive the shape here.
 const log = createLogger("plugin-runtime");
-
-function isAllowedHostSecretKey(value: unknown): value is string {
-  return (
-    typeof value === "string" &&
-    (LLM_API_KEY_PATTERN.test(value) ||
-      marketplaceProviderPresetIdFromSecretKey(value) !== undefined)
-  );
-}
 
 export function formatUnknownErrorMessage(err: unknown): string {
   if (err instanceof Error) return err.message;
