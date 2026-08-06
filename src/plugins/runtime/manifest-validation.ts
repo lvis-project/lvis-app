@@ -197,6 +197,22 @@ function materializeManifest(manifest: PluginManifest): PluginManifest {
  * fully-materialized {@link PluginManifest} every host consumer reads. Throws
  * with a descriptive message on any failure.
  */
+/**
+ * `keywords` fed a keyword-to-tool dispatch that was deleted. Dropping the
+ * schema property with it was deliberate, but bundles already installed still
+ * carry the field, and `additionalProperties: false` turns a dead field into a
+ * load failure — which then blocks the update that would have replaced it.
+ *
+ * Dropped from a copy, never from `parsed`: `registry.json` pins a
+ * `manifestSha256` that the Tier-3 secret gate reads, so rewriting the manifest
+ * would fix the load and invalidate that anchor.
+ */
+function forValidation(manifest: PluginManifest): PluginManifest {
+  if (!("keywords" in manifest)) return manifest;
+  const { keywords: _retired, ...rest } = manifest as PluginManifest & { keywords?: unknown };
+  return rest;
+}
+
 export async function parsePluginJson(
   path: string,
   validator: ValidateFunction,
@@ -291,7 +307,7 @@ export async function parsePluginJson(
     }
   }
 
-  if (!validator(parsed)) {
+  if (!validator(forValidation(parsed))) {
     // Enrich the error so users can act on it. Pre-fix AJV's default text
     // for additional-properties was "/ must NOT have additional properties"
     // — never named WHICH property was rejected, leaving users stuck (#737).
