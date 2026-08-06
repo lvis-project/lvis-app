@@ -6,7 +6,9 @@
 > §9, §14 and the implementation design in
 > `docs/development/tool-level-deferral-design.md`.
 >
-> Manifest `keywords` are retired and schema-rejected. Bundled
+> Manifest `keywords` are retired and ignored at load — not rejected, because
+> rejecting them made pre-retirement bundles unloadable and blocked their own
+> replacement. Bundled
 > `manifest.skills` provide plugin-owned instructions; bounded catalog search
 > controls Tool schema exposure and never turns Skill prose into Host dispatch.
 

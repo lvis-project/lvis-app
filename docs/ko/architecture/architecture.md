@@ -3007,7 +3007,9 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 `schemas/plugin-manifest.schema.json`이다. SDK는 이 파일과
 `src/plugins/public-contract.ts`를 생성 시점에 그대로 동기화하며 독자 계약을
 추가하지 않는다. Callable surface는 pure MCP `Tool[]` 하나뿐이고
-`toolSchemas`, `uiActions`, `keywords`는 스키마가 거부한다.
+`toolSchemas`, `uiActions`는 스키마가 거부한다. `keywords`는 거부 대신
+무시한다 — 거부하면 은퇴 이전에 설치된 번들이 로드 불가가 되고, 그 번들을
+교체할 업데이트 자체가 막힌다.
 
 ```json
 {
@@ -3111,8 +3113,9 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 | `configSchema` | `PluginConfigSchema` (선택) | JSON Schema draft-07 subset으로 Host의 typed config form을 선언한다.                                                                                                                                                                                                                                                                                                              |
 
 > **제거된 계약:** `toolSchemas`, `uiActions`, `uiTool`, `uiAction`,
-> `keywords`, 문자열 `tools[]`, top-level `operationGovernance`와
-> `appAllowed`는 compatibility adapter 없이 schema 단계에서 거부된다.
+> 문자열 `tools[]`, top-level `operationGovernance`와 `appAllowed`는
+> compatibility adapter 없이 schema 단계에서 거부된다. `keywords`도 제거된
+> 계약이지만 예외로 무시 처리한다(위 참조).
 
 > **`dependencies[]` — declarative preflight metadata only (issue #92, 2026-05).** Host는 manifest 의 `dependencies[]` 에 선언된 다른 플러그인을 **절대 auto-install 하지 않는다**. 마켓플레이스 install 시:
 >

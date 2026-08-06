@@ -111,7 +111,13 @@ describe("runtime manifest validation hardening", () => {
     };
   }
 
-  it("rejects the removed keyword-to-tool preload field", async () => {
+  // The keyword-to-tool dispatch this field fed was deleted, and dropping the
+  // schema property with it made every bundle installed before that unloadable
+  // — including the update that would have replaced the bundle. Loading is the
+  // only outcome that leaves a path forward, so the field is ignored, not
+  // rejected. `rejects an unknown top-level field` below holds the line for
+  // names that were never part of any schema.
+  it("loads a plugin still carrying the retired keyword-to-tool field", async () => {
     await writePlugin("p-kw", {
       tools: ["pkw_hello", "pkw_bad", "pkw_good"],
       keywords: [{ keyword: "회의", skillId: "p_kw_missing" }],
@@ -127,8 +133,27 @@ describe("runtime manifest validation hardening", () => {
     } finally {
       cap.restore();
     }
+    expect(runtime.listPluginIds()).toEqual(["p-kw"]);
+  });
+
+  it("rejects an unknown top-level field", async () => {
+    await writePlugin("p-unknown", {
+      tools: ["punk_hello", "punk_bad", "punk_good"],
+      neverAField: { nope: true },
+    });
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    const cap = captureErrors();
+    try {
+      await runtime.load();
+    } finally {
+      cap.restore();
+    }
     expect(runtime.listPluginIds()).toHaveLength(0);
-    expect(cap.errors.some((e) => /keywords|additional/i.test(e))).toBe(true);
+    expect(cap.errors.some((e) => /neverAField/.test(e))).toBe(true);
   });
 
   it("rejects the removed top-level schema map", async () => {
