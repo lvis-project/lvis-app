@@ -529,6 +529,19 @@ export function canUseLlmVendorWithoutApiKey(
  */
 export interface LLMVendorSettings {
   model: string;
+  /**
+   * Per-vendor ceiling on a turn's output, forwarded as the request's native
+   * output limit. Unset by default, which is the CTRL policy (vendor SDK
+   * defaults govern) — this is not a sampling control, it is the same
+   * host-owned ceiling `StreamTurnParams.outputTokenLimit` already carries.
+   *
+   * It exists because some gateways PRE-AUTHORIZE credit against the model's
+   * maximum output rather than the tokens actually produced: OpenRouter rejects
+   * a request with 402 "requires more credits, or fewer max_tokens" when a
+   * capped key cannot afford the model's full ceiling, so a credit-limited or
+   * weekly-capped key cannot start ANY turn until this is set.
+   */
+  outputTokenLimit?: number;
   baseUrl?: string;
   vertexProject?: string;
   vertexLocation?: string;
