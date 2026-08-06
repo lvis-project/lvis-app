@@ -520,7 +520,21 @@ type LongTermMemoryConsolidationResult =
   | { ok: false; error: string };
 
 export type PluginMarketplaceActionResult =
-  | { ok: true; pluginId: string; installed?: true; uninstalled?: true; rolledBackTo?: string; version?: string }
+  | {
+      ok: true;
+      pluginId: string;
+      installed?: true;
+      uninstalled?: true;
+      rolledBackTo?: string;
+      version?: string;
+      /**
+       * The install replaced nothing — the marketplace carries the same
+       * version, receipt, and artifact already on disk. For a repair attempt
+       * this is the difference between "reinstalled" and "there was nothing to
+       * reinstall but the broken bundle".
+       */
+      unchanged?: true;
+    }
   | { ok: false; error: string; message?: string };
 
 export type PluginMarketplaceInstallOptions = {

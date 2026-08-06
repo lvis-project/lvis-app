@@ -2026,6 +2026,7 @@ export const jaMessages: Record<string, string> = {
   "pluginConfigTab.doctorButton": "医者",
   "pluginConfigTab.doctorDescription": "このプラグインは再起動後にロードされませんでした。 Doctor は、最新のマーケットプレイス パッケージを再インストールするか、壊れたローカル インストールを削除できます。",
   "pluginConfigTab.doctorDiagnosticUnresolved": "{displayName}: 診断が完了しました — 利用できるローカル修復はなく、プラグインはまだ実行できません。",
+  "pluginConfigTab.doctorNoNewerPackage": "{displayName}: マーケットプレイスにインストール済みより新しいパッケージがないため、再インストールでは修正できません。公開元の修正版を待つか、プラグインを削除してください。",
   "pluginConfigTab.doctorFailureDetailLabel": "エラーの詳細",
   "pluginConfigTab.doctorGrantMismatchDescription": "Doctor は、ダウンロードしたアーティファクト マニフェストがカタログで承認された付与と一致しないことを確認しました。これをローカルで修復することはできません。マーケットプレイス パッケージが一致する許可で再公開された後に再インストールするか、ローカル インストールを削除します。",
   "pluginConfigTab.doctorGrantMismatchTitle": "マーケットプレイスのパッケージの不一致",

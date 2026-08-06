@@ -2020,6 +2020,7 @@ export const deMessages: Record<string, string> = {
   "pluginConfigTab.errorDoctor": "Plugin Doctor fehlgeschlagen",
   "pluginConfigTab.successDoctor": "{displayName} repariert",
   "pluginConfigTab.doctorDiagnosticUnresolved": "{displayName}: Diagnose abgeschlossen — keine lokale Reparatur möglich; weiterhin nicht ausführbar",
+  "pluginConfigTab.doctorNoNewerPackage": "{displayName}: Der Marktplatz hat kein neueres Paket als das installierte — eine Neuinstallation behebt das nicht. Warten Sie auf eine Korrektur des Herausgebers oder entfernen Sie das Plugin.",
   "pluginConfigTab.errorSave": "Speichern fehlgeschlagen",
   "pluginConfigTab.errorSaveSecret": "Der geheime Wert konnte nicht gespeichert werden",
   "pluginConfigTab.errorToggleEnabled": "Der aktive Status des Plugins konnte nicht geändert werden",
