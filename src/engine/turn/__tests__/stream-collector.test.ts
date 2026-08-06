@@ -11,9 +11,12 @@ const LLM_SETTINGS = {
 
 class ScriptedProvider implements LLMProvider {
   readonly vendor = "openai" as const;
+  /** Recorded so a test can assert what actually crossed the wire. */
+  lastParams: StreamTurnParams | null = null;
   constructor(private readonly events: readonly StreamEvent[]) {}
 
-  async *streamTurn(_params: StreamTurnParams): AsyncIterable<StreamEvent> {
+  async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
+    this.lastParams = params;
     yield* this.events;
   }
 }
@@ -176,5 +179,42 @@ describe("collectRoundStream tool call IDs", () => {
         { id: "second", name: "bash", input: { command: "pwd" } },
       ],
     });
+  });
+});
+describe("per-vendor output ceiling", () => {
+  // Some gateways pre-authorize credit against the MODEL's maximum output, not
+  // the tokens produced: OpenRouter answers 402 "requires more credits, or
+  // fewer max_tokens" when a capped key cannot afford the full ceiling, so such
+  // a key cannot start any turn. Setting a ceiling is the way out; the adapter
+  // already maps `outputTokenLimit` to the request's native limit.
+  it("forwards a configured ceiling to the provider", async () => {
+    const provider = new ScriptedProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    await collectRoundStream({
+      provider,
+      model: "test-model",
+      systemPrompt: "system",
+      messages: [],
+      toolSchemas: [],
+      llmSettings: { ...LLM_SETTINGS, outputTokenLimit: 2048 },
+    });
+    expect(provider.lastParams?.outputTokenLimit).toBe(2048);
+  });
+
+  it("sends nothing when no ceiling is configured", async () => {
+    const provider = new ScriptedProvider([
+      { type: "message_complete", stopReason: "end_turn" },
+    ]);
+    await collectRoundStream({
+      provider,
+      model: "test-model",
+      systemPrompt: "system",
+      messages: [],
+      toolSchemas: [],
+      llmSettings: LLM_SETTINGS,
+    });
+    // Default stays CTRL policy — vendor SDK defaults govern.
+    expect(provider.lastParams).not.toHaveProperty("outputTokenLimit");
   });
 });
