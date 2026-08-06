@@ -21,11 +21,15 @@ export function UserMessageEditor({
   const { t } = useTranslation();
   const [draft, setDraft] = useState(initialText);
   return (
-    <div className="ml-auto w-full max-w-[75%] rounded-lg border border-message-user-border bg-message-user p-2 text-body-sm text-message-user-foreground">
+    /* The bubble IS the input frame: it owns the border, the padding and the
+       focus ring. The Textarea inside stays chromeless — its default
+       `border border-input` plus its own focus ring drew a second box inside
+       this one. */
+    <div className="ml-auto w-full max-w-[75%] rounded-lg border border-message-user-border bg-message-user p-2 text-body-sm text-message-user-foreground transition-colors focus-within:border-message-user-action focus-within:ring-1 focus-within:ring-message-user-action motion-reduce:transition-none">
       <Textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        className="min-h-[60px] border-message-user-border bg-message-user text-body-sm text-message-user-foreground placeholder:text-message-user-muted focus-visible:ring-message-user-action focus-visible:ring-offset-message-user"
+        className="min-h-[60px] resize-none border-0 bg-transparent p-0 text-body-sm text-message-user-foreground shadow-none placeholder:text-message-user-muted focus-visible:ring-0 focus-visible:ring-offset-0"
         autoFocus
       />
       <div className="mt-1 flex justify-end gap-1">
