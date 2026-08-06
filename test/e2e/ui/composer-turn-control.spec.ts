@@ -98,7 +98,13 @@ test('message queue panel stays a full-bleed band and paints visible actions', a
 
   const measured = await panel.evaluate((el) => {
     const panelBox = el.getBoundingClientRect();
-    const mainBox = document.querySelector('main')?.getBoundingClientRect();
+    // Measure against the dock column the strip lives in, NOT <main>: <main>
+    // spans the whole window including the sidebar, so nothing inside the dock
+    // can align with it — which is why the equivalent assertion in
+    // session-todo-in-chat.spec.ts is red on main too.
+    const dockBox = document
+      .querySelector('[data-testid="session-todo-dock"]')
+      ?.getBoundingClientRect();
     const injectEl = el.querySelector('[data-testid="message-queue-row-send-now-button"]')!;
     // The panel's own tint is 5% alpha, so the effective backdrop is the
     // nearest OPAQUE ancestor background — that is what the label competes with.
@@ -114,18 +120,18 @@ test('message queue panel stays a full-bleed band and paints visible actions', a
     return {
       left: Math.round(panelBox.left),
       right: Math.round(panelBox.right),
-      mainLeft: mainBox ? Math.round(mainBox.left) : null,
-      mainRight: mainBox ? Math.round(mainBox.right) : null,
+      dockLeft: dockBox ? Math.round(dockBox.left) : null,
+      dockRight: dockBox ? Math.round(dockBox.right) : null,
       injectWidth: Math.round(injectEl.getBoundingClientRect().width),
       injectColor: getComputedStyle(injectEl).color,
       behindPanel,
     };
   });
 
-  // Dock strips are BANDS across <main>; only the composer is an inset card.
-  // The same contract is pinned for its sibling in session-todo-in-chat.spec.ts.
-  expect(measured.left).toBe(measured.mainLeft);
-  expect(measured.right).toBe(measured.mainRight);
+  // Dock strips are BANDS filling the dock column; only the composer is an
+  // inset card. Insetting this one made the two siblings disagree.
+  expect(measured.left).toBe(measured.dockLeft);
+  expect(measured.right).toBe(measured.dockRight);
 
   // The inject action used to be painted with `--accent`, a pale SURFACE token,
   // so it disappeared against the panel. It must render with real width and
