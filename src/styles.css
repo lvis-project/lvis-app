@@ -307,6 +307,20 @@
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+/* Composer turn control (send ⇄ stop). One button changing role, so the glyph
+   fades+scales in place instead of being substituted instantly — an instant
+   swap reads as two different buttons trading places. Keyed on the React side
+   so the animation re-runs on every state change. */
+@keyframes lvis-turn-control-glyph-in {
+  from { opacity: 0; transform: scale(0.7); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.lvis-turn-control-glyph {
+  animation: lvis-turn-control-glyph-in var(--motion-fast) var(--motion-ease-out);
+}
+@media (prefers-reduced-motion: reduce) {
+  .lvis-turn-control-glyph { animation: none; }
+}
 @keyframes lvis-slide-down {
   from { opacity: 0; transform: translateY(-8px); }
   to   { opacity: 1; transform: translateY(0); }

@@ -174,7 +174,13 @@ describe("InputActionBar (unified bar)", () => {
       isSendDisabled: true,
     });
     expect(queryByTestId("composer-cancel-button")).toBeNull();
-    expect((getByTestId("composer-send-button") as HTMLButtonElement).disabled).toBe(true);
+    const send = getByTestId("composer-send-button") as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    // A disabled SOLID primary is a near-black disc at 50% opacity — the grey
+    // blob this redesign is replacing. With nothing to send the control goes
+    // quiet instead, matching the outline treatment of the leading cluster.
+    expect(send.className).toContain("bg-input-bar-subtle");
+    expect(send.className).not.toContain("bg-primary");
   });
 
   it("busy with an empty draft turns the one button into stop", () => {
@@ -189,8 +195,10 @@ describe("InputActionBar (unified bar)", () => {
     });
     expect(queryByTestId("composer-send-button")).toBeNull();
     const stop = getByTestId("composer-cancel-button") as HTMLButtonElement;
-    // Stop stays clickable even though sending is blocked by the empty draft.
+    // Stop stays clickable even though sending is blocked by the empty draft,
+    // and it is solid — it is the one thing the user can act on right now.
     expect(stop.disabled).toBe(false);
+    expect(stop.className).toContain("bg-primary");
     fireEvent.click(stop);
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onSend).not.toHaveBeenCalled();
