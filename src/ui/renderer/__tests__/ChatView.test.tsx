@@ -15,13 +15,14 @@ import {
   __teardownSuggestedRepliesIpcForTests,
 } from "../hooks/use-suggested-replies.js";
 
-function installDeterministicScrollMetrics(scrollHeight = 2400, clientHeight = 600) {
+function installDeterministicScrollMetrics(initialScrollHeight = 2400, clientHeight = 600) {
   const descriptors = {
     scrollHeight: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollHeight"),
     clientHeight: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight"),
     scrollTop: Object.getOwnPropertyDescriptor(HTMLElement.prototype, "scrollTop"),
   };
   let assignedScrollTop = 0;
+  let scrollHeight = initialScrollHeight;
   Object.defineProperty(HTMLElement.prototype, "scrollHeight", {
     configurable: true,
     get: () => scrollHeight,
@@ -43,6 +44,10 @@ function installDeterministicScrollMetrics(scrollHeight = 2400, clientHeight = 6
     },
     setAssignedScrollTop(value: number) {
       assignedScrollTop = value;
+    },
+    /** Simulates the transcript growing (a newly appended entry) without moving scrollTop. */
+    setScrollHeight(value: number) {
+      scrollHeight = value;
     },
     restore() {
       for (const [key, descriptor] of Object.entries(descriptors)) {
@@ -2007,6 +2012,57 @@ describe("ChatView", () => {
 
       expect(scrollMetrics.assignedScrollTop).toBe(2400);
       expect(scrollToSpy).not.toHaveBeenCalled();
+    } finally {
+      scrollMetrics.restore();
+    }
+  });
+
+  it("keeps following the bottom when an appended entry grows the transcript below the fold", async () => {
+    const scrollMetrics = installDeterministicScrollMetrics();
+    const rafCallbacks: FrameRequestCallback[] = [];
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+      rafCallbacks.push(cb);
+      return rafCallbacks.length;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn((id: number) => {
+      rafCallbacks[id - 1] = () => undefined;
+    }));
+
+    try {
+      const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+      await submitChatMessage(container, "긴 답변 줘");
+      await act(async () => {
+        while (rafCallbacks.length > 0) {
+          rafCallbacks.shift()?.(0);
+        }
+      });
+
+      // Park the reader at the bottom the way a real scroll would: gap 0.
+      const viewport = container.querySelector(".lvis-chat-scroll [data-radix-scroll-area-viewport]");
+      expect(viewport).not.toBeNull();
+      scrollMetrics.setAssignedScrollTop(1800);
+      await act(async () => {
+        fireEvent.scroll(viewport as Element);
+      });
+      rafCallbacks.length = 0;
+
+      // A newly appended entry grows the transcript while scrollTop still points
+      // at the previous bottom — the exact shape that used to be misread as
+      // "the reader scrolled away" and left the viewport stranded.
+      await act(async () => {
+        scrollMetrics.setScrollHeight(3200);
+        emitChatStream({ type: "text_delta", text: "새로 삽입된 어시스턴트 엔트리" });
+      });
+      await waitFor(() => expect(container.textContent).toContain("새로 삽입된 어시스턴트 엔트리"));
+
+      await act(async () => {
+        while (rafCallbacks.length > 0) {
+          rafCallbacks.shift()?.(0);
+        }
+      });
+
+      expect(scrollMetrics.assignedScrollTop).toBe(3200);
+      expect(container.querySelector('[data-testid="jump-to-bottom"]')).toBeNull();
     } finally {
       scrollMetrics.restore();
     }
