@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { dirname, isAbsolute, posix, resolve } from "node:path";
 import { buildSideloadCopyFilter, rejectSideloadSymlinks } from "./sideload-filter.js";
 import { readPluginRegistry, updatePluginRegistry } from "./registry.js";
-import type { PluginDeploymentGuard } from "./deployment-guard.js";
+import type { Actor, PluginDeploymentGuard } from "./deployment-guard.js";
 import type { CommittedPluginGeneration } from "./plugin-host-generation.js";
 import {
   isCommittedPluginGenerationPublicationError,
@@ -230,6 +230,33 @@ function catalogItemMatchesPluginId(item: PluginMarketplaceItem, pluginId: strin
   const pluginKey = normalizePluginLookupKey(pluginId);
   return [item.id, item.slug, item.name, item.packageName, item.packageSpec].some((value) =>
     normalizePluginLookupKey(value) === pluginKey,
+  );
+}
+
+/**
+ * Admin installs the given catalog snapshot no longer lists.
+ *
+ * The catalog is the authority for an admin plugin: enforced synchronization is
+ * what makes an install "admin" rather than the user's. An entry the catalog
+ * stopped listing is therefore a removal candidate, whether the user asks
+ * (`canUserRemoveOrphanedAdminInstall`) or boot sync enforces it.
+ *
+ * Callers pass a snapshot they already fetched — never re-fetch here, or the
+ * two reads can disagree and a plugin is judged against a catalog the caller
+ * never saw (#1098 keeps installs on one snapshot for the same reason).
+ *
+ * Candidate, not verdict: `mapItem` drops rows whose app-version resolution is
+ * absent or malformed, so absence from a listing is not proof of delisting. The
+ * caller decides what evidence it needs before acting on the candidate.
+ */
+function orphanedAdminInstalls(
+  registry: { plugins: PluginRegistryEntry[] },
+  catalogPlugins: PluginMarketplaceItem[],
+): PluginRegistryEntry[] {
+  return registry.plugins.filter(
+    (entry) =>
+      entry.installSource === "admin" &&
+      !catalogPlugins.some((item) => catalogItemMatchesPluginId(item, entry.id)),
   );
 }
 
@@ -1115,6 +1142,7 @@ export class PluginMarketplaceService {
   }): Promise<{
     installed: string[];
     updated: string[];
+    removed: string[];
     failed: Array<{ id: string; error: string }>;
   }> {
     if (
@@ -1146,6 +1174,7 @@ export class PluginMarketplaceService {
     const result = {
       installed: [] as string[],
       updated: [] as string[],
+      removed: [] as string[],
       failed: [] as Array<{ id: string; error: string }>,
     };
     let plugins: PluginMarketplaceItem[];
@@ -1158,7 +1187,6 @@ export class PluginMarketplaceService {
       return result;
     }
     const managed = plugins.filter((p) => normalizeInstallPolicy(p) === "admin");
-    if (managed.length === 0) return result;
     // Round-3 §6: registry read errors must propagate. ENOENT is already
     // handled inside readPluginRegistry (returns empty default for first
     // boot); a corrupt registry must NOT silently force-reinstall every
@@ -1323,7 +1351,45 @@ export class PluginMarketplaceService {
         log.warn(`managed plugin '${plugin.id}' ${isUpdate ? "update" : "install"} failed: ${msg}`);
       }
     }
+    await this.removeDelistedAdminInstalls(plugins, result);
     return result;
+  }
+
+  /**
+   * Enforced half of admin synchronization: an admin install the catalog no
+   * longer carries is removed, not left for the user to notice. Runs after the
+   * install/update pass so a plugin that merely moved versions is reconciled by
+   * that pass and never reaches here. Removal commits to the registry before
+   * `startPlugins()` reads its snapshot, so the runtime never loads the entry.
+   *
+   * Listing absence alone is not the trigger. `mapItem` drops catalog rows
+   * whose app-version resolution is absent or malformed, so a listing can omit
+   * a plugin that is very much still published — and unlike the user-initiated
+   * path, nobody is here to notice a wrong call. Each candidate is confirmed
+   * against the per-slug endpoint, which returns null only for a definite 404
+   * and throws for anything else, so an unreachable or degraded server leaves
+   * the install in place.
+   */
+  private async removeDelistedAdminInstalls(
+    catalogPlugins: PluginMarketplaceItem[],
+    result: { removed: string[]; failed: Array<{ id: string; error: string }> },
+  ): Promise<void> {
+    const registry = await readPluginRegistry(this.registryPath);
+    for (const entry of orphanedAdminInstalls(registry, catalogPlugins)) {
+      try {
+        const detail = await this.fetcher.getPluginDetail(entry.id);
+        if (detail !== null) continue;
+        await this.uninstall(entry.id, { actor: "it-admin" });
+        result.removed.push(entry.id);
+        log.info(
+          `managed plugin '${entry.id}' removed — the marketplace no longer publishes it`,
+        );
+      } catch (err) {
+        const msg = (err as Error).message;
+        result.failed.push({ id: entry.id, error: msg });
+        log.warn(`managed plugin '${entry.id}' removal failed: ${msg}`);
+      }
+    }
   }
 
   async quarantinePlugin(
@@ -1358,11 +1424,16 @@ export class PluginMarketplaceService {
 
   async uninstall(
     pluginId: string,
-    options?: { removeBundleMembers?: boolean },
+    options?: { removeBundleMembers?: boolean; actor?: Actor },
   ): Promise<{ pluginId: string; uninstalled: true }> {
     // §7.2 PluginDeploymentGuard — managed 플러그인은 user actor에게 차단.
+    // `actor` defaults to "user"; boot's managed sync passes "it-admin", the
+    // same trust anchor the managed install path uses. The guard already
+    // admits it-admin unconditionally (deployment-guard.ts), so this reads
+    // the actor rather than deciding admin-ness a second time.
+    const actor: Actor = options?.actor ?? "user";
     if (this.deploymentGuard) {
-      const guardResult = await this.deploymentGuard.canUninstall(pluginId, "user");
+      const guardResult = await this.deploymentGuard.canUninstall(pluginId, actor);
       if (!guardResult.allowed) {
         const isOrphanedAdminInstall = await this.canUserRemoveOrphanedAdminInstall(pluginId, guardResult.reason);
         if (!isOrphanedAdminInstall) {
@@ -1459,8 +1530,10 @@ export class PluginMarketplaceService {
       return false;
     }
 
-    const stillManagedByCatalog = catalogPlugins.some((item) => catalogItemMatchesPluginId(item, pluginId));
-    if (stillManagedByCatalog) return false;
+    const orphaned = orphanedAdminInstalls(registry, catalogPlugins).some(
+      (candidate) => candidate.id === pluginId,
+    );
+    if (!orphaned) return false;
 
     log.warn(`uninstall: allowing orphaned admin plugin cleanup for '${pluginId}' after marketplace removal`);
     return true;
