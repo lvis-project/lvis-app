@@ -161,6 +161,16 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
         `boot: managed plugin bootstrap auto-updated ${updated.length}: ${updated.join(", ")}`,
       );
     }
+    const removed = ensureResult.removed ?? [];
+    if (removed.length > 0) {
+      // Removal is the enforced half of admin sync: the catalog stopped
+      // publishing these, so the install goes with it. Logged at info because a
+      // plugin disappearing is something an operator reading boot logs after
+      // the fact needs to be able to account for.
+      log.info(
+        `boot: managed plugin bootstrap removed ${removed.length} delisted: ${removed.join(", ")}`,
+      );
+    }
     if (ensureResult.failed.length > 0) {
       log.warn(
         `boot: managed plugin bootstrap failed ${ensureResult.failed.length}: %s`,
