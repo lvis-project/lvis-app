@@ -5,8 +5,8 @@
  * Constructs the workflow-tool-backing stores (session todos, skills, agent
  * profiles, persona prompts, skill overlay/approvals, ask-user gate), assembles
  * the {@link WorkflowToolDeps} closure bundle (late-binding the sub-agent runner
- * and approval gate through refs), registers the builtin + meta tools, and wires
- * the knowledge retriever + idle scheduler.
+ * through a ref), registers the builtin + meta tools, and wires the knowledge
+ * retriever + idle scheduler.
  */
 import { SessionTodoStore } from "../../main/session-todo-store.js";
 import { AskUserQuestionGate } from "../../main/ask-user-question-gate.js";
@@ -66,11 +66,6 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     notificationService,
   );
   const subAgentRunnerRef: { fn: SubAgentRunner | undefined } = { fn: undefined };
-  // ApprovalGate ref — gate is constructed up-front (before initPluginRuntime)
-  // so this is bound immediately. skill_load reuses the same gate the
-  // executor uses so user-authored skills pop the approval modal on first
-  // load (and only on first load).
-  const approvalGateRef: { fn: import("../../permissions/approval-gate.js").ApprovalGate | undefined } = { fn: approvalGate };
   const workflowDeps: WorkflowToolDeps = {
     routinesStore,
     sessionTodoStore,
@@ -79,7 +74,11 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     skillOverlay,
     skillApprovalsStore,
     getAskUserQuestionGate: () => askUserQuestionGate,
-    getApprovalGate: () => approvalGateRef.fn,
+    // The gate is constructed up-front (before initPluginRuntime), so it is
+    // held by value like every other gate wiring. skill_load reuses the same
+    // gate the executor uses so user-authored skills pop the approval modal on
+    // first load (and only on first load).
+    approvalGate,
     getSubAgentRunner: () => subAgentRunnerRef.fn,
     getAgentSendRuntime: () => {
       const runtime = subAgentRunnerRef.fn as unknown as Partial<AgentSendRuntime> | undefined;

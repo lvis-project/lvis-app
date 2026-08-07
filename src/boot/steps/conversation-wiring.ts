@@ -285,7 +285,6 @@ export async function wireConversation(
 
   // ApprovalGate already constructed above (before initPluginRuntime) so the
   // plugin HostApi factory could wire `agentApproval` to the live gate.
-  // approvalGateRef was bound at construction time.
 
   // §4.5: ConversationLoop.
   let conversationLoop!: ConversationLoop;
