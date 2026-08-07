@@ -77,6 +77,39 @@ describe("validateHostRendererSender", () => {
   });
 });
 
+// The shell predicate is one authority shared with `validatePluginFrame` and
+// `shouldBlockGlobalWebviewNavigation`. These rows pin the exact shape the
+// three guards agree on, so a looser spelling in any of them is a red test.
+describe("plugin-shell frame predicate — agreement across guards", () => {
+  const HOST_LOOKALIKE = "file:///dist/src/index.html?next=plugin-ui-shell.html";
+  const REMOTE_LOOKALIKE = "https://evil.example.com/plugin-ui-shell.html";
+  const SHELL = "file:///dist/src/plugin-ui-shell.html";
+  const SHELL_MIXED_CASE = "file:///dist/src/Plugin-UI-Shell.HTML";
+  const SHELL_SUFFIX_LOOKALIKE = "file:///dist/src/evil-plugin-ui-shell.html";
+
+  it("treats a host file frame that merely mentions the shell name as the HOST renderer", () => {
+    expect(validateHostRendererSender(ev(HOST_LOOKALIKE))).toBe(true);
+    expect(validatePluginFrame(ev(HOST_LOOKALIKE))).toBe(false);
+  });
+
+  it("treats a remote page serving the shell filename as neither host nor plugin", () => {
+    expect(validateHostRendererSender(ev(REMOTE_LOOKALIKE))).toBe(false);
+    expect(validatePluginFrame(ev(REMOTE_LOOKALIKE))).toBe(false);
+  });
+
+  it("matches the real shell document, case-folded, on a /-anchored path segment", () => {
+    expect(validatePluginFrame(ev(SHELL))).toBe(true);
+    expect(validatePluginFrame(ev(SHELL_MIXED_CASE))).toBe(true);
+    expect(validateHostRendererSender(ev(SHELL))).toBe(false);
+    expect(validateHostRendererSender(ev(SHELL_MIXED_CASE))).toBe(false);
+  });
+
+  it("does not accept a filename that merely ENDS with the shell name", () => {
+    expect(validatePluginFrame(ev(SHELL_SUFFIX_LOOKALIKE))).toBe(false);
+    expect(validateHostRendererSender(ev(SHELL_SUFFIX_LOOKALIKE))).toBe(true);
+  });
+});
+
 describe("UNAUTHORIZED_FRAME", () => {
   it("has ok=false and error='unauthorized-frame'", () => {
     expect(UNAUTHORIZED_FRAME).toEqual({ ok: false, error: "unauthorized-frame" });

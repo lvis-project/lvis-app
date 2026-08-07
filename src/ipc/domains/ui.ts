@@ -18,7 +18,7 @@ import {
 } from "../../shared/native-context-menu.js";
 import { UI } from "../../shared/ipc-channels.js";
 import { t } from "../../i18n/index.js";
-import { auditUnauthorized, UNAUTHORIZED_FRAME, validateSender } from "../gated.js";
+import { auditUnauthorized, UNAUTHORIZED_FRAME, validateHostRendererSender } from "../gated.js";
 import type { IpcDeps } from "../types.js";
 
 const MAX_OPTIONS = 120;
@@ -185,19 +185,13 @@ function normalizeNativePayload(value: unknown): NativeContextMenuPayload | null
 }
 
 function hostWindowForUiEvent(event: IpcMainInvokeEvent): BrowserWindow | null {
-  if (!validateSender(event)) return null;
+  // Host-renderer frames only: this used to re-type the plugin-shell rejection
+  // by hand instead of asking the guard that owns it.
+  if (!validateHostRendererSender(event)) return null;
   const window = BrowserWindow.fromWebContents(event.sender);
   if (!window || window.isDestroyed()) return null;
 
   const rawUrl = event.senderFrame?.url ?? "";
-  try {
-    const url = new URL(rawUrl);
-    if (url.protocol === "file:" && url.pathname.toLowerCase().endsWith("/plugin-ui-shell.html")) {
-      return null;
-    }
-  } catch {
-    return null;
-  }
 
   const topLevelUrl = event.sender.getURL();
   if (topLevelUrl && rawUrl && topLevelUrl !== rawUrl) return null;
