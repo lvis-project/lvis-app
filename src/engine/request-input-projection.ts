@@ -49,7 +49,7 @@ function isValidProviderRequestInputProjection(value: unknown): value is Request
  */
 export function estimateRequestInputProjection(
   input: RequestInputProjectionInput,
-  provider?: Pick<LLMProvider, "projectRequestInput">,
+  provider?: Pick<LLMProvider, "projectRequestInput"> & Partial<Pick<LLMProvider, "vendor">>,
 ): RequestInputProjection {
   try {
     const providerProjection = provider?.projectRequestInput?.(input);
@@ -61,7 +61,10 @@ export function estimateRequestInputProjection(
   const systemPromptTokens = input.systemPrompt.trim().length > 0
     ? estimateTokens(JSON.stringify({ role: "system", content: input.systemPrompt }))
     : 0;
-  const messageTokens = estimateMessagesTokens(input.messages);
+  // The serving vendor decides whether a tool_result image is on the wire at
+  // all. Providers that own their projection answered above; this fallback runs
+  // for every API-key vendor, so it must not charge for bytes the mapper drops.
+  const messageTokens = estimateMessagesTokens(input.messages, provider?.vendor);
   const toolSchemaTokens = input.toolSchemas.length > 0
     ? estimateTokens(JSON.stringify({ tools: input.toolSchemas }))
     : 0;
