@@ -10,6 +10,7 @@ import {
   type ApprovalIntent,
 } from "../../../permissions/approval-intent.js";
 import type { DeferredGrantScope, DeferredQueueEntry } from "../types.js";
+import { NARROWEST_DEFERRED_SCOPE } from "../types.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 export interface DeferredApprovalChipProps {
@@ -22,48 +23,25 @@ export interface DeferredApprovalChipProps {
 /**
  * What an approve sentence would grant on this entry.
  *
- * The chip may only offer what the entry can actually deliver, and never more
- * than the sentence asked for. Both directions matter:
+ * The sentence selects nothing here: a plain approve intent always maps to the
+ * NARROWEST breadth the lane offers, and the entry's own recorded grant
+ * supplies the target. `null` ⇒ there is nothing to grant, so no offer.
  *
- *  • `grant` absent ⇒ nothing to give. No offer.
- *  • scope "once" ⇒ the user asked for the narrowest breadth, and the deferred
- *    lane has no such breadth (the call it would scope is over). Upgrading it
- *    to a session grant would hand out more than was asked for, so the chip
- *    declines instead. This is the one case where honouring the sentence
- *    literally means refusing it.
- *  • an explicit target that is not this entry's directory ⇒ the user named
- *    somewhere else. Granting the entry's path would be granting a thing the
- *    sentence did not name. No offer.
+ * Breadth selection from the sentence deliberately does not exist yet. Reading
+ * a duration or a path out of the text is the job of the permission-review
+ * model (issue #1940), and having the chip ALSO infer one would put two
+ * authorities on the same decision. Until that lands, the chip proposes only
+ * what the narrow default already permits.
  *
- * `path` in the returned plan is always the HOST-derived `entry.grant.path`,
- * never the user's typed text, so the confirmation line states a path the host
- * resolved.
+ * `path` is always the HOST-derived `entry.grant.path`, never user text, so the
+ * confirmation line states a path the host resolved.
  */
 function resolveGrantPlan(
-  intent: Extract<ApprovalIntent, { kind: "approve" }>,
   entry: DeferredQueueEntry,
-): { scope: DeferredGrantScope; path: string; widensBeyondDefault: boolean } | null {
+): { scope: DeferredGrantScope; path: string } | null {
   const grant = entry.grant;
   if (!grant) return null;
-  if (intent.scope.explicit && intent.scope.value === "once") return null;
-  if (intent.target.kind === "path" && !sameDirectory(intent.target.raw, grant.path)) {
-    return null;
-  }
-  const scope: DeferredGrantScope =
-    intent.scope.explicit && intent.scope.value === "always" ? "always" : "session";
-  return {
-    scope,
-    path: grant.path,
-    // "always" writes settings.json — broader than the button's default, so
-    // the confirmation must be explicit about it.
-    widensBeyondDefault: scope === "always",
-  };
-}
-
-/** Case- and separator-insensitive comparison; no traversal resolution. */
-function sameDirectory(a: string, b: string): boolean {
-  const norm = (p: string) => p.replace(/\\/gu, "/").replace(/\/+$/u, "").toLowerCase();
-  return norm(a) === norm(b);
+  return { scope: NARROWEST_DEFERRED_SCOPE, path: grant.path };
 }
 
 export function DeferredApprovalChip({
@@ -121,10 +99,10 @@ export function DeferredApprovalChip({
 
   // What an approval would actually grant, resolved against the entry rather
   // than against the sentence. `null` ⇒ the chip must not offer approval.
-  const plan = intent.kind === "approve" ? resolveGrantPlan(intent, target) : null;
+  const plan = intent.kind === "approve" ? resolveGrantPlan(target) : null;
   if (intent.kind === "approve" && !plan) return null;
 
-  const suggestionKey = `${target.id}:${intent.kind}:${intent.matchedPhrase}:${plan?.scope ?? ""}`;
+  const suggestionKey = `${target.id}:${intent.kind}:${intent.matchedPhrase}`;
   if (dismissedKey === suggestionKey) return null;
 
   const handle = async () => {
@@ -179,14 +157,9 @@ export function DeferredApprovalChip({
       // `approvalSource: "natural-language"` field already carries
       // the provenance signal; the phrase itself adds no integrity
       // value, only PII risk. Use a static reason string.
-      // Re-resolve the plan from the live intent for the same reason the
-      // intent itself is re-read: the composer may have changed since render.
-      const livePlan =
-        liveIntent.kind === "approve" ? resolveGrantPlan(liveIntent, target) : null;
-      if (liveIntent.kind === "approve" && livePlan?.scope !== plan?.scope) {
-        setError(t("deferredApprovalChip.intentChanged"));
-        return;
-      }
+      // Re-resolve the grant for the same reason the intent itself is re-read:
+      // the queue entry may have changed since render.
+      const livePlan = liveIntent.kind === "approve" ? resolveGrantPlan(target) : null;
       const r = await api(
         target.id,
         decision,
@@ -239,15 +212,10 @@ export function DeferredApprovalChip({
   // typed — so that what the click will do is legible before it happens.
   const labelTail =
     intent.kind === "approve" && plan
-      ? plan.scope === "always"
-        ? t("deferredApprovalChip.labelApproveAlways", {
-            toolName: target.toolName,
-            path: plan.path,
-          })
-        : t("deferredApprovalChip.labelApproveSession", {
-            toolName: target.toolName,
-            path: plan.path,
-          })
+      ? t("deferredApprovalChip.labelApproveSession", {
+          toolName: target.toolName,
+          path: plan.path,
+        })
       : intent.kind === "approve"
         ? t("deferredApprovalChip.labelApprove", { toolName: target.toolName })
         : t("deferredApprovalChip.labelReject", { toolName: target.toolName });
@@ -255,9 +223,7 @@ export function DeferredApprovalChip({
   // narrow one — the button names the breadth it is about to apply.
   const action =
     intent.kind === "approve"
-      ? plan?.widensBeyondDefault
-        ? t("deferredApprovalChip.actionApproveAlways")
-        : t("deferredApprovalChip.actionApprove")
+      ? t("deferredApprovalChip.actionApprove")
       : t("deferredApprovalChip.actionReject");
 
   return (
