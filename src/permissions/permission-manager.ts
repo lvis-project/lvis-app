@@ -261,7 +261,18 @@ export interface ReviewerDispatchInput {
   category: ToolCategory;
   /** Manifest-declared path-bearing argument selectors. Dotted selectors are supported. */
   pathFields: readonly string[];
-  /** DLP-redacted finalInput — caller is responsible for redaction. */
+  /**
+   * RAW finalized tool input — the arguments the tool will actually run with.
+   *
+   * Deliberately NOT pre-redacted. A verdict computed on masked text is a
+   * verdict about data that does not exist: DLP masking can break a URL parse
+   * or hide a trusted hostname, so the same call graded LOW by the foreground
+   * modal lane (`tryUserApprovalMemorySkip`, which has always classified raw
+   * input) graded HIGH here. Redaction is applied at each SINK instead —
+   * {@link buildUserPrompt} for the reviewer LLM, {@link summariseInput} for the
+   * deferred queue, `maskSensitiveData` for the sandbox audit — so no lane can
+   * change the verdict by pre-masking.
+   */
   finalInput: Record<string, unknown>;
   /**
    * The cwd the tool will execute against. Threaded into
@@ -278,8 +289,10 @@ export interface ReviewerDispatchInput {
    */
   auditInput?: Record<string, unknown>;
   /**
-   * Raw invocation identity for local approval/cache matching. This must not be
-   * sent to the reviewer classifier, deferred queue, or sandbox audit.
+   * Invocation identity for local approval/cache matching, when it must differ
+   * from {@link finalInput}. It no longer normally does — the pipeline lanes
+   * pass one raw object — so this defaults to `finalInput`. Retained for callers
+   * that genuinely key approval identity on a narrowed projection.
    */
   cacheIdentityInput?: Record<string, unknown>;
   /** Captured policy/sandbox context for user review. */
@@ -1581,7 +1594,10 @@ export class PermissionManager {
           // for this invocation and can never reappear as an eligible "cache"
           // rationale outcome on the next call.
           if (outcome === "fresh") {
-            await cache.store(lookupKey, cacheCtx, verdict);
+            // The verdict cache is the one sink written BEFORE the common
+            // redaction point below, so it redacts its own copy. A cache hit
+            // then replays an already-masked reason.
+            await cache.store(lookupKey, cacheCtx, redactVerdictReason(verdict));
           }
         }
       } catch (err) {
@@ -1592,6 +1608,16 @@ export class PermissionManager {
         llmVerdictForAudit = classifier instanceof LlmRiskClassifier ? "high" : null;
       }
     }
+
+    // ── Verdict reason redaction ──────────────────────────────────────────
+    // The classifier grades RAW input (see ReviewerDispatchInput.finalInput), so
+    // a classifier reason may echo argument text — and `reason` is display data:
+    // it is broadcast to the renderer as a permission-review event, written to
+    // the deferred queue and recorded in the sandbox audit. The host does not
+    // trust a classifier to have redacted its own prose. Mask HERE, on the one
+    // path every sink downstream of this point shares. The verdict LEVEL, which
+    // is the only field any decision reads, is untouched.
+    verdict = redactVerdictReason(verdict);
 
     // ── S2 audit emit ─────────────────────────────────────────────────────
     // Emit a sandbox audit entry for every dispatchReviewer call so the
@@ -1972,14 +1998,32 @@ function normalizeApprovalCacheKey(key: string | undefined): string | null {
 }
 
 /**
+ * DLP-mask a reviewer verdict's human-readable `reason`.
+ *
+ * Only the prose moves; `level` is the field every decision reads and is left
+ * exactly as the classifier produced it. Applied by {@link
+ * PermissionManager.dispatchReviewer} so no sink downstream — renderer event,
+ * deferred queue, sandbox audit, verdict cache — has to trust that a classifier
+ * (or a provider's error text) redacted its own output.
+ */
+function redactVerdictReason(verdict: RiskVerdict): RiskVerdict {
+  const masked = maskSensitiveData(verdict.reason).masked;
+  return masked === verdict.reason ? verdict : { ...verdict, reason: masked };
+}
+
+/**
  * Permission policy P3 — render a deferred-queue-friendly summary of `finalInput`.
- * Caller is expected to have already DLP-redacted; this is a pure
- * length-cap so the queue file stays manageable. Keys are sorted for
- * deterministic display.
+ *
+ * Redacts HERE rather than trusting the caller to have done it. The classifier
+ * is fed raw input on purpose (a verdict about masked text is a verdict about
+ * data that does not exist), so this sink — a file on disk — owns its own
+ * masking, exactly like {@link summarizeInputForDeferred} on the pipeline side.
+ * Keys are sorted for deterministic display, then the string is length-capped so
+ * the queue file stays manageable.
  */
 function summariseInput(input: Record<string, unknown>): string {
   const sorted: Record<string, unknown> = {};
   for (const k of Object.keys(input).sort()) sorted[k] = input[k];
-  const json = JSON.stringify(sorted);
+  const json = maskSensitiveData(JSON.stringify(sorted)).masked;
   return json.length > 240 ? json.slice(0, 240) + "…" : json;
 }

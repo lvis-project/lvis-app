@@ -90,11 +90,19 @@ export function maxVerdict(a: RiskVerdict, b: RiskVerdict): RiskVerdict {
 }
 
 /**
- * Per-invocation context passed into a classifier. `finalInput` MUST
- * already be DLP-redacted by the caller for non-LLM paths; the LLM
- * classifier additionally re-masks before formatting into the prompt
- * so the same secret never reaches the provider even if the upstream
- * forgot.
+ * Per-invocation context passed into a classifier.
+ *
+ * `finalInput` is RAW and must stay raw: every classifier rule grades it, and a
+ * rule that grades DLP-masked text grades data that does not exist. Masking a
+ * value can destroy the very signal a rule keys on — `https://live-corp.openai.
+ * azure.com/x` masks to `https://[REDACTED:TOKEN].openai.azure.com/x`, which no
+ * longer parses as a URL, so the trusted-host rule stops matching and the call
+ * rates HIGH instead of LOW. Pre-masking on one lane and not another is how the
+ * same call got two different verdicts.
+ *
+ * DLP is applied at the SINKS, not at the input: {@link buildUserPrompt} masks
+ * every value before the reviewer LLM sees it (so a secret never reaches the
+ * provider), the deferred queue and the sandbox audit mask before writing.
  */
 export interface ToolInvocationContext {
   toolName: string;
