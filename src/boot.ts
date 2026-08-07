@@ -520,19 +520,34 @@ export async function bootstrap(
   await setupWorkBoard(ctx);
   await setupWorkflowStores(ctx);
   await setupMarketplace(ctx);
+  // ONE cleanup service set for every boot entry point into
+  // plugins/uninstall-lifecycle. It used to be hand-spelled per call site, and
+  // `emitHostEvent` — optional on the dep interface, so its absence type-checks
+  // — was passed by only one of them. Without it a completed cleanup emits no
+  // `plugin.uninstalled`, and that event is what drops the stale registry-entry
+  // cache (boot/steps/plugin-runtime.ts, "so a re-install does not inherit the
+  // previous Tier-3 bypass or manifest SHA decision"). The subscriber is
+  // registered by initPluginRuntime above, so it is live for both uses below.
+  //
+  // `refreshPluginNotifications` is deliberately NOT in this set: it re-registers
+  // the notification bridge against a renderer window, and the first use below
+  // runs before conversation wiring has one. The renderer-driven (IPC) and
+  // deep-link wirings pass it because they run with a live window; boot does not.
+  const pluginStateCleanupDeps = {
+    pluginRuntime,
+    settingsService,
+    pluginPaths,
+    clearAuthPartitionService,
+    listPluginAuthPartitionsService: getTrackedPluginAuthPartitions,
+    forgetPluginAuthPartitionsService: forgetTrackedPluginAuthPartitions,
+    drainPluginInstallLockOperationsService: drainPluginInstallLockOperations,
+    emitHostEvent,
+    log,
+  };
   const unresolvedUninstallCleanups =
     await recoverPendingPluginUninstallCleanups({
       pluginMarketplace: ctx.pluginMarketplace,
-      pluginRuntime,
-      settingsService,
-      pluginPaths,
-      clearAuthPartitionService,
-      listPluginAuthPartitionsService: getTrackedPluginAuthPartitions,
-      forgetPluginAuthPartitionsService:
-        forgetTrackedPluginAuthPartitions,
-      drainPluginInstallLockOperationsService:
-        drainPluginInstallLockOperations,
-      log,
+      ...pluginStateCleanupDeps,
     });
   if (unresolvedUninstallCleanups.length > 0) {
     ctx.bootAuditLogger.log({
@@ -637,16 +652,6 @@ export async function bootstrap(
   // commits verified bytes/receipt/registry only: it never publishes or starts
   // a candidate. startPlugins() seals admission synchronously, waits for the
   // tail (including rollback), then loads the one committed registry snapshot.
-  const pluginStateCleanupDeps = {
-    pluginRuntime,
-    settingsService,
-    pluginPaths,
-    clearAuthPartitionService,
-    listPluginAuthPartitionsService: getTrackedPluginAuthPartitions,
-    forgetPluginAuthPartitionsService: forgetTrackedPluginAuthPartitions,
-    drainPluginInstallLockOperationsService: drainPluginInstallLockOperations,
-    log,
-  };
   const managedPreStartSync = runManagedBootstrap({
     pluginMarketplace: ctx.pluginMarketplace,
     ensurePluginStateReadyForInstall: (pluginId) =>
@@ -661,7 +666,7 @@ export async function bootstrap(
       removeQuiescentPluginResidualState(
         { ...removal, installPluginId: removal.pluginId },
         commitRegistryRemoval,
-        { ...pluginStateCleanupDeps, emitHostEvent: emitHostEvent },
+        pluginStateCleanupDeps,
       ),
     mainWindow,
     marketplace: ctx.settingsService.get("marketplace"),
