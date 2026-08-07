@@ -1,11 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import type { InstallPolicy, PluginAccessSpec, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
 import { plog, PluginPhase } from "./lifecycle-log.js";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
+import { resolveTrustedRegistryManifestPath } from "./registry-manifest-trust.js";
 
 /**
  * Pre-PR #430 registry shape — `installedBy` ("admin"|"user") and
@@ -407,12 +408,38 @@ export function resolveManifestPathsFromRegistry(
   registryPath: string,
   entries: PluginRegistryEntry[],
 ): string[] {
-  const baseDir = dirname(registryPath);
+  // `dirname(registryPath) === pluginsRoot` by construction —
+  // `resolvePluginPaths` sets `registryPath: resolve(pluginsRoot,
+  // "registry.json")`.
+  const pluginsRoot = dirname(registryPath);
   // Keep inactive manifest paths discoverable as metadata. PluginRuntime does
   // not instantiate them or assign an active generation pointer.
+  //
+  // Trust-root containment is the SAME check the sibling
+  // `resolveManifestLoadPlan` (runtime/snapshots.ts) applies to this field,
+  // and it is applied here for the same reason: `validateRegistryEntry` only
+  // checks that `manifestPath` is a non-empty string, so a crafted
+  // `"../../etc/passwd"` reaches this function intact. Untrusted rows are
+  // dropped, matching the sibling's behaviour.
   return entries
     .filter((entry) => entry.pendingUpdate === undefined)
-    .map((entry) => (isAbsolute(entry.manifestPath) ? entry.manifestPath : resolve(baseDir, entry.manifestPath)));
+    .flatMap((entry) => {
+      const trusted = resolveTrustedRegistryManifestPath(entry.manifestPath, pluginsRoot);
+      if (trusted === null) {
+        plog(
+          "warn",
+          {
+            pluginId: entry.id,
+            phase: PluginPhase.DISCOVERY_SKIP,
+            reason: "untrusted_manifest_path",
+            manifestPath: entry.manifestPath,
+          },
+          "ignoring untrusted registry manifest path",
+        );
+        return [];
+      }
+      return [trusted];
+    });
 }
 
 // ─── In-process async mutex ──────────────────────────────────────────

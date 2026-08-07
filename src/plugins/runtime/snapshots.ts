@@ -3,49 +3,21 @@
  * trust-boundary checks for registry manifest paths.
  */
 
-import { isAbsolute, relative, resolve, dirname } from "node:path";
-import { realpathSync } from "node:fs";
+import { isAbsolute, resolve, dirname } from "node:path";
 import type { ValidateFunction } from "ajv";
 import type { PluginAccessSpec } from "../types.js";
 import type { ManifestLoadPlan, ManifestSnapshot } from "./types.js";
 import { parsePluginJson } from "./manifest-validation.js";
 import { readPluginRegistry } from "../registry.js";
+import { isTrustedRegistryManifestPath } from "../registry-manifest-trust.js";
 import { createLogger } from "../../lib/logger.js";
 const log = createLogger("plugin-runtime");
 
-/**
- * Trust-root containment check for registry-recorded manifest paths.
- *
- * A registry entry's manifestPath is trusted iff its `realpathSync()`
- * (symlinks resolved) is contained under `realpathSync(pluginsRoot)`.
- */
-export function isTrustedRegistryManifestPath(
-  manifestPath: string,
-  pluginsRoot: string,
-): boolean {
-  if (!isAbsolute(manifestPath)) return true;
-  let realManifest: string;
-  let realRoot: string;
-  try {
-    realManifest = realpathSync(manifestPath);
-    realRoot = realpathSync(pluginsRoot);
-  } catch {
-    return false;
-  }
-  return isPathContained(realRoot, realManifest);
-}
-
-/**
- * Containment via `path.relative` — null/empty/`..`/absolute means the
- * candidate is outside `parent`.
- */
-export function isPathContained(parent: string, candidate: string): boolean {
-  const rel = relative(parent, candidate);
-  if (rel === "" || rel === ".") return false;
-  if (rel.startsWith("..")) return false;
-  if (isAbsolute(rel)) return false;
-  return true;
-}
+// The trust predicate lives in `../registry-manifest-trust.js` — one authority
+// shared with `resolveManifestPathsFromRegistry` (registry.ts), which resolves
+// the SAME field from the SAME registry for the same purpose. It cannot live
+// in registry.ts: this module already imports that one.
+export { isTrustedRegistryManifestPath } from "../registry-manifest-trust.js";
 
 /**
  * Build a ManifestLoadPlan from manifestPaths + registry.
