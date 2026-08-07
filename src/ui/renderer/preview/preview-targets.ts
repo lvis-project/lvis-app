@@ -4,6 +4,14 @@ import type { Attachment } from "../types/attachments.js";
 import { extractFileEditDiff, type FileEditDiffData } from "../utils/file-diff.js";
 import { parseRenderHtmlResult } from "../utils/html-preview.js";
 import { getToolDisplayName } from "../utils/tool-display.js";
+import {
+  FILE_WRITE_TOOL_NAMES,
+  READ_TOOL_PATTERN,
+  TOOL_PATH_KEYS,
+  TOOL_URL_PATTERN,
+  extractPatchPaths,
+  isGlobPattern,
+} from "../utils/tool-input-paths.js";
 import { displaySafeLabel } from "../../../shared/display-safe-text.js";
 import { MCP_RESOURCE_URI_MAX_CHARS } from "../../../shared/mcp-resource-bounds.js";
 
@@ -128,22 +136,6 @@ export interface ChatPreviewModel {
   files: WorkspaceFileItem[];
 }
 
-const PATH_KEYS = new Set([
-  "path",
-  "paths",
-  "file",
-  "files",
-  "filepath",
-  "filepaths",
-  "filename",
-  "filenames",
-  "target",
-  "targets",
-]);
-
-const READ_TOOL_PATTERN = /(^|[._:-])(read|open|cat|grep|rg|search|find|list|glob)([._:-]|$)/i;
-const WRITE_TOOL_NAMES = new Set(["edit_file", "apply_patch", "write_file"]);
-const URL_PATTERN = /\bhttps?:\/\/[^\s"'<>]+/gi;
 const MAX_TEXT_PREVIEW_CHARS = 12_000;
 
 function basename(path: string): string {
@@ -185,17 +177,6 @@ function isBareFilename(value: string): boolean {
   return !/[\\/]/.test(value) && /\.[A-Za-z0-9]{1,12}$/.test(value);
 }
 
-/**
- * A glob pattern (`**\/*architecture*.md`, `foo?.ts`, `a{b,c}`) is a tool
- * ARGUMENT, not a concrete file — it must never become a file-preview target.
- * `isLikelyPath` alone accepts `**\/*.md` (it has a `/` and a `.md` tail), so
- * the diagnosis-③ placeholder card came from a glob leaking into a file target.
- * The pattern's real MATCHES are surfaced separately via {@link extractGlobMatches}.
- */
-function isGlobPattern(value: string): boolean {
-  return /[*?[\]{}]/.test(value) || value.includes("**");
-}
-
 function isToolResultStub(value: string): boolean {
   return value.startsWith("[tool_result stripped:") || value.startsWith("[tool_result truncated by host");
 }
@@ -209,7 +190,7 @@ function collectUrls(value: unknown): string[] {
   const urls = new Set<string>();
   visitUnknown(value, (_key, item) => {
     if (typeof item !== "string") return;
-    for (const match of item.matchAll(URL_PATTERN)) {
+    for (const match of item.matchAll(TOOL_URL_PATTERN)) {
       urls.add(match[0]);
     }
   });
@@ -220,9 +201,18 @@ function collectPathStrings(value: unknown): string[] {
   const paths = new Set<string>();
   visitUnknown(value, (key, item) => {
     if (typeof item !== "string") return;
+    // An `apply_patch` body names the files it writes only inside the patch
+    // text; the call's own arguments do not list them. Without this branch the
+    // action panel emits those paths and this side does not, so the row's
+    // lookup against `targets` misses and the open falls to the dead-end
+    // file-browser branch.
+    if (key != null && key.toLowerCase() === "patch") {
+      for (const patched of extractPatchPaths(item)) paths.add(patched);
+      return;
+    }
     // Glob patterns are tool arguments, never files — never a file target.
     if (isGlobPattern(item)) return;
-    if (key != null && PATH_KEYS.has(key.toLowerCase())) {
+    if (key != null && TOOL_PATH_KEYS.has(key.toLowerCase())) {
       // A path-keyed value may be a bare working-dir filename (no separator);
       // accept it here where the key vouches for its role as a path.
       if (isLikelyPath(item) || isBareFilename(item)) paths.add(item);
@@ -326,7 +316,7 @@ function toolSourceLabel(tool: ToolItem): string {
 }
 
 function toolOperation(tool: ToolItem): WorkspaceFileItem["operation"] {
-  if (WRITE_TOOL_NAMES.has(tool.name) || tool.category === "write") return "write";
+  if (FILE_WRITE_TOOL_NAMES.has(tool.name) || tool.category === "write") return "write";
   if (tool.category === "read" || READ_TOOL_PATTERN.test(tool.name)) return "read";
   return "tool";
 }
