@@ -52,6 +52,7 @@ import {
 } from "../shared/llm-model-list.js";
 import {
   isMarketplaceProviderPresetId,
+  modelDiscoveryPolicyUsesSeededOptions,
   normalizeMarketplaceProviderPreset,
   type MarketplaceInstalledProviderPreset,
 } from "../shared/marketplace-package-assets.js";
@@ -167,7 +168,7 @@ function marketplaceProviderPresetUsesSeededModelOptions(
   installedProviderPresets: readonly MarketplaceInstalledProviderPreset[] | undefined,
 ): boolean {
   const preset = marketplaceProviderPresetForId(providerId, installedProviderPresets);
-  return preset?.modelDiscoveryPolicy === "manual" || preset?.modelDiscoveryPolicy === "static";
+  return modelDiscoveryPolicyUsesSeededOptions(preset?.modelDiscoveryPolicy);
 }
 
 function bindOpenAICompatibleVendorBlockToMarketplaceProviderPreset(
