@@ -3,29 +3,22 @@ import type {
   ActionPanelActivityItem,
   ActionPanelActivityState,
 } from "../components/ActionPanel.js";
+import {
+  FILE_WRITE_TOOL_NAMES,
+  READ_TOOL_PATTERN,
+  TOOL_PATH_KEYS,
+  TOOL_URL_PATTERN,
+  extractPatchPaths,
+  isGlobPattern,
+} from "./tool-input-paths.js";
 
 const ACTION_PANEL_ACTIVITY_LIMIT = 5;
 const ACTION_PANEL_ICON_LIMIT = 10;
-const FILE_CHANGE_TOOL_NAMES = new Set(["edit_file", "apply_patch", "write_file"]);
-const READ_TOOL_PATTERN = /(^|[._:-])(read|open|cat|grep|rg|search|find|list|glob)([._:-]|$)/i;
 const TERMINAL_TOOL_PATTERN = /(^|[._:-])(shell|bash|cmd|powershell|terminal|exec|run)([._:-]|$)/i;
 const BROWSER_TOOL_PATTERN = /(browser|playwright|screenshot|chrome|viewport|open_url|web_page|web_fetch|web_search|web_patch|fetch)/i;
-const ACTION_PANEL_URL_PATTERN = /\bhttps?:\/\/[^\s"'<>]+/gi;
-const ACTION_PANEL_PATH_KEYS = new Set([
-  "path",
-  "paths",
-  "file",
-  "files",
-  "filepath",
-  "filepaths",
-  "filename",
-  "filenames",
-  "target",
-  "targets",
-]);
 
 export function isFileChangeTool(tool: ToolEntryItem): boolean {
-  return FILE_CHANGE_TOOL_NAMES.has(tool.name) || tool.category === "write";
+  return FILE_WRITE_TOOL_NAMES.has(tool.name) || tool.category === "write";
 }
 
 export function isReadTool(tool: ToolEntryItem): boolean {
@@ -55,6 +48,10 @@ export function looksLikeUrl(value: string): boolean {
 export function looksLikeFilePath(value: string): boolean {
   const trimmed = value.trim();
   if (!trimmed || looksLikeUrl(trimmed)) return false;
+  // A glob is a tool argument, never a concrete file. The preview derivation
+  // has always excluded it; without the same guard here an action-panel row
+  // for `src/**` can never resolve against the preview model.
+  if (isGlobPattern(trimmed)) return false;
   return /^[A-Za-z]:[\\/]/.test(trimmed) ||
     trimmed.startsWith("~/") ||
     trimmed.startsWith("./") ||
@@ -69,7 +66,7 @@ export function collectUrls(value: unknown, depth = 0): string[] {
   if (typeof value === "string") {
     const trimmed = value.trim();
     if (looksLikeUrl(trimmed)) return [trimmed.replace(/[),.;]+$/g, "")];
-    return Array.from(value.matchAll(ACTION_PANEL_URL_PATTERN), (match) => match[0].replace(/[),.;]+$/g, ""));
+    return Array.from(value.matchAll(TOOL_URL_PATTERN), (match) => match[0].replace(/[),.;]+$/g, ""));
   }
   if (Array.isArray(value)) return value.flatMap((item) => collectUrls(item, depth + 1));
   if (!isRecord(value)) return [];
@@ -85,7 +82,7 @@ export function collectPathStrings(value: unknown, depth = 0): string[] {
   const out: string[] = [];
   for (const [key, child] of Object.entries(value)) {
     const normalizedKey = key.toLowerCase();
-    if (ACTION_PANEL_PATH_KEYS.has(normalizedKey)) {
+    if (TOOL_PATH_KEYS.has(normalizedKey)) {
       out.push(...collectPathStrings(child, depth + 1));
     } else if (normalizedKey === "patch" && typeof child === "string") {
       out.push(...extractPatchPaths(child));
@@ -94,17 +91,6 @@ export function collectPathStrings(value: unknown, depth = 0): string[] {
     }
   }
   return out;
-}
-
-export function extractPatchPaths(patch: string): string[] {
-  const paths: string[] = [];
-  const pattern = /^\*\*\* (?:Add|Update|Delete) File: (.+)$/gm;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(patch)) !== null) {
-    const value = match[1]?.trim();
-    if (value) paths.push(value);
-  }
-  return paths;
 }
 
 export function addUniqueActivity(

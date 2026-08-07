@@ -11,10 +11,11 @@ import {
   looksLikeFilePath,
   collectUrls,
   collectPathStrings,
-  extractPatchPaths,
   formatToolSource,
   formatUrlOrigin,
 } from "../utils/action-panel-activity.js";
+// Moved to the shared authority both file-target derivations now read from.
+import { extractPatchPaths } from "../utils/tool-input-paths.js";
 
 function tool(partial: Partial<ToolEntryItem> & { name: string }): ToolEntryItem {
   return {
