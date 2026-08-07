@@ -218,6 +218,16 @@ export function isIssuedHostShellExecutionPlan(
  *     use `LoopbackTransport` (in-process) — not ASRT-wrapped.
  *   - other `builtin` tools (read_file, write_file, list_files, …) run
  *     IN-PROCESS in the host — no OS jail either.
+ *
+ * This is one of THREE shell-tool derivations in the host, and it is
+ * intentionally the NARROWEST — an exact two-name builtin set, not a prefix
+ * rule. It must not be unified with `BashAstValidator._isBashTool`
+ * (`src/main/bash-ast-validator.ts`, a deliberately wide name regex covering
+ * plugin/MCP tools named `shell*`/`exec*`/…) nor with the canonical-instance
+ * discriminator in `src/tools/invocation-runner.ts`: widening this set would
+ * report confinement for a substrate that is not actually ASRT-wrapped.
+ * The asymmetry is pinned by
+ * `src/tools/__tests__/executor-shell-tool-identity.test.ts`.
  */
 const ASRT_WRAPPED_SHELL_TOOLS: ReadonlySet<string> = new Set(["bash", "powershell"]);
 
