@@ -459,7 +459,7 @@ describe("ConversationLoop queryLoop", () => {
           isApproved: async () => true,
           approve: async () => undefined,
         } as never,
-        getApprovalGate: () => undefined,
+        approvalGate: undefined as never,
         emit: () => undefined,
       }),
       );
@@ -532,7 +532,7 @@ describe("ConversationLoop queryLoop", () => {
           isApproved: async () => true,
           approve: async () => undefined,
         } as never,
-        getApprovalGate: () => undefined,
+        approvalGate: undefined as never,
         emit: () => undefined,
       }),
       );
