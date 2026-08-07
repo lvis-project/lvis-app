@@ -20,6 +20,7 @@ const {
   sanitizeUrlForLog,
   buildAuthResult,
   buildAuthWindowShellHtml,
+  openAuthWindow,
   wirePluginAuthPartitionPersistence,
   seedPluginAuthPartitions,
   rememberPluginAuthPartition,
@@ -102,6 +103,68 @@ describe("filterCookiesByHost", () => {
       name: "n", value: "v", domain: ".example.com", path: "/p",
       secure: true, httpOnly: true, expirationDate: 1700000000,
     });
+  });
+});
+
+/**
+ * These drive the REAL producer — the exported `openAuthWindow` entry point
+ * that `hostApi.openAuthWindow` calls with the plugin's own `opts` object
+ * (src/boot/steps/plugin-runtime/host-api-factory.ts spreads `opts` through
+ * untouched). Every rejection below is reached before any BrowserWindow or
+ * session partition is constructed, so no Electron surface is exercised.
+ *
+ * Asserting on `filterCookiesByHost` alone would NOT cover this: that helper
+ * is handed an already-accepted list. The gate is at intake.
+ */
+describe("openAuthWindow — cookieHosts is validated by the host-allow-list SoT", () => {
+  const parent = {} as never;
+  function call(cookieHosts: unknown) {
+    return openAuthWindow(parent, {
+      url: "https://login.example.com/start",
+      completionUrlPatterns: ["portal.example.com/done"],
+      cookieHosts: cookieHosts as string[],
+    });
+  }
+
+  it("rejects a bare public suffix — 'com' would blanket-match the whole jar", async () => {
+    await expect(call(["com"])).rejects.toThrow(/cookieHosts rejected/);
+    await expect(call(["com"])).rejects.toThrow(/public-suffix/);
+  });
+
+  it("rejects a single-label host", async () => {
+    await expect(call(["localhost"])).rejects.toThrow(/at least one dot/);
+  });
+
+  it("rejects a wildcard", async () => {
+    await expect(call(["*.example.com"])).rejects.toThrow(/wildcard/);
+  });
+
+  it("rejects an IDN-punycode homoglyph label", async () => {
+    await expect(call(["xn--80ak6aa92e.com"])).rejects.toThrow(/punycode/);
+  });
+
+  it("rejects a URL where a hostname is required", async () => {
+    await expect(call(["https://portal.example.com/"])).rejects.toThrow(/hostname, not a URL/);
+  });
+
+  it("rejects a list longer than the SoT cap", async () => {
+    const many = Array.from({ length: 17 }, (_, i) => `h${i}.example.com`);
+    await expect(call(many)).rejects.toThrow(/at most 16/);
+  });
+
+  it("still rejects an all-blank list with the original message", async () => {
+    await expect(call(["  ", ""])).rejects.toThrow(/non-empty array of non-blank strings/);
+    await expect(call([])).rejects.toThrow(/non-empty array of non-blank strings/);
+  });
+
+  it("accepts a well-formed list — it gets past validation into window setup", async () => {
+    // The BrowserWindow constructor is a bare `vi.fn()` in this file's electron
+    // stub, so a list that PASSES validation fails later with a different,
+    // non-validation error. That distinction is the positive assertion: the
+    // rejection reason must not be a cookieHosts one.
+    await expect(call(["portal.example.com", ".SSO.example.com "])).rejects.not.toThrow(
+      /cookieHosts/,
+    );
   });
 });
 
