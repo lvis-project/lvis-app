@@ -26,10 +26,10 @@ import { z } from "zod";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
   MAX_TEXT_FILE_BYTES,
-  expandTilde,
   isBinaryFile,
   readTextFileWindow,
 } from "./file-read-core.js";
+import { expandLeadingTilde } from "../shared/home-tilde.js";
 import { globToRegExp } from "../lib/glob-matcher.js";
 import { writeDiffSidecar, WRITE_DIFF_PREVIEW_LIMIT } from "./write-diff-cache.js";
 import {
@@ -126,7 +126,7 @@ abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
   readonly pathFields: readonly string[] = ["path"];
 
   protected resolvePath(inputPath: string, ctx: ToolExecutionContext): string {
-    const expanded = expandTilde(inputPath);
+    const expanded = expandLeadingTilde(inputPath);
     return isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(ctx.cwd, expanded);
   }
 
@@ -146,7 +146,7 @@ abstract class FileTool<TSchema extends z.ZodTypeAny> extends ZodTool<TSchema> {
     if (!ctx?.cwd) {
       throw new Error(`${this.name} approvalCacheKey requires explicit cwd`);
     }
-    const expanded = expandTilde(inputPath);
+    const expanded = expandLeadingTilde(inputPath);
     return isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(ctx.cwd, expanded);
   }
 

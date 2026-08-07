@@ -5,8 +5,8 @@
  * state is touched; every function is a free transformation over the tool
  * descriptor + finalized input.
  */
-import { homedir } from "node:os";
 import { resolve as pathResolve } from "node:path";
+import { expandLeadingTilde } from "../../shared/home-tilde.js";
 import type { Tool } from "../base.js";
 import {
   findShellPathPolicyViolation,
@@ -56,12 +56,11 @@ function getDottedFieldValue(input: Record<string, unknown>, field: string): unk
 }
 
 export function resolveToolPathForPermission(value: string, cwd: string): string {
-  const expanded = value === "~"
-    ? homedir()
-    : value.startsWith("~/") || value.startsWith("~\\")
-      ? pathResolve(homedir(), value.slice(2))
-      : value;
-  return pathResolve(pathResolve(cwd), expanded);
+  // Tilde expansion is delegated to `shared/home-tilde.ts` — the SAME function
+  // the tool side calls (`file-read-core.assertReadableFilePath`,
+  // `FileTool.resolvePath`, `FileTool.resolveApprovalPath`). If this diverges
+  // again, the permission layer judges a file the tool never opens.
+  return pathResolve(pathResolve(cwd), expandLeadingTilde(value));
 }
 
 export function shellPathPolicyViolation(
