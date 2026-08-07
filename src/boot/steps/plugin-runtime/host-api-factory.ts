@@ -27,7 +27,11 @@ import { recordEffect } from "../../../permissions/effect-ledger.js";
 import { methodEffect } from "../../../permissions/effect-kind.js";
 import type { PluginAccessSpec, PluginRegistryEntry } from "../../../plugins/types.js";
 import type { PluginHostApiIncarnation } from "../../../plugins/runtime/index.js";
-import { createPluginStorage } from "../../../plugins/storage.js";
+import {
+  createPluginStorage,
+  createPluginStorageAuditSink,
+  type PluginStorageAuditLog,
+} from "../../../plugins/storage.js";
 import {
   isPluginInstallLockHeld,
   withPluginInstallLock,
@@ -154,6 +158,13 @@ export interface CreateHostApiFactoryDeps {
   readAppPreference: (pluginId: string, key: string) => unknown;
   settingsService: SettingsService;
   bootAuditLogger: AuditLogger;
+  /**
+   * The very callback handed to `new PluginRuntime({ auditLog })`, narrowed to
+   * what the storage rejection sink needs. Reused (rather than re-derived from
+   * `bootAuditLogger`) so a storage refusal on the host-plugin path and the
+   * same refusal on the webview-bridge path land as one record shape.
+   */
+  pluginRuntimeAuditLog: PluginStorageAuditLog;
   networkFetch: typeof fetch;
   mainWindow: BrowserWindow;
   openAuthWindowService: (
@@ -201,6 +212,7 @@ export function createHostApiFactory(
     readAppPreference,
     settingsService,
     bootAuditLogger,
+    pluginRuntimeAuditLog,
     networkFetch,
     mainWindow,
     openAuthWindowService,
@@ -351,16 +363,11 @@ export function createHostApiFactory(
       // the single verb snapshot; the wrapper skips it.
       return enforceActiveHostApi(pluginId, hostIncarnation, enforceMutatingEffects<PluginHostApi>(
         instrumentEffectsByPath<PluginHostApi>({
-      storage: createPluginStorage(pluginId, pluginDataDir, (msg, meta) => {
-        try {
-          bootAuditLogger.log({
-            timestamp: new Date().toISOString(),
-            sessionId: "plugin",
-            type: "warn",
-            input: `[plugin:${pluginId}] storage_${msg.replace(/\s+/g, "_")} ${typeof meta === "object" ? JSON.stringify(meta) : ""}`.trim(),
-          });
-        } catch { /* audit must not break host */ }
-      }),
+      storage: createPluginStorage(
+        pluginId,
+        pluginDataDir,
+        createPluginStorageAuditSink(pluginId, pluginRuntimeAuditLog),
+      ),
       // §9.2 Track B — typed plugin config access, scoped to this pluginId.
       // `get` reads the live merged config (manifest defaults + saved
       //   overrides) directly from settingsService so a write from another
