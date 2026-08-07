@@ -266,7 +266,6 @@ describe("MarketplaceTab", () => {
     };
     const api = marketplaceTabApi({
       listMarketplacePlugins: vi.fn().mockResolvedValue([privateNetworkPlugin]),
-      installMarketplacePlugin: vi.fn().mockResolvedValue({ ok: true }),
     });
     const { findByTestId } = render(<MarketplaceTab {...defaultProps(api)} />);
 
