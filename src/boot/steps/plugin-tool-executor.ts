@@ -16,7 +16,10 @@ import { BrowserWindow as BrowserWindowValue } from "electron";
 import { createHookRunner } from "../conversation.js";
 import { wireHookSystem } from "./hook-system-wiring.js";
 import { ToolExecutor } from "../../tools/executor.js";
-import { createPluginSurfacePermissionScope } from "../plugin-surface-permissions.js";
+import {
+  createPluginSurfacePermissionScope,
+  setActivePluginSurfacePermissionScope,
+} from "../plugin-surface-permissions.js";
 import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
 import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
@@ -131,7 +134,13 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     onSessionDirectoryAdded: () => {
       broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
     },
+    onSessionDirectoriesRevoked: () => {
+      broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+    },
   });
+  // Publish it as a live-scope owner so a workspace-root removal sweeps plugin
+  // session grants alongside the conversation loops and the routine engine.
+  setActivePluginSurfacePermissionScope(pluginSurfacePermissionScope);
   const revokeInvalidatedPluginAccount = (
     pluginId: string,
     invalidatedAccountHash: string,

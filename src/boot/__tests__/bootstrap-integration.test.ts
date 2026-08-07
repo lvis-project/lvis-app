@@ -308,7 +308,9 @@ vi.mock("../steps/work-board-migration.js", () => ({
 
 vi.mock("../plugin-surface-permissions.js", () => ({
   createPluginSurfacePermissionScope: vi.fn(() => ({ createPermissionContext: vi.fn(),
+    revokeWorkspaceRoot: vi.fn(() => ({ sessionDirectoriesRemoved: 0, turnDirectoriesRemoved: 0 })),
   })),
+  setActivePluginSurfacePermissionScope: vi.fn(),
 }));
 
 // ── data / mcp ───────────────────────────────────────────────────────────────
