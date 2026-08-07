@@ -44,6 +44,11 @@ import {
   caseFoldForMatch,
 } from "../sensitive-paths.js";
 import { isPathAllowed } from "../allowed-directories.js";
+import {
+  extractNetworkTarget,
+  NETWORK_TARGET_FIELDS,
+  type NetworkTarget,
+} from "./network-target.js";
 import { resolveToolPathForPermission } from "../../shared/tool-path-resolution.js";
 
 /** Verdict level — discrete enum. The reviewer lane never uses scalars. */
@@ -364,27 +369,6 @@ function extractShellCommand(input: Record<string, unknown>): string | null {
   return null;
 }
 
-interface NetworkTarget {
-  host: string;
-  path: string;
-}
-
-function extractNetworkTarget(input: Record<string, unknown>): NetworkTarget | null {
-  const candidates = ["url", "endpoint", "host", "uri"];
-  for (const k of candidates) {
-    const v = input[k];
-    if (typeof v !== "string" || v.length === 0) continue;
-    try {
-      const u = new URL(v);
-      return { host: u.hostname.toLowerCase(), path: u.pathname };
-    } catch {
-      // Not a URL — try direct host
-      if (/^[a-zA-Z0-9.-]+$/.test(v)) return { host: v.toLowerCase(), path: "" };
-    }
-  }
-  return null;
-}
-
 function extractNetworkHost(input: Record<string, unknown>): string | null {
   return extractNetworkTarget(input)?.host ?? null;
 }
@@ -428,10 +412,7 @@ function hasNetworkPayload(input: Record<string, unknown>): boolean {
 }
 
 const NETWORK_DESCRIPTOR_FIELDS: ReadonlySet<string> = new Set([
-  "url",
-  "endpoint",
-  "host",
-  "uri",
+  ...NETWORK_TARGET_FIELDS,
   "method",
   "httpMethod",
   "verb",
