@@ -99,7 +99,7 @@ describe("cost renders identically across the badge, the usage panel and the est
     tokensIn: 500_000,
     freshInputTokens: 500_000,
     tokensOut: 0,
-    pricing: { inputPer1M: 1, outputPer1M: 0, contextWindow: 1_000_000 },
+    pricing: { inputPer1M: 1, outputPer1M: 0 },
     vendor: "claude" as const,
   };
 
@@ -138,6 +138,46 @@ describe("cost renders identically across the badge, the usage panel and the est
     );
 
     await waitFor(() => expect(screen.getByText(/\$0\.500/)).toBeTruthy());
+  });
+
+  it("groups thousands on every surface — the separator was starred-view-only before", async () => {
+    render(
+      <TooltipProvider>
+        <TokenCostBadge
+          tokensIn={1_000_000}
+          freshInputTokens={1_000_000}
+          tokensOut={0}
+          pricing={{ inputPer1M: 1234.5, outputPer1M: 0 }}
+          vendor="claude"
+        />
+      </TooltipProvider>,
+    );
+    fireEvent.click(screen.getByTestId("token-cost-badge"));
+    expect(screen.getByText(/\$1,234\.50/)).toBeTruthy();
+    cleanup();
+
+    const api = {
+      starredRemove: vi.fn(async () => ({ ok: true })),
+      getUsageRange: vi.fn(async () => ({
+        today: { totalTokens: 1234, inputTokens: 1000, outputTokens: 234, cost: 1234.5 },
+        trend: [],
+      })),
+    } as unknown as Parameters<typeof StarredView>[0]["api"];
+    render(
+      <StarredView
+        api={api}
+        starred={[]}
+        sessions={[]}
+        workspaceProjects={[]}
+        currentSessionId=""
+        refreshStarred={vi.fn()}
+        onJumpToSession={vi.fn()}
+        onActivateHome={vi.fn()}
+      />,
+    );
+    await waitFor(() => expect(screen.getByText(/\$1,234\.50/)).toBeTruthy());
+
+    expect(formatCostBadge(1234.5)).toBe("~$1,234.50");
   });
 
   it("the pre-flight estimate badge differs from the settled cost only by its ~ prefix", () => {
