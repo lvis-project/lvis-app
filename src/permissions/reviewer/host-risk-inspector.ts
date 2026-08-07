@@ -15,16 +15,18 @@
  *    direction. The inspector never auto-classifies DOWN to `"read"` without
  *    positive evidence.
  *  - HOST-OWNED SIGNALS ONLY: shell commands are parsed from the call args and
- *    matched against a built-in read-only command set; filesystem reach is
- *    inferred from the actual path arguments and checked against
- *    `allowedDirectories`; network reach is inferred from URL-shaped args —
- *    none of these read the declared category.
- *  - NO GLOBAL STATE. Path containment reuses the same `sensitive-paths`
- *    canonicalization as {@link RuleBasedRiskClassifier} — a bounded `realpath`
- *    walk-up on the call's path ARGUMENTS (the only I/O here) — so containment
- *    math is identical across the two modules. The `allowedDirectories` arrive
- *    already canonicalized/case-folded (frozen-canonical contract) and are used
- *    as-is, without re-walking.
+ *    matched against a built-in read-only command set; network reach is inferred
+ *    from URL-shaped args — neither reads the declared category.
+ *  - NO PATH CONTAINMENT HERE. Layer-1 containment has ONE authority,
+ *    `isPathAllowed` (`permissions/allowed-directories.ts`), which BOTH
+ *    enforcement (`PermissionManager.checkPathScope`) and the reviewer's
+ *    {@link RuleBasedRiskClassifier} call. This module used to restate it, but
+ *    the answer never reached the output: a path argument is write-equivalent
+ *    whether it escapes the allowed scope (out-of-scope reach) or sits inside it
+ *    (no read-only proof), and "no signal at all" is write-equivalent too.
+ *    Containment refines nothing this function returns, so it is not computed —
+ *    and with it goes the `realpath` walk-up that was this module's only I/O.
+ *  - NO GLOBAL STATE and NO I/O: the inspector is pure string analysis.
  *
  * This module does NOT make the final permission decision and does NOT touch
  * {@link LlmRiskClassifier}. It only produces the effective `ToolCategory` that
@@ -32,7 +34,6 @@
  * exactly where the declared category was consumed before.
  */
 import type { ToolCategory } from "../../tools/types.js";
-import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
 import { tokenizeShell, type ShellLeaf } from "../../main/shell-tokenizer.js";
 
 /**
@@ -181,15 +182,6 @@ export interface HostRiskSignals {
   source: "builtin" | "plugin" | "mcp";
   /** The actual, post-hook tool-call arguments. */
   finalInput: Record<string, unknown>;
-  /**
-   * Path-bearing argument selectors INFERRED for this tool (dotted selectors
-   * supported). These are the tool's `pathFields`, kept as advisory hints —
-   * the inspector still verifies containment of
-   * whatever paths actually appear in the args.
-   */
-  pathFields: readonly string[];
-  /** Canonicalized allowed directories (Layer 1 scope). */
-  allowedDirectories: readonly string[];
 }
 
 /**
@@ -200,10 +192,11 @@ export interface HostRiskSignals {
  *     compound → `"read"`, otherwise `"shell"`. Checked before network so a
  *     command that invokes `curl`/`wget` stays shell-domain (higher risk).
  *  2. Network — a URL-shaped arg on a non-shell tool → `"network"`.
- *  3. Filesystem — a path arg that escapes `allowedDirectories` → `"write"`
- *     (out-of-scope reach is mutation-equivalent for policy); a contained path
- *     arg with no read-only proof → `"write"`.
- *  4. Default-strict — no positive read-only evidence → `"write"`.
+ *  3. Default-strict — no positive read-only evidence → `"write"`. This
+ *     subsumes every filesystem shape: a path argument is write-equivalent
+ *     whether it escapes the allowed scope (out-of-scope reach is
+ *     mutation-equivalent for policy) or is contained (no read-only proof).
+ *     Layer-1 containment is answered by `isPathAllowed`, not here.
  */
 export function inspectHostRisk(signals: HostRiskSignals): ToolCategory {
   // External MCP tools are foreign peers — the host assigns them `"network"`
@@ -226,19 +219,9 @@ export function inspectHostRisk(signals: HostRiskSignals): ToolCategory {
   // (2) Network — a URL-shaped argument on a non-shell tool.
   if (hasNetworkTarget(signals.finalInput)) return "network";
 
-  // (3) Filesystem — inspect the actual path arguments.
-  const paths = extractCallPaths(signals.finalInput, signals.pathFields);
-  if (paths.length > 0) {
-    // `allowedDirectories` are already canonical/case-folded (frozen contract) —
-    // re-canonicalizing would reintroduce realpath I/O and TOCTOU drift.
-    const escapes = paths.some((p) => !isInsideAllowed(p, signals.allowedDirectories));
-    if (escapes) return "write";
-    // A contained path argument with no read-only verb proof is still a
-    // potential mutation. Default-strict: treat as write.
-    return "write";
-  }
-
-  // (4) No host-owned signal proved read-only → default-strict write-equivalent.
+  // (3) No host-owned signal proved read-only → default-strict write-equivalent.
+  // Filesystem arguments land here on purpose: contained and escaping paths are
+  // both write-equivalent, so inspecting them cannot change this answer.
   return "write";
 }
 
@@ -642,47 +625,4 @@ function skipToSedLineEnd(script: string, start: number): number {
 function stripPath(token: string): string {
   const slash = token.lastIndexOf("/");
   return slash >= 0 ? token.slice(slash + 1) : token;
-}
-
-/**
- * Collect canonicalized path arguments from the call. Uses `pathFields` as the
- * primary selectors but the containment check below is what closes the
- * traversal vector — the declaration alone is advisory.
- */
-function extractCallPaths(
-  input: Record<string, unknown>,
-  pathFields: readonly string[],
-): string[] {
-  const paths: string[] = [];
-  for (const field of pathFields) {
-    const candidate = getDottedFieldValue(input, field);
-    const values = Array.isArray(candidate) ? candidate : [candidate];
-    for (const value of values) {
-      if (typeof value === "string" && value.length > 0) {
-        paths.push(caseFoldForMatch(canonicalizePathForMatch(value)));
-      }
-    }
-  }
-  return [...new Set(paths)];
-}
-
-function getDottedFieldValue(input: Record<string, unknown>, field: string): unknown {
-  let current: unknown = input;
-  for (const segment of field.split(".")) {
-    if (segment.length === 0) return undefined;
-    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
-}
-
-/**
- * Containment check against canonicalized allowed dirs. Inputs MUST already be
- * canonicalized (same invariant as {@link RuleBasedRiskClassifier}).
- */
-function isInsideAllowed(path: string, allowed: readonly string[]): boolean {
-  for (const a of allowed) {
-    if (path === a || path.startsWith(a + "/")) return true;
-  }
-  return false;
 }
