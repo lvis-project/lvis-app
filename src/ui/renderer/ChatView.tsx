@@ -45,6 +45,7 @@ import { useAttachmentPicker } from "./hooks/use-attachment-picker.js";
 import { TranscriptRenderer, type TurnSummary } from "./components/TranscriptRenderer.js";
 import { ChatTranscript } from "./components/ChatTranscript.js";
 import { ChatComposerDock } from "./components/ChatComposerDock.js";
+import { DockedApprovalCard } from "./components/permissions/DockedApprovalCard.js";
 
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
@@ -637,6 +638,16 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         onRoutineAcknowledge={onRoutineAcknowledge}
       />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
+      {/* Approval overlay fills the chat region and aligns its card to the
+          bottom, so the decision covers what it is about and cannot scroll
+          away. */}
+      {approvalRequest && onApprovalDecide ? (
+        <DockedApprovalCard
+          request={approvalRequest}
+          onDecide={onApprovalDecide}
+          onReturnFocus={() => composerRef.current?.focus()}
+        />
+      ) : null}
       <div className="grid h-full min-h-0 min-w-0 grid-cols-1">
       <div className="relative min-h-0 min-w-0 overflow-hidden">
       {/* Checkpoint view-mode banner — sticky at the top of the chat scroll area */}
@@ -850,8 +861,6 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         onOpenApprovalQueue={onOpenApprovalQueue}
         askQuestions={askQuestions}
         onResolveAskQuestion={onResolveAskQuestion}
-        approvalRequest={approvalRequest}
-        onApprovalDecide={onApprovalDecide}
         activeProject={activeProject}
         workspaceProjects={workspaceProjects}
         onNewChatForProject={onNewChatForProject}

@@ -8,7 +8,7 @@ export const en = {
   "dockedApprovalCard.choiceSession": "This session",
   "dockedApprovalCard.choiceAlways": "Always",
   "dockedApprovalCard.choiceDeny": "Deny",
-  "dockedApprovalCard.keyHint": "← → to move · Ctrl+Enter to apply · Esc to deny",
+  "dockedApprovalCard.keyHint": "← → to move · Enter to apply · Esc to deny",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "dockedApprovalCard.headline": "'{toolName}' 이(가) 허용된 디렉터리 밖을 읽으려 합니다",
@@ -19,5 +19,5 @@ export const ko: Record<keyof typeof en, string> = {
   "dockedApprovalCard.choiceSession": "이 세션",
   "dockedApprovalCard.choiceAlways": "항상",
   "dockedApprovalCard.choiceDeny": "거부",
-  "dockedApprovalCard.keyHint": "← → 이동 · Ctrl+Enter 적용 · Esc 거부",
+  "dockedApprovalCard.keyHint": "← → 이동 · Enter 적용 · Esc 거부",
 };
