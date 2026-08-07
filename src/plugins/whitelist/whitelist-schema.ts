@@ -14,7 +14,11 @@
  * descriptive per-field errors, fail-closed on any unknown shape.
  */
 import type { SignatureEnvelope } from "../types.js";
-import { isAllowedHostSecretKey } from "../../shared/marketplace-package-assets.js";
+import {
+  HOST_SECRET_READ_MAX_ITEMS,
+  findHostSecretReadListViolation,
+  isAllowedHostSecretKey,
+} from "../../shared/marketplace-package-assets.js";
 
 /** Per-plugin grant entry. */
 export interface WhitelistPluginGrant {
@@ -43,7 +47,9 @@ export type WhitelistSignatureEnvelope = SignatureEnvelope;
 // Accepted `hostSecrets.read[]` keys: `isAllowedHostSecretKey`
 // (src/shared/marketplace-package-assets.ts) — the SAME predicate the manifest
 // validator applies. A signed grant and a manifest must not be able to disagree
-// about what a well-formed host-secret key is.
+// about what a well-formed host-secret key is. Its collection-level counterpart
+// `findHostSecretReadListViolation` (same module) carries the `maxItems` /
+// `uniqueItems` bounds for the same reason.
 
 /** ISO-8601 — accept the subset Date.parse round-trips correctly. */
 function isValidIsoTimestamp(value: unknown): value is string {
@@ -130,6 +136,17 @@ export function parseWhitelistDocument(raw: string): WhitelistDocument {
         );
       }
       read.push(k);
+    }
+    // Collection bounds (`maxItems`, `uniqueItems`) — the manifest path gets
+    // these from AJV against the vendored schema; this path has no schema leg,
+    // so the shared gate is the only thing enforcing them here (#1939).
+    const violation = findHostSecretReadListViolation(read);
+    if (violation) {
+      throw new Error(
+        violation.kind === "maxItems"
+          ? `[whitelist] pluginGrants['${pluginId}'].hostSecrets.read has ${violation.count} entries (max ${HOST_SECRET_READ_MAX_ITEMS})`
+          : `[whitelist] pluginGrants['${pluginId}'].hostSecrets.read[${violation.index}] '${violation.key}' is a duplicate`,
+      );
     }
     grants[pluginId] = {
       publisher: grant.publisher,
