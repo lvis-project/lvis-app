@@ -46,6 +46,85 @@ import { globMatch } from "../lib/glob-matcher.js";
 export const MAX_WALK_UP = 64;
 
 /**
+ * One entry in the LVIS-home sensitive namespace — the single authority for
+ * "which `<lvisHome>/…` paths are secret".
+ *
+ * TWO enforcement points consume this table and neither may restate it:
+ *   - the in-process host-tool guard, via the glob projection baked into
+ *     {@link SENSITIVE_PATH_PATTERNS} below (anchor-free `**` patterns, because
+ *     the host guard matches an already-canonicalized absolute path); and
+ *   - the OS sandbox read/write deny floor, via
+ *     `getDefaultSensitiveReadDenyPaths` in `src/permissions/asrt-sandbox.ts`
+ *     (literal absolute paths anchored on `lvisHome()` at CALL time, because
+ *     bwrap/seatbelt cannot glob and `LVIS_HOME` can move between calls).
+ *
+ * Those two shapes are why the table stores segments rather than strings: each
+ * side projects the same rows into the form its enforcement point can consume.
+ * Adding a row here denies the path on BOTH surfaces; there is no second list
+ * to mirror it into.
+ */
+export interface LvisHomeSensitiveEntry {
+  /** Path segments below the LVIS home root (`~/.lvis` unless `LVIS_HOME`). */
+  readonly segments: readonly string[];
+  /** `dir` denies the directory and everything under it; `file` one path. */
+  readonly kind: "dir" | "file";
+  /**
+   * Also deny `<name>.*` rotations. Host-glob only — a rotation glob has no
+   * literal form, so the sandbox floor covers the base file only.
+   */
+  readonly rotations?: true;
+  /** Why this is secret. Kept next to the row so neither side drifts alone. */
+  readonly why: string;
+}
+
+/**
+ * The LVIS-home sensitive namespace. Order is the projection order for
+ * {@link SENSITIVE_PATH_PATTERNS}; both projections dedupe, so it carries no
+ * meaning beyond which pattern string a match reports.
+ */
+export const LVIS_HOME_SENSITIVE_ENTRIES: readonly LvisHomeSensitiveEntry[] = Object.freeze([
+  { segments: ["certs"], kind: "dir", why: "corporate CA bundle + extracted certs" },
+  { segments: ["secrets"], kind: "dir", why: "encrypted API keys, tokens" },
+  { segments: ["keys"], kind: "dir", why: "signing / encryption keys" },
+  { segments: ["lvis-secrets.json"], kind: "file", why: "legacy consolidated secrets file" },
+  { segments: ["settings.json"], kind: "file", why: "app settings + permission configuration" },
+  { segments: ["permissions.json"], kind: "file", why: "legacy/current permission settings file" },
+  { segments: ["policy.json"], kind: "file", why: "policy SOT" },
+  {
+    segments: ["permissions"],
+    kind: "dir",
+    why: "reviewer cache, deferred queue, permission state",
+  },
+  { segments: ["audit"], kind: "dir", why: "audit log directory (self-tampering)" },
+  { segments: ["audit.log"], kind: "file", rotations: true, why: "audit log + rotated archives" },
+  { segments: ["sessions"], kind: "dir", why: "chat session JSONL" },
+  { segments: ["routine"], kind: "dir", why: "routine v2 session history" },
+  {
+    segments: ["plugins", "auth-partitions.json"],
+    kind: "file",
+    why: "plugin auth-partition state (OAuth partition mapping)",
+  },
+]);
+
+/**
+ * Host-tool glob projection of {@link LVIS_HOME_SENSITIVE_ENTRIES}.
+ *
+ * Anchor-free (`**` prefix) because the host guard matches a canonicalized
+ * absolute path and `LVIS_HOME` may point anywhere. A `dir` row needs only the
+ * `/**` form: `policyMatchPaths` also tries `<path>/`, so `**\/.lvis/certs/**`
+ * already matches the bare directory.
+ */
+function lvisHomeSensitiveGlobs(): readonly string[] {
+  const globs: string[] = [];
+  for (const entry of LVIS_HOME_SENSITIVE_ENTRIES) {
+    const base = "**/.lvis/" + entry.segments.join("/");
+    globs.push(entry.kind === "dir" ? base + "/**" : base);
+    if (entry.rotations) globs.push(base + ".*");
+  }
+  return globs;
+}
+
+/**
  * Patterns use minimatch-compatible glob syntax:
  *   double-star  — matches any path (including path separators)
  *   single-star  — matches any single path segment
@@ -89,22 +168,12 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/id_ed25519.pub",
   "**/id_ecdsa",
   "**/id_ecdsa.pub",
-  // ── LVIS-specific additions ─────────────────────────
-  "**/.lvis/certs/**", // corporate CA bundle + extracted certs
-  "**/.lvis/secrets/**", // API keys, tokens
-  "**/.lvis/keys/**", // signing / encryption keys
-  "**/.lvis/lvis-secrets.json", // legacy consolidated secrets file
-  "**/lvis-secrets.json", // shallow sibling form
-  // ── Permission policy P2.5 — LVIS-internal sensitive paths ───────
-  "**/.lvis/settings.json", // app settings and permission configuration
-  "**/.lvis/permissions.json", // legacy/current permission settings file
-  "**/.lvis/policy.json", // policy SOT
-  "**/.lvis/permissions/**", // reviewer cache, deferred queue, permission state
-  "**/.lvis/audit", // audit log directory (self-tampering)
-  "**/.lvis/audit/**", // audit log files inside dir
-  "**/.lvis/audit.log", // legacy audit log file
-  "**/.lvis/audit.log.*", // rotated audit archives
-  "**/.lvis/sessions/**", // chat session JSONL
+  // ── LVIS-home sensitive namespace ───────────────────
+  // Projected from LVIS_HOME_SENSITIVE_ENTRIES so the host guard and the OS
+  // sandbox deny floor cannot drift. Do NOT hand-add a `**/.lvis/…` pattern
+  // here — add a row to the table instead.
+  ...lvisHomeSensitiveGlobs(),
+  "**/lvis-secrets.json", // shallow sibling form (not under the LVIS home root)
   "**/.config/lvis/hooks/**", // hook supply-chain protection
 ]);
 

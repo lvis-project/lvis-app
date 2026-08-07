@@ -8,6 +8,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
+import { LVIS_HOME_SENSITIVE_ENTRIES } from "./sensitive-paths.js";
 
 import type {
   SandboxRuntimeConfig,
@@ -459,16 +460,13 @@ export function isAsrtSandboxActive(): boolean {
  * on this list stays readable. Do NOT describe this as a read jail.
  *
  * WHAT IS DENIED (absolute, derived from the real host home + `~/.lvis` layout):
- *   - `~/.lvis/secrets`   — encrypted API keys / secrets (was the only prior deny)
- *   - `~/.lvis/sessions`  — chat session history (architecture §5)
- *   - `~/.lvis/routine`   — routine v2 session history (CLAUDE.md Q9 namespace)
- *   - `~/.lvis/audit.log` + `~/.lvis/audit` — audit trail
- *   - `~/.lvis/settings.json` — cross-cutting host settings (holds vendor
- *                               baseUrls / may hold credentials)
- *   - `~/.lvis/permissions`, `~/.lvis/permissions.json`, `~/.lvis/policy.json`,
- *     `~/.lvis/plugins/auth-partitions.json` — permission / auth-partition state
- *   - `~/.lvis/certs`, `~/.lvis/keys` — CA bundles / signing keys (drift-sync with
- *     SENSITIVE_PATH_PATTERNS in src/permissions/sensitive-paths.ts)
+ *   - the WHOLE LVIS-home sensitive namespace — secrets, sessions, routine,
+ *     audit(.log), settings.json, permissions(.json), policy.json,
+ *     plugins/auth-partitions.json, certs, keys, lvis-secrets.json. This is NOT
+ *     restated here: it is projected from `LVIS_HOME_SENSITIVE_ENTRIES`
+ *     (src/permissions/sensitive-paths.ts), the single authority that the
+ *     in-process host-tool guard projects into globs. Add a row THERE and both
+ *     surfaces deny it; there is no list to keep in sync.
  *   - Electron userData dir (productName="LVIS") — whole dir, deny-by-default so
  *     future Electron auth artefacts are covered automatically.
  *     Exact path when `userDataDir` is provided by a trusted caller (handles
@@ -543,20 +541,11 @@ export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[]
           ));
   const raw = [
     // ── LVIS host-domain sensitive namespaces (~/.lvis/<feature>/) ──
-    join(lvis, "secrets"), // encrypted API keys (the only prior deny)
-    join(lvis, "sessions"), // chat session history
-    join(lvis, "routine"), // routine v2 session history
-    join(lvis, "audit.log"), // audit trail (file)
-    join(lvis, "audit"), // audit trail (dir form, if present)
-    join(lvis, "settings.json"), // cross-cutting settings (may hold credentials)
-    join(lvis, "permissions"), // permission state dir
-    join(lvis, "permissions.json"), // permission state file (flat form)
-    join(lvis, "policy.json"), // policy state
-    join(lvis, "plugins", "auth-partitions.json"), // plugin auth-partition state
-    // FIX 3: drift-sync with SENSITIVE_PATH_PATTERNS (src/permissions/sensitive-paths.ts).
-    // Both lists must be kept in sync. When adding to either, mirror it here.
-    join(lvis, "certs"), // corporate CA bundle + extracted certs
-    join(lvis, "keys"), // signing / encryption keys
+    // Projected from the single authority, LVIS_HOME_SENSITIVE_ENTRIES in
+    // src/permissions/sensitive-paths.ts, which the in-process host-tool guard
+    // projects into globs. Do NOT hand-add a `join(lvis, …)` entry here — add a
+    // row to that table and BOTH surfaces deny it.
+    ...LVIS_HOME_SENSITIVE_ENTRIES.map((entry) => join(lvis, ...entry.segments)),
     // ── Electron userData dir (whole dir — deny-by-default for future artefacts) ──
     // Contains plugin OAuth session cookies/tokens, Cookies (SQLite), Local/Session
     // Storage, Network Persistent State, Trust Tokens, lvis-secrets.json.

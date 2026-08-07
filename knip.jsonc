@@ -38,6 +38,12 @@
     "config": "vitest.analysis.config.ts"
   },
   "ignoreDependencies": [
+    // Invoked as a BINARY from an argv array the pre-push hook builds at runtime
+    // (`bun x electron-rebuild -f --only better-sqlite3`, scripts/hooks/run-local-checks.mjs),
+    // so no package.json script names it and Knip cannot infer the reference.
+    // It is the only Electron-ABI repair path left now that `postinstall` no
+    // longer rebuilds native modules.
+    "@electron/rebuild",
     "@openai/codex",
     "@sentry/electron",
     "@types/better-sqlite3",

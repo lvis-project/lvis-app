@@ -211,7 +211,7 @@ Perform on each platform artifact before uploading:
 
 - Electron: pin the major version (`^`) and periodically bump security patches.
 - electron-updater / electron-builder: pin minor, allow automatic patch updates (`~`).
-- Plugin native deps (for example `better-sqlite3`): rerun electron-rebuild; `bun install` handles this in postinstall.
+- Native deps (`better-sqlite3`, `node-pty`): both are N-API (ABI-stable) and ship per-platform prebuilds, so no `electron-rebuild` runs in `postinstall`. Each module's own loader picks the binding (better-sqlite3 `lib/binding.js`, node-pty `lib/utils.js`), and `scripts/electron-after-pack.cjs` asserts the packaged artifact at that same resolved path. A failing load means the prebuild is missing/corrupt — reinstall (`bun install --force`), do not rebuild.
 - Python runtime: pin shared envs by host-managed Python plugin lockfile content plus OS/arch. For every release, review the active plugin lockfile diff and packaged asset boundary (include uv, exclude venv/wheelhouse/model cache).
 
 ## Direct local publishing (not the public release path)

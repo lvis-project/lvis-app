@@ -74,5 +74,17 @@ describe("main process plugin lifecycle regression guards", () => {
     expect(bootSource).toContain("disposePluginEventBridge();");
     expect(bootSource).toContain("replacePluginEventBridge(ctx.pluginEventBridgeWindow);");
     expect(bootSource).toContain("registerPluginEventBridge: ctx.replacePluginEventBridge");
+    // The assertions above pin the replace/dispose CLOSURES. They do not pin
+    // that the bridge is ever registered: replacing both call sites with
+    // `ctx.disposePluginEventBridge = () => {}` left all 52 src/boot suites
+    // (399 tests) green. These two pin the call sites themselves — boot-time
+    // registration for the first main window, and re-registration for a
+    // window recreated after `closed`.
+    expect(bootSource).toContain(
+      "ctx.disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, mainWindow",
+    );
+    expect(bootSource).toContain(
+      "ctx.disposePluginEventBridge = registerPluginEventBridge(pluginRuntime, win",
+    );
   });
 });

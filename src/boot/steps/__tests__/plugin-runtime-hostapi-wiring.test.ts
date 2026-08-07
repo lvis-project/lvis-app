@@ -176,9 +176,13 @@ let lastBootAuditLogger: { log: ReturnType<typeof vi.fn> };
 
 async function initAndGetFactory(
   settingsService: unknown,
+  bootAuditLogger: { log: ReturnType<typeof vi.fn> } = { log: vi.fn() },
 ): Promise<CreateHostApi> {
   runtimeTestState.capturedRuntimeOptions = null;
-  lastBootAuditLogger = { log: vi.fn() };
+  // Honour a caller-supplied logger; only default when none was given. The
+  // module-level handle still points at whatever was actually wired, so tests
+  // that do not pass one can still read the sink.
+  lastBootAuditLogger = bootAuditLogger;
   await initPluginRuntime({
     projectRoot: "/tmp/lvis-test/project",
     settingsService: settingsService as never,
@@ -780,6 +784,56 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     expect(workerStop).toHaveBeenCalledTimes(1);
     worker.stop();
     expect(workerStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("audits a capability-denied emit from the production HostApi emit closure", async () => {
+    // Producer is the real `createHostApi` captured out of initPluginRuntime —
+    // the same closure the plugin's SDK code calls. `capabilities` is present
+    // and deliberately does NOT authorize: emit authorization is inferred from
+    // `emittedEvents`.
+    const bootAuditLogger = { log: vi.fn() };
+    const createHostApi = await initAndGetFactory(
+      makeSettingsService(new Map()),
+      bootAuditLogger,
+    );
+    const api = createHostApi(
+      "plugin-a",
+      {
+        id: "plugin-a",
+        config: {},
+        capabilities: ["mail-source"],
+        emittedEvents: ["plugin-a.updated"],
+      },
+      mkdtempSync("/tmp/lvis-emit-denied-"),
+      activeIncarnation(),
+      "plugin-a",
+    );
+
+    expect(() => api.emitEvent("email.new", { subject: "hi" })).toThrow(
+      /not allowed to emit undeclared event 'email\.new'/,
+    );
+
+    const denials = bootAuditLogger.log.mock.calls
+      .map(([entry]) => entry as { sessionId: string; type: string; input: string })
+      .filter((entry) =>
+        String(entry?.input ?? "").includes("plugin_emit_capability_denied"),
+      );
+    expect(denials).toHaveLength(1);
+    expect(denials[0].sessionId).toBe("plugin");
+    expect(denials[0].type).toBe("error");
+    expect(denials[0].input).toBe(
+      "[plugin:plugin-a] plugin_emit_capability_denied eventType=email.new"
+      + " required=mail-source declaredEmittedEvents=plugin-a.updated",
+    );
+
+    // Negative control: a declared emit adds no denial row.
+    api.emitEvent("plugin-a.updated", { value: 1 });
+    expect(
+      bootAuditLogger.log.mock.calls.filter(([entry]) =>
+        String((entry as { input?: string })?.input ?? "")
+          .includes("plugin_emit_capability_denied"),
+      ),
+    ).toHaveLength(1);
   });
 
   it("revokes every callable HostApi surface when its incarnation is deactivated", async () => {
