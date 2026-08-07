@@ -57,12 +57,12 @@ const LANE_SENSITIVE: Array<{
     rawVerdict: { level: "low", reason: "network trusted host (live-corpname.openai.azure.com)" },
     maskedVerdict: { level: "high", reason: "network untrusted host" },
   },
-  {
-    label: "bare `host` field naming a `proj-…` Azure resource",
-    input: { host: "proj-abcdefgh.services.ai.azure.com" },
-    rawVerdict: { level: "low", reason: "network trusted host (proj-abcdefgh.services.ai.azure.com)" },
-    maskedVerdict: { level: "high", reason: "network untrusted host" },
-  },
+  // A bare `host` fixture used to live here. It no longer belongs: the
+  // network-target consolidation made the trusted-host rule reachable for that
+  // field, so the masked and raw forms now agree and the fixture stopped
+  // demonstrating lane sensitivity. The two `url` cases still do — they mask a
+  // segment the URL parser needs, which is a different mechanism and the one
+  // this guard exists for.
 ];
 
 describe("DLP masking really does change these verdicts", () => {
