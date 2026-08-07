@@ -14,6 +14,21 @@ vi.mock("../../../../components/ui/scroll-area.js", () => ({
 import { PermissionsTab } from "../PermissionsTab.js";
 import { makeHookTrustRow as hook } from "./test-helpers.js";
 import type { HookTrustRow } from "../../types.js";
+import { isPolicyUserEditable, type PolicySource } from "../../../../shared/policy-editability.js";
+
+/**
+ * Mirrors the `PERMISSIONS.policyGet` handler: the host attaches `editable`
+ * from the real predicate. Built here the same way so a renderer that goes back
+ * to reading `managed` directly fails these tests.
+ */
+function policyGetPayload(loaded: {
+  requireExplicitApproval: boolean;
+  managed: boolean;
+  source: PolicySource;
+  adminPath?: string;
+}) {
+  return { version: 1 as const, updatedAt: "2026-01-01T00:00:00.000Z", ...loaded, editable: isPolicyUserEditable(loaded) };
+}
 
 
 function installApi(disabledBatches: HookTrustRow[][]) {
@@ -152,7 +167,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
       })),
     },
     policy: {
-      get: vi.fn(async () => ({
+      get: vi.fn(async () => policyGetPayload({
         requireExplicitApproval: true,
         managed: false,
         source: "defaults",
@@ -712,6 +727,65 @@ describe("PermissionsTab hook quarantine notice", () => {
       render(<PermissionsTab />);
     });
     expect(screen.queryByTestId("permissions-legacy-auto-mode-banner")).toBeNull();
+  });
+});
+
+describe("PermissionsTab — explicit-approval policy editability", () => {
+  const CHECKBOX_LABEL = "승인 대화상자에서 버튼 또는 단축키로 명시적 승인 또는 거부를 요구";
+
+  it("enables the checkbox when no admin policy is deployed", async () => {
+    installApi([[]]);
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    expect(screen.getByLabelText(CHECKBOX_LABEL)).not.toBeDisabled();
+    expect(screen.queryByTitle("IT 관리자 설정")).toBeNull();
+  });
+
+  // The case the `managed` flag alone gets wrong: an admin-dir policy that
+  // pins requireExplicitApproval without claiming `managed`. loadPolicy returns
+  // managed:false + source:"admin", savePolicy still refuses every write.
+  it("locks the checkbox for an admin-dir policy that does not set managed:true", async () => {
+    const api = installApi([[]]);
+    api.policy.get.mockResolvedValueOnce(policyGetPayload({
+      requireExplicitApproval: true,
+      managed: false,
+      source: "admin",
+      adminPath: "/etc/lvis/policy.json",
+    }));
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    expect(screen.getByLabelText(CHECKBOX_LABEL)).toBeDisabled();
+    expect(screen.getByTitle("IT 관리자 설정")).toBeTruthy();
+    expect(screen.getByText(/\/etc\/lvis\/policy.json/)).toBeTruthy();
+  });
+
+  it("locks the checkbox for a merged admin+user policy with managed:false", async () => {
+    const api = installApi([[]]);
+    api.policy.get.mockResolvedValueOnce(policyGetPayload({
+      requireExplicitApproval: false,
+      managed: false,
+      source: "merged",
+      adminPath: "/etc/lvis/policy.json",
+    }));
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    expect(screen.getByLabelText(CHECKBOX_LABEL)).toBeDisabled();
+  });
+
+  it("locks the checkbox for a user policy with managed:true", async () => {
+    const api = installApi([[]]);
+    api.policy.get.mockResolvedValueOnce(policyGetPayload({
+      requireExplicitApproval: true,
+      managed: true,
+      source: "user",
+    }));
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+    expect(screen.getByLabelText(CHECKBOX_LABEL)).toBeDisabled();
   });
 });
 

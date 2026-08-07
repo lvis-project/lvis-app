@@ -245,13 +245,36 @@ describe("lvis:permission:remove-rule", () => {
 });
 
 describe("lvis:policy:get", () => {
-  it("returns loadPolicy() result", async () => {
-    const fakePolicy = { version: 1, requireExplicitApproval: true, managed: false, updatedAt: "2026-01-01" };
+  it("returns loadPolicy() result plus the host-derived editable flag", async () => {
+    const fakePolicy = {
+      version: 1,
+      requireExplicitApproval: true,
+      managed: false,
+      updatedAt: "2026-01-01",
+      source: "user",
+    };
     mockLoadPolicy.mockResolvedValue(fakePolicy);
     await setupHandlers();
     const result = await invoke("lvis:policy:get");
-    expect(result).toEqual(fakePolicy);
+    expect(result).toEqual({ ...fakePolicy, editable: true });
     expect(mockLoadPolicy).toHaveBeenCalled();
+  });
+
+  // An admin-dir policy that never sets managed:true is still unwritable —
+  // savePolicy blocks on the file's existence, which `source` records.
+  it("reports editable:false for an admin-dir policy with managed:false", async () => {
+    const fakePolicy = {
+      version: 1,
+      requireExplicitApproval: true,
+      managed: false,
+      updatedAt: "2026-01-01",
+      source: "admin",
+      adminPath: "/admin-dir/policy.json",
+    };
+    mockLoadPolicy.mockResolvedValue(fakePolicy);
+    await setupHandlers();
+    const result = await invoke("lvis:policy:get");
+    expect(result).toEqual({ ...fakePolicy, editable: false });
   });
 });
 
