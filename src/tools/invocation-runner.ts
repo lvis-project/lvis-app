@@ -4,7 +4,7 @@ import type { Tool } from "./base.js";
 import type { HookRunner } from "../hooks/hook-runner.js";
 import { isModelExposedTool } from "./base.js";
 import { isCanonicalBashTool } from "./bash.js";
-import { isCanonicalPowerShellTool } from "./powershell.js";
+import { isCanonicalPowerShellTool, validatePowerShellCommand } from "./powershell.js";
 // Effective invocation-origin SoT (AsyncLocalStorage). The plugin-surface executor
 // enters a `runWithInvocationOrigin` frame for every card/panel/plugin call, so this
 // is defined ("mcp-app" | "ui" | "plugin") ONLY on that path; the model's main-loop
@@ -1176,20 +1176,46 @@ export async function runToolInvocation(
       }
     }
 
-    // ── Step 2.5: Bash AST Pre-Validator ────────────
+    // ── Step 2.5: structural shell command pre-validator ────────────
+    //
+    // One ladder position for "this command string is structurally refused",
+    // two dialect analyzers behind it. POSIX regexes are meaningless for
+    // PowerShell and the cmdlet blocklist is meaningless for bash, so the RULE
+    // SETS stay separate — but the STAGE must not, or the two dialects sit on
+    // opposite sides of approval and permit consumption.
     //
     // Hooks are allowed to rewrite tool inputs. Validate the final invocation,
     // not the original provider payload, so a hook cannot approve one command
     // and execute another.
+    const denyStructuralShellCommand = async (
+      msg: string,
+      auditReason: string,
+    ): Promise<ToolResult> => {
+      const durationMs = Date.now() - startTime;
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: auditReason, layer: 0 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
+      return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+    };
+    // Boolean, not the type guard: narrowing `tool` to `PowerShellTool` here
+    // would widen it to a union for the rest of the function.
+    const isPowerShellDialect: boolean = isCanonicalPowerShellTool(tool);
+    if (isPowerShellDialect && typeof finalInput.command === "string") {
+      // The PowerShell dialect analyzer used to run INSIDE the tool, after
+      // `consumeHostShellExecutionPermit` had already burned the user's
+      // one-shot allow — the user was shown a modal for a command the host was
+      // always going to refuse, with no refund path. Bash never had that
+      // ordering; both now deny before any approval or permit minting.
+      const preflightError = await validatePowerShellCommand(finalInput.command);
+      if (preflightError) {
+        return await denyStructuralShellCommand(preflightError, "powershell AST");
+      }
+    }
     if (services.bashAstValidator) {
       const bashResult = services.bashAstValidator.validate(toolUse.name, finalInput);
       if (bashResult.decision === "deny") {
         const msg = t("be_executor.bashAstBlock", { reason: bashResult.reason ?? "", patternId: bashResult.patternId ?? "" });
-        const durationMs = Date.now() - startTime;
-        emitToolStart(callbacks, toolUse.name, finalInput, meta);
-        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
-        await auditCurrentToolCall(sessionId, toolUse.name, source, trust, finalInput, msg, true, startTime, { decision: "deny", reason: bashResult.reason ?? "bash AST", layer: 0 }, Infinity, invocationPermissionContext, invocationCategory, executionCwd);
-        return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs });
+        return await denyStructuralShellCommand(msg, bashResult.reason ?? "bash AST");
       }
       if (bashResult.decision === "warn") {
         log.warn(`${bashResult.reason}`);

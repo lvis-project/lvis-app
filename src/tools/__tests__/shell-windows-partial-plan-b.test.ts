@@ -179,8 +179,11 @@ const SHELLS = [
     toolName: "powershell" as const,
     create: () => new PowerShellTool(),
     input: { command: "Write-Output native-plan-b", timeoutSeconds: 7 },
-    // One parser child validates the AST, then the approved plain child runs.
-    expectedSpawnCount: 2,
+    // Only the approved plain child. The AST parser child used to spawn here
+    // too, because the structural deny ran inside the tool; it now runs at the
+    // runner's Step 2.5 alongside bash's, so a direct `execute()` spawns
+    // exactly one child for both dialects.
+    expectedSpawnCount: 1,
   },
 ] as const;
 
