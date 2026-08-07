@@ -24,8 +24,7 @@ import type {
   RuntimePlugin,
 } from "../types.js";
 import { createPluginStorage, createPluginStorageAuditSink } from "../storage.js";
-import type { PluginDeploymentGuard } from "../deployment-guard.js";
-import { PluginDeploymentDeniedError } from "../deployment-guard.js";
+import { assertDisableAllowed, type PluginDeploymentGuard } from "../deployment-guard.js";
 import { installReceiptPath } from "../plugin-install-receipt.js";
 import type { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
 import { withResolvedPluginInstallLocks } from "../install-lifecycle.js";
@@ -43,18 +42,11 @@ import {
   SessionActivationTracker,
 } from "./lifecycle-timeout.js";
 
-import {
-  readEnabledManifestSnapshots,
-  resolveManifestLoadPlan,
-} from "./snapshots.js";
+import { readEnabledManifestSnapshots, resolveManifestLoadPlan } from "./snapshots.js";
 import type { LoadedPlugin, ManifestLoadPlan, ManifestSnapshot, PluginStartPreparationReturn } from "./types.js";
 import { buildPluginCard } from "./cards.js";
 import type { PluginPerfStats } from "./perf-stats.js";
-import {
-  assertEventEmitAccess,
-  assertEventSubscribeAccess,
-  assertAppVisibleToolInvokable,
-} from "./access-control.js";
+import { assertEventEmitAccess, assertEventSubscribeAccess, assertAppVisibleToolInvokable } from "./access-control.js";
 import { declaredAppVisibleToolMethods } from "./plugin-loader.js";
 import type { InvocationOrigin } from "./origin-chain.js";
 import { createLogger } from "../../lib/logger.js";
@@ -882,31 +874,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
         if (installClaim === undefined) {
           throw new Error(`Plugin install provenance unknown: ${pluginId}`);
         }
-        // Deployment policy. This is the live disable writer (the renderer
-        // toggle reaches it through `CHANNELS.plugins.setEnabled`), so the
-        // admin-managed check that `disable()` performs has to run here too —
-        // otherwise a user can switch off an admin-deployed plugin.
-        //
-        // The actor is hard-coded to "user": every caller of this method is
-        // the renderer IPC toggle. An it-admin lane would be an unreachable
-        // branch, so it is deliberately absent — `disable(id, "it-admin")` is
-        // the API for that.
-        //
-        // Only the registry-backed lane is checked: `installClaim` is the
-        // registry row id the guard looks entries up by, and a static manifest
-        // (`installClaim === null`) has no registry row for the guard to
-        // classify — its toggle is session-local and persists nothing.
-        if (!enabled && this.deploymentGuard && installClaim !== null) {
-          const guardResult = await this.deploymentGuard.canDisable(
-            installClaim,
-            "user",
-          );
-          if (!guardResult.allowed) {
-            throw new PluginDeploymentDeniedError(
-              guardResult.reason ?? `Plugin disable denied: ${pluginId}`,
-            );
-          }
-        }
+        await assertDisableAllowed(enabled, installClaim, pluginId, this.deploymentGuard);
         const generationLifecycle = this.requireCapabilityCommitLifecycle(
           "plugin enabled-state change",
         );
