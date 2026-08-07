@@ -246,6 +246,37 @@ describe("MarketplaceTab", () => {
     expect(screen.getByRole("button", { name: "설치" })).toBeTruthy();
   });
 
+  it("discloses a private-network-only grant it routed here for disclosure", async () => {
+    // Wiring test for the predicate shadow: `needsInstallDisclosure` uses the
+    // shared `hasNetworkAccessDisclosure` (which counts `allowPrivateNetworks`)
+    // to decide the install must be disclosed, but the dialog used its own
+    // narrower copy to decide what to render. The two disagreed exactly here:
+    // the install was routed to a confirmation dialog that then showed the user
+    // nothing about the private-network grant.
+    const privateNetworkPlugin: MarketplaceItem = {
+      id: "lan-plug",
+      name: "LAN Plug",
+      description: "d",
+      packageSpec: "s",
+      installed: false,
+      enabled: false,
+      pluginType: "plugin",
+      installPolicy: "user",
+      networkAccess: { allowedDomains: [], allowPrivateNetworks: true },
+    };
+    const api = marketplaceTabApi({
+      listMarketplacePlugins: vi.fn().mockResolvedValue([privateNetworkPlugin]),
+      installMarketplacePlugin: vi.fn().mockResolvedValue({ ok: true }),
+    });
+    const { findByTestId } = render(<MarketplaceTab {...defaultProps(api)} />);
+
+    fireEvent.click(await findByTestId("marketplace:action:lan-plug"));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("plugin-install-network-access").textContent).toContain("사설 네트워크"),
+    );
+  });
+
   it("installs provider/theme/language packages through marketplace settings", async () => {
     const packages: MarketplaceItem[] = [
       {
