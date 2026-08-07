@@ -10,20 +10,20 @@
  *   - the ActionPanel routing callback (routeActivityItem / routeActivityItemPinned),
  *   - the workspace-tab store (openInEphemeral / openPinned reject invalid urls),
  *   - the in-app browser viewer (UrlDocumentViewer, incl. its credential check).
- * The main process independently re-validates on the IPC / webview boundary
- * (side-browser-webview.ts) with the same protocol + credential rules.
+ *
+ * The protocol + credential decision itself is NOT implemented here — it is
+ * delegated to `validateExternalUrl` (src/shared/external-url.ts), the single
+ * authority shared with every main-process sink (shell.openExternal IPC, the
+ * side-browser webview policy, the plugin host's openExternalUrl). This module
+ * owns only the renderer-specific affordance on top: trimming and treating a
+ * bare `example.com` as `https://example.com`.
  */
+import { validateExternalUrl } from "../../../shared/external-url.js";
+
 export function normalizeBrowserNavigationUrl(value: string): string | null {
   const trimmed = value.trim();
   if (!trimmed) return null;
   const candidate = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
-  try {
-    const url = new URL(candidate);
-    if ((url.protocol !== "http:" && url.protocol !== "https:") || url.username || url.password) {
-      return null;
-    }
-    return url.toString();
-  } catch {
-    return null;
-  }
+  const validated = validateExternalUrl(candidate);
+  return validated.ok ? validated.url : null;
 }
