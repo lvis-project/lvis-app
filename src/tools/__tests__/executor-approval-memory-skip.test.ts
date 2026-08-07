@@ -584,6 +584,147 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
     expect(result[0].is_error).toBe(true);
   });
 
+  // ─────────────────────────────────────────────────────────────────────
+  // (i) DISCLOSURE — a foreground memory auto-approve must announce itself
+  //     to the renderer exactly like the reviewer lane's does.
+  //
+  // These assert on the CONSUMER's constructed input: the payload handed to
+  // `setBroadcastUserApprovalHit`, which is the seam boot wires to
+  // `sendToWindow(mainWindow, PERMISSIONS.userApprovalHit, ...)` — the toast
+  // in ChatView. The producer is the real ToolExecutor running a real
+  // invocation; nothing here calls the disclosure by hand.
+  // ─────────────────────────────────────────────────────────────────────
+
+  it("(i) foreground memory skip broadcasts the user-approval hit to the renderer", async () => {
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(makeWriteProbeTool(executeSpy));
+
+    const permMgr = pmReturning({ decision: "ask", reason: "needs confirm", layer: 6 });
+    // The real renderer seam.
+    const broadcast = vi.fn();
+    permMgr.setBroadcastUserApprovalHit(broadcast);
+
+    state.lookupResult = {
+      scope: "session",
+      verdictAtApproval: "low",
+      nlJustification: null,
+      revokedAt: null,
+    };
+
+    const requestAndWait = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "allow-once" as const,
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-disclose", name: "write_probe", input: { path: join(dir, "file.txt") } }],
+      {
+        sessionId: "sess-disclose",
+        permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
+      },
+    );
+
+    // Precondition: this really was a silent memory skip, not a modal.
+    expect(requestAndWait).not.toHaveBeenCalled();
+    expect(executeSpy).toHaveBeenCalledTimes(1);
+    expect(result[0].is_error).toBeUndefined();
+
+    // The disclosure the user actually sees.
+    expect(broadcast).toHaveBeenCalledTimes(1);
+    expect(broadcast).toHaveBeenCalledWith({
+      toolName: "write_probe",
+      scope: "session",
+      verdictAtApproval: "low",
+    });
+  });
+
+  it("(i2) carries the persistent scope through to the renderer payload", async () => {
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(makeWriteProbeTool(executeSpy));
+
+    const permMgr = pmReturning({ decision: "ask", reason: "needs confirm", layer: 6 });
+    const broadcast = vi.fn();
+    permMgr.setBroadcastUserApprovalHit(broadcast);
+
+    state.lookupResult = {
+      scope: "persistent",
+      verdictAtApproval: "low",
+      nlJustification: null,
+      revokedAt: null,
+    };
+
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait: vi.fn() } as never,
+    );
+
+    await executor.executeAll(
+      [{ id: "tu-disclose-p", name: "write_probe", input: { path: join(dir, "file.txt") } }],
+      {
+        sessionId: "sess-disclose-p",
+        permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
+      },
+    );
+
+    expect(broadcast).toHaveBeenCalledWith(
+      expect.objectContaining({ scope: "persistent", verdictAtApproval: "low" }),
+    );
+  });
+
+  it("(i3) does NOT disclose when the memory skip is refused (legacy-null → re-prompt)", async () => {
+    // Negative control: the broadcast must track the actual auto-approve, not
+    // merely the presence of a stored entry.
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(makeWriteProbeTool(executeSpy));
+
+    const permMgr = pmReturning({ decision: "ask", reason: "needs confirm", layer: 6 });
+    const broadcast = vi.fn();
+    permMgr.setBroadcastUserApprovalHit(broadcast);
+
+    state.lookupResult = {
+      scope: "session",
+      verdictAtApproval: null,
+      nlJustification: null,
+      revokedAt: null,
+    };
+
+    const requestAndWait = vi.fn(async (req: { id: string }) => ({
+      requestId: req.id,
+      choice: "deny" as const,
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    await executor.executeAll(
+      [{ id: "tu-disclose-legacy", name: "write_probe", input: { path: join(dir, "file.txt") } }],
+      {
+        sessionId: "sess-disclose-legacy",
+        permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
+      },
+    );
+
+    expect(requestAndWait).toHaveBeenCalledTimes(1);
+    expect(broadcast).not.toHaveBeenCalled();
+  });
+
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
   });
