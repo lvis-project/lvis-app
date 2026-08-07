@@ -79,16 +79,26 @@ type SensitiveAnchor = "lvis-home" | "home" | "root";
  * Adding a row here denies the path on BOTH surfaces; there is no second list
  * to mirror it into.
  *
- * What is NOT in this table, and why:
- *   - patterns with a wildcard in the middle or a wildcard basename
- *     (`**\/.env.*`, `**\/id_rsa`, `**\/.config/**\/Login Data`) have no literal
- *     absolute form, so they stay host-guard-only in
- *     {@link SENSITIVE_PATH_PATTERNS}. This is the glob-vs-literal constraint
- *     the sandbox module documents, and it is the ONLY legitimate reason for a
- *     path to be secret on one surface and not the other.
+ * What is NOT in this table, and why. These are the ONLY admissible reasons
+ * for a path to be secret on one surface and not the other; anything else is
+ * drift:
+ *   - DELIBERATELY UNANCHORED patterns (`**\/.env`, `**\/.env.*`, `**\/id_rsa`,
+ *     `**\/.config/**\/Login Data`, `**\/lvis-secrets.json`) must match wherever
+ *     the file lands — a staged key under `/tmp`, a `.env` in any working tree.
+ *     They therefore have no single literal absolute form to hand bwrap or
+ *     seatbelt, and stay host-guard-only in {@link SENSITIVE_PATH_PATTERNS}.
+ *     (A table row is also matched anchor-free by the host guard; what makes
+ *     these different is that they have no anchored form AT ALL.)
  *   - `~/Library/Cookies` and `~/Library/Keychains` are a deliberate sandbox
  *     exclusion (encrypted-at-rest, outside ASRT's filesystem threat model) and
  *     stay host-guard-only for that recorded reason.
+ *   - the {@link SensitiveEntry.rotations} flag is the same unanchored case one
+ *     level down: `<name>.*` has no literal form, so a row's rotation glob is
+ *     host-guard-only while its base file is on both surfaces.
+ *   - the Electron userData dir is hand-projected on BOTH surfaces rather than
+ *     being a row, because the exact directory is only knowable at runtime from
+ *     `app.getPath("userData")`. The sandbox floor gets the exact path; the host
+ *     guard can only pin the per-platform defaults as static globs.
  */
 export interface SensitiveEntry {
   /** Which root {@link segments} hangs off — see {@link SensitiveAnchor}. */
@@ -230,9 +240,10 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   // realpath() resolves /etc → /private/etc on macOS; the double-star matches
   // both forms.
   ...sensitiveEntryGlobs(),
-  // ── Host-guard-only: no literal absolute form (glob-vs-literal) ─────
-  // bwrap/seatbelt cannot glob, so these cannot be projected onto the sandbox
-  // floor. Each has a wildcard basename or a wildcard interior segment.
+  // ── Host-guard-only: deliberately unanchored, so no literal form ────
+  // These must match wherever the file lands, which is exactly why they have no
+  // single absolute path to project onto the sandbox floor (bwrap/seatbelt
+  // cannot glob). See SENSITIVE_PATH_ENTRIES for the full rule.
   "**/.config/**/Login Data", // browser credential DB, vendor dir varies
   "**/.env",
   "**/.env.*",
