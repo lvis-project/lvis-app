@@ -36,6 +36,7 @@ function ctx(overrides: Partial<ToolInvocationContext>): ToolInvocationContext {
     pathFields: ["path"],
     trustOrigin: "plugin-emitted",
     finalInput: {},
+    executionCwd: TMP,
     allowedDirectories: ALLOWED,
     sensitivePathsAdjacent: [],
     sandboxCapability: detectSandboxCapability(),

@@ -88,7 +88,6 @@ export interface AuthorizationStageContext {
   callbacks: ToolExecutorCallbacks | undefined;
   meta: ToolCallMeta;
   approvalPurpose: ApprovalPurposeSuggestion | undefined;
-  reviewerInput: Record<string, unknown>;
   auditInput: Record<string, unknown>;
   abortSignal: AbortSignal | undefined;
   rationaleResumeContext: RationaleResumeExecutionContext | undefined;
@@ -147,7 +146,6 @@ export async function authorizeToolInvocation(
     callbacks,
     meta,
     approvalPurpose,
-    reviewerInput,
     auditInput,
     abortSignal,
     rationaleResumeContext,
@@ -697,6 +695,7 @@ export async function authorizeToolInvocation(
           invocationCategory,
           tool.pathFields ?? [],
           finalInput,
+          executionCwd,
           invocationAllowedScope.directories,
           sensitivePathPattern ? [sensitivePathPattern] : [],
           invocationPermissionContext,
@@ -723,7 +722,6 @@ export async function authorizeToolInvocation(
         source,
         invocationCategory,
         tool.pathFields ?? [],
-        reviewerInput,
         finalInput,
         invocationAllowedScope.directories,
         sensitivePathPattern ? [sensitivePathPattern] : [],
@@ -979,7 +977,6 @@ export async function authorizeToolInvocation(
           source,
           invocationCategory,
           tool.pathFields ?? [],
-          reviewerInput,
           finalInput,
           invocationAllowedScope.directories,
           sensitivePathPattern ? [sensitivePathPattern] : [],
@@ -1088,6 +1085,7 @@ export async function authorizeToolInvocation(
         invocationCategory,
         tool.pathFields ?? [],
         finalInput,
+        executionCwd,
         invocationAllowedScope.directories,
         sensitivePathPattern ? [sensitivePathPattern] : [],
         invocationPermissionContext,
