@@ -59,7 +59,7 @@ test.describe('live plugin + scope', () => {
     expect(seen.indexer || seen.meeting).toBe(true);
   });
 
-  test('a path outside the allowed directories reaches the scope review', async ({ mainWindow }) => {
+  test('a path outside the allowed directories reaches the scope review', async ({ mainWindow, t }) => {
     test.skip(mode !== 'default', 'needs LVIS_E2E_PERMISSION_MODE=default');
 
     const composer = mainWindow.locator('[data-testid="composer-textarea"]').first();
@@ -70,25 +70,35 @@ test.describe('live plugin + scope', () => {
     );
     await mainWindow.locator('[data-testid="composer-send-button"]').first().click();
 
-    // The review card — NOT a silent read, and NOT a silent refusal.
-    const card = mainWindow.getByText(/Access outside allowed directories|허용된 디렉토리 밖/i).first();
+    // The review card — NOT a silent read, and NOT a silent refusal. Assert
+    // through the catalog: a hard-coded literal only matches whichever locale
+    // it was typed in, so it would pass under `en` and fail under `ko` for
+    // reasons that have nothing to do with the behaviour.
+    const card = mainWindow.getByText(t('outOfAllowedDirCard.title')).first();
     await expect(card).toBeVisible({ timeout: 180_000 });
 
-    const detail = await mainWindow.evaluate(() => {
+    const once = t('outOfAllowedDirCard.allowOnceButton');
+    const deny = t('outOfAllowedDirCard.denyButton');
+    const detail = await mainWindow.evaluate(({ once, deny }) => {
       const text = document.body.innerText;
       return {
         showsRequestedPath: /\/etc\/hosts/.test(text),
-        offersScopes: /Once only|이번 1회만/.test(text) && /Deny|거부/.test(text),
+        // Substring, not regex — a catalog string may contain regex
+        // metacharacters and is not a pattern.
+        offersScopes: text.includes(once) && text.includes(deny),
       };
-    });
+    }, { once, deny });
     console.log(`[live-scope] requestedPathShown=${detail.showsRequestedPath} scopesOffered=${detail.offersScopes}`);
 
-    // The card has to name what is being asked for and let the user bound it,
-    // otherwise it is a prompt the user cannot answer responsibly.
+    // The card has to NAME what is being asked for and let the user bound it,
+    // otherwise it is a prompt the user cannot answer responsibly. Both halves
+    // are asserted — computing `showsRequestedPath` and only logging it made
+    // the more important half unfalsifiable.
+    expect(detail.showsRequestedPath).toBe(true);
     expect(detail.offersScopes).toBe(true);
 
     // Denying must end the attempt rather than fall through to the read.
-    await mainWindow.getByRole('button', { name: /Deny|거부/ }).first().click();
+    await mainWindow.getByRole('button', { name: deny }).first().click();
     await expect(mainWindow.locator('body')).not.toContainText(/127\.0\.0\.1\s+localhost/, { timeout: 60_000 });
   });
 });
