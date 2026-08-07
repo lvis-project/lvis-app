@@ -99,6 +99,8 @@ export async function dispatchReviewerForHeadless(
       category,
       pathFields,
       finalInput,
+      // Reviewer resolves path args against the SAME cwd Layer 1 enforces with.
+      executionCwd: evaluationContext.executionCwd,
       auditInput,
       cacheIdentityInput,
       allowedDirectories,
@@ -227,6 +229,8 @@ export async function dispatchReviewerForInteractiveAuto(
         category,
         pathFields,
         finalInput,
+        // Reviewer resolves path args against the SAME cwd Layer 1 enforces with.
+        executionCwd: evaluationContext.executionCwd,
         auditInput,
         cacheIdentityInput,
         allowedDirectories,
