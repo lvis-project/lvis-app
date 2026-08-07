@@ -352,9 +352,12 @@ describe("ApprovalDialog", () => {
     });
   });
 
-  it("routes out-of-allowed-dir requests to the directory access card", async () => {
+  it("renders no modal for out-of-allowed-dir — the docked card serves it", async () => {
+    // The modal OutOfAllowedDirCard was replaced by DockedApprovalCard, which
+    // lives in the chat region. Rendering a modal here as well would put two
+    // surfaces on one decision.
     const onDecide = vi.fn();
-    render(
+    const { container } = render(
       <ApprovalDialog
         queue={[
           makeRequest({
@@ -374,17 +377,9 @@ describe("ApprovalDialog", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(document.body.textContent).toContain("허용 디렉토리 외부 접근");
-      expect(document.body.textContent).toContain("/Users/example/Documents/project/notes.md");
-    });
-
-    const allowOnce = Array.from(document.body.querySelectorAll("button")).find(
-      (button) => button.textContent === "이번 1회만",
-    );
-    expect(allowOnce).toBeTruthy();
-    fireEvent.click(allowOnce!);
-    expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
+    expect(container.firstChild).toBeNull();
+    expect(document.body.textContent).not.toContain("/Users/example/Documents/project/notes.md");
+    expect(onDecide).not.toHaveBeenCalled();
   });
 
   it("prefills HIGH approval purpose from a sufficient suggestion and enables approval", async () => {
