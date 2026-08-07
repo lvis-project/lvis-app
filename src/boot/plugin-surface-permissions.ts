@@ -7,10 +7,6 @@ export type PluginSurfacePermissionBase = Omit<
   "additionalDirectories" | "getAdditionalDirectories" | "onTurnDirectoryGrant" | "onSessionDirectoryGrant"
 >;
 
-export interface WorkspaceRootRevocationOptions {
-  readonly preserveRoots?: readonly string[];
-}
-
 export interface PluginSurfacePermissionScope {
   createPermissionContext(
     context: PluginToolInvocationContext,
@@ -28,7 +24,7 @@ export interface PluginSurfacePermissionScope {
    */
   revokeWorkspaceRoot(
     removedRoot: string,
-    options?: WorkspaceRootRevocationOptions,
+    options?: { readonly preserveRoots?: readonly string[] },
   ): { sessionDirectoriesRemoved: number; turnDirectoriesRemoved: number };
 }
 
@@ -58,7 +54,7 @@ export function createPluginSurfacePermissionScope(
   return {
     revokeWorkspaceRoot(
       removedRoot: string,
-      revocation: WorkspaceRootRevocationOptions = {},
+      revocation: { readonly preserveRoots?: readonly string[] } = {},
     ): { sessionDirectoriesRemoved: number; turnDirectoriesRemoved: number } {
       const isRevoked = createWorkspaceRootRevocationFilter(
         removedRoot,
