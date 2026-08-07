@@ -229,11 +229,6 @@
     },
     {
       "type": "exports",
-      "file": "src/boot/plugins.ts",
-      "name": "registerPluginEventBridge"
-    },
-    {
-      "type": "exports",
       "file": "src/boot/steps/reviewer-wiring.ts",
       "name": "ReviewerProviderUnconfiguredError"
     },
