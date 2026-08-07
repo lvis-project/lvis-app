@@ -656,3 +656,118 @@ describe("ConversationLoop — session-scoped on-demand activation (Option C, di
     expect(setPluginEnabled).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * Carried-forward scope invalidation on disable — WITHOUT `onPluginDisabled`.
+ *
+ * Only the MAIN chat loop is reachable from the plugin runtime's `onDisable`
+ * hook (`lateBinding.conversationLoopRef.fn` is assigned the main loop only, in
+ * `src/boot/steps/conversation-wiring.ts`). The side-chat loop — and every
+ * routine loop — is therefore NEVER told that a plugin was disabled, yet each
+ * one carries `lastTurnScope` forward across turns.
+ *
+ * That is safe because `resolveToolScope` re-reads `pluginRuntime.isPluginEnabled`
+ * on EVERY turn (`src/engine/turn/tool-scope.ts`) and drops now-disabled plugins
+ * from the carried-forward set. `onPluginDisabled` is a redundant fast-path, not
+ * the authority. These tests pin that: the loops below never call
+ * `onPluginDisabled`, exactly like the side-chat loop in production.
+ */
+describe("ConversationLoop — disable invalidates carried-forward scope without onPluginDisabled", () => {
+  it("drops a session-activated plugin the turn after it is disabled (side-chat shape)", async () => {
+    // Mutable so the runtime mock reports the disable BETWEEN turns, the way a
+    // real toggle does — the loop is never notified.
+    const inactivePluginIds: string[] = [];
+    const provider = new RecordingProvider([
+      // Turn 1 round 1 — the model activates the plugin for this session.
+      [
+        {
+          type: "tool_call",
+          id: "tu-1",
+          name: "request_plugin",
+          input: { pluginId: "com.example.meeting" },
+        },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      // Turn 1 round 2 — suite is live, so lastTurnScope carries it forward.
+      [
+        { type: "text_delta", text: "활성화됨" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      // Turn 2 — after the disable.
+      [
+        { type: "text_delta", text: "계속" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    // Side-chat shape: no allowedPluginIds (main-chat-equivalent gating) and no
+    // forcedActivePluginIds, so `lastTurnScope` is the ONLY thing that can put
+    // the plugin into turn 2's scope.
+    const loop = makeLoop({
+      provider,
+      availablePluginIds: ["com.example.meeting"],
+      inactivePluginIds,
+    });
+
+    await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+    // Positive control — the plugin really was in scope and really did carry
+    // forward, so turn 2's assertion is not vacuous.
+    expect(provider.observedToolNames[1]).toContain("meeting_start");
+    expect(
+      (loop as unknown as { lastTurnScope: Set<string> | null }).lastTurnScope,
+    ).toContain("com.example.meeting");
+
+    // The user toggles the plugin off. NOTE: `onPluginDisabled` is deliberately
+    // NOT called — this loop is not wired to the runtime's onDisable hook.
+    inactivePluginIds.push("com.example.meeting");
+
+    await loop.runTurn("계속 진행해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    expect(provider.observedToolNames[2]).not.toContain("meeting_start");
+    // The turn really ran with a non-empty surface — builtins are unaffected.
+    expect(provider.observedToolNames[2]).toContain("request_plugin");
+  });
+
+  it("keeps the plugin in scope while it stays enabled (control)", async () => {
+    const inactivePluginIds: string[] = [];
+    const provider = new RecordingProvider([
+      [
+        {
+          type: "tool_call",
+          id: "tu-1",
+          name: "request_plugin",
+          input: { pluginId: "com.example.meeting" },
+        },
+        { type: "message_complete", stopReason: "tool_use" },
+      ],
+      [
+        { type: "text_delta", text: "활성화됨" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+      [
+        { type: "text_delta", text: "계속" },
+        { type: "message_complete", stopReason: "end_turn" },
+      ],
+    ]);
+    const loop = makeLoop({
+      provider,
+      availablePluginIds: ["com.example.meeting"],
+      inactivePluginIds,
+    });
+
+    await loop.runTurn("회의 정리해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+    await loop.runTurn("계속 진행해줘", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+
+    // No disable happened → carry-forward is what keeps it visible. This is the
+    // assertion that fails if carry-forward is broken outright, so the test
+    // above cannot pass merely because scope is always empty on turn 2.
+    expect(provider.observedToolNames[2]).toContain("meeting_start");
+  });
+});
