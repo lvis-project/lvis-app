@@ -15,6 +15,8 @@ export const en = {
   "messageQueuePanel.sendNowLabel": "Now",
   "messageQueuePanel.removeAriaLabel": "Remove",
   "messageQueuePanel.removeTitle": "Remove",
+  "messageQueuePanel.handedOffBadge": "delivering",
+  "messageQueuePanel.handedOffTitle": "Handed to the model — it appears above once the current step finishes.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "messageQueuePanel.panelTitle": "메시지 큐",
@@ -32,4 +34,6 @@ export const ko: Record<keyof typeof en, string> = {
   "messageQueuePanel.sendNowLabel": "즉시",
   "messageQueuePanel.removeAriaLabel": "제거",
   "messageQueuePanel.removeTitle": "제거",
+  "messageQueuePanel.handedOffBadge": "주입됨",
+  "messageQueuePanel.handedOffTitle": "모델에 전달됨 — 현재 단계가 끝나면 위 대화에 나타납니다.",
 };

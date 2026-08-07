@@ -146,6 +146,11 @@ function MessageQueueRow({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.text);
   const inputRef = useRef<HTMLInputElement | null>(null);
+  // Accepted by the engine, not yet delivered. The row is no longer the
+  // user's to change — editing or re-injecting it would diverge from what the
+  // engine already holds — but it stays visible so the message is never
+  // missing from both the queue and the transcript at once.
+  const handedOff = item.handedOffAs !== undefined;
 
   const enterEdit = useCallback(() => {
     setDraft(item.text);
@@ -212,7 +217,7 @@ function MessageQueueRow({
       <button
         type="button"
         onClick={onToggle}
-        disabled={editing}
+        disabled={editing || handedOff}
         className={
           "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border transition-colors motion-reduce:transition-none " +
           (item.selected
@@ -247,15 +252,29 @@ function MessageQueueRow({
         />
       ) : (
         <span
-          className="min-w-0 flex-1 cursor-text truncate text-xs text-foreground"
-          onDoubleClick={enterEdit}
-          title={t("messageQueuePanel.doubleClickToEditTitle")}
+          className={
+            "min-w-0 flex-1 truncate text-xs " +
+            (handedOff ? "text-muted-foreground" : "cursor-text text-foreground")
+          }
+          onDoubleClick={handedOff ? undefined : enterEdit}
+          title={handedOff
+            ? t("messageQueuePanel.handedOffTitle")
+            : t("messageQueuePanel.doubleClickToEditTitle")}
           data-testid="message-queue-row-text"
         >
           {item.text}
         </span>
       )}
-      {!editing && (
+      {!editing && handedOff && (
+        <span
+          className="shrink-0 rounded border border-info/(--opacity-medium) bg-info/(--opacity-subtle) px-1.5 py-0.5 text-[10px] font-medium text-foreground"
+          title={t("messageQueuePanel.handedOffTitle")}
+          data-testid="message-queue-row-handed-off"
+        >
+          {t("messageQueuePanel.handedOffBadge")}
+        </span>
+      )}
+      {!editing && !handedOff && (
         /* One action cluster, uniform 20px hit targets and a single gap so the
            three verbs read as a row rather than three differently-sized chips.
            "즉시" keeps its label — it is the only destructive-adjacent action

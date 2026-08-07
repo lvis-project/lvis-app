@@ -1697,6 +1697,8 @@ export const frMessages: Record<string, string> = {
   "messageQueuePanel.panelTitle": "File d'attente des messages",
   "messageQueuePanel.removeAriaLabel": "Retirer",
   "messageQueuePanel.removeTitle": "Retirer",
+  "messageQueuePanel.handedOffBadge": "transmission",
+  "messageQueuePanel.handedOffTitle": "Transmis au modèle — apparaît ci-dessus dès la fin de l'étape en cours.",
   "messageQueuePanel.selectAriaLabel": "Sélectionner",
   "messageQueuePanel.selectedCount": "{count} sélectionné",
   "messageQueuePanel.sendNowAriaLabel": "Injectez cet article immédiatement",

@@ -12,6 +12,17 @@ export interface MessageQueueItem {
   createdAt: number;
 
   expiresAt: number;
+  /**
+   * The exact text handed to the engine at a brake point, set once the engine
+   * has ACCEPTED it and cleared once it has actually been delivered.
+   *
+   * The row stays on screen in between because acceptance is not arrival: the
+   * engine holds guidance until its next round boundary, which can be a whole
+   * LLM round away. Clearing the row at hand-off left the message invisible in
+   * BOTH places for that entire stretch — gone from the queue, not yet in the
+   * transcript. That gap is what reads as "the queue just disappeared".
+   */
+  handedOffAs?: string;
 }
 
 let nextId = 0;
@@ -103,6 +114,55 @@ export class MessageQueueStore {
     const before = this.items.length;
     this.items = this.items.filter((it) => it.id !== id);
     if (this.items.length !== before) this.notify();
+  }
+
+  /** Mark rows as accepted by the engine, recording what it was given. */
+  markHandedOff(ids: readonly string[], handedOffAs: string): void {
+    const target = new Set(ids);
+    let changed = false;
+    this.items = this.items.map((it) => {
+      if (!target.has(it.id) || it.handedOffAs === handedOffAs) return it;
+      changed = true;
+      return { ...it, handedOffAs };
+    });
+    if (changed) this.notify();
+  }
+
+  /**
+   * Drop the rows whose hand-off text the engine has now delivered.
+   *
+   * Matching is containment, not equality: the engine joins everything pending
+   * at a round boundary into one guidance block, so a batch handed over here
+   * can arrive as a substring of a larger delivery.
+   */
+  clearDelivered(injectedText: string): void {
+    const before = this.items.length;
+    this.items = this.items.filter(
+      (it) => it.handedOffAs === undefined || !injectedText.includes(it.handedOffAs),
+    );
+    if (this.items.length !== before) this.notify();
+  }
+
+  /**
+   * Return handed-off rows to the queue — the engine took them but could not
+   * deliver them (`guidance_dropped`), so they are the user's again and the
+   * end-of-turn drain must pick them up.
+   */
+  releaseHandedOff(): void {
+    let changed = false;
+    this.items = this.items.map((it) => {
+      if (it.handedOffAs === undefined) return it;
+      changed = true;
+      const { handedOffAs: _dropped, ...rest } = it;
+      return rest;
+    });
+    if (changed) this.notify();
+  }
+
+  /** Rows the engine has not been given yet — the only ones a drain may send. */
+  getPending(): readonly MessageQueueItem[] {
+    this.prune();
+    return this.items.filter((it) => it.handedOffAs === undefined);
   }
 
   /**
