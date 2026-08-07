@@ -7,10 +7,11 @@ import { StatusBar, type StatusBarProps } from "./StatusBar.js";
 import { Composer, type ComposerHandle } from "./Composer.js";
 import { InputActionBar } from "./InputActionBar.js";
 import { QuestionOverlay } from "./QuestionOverlay.js";
+import { DockedApprovalCard } from "./permissions/DockedApprovalCard.js";
 import { computeComposerPlaceholder } from "../utils/composer-placeholder.js";
 import { ATTACH_MAX_COUNT, type Attachment } from "../types/attachments.js";
 import { MessageQueueStore, type MessageQueueItem } from "../state/message-queue-store.js";
-import type { LvisApi } from "../types.js";
+import type { ApprovalChoice, ApprovalRequest, LvisApi } from "../types.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import type { SuggestedRepliesSnapshot } from "../hooks/use-suggested-replies.js";
 import type { QuickAction } from "./CommandPopover.js";
@@ -53,6 +54,9 @@ export interface ChatComposerDockProps {
   onOpenSettings: (tab?: string) => void;
   viewMode: ViewModeState | null;
   streaming: boolean;
+  /** Head-of-queue approval request served by the docked card, if any. */
+  approvalRequest?: ApprovalRequest | null;
+  onApprovalDecide?: (choice: ApprovalChoice, rememberPattern?: string) => void;
   onInsertSlashCommand: (cmd: string) => void;
   onRunMcpPrompt: (prompt: McpPromptEntry) => void;
   commandPopoverOpen: boolean;
@@ -135,6 +139,8 @@ export function ChatComposerDock({
   onOpenSettings,
   viewMode,
   streaming,
+  approvalRequest = null,
+  onApprovalDecide,
   onInsertSlashCommand,
   onRunMcpPrompt,
   commandPopoverOpen,
@@ -272,6 +278,15 @@ export function ChatComposerDock({
             chip. Renders directly above the composer (the position its own
             contract describes); self-hides unless the draft expresses an
             approve/reject intent AND exactly one queue entry is pending. */}
+        {/* Docked approval card — sibling of the composer, outside the
+            transcript scroll flow, so it cannot scroll out of view. */}
+        {approvalRequest && onApprovalDecide ? (
+          <DockedApprovalCard
+            request={approvalRequest}
+            onDecide={onApprovalDecide}
+            onReturnFocus={() => composerRef?.current?.focus()}
+          />
+        ) : null}
         <DeferredApprovalChip draftText={question} />
         {/* ONE unified input box: textarea + the single InputActionBar
             (action row + status sub-row). The window StatusBar is

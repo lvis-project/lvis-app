@@ -1,0 +1,33 @@
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/permissions/DockedApprovalCard.tsx. Do not edit by hand.
+export const en = {
+  "dockedApprovalCard.title": "Outside allowed directories",
+  "dockedApprovalCard.cardAriaLabel": "Permission approval",
+  "dockedApprovalCard.groupAriaLabel": "Approval scope",
+  "dockedApprovalCard.choiceOnce": "This turn only",
+  "dockedApprovalCard.choiceSession": "This session",
+  "dockedApprovalCard.choiceAlways": "Always · parent folder",
+  "dockedApprovalCard.choiceDeny": "Deny",
+  "dockedApprovalCard.fieldTarget": "Target",
+  "dockedApprovalCard.fieldDuration": "Duration",
+  "dockedApprovalCard.fieldWarning": "Warning",
+  "dockedApprovalCard.durationSession": "Until this session ends",
+  "dockedApprovalCard.durationAlways": "Until you revoke it",
+  "dockedApprovalCard.commitHint": "Ctrl+Enter to confirm · Esc to cancel",
+  "dockedApprovalCard.commitButton": "Confirm",
+} as const;
+export const ko: Record<keyof typeof en, string> = {
+  "dockedApprovalCard.title": "허용된 디렉터리 밖",
+  "dockedApprovalCard.cardAriaLabel": "권한 승인",
+  "dockedApprovalCard.groupAriaLabel": "승인 범위",
+  "dockedApprovalCard.choiceOnce": "이번 턴만",
+  "dockedApprovalCard.choiceSession": "이 세션",
+  "dockedApprovalCard.choiceAlways": "항상 · 상위 폴더",
+  "dockedApprovalCard.choiceDeny": "거부",
+  "dockedApprovalCard.fieldTarget": "대상",
+  "dockedApprovalCard.fieldDuration": "기간",
+  "dockedApprovalCard.fieldWarning": "경고",
+  "dockedApprovalCard.durationSession": "이 세션이 끝날 때까지",
+  "dockedApprovalCard.durationAlways": "취소할 때까지",
+  "dockedApprovalCard.commitHint": "Ctrl+Enter 확정 · Esc 취소",
+  "dockedApprovalCard.commitButton": "확정",
+};
