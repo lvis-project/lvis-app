@@ -40,6 +40,7 @@ export const en = {
   "mainDialog.installLocalPluginTitle": "Install local plugin (developer)",
   "mainDialog.installLocalPluginMessage": "Select the build folder that contains plugin.json",
   "mainDialog.unauthorizedFrame": "Unauthorized frame.",
+  "mainDialog.pluginDisableNotPermitted": "This plugin is managed by your organization and cannot be disabled.",
   "mainDialog.noPersonasAvailable": "No personas available",
   "mainDialog.exportConversationTitle": "Export conversation",
   "mainDialog.importConversationTitle": "Import conversation",

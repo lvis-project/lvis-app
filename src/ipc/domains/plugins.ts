@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 import { emitEvent as emitHostEvent } from "../../boot/types.js";
 import { HOST_ONLY_EMIT_NAMESPACES, canEmitEvent } from "../../plugins/capabilities.js";
 import { auditPluginEmitDenial } from "../../plugins/emit-denial-audit.js";
+import { PluginDeploymentDeniedError } from "../../plugins/deployment-guard.js";
 import { getDeclaredEmittedEvents } from "../../plugins/runtime/manifest-validation.js";
 import { stripSecretFields } from "../../plugins/config-schema.js";
 import { shouldBlockPluginSecretRead, validateApiKeyLikeSecretValue } from "../../plugins/secret-shape.js";
@@ -577,6 +578,15 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         await pluginRuntime.setPluginEnabled(pluginId, enabled);
       } catch (err) {
         const message = errMessage(err);
+        if (err instanceof PluginDeploymentDeniedError) {
+          // Deployment policy, not a failure. Log the guard's own reason for
+          // forensics; the renderer banner gets a stable user-facing line.
+          log.warn(`plugin enabled-state change denied (${pluginId}): %s`, message);
+          return pluginConfigError(
+            "disable-not-permitted",
+            t("mainDialog.pluginDisableNotPermitted"),
+          );
+        }
         if (message.startsWith("Plugin not found")) {
           return pluginConfigError("no-such-plugin", `unknown plugin: ${pluginId}`);
         }
