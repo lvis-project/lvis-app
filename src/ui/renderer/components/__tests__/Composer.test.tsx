@@ -47,6 +47,7 @@ function Harness({
   imageAttachmentLimits,
   onImageAttachmentLimitExceeded,
   discardClipboardImage,
+  disabled,
 }: {
   initialText?: string;
   initialAttachments?: Attachment[];
@@ -57,6 +58,8 @@ function Harness({
   imageAttachmentLimits?: SubscriptionImageAttachmentLimits | null;
   onImageAttachmentLimitExceeded?: () => void;
   discardClipboardImage?: (path: string) => Promise<unknown>;
+  /** Composer refuses input entirely (no API key, context overflow, ...). */
+  disabled?: boolean;
   /**
    * Hands the attachment setter to the test.
    *
@@ -100,6 +103,7 @@ function Harness({
       saveClipboardImage={mockSave}
       discardClipboardImage={discardClipboardImage}
       onSend={stableOnSend}
+      disabled={disabled}
       imagesEnabled={imagesEnabled}
       commandActions={STABLE_COMMAND_ACTIONS}
       inlinePlugins={STABLE_PLUGINS}
@@ -249,6 +253,25 @@ describe("Composer", () => {
     // A subsequent plain ⌘V must chip again.
     fireEvent.keyDown(textarea, { key: "v", code: "KeyV", metaKey: true });
     fireEvent.paste(textarea, { clipboardData: textClipboardData(LONG_PASTE) });
+    await waitFor(() => expect(screen.queryByTestId("attachment-chip")).not.toBeNull());
+  });
+
+  it("does not leak the bypass out of a paste the composer refused", async () => {
+    const { rerender } = render(<Harness disabled />);
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    // Chord + paste while the composer is disabled: the paste is refused, and
+    // the chord must be spent rather than left armed.
+    fireEvent.keyDown(textarea, { key: "v", code: "KeyV", metaKey: true, shiftKey: true });
+    fireEvent.paste(textarea, { clipboardData: textClipboardData(LONG_PASTE) });
+    await act(async () => { await Promise.resolve(); });
+
+    rerender(<Harness />);
+    // A context-menu paste arrives with no keydown to clear a stale flag.
+    fireEvent.paste(
+      screen.getByTestId("composer-textarea"),
+      { clipboardData: textClipboardData(LONG_PASTE) },
+    );
     await waitFor(() => expect(screen.queryByTestId("attachment-chip")).not.toBeNull());
   });
 

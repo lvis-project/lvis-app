@@ -405,18 +405,21 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
 
   const handlePaste = useCallback(
     async (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
+      // The Ctrl/⌘+Shift+V chord belongs to the paste it arrived with, so it is
+      // consumed before any early return. A refused paste must not leave the
+      // flag set for a later one that never asked for plain text — a
+      // context-menu paste carries no keydown to clear it.
+      const plainPasteRequested = plainPasteRequestedRef.current;
+      plainPasteRequestedRef.current = false;
       // When the composer is disabled (no API key, context overflow, etc.)
       // the action-bar attach button is also disabled. Without this
       // short-circuit, clipboard paste would silently bypass that gate
       // and grow attachment state while the user cannot send.
       if (disabled) return;
-      // Ctrl/⌘+Shift+V — the user asked for the raw text, so the chipping
-      // engine sits this one out and the browser's own paste inserts
-      // text/plain. Only when there IS text: an image-only clipboard still
-      // goes through the attachment path, since "paste as plain text" has
-      // nothing to insert for it.
-      const plainPasteRequested = plainPasteRequestedRef.current;
-      plainPasteRequestedRef.current = false;
+      // Chord honoured: the chipping engine sits this one out and the browser's
+      // own paste inserts text/plain. Only when there IS text — an image-only
+      // clipboard still takes the attachment path, since "paste as plain text"
+      // has nothing to insert for it.
       if (plainPasteRequested && (e.clipboardData?.getData("text/plain") ?? "") !== "") {
         return;
       }
