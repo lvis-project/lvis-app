@@ -34,6 +34,12 @@ const WIN_WEBGL_FALLBACK_FILES = [
   "dxil.dll",
 ];
 
+// electron-builder's `context.arch` is the numeric Arch enum (1=x64, 3=arm64).
+// Native packages name their per-target artifacts by platform+arch (node-pty:
+// `prebuilds/win32-x64/`, better-sqlite3: `prebuilds/win32-x64.node`), so every
+// packaged-native assert below maps the enum through this one table.
+const ARCH_DIR_BY_ENUM = { 1: "x64", 3: "arm64" };
+
 function electronResourcesDir(context) {
   if (context.electronPlatformName === "darwin") {
     const productFilename = context.packager.appInfo.productFilename;
@@ -141,11 +147,10 @@ function assertSandboxVendorBinaries(context) {
   // {x64,arm64}; the binary the host actually runs depends on the packed arch,
   // so we assert the binary exists under AT LEAST the packed arch dir.
   //
-  // electron-builder's `context.arch` is the numeric Arch enum (1=x64, 3=arm64,
-  // …). Map only the two arch dirs ASRT vendors; any other/unknown value falls
-  // back to scanning all vendored arch dirs (null), which still asserts the
-  // binary is present + executable without a brittle dependency on builder-util.
-  const ARCH_DIR_BY_ENUM = { 1: "x64", 3: "arm64" };
+  // ARCH_DIR_BY_ENUM maps only the two arch dirs ASRT vendors; any other/unknown
+  // value falls back to scanning all vendored arch dirs (null), which still
+  // asserts the binary is present + executable without a brittle dependency on
+  // builder-util.
   const arch = ARCH_DIR_BY_ENUM[context.arch] ?? null;
   const matrix = {
     win32: { keep: { dir: "srt-win", binary: "srt-win.exe" }, prune: ["seccomp"] },
@@ -209,25 +214,66 @@ function assertSandboxVendorBinaries(context) {
 }
 
 /**
- * node-pty ships a native `.node` addon (+ a `spawn-helper` exec on POSIX) that
- * the main process resolves unbundled from `app.asar.unpacked/node_modules/
- * node-pty` (the package.json `asarUnpack` glob). Assert both are present and
- * (POSIX) executable so a prune regression fails the BUILD loudly instead of
- * bricking the terminal at runtime with an `ERR_DLOPEN_FAILED` / missing
- * spawn-helper. node-pty is N-API (ABI-stable), so no per-Electron-ABI matrix
- * is needed here — presence + exec bit is the correct packaged invariant.
+ * Resolve the directory the PACKAGED node-pty will dlopen from, the same way
+ * node-pty itself does.
+ *
+ * node-pty `lib/utils.js` `loadNativeModule()` is the single authority on where
+ * the binding comes from: it tries `build/Release`, then `build/Debug`, then
+ * `prebuilds/<platform>-<arch>`, and takes the first one that loads. node-pty is
+ * N-API (ABI-stable, `node-addon-api` dependency), so the vendor prebuild is a
+ * first-class load path under Electron — not a fallback for a missing
+ * per-Electron-ABI compile.
+ *
+ * Which entry wins is platform-shaped, and no packaging step produces
+ * `build/Release` on Windows/macOS: node-pty's own `install` script
+ * (`node scripts/prebuild.js || node-gyp rebuild`) compiles only where no
+ * prebuild ships (Linux), and release installers run electron-builder with
+ * `-c.npmRebuild=false` (`scripts/build-installers.mjs --skip-native-rebuild`).
+ * Asserting `build/Release` unconditionally therefore demanded an artifact that
+ * only an install-time `electron-rebuild` produced — a per-Electron-ABI compile
+ * this app does not need and no longer runs.
  */
-function assertNodePtyBinary(context) {
+function resolveNodePtyBindingDir(context) {
   const platform = context.electronPlatformName;
-  const resourcesDir = electronResourcesDir(context);
-  const ptyRoot = join(
-    resourcesDir,
+  const ptyModuleRoot = join(
+    electronResourcesDir(context),
     "app.asar.unpacked",
     "node_modules",
     "node-pty",
-    "build",
-    "Release",
   );
+  const arch = ARCH_DIR_BY_ENUM[context.arch];
+  if (!arch) {
+    throw new Error(
+      `packaged node-pty binding: unsupported arch enum ${context.arch} for ${platform}`,
+    );
+  }
+  const searchDirs = [
+    join(ptyModuleRoot, "build", "Release"),
+    join(ptyModuleRoot, "build", "Debug"),
+    join(ptyModuleRoot, "prebuilds", `${platform}-${arch}`),
+  ];
+  const resolved = searchDirs.find((dir) => existsSync(join(dir, "pty.node")));
+  if (!resolved) {
+    throw new Error(
+      `packaged node-pty native addon missing: no pty.node in ${searchDirs.join(", ")} `
+      + `(asarUnpack of node_modules/node-pty/** drifted?)`,
+    );
+  }
+  return resolved;
+}
+
+/**
+ * node-pty ships a native `.node` addon (+ a `spawn-helper` exec on macOS) that
+ * the main process resolves unbundled from `app.asar.unpacked/node_modules/
+ * node-pty` (the package.json `asarUnpack` glob). Assert both are present and
+ * (macOS) executable so a prune regression fails the BUILD loudly instead of
+ * bricking the terminal at runtime with an `ERR_DLOPEN_FAILED` / missing
+ * spawn-helper. Presence + exec bit AT THE LOADER'S RESOLVED DIRECTORY is the
+ * correct packaged invariant; see resolveNodePtyBindingDir above.
+ */
+function assertNodePtyBinary(context) {
+  const platform = context.electronPlatformName;
+  const ptyRoot = resolveNodePtyBindingDir(context);
   const requiredNativeFiles = platform === "win32"
     ? [
         "pty.node",
@@ -285,8 +331,10 @@ function assertNodePtyBinary(context) {
  *
  * better-sqlite3 13 is N-API (ABI-stable) and ships per-platform PREBUILDS at
  * `prebuilds/<platform>-<arch>.node` — one file per target it supports — rather
- * than a per-Electron-ABI `build/Release/better_sqlite3.node` compiled by
- * postinstall `electron-rebuild`. Its runtime loader (lib/binding.js) picks the
+ * than the per-Electron-ABI `build/Release/better_sqlite3.node` that
+ * `electron-rebuild` used to compile at install time (nothing does now — the
+ * only remaining caller is the pre-push ABI-drift repair in
+ * `scripts/hooks/run-local-checks.mjs`). Its runtime loader (lib/binding.js) picks the
  * prebuild by platform+arch, so there is no `bindings`/`file-uri-to-path`
  * resolver walk to keep unpacked anymore. Presence of THIS target's prebuild is
  * the correct packaged invariant; the other 7 prebuilds are dead weight on this
@@ -296,9 +344,7 @@ function assertBetterSqlite3Binary(context) {
   const platform = context.electronPlatformName;
   const win = platform === "win32";
   const platformPrefix = platform === "darwin" ? "darwin" : win ? "win32" : "linux";
-  // electron-builder's `context.arch` is the numeric Arch enum (1=x64, 3=arm64).
   // better-sqlite3 names its prebuilds by platform+arch (e.g. win32-x64.node).
-  const ARCH_DIR_BY_ENUM = { 1: "x64", 3: "arm64" };
   const arch = ARCH_DIR_BY_ENUM[context.arch];
   if (!arch) {
     throw new Error(

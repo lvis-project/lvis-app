@@ -686,7 +686,6 @@ export async function runToolInvocation(
       tool,
       invocationCategory,
       finalInput,
-      invocationAllowedScope.directories,
       effectLedger.correlationId,
       resolvedPluginOperation?.rule.minimumRisk,
     );

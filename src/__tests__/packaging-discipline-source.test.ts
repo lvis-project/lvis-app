@@ -479,6 +479,40 @@ describe("installer smoke and packaging discipline", () => {
     expect(packageFootprint).toContain("required lazy renderer chunks missing from app.asar");
   });
 
+  it("asserts the packaged node-pty binding where node-pty's loader resolves it", () => {
+    const packageJson = JSON.parse(readRepoFile("package.json")) as {
+      scripts?: Record<string, string>;
+    };
+    const afterPack = readRepoFile("scripts/electron-after-pack.cjs");
+    const buildInstallers = readRepoFile("scripts/build-installers.mjs");
+    const localChecks = readRepoFile("scripts/hooks/run-local-checks.mjs");
+
+    // Release installers disable electron-builder's own native rebuild, so
+    // `build/Release` is not an artifact any packaging step produces on
+    // Windows/macOS — only an install-time `electron-rebuild` ever did.
+    expect(buildInstallers).toContain('args.push("-c.npmRebuild=false")');
+    // node-pty is N-API and ships per-platform prebuilds; postinstall must not
+    // compile a per-Electron-ABI copy (it needs a C++ toolchain, `node-gyp
+    // rebuild` deletes the working binding before it fails, and the `&&` chain
+    // then skips uv fetch + protocol registration + hook install).
+    expect(packageJson.scripts?.postinstall).not.toContain("electron-rebuild");
+    expect(packageJson.scripts?.postinstall).toBe(
+      "node scripts/fetch-uv.mjs && node scripts/register-lvis-protocol.mjs && node scripts/hooks/install.mjs",
+    );
+    // afterPack follows node-pty's loader order instead of hardcoding the
+    // per-ABI gyp output directory.
+    expect(afterPack).toContain("function resolveNodePtyBindingDir(context) {");
+    expect(afterPack).toContain("const ptyRoot = resolveNodePtyBindingDir(context);");
+    expect(afterPack).toContain('join(ptyModuleRoot, "build", "Release")');
+    expect(afterPack).toContain("join(ptyModuleRoot, \"prebuilds\", `${platform}-${arch}`)");
+    // One arch-enum table for every packaged-native assert.
+    expect(afterPack.match(/const ARCH_DIR_BY_ENUM = /gu)).toHaveLength(1);
+    // ABI-drift repair still exists — it just lives only in the pre-push hook,
+    // which probes first and rebuilds only when better-sqlite3 actually drifted.
+    expect(localChecks).toContain('"electron-rebuild"');
+    expect(localChecks).toContain("rebuildBetterSqlite3ForElectron(dir)");
+  });
+
   it("packages only the default Electron locale in the desktop shell", () => {
     const packageJson = JSON.parse(readRepoFile("package.json")) as {
       build?: { electronLanguages?: string[] };
