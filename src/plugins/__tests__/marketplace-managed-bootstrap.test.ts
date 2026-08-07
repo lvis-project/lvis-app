@@ -11,6 +11,7 @@ import {
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
+import { removeQuiescentPluginResidualState } from "../uninstall-lifecycle.js";
 
 function makeManagedService(testDir: string, marketplacePath: string): PluginMarketplaceService {
   const paths = makeTestPluginPaths({ rootDir: testDir });
@@ -18,10 +19,18 @@ function makeManagedService(testDir: string, marketplacePath: string): PluginMar
   return new TestPluginMarketplaceService(paths, fetcher);
 }
 
-/** The mode boot uses; spelled out so these calls typecheck. */
+/**
+ * The mode boot uses; spelled out so these calls typecheck. The remover is a
+ * bare pass-through here — the cases that pin what it must actually do bind
+ * the real `removeQuiescentPluginResidualState` instead.
+ */
 const PRE_START_SYNC = {
   mode: "pre-start-sync",
   ensurePluginStateReadyForInstall: async () => {},
+  removeDelistedAdminInstall: async (
+    _removal: { pluginId: string; secretKeys: readonly string[] },
+    commitRegistryRemoval: () => Promise<void>,
+  ) => { await commitRegistryRemoval(); },
 } as const;
 
 /** Just the fetcher members these tests stub. */
@@ -331,6 +340,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const result = await service.ensureManagedInstalled({
       mode: "pre-start-sync",
       ensurePluginStateReadyForInstall: cleanupGate,
+      removeDelistedAdminInstall: PRE_START_SYNC.removeDelistedAdminInstall,
     });
 
     expect(cleanupGate).toHaveBeenCalledWith("meeting");
@@ -430,6 +440,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const result = await service.ensureManagedInstalled({
       mode: "pre-start-sync",
       ensurePluginStateReadyForInstall: cleanupGate,
+      removeDelistedAdminInstall: PRE_START_SYNC.removeDelistedAdminInstall,
     });
 
     expect(cleanupGate).not.toHaveBeenCalled();
@@ -541,6 +552,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const result = await service.ensureManagedInstalled({
       mode: "pre-start-sync",
       ensurePluginStateReadyForInstall: vi.fn(async () => undefined),
+      removeDelistedAdminInstall: PRE_START_SYNC.removeDelistedAdminInstall,
     });
 
     expect(result).toEqual({ installed: ["meeting"], updated: [], removed: [], failed: [] });
@@ -1250,7 +1262,9 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     // per-slug probe. Every case below stubs `getPluginDetail` explicitly so
     // the two can disagree — which is exactly the case that matters, since
     // `mapItem` drops rows whose app-version resolution is malformed.
-    async function seedAdminInstall(): Promise<void> {
+    async function seedAdminInstall(
+      manifestExtras: Record<string, unknown> = {},
+    ): Promise<void> {
       await writeFile(
         marketplacePath,
         JSON.stringify({ version: 1, plugins: [] }),
@@ -1274,7 +1288,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       await mkdir(join(pluginsDir, "ep-api"), { recursive: true });
       await writeFile(
         join(pluginsDir, "ep-api", "plugin.json"),
-        JSON.stringify({ id: "ep-api", version: "0.17.32" }),
+        JSON.stringify({ id: "ep-api", version: "0.17.32", ...manifestExtras }),
         "utf-8",
       );
     }
@@ -1392,6 +1406,106 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         plugins: Array<{ id: string }>;
       };
       expect(registry.plugins.map((entry) => entry.id)).toEqual(["ep-api"]);
+    });
+
+    // `PluginMarketplaceService.uninstall` is only the registry+directories
+    // half of a removal. Everything else a user-initiated uninstall does lives
+    // in the uninstall lifecycle, and an enforced removal used to skip all of
+    // it — leaving the plugin's config, its secrets, its auth partition and
+    // its cache behind, which a later re-install then silently inherited.
+    // The real lifecycle function is bound here, driven by the real producer.
+    it("runs the host-owned residual cleanup when it removes a delisted admin install", async () => {
+      await seedAdminInstall({
+        configSchema: {
+          properties: {
+            token: { type: "string", format: "secret" },
+            endpoint: { type: "string" },
+          },
+        },
+      });
+      const paths = makeTestPluginPaths({ rootDir: testDir });
+      await mkdir(join(paths.cacheRoot, "ep-api"), { recursive: true });
+      await writeFile(join(paths.cacheRoot, "ep-api", "state.json"), "{}", "utf-8");
+      const partition = "persist:plugin-auth:ep-api";
+      const deletePluginConfig = vi.fn(async () => undefined);
+      const deletePluginSecrets = vi.fn(async () => 1);
+      const clearAuthPartitionService = vi.fn(async () => undefined);
+      const forgetPluginAuthPartitionsService = vi.fn();
+      const clearConfigOverride = vi.fn();
+      const emitHostEvent = vi.fn();
+      const service = makeManagedService(testDir, marketplacePath);
+      stubDetail(service, async () => null);
+
+      const result = await service.ensureManagedInstalled({
+        mode: "pre-start-sync",
+        ensurePluginStateReadyForInstall: async () => {},
+        removeDelistedAdminInstall: (removal, commitRegistryRemoval) =>
+          removeQuiescentPluginResidualState(
+            { ...removal, installPluginId: removal.pluginId },
+            commitRegistryRemoval,
+            {
+              pluginRuntime: { clearConfigOverride } as never,
+              settingsService: { deletePluginConfig, deletePluginSecrets },
+              pluginPaths: { cacheRoot: paths.cacheRoot },
+              clearAuthPartitionService,
+              listPluginAuthPartitionsService: () => [partition],
+              forgetPluginAuthPartitionsService,
+              drainPluginInstallLockOperationsService: async () => undefined,
+              emitHostEvent,
+            },
+          ),
+      });
+
+      expect(result.removed).toEqual(["ep-api"]);
+      expect(result.failed).toEqual([]);
+      expect(deletePluginConfig).toHaveBeenCalledWith("ep-api");
+      // The secret key set is derived by the producer from the manifest still
+      // on disk at removal time — not handed in by the test.
+      expect(deletePluginSecrets).toHaveBeenCalledWith("ep-api", new Set(["token"]));
+      expect(clearAuthPartitionService).toHaveBeenCalledWith(partition);
+      expect(forgetPluginAuthPartitionsService).toHaveBeenCalledWith("ep-api");
+      expect(clearConfigOverride).toHaveBeenCalledWith("ep-api");
+      expect(existsSync(join(paths.cacheRoot, "ep-api"))).toBe(false);
+      // The registry-entry cache, the uninstall telemetry track and every
+      // per-plugin `plugin.uninstalled` subscriber hang off this event.
+      expect(emitHostEvent).toHaveBeenCalledWith("plugin.uninstalled", {
+        pluginId: "ep-api",
+      });
+    });
+
+    it("refuses a pre-start sync that cannot clean up a removed install", async () => {
+      await seedAdminInstall();
+      const service = makeManagedService(testDir, marketplacePath);
+
+      await expect(
+        service.ensureManagedInstalled({
+          mode: "pre-start-sync",
+          ensurePluginStateReadyForInstall: async () => {},
+        } as never),
+      ).rejects.toThrow(/delisted-install residual cleanup/);
+    });
+
+    // Enforced removal is safe only because the pre-start pass commits before
+    // `startPlugins()` reads its snapshot. The retry path runs long after that,
+    // against live generations, so it must not delete registry rows out from
+    // under them; the next boot's pre-start pass does the removal.
+    it("does not remove a delisted admin install during live repair", async () => {
+      await seedAdminInstall();
+      const service = makeManagedService(testDir, marketplacePath);
+      const detailSpy = stubDetail(service, async () => null);
+
+      const result = await service.ensureManagedInstalled({
+        mode: "repair-missing-only",
+        ensurePluginStateReadyForInstall: async () => {},
+        activatePreparedArtifact: vi.fn() as never,
+      });
+
+      expect(result.removed).toEqual([]);
+      expect(detailSpy).not.toHaveBeenCalled();
+      const liveRegistry = JSON.parse(await readFile(registryPath, "utf-8")) as {
+        plugins: Array<{ id: string }>;
+      };
+      expect(liveRegistry.plugins.map((entry) => entry.id)).toEqual(["ep-api"]);
     });
   });
 });

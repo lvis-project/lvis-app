@@ -31,6 +31,7 @@ import {
   retryOnTransientFsLock,
 } from "./plugin-artifact-store.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
+import { listSecretKeys } from "./config-schema.js";
 import {
   cleanupPendingPluginUpdateBackup,
   cleanupObsoletePluginBackup,
@@ -248,6 +249,17 @@ function orphanedAdminInstalls(
       !catalogPlugins.some((item) => catalogItemMatchesPluginId(item, entry.id)),
   );
 }
+
+/**
+ * Injected removal authority for a delisted admin install. The marketplace owns
+ * the registry-removal commit; everything Host-owned around it (cleanup
+ * journal, config, secrets, auth partitions, cache, `plugin.uninstalled`) lives
+ * in the uninstall lifecycle, which cannot be imported here without a cycle.
+ */
+export type RemoveDelistedAdminInstall = (
+  input: { pluginId: string; secretKeys: readonly string[] },
+  commitRegistryRemoval: () => Promise<void>,
+) => Promise<void>;
 
 function shaOfManifest(manifest: unknown): string {
   return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
@@ -1128,10 +1140,12 @@ export class PluginMarketplaceService {
   async ensureManagedInstalled(options: {
     mode: "pre-start-sync";
     ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
+    removeDelistedAdminInstall: RemoveDelistedAdminInstall;
     activatePreparedArtifact?: never;
   } | {
     mode: "repair-missing-only";
     ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
+    removeDelistedAdminInstall?: never;
     activatePreparedArtifact: PreparedMarketplacePluginActivation;
   }): Promise<{
     installed: string[];
@@ -1165,6 +1179,18 @@ export class PluginMarketplaceService {
     }
     const ensurePluginStateReadyForInstall =
       options.ensurePluginStateReadyForInstall;
+    // Removal is only offered in the mode whose comment on
+    // `removeDelistedAdminInstalls` is actually true — the pre-start pass, run
+    // before the sealed `startPlugins()`. Requiring the residual-state remover
+    // there fails closed: no wiring, no enforced removal.
+    if (
+      options.mode === "pre-start-sync" &&
+      typeof options.removeDelistedAdminInstall !== "function"
+    ) {
+      throw new Error(
+        "managed pre-start sync requires delisted-install residual cleanup",
+      );
+    }
     const result = {
       installed: [] as string[],
       updated: [] as string[],
@@ -1345,7 +1371,13 @@ export class PluginMarketplaceService {
         log.warn(`managed plugin '${plugin.id}' ${isUpdate ? "update" : "install"} failed: ${msg}`);
       }
     }
-    await this.removeDelistedAdminInstalls(plugins, result);
+    if (options.mode === "pre-start-sync") {
+      await this.removeDelistedAdminInstalls(
+        plugins,
+        result,
+        options.removeDelistedAdminInstall,
+      );
+    }
     return result;
   }
 
@@ -1367,13 +1399,27 @@ export class PluginMarketplaceService {
   private async removeDelistedAdminInstalls(
     catalogPlugins: PluginMarketplaceItem[],
     result: { removed: string[]; failed: Array<{ id: string; error: string }> },
+    removeDelistedAdminInstall: RemoveDelistedAdminInstall,
   ): Promise<void> {
     const registry = await readPluginRegistry(this.registryPath);
     for (const entry of orphanedAdminInstalls(registry, catalogPlugins)) {
       try {
         const detail = await this.fetcher.getPluginDetail(entry.id);
         if (detail !== null) continue;
-        await this.uninstall(entry.id, { actor: "it-admin" });
+        // `uninstall` is only the registry+directories half. The Host-owned
+        // residual state (config, secrets, auth partitions, cache) and the
+        // `plugin.uninstalled` event belong to the uninstall lifecycle, which
+        // wraps the commit below. The declared secret keys must be read while
+        // the manifest still exists on disk.
+        await removeDelistedAdminInstall(
+          {
+            pluginId: entry.id,
+            secretKeys: await this.readDeclaredSecretKeys(entry),
+          },
+          async () => {
+            await this.uninstall(entry.id, { actor: "it-admin" });
+          },
+        );
         result.removed.push(entry.id);
         log.info(
           `managed plugin '${entry.id}' removed — the marketplace no longer publishes it`,
@@ -1781,6 +1827,30 @@ export class PluginMarketplaceService {
       });
     } catch (err) {
       log.warn(`appendHistoryFromManifestVersion failed for ${pluginId}: ${(err as Error).message}`);
+    }
+  }
+
+  /**
+   * The plugin's manifest-declared secret config keys, read from disk because
+   * the pre-start sync runs before the runtime holds any manifest. An
+   * unreadable or schema-less manifest yields no keys — the rest of the
+   * residual cleanup still runs.
+   */
+  private async readDeclaredSecretKeys(
+    entry: PluginRegistryEntry,
+  ): Promise<readonly string[]> {
+    const manifestAbs = isAbsolute(entry.manifestPath)
+      ? entry.manifestPath
+      : resolve(dirname(this.registryPath), entry.manifestPath);
+    try {
+      const raw = await readFile(manifestAbs, "utf-8");
+      const parsed = JSON.parse(raw) as Pick<PluginManifest, "configSchema">;
+      return [...listSecretKeys(parsed.configSchema)];
+    } catch (err) {
+      log.warn(
+        `delisted admin removal: config schema unreadable for '${entry.id}' — secret keys not derivable: ${(err as Error).message}`,
+      );
+      return [];
     }
   }
 

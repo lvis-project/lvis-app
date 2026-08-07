@@ -57,12 +57,13 @@ import {
 import {
   ensurePluginStateReadyForInstall,
   recoverPendingPluginUninstallCleanups,
+  removeQuiescentPluginResidualState,
 } from "./plugins/uninstall-lifecycle.js";
 import { drainPluginInstallLockOperations } from "./plugins/install-lifecycle.js";
 import { openLinkWindow as openLinkWindowService } from "./main/link-window-service.js";
 import { openAuthPartitionViewer as openAuthPartitionViewerService } from "./main/auth-partition-viewer-service.js";
 
-import { type AppServices, onEvent } from "./boot/types.js";
+import { type AppServices, emitEvent as emitHostEvent, onEvent } from "./boot/types.js";
 import { revokePluginWebviewsForPlugin } from "./ipc/domains/plugins.js";
 import { startWatcherTelemetryCollector } from "./boot/steps/watcher-telemetry-collector.js";
 import { bootstrapCoreServices } from "./boot/services.js";
@@ -636,22 +637,32 @@ export async function bootstrap(
   // commits verified bytes/receipt/registry only: it never publishes or starts
   // a candidate. startPlugins() seals admission synchronously, waits for the
   // tail (including rollback), then loads the one committed registry snapshot.
+  const pluginStateCleanupDeps = {
+    pluginRuntime,
+    settingsService,
+    pluginPaths,
+    clearAuthPartitionService,
+    listPluginAuthPartitionsService: getTrackedPluginAuthPartitions,
+    forgetPluginAuthPartitionsService: forgetTrackedPluginAuthPartitions,
+    drainPluginInstallLockOperationsService: drainPluginInstallLockOperations,
+    log,
+  };
   const managedPreStartSync = runManagedBootstrap({
     pluginMarketplace: ctx.pluginMarketplace,
     ensurePluginStateReadyForInstall: (pluginId) =>
       ensurePluginStateReadyForInstall(pluginId, {
         pluginMarketplace: ctx.pluginMarketplace,
-        pluginRuntime,
-        settingsService,
-        pluginPaths,
-        clearAuthPartitionService,
-        listPluginAuthPartitionsService: getTrackedPluginAuthPartitions,
-        forgetPluginAuthPartitionsService:
-          forgetTrackedPluginAuthPartitions,
-        drainPluginInstallLockOperationsService:
-          drainPluginInstallLockOperations,
-        log,
+        ...pluginStateCleanupDeps,
       }),
+    // The registry-entry cache, the uninstall telemetry track and every
+    // per-plugin `onEvent("plugin.uninstalled")` subscriber hang off this
+    // event; an enforced removal has to publish it like any other.
+    removeDelistedAdminInstall: (removal, commitRegistryRemoval) =>
+      removeQuiescentPluginResidualState(
+        { ...removal, installPluginId: removal.pluginId },
+        commitRegistryRemoval,
+        { ...pluginStateCleanupDeps, emitHostEvent: emitHostEvent },
+      ),
     mainWindow,
     marketplace: ctx.settingsService.get("marketplace"),
     mode: "pre-start-sync",
