@@ -2,7 +2,11 @@
 // Pure type declarations — no React runtime, no hook state, no side effects.
 
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
-import type { PluginInstallResultPayload } from "../../contract/app-contract.js";
+import type {
+  AgentInstallResultPayload,
+  PluginInstallResultPayload,
+  SkillInstallResultPayload,
+} from "../../contract/app-contract.js";
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
@@ -1162,10 +1166,10 @@ export type LvisApi = {
   onPluginEnabledChanged?: (h: (payload: { pluginId: string; enabled: boolean }) => void) => () => void;
   /** Fires after a loaded plugin runtime is restarted/reloaded without a full app restart. */
   onPluginRuntimeUpdated?: (h: (payload: { pluginId: string }) => void) => () => void;
-  onAgentInstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
-  onAgentUninstallResult: (h: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => () => void;
-  onSkillInstallResult: (h: (payload: { slug: string; success: boolean; skillId?: string; error?: string }) => void) => () => void;
-  onSkillUninstallResult: (h: (payload: { slug: string; success: boolean; skillId?: string; error?: string }) => void) => () => void;
+  onAgentInstallResult: (h: (payload: AgentInstallResultPayload) => void) => () => void;
+  onAgentUninstallResult: (h: (payload: AgentInstallResultPayload) => void) => () => void;
+  onSkillInstallResult: (h: (payload: SkillInstallResultPayload) => void) => () => void;
+  onSkillUninstallResult: (h: (payload: SkillInstallResultPayload) => void) => () => void;
   /**
    * Dev-only: open a folder picker and install a local plugin directory.
    *
