@@ -695,6 +695,15 @@ export async function runToolInvocation(
     meta.category = invocationCategory;
     // Freeze the shell substrate before any reviewer, memory, or approval path.
     // Only these host-owned builtin tools may consume the plan.
+    //
+    // Canonical-INSTANCE identity — the narrow, unspoofable derivation. It is
+    // deliberately NOT the same question as `BashAstValidator._isBashTool`
+    // (Step 2.5 below), which is a wide name regex so that plugin/MCP tools
+    // named `shell*`/`exec*`/… still receive POSIX structural analysis; and not
+    // the same as `ASRT_WRAPPED_SHELL_TOOLS`. Do not unify the three: using
+    // instance identity for the structural gate would silently drop every
+    // non-builtin shell tool out of it. See
+    // `src/tools/__tests__/executor-shell-tool-identity.test.ts`.
     const hostShellToolName =
       invocationCategory !== "shell" || toolUse.name !== tool.name
         ? undefined
