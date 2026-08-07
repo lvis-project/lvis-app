@@ -41,6 +41,12 @@ export function formatTokens(n: number): string {
  * Non-positive and non-finite amounts collapse to `"$0"` — a negative amount is
  * not meaningful here and previously rendered as `$-0.5000`.
  *
+ * Amounts of $1,000 and over carry thousand separators. The starred-session
+ * list already grouped (via `Intl`) and must not lose it; the other three
+ * gain it. Dropping the separator would have been the one change in this
+ * consolidation that made a number HARDER to read, where every other one
+ * converges on a finer or more correct rendering.
+ *
  * Callers that need a prefix or a qualifier (`~` for an estimate, an
  * unknown-pricing message) compose it around this function rather than
  * re-deriving the digits; see `cost-estimator.ts:formatCostBadge`.
@@ -50,5 +56,5 @@ export function formatCost(n: number): string {
   if (n < 0.001) return `$${n.toFixed(5)}`;
   if (n < 0.01) return `$${n.toFixed(4)}`;
   if (n < 1) return `$${n.toFixed(3)}`;
-  return `$${n.toFixed(2)}`;
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
