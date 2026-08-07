@@ -42,6 +42,18 @@ interface NodePtyUtils {
   };
 }
 
+/**
+ * The binding's export surface is platform-shaped, so assert the exports
+ * node-pty's OWN terminal implementation calls on this platform:
+ *   - win32: `lib/windowsPtyAgent.js` → `startProcess`, `resize`, `kill`
+ *   - posix: `lib/unixTerminal.js` → `fork`, `open`, `process`, `resize`
+ * (CI caught a Windows-shaped list here: the Linux binding exports
+ * `['fork','open','resize','process']` and has no `startProcess`/`kill`.)
+ */
+const REQUIRED_BINDING_EXPORTS = process.platform === "win32"
+  ? ["startProcess", "resize", "kill"]
+  : ["fork", "open", "process", "resize"];
+
 const utilsPath = nodeRequire.resolve("node-pty/lib/utils.js");
 const ptyModuleRoot = resolve(dirname(utilsPath), "..");
 const prebuildDir = join(
@@ -61,7 +73,7 @@ describe("node-pty native binding", () => {
     const loaded = utils.loadNativeModule("pty");
 
     expect(Object.keys(loaded.module)).toEqual(
-      expect.arrayContaining(["startProcess", "resize", "kill"]),
+      expect.arrayContaining(REQUIRED_BINDING_EXPORTS),
     );
   });
 
@@ -94,7 +106,7 @@ describe("node-pty native binding", () => {
       >;
 
       expect(Object.keys(prebuilt)).toEqual(
-        expect.arrayContaining(["startProcess", "resize", "kill"]),
+        expect.arrayContaining(REQUIRED_BINDING_EXPORTS),
       );
     },
   );
