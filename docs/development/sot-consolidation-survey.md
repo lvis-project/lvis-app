@@ -1533,3 +1533,89 @@ what is permitted, so it needs an owner decision, not a refactor:
   finding is that the IPC patch path skips validation the load path applies.
   Extracting the constants without closing that gap moves the drift rather than
   removing it, and closing it rejects settings writes that currently persist.
+
+# Status as of 2026-08-07 — supersedes the "Implementation pass" section above
+
+That section stops at PR #1882 and lists five landed candidates. It is badly out
+of date: roughly forty PRs from this survey have landed since. Read THIS section
+for the current state of any entry; the ones above remain accurate about what
+they describe, only incomplete about what has since been done.
+
+## The finding that matters most for how you use this document
+
+**Six entries were re-verified as ALREADY FIXED before anyone wrote code**, each
+by a different worker, each naming the commit that closed it:
+
+| entry | closed by |
+| --- | --- |
+| `install-result-broadcast-shape-five-declarations` | one `PluginInstallResultPayload` in `contract/app-contract.ts:794`; phantom `preparing?` gone |
+| `delisted-admin-uninstall-bypasses-cleanup` | `e485b9ef` |
+| `approval-gate-sandbox-capability-fallback` | `dbc39ab0` |
+| `reviewer-containment-copy-inert` | `daefbe4c` + `c53bad1f` |
+| `network-target-extraction` | `7d3e8a5a` — `src/permissions/reviewer/network-target.ts` |
+| `host-secret-key-allowlist-three-authorities` | `1b142363` |
+
+Plus one entry — `outgoing-turn-dlp-redaction` — that an earlier reviewer
+REFUTED as "centralized, not leaky" and which turned out to be a **real PII
+leak**: the refutation checked the main-chat replay lanes, all of which do route
+through `ipc/domains/chat.ts:579`, and missed that side chat parses its own
+payload and calls the loop directly. Fixed in #1930.
+
+**So this document lies in both directions.** Treat every entry as a LEAD, not a
+finding, and re-verify against the deciding code before writing anything. Grep
+for the PRODUCER of every field involved — comments in this codebase actively
+describe removed lanes as live, which has produced unreachable code more than
+once.
+
+## Landed since #1882
+
+`ensure-install-ready-three-wirings` #1929 · `plugin-execution-gate-parity` #1928
+· `subagent-prompt-scope-two-authorities` #1931 · `outgoing-turn-dlp-redaction`
+#1930 · `workspace-root-lifecycle-wirings` #1933 · `approval-request-isreadonly`
+#1932 · `message-token-cost-two-estimators` #1937 · `plugin-skill-turn-scope`
+#1936 · `mcp-ui-payload-generation-id-enumerators` #1941 · `sensitive-path-two-denylists`
+#1934 · `plugin-surface-directory-scope` #1942 · `model-discovery-policy-three-predicates`
+#1943.
+
+Not from the survey but found while working it, and worth knowing about:
+
+- **#1938** — `plugin-artifact-store.test.ts` and `marketplace-installer.test.ts`
+  were failing full-suite runs for the entire round. Not flake and not
+  contention: the assertion passed and the **`finally` block** threw `ENOTEMPTY`.
+  `makeTmpDir` roots scratch dirs at `process.cwd()`, and on Windows a scanner or
+  the shell indexer holds a handle briefly after the last write. The tell was a
+  failure in **69ms on a serialized run** — contention cannot produce that.
+  `plugin-artifact-store.ts:71-80` already documents these codes and
+  `retryOnTransientFsLock` retries them; the teardown was the one filesystem
+  caller not using its own module's remedy. Full runs went to 983-986 files
+  green, 0 failed, immediately after.
+
+## Open
+
+`host-secret-gate-two-implementations` (branch `agent/w7-secret-gate`) ·
+`permission-config-broadcast-four-wirings` (#1935) · the `install-result`
+deep-link residual (#1944) · `tool-pair-invariant-two-impls`,
+`shell-structural-command-deny-two-wirings`, `plugin-shell-frame-predicate`,
+`tool-result-image-wire-vendor-gate` (branches pushed, PRs pending).
+
+Filed as issues rather than fixed: **#1939** (`hostSecrets.read[]` collection
+bounds unenforced on the signed-whitelist path — the manifest path is covered by
+AJV, the whitelist path has no schema leg at all, so the TS gate is the only one
+and it is missing two of three bounds).
+
+## Untriaged, deliberately not called flake
+
+- `subagent-runner.test.ts > tags the persisted sub-agent session ... resume
+  metadata` — failed once under load; the output was piped through `grep` and
+  lost, so assertion-vs-teardown is unknown. Recorded as unknown rather than
+  guessed from the test name.
+- `replaceStagedFile` (`src/lib/atomic-file.ts:41-53`) retries `EPERM`/`EACCES`/
+  `EBUSY` on win32 with **4 attempts and 60ms of total backoff**, against the
+  sibling `retryOnTransientFsLock`'s 10 attempts / ~1750ms — roughly 29x apart,
+  for the same Windows lock class, neither aware of the other. The sibling's own
+  docstring says these locks "typically clear within a few hundred
+  milliseconds", which 60ms does not cover. Observed once as a real production
+  frame (`permission-settings-store.ts:570`, assertion never reached, `%TEMP%`
+  not cwd — so neither #1938's class nor the cwd-staging contributor). One
+  occurrence, no idle-machine reproduction: a design question, not a confirmed
+  bug.
