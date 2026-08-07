@@ -1,4 +1,3 @@
-import type { PluginInstallResultPayload } from "../contract/app-contract.js";
 /**
  * Host-owned public contract for LVIS plugin authors.
  *
@@ -1570,31 +1569,3 @@ export interface RuntimePlugin {
 
 export type RuntimePluginFactory = (context: PluginRuntimeContext,
 ) => Promise<RuntimePlugin> | RuntimePlugin;
-
-/**
- * The `plugins.installResult` failure payload. Sole producer of the shape, so
- * the code/message pairing cannot drift between the install handler and the
- * dev local-install handler.
- *
- * A recognised failure sends its stable English code in `error` and keeps the
- * concrete English text (which carries the version numbers) in `message`.
- * `formatIpcError(error, message)` on the renderer turns that pair into
- * localized copy; an unrecognised failure has no code, so the plain message
- * goes in `error` and the renderer's fallback surfaces it verbatim.
- */
-export function buildInstallFailureResult(
-  slug: string,
-  error: unknown,
-  fallbackMessage: string,
-): PluginInstallResultPayload {
-  const message = (error instanceof Error ? error.message : "") || fallbackMessage;
-  const code = error instanceof IncompatibleAppVersionError
-    ? INCOMPATIBLE_APP_VERSION_CODE
-    : undefined;
-  return {
-    slug,
-    success: false,
-    error: code ?? message,
-    ...(code ? { message } : {}),
-  };
-}

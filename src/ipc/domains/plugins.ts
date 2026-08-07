@@ -91,7 +91,7 @@ import {
   ensurePluginStateReadyForInstall,
   uninstallPluginWithLifecycle,
 } from "../../plugins/uninstall-lifecycle.js";
-import { buildInstallFailureResult } from "../../plugins/public-contract.js";
+import { buildInstallFailureResult } from "../../shared/plugin-install-result.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import { isPluginInstallFailureKind, type PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
