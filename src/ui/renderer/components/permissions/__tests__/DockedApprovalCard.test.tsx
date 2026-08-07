@@ -137,7 +137,7 @@ describe("DockedApprovalCard — widening choices cannot be committed by momentu
           currentAllowed: [],
           adjacencyWarnings: ["path contains '.git' segment"],
         },
-      } as Partial<ApprovalRequest>),
+      }),
     );
     await act(async () => {
       fireEvent.click(screen.getByTestId("docked-approval-choice-allow-always"));
@@ -219,11 +219,11 @@ describe("DockedApprovalCard — option table", () => {
       makeRequest({
         outOfAllowedDir: {
           candidatePath: "C:\\x\\y.json",
-          suggestedParent: undefined,
+          suggestedParent: null,
           currentAllowed: [],
           adjacencyWarnings: [],
         },
-      } as Partial<ApprovalRequest>),
+      }),
     );
     expect(
       container.querySelector('[data-testid="docked-approval-choice-allow-session"]'),
@@ -237,7 +237,7 @@ describe("DockedApprovalCard — option table", () => {
 
   it("honours allowedChoices from the host", async () => {
     const { container } = await renderCard(
-      makeRequest({ allowedChoices: ["allow-once", "deny-once"] } as Partial<ApprovalRequest>),
+      makeRequest({ allowedChoices: ["allow-once", "deny-once"] }),
     );
     expect(
       container.querySelector('[data-testid="docked-approval-choice-allow-always"]'),
