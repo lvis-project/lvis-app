@@ -30,6 +30,11 @@ import { resolveAppIconPath } from "./app-icon.js";
 import {
   withAuthPartitionViewersClosed,
 } from "./auth-partition-viewer-service.js";
+import {
+  normalizeAllowedHosts,
+  normalizeHost,
+  urlHostMatchesAllowList,
+} from "./host-allow-list.js";
 import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("auth-window");
@@ -317,16 +322,17 @@ function buildErudaInlineScript(): string {
 ;try{if(!window.__lvis_eruda_booted){window.__lvis_eruda_booted=true;eruda.init();}}catch(e){console.error("[lvis] auth shell eruda init failed", e);}</script>`;
 }
 
-/** Normalize host strings by absorbing leading dots, whitespace, and case differences. Empty strings are dropped. */
-function normalizeHost(raw: string): string {
-  const trimmed = raw.trim().toLowerCase();
-  return trimmed.startsWith(".") ? trimmed.slice(1) : trimmed;
-}
-
 /**
  * Filter a cookie array to allowed hosts and serialize it as AuthCookie.
  * `allowedHosts` are normalized the same way as cookie domains so spelling
  * differences like ".example.com" vs "example.com" do not break matches.
+ *
+ * Matching is delegated to `host-allow-list.ts`, which declares itself the SoT
+ * for this surface — see its header, which names `openAuthWindow.cookieHosts`
+ * first. `normalizeHost` there already strips the leading-dot cookie-domain
+ * artifact (that is what the helper was written for). The re-normalization
+ * below is idempotent and keeps this exported helper safe for direct callers
+ * that have not run their list through `normalizeAllowedHosts`.
  */
 export function filterCookiesByHost(cookies: Cookie[], allowedHosts: string[]): AuthCookie[] {
   const normalizedAllowed = allowedHosts
@@ -336,11 +342,9 @@ export function filterCookiesByHost(cookies: Cookie[], allowedHosts: string[]): 
   return cookies
     .filter((c) => {
       if (!c.domain) return false;
-      // Electron cookie domains may include a leading dot (".example.com"); normalize before comparing.
-      const normalized = normalizeHost(c.domain);
-      return normalizedAllowed.some(
-        (host) => normalized === host || normalized.endsWith(`.${host}`),
-      );
+      // Electron cookie domains may include a leading dot (".example.com");
+      // `urlHostMatchesAllowList` normalizes the probe host internally.
+      return urlHostMatchesAllowList(c.domain, normalizedAllowed);
     })
     .map((c) => ({
       name: c.name,
@@ -496,10 +500,24 @@ export async function openAuthWindow(
     throw new Error("openAuthWindow: completionUrlPatterns must be a non-empty array of non-blank strings");
   }
 
-  const normalizedCookieHosts = (Array.isArray(cookieHosts) ? cookieHosts : [])
-    .filter((h): h is string => typeof h === "string")
-    .map((h) => h.trim())
-    .filter((h) => h.length > 0);
+  // `cookieHosts` decides which cookies leave the host for plugin code, so it
+  // goes through the SAME validator as the sibling `partitionDomains` arm
+  // (`host-allow-list.ts` names both surfaces as governed by it). Without this
+  // a caller could declare `["com"]` or an `xn--*` homoglyph and blanket-match
+  // the partition's whole cookie jar. Validation is fail-fast — the throw
+  // happens before any BrowserWindow / partition is created.
+  let normalizedCookieHosts: string[];
+  try {
+    normalizedCookieHosts = normalizeAllowedHosts(
+      (Array.isArray(cookieHosts) ? cookieHosts : []).filter(
+        (h): h is string => typeof h === "string",
+      ),
+    );
+  } catch (err) {
+    throw new Error(
+      `openAuthWindow: cookieHosts rejected — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
   if (normalizedCookieHosts.length === 0) {
     throw new Error("openAuthWindow: cookieHosts must be a non-empty array of non-blank strings");
   }
