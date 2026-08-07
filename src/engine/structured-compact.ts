@@ -7,8 +7,8 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { GenericMessage } from "./llm/types.js";
-import { serializeMessageForEstimation, userContentText } from "./llm/types.js";
-import { estimateTokens, estimateMessageTokensForWire, estimateMessagesTokens } from "./auto-compact.js";
+import { userContentText } from "./llm/types.js";
+import { estimateMessageTokensForWire, estimateMessagesTokens } from "./auto-compact.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { createLogger } from "../lib/logger.js";
 import {
@@ -262,7 +262,7 @@ async function truncateOversizeMessages(
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
-    const msgTokens = estimateTokens(serializeMessageForEstimation(msg));
+    const msgTokens = estimateMessageTokensForWire(msg);
     if (msgTokens <= TRUNCATION_THRESHOLD_TOKENS) {
       result.push(msg);
       continue;
