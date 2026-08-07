@@ -93,6 +93,83 @@ describe("PluginInstallDialog — admin consent gate (#1098)", () => {
     expect(onConfirm).toHaveBeenCalledWith("meeting");
   });
 
+  it("discloses a private-network grant that carries no domains and no reasoning", () => {
+    // The dialog used to derive "is there anything to disclose" locally as
+    // `allowedDomains.length > 0 || !!reasoning`, shadowing the shared
+    // `hasNetworkAccessDisclosure`, which also counts `allowPrivateNetworks`.
+    // A grant that ONLY opts into private networks therefore rendered NO panel
+    // — including the private-network warning nested inside it — even though
+    // `MarketplaceTab` used the shared predicate to route the install here.
+    render(
+      <PluginInstallDialog
+        target={item({
+          installPolicy: "user",
+          networkAccess: { allowedDomains: [], allowPrivateNetworks: true },
+        })}
+        working={false}
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    const disclosure = screen.getByTestId("plugin-install-network-access");
+    expect(disclosure.textContent).toContain("네트워크 접근 요청");
+    expect(disclosure.textContent).toContain("사설 네트워크");
+  });
+
+  it("adds the private-network warning to a grant that also has domains", () => {
+    render(
+      <PluginInstallDialog
+        target={item({
+          installPolicy: "user",
+          networkAccess: {
+            allowedDomains: ["api.example.com"],
+            reasoning: "Sync.",
+            allowPrivateNetworks: true,
+          },
+        })}
+        working={false}
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    const disclosure = screen.getByTestId("plugin-install-network-access");
+    expect(disclosure.textContent).toContain("api.example.com");
+    expect(disclosure.textContent).toContain("사설 네트워크");
+  });
+
+  it("shows no panel when there is no network grant at all", () => {
+    // Companion negative: the widened predicate must not degrade into
+    // "always show", which would satisfy both cases above.
+    render(
+      <PluginInstallDialog
+        target={item({ installPolicy: "user" })}
+        working={false}
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("plugin-install-network-access")).toBeNull();
+  });
+
+  it("shows no panel for a grant whose every field is empty", () => {
+    render(
+      <PluginInstallDialog
+        target={item({
+          installPolicy: "user",
+          networkAccess: { allowedDomains: ["  "], reasoning: "   ", allowPrivateNetworks: false },
+        })}
+        working={false}
+        onClose={vi.fn()}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByTestId("plugin-install-network-access")).toBeNull();
+  });
+
   it("re-arms consent when reopened for a different admin plugin", () => {
     const onConfirm = vi.fn();
     const { rerender } = render(
