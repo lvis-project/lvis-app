@@ -3,7 +3,6 @@
  */
 import type { BrowserWindow } from "electron";
 import type { AppServices } from "../boot/types.js";
-import type { PermissionDirectoryLifecycle } from "../permissions/permission-slash.js";
 import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-runtime.js";
 import type { ConversationCommandPort } from "../main/conversation-command-port.js";
 import type { TailnetSharingOwnerService } from "../main/tailnet-sharing-owner-service.js";
@@ -12,13 +11,6 @@ import type { TelegramConnectionService } from "../main/telegram-connection-serv
 export type IpcDeps = AppServices & {
   getMainWindow: () => BrowserWindow | null;
   getAppWindows?: () => Array<BrowserWindow | null | undefined>;
-  /**
-   * Main-process-owned workspace registry lifecycle. Workspace handlers wire
-   * this once during IPC registration; permission IPC resolves it lazily when
-   * a mutating command runs so Settings cannot fall back to settings-only
-   * allow/deny writes.
-   */
-  workspaceRootLifecycle?: PermissionDirectoryLifecycle;
   /**
    * Host-owned event/lease runtime shared by every main-conversation surface.
    * It is injected by main-process composition and intentionally optional for
