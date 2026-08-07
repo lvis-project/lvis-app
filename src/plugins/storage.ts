@@ -36,16 +36,76 @@ const PLUGIN_DIR_MODE = 0o700;
 const PLUGIN_FILE_MODE = 0o600;
 
 /**
+ * Sink invoked when a storage operation is REFUSED by the containment guards.
+ * `message` names the refusal; `meta` carries the offending paths.
+ */
+export type PluginStorageRejectionLog = (message: string, meta?: unknown) => void;
+
+/**
+ * Audit transport a rejection sink writes to. Deliberately narrower than the
+ * runtime's general `(level, message, data)` audit callback — level is always
+ * `"error"` — so any caller can hand its existing audit callback over
+ * unchanged (a wider parameter type is assignable to a narrower one).
+ */
+export type PluginStorageAuditLog = (
+  level: "error",
+  event: string,
+  data: Record<string, unknown>,
+) => void;
+
+/**
+ * SINGLE AUTHORITY for the audit record a plugin-storage containment refusal
+ * produces.
+ *
+ * Every production `createPluginStorage` wiring builds its sink here, so the
+ * host-plugin path (`hostApi.storage`) and the plugin-webview bridge path
+ * (`bridge.storage.get/set` → `PluginRuntime.getPluginStorage`) emit the SAME
+ * event name and the SAME meta for the same refusal. Before this existed the
+ * two wirings disagreed: the host path hand-rolled a `[plugin:<id>]
+ * storage_<msg>` line and the webview path passed no sink at all, so a symlink
+ * escape refused on behalf of a webview left no trace anywhere (the IPC
+ * handler's catch only replies to the caller).
+ *
+ * `level` is fixed to `"error"` — a refused containment check is a rejected
+ * sandbox escape, matching the runtime's other `plugin_*_rejected` events. The
+ * emit is wrapped so a failing audit transport can never convert a refusal
+ * into a different throw: `createPluginStorage` still rejects the operation.
+ */
+export function createPluginStorageAuditSink(
+  pluginId: string,
+  auditLog: PluginStorageAuditLog,
+): PluginStorageRejectionLog {
+  return (message, meta) => {
+    try {
+      auditLog("error", "plugin_storage_path_rejected", {
+        // Spread meta FIRST so the authoritative fields below always win, even
+        // if a future call site puts a `pluginId`/`reason` key in its meta.
+        ...(meta && typeof meta === "object" ? (meta as Record<string, unknown>) : {}),
+        pluginId,
+        reason: message,
+      });
+    } catch {
+      /* audit must never break the refusal it is reporting */
+    }
+  };
+}
+
+/**
  * Build a sandboxed `PluginStorage` instance pinned to `pluginDataDir`.
  *
  * The root is canonicalised via `realpathSync` once at construction; all
  * subsequent path checks compare against the canonical form. Callers must
  * have created `pluginDataDir` before calling this.
+ *
+ * `log` receives every containment refusal. Production callers MUST pass
+ * {@link createPluginStorageAuditSink} — omitting it silently discards the
+ * sandbox-escape trail. It stays optional only for unit tests and the
+ * test-only noop HostApi, which have no audit transport.
  */
 export function createPluginStorage(
   pluginId: string,
   pluginDataDir: string,
-  log?: (message: string, meta?: unknown) => void,
+  log?: PluginStorageRejectionLog,
 ): PluginStorage {
   // Construction-time canonicalisation is intentionally sync: it runs once
   // per plugin during boot and the result is reused on every subsequent
@@ -189,8 +249,10 @@ export function createPluginStorage(
   // that mutates ONLY via storage would be recorded `hostObservable:true,
   // hasMutatingEffect:false` — a confirmed host-observed read, a fail-open seed
   // for the future read-recognition gate. Wrapping at this construction boundary
-  // (rather than per-method) covers EVERY storage instance uniformly — the four
-  // `createPluginStorage` call-sites and any future storage method.
+  // (rather than per-method) covers EVERY storage instance uniformly — the two
+  // production `createPluginStorage` call-sites (boot host-api-factory and
+  // PluginRuntime.getPluginStorage), the test-only noop HostApi, and any
+  // future storage method.
   const raw: PluginStorage = {
     resolve: (...segments) => guardLexicalOnly(segments.length === 0 ? "." : join(...segments)),
 
