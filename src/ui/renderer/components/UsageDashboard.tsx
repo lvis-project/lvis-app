@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { Card, CardContent, CardHeader, CardTitle } from "../../../components/ui/card.js";
 import { Input } from "../../../components/ui/input.js";
-import { formatCost, formatTokens } from "../utils/cost-format.js";
+import { formatCost, formatTokens } from "../../../lib/cost-format.js";
 import type { LvisApi, UsageSummaryShape, UsageTrendPt } from "../types.js";
 import { Sparkline } from "./Sparkline.js";
 import { SettingsPageHeader } from "./SettingsPageHeader.js";

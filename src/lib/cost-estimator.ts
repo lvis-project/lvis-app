@@ -19,6 +19,7 @@ import {
   type UserContentForTokenEstimate,
 } from "../shared/multimodal-token-estimate.js";
 import { estimateTokens } from "../shared/token-estimate.js";
+import { formatCost } from "./cost-format.js";
 
 export { estimateTokens } from "../shared/token-estimate.js";
 export interface ModelPricingLite {
@@ -91,8 +92,12 @@ export function costTier(total: number): CostTier {
   return "high";
 }
 
+/**
+ * The pre-flight estimate badge. Only the `~` prefix and the unknown-pricing
+ * message belong here — the digits come from the shared `formatCost` so the
+ * estimate and the post-call cost the user sees next never round differently.
+ */
 export function formatCostBadge(total: number, pricingKnown = true): string {
   if (!pricingKnown) return t("be_costEstimator.costUnknown");
-  if (total < 0.01) return `~$${total.toFixed(4)}`;
-  return `~$${total.toFixed(2)}`;
+  return `~${formatCost(total)}`;
 }
