@@ -374,7 +374,7 @@ async function dropOldestUntilUnderBudget(
   // re-ran `estimateMessagesTokens(surviving)` after every shift (O(N²)
   // serialization cost on 200+ message histories while holding `isCompacting`
   // lock). Maintain a running total instead — O(N).
-  const perMessageTokens = toCompact.map(estimateMessageTokensForWire);
+  const perMessageTokens = toCompact.map((message) => estimateMessageTokensForWire(message));
   let currentTotal = perMessageTokens.reduce((a, b) => a + b, 0);
   if (currentTotal <= budget) {
     return { messages: toCompact, droppedCount: 0, truncatedDir: "" };

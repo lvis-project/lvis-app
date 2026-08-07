@@ -10,6 +10,7 @@ import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../sh
 import {
   estimateMultimodalTokenOverhead,
   estimateUserMessageTokens,
+  vendorCarriesToolResultImage,
 } from "../shared/multimodal-token-estimate.js";
 import { estimateTokens } from "../shared/token-estimate.js";
 
@@ -124,8 +125,13 @@ export function getRuntimePreflightOverride(): number | null {
 // depends on engine-only types (GenericMessage, wire serialization, tool-result
 // stubbing) and so cannot move down to shared/.
 
-/** Estimate one message from the provider-wire shape. */
-export function estimateMessageTokensForWire(message: GenericMessage): number {
+/**
+ * Estimate one message from the provider-wire shape.
+ *
+ * `vendor` is the serving vendor when the caller knows it. Omitting it keeps
+ * the historical Claude-shaped answer (the wire mapper defaults the same way).
+ */
+export function estimateMessageTokensForWire(message: GenericMessage, vendor?: LLMVendor): number {
   if (message.role === "user") return estimateUserMessageTokens(message.content);
 
   // Marked tool_results keep raw content in memory for UI and checkpoint
@@ -142,6 +148,9 @@ export function estimateMessageTokensForWire(message: GenericMessage): number {
   if (
     message.role === "tool_result" &&
     message.image !== undefined &&
+    // Same authority the wire mapper applies: on a vendor whose tool role is
+    // text-only the image never leaves the host, so it costs nothing.
+    vendorCarriesToolResultImage(vendor) &&
     message.meta?.compactedAt === undefined &&
     message.meta?.truncated === undefined &&
     message.meta?.serializedStub !== true
@@ -154,8 +163,8 @@ export function estimateMessageTokensForWire(message: GenericMessage): number {
 }
 
 /** 메시지 배열의 총 토큰 추정 */
-export function estimateMessagesTokens(messages: GenericMessage[]): number {
-  return messages.reduce((total, message) => total + estimateMessageTokensForWire(message), 0);
+export function estimateMessagesTokens(messages: GenericMessage[], vendor?: LLMVendor): number {
+  return messages.reduce((total, message) => total + estimateMessageTokensForWire(message, vendor), 0);
 }
 
 function serializeMessageForWireEstimate(message: GenericMessage): string {
