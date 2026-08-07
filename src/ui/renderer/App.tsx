@@ -1017,6 +1017,10 @@ export function App() {
             loadedSkills={loadedSkills}
             hasAskQuestions={askQuestions.length > 0}
             askQuestions={askQuestions}
+            approvalRequest={
+              approvalQueue[0]?.kind === "out-of-allowed-dir" ? approvalQueue[0] : null
+            }
+            onApprovalDecide={(choice, pattern) => void handleApprovalDecide(choice, pattern)}
             onResolveAskQuestion={dismissAskQuestion}
             plugins={pluginEntries}
             onSelectPlugin={handleViewSelectWithDoctor}
