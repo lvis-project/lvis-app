@@ -43,6 +43,7 @@ import type { PluginManifest } from "../../plugins/types.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import { shouldBlockPluginSecretRead } from "../../plugins/secret-shape.js";
 import { runTier3Then4 } from "../../plugins/whitelist/tier-order.js";
+import type { TierOutcome } from "../../plugins/whitelist/tier-order.js";
 import {
   incrementHostSecretCounter,
   sanitizeKeyPrefix,
@@ -368,7 +369,7 @@ export async function resolveApiKey(
   audit(
     deps,
     "info",
-    `resolveApiKey allow source=whitelist-registry vendor=${vendor} purpose=${request.purpose}`,
+    `resolveApiKey allow source=${grantAuditSource(tierOutcome.via)} vendor=${vendor} purpose=${request.purpose}`,
   );
   incrementHostSecretCounter("hostSecret_read", deps.pluginId, keyPrefix);
 
@@ -383,6 +384,35 @@ export async function resolveApiKey(
     baseUrl = llmSettings?.vendors?.["azure-foundry"]?.baseUrl;
   }
   return makeSuccess(vendor, value, mergedSignal, baseUrl);
+}
+
+/**
+ * Name the gate path that produced a grant, for the `resolveApiKey allow`
+ * audit line.
+ *
+ * The line used to say `source=whitelist-registry` unconditionally, including
+ * on the admin-bypass path — where the signed Tier-3 whitelist ACL is exactly
+ * the gate that was NOT consulted. That misreported the grant source to
+ * operators auditing host-secret reads.
+ *
+ * Derived from the `via` discriminator so the source claim has a single
+ * authority (`TierOutcome`), and exhaustively matched so a future bypass
+ * variant is a compile-time error here rather than a silently wrong audit
+ * line — which is the contract `TierOutcome`'s own doc comment promises.
+ */
+function grantAuditSource(
+  via: Extract<TierOutcome, { kind: "allow" }>["via"],
+): string {
+  switch (via) {
+    case "admin-bypass":
+      return "registry.installSource";
+    case undefined:
+      return "whitelist-registry";
+    default: {
+      const exhaustive: never = via;
+      return exhaustive;
+    }
+  }
 }
 
 /**
