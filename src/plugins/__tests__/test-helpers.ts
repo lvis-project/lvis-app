@@ -62,6 +62,13 @@ export const preparedActivationOptionsForTest = Object.freeze({
 export const preparedManagedActivationOptionsForTest = Object.freeze({
   mode: "pre-start-sync" as const,
   ensurePluginStateReadyForInstall: async (_pluginId: string) => undefined,
+  // Registry-removal commit only. What the real remover does around that commit
+  // is pinned in marketplace-managed-bootstrap.test.ts, which binds the actual
+  // `removeQuiescentPluginResidualState` instead of this default.
+  removeDelistedAdminInstall: async (
+    _removal: { pluginId: string; secretKeys: readonly string[] },
+    commitRegistryRemoval: () => Promise<void>,
+  ) => { await commitRegistryRemoval(); },
 });
 
 /**
