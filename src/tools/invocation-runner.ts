@@ -102,7 +102,10 @@ import {
   resolveEnforcedCategory,
   type InvocationRunnerServices,
 } from "./invocation-services.js";
-import { authorizeToolInvocation } from "./invocation-authorization.js";
+import {
+  authorizeToolInvocation,
+  deriveApprovalIsReadOnly,
+} from "./invocation-authorization.js";
 import { executeAuthorizedToolInvocation } from "./invocation-execution.js";
 import {
   resolvePluginOperation,
@@ -832,7 +835,12 @@ export async function runToolInvocation(
           source: source as "builtin" | "plugin" | "mcp",
           createdAt: Date.now(),
           target: { filePath: outOfAllowedTarget.filePath },
-          isReadOnly: invocationCategory === "read",
+          isReadOnly: deriveApprovalIsReadOnly({
+            invocationCategory,
+            approvalReasonPrefix,
+            remoteControllerAuthority:
+              invocationPermissionContext.remoteControllerAuthority,
+          }),
           mode: currentApprovalMode(services.permissionManager),
           sensitivePathPattern: requestSensitivePathPattern,
           // Canonical host shells carry the sealed renderer-safe projection;
