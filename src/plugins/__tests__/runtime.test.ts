@@ -247,6 +247,100 @@ describe("PluginRuntime.disable", () => {
     expect(runtime.listPluginIds()).toContain("p-existing");
   });
 
+  /**
+   * `setPluginEnabled` is the writer the renderer toggle actually reaches
+   * (`lvis:plugins:set-enabled` → `PluginRuntime.setPluginEnabled`);
+   * `disable()` has no production caller. Both mutate the same registry
+   * `enabled` field, so both must consult the deployment guard — otherwise the
+   * admin-managed protection is reachable only from the dead lane.
+   */
+  function makeRuntimeWithGuard(): {
+    runtime: PluginRuntime;
+    guard: PluginDeploymentGuard;
+  } {
+    const guard = new PluginDeploymentGuard({
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    const runtime = makeTestPluginRuntime(
+      { rootDir: testDir, registryPath, pluginsRoot: installedDir },
+      { deploymentGuard: guard },
+    );
+    return { runtime, guard };
+  }
+
+  it("setPluginEnabled(false) rejects a manifest-declared admin plugin and leaves it enabled", async () => {
+    const manifestPath = await writeFakePlugin("p-managed", "admin");
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "p-managed", manifestPath, enabled: true },
+    ]);
+    const { runtime } = makeRuntimeWithGuard();
+    await runtime.startAll();
+
+    await expect(runtime.setPluginEnabled("p-managed", false)).rejects.toThrow(
+      /Admin plugin/,
+    );
+
+    expect(runtime.listPluginIds()).toContain("p-managed");
+    expect(runtime.listToolNames()).toContain("p_managed_hello");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(
+      registry.plugins.find((p: { id: string }) => p.id === "p-managed").enabled,
+    ).toBe(true);
+  });
+
+  it("setPluginEnabled(false) rejects a registry installSource=admin plugin", async () => {
+    // Trust-precedence shape: the manifest claims "user" (it is user-writable)
+    // but the host-recorded registry row says admin. The guard must win.
+    const manifestPath = await writeFakePlugin("p-managed", "user");
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "p-managed", manifestPath, enabled: true, installSource: "admin" },
+    ]);
+    const { runtime } = makeRuntimeWithGuard();
+    await runtime.startAll();
+
+    await expect(runtime.setPluginEnabled("p-managed", false)).rejects.toThrow(
+      /Admin plugin/,
+    );
+
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(
+      registry.plugins.find((p: { id: string }) => p.id === "p-managed").enabled,
+    ).toBe(true);
+  });
+
+  it("setPluginEnabled(false) still disables an ordinary user plugin", async () => {
+    const manifestPath = await writeFakePlugin("p-user");
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "p-user", manifestPath, enabled: true },
+    ]);
+    const { runtime } = makeRuntimeWithGuard();
+    await runtime.startAll();
+
+    await runtime.setPluginEnabled("p-user", false);
+
+    expect(runtime.listPluginIds()).not.toContain("p-user");
+    const registry = JSON.parse(await readFile(registryPath, "utf-8"));
+    expect(
+      registry.plugins.find((p: { id: string }) => p.id === "p-user").enabled,
+    ).toBe(false);
+  });
+
+  it("setPluginEnabled does not consult the disable guard on the enable direction", async () => {
+    const manifestPath = await writeFakePlugin("p-managed", "admin");
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "p-managed", manifestPath, enabled: true },
+    ]);
+    const { runtime, guard } = makeRuntimeWithGuard();
+    await runtime.startAll();
+    const canDisable = vi.spyOn(guard, "canDisable");
+
+    await runtime.setPluginEnabled("p-managed", true);
+
+    expect(canDisable).not.toHaveBeenCalled();
+    expect(runtime.listPluginIds()).toContain("p-managed");
+  });
+
   it("plugin with kebab-case id (example-plugin) and underscore methods loads correctly", async () => {
     // Plugin ID must use kebab-case (SDK v5.11.0 pattern ^[a-z][a-z0-9-]*$)
     // Tool names (methods[]) must still be underscore-only (LLM tool name namespace)

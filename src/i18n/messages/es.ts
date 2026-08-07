@@ -27,6 +27,7 @@ export const es: Record<SeedMessageKey, string> = {
   "mainDialog.installLocalPluginTitle": "Instalar plugin local (desarrollador)",
   "mainDialog.installLocalPluginMessage": "Selecciona la carpeta de build que contiene plugin.json",
   "mainDialog.unauthorizedFrame": "Marco no autorizado.",
+  "mainDialog.pluginDisableNotPermitted": "Este complemento está gestionado por tu organización y no se puede desactivar.",
   "mainDialog.noPersonasAvailable": "No hay personas disponibles",
   "mainDialog.exportConversationTitle": "Exportar conversación",
   "mainDialog.importConversationTitle": "Importar conversación",
