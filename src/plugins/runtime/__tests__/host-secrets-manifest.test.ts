@@ -13,7 +13,11 @@ import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
 import { parseWhitelistDocument } from "../../whitelist/whitelist-schema.js";
-import { isAllowedHostSecretKey } from "../../../shared/marketplace-package-assets.js";
+import {
+  HOST_SECRET_READ_MAX_ITEMS,
+  isAllowedHostSecretKey,
+} from "../../../shared/marketplace-package-assets.js";
+import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 
 describe("manifest hostSecrets.read[] validator (#893)", () => {
   let workDir: string;
@@ -278,6 +282,161 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
       await expect(parsePluginJson(path, makeValidator())).rejects.toThrow(
         /dotted ids are not allowed.*manifest_schema/,
       );
+    });
+  });
+
+  // ── #1939: the two COLLECTION-level bounds ──
+  //
+  // `isAllowedHostSecretKey` judges one entry at a time, so it can see neither
+  // `maxItems` nor `uniqueItems`. On the manifest path AJV enforces both from
+  // the vendored schema; on the signed-whitelist path there is no schema leg,
+  // so `findHostSecretReadListViolation` is the only gate there. Every case
+  // below drives a real producer — `parseWhitelistDocument` on a whole document
+  // string, `parsePluginJson` on a manifest file.
+  describe("hostSecrets.read[] collection bounds (#1939)", () => {
+    const readSchema = (
+      manifestSchema as unknown as {
+        properties: {
+          hostSecrets: {
+            properties: {
+              read: { maxItems?: number; uniqueItems?: boolean };
+            };
+          };
+        };
+      }
+    ).properties.hostSecrets.properties.read;
+
+    /** `count` distinct, individually well-formed host-secret keys. */
+    function distinctKeys(count: number): string[] {
+      return Array.from(
+        { length: count },
+        (_, i) => `llm.marketplaceProvider.p${i}.apiKey`,
+      );
+    }
+
+    function whitelistJson(read: unknown[]): string {
+      return JSON.stringify({
+        version: 1,
+        schemaVersion: 1,
+        issuedAt: "2026-01-01T00:00:00.000Z",
+        expiresAt: "2027-01-01T00:00:00.000Z",
+        pluginGrants: {
+          "host-secrets-test": {
+            publisher: "LVIS",
+            approvedManifestSha256: "a".repeat(64),
+            hostSecrets: { read },
+          },
+        },
+      });
+    }
+
+    // Pins the hand-declared TS constant to the JSON schema it mirrors, so a
+    // schema edit that is not carried into TS fails here instead of silently
+    // splitting the two paths.
+    it("declares the same maxItems the vendored JSON schema declares", () => {
+      expect(readSchema.maxItems).toBe(HOST_SECRET_READ_MAX_ITEMS);
+      expect(readSchema.uniqueItems).toBe(true);
+    });
+
+    // Guards the negative cases below: an over-limit rejection must come from
+    // the count, not from a generated key the per-item predicate dislikes.
+    it("generates fixture keys that are individually allowed", () => {
+      for (const key of distinctKeys(HOST_SECRET_READ_MAX_ITEMS + 1)) {
+        expect(isAllowedHostSecretKey(key), key).toBe(true);
+      }
+    });
+
+    it("accepts a whitelist grant at exactly maxItems", () => {
+      const doc = parseWhitelistDocument(
+        whitelistJson(distinctKeys(HOST_SECRET_READ_MAX_ITEMS)),
+      );
+      expect(doc.pluginGrants["host-secrets-test"].hostSecrets.read).toHaveLength(
+        HOST_SECRET_READ_MAX_ITEMS,
+      );
+    });
+
+    it("rejects a whitelist grant over maxItems", () => {
+      expect(() =>
+        parseWhitelistDocument(
+          whitelistJson(distinctKeys(HOST_SECRET_READ_MAX_ITEMS + 1)),
+        ),
+      ).toThrow(
+        new RegExp(
+          `hostSecrets\\.read has ${HOST_SECRET_READ_MAX_ITEMS + 1} entries \\(max ${HOST_SECRET_READ_MAX_ITEMS}\\)`,
+        ),
+      );
+    });
+
+    it("rejects a whitelist grant with duplicate entries", () => {
+      expect(() =>
+        parseWhitelistDocument(
+          whitelistJson(["llm.apiKey.openai", "llm.apiKey.openai"]),
+        ),
+      ).toThrow(/hostSecrets\.read\[1\] 'llm\.apiKey\.openai' is a duplicate/);
+    });
+
+    it("keeps a whitelist grant with distinct entries", () => {
+      const doc = parseWhitelistDocument(
+        whitelistJson(["llm.apiKey.openai", "llm.apiKey.claude"]),
+      );
+      expect(doc.pluginGrants["host-secrets-test"].hostSecrets.read).toEqual([
+        "llm.apiKey.openai",
+        "llm.apiKey.claude",
+      ]);
+    });
+
+    // Manifest path, host-side leg only: `makeValidator()` is deliberately
+    // permissive (no maxItems/uniqueItems), so these two exercise the TS mirror
+    // rather than AJV.
+    it("rejects a manifest over maxItems at the host check", async () => {
+      const path = await writeManifest({
+        hostSecrets: { read: distinctKeys(HOST_SECRET_READ_MAX_ITEMS + 1) },
+      });
+      await expect(parsePluginJson(path, makeValidator())).rejects.toThrow(
+        /hostSecrets\.read.*entries.*manifest_schema/,
+      );
+    });
+
+    it("rejects a manifest with duplicate entries at the host check", async () => {
+      const path = await writeManifest({
+        hostSecrets: { read: ["llm.apiKey.openai", "llm.apiKey.openai"] },
+      });
+      await expect(parsePluginJson(path, makeValidator())).rejects.toThrow(
+        /hostSecrets\.read\[1\].*duplicate.*manifest_schema/,
+      );
+    });
+
+    // Manifest path, AJV leg: the covering layer the whitelist path lacks.
+    it("rejects both bounds against the vendored schema too", async () => {
+      const validator = await buildManifestValidator();
+      const base = {
+        id: "host-secret-bounds",
+        name: "Host Secret Bounds Plugin",
+        version: "1.0.0",
+        description: "Host secret bounds fixture.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+      };
+      expect(
+        validator({
+          ...base,
+          hostSecrets: { read: distinctKeys(HOST_SECRET_READ_MAX_ITEMS + 1) },
+        }),
+      ).toBe(false);
+      expect(
+        validator({
+          ...base,
+          hostSecrets: { read: ["llm.apiKey.openai", "llm.apiKey.openai"] },
+        }),
+      ).toBe(false);
+      expect(
+        validator({
+          ...base,
+          hostSecrets: { read: distinctKeys(HOST_SECRET_READ_MAX_ITEMS) },
+        }),
+        JSON.stringify(validator.errors, null, 2),
+      ).toBe(true);
     });
   });
 });
