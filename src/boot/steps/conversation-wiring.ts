@@ -29,7 +29,7 @@ import { registerPluginNotifications } from "../plugins.js";
 import { registerPluginEventBridge } from "./ipc-bridge.js";
 import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
 import { retainedDescendantWorkspaceRoots } from "../../permissions/workspace-root-reconciler.js";
-import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
+import { broadcastPermissionConfigChangedFromHost } from "../permission-config-broadcast.js";
 import { PreferenceRefreshService } from "../../memory/preference-refresh-service.js";
 import { MemoryConsolidationService, MemoryMaintenanceCoordinator } from "../../memory/memory-consolidation-service.js";
 import { MemoryReviewerService } from "../../memory/memory-reviewer-service.js";
@@ -204,7 +204,6 @@ export async function wireConversation(
     workBoardStore,
     workBoardStorage,
     agentProfileStore,
-    getMainWindow,
     mainWindow,
     subscriptionProviderFactory,
   } = ctx;
@@ -237,6 +236,7 @@ export async function wireConversation(
     auditLogger: bootAuditLogger,
     llmFetch,
     subscriptionProviderFactory,
+    broadcastPermissionConfigChanged: broadcastPermissionConfigChangedFromHost,
   };
   const routineEngine = createRoutineEngine({
     createConversationLoop: (input) => createRoutineConversationLoop(
@@ -315,14 +315,11 @@ export async function wireConversation(
     hookRunner,
     scriptHookManager,
     getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
-    // Round-3 fix: dialog-driven session-add grants must broadcast so
-    // multi-window PermissionsTab refreshes. Boot owns getMainWindow
-    // and forwards it to the broadcaster declared in the permissions
-    // IPC domain — no engine→ipc coupling, just a callback handed down.
-    broadcastPermissionConfigChanged: () => {
-      broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows(),
-      } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
-    },
+    // Dialog-driven session-add grants must broadcast so multi-window
+    // PermissionsTab views refresh. Boot hands the loop a callback rather than
+    // letting the engine import ipc; every interactive/background loop gets the
+    // SAME callback, so a permission mutation on any of them is reported.
+    broadcastPermissionConfigChanged: broadcastPermissionConfigChangedFromHost,
     pluginRuntime,
     pluginOperationGrants,
     pluginOperationIdentityProvider,
@@ -372,6 +369,7 @@ export async function wireConversation(
     sideChatMemoryManager,
     getAdditionalDirectories: () => readPermissionSettings().permissions.additionalDirectories,
     subscriptionProviderFactory,
+    broadcastPermissionConfigChanged: broadcastPermissionConfigChangedFromHost,
     ...sideChatRationaleBindings,
   });
   ctx.sideChatConversationLoop = sideChatConversationLoop;

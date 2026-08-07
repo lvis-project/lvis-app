@@ -12,7 +12,6 @@
  * Installs the delegate on the late-binding ref + the plugin runtime.
  */
 import { randomUUID } from "node:crypto";
-import { BrowserWindow as BrowserWindowValue } from "electron";
 import { createHookRunner } from "../conversation.js";
 import { wireHookSystem } from "./hook-system-wiring.js";
 import { ToolExecutor } from "../../tools/executor.js";
@@ -22,7 +21,7 @@ import {
 } from "../plugin-surface-permissions.js";
 import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
 import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
-import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
+import { broadcastPermissionConfigChangedFromHost } from "../permission-config-broadcast.js";
 // Confines-aware reader for the foreground plugin read-relaxation coupling. It
 // reads the published active-sandbox capability snapshot plus the exact
 // host-owned plugin worker registry (no asrt-sandbox.js import) and reports
@@ -62,7 +61,7 @@ function pluginInvocationSessionId(context: PluginToolInvocationContext): string
 }
 
 export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
-  const { toolRegistry, permissionManager, bashAstValidator, approvalGate, bootAuditLogger, settingsService, pluginRuntime, lateBinding, getMainWindow } = ctx;
+  const { toolRegistry, permissionManager, bashAstValidator, approvalGate, bootAuditLogger, settingsService, pluginRuntime, lateBinding } = ctx;
 
   // In-process HookRunner kept for internal/test hook registration only.
   // Production external hooks flow through ScriptHookManager below so strict
@@ -132,10 +131,10 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
   const pluginSurfacePermissionScope = createPluginSurfacePermissionScope({
     readPersistedDirectories: () => readPermissionSettings().permissions.additionalDirectories,
     onSessionDirectoryAdded: () => {
-      broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+      broadcastPermissionConfigChangedFromHost();
     },
     onSessionDirectoriesRevoked: () => {
-      broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+      broadcastPermissionConfigChangedFromHost();
     },
   });
   // Publish it as a live-scope owner so a workspace-root removal sweeps plugin
