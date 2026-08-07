@@ -98,6 +98,10 @@ describe("runManagedBootstrap concurrency", () => {
       mainWindow: null,
       mode: "pre-start-sync",
       admitPreStartOperation,
+      removeDelistedAdminInstall: async (
+        _removal: { pluginId: string; secretKeys: readonly string[] },
+        commitRegistryRemoval: () => Promise<void>,
+      ) => { await commitRegistryRemoval(); },
       marketplace: {
         backend: "real-cloud" as const,
         cloudBaseUrl: "https://marketplace.example.com",
@@ -107,6 +111,7 @@ describe("runManagedBootstrap concurrency", () => {
     expect(ensureManagedInstalled).toHaveBeenCalledWith({
       mode: "pre-start-sync",
       ensurePluginStateReadyForInstall: expect.any(Function),
+      removeDelistedAdminInstall: expect.any(Function),
     });
     expect(admissionSpy).toHaveBeenCalledOnce();
   });
@@ -155,6 +160,10 @@ describe("runManagedBootstrap concurrency", () => {
       },
       mode: "pre-start-sync",
       admitPreStartOperation: (operation) => phase.admit(operation),
+      removeDelistedAdminInstall: async (
+        _removal: { pluginId: string; secretKeys: readonly string[] },
+        commitRegistryRemoval: () => Promise<void>,
+      ) => { await commitRegistryRemoval(); },
     });
     const start = phase.start(async () => {
       events.push("incumbent:start");

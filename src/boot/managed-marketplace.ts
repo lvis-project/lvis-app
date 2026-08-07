@@ -3,6 +3,7 @@ import type { MarketplaceSettings } from "../data/settings-store.js";
 import type {
   PluginMarketplaceService,
   PreparedMarketplacePluginActivation,
+  RemoveDelistedAdminInstall,
 } from "../plugins/marketplace.js";
 import { notifyBootstrapStatus } from "./bootstrap-status.js";
 import { createLogger } from "../lib/logger.js";
@@ -44,11 +45,13 @@ export type RunManagedBootstrapInput = RunManagedBootstrapBaseInput & (
   | {
       mode: "pre-start-sync";
       admitPreStartOperation: <T>(operation: () => Promise<T>) => Promise<T>;
+      removeDelistedAdminInstall: RemoveDelistedAdminInstall;
       activatePreparedArtifact?: never;
     }
   | {
       mode: "repair-missing-only";
       admitPreStartOperation?: never;
+      removeDelistedAdminInstall?: never;
       activatePreparedArtifact: PreparedMarketplacePluginActivation;
     }
 );
@@ -148,6 +151,7 @@ async function doRunManagedBootstrap(input: RunManagedBootstrapInput): Promise<v
       return pluginMarketplace.ensureManagedInstalled({
         mode: "pre-start-sync",
         ensurePluginStateReadyForInstall,
+        removeDelistedAdminInstall: input.removeDelistedAdminInstall,
       });
     });
     const updated = ensureResult.updated ?? [];
