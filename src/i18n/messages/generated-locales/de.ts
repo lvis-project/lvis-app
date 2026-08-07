@@ -2673,6 +2673,7 @@ export const deMessages: Record<string, string> = {
   "useChatState.errorPrefix": "Fehler: {error}",
   "useChatState.fallbackToast": "⚡ {from}→{to} automatisch umgeschaltet",
   "useChatState.guidanceDroppedText": "⚠️ Richtungsanweisung nicht angewendet (Antwortgrenze erreicht): {text}",
+  "useChatState.approvalUnansweredGuidance": "⚠️ {tools} wurde nicht genehmigt, daher wurde die Antwort abgebrochen. Frage erneut, um die Genehmigungskarte zurückzuholen — einmalig, diese Sitzung oder dauerhaft — oder versuche es mit einem Pfad innerhalb der erlaubten Verzeichnisse.",
   "useChatState.llmStatusAttemptFirst": "Denken...",
   "useChatState.llmStatusAttemptRetrying": "Nachdenken... Ich warte erneut auf die Antwort des Modells. ({attempt}/{max})",
   "useChatState.llmStatusFallback": "Denken... Das Standardmodell ist langsam; Wechsel zu einem Backup-Modell{to}.",

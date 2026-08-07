@@ -723,6 +723,33 @@ export function dropPermissionReviewEntries(
   });
 }
 
+/**
+ * Append a notice when a turn ends with an approval still unanswered.
+ *
+ * `dropPermissionReviewEntries` clears the review cards at turn end, which is
+ * right — they are not actionable once the turn is over — but it also erased
+ * the only explanation the user had. A denied or ignored approval left a bare
+ * failed tool card and nothing that said what was blocked or how to proceed.
+ *
+ * Call this BEFORE the drop, so the reviews are still there to be read. Reviews
+ * that were answered are already `auto_approved`/`failed` or gone; only
+ * `needs_approval` means the turn ended without an answer.
+ */
+export function withUnansweredApprovalNotice(
+  entries: ChatEntry[],
+  notice: (toolNames: string[]) => string,
+): ChatEntry[] {
+  const unanswered = entries.filter(
+    (entry): entry is Extract<ChatEntry, { kind: "permission_review" }> =>
+      entry.kind === "permission_review" && entry.status === "needs_approval",
+  );
+  if (unanswered.length === 0) return entries;
+  const toolNames = [...new Set(unanswered.map((entry) => entry.toolName))];
+  const text = notice(toolNames);
+  if (text.length === 0) return entries;
+  return [...entries, { kind: "system", text }];
+}
+
 export function applyToolStart(
   entries: ChatEntry[],
   payload: {
