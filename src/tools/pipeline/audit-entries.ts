@@ -14,7 +14,7 @@ import type { PermissionAuditEntryInput, HookResult, ToolExecutionAuditMetadata 
 import type { HookTrustOrigin, ScriptHookInvocationResult } from "../../hooks/script-hook-types.js";
 import type { HookDispatchResult } from "../../hooks/script-hook-manager.js";
 import type { ToolPermissionContext } from "../executor.js";
-import { resolveToolPathForPermission } from "./path-extraction.js";
+import { resolveToolPathForPermission } from "../../shared/tool-path-resolution.js";
 
 /**
  * Redact every `freeText` field from an `ask_user_question` tool result

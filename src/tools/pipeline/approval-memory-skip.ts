@@ -60,6 +60,12 @@ export async function tryUserApprovalMemorySkip(
   category: ToolCategory,
   pathFields: readonly string[],
   finalInput: Record<string, unknown>,
+  /**
+   * Invocation cwd — threaded so the escalation guard's rule classifier
+   * resolves path arguments exactly as Layer 1 does. Positional (not optional)
+   * so the compiler catches a caller that forgets it.
+   */
+  executionCwd: string,
   allowedDirectories: string[],
   sensitivePathsAdjacent: string[],
   context: ToolPermissionContext,
@@ -126,6 +132,7 @@ export async function tryUserApprovalMemorySkip(
     pathFields,
     trustOrigin: context.trustOrigin,
     finalInput,
+    executionCwd,
     allowedDirectories,
     sensitivePathsAdjacent,
     sandboxCapability,
