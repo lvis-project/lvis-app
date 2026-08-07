@@ -16,6 +16,8 @@ function makeEntry(overrides: Partial<DeferredEntry> = {}): DeferredEntry {
     category: "write",
     inputSummary: '{"path":"<redacted>"}',
     verdict: { level: "high", reason: "write outside allowed dirs" },
+    // Approval is only offered when the entry records something to grant.
+    grant: { kind: "directory", path: "/srv/app/data" },
     status: "pending",
     ...overrides,
   };
@@ -184,7 +186,7 @@ describe("DeferredQueuePanel", () => {
     await act(async () => {
       render(<DeferredQueuePanel />);
     });
-    const button = screen.getByText("허용");
+    const button = screen.getByTestId("deferred-queue-approve");
     await act(async () => {
       fireEvent.click(button);
     });
@@ -240,7 +242,7 @@ describe("DeferredQueuePanel", () => {
       render(<DeferredQueuePanel />);
     });
     await act(async () => {
-      fireEvent.click(screen.getByText("허용"));
+      fireEvent.click(screen.getByTestId("deferred-queue-approve"));
     });
     expect(api.deferredResolve).toHaveBeenCalledWith("err-1", "approved", undefined, "button");
     expect(api.deferredList.mock.calls.length).toBeGreaterThanOrEqual(2);

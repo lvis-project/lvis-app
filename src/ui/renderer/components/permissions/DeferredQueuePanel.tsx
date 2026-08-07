@@ -205,13 +205,33 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
                 >
                   {t("deferredQueuePanel.rejectButton")}
                 </Button>
-                <Button
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => handle(activeEntry.id, "approved")}
-                >
-                  {t("deferredQueuePanel.approveButton")}
-                </Button>
+                {/* An approve control only appears when approving grants
+                    something. The call this entry came from is already over,
+                    so approval means "allow the recorded directory from now
+                    on"; with no recorded grant there is nothing to allow and
+                    the button would be claiming an effect it cannot have. */}
+                {activeEntry.grant ? (
+                  <Button
+                    size="sm"
+                    disabled={busy}
+                    data-testid="deferred-queue-approve"
+                    title={t("deferredQueuePanel.approveSessionTitle", {
+                      path: activeEntry.grant.path,
+                    })}
+                    onClick={() => handle(activeEntry.id, "approved")}
+                  >
+                    {t("deferredQueuePanel.approveSessionButton", {
+                      path: activeEntry.grant.path,
+                    })}
+                  </Button>
+                ) : (
+                  <p
+                    className="text-xs text-muted-foreground"
+                    data-testid="deferred-queue-no-grant"
+                  >
+                    {t("deferredQueuePanel.noGrantAvailable")}
+                  </p>
+                )}
               </div>
             </li>
           )}
