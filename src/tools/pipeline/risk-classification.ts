@@ -31,7 +31,6 @@ export function resolveEnforcedCategory(args: {
   tool: Tool;
   declaredCategory: ToolCategory;
   finalInput: Record<string, unknown>;
-  allowedDirectories: readonly string[];
   correlationId: string;
   hostClassifiesRisk: boolean;
   auditLogger: AuditLogger;
@@ -41,7 +40,6 @@ export function resolveEnforcedCategory(args: {
     tool,
     declaredCategory,
     finalInput,
-    allowedDirectories,
     correlationId,
     hostClassifiesRisk,
     auditLogger,
@@ -58,13 +56,14 @@ export function resolveEnforcedCategory(args: {
     (tool.source === "plugin" || tool.source === "mcp") &&
     declaredCategory !== "meta";
 
+  // The inspector reads ONLY `source` + `finalInput`. It used to also take the
+  // tool's `pathFields` and the Layer-1 `allowedDirectories`; both were inert —
+  // the containment answer they fed was discarded because a path argument is
+  // write-equivalent either way. Passing an input no consumer reads is how a
+  // signal rots, so the producer stopped computing them. Layer-1 containment is
+  // still enforced, by `isPathAllowed`, on the enforcement path.
   const hostDerivedCategory = eligibleForHostDerivation
-    ? inspectHostRisk({
-        source: tool.source,
-        finalInput,
-        pathFields: tool.pathFields ?? [],
-        allowedDirectories,
-      })
+    ? inspectHostRisk({ source: tool.source, finalInput })
     : declaredCategory;
 
   const enforced = hostClassifiesRisk;

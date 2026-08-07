@@ -5,8 +5,10 @@
  *   (a) DEFAULT-STRICT — anything not confidently read-only is write-equivalent.
  *   (b) Shell commands are parsed host-side: a fully read-only compound → read;
  *       any mutating/unknown leaf → shell. Wrapper commands are stripped.
- *   (c) Filesystem path args that escape allowedDirectories escalate to write;
- *       even contained path args are write (no auto-classify-down).
+ *   (c) Filesystem path args are write-equivalent whether they escape the
+ *       allowed scope or sit inside it — the inspector does not answer
+ *       containment (single authority: `isPathAllowed`), it just never
+ *       classifies a path-bearing call down.
  *   (d) Network targets (URL-shaped args / host-mediated egress) → network.
  *
  * The inspector reads ONLY host-owned signals — never the declared category.
@@ -22,8 +24,6 @@ function signals(overrides: Partial<Parameters<typeof inspectHostRisk>[0]>) {
   return inspectHostRisk({
     source: "plugin",
     finalInput: {},
-    pathFields: [],
-    allowedDirectories: [],
     ...overrides,
   });
 }
@@ -627,24 +627,24 @@ describe("inspectHostRisk — foreign-peer (mcp) source", () => {
 });
 
 describe("inspectHostRisk — filesystem classification", () => {
-  it("escalates a path that escapes allowedDirectories to write", () => {
-    expect(
-      signals({
-        finalInput: { path: "/etc/passwd" },
-        pathFields: ["path"],
-        allowedDirectories: [TMP],
-      }),
-    ).toBe("write");
+  // The inspector answers no containment question — `isPathAllowed` is the
+  // single authority for that, on the enforcement path. What it DOES guarantee
+  // is that no filesystem-shaped call classifies down, whichever side of the
+  // allowed scope the path is on.
+  it("classifies a path escaping any plausible allowed scope as write", () => {
+    expect(signals({ finalInput: { path: "/etc/passwd" } })).toBe("write");
+    expect(signals({ finalInput: { file_path: "/etc/shadow" } })).toBe("write");
   });
 
-  it("a contained path arg is still write (no auto-classify-down)", () => {
-    expect(
-      signals({
-        finalInput: { path: `${TMP}/workspace/file.txt` },
-        pathFields: ["path"],
-        allowedDirectories: [TMP],
-      }),
-    ).toBe("write");
+  it("classifies a contained path as write too (no auto-classify-down)", () => {
+    expect(signals({ finalInput: { path: `${TMP}/workspace/file.txt` } })).toBe("write");
+  });
+
+  it("does not classify down on a read-flavoured path call", () => {
+    // A read-looking non-shell call has no host-owned read-only PROOF: `mode`
+    // is plugin-supplied text, not a host signal. Default-strict wins.
+    expect(signals({ finalInput: { path: `${TMP}/a.txt`, mode: "read" } })).toBe("write");
+    expect(signals({ finalInput: { nested: { path: `${TMP}/a.txt` } } })).toBe("write");
   });
 });
 
