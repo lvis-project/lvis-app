@@ -1548,10 +1548,23 @@ export interface DeferredQueueEntry {
   /** Captured policy/sandbox context for user review. */
   evaluationContext?: PermissionEvaluationContextShape;
   verdict: { level: "low" | "medium" | "high"; reason: string };
+  /**
+   * What approving this entry grants. Absent ⇒ approval is unavailable: the
+   * original call is dead and this lane recorded nothing to grant forward, so
+   * the UI must not offer an approve control. Mirrors `DeferredGrant`.
+   */
+  grant?: { kind: "directory"; path: string };
   status: "pending" | "approved" | "rejected";
   resolvedAt?: string;
+  resolvedScope?: DeferredGrantScope;
   resolutionReason?: string;
 }
+
+/**
+ * Grant breadth for a deferred approval. No "once": the call it would have
+ * scoped is already over. Mirrors `DeferredGrantScope`.
+ */
+export type DeferredGrantScope = "session" | "always";
 
 export interface HookTrustRow {
   fileName: string;
@@ -1651,9 +1664,16 @@ export type LvisPermissionApi = {
     decision: "approved" | "rejected",
     reason: string | undefined,
     approvalSource: "button" | "natural-language",
+    options?: { scope?: DeferredGrantScope; acknowledgeWarnings?: boolean },
   ) => Promise<
     | { ok: true; entry: DeferredQueueEntry }
-    | { ok: false; error: string }
+    | {
+        ok: false;
+        error: string;
+        /** Adjacency gate — the caller must ask before retrying with ack. */
+        requiresAcknowledgement?: boolean;
+        warnings?: string[];
+      }
   >;
   /** Permission policy — subscribe to foreground-entry deferred-pending events. */
   onDeferredPending: (cb: (summary: { pending: number }) => void) => () => void;

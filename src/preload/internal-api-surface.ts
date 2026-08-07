@@ -989,12 +989,19 @@ export function buildInternalApiSurface() {
       // Required: callers must explicitly opt into a provenance value
       // before main writes the HMAC-chained audit row.
       approvalSource: "button" | "natural-language",
+      // Grant breadth + adjacency acknowledgement for an approval. Omitting
+      // `scope` grants the narrowest breadth; main never widens on its own.
+      options?: { scope?: "session" | "always"; acknowledgeWarnings?: boolean },
     ) =>
       ipcRenderer.invoke(PERMISSIONS.deferredResolve, {
         id,
         decision,
         reason,
         approvalSource,
+        ...(options?.scope ? { scope: options.scope } : {}),
+        ...(options?.acknowledgeWarnings
+          ? { acknowledgeWarnings: true }
+          : {}),
         intent: ipcUserKeyboardIntent(),
       }),
     /** Foreground-entry pending notification — main→renderer event. */
