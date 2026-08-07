@@ -17,6 +17,7 @@ import { t } from "../../i18n/index.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { GenericMessage } from "../../engine/llm/types.js";
 import { userContentText } from "../../engine/llm/types.js";
+import { normalizeToolPairInvariant } from "../../engine/conversation-history.js";
 import {
   MAX_LOCAL_USER_CONTENT_PARTS,
   MAX_LOCAL_USER_CONTENT_TEXT_CHARS,
@@ -459,31 +460,6 @@ function vendorBaseUrlSignature(llm: LLMSettings): string {
 
 export type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 
-function removeOrphanToolUse(messages: GenericMessage[]): GenericMessage[] {
-  const result = [...messages];
-  const resolvedIds = new Set<string>();
-  for (const m of result) {
-    if (m.role === "user" && Array.isArray(m.content)) {
-      for (const block of m.content as Array<Record<string, unknown>>) {
-        if (block.type === "tool_result" && typeof block.tool_use_id === "string") {
-          resolvedIds.add(block.tool_use_id);
-        }
-      }
-    }
-  }
-  for (let i = result.length - 1; i >= 0; i--) {
-    const m = result[i];
-    if (m.role !== "assistant" || !Array.isArray(m.content)) break;
-    const blocks = m.content as Array<Record<string, unknown>>;
-    const hasOrphan = blocks.some(
-      (b) => b.type === "tool_use" && typeof b.id === "string" && !resolvedIds.has(b.id),
-    );
-    if (!hasOrphan) break;
-    result.splice(i, 1);
-  }
-  return result;
-}
-
 function entryOrdinalToHistoryIndex(history: GenericMessage[], ordinal: number): number {
   if (ordinal < 0) return -1;
   let count = 0;
@@ -916,8 +892,16 @@ export function registerChatHandlers(deps: IpcDeps): void {
         const historyIndex = entryOrdinalToHistoryIndex(current, messageIndex);
         if (historyIndex >= 0) upto = Math.min(historyIndex + 1, current.length);
       }
-      let slice = current.slice(0, upto);
-      slice = removeOrphanToolUse(slice);
+      const sliced = current.slice(0, upto);
+      // Repair tool-pair invariant before the slice is written to a NEW session
+      // file — the same authority `branchFromCheckpoint` uses on the identical
+      // slice→repair→rehydrate→saveSession sequence (engine/turn/session.ts).
+      const { messages: slice, removedMessages, removedToolCalls } = normalizeToolPairInvariant(sliced);
+      if (removedMessages > 0 || removedToolCalls > 0) {
+        log.warn(
+          `chat:fork repaired ${removedMessages} messages + ${removedToolCalls} tool calls from the forked slice`,
+        );
+      }
       if (current.length > 0) {
         await memoryManager.saveSession(conversationLoop.getSessionId(), current);
       }
