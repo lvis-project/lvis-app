@@ -13,6 +13,8 @@ function installDeferredApi(pending = 1) {
     category: "write",
     inputSummary: '{"path":"<redacted>"}',
     verdict: { level: "high", reason: "outside allowed directory" },
+    // Approval is only offered when the entry records something to grant.
+    grant: { kind: "directory", path: "/srv/app/data" },
     status: "pending",
   }));
   const permission = {
@@ -61,7 +63,7 @@ describe("DeferredQueueDialog", () => {
     await waitFor(() => {
       expect(screen.getAllByText("write_file").length).toBeGreaterThan(0);
     });
-    fireEvent.click(screen.getByText("허용"));
+    fireEvent.click(screen.getByTestId("deferred-queue-approve"));
 
     await waitFor(() => {
       expect(permission.deferredResolve).toHaveBeenCalledWith("dq-1", "approved", undefined, "button");

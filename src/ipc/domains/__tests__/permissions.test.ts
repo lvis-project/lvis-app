@@ -64,6 +64,10 @@ function makeDeferredEntry(overrides: Record<string, unknown> = {}) {
     category: "shell",
     inputSummary: "bash command",
     verdict: { level: "high", reason: "test" },
+    // Approving an entry applies its recorded grant; an entry without one
+    // cannot be approved at all (see the "no-grant-available" tests below),
+    // so the shared fixture carries the out-of-allowed-dir lane's grant.
+    grant: { kind: "directory", path: "/srv/app/data" },
     status: "pending",
     ...overrides,
   };
@@ -551,7 +555,12 @@ describe("permissions IPC handlers", () => {
         entry: expect.objectContaining({ id: "deferred-1", status: decision }),
       });
       expect(order).toEqual(["audit", "resolve"]);
-      expect(queue.resolve).toHaveBeenCalledWith("deferred-1", decision, "reviewed by user");
+      expect(queue.resolve).toHaveBeenCalledWith(
+        "deferred-1",
+        decision,
+        "reviewed by user",
+        decision === "approved" ? "session" : undefined,
+      );
       expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
         expect.objectContaining({
           decision: "deferred_resolve",
@@ -564,6 +573,200 @@ describe("permissions IPC handlers", () => {
       );
     },
   );
+
+  // ── What an approval actually GRANTS ──────────────────────────────────────
+  // The original call is dead by the time anyone resolves the entry, so these
+  // assert the forward-looking grant — the directory reaching the permission
+  // scope — not the JSONL `status` field, which is only bookkeeping.
+
+  it("approving a deferred entry registers its directory for the session", async () => {
+    const entry = makeDeferredEntry();
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async (_id: string, status: string) => ({ ...entry, status })),
+    };
+    const { deps } = await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "button",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    // The observable consequence: the next call under this directory passes
+    // Layer 1 without asking.
+    expect(deps.conversationLoop.addSessionAdditionalDirectory).toHaveBeenCalledWith(
+      expect.stringContaining("srv/app/data"),
+    );
+  });
+
+  it("approving with scope 'always' persists the directory through the lifecycle", async () => {
+    const entry = makeDeferredEntry();
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async (_id: string, status: string) => ({ ...entry, status })),
+    };
+    const { workspaceRootLifecycle, deps } = await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "button",
+      scope: "always",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(workspaceRootLifecycle.allowDirectory).toHaveBeenCalledWith(
+      expect.stringContaining("srv/app/data"),
+      "permission-slash",
+    );
+    // A persisted grant is not also a session grant.
+    expect(deps.conversationLoop.addSessionAdditionalDirectory).not.toHaveBeenCalled();
+  });
+
+  it("an omitted scope grants the narrowest breadth, never a persisted one", async () => {
+    const entry = makeDeferredEntry();
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async (_id: string, status: string) => ({ ...entry, status })),
+    };
+    const { workspaceRootLifecycle, deps } = await setup({ queue });
+
+    await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "button",
+      intent: USER_INTENT,
+    });
+
+    expect(workspaceRootLifecycle.allowDirectory).not.toHaveBeenCalled();
+    expect(deps.conversationLoop.addSessionAdditionalDirectory).toHaveBeenCalled();
+  });
+
+  it("refuses to approve an entry whose lane recorded no grant", async () => {
+    // The strict-mode reviewer lane defers on an exact (tool, args, source)
+    // tuple and keeps only a redacted summary, so no grant is reconstructable.
+    // Recording an approval here would tell the user their click did
+    // something it did not.
+    const entry = makeDeferredEntry({ grant: undefined });
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async () => ({ ...entry, status: "approved" })),
+    };
+    const { deps } = await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "button",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "no-grant-available" });
+    expect(queue.resolve).not.toHaveBeenCalled();
+    expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
+    expect(deps.conversationLoop.addSessionAdditionalDirectory).not.toHaveBeenCalled();
+  });
+
+  it("rejecting an entry with no grant still works — a rejection grants nothing", async () => {
+    const entry = makeDeferredEntry({ grant: undefined });
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async (_id: string, status: string) => ({ ...entry, status })),
+    };
+    await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "rejected",
+      approvalSource: "button",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toMatchObject({ ok: true });
+  });
+
+  it("does not record an approval when applying the grant fails", async () => {
+    // A sensitive path is refused outright by validateDirectoryAddition
+    // ("path matches sensitive pattern '**/.ssh/**'"). The entry must stay
+    // pending rather than be marked approved with nothing granted.
+    const entry = makeDeferredEntry({
+      grant: { kind: "directory", path: "/srv/app/.ssh" },
+    });
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async (_id: string, status: string) => ({ ...entry, status })),
+    };
+    const { deps } = await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "button",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "grant-failed" });
+    expect(queue.resolve).not.toHaveBeenCalled();
+    expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("holds the adjacency gate instead of acknowledging on the user's behalf", async () => {
+    // Same widening gate the foreground card renders as a warning checkbox.
+    // ".git" warns; ".ssh" would be a hard reject, which is a different path.
+    const entry = makeDeferredEntry({
+      grant: { kind: "directory", path: "/srv/app/.git" },
+    });
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async (_id: string, status: string) => ({ ...entry, status })),
+    };
+    const { deps } = await setup({ queue });
+
+    const blocked = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "button",
+      intent: USER_INTENT,
+    });
+
+    expect(blocked).toMatchObject({ ok: false, requiresAcknowledgement: true });
+    expect(deps.conversationLoop.addSessionAdditionalDirectory).not.toHaveBeenCalled();
+
+    const acknowledged = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "button",
+      acknowledgeWarnings: true,
+      intent: USER_INTENT,
+    });
+
+    expect(acknowledged).toMatchObject({ ok: true });
+    expect(deps.conversationLoop.addSessionAdditionalDirectory).toHaveBeenCalled();
+  });
+
+  it("rejects an out-of-range scope rather than coercing it", async () => {
+    const entry = makeDeferredEntry();
+    const queue = {
+      get: vi.fn(() => entry),
+      resolve: vi.fn(async () => ({ ...entry, status: "approved" })),
+    };
+    await setup({ queue });
+
+    const result = await invoke(PERMISSIONS.deferredResolve, {
+      id: "deferred-1",
+      decision: "approved",
+      approvalSource: "button",
+      scope: "forever",
+      intent: USER_INTENT,
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "invalid-params" });
+    expect(queue.resolve).not.toHaveBeenCalled();
+  });
 
   it("deferredResolve fails closed before queue mutation when audit chain is not ready", async () => {
     const entry = makeDeferredEntry();
@@ -680,7 +883,7 @@ describe("permissions IPC handlers", () => {
       entry: resolvedElsewhere,
     });
     expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledOnce();
-    expect(queue.resolve).toHaveBeenCalledWith("deferred-1", "approved", undefined);
+    expect(queue.resolve).toHaveBeenCalledWith("deferred-1", "approved", undefined, "session");
   });
 
   it("deferredResolve reports no queue without audit side effects", async () => {
@@ -762,6 +965,7 @@ describe("permissions IPC handlers", () => {
       "deferred-1",
       "approved",
       "natural-language chip click",
+      "session",
     );
   });
 

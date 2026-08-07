@@ -9,7 +9,8 @@ import {
   detectApprovalIntent,
   type ApprovalIntent,
 } from "../../../permissions/approval-intent.js";
-import type { DeferredQueueEntry } from "../types.js";
+import type { DeferredGrantScope, DeferredQueueEntry } from "../types.js";
+import { NARROWEST_DEFERRED_SCOPE } from "../types.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 export interface DeferredApprovalChipProps {
@@ -17,6 +18,30 @@ export interface DeferredApprovalChipProps {
   draftText: string;
   /** Optional callback the parent can use to log telemetry / surface errors. */
   onResolved?: (decision: "approved" | "rejected", entryId: string) => void;
+}
+
+/**
+ * What an approve sentence would grant on this entry.
+ *
+ * The sentence selects nothing here: a plain approve intent always maps to the
+ * NARROWEST breadth the lane offers, and the entry's own recorded grant
+ * supplies the target. `null` ⇒ there is nothing to grant, so no offer.
+ *
+ * Breadth selection from the sentence deliberately does not exist yet. Reading
+ * a duration or a path out of the text is the job of the permission-review
+ * model (issue #1940), and having the chip ALSO infer one would put two
+ * authorities on the same decision. Until that lands, the chip proposes only
+ * what the narrow default already permits.
+ *
+ * `path` is always the HOST-derived `entry.grant.path`, never user text, so the
+ * confirmation line states a path the host resolved.
+ */
+function resolveGrantPlan(
+  entry: DeferredQueueEntry,
+): { scope: DeferredGrantScope; path: string } | null {
+  const grant = entry.grant;
+  if (!grant) return null;
+  return { scope: NARROWEST_DEFERRED_SCOPE, path: grant.path };
 }
 
 export function DeferredApprovalChip({
@@ -71,6 +96,12 @@ export function DeferredApprovalChip({
 
   const target = pending[0]!;
   const decision = intent.kind === "approve" ? "approved" : "rejected";
+
+  // What an approval would actually grant, resolved against the entry rather
+  // than against the sentence. `null` ⇒ the chip must not offer approval.
+  const plan = intent.kind === "approve" ? resolveGrantPlan(target) : null;
+  if (intent.kind === "approve" && !plan) return null;
+
   const suggestionKey = `${target.id}:${intent.kind}:${intent.matchedPhrase}`;
   if (dismissedKey === suggestionKey) return null;
 
@@ -126,11 +157,15 @@ export function DeferredApprovalChip({
       // `approvalSource: "natural-language"` field already carries
       // the provenance signal; the phrase itself adds no integrity
       // value, only PII risk. Use a static reason string.
+      // Re-resolve the grant for the same reason the intent itself is re-read:
+      // the queue entry may have changed since render.
+      const livePlan = liveIntent.kind === "approve" ? resolveGrantPlan(target) : null;
       const r = await api(
         target.id,
         decision,
         "natural-language chip click",
         "natural-language",
+        livePlan ? { scope: livePlan.scope } : undefined,
       );
       if (!r.ok) {
         // Round-6 UX MINOR — sanitize raw IPC error string before
@@ -172,11 +207,24 @@ export function DeferredApprovalChip({
         : t("deferredApprovalChip.sourceBuiltinTool");
   // Round-5 UX MAJOR — "호출" is dev jargon; "실행" reads as
   // conversational confirmation rather than legal-permission form.
+  // The confirmation line. It states the resolved breadth and the
+  // host-derived path in concrete terms — never a paraphrase of what the user
+  // typed — so that what the click will do is legible before it happens.
   const labelTail =
+    intent.kind === "approve" && plan
+      ? t("deferredApprovalChip.labelApproveSession", {
+          toolName: target.toolName,
+          path: plan.path,
+        })
+      : intent.kind === "approve"
+        ? t("deferredApprovalChip.labelApprove", { toolName: target.toolName })
+        : t("deferredApprovalChip.labelReject", { toolName: target.toolName });
+  // A widening grant never rides on the same one-click affordance as the
+  // narrow one — the button names the breadth it is about to apply.
+  const action =
     intent.kind === "approve"
-      ? t("deferredApprovalChip.labelApprove", { toolName: target.toolName })
-      : t("deferredApprovalChip.labelReject", { toolName: target.toolName });
-  const action = intent.kind === "approve" ? t("deferredApprovalChip.actionApprove") : t("deferredApprovalChip.actionReject");
+      ? t("deferredApprovalChip.actionApprove")
+      : t("deferredApprovalChip.actionReject");
 
   return (
     // Round-3 UX MAJOR — switched to `flex-col` so the error row drops

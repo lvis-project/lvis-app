@@ -14,6 +14,9 @@ function makeEntry(overrides: Partial<DeferredQueueEntry> = {}): DeferredQueueEn
     category: "write",
     inputSummary: '{"path":"<redacted>"}',
     verdict: { level: "high", reason: "write outside allowed dirs" },
+    // Approval is only offered for entries that can grant something, so the
+    // shared fixture carries the out-of-allowed-dir lane's directory grant.
+    grant: { kind: "directory", path: "/srv/app/data" },
     status: "pending",
     ...overrides,
   };
@@ -81,7 +84,10 @@ describe("DeferredApprovalChip", () => {
       render(<DeferredApprovalChip draftText="OK 허용해줘" />);
     });
     expect(screen.getByTestId("deferred-approval-chip")).toBeTruthy();
-    expect(screen.getByText(/'bash' 실행을 허용할까요\?/)).toBeTruthy();
+    // The label now names the concrete grant as well as the tool: an approval
+    // here allows a directory going forward, and the copy has to say which.
+    expect(screen.getByText(/'bash' — 이 대화가 끝날 때까지 .+ 접근을 허용할까요\?/)).toBeTruthy();
+    expect(screen.getByText(/\/srv\/app\/data/)).toBeTruthy();
     expect(screen.getByTestId("deferred-approval-chip-action").textContent).toContain("허용");
     expect(screen.getByRole("button", { name: /기본 도구 'bash' 실행을 허용/ })).toBeTruthy();
   });
@@ -243,5 +249,75 @@ describe("DeferredApprovalChip", () => {
     expect(screen.getByTestId("deferred-approval-chip-error").textContent).toContain(
       "요청 처리 중 오류",
     );
+  });
+});
+
+describe("DeferredApprovalChip — what the approval grants", () => {
+  async function renderChip(draftText: string, entry = makeEntry()) {
+    const api = installApi([entry]);
+    let container!: HTMLElement;
+    await act(async () => {
+      container = render(<DeferredApprovalChip draftText={draftText} />).container;
+    });
+    return { api, container };
+  }
+
+  it("states the concrete host-derived path, not a paraphrase of the draft", async () => {
+    await renderChip("허용");
+    const chip = screen.getByTestId("deferred-approval-chip");
+    // The path comes from the entry's recorded grant even though the sentence
+    // never named one — the confirmation names what the host resolved.
+    expect(chip.textContent).toContain("/srv/app/data");
+    expect(chip.textContent).toContain("이 대화가 끝날 때까지");
+  });
+
+  it("does not grant until the confirmation gesture happens", async () => {
+    const { api } = await renderChip("허용");
+    expect(api.deferredResolve).not.toHaveBeenCalled();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("deferred-approval-chip-action"));
+    });
+    expect(api.deferredResolve).toHaveBeenCalledWith(
+      "id-1",
+      "approved",
+      expect.any(String),
+      "natural-language",
+      { scope: "session" },
+    );
+  });
+
+  it("only ever proposes the narrowest breadth", async () => {
+    // Breadth selection from the sentence does not exist on this path — that
+    // is the permission-review model's job (#1940). Until then the chip must
+    // not reach for the persisted grant under any phrasing.
+    for (const text of ["허용", "승인", "진행해", "허용해 주세요"]) {
+      const { api, container } = await renderChip(text);
+      const action = container.querySelector<HTMLElement>(
+        '[data-testid="deferred-approval-chip-action"]',
+      );
+      expect(action).not.toBeNull();
+      await act(async () => {
+        fireEvent.click(action!);
+      });
+      expect(api.deferredResolve).toHaveBeenCalledWith(
+        "id-1",
+        "approved",
+        expect.any(String),
+        "natural-language",
+        { scope: "session" },
+      );
+    }
+  });
+
+  it("offers nothing when the entry has no grant to give", async () => {
+    const { container } = await renderChip("허용", makeEntry({ grant: undefined }));
+    expect(container.querySelector('[data-testid="deferred-approval-chip"]')).toBeNull();
+  });
+
+  it("still offers rejection for an entry with no grant", async () => {
+    // A rejection grants nothing, so the absence of a grant does not block it.
+    const { container } = await renderChip("거부", makeEntry({ grant: undefined }));
+    expect(container.querySelector('[data-testid="deferred-approval-chip"]')).not.toBeNull();
   });
 });
