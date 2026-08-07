@@ -44,8 +44,13 @@ import {
 } from "./permissions/PermissionEvaluationContextPanel.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { t } from "../../../i18n/runtime.js";
+import {
+  parseElicitationSchema,
+  type ElicitationEnumValue,
+  type ElicitationFieldKind as ElicitationSchemaFieldKind,
+} from "../../../shared/mcp-elicitation-schema.js";
 
-type ElicitationFieldKind = "string" | "number" | "integer" | "boolean";
+type ElicitationFieldKind = ElicitationSchemaFieldKind;
 type ElicitationFormValue = string | boolean;
 
 type ElicitationEnumOption = {
@@ -68,95 +73,55 @@ type ElicitationSchemaParseResult =
   | { supported: true; fields: ElicitationField[] }
   | { supported: false; fields: [] };
 
-const MAX_ELICITATION_FIELDS = 12;
-const ELICITATION_FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/;
 const INTEGER_INPUT_RE = /^[+-]?\d+$/;
+/**
+ * Shown for an enum member whose natural label would be blank (the empty
+ * string). The member is still offered — dropping it, or rejecting the whole
+ * schema over it, would leave the user unable to answer a request the resolver
+ * considers perfectly valid.
+ */
+const EMPTY_ENUM_OPTION_LABEL = '""';
+
+const UNSUPPORTED_ELICITATION_SCHEMA: ElicitationSchemaParseResult = { supported: false, fields: [] };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function scalarLabel(value: unknown): string {
-  if (value === null) return "null";
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  return "";
+function enumOptionLabel(value: ElicitationEnumValue): string {
+  const label = value === null ? "null" : String(value);
+  return label.length > 0 ? label : EMPTY_ENUM_OPTION_LABEL;
 }
 
-function buildEnumOptions(raw: unknown): ElicitationEnumOption[] | undefined {
-  if (raw === undefined) return undefined;
-  if (!Array.isArray(raw) || raw.length === 0) return undefined;
-  const options = raw
-    .map((value, index): ElicitationEnumOption | null => {
-      const label = scalarLabel(value);
-      return label.length > 0 ? { key: String(index), label, value } : null;
-    })
-    .filter((option): option is ElicitationEnumOption => option !== null);
-  return options.length === raw.length ? options : undefined;
+function buildEnumOptions(values: readonly ElicitationEnumValue[]): ElicitationEnumOption[] {
+  return values.map((value, index) => ({
+    key: String(index),
+    label: enumOptionLabel(value),
+    value,
+  }));
 }
 
-function normalizeElicitationKind(rawType: unknown): ElicitationFieldKind | undefined {
-  if (rawType === "boolean" || rawType === "number" || rawType === "integer") {
-    return rawType;
-  }
-  if (rawType === "string") return "string";
-  return undefined;
-}
-
+/**
+ * Adapt the shared parse result into display fields. Support is decided by
+ * {@link parseElicitationSchema} alone; this must not add rejections of its own,
+ * or the dialog can once again refuse a schema the resolver would accept.
+ */
 function parseElicitationFields(args: unknown): ElicitationSchemaParseResult {
-  if (!isRecord(args)) return { supported: false, fields: [] };
-  const schema = isRecord(args.requestedSchema) ? args.requestedSchema : null;
-  if (!schema || schema.type !== "object" || !isRecord(schema.properties)) {
-    return { supported: false, fields: [] };
-  }
-  const propertyEntries = Object.entries(schema.properties);
-  if (propertyEntries.length > MAX_ELICITATION_FIELDS) return { supported: false, fields: [] };
-  if (
-    schema.required !== undefined &&
-    (!Array.isArray(schema.required) || !schema.required.every((name) => typeof name === "string"))
-  ) {
-    return { supported: false, fields: [] };
-  }
-  const required = new Set(
-    Array.isArray(schema.required)
-      ? schema.required.filter((name): name is string => typeof name === "string")
-      : [],
-  );
-  const fields: ElicitationField[] = [];
-  for (const [name, rawProperty] of propertyEntries) {
-    if (!ELICITATION_FIELD_NAME_RE.test(name) || !isRecord(rawProperty)) {
-      return { supported: false, fields: [] };
-    }
-    const property = rawProperty;
-    const title = typeof property.title === "string" && property.title.trim().length > 0
-      ? property.title.trim()
-      : name;
-    const description = typeof property.description === "string" && property.description.trim().length > 0
-      ? property.description.trim()
-      : undefined;
-    const enumOptions = buildEnumOptions(property.enum);
-    if (property.enum !== undefined && !enumOptions) return { supported: false, fields: [] };
-    const declaredKind = normalizeElicitationKind(property.type);
-    if (property.type !== undefined && !declaredKind) return { supported: false, fields: [] };
-    const kind = enumOptions ? declaredKind ?? "string" : declaredKind;
-    if (!kind) return { supported: false, fields: [] };
-    fields.push({
-      name,
-      label: title,
-      ...(description ? { description } : {}),
-      kind,
-      required: required.has(name),
-      defaultValue: property.default,
-      ...(enumOptions ? { enumOptions } : {}),
-    });
-  }
-  for (const requiredName of required) {
-    if (!fields.some((field) => field.name === requiredName)) {
-      return { supported: false, fields: [] };
-    }
-  }
-  return { supported: true, fields };
+  if (!isRecord(args)) return UNSUPPORTED_ELICITATION_SCHEMA;
+  const parsed = parseElicitationSchema(args.requestedSchema);
+  if (!parsed) return UNSUPPORTED_ELICITATION_SCHEMA;
+  return {
+    supported: true,
+    fields: parsed.fields.map((field) => ({
+      name: field.name,
+      label: field.title ?? field.name,
+      ...(field.description ? { description: field.description } : {}),
+      kind: field.kind,
+      required: field.required,
+      defaultValue: field.defaultValue,
+      ...(field.enumValues ? { enumOptions: buildEnumOptions(field.enumValues) } : {}),
+    })),
+  };
 }
 
 function initialElicitationValues(fields: readonly ElicitationField[]): Record<string, ElicitationFormValue> {
