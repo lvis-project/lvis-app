@@ -26,6 +26,7 @@ import { t } from "../i18n/index.js";
 import { createDynamicTool, type Tool } from "./base.js";
 import type { SkillStore } from "../main/skill-store.js";
 import { SKILL_SELECTOR_ALLOWLIST } from "../main/skill-store.js";
+import { parsePluginSkillSelector } from "../shared/plugin-skill-selector.js";
 import type { SkillOverlay } from "../main/skill-overlay.js";
 import type { SkillApprovalsStore } from "../main/skill-approvals-store.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
@@ -152,7 +153,8 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
           isError: true,
         };
       }
-      const selectorMatch = /^plugin:([^:]+):([^:]+)$/.exec(skillName);
+      // Same parser the turn-scope gate uses (src/shared/plugin-skill-selector.ts).
+      const selectorMatch = parsePluginSkillSelector(skillName);
       if (selectorMatch && !deps.acquirePluginGeneration) {
         return {
           output: JSON.stringify({
@@ -163,8 +165,8 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
       }
       const generationLease = selectorMatch
         ? await deps.acquirePluginGeneration!({
-            pluginId: selectorMatch[1],
-            localId: selectorMatch[2],
+            pluginId: selectorMatch.pluginId,
+            localId: selectorMatch.localId,
           })
         : undefined;
       const skill = generationLease

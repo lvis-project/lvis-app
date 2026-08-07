@@ -18,6 +18,7 @@ import { closeSync, openSync, readdirSync, readSync, realpathSync } from "node:f
 import { resolve, join, relative, isAbsolute, dirname, basename, sep } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { PLUGIN_SKILL_SELECTOR_PATTERN } from "../shared/plugin-skill-selector.js";
 import type { ActivePluginGeneration } from "../plugins/plugin-generation-coordinator.js";
 import type { MaterializedPluginContribution } from "../plugins/plugin-contributions.js";
 const log = createLogger("lvis");
@@ -30,8 +31,12 @@ const log = createLogger("lvis");
  * metacharacters into the resolved file path.
  */
 export const SKILL_NAME_ALLOWLIST = /^[a-zA-Z0-9_-]+$/;
-const PLUGIN_SKILL_SELECTOR_ALLOWLIST = /^plugin:[a-z][a-z0-9-]{2,127}:[a-zA-Z_][a-zA-Z0-9_]*$/;
-export const SKILL_SELECTOR_ALLOWLIST = /^(?:[a-zA-Z0-9_-]+|plugin:[a-z][a-z0-9-]{2,127}:[a-zA-Z_][a-zA-Z0-9_]*)$/;
+// Built from the ONE selector pattern (src/shared/plugin-skill-selector.ts), so
+// the catalog, `skill_load`/`skill_read`, and the turn-scope gate cannot drift.
+const PLUGIN_SKILL_SELECTOR_ALLOWLIST = new RegExp(`^${PLUGIN_SKILL_SELECTOR_PATTERN}$`);
+export const SKILL_SELECTOR_ALLOWLIST = new RegExp(
+  `^(?:[a-zA-Z0-9_-]+|${PLUGIN_SKILL_SELECTOR_PATTERN})$`,
+);
 
 /** C2(e): skills with a body larger than this are refused at load time. */
 export const SKILL_MAX_BODY_BYTES = 8 * 1024;
