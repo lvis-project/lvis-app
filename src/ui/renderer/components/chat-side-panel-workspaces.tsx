@@ -364,18 +364,13 @@ function ProjectRootsBrowser({
     return () => document.removeEventListener("keydown", onKey);
   }, [addFolder]);
 
-  // Surface a mutating-op IPC failure inline. `path-not-allowed` / `sensitive-path`
-  // are the workspace-specific reveal codes absent from the shared IPC map, so
-  // map them to the same "outside allowed folders" copy the file preview uses.
+  // Surface a mutating-op IPC failure inline. `path-not-allowed` /
+  // `sensitive-path` used to need a local override because the shared IPC map
+  // did not know them; it does now (format-ipc-error.ts), so this is a plain
+  // pass-through and the mapping lives in exactly one place.
   const formatOpError = useCallback(
-    (error: string | undefined, message: string | undefined) =>
-      formatIpcError(error, message, {
-        codeMap: {
-          "path-not-allowed": t("chatPreviewRail.fileErrorNotAllowed"),
-          "sensitive-path": t("chatPreviewRail.fileErrorNotAllowed"),
-        },
-      }),
-    [t],
+    (error: string | undefined, message: string | undefined) => formatIpcError(error, message),
+    [],
   );
 
   // Drag-drop add-root (#1458). A dropped folder path is renderer-NAMED — the
