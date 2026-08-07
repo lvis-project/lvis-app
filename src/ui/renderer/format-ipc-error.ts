@@ -113,6 +113,14 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "ack-expired": "formatIpcError.ackExpired",
   // Workspace root remove (workspace.ts): removeRoot.
   "invalid-path": "formatIpcError.invalidPath",
+  // Layer-0 directory denial. `directoryDenyCode` (ipc/domains/workspace.ts)
+  // and preview.ts emit these precisely so the raw reason string — which names
+  // the matched sensitive pattern — never reaches the UI. They belonged here
+  // from the start: while they were known only to two local renderer tables,
+  // every OTHER surface fell through to the `${raw}${errorSuffix}` branch and
+  // rendered the kebab-case code, which is the leak the codes exist to prevent.
+  "path-not-allowed": "chatPreviewRail.fileErrorNotAllowed",
+  "sensitive-path": "chatPreviewRail.fileErrorNotAllowed",
   "cannot-remove-default": "formatIpcError.cannotRemoveDefaultRoot",
   "not-an-additional-root": "formatIpcError.notAnAdditionalRoot",
   "persist-failed": "formatIpcError.writeFailed",
