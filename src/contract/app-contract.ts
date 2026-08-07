@@ -789,3 +789,22 @@ export const INTERNAL_HOST_CHANNELS = {
     CHANNELS.update.skipVersion,
   ],
 } as const;
+
+/**
+ * Payload of the `plugins.installResult` / `plugins.uninstallResult` broadcasts
+ * (main -> renderer). Single declaration for the channel: the preload bridge,
+ * the renderer API type and the toast handler all read this one, so a field the
+ * producer attaches cannot go missing on the way to the UI.
+ *
+ * `error` is the stable English IPC code when one exists (e.g.
+ * `incompatible-app-version`) and the plain message otherwise; `message` is the
+ * human detail that accompanies a code. Together they are exactly the pair
+ * `formatIpcError(error, message)` consumes — pass both, never render `error`
+ * raw, or the user sees the bare code.
+ */
+export interface PluginInstallResultPayload {
+  slug: string;
+  success: boolean;
+  error?: string;
+  message?: string;
+}

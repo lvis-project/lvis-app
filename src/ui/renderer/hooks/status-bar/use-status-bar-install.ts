@@ -1,5 +1,7 @@
 import { useEffect } from "react";
 import { t } from "../../../../i18n/runtime.js";
+import type { PluginInstallResultPayload } from "../../../../contract/app-contract.js";
+import { formatIpcError } from "../../format-ipc-error.js";
 import type { LvisApi } from "../../types.js";
 import type { StatusBarSeverity } from "./types.js";
 import { safeField } from "./utils.js";
@@ -19,7 +21,12 @@ type InstallProgressPayload =
   | { slug: string; phase: "installing" | "restarting" | "verifying" | "registering" | "preparing" }
   | { slug: string; phase: "downloading"; bytesDownloaded: number; bytesTotal: number | null };
 
-type InstallResultPayload = { slug: string; success: boolean; preparing?: boolean; error?: string };
+/**
+ * The channel's own declaration. `preparing` used to be re-spelled here and in
+ * the renderer API type; no producer ever set it - it had drifted in from the
+ * install-PROGRESS channel, which has a `phase: "preparing"`.
+ */
+type InstallResultPayload = PluginInstallResultPayload;
 
 function formatBytes(bytes: number): string {
   if (bytes >= 1_048_576) {
@@ -71,7 +78,7 @@ export function useStatusBarInstall({ api, pushToast, upsertToast }: Options): v
       upsertToast(installToastId(kind, safeSlug), { severity: "info", message, ttlMs: 8000 });
     };
     const handleInstallResult = (
-      { slug, success, error }: InstallResultPayload,
+      { slug, success, error, message }: InstallResultPayload,
       label = "",
       kind: InstallTargetKind = "plugin",
     ) => {
@@ -85,15 +92,37 @@ export function useStatusBarInstall({ api, pushToast, upsertToast }: Options): v
       } else {
         upsertToast(installToastId(kind, safeSlug), {
           severity: "error",
-          message: t("useStatusBarInstall.installFailure", { target, error: safeField(error) }),
+          // The producer sends a stable English code plus its human detail
+          // precisely so this maps to localized copy. Rendering `error` raw
+          // showed the user the literal string `incompatible-app-version`.
+          //
+          // `message` is the documented fallback for a code with no i18n
+          // entry. It changes nothing today — the only code this producer
+          // emits is mapped — so do not read a behavioural guarantee into it;
+          // it is here so the next unmapped code degrades to readable text
+          // instead of a bare identifier.
+          message: t("useStatusBarInstall.installFailure", {
+            target,
+            error: safeField(formatIpcError(error, message)),
+          }),
           ttlMs: 10000,
         });
       }
     };
-    const handleUninstallResult = ({ slug, success, error }: InstallResultPayload, label = "") => {
+    const handleUninstallResult = (
+      { slug, success, error, message }: InstallResultPayload,
+      label = "",
+    ) => {
       const target = targetLabel(safeField(slug, 64), label);
       if (success) pushToast({ severity: "success", message: t("useStatusBarInstall.uninstallSuccess", { target }) });
-      else pushToast({ severity: "error", message: t("useStatusBarInstall.uninstallFailure", { target, error: safeField(error) }), ttlMs: 10000 });
+      else pushToast({
+        severity: "error",
+        message: t("useStatusBarInstall.uninstallFailure", {
+          target,
+          error: safeField(formatIpcError(error, message)),
+        }),
+        ttlMs: 10000,
+      });
     };
 
     if (typeof api.onPluginInstallProgress === "function") {
