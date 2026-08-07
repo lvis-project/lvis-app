@@ -68,8 +68,7 @@ import { createLogger } from "../../../lib/logger.js";
 import { plog, PluginPhase } from "../../../plugins/lifecycle-log.js";
 import { incrementHostSecretCounter, sanitizeKeyPrefix } from "../../../telemetry/host-secret-counters.js";
 import { canonicalJSON } from "../../../plugins/whitelist/canonical-json.js";
-import { runTier3Then4 } from "../../../plugins/whitelist/tier-order.js";
-import { isMarketplaceProviderPresetId } from "../../../shared/marketplace-package-assets.js";
+import { runSecretGate } from "../../../plugins/whitelist/secret-gate.js";
 import {
   resolveApiKey as resolveApiKeyImpl,
   type ResolveApiKeyPurpose,
@@ -636,23 +635,10 @@ export function createHostApiFactory(
         return bindApiKeyResult(result);
       },
       getSecret: (key) => {
-        // #893 Stage 2 — Four-tier secret access gate:
-        //   (1) Plugin's own `plugin.<pluginId>.*` namespace — always allowed.
-        //       ADDITIVE WHITELIST: this tier intentionally never consults the
-        //       whitelist registry so non-whitelisted plugins still get to hold
-        //       their own keys under their own namespace.
-        //   (2) Host secret declared in `manifest.hostSecrets.read[]` — must
-        //       match the static manifest allowlist. Manifest-only check.
-        //   (3) Whitelist registry — `whitelistRegistry.isAllowed(pluginId,
-        //       key, manifestSha256)`. Tier-3 was added in Stage 2 of the
-        //       #893 redesign so a remote-signed policy roll can pull a
-        //       grant without shipping a host build. Manifest sha pin
-        //       prevents post-install manifest swaps from inheriting the
-        //       grant.
-        //   (4) Active-vendor cross-check — `settings.llm.provider` must
-        //       equal the vendor in the requested `llm.apiKey.<vendor>` key.
-        //       Stops a plugin from harvesting idle credentials for a
-        //       non-active provider.
+        // #893 Stage 2 — the four-tier secret access gate. The DECISION lives
+        // in `runSecretGate` (src/plugins/whitelist/secret-gate.ts), the one
+        // authority `resolveApiKey` above also calls; everything below is this
+        // API's own audit vocabulary, counters, and `string | null` shape.
         //
         // PR #894 review B7 — `keyPrefix` is folded through `sanitizeKeyPrefix`
         // before it reaches the in-process counter map. An attacker plugin
@@ -664,151 +650,85 @@ export function createHostApiFactory(
         // Audit log lines additionally cap `key` to 64 chars so an attacker
         // can't bloat the JSONL with megabyte-long denied keys.
         const auditKey = key.slice(0, 64);
-        // Tier 1 — own namespace.
-        if (key.startsWith(`plugin.${pluginId}.`)) {
-          const value = settingsService.getSecret(key);
-          if (shouldBlockPluginSecretRead({ pluginId, storageKey: key, value })) {
-            try {
-              bootAuditLogger.log({
-                timestamp: new Date().toISOString(),
-                sessionId: "plugin",
-                type: "warn",
-                input: `[plugin:${pluginId}] pluginSecret_denied reason=endpoint-url-in-api-key-like-secret key=${auditKey}`,
-              });
-            } catch { /* audit must not break host */ }
-            return null;
-          }
-          return value;
-        }
-        const allowlist = manifest.hostSecrets?.read ?? [];
         const keyPrefix = sanitizeKeyPrefix(key);
-        // Tier 2 — manifest allowlist.
-        if (allowlist.includes(key)) {
-          // Tier 3 + Tier 4 — shared helper (`runTier3Then4`) keeps the
-          // order identical with `resolveApiKey`: whitelist registry
-          // (coarse signed ACL) before vendor cross-check (per-call
-          // dynamic state). Ralph cycle 1 MEDIUM fix.
-          //
-          const llmKeyPrefix = "llm.apiKey.";
-          const isLlmKey = key.startsWith(llmKeyPrefix);
-          const marketplaceProviderKeyPrefix = "llm.marketplaceProvider.";
-          const marketplaceProviderKeySuffix = ".apiKey";
-          const marketplaceProviderPresetId =
-            key.startsWith(marketplaceProviderKeyPrefix) &&
-            key.endsWith(marketplaceProviderKeySuffix)
-              ? key.slice(
-                  marketplaceProviderKeyPrefix.length,
-                  -marketplaceProviderKeySuffix.length,
-                )
-              : "";
-          const isMarketplaceProviderKey = marketplaceProviderPresetId.length > 0;
-          let vendor = "";
-          let activeProvider = "";
-          if (isLlmKey) {
-            vendor = key.slice(llmKeyPrefix.length);
-            const llm = settingsService.get("llm");
-            activeProvider =
-              vendor === "openai-compatible" &&
-              llm.provider === "openai-compatible" &&
-              isMarketplaceProviderPresetId(llm.marketplaceProviderPresetId)
-                ? llm.marketplaceProviderPresetId
-                : (llm.provider as string);
-          } else if (isMarketplaceProviderKey) {
-            vendor = marketplaceProviderPresetId;
-            const llm = settingsService.get("llm");
-            const installedPreset = isMarketplaceProviderPresetId(marketplaceProviderPresetId)
-              ? (settingsService
-                .get("marketplace")
-                .installedProviderPresets ?? [])
-                .some((preset) => preset.providerId === marketplaceProviderPresetId)
-              : false;
-            activeProvider =
-              installedPreset &&
-              llm.provider === "openai-compatible" &&
-              llm.marketplaceProviderPresetId === marketplaceProviderPresetId
-                ? marketplaceProviderPresetId
-                : "";
-          } else {
-            activeProvider = vendor;
-          }
-          // #958/#959 security — registry-recorded `installSource` is the
-          // only source that can activate admin secret-access bypass.
-          // The registry file is host-managed; `plugin.json` is inside
-          // the plugin's writable surface so a malicious post-install
-          // patch could flip `installPolicy:"admin"` and inherit Tier-3
-          // bypass if manifest-only metadata were trusted here.
-          const registryEntry = getCurrentRegistryEntry();
-          const registryInstallSource = registryEntry?.installSource;
-          const effectiveInstallPolicy: "admin" | "user" =
-            registryInstallSource === "admin" ? "admin" : "user";
-          const outcome = runTier3Then4({
-            pluginId,
-            key,
-            manifestSha256,
-            installedManifestSha256: registryEntry?.manifestSha256,
-            vendor,
-            activeProvider,
-            // #955/#959 — admin-installed plugins bypass only the Tier-3
-            // signed whitelist registry ACL. The registry manifest SHA and
-            // Tier-4 vendor cross-check still apply via the same helper.
-            installPolicy: effectiveInstallPolicy,
-          });
-          if (outcome.kind === "deny") {
-            const auditReason =
-              outcome.tier === "tier-4" ? "non-active-vendor" : outcome.reason;
-            try {
-              bootAuditLogger.log({
-                timestamp: new Date().toISOString(),
-                sessionId: "plugin",
-                type: "warn",
-                input: `[plugin:${pluginId}] hostSecret_denied reason=${auditReason} key=${auditKey}`,
-              });
-            } catch { /* audit must not break host */ }
-            incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
-            return null;
-          }
-          // #958 round-1 security MEDIUM — admin-bypass audit + counter.
-          // Emit BEFORE the host-secret read line so operators can pivot
-          // on `policy=admin manifest-allowlist-bypassed` in the audit log. The
-          // dedicated `hostSecret_admin_bypass` counter is on top of the
-          // regular `hostSecret_read` increment below so totals stay
-          // comparable across bypass and non-bypass reads.
-          if (outcome.via === "admin-bypass") {
-            try {
-              bootAuditLogger.log({
-                timestamp: new Date().toISOString(),
-                sessionId: "plugin",
-                type: "info",
-                input: `[plugin:${pluginId}] policy=admin manifest-allowlist-bypassed key=${auditKey} source=registry.installSource`,
-              });
-            } catch { /* audit must not break host */ }
-            incrementHostSecretCounter(
-              "hostSecret_admin_bypass",
-              pluginId,
-              keyPrefix,
-            );
-          }
+        const audit = (type: "info" | "warn", line: string): void => {
           try {
             bootAuditLogger.log({
               timestamp: new Date().toISOString(),
               sessionId: "plugin",
-              type: "info",
-              input: `[plugin:${pluginId}] hostSecret_read key=${auditKey}`,
+              type,
+              input: `[plugin:${pluginId}] ${line}`,
             });
           } catch { /* audit must not break host */ }
-          incrementHostSecretCounter("hostSecret_read", pluginId, keyPrefix);
-          return settingsService.getSecret(key);
+        };
+        // #958/#959 security — registry-recorded `installSource` is the only
+        // source that can activate the admin secret-access bypass. The registry
+        // file is host-managed; `plugin.json` is inside the plugin's writable
+        // surface, so a malicious post-install patch could flip
+        // `installPolicy:"admin"` and inherit the Tier-3 bypass if
+        // manifest-only metadata were trusted here.
+        const registryEntry = getCurrentRegistryEntry();
+        const outcome = runSecretGate({
+          pluginId,
+          key,
+          allowlist: manifest.hostSecrets?.read ?? [],
+          manifestSha256,
+          installedManifestSha256: registryEntry?.manifestSha256,
+          installPolicy: registryEntry?.installSource === "admin" ? "admin" : "user",
+          readSettings: () => {
+            const llm = settingsService.get("llm");
+            return {
+              llmProvider: llm.provider as string,
+              marketplaceProviderPresetId: llm.marketplaceProviderPresetId,
+              readInstalledProviderPresetIds: () =>
+                (settingsService.get("marketplace").installedProviderPresets ?? []).map(
+                  (preset) => preset.providerId,
+                ),
+            };
+          },
+        });
+        if (outcome.kind === "deny") {
+          audit("warn", `hostSecret_denied reason=${outcome.reason} key=${auditKey}`);
+          incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
+          return null;
         }
-        try {
-          bootAuditLogger.log({
-            timestamp: new Date().toISOString(),
-            sessionId: "plugin",
-            type: "warn",
-            input: `[plugin:${pluginId}] hostSecret_denied reason=not-allowlisted key=${auditKey}`,
-          });
-        } catch { /* audit must not break host */ }
-        incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
-        return null;
+        const value = settingsService.getSecret(key);
+        // Value-shape guard. `shouldBlockPluginSecretRead` self-scopes to
+        // `plugin.<id>.*` keys, so this only ever fires on a Tier-1 grant: an
+        // endpoint URL parked in an api-key-shaped plugin secret is an
+        // exfiltration primitive.
+        if (shouldBlockPluginSecretRead({ pluginId, storageKey: key, value })) {
+          audit(
+            "warn",
+            `pluginSecret_denied reason=endpoint-url-in-api-key-like-secret key=${auditKey}`,
+          );
+          incrementHostSecretCounter("hostSecret_denied", pluginId, keyPrefix);
+          return null;
+        }
+        if (outcome.via === "own-namespace") {
+          // Tier-1 reads are counted like every other grant so `hostSecret_read`
+          // totals are comparable between `getSecret` and `resolveApiKey`, which
+          // has always counted its own-namespace hits.
+          audit("info", `pluginSecret_read key=${auditKey}`);
+          incrementHostSecretCounter("hostSecret_read", pluginId, keyPrefix);
+          return value;
+        }
+        // #958 round-1 security MEDIUM — admin-bypass audit + counter. Emit
+        // BEFORE the host-secret read line so operators can pivot on
+        // `policy=admin manifest-allowlist-bypassed` in the audit log. The
+        // dedicated `hostSecret_admin_bypass` counter is on top of the regular
+        // `hostSecret_read` increment below so totals stay comparable across
+        // bypass and non-bypass reads.
+        if (outcome.via === "admin-bypass") {
+          audit(
+            "info",
+            `policy=admin manifest-allowlist-bypassed key=${auditKey} source=registry.installSource`,
+          );
+          incrementHostSecretCounter("hostSecret_admin_bypass", pluginId, keyPrefix);
+        }
+        audit("info", `hostSecret_read key=${auditKey}`);
+        incrementHostSecretCounter("hostSecret_read", pluginId, keyPrefix);
+        return value;
       },
       callLlm: async (prompt, opts) => {
         if (lateBinding.pluginCallLlmRef.fn) {
