@@ -95,6 +95,12 @@ export function useStatusBarInstall({ api, pushToast, upsertToast }: Options): v
           // The producer sends a stable English code plus its human detail
           // precisely so this maps to localized copy. Rendering `error` raw
           // showed the user the literal string `incompatible-app-version`.
+          //
+          // `message` is the documented fallback for a code with no i18n
+          // entry. It changes nothing today — the only code this producer
+          // emits is mapped — so do not read a behavioural guarantee into it;
+          // it is here so the next unmapped code degrades to readable text
+          // instead of a bare identifier.
           message: t("useStatusBarInstall.installFailure", {
             target,
             error: safeField(formatIpcError(error, message)),
