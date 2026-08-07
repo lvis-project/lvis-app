@@ -766,7 +766,7 @@ describe("asrt-sandbox — sensitive read deny-list (host-secret hardening)", ()
     expect(paths).toContain(join(FAKE_LVIS_HOME, "policy.json"));
     expect(paths).toContain(join(FAKE_LVIS_HOME, "plugins", "auth-partitions.json"));
 
-    // FIX 3: drift-sync paths added to match SENSITIVE_PATH_PATTERNS.
+    // Literal pins on the sandbox projection of SENSITIVE_PATH_ENTRIES.
     expect(paths).toContain(join(FAKE_LVIS_HOME, "certs"));
     expect(paths).toContain(join(FAKE_LVIS_HOME, "keys"));
     expect(paths).toContain(join(home, ".azure"));

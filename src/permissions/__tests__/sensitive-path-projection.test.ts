@@ -94,6 +94,36 @@ describe("sensitive paths — one table, two projections", () => {
     }
   });
 
+  it("rejects an empty-segment row, which would project to `**/` and bare $HOME", () => {
+    for (const entry of SENSITIVE_PATH_ENTRIES) {
+      expect(entry.segments.length, `${entry.anchor}: ${entry.why}`).toBeGreaterThan(0);
+    }
+  });
+
+  // ── Content pins, independent of the table ───────────────────────────
+  //
+  // The loop above stays green when a row is DELETED (both projections shrink
+  // together). These name the path, so a deletion reds a specific case.
+
+  it.each([
+    ["routine", join(FAKE_LVIS_HOME, "routine", "session-1.jsonl")],
+    ["auth partitions", join(FAKE_LVIS_HOME, "plugins", "auth-partitions.json")],
+    ["secrets", join(FAKE_LVIS_HOME, "secrets", "k.key")],
+    ["sessions", join(FAKE_LVIS_HOME, "sessions", "abc.jsonl")],
+    ["audit", join(FAKE_LVIS_HOME, "audit", "today.jsonl")],
+    ["audit log", join(FAKE_LVIS_HOME, "audit.log")],
+    ["settings", join(FAKE_LVIS_HOME, "settings.json")],
+    ["permissions", join(FAKE_LVIS_HOME, "permissions", "cache.json")],
+    ["permissions file", join(FAKE_LVIS_HOME, "permissions.json")],
+    ["policy", join(FAKE_LVIS_HOME, "policy.json")],
+    ["certs", join(FAKE_LVIS_HOME, "certs", "ca.pem")],
+    ["keys", join(FAKE_LVIS_HOME, "keys", "sign.key")],
+    ["legacy secrets file", join(FAKE_LVIS_HOME, "lvis-secrets.json")],
+  ])("%s is secret to the host guard and to the sandbox floor", (_label, target) => {
+    expect(hostDeniesAsSensitive(target, FAKE_LVIS_HOME)).toBe(true);
+    expect(sandboxDenies(target)).toBe(true);
+  });
+
   // ── The disagreement set, pinned independently of the table ──────────
   //
   // Deleting the corresponding row must red these even if the loop above is
