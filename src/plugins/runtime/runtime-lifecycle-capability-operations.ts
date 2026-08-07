@@ -9,6 +9,7 @@ import type {
   RuntimePluginFactory,
 } from "../types.js";
 import type { Actor } from "../deployment-guard.js";
+import { PluginDeploymentDeniedError } from "../deployment-guard.js";
 import { resolveDependencies } from "../dependency-resolver.js";
 import { pluginArtifactGenerationId } from "../plugin-artifact-identity.js";
 import { updatePluginRegistry } from "../registry.js";
@@ -1227,7 +1228,9 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
     if (this.deploymentGuard) {
       const result = await this.deploymentGuard.canDisable(pluginId, actor);
       if (!result.allowed) {
-        throw new Error(result.reason ?? `Plugin disable denied: ${pluginId}`);
+        throw new PluginDeploymentDeniedError(
+          result.reason ?? `Plugin disable denied: ${pluginId}`,
+        );
       }
     }
     if (!this.plugins.has(canonicalPluginId)) {

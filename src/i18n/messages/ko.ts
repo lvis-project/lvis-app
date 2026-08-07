@@ -35,6 +35,7 @@ export const ko: Record<SeedMessageKey, string> = {
   "mainDialog.installLocalPluginTitle": "로컬 플러그인 설치 (개발자)",
   "mainDialog.installLocalPluginMessage": "plugin.json이 포함된 빌드 폴더를 선택하세요",
   "mainDialog.unauthorizedFrame": "권한이 없는 프레임입니다.",
+  "mainDialog.pluginDisableNotPermitted": "이 플러그인은 조직에서 관리하므로 비활성화할 수 없습니다.",
   "mainDialog.noPersonasAvailable": "사용 가능한 persona 없음",
   "mainDialog.exportConversationTitle": "대화 내보내기",
   "mainDialog.importConversationTitle": "대화 가져오기",
