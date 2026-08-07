@@ -84,6 +84,12 @@ export function useMessageQueue({
   }, [messageQueueStore]);
   useEffect(() => {
     messageQueueStore.clear();
+    // The guide-flush refs are turn-scoped, and `done` is what normally clears
+    // them. Switching sessions mid-turn means that `done` never arrives for
+    // this hook, so a refusal from the old session would keep suppressing
+    // brake-point hand-offs in the new one. Reset them with the queue.
+    guideFlushInflightRef.current = false;
+    guideFlushBlockedRef.current = false;
   }, [currentSessionId, messageQueueStore]);
 
 

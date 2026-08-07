@@ -14,13 +14,7 @@ import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
-import { deferred, submitChatMessage } from "../../../../test/renderer/helpers.js";
-import type { MessageQueueStore } from "../state/message-queue-store.js";
-
-function getQueueStore(): MessageQueueStore | undefined {
-  return (window as unknown as { __lvis_message_queue_store__?: MessageQueueStore })
-    .__lvis_message_queue_store__;
-}
+import { clearQueueStoreHandle, deferred, getQueueStore, submitChatMessage } from "../../../../test/renderer/helpers.js";
 
 async function queueOneWhileStreaming() {
   const pendingSend = deferred<{ ok: true }>();
@@ -41,7 +35,7 @@ async function queueOneWhileStreaming() {
 describe("message queue — mid-turn tool_end drain", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    delete (window as unknown as { __lvis_message_queue_store__?: unknown }).__lvis_message_queue_store__;
+    clearQueueStoreHandle();
   });
 
   it("clears the queue only once the engine has accepted the hand-off", async () => {
