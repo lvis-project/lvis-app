@@ -67,12 +67,15 @@ function makeMainLoop() {
   };
 }
 
-function register(sideLoop: unknown, mainLoop: unknown) {
+function register(sideLoop: unknown, mainLoop: unknown, piiRedactEnabled = false) {
   const deps = {
     conversationLoop: mainLoop,
     sideChatConversationLoop: sideLoop,
     auditLogger: { log: vi.fn() },
     getMainWindow: () => ({ webContents: {} }),
+    settingsService: {
+      get: vi.fn((key: string) => (key === "privacy" ? { piiRedactEnabled } : undefined)),
+    },
   };
   registerSideChatHandlers(deps as never);
 }
@@ -102,6 +105,33 @@ describe("side-chat IPC domain", () => {
     }
   });
 
+  // Side chat is a second send site into the same provider, and redaction lives at
+  // the send sites rather than inside the loop — so this path simply did not have
+  // one. With `piiRedactEnabled` on, the raw text the user typed went out on the
+  // wire. These two assert the DLP boundary from the PRODUCER side: what the loop
+  // actually received, not what the sanitizer returns in isolation.
+  it("redacts side-chat input before it reaches the loop when PII redaction is on", async () => {
+    const side = makeSideLoop();
+    register(side, makeMainLoop(), true);
+    const handler = handlers.get(CHANNELS.sidechat.send)!;
+
+    await handler(ev("file:///index.html"), { input: "email me at alice@example.com" });
+
+    expect(side.runTurn).toHaveBeenCalledTimes(1);
+    const forwarded = side.runTurn.mock.calls[0]![0] as string;
+    expect(forwarded).not.toContain("alice@example.com");
+  });
+
+  it("forwards side-chat input verbatim when PII redaction is off", async () => {
+    const side = makeSideLoop();
+    register(side, makeMainLoop(), false);
+    const handler = handlers.get(CHANNELS.sidechat.send)!;
+
+    await handler(ev("file:///index.html"), { input: "email me at alice@example.com" });
+
+    const forwarded = side.runTurn.mock.calls[0]![0] as string;
+    expect(forwarded).toBe("email me at alice@example.com");
+  });
   // Side chat parses its own payload — it never passes through `parseChatSendPayload`
   // — so a per-turn bound enforced at either send gate would simply not exist here.
   // It holds because the bound lives at the turn-entry chokepoint both paths share.
