@@ -189,9 +189,28 @@ vi.mock("../plugins.js", () => ({
 }));
 
 vi.mock("../managed-marketplace.js", () => ({
-  runManagedBootstrap: vi.fn(async () => {
+  runManagedBootstrap: vi.fn(async (input: unknown) => {
+    h.captured["managedBootstrapInput"] = input;
     h.rec("managedPreStartSync");
   }),
+}));
+
+// Captures the dep bag each uninstall-lifecycle entry point receives FROM
+// bootstrap(). These are the real closures boot.ts builds; the module behind
+// them is stubbed so boot stays hermetic, but the arguments are production's.
+vi.mock("../../plugins/uninstall-lifecycle.js", () => ({
+  recoverPendingPluginUninstallCleanups: vi.fn(async (deps: unknown) => {
+    h.captured["recoverCleanupDeps"] = deps;
+    return [] as string[];
+  }),
+  ensurePluginStateReadyForInstall: vi.fn(async (_pluginId: string, deps: unknown) => {
+    h.captured["ensureInstallReadyDeps"] = deps;
+  }),
+  removeQuiescentPluginResidualState: vi.fn(
+    async (_input: unknown, _commit: unknown, deps: unknown) => {
+      h.captured["delistedRemovalDeps"] = deps;
+    },
+  ),
 }));
 
 vi.mock("../steps/plugin-runtime.js", () => ({
@@ -679,6 +698,87 @@ describe("bootstrap() integration lock", () => {
     assertBefore("lifecycleBound", "retirementsRecovered");
     assertBefore("retirementsRecovered", "managedPreStartSync");
     assertBefore("managedPreStartSync", "startPlugins");
+  });
+
+  // ── plugin-state cleanup dep bag ────────────────────────────────────────
+  //
+  // `plugin.uninstalled` is what drops the stale registry-entry cache entry
+  // (src/boot/steps/plugin-runtime.ts:555 → refreshRegistryEntryCache, whose
+  // comment says "so a re-install does not inherit the previous Tier-3 bypass
+  // or manifest SHA decision") and what every per-plugin
+  // `onEvent("plugin.uninstalled")` subscriber hangs off. It is optional on
+  // `PluginUninstallLifecycleDeps`, so a wiring that forgets it type-checks and
+  // silently emits nothing.
+  //
+  // boot.ts used to hand-spell the dep bag three times and pass `emitHostEvent`
+  // in exactly ONE of them. These assertions drive the REAL closures bootstrap()
+  // built — including the two it hands to runManagedBootstrap — and check the
+  // arguments that actually reach the lifecycle module.
+  describe("plugin-state cleanup dep bag", () => {
+    function bagFor(key: string): Record<string, unknown> {
+      const bag = h.captured[key];
+      expect(bag, `${key} was never captured`).toBeDefined();
+      return bag as Record<string, unknown>;
+    }
+
+    it("gives boot-time cleanup recovery the host event emitter", () => {
+      expect(typeof bagFor("recoverCleanupDeps")["emitHostEvent"]).toBe("function");
+    });
+
+    it("gives the managed pre-start install-readiness check the host event emitter", async () => {
+      const input = h.captured["managedBootstrapInput"] as {
+        ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
+      };
+      await input.ensurePluginStateReadyForInstall("managed-plugin");
+
+      expect(typeof bagFor("ensureInstallReadyDeps")["emitHostEvent"]).toBe("function");
+    });
+
+    it("gives delisted admin removal the host event emitter", async () => {
+      const input = h.captured["managedBootstrapInput"] as {
+        removeDelistedAdminInstall: (
+          removal: { pluginId: string; secretKeys: readonly string[] },
+          commit: () => Promise<void>,
+        ) => Promise<void>;
+      };
+      await input.removeDelistedAdminInstall(
+        { pluginId: "delisted-plugin", secretKeys: [] },
+        async () => {},
+      );
+
+      expect(typeof bagFor("delistedRemovalDeps")["emitHostEvent"]).toBe("function");
+    });
+
+    it("spells one identical cleanup service set at every boot entry point", async () => {
+      // The three bags are one value set, not three capabilities. Compare the
+      // KEYS: a fourth boot wiring that hand-spells a subset (which is exactly
+      // how emitHostEvent went missing) shows up here as a key-set mismatch.
+      const managed = h.captured["managedBootstrapInput"] as {
+        ensurePluginStateReadyForInstall: (pluginId: string) => Promise<void>;
+        removeDelistedAdminInstall: (
+          removal: { pluginId: string; secretKeys: readonly string[] },
+          commit: () => Promise<void>,
+        ) => Promise<void>;
+      };
+      await managed.ensurePluginStateReadyForInstall("managed-plugin");
+      await managed.removeDelistedAdminInstall(
+        { pluginId: "delisted-plugin", secretKeys: [] },
+        async () => {},
+      );
+
+      // `pluginMarketplace` is genuinely not part of the set: the delisted
+      // remover takes `PluginStateCleanupDeps`, which omits it by type. Every
+      // OTHER key is the shared set.
+      const keysOf = (key: string) =>
+        Object.keys(bagFor(key)).filter((k) => k !== "pluginMarketplace").sort();
+      const recover = keysOf("recoverCleanupDeps");
+      expect(keysOf("ensureInstallReadyDeps")).toEqual(recover);
+      expect(keysOf("delistedRemovalDeps")).toEqual(recover);
+      // And that shared set is the one the module needs to do its job.
+      expect(recover).toContain("emitHostEvent");
+      expect(recover).toContain("drainPluginInstallLockOperationsService");
+      expect(recover).toContain("clearAuthPartitionService");
+    });
   });
 
   it("exposes the deferred lifecycle handles main.ts drives after boot", () => {
