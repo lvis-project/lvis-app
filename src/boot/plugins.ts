@@ -12,7 +12,6 @@ import type { NotificationService } from "../main/notification-service.js";
 import { classifySubscription } from "../plugins/capabilities.js";
 import { type EventHandler, onEvent, offEvent } from "./types.js";
 import { createLogger } from "../lib/logger.js";
-import { CHANNELS } from "../contract/app-contract.js";
 const log = createLogger("lvis");
 
 export interface EventCollector {
@@ -129,49 +128,11 @@ export function buildManifestEventHints(
   return hints;
 }
 
-/**
- * Register renderer event bridges from manifest.emittedEvents declarations.
- * Only events that pass classifySubscription("public") are forwarded with webContents.send.
- * Keep this plugin-agnostic: do not hardcode plugin IDs or event literals in boot.ts.
- */
-export function registerPluginEventBridge(
-  pluginRuntime: PluginRuntime,
-  mainWindow: import("electron").BrowserWindow,
-): () => void {
-  const registered: Array<{ type: string; handler: EventHandler }> = [];
-  const registeredEvents = new Set<string>();
-
-  for (const { manifest } of pluginRuntime.listPluginManifests()) {
-    for (const eventType of manifest.emittedEvents ?? []) {
-      if (registeredEvents.has(eventType)) continue;
-      const verdict = classifySubscription(eventType);
-      if (verdict === "private") {
-        log.warn(
-          `boot: emittedEvents["${eventType}"] is private-namespace — bridge skipped`,
-        );
-        continue;
-      }
-      registeredEvents.add(eventType);
-      const handler: EventHandler = (data) => {
-        if (mainWindow.isDestroyed()) return;
-        try {
-          mainWindow.webContents.send(CHANNELS.pluginBridge.event, eventType, data);
-        } catch (e) {
-          log.warn(
-            `boot: plugin-event-bridge send failed (${eventType}): %s`,
-            (e as Error).message,
-          );
-        }
-      };
-      onEvent(eventType, handler);
-      registered.push({ type: eventType, handler });
-    }
-  }
-
-  return () => {
-    for (const { type, handler } of registered) offEvent(type, handler);
-  };
-}
+// The renderer event bridge (manifest.emittedEvents → CHANNELS.pluginBridge.event)
+// lives in `boot/steps/ipc-bridge.ts` — the only implementation, and the one
+// `boot/steps/conversation-wiring.ts` wires. A second, never-called copy used to
+// sit here; it has been deleted. Its private-namespace skip (the one behaviour
+// the live bridge lacked) moved into `collectPluginEventTypes` there.
 
 /**
  * Register OS notifications from manifest.notificationEvents declarations.
