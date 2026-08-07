@@ -6,10 +6,7 @@ import { app } from "electron";
 import { resolve } from "node:path";
 import { t } from "./i18n/index.js";
 import { registerIpcHandlers, unregisterPluginWebview } from "./ipc-bridge.js";
-import {
-  installHtmlPreviewPartitionBlock,
-  installPluginPartitionPolicy,
-} from "./main/html-preview-partition.js";
+import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
 import { isAuthOwned } from "./main/auth-window-registry.js";
 import { isLinkOwned } from "./main/link-window-registry.js";
 import { shouldBlockGlobalWebviewNavigation } from "./main/webview-navigation-policy.js";
@@ -583,25 +580,23 @@ app.on("web-contents-created", (_event, contents) => {
     return;
   }
 
-  // Eagerly install the partition network policy at attach time —
-  // BEFORE the first navigation lands. The previous `did-navigate`
-  // hook ran AFTER the first request, leaving a TOCTOU window where
-  // the plugin shell document itself escaped the file://-only allow
-  // list. `installPluginPartitionPolicy` is idempotent so re-installs
-  // on the same partition are no-ops.
+  // There is deliberately NO attach-time `installPluginPartitionPolicy` call
+  // here (#1953). One used to sit at this point, reading
+  // `contents.session.partition` to recover the partition name — but Electron's
+  // `Session` exposes no `partition` property (verified against the Electron 43
+  // typings; only the *options* interfaces carry one), so the read was always
+  // `undefined` and the branch never ran (#498). Keeping it implied a second
+  // installer of the partition request filter and a fallback for partitions the
+  // lifecycle missed; neither existed.
   //
-  // BUG (#498): `contents.session.partition` is undocumented and returns
-  // `undefined` on current Electron, so this guard never matches and
-  // session preload is never registered → plugin webviews load without the
-  // `lvisPlugin` contextBridge → shell aborts with "lvisPlugin bridge
-  // missing". The proper fix pre-registers the policy at boot for every
-  // known plugin partition (see `boot/steps/plugin-runtime.ts`); the
-  // attach-time hook here is kept for the case where the partition wasn't
-  // pre-registered (defensive only).
-  const partitionName = (contents.session as unknown as { partition?: string }).partition;
-  if (typeof partitionName === "string" && partitionName.startsWith("persist:plugin:")) {
-    installPluginPartitionPolicy(partitionName);
-  }
+  // `boot/steps/plugin-runtime.ts` is the single installer, covering every
+  // partition a plugin-shell webview can be attached with: the post-`startAll`
+  // loop, the `plugin.installed` event, and the `onEnable` lifecycle hook — all
+  // keyed by the same `pluginPartitionName(pluginId)` the renderer uses for the
+  // `<webview partition=…>` attribute. If a new producer ever attaches a
+  // shell-URL webview with a partition that path does not cover, that partition
+  // has no request filter and `shouldBlockGlobalWebviewNavigation` below becomes
+  // its only gate.
 
   // Plugin webview lifecycle: clean up the (webContents.id → pluginId)
   // registry entry on destroy so a stale id can't be reused for an
