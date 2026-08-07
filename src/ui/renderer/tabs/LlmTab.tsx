@@ -40,6 +40,7 @@ import {
 } from "../../../shared/openrouter-free-models.js";
 import {
   marketplaceProviderPresetSecretId,
+  modelDiscoveryPolicyUsesSeededOptions,
   type MarketplaceInstalledProviderPreset,
   type MarketplaceProviderModelDiscoveryPolicy,
 } from "../../../shared/marketplace-package-assets.js";
@@ -342,12 +343,6 @@ function shouldSyncModelList(
   if (vendorId === "openai" || vendorId === "copilot") return true;
   if (!info.needsBaseUrl) return false;
   return vendorId !== "openai-compatible" && vendorId !== "azure-foundry";
-}
-
-function modelDiscoveryPolicyUsesSeededOptions(
-  modelDiscoveryPolicy: MarketplaceProviderModelDiscoveryPolicy | undefined,
-): boolean {
-  return modelDiscoveryPolicy === "manual" || modelDiscoveryPolicy === "static";
 }
 
 /**

@@ -14,8 +14,8 @@ import {
 import {
   isMarketplaceProviderPresetId,
   marketplaceProviderPresetSecretKey,
+  modelDiscoveryPolicyAllowsFetch,
   type MarketplaceInstalledProviderPreset,
-  type MarketplaceProviderModelDiscoveryPolicy,
 } from "../../shared/marketplace-package-assets.js";
 import {
   ensurePublicHttpUrl,
@@ -40,14 +40,6 @@ const STANDARD_MODEL_LIST_BASE_URLS: Partial<Record<LLMVendor, string>> = {
 
 const GITHUB_MODELS_CATALOG_ENDPOINT = "https://models.github.ai/catalog/models";
 const GITHUB_MODELS_API_VERSION = "2026-03-10";
-
-function modelDiscoveryPolicyAllowsFetch(
-  policy: MarketplaceProviderModelDiscoveryPolicy | undefined,
-): boolean {
-  return policy === undefined ||
-    policy === "models-api" ||
-    policy === "openrouter-models-api";
-}
 
 export type LlmModelListFetchOptions = {
   fetchImpl?: typeof fetch;
