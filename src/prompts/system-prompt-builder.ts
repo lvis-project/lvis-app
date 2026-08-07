@@ -102,8 +102,14 @@ export interface SystemPromptBuilderDeps {
   toolRegistry: ToolRegistry;
   /**
    * request_plugin candidate catalog provider. Empty/undefined omits the section.
+   *
+   * The registry is a PARAMETER, not something the provider may close over: a
+   * sub-agent's builder is created with `createIsolated({ toolRegistry: <scoped
+   * view> })`, and the advertised plugin surface must be bounded by the SAME
+   * registry the child is frozen with. A closure over the boot-time global
+   * registry silently advertises plugins the child cannot call.
    */
-  getPluginCards?: () => RequestablePluginCatalogCard[];
+  getPluginCards?: (toolRegistry: ToolRegistry) => RequestablePluginCatalogCard[];
   /**
    * Session-scoped on-demand activation allow-list. Plugin ids returned here are
    * treated as requestable in the catalog even when the user has toggled them
@@ -818,7 +824,9 @@ export class SystemPromptBuilder {
       name: "Requestable Plugin Catalog",
       refresh: "per-turn",
       build: () => {
-        const cards = getPluginCards?.() ?? [];
+        // `this.deps.toolRegistry`, not a captured one — `createIsolated`
+        // overrides exactly this field for a scoped sub-agent.
+        const cards = getPluginCards?.(this.deps.toolRegistry) ?? [];
         if (cards.length === 0) return "";
         const active = this.toolScope?.activePluginIds ?? new Set<string>();
         const activatable = getActivatablePluginIds?.();
