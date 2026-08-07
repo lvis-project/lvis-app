@@ -401,6 +401,29 @@ export async function initPluginRuntime(
   // C6 — build the extracted factories. Lazy bindings (pluginRuntime,
   // loopbackManager) are passed as getters so the eventual assignments below
   // are visible; both are still unassigned at this point (never value-captured).
+  //
+  // ONE plugin-runtime audit transport, shared by `new PluginRuntime` below and
+  // by the HostApi factory's plugin-storage rejection sink. Hoisted (rather
+  // than inlined at the PluginRuntime construction) so the storage sink cannot
+  // drift into a second record shape.
+  const pluginRuntimeAuditLog = (
+    level: "info" | "warn" | "error",
+    message: string,
+    data?: unknown,
+  ): void => {
+    try {
+      bootAuditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId: "plugin-runtime",
+        type: level === "error" ? "error" : "tool_call",
+        input: `[${level.toUpperCase()}] ${message}`,
+        output:
+          data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
+      });
+    } catch (error) {
+      log.error({ err: error }, "plugin runtime audit sink failed");
+    }
+  };
   const createHostApi = createHostApiFactory({
     getPluginRuntime: () => pluginRuntime,
     lateBinding,
@@ -410,6 +433,7 @@ export async function initPluginRuntime(
     readAppPreference,
     settingsService,
     bootAuditLogger,
+    pluginRuntimeAuditLog,
     networkFetch,
     mainWindow,
     openAuthWindowService,
@@ -438,20 +462,7 @@ export async function initPluginRuntime(
     configOverrides,
     deploymentGuard,
     installReceiptCacheRoot: pluginPaths.cacheRoot,
-    auditLog: (level, message, data) => {
-      try {
-        bootAuditLogger.log({
-          timestamp: new Date().toISOString(),
-          sessionId: "plugin-runtime",
-          type: level === "error" ? "error" : "tool_call",
-          input: `[${level.toUpperCase()}] ${message}`,
-          output:
-            data === undefined ? undefined : JSON.stringify(data).slice(0, 500),
-        });
-      } catch (error) {
-        log.error({ err: error }, "plugin runtime audit sink failed");
-      }
-    },
+    auditLog: pluginRuntimeAuditLog,
     preparePluginStart,
     onDisable,
     onActiveStateChange,

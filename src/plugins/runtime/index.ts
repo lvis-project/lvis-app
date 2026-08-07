@@ -23,7 +23,7 @@ import type {
   PluginUiExtension,
   RuntimePlugin,
 } from "../types.js";
-import { createPluginStorage } from "../storage.js";
+import { createPluginStorage, createPluginStorageAuditSink } from "../storage.js";
 import type { PluginDeploymentGuard } from "../deployment-guard.js";
 import { installReceiptPath } from "../plugin-install-receipt.js";
 import type { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
@@ -1241,19 +1241,19 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
   }
 
   /**
-   * Resolve the per-plugin sandboxed `PluginStorage` instance for `pluginId`.
-   *
-   * Used by the plugin webview bridge (`lvis:plugin:storage:*` IPC) so a UI
-   * panel running in an isolated webview can read/write its own plugin data
-   * dir through the same containment-checked path validation enforced for
-   * the host plugin (createPluginStorage). Returns `undefined` for unknown
-   * pluginIds — the IPC handler maps that to `unknown-plugin-id`.
+   * Resolve the per-plugin sandboxed `PluginStorage` for `pluginId` — used by
+   * the plugin webview bridge (`lvis:plugin:storage:*` IPC) so a UI panel in an
+   * isolated webview gets the same containment-checked path validation the host
+   * plugin gets. `undefined` for unknown ids (IPC → `unknown-plugin-id`).
+   * The audit sink is MANDATORY: those handlers only reply to the webview on
+   * refusal, so without it a symlink escape on a webview's behalf leaves no
+   * host-side trace. Shared with the boot host-api-factory wiring: ONE record.
    */
   getPluginStorage(pluginId: string): import("../types.js").PluginStorage | undefined {
     const plugin = this.plugins.get(pluginId);
     if (!plugin) return undefined;
-    const pluginDataDir = this.ensureDataDir(pluginId, plugin.pluginRoot);
-    return createPluginStorage(pluginId, pluginDataDir);
+    const audit = createPluginStorageAuditSink(pluginId, (...a) => this.auditLog?.(...a));
+    return createPluginStorage(pluginId, this.ensureDataDir(pluginId, plugin.pluginRoot), audit);
   }
 
   listUiExtensions(): Array<{ pluginId: string; icon?: string; iconText?: string; extension: PluginUiExtension; entryUrl?: string; runtimeRevision?: number }> {
