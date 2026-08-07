@@ -296,12 +296,39 @@ describe("prepared artifact install identity", () => {
       .toBe("shared-identity");
   });
 
+  // Every throw site spanned by the prepared identity reservation belongs in
+  // this table: the reservation is released by one outer `finally`, so a phase
+  // that is absent here has its release asserted by structure alone. Adding a
+  // pre-publication throw site to `activatePreparedArtifact` without adding a
+  // row leaves that phase's release unproven.
   const failurePhases: ReadonlyArray<{
     label: string;
     entrySource?: (toolName: string) => string;
+    /** Corrupt the registry provenance the activation input carries. */
+    failsRegistryProvenance?: boolean;
+    failsPreparePluginStart?: boolean;
+    /** Delete a receipt-declared payload file so materialization cannot copy it. */
+    failsGenerationMaterialization?: boolean;
+    failsHostApiIncarnation?: boolean;
     failsDurableCommit?: boolean;
     failsPublication?: boolean;
+    /** Message of the first activation's rejection; defaults to the injected error. */
+    expectedMessage?: string;
+    /** Phases reached only after the durable commit callback has run. */
+    reachesDurableCommit?: boolean;
   }> = [
+    {
+      label: "registry provenance",
+      failsRegistryProvenance: true,
+      expectedMessage: "registry manifest provenance changed",
+    },
+    { label: "runtime preparation hook", failsPreparePluginStart: true },
+    {
+      label: "generation materialization",
+      failsGenerationMaterialization: true,
+      expectedMessage: "ENOENT",
+    },
+    { label: "host api incarnation", failsHostApiIncarnation: true },
     {
       label: "module import",
       entrySource: () => 'throw new Error("module import failure");\n',
@@ -323,8 +350,16 @@ describe("prepared artifact install identity", () => {
 }
 `,
     },
-    { label: "durable commit", failsDurableCommit: true },
-    { label: "prepared publication", failsPublication: true },
+    {
+      label: "durable commit",
+      failsDurableCommit: true,
+      reachesDurableCommit: true,
+    },
+    {
+      label: "prepared publication",
+      failsPublication: true,
+      reachesDurableCommit: true,
+    },
   ];
 
   for (const phase of failurePhases) {
@@ -338,6 +373,19 @@ describe("prepared artifact install identity", () => {
         retained: "incumbent",
       };
       const candidatePythonExecutable = join(root, "candidate-python");
+      const failure = new Error(`${phase.label} failure`);
+      // Injections that live on the runtime rather than on the activation input
+      // must fail the first activation only, so the retry exercises the same
+      // runtime instance that still holds the reservation map.
+      let injectRuntimeFailure = true;
+      const failingCreateHostApi: PluginRuntimeOptions["createHostApi"] = (
+        hostApiPluginId,
+        hostApiManifest,
+        dataDir,
+      ) => {
+        if (injectRuntimeFailure) throw failure;
+        return createNoopHostApiForTests(hostApiPluginId, hostApiManifest, dataDir);
+      };
       const runtime = makeTestPluginRuntime(
         {
           rootDir: root,
@@ -346,13 +394,14 @@ describe("prepared artifact install identity", () => {
         },
         {
           installReceiptCacheRoot: join(root, "cache"),
-          preparePluginStart: async () => ({
-            configOverride: { pythonExecutable: candidatePythonExecutable },
-          }),
+          preparePluginStart: async () => {
+            if (phase.failsPreparePluginStart && injectRuntimeFailure) throw failure;
+            return { configOverride: { pythonExecutable: candidatePythonExecutable } };
+          },
+          ...(phase.failsHostApiIncarnation ? { createHostApi: failingCreateHostApi } : {}),
         },
       );
       runtime.setConfigOverride(pluginId, incumbentConfig);
-      const failure = new Error(`${phase.label} failure`);
       const publicationSpy = phase.failsPublication
         ? vi.spyOn(runtime, "prepareRuntimeGeneration").mockImplementation(
           () => ({ publish: () => { throw failure; } }) as never,
@@ -364,6 +413,14 @@ describe("prepared artifact install identity", () => {
         installId,
         phase.entrySource,
       );
+      if (phase.failsGenerationMaterialization) {
+        // The receipt still declares `entry.mjs`, so materializing the retained
+        // generation cannot copy the payload out of the staging tree.
+        await rm(join(failedPrepared.pluginRoot, "entry.mjs"));
+      }
+      const failedRegistryEntry = phase.failsRegistryProvenance
+        ? { ...failedPrepared.registryEntry, manifestSha256: "b".repeat(64) }
+        : failedPrepared.registryEntry;
       const failedCommit = vi.fn(async () => {
         if (phase.failsDurableCommit) throw failure;
         return "first-commit";
@@ -372,14 +429,16 @@ describe("prepared artifact install identity", () => {
       await expect(runtime.activatePreparedArtifact({
         installId,
         ...failedPrepared,
+        registryEntry: failedRegistryEntry,
         durableCommit: failedCommit,
-      })).rejects.toThrow(failure.message);
+      })).rejects.toThrow(phase.expectedMessage ?? failure.message);
       publicationSpy?.mockRestore();
+      injectRuntimeFailure = false;
 
       expect(runtime.listPluginIds()).not.toContain(pluginId);
       expect(runtime.getConfigOverride(pluginId)).toEqual(incumbentConfig);
-      if (phase.entrySource) expect(failedCommit).not.toHaveBeenCalled();
-      else expect(failedCommit).toHaveBeenCalledOnce();
+      if (phase.reachesDurableCommit) expect(failedCommit).toHaveBeenCalledOnce();
+      else expect(failedCommit).not.toHaveBeenCalled();
 
       const retryPrepared = await writePreparedPlugin(root, pluginId, installId);
       const retryCommit = vi.fn(async () => "retry-commit");
