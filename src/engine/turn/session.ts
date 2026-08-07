@@ -17,8 +17,8 @@ import { latestPersistedContextTokens } from "./context-carrier.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { createLogger } from "../../lib/logger.js";
 import { projectBasename, projectRootEquals } from "../../shared/project-identity.js";
+import { createWorkspaceRootRevocationFilter } from "../../permissions/workspace-root-revocation.js";
 import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
-import { canonicalizePathForMatch, caseFoldForMatch } from "../../permissions/sensitive-paths.js";
 
 const log = createLogger("lvis");
 
@@ -85,16 +85,6 @@ export interface WorkspaceRootRevocationResult {
   projectRebound: boolean;
 }
 
-function isPathAtOrBelow(root: string, candidate: string): boolean {
-  try {
-    const canonicalRoot = caseFoldForMatch(canonicalizePathForMatch(root));
-    const canonicalCandidate = caseFoldForMatch(canonicalizePathForMatch(candidate));
-    if (!canonicalRoot || !canonicalCandidate) return false;
-    return canonicalCandidate === canonicalRoot || canonicalCandidate.startsWith(`${canonicalRoot}/`);
-  } catch {
-    return projectRootEquals(root, candidate);
-  }
-}
 
 /**
  * Revoke every live session/turn directory covered by a removed workspace
@@ -117,15 +107,12 @@ export function revokeWorkspaceRoot(
   const previousProjectName = self.sessionProjectName;
   const previousProjectWasDefault = self.sessionProjectIsDefault;
   const staticDirectories = self.deps.additionalDirectories ?? [];
-  const preserveRoots = (options.preserveRoots ?? []).filter(
-    (preserveRoot) =>
-      !projectRootEquals(normalizedRoot, preserveRoot)
-      && isPathAtOrBelow(normalizedRoot, preserveRoot),
+  // ONE revocation predicate, shared with every other live-scope owner the
+  // workspace-root removal sweep drives (see permissions/workspace-root-revocation.ts).
+  const isRevoked = createWorkspaceRootRevocationFilter(
+    normalizedRoot,
+    options.preserveRoots ?? [],
   );
-  const isPreserved = (directory: string): boolean =>
-    preserveRoots.some((preserveRoot) => isPathAtOrBelow(preserveRoot, directory));
-  const isRevoked = (directory: string): boolean =>
-    isPathAtOrBelow(normalizedRoot, directory) && !isPreserved(directory);
   const affectsActiveTurn = Boolean(
     options.globalScopeWasAuthorized === true
       || (previousProjectRoot && isRevoked(previousProjectRoot))
