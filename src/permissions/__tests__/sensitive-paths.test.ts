@@ -27,8 +27,10 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
 
   it("contains core credential-store patterns", () => {
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.ssh/**");
-    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.aws/credentials");
-    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.aws/config");
+    // The whole `.aws` dir, not just credentials/config: the SSO token cache
+    // (`.aws/sso/cache/*.json`) is a bearer credential too, and the OS sandbox
+    // floor has always denied the dir wholesale.
+    expect(SENSITIVE_PATH_PATTERNS).toContain("**/.aws/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.gnupg/**");
     expect(SENSITIVE_PATH_PATTERNS).toContain("**/.kube/config");
   });
@@ -102,11 +104,17 @@ describe("isSensitivePath — positive matches", () => {
 
   it("matches /Users/ken/.aws/credentials", () => {
     const result = isSensitivePath("/Users/ken/.aws/credentials");
-    expect(result).toBe("**/.aws/credentials");
+    expect(result).toBe("**/.aws/**");
   });
 
   it("matches /Users/ken/.aws/config", () => {
-    expect(isSensitivePath("/Users/ken/.aws/config")).toBe("**/.aws/config");
+    expect(isSensitivePath("/Users/ken/.aws/config")).toBe("**/.aws/**");
+  });
+
+  it("matches the AWS SSO token cache, which the file-only patterns missed", () => {
+    expect(
+      isSensitivePath("/Users/ken/.aws/sso/cache/abc123.json"),
+    ).toBe("**/.aws/**");
   });
 
   it("matches /Users/ken/.gnupg/pubring.kbx via **/.gnupg/**", () => {
