@@ -42,11 +42,37 @@ describe("formatTokens", () => {
   });
 });
 
+/**
+ * The ladder widens precision as the amount shrinks. These are exact strings
+ * because the four copies this replaced each cut off at a different decimal,
+ * so the same amount read `$0.50`, `$0.500` and `$0.5` on three screens.
+ */
 describe("formatCost", () => {
-  it("renders exact cost strings", () => {
+  it("renders exact cost strings across the whole ladder", () => {
     expect(formatCost(0)).toBe("$0");
+    expect(formatCost(0.0005)).toBe("$0.00050");
     expect(formatCost(0.005)).toBe("$0.0050");
-    expect(formatCost(0.05)).toBe("$0.05");
+    expect(formatCost(0.05)).toBe("$0.050");
+    expect(formatCost(0.5)).toBe("$0.500");
     expect(formatCost(1.5)).toBe("$1.50");
+    expect(formatCost(1234.5)).toBe("$1,234.50");
+  });
+
+  // The starred-session list grouped via `Intl` before this consolidation.
+  // Dropping the separator would have been the one change here that made a
+  // number harder to read, so the unified formatter keeps it and the other
+  // three surfaces gain it. Grouping is pinned to en-US regardless of UI
+  // locale — costs are USD everywhere, and the locale-shaped `1234,50 $` the
+  // starred view used to render was the outlier being removed.
+  it("groups thousands, and does not follow the UI locale to do it", () => {
+    expect(formatCost(1000)).toBe("$1,000.00");
+    expect(formatCost(1234567.891)).toBe("$1,234,567.89");
+    expect(formatCost(999.99)).toBe("$999.99");
+  });
+
+  it("collapses non-positive and non-finite amounts instead of printing $-0.5000", () => {
+    expect(formatCost(-0.5)).toBe("$0");
+    expect(formatCost(Number.NaN)).toBe("$0");
+    expect(formatCost(Number.POSITIVE_INFINITY)).toBe("$0");
   });
 });

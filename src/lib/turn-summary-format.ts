@@ -1,11 +1,18 @@
 /**
- * Turn summary footer — display formatters.
+ * Wall-clock duration display formatting — single authority.
  *
- * Used by `TurnSummaryFooter` to render the aggregate one-line footer
- * appended to a completed chat turn. Companion to per-tool duration
- * formatting on `ToolGroupCard`; both stay in sync on rounding rules
- * (sub-second → "<0.1s", minute → "Xm Y.Zs") so the cumulative total
- * never visually contradicts the per-tool slices it sums.
+ * The turn footer (`WorkGroup`) and the per-tool badges on `ToolGroupCard`
+ * render the same quantity. They used to do it with two functions
+ * (`formatDuration` here and `formatToolDuration` in
+ * `ui/renderer/utils/format-duration.ts`) whose header comments each claimed
+ * the two "stay in sync on rounding rules" while they disagreed on three:
+ * whole seconds at minute scale (`1m 12s` vs `1m 12.0s`), the hour scale
+ * (`1h 03m` vs `63m 0.0s`), and zero. A turn footer could therefore read
+ * `1h 03m` above tool rows summing to `63m 0.0s`.
+ *
+ * The richer set of rules won, so nothing rounds more coarsely than before.
+ * Callers that must hide the label for a missing or nonsensical duration guard
+ * at the call site instead of relying on an empty-string return.
  */
 
 /**
@@ -18,9 +25,9 @@
  *   - <60min          → `1m 12.4s`  (when fractional component is significant)
  *   - ≥60min          → `1h 03m`    (drop seconds at hour scale)
  *
- * Negative or non-finite inputs collapse to `0s`. The function never
- * throws — caller can pass an optional `cumulativeToolMs` that may be
- * 0 when the per-tool duration PR has not yet been merged.
+ * Negative or non-finite inputs collapse to `0s`; the function never throws.
+ * A caller that wants no label at all for those cases (the tool badges hide
+ * rather than print `0s`) checks the input itself.
  */
 export function formatDuration(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return "0s";

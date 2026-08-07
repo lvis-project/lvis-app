@@ -10,6 +10,7 @@ import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
 import { kstDateKey } from "../../../shared/kst-date.js";
+import { formatCost } from "../../../lib/cost-format.js";
 
 export interface StarredItem {
   id: string;
@@ -84,10 +85,6 @@ function dateFromKey(dateKey: string): Date {
 
 function formatTokenCount(value: number | undefined): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(Math.max(0, value ?? 0));
-}
-
-function formatCost(value: number | undefined): string {
-  return new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 }).format(Math.max(0, value ?? 0));
 }
 
 function formatSessionTime(value: string): string {
@@ -448,7 +445,7 @@ export function StarredView({
             <h3 className="text-sm font-semibold text-foreground">{t("starredView.tokensTitle")}</h3>
             <p className="mt-3 text-2xl font-semibold text-foreground">{formatTokenCount(dailyUsage?.totalTokens)}</p>
             <p className="mt-1 text-xs text-muted-foreground">
-              {formatTokenCount(dailyUsage?.inputTokens)} / {formatTokenCount(dailyUsage?.outputTokens)} · {formatCost(dailyUsage?.cost)}
+              {formatTokenCount(dailyUsage?.inputTokens)} / {formatTokenCount(dailyUsage?.outputTokens)} · {formatCost(dailyUsage?.cost ?? 0)}
             </p>
           </section>
         </div>
