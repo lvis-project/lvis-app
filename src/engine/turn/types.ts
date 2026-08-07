@@ -40,7 +40,6 @@ import type { PostTurnHookChain } from "../../hooks/post-turn-hook-chain.js";
 import type { HookRunner } from "../../hooks/hook-runner.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import type { HookTrustCommandOptions } from "../../hooks/hook-trust-commands.js";
-import type { PermissionDirectoryLifecycle } from "../../permissions/permission-slash.js";
 import type { RationaleCoordinatorFactory } from "./rationale-conversation-orchestration.js";
 
 // ─── Types ──────────────────────────────────────────
@@ -288,12 +287,6 @@ export interface ConversationLoopDeps {
    * grants. Closes the round-3 architect Q5 / critic M1 / security Q6 gap.
    */
   broadcastPermissionConfigChanged?: () => void;
-  /**
-   * Host-owned persistent workspace lifecycle. Slash commands use this instead
-   * of mutating settings alone so live scopes, routines, grants, and session
-   * metadata remain consistent with the project registry.
-   */
-  workspaceRootLifecycle?: PermissionDirectoryLifecycle;
   permissionManager?: import("../../permissions/permission-manager.js").PermissionManager;
   routineEngine?: RoutineEngine;
 

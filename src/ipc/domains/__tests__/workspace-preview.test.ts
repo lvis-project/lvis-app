@@ -60,6 +60,7 @@ vi.mock("../../../permissions/permission-settings-store.js", () => ({
 import { registerPreviewHandlers } from "../preview.js";
 import { registerWorkspaceHandlers } from "../workspace.js";
 import { CHANNELS } from "../../../contract/app-contract.js";
+import { getWorkspaceRootLifecycle } from "../../../permissions/workspace-root-lifecycle.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../../../permissions/sensitive-paths.js";
 
 const deps = {
@@ -395,14 +396,7 @@ describe("workspace handlers", () => {
     const filePath = join(root, "not-a-workspace-root.txt");
     const missingPath = join(root, "missing-workspace-root");
     writeFileSync(filePath, "not a directory");
-    const lifecycle = (deps as unknown as {
-      workspaceRootLifecycle?: {
-        allowDirectory: (
-          rootPath: string,
-          source: "permission-slash",
-        ) => Promise<string[]>;
-      };
-    }).workspaceRootLifecycle;
+    const lifecycle = getWorkspaceRootLifecycle();
 
     try {
       expect(lifecycle).toBeDefined();
