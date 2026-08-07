@@ -33,8 +33,7 @@ import type { PluginInstallFailureKind } from "../../shared/plugin-install-failu
 import { updatePluginRegistry } from "../registry.js";
 import { runWithCeiling } from "../../tools/executor-ceiling.js";
 import { PluginRuntimeDetachedOperationError } from "./detached-operation.js";
-import { manifestIntegrityState } from "../../permissions/manifest-integrity.js";
-import { sessionContext } from "../../engine/session-context.js";
+import { checkRuntimeAdmission } from "./runtime-admission.js";
 import {
   runPluginImportWithTimeout,
   runPluginFactoryWithTimeout,
@@ -642,10 +641,10 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    * serving policy — own-namespace authority + declared-only — so this method's
    * job is the RUNTIME-STATE gate plus bounding the hook:
    *
-   *  - the same fail-closed gates `pluginRuntimeToolDelegate` applies to
-   *    `tools/call` (registry-enabled OR session-activated for the calling ALS
-   *    session; not manifest-integrity-disabled), so a disabled plugin cannot
-   *    render a card any more than it can run a tool;
+   *  - the same fail-closed gate `pluginRuntimeToolDelegate` applies to
+   *    `tools/call` — literally the same predicate, {@link checkRuntimeAdmission},
+   *    not a copy of it — so a disabled plugin cannot render a card any more than
+   *    it can run a tool;
    *  - a `pluginUiResourceReadMs` ceiling (SOT: TOOL_TIMEOUT_POLICY) — a plugin
    *    hook, unlike a file read, can hang; the user is waiting on a card;
    *  - a hard HTML size cap, so a runaway hook cannot balloon the render path.
@@ -663,19 +662,15 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     ceilingMs: number = TOOL_TIMEOUT_POLICY.pluginUiResourceReadMs,
     expectedGenerationId?: string,
   ): Promise<string> {
-    // Gate parity with pluginRuntimeToolDelegate (Gate 4): registry-enabled OR
-    // session-activated for the CALLING session (read from the ALS store;
-    // fail-closed when absent).
-    const sessionId = sessionContext.getStore()?.sessionId;
-    if (
-      !this.isPluginEnabled(pluginId) &&
-      !(sessionId !== undefined && this.isSessionActivated(sessionId, pluginId))
-    ) {
+    // Gate 4, shared with pluginRuntimeToolDelegate — same predicate object,
+    // card-shaped message.
+    const refusal = checkRuntimeAdmission(this, pluginId);
+    if (refusal === "inactive") {
       throw new Error(
         `Plugin '${pluginId}' is inactive; its ui:// resources are unavailable until the plugin is re-enabled.`,
       );
     }
-    if (manifestIntegrityState.isDisabled(pluginId)) {
+    if (refusal === "integrity-disabled") {
       throw new Error(
         `Plugin '${pluginId}' was disabled after a manifest integrity violation. Reinstall the plugin to re-enable.`,
       );
