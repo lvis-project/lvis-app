@@ -65,6 +65,7 @@ import { t } from "../i18n/index.js";
 // delegated to their named stages below.
 import { extractTargetFilePaths, shellPathPolicyViolation } from "./pipeline/path-extraction.js";
 import { buildApprovalPurposeSuggestion } from "./pipeline/approval-purpose.js";
+import { pluginTurnScopeTarget } from "./pipeline/plugin-turn-scope.js";
 import {
   approvalCacheKeyFor,
   emitToolStart,
@@ -1208,14 +1209,22 @@ export async function runToolInvocation(
     const targetFilePath = canonicalTargets[0]?.filePath;
     const sensitivePathPattern = sensitiveTarget?.pattern ?? null;
 
-    if (source === "plugin" && invocationPermissionContext.allowedPluginIds) {
-      const pluginAllowed = !!tool.pluginId && invocationPermissionContext.allowedPluginIds.has(tool.pluginId);
+    // Turn-scope admission. `pluginTurnScopeTarget` answers "which plugin does
+    // this invocation reach into" for BOTH plugin-owned surfaces the model can
+    // pull in: a plugin's tools, and a plugin's SKILL body via
+    // `skill_load("plugin:<id>:<localId>")` — the latter is a builtin tool, so
+    // keying on `source === "plugin"` alone left it ungated while the prompt
+    // catalog was already filtering the very same skills out of view.
+    const pluginScopeTarget = pluginTurnScopeTarget(tool, finalInput);
+    if (pluginScopeTarget && invocationPermissionContext.allowedPluginIds) {
+      const targetPluginId = pluginScopeTarget.pluginId;
+      const pluginAllowed = !!targetPluginId && invocationPermissionContext.allowedPluginIds.has(targetPluginId);
       if (!pluginAllowed) {
-        const msg = t("be_executor.permBlockPluginOutOfScope", { name: toolUse.name, pluginId: tool.pluginId ?? "(unknown)" });
+        const msg = t("be_executor.permBlockPluginOutOfScope", { name: toolUse.name, pluginId: targetPluginId ?? "(unknown)" });
         const durationMs = Date.now() - startTime;
         const blockedPermission: PermissionCheckResult = {
           decision: "deny",
-          reason: "plugin tool outside active allowed plugin scope",
+          reason: `plugin ${pluginScopeTarget.surface} outside active allowed plugin scope`,
           layer: 0,
         };
         emitToolStart(callbacks, toolUse.name, finalInput, meta);
