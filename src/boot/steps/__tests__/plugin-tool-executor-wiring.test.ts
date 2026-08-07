@@ -38,7 +38,12 @@ vi.mock("../../plugin-surface-permissions.js", () => ({
     createPermissionContext: vi.fn(
       (_context: unknown, overrides: Record<string, unknown>) => overrides,
     ),
+    revokeWorkspaceRoot: vi.fn(() => ({
+      sessionDirectoriesRemoved: 0,
+      turnDirectoriesRemoved: 0,
+    })),
   })),
+  setActivePluginSurfacePermissionScope: vi.fn(),
 }));
 
 vi.mock("../../../permissions/permission-settings-store.js", () => ({
