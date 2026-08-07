@@ -59,15 +59,56 @@ function extractErrorCodes(source: string): Set<string> {
   return codes;
 }
 
+/**
+ * Codes named in a DECLARED error union rather than an inline literal, e.g.
+ *
+ *   error?: "unauthorized" | "path-not-allowed" | "sensitive-path" | "not-found";
+ *
+ * `extractErrorCodes` cannot see these: the handler returns
+ * `error: directoryDenyCode(reason)` — a call, not a string literal — so the
+ * code never appears in a `{ok:false, error:"..."}` shape anywhere. That blind
+ * spot is exactly how `path-not-allowed` / `sensitive-path` stayed unmapped
+ * while this suite was green, leaving every surface but two hand-written local
+ * tables to render the raw kebab-case code.
+ */
+function extractDeclaredErrorUnionCodes(source: string): Set<string> {
+  const codes = new Set<string>();
+  const union = /\berror\??:\s*((?:"[a-zA-Z][a-zA-Z0-9_-]+"\s*\|\s*)+"[a-zA-Z][a-zA-Z0-9_-]+")/g;
+  let m: RegExpExecArray | null;
+  while ((m = union.exec(source)) !== null) {
+    for (const member of m[1].matchAll(/"([^"]+)"/g)) codes.add(member[1]);
+  }
+  return codes;
+}
+
 describe("formatIpcError — full IPC error code coverage", () => {
   it("every error code returned by src/ipc/domains/** has a Korean mapping", () => {
     const files = listTsFiles(IPC_DOMAIN_DIR);
     expect(files.length).toBeGreaterThan(0);
 
     const allCodes = new Set<string>();
+    const unionCodes = new Set<string>();
     for (const f of files) {
       const src = readFileSync(f, "utf8");
       for (const code of extractErrorCodes(src)) allCodes.add(code);
+      for (const code of extractDeclaredErrorUnionCodes(src)) {
+        allCodes.add(code);
+        unionCodes.add(code);
+      }
+    }
+
+    // Non-vacuity floor for the union extractor specifically: if its regex ever
+    // stops matching, the codes it is here to catch would silently drop out of
+    // `allCodes` and this suite would go green while the leak returned.
+    expect(
+      unionCodes.size,
+      "declared-error-union regex captured zero codes — the blind spot it closes is back",
+    ).toBeGreaterThan(5);
+    for (const code of ["path-not-allowed", "sensitive-path"]) {
+      expect(
+        unionCodes.has(code),
+        `"${code}" is no longer discovered by the union extractor`,
+      ).toBe(true);
     }
 
     const missing = [...allCodes]
