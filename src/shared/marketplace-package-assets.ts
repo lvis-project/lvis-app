@@ -54,6 +54,72 @@ export const MARKETPLACE_PROVIDER_MODEL_DISCOVERY_POLICIES = [
 export type MarketplaceProviderModelDiscoveryPolicy =
   (typeof MARKETPLACE_PROVIDER_MODEL_DISCOVERY_POLICIES)[number];
 
+/**
+ * What each discovery policy permits. Two independent columns, not one flag:
+ * "may the host fetch the model list over the network" and "does this preset
+ * ship its own model list" are separate questions. Today's four values happen
+ * to occupy the diagonal (every fetching policy is unseeded and vice versa),
+ * which is exactly why three hand-written predicates could disagree only in
+ * the abstract — and why collapsing them to a single boolean would destroy
+ * expressible behaviour.
+ *
+ * `satisfies Record<...>` is the point of this table: adding a member to
+ * `MARKETPLACE_PROVIDER_MODEL_DISCOVERY_POLICIES` is a compile error until its
+ * behaviour is declared here, so a new policy can no longer be accepted at
+ * ingest (`cleanEnum`, below) while the deciding predicates are never revisited.
+ */
+export interface MarketplaceProviderModelDiscoveryBehavior {
+  /** The host may fetch this provider's model list over the network. */
+  allowsFetch: boolean;
+  /** The preset supplies its model options; a cached fetched list is meaningless. */
+  usesSeededOptions: boolean;
+}
+
+export const MARKETPLACE_PROVIDER_MODEL_DISCOVERY_BEHAVIOR = {
+  static: { allowsFetch: false, usesSeededOptions: true },
+  "models-api": { allowsFetch: true, usesSeededOptions: false },
+  "openrouter-models-api": { allowsFetch: true, usesSeededOptions: false },
+  manual: { allowsFetch: false, usesSeededOptions: true },
+} as const satisfies Record<
+  MarketplaceProviderModelDiscoveryPolicy,
+  MarketplaceProviderModelDiscoveryBehavior
+>;
+
+/**
+ * An absent policy is the legacy default: a plain provider with no marketplace
+ * preset opinion, which discovers its models over the network. Both ingest
+ * paths normalize an out-of-union string to `undefined`, so unrecognized input
+ * lands here rather than in the table.
+ */
+const UNDECLARED_MODEL_DISCOVERY_BEHAVIOR: MarketplaceProviderModelDiscoveryBehavior = {
+  allowsFetch: true,
+  usesSeededOptions: false,
+};
+
+function marketplaceProviderModelDiscoveryBehavior(
+  policy: MarketplaceProviderModelDiscoveryPolicy | undefined,
+): MarketplaceProviderModelDiscoveryBehavior {
+  if (policy === undefined) return UNDECLARED_MODEL_DISCOVERY_BEHAVIOR;
+  return (
+    MARKETPLACE_PROVIDER_MODEL_DISCOVERY_BEHAVIOR[policy] ??
+    UNDECLARED_MODEL_DISCOVERY_BEHAVIOR
+  );
+}
+
+/** The host may fetch this provider's model list over the network. */
+export function modelDiscoveryPolicyAllowsFetch(
+  policy: MarketplaceProviderModelDiscoveryPolicy | undefined,
+): boolean {
+  return marketplaceProviderModelDiscoveryBehavior(policy).allowsFetch;
+}
+
+/** The preset supplies its model options rather than discovering them. */
+export function modelDiscoveryPolicyUsesSeededOptions(
+  policy: MarketplaceProviderModelDiscoveryPolicy | undefined,
+): boolean {
+  return marketplaceProviderModelDiscoveryBehavior(policy).usesSeededOptions;
+}
+
 export interface MarketplaceProviderPackageCapabilities {
   streaming?: boolean;
   toolCalls?: boolean;
