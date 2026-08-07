@@ -834,7 +834,7 @@ describe("policyGet exposes host-derived editability", () => {
     ["user policy with managed:true", { ...base, managed: true, source: "user" as const }, false],
     ["plain user policy", { ...base, managed: false, source: "user" as const }, true],
     ["no policy files", { ...base, managed: false, source: "defaults" as const }, true],
-  ])("%s → editable=%s", async (_label, loaded, expected) => {
+  ])("%s", async (_label, loaded, expected) => {
     await setup();
     loadPolicyMock.mockResolvedValueOnce(loaded);
 
