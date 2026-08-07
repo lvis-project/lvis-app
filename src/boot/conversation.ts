@@ -283,6 +283,7 @@ export type RoutineConversationLoopDeps = Pick<
   | "getDefaultProject"
   | "authorizeProject"
   | "subscriptionProviderFactory"
+  | "broadcastPermissionConfigChanged"
 >;
 
 export function createRoutineConversationLoop(
@@ -357,6 +358,7 @@ export function createRoutineConversationLoop(
     ...(forcedActiveToolNames.size > 0 ? { forcedActiveToolNames } : {}),
     additionalDirectories: scope?.directories ?? [],
     subscriptionProviderFactory: deps.subscriptionProviderFactory,
+    broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,
     headless: true,
     // postTurnHookChain / idleScheduler intentionally omitted — routine loops
     // are isolated from interactive chat side effects. The fallback persistence
@@ -406,6 +408,7 @@ export type SideChatConversationLoopDeps = Pick<
   | "closeRationaleSession"
   | "auditLogger"
   | "subscriptionProviderFactory"
+  | "broadcastPermissionConfigChanged"
 > & {
   /** Isolated MemoryManager rooted at `~/.lvis/side-chat/`. */
   sideChatMemoryManager: MemoryManager;
@@ -466,6 +469,7 @@ export function createSideChatConversationLoop(
       : {}),
     llmFetch: deps.llmFetch,
     subscriptionProviderFactory: deps.subscriptionProviderFactory,
+    broadcastPermissionConfigChanged: deps.broadcastPermissionConfigChanged,
     isDefaultProjectRoot: deps.isDefaultProjectRoot ?? isDefaultWorkspaceRoot,
     getDefaultProject: deps.getDefaultProject ?? defaultWorkspaceProject,
     authorizeProject: deps.authorizeProject ?? authorizeWorkspaceProjectRoot,

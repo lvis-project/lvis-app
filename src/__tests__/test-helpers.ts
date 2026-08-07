@@ -125,3 +125,19 @@ export function makeRecordedSpawn(
     return child;
   };
 }
+
+/**
+ * A live (non-destroyed) BrowserWindow stand-in for IPC fan-out assertions.
+ * Shared so window-broadcast suites do not each re-declare the same shape.
+ */
+export interface FakeBrowserWindow {
+  isDestroyed: () => boolean;
+  webContents: { isDestroyed: () => boolean; send: (channel: string, payload?: unknown) => void };
+}
+
+export function liveWindow(): FakeBrowserWindow {
+  return {
+    isDestroyed: () => false,
+    webContents: { isDestroyed: () => false, send: vi.fn() },
+  };
+}
