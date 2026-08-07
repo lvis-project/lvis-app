@@ -5,6 +5,7 @@
 import { ipcMain } from "electron";
 import { randomUUID } from "node:crypto";
 import { loadPolicy, savePolicy } from "../../permissions/policy-store.js";
+import { isPolicyUserEditable } from "../../shared/policy-editability.js";
 import type { ApprovalDecision } from "../../permissions/approval-gate.js";
 import { PERMISSIONS } from "../../shared/ipc-channels.js";
 import type {
@@ -387,7 +388,10 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
 
   // read-only, sender guard optional
   ipcMain.handle(PERMISSIONS.policyGet, async () => {
-    return loadPolicy();
+    const policy = await loadPolicy();
+    // `editable` is host-derived, never re-derived in the renderer: it is the
+    // same predicate that decides whether `savePolicy` will accept a write.
+    return { ...policy, editable: isPolicyUserEditable(policy) };
   });
 
   // ── Permission policy — `/permission dir` slash dispatcher (IPC) ──────────
