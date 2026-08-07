@@ -9,7 +9,7 @@ import {
   detectApprovalIntent,
   type ApprovalIntent,
 } from "../../../permissions/approval-intent.js";
-import type { DeferredQueueEntry } from "../types.js";
+import type { DeferredGrantScope, DeferredQueueEntry } from "../types.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 export interface DeferredApprovalChipProps {
@@ -17,6 +17,53 @@ export interface DeferredApprovalChipProps {
   draftText: string;
   /** Optional callback the parent can use to log telemetry / surface errors. */
   onResolved?: (decision: "approved" | "rejected", entryId: string) => void;
+}
+
+/**
+ * What an approve sentence would grant on this entry.
+ *
+ * The chip may only offer what the entry can actually deliver, and never more
+ * than the sentence asked for. Both directions matter:
+ *
+ *  • `grant` absent ⇒ nothing to give. No offer.
+ *  • scope "once" ⇒ the user asked for the narrowest breadth, and the deferred
+ *    lane has no such breadth (the call it would scope is over). Upgrading it
+ *    to a session grant would hand out more than was asked for, so the chip
+ *    declines instead. This is the one case where honouring the sentence
+ *    literally means refusing it.
+ *  • an explicit target that is not this entry's directory ⇒ the user named
+ *    somewhere else. Granting the entry's path would be granting a thing the
+ *    sentence did not name. No offer.
+ *
+ * `path` in the returned plan is always the HOST-derived `entry.grant.path`,
+ * never the user's typed text, so the confirmation line states a path the host
+ * resolved.
+ */
+function resolveGrantPlan(
+  intent: Extract<ApprovalIntent, { kind: "approve" }>,
+  entry: DeferredQueueEntry,
+): { scope: DeferredGrantScope; path: string; widensBeyondDefault: boolean } | null {
+  const grant = entry.grant;
+  if (!grant) return null;
+  if (intent.scope.explicit && intent.scope.value === "once") return null;
+  if (intent.target.kind === "path" && !sameDirectory(intent.target.raw, grant.path)) {
+    return null;
+  }
+  const scope: DeferredGrantScope =
+    intent.scope.explicit && intent.scope.value === "always" ? "always" : "session";
+  return {
+    scope,
+    path: grant.path,
+    // "always" writes settings.json — broader than the button's default, so
+    // the confirmation must be explicit about it.
+    widensBeyondDefault: scope === "always",
+  };
+}
+
+/** Case- and separator-insensitive comparison; no traversal resolution. */
+function sameDirectory(a: string, b: string): boolean {
+  const norm = (p: string) => p.replace(/\\/gu, "/").replace(/\/+$/u, "").toLowerCase();
+  return norm(a) === norm(b);
 }
 
 export function DeferredApprovalChip({
@@ -71,7 +118,13 @@ export function DeferredApprovalChip({
 
   const target = pending[0]!;
   const decision = intent.kind === "approve" ? "approved" : "rejected";
-  const suggestionKey = `${target.id}:${intent.kind}:${intent.matchedPhrase}`;
+
+  // What an approval would actually grant, resolved against the entry rather
+  // than against the sentence. `null` ⇒ the chip must not offer approval.
+  const plan = intent.kind === "approve" ? resolveGrantPlan(intent, target) : null;
+  if (intent.kind === "approve" && !plan) return null;
+
+  const suggestionKey = `${target.id}:${intent.kind}:${intent.matchedPhrase}:${plan?.scope ?? ""}`;
   if (dismissedKey === suggestionKey) return null;
 
   const handle = async () => {
@@ -126,11 +179,20 @@ export function DeferredApprovalChip({
       // `approvalSource: "natural-language"` field already carries
       // the provenance signal; the phrase itself adds no integrity
       // value, only PII risk. Use a static reason string.
+      // Re-resolve the plan from the live intent for the same reason the
+      // intent itself is re-read: the composer may have changed since render.
+      const livePlan =
+        liveIntent.kind === "approve" ? resolveGrantPlan(liveIntent, target) : null;
+      if (liveIntent.kind === "approve" && livePlan?.scope !== plan?.scope) {
+        setError(t("deferredApprovalChip.intentChanged"));
+        return;
+      }
       const r = await api(
         target.id,
         decision,
         "natural-language chip click",
         "natural-language",
+        livePlan ? { scope: livePlan.scope } : undefined,
       );
       if (!r.ok) {
         // Round-6 UX MINOR — sanitize raw IPC error string before
@@ -172,11 +234,31 @@ export function DeferredApprovalChip({
         : t("deferredApprovalChip.sourceBuiltinTool");
   // Round-5 UX MAJOR — "호출" is dev jargon; "실행" reads as
   // conversational confirmation rather than legal-permission form.
+  // The confirmation line. It states the resolved breadth and the
+  // host-derived path in concrete terms — never a paraphrase of what the user
+  // typed — so that what the click will do is legible before it happens.
   const labelTail =
+    intent.kind === "approve" && plan
+      ? plan.scope === "always"
+        ? t("deferredApprovalChip.labelApproveAlways", {
+            toolName: target.toolName,
+            path: plan.path,
+          })
+        : t("deferredApprovalChip.labelApproveSession", {
+            toolName: target.toolName,
+            path: plan.path,
+          })
+      : intent.kind === "approve"
+        ? t("deferredApprovalChip.labelApprove", { toolName: target.toolName })
+        : t("deferredApprovalChip.labelReject", { toolName: target.toolName });
+  // A widening grant never rides on the same one-click affordance as the
+  // narrow one — the button names the breadth it is about to apply.
+  const action =
     intent.kind === "approve"
-      ? t("deferredApprovalChip.labelApprove", { toolName: target.toolName })
-      : t("deferredApprovalChip.labelReject", { toolName: target.toolName });
-  const action = intent.kind === "approve" ? t("deferredApprovalChip.actionApprove") : t("deferredApprovalChip.actionReject");
+      ? plan?.widensBeyondDefault
+        ? t("deferredApprovalChip.actionApproveAlways")
+        : t("deferredApprovalChip.actionApprove")
+      : t("deferredApprovalChip.actionReject");
 
   return (
     // Round-3 UX MAJOR — switched to `flex-col` so the error row drops
