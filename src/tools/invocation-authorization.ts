@@ -65,6 +65,32 @@ type AuditPermissionAsk = (
   ...args: Parameters<AuditWriter["auditPermissionAsk"]>
 ) => Promise<void>;
 
+/**
+ * Single authority for `ApprovalRequest.isReadOnly`.
+ *
+ * The flag has exactly one consumer — the §S4 short-circuit in
+ * {@link ApprovalGate.requestAndWait} — which auto-approves without ever
+ * consulting `forceExplicit`/`requireExplicit`. So pinning the flag false is
+ * the ONLY producer-side lever that keeps a cross-agent (A2A-prefixed) or
+ * remote-controller invocation in front of the user; setting `forceExplicit`
+ * buys nothing against §S4.
+ *
+ * Both executor approval sites derive it here so the two cannot drift: the
+ * Layer 3 tool ask and the Layer 1 out-of-allowed-dir ask ask the same
+ * question about the same invocation. The directory ask is additionally
+ * excluded from §S4 by its `kind`, but that exclusion lives in a third module
+ * and is not what makes this value correct.
+ */
+export function deriveApprovalIsReadOnly(opts: {
+  invocationCategory: ToolCategory;
+  approvalReasonPrefix: string | undefined;
+  remoteControllerAuthority: unknown;
+}): boolean {
+  if (opts.approvalReasonPrefix) return false;
+  if (opts.remoteControllerAuthority !== undefined) return false;
+  return opts.invocationCategory === "read";
+}
+
 export interface AuthorizationStageContext {
   services: InvocationRunnerServices;
   tool: Tool;
@@ -1227,9 +1253,12 @@ export async function authorizeToolInvocation(
           source: source as "builtin" | "plugin" | "mcp",
           createdAt: Date.now(),
           ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
-          isReadOnly: approvalReasonPrefix || requiresRemoteLocalOneShot
-            ? false
-            : invocationCategory === "read",
+          isReadOnly: deriveApprovalIsReadOnly({
+            invocationCategory,
+            approvalReasonPrefix,
+            remoteControllerAuthority:
+              invocationPermissionContext.remoteControllerAuthority,
+          }),
           mode: currentApprovalMode(services.permissionManager),
           sensitivePathPattern,
           trustOrigin: invocationPermissionContext.trustOrigin,
