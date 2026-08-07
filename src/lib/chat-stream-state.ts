@@ -735,7 +735,9 @@ export function withUnansweredApprovalNotice(
   if (unanswered.length === 0) return entries;
   const toolNames = [...new Set(unanswered.map((entry) => entry.toolName))];
   const text = notice(toolNames);
-  if (text.length === 0) return entries;
+  // Whitespace is not a message. A locale whose string collapsed to spaces
+  // would otherwise append a blank system row.
+  if (text.trim().length === 0) return entries;
   return [...entries, { kind: "system", text }];
 }
 

@@ -556,7 +556,10 @@ export function useChatState(api: LvisApi) {
             });
           }
           setEntries((p) => {
-            const base = dropPermissionReviewEntries(p);
+            // Same notice as the skip-finalize paths — this is the MAIN way a
+            // turn ends, so leaving it out meant the explanation was missing
+            // exactly when it was most likely to be needed.
+            const base = dropPermissionReviewEntries(noteUnansweredApprovals(p));
             let next = finalizeStreamingReasoning(base, thoughtRef.current);
             next = finalizeStreamingAssistant(
               next,

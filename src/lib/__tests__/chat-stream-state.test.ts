@@ -612,4 +612,9 @@ describe("withUnansweredApprovalNotice", () => {
     const entries: ChatEntry[] = [review("needs_approval", "read_file")];
     expect(withUnansweredApprovalNotice(entries, () => "")).toBe(entries);
   });
+
+  it("treats a whitespace-only notice as empty", () => {
+    const entries: ChatEntry[] = [review("needs_approval", "read_file")];
+    expect(withUnansweredApprovalNotice(entries, () => "   \n\t ")).toBe(entries);
+  });
 });
