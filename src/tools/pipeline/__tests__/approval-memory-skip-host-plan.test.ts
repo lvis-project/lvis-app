@@ -66,6 +66,7 @@ describe("foreground approval memory — sealed host shell plan", () => {
       "shell",
       [],
       finalInput,
+      process.cwd(),
       [],
       [],
       { trustOrigin: "user-keyboard" },

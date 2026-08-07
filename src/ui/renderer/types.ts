@@ -1748,6 +1748,13 @@ export type LvisPolicyApi = {
     source: "defaults" | "user" | "admin" | "merged";
     adminOverrides?: string[];
     adminPath?: string;
+    /**
+     * Host-derived: whether `policy.set` will be accepted. Computed by
+     * `isPolicyUserEditable`, the same predicate behind `savePolicy`'s
+     * blocking conditions — do NOT re-derive it in the renderer from
+     * `managed`/`source`.
+     */
+    editable: boolean;
   }>;
   set: (patch: unknown) => Promise<{ ok: boolean; policy?: unknown; error?: string; message?: string }>;
 };

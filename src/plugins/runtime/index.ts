@@ -24,7 +24,7 @@ import type {
   RuntimePlugin,
 } from "../types.js";
 import { createPluginStorage, createPluginStorageAuditSink } from "../storage.js";
-import type { PluginDeploymentGuard } from "../deployment-guard.js";
+import { assertDisableAllowed, type PluginDeploymentGuard } from "../deployment-guard.js";
 import { installReceiptPath } from "../plugin-install-receipt.js";
 import type { HostApiGenerationScope } from "../plugin-host-effect-scope.js";
 import { withResolvedPluginInstallLocks } from "../install-lifecycle.js";
@@ -42,18 +42,11 @@ import {
   SessionActivationTracker,
 } from "./lifecycle-timeout.js";
 
-import {
-  readEnabledManifestSnapshots,
-  resolveManifestLoadPlan,
-} from "./snapshots.js";
+import { readEnabledManifestSnapshots, resolveManifestLoadPlan } from "./snapshots.js";
 import type { LoadedPlugin, ManifestLoadPlan, ManifestSnapshot, PluginStartPreparationReturn } from "./types.js";
 import { buildPluginCard } from "./cards.js";
 import type { PluginPerfStats } from "./perf-stats.js";
-import {
-  assertEventEmitAccess,
-  assertEventSubscribeAccess,
-  assertAppVisibleToolInvokable,
-} from "./access-control.js";
+import { assertEventEmitAccess, assertEventSubscribeAccess, assertAppVisibleToolInvokable } from "./access-control.js";
 import { declaredAppVisibleToolMethods } from "./plugin-loader.js";
 import type { InvocationOrigin } from "./origin-chain.js";
 import { createLogger } from "../../lib/logger.js";
@@ -881,6 +874,7 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
         if (installClaim === undefined) {
           throw new Error(`Plugin install provenance unknown: ${pluginId}`);
         }
+        await assertDisableAllowed(enabled, installClaim, pluginId, this.deploymentGuard);
         const generationLifecycle = this.requireCapabilityCommitLifecycle(
           "plugin enabled-state change",
         );

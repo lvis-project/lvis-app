@@ -25,8 +25,8 @@ import {
   normalizeLlmVendorModel,
 } from "../shared/llm-vendor-defaults.js";
 import {
-  BUNDLE_IDS,
   DEFAULT_BUNDLE_ID,
+  isBundleId,
   isMarketplaceEligibleThemeBundleId,
 } from "../shared/theme-bundles.js";
 import {
@@ -729,8 +729,6 @@ export function normalizeMarketplace(input: unknown): MarketplaceSettings {
 const VALID_THEMES_V1: readonly ThemePreference[] = ["system", "light", "dark", "high-contrast"];
 const VALID_CHAT_THEMES_V1: readonly ChatThemePreference[] = ["default", "lg", "purple", "orange", "blue"];
 
-/** All valid bundle IDs — §C3: single source from src/shared/theme-bundles.ts. */
-const VALID_BUNDLE_IDS: readonly string[] = BUNDLE_IDS;
 
 /**
  * Migrate a v1 tri-axis appearance object to a v2 bundleId.
@@ -799,13 +797,10 @@ export function normalizeAppearance(input: unknown): AppearanceSettings {
   if (obj.schemaVersion === 2) {
     // Retired bundle IDs from earlier internal builds are not migrated:
     // the open-source release has no install base that would carry them
-    // forward. Unknown bundleIds fall through to DEFAULT_BUNDLE_ID by
-    // the VALID_BUNDLE_IDS gate below.
-    const rawBundleId = typeof obj.bundleId === "string" ? obj.bundleId : "";
-    const bundleId =
-      VALID_BUNDLE_IDS.includes(rawBundleId)
-        ? rawBundleId
-        : DEFAULT_BUNDLE_ID;
+    // forward. Unknown bundleIds fall through to DEFAULT_BUNDLE_ID via
+    // `isBundleId` — the same predicate the patch path in settings-store uses,
+    // so the two write paths cannot accept different value sets.
+    const bundleId = isBundleId(obj.bundleId) ? obj.bundleId : DEFAULT_BUNDLE_ID;
     const followSystem = typeof obj.followSystem === "boolean" ? obj.followSystem : undefined;
     const result: AppearanceSettings = {
       schemaVersion: 2,
@@ -868,14 +863,25 @@ function normalizeAppearanceFont(input: unknown): AppearanceFontSettings | undef
  */
 const VALID_WEBVIEW_FLOWS: readonly WebViewPreferredFlow[] = ["in-app", "system-browser"];
 
+/**
+ * Single authority for the accepted `webView.preferredFlow` value set. Both
+ * write paths use it: `normalizeWebView` (disk load) and the `webView` branch
+ * of `SettingsService.patch` (IPC/renderer). Before this predicate existed the
+ * patch path did a bare spread with no validation, so an out-of-enum value
+ * persisted to settings.json and was only dropped on the *next* load.
+ */
+export function isWebViewPreferredFlow(value: unknown): value is WebViewPreferredFlow {
+  return typeof value === "string" && (VALID_WEBVIEW_FLOWS as readonly string[]).includes(value);
+}
+
 export function normalizeWebView(input: unknown): WebViewSettings {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ...DEFAULT_SETTINGS.webView };
   }
   const obj = input as { preferredFlow?: unknown };
   const raw = obj.preferredFlow;
-  if (typeof raw === "string" && (VALID_WEBVIEW_FLOWS as readonly string[]).includes(raw)) {
-    return { preferredFlow: raw as WebViewPreferredFlow };
+  if (isWebViewPreferredFlow(raw)) {
+    return { preferredFlow: raw };
   }
   if (raw !== undefined) {
     log.warn(

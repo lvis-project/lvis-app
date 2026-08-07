@@ -29,6 +29,11 @@ import type {
   ApprovalRequestInput,
 } from "../permissions/approval-gate.js";
 import type { McpInputRequestResolver } from "./mcp-client.js";
+import {
+  parseElicitationSchema,
+  type ElicitationSchemaField,
+  type ParsedElicitationSchema,
+} from "../shared/mcp-elicitation-schema.js";
 
 /** MCP `ElicitResult` (§8). Returned verbatim into `inputResponses[id]`. */
 export interface ElicitResult {
@@ -37,21 +42,6 @@ export interface ElicitResult {
 }
 
 const ELICITATION_METHOD = "elicitation/create";
-const MAX_ELICITATION_FIELDS = 12;
-const ELICITATION_FIELD_NAME_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/;
-
-type JsonScalar = string | number | boolean | null;
-type ElicitationSchemaFieldKind = "string" | "number" | "integer" | "boolean";
-
-type SupportedElicitationProperty = {
-  kind?: ElicitationSchemaFieldKind;
-  required: boolean;
-  enumValues?: readonly JsonScalar[];
-};
-
-type SupportedElicitationSchema = {
-  properties: Map<string, SupportedElicitationProperty>;
-};
 
 /** The single approval-gate method this resolver depends on (keeps it test-seam-able). */
 export interface ElicitationApprovalGate {
@@ -72,96 +62,34 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function isJsonScalar(value: unknown): value is JsonScalar {
-  if (value === null) return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  return typeof value === "string" || typeof value === "boolean";
-}
-
-function supportedKind(value: unknown): ElicitationSchemaFieldKind | undefined {
-  if (value === "string" || value === "number" || value === "integer" || value === "boolean") {
-    return value;
-  }
-  return undefined;
-}
-
-function parseEnumValues(value: unknown): readonly JsonScalar[] | undefined {
-  if (value === undefined) return undefined;
-  if (!Array.isArray(value)) return undefined;
-  if (value.length === 0) return undefined;
-  if (!value.every(isJsonScalar)) return undefined;
-  return value;
-}
-
-function parseSupportedElicitationSchema(rawSchema: unknown): SupportedElicitationSchema | undefined {
-  if (!isRecord(rawSchema) || rawSchema.type !== "object" || !isRecord(rawSchema.properties)) {
-    return undefined;
-  }
-
-  const entries = Object.entries(rawSchema.properties);
-  if (entries.length > MAX_ELICITATION_FIELDS) return undefined;
-
-  let requiredNames: Set<string>;
-  if (rawSchema.required === undefined) {
-    requiredNames = new Set();
-  } else if (Array.isArray(rawSchema.required) && rawSchema.required.every((name) => typeof name === "string")) {
-    requiredNames = new Set(rawSchema.required);
-  } else {
-    return undefined;
-  }
-
-  const properties = new Map<string, SupportedElicitationProperty>();
-  for (const [name, rawProperty] of entries) {
-    if (!ELICITATION_FIELD_NAME_RE.test(name) || !isRecord(rawProperty)) return undefined;
-    const enumValues = parseEnumValues(rawProperty.enum);
-    if (rawProperty.enum !== undefined && enumValues === undefined) return undefined;
-    const kind = supportedKind(rawProperty.type);
-    if (rawProperty.type !== undefined && !kind) return undefined;
-    if (!enumValues && !kind) return undefined;
-    properties.set(name, {
-      ...(kind ? { kind } : {}),
-      required: requiredNames.has(name),
-      ...(enumValues ? { enumValues } : {}),
-    });
-  }
-
-  for (const requiredName of requiredNames) {
-    if (!properties.has(requiredName)) return undefined;
-  }
-
-  return { properties };
-}
-
 function hasOwnRecordKey(value: Record<string, unknown>, key: string): boolean {
   return Object.prototype.hasOwnProperty.call(value, key);
 }
 
-function isValidFieldValue(value: unknown, field: SupportedElicitationProperty): boolean {
+function isValidFieldValue(value: unknown, field: ElicitationSchemaField): boolean {
   if (field.enumValues) {
     return field.enumValues.some((candidate) => Object.is(candidate, value));
   }
   if (field.kind === "string") return typeof value === "string";
   if (field.kind === "boolean") return typeof value === "boolean";
   if (field.kind === "number") return typeof value === "number" && Number.isFinite(value);
-  if (field.kind === "integer") {
-    return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value);
-  }
-  return false;
+  return typeof value === "number" && Number.isFinite(value) && Number.isInteger(value);
 }
 
 function validateElicitationContent(
-  schema: SupportedElicitationSchema,
+  schema: ParsedElicitationSchema,
   content: Record<string, unknown>,
 ): boolean {
+  const declaredNames = new Set(schema.fields.map((field) => field.name));
   for (const name of Object.keys(content)) {
-    if (!schema.properties.has(name)) return false;
+    if (!declaredNames.has(name)) return false;
   }
-  for (const [name, field] of schema.properties) {
-    if (!hasOwnRecordKey(content, name)) {
+  for (const field of schema.fields) {
+    if (!hasOwnRecordKey(content, field.name)) {
       if (field.required) return false;
       continue;
     }
-    if (!isValidFieldValue(content[name], field)) return false;
+    if (!isValidFieldValue(content[field.name], field)) return false;
   }
   return true;
 }
@@ -216,7 +144,7 @@ export function createElicitationResolverFactory(deps: {
       if (decision.choice !== "allow-once") return { action: "decline" };
 
       if (shouldValidateFormContent(request)) {
-        const schema = parseSupportedElicitationSchema(request.requestedSchema);
+        const schema = parseElicitationSchema(request.requestedSchema);
         if (!schema || !isRecord(decision.elicitationContent)) return { action: "decline" };
         if (!validateElicitationContent(schema, decision.elicitationContent)) {
           return { action: "decline" };
