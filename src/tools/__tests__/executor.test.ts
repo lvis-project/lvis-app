@@ -4684,6 +4684,92 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
     expect(result[0]).toMatchObject({ is_error: true });
   });
 
+  // Same question, other approval site. The Layer 1 directory-confirm ask is
+  // raised by a different module than the Layer 3 tool ask above, and §S4 —
+  // the flag's only consumer — never consults `forceExplicit`. Today the
+  // directory ask is additionally excluded from §S4 by its `kind`, so this is
+  // not the thing keeping the modal up; it is the thing that stops the two
+  // producers of one field from disagreeing about the same invocation.
+  it("pins the directory-confirm ask non-read-only for a remote turn, like the Layer 3 ask", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const permissions = new PermissionManager(
+      "/tmp/nonexistent-tailnet-directory-permissions.json",
+    );
+    permissions.setMode("allow");
+    const requestAndWait = vi.fn(async (request: { id: string }) => ({
+      requestId: request.id,
+      choice: "deny-once" as const,
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permissions,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    await executor.executeAll(
+      [{
+        id: "tailnet-dir-readonly",
+        name: "read_file",
+        input: { path: "/var/tmp/some-random-area/file.txt" },
+      }],
+      {
+        sessionId: "tailnet-dir-readonly",
+        permissionContext: tailnetContext(),
+      },
+    );
+
+    const directoryAsk = requestAndWait.mock.calls
+      .map((call) => call[0] as unknown as { kind?: string; isReadOnly?: boolean })
+      .find((request) => request.kind === "out-of-allowed-dir");
+    expect(
+      directoryAsk,
+      "Layer 1 must raise the directory-confirm ask for a path outside scope",
+    ).toBeDefined();
+    expect(directoryAsk?.isReadOnly).toBe(false);
+  });
+
+  // A purely local turn keeps the read short-circuit it always had — the pin
+  // above must be caused by the remote authority, not by the site.
+  it("leaves the directory-confirm ask read-only for a local turn", async () => {
+    const executeSpy = vi.fn(async () => "ok");
+    const registry = new ToolRegistry();
+    registry.register(makeReadFileTool(executeSpy));
+    const permissions = new PermissionManager(
+      "/tmp/nonexistent-local-directory-permissions.json",
+    );
+    permissions.setMode("allow");
+    const requestAndWait = vi.fn(async (request: { id: string }) => ({
+      requestId: request.id,
+      choice: "deny-once" as const,
+    }));
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permissions,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    await executor.executeAll(
+      [{
+        id: "local-dir-readonly",
+        name: "read_file",
+        input: { path: "/var/tmp/some-random-area/file.txt" },
+      }],
+      { sessionId: "local-dir-readonly", permissionContext: userPermissionContext() },
+    );
+
+    const directoryAsk = requestAndWait.mock.calls
+      .map((call) => call[0] as unknown as { kind?: string; isReadOnly?: boolean })
+      .find((request) => request.kind === "out-of-allowed-dir");
+    expect(directoryAsk).toBeDefined();
+    expect(directoryAsk?.isReadOnly).toBe(true);
+  });
+
   // The approval also records WHICH controller's turn raised it, as a marker the
   // host sets from the authority it already holds. Sub-agent provenance travels
   // in the free-text `reason` today; a fact recovered from a display string is
