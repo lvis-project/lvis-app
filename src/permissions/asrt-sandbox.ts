@@ -459,26 +459,12 @@ export function isAsrtSandboxActive(): boolean {
  * reads; we can only enumerate the KNOWN-sensitive subpaths to deny. A path not
  * on this list stays readable. Do NOT describe this as a read jail.
  *
- * WHAT IS DENIED — this function restates NOTHING. Every path below the
- * Electron userData dir is projected from `SENSITIVE_PATH_ENTRIES`
+ * WHAT IS DENIED — this function restates NOTHING. Every path except the
+ * Electron userData dir below is projected from `SENSITIVE_PATH_ENTRIES`
  * (src/permissions/sensitive-paths.ts), the single authority that the
- * in-process host-tool guard projects into globs. Add a row THERE and both
- * surfaces deny it; there is no list to keep in sync. The table currently
- * covers:
- *   - the WHOLE LVIS-home sensitive namespace — secrets, sessions, routine,
- *     audit(.log), settings.json, permissions(.json), policy.json,
- *     plugins/auth-partitions.json, certs, keys, lvis-secrets.json
- *   - `~/.ssh`, `~/.aws`, `~/.azure`, `~/.config/gcloud`, `~/.kube/config`,
- *     `~/.gnupg` — standard cloud / SSH / GPG credential stores
- *   - `~/.config/gh`      — GitHub CLI OAuth token (hosts.yml)
- *   - `~/.config/git`, `~/.gitconfig`, `~/.git-credentials` — git credential stores
- *   - `~/.npmrc`, `~/.netrc`, `~/.pgpass`, `~/.docker/config.json` — registry /
- *                         netrc / PostgreSQL / docker auth files
- *   - `~/.bash_history`, `~/.zsh_history`, `~/.python_history`,
- *     `~/.psql_history`, `~/.viminfo` — shell / REPL / editor histories (may
- *                         contain pasted secrets, tokens, DSNs)
- *   - `~/.config/lvis/hooks` — host-executed hook scripts (supply chain)
- *   - `/etc/shadow`, `/etc/sudoers`, `/etc/passwd-` — system account databases
+ * in-process host-tool guard projects into globs. Read the table for the
+ * contents; do NOT mirror them here, or the mirror becomes the next thing to
+ * drift. Add a row THERE and both surfaces deny it.
  *
  * The ONE path this function adds on its own:
  *   - Electron userData dir (productName="LVIS") — whole dir, deny-by-default so
@@ -566,8 +552,12 @@ export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[]
           // path that does not exist is harmless to list).
           return "/" + entry.segments.join("/");
         default: {
+          // Fail closed: an unrecognised anchor must not silently push
+          // `undefined` into the deny list ASRT is configured from.
           const exhaustive: never = entry.anchor;
-          return exhaustive;
+          throw new Error(
+            `sensitive-path entry has an unknown anchor: ${String(exhaustive)}`,
+          );
         }
       }
     }),
