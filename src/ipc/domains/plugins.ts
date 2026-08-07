@@ -93,7 +93,11 @@ import {
   ensurePluginStateReadyForInstall,
   uninstallPluginWithLifecycle,
 } from "../../plugins/uninstall-lifecycle.js";
-import { buildInstallFailureResult } from "../../shared/plugin-install-result.js";
+import {
+  buildInstallFailureResult,
+  MarketplaceBackendDisabledError,
+  MARKETPLACE_DISABLED_CODE,
+} from "../../shared/plugin-install-result.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import { isPluginInstallFailureKind, type PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
@@ -805,10 +809,13 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     const trimmed = typeof slug === "string" ? slug.trim() : "";
     if (!trimmed) return { ok: false, error: "invalid-slug", message: "slug is required" } as const;
     if (!agentArtifactStore) {
+      // Same error object the deep-link path throws, so both paths reach the
+      // renderer with the identical stable code rather than two hand-written
+      // copies of the sentence.
       return {
         ok: false,
-        error: "marketplace-disabled",
-        message: "Agent marketplace install is unavailable: marketplace backend is disabled in this build.",
+        error: MARKETPLACE_DISABLED_CODE,
+        message: new MarketplaceBackendDisabledError("agent").message,
       } as const;
     }
     try {
@@ -840,7 +847,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: true as const, slug: result.slug, agentId: result.agentId, version: result.version, installed: true as const };
     } catch (err) {
       const message = (err as Error).message ?? "Agent install failed";
-      broadcastPluginLifecycleEvent(CHANNELS.agents.installResult, { slug: trimmed, success: false, error: message });
+      broadcastPluginLifecycleEvent(
+        CHANNELS.agents.installResult,
+        buildInstallFailureResult(trimmed, err, "Agent install failed"),
+      );
       return { ok: false as const, error: "install-failed", message };
     }
   });
@@ -867,7 +877,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: true as const, slug: result.slug, agentId: result.agentId, uninstalled: true as const };
     } catch (err) {
       const message = (err as Error).message ?? "Agent uninstall failed";
-      broadcastPluginLifecycleEvent(CHANNELS.agents.uninstallResult, { slug: trimmed, success: false, error: message });
+      broadcastPluginLifecycleEvent(
+        CHANNELS.agents.uninstallResult,
+        buildInstallFailureResult(trimmed, err, "Agent uninstall failed"),
+      );
       return { ok: false as const, error: "uninstall-failed", message };
     }
   });
@@ -882,8 +895,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!skillArtifactStore) {
       return {
         ok: false,
-        error: "marketplace-disabled",
-        message: "Skill marketplace install is unavailable: marketplace backend is disabled in this build.",
+        error: MARKETPLACE_DISABLED_CODE,
+        message: new MarketplaceBackendDisabledError("skill").message,
       } as const;
     }
     try {
@@ -915,7 +928,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: true as const, slug: result.slug, skillId: result.skillId, version: result.version, installed: true as const };
     } catch (err) {
       const message = (err as Error).message ?? "Skill install failed";
-      broadcastPluginLifecycleEvent(CHANNELS.skills.installResult, { slug: trimmed, success: false, error: message });
+      broadcastPluginLifecycleEvent(
+        CHANNELS.skills.installResult,
+        buildInstallFailureResult(trimmed, err, "Skill install failed"),
+      );
       return { ok: false as const, error: "install-failed", message };
     }
   });
@@ -942,7 +958,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return { ok: true as const, slug: result.slug, skillId: result.skillId, uninstalled: true as const };
     } catch (err) {
       const message = (err as Error).message ?? "Skill uninstall failed";
-      broadcastPluginLifecycleEvent(CHANNELS.skills.uninstallResult, { slug: trimmed, success: false, error: message });
+      broadcastPluginLifecycleEvent(
+        CHANNELS.skills.uninstallResult,
+        buildInstallFailureResult(trimmed, err, "Skill uninstall failed"),
+      );
       return { ok: false as const, error: "uninstall-failed", message };
     }
   });

@@ -8,7 +8,9 @@ import {
   ROUTINES_V2,
   SETTINGS,
   WORK_BOARD,
+  type AgentInstallResultPayload,
   type PluginInstallResultPayload,
+  type SkillInstallResultPayload,
 } from "../contract/app-contract.js";
 import { t } from "../i18n/index.js";
 import { ipcUserKeyboardIntent } from "./gesture-intent.js";
@@ -799,22 +801,22 @@ export function buildInternalApiSurface() {
     return () => ipcRenderer.removeListener(CHANNELS.prompts.updated, listener);
   },
 
-  onAgentInstallResult: (handler: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => {
+  onAgentInstallResult: (handler: (payload: AgentInstallResultPayload) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(CHANNELS.agents.installResult, listener);
     return () => ipcRenderer.removeListener(CHANNELS.agents.installResult, listener);
   },
-  onAgentUninstallResult: (handler: (payload: { slug: string; success: boolean; agentId?: string; error?: string }) => void) => {
+  onAgentUninstallResult: (handler: (payload: AgentInstallResultPayload) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(CHANNELS.agents.uninstallResult, listener);
     return () => ipcRenderer.removeListener(CHANNELS.agents.uninstallResult, listener);
   },
-  onSkillInstallResult: (handler: (payload: { slug: string; success: boolean; skillId?: string; error?: string }) => void) => {
+  onSkillInstallResult: (handler: (payload: SkillInstallResultPayload) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(CHANNELS.skills.installResult, listener);
     return () => ipcRenderer.removeListener(CHANNELS.skills.installResult, listener);
   },
-  onSkillUninstallResult: (handler: (payload: { slug: string; success: boolean; skillId?: string; error?: string }) => void) => {
+  onSkillUninstallResult: (handler: (payload: SkillInstallResultPayload) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(CHANNELS.skills.uninstallResult, listener);
     return () => ipcRenderer.removeListener(CHANNELS.skills.uninstallResult, listener);

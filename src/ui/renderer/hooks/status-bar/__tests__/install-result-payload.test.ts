@@ -22,7 +22,12 @@ import {
   IncompatibleAppVersionError,
   INCOMPATIBLE_APP_VERSION_CODE,
 } from "../../../../../plugins/public-contract.js";
-import { buildInstallFailureResult } from "../../../../../shared/plugin-install-result.js";
+import {
+  buildInstallFailureResult,
+  MarketplaceBackendDisabledError,
+  MARKETPLACE_DISABLED_CODE,
+} from "../../../../../shared/plugin-install-result.js";
+import { t } from "../../../../../i18n/runtime.js";
 import type { PluginInstallResultPayload } from "../../../../../contract/app-contract.js";
 import type { LvisApi } from "../../../types.js";
 import { useStatusBarInstall } from "../use-status-bar-install.js";
@@ -31,10 +36,16 @@ import { useStatusBarInstall } from "../use-status-bar-install.js";
  * Mount the real hook, push one real producer payload through the real
  * install-result subscription, and return the toast copy the user would see.
  */
-function toastCopyFor(payload: PluginInstallResultPayload): string {
+function toastCopyFor(
+  payload: PluginInstallResultPayload,
+  subscription:
+    | "onPluginInstallResult"
+    | "onAgentInstallResult"
+    | "onSkillInstallResult" = "onPluginInstallResult",
+): string {
   let deliver: ((p: PluginInstallResultPayload) => void) | null = null;
   const api = {
-    onPluginInstallResult: (h: (p: PluginInstallResultPayload) => void) => {
+    [subscription]: (h: (p: PluginInstallResultPayload) => void) => {
       deliver = h;
       return () => { deliver = null; };
     },
@@ -115,6 +126,31 @@ describe("install-result payload", () => {
       expect(Object.keys(payload)).not.toContain("preparing");
     }
   });
+
+  it.each([
+    ["agent", "onAgentInstallResult"],
+    ["skill", "onSkillInstallResult"],
+  ] as const)(
+    "shows localized copy for a marketplace-disabled %s install, not the raw sentence",
+    (packageType, subscription) => {
+      // The agent/skill deep link used to hand-build `{ error: err.message }`,
+      // so this toast read "Agent marketplace install is unavailable:
+      // marketplace backend is disabled in this build." — untranslated English
+      // in a localized UI — while the IPC path for the SAME failure carried the
+      // `marketplace-disabled` code this consumer maps.
+      const payload = buildInstallFailureResult(
+        "sample",
+        new MarketplaceBackendDisabledError(packageType),
+        `${packageType} install failed`,
+      );
+
+      expect(payload.error).toBe(MARKETPLACE_DISABLED_CODE);
+      const copy = toastCopyFor(payload, subscription);
+      expect(copy).not.toContain("marketplace backend is disabled");
+      expect(copy).not.toContain(MARKETPLACE_DISABLED_CODE);
+      expect(copy).toContain(t("formatIpcError.marketplaceDisabled"));
+    },
+  );
 
   it("subscribes through the same bridge method the preload exposes", () => {
     const onPluginInstallResult = vi.fn(() => () => undefined);

@@ -69,6 +69,29 @@ describe("main process plugin lifecycle regression guards", () => {
     expect(lifecycleHelperIndex).toBeLessThan(failureIndex);
   });
 
+  it("addresses the agent/skill lifecycle channels through CHANNELS, not a template", async () => {
+    // The deep-link handler used to build `lvis:${ns}:install-progress` and its
+    // siblings from the package type. Those strings equal the declared
+    // constants today, so no runtime test can tell the two apart — the
+    // regression a template invites is a RENAME: `CHANNELS.agents.*` moves, the
+    // renderer follows it, and the templated producer keeps broadcasting the
+    // old name with nothing failing. This is the assertion that catches it.
+    const source = await readSource("../main/lvis-deep-link.ts");
+    const channelsHelper = source.match(
+      // Terminated by a brace alone on its own line, so the helper's return-TYPE
+      // block (which closes with `} {`) does not end the match early.
+      /function assistantPackageChannels\([\s\S]*?\r?\n}\r?\n/,
+    )?.[0];
+
+    expect(channelsHelper, "assistantPackageChannels must be present").toBeTruthy();
+    expect(channelsHelper).toContain("CHANNELS.agents");
+    expect(channelsHelper).toContain("CHANNELS.skills");
+    // No `lvis:`-prefixed channel literal anywhere in the helper.
+    expect(channelsHelper).not.toMatch(/["'`]lvis:/);
+    // ...and no template-built channel name anywhere in the file.
+    expect(source).not.toMatch(/`lvis:\$\{/);
+  });
+
   it("replaces plugin event bridge subscriptions when the main window is recreated", async () => {
     // C17: the deep-link window-recreation path (which re-registers the plugin
     // event bridge for the freshly created main window) moved into
