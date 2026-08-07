@@ -102,6 +102,7 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
       pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: ["/Users/example/work"],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -146,6 +147,7 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
       pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: ["/Users/example/work"],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -181,6 +183,7 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
       pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: ["/Users/example/work"],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -222,6 +225,7 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
       pathFields: [],
       finalInput: { command: "rm -rf /tmp/lvis-audit-probe" },
       allowedDirectories: ["/Users/example/work"],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "llm-tool-arg" as const,
     });
@@ -250,6 +254,7 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
         apiKey: "sk-abcdefghijklmnopqrst",
       },
       allowedDirectories: [],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "plugin-emitted" as const,
       approvalCacheKey: "plugin_send:scope-a",
@@ -285,6 +290,7 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
       },
       auditInput: { operation: "status" },
       allowedDirectories: [],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "plugin-emitted" as const,
     });
