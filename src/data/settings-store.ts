@@ -21,7 +21,7 @@ import {
   type LLMVendorSettings,
   type MarketplaceEligibleLLMVendor,
 } from "../shared/llm-vendor-defaults.js";
-import type { BundleId } from "../shared/theme-bundles.js";
+import { isBundleId, type BundleId } from "../shared/theme-bundles.js";
 import {
   FONT_SIZE_SCALE_VALUES,
   type FontSizeScale,
@@ -781,14 +781,57 @@ export class SettingsService {
       // the nested deep-merge below to be authoritative. Without this,
       // a caller passing `font: null` would land `null` directly via the
       // shallow spread and overwrite the previously-merged font block.
-      const { font: fontPatch, ...appearanceRest } = partial.appearance as unknown as {
+      // `bundleId`, `schemaVersion` and `followSystem` are stripped from the
+      // outer spread for the same reason as `font`: the load path
+      // (`normalizeAppearance`) validates all three, so letting them ride the
+      // plain spread meant a malformed IPC payload persisted a value that only
+      // the NEXT load would reject — and for `schemaVersion` that next load
+      // takes the v1 branch, finds no legacy keys, and resets the whole block
+      // to defaults (bundle + language + font lost at once).
+      const {
+        font: fontPatch,
+        bundleId: bundleIdPatch,
+        schemaVersion: schemaVersionPatch,
+        followSystem: followSystemPatch,
+        ...appearanceRest
+      } = partial.appearance as unknown as {
         font?: AppearanceFontSettings | null;
+        bundleId?: unknown;
+        schemaVersion?: unknown;
+        followSystem?: unknown;
         [k: string]: unknown;
       };
       const nextAppearance: AppearanceSettings = {
         ...this.settings.appearance,
         ...(appearanceRest as Partial<AppearanceSettings>),
       };
+      // schemaVersion is host-owned, not user data: this store only ever
+      // persists the v2 shape, so the stored value is pinned to 2 regardless of
+      // what the caller claims. Migration from v1 happens on load, from disk.
+      if (schemaVersionPatch !== undefined && schemaVersionPatch !== 2) {
+        log.warn(
+          `appearance.schemaVersion patch ignored (received ${JSON.stringify(schemaVersionPatch)}), keeping 2`,
+        );
+      }
+      nextAppearance.schemaVersion = 2;
+      // Same value set as the load path — `isBundleId` in shared/theme-bundles
+      // is the single source of truth for both.
+      if (isBundleId(bundleIdPatch)) {
+        nextAppearance.bundleId = bundleIdPatch;
+      } else if (bundleIdPatch !== undefined) {
+        log.warn(
+          `appearance.bundleId patch ignored (received ${JSON.stringify(bundleIdPatch)}), keeping %s`,
+          this.settings.appearance.bundleId,
+        );
+      }
+      if (typeof followSystemPatch === "boolean") {
+        nextAppearance.followSystem = followSystemPatch;
+      } else if (followSystemPatch !== undefined) {
+        log.warn(
+          `appearance.followSystem patch ignored (received ${JSON.stringify(followSystemPatch)}), keeping %s`,
+          this.settings.appearance.followSystem,
+        );
+      }
       // Validate the language patch — coerce to a supported locale so a
       // malformed renderer/IPC payload can never persist an unknown language
       // (mirrors the font validation below; No-Fallback-Code: validate at the
