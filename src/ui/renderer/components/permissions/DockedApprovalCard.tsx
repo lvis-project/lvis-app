@@ -11,36 +11,40 @@ export interface DockedApprovalCardProps {
   onReturnFocus?: () => void;
 }
 
-interface ChoiceRow {
+interface Scope {
   choice: ApprovalChoice;
-  /** Widening choices outlive the call being decided and need the confirm step. */
+  /** Widening scopes outlive the call being decided. */
   widens: boolean;
-  /** Host-resolved directory this choice would allow. Never user-supplied. */
+  /** Host-resolved path this scope would allow. Never user-supplied. */
   path?: string;
 }
 
 /**
  * Docked, non-modal approval card (issue #1940).
  *
- * Placed as a sibling of the composer, outside the transcript scroll flow, so
- * it cannot scroll out of view — the placement `QuestionOverlay` already uses.
+ * Replaces the modal `OutOfAllowedDirCard`. Rendered as a bottom-anchored
+ * overlay inside the composer dock — the placement `QuestionOverlay` uses — so
+ * it grows upward over the chat surface and cannot scroll out of view.
  *
- * ## How momentum is stopped without breaking a button
+ * ## Reading order, and where safety comes from
  *
- * Every choice is a real `<button>`. Enter and Space are NOT intercepted on
- * them — they press the button natively, so screen readers, switch access and
- * voice control keep working (WCAG 2.1.1).
+ * Content first, buttons after: what is being asked, **what this scope would
+ * actually grant**, any warning — then the scopes. Moving between scopes
+ * rewrites the target line, because the target is the only thing that differs
+ * between them (`항상` grants the parent folder, not the file). Duration is not
+ * a separate field; the button's own label is the duration.
  *
- * Pressing a widening choice **opens the confirm step; it does not grant**.
- * Focus deliberately stays on that choice button, so pressing Enter again
- * merely re-opens the same confirm step. The momentum chain dies without any
- * key being swallowed. Committing is a separate act: `Ctrl+Enter`, or `Tab` to
- * the confirm button — which itself behaves natively.
+ * Three properties carry the safety, and none of them is a swallowed key:
  *
- * The keyboard model otherwise follows `AskUserQuestionCard`: container
- * `tabIndex={0}`, roving tabIndex so the group is one tab stop, arrows and
- * number keys to move, `stopPropagation` on the committing key so the composer
- * never sees it.
+ *  1. Focus lands on the NARROWEST scope.
+ *  2. What would be granted is on screen above the buttons at all times, and
+ *     visibly changes as focus moves.
+ *  3. Widening scopes are not reachable by repeating a key — you have to move
+ *     to them first, and moving is what redraws the target.
+ *
+ * Every scope is a real `<button>`; nothing intercepts Enter or Space on them,
+ * so screen readers, switch access and voice control keep working
+ * (WCAG 2.1.1).
  */
 export function DockedApprovalCard({
   request,
@@ -48,230 +52,199 @@ export function DockedApprovalCard({
   onReturnFocus,
 }: DockedApprovalCardProps) {
   const { t } = useTranslation();
-  const cardRef = useRef<HTMLDivElement | null>(null);
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const [active, setActive] = useState(0);
-  const [confirming, setConfirming] = useState<ChoiceRow | null>(null);
+  // Mirrors `active` so repeated arrow keys within one render batch move from
+  // the position they just moved to, not from a stale closure value.
+  const activeRef = useRef(0);
 
   const outOfDir = request?.outOfAllowedDir;
   const suggestedParent = outOfDir?.suggestedParent;
+  const candidatePath = outOfDir?.candidatePath ?? "";
 
-  const choices = useMemo<ChoiceRow[]>(() => {
+  const scopes = useMemo<Scope[]>(() => {
     if (!request) return [];
     const allowed = request.allowedChoices;
     const permitted = (c: ApprovalChoice) => !allowed || allowed.includes(c);
-    const out: ChoiceRow[] = [];
-    if (permitted("allow-once")) out.push({ choice: "allow-once", widens: false });
-    // Widening choices exist only when the host resolved a directory to widen
-    // to. The path is always the host's, never anything the user supplied.
+    const out: Scope[] = [];
+    // Narrowest first — this is also where focus lands.
+    if (permitted("allow-once")) {
+      out.push({ choice: "allow-once", widens: false, path: candidatePath });
+    }
     if (suggestedParent && permitted("allow-session")) {
-      out.push({ choice: "allow-session", widens: true, path: suggestedParent });
+      out.push({ choice: "allow-session", widens: true, path: candidatePath });
     }
     if (suggestedParent && permitted("allow-always")) {
       out.push({ choice: "allow-always", widens: true, path: suggestedParent });
     }
-    // Deny is a peer button in the same group, not a corner action, so
-    // refusing costs exactly as many keystrokes as allowing.
+    // Deny is a peer button, so refusing costs what allowing costs.
     if (permitted("deny-once")) out.push({ choice: "deny-once", widens: false });
     return out;
-  }, [request, suggestedParent]);
+  }, [request, suggestedParent, candidatePath]);
 
-  // New request → reset. Focus the card only when focus is not already inside
-  // it, so a re-render never yanks the caret out of the composer mid-typing.
+  // New request → focus the narrowest scope, but never steal focus that is
+  // already inside the card (a re-render must not move the user's place).
   useEffect(() => {
     if (!request) return;
     setActive(0);
-    setConfirming(null);
+    activeRef.current = 0;
     const frame = requestAnimationFrame(() => {
-      const activeEl = document.activeElement;
-      if (
-        activeEl instanceof HTMLElement &&
-        cardRef.current?.contains(activeEl) &&
-        activeEl !== cardRef.current
-      ) {
+      const el = document.activeElement;
+      if (el instanceof HTMLElement && buttonRefs.current.includes(el as HTMLButtonElement)) {
         return;
       }
-      (buttonRefs.current[0] ?? cardRef.current)?.focus();
+      buttonRefs.current[0]?.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [request?.id]);
 
-  // DELIBERATELY ABSENT: opening the confirm step does not move focus to the
-  // confirm button.
-  //
-  // `AskUserQuestionCard` focuses its submit control on the confirm step, and
-  // that one line is the entire momentum chain — it puts a live target under
-  // the next Enter. Here the choices that reach this step grant standing
-  // filesystem permission, so focus stays on the choice button and a repeated
-  // Enter just re-opens the same step. Do not "fix" this by adding a focus()
-  // call; the confirm button is still Tab-reachable and still activates
-  // natively once focused.
+  if (!request || scopes.length === 0) return null;
 
-  if (!request || choices.length === 0) return null;
+  const current = scopes[active] ?? scopes[0]!;
 
-  const press = (row: ChoiceRow) => {
-    if (row.widens) setConfirming(row);
-    else onDecide(row.choice);
+  const setActiveIndex = (index: number) => {
+    activeRef.current = index;
+    setActive(index);
   };
 
-  const moveTo = (next: number) => {
-    const wrapped = (next + choices.length) % choices.length;
-    setActive(wrapped);
+  const moveBy = (delta: number) => {
+    const wrapped = (activeRef.current + delta + scopes.length) % scopes.length;
+    setActiveIndex(wrapped);
     buttonRefs.current[wrapped]?.focus();
+  };
+
+  const moveTo = (index: number) => {
+    setActiveIndex(index);
+    buttonRefs.current[index]?.focus();
+  };
+
+  const commit = (scope: Scope) => {
+    onDecide(scope.choice, scope.widens ? scope.path : undefined);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.defaultPrevented) return;
 
     if (e.key === "Escape") {
-      if (confirming) {
-        e.preventDefault();
-        setConfirming(null);
-        buttonRefs.current[active]?.focus();
-        return;
-      }
-      // Deliberately NOT `AskUserQuestionCard`'s dismiss. On the choice group,
-      // Escape keeps the fail-closed `deny-once` the modal already had —
-      // redefining a shipped safety gesture is worse than the inconvenience.
+      // Deliberately NOT `AskUserQuestionCard`'s dismiss: Escape keeps the
+      // fail-closed `deny-once` the modal already had.
       if (request.requireExplicit) return;
       e.preventDefault();
       onDecide("deny-once");
       return;
     }
 
-    if (confirming) {
-      // Needs a modifier, so no amount of Enter-momentum reaches it.
-      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-        e.preventDefault();
-        e.stopPropagation();
-        onDecide(confirming.choice, confirming.path);
-      }
+    // Widening scopes are not committed by the key that is already under the
+    // user's finger. With no confirm step left, this modifier is the only
+    // thing between arrow-then-Enter and a standing grant.
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      e.stopPropagation();
+      commit(scopes[activeRef.current] ?? current);
       return;
     }
 
-    // NOTE: Enter and Space are deliberately not handled here. They press the
-    // focused choice button natively.
     const digit = Number.parseInt(e.key, 10);
-    if (!Number.isNaN(digit) && digit >= 1 && digit <= choices.length) {
+    if (!Number.isNaN(digit) && digit >= 1 && digit <= scopes.length) {
       e.preventDefault();
       moveTo(digit - 1);
       return;
     }
     if (e.key === "ArrowRight" || e.key === "ArrowDown") {
       e.preventDefault();
-      moveTo(active + 1);
+      moveBy(1);
       return;
     }
     if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
       e.preventDefault();
-      moveTo(active - 1);
+      moveBy(-1);
       return;
     }
     if (e.key === "Tab" && e.shiftKey) onReturnFocus?.();
   };
 
-  const label = (row: ChoiceRow) =>
-    row.choice === "allow-once"
+  const label = (scope: Scope) =>
+    scope.choice === "allow-once"
       ? t("dockedApprovalCard.choiceOnce")
-      : row.choice === "allow-session"
+      : scope.choice === "allow-session"
         ? t("dockedApprovalCard.choiceSession")
-        : row.choice === "allow-always"
+        : scope.choice === "allow-always"
           ? t("dockedApprovalCard.choiceAlways")
           : t("dockedApprovalCard.choiceDeny");
 
-  const requestLine = `${request.toolName} · ${outOfDir?.candidatePath ?? ""}`;
+  // Only `allow-always` widens to the parent, and only it carries the
+  // adjacency warning — the warning is about the directory being added.
+  const showWarning =
+    current.choice === "allow-always" && (outOfDir?.adjacencyWarnings.length ?? 0) > 0;
 
   return (
-    <Card
-      ref={cardRef}
-      tabIndex={-1}
-      aria-label={t("dockedApprovalCard.cardAriaLabel")}
-      data-testid="docked-approval-card"
-      className="mx-3 mb-2 outline-none"
+    <div
+      className="pointer-events-auto absolute inset-x-0 bottom-0 z-40 flex justify-center"
+      data-testid="docked-approval-overlay"
       onKeyDown={onKeyDown}
     >
-      <div className="flex items-baseline justify-between gap-3 border-b px-3 py-1.5">
-        <strong className="shrink-0 text-xs font-semibold">
-          {t("dockedApprovalCard.title")}
-        </strong>
-        <span
-          className="truncate font-mono text-[11px] text-muted-foreground"
-          title={requestLine}
-          data-testid="docked-approval-request"
-        >
-          {requestLine}
-        </span>
-      </div>
-
-      <div className="flex flex-col gap-1.5 p-2">
-        <div className="flex flex-wrap gap-1.5" role="group" aria-label={t("dockedApprovalCard.groupAriaLabel")}>
-          {choices.map((row, i) => (
-            <Button
-              key={row.choice}
-              ref={(el) => {
-                buttonRefs.current[i] = el;
-              }}
-              type="button"
-              size="sm"
-              variant="outline"
-              tabIndex={i === active ? 0 : -1}
-              aria-expanded={row.widens ? confirming?.choice === row.choice : undefined}
-              data-testid={`docked-approval-choice-${row.choice}`}
-              onFocus={() => setActive(i)}
-              onClick={() => press(row)}
-              className={
-                row.choice === "deny-once"
-                  ? "gap-1.5 border-destructive/(--opacity-half) text-destructive"
-                  : "gap-1.5"
-              }
+      <div className="w-full min-w-0 p-2">
+        <Card className="flex flex-col gap-2 p-2.5">
+          <div className="flex flex-col gap-0.5">
+            <p className="m-0 text-xs">
+              {t("dockedApprovalCard.headline", { toolName: request.toolName })}
+            </p>
+            <p
+              className="m-0 break-all font-mono text-xs"
+              data-testid="docked-approval-target"
             >
-              <span className="font-mono text-[11px] opacity-60">{i + 1}</span>
-              {label(row)}
-            </Button>
-          ))}
-        </div>
-
-        {confirming ? (
-          <div
-            className="flex flex-col gap-1.5 rounded-md border border-warning bg-warning/(--opacity-subtle) px-2.5 py-2"
-            data-testid="docked-approval-confirm"
-          >
-            <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-              <dt className="opacity-75">{t("dockedApprovalCard.fieldTarget")}</dt>
-              <dd className="m-0 break-all font-mono text-foreground">{confirming.path}</dd>
-              <dt className="opacity-75">{t("dockedApprovalCard.fieldDuration")}</dt>
-              <dd className="m-0 font-mono text-foreground">
-                {confirming.choice === "allow-always"
-                  ? t("dockedApprovalCard.durationAlways")
-                  : t("dockedApprovalCard.durationSession")}
-              </dd>
-              {outOfDir && outOfDir.adjacencyWarnings.length > 0 ? (
-                <>
-                  <dt className="opacity-75">{t("dockedApprovalCard.fieldWarning")}</dt>
-                  <dd
-                    className="m-0 font-mono text-foreground"
-                    data-testid="docked-approval-warning"
-                  >
-                    {outOfDir.adjacencyWarnings.join(" · ")}
-                  </dd>
-                </>
-              ) : null}
-            </dl>
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <span className="text-xs text-muted-foreground">
-                {t("dockedApprovalCard.commitHint")}
-              </span>
-              <Button
-                size="sm"
-                data-testid="docked-approval-commit"
-                onClick={() => onDecide(confirming.choice, confirming.path)}
-              >
-                {t("dockedApprovalCard.commitButton")}
-              </Button>
-            </div>
+              {current.choice === "deny-once"
+                ? t("dockedApprovalCard.denySummary")
+                : current.choice === "allow-always"
+                  ? t("dockedApprovalCard.targetParent", { path: current.path ?? "" })
+                  : current.path}
+            </p>
+            {showWarning ? (
+              <p className="m-0 text-xs text-warning" data-testid="docked-approval-warning">
+                {`⚠ ${outOfDir?.adjacencyWarnings.join(" · ")}`}
+              </p>
+            ) : null}
           </div>
-        ) : null}
+
+          <div
+            className="flex flex-wrap items-center gap-1.5"
+            role="group"
+            aria-label={t("dockedApprovalCard.groupAriaLabel")}
+          >
+            {scopes.map((scope, i) => (
+              <Button
+                key={scope.choice}
+                ref={(el) => {
+                  buttonRefs.current[i] = el;
+                }}
+                type="button"
+                size="sm"
+                variant="outline"
+                tabIndex={i === active ? 0 : -1}
+                data-testid={`docked-approval-choice-${scope.choice}`}
+                onFocus={() => setActiveIndex(i)}
+                onClick={() => {
+                  // Narrow scopes commit on native activation. Widening scopes
+                  // deliberately do not: a pointer press focuses them and
+                  // redraws the target, and applying is the separate
+                  // Ctrl+Enter act.
+                  if (!scope.widens) commit(scope);
+                }}
+                className={
+                  scope.choice === "deny-once"
+                    ? "border-destructive/(--opacity-half) text-destructive"
+                    : undefined
+                }
+              >
+                {label(scope)}
+              </Button>
+            ))}
+            <span className="ml-auto text-[11px] text-muted-foreground">
+              {t("dockedApprovalCard.keyHint")}
+            </span>
+          </div>
+        </Card>
       </div>
-    </Card>
+    </div>
   );
 }
