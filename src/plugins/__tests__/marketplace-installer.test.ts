@@ -8,7 +8,8 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { createHash, generateKeyPairSync, sign as cryptoSign } from "node:crypto";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync } from "node:fs";
+import { cleanupTmpDir } from "./artifact-store-test-helpers.js";
 import { readFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import {
@@ -123,7 +124,7 @@ describe("installFromMarketplace — happy path", () => {
       const persisted = await readFile(out.tarballPath);
       expect(persisted.equals(tarball)).toBe(true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 });
@@ -143,7 +144,7 @@ describe("installFromMarketplace — artifact size ceiling", () => {
       })).rejects.toMatchObject({ code: "ARTIFACT_TOO_LARGE" });
       expect(http.envelopeCalls).toBe(0);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -161,7 +162,7 @@ describe("installFromMarketplace — artifact size ceiling", () => {
       });
       expect(result.sha256).toBe(createHash("sha256").update(tarball).digest("hex"));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -183,7 +184,7 @@ describe("installFromMarketplace — artifact size ceiling", () => {
       expect(http.downloadCalls).toBe(0);
       expect(http.envelopeCalls).toBe(0);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 });
@@ -194,7 +195,7 @@ describe("installFromMarketplace — path hardening", () => {
     "nested/path",
     "../../verified-downloads/pwn",
     "./../still-bad",
-  ])("keeps final and temp paths inside the verified download directory for %s", (version) => {
+  ])("keeps final and temp paths inside the verified download directory for %s", async (version) => {
     const root = tmpDownloadRoot();
     try {
       const { pluginDir, tarballPath, tmpPath } = buildVerifiedTarballPaths(
@@ -208,7 +209,7 @@ describe("installFromMarketplace — path hardening", () => {
       expect(relative(pluginDir, tarballPath).startsWith("..")).toBe(false);
       expect(relative(pluginDir, tmpPath).startsWith("..")).toBe(false);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -233,11 +234,11 @@ describe("installFromMarketplace — path hardening", () => {
       const persisted = await readFile(out.tarballPath);
       expect(persisted.equals(tarball)).toBe(true);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
-  it("rejects slugs that escape the verified download directory", () => {
+  it("rejects slugs that escape the verified download directory", async () => {
     const root = tmpDownloadRoot();
     const escapingSlug = join("..", "outside");
     try {
@@ -247,7 +248,7 @@ describe("installFromMarketplace — path hardening", () => {
         }),
       );
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 });
@@ -269,7 +270,7 @@ describe("installFromMarketplace — integrity failures", () => {
         }),
       ).rejects.toMatchObject({ code: "SHA256_HEADER_MISMATCH" });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -290,7 +291,7 @@ describe("installFromMarketplace — integrity failures", () => {
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -315,7 +316,7 @@ describe("installFromMarketplace — integrity failures", () => {
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -345,7 +346,7 @@ describe("installFromMarketplace — integrity failures", () => {
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 });
@@ -366,7 +367,7 @@ describe("installFromMarketplace — key rotation", () => {
       });
       expect(out.signerKeyId).toBe("prod-v1");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -386,7 +387,7 @@ describe("installFromMarketplace — key rotation", () => {
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -408,7 +409,7 @@ describe("installFromMarketplace — key rotation", () => {
       });
       expect(out.signerKeyId).toBe("prod-v1");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 });
@@ -431,7 +432,7 @@ describe("installFromMarketplace — envelope guards", () => {
         }),
       ).rejects.toMatchObject({ code: "CLOCK_SKEW" });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -461,7 +462,7 @@ describe("installFromMarketplace — envelope guards", () => {
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -485,7 +486,7 @@ describe("installFromMarketplace — envelope guards", () => {
         }),
       ).rejects.toMatchObject({ code: "SIGNATURE_INVALID" });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -505,7 +506,7 @@ describe("installFromMarketplace — envelope guards", () => {
         }),
       ).rejects.toMatchObject({ code: "ENVELOPE_FETCH_FAILED" });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -531,7 +532,7 @@ describe("installFromMarketplace — envelope guards", () => {
         message: expect.stringMatching(/no trusted marketplace public keys/i),
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 });
@@ -562,7 +563,7 @@ describe("installFromMarketplace — HTTP handling", () => {
       expect(http.downloadCalls).toBe(3);
     } finally {
       vi.useRealTimers();
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -591,7 +592,7 @@ describe("installFromMarketplace — HTTP handling", () => {
       expect(http.downloadCalls).toBe(2);
     } finally {
       vi.useRealTimers();
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -631,8 +632,8 @@ describe("installFromMarketplace — HTTP handling", () => {
       expect(deadlineHttp.downloadCalls).toBe(3);
     } finally {
       vi.useRealTimers();
-      rmSync(firstRoot, { recursive: true, force: true });
-      rmSync(deadlineRoot, { recursive: true, force: true });
+      await cleanupTmpDir(firstRoot);
+      await cleanupTmpDir(deadlineRoot);
     }
   });
 
@@ -671,7 +672,7 @@ describe("installFromMarketplace — HTTP handling", () => {
       expect(vi.getTimerCount()).toBe(0);
     } finally {
       vi.useRealTimers();
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -706,7 +707,7 @@ describe("installFromMarketplace — HTTP handling", () => {
       await vi.advanceTimersByTimeAsync(30_000);
     } finally {
       vi.useRealTimers();
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -733,7 +734,7 @@ describe("installFromMarketplace — HTTP handling", () => {
       expect(http.downloadCalls).toBe(2);
     } finally {
       vi.useRealTimers();
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -753,7 +754,7 @@ describe("installFromMarketplace — HTTP handling", () => {
       ).rejects.toMatchObject({ code: "CLIENT_ERROR" });
       expect(http.downloadCalls).toBe(1);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -790,7 +791,7 @@ describe("installFromMarketplace — HTTP handling", () => {
       expect(calls).toBe(2);
     } finally {
       vi.useRealTimers();
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -816,7 +817,7 @@ describe("installFromMarketplace — HTTP handling", () => {
       })).rejects.toBe(protocolError);
       expect(calls).toBe(1);
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 });
@@ -867,7 +868,7 @@ describe("installFromMarketplace — onProgress callback", () => {
       expect(events).toContain("registering");
       expect(events.indexOf("verifying")).toBeLessThan(events.indexOf("registering"));
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -917,7 +918,7 @@ describe("installFromMarketplace — onProgress callback", () => {
       expect(allPhases).toContain("verifying");
       expect(allPhases).toContain("registering");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -942,7 +943,7 @@ describe("installFromMarketplace — onProgress callback", () => {
       });
       expect(out.slug).toBe("acme-notes");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 });
@@ -983,7 +984,7 @@ describe("installFromMarketplace — artifact cache invalidation", () => {
     } finally {
       if (originalCacheFlag === undefined) delete process.env.LVIS_MARKETPLACE_USE_CACHE;
       else process.env.LVIS_MARKETPLACE_USE_CACHE = originalCacheFlag;
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 });
