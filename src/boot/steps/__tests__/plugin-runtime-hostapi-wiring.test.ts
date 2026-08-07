@@ -15,7 +15,9 @@
  * initPluginRuntime call shape stays type-compatible.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 
 const runtimeTestState = vi.hoisted(() => ({
@@ -109,6 +111,10 @@ type ConfigHostApi = {
   emitEvent: (type: string, data?: unknown) => void;
   onEvent: (type: string, handler: (data: unknown) => void) => () => void;
   getSecret: (key: string) => string | undefined | null;
+  storage: {
+    readText: (rel: string) => Promise<string>;
+    writeJson: (rel: string, value: unknown) => Promise<void>;
+  };
   resolveApiKey: (opts: {
     purpose: "llm";
     vendor?: "openai";
@@ -161,11 +167,22 @@ type CreateHostApi = (
   candidateApprovedPluginAccess?: PluginAccessSpec | null,
 ) => ConfigHostApi;
 
+/**
+ * The `bootAuditLogger` handed to the LAST `initAndGetFactory` call — the sink
+ * every plugin-runtime audit record (including plugin-storage containment
+ * refusals) lands on in production.
+ */
+let lastBootAuditLogger: { log: ReturnType<typeof vi.fn> };
+
 async function initAndGetFactory(
   settingsService: unknown,
   bootAuditLogger: { log: ReturnType<typeof vi.fn> } = { log: vi.fn() },
 ): Promise<CreateHostApi> {
   runtimeTestState.capturedRuntimeOptions = null;
+  // Honour a caller-supplied logger; only default when none was given. The
+  // module-level handle still points at whatever was actually wired, so tests
+  // that do not pass one can still read the sink.
+  lastBootAuditLogger = bootAuditLogger;
   await initPluginRuntime({
     projectRoot: "/tmp/lvis-test/project",
     settingsService: settingsService as never,
@@ -178,7 +195,7 @@ async function initAndGetFactory(
       replacePluginTools: vi.fn(),
     } as never,
     pythonPath: undefined,
-    bootAuditLogger: bootAuditLogger as never,
+    bootAuditLogger: lastBootAuditLogger as never,
     mainWindow: {} as never,
     networkFetch: vi.fn() as unknown as typeof fetch,
     openAuthWindowService: vi.fn(),
@@ -314,6 +331,69 @@ describe("HostApi.config.get merged-read precedence", () => {
     expect(api.config.get("savedKey")).toBe("saved");
     // A key with neither a value nor a schema default is still undefined.
     expect(api.config.get("nothing")).toBeUndefined();
+  });
+});
+
+describe("HostApi.storage containment refusals reach the boot audit log", () => {
+  // Windows creates directory junctions without Developer Mode, so the escape
+  // is a real reparse point on every platform CI runs on.
+  const dirLinkType = process.platform === "win32" ? "junction" : "dir";
+
+  it("routes a symlink escape through the shared plugin-runtime audit sink", async () => {
+    const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
+    const dataDir = mkdtempSync(join(tmpdir(), "lvis-storage-audit-boot-"));
+    const outsideDir = mkdtempSync(join(tmpdir(), "lvis-storage-audit-boot-out-"));
+    writeFileSync(join(outsideDir, "secret.txt"), "shhh", "utf-8");
+    symlinkSync(outsideDir, join(dataDir, "escape"), dirLinkType);
+
+    const api = createHostApi(
+      "plugin-a",
+      { id: "plugin-a", config: {} },
+      dataDir,
+      activeIncarnation(),
+      "plugin-a",
+    );
+
+    await expect(api.storage.readText("escape/secret.txt")).rejects.toThrow(
+      /symlink escapes plugin storage root/,
+    );
+
+    // Same record the webview-bridge wiring emits (single authority:
+    // createPluginStorageAuditSink), carried by the same `pluginRuntimeAuditLog`
+    // transport `new PluginRuntime({ auditLog })` receives.
+    const entries = lastBootAuditLogger.log.mock.calls.map(
+      ([entry]) => entry as { type: string; sessionId: string; input: string; output?: string },
+    );
+    const refusals = entries.filter((e) =>
+      e.input.includes("plugin_storage_path_rejected"),
+    );
+    expect(refusals).toHaveLength(1);
+    expect(refusals[0]!.type).toBe("error");
+    expect(refusals[0]!.sessionId).toBe("plugin-runtime");
+    expect(refusals[0]!.input).toBe("[ERROR] plugin_storage_path_rejected");
+    const payload = JSON.parse(refusals[0]!.output!) as Record<string, unknown>;
+    expect(payload).toMatchObject({
+      pluginId: "plugin-a",
+      reason: "storage: rejected symlink escape",
+    });
+  });
+
+  it("stays silent for an in-sandbox write", async () => {
+    const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
+    const api = createHostApi(
+      "plugin-a",
+      { id: "plugin-a", config: {} },
+      mkdtempSync(join(tmpdir(), "lvis-storage-audit-ok-")),
+      activeIncarnation(),
+      "plugin-a",
+    );
+
+    await api.storage.writeJson("prefs.json", { theme: "dark" });
+
+    const inputs = lastBootAuditLogger.log.mock.calls.map(
+      ([entry]) => (entry as { input: string }).input,
+    );
+    expect(inputs.filter((i) => i.includes("plugin_storage_path_rejected"))).toEqual([]);
   });
 });
 
