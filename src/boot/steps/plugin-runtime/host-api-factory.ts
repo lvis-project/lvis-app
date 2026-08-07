@@ -45,6 +45,7 @@ import {
 import { auditPluginEmitDenial } from "../../../plugins/emit-denial-audit.js";
 import { getDeclaredEmittedEvents } from "../../../plugins/runtime/manifest-validation.js";
 import { applyConfigDefaults } from "../../../plugins/config-schema.js";
+import { shouldRestartAfterPluginConfigWrite } from "../../../plugins/config-restart-policy.js";
 import { OVERLAY_V1 } from "../../../shared/ipc-channels.js";
 import {
   emitPluginConfigChange,
@@ -471,9 +472,18 @@ export function createHostApiFactory(
             // Lifecycle hooks inherit the owning mutation context. Persist
             // their write, but never recursively restart the instance whose
             // start/stop Promise is currently being awaited.
+            // Restart policy: see `plugins/config-restart-policy.ts`. This write
+            // always mutates cleartext config (secrets were rejected above), so
+            // the only question is safety — a write issued from inside a
+            // lifecycle hook, or with a restart already in flight, would re-enter
+            // the mutation whose Promise is currently being awaited.
             if (
-              nestedLifecycleMutation
-              || pluginRuntime.isPluginRestartPending?.(pluginId)
+              !shouldRestartAfterPluginConfigWrite({
+                mutatedCleartextConfig: true,
+                restartUnsafe:
+                  nestedLifecycleMutation
+                  || pluginRuntime.isPluginRestartPending?.(pluginId) === true,
+              })
             ) {
               return;
             }

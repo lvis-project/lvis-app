@@ -87,6 +87,7 @@ import {
   rollbackMarketplacePluginWithLifecycle,
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
+import { shouldRestartAfterPluginConfigWrite } from "../../plugins/config-restart-policy.js";
 import {
   cleanupFailedPluginInstallWithLifecycle,
   ensurePluginStateReadyForInstall,
@@ -983,6 +984,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         }
         return { manifest, savedConfig };
       });
+      // Restart policy: see `plugins/config-restart-policy.ts`. This site pins
+      // `mutatedCleartextConfig: true` (it always writes cleartext config) and
+      // `restartUnsafe: false` (host IPC caller), so the shared rule is
+      // statically "restart" — the predicate is not called because the branch
+      // could never go the other way.
       if (pluginRuntime.getPluginManifest(pluginId) !== persisted.manifest) {
         throw new Error(`Plugin instance changed before config reload: ${pluginId}`);
       }
@@ -1025,7 +1031,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       const secretValue = String(value ?? "");
       const validationError = validateSecretConfigValue(safePluginId, key, secretValue);
       if (validationError) return validationError;
-      return await withPluginInstallLock(safePluginId, async () => {
+      const persisted = await withPluginInstallLock(safePluginId, async () => {
         const manifest = pluginRuntime.getPluginManifest(safePluginId);
         const prop = manifest?.configSchema?.properties?.[key];
         if (!prop || prop.type !== "string" || prop.format !== "secret") {
@@ -1036,15 +1042,47 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         }
         await settingsService.setSecret(`plugin.${safePluginId}.${key}`, secretValue);
         const current = settingsService.getPluginConfig(safePluginId) ?? {};
+        // A stray CLEARTEXT copy of this key can exist even with no legacy data:
+        // a plugin update that newly marks an existing plain key
+        // `format: "secret"` leaves the previously-saved plaintext value sitting
+        // in `pluginConfigs`, because `stripSecretFields` only runs on write.
+        let mutatedCleartextConfig = false;
         if (key in current) {
           const next = { ...current };
           delete next[key];
           await settingsService.setPluginConfig(safePluginId, next);
           pluginRuntime.setConfigOverride(safePluginId, next);
+          mutatedCleartextConfig = true;
         }
         emitPluginConfigChange(safePluginId, key, SECRET_REDACTED_SENTINEL);
-        return { ok: true as const };
+        return { ok: true as const, manifest, mutatedCleartextConfig };
       });
+      if (!persisted.ok) return persisted;
+      if (!persisted.mutatedCleartextConfig) return { ok: true as const };
+      // Deleting the cleartext copy staled `PluginRuntimeContext.config`, which
+      // would otherwise leave the plugin using the OLD plaintext secret from its
+      // start-time snapshot. Restart is safe here (host IPC caller), so the
+      // shared rule says restart. Mirrors config:set by restarting OUTSIDE the
+      // install lock — `restartPlugin` takes that lock itself.
+      if (
+        !shouldRestartAfterPluginConfigWrite({
+          mutatedCleartextConfig: true,
+          restartUnsafe: false,
+        })
+      ) {
+        return persisted;
+      }
+      if (pluginRuntime.getPluginManifest(safePluginId) !== persisted.manifest) {
+        throw new Error(`Plugin instance changed before secret reload: ${safePluginId}`);
+      }
+      const restartResult = await pluginRuntime.restartPlugin(
+        safePluginId,
+        { skipPreparation: true },
+      );
+      if (restartResult !== "started") {
+        throw new Error(`Plugin secret saved but runtime reload returned ${restartResult ?? "not-loaded"}`);
+      }
+      return { ok: true as const };
     } catch (err) {
       return pluginConfigError("plugin-config-secret-save-failed", (err as Error).message);
     }
@@ -2530,6 +2568,14 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         const savedConfig = await settingsService.setPluginConfig(binding.pluginId, stripped);
         pluginRuntime.setConfigOverride(binding.pluginId, savedConfig);
         emitPluginConfigChange(binding.pluginId, key, savedConfig?.[key]);
+        // Restart policy: see `plugins/config-restart-policy.ts`. This site pins
+        // `restartUnsafe: true` — the caller IS the plugin webview that a
+        // restart would tear down mid-call — so the shared rule is statically
+        // "no restart" no matter what the write touched. The plugin observes the
+        // new value through the `emitPluginConfigChange` above and through the
+        // live `hostApi.config.get`; only its start-time
+        // `PluginRuntimeContext.config` snapshot stays stale until it next
+        // restarts for other reasons.
         return { ok: true as const };
       });
     } catch (err) {
