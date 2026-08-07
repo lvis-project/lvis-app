@@ -264,6 +264,14 @@ export interface ReviewerDispatchInput {
   /** DLP-redacted finalInput — caller is responsible for redaction. */
   finalInput: Record<string, unknown>;
   /**
+   * The cwd the tool will execute against. Threaded into
+   * {@link ToolInvocationContext.executionCwd} so the reviewer resolves path
+   * arguments with the enforcer's resolver
+   * ({@link resolveToolPathForPermission}) instead of `process.cwd()`.
+   * Required so a producer cannot silently reintroduce the divergence.
+   */
+  executionCwd: string;
+  /**
    * Host-owned metadata-only projection for persisted reviewer/deferred audit
    * sinks. Classifier and approval identity continue to use `finalInput` /
    * `cacheIdentityInput`; this field is never an authority input.
@@ -1456,6 +1464,7 @@ export class PermissionManager {
       pathFields: input.pathFields,
       trustOrigin: input.trustOrigin,
       finalInput: input.finalInput,
+      executionCwd: input.executionCwd,
       allowedDirectories: input.allowedDirectories,
       sensitivePathsAdjacent: input.sensitivePathsAdjacent,
       // Substrate-aware (NOT process-global): only the ASRT-wrapped host-shell
