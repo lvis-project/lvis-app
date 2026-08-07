@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "knipVersion": "6.29.0",
+  "knipVersion": "6.31.0",
   "entries": [
     {
       "type": "devDependencies",
@@ -979,11 +979,6 @@
     },
     {
       "type": "exports",
-      "file": "src/shared/settings-tabs.ts",
-      "name": "SETTINGS_TABS"
-    },
-    {
-      "type": "exports",
       "file": "src/shared/sidebar-tab.ts",
       "name": "SIDEBAR_TABS"
     },
@@ -1086,6 +1081,11 @@
       "type": "exports",
       "file": "src/ui/renderer/components/slash-picker-data.ts",
       "name": "SLASH_COMMANDS"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/components/SlashPickerPanel.tsx",
+      "name": "SlashPickerPanel"
     },
     {
       "type": "exports",
@@ -2135,11 +2135,6 @@
     {
       "type": "types",
       "file": "src/main/platform-bridge-delivery.ts",
-      "name": "PlatformBridgeDeliveryChannel"
-    },
-    {
-      "type": "types",
-      "file": "src/main/platform-bridge-delivery.ts",
       "name": "PlatformBridgeDeliveryChannelState"
     },
     {
@@ -2150,32 +2145,7 @@
     {
       "type": "types",
       "file": "src/main/platform-bridge-delivery.ts",
-      "name": "PlatformBridgeDeliveryTransport"
-    },
-    {
-      "type": "types",
-      "file": "src/main/platform-bridge-delivery.ts",
-      "name": "PlatformBridgeDeliveryTransportSendOptions"
-    },
-    {
-      "type": "types",
-      "file": "src/main/platform-bridge-delivery.ts",
       "name": "PlatformBridgeOutboundStatus"
-    },
-    {
-      "type": "types",
-      "file": "src/main/platform-bridge-inbound.ts",
-      "name": "PlatformBridgeInboundAuthorizer"
-    },
-    {
-      "type": "types",
-      "file": "src/main/platform-bridge-inbound.ts",
-      "name": "PlatformBridgeReceiptStore"
-    },
-    {
-      "type": "types",
-      "file": "src/main/platform-bridge-inbound.ts",
-      "name": "PlatformBridgeWebhookVerifier"
     },
     {
       "type": "types",
@@ -2326,11 +2296,6 @@
       "type": "types",
       "file": "src/permissions/agent-action-approver.ts",
       "name": "AgentActionApprovalRequest"
-    },
-    {
-      "type": "types",
-      "file": "src/permissions/approval-gate.ts",
-      "name": "ApprovalKind"
     },
     {
       "type": "types",
@@ -2756,11 +2721,6 @@
       "type": "types",
       "file": "src/shared/chat-history.ts",
       "name": "SerializedTurnSummary"
-    },
-    {
-      "type": "types",
-      "file": "src/shared/chat-origin.ts",
-      "name": "PlatformBridgeAuthority"
     },
     {
       "type": "types",
