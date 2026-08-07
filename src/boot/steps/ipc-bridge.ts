@@ -14,6 +14,7 @@
 import type { BrowserWindow } from "electron";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import { onEvent } from "../types.js";
+import { classifySubscription } from "../../plugins/capabilities.js";
 import { createLogger } from "../../lib/logger.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 const log = createLogger("lvis");
@@ -65,14 +66,36 @@ export function makeCoalescingSend(
  * Collect plugin emitted event types from `manifest.emittedEvents`, plus the
  * host-derived `${id}.auth.changed` for any manifest that declares an `auth`
  * block (R3, 0.5.2).
+ *
+ * This is the ONE chokepoint where a manifest-declared name becomes a bridged
+ * name, so the private-namespace gate lives here and covers BOTH the declared
+ * and the host-derived spelling. A private-namespace type
+ * (`classifySubscription` = "private": memory.private.*, settings.apiKey.*,
+ * audit.*, dlp.*) is never bridged: both consumers of
+ * `CHANNELS.pluginBridge.event` — `plugin-preload.ts` (plugin webviews) and
+ * `preload/internal-api-surface.ts` — receive whatever main sends on that
+ * channel, and only the latter re-checks the namespace. Filtering at the
+ * registration site keeps the host from ever putting such a payload on the
+ * wire.
  */
 function collectPluginEventTypes(pluginRuntime: PluginRuntime): Set<string> {
   const types = new Set<string>();
+  const addBridgeable = (candidate: string, pluginId: unknown): void => {
+    const type = candidate.trim();
+    if (!type) return;
+    if (classifySubscription(type) === "private") {
+      log.warn(
+        `boot: plugin:${String(pluginId)} emittedEvents["${type}"] is private-namespace — bridge skipped`,
+      );
+      return;
+    }
+    types.add(type);
+  };
   for (const { manifest } of pluginRuntime.listPluginManifests()) {
     const raw = manifest as unknown as Record<string, unknown>;
     if (Array.isArray(raw["emittedEvents"])) {
       for (const t of raw["emittedEvents"] as unknown[]) {
-        if (typeof t === "string" && t.trim()) types.add(t.trim());
+        if (typeof t === "string") addBridgeable(t, raw["id"]);
       }
     }
     // R3 — when a manifest declares `auth`, host-derive `${id}.auth.changed`
@@ -85,7 +108,7 @@ function collectPluginEventTypes(pluginRuntime: PluginRuntime): Set<string> {
     // against an author who still lists it, so the bridge registers exactly once.
     const id = manifest.id;
     if (raw["auth"] && typeof id === "string" && id.length > 0) {
-      types.add(`${id}.auth.changed`);
+      addBridgeable(`${id}.auth.changed`, id);
     }
   }
   return types;
