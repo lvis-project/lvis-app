@@ -18,7 +18,6 @@ import {
   readdirSync,
   createReadStream,
   readSync,
-  renameSync,
   statSync,
   unlinkSync,
   writeSync,
@@ -46,7 +45,11 @@ import {
   normalizeSubscriptionUsageTelemetry,
   type SubscriptionUsageTelemetry,
 } from "../shared/subscription-runtime.js";
-import { iterateJsonlLines, withAuditSnapshotLock } from "./jsonl-reader.js";
+import {
+  iterateJsonlLines,
+  iterateJsonlLinesFromFd,
+  withAuditSnapshotLock,
+} from "./jsonl-reader.js";
 
 const MAX_PERMISSION_AUDIT_LINE_BYTES = 1024 * 1024;
 
@@ -124,7 +127,7 @@ function publishOpenFileArchiveSync(
       linkSync(stagedPath, archivePath);
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        throw new Error("permission audit torn-tail archive already exists");
+        throw new Error("permission audit archive already exists");
       }
       throw error;
     }
@@ -755,15 +758,28 @@ export class AuditLogger {
     let lineIndex = 0;
     let authenticatedRowsStarted = false;
     await withFileLock(this.permissionAuditLogFile, async () => {
+      const noFollow = platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
+      // One descriptor spans verification AND publication. Re-resolving the
+      // pathname after the bytes were authenticated is the time-of-check /
+      // time-of-use gap: a local process that replaces the active file in
+      // between would otherwise have its bytes archived as if verified.
+      let fd: number | undefined;
       try {
-        const noFollow = platform === "win32" ? 0 : fsConstants.O_NOFOLLOW;
-        const fd = openSync(
+        fd = openSync(
           this.permissionAuditLogFile,
           fsConstants.O_RDWR | fsConstants.O_CREAT | noFollow,
           0o600,
         );
-        try {
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
+      try {
+        // Bytes [0, verifiedSize) of the open descriptor: what the loop below
+        // authenticates and what any archival below publishes, byte for byte.
+        let verifiedSize = 0;
+        if (fd !== undefined) {
           const { size } = fstatSync(fd);
+          verifiedSize = size;
           if (size > 0) {
             const lastByte = Buffer.allocUnsafe(1);
             readSync(fd, lastByte, 0, 1, size - 1);
@@ -793,88 +809,108 @@ export class AuditLogger {
               );
               ftruncateSync(fd, boundary);
               fsyncSync(fd);
+              verifiedSize = boundary;
             }
           }
-        } finally {
-          closeSync(fd);
-        }
-        for await (const line of iterateJsonlLines(
-          this.permissionAuditLogFile,
-          MAX_PERMISSION_AUDIT_LINE_BYTES,
-        )) {
-          if (line.length === 0) continue;
-          if (Buffer.byteLength(line, "utf-8") > MAX_PERMISSION_AUDIT_LINE_BYTES) {
-            throw new Error(
-              `permission audit chain invalid at line ${lineIndex + 1}: line-too-large`,
+          for await (const line of iterateJsonlLinesFromFd(
+            fd,
+            verifiedSize,
+            MAX_PERMISSION_AUDIT_LINE_BYTES,
+          )) {
+            if (line.length === 0) continue;
+            if (Buffer.byteLength(line, "utf-8") > MAX_PERMISSION_AUDIT_LINE_BYTES) {
+              throw new Error(
+                `permission audit chain invalid at line ${lineIndex + 1}: line-too-large`,
+              );
+            }
+            const verification = verifyChainLine(
+              secret,
+              line,
+              previousSerialized,
+              authenticatedRowsStarted,
             );
+            if (!verification.ok) {
+              throw new Error(
+                `permission audit chain invalid at line ${lineIndex + 1}: ${verification.reason}`,
+              );
+            }
+            penultimateSerialized = previousSerialized;
+            lastRowSelfAuthenticated = verification.selfAuthenticated;
+            authenticatedRowsStarted ||= verification.selfAuthenticated;
+            previousSerialized = line;
+            lineIndex += 1;
+            if (lineIndex % 1_024 === 0) {
+              await new Promise<void>((resolve) => setImmediate(resolve));
+            }
           }
-          const verification = verifyChainLine(
-            secret,
-            line,
-            previousSerialized,
-            authenticatedRowsStarted,
-          );
-          if (!verification.ok) {
-            throw new Error(
-              `permission audit chain invalid at line ${lineIndex + 1}: ${verification.reason}`,
+        }
+        const sealName = sealKeyName(this.permissionAuditDate);
+        const storedSeal = sealStore?.read(sealName, 4 * 1024) ?? null;
+        if (previousSerialized === GENESIS_MARKER) {
+          if (storedSeal !== null) {
+            throw new Error("permission audit seal exists for an empty active file");
+          }
+        } else if (!authenticatedRowsStarted) {
+          const computedSeal = computeDailySeal(secret, previousSerialized);
+          if (storedSeal !== null) {
+            if (storedSeal !== computedSeal) {
+              throw new Error("permission audit active-tail seal mismatch");
+            }
+          } else {
+            // Never trust-on-first-use a mutable legacy tail. Preserve it as
+            // unverified evidence and begin a fresh self-authenticated epoch.
+            if (fd === undefined) {
+              throw new Error("permission audit legacy tail lost its open descriptor");
+            }
+            const archivePath = join(
+              this.auditDir,
+              `${this.permissionAuditDate}.permission-audit.legacy-unverified-${computedSeal.slice(0, 12)}.jsonl`,
             );
+            // Publish the verified inode through its own descriptor and empty
+            // it in place. Renaming the pathname instead would archive whatever
+            // file happens to answer to that name now, and an existing archive
+            // fails closed on the hard link rather than being overwritten.
+            publishOpenFileArchiveSync(
+              fd,
+              verifiedSize,
+              archivePath,
+              this.auditDir,
+              noFollow,
+            );
+            try { chmodSync(archivePath, 0o600); } catch { /* best effort */ }
+            ftruncateSync(fd, 0);
+            fsyncSync(fd);
+            // The fresh epoch may only begin on the file that was just emptied.
+            // A non-empty active name means something replaced it during
+            // archival: refuse to start a chain over unauthenticated bytes.
+            if (statSync(this.permissionAuditLogFile).size !== 0) {
+              throw new Error(
+                "permission audit active file was replaced during legacy archival",
+              );
+            }
+            previousSerialized = GENESIS_MARKER;
+            penultimateSerialized = GENESIS_MARKER;
+            lastRowSelfAuthenticated = false;
+            lineIndex = 0;
           }
-          penultimateSerialized = previousSerialized;
-          lastRowSelfAuthenticated = verification.selfAuthenticated;
-          authenticatedRowsStarted ||= verification.selfAuthenticated;
-          previousSerialized = line;
-          lineIndex += 1;
-          if (lineIndex % 1_024 === 0) {
-            await new Promise<void>((resolve) => setImmediate(resolve));
-          }
-        }
-      } catch (err) {
-        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
-      }
-      const sealName = sealKeyName(this.permissionAuditDate);
-      const storedSeal = sealStore?.read(sealName, 4 * 1024) ?? null;
-      if (previousSerialized === GENESIS_MARKER) {
-        if (storedSeal !== null) {
-          throw new Error("permission audit seal exists for an empty active file");
-        }
-      } else if (!authenticatedRowsStarted) {
-        const computedSeal = computeDailySeal(secret, previousSerialized);
-        if (storedSeal !== null) {
+        } else if (sealStore) {
+          const computedSeal = computeDailySeal(secret, previousSerialized);
           if (storedSeal !== computedSeal) {
-            throw new Error("permission audit active-tail seal mismatch");
+            const predecessorSeal = penultimateSerialized === GENESIS_MARKER
+              ? null
+              : computeDailySeal(secret, penultimateSerialized);
+            const interruptedCommit =
+              lastRowSelfAuthenticated && storedSeal === predecessorSeal;
+            if (!interruptedCommit) {
+              throw new Error("permission audit active-tail seal mismatch");
+            }
+            // The row is fsynced/self-authenticated and the stored checkpoint
+            // names its exact predecessor: finish the interrupted seal commit.
+            sealStore.write(sealName, computedSeal);
           }
-        } else {
-          // Never trust-on-first-use a mutable legacy tail. Preserve it as
-          // unverified evidence and begin a fresh self-authenticated epoch.
-          const archivePath = join(
-            this.auditDir,
-            `${this.permissionAuditDate}.permission-audit.legacy-unverified-${computedSeal.slice(0, 12)}.jsonl`,
-          );
-          if (existsSync(archivePath)) {
-            throw new Error("permission audit legacy archive already exists");
-          }
-          renameSync(this.permissionAuditLogFile, archivePath);
-          try { chmodSync(archivePath, 0o600); } catch { /* best effort */ }
-          previousSerialized = GENESIS_MARKER;
-          penultimateSerialized = GENESIS_MARKER;
-          lastRowSelfAuthenticated = false;
-          lineIndex = 0;
         }
-      } else if (sealStore) {
-        const computedSeal = computeDailySeal(secret, previousSerialized);
-        if (storedSeal !== computedSeal) {
-          const predecessorSeal = penultimateSerialized === GENESIS_MARKER
-            ? null
-            : computeDailySeal(secret, penultimateSerialized);
-          const interruptedCommit =
-            lastRowSelfAuthenticated && storedSeal === predecessorSeal;
-          if (!interruptedCommit) {
-            throw new Error("permission audit active-tail seal mismatch");
-          }
-          // The row is fsynced/self-authenticated and the stored checkpoint
-          // names its exact predecessor: finish the interrupted seal commit.
-          sealStore.write(sealName, computedSeal);
-        }
+      } finally {
+        if (fd !== undefined) closeSync(fd);
       }
     });
     this.permissionAuditSecret = secret;
