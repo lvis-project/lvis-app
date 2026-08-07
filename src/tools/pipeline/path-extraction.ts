@@ -6,7 +6,7 @@
  * descriptor + finalized input.
  */
 import { resolve as pathResolve } from "node:path";
-import { expandLeadingTilde } from "../../shared/home-tilde.js";
+import { resolveToolPathForPermission } from "../../shared/tool-path-resolution.js";
 import type { Tool } from "../base.js";
 import { getDottedFieldValue } from "../../shared/dotted-field-value.js";
 import {
@@ -44,14 +44,6 @@ export function extractTargetFilePaths(
     }
   }
   return [...new Set(paths)];
-}
-
-export function resolveToolPathForPermission(value: string, cwd: string): string {
-  // Tilde expansion is delegated to `shared/home-tilde.ts` — the SAME function
-  // the tool side calls (`file-read-core.assertReadableFilePath`,
-  // `FileTool.resolvePath`, `FileTool.resolveApprovalPath`). If this diverges
-  // again, the permission layer judges a file the tool never opens.
-  return pathResolve(pathResolve(cwd), expandLeadingTilde(value));
 }
 
 export function shellPathPolicyViolation(
