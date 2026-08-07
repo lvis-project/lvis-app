@@ -9,9 +9,8 @@
  * bridge. `rewireReviewerAgent` is stored on the context so settings/auth
  * changes can re-fire it.
  */
-import { BrowserWindow as BrowserWindowValue } from "electron";
 import { sendToWindow } from "../../ipc/safe-send.js";
-import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
+import { broadcastPermissionConfigChangedFromHost } from "../permission-config-broadcast.js";
 import { PERMISSIONS } from "../../shared/ipc-channels.js";
 import { createProvider, secretKeyFor } from "../../engine/llm/provider-factory.js";
 import { selectProviderRuntimeFetch } from "../../engine/llm/marketplace-provider-fetch.js";
@@ -176,7 +175,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     // would keep showing a stale degrade banner. Push a config-changed event so
     // its onConfigChanged subscription refetches reviewerDegradedToRule and the
     // banner clears the moment a provider/key heals the reviewer.
-    broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+    broadcastPermissionConfigChangedFromHost();
   };
   rewireReviewerAgent();
 
@@ -194,7 +193,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
   // handlers all reach multi-window PermissionsTab — without each
   // call site re-implementing the wiring.
   permissionManager.setBroadcastConfigChanged(() => {
-    broadcastPermissionConfigChangedFromIpc({ getMainWindow, getAppWindows: () => BrowserWindowValue.getAllWindows() } as Parameters<typeof broadcastPermissionConfigChangedFromIpc>[0]);
+    broadcastPermissionConfigChangedFromHost();
   });
 
   // Manifest integrity proxy. Subscribes the audit logger so every read→write
