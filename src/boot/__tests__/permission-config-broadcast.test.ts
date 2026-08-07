@@ -25,6 +25,7 @@ import {
   makeConversationLoopSettings,
 } from "../../engine/__tests__/conversation-loop-test-helpers.js";
 import { PERMISSIONS } from "../../shared/ipc-channels.js";
+import { liveWindow } from "../../__tests__/test-helpers.js";
 
 const h = vi.hoisted(() => ({
   curatedWindows: [] as unknown[],
@@ -51,13 +52,6 @@ import {
   createRoutineConversationLoop,
   createSideChatConversationLoop,
 } from "../conversation.js";
-
-function makeWindow() {
-  return {
-    isDestroyed: () => false,
-    webContents: { isDestroyed: () => false, send: vi.fn() },
-  };
-}
 
 function sharedLoopDeps() {
   return {
@@ -88,8 +82,8 @@ function sharedLoopDeps() {
 
 describe("host permission-config broadcast — window set", () => {
   it("fans out over the curated app windows and never the raw window list", () => {
-    const curated = makeWindow();
-    const oauthWindow = makeWindow();
+    const curated = liveWindow();
+    const oauthWindow = liveWindow();
     h.curatedWindows = [curated];
     h.mainWindow = curated;
     h.getAllWindows.mockReturnValue([curated, oauthWindow]);
