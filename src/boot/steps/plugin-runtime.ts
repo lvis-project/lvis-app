@@ -436,6 +436,7 @@ export async function initPluginRuntime(
     pluginRuntimeAuditLog,
     networkFetch,
     mainWindow,
+    getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
     openAuthPartitionViewerService,
