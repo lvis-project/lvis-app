@@ -1,17 +1,16 @@
 import { session, type WebContents } from "electron";
 import { LVIS_SIDE_BROWSER_PARTITION } from "../shared/side-browser.js";
+import { validateExternalUrl } from "../shared/external-url.js";
 import { markAsLinkOwned } from "./link-window-registry.js";
 
 export type SideBrowserAttachResult = "ignored" | "accepted" | "blocked";
 
+/**
+ * Protocol + embedded-credential rule, delegated to the shared authority
+ * (src/shared/external-url.ts) rather than re-implemented here.
+ */
 function isHttpUrl(value: string): boolean {
-  try {
-    const url = new URL(value);
-    if (url.username || url.password) return false;
-    return url.protocol === "http:" || url.protocol === "https:";
-  } catch {
-    return false;
-  }
+  return validateExternalUrl(value).ok;
 }
 
 export function installSideBrowserPartitionPolicy(): void {
