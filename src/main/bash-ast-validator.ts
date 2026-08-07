@@ -185,6 +185,25 @@ export class BashAstValidator {
       || target === "*";
   }
 
+  /**
+   * Does this tool present itself as a shell? Deliberately a NAME test, and
+   * deliberately the WIDEST of the host's three shell-tool derivations.
+   *
+   * A plugin or MCP tool registers under its own unprefixed name
+   * (`mcpToolToPluginTool` passes `tool.name` through verbatim), so a plugin
+   * tool called `shell-runner` reaches this validator and gets the POSIX
+   * structural rules applied to its command string. That coverage is the point:
+   * narrowing this to the canonical-instance discriminator the runner computes
+   * (`isCanonicalBashTool` / `isCanonicalPowerShellTool` in
+   * `src/tools/invocation-runner.ts`) would drop every non-builtin shell tool
+   * out of structural analysis. The third derivation,
+   * `ASRT_WRAPPED_SHELL_TOOLS` in `src/permissions/sandbox-capability.ts`,
+   * answers a different question (which tools run on the ASRT-wrapped host
+   * shell) and is intentionally the narrowest, builtin-only set.
+   *
+   * The three are NOT merged, and the asymmetry is pinned by
+   * `src/tools/__tests__/executor-shell-tool-identity.test.ts`.
+   */
   private _isBashTool(toolName: string): boolean {
     return /^(bash|shell|exec|run_command|terminal)/i.test(toolName);
   }
