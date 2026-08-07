@@ -141,6 +141,7 @@ function createDeps(pluginRoot: string): {
 }
 
 function registerHandlersWithPlugin(webContentsId: number): {
+  deps: IpcDeps;
   pluginRuntime: ReturnType<typeof createDeps>["pluginRuntime"];
 } {
   const { root, entryUrl } = createPluginFixture();
@@ -154,7 +155,19 @@ function registerHandlersWithPlugin(webContentsId: number): {
       entryUrl,
     }),
   ).toEqual({ ok: true });
-  return { pluginRuntime };
+  return { deps, pluginRuntime };
+}
+
+/** Denial rows written by the single authority (plugins/emit-denial-audit.ts). */
+function emitDenialRows(deps: IpcDeps): Array<{
+  sessionId: string;
+  type: string;
+  input: string;
+}> {
+  const log = deps.auditLogger.log as unknown as ReturnType<typeof vi.fn>;
+  return log.mock.calls
+    .map(([entry]) => entry as { sessionId: string; type: string; input: string })
+    .filter((entry) => String(entry?.input ?? "").includes("plugin_emit_capability_denied"));
 }
 
 describe("plugin theme replay cache", () => {
@@ -433,6 +446,9 @@ describe("plugin theme IPC handlers", () => {
     unregisterPluginWebview(1704, () => {});
     unregisterPluginWebview(1705, () => {});
     unregisterPluginWebview(1706, () => {});
+    unregisterPluginWebview(1709, () => {});
+    unregisterPluginWebview(1710, () => {});
+    unregisterPluginWebview(1711, () => {});
     __resetLastThemePayloadForTests();
   });
 
@@ -739,6 +755,66 @@ describe("plugin theme IPC handlers", () => {
       theme: "dark",
     });
   });
+  it("audits a capability-denied emit through the production plugin emit IPC handler", () => {
+    // Producer is the real handler `registerPluginsHandlers` wires onto
+    // `lvis:plugin:emit-event` — the channel plugin-preload.ts:117 invokes from
+    // a plugin webview. The fixture manifest declares no `emittedEvents`, the
+    // default for a manifest that has not opted into a gated namespace.
+    const { deps, pluginRuntime } = registerHandlersWithPlugin(1709);
+    const emitEvent = getRegisteredHandler("lvis:plugin:emit-event");
+
+    expect(emitEvent(pluginEvent(1709), "meeting.started", { id: "m1" })).toEqual({
+      ok: false,
+      error: "missing-capability:meeting-recorder",
+    });
+
+    const denials = emitDenialRows(deps);
+    expect(denials).toHaveLength(1);
+    expect(denials[0].sessionId).toBe("ipc-bridge");
+    expect(denials[0].type).toBe("error");
+    expect(denials[0].input).toBe(
+      "[plugin:meeting] plugin_emit_capability_denied eventType=meeting.started"
+      + " required=meeting-recorder declaredEmittedEvents=",
+    );
+    expect(pluginRuntime.assertPluginEventEmitAccess).not.toHaveBeenCalled();
+  });
+
+  it("does not audit an emit the manifest declares", () => {
+    const { deps, pluginRuntime } = registerHandlersWithPlugin(1710);
+    pluginRuntime.getPluginManifest.mockReturnValue({
+      id: "meeting",
+      emittedEvents: ["meeting.started"],
+    });
+    const emitEvent = getRegisteredHandler("lvis:plugin:emit-event");
+
+    expect(emitEvent(pluginEvent(1710), "meeting.started", { id: "m1" })).toEqual({
+      ok: true,
+    });
+    expect(pluginRuntime.assertPluginEventEmitAccess).toHaveBeenCalledWith(
+      "meeting",
+      "meeting.started",
+    );
+    expect(emitDenialRows(deps)).toEqual([]);
+  });
+
+  it("audits a host-only-namespace emit denial without a capability label", () => {
+    const { deps } = registerHandlersWithPlugin(1711);
+    const emitEvent = getRegisteredHandler("lvis:plugin:emit-event");
+
+    expect(emitEvent(pluginEvent(1711), "plugin.installed", { id: "spoof" })).toEqual({
+      ok: false,
+      error: "host-only-namespace:plugin",
+    });
+
+    const denials = emitDenialRows(deps);
+    expect(denials).toHaveLength(1);
+    expect(denials[0].sessionId).toBe("ipc-bridge");
+    expect(denials[0].input).toBe(
+      "[plugin:meeting] plugin_emit_capability_denied eventType=plugin.installed"
+      + " required=undefined declaredEmittedEvents=",
+    );
+  });
+
   it("rejects host namespace emits through the production plugin emit IPC handler", () => {
     const { pluginRuntime } = registerHandlersWithPlugin(1703);
     const emitEvent = getRegisteredHandler("lvis:plugin:emit-event");
