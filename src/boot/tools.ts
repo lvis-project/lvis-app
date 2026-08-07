@@ -183,7 +183,7 @@ export interface WorkflowToolDeps {
   /** C2(d): persistent skill-approval allowlist. */
   skillApprovalsStore?: SkillApprovalsStore;
   /** C2(d): ApprovalGate for first-use skill approval modal. */
-  getApprovalGate?: () => ApprovalGate | undefined;
+  approvalGate?: ApprovalGate;
   /**
    * Electron network-stack fetch (`net.fetch`) — routes builtin tool traffic
    * through Chromium's network stack (system proxy/PAC, OS certificate store)
@@ -259,14 +259,14 @@ export function registerBuiltinTools(
     workflowDeps.emitSkillLoad &&
     workflowDeps.skillOverlay &&
     workflowDeps.skillApprovalsStore &&
-    workflowDeps.getApprovalGate
+    workflowDeps.approvalGate
   ) {
     builtins.push(
       createSkillLoadTool({
         store: workflowDeps.skillStore,
         overlay: workflowDeps.skillOverlay,
         approvals: workflowDeps.skillApprovalsStore,
-        getApprovalGate: workflowDeps.getApprovalGate,
+        approvalGate: workflowDeps.approvalGate,
         emit: workflowDeps.emitSkillLoad,
         acquirePluginGeneration: workflowDeps.acquirePluginSkillGeneration,
       }),
