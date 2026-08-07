@@ -41,6 +41,10 @@ async function publishTestHost(
 // fakeRuntime builds a minimal PluginRuntime stub. isSessionActivated now takes
 // (sessionId, pluginId) matching the per-session Map API; the mock can ignore
 // sessionId and return a test-controlled value.
+//
+// Gate 4 itself is NOT stubbed: the delegate runs the real
+// `checkRuntimeAdmission` over the state below, so these assertions still
+// exercise the production predicate.
 function fakeRuntime(over: Partial<Pick<PluginRuntime, "isPluginEnabled" | "isSessionActivated" | "call">>): PluginRuntime {
   const call = over.call ?? vi.fn(async () => "ok");
   return {
