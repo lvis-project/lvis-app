@@ -16,6 +16,10 @@ import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { sendToWindow } from "../safe-send.js";
 import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
+import {
+  NARROWEST_DEFERRED_SCOPE,
+  type DeferredGrantScope,
+} from "../../permissions/reviewer/deferred-queue.js";
 import type { IpcDeps } from "../types.js";
 import type {
   PermissionDirCommand,
@@ -558,6 +562,19 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
          * explicitly declare provenance for audit-chain entries.
          */
         approvalSource: "button" | "natural-language";
+        /**
+         * Grant breadth for an `"approved"` decision. Absent ⇒ the narrowest
+         * ("session"). `"always"` writes settings.json and must therefore be
+         * an explicitly confirmed choice, never a default.
+         */
+        scope?: DeferredGrantScope;
+        /**
+         * Explicit acknowledgement of adjacency warnings. Never defaulted to
+         * true: this is the same widening gate the foreground card enforces
+         * with its warning checkbox, and it lives in
+         * `dispatchPermissionDirCommand` for both callers.
+         */
+        acknowledgeWarnings?: boolean;
       },
     ) => {
       if (!validateSender(e)) {
@@ -574,11 +591,21 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
           params.reason !== undefined &&
           (typeof params.reason !== "string" || params.reason.length > 1_000)
         ) ||
-        (params.approvalSource !== "button" && params.approvalSource !== "natural-language")
+        (params.approvalSource !== "button" && params.approvalSource !== "natural-language") ||
+        (
+          params.scope !== undefined &&
+          params.scope !== "session" &&
+          params.scope !== "always"
+        ) ||
+        (params.acknowledgeWarnings !== undefined &&
+          typeof params.acknowledgeWarnings !== "boolean")
       ) {
         return { ok: false, error: "invalid-params" };
       }
       const approvalSource = params.approvalSource;
+      // Absent scope resolves narrow. An "always" grant only happens when the
+      // caller said so.
+      const scope: DeferredGrantScope = params.scope ?? NARROWEST_DEFERRED_SCOPE;
       const pm = conversationLoop.permissionManager;
       const queue = pm?.getDeferredQueue();
       if (!queue) return { ok: false, error: "no-deferred-queue" };
@@ -600,6 +627,57 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
           approvalSource === "natural-language"
             ? "natural-language chip click"
             : params.reason;
+
+        // An approval must GRANT something. The original call is long dead —
+        // its turn ended and its tool_use_id is consumed — so approving can
+        // only mean "make the next equivalent call succeed". When the lane
+        // recorded no reconstructable grant there is nothing to make succeed,
+        // and recording an approval would tell the user their click did
+        // something it did not. Refuse instead.
+        if (params.decision === "approved") {
+          if (!current.grant) {
+            return { ok: false, error: "no-grant-available" };
+          }
+          const { dispatchPermissionDirCommand } = await import(
+            "../../permissions/permission-slash.js"
+          );
+          const lifecycle = getWorkspaceRootLifecycle();
+          // Mirrors the dirDispatch handler: a settings mutation must never
+          // fall back to the slash dispatcher's settings-only path.
+          if (scope === "always" && !lifecycle) {
+            return { ok: false, error: "workspace lifecycle unavailable" };
+          }
+          const dirResult = await dispatchPermissionDirCommand(
+            {
+              verb: "allow",
+              path: current.grant.path,
+              session: scope === "session",
+              acknowledgeWarnings: params.acknowledgeWarnings === true,
+            },
+            undefined,
+            lifecycle,
+          );
+          if (!dirResult.ok) {
+            // `requiresAcknowledgement` is the adjacency gate — the same one
+            // the foreground card renders as a warning checkbox. Pass it back
+            // so the caller can ask, rather than acknowledging on their behalf.
+            return {
+              ok: false,
+              error: "grant-failed",
+              reason: dirResult.error,
+              ...(dirResult.requiresAcknowledgement
+                ? { requiresAcknowledgement: true, warnings: dirResult.warnings ?? [] }
+                : {}),
+            };
+          }
+          if (dirResult.verb !== "allow") {
+            return { ok: false, error: "grant-failed", reason: "unexpected result" };
+          }
+          if (dirResult.sessionOnly && dirResult.sessionDirectory) {
+            conversationLoop.addSessionAdditionalDirectory(dirResult.sessionDirectory);
+          }
+          broadcastPermissionConfigChanged(deps);
+        }
         try {
           await auditLogger.appendPermissionAuditEntry({
             decision: "deferred_resolve",
@@ -613,6 +691,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
             queueId: current.id,
             resolution: params.decision,
             approvalSource,
+            ...(params.decision === "approved" ? { grantScope: scope } : {}),
             ...(auditReason ? { reason: auditReason } : {}),
           });
         } catch (err) {
@@ -622,7 +701,12 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
             message: (err as Error).message,
           };
         }
-        const resolved = await queue.resolve(params.id, params.decision, auditReason);
+        const resolved = await queue.resolve(
+          params.id,
+          params.decision,
+          auditReason,
+          params.decision === "approved" ? scope : undefined,
+        );
         if (!resolved) return { ok: false, error: "not-found" };
         if (resolved.status !== params.decision) {
           return { ok: false, error: "already-resolved", entry: resolved };

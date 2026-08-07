@@ -1020,6 +1020,12 @@ export async function runToolInvocation(
           level: "high",
           reason: "headless out-of-allowed-dir requires manual directory approval",
         };
+        // The grant an eventual approval will apply. Host-derived, and the
+        // same path the interactive `allow-session` branch above uses, so a
+        // deferred approval cannot be broader than the button would have been.
+        // Recording it here is what makes `"approved"` available for this
+        // entry at all — see DeferredGrant.
+        const deferredGrantPath = suggestedParent ?? outOfAllowedTarget.filePath;
         const deferredId = deferredQueue
           ? await deferredQueue.append({
             toolName: toolUse.name,
@@ -1032,6 +1038,9 @@ export async function runToolInvocation(
               sensitivePathsAdjacent: validation.adjacencyWarnings,
             }),
             verdict,
+            ...(deferredGrantPath
+              ? { grant: { kind: "directory" as const, path: deferredGrantPath } }
+              : {}),
           })
           : undefined;
         const permissionResult: PermissionCheckResult = {
