@@ -11,11 +11,11 @@
  * compile-time fact instead of a copy-paste that rots.
  */
 import { createReadStream, realpathSync } from "node:fs";
-import { homedir } from "node:os";
-import { isAbsolute, join, resolve as pathResolve } from "node:path";
+import { isAbsolute, resolve as pathResolve } from "node:path";
 import { createInterface } from "node:readline";
 import { finished } from "node:stream/promises";
 
+import { expandLeadingTilde } from "../shared/home-tilde.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
   canonicalizePathForMatch,
@@ -27,12 +27,6 @@ import {
 export const MAX_TEXT_FILE_BYTES = 2_000_000;
 /** Leading-byte sample size used for the NUL-byte binary sniff. */
 export const BINARY_SAMPLE_BYTES = 8_192;
-
-export function expandTilde(path: string): string {
-  if (path === "~") return homedir();
-  if (path.startsWith("~/")) return join(homedir(), path.slice(2));
-  return path;
-}
 
 /**
  * A glob pattern (`**\/*.md`, `foo?.ts`, `a{b,c}`) is a tool ARGUMENT, never a
@@ -65,7 +59,7 @@ export function assertReadableFilePath(
   extraAllowed: readonly string[],
 ): AssertReadableResult {
   if (isGlobPattern(inputPath)) return { ok: false, error: "not-a-file" };
-  const expanded = expandTilde(inputPath);
+  const expanded = expandLeadingTilde(inputPath);
   const lexical = isAbsolute(expanded) ? pathResolve(expanded) : pathResolve(cwd, expanded);
   // Resolve symlinks up-front so the guard checks AND the eventual stat/read
   // operate on the SAME canonical target — closes the check-vs-read TOCTOU gap

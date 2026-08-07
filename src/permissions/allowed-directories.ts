@@ -22,13 +22,13 @@
  * compare. This module performs ONLY string prefix logic — never calls
  * `realpath` again (closes TOCTOU race).
  */
-import { homedir } from "node:os";
 import { resolve as pathResolve, sep as pathSep } from "node:path";
 import {
   canonicalizePathForMatch,
   caseFoldForMatch,
   isSensitivePath,
 } from "./sensitive-paths.js";
+import { expandLeadingTilde } from "../shared/home-tilde.js";
 import { lvisHome } from "../shared/lvis-home.js";
 
 /**
@@ -135,7 +135,7 @@ function sanitizeAllowedDirectoryEntries(
   const seen = new Set<string>();
   for (const raw of input) {
     if (typeof raw !== "string" || raw.length === 0) continue;
-    const expanded = expandHomeTilde(raw);
+    const expanded = expandLeadingTilde(raw);
     if (isFilesystemRootPath(expanded)) continue;
     const canonical = canonicalizePathForMatch(expanded);
     const folded = caseFoldForMatch(canonical);
@@ -247,7 +247,7 @@ export function validateDirectoryAddition(rawPath: string): ValidateDirectoryRes
   if (typeof rawPath !== "string" || rawPath.trim().length === 0) {
     return { ok: false, reason: "directory path is empty", adjacencyWarnings };
   }
-  const expanded = expandHomeTilde(rawPath.trim());
+  const expanded = expandLeadingTilde(rawPath.trim());
   if (isFilesystemRootPath(expanded)) {
     return { ok: false, reason: "filesystem root is not allowed", adjacencyWarnings };
   }
@@ -354,14 +354,3 @@ export function buildRuntimeAllowedDirectories(
 }
 
 // ─── helpers ─────────────────────────────────────────
-
-/**
- * Resolve a leading `~` to `homedir()`. Pass-through for everything
- * else. Does not handle `~user` style (Posix only); unsupported by
- * design — spec scope is "current user's home only".
- */
-function expandHomeTilde(p: string): string {
-  if (p === "~") return homedir();
-  if (p.startsWith("~/")) return pathResolve(homedir(), p.slice(2));
-  return p;
-}
