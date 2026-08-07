@@ -1,6 +1,7 @@
 // AUTO-GENERATED — i18n migration. Source: src/ui/renderer/hooks/use-chat-state.ts. Do not edit by hand.
 export const en = {
   "useChatState.guidanceDroppedText": "⚠️ Direction instruction not applied (response limit reached): {text}",
+  "useChatState.approvalUnansweredGuidance": "⚠️ {tools} was not approved, so the response stopped. Ask again to bring the approval card back — pick once, this session, or permanent — or retry with a path inside the allowed directories.",
   "useChatState.errorPrefix": "Error: {error}",
   "useChatState.unknownError": "Unknown error",
   "useChatState.piiRedactedText": "🔒 {count} PII item(s) redacted before sending{kindSuffix}",
@@ -18,6 +19,7 @@ export const en = {
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "useChatState.guidanceDroppedText": "⚠️ 방향 지시 미적용 (응답 한도 도달): {text}",
+  "useChatState.approvalUnansweredGuidance": "⚠️ {tools} 승인이 완료되지 않아 응답이 중단되었습니다. 다시 요청하면 승인 카드가 다시 표시됩니다 — 이번 1회만 / 이 세션 / 영구 중에서 고르거나, 허용된 디렉토리 안의 경로로 다시 시도해 보세요.",
   "useChatState.errorPrefix": "오류: {error}",
   "useChatState.unknownError": "알 수 없는 오류",
   "useChatState.piiRedactedText": "🔒 전송 전 PII {count}건 리댁트됨{kindSuffix}",

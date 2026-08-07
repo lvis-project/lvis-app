@@ -2714,6 +2714,7 @@ export const jaMessages: Record<string, string> = {
   "useChatState.errorPrefix": "エラー: {error}",
   "useChatState.fallbackToast": "⚡ {from}→{to} 自動切り替え",
   "useChatState.guidanceDroppedText": "⚠️ 方向命令は適用されません (応答制限に達しました): {text}",
+  "useChatState.approvalUnansweredGuidance": "⚠️ {tools} が承認されなかったため応答を中断しました。もう一度依頼すると承認カードが再表示されます — 今回のみ / このセッション / 恒久 から選ぶか、許可されたディレクトリ内のパスで再試行してください。",
   "useChatState.llmStatusAttemptFirst": "考え...",
   "useChatState.llmStatusAttemptRetrying": "考え中... 再びモデルの応答を待っています。 ({attempt}/{max})",
   "useChatState.llmStatusFallback": "考え中... デフォルトのモデルは遅いです。バックアップ モデル{to} に切り替えます。",

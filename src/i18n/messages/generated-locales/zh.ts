@@ -2714,6 +2714,7 @@ export const zhMessages: Record<string, string> = {
   "useChatState.errorPrefix": "错误：{error}",
   "useChatState.fallbackToast": "⚡ {from}→{to} 自动切换",
   "useChatState.guidanceDroppedText": "⚠️未应用方向指令（达到响应限制）：{text}",
+  "useChatState.approvalUnansweredGuidance": "⚠️ {tools} 未获批准，响应已中断。再次请求会重新显示批准卡片 — 可选择仅此一次 / 本会话 / 永久，或改用允许目录内的路径重试。",
   "useChatState.llmStatusAttemptFirst": "思维...",
   "useChatState.llmStatusAttemptRetrying": "想着……再次等待模型响应。 ({attempt}/{max})",
   "useChatState.llmStatusFallback": "思考...默认模型很慢；切换到备份模型{to}。",

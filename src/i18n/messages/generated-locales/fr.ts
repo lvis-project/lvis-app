@@ -2678,6 +2678,7 @@ export const frMessages: Record<string, string> = {
   "useChatState.errorPrefix": "Erreur: {error}",
   "useChatState.fallbackToast": "⚡ {from}→{to} à commutation automatique",
   "useChatState.guidanceDroppedText": "⚠️ Instruction de direction non appliquée (limite de réponse atteinte): {text}",
+  "useChatState.approvalUnansweredGuidance": "⚠️ {tools} n'a pas été approuvé, la réponse s'est donc arrêtée. Redemandez pour faire réapparaître la carte d'approbation — une fois, cette session ou permanent — ou réessayez avec un chemin situé dans les répertoires autorisés.",
   "useChatState.llmStatusAttemptFirst": "Pensée...",
   "useChatState.llmStatusAttemptRetrying": "Je réfléchis... J'attends à nouveau la réponse du modèle. ({attempt}/{max})",
   "useChatState.llmStatusFallback": "En réflexion... Le modèle par défaut est lent; passage à un modèle de sauvegarde{to}.",

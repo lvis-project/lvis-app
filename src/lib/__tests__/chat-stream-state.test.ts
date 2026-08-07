@@ -11,6 +11,7 @@ import {
   finalizeStreamingAssistant,
   setAssistantError,
   upsertPermissionReview,
+  withUnansweredApprovalNotice,
   upsertStreamingReasoning,
   upsertStreamingAssistant,
   type ChatEntry,
@@ -572,5 +573,43 @@ describe("dropOptimisticUserEntry", () => {
     expect(dropOptimisticUserEntry(otherUser, "refused turn")).toEqual(otherUser);
 
     expect(dropOptimisticUserEntry([], "refused turn")).toEqual([]);
+  });
+});
+
+describe("withUnansweredApprovalNotice", () => {
+  const review = (status: "needs_approval" | "auto_approved", toolName: string): ChatEntry => ({
+    kind: "permission_review",
+    status,
+    toolName,
+    groupId: "g1",
+    toolUseId: `tu-${toolName}`,
+    displayOrder: 0,
+  });
+
+  it("explains an approval the turn ended without an answer to", () => {
+    const out = withUnansweredApprovalNotice(
+      [{ kind: "user", text: "read it" }, review("needs_approval", "read_file")],
+      (names) => `blocked: ${names.join(", ")}`,
+    );
+    expect(out).toHaveLength(3);
+    expect(out[2]).toEqual({ kind: "system", text: "blocked: read_file" });
+  });
+
+  it("says nothing when every review was answered", () => {
+    const entries: ChatEntry[] = [review("auto_approved", "read_file")];
+    expect(withUnansweredApprovalNotice(entries, () => "blocked")).toBe(entries);
+  });
+
+  it("names each blocked tool once", () => {
+    const out = withUnansweredApprovalNotice(
+      [review("needs_approval", "read_file"), review("needs_approval", "read_file"), review("needs_approval", "run_shell")],
+      (names) => names.join("|"),
+    );
+    expect((out[out.length - 1] as { text: string }).text).toBe("read_file|run_shell");
+  });
+
+  it("adds nothing when the notice renders empty", () => {
+    const entries: ChatEntry[] = [review("needs_approval", "read_file")];
+    expect(withUnansweredApprovalNotice(entries, () => "")).toBe(entries);
   });
 });
