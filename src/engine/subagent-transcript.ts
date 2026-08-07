@@ -70,18 +70,17 @@ export class SubAgentTranscriptAccumulator {
     durationMs: number,
   ): void {
     // Child tool RESULTS are unmasked at this boundary — mask before persist.
-    // `uiPayload` is narrowed to the ToolEntryItem shape (drop `csp` — the
-    // renderer's stored payload never carried it); slot values already match.
     // `title` is a free-text server-authored label that enters this NEW
     // persisted+forwarded snapshot, so it is DLP-masked like every other
-    // child-authored text field. serverId/resourceUri/slot/height are
-    // structural identifiers (masking a URI would corrupt it), left verbatim.
-    const storedUiPayload = uiPayload
+    // child-authored text field. Every other field is a host-minted or
+    // structural identifier (masking a URI would corrupt it), left verbatim —
+    // `generationId` in particular is minted by the host in `PluginMcpHost`,
+    // never child-authored, and the loopback resolver hard-fails a card
+    // without it, so dropping it renders a dead card in the sub-agent
+    // transcript.
+    const storedUiPayload: McpUiPayload | undefined = uiPayload
       ? {
-          serverId: uiPayload.serverId,
-          resourceUri: uiPayload.resourceUri,
-          ...(uiPayload.slot ? { slot: uiPayload.slot } : {}),
-          ...(uiPayload.height !== undefined ? { height: uiPayload.height } : {}),
+          ...uiPayload,
           ...(uiPayload.title !== undefined
             ? { title: maskSensitiveData(uiPayload.title).masked }
             : {}),
