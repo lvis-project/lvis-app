@@ -1509,6 +1509,23 @@ what is permitted, so it needs an owner decision, not a refactor:
 - `plugin-install-network-disclosure-predicate-shadow` — merging makes the
   private-network warning panel appear where it currently does not. That is the
   correct fix, and it is a behaviour change.
+- `assistant-package-lifecycle-channels-templated` — found while closing the
+  deep-link half of `install-result-broadcast-shape-five-declarations`. The
+  plugin lifecycle channels now go through `CHANNELS.plugins.*` and one payload
+  constructor (`buildInstallFailureResult`), but
+  `src/main/lvis-deep-link.ts:171-182` `assistantPackageChannels` still builds
+  the agents/skills equivalents by template — `lvis:${ns}:install-progress`,
+  `-result`, `uninstall-result` — against `CHANNELS.agents.*` /
+  `CHANNELS.skills.*` in `src/contract/app-contract.ts:212,221`. Those are
+  addressable structurally. What makes the entry behaviour-changing is the
+  payload half: agents and skills carry `agentId` / `skillId`
+  (`src/ui/renderer/types.ts:1164-1167`, produced at
+  `src/main/lvis-deep-link.ts:289,318`) and their failures still send
+  `error: err.message` raw. Routing them through the plugin payload type is a
+  field-addition sweep across three channel families, and adopting the stable
+  code changes what the status-bar toast renders for every agent/skill install
+  failure. NOT a quick win: the channel-constant part looks like a five-minute
+  structural edit and the payload part is the actual entry.
 - `webview-preferred-flow-seven-wirings`,
   `appearance-patch-skips-bundleid-and-schemaversion`,
   `system-settings-normalization-duplicated-load-vs-patch` — the
