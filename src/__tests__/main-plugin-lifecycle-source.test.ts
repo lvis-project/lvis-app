@@ -25,10 +25,15 @@ describe("main process plugin lifecycle regression guards", () => {
     const progressCanonicalIndex = lifecycleSection!.indexOf("installProgressSlug = installLockId");
     const lifecycleKeyIndex = lifecycleSection!.indexOf("lifecyclePluginId: installLockId");
     const requestedIdIndex = lifecycleSection!.indexOf("requestedPluginId: params.slug");
-    const catchResultIndex = source.indexOf('slug: installProgressSlug');
+    // The failure payload is now built by the shared `buildInstallFailureResult`
+    // (one constructor for the IPC handler and this deep link), so the literal
+    // `slug: installProgressSlug` object no longer appears. What this index
+    // pins is unchanged: the failure is keyed by the CANONICAL install id, not
+    // by `params.slug`.
+    const catchResultIndex = source.indexOf("buildInstallFailureResult(installProgressSlug");
     const lifecycleHelperIndex = lifecycleSection!.indexOf("await installMarketplacePluginWithLifecycle({");
-    const progressBridgeIndex = lifecycleSection!.indexOf('broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload)');
-    const failureIndex = lifecycleSection!.indexOf('slug: installProgressSlug');
+    const progressBridgeIndex = lifecycleSection!.indexOf("broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload)");
+    const failureIndex = lifecycleSection!.indexOf("buildInstallFailureResult(installProgressSlug");
     const successIndex = lifecycleSection!.indexOf("success: true", lifecycleHelperIndex);
 
     expect(canonicalIdIndex).toBeGreaterThanOrEqual(0);
@@ -37,8 +42,14 @@ describe("main process plugin lifecycle regression guards", () => {
     expect(lifecycleKeyIndex).toBeGreaterThanOrEqual(0);
     expect(requestedIdIndex).toBeGreaterThanOrEqual(0);
     expect(catchResultIndex).toBeGreaterThanOrEqual(0);
-    expect(lifecycleSection).not.toContain('broadcastPluginLifecycleEvent("lvis:plugins:install-progress", { slug: params.slug');
-    expect(lifecycleSection).not.toContain('broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: params.slug');
+    // Both channels are addressed through CHANNELS now, so these guard the
+    // current form. Keyed by `params.slug` is the regression they exist for:
+    // an alias deep-link would then leave a stale in-flight row.
+    expect(lifecycleSection).not.toContain("CHANNELS.plugins.installProgress, { slug: params.slug");
+    expect(lifecycleSection).not.toContain("CHANNELS.plugins.installResult, { slug: params.slug");
+    // ...and the hardcoded channel strings must not come back either.
+    expect(lifecycleSection).not.toContain('broadcastPluginLifecycleEvent("lvis:plugins:install-progress"');
+    expect(lifecycleSection).not.toContain('broadcastPluginLifecycleEvent("lvis:plugins:install-result"');
     expect(lifecycleSection).not.toContain("preparePythonRuntimeForInstalledPlugin");
     expect(lifecycleHelperIndex).toBeGreaterThanOrEqual(0);
     expect(lifecycleSection).toContain("pluginRuntime: activeServices.pluginRuntime");
