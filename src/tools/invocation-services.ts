@@ -60,7 +60,6 @@ export function resolveEnforcedCategory(
   tool: Tool,
   declaredCategory: ToolCategory,
   finalInput: Record<string, unknown>,
-  allowedDirectories: readonly string[],
   correlationId: string,
   operationFloor?: GovernedRiskFloor,
 ): ToolCategory {
@@ -68,7 +67,6 @@ export function resolveEnforcedCategory(
     tool,
     declaredCategory,
     finalInput,
-    allowedDirectories,
     correlationId,
     hostClassifiesRisk: services.hostClassifiesRiskProvider(),
     auditLogger: services.auditLogger,
