@@ -25,6 +25,7 @@ import { act, fireEvent, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 import { t } from "../../../i18n/runtime.js";
 import { fakeLlmSettings } from "../../../shared/__tests__/fake-llm-settings.js";
+import { SESSION_LIST_MAX_LIMIT } from "../../../shared/session-lookup.js";
 
 /**
  * Submit a "/"-prefixed command through the composer. Typing "/foo" opens the
@@ -143,6 +144,70 @@ describe("App.handleAsk — /load command routing", () => {
     // NOTE: chatSessions is called on mount for the session list, so its
     // absence cannot be asserted here; the usage-error banner + no-send are the
     // load-branch locks (the bare-/load path returns before resolving/sending).
+    expect(api.chatSend).not.toHaveBeenCalled();
+  });
+
+  // The renderer's `/load` is the only implementation that runs for typed
+  // composer input (it intercepts before chatSend), so it — not the engine
+  // dispatcher at src/engine/turn/commands.ts — decides what a user can reach.
+  // It used to call `api.chatSessions()` with no options and silently inherit
+  // the `lvis:chat:sessions` defaults (20 rows, kind "main"), while the engine
+  // searched every session of every kind. These two lock the widened query and
+  // the rows it unlocks; the handler half is pinned in
+  // src/ipc/handlers/__tests__/chat-session-prefix-lookup.test.ts.
+  it("sends the shared widest lookup query rather than inheriting the IPC defaults", async () => {
+    const now = new Date().toISOString();
+    const { container, api } = await renderApp({
+      hasApiKey: true,
+      sessions: [{ id: "sess-load-target-xyz", modifiedAt: now, title: "불러올 대화" }],
+    });
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+    api.chatSessions.mockClear();
+
+    await submitSlashCommand(container, "/load sess-load-target");
+
+    await waitFor(() => expect(api.chatSessions).toHaveBeenCalled());
+    const lookupCalls = api.chatSessions.mock.calls.filter(
+      (call: unknown[]) => (call[0] as { kind?: string } | undefined)?.kind === "all",
+    );
+    expect(lookupCalls.length).toBeGreaterThan(0);
+    expect(lookupCalls[0][0]).toMatchObject({
+      kind: "all",
+      limit: SESSION_LIST_MAX_LIMIT,
+    });
+  });
+
+  it("resolves a session past the default page size and a routine-kind session", async () => {
+    const base = Date.parse("2026-01-01T00:00:00.000Z");
+    // 24 filler main sessions ahead of the target, so the target sits outside
+    // the handler's default 20-row page.
+    const filler = Array.from({ length: 24 }, (_, index) => ({
+      id: `sess-filler-${String(index).padStart(2, "0")}`,
+      modifiedAt: new Date(base - index * 1_000).toISOString(),
+      title: `채움 ${index}`,
+    }));
+    const { container, api } = await renderApp({
+      hasApiKey: true,
+      sessions: [
+        ...filler,
+        {
+          id: "sess-deep-routine-target",
+          modifiedAt: new Date(base - 90_000).toISOString(),
+          title: "깊은 루틴 대화",
+          sessionKind: "routine" as const,
+        },
+      ],
+    });
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    await submitSlashCommand(container, "/load sess-deep-routine-target");
+
+    await waitFor(() =>
+      expect(api.chatSessionResume).toHaveBeenCalledWith("sess-deep-routine-target"),
+    );
+    expect(container.textContent).not.toContain(
+      t("app.sessionNotFound", { requested: "sess-deep-routine-target" }),
+    );
     expect(api.chatSend).not.toHaveBeenCalled();
   });
 

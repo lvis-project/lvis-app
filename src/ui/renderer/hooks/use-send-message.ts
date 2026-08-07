@@ -23,6 +23,10 @@ import type { useChatState } from "./use-chat-state.js";
 import type { useSessions } from "./use-sessions.js";
 import type { useSettings } from "./use-settings.js";
 import { subscriptionImageAttachmentLimitViolation } from "../utils/subscription-runtime-ui-policy.js";
+import {
+  SESSION_ID_PREFIX_LOOKUP_QUERY,
+  findSessionByIdPrefix,
+} from "../../../shared/session-lookup.js";
 import type { HandleAskRefFn } from "./use-routine-overlay.js";
 
 type Api = ReturnType<typeof getApi>;
@@ -180,8 +184,12 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
             setErrorWithThought(t("app.loadCommandUsage"));
             return;
           }
-          const listed = await api.chatSessions();
-          const match = listed.sessions.find((session) => session.id.startsWith(requested));
+          // Ask the widest query the IPC honours — `/load` is scoped by the id
+          // the user typed, not by recency or kind. Passing no options here
+          // silently inherited the handler defaults (20 rows, kind "main") and
+          // disagreed with the engine dispatcher's lookup.
+          const listed = await api.chatSessions({ ...SESSION_ID_PREFIX_LOOKUP_QUERY });
+          const match = findSessionByIdPrefix(listed.sessions, requested);
           if (!match) {
             setErrorWithThought(t("app.sessionNotFound", { requested }));
             return;
