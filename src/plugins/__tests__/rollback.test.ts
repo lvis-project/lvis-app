@@ -286,6 +286,9 @@ describe("PluginMarketplaceService install → update → rollback", () => {
     await expect(svc.ensureManagedInstalled({
       mode: "pre-start-sync",
       ensurePluginStateReadyForInstall: async () => undefined,
+      removeDelistedAdminInstall: async (_removal, commitRegistryRemoval) => {
+        await commitRegistryRemoval();
+      },
     })).resolves.toMatchObject({
       updated: ["example-sample"],
     });
