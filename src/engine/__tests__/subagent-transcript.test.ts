@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { SubAgentTranscriptAccumulator } from "../subagent-transcript.js";
 import type { ToolCallMeta } from "../../tools/executor.js";
+import { resolveMcpUiBackend } from "../../mcp/mcp-ui-backend-resolver.js";
+import type {
+  ExternalUiSource,
+  LoopbackUiSource,
+} from "../../mcp/mcp-ui-backend-resolver.js";
 
 function meta(over: Partial<ToolCallMeta> = {}): ToolCallMeta {
   return {
@@ -70,6 +75,60 @@ describe("SubAgentTranscriptAccumulator", () => {
     // Structural identifiers are left verbatim (masking a URI would corrupt it).
     expect(stored?.resourceUri).toBe("ui://widget/1");
     expect(stored?.serverId).toBe("srv-1");
+  });
+
+  it("keeps the card's generation id so a sub-agent card resolves its loopback backend", () => {
+    // Producer-driven: the accumulator is the ONLY hop that rebuilds the
+    // uiPayload object, and the sub-agent transcript renders through the same
+    // TranscriptRenderer as main chat — so a card that loses `generationId`
+    // here reaches `resolveMcpUiBackend` without one and hard-fails, showing a
+    // dead card. Start at the real producer, end at the real consumer.
+    const acc = new SubAgentTranscriptAccumulator();
+    acc.onToolStart("mcp_widget", {}, meta());
+    acc.onToolEnd(
+      "mcp_widget",
+      "ok",
+      false,
+      meta(),
+      {
+        serverId: "my-plugin",
+        generationId: "gen-abc",
+        resourceUri: "ui://my-plugin/card.html",
+        slot: "chat",
+      },
+      5,
+    );
+    const group = acc.snapshot()[0];
+    if (group.kind !== "tool_group") throw new Error("expected tool_group");
+    const stored = group.tools[0].uiPayload;
+
+    const asserted: string[] = [];
+    const loopback = {
+      has: () => true,
+      assertCardGeneration: (_serverId: string, generationId: string) => {
+        asserted.push(generationId);
+      },
+      readUiResource: async () => ({}),
+      resolveToolOwner: () => undefined,
+      resolveOperationGrantTarget: () => undefined,
+      callTool: async () => ({}),
+    } as unknown as LoopbackUiSource;
+    const mcpManager = {
+      readUiResource: async () => ({}),
+      resolveToolOwner: () => undefined,
+      resolveOperationGrantTarget: () => undefined,
+      callTool: async () => ({}),
+    } as unknown as ExternalUiSource;
+
+    const backend = resolveMcpUiBackend(
+      stored!.serverId,
+      { loopback, mcpManager },
+      stored?.generationId,
+    );
+    expect(backend).toBeDefined();
+    // The resolver binds the exact generation the host minted — not merely
+    // "some truthy id".
+    expect(asserted).toEqual(["gen-abc"]);
   });
 
   it("DLP-masks reasoning + assistant text from a child round", () => {
