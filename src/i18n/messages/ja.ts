@@ -33,6 +33,7 @@ export const ja: Record<SeedMessageKey, string> = {
   "mainDialog.installLocalPluginTitle": "ローカルプラグインをインストール (開発者)",
   "mainDialog.installLocalPluginMessage": "plugin.json を含むビルドフォルダーを選択してください",
   "mainDialog.unauthorizedFrame": "許可されていないフレームです。",
+  "mainDialog.pluginDisableNotPermitted": "このプラグインは組織によって管理されているため、無効にできません。",
   "mainDialog.noPersonasAvailable": "利用可能な persona はありません",
   "mainDialog.exportConversationTitle": "会話をエクスポート",
   "mainDialog.importConversationTitle": "会話をインポート",

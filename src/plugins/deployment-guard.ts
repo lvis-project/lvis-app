@@ -16,6 +16,20 @@ export interface GuardResult {
   reason?: string;
 }
 
+/**
+ * Thrown when a {@link PluginDeploymentGuard} decision denies a lifecycle
+ * mutation. Callers that need to distinguish a policy denial from an
+ * operational failure (the IPC layer maps it to its own error code) must use
+ * `instanceof` — never a message-prefix match, so the denial wording stays a
+ * single authority here.
+ */
+export class PluginDeploymentDeniedError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "PluginDeploymentDeniedError";
+  }
+}
+
 function normalizeInstallPolicy(value: {
   installPolicy?: InstallPolicy;
 } | null | undefined): InstallPolicy {
