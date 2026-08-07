@@ -82,7 +82,11 @@ export function createSystemPromptBuilder(opts: {
     memoryManager,
     toolRegistry,
 
-    getPluginCards: () => pluginRuntime.listPluginCards(toolRegistry),
+    // Registry-in, cards-out: the builder passes ITS OWN `deps.toolRegistry`,
+    // so a sub-agent's isolated builder (created with a `createScopedView`)
+    // advertises only plugins whose tools that child can actually call. Do not
+    // close over `toolRegistry` here — that reintroduces the two-authority split.
+    getPluginCards: (registry) => pluginRuntime.listPluginCards(registry),
     getActivatablePluginIds,
     getAvailableSkills,
     getActiveSkillsSection,

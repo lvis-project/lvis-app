@@ -48,6 +48,14 @@ import {
   type SubscriptionChatRuntimeSelection,
 } from "../../shared/subscription-runtime.js";
 import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
+import {
+  CARD_FIXTURE_IN_SCOPE_PLUGIN,
+  CARD_FIXTURE_IN_SCOPE_TOOL,
+  CARD_FIXTURE_OUT_OF_SCOPE_PLUGIN,
+  CARD_FIXTURE_OUT_OF_SCOPE_TOOLS,
+  pluginCardRuntimeFixture,
+} from "../../plugins/__tests__/plugin-card-runtime-fixture.js";
+import { createSystemPromptBuilder } from "../../boot/conversation.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import { A2A_ROLE_AGENT, A2ATaskState, type A2AMessage,
@@ -63,11 +71,13 @@ class ScriptedProvider implements LLMProvider {
   readonly vendor = "openai" as const;
   public turnsServed = 0;
   public observedToolNames: string[][] = [];
+  public observedSystemPrompts: string[] = [];
 
   constructor(private readonly turns: StreamEvent[][]) {}
 
   async *streamTurn(params: StreamTurnParams): AsyncIterable<StreamEvent> {
     this.observedToolNames.push((params.tools ?? []).map((tool) => tool.name));
+    this.observedSystemPrompts.push(params.systemPrompt);
     const idx = this.turnsServed++;
     yield* this.turns[idx] ?? this.turns[this.turns.length - 1] ?? [
       { type: "text_delta", text: "(out-of-script)" },
@@ -1063,6 +1073,97 @@ describe("SubAgentRunner — sourceTools allowlist", () => {
       expect(provider.observedToolNames[0]).toEqual([scheduleToolName]);
       expect(provider.observedToolNames[0]).not.toContain("other_plugin_tool");
       expect(execSpy).toHaveBeenCalledOnce();
+    } finally {
+      hasProviderSpy.mockRestore();
+      refreshProviderSpy.mockRestore();
+    }
+  });
+
+  it("does not ADVERTISE a plugin the child cannot call (prompt scope == registry scope)", async () => {
+    // The child's executable surface is the scoped registry. Its ADVERTISED
+    // surface (the request_plugin catalog in the system prompt) must be bounded
+    // by that same registry — it used to be computed from the boot-time global
+    // one, because the boot factory closed over it.
+    const toolRegistry = new ToolRegistry();
+    const pluginTools: Array<[string, string]> = [
+      [CARD_FIXTURE_IN_SCOPE_PLUGIN, CARD_FIXTURE_IN_SCOPE_TOOL],
+      ...CARD_FIXTURE_OUT_OF_SCOPE_TOOLS.map(
+        (name) => [CARD_FIXTURE_OUT_OF_SCOPE_PLUGIN, name] as [string, string],
+      ),
+    ];
+    for (const [pluginId, name] of pluginTools) {
+      toolRegistry.register(
+        createDynamicTool({
+          name,
+          description: `${name} description`,
+          source: "plugin",
+          pluginId,
+          category: "read",
+          isReadOnly: () => true,
+          jsonSchema: { type: "object", properties: {} },
+          execute: async () => ({ output: "ok", isError: false }),
+        }),
+      );
+    }
+
+    const provider = new ScriptedProvider([[
+      { type: "text_delta", text: "done" },
+      { type: "message_complete", stopReason: "end_turn" },
+    ]]);
+    // The REAL boot factory builds the card provider — this is the producer.
+    const parentDeps = {
+      ...buildLoopDeps(toolRegistry),
+      systemPromptBuilder: createSystemPromptBuilder({
+        memoryManager: {
+          getAgentsMd: () => "",
+          getMemoryIndex: () => "",
+          getUserPreferences: () => "",
+          getMemoryContext: () => "",
+        } as never,
+        toolRegistry,
+        pluginRuntime: pluginCardRuntimeFixture(process.cwd()),
+      }),
+    } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["parentDeps"];
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      // The child builder reads THIS memory manager (createIsolated overrides it).
+      subAgentMemoryManager: {
+        ...fakeSubAgentMemoryManager(),
+        getAgentsMd: () => "",
+        getMemoryIndex: () => "",
+        getUserPreferences: () => "",
+        getMemoryContext: () => "",
+      } as never,
+    });
+    const hasProviderSpy = vi
+      .spyOn(ConversationLoop.prototype as unknown as { hasProvider: () => boolean }, "hasProvider")
+      .mockReturnValue(true);
+    const refreshProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { refreshProvider: () => void },
+        "refreshProvider",
+      )
+      .mockImplementation(function (this: ConversationLoop) {
+        (this as { provider: LLMProvider | null }).provider = provider;
+      });
+
+    try {
+      await runner.spawn({
+        title: "scoped child",
+        instructions: "summarize",
+        sourceTools: [CARD_FIXTURE_IN_SCOPE_TOOL],
+        maxRounds: 1,
+      });
+
+      const childPrompt = provider.observedSystemPrompts[0] ?? "";
+      // Enforcement: the child can only call the one allowlisted plugin tool.
+      expect(provider.observedToolNames[0]).toEqual([CARD_FIXTURE_IN_SCOPE_TOOL]);
+      // Advertisement must agree.
+      expect(childPrompt).not.toContain(CARD_FIXTURE_OUT_OF_SCOPE_PLUGIN);
+      for (const name of CARD_FIXTURE_OUT_OF_SCOPE_TOOLS) {
+        expect(childPrompt).not.toContain(name);
+      }
     } finally {
       hasProviderSpy.mockRestore();
       refreshProviderSpy.mockRestore();
