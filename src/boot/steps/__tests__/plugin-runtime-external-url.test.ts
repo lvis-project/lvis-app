@@ -151,6 +151,24 @@ describe("routeExternalUrl (§B3)", () => {
     ).rejects.toThrow(/only http\(s\)/);
   });
 
+  it("rejects URLs with embedded credentials without opening anything", async () => {
+    // http(s) alone is not sufficient: `https://trusted.example@evil.tld/`
+    // reads as trusted.example but navigates to evil.tld. Delegated to the
+    // shared validateExternalUrl authority, so this goes red if that rule is
+    // dropped there OR if this wiring stops delegating.
+    const stub = makeStub("in-app");
+    await expect(
+      routeExternalUrl({ url: "https://trusted.example@evil.tld/", pluginId: "p", ...stub }),
+    ).rejects.toThrow(/embedded credentials/);
+    expect(stub.openLinkWindowService).not.toHaveBeenCalled();
+
+    const sysStub = makeStub("system-browser");
+    await expect(
+      routeExternalUrl({ url: "https://u:p@evil.tld/", pluginId: "p", ...sysStub }),
+    ).rejects.toThrow(/embedded credentials/);
+    expect(sysStub.shellOpenExternal).not.toHaveBeenCalled();
+  });
+
   it("audit log records origin+path but NOT query/hash (secret-bearing)", async () => {
     const stub = makeStub("in-app");
     await routeExternalUrl({

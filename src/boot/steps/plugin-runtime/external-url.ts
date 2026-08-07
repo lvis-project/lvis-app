@@ -7,6 +7,7 @@
  */
 import type { AuditEntry } from "../../../audit/audit-logger.js";
 import type { SettingsService } from "../../../data/settings-store.js";
+import { validateExternalUrl } from "../../../shared/external-url.js";
 
 /**
  * §B3 — Stable persistent partition for the in-app external-link viewer.
@@ -51,20 +52,27 @@ export async function routeExternalUrl(input: {
   shellOpenExternal: (url: string) => Promise<void>;
 }): Promise<void> {
   const { url, pluginId, settingsService, bootAuditLogger, openLinkWindowService, shellOpenExternal } = input;
-  if (typeof url !== "string" || url.length === 0) {
-    throw new Error(`[plugin:${pluginId}] openExternalUrl: url must be a non-empty string`);
-  }
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    throw new Error(`[plugin:${pluginId}] openExternalUrl: invalid URL`);
-  }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+  // Protocol + embedded-credential rule delegated to the shared authority
+  // (src/shared/external-url.ts); this function only maps the structured
+  // verdict onto the plugin-facing error messages.
+  const validated = validateExternalUrl(url);
+  if (!validated.ok) {
+    if (validated.error === "invalid-url") {
+      throw new Error(`[plugin:${pluginId}] openExternalUrl: url must be a non-empty string`);
+    }
+    if (validated.error === "malformed-url") {
+      throw new Error(`[plugin:${pluginId}] openExternalUrl: invalid URL`);
+    }
+    if (validated.error === "embedded-credentials") {
+      throw new Error(
+        `[plugin:${pluginId}] openExternalUrl: URLs with embedded credentials are not allowed`,
+      );
+    }
     throw new Error(
-      `[plugin:${pluginId}] openExternalUrl: only http(s) URLs are allowed (got ${parsed.protocol})`,
+      `[plugin:${pluginId}] openExternalUrl: only http(s) URLs are allowed (got ${validated.protocol})`,
     );
   }
+  const parsed = new URL(validated.url);
   const safeUrlForLog = `${parsed.origin}${parsed.pathname}`;
   const flow = settingsService.get("webView")?.preferredFlow ?? "in-app";
 

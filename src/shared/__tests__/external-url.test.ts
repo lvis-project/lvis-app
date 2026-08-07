@@ -64,11 +64,38 @@ describe("validateExternalUrl", () => {
     });
   });
 
-  it("accepts http URLs with path, query, and credentials", () => {
+  it("accepts http URLs with path and query", () => {
     // Documents the positive case beyond the bare-host smoke test —
     // path/query do not change the validator's decision.
     const result = validateExternalUrl("https://marketplace.lvisai.xyz/admin?tab=keys");
     expect(result.ok).toBe(true);
     if (result.ok) expect(result.url).toBe("https://marketplace.lvisai.xyz/admin?tab=keys");
+  });
+
+  it("rejects URLs with embedded credentials", () => {
+    // `https://trusted.example@evil.tld/` reads as "trusted.example" to a
+    // human but navigates to evil.tld — a phishing primitive, so http(s)
+    // alone is not sufficient.
+    expect(validateExternalUrl("https://trusted.example@evil.tld/")).toEqual({
+      ok: false,
+      error: "embedded-credentials",
+    });
+    expect(validateExternalUrl("https://user:pass@evil.tld/")).toEqual({
+      ok: false,
+      error: "embedded-credentials",
+    });
+    expect(validateExternalUrl("http://:hunter2@evil.tld/pay")).toEqual({
+      ok: false,
+      error: "embedded-credentials",
+    });
+  });
+
+  it("does not treat an @ elsewhere in the URL as credentials", () => {
+    // Guards the rule against over-rejection: `@` in a path or query is
+    // ordinary, and only the parsed username/password fields count.
+    const path = validateExternalUrl("https://example.com/users/@alice");
+    expect(path.ok).toBe(true);
+    const query = validateExternalUrl("https://example.com/s?to=a@b.com");
+    expect(query.ok).toBe(true);
   });
 });
