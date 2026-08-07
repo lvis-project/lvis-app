@@ -54,7 +54,16 @@ function skillLoadHarness() {
     overlay: { register: vi.fn(), unregister: vi.fn() } as unknown as SkillLoadToolDeps["overlay"],
     approvals: { isApproved: async () => true, record: async () => undefined } as unknown as
       SkillLoadToolDeps["approvals"],
-    getApprovalGate: () => undefined,
+    // The tool's own approval gate must never be consulted here: `isApproved`
+    // above already returns true, so any refusal can only come from the
+    // turn-scope gate. A throwing gate keeps that precondition honest — if a
+    // change ever routes this harness through the modal, this fails loudly
+    // instead of quietly turning a scope test into an approval test.
+    approvalGate: {
+      requestAndWait: async () => {
+        throw new Error("approval gate must not be consulted in a turn-scope test");
+      },
+    } as unknown as SkillLoadToolDeps["approvalGate"],
     emit: vi.fn(),
     acquirePluginGeneration: acquirePluginGeneration as unknown as
       SkillLoadToolDeps["acquirePluginGeneration"],

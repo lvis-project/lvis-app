@@ -1477,7 +1477,7 @@ describe("skill_load tool", () => {
       store,
       overlay,
       approvals: stubApprovals,
-      getApprovalGate: () => undefined,
+      approvalGate: undefined as never,
       emit: (e) => events.push(e.name),
     });
     const r = await tool.execute({ skillName: "report-writing" }, ctx("sess-1"));
@@ -1500,7 +1500,7 @@ describe("skill_load tool", () => {
       store,
       overlay,
       approvals: stubApprovals,
-      getApprovalGate: () => undefined,
+      approvalGate: undefined as never,
       emit: () => undefined,
     });
     const r = await tool.execute({ skillName: "does-not-exist" }, ctx());
@@ -1514,7 +1514,7 @@ describe("skill_load tool", () => {
       store,
       overlay,
       approvals: stubApprovals,
-      getApprovalGate: () => undefined,
+      approvalGate: undefined as never,
       emit: () => undefined,
     });
     const r = await tool.execute({ skillName: "../../etc/passwd" }, ctx());
@@ -1530,7 +1530,7 @@ describe("skill_load tool", () => {
       store,
       overlay: new SkillOverlay(),
       approvals: stubApprovals,
-      getApprovalGate: () => undefined,
+      approvalGate: undefined as never,
       emit: () => undefined,
     });
     const result = await tool.execute(

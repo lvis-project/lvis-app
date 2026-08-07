@@ -92,8 +92,12 @@ export interface SkillLoadToolDeps {
   overlay: SkillOverlay;
   /** Persistent allowlist for user-authored skills. */
   approvals: SkillApprovalsStore;
-  /** ApprovalGate for first-use prompts (user-authored skills only). */
-  getApprovalGate: () => ApprovalGate | undefined;
+  /**
+   * ApprovalGate for first-use prompts (user-authored skills only). Held by
+   * value like every other gate wiring: the gate is constructed before the
+   * builtin tools are registered, so there is nothing to late-bind.
+   */
+  approvalGate: ApprovalGate;
   /** Renderer event sink — used by the chat to render the SkillBadge. */
   emit: (event: SkillLoadEvent) => void;
   /** Exact generation lease held from materialized body read through overlay registration. */
@@ -195,16 +199,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
         approvalMaterial(skill),
       );
       if (!alreadyApproved) {
-        const gate = deps.getApprovalGate();
-        if (!gate) {
-          return {
-            output: JSON.stringify({
-              error: "skill_load approval gate unavailable",
-            }),
-            isError: true,
-          };
-        }
-        const decision = await gate.requestAndWait({
+        const decision = await deps.approvalGate.requestAndWait({
           id: randomUUID(),
           category: "tool",
           toolName: "skill_load",
