@@ -35,10 +35,6 @@ describe("headless reviewer governed audit projection", () => {
           operation: "status",
           opaqueSecret: "must-never-reach-deferred-storage",
         },
-        {
-          operation: "status",
-          opaqueSecret: "must-never-reach-deferred-storage",
-        },
         [],
         [],
         { trustOrigin: "plugin-emitted" },
