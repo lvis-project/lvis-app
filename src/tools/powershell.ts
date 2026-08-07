@@ -243,10 +243,10 @@ export class PowerShellTool extends ZodTool<typeof PowerShellToolInputSchema> {
         };
       }
     }
-    const preflightError = await validatePowerShellCommand(input.command);
-    if (preflightError) {
-      return { output: preflightError, isError: true, metadata: { preflightDenied: true } };
-    }
+    // The structural AST deny for this command string is Step 2.5 in the
+    // invocation runner (one stage for both shell dialects), NOT here. Running
+    // it here put it AFTER `consumeHostShellExecutionPermit` had burned the
+    // user's one-shot allow, so a refused command still cost the permit.
     if (hostShellPlan.mode === "blocked") {
       return {
         output:
