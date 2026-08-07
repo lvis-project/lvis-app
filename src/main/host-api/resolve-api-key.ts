@@ -42,13 +42,15 @@ import type { SettingsService } from "../../data/settings-store.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import { shouldBlockPluginSecretRead } from "../../plugins/secret-shape.js";
-import { runTier3Then4 } from "../../plugins/whitelist/tier-order.js";
-import type { TierOutcome } from "../../plugins/whitelist/tier-order.js";
+import {
+  hostSecretKeyForVendor,
+  runSecretGate,
+} from "../../plugins/whitelist/secret-gate.js";
+import type { SecretGateOutcome } from "../../plugins/whitelist/secret-gate.js";
 import {
   incrementHostSecretCounter,
   sanitizeKeyPrefix,
 } from "../../telemetry/host-secret-counters.js";
-import { isMarketplaceProviderPresetId } from "../../shared/marketplace-package-assets.js";
 
 export type ResolveApiKeyPurpose = "llm" | "stt" | "embedding" | "vision";
 export type ResolveApiKeyVendor =
@@ -254,18 +256,33 @@ export async function resolveApiKey(
     );
   }
   const vendor = normalizedVendor;
-  const activeProvider =
-    vendor === "openai-compatible" &&
-    defaultActiveProvider === "openai-compatible" &&
-    isMarketplaceProviderPresetId(llmSettings.marketplaceProviderPresetId)
-      ? llmSettings.marketplaceProviderPresetId
-      : defaultActiveProvider;
-  const llmKey = `llm.apiKey.${vendor}`;
+  const readGateSettings = () => ({
+    llmProvider: defaultActiveProvider,
+    marketplaceProviderPresetId: llmSettings.marketplaceProviderPresetId,
+    readInstalledProviderPresetIds: () =>
+      (
+        (
+          deps.settingsService.get("marketplace") as {
+            installedProviderPresets?: readonly { providerId: string }[];
+          }
+        ).installedProviderPresets ?? []
+      ).map((preset) => preset.providerId),
+  });
+  // WHICH key holds this vendor's credential is asked once, in the shared gate
+  // module. Building `llm.apiKey.<vendor>` inline here is what made the
+  // `llm.marketplaceProvider.<presetId>.apiKey` family structurally unreachable
+  // through this API even when the manifest and the signed whitelist granted it.
+  const llmKey = hostSecretKeyForVendor(vendor, {
+    llmProvider: defaultActiveProvider,
+    marketplaceProviderPresetId: llmSettings.marketplaceProviderPresetId,
+  });
   const keyPrefix = sanitizeKeyPrefix(llmKey);
 
-  // Tier-1 own namespace shortcut — the plugin asked for *its* key, not a
-  // host secret. We still return the bearer through `resolveApiKey` to
-  // unify the lifetime contract on the plugin side.
+  // Tier-1 own-namespace shortcut — the plugin asked for *its* key, not a host
+  // secret. We still return the bearer through `resolveApiKey` to unify the
+  // lifetime contract on the plugin side. A MISS falls through to the host
+  // tiers rather than terminating, which is this API's own semantics: it was
+  // asked for "a key for this vendor", not for one named key.
   const ownNamespaceKey = `plugin.${deps.pluginId}.llm.apiKey.${vendor}`;
   const ownValue = deps.settingsService.getSecret(ownNamespaceKey);
   if (shouldBlockPluginSecretRead({ pluginId: deps.pluginId, storageKey: ownNamespaceKey, value: ownValue })) {
@@ -287,66 +304,43 @@ export async function resolveApiKey(
     return makeSuccess(vendor, ownValue, mergedSignal);
   }
 
-  // Tier-2 manifest allowlist.
-  const allowlist = deps.manifest.hostSecrets?.read ?? [];
-  if (!allowlist.includes(llmKey)) {
-    audit(
-      deps,
-      "warn",
-      `resolveApiKey deny reason=not-whitelisted vendor=${vendor} (manifest)`,
-    );
-    incrementHostSecretCounter("hostSecret_denied", deps.pluginId, keyPrefix);
-    return { ok: false, reason: "not-whitelisted" };
-  }
-
-  // #958/#959 security — trust source for the Tier-3
-  // admin-bypass gate: registry-recorded `installSource` (verified at
-  // install time, lives outside the plugin's writable surface) is the only
-  // admin bypass source. `manifest.installPolicy` is user-writable advisory
-  // metadata and never activates the secret-access bypass.
-  // Without this anchoring a malicious post-install plugin.json patch
-  // could flip `installPolicy:"admin"` and inherit the Tier-3 bypass.
-  const effectiveInstallPolicy: "admin" | "user" =
-    deps.registryInstallSource === "admin" ? "admin" : "user";
-  // Tier-3 + Tier-4 via the shared helper (`runTier3Then4`). Ralph cycle 1
-  // MEDIUM fix unifies the order between this path and `getSecret`:
-  // whitelist registry (coarse signed ACL) → active-vendor cross-check
-  // (per-call dynamic state).
-  const tierOutcome = runTier3Then4({
+  // #958/#959 security — trust source for the Tier-3 admin-bypass gate:
+  // registry-recorded `installSource` (verified at install time, lives outside
+  // the plugin's writable surface) is the only admin bypass source.
+  // `manifest.installPolicy` is user-writable advisory metadata and never
+  // activates the secret-access bypass.
+  const gateOutcome = runSecretGate({
     pluginId: deps.pluginId,
     key: llmKey,
+    allowlist: deps.manifest.hostSecrets?.read ?? [],
     manifestSha256: deps.manifestSha256,
     installedManifestSha256: deps.registryManifestSha256,
-    vendor,
-    activeProvider,
-    // #955/#959 — admin-installed plugins bypass only the Tier-3 signed
-    // whitelist registry ACL. The registry manifest SHA and Tier-4 vendor
-    // cross-check still apply.
-    installPolicy: effectiveInstallPolicy,
+    installPolicy: deps.registryInstallSource === "admin" ? "admin" : "user",
+    readSettings: readGateSettings,
   });
-  if (tierOutcome.kind === "deny") {
+  if (gateOutcome.kind === "deny") {
     audit(
       deps,
       "warn",
-      `resolveApiKey deny reason=${tierOutcome.reason} vendor=${vendor} (${tierOutcome.tier})`,
+      `resolveApiKey deny reason=${gateOutcome.reason} vendor=${vendor} (${gateOutcome.tier})`,
     );
     incrementHostSecretCounter("hostSecret_denied", deps.pluginId, keyPrefix);
-    if (tierOutcome.tier === "tier-4") {
+    if (gateOutcome.tier === "tier-4") {
       return { ok: false, reason: "vendor-mismatch" };
     }
-    // Tier-3 deny — map registry reasons (`manifest-sha-mismatch`,
-    // `whitelist-unreachable`, `whitelist-stale-exceeded`, `not-whitelisted`)
-    // to the SDK enum's narrow `not-whitelisted` slot. Detailed reason
-    // lives in the audit log for operators.
+    // Tier-2/Tier-3 deny — map the gate's reasons (`not-allowlisted`,
+    // `manifest-sha-mismatch`, `whitelist-unreachable`,
+    // `whitelist-stale-exceeded`, `not-whitelisted`) to the SDK enum's narrow
+    // `not-whitelisted` slot. The precise reason lives in the audit log.
     return { ok: false, reason: "not-whitelisted" };
   }
   // #958 round-1 security MEDIUM — admin-bypass audit + counter. Emit an
-  // explicit audit line BEFORE the host-secret read so operators can
-  // pivot on `policy=admin manifest-allowlist-bypassed` in the audit log even if the
-  // subsequent settings lookup fails for an unrelated reason. The
-  // dedicated `hostSecret_admin_bypass` counter is on top of the regular
+  // explicit audit line BEFORE the host-secret read so operators can pivot on
+  // `policy=admin manifest-allowlist-bypassed` in the audit log even if the
+  // subsequent settings lookup fails for an unrelated reason. The dedicated
+  // `hostSecret_admin_bypass` counter is on top of the regular
   // `hostSecret_read` increment downstream so totals stay comparable.
-  if (tierOutcome.via === "admin-bypass") {
+  if (gateOutcome.via === "admin-bypass") {
     audit(
       deps,
       "info",
@@ -369,7 +363,7 @@ export async function resolveApiKey(
   audit(
     deps,
     "info",
-    `resolveApiKey allow source=${grantAuditSource(tierOutcome.via)} vendor=${vendor} purpose=${request.purpose}`,
+    `resolveApiKey allow source=${grantAuditSource(gateOutcome.via)} vendor=${vendor} purpose=${request.purpose}`,
   );
   incrementHostSecretCounter("hostSecret_read", deps.pluginId, keyPrefix);
 
@@ -401,11 +395,13 @@ export async function resolveApiKey(
  * line — which is the contract `TierOutcome`'s own doc comment promises.
  */
 function grantAuditSource(
-  via: Extract<TierOutcome, { kind: "allow" }>["via"],
+  via: Extract<SecretGateOutcome, { kind: "allow" }>["via"],
 ): string {
   switch (via) {
     case "admin-bypass":
       return "registry.installSource";
+    case "own-namespace":
+      return "plugin-namespace";
     case undefined:
       return "whitelist-registry";
     default: {
