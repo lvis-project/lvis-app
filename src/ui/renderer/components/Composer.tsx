@@ -884,6 +884,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
           onKeyUp={syncCaret}
           onClick={syncCaret}
           onSelect={syncCaret}
+          // The chord is armed by a keydown and disarmed by the paste it
+          // belongs to. If that paste never arrives — the OS swallowed the
+          // accelerator, or focus moved on — leaving focus ends the chord too,
+          // so a later context-menu paste (which has no keydown to disarm it)
+          // cannot inherit an intent the user expressed for a different one.
+          onBlur={() => { plainPasteRequestedRef.current = false; }}
           onCompositionStart={() => {
             isComposingRef.current = true;
             setIsComposing(true);

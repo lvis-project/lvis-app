@@ -275,6 +275,20 @@ describe("Composer", () => {
     await waitFor(() => expect(screen.queryByTestId("attachment-chip")).not.toBeNull());
   });
 
+  it("disarms the chord when focus leaves before any paste arrives", async () => {
+    render(<Harness />);
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    // Chord pressed, but the paste never arrives — the OS swallowed the
+    // accelerator, say — and focus moves on.
+    fireEvent.keyDown(textarea, { key: "v", code: "KeyV", metaKey: true, shiftKey: true });
+    fireEvent.blur(textarea);
+
+    // A context-menu paste carries no keydown that would disarm a stale chord.
+    fireEvent.paste(textarea, { clipboardData: textClipboardData(LONG_PASTE) });
+    await waitFor(() => expect(screen.queryByTestId("attachment-chip")).not.toBeNull());
+  });
+
   it("blocks clipboard image attachment when native image input is unavailable", () => {
     const onWarningCb = vi.fn();
     mockSave.mockClear();
