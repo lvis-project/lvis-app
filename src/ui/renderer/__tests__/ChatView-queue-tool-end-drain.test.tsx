@@ -100,6 +100,40 @@ describe("message queue — mid-turn tool_end drain", () => {
     });
   });
 
+  it("keeps a row the user rewrote while the hand-off was in flight", async () => {
+    const guide = deferred<{ ok: true }>();
+    const { emitChatStream, api, pendingSend } = await queueOneWhileStreaming();
+    api.chatGuide.mockImplementationOnce(async () => guide.promise);
+
+    await act(async () => {
+      emitChatStream({ type: "tool_end", toolUseId: "t1", name: "read_file", result: "ok" });
+    });
+    await waitFor(() => expect(api.chatGuide).toHaveBeenCalledTimes(1));
+    expect(api.chatGuide.mock.calls[0][0]).toContain("대기 중 추가 요청");
+
+    // Items stay editable while the call is in flight — the whole point of not
+    // taking them optimistically.
+    const queued = getQueueStore()!.getItems()[0]!;
+    await act(async () => {
+      getQueueStore()!.update(queued.id, "고쳐 쓴 요청");
+    });
+
+    await act(async () => {
+      guide.resolve({ ok: true });
+      await Promise.resolve();
+    });
+
+    // The engine only ever saw the OLD wording, so the rewritten row must not
+    // be discarded on the strength of its id.
+    expect(getQueueStore()!.size()).toBe(1);
+    expect(getQueueStore()!.getItems()[0]!.text).toBe("고쳐 쓴 요청");
+
+    await act(async () => {
+      pendingSend.resolve({ ok: true });
+      await Promise.resolve();
+    });
+  });
+
   it("does not send the same items twice when tool_end events burst", async () => {
     const guide = deferred<{ ok: true }>();
     const { emitChatStream, api, pendingSend } = await queueOneWhileStreaming();
