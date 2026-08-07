@@ -520,6 +520,53 @@ export function isAllowedHostSecretKey(value: unknown): value is string {
   );
 }
 
+/**
+ * Collection bound from `schemas/plugin-manifest.schema.json`
+ * (`hostSecrets.read.maxItems`). Declared rather than imported from the schema
+ * JSON: this module is renderer-reachable and the schema is a ~38 KB JSON
+ * module. The two values are pinned to each other by an executed test
+ * (`src/plugins/runtime/__tests__/host-secrets-manifest.test.ts`), which reads
+ * the schema from disk — so a schema edit that is not mirrored here fails CI.
+ */
+export const HOST_SECRET_READ_MAX_ITEMS = 32;
+
+/** What {@link findHostSecretReadListViolation} found, if anything. */
+export type HostSecretReadListViolation =
+  | { readonly kind: "maxItems"; readonly count: number }
+  | { readonly kind: "duplicate"; readonly index: number; readonly key: string };
+
+/**
+ * THE collection gate for a `hostSecrets.read[]` array — the counterpart of
+ * {@link isAllowedHostSecretKey}, which judges one entry at a time and so can
+ * see neither `maxItems` nor `uniqueItems`.
+ *
+ * One definition for both runtime enforcement points, for the same reason the
+ * per-item predicate has one: a signed whitelist grant and a manifest must not
+ * be able to disagree about how large a host-secret allowlist may be. On the
+ * manifest path AJV enforces the same two bounds against the vendored schema,
+ * so this is defence-in-depth there; on the signed-whitelist path
+ * (`parseWhitelistDocument`) there is no schema leg at all and this is the only
+ * gate (#1939).
+ *
+ * Reports the first violation rather than throwing: the two call sites raise
+ * differently shaped errors (`fail()` vs a `[whitelist]`-prefixed throw), and
+ * both reject the document — a signed grant is never silently trimmed, since
+ * that would enforce something other than what was signed.
+ */
+export function findHostSecretReadListViolation(
+  keys: readonly string[],
+): HostSecretReadListViolation | undefined {
+  if (keys.length > HOST_SECRET_READ_MAX_ITEMS) {
+    return { kind: "maxItems", count: keys.length };
+  }
+  const seen = new Set<string>();
+  for (let i = 0; i < keys.length; i += 1) {
+    const key = keys[i];
+    if (seen.has(key)) return { kind: "duplicate", index: i, key };
+    seen.add(key);
+  }
+  return undefined;
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === "object" && !Array.isArray(value)

@@ -28,6 +28,8 @@ import { toolVisibility } from "./tool-visibility.js";
 import { createLogger } from "../../lib/logger.js";
 import { normalizeAllowedHosts } from "../../main/host-allow-list.js";
 import {
+  HOST_SECRET_READ_MAX_ITEMS,
+  findHostSecretReadListViolation,
   isAllowedHostSecretKey } from "../../shared/marketplace-package-assets.js";
 import { resolvePluginContributionDeclarations } from "../plugin-contributions.js";
 
@@ -714,6 +716,22 @@ export async function parsePluginJson(
             `"hostSecrets": { "read": ["llm.apiKey.openai", "llm.marketplaceProvider.future-router.apiKey"] }`,
           );
         }
+      }
+      // Collection bounds. AJV already enforces `maxItems`/`uniqueItems` from
+      // the vendored schema on this path, so this is defence-in-depth — but it
+      // is what makes the "no wider allowlist than the schema permits" claim
+      // above true rather than approximately true (#1939).
+      const violation = findHostSecretReadListViolation(readArr as string[]);
+      if (violation) {
+        fail(
+          violation.kind === "maxItems"
+            ? "hostSecrets.read"
+            : `hostSecrets.read[${violation.index}]`,
+          violation.kind === "maxItems"
+            ? `has ${violation.count} entries; at most ${HOST_SECRET_READ_MAX_ITEMS} are allowed (manifest_schema)`
+            : `value '${violation.key}' is a duplicate; entries must be unique (manifest_schema)`,
+          `"hostSecrets": { "read": ["llm.apiKey.openai"] }`,
+        );
       }
     }
   }
