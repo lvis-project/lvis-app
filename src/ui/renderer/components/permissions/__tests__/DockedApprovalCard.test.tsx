@@ -121,62 +121,39 @@ describe("DockedApprovalCard — narrow scopes commit on native activation", () 
   });
 });
 
-describe("DockedApprovalCard — widening scopes need the modifier", () => {
-  it.each(["allow-session", "allow-always"])(
-    "activating %s does not grant on its own",
-    async (choice) => {
-      const { onDecide } = await renderCard();
-      await act(async () => {
-        fireEvent.click(screen.getByTestId(`docked-approval-choice-${choice}`));
-      });
-      expect(onDecide).not.toHaveBeenCalled();
-    },
-  );
-
-  it("repeating plain Enter on a widening scope never grants", async () => {
-    // With the confirm step gone, this modifier is the only thing between
-    // arrow-then-Enter and a standing grant.
+describe("DockedApprovalCard — widening requires moving there first", () => {
+  it("grants nothing until focus has been moved to the widening scope", async () => {
+    // The safety claim: a widening scope is not reachable by repeating the key
+    // already under the user's finger. Pressing the focused (narrowest) scope
+    // can never yield a standing grant.
     const { onDecide } = await renderCard();
     await act(async () => {
-      fireEvent.keyDown(card(), { key: "3" });
+      fireEvent.click(screen.getByTestId("docked-approval-choice-allow-once"));
     });
-    for (let i = 0; i < 4; i += 1) {
-      await act(async () => {
-        fireEvent.keyDown(card(), { key: "Enter" });
-        fireEvent.click(screen.getByTestId("docked-approval-choice-allow-always"));
-      });
-    }
-    expect(onDecide).not.toHaveBeenCalled();
+    expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
+    expect(onDecide).not.toHaveBeenCalledWith("allow-always", expect.anything());
   });
 
-  it("applies the focused widening scope on Ctrl+Enter with the host path", async () => {
+  it("applies the widening scope, with the host path, once moved there", async () => {
     const { onDecide } = await renderCard();
     await act(async () => {
       fireEvent.keyDown(card(), { key: "3" });
     });
     await act(async () => {
-      fireEvent.keyDown(card(), { key: "Enter", ctrlKey: true });
+      fireEvent.click(screen.getByTestId("docked-approval-choice-allow-always"));
     });
     expect(onDecide).toHaveBeenCalledWith("allow-always", PARENT);
   });
 
-  it("applies session scope on Ctrl+Enter", async () => {
+  it("applies session scope with the file it was asked about", async () => {
     const { onDecide } = await renderCard();
     await act(async () => {
       fireEvent.keyDown(card(), { key: "2" });
     });
     await act(async () => {
-      fireEvent.keyDown(card(), { key: "Enter", ctrlKey: true });
+      fireEvent.click(screen.getByTestId("docked-approval-choice-allow-session"));
     });
     expect(onDecide).toHaveBeenCalledWith("allow-session", TARGET);
-  });
-
-  it("Ctrl+Enter on the narrowest scope applies that, not a wider one", async () => {
-    const { onDecide } = await renderCard();
-    await act(async () => {
-      fireEvent.keyDown(card(), { key: "Enter", ctrlKey: true });
-    });
-    expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
 });
 

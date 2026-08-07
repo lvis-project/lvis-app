@@ -1152,7 +1152,7 @@ export const frMessages: Record<string, string> = {
   "dockedApprovalCard.choiceSession": "Cette session",
   "dockedApprovalCard.choiceAlways": "Toujours",
   "dockedApprovalCard.choiceDeny": "Refuser",
-  "dockedApprovalCard.keyHint": "← → déplacer · Ctrl+Entrée appliquer · Échap refuser",
+  "dockedApprovalCard.keyHint": "← → déplacer · Entrée appliquer · Échap refuser",
   "deferredQueuePanel.approveSessionButton": "Autoriser {path} pour cette session",
   "deferredQueuePanel.approveSessionTitle": "Autorise l'accès sous {path} jusqu'à la fin de cette conversation. Non enregistré de façon permanente.",
   "deferredQueuePanel.noGrantAvailable": "Cette demande ne peut plus être approuvée : son appel est terminé et aucun répertoire à autoriser n'a été enregistré.",

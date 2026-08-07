@@ -1149,7 +1149,7 @@ export const deMessages: Record<string, string> = {
   "dockedApprovalCard.choiceSession": "Diese Sitzung",
   "dockedApprovalCard.choiceAlways": "Immer",
   "dockedApprovalCard.choiceDeny": "Ablehnen",
-  "dockedApprovalCard.keyHint": "← → bewegen · Ctrl+Enter anwenden · Esc ablehnen",
+  "dockedApprovalCard.keyHint": "← → bewegen · Enter anwenden · Esc ablehnen",
   "deferredQueuePanel.approveSessionButton": "{path} für diese Sitzung erlauben",
   "deferredQueuePanel.approveSessionTitle": "Erlaubt den Zugriff unter {path} bis zum Ende dieser Konversation. Nicht dauerhaft gespeichert.",
   "deferredQueuePanel.noGrantAvailable": "Diese Anfrage kann nicht nachträglich genehmigt werden – ihr Aufruf ist beendet und es wurde kein zu erlaubendes Verzeichnis aufgezeichnet.",
