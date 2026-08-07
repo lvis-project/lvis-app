@@ -259,7 +259,16 @@ describe("ConversationLoop — active/inactive plugin gating (#1176)", () => {
     expect(provider.observedToolNames[0]).toContain("meeting_stop");
   });
 
-  it("onPluginDisabled prunes the disabled plugin from carried-forward scope", async () => {
+  // NOTE: this loop is built with `forcedActivePluginIds: ["com.example.meeting"]`,
+  // which re-adds the plugin to `activePluginIds` on EVERY turn regardless of
+  // `lastTurnScope`. `onPluginDisabled` (which only deletes from `lastTurnScope`)
+  // therefore cannot change the outcome here — deleting its body leaves this test
+  // green. The disabled-plugin drop is owned solely by the per-turn
+  // `isPluginEnabled` gate in `resolveToolScope`; the call is asserted below only
+  // to pin that it stays harmless on the forced-scope path. Carried-forward
+  // invalidation itself is covered by request-plugin.test.ts, which uses a loop
+  // with no forced scope so `lastTurnScope` is actually load-bearing.
+  it("re-disabling a forced-active plugin drops its tools even though onPluginDisabled cannot prune forced scope", async () => {
     const provider = new RecordingProvider([
       [
         { type: "text_delta", text: "meeting scoped" },
@@ -277,8 +286,9 @@ describe("ConversationLoop — active/inactive plugin gating (#1176)", () => {
     });
     expect(provider.observedToolNames[0]).toContain("meeting_start");
 
-    // Simulate the disable hook firing — the carried-forward meeting scope is
-    // pruned so a follow-up turn no longer revives meeting tools.
+    // The user toggles the plugin inactive. The disable hook fires too, but
+    // forced scope means the drop below comes entirely from the per-turn
+    // isPluginEnabled gate.
     inactivePluginIds.add("com.example.meeting");
     loop.onPluginDisabled("com.example.meeting");
     await loop.runTurn("계속 진행해줘", undefined, undefined, {
