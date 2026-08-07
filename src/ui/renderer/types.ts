@@ -2,6 +2,7 @@
 // Pure type declarations — no React runtime, no hook state, no side effects.
 
 import type { PluginUiExtensionView } from "../../plugin-ui-host.js";
+import type { PluginInstallResultPayload } from "../../contract/app-contract.js";
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
@@ -1155,7 +1156,7 @@ export type LvisApi = {
     ) => void,
   ) => () => void;
   retryBootstrap: () => Promise<{ ok: true } | { ok: false; error: string }>;
-  onPluginInstallResult: (h: (payload: { slug: string; success: boolean; preparing?: boolean; error?: string }) => void) => () => void;
+  onPluginInstallResult: (h: (payload: PluginInstallResultPayload) => void) => () => void;
   onPluginUninstallResult: (h: (payload: { slug: string; success: boolean; error?: string }) => void) => () => void;
   /** #1176 — plugin active/inactive toggled (this surface or another). */
   onPluginEnabledChanged?: (h: (payload: { pluginId: string; enabled: boolean }) => void) => () => void;
