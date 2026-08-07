@@ -25,7 +25,7 @@ import {
   resolve as pathResolve,
   sep,
 } from "node:path";
-import { homedir } from "node:os";
+import { expandLeadingTilde } from "../shared/home-tilde.js";
 
 export interface SandboxValidationResult {
   allowed: boolean;
@@ -54,7 +54,7 @@ export function validateSandboxPath(
   }
 
   for (const allowed of extraAllowed) {
-    const resolvedAllowed = canonicalize(expandTilde(allowed));
+    const resolvedAllowed = canonicalize(expandLeadingTilde(allowed));
     if (isWithin(resolved, resolvedAllowed)) {
       return { allowed: true, reason: "" };
     }
@@ -67,7 +67,7 @@ export function validateSandboxPath(
 }
 
 function canonicalize(path: string): string {
-  const absolute = pathResolve(expandTilde(path));
+  const absolute = pathResolve(expandLeadingTilde(path));
   if (existsSync(absolute)) {
     return realpathSync.native(absolute);
   }
@@ -85,16 +85,6 @@ function canonicalize(path: string): string {
 
   const canonicalParent = realpathSync.native(cursor);
   return suffix.length > 0 ? join(canonicalParent, ...suffix) : canonicalParent;
-}
-
-function expandTilde(path: string): string {
-  if (path === "~") {
-    return homedir();
-  }
-  if (path.startsWith("~/")) {
-    return pathResolve(homedir(), path.slice(2));
-  }
-  return path;
 }
 
 function isWithin(child: string, parent: string): boolean {
