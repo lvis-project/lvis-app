@@ -17,7 +17,10 @@ import { emitEvent as emitHostEvent } from "../boot/types.js";
 import type { AppServices } from "../boot.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { CHANNELS } from "../contract/app-contract.js";
-import { buildInstallFailureResult } from "../shared/plugin-install-result.js";
+import {
+  buildInstallFailureResult,
+  MarketplaceBackendDisabledError,
+} from "../shared/plugin-install-result.js";
 import {
   drainPluginInstallLockOperations,
   installMarketplacePluginWithLifecycle,
@@ -168,16 +171,24 @@ function marketplacePackageLabel(packageType: MarketplacePackageType): string {
   return t("be_main.labelPlugin");
 }
 
+/**
+ * The agents/skills lifecycle channels this handler broadcasts on.
+ *
+ * Reads the declared constants rather than interpolating the package namespace
+ * into the channel name: an interpolated name renames silently when a channel
+ * does, and the renderer listens on `CHANNELS.agents.*` / `CHANNELS.skills.*`,
+ * so the toast would just stop appearing with nothing failing.
+ */
 function assistantPackageChannels(packageType: "agent" | "skill"): {
   installProgress: string;
   installResult: string;
   uninstallResult: string;
 } {
-  const ns = packageType === "agent" ? "agents" : "skills";
+  const family = packageType === "agent" ? CHANNELS.agents : CHANNELS.skills;
   return {
-    installProgress: `lvis:${ns}:install-progress`,
-    installResult: `lvis:${ns}:install-result`,
-    uninstallResult: `lvis:${ns}:uninstall-result`,
+    installProgress: family.installProgress,
+    installResult: family.installResult,
+    uninstallResult: family.uninstallResult,
   };
 }
 
@@ -188,6 +199,10 @@ async function handleAssistantMarketplaceAction(
 ): Promise<void> {
   const channels = assistantPackageChannels(params.packageType);
   const label = marketplacePackageLabel(params.packageType);
+  // `label` is localized for dialog copy. The failure payload's fallback text
+  // is not UI copy — it lands in `error`, which the renderer treats as a stable
+  // English code, so it must not be localized here.
+  const englishLabel = params.packageType === "agent" ? "Agent" : "Skill";
   const target = await resolveMarketplaceActionTarget(activeServices, params.slug);
   if (params.action === "uninstall") {
     if (target.installed === false) {
@@ -243,11 +258,10 @@ async function handleAssistantMarketplaceAction(
       });
     })().catch((err: Error) => {
       log.error({ slug: params.slug, packageType: params.packageType, error: err.message, stack: err.stack }, "lvis:// assistant package uninstall failed");
-      broadcastPluginLifecycleEvent(channels.uninstallResult, {
-        slug: params.slug,
-        success: false,
-        error: err.message,
-      });
+      broadcastPluginLifecycleEvent(
+        channels.uninstallResult,
+        buildInstallFailureResult(params.slug, err, `${englishLabel} uninstall failed`),
+      );
     });
     return;
   }
@@ -265,7 +279,7 @@ async function handleAssistantMarketplaceAction(
   void (async () => {
     if (params.packageType === "agent") {
       if (!activeServices.agentArtifactStore) {
-        throw new Error("Agent marketplace install is unavailable: marketplace backend is disabled in this build.");
+        throw new MarketplaceBackendDisabledError("agent");
       }
       const { installAgentPackageFromMarketplace } = await import("../agents/agent-installer.js");
       const result = await installAgentPackageFromMarketplace(params.slug, {
@@ -294,7 +308,7 @@ async function handleAssistantMarketplaceAction(
       return;
     }
     if (!activeServices.skillArtifactStore) {
-      throw new Error("Skill marketplace install is unavailable: marketplace backend is disabled in this build.");
+      throw new MarketplaceBackendDisabledError("skill");
     }
     const { installSkillPackageFromMarketplace } = await import("../skills/skill-installer.js");
     const result = await installSkillPackageFromMarketplace(params.slug, {
@@ -322,11 +336,14 @@ async function handleAssistantMarketplaceAction(
     });
   })().catch((err: Error) => {
     log.error({ slug: params.slug, packageType: params.packageType, error: err.message, stack: err.stack }, "lvis:// assistant package install failed");
-    broadcastPluginLifecycleEvent(channels.installResult, {
-      slug: params.slug,
-      success: false,
-      error: err.message,
-    });
+    // Same failure payload the IPC agent/skill install handler sends. Both land
+    // on the same status-bar toast, which calls `formatIpcError(error, message)`
+    // — hand-building `{ error: err.message }` here sent the raw English
+    // sentence where the IPC path sends a code the renderer localizes.
+    broadcastPluginLifecycleEvent(
+      channels.installResult,
+      buildInstallFailureResult(params.slug, err, `${englishLabel} install failed`),
+    );
   });
 }
 
