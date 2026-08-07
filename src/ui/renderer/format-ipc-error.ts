@@ -151,6 +151,8 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "not-registered": "formatIpcError.notRegistered",
   "already-resolved": "formatIpcError.alreadyResolved",
   "already-resolving": "formatIpcError.alreadyResolving",
+  "no-grant-available": "formatIpcError.noGrantAvailable",
+  "grant-failed": "formatIpcError.grantFailed",
 
   // ── Assistant context / role / memory / routine ──
   "invalid-assistant-context": "formatIpcError.invalidAssistantContext",
