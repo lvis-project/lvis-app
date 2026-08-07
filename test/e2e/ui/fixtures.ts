@@ -105,15 +105,43 @@ function prepareE2eManifest(manifest: E2eManifest, enableCredentialProbe: boolea
   };
 }
 
-function buildHostPluginStub(manifestId: string, enableCredentialProbe: boolean,
+function buildHostPluginStub(
+  manifestId: string,
+  enableCredentialProbe: boolean,
+  toolNames: readonly string[] = [],
 ): string {
+  /**
+   * A handler per manifest tool.
+   *
+   * Without these the stub shipped `handlers: {}`, so every tool the manifest
+   * declared was dropped at registration ("tool disabled — missing handler")
+   * and the plugin tool surface simply did not exist for the model. Any spec
+   * claiming to prove a plugin tool call was proving nothing. The bodies echo
+   * a marker so a test can tell "the model asked for this tool AND the host
+   * dispatched it" from "the tool name merely appears in the prompt".
+   */
+  const echoHandlers = toolNames
+    .map((name) => `      ${JSON.stringify(name)}: async (args) => (`
+      + `{ ok: true, stub: ${JSON.stringify(`e2e-stub:${manifestId}:`)} + ${JSON.stringify(name)}, args }),`)
+    .join("\n");
+
   if (!enableCredentialProbe || manifestId !== "meeting") {
-    return `export default function createPlugin() { return { handlers: {}, start() {}, stop() {} }; }\n`;
+    return `export default function createPlugin() {
+  return {
+    handlers: {
+${echoHandlers}
+    },
+    start() {},
+    stop() {}
+  };
+}
+`;
   }
 
   return `export default function createPlugin(context) {
   return {
     handlers: {
+${echoHandlers}
       ${E2E_RESOLVE_CREDENTIAL_PROBE_TOOL}: async () => {
         const resolver = context.hostApi && context.hostApi.resolveApiKey;
         if (typeof resolver !== "function") {
@@ -394,7 +422,13 @@ async function seedE2ePlugins(
       fs.mkdirSync(targetDist, { recursive: true, mode: 0o700 });
       fs.writeFileSync(
         path.join(targetDist, "hostPlugin.js"),
-        buildHostPluginStub(manifest.id, enableCredentialProbe),
+        buildHostPluginStub(
+          manifest.id,
+          enableCredentialProbe,
+          (Array.isArray(manifest.tools) ? manifest.tools : [])
+            .map((tool) => (tool as { name?: unknown }).name)
+            .filter((name): name is string => typeof name === "string"),
+        ),
         "utf-8",
       );
       for (const ui of uiEntries) {
@@ -521,9 +555,17 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
     // LVIS_E2E_PERMISSION_MODE=allow to exercise the tool path end to end.
     const permissionMode = process.env.LVIS_E2E_PERMISSION_MODE?.trim();
     if (permissionMode) {
+      // The WHOLE PermissionsFile shape. `readPermissionsFile` discards the
+      // file unless `version === 1` and `rules` is an array, and a discarded
+      // file silently falls back to `default` — so a partial seed looks like
+      // it worked while the app never leaves the default mode.
       fs.writeFileSync(
         path.join(lvisHomeForTest, "permissions.json"),
-        JSON.stringify({ mode: permissionMode }, null, 2) + "\n",
+        JSON.stringify(
+          { version: 1, rules: [], mode: permissionMode, updatedAt: new Date().toISOString() },
+          null,
+          2,
+        ) + "\n",
         { encoding: "utf-8", mode: 0o600 },
       );
     }
