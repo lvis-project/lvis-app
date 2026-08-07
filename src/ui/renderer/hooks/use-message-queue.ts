@@ -121,7 +121,7 @@ export function useMessageQueue({
     if (guideFlushInflightRef.current || guideFlushBlockedRef.current) return;
     const pending = messageQueueStore.getItems();
     if (pending.length === 0) return;
-    const ids = pending.map((item) => item.id);
+    const handed = pending.map((item) => ({ id: item.id, text: item.text }));
     const count = pending.length;
     const formatted = formatQueueInject(pending);
     guideFlushInflightRef.current = true;
@@ -129,9 +129,17 @@ export function useMessageQueue({
       try {
         const result = await onGuide(formatted);
         if (result?.ok === true) {
-          // Remove exactly what was handed over. Anything the user queued
-          // while the call was in flight stays for the next brake point.
-          for (const id of ids) messageQueueStore.remove(id);
+          // Remove exactly what was handed over — by id AND by text. Items
+          // stay editable while the call is in flight, so an id alone would
+          // discard a row the user rewrote after the engine had already seen
+          // the old wording. A rewritten row stays queued and goes out at the
+          // next brake point. Anything queued during the call stays too.
+          const current = new Map(
+            messageQueueStore.getItems().map((item) => [item.id, item.text]),
+          );
+          for (const { id, text } of handed) {
+            if (current.get(id) === text) messageQueueStore.remove(id);
+          }
           return;
         }
         const reason = result?.error ?? "unknown";
