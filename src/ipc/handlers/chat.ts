@@ -27,6 +27,7 @@ import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ParentMailboxEntry } from "../../engine/subagent-message-mailbox.js";
 import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
+import { SESSION_LIST_MAX_LIMIT } from "../../shared/session-lookup.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import type { SessionKind } from "../../memory/memory-manager.js";
@@ -571,7 +572,7 @@ export function handleChatSessions(
 ) {
   const { conversationLoop, memoryManager } = deps;
   const limit = typeof opts?.limit === "number" && Number.isFinite(opts.limit)
-    ? Math.max(1, Math.min(100, Math.floor(opts.limit)))
+    ? Math.max(1, Math.min(SESSION_LIST_MAX_LIMIT, Math.floor(opts.limit)))
     : 20;
   const beforeTime = typeof opts?.before === "string" ? Date.parse(opts.before) : Number.NaN;
   const before = Number.isNaN(beforeTime) ? undefined : new Date(beforeTime);
