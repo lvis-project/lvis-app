@@ -99,7 +99,10 @@ describe("both lanes classify the same object", () => {
       cache: new VerdictCache(join(dir, "cache.jsonl")),
       deferredQueue: new DeferredQueue(join(dir, "queue.jsonl")),
     });
-    return { pm, seen };
+    // `dir` is handed back so a dispatch can name a REAL directory as the
+    // tool's execution cwd — `ReviewerDispatchInput.executionCwd` is required
+    // precisely so no producer can fall back to `process.cwd()`.
+    return { pm, seen, dir };
   };
 
   afterEach(() => {
@@ -109,12 +112,13 @@ describe("both lanes classify the same object", () => {
 
   for (const c of LANE_SENSITIVE) {
     it(`${c.label}: dispatchReviewer grades the raw arguments and returns the raw verdict`, async () => {
-      const { pm, seen } = makeManager();
+      const { pm, seen, dir } = makeManager();
       const result = await pm.dispatchReviewer("net_probe", {
         source: "plugin",
         category: "network",
         pathFields: [],
         finalInput: c.input,
+        executionCwd: dir,
         allowedDirectories: [],
         sensitivePathsAdjacent: [],
         trustOrigin: "llm-tool-arg",
@@ -179,6 +183,7 @@ describe("DLP is preserved at the sinks", () => {
         category: "network",
         pathFields: [],
         finalInput: { note: "alice@example.com" },
+        executionCwd: dir,
         allowedDirectories: [],
         sensitivePathsAdjacent: [],
         trustOrigin: "llm-tool-arg",
