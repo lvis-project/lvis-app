@@ -19,10 +19,10 @@ import { describe, expect, it, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 
 import {
-  buildInstallFailureResult,
   IncompatibleAppVersionError,
   INCOMPATIBLE_APP_VERSION_CODE,
 } from "../../../../../plugins/public-contract.js";
+import { buildInstallFailureResult } from "../../../../../shared/plugin-install-result.js";
 import type { PluginInstallResultPayload } from "../../../../../contract/app-contract.js";
 import type { LvisApi } from "../../../types.js";
 import { useStatusBarInstall } from "../use-status-bar-install.js";
