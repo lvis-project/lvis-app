@@ -5,6 +5,7 @@ import type {
 } from "../shared/permission-review-status.js";
 import type { LLMVendor } from "../shared/llm-vendor-defaults.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
+import type { McpUiPayload } from "../mcp/types.js";
 import {
   normalizeSubscriptionUsageTelemetry,
   type SubscriptionUsageTelemetry,
@@ -99,13 +100,7 @@ export type StreamEvent = {
   to?: string;
   reason?: string;
   /** Optional MCP Apps UI payload emitted with tool_end events. */
-  uiPayload?: {
-    serverId: string;
-    resourceUri: string;
-    slot?: "chat" | "sidebar" | "tool-result";
-    height?: number;
-    title?: string;
-  };
+  uiPayload?: McpUiPayload;
   /**
    * Wall-clock execution time of a single tool call (ms). Emitted on
    * `tool_end` for every path (success, error, deny, rate-limit) so the
@@ -161,13 +156,7 @@ export type ToolEntryItem = {
   /** Renderer-safe host shell substrate projection on tool completion. */
   executionPlan?: HostShellExecutionPlanAuditProjection;
   /** Optional MCP Apps UI payload from MCP tool response. */
-  uiPayload?: {
-    serverId: string;
-    resourceUri: string;
-    slot?: "chat" | "sidebar" | "tool-result";
-    height?: number;
-    title?: string;
-  };
+  uiPayload?: McpUiPayload;
   /**
    * Wall-clock execution duration in milliseconds. Set on tool completion
    * (success or error). Used by ToolGroupCard to render `⏱ 1.4s` next to
