@@ -40,9 +40,9 @@ import { probePrivateHost } from "../../../plugins/private-host-probe.js";
 import { shouldBlockPluginSecretRead } from "../../../plugins/secret-shape.js";
 import {
   canEmitEvent,
-  requiredCapabilityForEmit,
   CAPABILITY_EXTERNAL_AUTH_CONSUMER,
 } from "../../../plugins/capabilities.js";
+import { auditPluginEmitDenial } from "../../../plugins/emit-denial-audit.js";
 import { getDeclaredEmittedEvents } from "../../../plugins/runtime/manifest-validation.js";
 import { applyConfigDefaults } from "../../../plugins/config-schema.js";
 import { OVERLAY_V1 } from "../../../shared/ipc-channels.js";
@@ -490,16 +490,13 @@ export function createHostApiFactory(
         plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
         const declaredEmittedEvents = getDeclaredEmittedEvents(manifest);
         if (!canEmitEvent(type, declaredEmittedEvents)) {
-          const requiredCap = requiredCapabilityForEmit(type);
-          try {
-            bootAuditLogger.log({
-              timestamp: new Date().toISOString(),
-              sessionId: "plugin",
-              type: "error",
-              input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${requiredCap} declaredEmittedEvents=${declaredEmittedEvents.join("|")}`,
-            });
-          } catch { /* audit must not break host */ }
-          plog("warn", { pluginId, phase: PluginPhase.CAPABILITY_DENY, capability: requiredCap ?? type, eventType: type, reason: "missing_capability" }, "capability denied");
+          auditPluginEmitDenial({
+            auditLogger: bootAuditLogger,
+            lane: "plugin",
+            pluginId,
+            eventType: type,
+            declaredEmittedEvents,
+          });
           throw new Error(`Plugin '${pluginId}' is not allowed to emit undeclared event '${type}'`);
         }
         pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
