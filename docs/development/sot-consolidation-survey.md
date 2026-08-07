@@ -1492,6 +1492,30 @@ audit row, or a cache key.
 Each is a real duplicate whose consolidation would change what a user sees or
 what is permitted, so it needs an owner decision, not a refactor:
 
+- `shell-tool-identity-three-derivations` — found while landing
+  `shell-structural-command-deny-two-wirings` (PR #1949). Three answers to
+  "is this a shell tool" coexist: the name regex `_isBashTool` at
+  `src/main/bash-ast-validator.ts:188` (`/^(bash|shell|exec|run_command|terminal)/i`),
+  the canonical-instance discriminator the runner already computes at
+  `src/tools/invocation-runner.ts:696-703` (`isCanonicalBashTool` /
+  `isCanonicalPowerShellTool`), and the by-name pair
+  `ASRT_WRAPPED_SHELL_TOOLS = new Set(["bash","powershell"])` at
+  `src/permissions/sandbox-capability.ts:222`. Two of them disagree inside a
+  single function, which is the textbook shape.
+  **The tempting consolidation is a security regression — do not do it.**
+  Replacing the regex with the instance discriminator NARROWS an existing gate:
+  today any plugin or MCP tool whose name starts with `bash`/`shell`/`exec`/
+  `run_command`/`terminal` gets the POSIX structural rules applied to its
+  command string, and instance identity drops every one of them. PR #1949
+  deliberately left the regex untouched for exactly this reason and moved only
+  the PowerShell dialect to the same ladder position. Nothing pins the current
+  set either way: `src/main/__tests__/bash-ast-validator.test.ts` contains zero
+  occurrences of "powershell", and nothing asserts that a plugin tool named
+  `shell*` must or must not receive POSIX regexes. So the owner decision is
+  "which tools should the POSIX analyzer cover", and the three derivations
+  cannot be merged until that is answered. `ASRT_WRAPPED_SHELL_TOOLS` answers a
+  different question (which tools get ASRT wrapping) and may or may not want the
+  same set.
 - `max-verdict-composition` — verified: authority `risk-classifier.ts:84` is
   `LEVEL_RANK[b.level] >= LEVEL_RANK[a.level]` (ties prefer `b`, documented on
   the line above and pinned by a test); the private copy
