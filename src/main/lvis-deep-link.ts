@@ -16,6 +16,8 @@ import { sendToWindow } from "../ipc/safe-send.js";
 import { emitEvent as emitHostEvent } from "../boot/types.js";
 import type { AppServices } from "../boot.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import { CHANNELS } from "../contract/app-contract.js";
+import { buildInstallFailureResult } from "../shared/plugin-install-result.js";
 import {
   drainPluginInstallLockOperations,
   installMarketplacePluginWithLifecycle,
@@ -663,19 +665,25 @@ export async function handleLvisUri(url: string) {
           log,
         }),
       broadcastInstallProgress: (payload) =>
-        broadcastPluginLifecycleEvent("lvis:plugins:install-progress", payload),
+        broadcastPluginLifecycleEvent(CHANNELS.plugins.installProgress, payload),
       emitPluginInstalled: (payload) => emitHostEvent("plugin.installed", payload),
       refreshPluginNotifications: activeServices.refreshPluginNotifications,
     });
     const pluginId = result.pluginId;
     lvisDevLog("[lvis] handleLvisUri: install succeeded", { slug: pluginId });
-    broadcastPluginLifecycleEvent("lvis:plugins:install-result", {
+    broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
       slug: pluginId,
       success: true,
     });
   })().catch((err: Error) => {
     log.error({ slug: params.slug, error: err.message, stack: err.stack }, "lvis:// install failed");
-    broadcastPluginLifecycleEvent("lvis:plugins:install-result", { slug: installProgressSlug, success: false, error: err.message });
+    // Same failure payload the IPC install handler sends. This path reaches the
+    // same toast, so building it by hand here would send the raw English
+    // message where the IPC path sends a stable code the renderer localizes.
+    broadcastPluginLifecycleEvent(
+      CHANNELS.plugins.installResult,
+      buildInstallFailureResult(installProgressSlug, err, "addPlugin failed"),
+    );
   });
 }
 
