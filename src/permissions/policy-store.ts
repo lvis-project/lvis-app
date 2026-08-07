@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import type { PolicySource } from "../shared/policy-editability.js";
 const log = createLogger("policy-store");
 
 
@@ -46,7 +47,7 @@ export interface PolicyFile {
 
 export interface LoadedPolicy extends PolicyFile {
 
-  source: "defaults" | "user" | "admin" | "merged";
+  source: PolicySource;
 
   adminOverrides?: string[];
 
