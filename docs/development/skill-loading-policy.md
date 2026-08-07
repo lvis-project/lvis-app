@@ -82,6 +82,13 @@ its plugin into scope). This removes the case where the model sees skill
 metadata — or loads a skill body — that references Tools it currently cannot
 call. Registry/execution authority is unchanged; this is exposure, not removal.
 
+The "or loads" half is ENFORCED, not merely catalogued: `skill_load` of a
+`plugin:<id>:<localId>` selector is admitted by the SAME per-turn plugin scope
+that admits that plugin's tools, at the same deny point (see
+`src/tools/pipeline/plugin-turn-scope.ts`). A user skill has no plugin owner and
+is never turn-scoped. A turn that declares no plugin scope at all (an
+unrestricted caller) is unaffected.
+
 ### 2. Catalog Is Token-Budgeted
 
 The catalog is bounded by an **estimated token budget**
@@ -178,6 +185,7 @@ rendered (`src/prompts/system-prompt-builder.ts`), reusing the existing
   `request_plugin`, then present.
 - Budget: a synthetic over-budget catalog is ranked + trimmed to budget, with
   overflow reachable via `skill_list`.
-- Symmetry: the same active-plugin scope drives both tool schemas and the skill
-  catalog in one turn.
+- Symmetry: the same active-plugin scope drives tool schemas, the skill catalog,
+  and `skill_load` admission in one turn — an out-of-scope plugin's skill is
+  refused at the same deny point that refuses that plugin's tools.
 - Bodies: approval-gate + hash binding + turn-boundary clearing unchanged.
