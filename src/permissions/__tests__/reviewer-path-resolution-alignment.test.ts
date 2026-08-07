@@ -240,7 +240,6 @@ describe("producer wiring — the dispatch lanes thread the invocation cwd", () 
       "write",
       ["path"],
       { path: "out.txt" },
-      { path: "out.txt" },
       [canon(invocationCwd)],
       [],
       { trustOrigin: "llm-tool-arg", headless: true } as ToolPermissionContext,
