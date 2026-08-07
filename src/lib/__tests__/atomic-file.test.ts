@@ -16,6 +16,14 @@ import {
   replaceUtf8FileAtomicSyncIf,
   writeUtf8FileAtomicSync,
 } from "../atomic-file.js";
+import {
+  BACKGROUND_ATTEMPTS,
+  BACKGROUND_BUDGET_MS,
+  SYNC_UI_BLOCKING_ATTEMPTS,
+  SYNC_UI_BLOCKING_BUDGET_MS,
+  transientFsLockDelayMs,
+} from "../transient-fs-lock-retry.js";
+import { retryOnTransientFsLock } from "../../plugins/plugin-artifact-store.js";
 
 let dir: string;
 
@@ -160,7 +168,8 @@ describe("writeUtf8FileAtomicSync", () => {
     });
 
     expect(attempts).toBe(3);
-    expect(waits).toEqual([10, 20]);
+    // Schedule comes from the shared ladder, not a local constant.
+    expect(waits).toEqual([transientFsLockDelayMs(1), transientFsLockDelayMs(2)]);
     expect(readFileSync(target, "utf8")).toBe("new");
     expect(readdirSync(dir)).toEqual(["windows.json"]);
   });
@@ -187,8 +196,76 @@ describe("writeUtf8FileAtomicSync", () => {
       },
       wait: () => undefined,
     })).toThrow("persistent");
-    expect(attempts).toBe(4);
+    expect(attempts).toBe(SYNC_UI_BLOCKING_ATTEMPTS);
     expect(readFileSync(target, "utf8")).toBe("old");
     expect(readdirSync(dir)).toEqual(["windows.json"]);
+  });
+
+  it("takes its curve and budget from the shared policy, and so does the async ladder", async () => {
+    // The two ladders defend against the same Windows lock class and cannot be
+    // merged (this one is sync/Atomics.wait, the other async/setTimeout). They
+    // HAD drifted: this side budgeted 60ms against a class its sibling
+    // documents as clearing in "a few hundred milliseconds".
+    //
+    // NOT asserting the two totals are EQUAL — they are deliberately different
+    // now, because only this side blocks the caller (the Electron main thread
+    // for the settings/secret writers). What must hold is that neither side
+    // hardcodes its own schedule: both observed wait sequences have to be the
+    // shared curve evaluated over that side's own budget. Hardcoding a
+    // different curve on either side breaks its row.
+    const target = join(dir, "windows.json");
+    writeFileSync(target, "old", "utf8");
+    const syncWaits: number[] = [];
+    const writeWithRuntime = writeUtf8FileAtomicSync as unknown as (
+      path: string,
+      content: string,
+      mode: number | undefined,
+      runtime: { platform: NodeJS.Platform; open(path: string): number; fsync(fd: number): void; close(fd: number): void; rename(from: string, to: string): void; wait(ms: number): void },
+    ) => void;
+
+    expect(() => writeWithRuntime(target, "new", undefined, {
+      platform: "win32",
+      open: () => 0,
+      fsync: () => undefined,
+      close: () => undefined,
+      rename: () => {
+        throw Object.assign(new Error("locked"), { code: "EBUSY" });
+      },
+      wait: (ms) => syncWaits.push(ms),
+    })).toThrow("locked");
+
+    // Drive the REAL async ladder over a permanently-locked op and record its
+    // sleeps the same way.
+    const asyncWaits: number[] = [];
+    await expect(
+      retryOnTransientFsLock(
+        async () => {
+          throw Object.assign(new Error("locked"), { code: "EBUSY" });
+        },
+        { sleep: async (ms) => { asyncWaits.push(ms); } },
+      ),
+    ).rejects.toThrow("locked");
+
+    const curveOver = (attempts: number) =>
+      Array.from({ length: attempts - 1 }, (_, i) => transientFsLockDelayMs(i + 1));
+
+    // Each side rides the SHARED curve over its OWN budget.
+    expect(syncWaits).toEqual(curveOver(SYNC_UI_BLOCKING_ATTEMPTS));
+    expect(asyncWaits).toEqual(curveOver(BACKGROUND_ATTEMPTS));
+
+    const syncTotal = syncWaits.reduce((sum, ms) => sum + ms, 0);
+    const asyncTotal = asyncWaits.reduce((sum, ms) => sum + ms, 0);
+    expect(syncTotal).toBe(SYNC_UI_BLOCKING_BUDGET_MS);
+    expect(asyncTotal).toBe(BACKGROUND_BUDGET_MS);
+
+    // The property that made the OLD budget wrong: 60ms could not outlast a
+    // lock class documented to clear in a few hundred milliseconds.
+    expect(syncTotal).toBeGreaterThanOrEqual(500);
+    // ...and the property that keeps the FIX from becoming a UI freeze. A
+    // sync block near a second earns the Windows "not responding" treatment,
+    // which is worse than the failed write it prevents and says nothing to the
+    // user. If someone raises this to match the background budget, this fails.
+    expect(syncTotal).toBeLessThanOrEqual(600);
+    expect(syncTotal).toBeLessThan(asyncTotal);
   });
 });

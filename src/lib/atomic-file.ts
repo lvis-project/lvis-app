@@ -10,6 +10,11 @@ import {
 } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { pid, platform } from "node:process";
+import {
+  RENAME_FILE_LOCK_CODES,
+  SYNC_UI_BLOCKING_ATTEMPTS,
+  transientFsLockDelayMs,
+} from "./transient-fs-lock-retry.js";
 
 const DEFAULT_FILE_MODE = 0o600;
 const DIRECTORY_SYNC_ERROR_CODE = "ATOMIC_FILE_DIRECTORY_SYNC_FAILED";
@@ -39,17 +44,23 @@ function replaceStagedFile(
   const wait = runtime.wait ?? ((milliseconds: number) => {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
   });
-  for (let attempt = 0; ; attempt += 1) {
+  // Policy (codes, curve, budget) comes from transient-fs-lock-retry.ts so this
+  // ladder and the async one in plugin-artifact-store.ts cannot drift apart
+  // again — they previously disagreed 60ms vs 1750ms. The SYNC budget is the
+  // small one on purpose: this blocks the caller, and for the settings/secret/
+  // session writers that caller is the Electron main thread.
+  for (let attempt = 1; ; attempt += 1) {
     try {
       rename(from, to);
       return;
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       const retryable = runtime.platform === "win32"
-        && (code === "EPERM" || code === "EACCES" || code === "EBUSY")
-        && attempt < 3;
+        && code !== undefined
+        && RENAME_FILE_LOCK_CODES.has(code)
+        && attempt < SYNC_UI_BLOCKING_ATTEMPTS;
       if (!retryable) throw error;
-      wait(10 * (attempt + 1));
+      wait(transientFsLockDelayMs(attempt));
     }
   }
 }

@@ -58,6 +58,11 @@ import {
   type PluginInstallReceipt,
 } from "./plugin-install-receipt.js";
 import { createLogger } from "../lib/logger.js";
+import {
+  BACKGROUND_ATTEMPTS,
+  DIRECTORY_OP_LOCK_CODES,
+  transientFsLockDelayMs,
+} from "../lib/transient-fs-lock-retry.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
 import {
   assertCompressedArtifactSize,
@@ -84,17 +89,12 @@ export function assertMarketplaceAppUpgradeNotRequired(
 const log = createLogger("plugin-artifact-store");
 
 /**
- * Transient filesystem error codes surfaced on Windows when another process
- * (a still-running plugin webview/worker, an antivirus scanner, or the shell
- * indexer) holds a handle to a file inside the directory we are trying to
- * `rename()`/`rm()`. Windows rejects the operation with one of these until the
- * lock clears — which typically happens within a few hundred milliseconds of
- * the previous plugin instance tearing down. macOS/Linux do not surface these
- * for the directory-swap path. `ENOENT` is deliberately NOT included: an
- * absent source is a legitimate "first install" signal that callers must be
- * able to tell apart from a locked source.
+ * Windows transient-lock codes for the directory-swap / `rm()` paths. The set
+ * itself lives in `lib/transient-fs-lock-retry.ts` alongside the narrower set
+ * the file-rename ladder uses and the shared delay curve, so the two ladders
+ * cannot drift apart again. macOS/Linux do not surface these for this path.
  */
-const TRANSIENT_FS_LOCK_CODES = new Set(["EPERM", "EACCES", "EBUSY", "ENOTEMPTY", "EEXIST"]);
+const TRANSIENT_FS_LOCK_CODES = DIRECTORY_OP_LOCK_CODES;
 
 export function isTransientFsLockError(err: unknown): boolean {
   const code = (err as NodeJS.ErrnoException | null)?.code;
@@ -121,8 +121,8 @@ export async function retryOnTransientFsLock<T>(
     onRetry?: (attempt: number, code: string | undefined) => void;
   } = {},
 ): Promise<T> {
-  const attempts = opts.attempts ?? 10;
-  const delayMs = opts.delayMs ?? ((attempt) => Math.min(50 * attempt, 250));
+  const attempts = opts.attempts ?? BACKGROUND_ATTEMPTS;
+  const delayMs = opts.delayMs ?? transientFsLockDelayMs;
   const sleep = opts.sleep ?? ((ms) => new Promise<void>((r) => setTimeout(r, ms)));
   for (let attempt = 1; ; attempt++) {
     try {
