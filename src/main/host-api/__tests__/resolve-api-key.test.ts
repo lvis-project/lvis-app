@@ -120,6 +120,8 @@ function makeAuditLogger() {
 interface SettingsOverrides {
   provider: string;
   marketplaceProviderPresetId?: string;
+  /** Defaults to "the active preset is installed", the realistic state. */
+  installedProviderPresetIds?: readonly string[];
   secrets?: Record<string, string | null>;
   baseUrl?: string;
 }
@@ -139,6 +141,14 @@ function makeSettingsService(overrides: SettingsOverrides) {
               : {},
           },
         };
+      }
+      if (key === "marketplace") {
+        const installed =
+          overrides.installedProviderPresetIds ??
+          (overrides.marketplaceProviderPresetId
+            ? [overrides.marketplaceProviderPresetId]
+            : []);
+        return { installedProviderPresets: installed.map((providerId) => ({ providerId })) };
       }
       return undefined;
     }),
@@ -322,6 +332,113 @@ describe("resolveApiKey — Tier-4 vendor mismatch", () => {
     if (!result.ok) expect(result.reason).toBe("vendor-mismatch");
   });
 
+  // ── The gate-merge disagreement set ─────────────────────────────────
+  //
+  // Tiers 1+2 used to be hand-copied into this file while only tiers 3+4 were
+  // shared with `getSecret`. These pin the two behaviours that differed.
+
+  it("resolves a marketplace provider preset key — structurally unreachable before the gate merge", async () => {
+    // `getSecret` has always granted this key family (manifest schema and the
+    // signed whitelist schema both accept it). `resolveApiKey` synthesized only
+    // `llm.apiKey.<vendor>`, so with an active preset EVERY vendor landed on a
+    // Tier-4 mismatch and the family had no reachable allow path here at all.
+    const presetKey = "llm.marketplaceProvider.future-router.apiKey";
+    const manifest = manifestFor("p", [presetKey]);
+    const manifestSha256 = shaOfManifest(manifest);
+    await seedRegistryWithGrant({
+      pluginId: "p",
+      allowedKeys: [presetKey],
+      manifestSha256,
+    });
+    const settingsService = makeSettingsService({
+      provider: "openai-compatible",
+      marketplaceProviderPresetId: "future-router",
+      secrets: { [presetKey]: "fr-secret" },
+    });
+
+    const result = await resolveApiKey(
+      { purpose: "llm" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256,
+        settingsService: settingsService as never,
+        auditLogger: makeAuditLogger(),
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.bearer()).toBe("fr-secret");
+      result.release();
+    }
+    expect(settingsService.getSecret).toHaveBeenCalledWith(presetKey);
+  });
+
+  it("still denies a preset key whose preset is installed but NOT active", async () => {
+    // Tier-4 is preserved across the merge: reachable is not the same as open.
+    const presetKey = "llm.marketplaceProvider.future-router.apiKey";
+    const manifest = manifestFor("p", [presetKey]);
+    const manifestSha256 = shaOfManifest(manifest);
+    await seedRegistryWithGrant({
+      pluginId: "p",
+      allowedKeys: [presetKey],
+      manifestSha256,
+    });
+    const settingsService = makeSettingsService({
+      provider: "openai-compatible",
+      marketplaceProviderPresetId: "other-router",
+      installedProviderPresetIds: ["future-router", "other-router"],
+      secrets: { [presetKey]: "fr-secret" },
+    });
+
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256,
+        settingsService: settingsService as never,
+        auditLogger: makeAuditLogger(),
+      },
+    );
+
+    expect(settingsService.getSecret).not.toHaveBeenCalledWith(presetKey);
+    expect(result.ok).toBe(false);
+  });
+
+  it("names the Tier-2 deny `not-allowlisted`, the same token `getSecret` audits", async () => {
+    // The audit vocabularies had drifted: this path logged
+    // `reason=not-whitelisted ... (manifest)` for a plain manifest-allowlist
+    // miss with no whitelist involvement, while `getSecret` logged
+    // `reason=not-allowlisted`. An operator pivoting on either token saw half
+    // the traffic. The SDK-facing `reason` stays `not-whitelisted` — that enum
+    // is the plugin contract and is deliberately unchanged.
+    const manifest = manifestFor("p", []);
+    const manifestSha256 = shaOfManifest(manifest);
+    const auditLogger = makeAuditLogger();
+    const settingsService = makeSettingsService({ provider: "openai" });
+
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256,
+        settingsService: settingsService as never,
+        auditLogger,
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not-whitelisted");
+    const lines = auditLogger.log.mock.calls.map(
+      (c) => (c[0] as { input?: string }).input ?? "",
+    );
+    expect(lines.some((l) => l.includes("reason=not-allowlisted"))).toBe(true);
+    expect(lines.some((l) => l.includes("(tier-2)"))).toBe(true);
+  });
+
   it("denies the generic OpenAI-compatible key while a marketplace preset is active", async () => {
     const genericKey = "llm.apiKey.openai-compatible";
     const manifest = manifestFor("p", [genericKey]);
@@ -348,9 +465,18 @@ describe("resolveApiKey — Tier-4 vendor mismatch", () => {
       },
     );
 
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe("vendor-mismatch");
+    // The security property is unchanged and is the first assertion: the
+    // generic key is never read while a preset is active. The REASON changed
+    // with the merged gate. `resolveApiKey` no longer synthesizes
+    // `llm.apiKey.<vendor>` unconditionally — it asks
+    // `hostSecretKeyForVendor` which key holds the ACTIVE provider's
+    // credential, which under an active preset is the preset key. That key is
+    // absent from this manifest, so the verdict is a Tier-2 allowlist miss
+    // (`not-whitelisted`, the SDK's slot for it) rather than a Tier-4
+    // vendor mismatch.
     expect(settingsService.getSecret).not.toHaveBeenCalledWith(genericKey);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.reason).toBe("not-whitelisted");
   });
 });
 

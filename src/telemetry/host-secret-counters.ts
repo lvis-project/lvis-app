@@ -54,7 +54,7 @@ export type HostSecretCounterEvent =
  */
 export type HostSecretDeniedReason =
   | "not-allowlisted"
-  | "non-active-vendor"
+  | "vendor-mismatch"
   | "not-whitelisted"
   | "manifest-sha-mismatch"
   | "whitelist-unreachable"
