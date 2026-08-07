@@ -95,3 +95,21 @@ export function normalizeMultimodalTokenEstimateDimension(value: unknown): numbe
   if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return undefined;
   return Math.min(8192, Math.ceil(value));
 }
+
+/**
+ * Single authority for "does a tool_result's image actually reach this vendor".
+ *
+ * `tool_result` images are only representable inside a tool result on Claude,
+ * via the AI SDK `content` output variant carrying a `file` part; every other
+ * vendor's tool role is text-only, so the mapper drops the image and sends the
+ * text placeholder instead. The wire mapper applied that rule and the token
+ * estimator did not, so a non-Claude turn holding a `view_image` result was
+ * charged the full image overhead for bytes that were never sent.
+ *
+ * `undefined` answers `true`, matching the wire mapper's own `vendor` default.
+ * Subscription transports drop the image on every route; their provider marker
+ * vendor is not `"claude"`, so they answer `false` here without a special case.
+ */
+export function vendorCarriesToolResultImage(vendor: string | undefined): boolean {
+  return vendor === undefined || vendor === "claude";
+}
