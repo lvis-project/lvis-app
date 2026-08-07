@@ -12,6 +12,7 @@ import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import { isUserKeyboardOrigin } from "../../shared/chat-origin.js";
 import type { ToolSource } from "../../tools/types.js";
 import { t } from "../../i18n/index.js";
+import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
 import { findSessionByIdPrefix } from "../../shared/session-lookup.js";
 
 function toolProvenanceLabel(tool: {
@@ -164,7 +165,7 @@ export async function handlePermissionCommand(
       return t("be_conversationLoop.permissionShowCurrent", { mode });
     }
     if (outcome.kind === "dir") {
-      const result = await dispatchPermissionDirCommand(outcome.cmd, undefined, self.deps.workspaceRootLifecycle);
+      const result = await dispatchPermissionDirCommand(outcome.cmd, undefined, getWorkspaceRootLifecycle());
       if (!result.ok) {
         const warnings = result.warnings?.length ? t("be_conversationLoop.permissionDirWarnings", { warnings: result.warnings.map((w) => `- ${w}`).join("\n") }) : "";
         const ack = result.requiresAcknowledgement ? t("be_conversationLoop.permissionDirAckRequired") : "";

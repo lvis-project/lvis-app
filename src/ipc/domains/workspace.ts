@@ -51,6 +51,7 @@ import {
   opaqueWorkspaceRootAuditRef,
 } from "../../permissions/workspace-root-reconciler.js";
 import { withWorkspaceRootLifecycleLock } from "../../permissions/workspace-root-lifecycle-lock.js";
+import { setWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
 import { detachWorkspaceRootSessions } from "../../memory/workspace-root-session-lifecycle.js";
 
 /** Max directory entries returned per lazy listing (bounds huge dirs). */
@@ -632,13 +633,12 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       (await removePersistedWorkspaceRoot(root, source))?.persisted ??
         readPermissionSettings().permissions.additionalDirectories,
   };
-  deps.workspaceRootLifecycle = permissionDirectoryLifecycle;
-  if (deps.conversationLoop?.deps) {
-    deps.conversationLoop.deps.workspaceRootLifecycle = permissionDirectoryLifecycle;
-  }
-  if (deps.sideChatConversationLoop) {
-    deps.sideChatConversationLoop.deps.workspaceRootLifecycle = permissionDirectoryLifecycle;
-  }
+  // Publish the ONE lifecycle instance. Every consumer (permission IPC, chat /
+  // side-chat / routine / sub-agent loops, the plugin-surface executor) resolves
+  // it lazily through `getWorkspaceRootLifecycle`, so none of them needs a
+  // hand-written assignment here — which is what used to leave sub-agent child
+  // loops and routine loops permanently unwired.
+  setWorkspaceRootLifecycle(permissionDirectoryLifecycle);
 
 
 
