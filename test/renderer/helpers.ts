@@ -2,6 +2,7 @@
  * Common test helpers for renderer test files.
  */
 import { act, fireEvent } from "@testing-library/react";
+import type { MessageQueueStore } from "../../src/ui/renderer/state/message-queue-store.js";
 export { relativeLuminance } from "../contrast-helpers.js";
 
 /**
@@ -29,4 +30,20 @@ export function deferred<T>() {
     resolve = r;
   });
   return { promise, resolve };
+}
+
+/**
+ * The live message-queue store, which `use-message-queue` publishes on `window`
+ * under dev+e2e. Render with `lvisEnv: { isDev: true, isE2E: true }` for it to
+ * be defined.
+ */
+export function getQueueStore(): MessageQueueStore | undefined {
+  return (window as unknown as { __lvis_message_queue_store__?: MessageQueueStore })
+    .__lvis_message_queue_store__;
+}
+
+/** Drops the published store so one test's queue cannot leak into the next. */
+export function clearQueueStoreHandle(): void {
+  delete (window as unknown as { __lvis_message_queue_store__?: unknown })
+    .__lvis_message_queue_store__;
 }

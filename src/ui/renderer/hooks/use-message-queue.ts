@@ -61,6 +61,10 @@ export function useMessageQueue({
   const messageQueueStore = useMemo(() => new MessageQueueStore(), []);
 
   const queueAutoInflightRef = useRef(false);
+  /** A guide hand-off is awaiting its result — do not send the same items again. */
+  const guideFlushInflightRef = useRef(false);
+  /** The engine refused this turn's hand-off — stop retrying until the turn ends. */
+  const guideFlushBlockedRef = useRef(false);
 
   // dev/e2e runtime test hook — Playwright launches production-built renderer
   // assets, so this must use preload runtime env instead of build-time NODE_ENV.
@@ -80,6 +84,12 @@ export function useMessageQueue({
   }, [messageQueueStore]);
   useEffect(() => {
     messageQueueStore.clear();
+    // The guide-flush refs are turn-scoped, and `done` is what normally clears
+    // them. Switching sessions mid-turn means that `done` never arrives for
+    // this hook, so a refusal from the old session would keep suppressing
+    // brake-point hand-offs in the new one. Reset them with the queue.
+    guideFlushInflightRef.current = false;
+    guideFlushBlockedRef.current = false;
   }, [currentSessionId, messageQueueStore]);
 
 
@@ -90,26 +100,59 @@ export function useMessageQueue({
   //
 
 
+  /**
+   * Hand the queue to the engine at a mid-turn brake point.
+   *
+   * The removal is CONFIRMED, not optimistic: the items stay in the store —
+   * and therefore on screen — until `onGuide` says the engine accepted them.
+   * The previous shape took them synchronously and fired `onGuide` off
+   * unawaited, so the panel emptied on the first `tool_end` of the turn and a
+   * refusal (`no-active-turn` when the brake point lands in the turn's
+   * `finally` window) destroyed text the user had typed.
+   *
+   * Two guards make "keep on failure" safe:
+   *   - `guideFlushInflightRef` — a burst of `tool_end` events cannot send the
+   *     same items twice now that they survive the first attempt.
+   *   - `guideFlushBlockedRef` — after a refusal, stop retrying for the rest
+   *     of the turn (one toast, not one per tool). The items stay queued and
+   *     the `done` handler injects them as a fresh turn, so nothing is lost.
+   */
   const flushQueueViaGuide = useCallback(() => {
-    if (messageQueueStore.size() === 0) return;
-    const taken = messageQueueStore.takeAll();
-    if (taken.length === 0) return;
-    const formatted = formatQueueInject(taken);
+    if (guideFlushInflightRef.current || guideFlushBlockedRef.current) return;
+    const pending = messageQueueStore.getItems();
+    if (pending.length === 0) return;
+    const handed = pending.map((item) => ({ id: item.id, text: item.text }));
+    const count = pending.length;
+    const formatted = formatQueueInject(pending);
+    guideFlushInflightRef.current = true;
     void (async () => {
-      const result = await onGuide(formatted);
-      if (result?.ok !== true) {
+      try {
+        const result = await onGuide(formatted);
+        if (result?.ok === true) {
+          // Remove exactly what was handed over — by id AND by text. Items
+          // stay editable while the call is in flight, so an id alone would
+          // discard a row the user rewrote after the engine had already seen
+          // the old wording. A rewritten row stays queued and goes out at the
+          // next brake point. Anything queued during the call stays too.
+          const current = new Map(
+            messageQueueStore.getItems().map((item) => [item.id, item.text]),
+          );
+          for (const { id, text } of handed) {
+            if (current.get(id) === text) messageQueueStore.remove(id);
+          }
+          return;
+        }
         const reason = result?.error ?? "unknown";
-        const count = taken.length;
         const reasonLabel =
           reason === "queue-full" ? t("chatView.queueFlushFailReasonFull") :
           reason === "too-long" ? t("chatView.queueFlushFailReasonTooLong") :
           reason === "no-active-turn" ? t("chatView.queueFlushFailReasonNoTurn") :
           `(${reason})`;
-        // Surface a user-visible error so the lost messages don't disappear
-        // silently. Re-add is intentionally avoided to prevent infinite-retry
-        // cascade — the user can re-type if they want to retry.
+        guideFlushBlockedRef.current = true;
         onGuideError(t("chatView.queueFlushFailMessage", { count, reasonLabel }));
-        console.warn(`[message-queue] guide flush dropped (${reason}):`, formatted.slice(0, 80));
+        console.warn(`[message-queue] guide flush refused (${reason}), items kept:`, formatted.slice(0, 80));
+      } finally {
+        guideFlushInflightRef.current = false;
       }
     })();
   }, [messageQueueStore, onGuide, onGuideError]);
@@ -122,6 +165,9 @@ export function useMessageQueue({
         return;
       }
       if (ev.type === "done") {
+        // A refusal only blocks the rest of THAT turn; the next one starts
+        // clean and may use its brake points again.
+        guideFlushBlockedRef.current = false;
         // turn 종료 시 큐 잔존 항목 → 새 user message 로 자동 inject.
         // inputOrigin "queue-auto" 사용 — chat.ts validator 가 userActivation
         // 검사 우회 (IPC stream context = user gesture 밖).
