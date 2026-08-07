@@ -54,15 +54,15 @@ export function resolveTrustedRegistryManifestPath(
   const absolute = isAbsolute(rawManifestPath)
     ? rawManifestPath
     : resolve(pluginsRoot, rawManifestPath);
-  let realManifest: string;
-  let realRoot: string;
+  let canonicalManifest: string;
+  let canonicalRoot: string;
   try {
-    realManifest = realpathSync(absolute);
-    realRoot = realpathSync(pluginsRoot);
+    canonicalManifest = realpathSync(absolute);
+    canonicalRoot = realpathSync(pluginsRoot);
   } catch {
     return null;
   }
-  return isPathContained(realRoot, realManifest) ? absolute : null;
+  return isPathContained(canonicalRoot, canonicalManifest) ? absolute : null;
 }
 
 /**
