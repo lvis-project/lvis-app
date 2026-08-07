@@ -91,7 +91,7 @@ import {
   ensurePluginStateReadyForInstall,
   uninstallPluginWithLifecycle,
 } from "../../plugins/uninstall-lifecycle.js";
-import { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE } from "../../plugins/types.js";
+import { buildInstallFailureResult } from "../../shared/plugin-install-result.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import { isPluginInstallFailureKind, type PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
@@ -471,20 +471,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         refreshPluginNotifications,
       });
     } catch (err) {
-      const message = errMessage(err) || "addPlugin failed";
-      // Plugin↔app minimum-version gate — surface the stable English IPC code
-      // so the renderer maps it to the Korean "needs newer app" copy + update
-      // link (per the IPC Error Message Language Convention). Other install
-      // failures keep their plain message.
-      const code = err instanceof IncompatibleAppVersionError
-        ? INCOMPATIBLE_APP_VERSION_CODE
-        : undefined;
-      broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
-        slug: lifecycleSlug,
-        success: false,
-        error: code ?? message,
-        ...(code ? { message } : {}),
-      });
+      broadcastPluginLifecycleEvent(
+        CHANNELS.plugins.installResult,
+        buildInstallFailureResult(lifecycleSlug, err, "addPlugin failed"),
+      );
       throw err;
     }
     broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, { slug: lifecycleSlug, success: true });
@@ -632,12 +622,10 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         });
         return result;
       } catch (err) {
-        const message = errMessage(err) || "addPlugin failed";
-        broadcastPluginLifecycleEvent(CHANNELS.plugins.installResult, {
-          slug: pluginId,
-          success: false,
-          error: message,
-        });
+        broadcastPluginLifecycleEvent(
+          CHANNELS.plugins.installResult,
+          buildInstallFailureResult(pluginId, err, "addPlugin failed"),
+        );
         throw err;
       }
     });
