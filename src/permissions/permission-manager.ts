@@ -629,6 +629,30 @@ export class PermissionManager {
   }
 
   /**
+   * SINGLE PRODUCER of the memory-hit auto-approve disclosure.
+   *
+   * A stored user approval can skip the ask from TWO lanes: the reviewer lane
+   * ({@link dispatchReviewer}) and the foreground modal lane
+   * (`tools/pipeline/approval-memory-skip.ts`). Both read the SAME Store B
+   * entry under the same key, so both owe the user the same disclosure — one
+   * lane announcing it while the other silently auto-approves is the bug this
+   * method closes.
+   *
+   * Both lanes call HERE rather than each holding their own broadcast, so the
+   * console line and the renderer toast cannot drift apart.
+   */
+  discloseUserApprovalHit(payload: UserApprovalHitPayload): void {
+    console.info(
+      `[permission] memory-hit auto-approve: ${payload.toolName} (scope=${payload.scope}, verdict=${payload.verdictAtApproval})`,
+    );
+    try {
+      this.broadcastUserApprovalHit?.(payload);
+    } catch {
+      // broadcast failure must not block tool execution
+    }
+  }
+
+  /**
    * Cluster review M1 — return the AbortSignal that will fire when this
    * plugin's outstanding bearer leases must be aborted (i.e. on any
    * permission rule change). Lazily creates the controller on first call.
@@ -1492,21 +1516,16 @@ export class PermissionManager {
         verdictAtApproval: userApproval.verdictAtApproval,
       };
       outcome = "approval-memory";
-      // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log
-      console.info(`[permission] memory-hit auto-approve: ${toolName} (scope=${userApproval.scope}, verdict=${userApproval.verdictAtApproval})`);
-      try {
-        // verdictAtApproval is non-null inside this branch — the outer
-        // gate `userApproval.verdictAtApproval != null` rejects legacy
-        // entries above. Broadcast passes the concrete literal straight
-        // through to UserApprovalHitPayload (non-null per SOT).
-        this.broadcastUserApprovalHit?.({
-          toolName,
-          scope: userApproval.scope,
-          verdictAtApproval: storedLevel,
-        });
-      } catch {
-        // broadcast failure must not block tool execution
-      }
+      // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log.
+      // verdictAtApproval is non-null inside this branch — the outer gate
+      // `userApproval.verdictAtApproval != null` rejects legacy entries above,
+      // so the concrete literal passes straight through to
+      // UserApprovalHitPayload (non-null per SOT).
+      this.discloseUserApprovalHit({
+        toolName,
+        scope: userApproval.scope,
+        verdictAtApproval: storedLevel,
+      });
     } else if (cacheResult.hit && cacheResult.verdict) {
       const ruleClassifier = new RuleBasedRiskClassifier();
       ruleVerdictForAudit = ruleClassifier.classify(buildReviewerContext()).level;
