@@ -3,6 +3,7 @@ import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../../../components/ui/dialog.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { normalizeNetworkAccessGrant } from "../../../shared/network-access.js";
 import type { MarketplaceItem } from "../types.js";
 
 export interface PluginInstallDialogProps {
@@ -22,12 +23,18 @@ export interface PluginInstallDialogProps {
 export function PluginInstallDialog({ target, onClose, onConfirm, working }: PluginInstallDialogProps) {
   const { t } = useTranslation();
   const isAdmin = target?.installPolicy === "admin";
-  const networkAccess = target?.networkAccess;
-  const allowedDomains = Array.isArray(networkAccess?.allowedDomains)
-    ? networkAccess.allowedDomains.map((domain) => domain.trim()).filter((domain) => domain.length > 0)
-    : [];
-  const reasoning = networkAccess?.reasoning?.trim();
-  const hasNetworkAccessDisclosure = allowedDomains.length > 0 || !!reasoning;
+  // Single authority for "is there a network-access grant to disclose" and for
+  // the exact domain list to show: `src/shared/network-access.ts`. This dialog
+  // used to re-derive both locally, and its copy omitted `allowPrivateNetworks`
+  // — so a grant that ONLY opts into private networks rendered no panel at all,
+  // even though `MarketplaceTab.needsInstallDisclosure` used the shared
+  // predicate to route that very install here for disclosure. Re-normalizing is
+  // idempotent and cannot throw: `item.networkAccess` is already the output of
+  // `mapNetworkAccessGrant` → `normalizeNetworkAccessGrant` in the catalog
+  // fetcher, so a malformed domain has already been rejected upstream.
+  const networkAccess = normalizeNetworkAccessGrant(target?.networkAccess);
+  const allowedDomains = networkAccess?.allowedDomains ?? [];
+  const reasoning = networkAccess?.reasoning;
   const [consented, setConsented] = useState(false);
 
   // Re-arm consent every time the dialog opens for a different plugin so a prior
@@ -61,7 +68,7 @@ export function PluginInstallDialog({ target, onClose, onConfirm, working }: Plu
             </label>
           </div>
         )}
-        {target && hasNetworkAccessDisclosure && (
+        {target && networkAccess && (
           <div
             className="space-y-2 rounded-md border bg-muted/(--opacity-subtle) p-3 text-xs"
             data-testid="plugin-install-network-access"
