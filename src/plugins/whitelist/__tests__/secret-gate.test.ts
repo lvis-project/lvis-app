@@ -1,16 +1,41 @@
 /**
- * #955 follow-up — `runTier3Then4` admin-install bypass.
+ * #955 follow-up — `runSecretGate` admin-install bypass.
  *
  * `installPolicy: "admin"` MUST skip only the Tier-3 signed whitelist
  * registry ACL while still enforcing the install-time manifest SHA pin and
  * Tier-4 active-vendor cross-check. Plain `"user"` installs keep the original
  * behaviour — both Tier-3 and Tier-4 apply in order.
+ *
+ * Tier-1/Tier-2 coverage lives with the two real callers
+ * (`src/boot/steps/__tests__/plugin-runtime.test.ts`,
+ * `src/main/host-api/__tests__/resolve-api-key.test.ts`); every case here
+ * allowlists the requested key so the Tier-3/Tier-4 ordering is what is
+ * under test.
  */
 import { describe, it, expect, beforeEach } from "vitest";
-import { runTier3Then4 } from "../tier-order.js";
+import { runSecretGate } from "../secret-gate.js";
+import type { SecretGateInput } from "../secret-gate.js";
 import { whitelistRegistry } from "../whitelist-registry.js";
 
-describe("runTier3Then4 — admin-install bypass (#955)", () => {
+/** Ask the gate for `llm.apiKey.openai` with the key allowlisted. */
+function gate(
+  overrides: Partial<SecretGateInput> & { activeProvider: string },
+): ReturnType<typeof runSecretGate> {
+  const { activeProvider, ...rest } = overrides;
+  return runSecretGate({
+    pluginId: "meeting",
+    key: "llm.apiKey.openai",
+    allowlist: ["llm.apiKey.openai"],
+    readSettings: () => ({
+      llmProvider: activeProvider,
+      marketplaceProviderPresetId: undefined,
+      readInstalledProviderPresetIds: () => [],
+    }),
+    ...rest,
+  });
+}
+
+describe("runSecretGate — admin-install bypass (#955)", () => {
   beforeEach(() => {
     // Leave the registry uninitialized — its default state is
     // `no-cache`, which makes `isAllowed` return a deny with reason
@@ -20,11 +45,8 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
   });
 
   it("denies a user-install plugin when registry has no grant", () => {
-    const outcome = runTier3Then4({
-      pluginId: "meeting",
-      key: "llm.apiKey.openai",
+    const outcome = gate({
       manifestSha256: "a".repeat(64),
-      vendor: "openai",
       activeProvider: "openai",
       installPolicy: "user",
     });
@@ -35,11 +57,8 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
   });
 
   it("denies a user-install plugin with no installPolicy field (back-compat)", () => {
-    const outcome = runTier3Then4({
-      pluginId: "meeting",
-      key: "llm.apiKey.openai",
+    const outcome = gate({
       manifestSha256: "a".repeat(64),
-      vendor: "openai",
       activeProvider: "openai",
     });
     expect(outcome.kind).toBe("deny");
@@ -50,12 +69,9 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
 
   it("allows an admin-install plugin when the install-time manifest sha matches", () => {
     const manifestSha256 = "a".repeat(64);
-    const outcome = runTier3Then4({
-      pluginId: "meeting",
-      key: "llm.apiKey.openai",
+    const outcome = gate({
       manifestSha256,
       installedManifestSha256: manifestSha256,
-      vendor: "openai",
       activeProvider: "openai",
       installPolicy: "admin",
     });
@@ -67,12 +83,9 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
   });
 
   it("denies an admin-install plugin when the running manifest sha differs from install time (#959)", () => {
-    const outcome = runTier3Then4({
-      pluginId: "meeting",
-      key: "llm.apiKey.openai",
+    const outcome = gate({
       manifestSha256: "b".repeat(64),
       installedManifestSha256: "a".repeat(64),
-      vendor: "openai",
       activeProvider: "openai",
       installPolicy: "admin",
     });
@@ -84,11 +97,8 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
   });
 
   it("denies an admin-install plugin when the install-time manifest sha is absent (#959)", () => {
-    const outcome = runTier3Then4({
-      pluginId: "meeting",
-      key: "llm.apiKey.openai",
+    const outcome = gate({
       manifestSha256: "a".repeat(64),
-      vendor: "openai",
       activeProvider: "openai",
       installPolicy: "admin",
     });
@@ -101,12 +111,9 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
 
   it("emits via='admin-bypass' on the allow outcome (#958)", () => {
     const manifestSha256 = "a".repeat(64);
-    const outcome = runTier3Then4({
-      pluginId: "meeting",
-      key: "llm.apiKey.openai",
+    const outcome = gate({
       manifestSha256,
       installedManifestSha256: manifestSha256,
-      vendor: "openai",
       activeProvider: "openai",
       installPolicy: "admin",
     });
@@ -164,7 +171,7 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
         },
       ],
     };
-    const cacheRoot = mkdtempSync(join(tmpdir(), "lvis-tier-order-"));
+    const cacheRoot = mkdtempSync(join(tmpdir(), "lvis-secret-gate-"));
     const cache = new WhitelistCache(cacheRoot);
     await cache.store({
       body,
@@ -176,11 +183,8 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
       online: false,
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
     });
-    const outcome = runTier3Then4({
-      pluginId: "meeting",
-      key: "llm.apiKey.openai",
+    const outcome = gate({
       manifestSha256: manifestSha,
-      vendor: "openai",
       activeProvider: "openai",
       installPolicy: "user",
     });
@@ -192,12 +196,9 @@ describe("runTier3Then4 — admin-install bypass (#955)", () => {
 
   it("denies an admin-install plugin on vendor mismatch (Tier-4 preserved)", () => {
     const manifestSha256 = "a".repeat(64);
-    const outcome = runTier3Then4({
-      pluginId: "meeting",
-      key: "llm.apiKey.openai",
+    const outcome = gate({
       manifestSha256,
       installedManifestSha256: manifestSha256,
-      vendor: "openai",
       activeProvider: "claude",
       installPolicy: "admin",
     });

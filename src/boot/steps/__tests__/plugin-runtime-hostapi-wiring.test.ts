@@ -219,6 +219,7 @@ function makeSettingsService(store: Map<string, Record<string, unknown>>) {
   return {
     get: vi.fn((key: string) => {
       if (key === "llm") return { provider: "openai" };
+      if (key === "marketplace") return { installedProviderPresets: [] };
       if (key === "pluginConfigs") return {};
       return undefined;
     }),
