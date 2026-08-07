@@ -808,3 +808,20 @@ export interface PluginInstallResultPayload {
   error?: string;
   message?: string;
 }
+
+/**
+ * Payload of the `agents.installResult` / `agents.uninstallResult` broadcasts.
+ *
+ * Extends the plugin shape rather than restating it: the status-bar toast runs
+ * one handler for all three package families, so the `error`/`message` pair has
+ * to mean the same thing here. `agentId` is the success-only field — a failed
+ * install never resolved one.
+ */
+export interface AgentInstallResultPayload extends PluginInstallResultPayload {
+  agentId?: string;
+}
+
+/** Skill twin of {@link AgentInstallResultPayload}. */
+export interface SkillInstallResultPayload extends PluginInstallResultPayload {
+  skillId?: string;
+}
