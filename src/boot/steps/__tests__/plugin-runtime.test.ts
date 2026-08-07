@@ -474,6 +474,77 @@ describe("initPluginRuntime partition policy", () => {
     expect(destroyedSend).not.toHaveBeenCalled();
     runtimeTestState.browserWindows = [];
   });
+
+  /**
+   * #1953 — this step is the SOLE installer of the plugin partition request
+   * filter (the narrow shell-file allow-list). The attach-time fallback in
+   * `main.ts` that once looked like a second installer never ran and is gone,
+   * so a partition this step misses has no filter at all and the broad
+   * `dist/src` navigation policy becomes its only gate.
+   *
+   * Both post-boot entry points are asserted against `pluginPartitionName` —
+   * the same shared function `plugin-ui-host.tsx` uses for the
+   * `<webview partition=…>` attribute, so the installed partition and the
+   * attached partition cannot drift apart.
+   */
+  it("installs the partition filter for every started plugin and every later install", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    runtimeTestState.runtime.listPluginIds.mockReturnValue(["alpha", "beta"]);
+    runtimeTestState.runtime.listPluginManifests.mockReturnValue([]);
+    runtimeTestState.runtime.getPluginRoot.mockImplementation(
+      (pluginId: string) => `/tmp/lvis-test/plugins/${pluginId}`,
+    );
+    const installPolicy = vi.mocked(installPluginPartitionPolicy);
+    installPolicy.mockClear();
+
+    await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: { log: vi.fn() } as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      clearAuthPartitionService: vi.fn(),
+      networkFetch: vi.fn() as never,
+      shellOpenExternal: vi.fn(),
+      approvalGate: {} as never,
+      routinesStore: { list: () => [] } as never,
+    });
+
+    // Post-`startAll` loop: every plugin that can render a UI view.
+    for (const pluginId of ["alpha", "beta"]) {
+      expect(installPolicy).toHaveBeenCalledWith(pluginPartitionName(pluginId), {
+        pluginRoot: `/tmp/lvis-test/plugins/${pluginId}`,
+      });
+    }
+
+    // Post-boot arrivals (deep-link install, sideload, dev hot-reload) are not
+    // in that loop; the `plugin.installed` subscription is what covers them.
+    installPolicy.mockClear();
+    emitEvent("plugin.installed", { pluginId: "gamma" });
+    expect(installPolicy).toHaveBeenCalledWith(pluginPartitionName("gamma"), {
+      pluginRoot: "/tmp/lvis-test/plugins/gamma",
+    });
+  });
 });
 
 describe("initPluginRuntime HostApi factory", () => {
