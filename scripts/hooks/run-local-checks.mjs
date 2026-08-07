@@ -230,9 +230,11 @@ function ensureAppTestRuntimeAbi(dir) {
     return ensureElectronAbiBetterSqlite3(dir);
   } catch (error) {
     // better-sqlite3 drifted off the Electron ABI (classically a stray
-    // `npm rebuild` that rebuilt it for the Node ABI). Realign it the same way
-    // `postinstall` does, then re-probe — one self-healing chokepoint so a push
-    // never dies on a confusing NODE_MODULE_VERSION mismatch.
+    // `npm rebuild` that rebuilt it for the Node ABI, shadowing the shipped
+    // N-API prebuild with a Node-ABI `build/Release`). `postinstall` does NOT
+    // rebuild native modules — this hook is the only electron-rebuild caller —
+    // so realign here and re-probe: one self-healing chokepoint so a push never
+    // dies on a confusing NODE_MODULE_VERSION mismatch.
     console.log(`[checks] ${basename(dir)} :: ${error.message}`);
     console.log(
       `[checks] ${basename(dir)} :: realigning better-sqlite3 to the Electron test ABI…`
