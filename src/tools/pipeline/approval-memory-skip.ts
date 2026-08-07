@@ -48,7 +48,7 @@ import { RuleBasedRiskClassifier, maxVerdict } from "../../permissions/reviewer/
 import { resolveReviewerSandboxCapability } from "../../permissions/sandbox-capability.js";
 import type { HostShellExecutionPlan } from "../../permissions/host-shell-execution-plan.js";
 import { lookupApproval, canonicalStringify } from "../../permissions/user-approval-store.js";
-import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
+import type { UserApprovalHitPayload, UserApprovalVerdict } from "../../shared/permissions-events.js";
 import { buildSandboxAuditEntry } from "../../audit/sandbox-audit.js";
 import { emitSandboxAudit } from "../../audit/sandbox-audit-sink.js";
 import { maskSensitiveData } from "../../audit/dlp-filter.js";
@@ -70,6 +70,14 @@ export async function tryUserApprovalMemorySkip(
   pluginId?: string,
   hostShellExecutionPlan?: HostShellExecutionPlan,
   auditInput?: Record<string, unknown>,
+  /**
+   * Disclosure sink — `PermissionManager.discloseUserApprovalHit`, bound by
+   * `ToolExecutor` from the PermissionManager it already holds. Optional
+   * because direct/unit callers may run without a PermissionManager; when it
+   * IS wired, a foreground memory skip announces itself exactly like the
+   * reviewer lane's.
+   */
+  disclose?: (payload: UserApprovalHitPayload) => void,
 ): Promise<PermissionCheckResult | null> {
   // Identity = exactly what ToolApprovalDialog stored (canonical finalInput).
   const canonicalArgs = canonicalStringify(finalInput);
@@ -194,9 +202,16 @@ export async function tryUserApprovalMemorySkip(
     // building the audit entry must never block tool execution
   }
 
-  console.info(
-    `[permission] foreground memory-hit auto-approve: ${toolName} (scope=${approval.scope}, verdict=${storedLevel})`,
-  );
+  // Disclosure. This lane used to end at a bare `console.info`, so a
+  // foreground memory auto-approve was invisible in the UI while the reviewer
+  // lane's identical decision raised a toast. Both lanes now go through
+  // `PermissionManager.discloseUserApprovalHit`, the single producer — this
+  // does NOT get its own broadcast, or the two would drift apart again.
+  disclose?.({
+    toolName,
+    scope: approval.scope,
+    verdictAtApproval: storedLevel,
+  });
   return {
     decision: "allow",
     reason: `prior user approval (scope=${approval.scope})`,
