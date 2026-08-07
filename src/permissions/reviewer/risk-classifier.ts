@@ -33,6 +33,7 @@
 import type { ToolCategory, ToolSource, ToolTrustOrigin } from "../../tools/types.js";
 import { maskSensitiveData } from "../../audit/dlp-filter.js";
 import { PERMISSION_REVIEWER_SYSTEM_PROMPT } from "../../shared/permission-reviewer-framework.js";
+import { getDottedFieldValue } from "../../shared/dotted-field-value.js";
 import {
   formatSandboxCapabilityForPrompt,
   sandboxRelaxesCategory,
@@ -429,16 +430,6 @@ function isGraphMetadataRead(input: Record<string, unknown>, target: NetworkTarg
   return normalizedPath === "/v1.0/me" || normalizedPath === "/beta/me" || normalizedPath === "/me";
 }
 
-function getDottedFieldValue(input: Record<string, unknown>, field: string): unknown {
-  let current: unknown = input;
-  for (const segment of field.split(".")) {
-    if (segment.length === 0) return undefined;
-    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
-}
-
 /**
  * Extract declared paths and canonicalize each one for sandbox/allowed-dir
  * matching. Security MAJOR-3 (cluster review): `..` segments / NFD unicode
@@ -451,6 +442,21 @@ function getDottedFieldValue(input: Record<string, unknown>, field: string): unk
  * The allowed-dir list passed by the caller is also canonicalized at the
  * caller's layer (boot-time / settings load), so both sides of the prefix
  * compare have the same shape.
+ *
+ * KNOWN DIVERGENCE from the path the invocation pipeline actually inspects.
+ * `extractTargetFilePaths` (`tools/pipeline/path-extraction.ts`) resolves the
+ * SAME declared values with `resolveToolPathForPermission`: it expands a
+ * leading `~` and resolves a relative value against the INVOCATION cwd. This
+ * function does neither — `canonicalizePathForMatch` absolutizes with a bare
+ * `path.resolve`, i.e. against `process.cwd()`, and a leading `~` survives as a
+ * literal directory segment. So for `~`-prefixed and relative values the
+ * reviewer classifies a different path than the one Layer 1 checks and the tool
+ * writes, in BOTH directions (see
+ * `__tests__/declared-path-resolution-divergence.test.ts`, which reproduces a
+ * `~/…` write to an unallowed location being classified `low` "write at
+ * allowed-dir leaf"). Deliberately left as-is here: aligning the two changes
+ * reviewer verdicts, which is an owner decision, not a refactor. Layer 1 is
+ * unaffected — it reads the pipeline's resolved path, never this one.
  */
 function extractDeclaredPaths(ctx: ToolInvocationContext): string[] {
   const paths: string[] = [];
