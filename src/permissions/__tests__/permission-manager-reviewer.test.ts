@@ -83,6 +83,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: [allowedDir("/Users/example/work")],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -98,6 +99,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: ["path"],
       finalInput: { path: "/etc/passwd" },
       allowedDirectories: [allowedDir("/Users/example/work")],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -116,6 +118,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: ["path"],
       finalInput: { path: "/Users/example/work/a/b/c/d.md" },
       allowedDirectories: [allowedDir("/Users/example/work")],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -133,6 +136,7 @@ describe("PermissionManager.dispatchReviewer", () => {
         pathFields: ["path"],
         finalInput: { path: "/Users/example/work/a/b/c/d.md" },
         allowedDirectories: [allowedDir("/Users/example/work")],
+        executionCwd: process.cwd(),
         sensitivePathsAdjacent: [],
         trustOrigin: "llm-tool-arg" as const,
       },
@@ -153,6 +157,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: [allowedDir("/Users/example/work")],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     };
@@ -200,6 +205,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: [],
       finalInput: { command: "echo sealed-plan" },
       allowedDirectories: [allowedDir("/Users/example/work")],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     };
@@ -257,6 +263,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       workerId: "embed",
       finalInput: { url: "https://api.example.com/index" },
       allowedDirectories: [],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "llm-tool-arg" as const,
       conversationContext: { recentUserMessage: "인덱스 상태를 확인해줘." },
@@ -306,6 +313,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       workerId: "embed",
       finalInput: { url: "https://api.example.com/index" },
       allowedDirectories: [],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "llm-tool-arg" as const,
       conversationContext: { recentUserMessage: "인덱스 상태를 확인해줘." },
@@ -339,6 +347,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: [allowedDir("/Users/example/work")],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
     };
 
@@ -384,6 +393,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: [],
       finalInput: { message: "notify admin" },
       allowedDirectories: [],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "llm-tool-arg" as const,
     };
@@ -421,6 +431,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: [],
       finalInput: { payload: "send ***@example.com with [REDACTED:TOKEN]" },
       allowedDirectories: [],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "llm-tool-arg" as const,
     };
@@ -468,6 +479,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: [],
       finalInput: { endpoint: "https://api.example.com/search" },
       allowedDirectories: [],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "llm-tool-arg" as const,
       workerId: "main",
@@ -505,6 +517,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: [],
       finalInput: firstInput,
       allowedDirectories,
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "llm-tool-arg",
       approvalCacheKey: `bash:${bash.approvalCacheKey(firstInput)}`,
@@ -515,6 +528,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: [],
       finalInput: destructiveInput,
       allowedDirectories,
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "llm-tool-arg",
       approvalCacheKey: `bash:${bash.approvalCacheKey(destructiveInput)}`,
@@ -534,6 +548,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: [allowedDir("/Users/example/work")],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     };
@@ -563,6 +578,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: ["path"],
       finalInput: { path: "/Users/example/work/note.md" },
       allowedDirectories: [allowedDir("/Users/example/work")],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     };
@@ -589,6 +605,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: ["path"],
       finalInput: { path: "/x" },
       allowedDirectories: [],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -613,6 +630,7 @@ describe("PermissionManager.dispatchReviewer", () => {
       pathFields: ["path"],
       finalInput: { path: "/x" },
       allowedDirectories: [allowedDir("/Users/example/work")],
+      executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "user-keyboard" as const,
     });
@@ -664,6 +682,7 @@ describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.
         pathFields: [],
         finalInput: { command: "echo hello" },
         allowedDirectories: [allowedDir("/Users/example/work")],
+        executionCwd: process.cwd(),
         sensitivePathsAdjacent: [],
         trustOrigin: "llm-tool-arg",
       },
@@ -701,6 +720,7 @@ describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.
         pathFields: [],
         finalInput: { command: "echo hello" },
         allowedDirectories: [allowedDir("/Users/example/work")],
+        executionCwd: process.cwd(),
         sensitivePathsAdjacent: [],
         trustOrigin: "llm-tool-arg",
       },
@@ -755,6 +775,7 @@ describe("#664 flood guard — degraded rule reviewer does not over-defer headle
         pathFields: ["path"],
         finalInput: { path: `${sandboxRoot}/msal-cache.bin` },
         allowedDirectories: [allowedDir(`${TMP}/lvis-664-flood/work`)],
+        executionCwd: process.cwd(),
         sensitivePathsAdjacent: [],
         trustOrigin: "plugin-emitted",
         // #885 v6 — auto-LOW keys solely on the host-computed ownerPluginSandboxRoot.
@@ -800,6 +821,7 @@ describe("reviewer outcome provenance and base-cache safety", () => {
     pathFields: [] as string[],
     finalInput: { command: "echo hello" },
     allowedDirectories: [] as string[],
+    executionCwd: process.cwd(),
     sensitivePathsAdjacent: [] as string[],
     trustOrigin: "llm-tool-arg" as const,
   };
