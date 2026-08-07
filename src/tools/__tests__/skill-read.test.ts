@@ -250,7 +250,7 @@ describe("skill_load — approval covers the bundled manifest", () => {
         store,
         overlay: new SkillOverlay(),
         approvals: approvals as never,
-        getApprovalGate: () => ({
+        approvalGate: ({
           requestAndWait: async () => { prompts += 1; return { choice: "allow" }; },
         }) as never,
         emit: () => {},
@@ -321,7 +321,7 @@ describe("skill_read — manifest fidelity", () => {
           },
           approve: async () => {},
         } as never,
-        getApprovalGate: () => ({
+        approvalGate: ({
           requestAndWait: async () => { prompts += 1; return { choice: "allow" }; },
         }) as never,
         emit: () => {},
@@ -362,7 +362,7 @@ describe("skill_load — approval key domains", () => {
             approvedMaterial.push(material);
           },
         } as never,
-        getApprovalGate: () => ({ requestAndWait: async () => ({ choice: "allow" }) }) as never,
+        approvalGate: ({ requestAndWait: async () => ({ choice: "allow" }) }) as never,
         emit: () => {},
       });
       await tool.execute({ skillName: "flat" }, ctx());
