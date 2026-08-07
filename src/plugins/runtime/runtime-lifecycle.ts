@@ -2,7 +2,6 @@ import { basename, dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import type {
   PluginManifest,
-  PluginToolHandler,
   RuntimePlugin,
   RuntimePluginFactory,
 } from "../types.js";
@@ -35,7 +34,6 @@ import type {
 } from "./types.js";
 import {
   buildMethodMap,
-  declaredRuntimeMethods,
   importPluginFactory,
 } from "./plugin-loader.js";
 import { createLogger } from "../../lib/logger.js";
@@ -329,14 +327,10 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
         continue;
       }
 
-      const methods = new Map<string, PluginToolHandler>();
-      for (const toolName of declaredRuntimeMethods(manifest)) {
-        const handler = instance.handlers[toolName];
-        if (!handler) {
-          plog("warn", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler");
-          continue;
-        }
-        methods.set(toolName, handler);
+      const methods = buildMethodMap(manifest, instance, (toolName) =>
+        plog("warn", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler"),
+      );
+      for (const toolName of methods.keys()) {
         if (this.methodMap.has(toolName)) {
           deactivate();
           hostEffects.discard();

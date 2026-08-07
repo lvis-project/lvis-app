@@ -39,7 +39,11 @@ export function declaredAppVisibleToolMethods(
  * duplicate names at load. This is the full declared-tool set (the model-visible
  * ∪ app-visible tool union).
  */
-export function declaredRuntimeMethods(manifest: Pick<PluginManifest, "tools">,
+/**
+ * Module-private: `buildMethodMap` is the only derivation of the declared
+ * runtime methods. Every instantiation path goes through it.
+ */
+function declaredRuntimeMethods(manifest: Pick<PluginManifest, "tools">,
 ): string[] {
   return [...new Set((manifest.tools ?? []).map((t) => t.name))];
 }

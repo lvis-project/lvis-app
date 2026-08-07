@@ -5,7 +5,6 @@ import type {
   PluginAccessSpec,
   PluginHostApi,
   PluginManifest,
-  PluginToolHandler,
   RuntimePlugin,
   RuntimePluginFactory,
 } from "../types.js";
@@ -42,7 +41,6 @@ import type {
 } from "./types.js";
 import {
   buildMethodMap,
-  declaredRuntimeMethods,
 } from "./plugin-loader.js";
 import { createLogger } from "../../lib/logger.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
@@ -591,14 +589,14 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
       return "failed";
     }
 
-    const methods = new Map<string, PluginToolHandler>();
-    for (const toolName of declaredRuntimeMethods(manifest)) {
-      const handler = instance.handlers[toolName];
-      if (!handler) {
-        log.warn(`missing handler '${toolName}' — tool disabled`);
-        continue;
-      }
-      methods.set(toolName, handler);
+    const methods = buildMethodMap(manifest, instance, (toolName) =>
+      plog(
+        "warn",
+        { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" },
+        "tool disabled — missing handler",
+      ),
+    );
+    for (const toolName of methods.keys()) {
       const owner = this.methodMap.get(toolName)?.pluginId;
       if (owner && owner !== manifest.id) {
         deactivate();

@@ -12,10 +12,11 @@
  * ends with: the plugin listed, its tool registered + callable, a perf-stats
  * entry present, and its manifest retrievable.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { rm } from "node:fs/promises";
 
 import { PluginRuntime } from "../runtime.js";
+import { PluginPhase } from "../lifecycle-log.js";
 import {
   makeTestPluginEntrySource,
   makeTestPluginRuntime,
@@ -103,5 +104,93 @@ describe("PluginRuntime instantiation parity", () => {
     expect(reloadState).toEqual(EXPECTED);
     expect(restartState).toEqual(startState);
     expect(reloadState).toEqual(startState);
+  });
+
+  /**
+   * A tool declared in the manifest with no matching runtime handler is
+   * skipped, and the skip is reported on the structured plugin-phase stream —
+   * that stream is how an operator finds out a tool silently disappeared.
+   *
+   * The four instantiation paths derived the same map four ways: two called
+   * the shared `buildMethodMap`, two re-implemented the loop by hand. One of
+   * the hand-rolled copies (addPlugin) reported the skip as a bare
+   * `log.warn` string carrying neither pluginId nor phase, so a tool dropped
+   * during install/enable never reached the stream the other paths feed.
+   */
+  describe("missing-handler skip telemetry", () => {
+    const DECLARED_ONLY = "parity_orphan";
+
+    beforeEach(async () => {
+      const { manifestPath } = await writeTestPlugin(fixture, {
+        id: PLUGIN_ID,
+        tools: [TOOL, DECLARED_ONLY],
+        entrySource: makeTestPluginEntrySource({ [TOOL]: JSON.stringify("pong") }),
+      });
+      await writeTestPluginRegistry(fixture, [
+        { id: PLUGIN_ID, manifestPath, enabled: true },
+      ]);
+    });
+
+    /** The structured phase records the run emitted for the orphan tool. */
+    function skipRecords(
+      warn: { mock: { calls: unknown[][] } },
+    ): unknown[] {
+      return warn.mock.calls
+        .flat()
+        .filter((arg): arg is Record<string, unknown> =>
+          typeof arg === "object"
+          && arg !== null
+          && (arg as Record<string, unknown>).phase === PluginPhase.REGISTER_TOOL_SKIP);
+    }
+
+    const EXPECTED_SKIP = {
+      pluginId: PLUGIN_ID,
+      phase: PluginPhase.REGISTER_TOOL_SKIP,
+      toolName: DECLARED_ONLY,
+      reason: "missing_handler",
+    };
+
+    it("startAll reports the skip on the plugin-phase stream", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        const rt = makeTestPluginRuntime(fixture);
+        await rt.startAll();
+        expect(rt.listToolNames()).not.toContain(DECLARED_ONLY);
+        expect(skipRecords(warn)).toContainEqual(
+          expect.objectContaining(EXPECTED_SKIP),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("addPlugin reports the skip on the same stream, not as an untagged string", async () => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        const rt = makeTestPluginRuntime(fixture);
+        await rt.addPlugin(PLUGIN_ID);
+        expect(rt.listToolNames()).not.toContain(DECLARED_ONLY);
+        expect(skipRecords(warn)).toContainEqual(
+          expect.objectContaining(EXPECTED_SKIP),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
+
+    it("restartPlugin reports the skip on the same stream", async () => {
+      const rt = makeTestPluginRuntime(fixture);
+      await rt.startAll();
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+      try {
+        await rt.restartPlugin(PLUGIN_ID);
+        expect(rt.listToolNames()).not.toContain(DECLARED_ONLY);
+        expect(skipRecords(warn)).toContainEqual(
+          expect.objectContaining(EXPECTED_SKIP),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 });
