@@ -173,8 +173,12 @@ Perform on each platform artifact before uploading:
 
 - Electron: 메이저 버전 고정 (`^`). 보안 패치만 주기적 bump.
 - electron-updater / electron-builder: minor 고정, patch 자동 (`~`).
-- Plugin native deps (better-sqlite3 등): electron-rebuild 재실행 필수 →
-  `bun install` postinstall 에서 처리됨.
+- Native deps (`better-sqlite3`, `node-pty`): 둘 다 N-API(ABI 안정) + 플랫폼별
+  prebuild 배포이므로 `postinstall` 에서 `electron-rebuild` 를 돌리지 않는다.
+  바인딩 경로는 각 모듈의 로더(better-sqlite3 `lib/binding.js`, node-pty
+  `lib/utils.js`)가 정하고, `scripts/electron-after-pack.cjs` 가 같은 경로로
+  패키징 산출물을 검증한다. 로드 실패는 prebuild 누락/손상이므로 재설치
+  (`bun install --force`)로 처리하고 재빌드하지 않는다.
 - Python 런타임: host-managed Python 플러그인의 lockfile content + OS/arch 로
   shared env 를 고정. 릴리스마다 active plugin lockfile diff 와 패키징 자산
   경계(uv 포함, venv/wheelhouse/model cache 제외)를 검토.
