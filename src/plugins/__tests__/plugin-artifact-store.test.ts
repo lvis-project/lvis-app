@@ -17,14 +17,14 @@
  */
 import AdmZip from "adm-zip";
 import { describe, expect, it, vi } from "vitest";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { ArtifactRollbackError, assertSafeArtifactSlug } from "../plugin-artifact-store.js";
 import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
 import { TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
-import { makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
+import { cleanupTmpDir, makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
 
 describe("PluginArtifactStore — history journal", () => {
   it("appendHistory + readHistory round-trip preserves order", async () => {
@@ -38,7 +38,7 @@ describe("PluginArtifactStore — history journal", () => {
       const history = await store.readHistory("acme");
       expect(history.map((e) => e.version)).toEqual(["1.0.0", "1.0.1", "2.0.0"]);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -49,7 +49,7 @@ describe("PluginArtifactStore — history journal", () => {
       const history = await store.readHistory("never-installed");
       expect(history).toEqual([]);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 });
@@ -61,7 +61,7 @@ describe("PluginArtifactStore — findRollbackTarget", () => {
       const store = makeStore(tmp);
       expect(await store.findRollbackTarget("acme")).toBeNull();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -86,7 +86,7 @@ describe("PluginArtifactStore — findRollbackTarget", () => {
       const target = await store.findRollbackTarget("acme", "2.0.0");
       expect(target).toBe("1.0.1");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -107,7 +107,7 @@ describe("PluginArtifactStore — findRollbackTarget", () => {
       // Pretend 2.0.0 is current — should pick 1.0.0.
       expect(await store.findRollbackTarget("acme", "2.0.0")).toBe("1.0.0");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -128,7 +128,7 @@ describe("PluginArtifactStore — findRollbackTarget", () => {
       // snapshot) and returns 1.0.0.
       expect(await store.findRollbackTarget("acme", "2.0.0")).toBe("1.0.0");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -147,24 +147,24 @@ describe("PluginArtifactStore — findRollbackTarget", () => {
       );
       expect(await store.findRollbackTarget("acme", "2.0.0")).toBe("1.0.0");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 });
 
 describe("PluginArtifactStore — installDirFor", () => {
-  it("anchors install dirs under installRoot", () => {
+  it("anchors install dirs under installRoot", async () => {
     const tmp = makeTmpDir();
     try {
       const store = makeStore(tmp);
       const dir = store.installDirFor("acme");
       expect(dir).toBe(resolve(tmp, "installed", "acme"));
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
-  it("rejects slugs that could escape the install root", () => {
+  it("rejects slugs that could escape the install root", async () => {
     const tmp = makeTmpDir();
     try {
       const store = makeStore(tmp);
@@ -172,7 +172,7 @@ describe("PluginArtifactStore — installDirFor", () => {
         expect(() => store.installDirFor(slug)).toThrow(/invalid artifact slug/);
       }
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 });
@@ -189,7 +189,7 @@ describe("PluginArtifactStore — extractZip", () => {
       entry.attr = (0o120777 << 16) >>> 0;
       await expect(store.extractZip("acme", zip.toBuffer())).rejects.toThrow(/unsupported member kind/);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -202,7 +202,7 @@ describe("PluginArtifactStore — extractZip", () => {
       zip.addFile("hooks/A.json", Buffer.from("two"));
       await expect(store.extractZip("acme", zip.toBuffer())).rejects.toThrow(/colliding entry/);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -215,7 +215,7 @@ describe("PluginArtifactStore — extractZip", () => {
       zip.addFile("SKILLS/STRASSE/skill.md", Buffer.from("two"));
       await expect(store.extractZip("acme", zip.toBuffer())).rejects.toThrow(/colliding entry/);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -229,7 +229,7 @@ describe("PluginArtifactStore — extractZip", () => {
         /invalid artifact slug/,
       );
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -253,7 +253,7 @@ describe("PluginArtifactStore — extractZip", () => {
       const restored = JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf-8"));
       expect(restored.version).toBe("old");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -277,7 +277,7 @@ describe("PluginArtifactStore — extractZip", () => {
       expect(durableCommit).not.toHaveBeenCalled();
       expect(JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf8")).version).toBe("old");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -317,7 +317,7 @@ describe("PluginArtifactStore — extractZip", () => {
       await expect(installing).resolves.toMatchObject({ result: "committed", predecessorRetired: true });
       expect((await readdir(installRoot)).filter((name) => name.startsWith(".acme.old-"))).toEqual([]);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -366,7 +366,7 @@ describe("PluginArtifactStore — extractZip", () => {
         .toHaveLength(1);
       expect(onCommittedBackupResolved).not.toHaveBeenCalled();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -379,7 +379,7 @@ describe("PluginArtifactStore — extractZip", () => {
       });
       expect(existsSync(resolve(tmp, "installed"))).toBe(false);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -398,7 +398,7 @@ describe("PluginArtifactStore — extractZip", () => {
         : [];
       expect(entries.filter((name) => name.includes(".stage-"))).toEqual([]);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -460,7 +460,7 @@ describe("PluginArtifactStore — extractZip", () => {
         : [];
       expect(entries.filter((name) => name.includes(".stage-"))).toEqual([]);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -480,7 +480,7 @@ describe("PluginArtifactStore — extractZip", () => {
       });
       expect(existsSync(resolve(tmp, "installed", "acme"))).toBe(false);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -509,7 +509,7 @@ describe("PluginArtifactStore — extractZip", () => {
       expect(entries.filter((name) => name.includes(".stage-"))).toEqual([]);
       expect(existsSync(resolve(tmp, "installed", "acme"))).toBe(false);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -531,7 +531,7 @@ describe("PluginArtifactStore — extractZip", () => {
         "two.txt",
       ]);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -563,7 +563,7 @@ describe("PluginArtifactStore — extractZip", () => {
         expect(JSON.parse(await readFile(resolve(installDir, "plugin.json"), "utf-8")).version).toBe("new");
       } finally {
         await chmod(installRoot, 0o700).catch(() => undefined);
-        rmSync(tmp, { recursive: true, force: true });
+        await cleanupTmpDir(tmp);
       }
     },
     10_000,
@@ -636,8 +636,8 @@ describe("PluginArtifactStore — process-wide artifact resource slot", () => {
       await expect(Promise.all([first, second])).resolves.toEqual(["first", "second"]);
       expect(secondEntered).toBe(true);
     } finally {
-      rmSync(firstTmp, { recursive: true, force: true });
-      rmSync(secondTmp, { recursive: true, force: true });
+      await cleanupTmpDir(firstTmp);
+      await cleanupTmpDir(secondTmp);
     }
   });
 
@@ -651,7 +651,7 @@ describe("PluginArtifactStore — process-wide artifact resource slot", () => {
       })).rejects.toBe(failure);
       await expect(store.withArtifactResourceSlot(async () => "next")).resolves.toBe("next");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -680,7 +680,7 @@ describe("PluginArtifactStore — process-wide artifact resource slot", () => {
       await first;
       await expect(third).resolves.toBe("third");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 });
@@ -708,7 +708,7 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
       const raw = await read(cached, "utf-8");
       expect(JSON.parse(raw)).toMatchObject({ id: "acme", version: "1.2.3" });
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -736,7 +736,7 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
         approvedPluginAccess: { plugins: [{ pluginId: "work-assistant" }] },
       });
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -746,7 +746,7 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
       const store = makeStore(tmp);
       expect(await store.readCachedRegistryEntrySnapshot("acme", "1.2.3")).toBeNull();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -758,7 +758,7 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
         store.cacheVersionFromManifest("acme", resolve(tmp, "does-not-exist.json")),
       ).resolves.toBeUndefined();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 });
