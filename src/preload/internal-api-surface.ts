@@ -8,6 +8,7 @@ import {
   ROUTINES_V2,
   SETTINGS,
   WORK_BOARD,
+  type PluginInstallResultPayload,
 } from "../contract/app-contract.js";
 import { t } from "../i18n/index.js";
 import { ipcUserKeyboardIntent } from "./gesture-intent.js";
@@ -741,7 +742,7 @@ export function buildInternalApiSurface() {
   // finished installing + restartAll() in the main process. Renderer uses
   // this to refresh its plugin UI list so newly-installed plugin views
   // appear without requiring an app restart.
-  onPluginInstallResult: (handler: (payload: { slug: string; success: boolean; error?: string }) => void) => {
+  onPluginInstallResult: (handler: (payload: PluginInstallResultPayload) => void) => {
     const listener = (_event: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
     ipcRenderer.on(CHANNELS.plugins.installResult, listener);
     return () => ipcRenderer.removeListener(CHANNELS.plugins.installResult, listener);
