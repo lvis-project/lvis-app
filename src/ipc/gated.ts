@@ -9,6 +9,7 @@
 import type { IpcMainInvokeEvent } from "electron";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import { redactFsPath } from "../audit/dlp-filter.js";
+import { isPluginShellFrameUrl } from "../shared/plugin-shell-frame.js";
 
 // ─── Sender validation ────────────────────────────────────────────────────────
 
@@ -43,21 +44,14 @@ export function validateSender(event: IpcMainInvokeEvent | null | undefined): bo
  * host-wide `window.lvisApi`; reject them explicitly at sensitive channels.
  */
 export function validateHostRendererSender(event: IpcMainInvokeEvent | null | undefined): boolean {
+  // `validateSender` already applied the accepted-protocol allow-list (and
+  // already rejected an unparseable URL on a present frame). The only two
+  // things this adds are the fail-closed empty-URL rule and the plugin-shell
+  // rejection, so those are all it spells out.
   if (!validateSender(event)) return false;
   const rawUrl = event?.senderFrame?.url ?? "";
   if (!rawUrl) return false;
-  try {
-    const url = new URL(rawUrl);
-    if (url.protocol === "file:" && url.pathname.toLowerCase().endsWith("/plugin-ui-shell.html")) {
-      return false;
-    }
-    if (url.protocol === "file:") return true;
-    if (url.protocol === "http:" && url.hostname === "localhost") return true;
-    if (url.protocol === "http:" && url.hostname === "127.0.0.1") return true;
-    return false;
-  } catch {
-    return false;
-  }
+  return !isPluginShellFrameUrl(rawUrl);
 }
 
 export const UNAUTHORIZED_FRAME = { ok: false, error: "unauthorized-frame" as const };
@@ -95,13 +89,5 @@ export function auditUnauthorized(
 export function validatePluginFrame(event: IpcMainInvokeEvent | null | undefined): boolean {
   const frame = event?.senderFrame;
   if (!frame) return true;
-  const rawUrl = frame.url ?? "";
-  try {
-    const url = new URL(rawUrl);
-    if (url.protocol !== "file:") return false;
-    const pathname = url.pathname.toLowerCase();
-    return pathname.endsWith("/plugin-ui-shell.html");
-  } catch {
-    return false;
-  }
+  return isPluginShellFrameUrl(frame.url ?? "");
 }
