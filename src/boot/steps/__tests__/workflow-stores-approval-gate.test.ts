@@ -9,10 +9,14 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { mkdirSync, writeFileSync, rmSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 
-const TEST_HOME = join(tmpdir(), `lvis-wf-gate-${randomBytes(4).toString("hex")}`);
+// `mkdtempSync`, not `join(tmpdir(), random)`. The latter builds a path and
+// then creates it non-exclusively, so anything already sitting at that path —
+// including a symlink planted in the shared temp dir — is followed by the
+// `mkdirSync`/`writeFileSync` below. `mkdtempSync` creates the directory
+// atomically and fails if it exists.
+const TEST_HOME = mkdtempSync(join(tmpdir(), "lvis-wf-gate-"));
 process.env.LVIS_HOME = TEST_HOME;
 
 const { setupWorkflowStores } = await import("../workflow-stores.js");
