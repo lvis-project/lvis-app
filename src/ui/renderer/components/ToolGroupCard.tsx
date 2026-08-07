@@ -7,7 +7,7 @@ import { parseRenderHtmlResult } from "../utils/html-preview.js";
 import { extractFileEditDiff } from "../utils/file-diff.js";
 import type { FileEditDiffData } from "../utils/file-diff.js";
 import { getToolDisplayName } from "../utils/tool-display.js";
-import { formatToolDuration } from "../utils/format-duration.js";
+import { formatDuration } from "../../../lib/turn-summary-format.js";
 import type { RenderHtmlPayload } from "../types.js";
 import { HtmlPreview } from "./HtmlPreview.js";
 import { FileEditDiff, WriteFileSidecarDiff } from "./FileEditDiff.js";
@@ -23,9 +23,11 @@ import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
  * predates the per-tool timer instrumentation).
  */
 function ToolDurationBadge({ durationMs }: { durationMs?: number }) {
-  if (typeof durationMs !== "number") return null;
-  const label = formatToolDuration(durationMs);
-  if (!label) return null;
+  // Hiding on a missing or nonsensical duration is this badge's own rule, not
+  // the formatter's — `formatDuration` renders `0s` for those, which would put
+  // a meaningless stopwatch on the row.
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs < 0) return null;
+  const label = formatDuration(durationMs);
   return (
     <span
       className="shrink-0 font-mono text-[10px] tabular-nums opacity-70"
@@ -55,8 +57,7 @@ function RunningDurationBadge({ startedAt }: { startedAt?: number }) {
   }, [startedAt]);
   if (typeof startedAt !== "number") return null;
   const elapsed = Math.max(0, now - startedAt);
-  const label = formatToolDuration(elapsed);
-  if (!label) return null;
+  const label = formatDuration(elapsed);
   return (
     <span
       className="shrink-0 font-mono text-[10px] tabular-nums opacity-70"
