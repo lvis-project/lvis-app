@@ -22,6 +22,7 @@
 import type { ModelMessage } from "ai";
 import type { GenericMessage, LLMVendor } from "../types.js";
 import { createLogger } from "../../../lib/logger.js";
+import { vendorCarriesToolResultImage } from "../../../shared/multimodal-token-estimate.js";
 import { normalizeLocalUserContentParts } from "../../../main/subscription-attachment-input.js";
 const log = createLogger("message-mapper");
 
@@ -146,7 +147,7 @@ export function genericToModelMessages(
       // back to the text placeholder in `msg.content` — the image is dropped
       // rather than sent as something the provider would reject.
       const output =
-        vendor === "claude" && msg.image
+        vendorCarriesToolResultImage(vendor) && msg.image
           ? {
               type: "content" as const,
               value: [
