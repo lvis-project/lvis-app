@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { makeAppIpcInvoker } from "./test-helpers.js";
+import { PluginDeploymentDeniedError } from "../../../plugins/deployment-guard.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const hostEventMock = vi.hoisted(() => ({ emit: vi.fn() }));
@@ -241,6 +242,30 @@ describe("lvis:plugins:set-enabled", () => {
     expect(res).toEqual({ ok: false, error: "unauthorized-frame" });
     expect(setPluginEnabled).not.toHaveBeenCalled();
     expect(deps.auditLogger.log).toHaveBeenCalled();
+  });
+
+  it("maps a deployment-guard denial to disable-not-permitted without broadcasting", async () => {
+    const { setPluginEnabled, appWindows } = await setup();
+    // The real error type the runtime guard throws — not a look-alike, so a
+    // rename of the class breaks this test rather than silently passing.
+    setPluginEnabled.mockRejectedValueOnce(
+      new PluginDeploymentDeniedError(
+        "Admin plugin cannot be uninstalled by user: com.example.meeting (registry installSource=\"admin\")",
+      ),
+    );
+
+    const res = await invoke("lvis:plugins:set-enabled", "com.example.meeting", false);
+
+    expect(res).toMatchObject({ ok: false, error: "disable-not-permitted" });
+    // The guard's internal reason must not leak into the renderer banner.
+    expect((res as { message: string }).message).not.toMatch(/installSource/);
+    expect(hostEventMock.emit).not.toHaveBeenCalled();
+    for (const win of appWindows) {
+      expect(win.webContents.send).not.toHaveBeenCalledWith(
+        "lvis:plugins:enabled-changed",
+        expect.anything(),
+      );
+    }
   });
 
   it("maps runtime I/O failures to generic toggle-failed without broadcasting", async () => {
