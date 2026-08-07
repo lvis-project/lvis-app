@@ -405,7 +405,9 @@ describe("AuditLogger permission audit chain", () => {
     expect(archiveName).toBeDefined();
     expect(readFileSync(join(auditDir, archiveName!), "utf-8"))
       .toBe(`${JSON.stringify(legacy)}\n`);
-    expect(existsSync(file)).toBe(false);
+    // The verified inode is emptied in place rather than renamed away, so the
+    // archived bytes come from the descriptor that was actually authenticated.
+    expect(readFileSync(file, "utf-8")).toBe("");
 
     const appended = await logger.appendPermissionAuditEntry({
       decision: "allow",
