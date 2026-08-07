@@ -331,8 +331,10 @@ function assertNodePtyBinary(context) {
  *
  * better-sqlite3 13 is N-API (ABI-stable) and ships per-platform PREBUILDS at
  * `prebuilds/<platform>-<arch>.node` — one file per target it supports — rather
- * than a per-Electron-ABI `build/Release/better_sqlite3.node` compiled by
- * postinstall `electron-rebuild`. Its runtime loader (lib/binding.js) picks the
+ * than the per-Electron-ABI `build/Release/better_sqlite3.node` that
+ * `electron-rebuild` used to compile at install time (nothing does now — the
+ * only remaining caller is the pre-push ABI-drift repair in
+ * `scripts/hooks/run-local-checks.mjs`). Its runtime loader (lib/binding.js) picks the
  * prebuild by platform+arch, so there is no `bindings`/`file-uri-to-path`
  * resolver walk to keep unpacked anymore. Presence of THIS target's prebuild is
  * the correct packaged invariant; the other 7 prebuilds are dead weight on this
