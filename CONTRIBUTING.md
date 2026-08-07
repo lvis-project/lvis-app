@@ -20,7 +20,7 @@ language should not be a barrier to participation.
 # Prerequisites: Node.js >= 22.4 and bun (https://bun.sh)
 git clone https://github.com/lvis-project/lvis-app.git
 cd lvis-app
-bun install            # runs electron-rebuild + uv binary fetch
+bun install            # uv binary fetch + protocol/hook install (no native rebuild)
 bun run build          # TypeScript + esbuild renderer + Tailwind
 bun run start          # build + Electron launch
 ```
