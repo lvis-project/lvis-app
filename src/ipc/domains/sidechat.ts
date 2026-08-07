@@ -42,13 +42,13 @@ import {
   STREAM_TURN_OPTIONS,
   type ConversationStreamEventSink,
 } from "../handlers/chat-stream.js";
-import { isSafeSessionId, validateUserContentParts } from "../handlers/chat.js";
+import { isSafeSessionId, sanitizeOutgoingTurnContent, validateUserContentParts } from "../handlers/chat.js";
 import type { IpcDeps } from "../types.js";
 
 const log = createLogger("sidechat");
 
 export function registerSideChatHandlers(deps: IpcDeps): void {
-  const { sideChatConversationLoop, auditLogger, getMainWindow } = deps;
+  const { sideChatConversationLoop, auditLogger, getMainWindow, settingsService } = deps;
 
   // A side-chat loop is only wired in production boot. When absent (test
   // fixtures that boot only the main loop), every handler fails closed with a
@@ -123,14 +123,27 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
         fallbackChannel: CHANNELS.sidechat.fallback,
       },
     );
+    // Side chat reaches the provider through the same loop as main chat, so it
+    // needs the same DLP boundary. It did not have one: `p.input` went out raw
+    // while `privacy.piiRedactEnabled` was on. Redaction lives at the send
+    // sites rather than inside the loop, so a new send site is a new hole —
+    // this was one.
+    const sanitized = sanitizeOutgoingTurnContent(
+      settingsService,
+      sink,
+      p.input as string,
+      attachments,
+    );
     const turnPromise = (async () => {
       return runStreamedTurn(
         loop,
-        p.input as string,
+        sanitized.input,
         sink,
         {
           ...STREAM_TURN_OPTIONS,
-          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          ...(sanitized.attachments && sanitized.attachments.length > 0
+            ? { attachments: sanitized.attachments }
+            : {}),
         },
       );
     })().finally(() => {
