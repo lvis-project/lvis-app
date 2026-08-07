@@ -51,7 +51,22 @@ import {
   createConversationLoop,
   createRoutineConversationLoop,
   createSideChatConversationLoop,
+  type ConversationDeps,
+  type RoutineConversationLoopDeps,
+  type SideChatConversationLoopDeps,
 } from "../conversation.js";
+
+/**
+ * The deps bags below are cast (the factories want full service objects), so
+ * the cast could hide the very key under test being renamed or dropped from a
+ * factory's dep type. Type the spy through all three real dep types instead:
+ * remove `broadcastPermissionConfigChanged` from any of those Picks and this
+ * line stops compiling under `check:typecheck-tests`.
+ */
+type LoopBroadcastCallback =
+  & NonNullable<ConversationDeps["broadcastPermissionConfigChanged"]>
+  & NonNullable<RoutineConversationLoopDeps["broadcastPermissionConfigChanged"]>
+  & NonNullable<SideChatConversationLoopDeps["broadcastPermissionConfigChanged"]>;
 
 function sharedLoopDeps() {
   return {
@@ -107,7 +122,7 @@ describe("permission-config broadcast — every real loop factory reports", () =
     } as never)],
     ["routine", (deps: Record<string, unknown>) => createRoutineConversationLoop(deps as never, {})],
   ])("%s loop broadcasts a session-directory grant", (_name, build) => {
-    const broadcastPermissionConfigChanged = vi.fn();
+    const broadcastPermissionConfigChanged: LoopBroadcastCallback = vi.fn();
     const loop = build({ ...sharedLoopDeps(), broadcastPermissionConfigChanged });
 
     loop.addSessionAdditionalDirectory("/tmp/granted-scope");
