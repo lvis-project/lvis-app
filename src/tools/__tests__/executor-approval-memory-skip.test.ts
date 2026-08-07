@@ -156,6 +156,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
         operation: "status",
         opaqueSecret: "must-never-reach-audit",
       },
+      process.cwd(),
       [],
       [],
       userPermissionContext({ trustOrigin: "plugin-emitted" }),

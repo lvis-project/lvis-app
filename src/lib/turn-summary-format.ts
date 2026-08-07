@@ -44,14 +44,3 @@ export function formatDuration(ms: number): string {
   const minutes = Math.round(totalMin - hours * 60);
   return `${hours}h ${String(minutes).padStart(2, "0")}m`;
 }
-
-/**
- * Format a token count compactly. Mirrors AssistantCard's existing
- * abbreviation rule (1.2k, 47.3k) and extends it to millions.
- */
-export function formatTokens(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return "0";
-  if (n < 1000) return String(Math.round(n));
-  if (n < 1_000_000) return `${(n / 1000).toFixed(1)}k`;
-  return `${(n / 1_000_000).toFixed(1)}M`;
-}

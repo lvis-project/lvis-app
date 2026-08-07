@@ -45,6 +45,7 @@ import {
 import { auditPluginEmitDenial } from "../../../plugins/emit-denial-audit.js";
 import { getDeclaredEmittedEvents } from "../../../plugins/runtime/manifest-validation.js";
 import { applyConfigDefaults } from "../../../plugins/config-schema.js";
+import { shouldRestartAfterPluginConfigWrite } from "../../../plugins/config-restart-policy.js";
 import { OVERLAY_V1 } from "../../../shared/ipc-channels.js";
 import {
   emitPluginConfigChange,
@@ -166,7 +167,21 @@ export interface CreateHostApiFactoryDeps {
    */
   pluginRuntimeAuditLog: PluginStorageAuditLog;
   networkFetch: typeof fetch;
+  /**
+   * The main window captured at boot. Only a FALLBACK — read
+   * {@link CreateHostApiFactoryDeps.getMainWindow} instead wherever the host
+   * targets "the current main window", because this handle is destroyed once
+   * the window is closed and reopened (tray / dock `activate` / deep link all
+   * route through `showOrCreateMainWindow`, which calls `createWindow()` and
+   * re-registers a NEW BrowserWindow).
+   */
   mainWindow: BrowserWindow;
+  /**
+   * Live main-window getter — the same authority `createLifecycleCallbacks`
+   * and every `boot/steps/*` sender already read. Optional so minimal test
+   * hosts can omit it; absent, callers fall back to `mainWindow`.
+   */
+  getMainWindow?: () => BrowserWindow | null;
   openAuthWindowService: (
     parent: BrowserWindow,
     opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean },
@@ -215,6 +230,7 @@ export function createHostApiFactory(
     pluginRuntimeAuditLog,
     networkFetch,
     mainWindow,
+    getMainWindow,
     openAuthWindowService,
     openLinkWindowService,
     openAuthPartitionViewerService,
@@ -224,6 +240,20 @@ export function createHostApiFactory(
     permissionManager,
     routinesStore,
   } = deps;
+
+  /**
+   * The window a host→renderer send (or a host-opened child window's parent)
+   * should target RIGHT NOW.
+   *
+   * Single authority for this factory: `mainWindow` is the boot-time capture,
+   * and after a close+reopen it is a destroyed handle whose `webContents.send`
+   * is a silent no-op. `getMainWindow()` is the registry the rest of boot reads
+   * (`routines-wiring`, `reviewer-permission-wiring`, `workflow-stores`,
+   * `plugin-runtime/lifecycle`), so reading it here keeps one answer to
+   * "which window" across the host. Falls back to the capture when the getter
+   * is absent (minimal hosts) or returns null.
+   */
+  const liveMainWindow = (): BrowserWindow => getMainWindow?.() ?? mainWindow;
 
   return (
     pluginId: string,
@@ -442,9 +472,18 @@ export function createHostApiFactory(
             // Lifecycle hooks inherit the owning mutation context. Persist
             // their write, but never recursively restart the instance whose
             // start/stop Promise is currently being awaited.
+            // Restart policy: see `plugins/config-restart-policy.ts`. This write
+            // always mutates cleartext config (secrets were rejected above), so
+            // the only question is safety — a write issued from inside a
+            // lifecycle hook, or with a restart already in flight, would re-enter
+            // the mutation whose Promise is currently being awaited.
             if (
-              nestedLifecycleMutation
-              || pluginRuntime.isPluginRestartPending?.(pluginId)
+              !shouldRestartAfterPluginConfigWrite({
+                mutatedCleartextConfig: true,
+                restartUnsafe:
+                  nestedLifecycleMutation
+                  || pluginRuntime.isPluginRestartPending?.(pluginId) === true,
+              })
             ) {
               return;
             }
@@ -972,7 +1011,7 @@ export function createHostApiFactory(
           pluginId,
           settingsService,
           bootAuditLogger,
-          openLinkWindowService: (opts) => openLinkWindowService(mainWindow, opts),
+          openLinkWindowService: (opts) => openLinkWindowService(liveMainWindow(), opts),
           shellOpenExternal,
         });
       },
@@ -1099,7 +1138,7 @@ export function createHostApiFactory(
         const effectiveOpts = requested
           ? opts
           : { ...opts, persistPartition: defaultPartition };
-        return openAuthWindowService(ElectronBrowserWindow.getFocusedWindow() ?? mainWindow, effectiveOpts);
+        return openAuthWindowService(ElectronBrowserWindow.getFocusedWindow() ?? liveMainWindow(), effectiveOpts);
       }) as PluginHostApi["openAuthWindow"],
 
       // ─── Issue #649 — Auth-partition viewer ───────────────────────────
@@ -1159,13 +1198,13 @@ export function createHostApiFactory(
           );
         }
         return openAuthPartitionViewerService(
-          ElectronBrowserWindow.getFocusedWindow() ?? mainWindow,
+          ElectronBrowserWindow.getFocusedWindow() ?? liveMainWindow(),
           {
             pluginId,
             url: opts.url,
             allowedHosts,
             windowTitle: opts.windowTitle,
-            parent: ElectronBrowserWindow.getFocusedWindow() ?? mainWindow,
+            parent: ElectronBrowserWindow.getFocusedWindow() ?? liveMainWindow(),
             audit: (event) => {
               try {
                 bootAuditLogger.log({
@@ -1349,8 +1388,9 @@ export function createHostApiFactory(
           pendingPrompt: formatPluginPendingPrompt(spec.prompt, decision.source),
           createdAt: new Date().toISOString(),
         };
-        if (!mainWindow.isDestroyed()) {
-          mainWindow.webContents.send(OVERLAY_V1.show, overlayItem);
+        const overlayTarget = liveMainWindow();
+        if (!overlayTarget.isDestroyed()) {
+          overlayTarget.webContents.send(OVERLAY_V1.show, overlayItem);
         }
 
         return { accepted: true, source: decision.source, eventId };

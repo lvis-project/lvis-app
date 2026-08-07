@@ -27,6 +27,7 @@ export const de: Record<SeedMessageKey, string> = {
   "mainDialog.installLocalPluginTitle": "Lokales Plugin installieren (Entwickler)",
   "mainDialog.installLocalPluginMessage": "Wähle den Build-Ordner aus, der plugin.json enthält",
   "mainDialog.unauthorizedFrame": "Nicht autorisierter Frame.",
+  "mainDialog.pluginDisableNotPermitted": "Dieses Plugin wird von Ihrer Organisation verwaltet und kann nicht deaktiviert werden.",
   "mainDialog.noPersonasAvailable": "Keine Personas verfügbar",
   "mainDialog.exportConversationTitle": "Konversation exportieren",
   "mainDialog.importConversationTitle": "Konversation importieren",

@@ -165,7 +165,9 @@ export function PermissionsTab() {
       }
       setMode((modeRes.mode as ExecMode) ?? "default");
       setRequireExplicit(policyRes.requireExplicitApproval);
-      setPolicyManaged(policyRes.managed);
+      // Host-derived: `managed` alone misses an admin-dir file that does not
+      // set managed:true, which savePolicy still refuses to overwrite.
+      setPolicyManaged(!policyRes.editable);
       setPolicySource((policyRes.source as "defaults" | "user" | "admin" | "merged") ?? "defaults");
       setPolicyAdminPath(policyRes.adminPath as string | undefined);
       setRules(rulesRes);
