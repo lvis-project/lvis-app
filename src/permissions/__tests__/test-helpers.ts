@@ -134,6 +134,7 @@ export function makeRiskClassifierContext(
     pathFields: ["path"],
     trustOrigin: "user-keyboard",
     finalInput: {},
+    executionCwd: process.cwd(),
     allowedDirectories: DEFAULT_ALLOWED_DIRECTORIES,
     sensitivePathsAdjacent: [],
     sandboxCapability: detectSandboxCapability(),
