@@ -13,7 +13,7 @@ import {
 } from "../../../shared/pricing-data.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import type { SubscriptionUsageTelemetry } from "../../../shared/subscription-runtime.js";
-import { formatTokens } from "../utils/cost-format.js";
+import { formatCost, formatTokens } from "../../../lib/cost-format.js";
 
 export interface TokenCostBadgePricing {
   inputPer1M: number;
@@ -65,14 +65,6 @@ export interface TokenCostBadgeProps {
    * API-key pricing inputs and is rendered as a token-only provenance badge.
    */
   subscriptionUsage?: readonly SubscriptionUsageTelemetry[];
-}
-
-function formatCost(c: number): string {
-  if (c <= 0) return "$0";
-  if (c < 0.001) return `$${c.toFixed(5)}`;
-  if (c < 0.01) return `$${c.toFixed(4)}`;
-  if (c < 1) return `$${c.toFixed(3)}`;
-  return `$${c.toFixed(2)}`;
 }
 
 function sumSubscriptionTokens(
