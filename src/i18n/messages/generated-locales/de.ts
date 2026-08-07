@@ -1694,6 +1694,8 @@ export const deMessages: Record<string, string> = {
   "messageQueuePanel.panelTitle": "Nachrichtenwarteschlange",
   "messageQueuePanel.removeAriaLabel": "Entfernen",
   "messageQueuePanel.removeTitle": "Entfernen",
+  "messageQueuePanel.handedOffBadge": "wird übergeben",
+  "messageQueuePanel.handedOffTitle": "An das Modell übergeben — erscheint oben, sobald der aktuelle Schritt endet.",
   "messageQueuePanel.selectAriaLabel": "Wählen",
   "messageQueuePanel.selectedCount": "{count} ausgewählt",
   "messageQueuePanel.sendNowAriaLabel": "Injizieren Sie diesen Artikel sofort",
