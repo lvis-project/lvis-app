@@ -56,7 +56,7 @@ export interface PluginFailedInstallCleanupLifecycleDeps
   >;
 }
 
-type PluginStateCleanupDeps = Omit<PluginUninstallLifecycleDeps, "pluginMarketplace">;
+export type PluginStateCleanupDeps = Omit<PluginUninstallLifecycleDeps, "pluginMarketplace">;
 type RequiredPluginStateCleanupDeps = PluginStateCleanupDeps & {
   settingsService: Pick<
     SettingsService,
@@ -319,6 +319,63 @@ export async function recoverPendingPluginUninstallCleanups(
   }
 
   return Object.freeze(unresolved);
+}
+
+/**
+ * Removal of a plugin whose runtime generation was never started, wrapped
+ * around the caller's own registry-removal commit.
+ *
+ * The enforced half of admin marketplace sync removes a delisted admin install
+ * directly through `PluginMarketplaceService.uninstall`, which is only the
+ * inner (registry + directories) half of a removal. Everything the Host owns —
+ * config, secrets, the plugin's auth partitions, its cache directory, the
+ * cleanup journal that makes all of that crash-safe, and the
+ * `plugin.uninstalled` event — lives in this module and was skipped entirely.
+ * That left the residual state of a removed plugin on disk, and a later
+ * re-install silently inherited the previous install's secrets because
+ * `ensurePluginStateReadyForInstall` found no journal record.
+ *
+ * The journal record is prepared BEFORE the commit, so a crash between the
+ * registry write and the state cleanup is recovered by
+ * `recoverPendingPluginUninstallCleanups` on the next boot rather than lost.
+ * `assumeRuntimeQuiescent` is true because the only caller runs before the
+ * sealed `startPlugins()`; if that ever stops holding, the cleanup throws with
+ * the journal record committed instead of deleting state out from under a
+ * running generation.
+ */
+export async function removeQuiescentPluginResidualState(
+  input: {
+    pluginId: string;
+    installPluginId: string;
+    secretKeys: readonly string[];
+  },
+  commitRegistryRemoval: () => Promise<void>,
+  deps: PluginStateCleanupDeps,
+): Promise<void> {
+  const cleanupDeps = requirePluginStateCleanupDeps(deps);
+  const journal = cleanupJournal(cleanupDeps);
+  const record = journal.prepare({
+    pluginId: input.pluginId,
+    installPluginId: input.installPluginId,
+    secretKeys: [...input.secretKeys],
+    authPartitions: cleanupDeps.listPluginAuthPartitionsService(input.pluginId),
+    cleanupCache: true,
+  });
+  try {
+    await commitRegistryRemoval();
+  } catch (error) {
+    journal.cancel(input.pluginId);
+    throw error;
+  }
+  await finishCommittedPluginCleanup(record, cleanupDeps, journal, {
+    // The caller already holds every plugin install lock for the whole sync
+    // pass, so draining that queue from inside would wait on itself.
+    drainRuntimeOperations: false,
+    assumeRuntimeQuiescent: true,
+    cleanupCache: true,
+  });
+  deps.emitHostEvent?.("plugin.uninstalled", { pluginId: input.pluginId });
+  deps.refreshPluginNotifications?.();
 }
 
 /**
