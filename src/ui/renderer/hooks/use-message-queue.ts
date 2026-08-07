@@ -119,7 +119,7 @@ export function useMessageQueue({
    */
   const flushQueueViaGuide = useCallback(() => {
     if (guideFlushInflightRef.current || guideFlushBlockedRef.current) return;
-    const pending = messageQueueStore.getItems();
+    const pending = messageQueueStore.getPending();
     if (pending.length === 0) return;
     const handed = pending.map((item) => ({ id: item.id, text: item.text }));
     const count = pending.length;
@@ -129,17 +129,22 @@ export function useMessageQueue({
       try {
         const result = await onGuide(formatted);
         if (result?.ok === true) {
-          // Remove exactly what was handed over — by id AND by text. Items
-          // stay editable while the call is in flight, so an id alone would
-          // discard a row the user rewrote after the engine had already seen
-          // the old wording. A rewritten row stays queued and goes out at the
-          // next brake point. Anything queued during the call stays too.
+          // Match by id AND text. Rows stay editable while the call is in
+          // flight, so an id alone would mark a row the user rewrote after the
+          // engine had already seen the old wording. A rewritten row stays
+          // pending and goes out at the next brake point, as does anything
+          // queued during the call.
+          //
+          // MARK, not remove: the engine has accepted this text but will not
+          // deliver it until its next round boundary. The row stays on screen
+          // as handed-off until `guidance_injected` reports it delivered.
           const current = new Map(
             messageQueueStore.getItems().map((item) => [item.id, item.text]),
           );
-          for (const { id, text } of handed) {
-            if (current.get(id) === text) messageQueueStore.remove(id);
-          }
+          messageQueueStore.markHandedOff(
+            handed.filter(({ id, text }) => current.get(id) === text).map(({ id }) => id),
+            formatted,
+          );
           return;
         }
         const reason = result?.error ?? "unknown";
@@ -164,6 +169,21 @@ export function useMessageQueue({
         flushQueueViaGuide();
         return;
       }
+      if (ev.type === "guidance_injected") {
+        // Delivered. The text is a user bubble in the transcript now, so the
+        // row has somewhere to have gone — this is the only place it is
+        // cleared after a hand-off.
+        const text = typeof ev.text === "string" ? ev.text : "";
+        if (text.length > 0) messageQueueStore.clearDelivered(text);
+        return;
+      }
+      if (ev.type === "guidance_dropped") {
+        // The engine took it but could not deliver it. The rows are the
+        // user's again so the end-of-turn drain below picks them up — the
+        // `done` that follows this event does exactly that.
+        messageQueueStore.releaseHandedOff();
+        return;
+      }
       if (ev.type === "done") {
         // A refusal only blocks the rest of THAT turn; the next one starts
         // clean and may use its brake points again.
@@ -174,9 +194,13 @@ export function useMessageQueue({
         // re-entrancy guard (critic Round 2 M4): inflight inject 중 재 done
         // event 무시 — rapid done sequence 시 cascade race 방지.
         if (queueAutoInflightRef.current) return;
-        if (messageQueueStore.size() === 0) return;
-        const taken = messageQueueStore.takeAll();
+        // Handed-off rows are already with the engine — re-sending them here
+        // would duplicate the message. A hand-off the engine could not deliver
+        // has been released by `guidance_dropped` above, so it is pending again
+        // and included.
+        const taken = [...messageQueueStore.getPending()];
         if (taken.length === 0) return;
+        for (const item of taken) messageQueueStore.remove(item.id);
         queueAutoInflightRef.current = true;
         const formatted = formatQueueInject(taken);
         void (async () => {

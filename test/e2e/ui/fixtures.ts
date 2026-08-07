@@ -514,6 +514,19 @@ export const test = base.extend<ElectronFixtures & ElectronOptions>({
        bootstrap dies). Resolved via the shared `lvisHome()` helper. */
     const lvisHomeForTest = path.join(userDataDir, "lvis-state");
     fs.mkdirSync(lvisHomeForTest, { recursive: true, mode: 0o700 });
+    // Permission mode for the profile. The default is `default`, under which a
+    // real model's first path-bearing tool call parks the turn on an approval
+    // card — nobody answers it headlessly, so a live spec that needs tools to
+    // actually RUN never gets past the first one. Export
+    // LVIS_E2E_PERMISSION_MODE=allow to exercise the tool path end to end.
+    const permissionMode = process.env.LVIS_E2E_PERMISSION_MODE?.trim();
+    if (permissionMode) {
+      fs.writeFileSync(
+        path.join(lvisHomeForTest, "permissions.json"),
+        JSON.stringify({ mode: permissionMode }, null, 2) + "\n",
+        { encoding: "utf-8", mode: 0o600 },
+      );
+    }
     fs.writeFileSync(
       path.join(userDataDir, "lvis-settings.json"),
       JSON.stringify(
