@@ -17,6 +17,16 @@ vi.mock("electron", () => ({
   },
 }));
 
+// `policyGet` must attach the host-derived `editable` flag. loadPolicy itself
+// reads real OS paths (/etc/lvis, %ProgramData%), so the file layer is stubbed
+// while the handler under test — and the predicate it calls — stay real.
+const loadPolicyMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../../../permissions/policy-store.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../permissions/policy-store.js")>();
+  return { ...actual, loadPolicy: loadPolicyMock };
+});
+
 vi.mock("../../../permissions/user-approval-store.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../permissions/user-approval-store.js")>();
   return {
@@ -810,6 +820,31 @@ function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): u
 }
 
 // ─── MAJOR-4: reviewerProviderHasKey returns UNAUTHORIZED_FRAME ───────────────
+
+describe("policyGet exposes host-derived editability", () => {
+  const base = {
+    version: 1 as const,
+    requireExplicitApproval: true,
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  it.each([
+    ["admin-dir policy without managed:true", { ...base, managed: false, source: "admin" as const, adminPath: "/etc/lvis/policy.json" }, false],
+    ["merged admin+user policy without managed:true", { ...base, managed: false, source: "merged" as const, adminPath: "/etc/lvis/policy.json" }, false],
+    ["user policy with managed:true", { ...base, managed: true, source: "user" as const }, false],
+    ["plain user policy", { ...base, managed: false, source: "user" as const }, true],
+    ["no policy files", { ...base, managed: false, source: "defaults" as const }, true],
+  ])("%s → editable=%s", async (_label, loaded, expected) => {
+    await setup();
+    loadPolicyMock.mockResolvedValueOnce(loaded);
+
+    const result = await invoke(PERMISSIONS.policyGet) as { editable: boolean; source: string };
+
+    expect(result.editable).toBe(expected);
+    // The rest of the LoadedPolicy still passes through untouched.
+    expect(result.source).toBe(loaded.source);
+  });
+});
 
 describe("MAJOR-4: reviewerProviderHasKey returns UNAUTHORIZED_FRAME on invalid sender", () => {
   it("returns UNAUTHORIZED_FRAME (not bare false) when sender is a foreign frame", async () => {
