@@ -1713,6 +1713,8 @@ export const jaMessages: Record<string, string> = {
   "messageQueuePanel.panelTitle": "メッセージキュー",
   "messageQueuePanel.removeAriaLabel": "取り除く",
   "messageQueuePanel.removeTitle": "取り除く",
+  "messageQueuePanel.handedOffBadge": "送信中",
+  "messageQueuePanel.handedOffTitle": "モデルに引き渡し済み — 現在のステップが終わると上の会話に表示されます。",
   "messageQueuePanel.selectAriaLabel": "選択",
   "messageQueuePanel.selectedCount": "{count} が選択されました",
   "messageQueuePanel.sendNowAriaLabel": "このアイテムをすぐに注入してください",

@@ -1710,6 +1710,8 @@ export const esMessages: Record<string, string> = {
   "messageQueuePanel.panelTitle": "Cola de mensajes",
   "messageQueuePanel.removeAriaLabel": "Eliminar",
   "messageQueuePanel.removeTitle": "Eliminar",
+  "messageQueuePanel.handedOffBadge": "entregando",
+  "messageQueuePanel.handedOffTitle": "Entregado al modelo — aparece arriba cuando termina el paso actual.",
   "messageQueuePanel.selectAriaLabel": "Seleccionar",
   "messageQueuePanel.selectedCount": "{count} seleccionado",
   "messageQueuePanel.sendNowAriaLabel": "Inyecte este artículo inmediatamente",

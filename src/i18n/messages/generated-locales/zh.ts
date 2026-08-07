@@ -1713,6 +1713,8 @@ export const zhMessages: Record<string, string> = {
   "messageQueuePanel.panelTitle": "消息队列",
   "messageQueuePanel.removeAriaLabel": "消除",
   "messageQueuePanel.removeTitle": "消除",
+  "messageQueuePanel.handedOffBadge": "传递中",
+  "messageQueuePanel.handedOffTitle": "已交给模型 — 当前步骤结束后会显示在上方对话中。",
   "messageQueuePanel.selectAriaLabel": "选择",
   "messageQueuePanel.selectedCount": "{count} 已选择",
   "messageQueuePanel.sendNowAriaLabel": "立即注入该物品",
