@@ -1034,9 +1034,15 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         reviewerVerdict: expect.objectContaining({ level: "medium" }),
         reason: expect.stringContaining("reviewer medium"),
       }));
+      // The classifier grades the RAW arguments — the same object the
+      // foreground modal lane (`tryUserApprovalMemorySkip`) has always graded.
+      // Grading masked text made the two lanes disagree about the same call.
+      // Redaction is applied at the sinks instead, which is exactly what the
+      // `reviewReason` assertions above prove: this spy echoes its input
+      // straight into `reason`, and the review event still comes out masked.
       const reviewerCtx = classifySpy.mock.calls[0]?.[0];
       expect(reviewerCtx?.finalInput).toMatchObject({
-        payload: "send ***@example.com with [REDACTED:TOKEN]",
+        payload: "send alice@example.com with sk-abcdefghijklmnopqrstuvwxyz",
       });
     } finally {
       rmSync(dir, { recursive: true, force: true });

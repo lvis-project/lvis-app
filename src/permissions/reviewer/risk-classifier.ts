@@ -49,6 +49,7 @@ import {
   NETWORK_TARGET_FIELDS,
   type NetworkTarget,
 } from "./network-target.js";
+import { resolveToolPathForPermission } from "../../shared/tool-path-resolution.js";
 
 /** Verdict level — discrete enum. The reviewer lane never uses scalars. */
 export type RiskLevel = "low" | "medium" | "high";
@@ -94,11 +95,19 @@ export function maxVerdict(a: RiskVerdict, b: RiskVerdict): RiskVerdict {
 }
 
 /**
- * Per-invocation context passed into a classifier. `finalInput` MUST
- * already be DLP-redacted by the caller for non-LLM paths; the LLM
- * classifier additionally re-masks before formatting into the prompt
- * so the same secret never reaches the provider even if the upstream
- * forgot.
+ * Per-invocation context passed into a classifier.
+ *
+ * `finalInput` is RAW and must stay raw: every classifier rule grades it, and a
+ * rule that grades DLP-masked text grades data that does not exist. Masking a
+ * value can destroy the very signal a rule keys on — `https://live-corp.openai.
+ * azure.com/x` masks to `https://[REDACTED:TOKEN].openai.azure.com/x`, which no
+ * longer parses as a URL, so the trusted-host rule stops matching and the call
+ * rates HIGH instead of LOW. Pre-masking on one lane and not another is how the
+ * same call got two different verdicts.
+ *
+ * DLP is applied at the SINKS, not at the input: {@link buildUserPrompt} masks
+ * every value before the reviewer LLM sees it (so a secret never reaches the
+ * provider), the deferred queue and the sandbox audit mask before writing.
  */
 export interface ToolInvocationContext {
   toolName: string;
@@ -113,6 +122,19 @@ export interface ToolInvocationContext {
    */
   trustOrigin: ToolTrustOrigin;
   finalInput: Record<string, unknown>;
+  /**
+   * The cwd the tool will actually execute against — the SAME value the
+   * enforcer resolves path arguments with
+   * (`extractTargetFilePaths(tool, finalInput, executionCwd)`).
+   *
+   * REQUIRED, deliberately: this is the second half of
+   * {@link resolveToolPathForPermission}'s contract, and an optional field
+   * with a `process.cwd()` fallback is exactly the divergence this replaced —
+   * the reviewer would silently judge a different file than Layer 1 checks.
+   * Making it required means the compiler, not a code reviewer, catches a
+   * producer that forgets to thread it.
+   */
+  executionCwd: string;
   allowedDirectories: string[];
   /** Adjacent sensitive entries (e.g. `.env`, `.git`) detected near the path. */
   sensitivePathsAdjacent: string[];
@@ -413,10 +435,20 @@ function isGraphMetadataRead(input: Record<string, unknown>, target: NetworkTarg
 
 /**
  * Extract declared paths and canonicalize each one for sandbox/allowed-dir
- * matching. Security MAJOR-3 (cluster review): `..` segments / NFD unicode
- * forms / trailing spaces / mixed-case (darwin/win32) / duplicate slashes
- * are all collapsed via {@link canonicalizePathForMatch} before any
- * prefix compare. Without canonicalization an attacker can pass
+ * matching.
+ *
+ * Step 1 — argument → absolute path via
+ * {@link resolveToolPathForPermission}, the SAME resolver the enforcer uses in
+ * `extractTargetFilePaths`. Not cosmetic: a bare `path.resolve` leaves a
+ * leading `~` as a literal path segment and resolves relative arguments
+ * against `process.cwd()` rather than the invocation cwd, so the reviewer used
+ * to compute its verdict about a path Layer 1 never checks.
+ *
+ * Step 2 — canonicalize for matching. Security MAJOR-3 (cluster review):
+ * `..` segments / NFD unicode forms / trailing spaces / mixed-case
+ * (darwin/win32) / duplicate slashes are all collapsed via
+ * {@link canonicalizePathForMatch} before any prefix compare. Without
+ * canonicalization an attacker can pass
  * `~/.lvis/plugins/foo/../../sessions/sensitive.jsonl` and bypass the
  * sandbox-write check via plain `startsWith`.
  *
@@ -424,20 +456,10 @@ function isGraphMetadataRead(input: Record<string, unknown>, target: NetworkTarg
  * caller's layer (boot-time / settings load), so both sides of the prefix
  * compare have the same shape.
  *
- * KNOWN DIVERGENCE from the path the invocation pipeline actually inspects.
- * `extractTargetFilePaths` (`tools/pipeline/path-extraction.ts`) resolves the
- * SAME declared values with `resolveToolPathForPermission`: it expands a
- * leading `~` and resolves a relative value against the INVOCATION cwd. This
- * function does neither — `canonicalizePathForMatch` absolutizes with a bare
- * `path.resolve`, i.e. against `process.cwd()`, and a leading `~` survives as a
- * literal directory segment. So for `~`-prefixed and relative values the
- * reviewer classifies a different path than the one Layer 1 checks and the tool
- * writes, in BOTH directions (see
- * `__tests__/declared-path-resolution-divergence.test.ts`, which reproduces a
- * `~/…` write to an unallowed location being classified `low` "write at
- * allowed-dir leaf"). Deliberately left as-is here: aligning the two changes
- * reviewer verdicts, which is an owner decision, not a refactor. Layer 1 is
- * unaffected — it reads the pipeline's resolved path, never this one.
+ * The divergence this replaced is pinned in the opposite direction now: see
+ * `__tests__/declared-path-resolution-divergence.test.ts` (both normalizers
+ * agree) and `permissions/__tests__/reviewer-path-resolution-alignment.test.ts`
+ * (which verdicts moved, and in which direction).
  */
 function extractDeclaredPaths(ctx: ToolInvocationContext): string[] {
   const paths: string[] = [];
@@ -445,8 +467,20 @@ function extractDeclaredPaths(ctx: ToolInvocationContext): string[] {
     const candidate = getDottedFieldValue(ctx.finalInput, field);
     const values = Array.isArray(candidate) ? candidate : [candidate];
     for (const value of values) {
-      if (typeof value === "string" && value.length > 0) {
-        paths.push(caseFoldForMatch(canonicalizePathForMatch(value)));
+      if (typeof value !== "string" || value.length === 0) continue;
+      try {
+        paths.push(
+          caseFoldForMatch(
+            canonicalizePathForMatch(
+              resolveToolPathForPermission(value, ctx.executionCwd),
+            ),
+          ),
+        );
+      } catch {
+        // Mirror the enforcer: tool schema validation owns argument-type
+        // failures. An unresolvable path contributes nothing, and an empty
+        // path list falls through to the "write path not declared" HIGH rule —
+        // the safe direction.
       }
     }
   }
