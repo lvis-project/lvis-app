@@ -1158,7 +1158,7 @@ export const jaMessages: Record<string, string> = {
   "dockedApprovalCard.choiceSession": "このセッション",
   "dockedApprovalCard.choiceAlways": "常に",
   "dockedApprovalCard.choiceDeny": "拒否",
-  "dockedApprovalCard.keyHint": "← → 移動 · Ctrl+Enter 適用 · Esc 拒否",
+  "dockedApprovalCard.keyHint": "← → 移動 · Enter 適用 · Esc 拒否",
   "deferredQueuePanel.approveSessionButton": "このセッション中は {path} を許可",
   "deferredQueuePanel.approveSessionTitle": "この会話が終わるまで {path} 配下へのアクセスを許可します。永久には保存されません。",
   "deferredQueuePanel.noGrantAvailable": "この要求は後から承認できません — 呼び出しは既に終了しており、許可すべきディレクトリが記録されていません。",

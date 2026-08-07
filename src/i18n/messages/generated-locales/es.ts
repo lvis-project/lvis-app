@@ -1163,7 +1163,7 @@ export const esMessages: Record<string, string> = {
   "dockedApprovalCard.choiceSession": "Esta sesión",
   "dockedApprovalCard.choiceAlways": "Siempre",
   "dockedApprovalCard.choiceDeny": "Denegar",
-  "dockedApprovalCard.keyHint": "← → mover · Ctrl+Enter aplicar · Esc denegar",
+  "dockedApprovalCard.keyHint": "← → mover · Enter aplicar · Esc denegar",
   "deferredQueuePanel.approveSessionButton": "Permitir {path} durante esta sesión",
   "deferredQueuePanel.approveSessionTitle": "Permite el acceso bajo {path} hasta que termine esta conversación. No se guarda de forma permanente.",
   "deferredQueuePanel.noGrantAvailable": "Esta solicitud ya no se puede aprobar: su llamada terminó y no se registró ningún directorio que permitir.",

@@ -34,17 +34,20 @@ interface Scope {
  * between them (`항상` grants the parent folder, not the file). Duration is not
  * a separate field; the button's own label is the duration.
  *
- * Three properties carry the safety, and none of them is a swallowed key:
+ Enter alone is enough here because there is no Enter chain to inherit: no
+ * Enter brings the user into the card, and there are no steps inside it, so the
+ * repeated-Enter momentum this design guards against cannot occur. Reaching a
+ * widening scope means deliberately arrowing to it, and the target line changes
+ * as you arrive — widening is "move, then press", not "press twice".
+ *
+ * Two properties carry the safety, and neither is a swallowed key:
  *
  *  1. Focus lands on the NARROWEST scope.
  *  2. What would be granted is on screen above the buttons at all times, and
  *     visibly changes as focus moves.
- *  3. Widening scopes are not reachable by repeating a key — you have to move
- *     to them first, and moving is what redraws the target.
  *
- * Every scope is a real `<button>`; nothing intercepts Enter or Space on them,
- * so screen readers, switch access and voice control keep working
- * (WCAG 2.1.1).
+ * Every scope is a real `<button>`; nothing intercepts Enter or Space, so
+ * screen readers, switch access and voice control keep working (WCAG 2.1.1).
  */
 export function DockedApprovalCard({
   request,
@@ -134,16 +137,8 @@ export function DockedApprovalCard({
       return;
     }
 
-    // Widening scopes are not committed by the key that is already under the
-    // user's finger. With no confirm step left, this modifier is the only
-    // thing between arrow-then-Enter and a standing grant.
-    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      e.stopPropagation();
-      commit(scopes[activeRef.current] ?? current);
-      return;
-    }
-
+    // Enter and Space are NOT handled here — they activate the focused
+    // button natively. Nothing on this card swallows a key.
     const digit = Number.parseInt(e.key, 10);
     if (!Number.isNaN(digit) && digit >= 1 && digit <= scopes.length) {
       e.preventDefault();
@@ -179,11 +174,11 @@ export function DockedApprovalCard({
 
   return (
     <div
-      className="pointer-events-auto absolute inset-x-0 bottom-0 z-40 flex justify-center"
+      className="pointer-events-auto absolute inset-0 z-40 flex items-end justify-center bg-background/(--opacity-strong) p-2"
       data-testid="docked-approval-overlay"
       onKeyDown={onKeyDown}
     >
-      <div className="w-full min-w-0 p-2">
+      <div className="w-full min-w-0">
         <Card className="flex flex-col gap-2 p-2.5">
           <div className="flex flex-col gap-0.5">
             <p className="m-0 text-xs">
@@ -223,13 +218,7 @@ export function DockedApprovalCard({
                 tabIndex={i === active ? 0 : -1}
                 data-testid={`docked-approval-choice-${scope.choice}`}
                 onFocus={() => setActiveIndex(i)}
-                onClick={() => {
-                  // Narrow scopes commit on native activation. Widening scopes
-                  // deliberately do not: a pointer press focuses them and
-                  // redraws the target, and applying is the separate
-                  // Ctrl+Enter act.
-                  if (!scope.widens) commit(scope);
-                }}
+                onClick={() => commit(scope)}
                 className={
                   scope.choice === "deny-once"
                     ? "border-destructive/(--opacity-half) text-destructive"

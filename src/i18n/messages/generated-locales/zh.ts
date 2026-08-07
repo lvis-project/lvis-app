@@ -1158,7 +1158,7 @@ export const zhMessages: Record<string, string> = {
   "dockedApprovalCard.choiceSession": "本次会话",
   "dockedApprovalCard.choiceAlways": "始终",
   "dockedApprovalCard.choiceDeny": "拒绝",
-  "dockedApprovalCard.keyHint": "← → 移动 · Ctrl+Enter 应用 · Esc 拒绝",
+  "dockedApprovalCard.keyHint": "← → 移动 · Enter 应用 · Esc 拒绝",
   "deferredQueuePanel.approveSessionButton": "本次会话内允许 {path}",
   "deferredQueuePanel.approveSessionTitle": "在当前对话结束前允许访问 {path} 下的内容。不会永久保存。",
   "deferredQueuePanel.noGrantAvailable": "此请求无法事后批准 — 调用已经结束，且没有记录可供允许的目录。",
