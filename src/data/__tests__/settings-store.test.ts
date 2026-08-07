@@ -32,6 +32,7 @@ import {
 import { llmModelListCacheKey } from "../../shared/llm-model-list.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
 import { MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH } from "../../shared/subscription-runtime.js";
+import { routeExternalUrl } from "../../boot/steps/plugin-runtime/external-url.js";
 
 describe("SettingsService remote A2A canonical route-control origin", () => {
   let userDataPath: string;
@@ -1365,6 +1366,70 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
     );
     const service = new SettingsService({ userDataPath });
     expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
+  });
+
+  // The patch path is the trust boundary: `CHANNELS.settings.update` forwards
+  // the renderer payload to `patch()` without a schema check, so an out-of-enum
+  // `preferredFlow` used to be spread straight into settings.json and was only
+  // dropped on the NEXT load. Both paths now share `isWebViewPreferredFlow`.
+  it.each([
+    ["string-not-in-enum", "yes"],
+    ["null", null],
+    ["number", 42],
+    ["array", ["in-app"]],
+    ["object", { preferredFlow: "in-app" }],
+  ])("ignores an invalid preferredFlow patch (%s) and keeps the stored preference", async (_label, badValue) => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ webView: { preferredFlow: "system-browser" } });
+
+    await service.patch({
+      webView: { preferredFlow: badValue as never },
+    });
+
+    expect(service.get("webView")).toEqual({ preferredFlow: "system-browser" });
+    // The rejected value must not reach disk either — otherwise the next load
+    // would silently reset the user's choice to the default.
+    const onDisk = JSON.parse(readFileSync(join(userDataPath, "lvis-settings.json"), "utf-8")) as {
+      webView: { preferredFlow: unknown };
+    };
+    expect(onDisk.webView).toEqual({ preferredFlow: "system-browser" });
+    expect(new SettingsService({ userDataPath }).get("webView")).toEqual({
+      preferredFlow: "system-browser",
+    });
+  });
+
+  it("keeps a valid preferredFlow patch working after validation", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ webView: { preferredFlow: "system-browser" } });
+    expect(service.get("webView")).toEqual({ preferredFlow: "system-browser" });
+    await service.patch({ webView: { preferredFlow: "in-app" } });
+    expect(service.get("webView")).toEqual({ preferredFlow: "in-app" });
+  });
+
+  // Consumer-side proof, driven by the REAL producer (SettingsService.patch),
+  // not a hand-built settings object: `routeExternalUrl` reads the live
+  // preferredFlow and treats anything that is not exactly "system-browser" as
+  // "in-app". A hostile/malformed patch therefore used to silently move a
+  // "system-browser" user back into the in-app viewer for the rest of the
+  // session — the validated patch keeps the routing on the user's choice.
+  it("keeps routeExternalUrl on system-browser after an invalid preferredFlow patch", async () => {
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ webView: { preferredFlow: "system-browser" } });
+    await service.patch({ webView: { preferredFlow: "systembrowser" as never } });
+
+    const shellOpened: string[] = [];
+    const inAppOpened: string[] = [];
+    await routeExternalUrl({
+      url: "https://example.com/sso",
+      pluginId: "plugin-a",
+      settingsService: service,
+      bootAuditLogger: { log: () => {} },
+      openLinkWindowService: async ({ url }) => { inAppOpened.push(url); },
+      shellOpenExternal: async (url) => { shellOpened.push(url); },
+    });
+
+    expect(shellOpened).toEqual(["https://example.com/sso"]);
+    expect(inAppOpened).toEqual([]);
   });
 });
 
