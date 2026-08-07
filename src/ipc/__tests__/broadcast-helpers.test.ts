@@ -13,18 +13,8 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { fanOutToAllWindows } from "../broadcast-helpers.js";
+import { liveWindow, type FakeBrowserWindow } from "../../__tests__/test-helpers.js";
 
-interface FakeWindow {
-  isDestroyed: () => boolean;
-  webContents: { isDestroyed: () => boolean; send: (channel: string, payload: unknown) => void };
-}
-
-function liveWindow(): FakeWindow {
-  return {
-    isDestroyed: () => false,
-    webContents: { isDestroyed: () => false, send: vi.fn() },
-  };
-}
 
 describe("fanOutToAllWindows", () => {
   it("delivers the payload to every live window and returns the count", () => {
@@ -40,7 +30,7 @@ describe("fanOutToAllWindows", () => {
 
   it("skips null and destroyed windows without throwing", () => {
     const live = liveWindow();
-    const destroyed: FakeWindow = {
+    const destroyed: FakeBrowserWindow = {
       isDestroyed: () => true,
       webContents: { isDestroyed: () => true, send: vi.fn() },
     };
@@ -58,7 +48,7 @@ describe("fanOutToAllWindows", () => {
 
   it("swallows a per-window send race, logs it, and keeps fanning out", () => {
     const logger = { warn: vi.fn() };
-    const failing: FakeWindow = {
+    const failing: FakeBrowserWindow = {
       isDestroyed: () => false,
       webContents: {
         isDestroyed: () => false,
