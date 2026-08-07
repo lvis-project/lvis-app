@@ -133,7 +133,7 @@ describe("PluginRuntime instantiation parity", () => {
 
     /** The structured phase records the run emitted for the orphan tool. */
     function skipRecords(
-      warn: ReturnType<typeof vi.spyOn<Console, "warn">>,
+      warn: { mock: { calls: unknown[][] } },
     ): unknown[] {
       return warn.mock.calls
         .flat()
