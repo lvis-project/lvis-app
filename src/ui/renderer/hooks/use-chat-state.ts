@@ -7,6 +7,7 @@ import {
   applyToolEnd,
   applyToolStart,
   dropPermissionReviewEntries,
+  withUnansweredApprovalNotice,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
   setAssistantError,
@@ -173,6 +174,14 @@ export function useChatState(api: LvisApi) {
         });
       }
       const streamId = typeof ev.streamId === "number" ? ev.streamId : null;
+      // A turn that ends with an approval still unanswered used to leave only a
+      // failed tool card: no statement of what was blocked, and no way back to
+      // the card, which this same `done` path discards. Say both.
+      const noteUnansweredApprovals = (entries: ChatEntry[]) =>
+        withUnansweredApprovalNotice(entries, (toolNames) =>
+          t("useChatState.approvalUnansweredGuidance", { tools: toolNames.join(", ") }),
+        );
+
       if (ev.type === "guidance_injected") {
         // 사용자 피드백 (2026-05-15): system entry → user bubble + 작은 hint 배지.
         const text = typeof ev.text === "string" ? ev.text : "";
@@ -520,7 +529,9 @@ export function useChatState(api: LvisApi) {
           });
         }
         if (finalAssistantRoundClosedRef.current) {
-          setEntries((p) => dropPermissionReviewEntries(dropPendingLlmStatusAssistant(p)));
+          setEntries((p) =>
+            dropPermissionReviewEntries(dropPendingLlmStatusAssistant(noteUnansweredApprovals(p))),
+          );
           clearAllPermissionReviewDwell();
           if (debugStreamEnabled) {
             debugLog("stream", "done:skip-finalize", {
@@ -564,7 +575,9 @@ export function useChatState(api: LvisApi) {
           streamRef.current = "";
           thoughtRef.current = "";
         } else {
-          setEntries((p) => dropPermissionReviewEntries(dropPendingLlmStatusAssistant(p)));
+          setEntries((p) =>
+            dropPermissionReviewEntries(dropPendingLlmStatusAssistant(noteUnansweredApprovals(p))),
+          );
           clearAllPermissionReviewDwell();
           if (debugStreamEnabled) {
             debugLog("stream", "done:skip-finalize", {

@@ -2695,6 +2695,7 @@ export const esMessages: Record<string, string> = {
   "useChatState.errorPrefix": "Error: {error}",
   "useChatState.fallbackToast": "⚡ {from}→{to} conmutado automáticamente",
   "useChatState.guidanceDroppedText": "⚠️ Instrucción de dirección no aplicada (límite de respuesta alcanzado): {text}",
+  "useChatState.approvalUnansweredGuidance": "⚠️ {tools} no se aprobó, así que la respuesta se detuvo. Vuelve a pedirlo para que reaparezca la tarjeta de aprobación — una vez, esta sesión o permanente — o reinténtalo con una ruta dentro de los directorios permitidos.",
   "useChatState.llmStatusAttemptFirst": "Pensamiento...",
   "useChatState.llmStatusAttemptRetrying": "Pensando... Esperando la respuesta del modelo nuevamente. ({attempt}/{max})",
   "useChatState.llmStatusFallback": "Pensando... El modelo predeterminado es lento; cambiando a un modelo de respaldo{to}.",
