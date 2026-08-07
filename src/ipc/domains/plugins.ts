@@ -12,7 +12,8 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { emitEvent as emitHostEvent } from "../../boot/types.js";
-import { HOST_ONLY_EMIT_NAMESPACES, canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { HOST_ONLY_EMIT_NAMESPACES, canEmitEvent } from "../../plugins/capabilities.js";
+import { auditPluginEmitDenial } from "../../plugins/emit-denial-audit.js";
 import { getDeclaredEmittedEvents } from "../../plugins/runtime/manifest-validation.js";
 import { stripSecretFields } from "../../plugins/config-schema.js";
 import { shouldBlockPluginSecretRead, validateApiKeyLikeSecretValue } from "../../plugins/secret-shape.js";
@@ -2620,22 +2621,29 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!manifest) {
       return { ok: false, error: "unknown-plugin-id" };
     }
-    // Host-only namespaces (plugin.*, etc.) are reserved for host-side emit
-    // via boot/types.ts:emitEvent — plugin webview/renderer MUST NOT spoof
-    // them. Mirrors the canEmitEvent gate at boot/steps/plugin-runtime.ts
-    // (which covers the SDK hostApi.emitEvent path); this branch covers the
-    // IPC bridge path that webviews use directly.
-    const namespacePrefix = type.split(".")[0] ?? "";
-    if (HOST_ONLY_EMIT_NAMESPACES.has(namespacePrefix)) {
-      return { ok: false, error: `host-only-namespace:${namespacePrefix}` };
-    }
-    // Emit authorization for gated event-source namespaces is inferred from the
-    // manifest's declared emittedEvents, not a separately-declared capability
-    // (same predicate as the SDK hostApi.emitEvent path). The error code keeps
-    // the `missing-capability:` prefix for renderer/preload compatibility.
-    if (!canEmitEvent(type, getDeclaredEmittedEvents(manifest))) {
-      const requiredCap = requiredCapabilityForEmit(type);
-      return { ok: false, error: `missing-capability:${requiredCap}` };
+    // `canEmitEvent` is the whole decision for this lane too — it already
+    // rejects host-only namespaces (plugin.*/host.*, reserved for host-side
+    // emit via boot/types.ts) and infers gated-namespace authorization from the
+    // manifest's declared emittedEvents. HOST_ONLY_EMIT_NAMESPACES is consulted
+    // below only to LABEL the denial, because this lane's wire contract
+    // distinguishes `host-only-namespace:` from `missing-capability:` (the
+    // latter prefix is kept for renderer/preload compatibility).
+    const declaredEmittedEvents = getDeclaredEmittedEvents(manifest);
+    if (!canEmitEvent(type, declaredEmittedEvents)) {
+      const requiredCap = auditPluginEmitDenial({
+        auditLogger,
+        lane: "ipc-bridge",
+        pluginId: binding.pluginId,
+        eventType: type,
+        declaredEmittedEvents,
+      });
+      const namespacePrefix = type.split(".")[0] ?? "";
+      return {
+        ok: false,
+        error: HOST_ONLY_EMIT_NAMESPACES.has(namespacePrefix)
+          ? `host-only-namespace:${namespacePrefix}`
+          : `missing-capability:${requiredCap}`,
+      };
     }
     try {
       pluginRuntime.assertPluginEventEmitAccess(binding.pluginId, type);

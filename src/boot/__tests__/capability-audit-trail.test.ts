@@ -15,7 +15,8 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TestPluginRuntime as PluginRuntime } from "../../plugins/__tests__/test-helpers.js";
-import { canEmitEvent, requiredCapabilityForEmit } from "../../plugins/capabilities.js";
+import { canEmitEvent } from "../../plugins/capabilities.js";
+import { auditPluginEmitDenial } from "../../plugins/emit-denial-audit.js";
 import { getDeclaredEmittedEvents } from "../../plugins/runtime/manifest-validation.js";
 import { registerManifestEventSubscriptions } from "../plugins.js";
 import type { AuditEntry } from "../../audit/audit-logger.js";
@@ -30,10 +31,11 @@ function collectingAudit() {
 }
 
 /**
- * Mirror the createHostApi emit closure that gates + audit-logs emit denials.
- * Duplicated here because createHostApi builds it inline. Authorization for a
- * gated namespace is inferred from the manifest's declared emittedEvents; the
- * internal effect label (`required`) is retained for the audit trail.
+ * Mirror the createHostApi emit closure's SHAPE (gate, then deny) over a real
+ * loaded PluginRuntime. The gate predicate and the denial row are NOT restated
+ * here — they are the production `canEmitEvent` and `auditPluginEmitDenial`.
+ * The call site itself is covered producer-driven in
+ * boot/steps/__tests__/plugin-runtime-hostapi-wiring.test.ts.
  */
 function makeGuardedEmit(
   runtime: PluginRuntime,
@@ -45,12 +47,12 @@ function makeGuardedEmit(
     const manifest = runtime.getPluginManifest(pluginId);
     const declaredEmittedEvents = manifest ? getDeclaredEmittedEvents(manifest) : [];
     if (!canEmitEvent(type, declaredEmittedEvents)) {
-      const required = requiredCapabilityForEmit(type);
-      auditLogger.log({
-        timestamp: new Date().toISOString(),
-        sessionId: "plugin",
-        type: "error",
-        input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${type} required=${required} declaredEmittedEvents=${declaredEmittedEvents.join("|")}`,
+      auditPluginEmitDenial({
+        auditLogger,
+        lane: "plugin",
+        pluginId,
+        eventType: type,
+        declaredEmittedEvents,
       });
       return;
     }
