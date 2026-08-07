@@ -80,8 +80,32 @@ const EN_CONTRACTION_NEGATION =
 // space-separated forms below already match these so EN_NOT_VERB_NEGATION
 // stays out of the active matcher set.
 
+/**
+ * Korean negation adverb `안`, anchored so it cannot match inside a word.
+ *
+ * `안` is a free-standing adverb: it precedes the verb it negates and is
+ * written separately or at the head of a word ("안 해", "안돼", "안 됩니다").
+ * A `안` glued to a preceding Hangul syllable is not a negation at all — it is
+ * the tail of an ordinary noun. Matching it as a bare substring made every
+ * such word suppress an approval:
+ *
+ *   "이번 세션 동안 허용"  → none   (동안 — the duration marker)
+ *   "제안 허용" / "방안 허용" / "편안하게 허용" → none
+ *
+ * The first of those is the phrasing in issue #1940's own title, so the
+ * natural-language chip was silently dead for a normal way of saying it.
+ *
+ * `않` and `못` are deliberately left unanchored. `않` legitimately follows a
+ * verb stem ("허용하지 않는다" — `않` sits right after `지`), so the same
+ * anchor would turn a real negation into an approval. `못` likewise appears
+ * mid-word in negations. Narrowing only the token that needed it keeps this a
+ * bug fix rather than a loosening of the negation guard.
+ */
+const KOREAN_NEGATION_AN = /(?<![가-힣])안/u;
+
 const NEGATION_TOKENS_NEAR_APPROVE: ReadonlyArray<RegExp> = [
-  /(안|않|못)/u,
+  KOREAN_NEGATION_AN,
+  /(않|못)/u,
   /(말고|금지)/u,
   /하지\s*마/u,
   /(^|\s)not(\s|$)/iu,
