@@ -735,11 +735,6 @@
     {
       "type": "exports",
       "file": "src/plugins/runtime/snapshots.ts",
-      "name": "isPathContained"
-    },
-    {
-      "type": "exports",
-      "file": "src/plugins/runtime/snapshots.ts",
       "name": "isTrustedRegistryManifestPath"
     },
     {
@@ -2231,11 +2226,6 @@
       "type": "types",
       "file": "src/mcp/mcp-client.ts",
       "name": "JsonRpcNotification"
-    },
-    {
-      "type": "types",
-      "file": "src/mcp/mcp-elicitation-resolver.ts",
-      "name": "ElicitResult"
     },
     {
       "type": "types",
