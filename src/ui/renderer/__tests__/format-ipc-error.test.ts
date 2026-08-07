@@ -13,6 +13,26 @@ describe("formatIpcError (SOT — #830)", () => {
     );
   });
 
+  it("Layer-0 directory denials resolve from the shared table, not a raw code", () => {
+    // These used to be known ONLY to two hand-written local renderer tables, so
+    // every other surface rendered the kebab-case code — the exact leak the
+    // codes were introduced to prevent (ipc/domains/workspace.ts).
+    for (const code of ["path-not-allowed", "sensitive-path"]) {
+      const message = formatIpcError(code, undefined);
+      expect(message).not.toContain(code);
+      expect(message).toBe(t("chatPreviewRail.fileErrorNotAllowed"));
+    }
+  });
+
+  it("renders the SAME string the removed local codeMap overrides produced", () => {
+    // The workspaces panel and the file preview both mapped these two codes to
+    // `chatPreviewRail.fileErrorNotAllowed`. Their local copies are gone; this
+    // pins that dropping them changed no rendered string.
+    const previousOverride = t("chatPreviewRail.fileErrorNotAllowed");
+    expect(formatIpcError("path-not-allowed", undefined)).toBe(previousOverride);
+    expect(formatIpcError("sensitive-path", undefined)).toBe(previousOverride);
+  });
+
   it("codeMap overrides win over the common default", () => {
     expect(
       formatIpcError("invalid-key", undefined, {

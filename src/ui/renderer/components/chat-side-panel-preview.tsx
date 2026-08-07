@@ -26,6 +26,7 @@ import { wrapRenderHtmlInlineFrameDocument } from "../../../shared/render-html-p
 import { LVIS_SIDE_BROWSER_PARTITION } from "../../../shared/side-browser.js";
 import type { LvisApi } from "../types.js";
 import type { ChatPreviewTarget, WorkspaceFileItem } from "../preview/preview-targets.js";
+import { resolveIpcErrorKey } from "../format-ipc-error.js";
 import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
 import { PreviewContent } from "../preview/preview-renderers.js";
 import { FileEditDiff } from "./FileEditDiff.js";
@@ -205,12 +206,20 @@ function CopyButton({ value }: { value: string }) {
 
 type PreviewReadError = NonNullable<Awaited<ReturnType<typeof window.lvis.preview.readFile>>["error"]>;
 
-/** Map a preview-read error code to its Korean user message key. */
+/**
+ * Map a preview-read error code to its user message key.
+ *
+ * The Layer-0 directory denials are NOT re-mapped here — they resolve through
+ * `resolveIpcErrorKey`, the shared table that is now their single authority, so
+ * this surface and every other one cannot drift apart on them. The remaining
+ * cases are preview-specific phrasings that deliberately differ from the shared
+ * table's wording (e.g. `read-failed` reads as "not found" here).
+ */
 function fileErrorKey(code: PreviewReadError): string {
   switch (code) {
     case "path-not-allowed":
     case "sensitive-path":
-      return "chatPreviewRail.fileErrorNotAllowed";
+      return resolveIpcErrorKey(code) ?? "chatPreviewRail.fileErrorGeneric";
     case "binary-file":
       return "chatPreviewRail.fileErrorBinary";
     case "too-large":
