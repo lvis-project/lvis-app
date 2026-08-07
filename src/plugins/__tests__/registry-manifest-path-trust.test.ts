@@ -17,6 +17,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
 import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../registry.js";
+import { writeTestPluginRegistry } from "./test-helpers.js";
 import { resolveTrustedRegistryManifestPath } from "../registry-manifest-trust.js";
 
 let testDir: string;
@@ -34,17 +35,6 @@ async function writeManifestAt(dir: string, id: string): Promise<string> {
   );
   await writeFile(join(dir, "attacker.lock"), "evil-package==1.0.0\n", "utf-8");
   return manifestPath;
-}
-
-/** Write a real registry.json the real reader will accept. */
-async function writeRegistry(
-  entries: { id: string; manifestPath: string }[],
-): Promise<void> {
-  await writeFile(
-    registryPath,
-    JSON.stringify({ version: 1, plugins: entries.map((e) => ({ ...e, enabled: true })) }),
-    "utf-8",
-  );
 }
 
 /** The exact producer call `python-runtime.ts` makes. */
@@ -70,7 +60,7 @@ afterEach(async () => {
 describe("resolveManifestPathsFromRegistry — trust root is enforced before the consumer sees a path", () => {
   it("passes through a legitimate entry under pluginsRoot (positive control)", async () => {
     const good = await writeManifestAt(join(pluginsRoot, "good"), "good");
-    await writeRegistry([{ id: "good", manifestPath: good }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "good", manifestPath: good }]);
 
     const paths = await consumerInput();
     expect(paths).toHaveLength(1);
@@ -80,7 +70,7 @@ describe("resolveManifestPathsFromRegistry — trust root is enforced before the
   it("drops an ABSOLUTE entry pointing outside pluginsRoot", async () => {
     const good = await writeManifestAt(join(pluginsRoot, "good"), "good");
     const evil = await writeManifestAt(join(outsideDir, "evil"), "evil");
-    await writeRegistry([
+    await writeTestPluginRegistry({ registryPath }, [
       { id: "good", manifestPath: good },
       { id: "evil", manifestPath: evil },
     ]);
@@ -94,7 +84,7 @@ describe("resolveManifestPathsFromRegistry — trust root is enforced before the
 
   it("drops a RELATIVE `../..` traversal entry", async () => {
     const evil = await writeManifestAt(join(outsideDir, "evil"), "evil");
-    await writeRegistry([
+    await writeTestPluginRegistry({ registryPath }, [
       { id: "evil", manifestPath: join("..", "outside", "evil", "plugin.json") },
     ]);
     // Sanity: the traversal really does resolve onto the planted manifest, so
@@ -112,7 +102,7 @@ describe("resolveManifestPathsFromRegistry — trust root is enforced before the
     } catch {
       return; // symlink/junction creation unavailable — nothing to assert
     }
-    await writeRegistry([{ id: "linked", manifestPath: join(linkDir, "plugin.json") }]);
+    await writeTestPluginRegistry({ registryPath }, [{ id: "linked", manifestPath: join(linkDir, "plugin.json") }]);
     expect(evil).toContain("outside");
 
     // A lexical containment check would ACCEPT this path; realpath is what
@@ -122,25 +112,18 @@ describe("resolveManifestPathsFromRegistry — trust root is enforced before the
 
   it("still drops pendingUpdate rows (pre-existing behaviour preserved)", async () => {
     const good = await writeManifestAt(join(pluginsRoot, "good"), "good");
-    await writeFile(
-      registryPath,
-      JSON.stringify({
-        version: 1,
-        plugins: [
-          {
-            id: "good",
-            manifestPath: good,
-            enabled: true,
-            pendingUpdate: {
-              kind: "marketplace",
-              previousManifestFileSha256: null,
-              previousReceiptRaw: null,
-            },
-          },
-        ],
-      }),
-      "utf-8",
-    );
+    await writeTestPluginRegistry({ registryPath }, [
+      {
+        id: "good",
+        manifestPath: good,
+        enabled: true,
+        pendingUpdate: {
+          kind: "marketplace",
+          previousManifestFileSha256: null,
+          previousReceiptRaw: null,
+        },
+      },
+    ]);
     expect(await consumerInput()).toEqual([]);
   });
 });

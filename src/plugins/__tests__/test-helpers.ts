@@ -269,6 +269,8 @@ export interface TestRegistryEntry {
   manifestPath: string;
   enabled?: boolean;
   approvedPluginAccess?: unknown;
+  /** Staged-update marker. Rows carrying it are skipped by manifest discovery. */
+  pendingUpdate?: unknown;
   installSource?: "admin" | "user" | "local-dev";
   installedBy?: "admin" | "user";
   _devLinked?: boolean;
