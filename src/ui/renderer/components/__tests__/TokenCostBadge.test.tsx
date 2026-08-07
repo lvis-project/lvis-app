@@ -171,3 +171,31 @@ describe("TokenCostBadge — cost parity with shared computeCost", () => {
     expect(screen.queryByText(/^≈ \$/)).toBeNull();
   });
 });
+
+/**
+ * Wiring, not rules: the badge no longer owns a private `formatTokens`, so it
+ * must render the shared authority's output. Asserted through a real render —
+ * a green unit test on `cost-format.ts` proves nothing if the badge stops
+ * calling it.
+ */
+describe("TokenCostBadge \u2014 token counts come from the shared formatter", () => {
+  afterEach(() => cleanup());
+
+  it.each<{ label: string; freshInputTokens: number; tokensOut: number; rendered: string }>([
+    { label: "abbreviates millions with one decimal", freshInputTokens: 1_234_567, tokensOut: 0, rendered: "1.2M" },
+    { label: "abbreviates thousands", freshInputTokens: 1_200, tokensOut: 0, rendered: "1.2k" },
+    { label: "rounds a fractional sub-1k count", freshInputTokens: 42.7, tokensOut: 0, rendered: "43" },
+    { label: "shows 0 rather than InfinityM", freshInputTokens: 1, tokensOut: Number.POSITIVE_INFINITY, rendered: "0" },
+    { label: "shows 0 rather than NaN", freshInputTokens: 1, tokensOut: Number.NaN, rendered: "0" },
+    { label: "shows 0 rather than a negative count", freshInputTokens: 10, tokensOut: -60, rendered: "0" },
+  ])("$label", ({ freshInputTokens, tokensOut, rendered }) => {
+    render(
+      <TooltipProvider>
+        <TokenCostBadge tokensIn={0} freshInputTokens={freshInputTokens} tokensOut={tokensOut} />
+      </TooltipProvider>,
+    );
+
+    const headline = screen.getByTestId("token-cost-badge").querySelector("span");
+    expect(headline?.textContent?.trim()).toBe(`\u{1FA99} ${rendered}`);
+  });
+});
