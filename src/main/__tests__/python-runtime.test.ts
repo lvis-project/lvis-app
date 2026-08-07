@@ -158,6 +158,9 @@ function makeBrowserWindow() {
 // ─── 테스트 ───────────────────────────────────────────────────────────────────
 
 describe("PythonRuntimeBootstrapper", () => {
+  /** Real on-disk plugin roots created by registry-discovery cases. */
+  const registryTempRoots: string[] = [];
+
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(fsMock.mkdir).mockResolvedValue(undefined);
@@ -184,6 +187,9 @@ describe("PythonRuntimeBootstrapper", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    while (registryTempRoots.length > 0) {
+      rmSync(registryTempRoots.pop()!, { recursive: true, force: true });
+    }
   });
 
   // ─── 1. .ready sentinel 존재 시 즉시 resolve ─────────────────────────────
@@ -318,25 +324,46 @@ describe("PythonRuntimeBootstrapper", () => {
   });
 
   it("registry discovery uses host-managed Python lockfiles without document-indexer hardcoding", async () => {
-    const registryPath = "/registry/plugins.json";
+    // `resolveManifestPathsFromRegistry` drops registry rows whose
+    // manifestPath escapes the trust root (realpath containment under
+    // `dirname(registryPath)`), so this fixture uses a REAL on-disk tree in
+    // the canonical layout — `<pluginsRoot>/registry.json` plus
+    // `<pluginsRoot>/<id>/plugin.json`, which is what `resolvePluginPaths`
+    // produces. File CONTENT still comes from the `node:fs/promises` mock;
+    // only the trust check touches the real filesystem (`node:fs`).
+    const pluginsRoot = mkdtempSync(path.join(tmpdir(), "lvis-pyreg-"));
+    registryTempRoots.push(pluginsRoot);
+    const registryPath = path.join(pluginsRoot, "registry.json");
+    const otherDir = path.join(pluginsRoot, "other");
+    const indexerDir = path.join(pluginsRoot, "local-indexer");
+    mkdirSync(otherDir, { recursive: true });
+    mkdirSync(indexerDir, { recursive: true });
+    const otherManifest = path.join(otherDir, "plugin.json");
+    const indexerManifest = path.join(indexerDir, "plugin.json");
+    writeFileSync(registryPath, "{}", "utf-8");
+    writeFileSync(otherManifest, "{}", "utf-8");
+    writeFileSync(indexerManifest, "{}", "utf-8");
+    const otherLock = path.join(otherDir, "python-requirements.lock");
+    const indexerLock = path.join(indexerDir, "python-requirements.lock");
+
     mockedReadFile.mockImplementation(async (filePath) => {
-      const path = String(filePath);
-      if (path === registryPath) {
+      const p = path.resolve(String(filePath));
+      if (p === path.resolve(registryPath)) {
         return JSON.stringify({
           plugins: [
-            { id: "other-python", manifestPath: "/installed/other/plugin.json", enabled: true },
-            { id: "local-indexer", manifestPath: "/installed/local-indexer/plugin.json", enabled: true },
+            { id: "other-python", manifestPath: otherManifest, enabled: true },
+            { id: "local-indexer", manifestPath: indexerManifest, enabled: true },
           ],
         });
       }
-      if (path === "/installed/other/plugin.json") {
+      if (p === path.resolve(otherManifest)) {
         return JSON.stringify({
           id: "other-python",
           python: { managedBy: "lvis-app", requirementsLock: "python-requirements.lock" },
           capabilities: ["some-other-python-capability"],
         });
       }
-      if (path === "/installed/local-indexer/plugin.json") {
+      if (p === path.resolve(indexerManifest)) {
         return JSON.stringify({
           id: "local-indexer",
           python: { managedBy: "lvis-app", requirementsLock: "python-requirements.lock" },
@@ -346,11 +373,13 @@ describe("PythonRuntimeBootstrapper", () => {
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
     mockedAccess.mockImplementation(async (filePath) => {
-      const normalizedPath = normalizePathForAssert(String(filePath));
+      const raw = String(filePath);
+      const normalizedPath = normalizePathForAssert(raw);
       if (normalizedPath.includes(".ready")) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
       if (normalizedPath.endsWith("/uv") || normalizedPath.endsWith("/uv.exe")) return undefined;
-      if (normalizedPath === "/installed/local-indexer/python-requirements.lock") return undefined;
-      if (normalizedPath === "/installed/other/python-requirements.lock") return undefined;
+      const p = path.resolve(raw);
+      if (p === path.resolve(indexerLock)) return undefined;
+      if (p === path.resolve(otherLock)) return undefined;
       throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
     });
     mockedSpawn
@@ -366,7 +395,7 @@ describe("PythonRuntimeBootstrapper", () => {
       ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
     );
     expect(pipSyncCall).toBeDefined();
-    expectArgsToContainPath(pipSyncCall![1] as string[], "/installed/other/python-requirements.lock");
+    expectArgsToContainPath(pipSyncCall![1] as string[], otherLock);
   });
 
   it("plugin.json이 선언한 절대 lockfile 경로는 거부하고 plugin 디렉토리 기본 lockfile만 사용한다", async () => {
