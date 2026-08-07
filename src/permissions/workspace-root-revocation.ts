@@ -14,7 +14,7 @@
 import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
 import { projectRootEquals } from "../shared/project-identity.js";
 
-export function isPathAtOrBelow(root: string, candidate: string): boolean {
+function isPathAtOrBelow(root: string, candidate: string): boolean {
   try {
     const canonicalRoot = caseFoldForMatch(canonicalizePathForMatch(root));
     const canonicalCandidate = caseFoldForMatch(canonicalizePathForMatch(candidate));
