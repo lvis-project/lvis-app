@@ -6,6 +6,7 @@ import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor } from "../tools/executor.js";
 import { backgroundShellManager } from "../tools/background-shell-manager.js";
 import { isActiveSandboxFilesystemContainedForPluginEffects } from "../permissions/sandbox-capability.js";
+import { getWorkspaceRootLifecycle } from "../permissions/workspace-root-lifecycle.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import type { LifecycleHookEvent } from "../hooks/script-hook-types.js";
 import {
@@ -238,9 +239,12 @@ export class ConversationLoop {
       // Tool.workerId calls that the host spawned and currently tracks as
       // ASRT-wrapped (mac/linux UDS or Windows holder-PID ACL grant).
       isActiveSandboxFilesystemContainedForPluginEffects,
-      // Workspace handlers wire this after loop construction; resolve lazily
-      // so persistent directory approvals never capture an empty snapshot.
-      () => deps.workspaceRootLifecycle,
+      // Workspace IPC registration publishes the lifecycle after every loop is
+      // constructed; resolve the single authority lazily so persistent
+      // directory approvals never capture an empty snapshot. Reading the
+      // authority (not a per-loop dep field) is what makes sub-agent child
+      // loops and routine loops work without a wiring of their own.
+      getWorkspaceRootLifecycle,
       deps.pluginOperationGrants,
       () => deps.pluginRuntime?.getGenerationAccess?.(),
       deps.pluginOperationIdentityProvider,

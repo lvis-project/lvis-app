@@ -18,6 +18,7 @@ import { wireHookSystem } from "./hook-system-wiring.js";
 import { ToolExecutor } from "../../tools/executor.js";
 import { createPluginSurfacePermissionScope } from "../plugin-surface-permissions.js";
 import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
+import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
 import { broadcastPermissionConfigChanged as broadcastPermissionConfigChangedFromIpc } from "../../ipc/domains/permissions.js";
 // Confines-aware reader for the foreground plugin read-relaxation coupling. It
 // reads the published active-sandbox capability snapshot plus the exact
@@ -103,8 +104,8 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
   ctx.pluginOperationIdentityProvider = pluginOperationIdentityProvider;
 
   // This executor is created before ConversationLoop and workspace IPC. Resolve
-  // the lifecycle through the existing late-binding ref at approval time; an
-  // unexpectedly early plugin invocation sees undefined and fails closed.
+  // the workspace-root lifecycle authority at approval time; an unexpectedly
+  // early plugin invocation sees undefined and fails closed.
   const pluginSurfaceExecutor = new ToolExecutor(
     toolRegistry,
     hookRunner,
@@ -121,7 +122,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
     // tools, degraded hosts, and sandbox-off hosts return false so the pre-exec
     // ask stands (see ToolExecutor.sandboxFsContainedProvider).
     isActiveSandboxFilesystemContainedForPluginEffects,
-    () => lateBinding.conversationLoopRef.fn?.deps.workspaceRootLifecycle,
+    getWorkspaceRootLifecycle,
     pluginOperationGrants,
     () => ctx.pluginBundleLifecycle,
   );
