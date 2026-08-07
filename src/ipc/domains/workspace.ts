@@ -52,6 +52,7 @@ import {
 } from "../../permissions/workspace-root-reconciler.js";
 import { withWorkspaceRootLifecycleLock } from "../../permissions/workspace-root-lifecycle-lock.js";
 import { setWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
+import { getActivePluginSurfacePermissionScope } from "../../boot/plugin-surface-permissions.js";
 import { detachWorkspaceRootSessions } from "../../memory/workspace-root-session-lifecycle.js";
 
 /** Max directory entries returned per lazy listing (bounds huge dirs). */
@@ -377,6 +378,10 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       deps.conversationLoop,
       deps.sideChatConversationLoop,
       deps.routineEngine,
+      // The plugin-surface permission scope holds session grants keyed by plugin
+      // subject. It is a live scope owner exactly like the loops above; leaving
+      // it out let a plugin's session grant outlive the removed root.
+      getActivePluginSurfacePermissionScope(),
     ];
     try {
       liveScopeOwners.push(deps.getSubAgentRunner?.());
