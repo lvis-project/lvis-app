@@ -66,7 +66,7 @@ const workspaceDeps = {
 } as never;
 
 /** A child loop's deps: exactly what `buildChildDeps` spreads — no lifecycle. */
-function makeSubAgentShapedLoop(gate: ApprovalGate, executeSpy: ReturnType<typeof vi.fn>) {
+function makeSubAgentShapedLoop(gate: ApprovalGate, executeSpy: (input: unknown) => Promise<string>) {
   const registry = new ToolRegistry();
   registry.register(createDynamicTool({
     name: "read_file",
