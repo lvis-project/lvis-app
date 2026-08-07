@@ -67,6 +67,7 @@ import {
   pruneLazyLlmVendorBlocks,
   SIDE_PANEL_SPLIT_KEYS,
   normalizeSystem,
+  isWebViewPreferredFlow,
   normalizeWebView,
   preserveInstalledProviderPresetMetadata,
   sanitizeStoredPluginConfigs,
@@ -861,7 +862,22 @@ export class SettingsService {
       this.settings.appearance = nextAppearance;
     }
     if (partial.webView) {
-      this.settings.webView = { ...this.settings.webView, ...partial.webView };
+      // Field-level validation (mirrors `system`/`shortcuts`): an out-of-enum
+      // `preferredFlow` is dropped and the existing preference kept, instead of
+      // persisting a value that only the *next* load would reject. The accepted
+      // value set is owned by `isWebViewPreferredFlow` so the load path and this
+      // path can never drift apart.
+      const nextWebView: WebViewSettings = { ...this.settings.webView };
+      const rawFlow = partial.webView.preferredFlow;
+      if (isWebViewPreferredFlow(rawFlow)) {
+        nextWebView.preferredFlow = rawFlow;
+      } else if (rawFlow !== undefined) {
+        log.warn(
+          `webView.preferredFlow patch ignored (received ${JSON.stringify(rawFlow)}), keeping %s`,
+          this.settings.webView.preferredFlow,
+        );
+      }
+      this.settings.webView = nextWebView;
     }
     if (partial.system) {
       // Field-level validation (mirrors `appearance` pattern): invalid

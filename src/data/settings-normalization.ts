@@ -863,14 +863,25 @@ function normalizeAppearanceFont(input: unknown): AppearanceFontSettings | undef
  */
 const VALID_WEBVIEW_FLOWS: readonly WebViewPreferredFlow[] = ["in-app", "system-browser"];
 
+/**
+ * Single authority for the accepted `webView.preferredFlow` value set. Both
+ * write paths use it: `normalizeWebView` (disk load) and the `webView` branch
+ * of `SettingsService.patch` (IPC/renderer). Before this predicate existed the
+ * patch path did a bare spread with no validation, so an out-of-enum value
+ * persisted to settings.json and was only dropped on the *next* load.
+ */
+export function isWebViewPreferredFlow(value: unknown): value is WebViewPreferredFlow {
+  return typeof value === "string" && (VALID_WEBVIEW_FLOWS as readonly string[]).includes(value);
+}
+
 export function normalizeWebView(input: unknown): WebViewSettings {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return { ...DEFAULT_SETTINGS.webView };
   }
   const obj = input as { preferredFlow?: unknown };
   const raw = obj.preferredFlow;
-  if (typeof raw === "string" && (VALID_WEBVIEW_FLOWS as readonly string[]).includes(raw)) {
-    return { preferredFlow: raw as WebViewPreferredFlow };
+  if (isWebViewPreferredFlow(raw)) {
+    return { preferredFlow: raw };
   }
   if (raw !== undefined) {
     log.warn(
