@@ -14,6 +14,7 @@ import type { UserKeyboardIntentSnapshot } from "../../../../shared/chat-origin.
 import type { QuickAction } from "../command-actions.js";
 import type { PluginEntry } from "../PluginGridButton.js";
 import { MCP_RESOURCE_ATTACHMENTS_PER_TURN } from "../../../../shared/mcp-resource-bounds.js";
+import { PASTE_TEXT_MIN_CHARS } from "../../types/attachments.js";
 import type { SubscriptionImageAttachmentLimits } from "../../../../shared/subscription-runtime.js";
 
 // Stable across renders ON PURPOSE. Passing nothing let Composer's default parameter
@@ -198,6 +199,57 @@ describe("Composer", () => {
       />,
     );
     expect(screen.getByTestId("composer-limit-warning")).toBeTruthy();
+  });
+
+  // Long text normally becomes a `paste` attachment chip with a marker token in
+  // the textarea. Ctrl/⌘+Shift+V asks for the original text instead.
+  const LONG_PASTE = "a".repeat(PASTE_TEXT_MIN_CHARS + 20);
+
+  function textClipboardData(text: string): DataTransfer {
+    return {
+      items: Object.assign([], { length: 0 }) as unknown as DataTransferItemList,
+      getData: (type: string) => (type === "text/plain" ? text : ""),
+    } as unknown as DataTransfer;
+  }
+
+  it("chips long pasted text into an attachment on a plain paste", async () => {
+    render(<Harness />);
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    fireEvent.paste(textarea, { clipboardData: textClipboardData(LONG_PASTE) });
+
+    await waitFor(() => expect(screen.queryByTestId("attachment-chip")).not.toBeNull());
+    expect(textarea.value).not.toContain(LONG_PASTE);
+  });
+
+  it("lets Ctrl/⌘+Shift+V paste the original text instead of chipping it", async () => {
+    render(<Harness />);
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    // The chord arrives as a keydown; the paste that follows carries no
+    // modifier state of its own.
+    fireEvent.keyDown(textarea, { key: "v", code: "KeyV", ctrlKey: true, shiftKey: true });
+    const notConsumed = fireEvent.paste(textarea, { clipboardData: textClipboardData(LONG_PASTE) });
+
+    // Not consumed: the browser's own paste inserts text/plain into the field.
+    expect(notConsumed).toBe(true);
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByTestId("attachment-chip")).toBeNull();
+  });
+
+  it("applies the bypass to exactly one paste, not the next ordinary one", async () => {
+    render(<Harness />);
+    const textarea = screen.getByTestId("composer-textarea") as HTMLTextAreaElement;
+
+    fireEvent.keyDown(textarea, { key: "v", code: "KeyV", metaKey: true, shiftKey: true });
+    fireEvent.paste(textarea, { clipboardData: textClipboardData(LONG_PASTE) });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.queryByTestId("attachment-chip")).toBeNull();
+
+    // A subsequent plain ⌘V must chip again.
+    fireEvent.keyDown(textarea, { key: "v", code: "KeyV", metaKey: true });
+    fireEvent.paste(textarea, { clipboardData: textClipboardData(LONG_PASTE) });
+    await waitFor(() => expect(screen.queryByTestId("attachment-chip")).not.toBeNull());
   });
 
   it("blocks clipboard image attachment when native image input is unavailable", () => {

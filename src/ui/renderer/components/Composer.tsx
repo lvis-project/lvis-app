@@ -191,6 +191,12 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   // ghost render path needs the value at render time, not just on key events.
   const [isComposing, setIsComposing] = useState(false);
   const isComposingRef = useRef(false);
+  /**
+   * Set by the Ctrl/⌘+Shift+V keydown and consumed by the paste that follows
+   * it — a ClipboardEvent exposes no modifier state of its own, so the chord
+   * has to be carried across the two events.
+   */
+  const plainPasteRequestedRef = useRef(false);
   // PR-D ↑/↓ chip cycle: index of the currently-focused alternate chip, or
   // `null` when focus is in the textarea. Composer owns this state so the
   // textarea's keydown handler can advance it (ChipRow is otherwise a leaf
@@ -404,6 +410,16 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       // short-circuit, clipboard paste would silently bypass that gate
       // and grow attachment state while the user cannot send.
       if (disabled) return;
+      // Ctrl/⌘+Shift+V — the user asked for the raw text, so the chipping
+      // engine sits this one out and the browser's own paste inserts
+      // text/plain. Only when there IS text: an image-only clipboard still
+      // goes through the attachment path, since "paste as plain text" has
+      // nothing to insert for it.
+      const plainPasteRequested = plainPasteRequestedRef.current;
+      plainPasteRequestedRef.current = false;
+      if (plainPasteRequested && (e.clipboardData?.getData("text/plain") ?? "") !== "") {
+        return;
+      }
       // Keep ordinary text paste available when only native image egress is
       // unavailable. A clipboard image itself is consumed so the browser does
       // not create an untracked attachment-like draft representation.
@@ -521,6 +537,14 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
       if (e.nativeEvent.isComposing || isComposingRef.current) return;
+
+      // Ctrl/⌘ + Shift + V = paste the ORIGINAL text straight into the field.
+      // A ClipboardEvent carries no modifier state, so the chord is recorded
+      // here and read by the paste handler that follows it. Deliberately NOT
+      // preventDefault-ed: the browser still fires its own paste, and a
+      // textarea inserts text/plain, which is exactly the wanted result.
+      plainPasteRequestedRef.current =
+        (e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "v";
 
       // Inline "/" autocomplete owns navigation while open. This MUST run
       // before the suggested-reply Tab/Arrow branches and the Enter→onSend
