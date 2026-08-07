@@ -35,6 +35,7 @@
  */
 import type { ToolCategory } from "../../tools/types.js";
 import { tokenizeShell, type ShellLeaf } from "../../main/shell-tokenizer.js";
+import { hasNetworkTarget } from "./network-target.js";
 
 /**
  * Built-in read-only command set (Claude Code / Codex model). A compound shell
@@ -173,9 +174,6 @@ const GIT_READ_ONLY_FLAGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 /** Argument selectors that commonly carry a shell command string. */
 const SHELL_COMMAND_FIELDS: readonly string[] = ["command", "cmd", "script", "shellCommand"];
 
-/** Argument selectors that commonly carry a network endpoint. */
-const NETWORK_FIELDS: readonly string[] = ["url", "endpoint", "uri"];
-
 /** Signals the host owns about the observed call. The inspector reads ONLY these. */
 export interface HostRiskSignals {
   /** Where the tool came from. Network MCP servers are foreign peers. */
@@ -223,42 +221,6 @@ export function inspectHostRisk(signals: HostRiskSignals): ToolCategory {
   // Filesystem arguments land here on purpose: contained and escaping paths are
   // both write-equivalent, so inspecting them cannot change this answer.
   return "write";
-}
-
-/** True when a string carries a parseable URL with a network scheme. */
-function isNetworkUrl(value: string): boolean {
-  if (value.length === 0) return false;
-  try {
-    const u = new URL(value);
-    return (
-      u.protocol === "http:" ||
-      u.protocol === "https:" ||
-      u.protocol === "ws:" ||
-      u.protocol === "wss:"
-    );
-  } catch {
-    return false;
-  }
-}
-
-/**
- * True when any argument is a network target. Checks the named URL-bearing
- * fields and a bare `host` field, then — default-strict toward `"network"` —
- * scans EVERY top-level string value for URL-shaped content, so a URL hidden
- * under an arbitrary key still escalates instead of slipping past the heuristic.
- */
-function hasNetworkTarget(input: Record<string, unknown>): boolean {
-  for (const key of NETWORK_FIELDS) {
-    const value = input[key];
-    if (typeof value === "string" && isNetworkUrl(value)) return true;
-  }
-  const host = input.host;
-  if (typeof host === "string" && host.length > 0) return true;
-  // Default-strict: a network URL under any other key is still a network target.
-  for (const value of Object.values(input)) {
-    if (typeof value === "string" && isNetworkUrl(value)) return true;
-  }
-  return false;
 }
 
 /** Pull a shell command string out of the call args, if any. */
