@@ -354,6 +354,13 @@ export class ToolExecutor {
       pluginId,
       hostShellExecutionPlan,
       auditInput,
+      // Route the foreground lane's disclosure through the SAME producer the
+      // reviewer lane uses, so a memory auto-approve raises the renderer toast
+      // from either lane. Bound here because this class already holds the
+      // PermissionManager.
+      this.permissionManager
+        ? (payload) => this.permissionManager!.discloseUserApprovalHit(payload)
+        : undefined,
     );
   }
 
