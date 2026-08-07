@@ -1,5 +1,5 @@
 {
-  "$schema": "https://unpkg.com/knip@6.29.0/schema.json",
+  "$schema": "https://unpkg.com/knip@6.31.0/schema.json",
   // Code-diet baseline (#1410).
   //
   // Keep structural debt visible as warnings while failing on new dependency
