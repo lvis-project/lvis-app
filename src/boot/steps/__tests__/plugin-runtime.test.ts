@@ -1093,6 +1093,7 @@ describe("initPluginRuntime HostApi factory", () => {
         get: vi.fn((key: string) => {
           // openai is the active vendor for this test
           if (key === "llm") return { provider: "openai" };
+          if (key === "marketplace") return { installedProviderPresets: [] };
           if (key === "pluginConfigs") return {};
           return undefined;
         }),
@@ -1157,11 +1158,13 @@ describe("initPluginRuntime HostApi factory", () => {
     // Non-active vendor (claude) — denied even though allowlisted
     expect(api.getSecret("llm.apiKey.claude")).toBeNull();
 
-    // Audit captured non-active-vendor warn
+    // Audit captured the Tier-4 deny. `vendor-mismatch` is the ONE token both
+    // host APIs now emit for this tier; `getSecret` used to rename it to
+    // `non-active-vendor`, so an operator pivoting on either saw half the traffic.
     const denyAudit = bootAuditLogger.log.mock.calls.find((c) => {
       const input = (c[0] as { input?: string }).input ?? "";
       return (
-        input.includes("non-active-vendor") &&
+        input.includes("vendor-mismatch") &&
         input.includes("llm.apiKey.claude")
       );
     });
@@ -1279,7 +1282,7 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(bootAuditLogger.log).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "warn",
-        input: expect.stringContaining("non-active-vendor"),
+        input: expect.stringContaining("vendor-mismatch"),
       }),
     );
   });
@@ -1388,7 +1391,7 @@ describe("initPluginRuntime HostApi factory", () => {
     expect(bootAuditLogger.log).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "warn",
-        input: expect.stringContaining("non-active-vendor"),
+        input: expect.stringContaining("vendor-mismatch"),
       }),
     );
   });
@@ -1474,6 +1477,9 @@ describe("initPluginRuntime HostApi factory", () => {
   it("quarantines endpoint URLs stored in api-key-like own plugin secrets", async () => {
     runtimeTestState.capturedRuntimeOptions = null;
     const bootAuditLogger = { log: vi.fn() };
+    const { resetHostSecretCountersForTesting, getHostSecretCounter } =
+      await import("../../../telemetry/host-secret-counters.js");
+    resetHostSecretCountersForTesting();
 
     await initPluginRuntime({
       projectRoot: "/tmp/lvis-test/project",
@@ -1549,6 +1555,14 @@ describe("initPluginRuntime HostApi factory", () => {
         ),
       }),
     );
+
+    // Gate-merge disagreement: `resolveApiKey` has always incremented
+    // hostSecret_read / hostSecret_denied on its own-namespace path while
+    // `getSecret` emitted NOTHING on Tier-1 — neither on allow nor on the
+    // endpoint-URL block. The two APIs' totals were not comparable.
+    // Two allows (webhookUrl, apiKey) and one block (sttApiKey) above.
+    expect(getHostSecretCounter("hostSecret_read", "plugin-q", "plugin")).toBe(2);
+    expect(getHostSecretCounter("hostSecret_denied", "plugin-q", "plugin")).toBe(1);
   });
 
   it("clears registry-entry cache on refresh failure so admin secret bypass fails closed (#959)", async () => {
@@ -1584,6 +1598,7 @@ describe("initPluginRuntime HostApi factory", () => {
       settingsService: {
         get: vi.fn((key: string) => {
           if (key === "llm") return { provider: "openai" };
+          if (key === "marketplace") return { installedProviderPresets: [] };
           if (key === "pluginConfigs") return {};
           return undefined;
         }),
