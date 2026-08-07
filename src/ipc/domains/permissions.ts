@@ -195,7 +195,9 @@ function createPermissionReviewSuggestionTracker() {
  * the full list in the broadcast payload (avoids serialization size
  * and keeps a single source of truth in the slash dispatcher).
  */
-export function broadcastPermissionConfigChanged(deps: IpcDeps): void {
+export type PermissionConfigBroadcastTarget = Pick<IpcDeps, "getMainWindow" | "getAppWindows">;
+
+export function broadcastPermissionConfigChanged(deps: PermissionConfigBroadcastTarget): void {
   const mainWindow = deps.getMainWindow?.();
   const windows = deps.getAppWindows?.() ?? [mainWindow];
   for (const win of windows) {
