@@ -21,7 +21,7 @@ export const NARROWEST_SCOPE: ApprovalGrantScope = "once";
  * directly: when the sentence is ambiguous, mixes scopes, or names none,
  * `value` is {@link NARROWEST_SCOPE} and `explicit` is false.
  */
-export interface ApprovalIntentScope {
+interface ApprovalIntentScope {
   value: ApprovalGrantScope;
   explicit: boolean;
   /** The literal phrase that selected `value`; "" when not explicit. */
@@ -43,7 +43,7 @@ export interface ApprovalIntentScope {
  * request's own target before it can select a grant, and must never widen
  * a grant to it on the parser's say-so.
  */
-export type ApprovalIntentTarget =
+type ApprovalIntentTarget =
   | { kind: "none" }
   | { kind: "path"; raw: string };
 
