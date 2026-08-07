@@ -41,6 +41,34 @@ describe("global webview navigation policy", () => {
     })).toBe(true);
   });
 
+  // `currentUrl` decides whether the plugin-shell dist/src allowance applies at
+  // all. It used to be a substring test against the whole URL, so any frame
+  // whose query carried the shell filename got the shell's file-navigation
+  // allowance — the `url` side had a look-alike test, this side had none.
+  it("grants the dist/src allowance only to the real shell document", () => {
+    const targetInDistSrc = fileUrlInDistSrc("plugin-entry.js");
+    // Genuine shell frame — allowance applies.
+    expect(decision({
+      currentUrl: fileUrlInDistSrc("plugin-ui-shell.html"),
+      url: targetInDistSrc,
+    })).toBe(false);
+    // Host renderer whose query merely names the shell — no allowance.
+    expect(decision({
+      currentUrl: `${fileUrlInDistSrc("index.html")}?next=plugin-ui-shell.html`,
+      url: targetInDistSrc,
+    })).toBe(true);
+    // Remote page serving the shell filename — no allowance.
+    expect(decision({
+      currentUrl: "https://evil.example.com/plugin-ui-shell.html",
+      url: targetInDistSrc,
+    })).toBe(true);
+    // A filename that merely ends with the shell name — no allowance.
+    expect(decision({
+      currentUrl: fileUrlInDistSrc("evil-plugin-ui-shell.html"),
+      url: targetInDistSrc,
+    })).toBe(true);
+  });
+
   it("keeps data and about navigations available for non-plugin preview frames", () => {
     expect(decision({ url: "data:text/html,ok" })).toBe(false);
     expect(decision({ url: "about:blank" })).toBe(false);

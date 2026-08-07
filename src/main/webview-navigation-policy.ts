@@ -1,6 +1,7 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { MCP_APP_SCHEME } from "../shared/mcp-app-partition.js";
+import { isPluginShellFrameUrl } from "../shared/plugin-shell-frame.js";
 
 export interface GlobalWebviewNavigationDecisionInput {
   url: string;
@@ -23,7 +24,7 @@ export function shouldBlockGlobalWebviewNavigation(
   // which would silently break the card. Mirrors the plugin-shell precedent above.
   if (input.url.startsWith(`${MCP_APP_SCHEME}:`)) return false;
 
-  const isPluginShellFrame = input.currentUrl.includes("plugin-ui-shell.html");
+  const isPluginShellFrame = isPluginShellFrameUrl(input.currentUrl);
   if (isPluginShellFrame && input.url.startsWith("file://")) {
     const distSrc = resolve(input.distRoot, "src");
     let targetPath: string | null = null;
