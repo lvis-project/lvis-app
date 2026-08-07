@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { loadPolicy, savePolicy, getAdminPolicyPath } from "../policy-store.js";
+import { isPolicyUserEditable } from "../../shared/policy-editability.js";
 import { makeTestPolicy } from "./test-helpers.js";
 
 // ─── Mock fs/promises ─────────────────────────────────
@@ -178,6 +179,79 @@ describe("policy-store", () => {
     // version 2 → null (ignored) → user만
     expect(result.source).toBe("user");
     expect(result.requireExplicitApproval).toBe(false);
+  });
+
+  // ══════════════════════════════════════════════════
+  // Read/write agreement — "is this policy user-editable?"
+  //
+  // The read side (Permissions tab) and the write side (savePolicy) must never
+  // disagree. Rather than asserting a hand-written expectation table, each row
+  // below runs BOTH real functions against the same on-disk state and requires
+  // `savePolicy rejects  <=>  !isPolicyUserEditable(loadPolicy(...))`.
+  // A new blocking condition added to savePolicy alone turns this red.
+  // ══════════════════════════════════════════════════
+
+  describe("isPolicyUserEditable agrees with savePolicy", () => {
+    const cases: Array<[string, () => void]> = [
+      ["no files at all", () => {}],
+      ["user only, managed:false", () => {
+        writeFile(USER_PATH, makeTestPolicy({ managed: false }));
+      }],
+      ["user only, managed:true", () => {
+        writeFile(USER_PATH, makeTestPolicy({ managed: true }));
+      }],
+      ["admin only, managed:true", () => {
+        writeFile(ADMIN_PATH, makeTestPolicy({ managed: true }));
+      }],
+      // The case the `managed`-flag-only read side got wrong: an admin-dir
+      // policy that pins requireExplicitApproval without claiming `managed`.
+      ["admin only, managed omitted", () => {
+        const { managed: _managed, ...rest } = makeTestPolicy({ requireExplicitApproval: true });
+        writeFile(ADMIN_PATH, rest);
+      }],
+      ["admin + user, neither managed", () => {
+        writeFile(USER_PATH,  makeTestPolicy({ managed: false, requireExplicitApproval: false }));
+        writeFile(ADMIN_PATH, makeTestPolicy({ managed: false, requireExplicitApproval: true }));
+      }],
+      ["admin + user, admin managed:true", () => {
+        writeFile(USER_PATH,  makeTestPolicy({ managed: false }));
+        writeFile(ADMIN_PATH, makeTestPolicy({ managed: true }));
+      }],
+      // admin file is unreadable (bad JSON) → savePolicy sees no admin file
+      ["invalid admin JSON + user managed:false", () => {
+        writeFile(USER_PATH, makeTestPolicy({ managed: false }));
+        files[ADMIN_PATH] = "not-valid-json";
+      }],
+      ["invalid admin JSON + user managed:true", () => {
+        writeFile(USER_PATH, makeTestPolicy({ managed: true }));
+        files[ADMIN_PATH] = "not-valid-json";
+      }],
+    ];
+
+    for (const [label, seed] of cases) {
+      it(`${label}`, async () => {
+        seed();
+        const loaded = await loadPolicy(USER_PATH, ADMIN_PATH);
+        const editable = isPolicyUserEditable(loaded);
+
+        let saveRejected = false;
+        try {
+          await savePolicy({ requireExplicitApproval: false }, USER_PATH, ADMIN_PATH);
+        } catch {
+          saveRejected = true;
+        }
+
+        expect(saveRejected).toBe(!editable);
+      });
+    }
+
+    it("at least one case is editable and one is not (the matrix can fail)", async () => {
+      writeFile(ADMIN_PATH, makeTestPolicy({ managed: true }));
+      expect(isPolicyUserEditable(await loadPolicy(USER_PATH, ADMIN_PATH))).toBe(false);
+      delete files[ADMIN_PATH];
+      writeFile(USER_PATH, makeTestPolicy({ managed: false }));
+      expect(isPolicyUserEditable(await loadPolicy(USER_PATH, ADMIN_PATH))).toBe(true);
+    });
   });
 
   // ══════════════════════════════════════════════════

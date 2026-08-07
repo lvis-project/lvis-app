@@ -16,6 +16,20 @@ export interface GuardResult {
   reason?: string;
 }
 
+/**
+ * Thrown when a {@link PluginDeploymentGuard} decision denies a lifecycle
+ * mutation. Callers that need to distinguish a policy denial from an
+ * operational failure (the IPC layer maps it to its own error code) must use
+ * `instanceof` — never a message-prefix match, so the denial wording stays a
+ * single authority here.
+ */
+export class PluginDeploymentDeniedError extends Error {
+  constructor(reason: string) {
+    super(reason);
+    this.name = "PluginDeploymentDeniedError";
+  }
+}
+
 function normalizeInstallPolicy(value: {
   installPolicy?: InstallPolicy;
 } | null | undefined): InstallPolicy {
@@ -147,5 +161,38 @@ export class PluginDeploymentGuard {
     if (rel.startsWith("..")) return false;
     if (isAbsolute(rel)) return false;
     return true;
+  }
+}
+
+/**
+ * Deployment policy for the LIVE disable writer.
+ *
+ * Two methods mutate the registry `enabled` field. `disable()` consults this
+ * guard but has no production caller; `setPluginEnabled()` is what the renderer
+ * toggle reaches through `CHANNELS.plugins.setEnabled`, and it had no guard at
+ * all — so the admin-managed protection existed only on a lane nothing calls,
+ * and a user could switch off an admin-deployed plugin from the settings tab.
+ *
+ * Actor is hard-coded to `"user"`: every caller of the live writer is the
+ * renderer IPC toggle. An it-admin lane here would be unreachable, so it is
+ * deliberately absent — `disable(id, "it-admin")` is the API for that.
+ *
+ * `installClaim` is the registry row id this guard looks entries up by, NOT the
+ * canonical manifest id, which it would fail to find. A static manifest
+ * (`installClaim === null`) has no registry row to classify, and its toggle is
+ * session-local and persists nothing.
+ */
+export async function assertDisableAllowed(
+  enabled: boolean,
+  installClaim: string | null,
+  pluginId: string,
+  deploymentGuard: Pick<PluginDeploymentGuard, "canDisable"> | undefined,
+): Promise<void> {
+  if (enabled || !deploymentGuard || installClaim === null) return;
+  const guardResult = await deploymentGuard.canDisable(installClaim, "user");
+  if (!guardResult.allowed) {
+    throw new PluginDeploymentDeniedError(
+      guardResult.reason ?? `Plugin disable denied: ${pluginId}`,
+    );
   }
 }

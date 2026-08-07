@@ -68,7 +68,6 @@ import { buildApprovalPurposeSuggestion } from "./pipeline/approval-purpose.js";
 import {
   approvalCacheKeyFor,
   emitToolStart,
-  maskToolInputForDisplay,
   summarizeInputForDeferred,
 } from "./pipeline/display-mask.js";
 import {
@@ -728,7 +727,6 @@ export async function runToolInvocation(
       ...(approvalCacheKey ? { approvalCacheKey } : {}),
     };
     const approvalPurpose = buildApprovalPurposeSuggestion(finalInput, invocationPermissionContext);
-    const reviewerInput = maskToolInputForDisplay(finalInput);
     const auditInput = auditSafeToolInput(
       finalInput,
       currentAuditMetadata(finalInput),
@@ -1341,7 +1339,6 @@ export async function runToolInvocation(
       callbacks,
       meta,
       approvalPurpose,
-      reviewerInput,
       auditInput,
       abortSignal,
       rationaleResumeContext,

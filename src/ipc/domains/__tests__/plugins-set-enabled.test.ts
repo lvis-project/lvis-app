@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { makeAppIpcInvoker } from "./test-helpers.js";
+import { PluginDeploymentDeniedError } from "../../../plugins/deployment-guard.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const hostEventMock = vi.hoisted(() => ({ emit: vi.fn() }));
@@ -72,7 +73,20 @@ async function setup() {
     return pluginConfig;
   });
   const restartPlugin = vi.fn(async () => "started" as const);
-  const pluginManifest = { id: "plugin-config" };
+  const setSecret = vi.fn(async () => {});
+  // `apiKey` is declared `format: "secret"` so the config:secret:set handler
+  // accepts it. `kept`/`removed` stay non-secret, so stripSecretFields is a
+  // no-op for the existing config:set tests.
+  const pluginManifest = {
+    id: "plugin-config",
+    configSchema: {
+      properties: {
+        apiKey: { type: "string", format: "secret" },
+        kept: { type: "string" },
+        removed: { type: "string" },
+      },
+    },
+  };
   const deps = {
     pluginMarketplace: { list: vi.fn(async () => []) },
     pluginRuntime: {
@@ -87,6 +101,7 @@ async function setup() {
       get: vi.fn(() => ({})),
       getPluginConfig: vi.fn(() => ({ ...pluginConfig })),
       setPluginConfig,
+      setSecret,
     },
     auditLogger: { log: vi.fn() },
     refreshPluginNotifications: vi.fn(),
@@ -104,6 +119,10 @@ async function setup() {
     pluginBundleLifecycle,
     setPluginConfig,
     restartPlugin,
+    setSecret,
+    /** Seed the cleartext `pluginConfigs` record the handlers read. */
+    seedPluginConfig: (next: Record<string, unknown>) => { pluginConfig = { ...next }; },
+    readPluginConfig: () => ({ ...pluginConfig }),
   };
 }
 
@@ -243,6 +262,30 @@ describe("lvis:plugins:set-enabled", () => {
     expect(deps.auditLogger.log).toHaveBeenCalled();
   });
 
+  it("maps a deployment-guard denial to disable-not-permitted without broadcasting", async () => {
+    const { setPluginEnabled, appWindows } = await setup();
+    // The real error type the runtime guard throws — not a look-alike, so a
+    // rename of the class breaks this test rather than silently passing.
+    setPluginEnabled.mockRejectedValueOnce(
+      new PluginDeploymentDeniedError(
+        "Admin plugin cannot be uninstalled by user: com.example.meeting (registry installSource=\"admin\")",
+      ),
+    );
+
+    const res = await invoke("lvis:plugins:set-enabled", "com.example.meeting", false);
+
+    expect(res).toMatchObject({ ok: false, error: "disable-not-permitted" });
+    // The guard's internal reason must not leak into the renderer banner.
+    expect((res as { message: string }).message).not.toMatch(/installSource/);
+    expect(hostEventMock.emit).not.toHaveBeenCalled();
+    for (const win of appWindows) {
+      expect(win.webContents.send).not.toHaveBeenCalledWith(
+        "lvis:plugins:enabled-changed",
+        expect.anything(),
+      );
+    }
+  });
+
   it("maps runtime I/O failures to generic toggle-failed without broadcasting", async () => {
     const { setPluginEnabled, appWindows } = await setup();
     setPluginEnabled.mockRejectedValueOnce(new Error("EACCES: permission denied, open /Users/example/.lvis/plugins/registry.json"));
@@ -340,5 +383,101 @@ describe("lvis:plugins:config:set", () => {
     expect(result).toMatchObject({ ok: false, error: "plugin-config-save-failed" });
     expect(result).toMatchObject({ message: expect.stringContaining("runtime reload returned failed") });
     expect(setPluginConfig).toHaveBeenCalledOnce();
+  });
+});
+
+/**
+ * Restart policy for secret writes — see `plugins/config-restart-policy.ts`.
+ *
+ * The rule is "restart iff the write mutated the CLEARTEXT config record (which
+ * is what stales `PluginRuntimeContext.config`) and restarting is safe here".
+ * A secret never enters that record, so the common case must NOT restart; but
+ * this handler also deletes a stray cleartext copy of the key when one exists,
+ * and that branch does stale the snapshot — leaving the plugin using the OLD
+ * plaintext secret until something else restarts it.
+ */
+describe("lvis:plugins:config:secret:set — restart policy", () => {
+  it("does NOT restart for a plain secret write (secrets never enter ctx.config)", async () => {
+    const { restartPlugin, setPluginConfig, setSecret, seedPluginConfig } = await setup();
+    // No cleartext copy of `apiKey` — the ordinary case.
+    seedPluginConfig({ kept: "old" });
+
+    const result = await invoke("lvis:plugins:config:secret:set", "plugin-config", "apiKey", "sk-live-123");
+
+    expect(result).toEqual({ ok: true });
+    expect(setSecret).toHaveBeenCalledWith("plugin.plugin-config.apiKey", "sk-live-123");
+    // Nothing cleartext changed, so nothing went stale, so no restart.
+    expect(setPluginConfig).not.toHaveBeenCalled();
+    expect(restartPlugin).not.toHaveBeenCalled();
+  });
+
+  it("DOES restart when it deletes a stray cleartext copy of the secret key", async () => {
+    const { restartPlugin, setPluginConfig, setSecret, seedPluginConfig, readPluginConfig } = await setup();
+    // Reachable without legacy data: a plugin update that newly marks an
+    // existing plain key `format: "secret"` leaves its plaintext value behind.
+    seedPluginConfig({ kept: "old", apiKey: "sk-OLD-plaintext" });
+
+    const result = await invoke("lvis:plugins:config:secret:set", "plugin-config", "apiKey", "sk-live-456");
+
+    expect(result).toEqual({ ok: true });
+    expect(setSecret).toHaveBeenCalledWith("plugin.plugin-config.apiKey", "sk-live-456");
+    // The cleartext copy is gone from the record the plugin's ctx.config is
+    // built from...
+    expect(setPluginConfig).toHaveBeenCalledOnce();
+    expect(readPluginConfig()).toEqual({ kept: "old" });
+    // ...so the stale snapshot must be rebuilt.
+    expect(restartPlugin).toHaveBeenCalledOnce();
+    expect(restartPlugin).toHaveBeenCalledWith("plugin-config", { skipPreparation: true });
+  });
+
+  it("restarts OUTSIDE the install lock, like config:set", async () => {
+    const { withPluginInstallLock } = await import("../../../plugins/install-lifecycle.js");
+    const { restartPlugin, setPluginConfig, seedPluginConfig } = await setup();
+    seedPluginConfig({ apiKey: "sk-OLD-plaintext" });
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const lockEntered = new Promise<void>((resolve) => { entered = resolve; });
+    const held = withPluginInstallLock("plugin-config", async () => {
+      entered();
+      await gate;
+    });
+    await lockEntered;
+
+    const secretSet = invoke("lvis:plugins:config:secret:set", "plugin-config", "apiKey", "sk-live-789");
+    await Promise.resolve();
+    // Blocked behind the lock — neither the persist nor the restart has run.
+    expect(setPluginConfig).not.toHaveBeenCalled();
+    expect(restartPlugin).not.toHaveBeenCalled();
+
+    release();
+    await held;
+    await expect(secretSet).resolves.toEqual({ ok: true });
+    expect(restartPlugin).toHaveBeenCalledOnce();
+  });
+
+  it("reports a saved secret whose targeted runtime reload failed", async () => {
+    const { restartPlugin, setSecret, seedPluginConfig } = await setup();
+    seedPluginConfig({ apiKey: "sk-OLD-plaintext" });
+    restartPlugin.mockResolvedValueOnce("failed" as never);
+
+    const result = await invoke("lvis:plugins:config:secret:set", "plugin-config", "apiKey", "sk-live-000");
+
+    expect(result).toMatchObject({ ok: false, error: "plugin-config-secret-save-failed" });
+    expect(result).toMatchObject({ message: expect.stringContaining("runtime reload returned failed") });
+    // The secret itself WAS written — the failure is the reload, not the save.
+    expect(setSecret).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a key the manifest does not declare secret, without touching anything", async () => {
+    const { restartPlugin, setPluginConfig, setSecret, seedPluginConfig } = await setup();
+    seedPluginConfig({ kept: "old" });
+
+    const result = await invoke("lvis:plugins:config:secret:set", "plugin-config", "kept", "not-a-secret");
+
+    expect(result).toMatchObject({ ok: false, error: "plugin-config-secret-invalid-key" });
+    expect(setSecret).not.toHaveBeenCalled();
+    expect(setPluginConfig).not.toHaveBeenCalled();
+    expect(restartPlugin).not.toHaveBeenCalled();
   });
 });

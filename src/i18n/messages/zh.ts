@@ -33,6 +33,7 @@ export const zh: Record<SeedMessageKey, string> = {
   "mainDialog.installLocalPluginTitle": "安装本地插件 (开发者)",
   "mainDialog.installLocalPluginMessage": "请选择包含 plugin.json 的构建文件夹",
   "mainDialog.unauthorizedFrame": "未经授权的框架。",
+  "mainDialog.pluginDisableNotPermitted": "此插件由您的组织管理，无法停用。",
   "mainDialog.noPersonasAvailable": "没有可用的 persona",
   "mainDialog.exportConversationTitle": "导出会话",
   "mainDialog.importConversationTitle": "导入会话",
