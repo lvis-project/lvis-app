@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -5,7 +6,7 @@ import {
   fstatSync,
   lstatSync,
   openSync,
-  readFileSync,
+  readSync,
   type Stats,
 } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
@@ -88,6 +89,30 @@ function openSecretFileNoFollow(path: string): number {
   return openSync(path, constants.O_RDONLY | noFollow);
 }
 
+/**
+ * Reads exactly `size` bytes from absolute file offsets, leaving the descriptor
+ * position untouched so the same window can be read again for verification.
+ * A short read returns the shorter buffer; the caller treats that as instability.
+ */
+function readWholeDescriptor(fd: number, size: number): Buffer {
+  const buffer = Buffer.allocUnsafe(size);
+  let filled = 0;
+  while (filled < size) {
+    const chunk = readSync(fd, buffer, filled, size - filled, filled);
+    if (chunk === 0) return buffer.subarray(0, filled);
+    filled += chunk;
+  }
+  return buffer;
+}
+
+/**
+ * Digest of secret-document bytes, used only for equality against another
+ * digest of the same window. Never logged, surfaced, or compared to a constant.
+ */
+function contentDigest(bytes: Buffer): Buffer {
+  return createHash("sha256").update(bytes).digest();
+}
+
 function readStableSecretFile(path: string): string {
   for (let attempt = 0; attempt < MAX_STABLE_READ_ATTEMPTS; attempt += 1) {
     let fd: number | undefined;
@@ -102,10 +127,16 @@ function readStableSecretFile(path: string): string {
       fd = openSecretFileNoFollow(path);
       const opened = fstatSync(fd);
       if (!isSameRegularFile(before, opened)) continue;
-      const bytes = readFileSync(fd);
+      const bytes = readWholeDescriptor(fd, opened.size);
+      // Trust is anchored to the bytes in hand: re-read the same window and
+      // require an identical digest. `fstat` identity cannot see an equal-size
+      // in-place mutation, so the content check — not the metadata — decides.
+      const readDigest = contentDigest(bytes);
+      const verifyDigest = contentDigest(readWholeDescriptor(fd, opened.size));
       const afterHandle = fstatSync(fd);
       const afterPath = lstatSync(path);
-      if (!isSameRegularFile(opened, afterHandle)
+      if (!readDigest.equals(verifyDigest)
+        || !isSameRegularFile(opened, afterHandle)
         || !isSameRegularFile(opened, afterPath)
         || bytes.byteLength !== opened.size) {
         continue;
