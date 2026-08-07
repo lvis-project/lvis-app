@@ -12,6 +12,7 @@ import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import { isUserKeyboardOrigin } from "../../shared/chat-origin.js";
 import type { ToolSource } from "../../tools/types.js";
 import { t } from "../../i18n/index.js";
+import { findSessionByIdPrefix } from "../../shared/session-lookup.js";
 
 function toolProvenanceLabel(tool: {
   source: ToolSource;
@@ -92,9 +93,9 @@ export async function handleCommand(
       case "load": {
         if (!args.trim()) { result = t("be_conversationLoop.cmdLoadUsage"); break; }
         const targetId = args.trim();
-        // 부분 ID 매칭
+        // 부분 ID 매칭 — 렌더러의 `/load`와 같은 술어를 공유한다.
         const sessions = self.listSessions();
-        const match = sessions.find((s) => s.id.startsWith(targetId));
+        const match = findSessionByIdPrefix(sessions, targetId);
         if (!match) { result = t("be_conversationLoop.cmdLoadNotFound", { id: targetId }); break; }
         const loaded = self.loadSession(match.id);
         result = loaded
