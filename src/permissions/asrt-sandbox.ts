@@ -8,7 +8,7 @@ import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
-import { LVIS_HOME_SENSITIVE_ENTRIES } from "./sensitive-paths.js";
+import { SENSITIVE_PATH_ENTRIES } from "./sensitive-paths.js";
 
 import type {
   SandboxRuntimeConfig,
@@ -459,14 +459,14 @@ export function isAsrtSandboxActive(): boolean {
  * reads; we can only enumerate the KNOWN-sensitive subpaths to deny. A path not
  * on this list stays readable. Do NOT describe this as a read jail.
  *
- * WHAT IS DENIED (absolute, derived from the real host home + `~/.lvis` layout):
- *   - the WHOLE LVIS-home sensitive namespace — secrets, sessions, routine,
- *     audit(.log), settings.json, permissions(.json), policy.json,
- *     plugins/auth-partitions.json, certs, keys, lvis-secrets.json. This is NOT
- *     restated here: it is projected from `LVIS_HOME_SENSITIVE_ENTRIES`
- *     (src/permissions/sensitive-paths.ts), the single authority that the
- *     in-process host-tool guard projects into globs. Add a row THERE and both
- *     surfaces deny it; there is no list to keep in sync.
+ * WHAT IS DENIED — this function restates NOTHING. Every path except the
+ * Electron userData dir below is projected from `SENSITIVE_PATH_ENTRIES`
+ * (src/permissions/sensitive-paths.ts), the single authority that the
+ * in-process host-tool guard projects into globs. Read the table for the
+ * contents; do NOT mirror them here, or the mirror becomes the next thing to
+ * drift. Add a row THERE and both surfaces deny it.
+ *
+ * The ONE path this function adds on its own:
  *   - Electron userData dir (productName="LVIS") — whole dir, deny-by-default so
  *     future Electron auth artefacts are covered automatically.
  *     Exact path when `userDataDir` is provided by a trusted caller (handles
@@ -476,15 +476,9 @@ export function isAsrtSandboxActive(): boolean {
  *       Windows: ~/AppData/Roaming/LVIS
  *     Contains: plugin OAuth session cookies/tokens (Partitions/), Cookies (SQLite),
  *     Local/Session Storage, Network Persistent State, Trust Tokens,
- *     lvis-secrets.json (safeStorage-encrypted plugin secrets).
- *   - `~/.ssh`, `~/.aws`, `~/.azure`, `~/.config/gcloud`, `~/.kube/config`,
- *     `~/.gnupg` — standard cloud / SSH / GPG credential stores
- *   - `~/.config/gh`      — GitHub CLI OAuth token (hosts.yml)
- *   - `~/.config/git`, `~/.gitconfig`, `~/.git-credentials` — git credential stores
- *   - `~/.npmrc`, `~/.netrc`, `~/.pgpass`, `~/.docker/config.json` — registry /
- *                         netrc / PostgreSQL / docker auth files
- *   - `~/.bash_history`, `~/.zsh_history` — shell histories (may contain pasted
- *                         secrets / tokens)
+ *     lvis-secrets.json (safeStorage-encrypted plugin secrets). It is not a
+ *     table row because the EXACT dir is only knowable at runtime; the host
+ *     guard pins the per-platform DEFAULT locations as static globs instead.
  *
  * WHAT IS DELIBERATELY NOT DENIED (over-deny safety):
  *   - `$HOME` WHOLESALE — denying all of `~` would break most legit shell tools
@@ -540,33 +534,40 @@ export function getDefaultSensitiveReadDenyPaths(userDataDir?: string): string[]
             "LVIS",
           ));
   const raw = [
-    // ── LVIS host-domain sensitive namespaces (~/.lvis/<feature>/) ──
-    // Projected from the single authority, LVIS_HOME_SENSITIVE_ENTRIES in
+    // ── The sensitive-path table, projected to literal absolute paths ──
+    // Projected from the single authority, SENSITIVE_PATH_ENTRIES in
     // src/permissions/sensitive-paths.ts, which the in-process host-tool guard
-    // projects into globs. Do NOT hand-add a `join(lvis, …)` entry here — add a
+    // projects into globs. Do NOT hand-add a `join(home, …)` entry here — add a
     // row to that table and BOTH surfaces deny it.
-    ...LVIS_HOME_SENSITIVE_ENTRIES.map((entry) => join(lvis, ...entry.segments)),
+    ...SENSITIVE_PATH_ENTRIES.map((entry) => {
+      switch (entry.anchor) {
+        case "lvis-home":
+          return join(lvis, ...entry.segments);
+        case "home":
+          return join(home, ...entry.segments);
+        case "root":
+          // POSIX-rooted (`/etc/…`). Kept literal rather than `join`ed so the
+          // string stays a seatbelt/bwrap subpath on the platforms that have
+          // it; on win32 it names nothing and ASRT skips it (No-Fallback: a
+          // path that does not exist is harmless to list).
+          return "/" + entry.segments.join("/");
+        default: {
+          // Fail closed: an unrecognised anchor must not silently push
+          // `undefined` into the deny list ASRT is configured from.
+          const exhaustive: never = entry.anchor;
+          throw new Error(
+            `sensitive-path entry has an unknown anchor: ${String(exhaustive)}`,
+          );
+        }
+      }
+    }),
     // ── Electron userData dir (whole dir — deny-by-default for future artefacts) ──
     // Contains plugin OAuth session cookies/tokens, Cookies (SQLite), Local/Session
     // Storage, Network Persistent State, Trust Tokens, lvis-secrets.json.
+    // Not a table row: the EXACT dir is only knowable at runtime from
+    // `app.getPath("userData")`. The host guard pins the per-platform DEFAULT
+    // locations as static globs in SENSITIVE_PATH_PATTERNS instead.
     electronUserData,
-    // ── Standard credential / secret stores under the real home ──
-    join(home, ".ssh"), // SSH private keys + known_hosts
-    join(home, ".aws"), // AWS access keys
-    join(home, ".azure"), // Azure credentials (drift-sync: sensitive-paths.ts)
-    join(home, ".config", "gcloud"), // Google Cloud credentials
-    join(home, ".config", "gh"), // GitHub CLI OAuth token (hosts.yml)
-    join(home, ".config", "git"), // git credential config
-    join(home, ".kube", "config"), // Kubernetes cluster credentials
-    join(home, ".gnupg"), // GPG private keyring
-    join(home, ".npmrc"), // npm registry auth token
-    join(home, ".netrc"), // generic machine credentials
-    join(home, ".pgpass"), // PostgreSQL credentials (drift-sync: sensitive-paths.ts)
-    join(home, ".gitconfig"), // git global config (credential.helper, tokens)
-    join(home, ".git-credentials"), // git credential store (file)
-    join(home, ".docker", "config.json"), // docker registry auth
-    join(home, ".bash_history"), // shell history (may contain pasted secrets)
-    join(home, ".zsh_history"), // shell history (may contain pasted secrets)
   ];
   const seen = new Set<string>();
   const out: string[] = [];

@@ -46,8 +46,24 @@ import { globMatch } from "../lib/glob-matcher.js";
 export const MAX_WALK_UP = 64;
 
 /**
- * One entry in the LVIS-home sensitive namespace — the single authority for
- * "which `<lvisHome>/…` paths are secret".
+ * Where a {@link SensitiveEntry}'s segments hang off.
+ *
+ *   - `lvis-home` — below the LVIS home root (`~/.lvis` unless `LVIS_HOME`).
+ *   - `home`      — below the real user home (`os.homedir()`).
+ *   - `root`      — below the filesystem root (`/etc/…`).
+ *
+ * The host-tool guard is anchor-INSENSITIVE by design: it matches a
+ * canonicalized absolute path with an anchor-free `**\/` prefix, so a
+ * credential store dropped outside the user's home (a copied `.ssh` under
+ * `/tmp`, a second `HOME` in a container mount) is still caught. The anchor
+ * exists for the OS sandbox floor, which needs a LITERAL absolute path because
+ * bwrap/seatbelt cannot glob.
+ */
+type SensitiveAnchor = "lvis-home" | "home" | "root";
+
+/**
+ * One row of the sensitive-path hard-blocklist — the single authority for
+ * "which filesystem paths are secret".
  *
  * TWO enforcement points consume this table and neither may restate it:
  *   - the in-process host-tool guard, via the glob projection baked into
@@ -55,16 +71,39 @@ export const MAX_WALK_UP = 64;
  *     the host guard matches an already-canonicalized absolute path); and
  *   - the OS sandbox read/write deny floor, via
  *     `getDefaultSensitiveReadDenyPaths` in `src/permissions/asrt-sandbox.ts`
- *     (literal absolute paths anchored on `lvisHome()` at CALL time, because
- *     bwrap/seatbelt cannot glob and `LVIS_HOME` can move between calls).
+ *     (literal absolute paths resolved at CALL time, because bwrap/seatbelt
+ *     cannot glob and `LVIS_HOME` / `HOME` can move between calls).
  *
  * Those two shapes are why the table stores segments rather than strings: each
  * side projects the same rows into the form its enforcement point can consume.
  * Adding a row here denies the path on BOTH surfaces; there is no second list
  * to mirror it into.
+ *
+ * What is NOT in this table, and why. These are the ONLY admissible reasons
+ * for a path to be secret on one surface and not the other; anything else is
+ * drift:
+ *   - DELIBERATELY UNANCHORED patterns (`**\/.env`, `**\/.env.*`, `**\/id_rsa`,
+ *     `**\/.config/**\/Login Data`, `**\/lvis-secrets.json`) must match wherever
+ *     the file lands — a staged key under `/tmp`, a `.env` in any working tree.
+ *     They therefore have no single literal absolute form to hand bwrap or
+ *     seatbelt, and stay host-guard-only in {@link SENSITIVE_PATH_PATTERNS}.
+ *     (A table row is also matched anchor-free by the host guard; what makes
+ *     these different is that they have no anchored form AT ALL.)
+ *   - `~/Library/Cookies` and `~/Library/Keychains` are a deliberate sandbox
+ *     exclusion (encrypted-at-rest, outside ASRT's filesystem threat model) and
+ *     stay host-guard-only for that recorded reason.
+ *   - the {@link SensitiveEntry.rotations} flag is the same unanchored case one
+ *     level down: `<name>.*` has no literal form, so a row's rotation glob is
+ *     host-guard-only while its base file is on both surfaces.
+ *   - the Electron userData dir is hand-projected on BOTH surfaces rather than
+ *     being a row, because the exact directory is only knowable at runtime from
+ *     `app.getPath("userData")`. The sandbox floor gets the exact path; the host
+ *     guard can only pin the per-platform defaults as static globs.
  */
-export interface LvisHomeSensitiveEntry {
-  /** Path segments below the LVIS home root (`~/.lvis` unless `LVIS_HOME`). */
+export interface SensitiveEntry {
+  /** Which root {@link segments} hangs off — see {@link SensitiveAnchor}. */
+  readonly anchor: SensitiveAnchor;
+  /** Path segments below the anchor. */
   readonly segments: readonly string[];
   /** `dir` denies the directory and everything under it; `file` one path. */
   readonly kind: "dir" | "file";
@@ -78,28 +117,84 @@ export interface LvisHomeSensitiveEntry {
 }
 
 /**
- * The LVIS-home sensitive namespace. Order is the projection order for
+ * The sensitive-path table. Order is the projection order for
  * {@link SENSITIVE_PATH_PATTERNS}; both projections dedupe, so it carries no
  * meaning beyond which pattern string a match reports.
  */
-export const LVIS_HOME_SENSITIVE_ENTRIES: readonly LvisHomeSensitiveEntry[] = Object.freeze([
-  { segments: ["certs"], kind: "dir", why: "corporate CA bundle + extracted certs" },
-  { segments: ["secrets"], kind: "dir", why: "encrypted API keys, tokens" },
-  { segments: ["keys"], kind: "dir", why: "signing / encryption keys" },
-  { segments: ["lvis-secrets.json"], kind: "file", why: "legacy consolidated secrets file" },
-  { segments: ["settings.json"], kind: "file", why: "app settings + permission configuration" },
-  { segments: ["permissions.json"], kind: "file", why: "legacy/current permission settings file" },
-  { segments: ["policy.json"], kind: "file", why: "policy SOT" },
+export const SENSITIVE_PATH_ENTRIES: readonly SensitiveEntry[] = Object.freeze([
+  // ── Standard credential / secret stores under the user home ──────────
+  { anchor: "home", segments: [".ssh"], kind: "dir", why: "SSH private keys + config" },
   {
+    anchor: "home",
+    segments: [".aws"],
+    kind: "dir",
+    why: "AWS static credentials, profile config, and SSO token cache",
+  },
+  { anchor: "home", segments: [".azure"], kind: "dir", why: "Azure credentials" },
+  { anchor: "home", segments: [".config", "gcloud"], kind: "dir", why: "GCP credentials" },
+  {
+    anchor: "home",
+    segments: [".config", "gh"],
+    kind: "dir",
+    why: "GitHub CLI OAuth token (hosts.yml)",
+  },
+  {
+    anchor: "home",
+    segments: [".config", "git"],
+    kind: "dir",
+    why: "git credential config (credential.helper, stored tokens)",
+  },
+  { anchor: "home", segments: [".gitconfig"], kind: "file", why: "git global config (credential.helper, tokens)" },
+  { anchor: "home", segments: [".git-credentials"], kind: "file", why: "plaintext git credential store" },
+  { anchor: "home", segments: [".kube", "config"], kind: "file", why: "Kubernetes credentials" },
+  { anchor: "home", segments: [".gnupg"], kind: "dir", why: "GPG private keyring" },
+  { anchor: "home", segments: [".docker", "config.json"], kind: "file", why: "Docker registry credentials" },
+  { anchor: "home", segments: [".npmrc"], kind: "file", why: "npm registry auth token" },
+  { anchor: "home", segments: [".netrc"], kind: "file", why: "generic machine credentials" },
+  { anchor: "home", segments: [".pgpass"], kind: "file", why: "PostgreSQL credentials" },
+  // ── Shell / tool histories — routinely contain pasted secrets ────────
+  { anchor: "home", segments: [".bash_history"], kind: "file", why: "shell history" },
+  { anchor: "home", segments: [".zsh_history"], kind: "file", why: "shell history" },
+  { anchor: "home", segments: [".python_history"], kind: "file", why: "REPL history" },
+  { anchor: "home", segments: [".psql_history"], kind: "file", why: "psql history (may hold DSNs)" },
+  { anchor: "home", segments: [".viminfo"], kind: "file", why: "editor history + register contents" },
+  // ── LVIS hook scripts — supply-chain / re-exec protection ────────────
+  {
+    anchor: "home",
+    segments: [".config", "lvis", "hooks"],
+    kind: "dir",
+    why: "hook supply-chain protection (host-executed scripts)",
+  },
+  // ── System account databases ─────────────────────────────────────────
+  { anchor: "root", segments: ["etc", "shadow"], kind: "file", why: "system password hashes" },
+  { anchor: "root", segments: ["etc", "sudoers"], kind: "file", why: "sudo policy" },
+  { anchor: "root", segments: ["etc", "passwd-"], kind: "file", why: "passwd backup" },
+  // ── LVIS home sensitive namespace ────────────────────────────────────
+  { anchor: "lvis-home", segments: ["certs"], kind: "dir", why: "corporate CA bundle + extracted certs" },
+  { anchor: "lvis-home", segments: ["secrets"], kind: "dir", why: "encrypted API keys, tokens" },
+  { anchor: "lvis-home", segments: ["keys"], kind: "dir", why: "signing / encryption keys" },
+  { anchor: "lvis-home", segments: ["lvis-secrets.json"], kind: "file", why: "legacy consolidated secrets file" },
+  { anchor: "lvis-home", segments: ["settings.json"], kind: "file", why: "app settings + permission configuration" },
+  { anchor: "lvis-home", segments: ["permissions.json"], kind: "file", why: "legacy/current permission settings file" },
+  { anchor: "lvis-home", segments: ["policy.json"], kind: "file", why: "policy SOT" },
+  {
+    anchor: "lvis-home",
     segments: ["permissions"],
     kind: "dir",
     why: "reviewer cache, deferred queue, permission state",
   },
-  { segments: ["audit"], kind: "dir", why: "audit log directory (self-tampering)" },
-  { segments: ["audit.log"], kind: "file", rotations: true, why: "audit log + rotated archives" },
-  { segments: ["sessions"], kind: "dir", why: "chat session JSONL" },
-  { segments: ["routine"], kind: "dir", why: "routine v2 session history" },
+  { anchor: "lvis-home", segments: ["audit"], kind: "dir", why: "audit log directory (self-tampering)" },
   {
+    anchor: "lvis-home",
+    segments: ["audit.log"],
+    kind: "file",
+    rotations: true,
+    why: "audit log + rotated archives",
+  },
+  { anchor: "lvis-home", segments: ["sessions"], kind: "dir", why: "chat session JSONL" },
+  { anchor: "lvis-home", segments: ["routine"], kind: "dir", why: "routine v2 session history" },
+  {
+    anchor: "lvis-home",
     segments: ["plugins", "auth-partitions.json"],
     kind: "file",
     why: "plugin auth-partition state (OAuth partition mapping)",
@@ -107,17 +202,22 @@ export const LVIS_HOME_SENSITIVE_ENTRIES: readonly LvisHomeSensitiveEntry[] = Ob
 ]);
 
 /**
- * Host-tool glob projection of {@link LVIS_HOME_SENSITIVE_ENTRIES}.
+ * Host-tool glob projection of {@link SENSITIVE_PATH_ENTRIES}.
  *
- * Anchor-free (`**` prefix) because the host guard matches a canonicalized
- * absolute path and `LVIS_HOME` may point anywhere. A `dir` row needs only the
- * `/**` form: `policyMatchPaths` also tries `<path>/`, so `**\/.lvis/certs/**`
- * already matches the bare directory.
+ * Anchor-free (`**` prefix) for every anchor — see {@link SensitiveAnchor} for
+ * why the host guard deliberately ignores the anchor. `lvis-home` rows keep the
+ * literal `.lvis` segment in the glob because the glob cannot know where
+ * `LVIS_HOME` points; a relocated LVIS home is still covered by the sandbox
+ * floor, which resolves `lvisHome()` per call.
+ *
+ * A `dir` row needs only the `/**` form: `policyMatchPaths` also tries
+ * `<path>/`, so `**\/.ssh/**` already matches the bare directory.
  */
-function lvisHomeSensitiveGlobs(): readonly string[] {
+function sensitiveEntryGlobs(): readonly string[] {
   const globs: string[] = [];
-  for (const entry of LVIS_HOME_SENSITIVE_ENTRIES) {
-    const base = "**/.lvis/" + entry.segments.join("/");
+  for (const entry of SENSITIVE_PATH_ENTRIES) {
+    const prefix = entry.anchor === "lvis-home" ? "**/.lvis/" : "**/";
+    const base = prefix + entry.segments.join("/");
     globs.push(entry.kind === "dir" ? base + "/**" : base);
     if (entry.rotations) globs.push(base + ".*");
   }
@@ -132,32 +232,19 @@ function lvisHomeSensitiveGlobs(): readonly string[] {
  * Ordering: credential store patterns first, then OS expansion, then LVIS-specific.
  */
 export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
-  // ── Credential store patterns adapted from OpenHarness ─────────────
-  "**/.ssh/**", // SSH keys and config
-  "**/.aws/credentials", // AWS static credentials
-  "**/.aws/config", // AWS profile/region config
-  "**/.config/gcloud/**", // GCP credentials
-  "**/.azure/**", // Azure credentials
-  "**/.gnupg/**", // GPG keys
-  "**/.docker/config.json", // Docker registry credentials
-  "**/.kube/config", // Kubernetes credentials
-  // ── Permission policy P2.5 — OS sensitive paths ───────
-  // Use double-star prefix because frozen-canonical realpath() resolves
-  // /etc → /private/etc on macOS. The double-star matches both forms.
-  "**/etc/shadow",
-  "**/etc/sudoers",
-  "**/etc/passwd-",
-  "**/.netrc",
-  "**/.pgpass",
-  "**/.npmrc",
-  "**/.bash_history",
-  "**/.zsh_history",
-  "**/.python_history",
-  "**/.psql_history",
-  "**/.viminfo",
-  "**/Library/Cookies/**",
-  "**/Library/Keychains/**",
-  "**/.config/**/Login Data",
+  // ── Projected from SENSITIVE_PATH_ENTRIES ───────────
+  // The single authority the OS sandbox deny floor projects from too. Do NOT
+  // hand-add a pattern here that has a literal absolute form — add a row to
+  // the table instead, or the two surfaces drift.
+  // Note: `**/etc/…` rows use the double-star prefix because frozen-canonical
+  // realpath() resolves /etc → /private/etc on macOS; the double-star matches
+  // both forms.
+  ...sensitiveEntryGlobs(),
+  // ── Host-guard-only: deliberately unanchored, so no literal form ────
+  // These must match wherever the file lands, which is exactly why they have no
+  // single absolute path to project onto the sandbox floor (bwrap/seatbelt
+  // cannot glob). See SENSITIVE_PATH_ENTRIES for the full rule.
+  "**/.config/**/Login Data", // browser credential DB, vendor dir varies
   "**/.env",
   "**/.env.*",
   // Generic SSH key globs — catches id_rsa / id_ed25519 / id_ecdsa even
@@ -168,13 +255,21 @@ export const SENSITIVE_PATH_PATTERNS: readonly string[] = Object.freeze([
   "**/id_ed25519.pub",
   "**/id_ecdsa",
   "**/id_ecdsa.pub",
-  // ── LVIS-home sensitive namespace ───────────────────
-  // Projected from LVIS_HOME_SENSITIVE_ENTRIES so the host guard and the OS
-  // sandbox deny floor cannot drift. Do NOT hand-add a `**/.lvis/…` pattern
-  // here — add a row to the table instead.
-  ...lvisHomeSensitiveGlobs(),
   "**/lvis-secrets.json", // shallow sibling form (not under the LVIS home root)
-  "**/.config/lvis/hooks/**", // hook supply-chain protection
+  // ── Host-guard-only: deliberate sandbox exclusion ───
+  // Recorded in `getDefaultSensitiveReadDenyPaths`: encrypted-at-rest and
+  // outside ASRT's filesystem threat model, so consciously not on the OS floor.
+  "**/Library/Cookies/**",
+  "**/Library/Keychains/**",
+  // ── Electron userData dir — per-platform DEFAULT locations ──────────
+  // Holds plugin OAuth session cookies/tokens (Partitions/), Cookies (SQLite),
+  // and the safeStorage-encrypted lvis-secrets.json. The sandbox floor denies
+  // the EXACT dir (it receives `app.getPath("userData")`, so it also covers
+  // `--user-data-dir` / XDG_CONFIG_HOME / a productName rename); the host guard
+  // can only pin the per-platform defaults as static globs.
+  "**/Library/Application Support/LVIS/**",
+  "**/AppData/Roaming/LVIS/**",
+  "**/.config/LVIS/**",
 ]);
 
 // ─── Public helpers ─────────────────────────────────
