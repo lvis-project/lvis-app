@@ -15,6 +15,7 @@ import type {
 import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
 import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { sendToWindow } from "../safe-send.js";
+import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
 import type { IpcDeps } from "../types.js";
 import type {
   PermissionDirCommand,
@@ -410,7 +411,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         const intent = requireUserKeyboardIntent((args as { intent?: unknown } | undefined)?.intent);
         if (!intent.ok) return intent;
       }
-      const lifecycle = deps.workspaceRootLifecycle;
+      const lifecycle = getWorkspaceRootLifecycle();
       const requiresPersistentLifecycle =
         parsed.verb === "deny" || (parsed.verb === "allow" && !parsed.session);
       if (requiresPersistentLifecycle && !lifecycle) {

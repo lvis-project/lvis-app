@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
 import { UNAUTHORIZED_FRAME } from "../../gated.js";
+import { setWorkspaceRootLifecycle } from "../../../permissions/workspace-root-lifecycle.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
@@ -156,8 +157,12 @@ function makeDeps(options: {
     },
     rewireReviewerAgent: vi.fn(),
     getAppWindows: vi.fn(() => appWindows),
-    ...(options.workspaceLifecycleAvailable === false ? {} : { workspaceRootLifecycle }),
   };
+  // The lifecycle is no longer a dep field: `ipc/domains/workspace.ts` publishes
+  // the one instance and every consumer resolves it through the authority.
+  setWorkspaceRootLifecycle(
+    options.workspaceLifecycleAvailable === false ? undefined : workspaceRootLifecycle,
+  );
   return { deps, permissionManager, appWindows, workspaceRootLifecycle };
 }
 
