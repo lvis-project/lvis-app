@@ -5,6 +5,19 @@
  * executor's {@link PermissionManager} and drive the risk-reviewer for the two
  * non-modal foreground/headless approval lanes, emitting permission-review
  * callback events as they go. No other executor state is touched.
+ *
+ * `finalInput` is the RAW finalized tool input — the same object the foreground
+ * modal lane classifies via `tryUserApprovalMemorySkip`. These lanes used to be
+ * handed `maskToolInputForDisplay(finalInput)` instead, which made the rule
+ * classifier grade masked text: a DLP-masked value can stop parsing as a URL, so
+ * an Azure endpoint whose resource name begins with a key-shaped prefix
+ * (`test-`, `live-`, `proj-`, `sk-`…) lost its trusted-host match and rated HIGH
+ * in this lane while the foreground lane rated the identical call LOW. Masking
+ * now happens at the single place that needs it — `buildUserPrompt`, which
+ * re-masks every value before the reviewer LLM sees it — so the verdict no
+ * longer depends on which lane asked. A separate `cacheIdentityInput` parameter
+ * is gone with it: it existed only because the classified input differed from
+ * the real one.
  */
 import type { ToolSource, ToolCategory } from "../types.js";
 import type {
@@ -31,7 +44,6 @@ export async function dispatchReviewerForHeadless(
   category: ToolCategory,
   pathFields: readonly string[],
   finalInput: Record<string, unknown>,
-  cacheIdentityInput: Record<string, unknown>,
   allowedDirectories: string[],
   sensitivePathsAdjacent: string[],
   context: ToolPermissionContext,
@@ -102,7 +114,6 @@ export async function dispatchReviewerForHeadless(
       // Reviewer resolves path args against the SAME cwd Layer 1 enforces with.
       executionCwd: evaluationContext.executionCwd,
       auditInput,
-      cacheIdentityInput,
       allowedDirectories,
       sensitivePathsAdjacent,
       trustOrigin: context.trustOrigin,
@@ -185,7 +196,6 @@ export async function dispatchReviewerForInteractiveAuto(
   category: ToolCategory,
   pathFields: readonly string[],
   finalInput: Record<string, unknown>,
-  cacheIdentityInput: Record<string, unknown>,
   allowedDirectories: string[],
   sensitivePathsAdjacent: string[],
   context: ToolPermissionContext,
@@ -232,7 +242,6 @@ export async function dispatchReviewerForInteractiveAuto(
         // Reviewer resolves path args against the SAME cwd Layer 1 enforces with.
         executionCwd: evaluationContext.executionCwd,
         auditInput,
-        cacheIdentityInput,
         allowedDirectories,
         sensitivePathsAdjacent,
         trustOrigin: context.trustOrigin,

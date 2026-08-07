@@ -89,7 +89,6 @@ function dispatch(
     category as never,
     [] as string[],
     {} as Record<string, unknown>,
-    {} as Record<string, unknown>,
     [] as string[],
     [] as string[],
     context,
