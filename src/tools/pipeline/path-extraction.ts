@@ -8,6 +8,7 @@
 import { resolve as pathResolve } from "node:path";
 import { expandLeadingTilde } from "../../shared/home-tilde.js";
 import type { Tool } from "../base.js";
+import { getDottedFieldValue } from "../../shared/dotted-field-value.js";
 import {
   findShellPathPolicyViolation,
   type ShellPathPolicyViolation,
@@ -43,16 +44,6 @@ export function extractTargetFilePaths(
     }
   }
   return [...new Set(paths)];
-}
-
-function getDottedFieldValue(input: Record<string, unknown>, field: string): unknown {
-  let current: unknown = input;
-  for (const segment of field.split(".")) {
-    if (segment.length === 0) return undefined;
-    if (!current || typeof current !== "object" || Array.isArray(current)) return undefined;
-    current = (current as Record<string, unknown>)[segment];
-  }
-  return current;
 }
 
 export function resolveToolPathForPermission(value: string, cwd: string): string {
