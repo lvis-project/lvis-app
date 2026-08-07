@@ -626,6 +626,74 @@ describe("resolveApiKey — registry.installSource precedence (#958 round-1)", (
     );
   });
 
+  it("attributes the allow line to registry.installSource on the admin-bypass path", async () => {
+    // The admin-bypass path is precisely the one where the signed Tier-3
+    // whitelist ACL was NOT consulted, so the allow line must not claim
+    // `source=whitelist-registry`. No `seedRegistryWithGrant` here: the
+    // whitelist registry holds no grant at all for this plugin.
+    const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    const manifestSha256 = shaOfManifest(manifest);
+    const auditLogger = makeAuditLogger();
+
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256,
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-admin-host" },
+        }) as never,
+        auditLogger,
+        registryInstallSource: "admin",
+        registryManifestSha256: manifestSha256,
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    const allowLine = auditLogger.mock.mock.calls
+      .map((c) => String(c[0]?.input ?? ""))
+      .find((input) => input.includes("resolveApiKey allow"));
+    expect(allowLine).toBeDefined();
+    expect(allowLine).toContain("source=registry.installSource");
+    expect(allowLine).not.toContain("source=whitelist-registry");
+  });
+
+  it("attributes the allow line to whitelist-registry on the ordinary Tier-3 path", async () => {
+    const manifest = manifestFor("p", ["llm.apiKey.openai"]);
+    const manifestSha256 = shaOfManifest(manifest);
+    await seedRegistryWithGrant({
+      pluginId: "p",
+      allowedKeys: ["llm.apiKey.openai"],
+      manifestSha256,
+    });
+    const auditLogger = makeAuditLogger();
+
+    const result = await resolveApiKey(
+      { purpose: "llm", vendor: "openai" },
+      {
+        pluginId: "p",
+        manifest,
+        manifestSha256,
+        settingsService: makeSettingsService({
+          provider: "openai",
+          secrets: { "llm.apiKey.openai": "sk-host" },
+        }) as never,
+        auditLogger,
+        registryInstallSource: "user",
+      },
+    );
+
+    expect(result.ok).toBe(true);
+    const allowLine = auditLogger.mock.mock.calls
+      .map((c) => String(c[0]?.input ?? ""))
+      .find((input) => input.includes("resolveApiKey allow"));
+    expect(allowLine).toBeDefined();
+    expect(allowLine).toContain("source=whitelist-registry");
+    expect(allowLine).not.toContain("source=registry.installSource");
+  });
+
   it("registry.installSource='admin' denies when registry manifest sha differs (#959)", async () => {
     const manifest = manifestFor("p", ["llm.apiKey.openai"]);
     const result = await resolveApiKey(
