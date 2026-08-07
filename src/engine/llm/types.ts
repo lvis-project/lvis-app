@@ -230,9 +230,20 @@ export function userContentText(
 }
 
 /**
- * Canonical serialized form for message-size / token-estimation logic.
- * Includes all prompt-bearing fields, notably assistant thinkingBlocks,
- * so callers do not undercount context usage when extended thinking is enabled.
+ * Serialized form of a message's TEXTUAL prompt-bearing fields, notably
+ * assistant thinkingBlocks, so callers do not undercount context usage when
+ * extended thinking is enabled.
+ *
+ * NOT a token estimator on its own, and not the answer to "what does this
+ * message cost on the wire":
+ *   - a `tool_result`'s `image` is deliberately absent here — it is not text,
+ *     and `estimateMessageTokensForWire` adds its tile overhead separately
+ *     (double-counting it here would inflate every caller);
+ *   - a marked/stubbed `tool_result` keeps its content verbatim in memory, so
+ *     this reads the RAW length while the wire carries only a short stub.
+ * Both compensations live in `estimateMessageTokensForWire` (auto-compact.ts),
+ * which is the single authority for per-message wire cost. This function is
+ * its serialization helper — call the authority, not this.
  */
 export function serializeMessageForEstimation(message: GenericMessage): string {
   switch (message.role) {

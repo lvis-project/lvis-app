@@ -2,7 +2,7 @@
  * Structured Compact tests — recap reviewer interface + parser + freeze invariant.
  * `compactWithBoundary()` 는 `ConversationLoop.runPreflightGuard` 에서 호출됨.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
@@ -17,6 +17,7 @@ import {
   type CompactRecapReviewer,
 } from "../structured-compact.js";
 import type { GenericMessage } from "../llm/types.js";
+import { markStaleToolResults } from "../auto-compact.js";
 
 let originalLvisHome: string | undefined;
 let testLvisHome: string | null = null;
@@ -819,5 +820,90 @@ describe("renderBoundaryAsPreamble — boundary → ⑧ slot text", () => {
     expect(text).not.toContain("Recent Tool Activity Ledger");
     expect(text).not.toContain("Pinned Artifacts");
     expect(text).toContain("Goal");
+  });
+});
+
+describe("compactWithBoundary — oversize pre-pass measures WIRE cost, not raw", () => {
+  it("does not archive+clip a marked tool_result whose wire form is a short stub", async () => {
+    // The damage this pins: `markStaleToolResults` keeps a marked tool_result's
+    // content VERBATIM in memory on purpose (UI + checkpoint preview) while the
+    // provider only ever receives `buildToolResultStub`. Measuring the raw
+    // content here made the pre-pass archive the message to disk and clip it —
+    // saving nothing on the wire and destroying the verbatim copy the marker
+    // contract exists to preserve.
+    const huge = "x".repeat(200_000); // ~50K tokens raw, ~0 on the wire
+    const raw: GenericMessage[] = [
+      { role: "user", content: "go" },
+      { role: "assistant", content: "calling tool" },
+      { role: "tool_result", toolUseId: "t1", toolName: "read_file", content: huge },
+      { role: "user", content: "thanks" },
+    ];
+
+    // Mark through the REAL producer, not a hand-set meta flag.
+    const { messages, result: markResult } = markStaleToolResults(raw, {
+      preserveRecentToolResults: 0,
+      minStubThreshold: 200,
+    });
+    expect(markResult.markedCount).toBe(1);
+    const marked = messages[2];
+    if (marked.role !== "tool_result") throw new Error("expected tool_result");
+    expect(marked.meta?.compactedAt).toBeDefined();
+    // The marker keeps memory verbatim — that is what the pre-pass must not undo.
+    expect(marked.content).toHaveLength(200_000);
+
+    const reviewer: CompactRecapReviewer = {
+      async review() {
+        throw new Error("no LLM call expected on this path");
+      },
+    };
+    const r = await compactWithBoundary({
+      messages,
+      memoryReviewer: reviewer,
+      // Large enough that nothing is split off for summarization, so the only
+      // thing under test is the oversize pre-pass.
+      preserveRecentTokens: 10_000_000,
+      sessionId: "wire-cost-sess",
+      preflightTokens: 1_000_000,
+      compactNum: 1,
+    });
+
+    expect(r.truncatedCount).toBe(0);
+    const out = r.newHistory.find((m) => m.role === "tool_result");
+    if (out?.role !== "tool_result") throw new Error("expected tool_result");
+    expect(out.content).toHaveLength(200_000);
+    expect(out.content).not.toContain("lines truncated, full content saved to");
+    // Nothing was written to the archive directory either.
+    expect(existsSync(join(testLvisHome!, "sessions", "wire-cost-sess", "truncated"))).toBe(false);
+  });
+
+  it("still archives+clips an UNMARKED oversize message (the pre-pass is not disabled)", async () => {
+    // Guards the fix against being satisfied by a pre-pass that never fires.
+    // Many lines: the clipper preserves the last N LINES, so a single 200K-char
+    // line would survive verbatim and prove nothing.
+    const huge = Array.from({ length: 4_000 }, (_, i) => `line ${i} ${"y".repeat(45)}`).join("\n");
+    const messages: GenericMessage[] = [
+      { role: "user", content: "go" },
+      { role: "assistant", content: huge },
+      { role: "user", content: "thanks" },
+    ];
+    const reviewer: CompactRecapReviewer = {
+      async review() {
+        throw new Error("no LLM call expected on this path");
+      },
+    };
+    const r = await compactWithBoundary({
+      messages,
+      memoryReviewer: reviewer,
+      preserveRecentTokens: 10_000_000,
+      sessionId: "unmarked-sess",
+      preflightTokens: 1_000_000,
+      compactNum: 1,
+    });
+
+    expect(r.truncatedCount).toBe(1);
+    const out = r.newHistory.find((m) => m.role === "assistant");
+    if (out?.role !== "assistant") throw new Error("expected assistant");
+    expect(out.content.length).toBeLessThan(huge.length);
+    expect(out.content).toContain("lines truncated, full content saved to");
   });
 });
