@@ -252,7 +252,7 @@ describe("DeferredApprovalChip", () => {
   });
 });
 
-describe("DeferredApprovalChip — scoped sentences", () => {
+describe("DeferredApprovalChip — what the approval grants", () => {
   async function renderChip(draftText: string, entry = makeEntry()) {
     const api = installApi([entry]);
     let container!: HTMLElement;
@@ -262,17 +262,17 @@ describe("DeferredApprovalChip — scoped sentences", () => {
     return { api, container };
   }
 
-  it("states the resolved breadth and the host-derived path, not the typed text", async () => {
-    await renderChip("이번 세션 동안 허용");
+  it("states the concrete host-derived path, not a paraphrase of the draft", async () => {
+    await renderChip("허용");
     const chip = screen.getByTestId("deferred-approval-chip");
-    // The concrete path comes from the entry, and it is the entry's own path
-    // even though the sentence never named one.
+    // The path comes from the entry's recorded grant even though the sentence
+    // never named one — the confirmation names what the host resolved.
     expect(chip.textContent).toContain("/srv/app/data");
     expect(chip.textContent).toContain("이 대화가 끝날 때까지");
   });
 
   it("does not grant until the confirmation gesture happens", async () => {
-    const { api } = await renderChip("이번 세션 동안 허용");
+    const { api } = await renderChip("허용");
     expect(api.deferredResolve).not.toHaveBeenCalled();
 
     await act(async () => {
@@ -287,48 +287,27 @@ describe("DeferredApprovalChip — scoped sentences", () => {
     );
   });
 
-  it("sends the narrow breadth when the sentence names none", async () => {
-    const { api } = await renderChip("허용");
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("deferred-approval-chip-action"));
-    });
-    expect(api.deferredResolve).toHaveBeenCalledWith(
-      "id-1",
-      "approved",
-      expect.any(String),
-      "natural-language",
-      { scope: "session" },
-    );
-  });
-
-  it("labels a standing grant distinctly and only sends it when asked for", async () => {
-    const { api } = await renderChip("항상 허용");
-    const chip = screen.getByTestId("deferred-approval-chip");
-    // The widening is legible before the click: the copy says permanent and
-    // saved-to-settings, and the button does not read like the narrow one.
-    expect(chip.textContent).toContain("영구 허용");
-    expect(screen.getByTestId("deferred-approval-chip-action").textContent).toContain(
-      "항상 허용",
-    );
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("deferred-approval-chip-action"));
-    });
-    expect(api.deferredResolve).toHaveBeenCalledWith(
-      "id-1",
-      "approved",
-      expect.any(String),
-      "natural-language",
-      { scope: "always" },
-    );
-  });
-
-  it("declines a turn-scoped sentence rather than upgrading it to a session grant", async () => {
-    // "이번 턴만" asks for the narrowest breadth. The deferred lane has no such
-    // breadth — the call it would scope already ended — so honouring the
-    // sentence means offering nothing, never silently widening to a session.
-    const { container } = await renderChip("이번 턴만 허용");
-    expect(container.querySelector('[data-testid="deferred-approval-chip"]')).toBeNull();
+  it("only ever proposes the narrowest breadth", async () => {
+    // Breadth selection from the sentence does not exist on this path — that
+    // is the permission-review model's job (#1940). Until then the chip must
+    // not reach for the persisted grant under any phrasing.
+    for (const text of ["허용", "승인", "진행해", "허용해 주세요"]) {
+      const { api, container } = await renderChip(text);
+      const action = container.querySelector<HTMLElement>(
+        '[data-testid="deferred-approval-chip-action"]',
+      );
+      expect(action).not.toBeNull();
+      await act(async () => {
+        fireEvent.click(action!);
+      });
+      expect(api.deferredResolve).toHaveBeenCalledWith(
+        "id-1",
+        "approved",
+        expect.any(String),
+        "natural-language",
+        { scope: "session" },
+      );
+    }
   });
 
   it("offers nothing when the entry has no grant to give", async () => {
@@ -336,36 +315,9 @@ describe("DeferredApprovalChip — scoped sentences", () => {
     expect(container.querySelector('[data-testid="deferred-approval-chip"]')).toBeNull();
   });
 
-  it("offers nothing when the sentence names a different path than the entry's", async () => {
-    const { container } = await renderChip("이번 세션 동안 /etc/hosts 허용");
-    expect(container.querySelector('[data-testid="deferred-approval-chip"]')).toBeNull();
-  });
-
-  it("still offers when the sentence names the entry's own path", async () => {
-    const { api } = await renderChip("이번 세션 동안 /srv/app/data 허용");
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("deferred-approval-chip-action"));
-    });
-    expect(api.deferredResolve).toHaveBeenCalledWith(
-      "id-1",
-      "approved",
-      expect.any(String),
-      "natural-language",
-      { scope: "session" },
-    );
-  });
-
-  it("treats a sentence mixing breadths as the narrow one", async () => {
-    const { api } = await renderChip("이번 세션 동안 그리고 항상 허용");
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("deferred-approval-chip-action"));
-    });
-    expect(api.deferredResolve).toHaveBeenCalledWith(
-      "id-1",
-      "approved",
-      expect.any(String),
-      "natural-language",
-      { scope: "session" },
-    );
+  it("still offers rejection for an entry with no grant", async () => {
+    // A rejection grants nothing, so the absence of a grant does not block it.
+    const { container } = await renderChip("거부", makeEntry({ grant: undefined }));
+    expect(container.querySelector('[data-testid="deferred-approval-chip"]')).not.toBeNull();
   });
 });

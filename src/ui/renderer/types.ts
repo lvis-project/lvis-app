@@ -1566,6 +1566,9 @@ export interface DeferredQueueEntry {
  */
 export type DeferredGrantScope = "session" | "always";
 
+/** Narrowest breadth a deferred approval can carry. Mirrors the host constant. */
+export const NARROWEST_DEFERRED_SCOPE: DeferredGrantScope = "session";
+
 export interface HookTrustRow {
   fileName: string;
   hookType: "pre" | "post" | "perm";
