@@ -13,6 +13,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -98,12 +99,25 @@ describe("AuditLogger.logSandboxGate() — activation telemetry", () => {
     expect(entries.every((e) => e.type === "sandbox_gate")).toBe(true);
   });
 
-  it("never throws — telemetry must not break boot (runs before the abort re-throw)", () => {
-    // A non-existent, non-creatable audit dir parent makes the append fail; the
-    // method swallows the error so boot's own fail-closed throw is the one that
-    // surfaces, not a telemetry write error.
-    const logger = new AuditLogger(join(auditDir, "missing", "deeper"));
-    rmSync(auditDir, { recursive: true, force: true });
+  it("swallows a failed telemetry write instead of surfacing it at boot", async () => {
+    // The failure has to be real for this to prove anything, and the previous
+    // version's was not. It pointed the logger at `<auditDir>/missing/deeper`
+    // and removed `auditDir`, on the premise that a "non-creatable" parent makes
+    // the append fail. Both halves were wrong: the constructor creates its audit
+    // dir with a recursive `mkdir`, and so does the write path — so the tree came
+    // straight back and the append SUCCEEDED. (Worse, it came back after the
+    // teardown had removed it.)
+    //
+    // Occupying the directory's name with a FILE after construction cannot be
+    // undone by `mkdir -p` on any platform, so the write genuinely fails here.
+    const gateDir = join(auditDir, "gate");
+    const logger = new AuditLogger(gateDir);
+    rmSync(gateDir, { recursive: true, force: true });
+    writeFileSync(gateDir, "not a directory", "utf-8");
+
+    // The call itself only enqueues, so "does not throw" is about boot never
+    // seeing a telemetry error — the write's own failure surfaces later, or not
+    // at all, which is the point.
     expect(() =>
       logger.logSandboxGate({
         platform: "win32",
@@ -112,5 +126,11 @@ describe("AuditLogger.logSandboxGate() — activation telemetry", () => {
         reason: "abort-explicit-cannot-activate",
       }),
     ).not.toThrow();
+
+    // Draining must not reject either, and the write must be accounted as
+    // dropped — that is what "swallowed" means here, and it is 0 if the append
+    // quietly succeeded instead of failing.
+    await expect(logger.flush()).resolves.toBeUndefined();
+    expect(logger.getWriterStats().droppedWrites).toBe(1);
   });
 });
