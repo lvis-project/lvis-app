@@ -38,7 +38,7 @@ export interface ComposerProjectSelectorProps {
  * Empty-state composer project selector — a small "📁 <project name> ⌄"
  * trigger attached directly above the composer card, opening a DOWNWARD
  * dropdown (side="bottom") that lists known projects + "add new project".
- * Mirrors the antigravity-style reference: the trigger sits in the same
+ * The trigger sits in the same
  * reserved toast-zone the composer dock already carries (see
  * `composer-toast-dock`), and the panel opens over the composer area below it
  * rather than upward, since the centered composer sits in the screen's
@@ -64,9 +64,9 @@ export function ComposerProjectSelector({
 
   // The default/base-directory binding is never a "selected project" for
   // display purposes — only an explicit (non-default) project counts.
-  // Matches antigravity/Claude Code/Codex convention: an imperative "Select
-  // project" CTA until the user actually picks one; the real directory name
-  // only appears once chosen. The default binding itself is untouched
+  // Imperative label, matching the prevailing convention for this control: a
+  // "Select project" CTA until the user actually picks one; the real directory
+  // name only appears once chosen. The default binding itself is untouched
   // internally (still used for tool/file access) — this is display-only.
   const hasRealSelection = Boolean(activeProject && activeProject.isDefault !== true);
   const label = hasRealSelection ? activeProject!.projectName : t("composerProjectSelector.selectProjectPlaceholder");

@@ -23,13 +23,13 @@ picker. It is NOT a model-controlled primitive like tools, and NOT a
 user-invokes-then-server-authors-the-turn primitive like prompts.
 
 Reference-host check (required before freezing a provenance design — the spec text
-alone has misled this project before): Claude Code exposes resources two ways at
+alone has misled this project before): shipped hosts expose resources two ways at
 once.
 
 1. `@server:protocol://path` mentions in the composer, autocompleted alongside
-   files, "automatically fetched and included **as attachments** when referenced".
-2. "Claude Code automatically provides tools to list and read MCP resources when
-   servers support them" — i.e. the model can also enumerate and read.
+   files, fetched and included **as attachments** when referenced.
+2. Host-provided tools to list and read MCP resources when servers support
+   them — i.e. the model can also enumerate and read.
 
 Both, not either. LVIS follows the same split, because they answer different
 questions: the mention is how a person says "consider this", the tools are how the

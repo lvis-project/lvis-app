@@ -2666,9 +2666,9 @@ SDK 에는 fallback artifact (JSON / CSS / TS const) 가 없으며, plugin 은
 
 ### 6.10.12 호스트 에이전트 레퍼런스와 워크스페이스 루트 수명주기
 
-호스트 에이전트 동작을 조사할 때는 공식 문서와 현재 배포 동작을 기준으로
-Codex CLI/Desktop, Claude Code/Desktop, Hermes Agent Desktop, goose Desktop,
-GitHub Copilot, Google Antigravity를 1차 비교 대상으로 삼는다. IDE 및
+호스트 에이전트 동작을 조사할 때는 공식 문서와 현재 배포 동작을 기준으로,
+LVIS와 범위가 같은 CLI·데스크톱 코딩 에이전트 호스트 제품을 1차 비교
+대상으로 삼는다. IDE 및
 워크스페이스 제품은 편집기·파일시스템·멀티 루트의 일반 관례를 확인하는
 2차 자료이며, 에이전트 수명주기·프로젝트 처리·상호작용·데스크톱 UX에 대한
 1차 호스트 에이전트 근거를 대체하지 않는다. 문서화된 계약이 아니라 추론한
@@ -2709,7 +2709,7 @@ GitHub Copilot, Google Antigravity를 1차 비교 대상으로 삼는다. IDE �
    재할당하거나 기본 루트로 조용히 다시 쓰지 않는다. 현재는 프로젝트 metadata를
    지우므로 연결이 끊긴 세션과 처음부터 프로젝트가 없던 세션을 저장 모델에서
    구분할 수 없다. 이는 LVIS의 현재 구현 선택이지 참고 제품의 공통 관행이 아니다.
-   Codex, Claude, Copilot, Hermes, goose, Antigravity의 근거가 공통으로 지지하는
+   조사한 호스트들이 공통으로 지지하는
    것은 transcript 보존이며, 일반 대화로의 자동 재분류는 아니다. 프로젝트가
    없는 대화를 실행할 때는 호스트가 그 턴의 실행 컨텍스트를 기본 워크스페이스에
    연결한다.

@@ -175,7 +175,7 @@ app.sendMessage({ role: "user", content: [{ type: "text", text: "Summarize the Q
 What happens next depends on the host's state, and **your card cannot wake the model either way**:
 
 - **A turn is in flight** → your text joins the guidance queue and reaches the model as part of that turn, **with no user confirmation**. Be deliberate about what you send on this path: it is ungated. The rest of that turn is downgraded to your app's provenance, which force-asks the user before any `write` / `shell` / `network` tool the model then reaches for.
-- **No turn in flight** → the host raises a **staging card**; the user clicks to send. This is deliberate and matches every other host (VS Code fills the chat input without auto-sending; OpenAI requires a synchronous user gesture). An app that could start a turn on its own could drive the model with no one watching.
+- **No turn in flight** → the host raises a **staging card**; the user clicks to send. This is deliberate and matches every other host: an app-authored message either lands in the composer without auto-sending, or requires a synchronous user gesture to go out. An app that could start a turn on its own could drive the model with no one watching.
 
 Either way the message is tagged `app-emitted` and wrapped so the model sees it came from your app, not from the user's keyboard. Text is capped at 4096 characters. The two intents are exclusive: notification meta wins, and that message never reaches the conversation.
 

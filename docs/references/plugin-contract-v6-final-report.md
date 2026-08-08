@@ -10,7 +10,7 @@ This document answers one question, asked when the legacy-reader removal (R) was
 
 ## 1. The initial design (#885, as redefined 2026-05-17)
 
-#885's primary goal, after the Claude Code / Codex CLI reference check ruled out a full MCP JSON-RPC migration, was two-fold:
+#885's primary goal, after the reference-host check ruled out a full MCP JSON-RPC migration, was two-fold:
 
 - **(a) Plugin manifest contract simplification** — unify the split `tools[]` (name strings) + separate `toolSchemas[]` map into **colocated tool objects** borrowing the MCP `tools/list` shape; consolidate the scattered SoTs (`capabilities[]` / `permissions` / `pathFields` / `category`); position the SDK as an *optional helper*, not a required dependency.
 - **(b) MCP server isolation parity** — plugin UI surfaces and external MCP App surfaces get equivalent isolation (per-server partitions, teardown, one governed executor pipeline).

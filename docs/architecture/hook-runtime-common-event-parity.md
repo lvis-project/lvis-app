@@ -8,8 +8,8 @@ Relates to: #811 (hook runtime compatibility), #1235 / #1236 (HTTP / context-alt
 
 `agent-connector` (github.com/ken-jo/agent-connector) normalizes host hook systems
 into a small canonical event union that it dispatches across 22 `json-stdio`
-hosts + 8 `ts-plugin` hosts (Claude Code, Codex, Cursor, Gemini, OpenCode, Kilo,
-Copilot, Warp, Hermes, and more — see its `/coverage`). That normalized union is
+hosts + 8 `ts-plugin` hosts (see its `/coverage` for the current host list).
+That normalized union is
 the de-facto **common hook set**: the events that are portable across the agent
 ecosystem. This doc measures LVIS against it and specifies the gap to close so
 LVIS's hook surface is at parity with the common standard.
