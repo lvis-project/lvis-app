@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    /* Pure-white canvas (antigravity) — structure from hairlines and whitespace, not tint. */
+    /* Pure-white canvas — structure from hairlines and whitespace, not tint. */
     --background: 0 0% 100%;
     --foreground: 230 18% 10%; /* #14161d ink */
     --card: 0 0% 100%;
@@ -112,7 +112,7 @@
   background-size: 32px 32px;
 }
 
-/* Circular monochrome icon chip — antigravity motif. */
+/* Circular monochrome icon chip — the capability motif. */
 .icon-chip {
   display: grid;
   place-items: center;
