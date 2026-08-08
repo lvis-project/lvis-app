@@ -2,6 +2,7 @@ import "../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
+import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.js";
 
 /**
  * Visit history and the top-bar path, driven the way a user drives them:
@@ -147,4 +148,72 @@ describe("App view history", () => {
     await waitFor(() => expect(path(container)).toContain("홈"));
   });
 
+});
+
+/**
+ * Where visit history meets the restored launch location (#1995).
+ *
+ * These two features pass their own suites independently and still combine
+ * wrongly: the restore lands ASYNCHRONOUSLY, so a history that records every
+ * location change sees `home → restored` and offers "back" to a home screen
+ * the user never opened.
+ */
+describe("App view history after a restored launch location", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  const path = (container: HTMLElement) =>
+    container.querySelector('[data-testid="view-path-breadcrumb"]')?.textContent?.trim() ?? "";
+
+  function settingsWithActiveView(activeView: string, settingsTab?: string) {
+    return {
+      ...MOCK_DEFAULT_SETTINGS,
+      system: {
+        closeBehavior: "hide-to-tray",
+        activeView,
+        ...(settingsTab ? { settingsTab } : {}),
+      },
+    };
+  }
+
+  it("starts with nothing behind it — the restore is arrival, not a step", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      settings: settingsWithActiveView("work-board"),
+    });
+
+    await waitFor(() => expect(path(container)).toContain("업무 보드"));
+    const back = container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement;
+    // Without this, back would offer a home screen that was never visited.
+    expect(back.disabled).toBe(true);
+  });
+
+  it("restores the settings PAGE into the path, not just the view", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      settings: settingsWithActiveView("settings", "permissions"),
+    });
+
+    await waitFor(() => expect(path(container)).toContain("권한"));
+    const back = container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement;
+    expect(back.disabled).toBe(true);
+  });
+
+  it("records normally once the user navigates from the restored location", async () => {
+    const { container } = await renderApp({
+      hasApiKey: true,
+      settings: settingsWithActiveView("work-board"),
+    });
+    await waitFor(() => expect(path(container)).toContain("업무 보드"));
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="sidebar-routines"]') as HTMLButtonElement);
+    });
+    await waitFor(() => expect(path(container)).toContain("루틴"));
+
+    // Back now returns to where the app launched — not to home.
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement);
+    });
+    await waitFor(() => expect(path(container)).toContain("업무 보드"));
+  });
 });

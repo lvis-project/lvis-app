@@ -53,12 +53,24 @@ export function useViewHistory(
   // Set while a back/forward is being applied, so the resulting location change
   // is recognized as a replay rather than recorded as a new visit.
   const replayingRef = useRef(false);
+  // Flips once the launch location is established; see the effect below.
+  const settledRef = useRef(false);
 
   useEffect(() => {
     if (replayingRef.current) {
       replayingRef.current = false;
       return;
     }
+    // Until the app has settled on its launch location, every change REPLACES
+    // the root rather than stacking on it. A boolean window alone is not
+    // enough: #1995 applies the restored view and finishes hydrating in the
+    // same React batch, so by the time this effect runs `restoring` is already
+    // false and the arrival looks exactly like a step away from `home`. The
+    // rule is therefore "the first location seen once restoring is over IS the
+    // root", which holds whichever order those two land in.
+    const settling = !settledRef.current;
+    if (settling && !restoring) settledRef.current = true;
+
     setState((current) => {
       const here = current.entries[current.index];
       // Re-selecting where you already are is not a visit. Sidebar entries get
@@ -66,9 +78,7 @@ export function useViewHistory(
       // steps that appear to do nothing when replayed.
       if (here && sameViewLocation(here, location)) return current;
 
-      // Settling into the launch location REPLACES the entry we started with,
-      // so history begins at where the user actually is, with nothing behind.
-      if (restoring) {
+      if (settling) {
         const entries = current.entries.slice();
         entries[current.index] = location;
         return { entries, index: current.index };
