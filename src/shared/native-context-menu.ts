@@ -10,6 +10,7 @@ export const NATIVE_CONTEXT_MENU_COMMANDS = [
   "project.pin",
   "project.unpin",
   "project.reveal",
+  "project.add",
   "project.remove",
   "conversation.open",
   "conversation.pin",
@@ -54,11 +55,16 @@ export const NATIVE_CONTEXT_MENU_COMMANDS_BY_KIND = {
     "workspace.copy-path",
     "workspace.copy-relative-path",
   ],
+  // `project.add` is the only command the Projects tab's EMPTY area offers, so
+  // it shares the `project` kind rather than earning a kind of its own: a
+  // right-click on a row and a right-click on the blank space below it are the
+  // same menu with a different subset of commands enabled.
   project: [
     "project.new-chat",
     "project.pin",
     "project.unpin",
     "project.reveal",
+    "project.add",
     "project.remove",
   ],
   conversation: ["conversation.open", "conversation.pin", "conversation.unpin"],

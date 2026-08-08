@@ -46,6 +46,9 @@ export function useNativeContextMenu() {
       for (let index = 0; index < selection.rangeCount; index += 1) {
         try {
           if (selection.getRangeAt(index).intersectsNode(event.currentTarget)) {
+            // Handled: the WebContents menu wins here, and an ancestor target
+            // must not override that decision with its own menu.
+            event.stopPropagation();
             return false;
           }
         } catch {
@@ -56,8 +59,15 @@ export function useNativeContextMenu() {
 
     const show = window.lvis?.ui?.showNativeContextMenu;
     const commands = Object.keys(handlers) as NativeContextMenuCommand[];
+    // Not handled — no bridge, or this target has nothing to offer right now.
+    // Let the event keep bubbling so an ancestor target (e.g. the sidebar's
+    // Projects tab behind a row) can still answer the right-click.
     if (!show || commands.length === 0) return false;
 
+    // The innermost target that CAN answer owns the menu: without this, a
+    // nested target's menu request is immediately replaced by its ancestor's
+    // (both write the same `pendingRef`, and two popups race).
+    event.stopPropagation();
     event.preventDefault();
     const rect = event.currentTarget.getBoundingClientRect();
     const requestId =
