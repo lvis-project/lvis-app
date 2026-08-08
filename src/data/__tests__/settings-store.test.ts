@@ -2331,7 +2331,7 @@ describe("SettingsService — persisted main-window location", () => {
   });
 
   it.each([
-    ["a detach-only key the main window cannot be at", "reminders"],
+    ["a key an older build shipped and this one retired", "reminders"],
     ["a malformed plugin key", "plugin:"],
     ["a card key that is detach-only by construction", "mcp-app:ab:card"],
     ["a typo", "wrok-board"],
@@ -2354,6 +2354,7 @@ describe("SettingsService — persisted main-window location", () => {
   it("refuses to patch an invalid location, keeping the stored one", async () => {
     const service = new SettingsService({ userDataPath });
     await service.patch({ system: { activeView: "work-board" } as SystemSettings });
+    // A retired key: valid in an older build, absent from the table now.
     await service.patch({ system: { activeView: "reminders" } as unknown as SystemSettings });
     expect(service.get("system").activeView).toBe("work-board");
   });

@@ -146,9 +146,11 @@ describe("restoring activeView on launch", () => {
     expect(api.updateSettings).not.toHaveBeenCalledWith({ system: { activeView: "home" } });
   });
 
-  it("falls back to home for a key with no inline form", async () => {
-    // `reminders` is a real view key — it is just detach-only, so the main
-    // window can never be at it. A structural check alone would accept it.
+  it("falls back to home for a key a previous build could produce but this one cannot", async () => {
+    // `reminders` shipped as a real view key and was retired from the table
+    // (#1994). That is the shape of the problem this guard exists for: a value
+    // written by an older build outlives the key space it came from, and only
+    // asking the table — not the string's shape — can tell.
     const { container } = await renderApp({
       hasApiKey: true,
       settings: settingsWithActiveView("reminders"),
