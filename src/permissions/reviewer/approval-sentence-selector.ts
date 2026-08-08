@@ -64,12 +64,13 @@ export interface ApprovalOption {
  * The ONLY facts about the pending request that may reach the model.
  *
  * This type is the reasoning-blind boundary, and it is a closed record on
- * purpose. Shipping permission classifiers are built this way — Claude Code's
- * auto-mode classifier "sees only user messages and the agent's tool calls;
- * we strip out Claude's own messages and tool outputs" — because anything the
+ * purpose. The evaluator sees only the user's own sentence and these
+ * host-sealed request facts — never agent reasoning, never tool output. That
+ * is how permission classifiers of this kind are built, because anything the
  * agent authored is downstream of content an attacker may control. Text
  * planted in a tool argument or a fetched page could otherwise describe the
- * approval it wants and have the model select it.
+ * approval it wants and have the model select it — injected text shaping its
+ * own approval.
  *
  * So: no assistant turns, no agent rationale, no tool output, no raw args, no
  * free-form `reason`. Widening this requires editing the type, which is the

@@ -669,9 +669,10 @@ export async function dispatchPermissionHooksCommand(
  *
  * It is a slash command, not context-dependent Enter, and not freeform prose.
  * Of seven shipping agent hosts surveyed, zero accept natural language as a
- * permission approval; Codex CLI's `/approve` is the closest precedent and it
- * likewise resolves a *pending* permission state from an explicit command.
- * This app already reads `/load` and `/permission dir allow|deny` the same way.
+ * permission approval. Resolving a *pending* permission state through an
+ * explicit slash verb is the established pattern, and it matches this app's
+ * existing vocabulary — `/load` and `/permission dir allow|deny` already read
+ * this way.
  *
  * The parser deliberately does almost nothing: it does not interpret the
  * sentence, tokenize it, or look for path-like or negation-like substrings.
