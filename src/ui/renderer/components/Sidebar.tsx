@@ -680,7 +680,7 @@ function ProjectSessionList({
   // chokepoint whenever the stored root is the default workspace root, so a
   // legacy session arrives here exactly like a normal "no explicit project"
   // one (no projectRoot) rather than a phantom named group. Rendered as a
-  // plain, ungrouped list — ChatGPT/Claude's "general chats" pattern — rather
+  // plain, ungrouped list — the conventional "general chats" pattern — rather
   // than wrapped in a fake project header. Pinned conversations sort first.
   const ungroupedSessions = useMemo(() => {
     const plain = mainSessions.filter(
@@ -745,7 +745,7 @@ function ProjectSessionList({
       </TabsList>
 
       {/* Chats tab — every conversation with no explicit project, a plain
-          ungrouped list (ChatGPT/Claude "general chats" pattern). */}
+          ungrouped list (the conventional "general chats" pattern). */}
       <TabsContent value="chats" className="mt-2 space-y-1" data-testid="sidebar-unassigned-sessions">
         {hasUngroupedSessions ? (
           <>

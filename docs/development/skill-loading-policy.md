@@ -37,13 +37,14 @@ promote` loop.
 
 ## Reference Basis
 
-- **Anthropic Agent Skills — progressive disclosure.** Each skill costs only a
-  few dozen tokens when summarized (name + description); the full `SKILL.md`
-  body loads only when a task matches the description, and bundled resources load
-  on demand. The name/description load into *every* session whether or not the
-  skill is used — a **fixed cost** — which is why that metadata must be bounded
-  and why the description is the load-decision signal.
-  - `https://www.anthropic.com/news/skills`, `https://agentskills.io`
+- **Progressive disclosure — the established Agent Skills discovery pattern.**
+  Each skill costs only a few dozen tokens when summarized (name + description);
+  the full `SKILL.md` body loads only when a task matches the description, and
+  bundled resources load on demand. The name/description load into *every*
+  session whether or not the skill is used — a **fixed cost** — which is why
+  that metadata must be bounded and why the description is the load-decision
+  signal.
+  - `https://agentskills.io`
 - **Tools-Tax / dynamic-toolset evidence** (see tool-loading-policy §Reference
   Basis): the per-turn cost that matters is *tokens*, paid on every round. A
   skill catalog that is unscoped and unbudgeted re-pays that cost each turn just
@@ -109,31 +110,33 @@ the **reactive** path — the model narrows by calling `skill_load` (or, for Too
 `tool_search`, which already lexically scores against the query it is handed),
 not by the host re-ordering an always-present catalog.
 
-Why not host-side query pre-ranking of the resident catalog (surveyed Codex,
-Copilot, Claude Code, OpenCode, Goose):
+**Host-side query pre-ranking of the resident catalog was evaluated across the
+mainstream agent hosts and deliberately NOT implemented.** This is a decision,
+not an oversight — do not implement it without revisiting all three reasons
+below:
 
-- **No precedent for lexical in-place re-ranking.** Claude Code, Codex, and the
-  mainstream OSS agents (OpenCode, Cline, Aider, Continue) present a bounded
-  catalog in a stable order and let the model decide; query scoring happens only
-  in a model-invoked search step. Goose's closest analogue (opt-in vector
-  *subset retrieval*, not in-place ranking) was removed as "painfully slow"
-  (block/goose#6250). Only Copilot pre-selects by query, and it uses embedding
-  semantics + candidate *promotion*, not lexical re-ordering.
-- **Prompt-cache stable prefix.** LVIS is Claude-backed. Re-ordering the resident
-  catalog every turn changes the cached prefix and invalidates KV/prompt caching.
-  Anthropic's tool-search guidance keeps the prefix untouched precisely to
-  preserve caching, and Copilot bypasses its own catalog re-ordering for
-  Anthropic-backed models for the same reason.
+- **No precedent for lexical in-place re-ranking.** The mainstream design is a
+  bounded catalog in a stable order, with the model deciding; query scoring
+  happens only inside a model-invoked search step. The one shipped analogue of
+  pre-ranking (opt-in vector *subset retrieval*, not in-place ranking) was
+  removed by its own maintainers as too slow to be worth it. Where a host does
+  pre-select by query it uses embedding semantics plus candidate *promotion*,
+  never lexical re-ordering of the resident set.
+- **Prompt-cache stable prefix.** Re-ordering the resident catalog every turn
+  changes the cached prefix and invalidates KV/prompt caching — a real per-turn
+  cost paid on every round, against a speculative relevance gain. Published
+  tool-search guidance leaves the prefix untouched for exactly this reason, and
+  hosts that do re-order their catalog disable it for cache-sensitive backends.
 - **Lexical ranking hides.** A lexical pre-rank can drop a skill the model would
-  have picked (synonym/paraphrase miss) — the reason Copilot reached for
-  embeddings. The reactive `skill_load`/`tool_search` seam has no such failure
-  mode: the model chooses.
+  have picked (synonym/paraphrase miss) — which is why the pre-selecting design
+  reached for embeddings instead. The reactive `skill_load`/`tool_search` seam
+  has no such failure mode: the model chooses.
 
 Because the catalog is already plugin-scoped (§1) and token-budgeted (§2), the
 always-present set stays below the size where catalog degradation is reported to
 bite (~100+ resident tools). If a future need arises, the only cache-safe shape
-is a **semantic** promotion block placed *after* the stable cached prefix (the
-Copilot-on-Anthropic pattern), or a shared semantic extension of the reactive
+is a **semantic** promotion block placed *after* the stable cached prefix, or a
+shared semantic extension of the reactive
 `tool_search`/`skill_load` scorer — never an in-place re-order of the resident
 catalog. This is shared future work with the tool side, not a gap in this policy.
 
