@@ -2398,6 +2398,7 @@ export const jaMessages: Record<string, string> = {
   "sidebar.pluginDoctorRequiredTitle": "{label} はロードされませんでした。プラグイン設定で Doctor を開きます。",
   "sidebar.pluginsLabel": "プラグイン",
   "sidebar.projectMenuNewChat": "このプロジェクトの新しいチャット",
+  "sidebar.projectMenuAdd": "プロジェクトを追加…",
   "sidebar.projectMenuRemove": "プロジェクトの削除",
   "sidebar.projectMenuReveal": "フォルダーを表示する",
   "sidebar.projectsLabel": "プロジェクト",
