@@ -105,9 +105,8 @@ describe("App plugin auth routing", () => {
     expect(await within(group).findByText("로컬 인덱서")).toBeInTheDocument();
   });
 
-  // Plugin views now ALWAYS render inline (chat mode no longer detaches them),
-  // so these auth-lifecycle tests run in the default mode and assert the view
-  // navigates inline — openDetached is never called for a plugin view.
+  // Plugin views ALWAYS render inline, so these auth-lifecycle tests assert on the
+  // inline view host's own back affordance rather than on a window that never opens.
   it("unauthenticated auth plugin → host fires loginTool and does NOT navigate the panel (login-first)", async () => {
     const user = userEvent.setup();
     const { api } = await renderApp(authPluginFixture);
@@ -124,9 +123,8 @@ describe("App plugin auth routing", () => {
         userAction: true,
       });
     });
-    // ...never opens a detached window (plugin views are inline-only) AND does
-    // not navigate the inline view until the plugin reports authed (login-first).
-    expect(api.window.openDetached).not.toHaveBeenCalled();
+    // ...and does not navigate the inline view until the plugin reports authed
+    // (login-first).
     expect(screen.queryByTestId("plugin-page-back")).not.toBeInTheDocument();
   });
 
@@ -139,12 +137,11 @@ describe("App plugin auth routing", () => {
 
     await selectPluginView(user, "Token Plugin");
 
-    // Already authed → navigate inline directly, no login round-trip and no
-    // detached window. Assert the plugin view host actually rendered (its back
+    // Already authed → navigate inline directly, no login round-trip. Assert the
+    // plugin view host actually rendered (its back
     // affordance) — not merely that the picker closed (it closes on every
     // selection regardless of navigation).
     expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
-    expect(api.window.openDetached).not.toHaveBeenCalled();
     expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "token_login")).toBe(false);
   });
 
@@ -165,7 +162,6 @@ describe("App plugin auth routing", () => {
         userAction: true,
       });
     });
-    expect(api.window.openDetached).not.toHaveBeenCalled();
     // Deferred: the inline view is NOT navigated yet (still unauthed).
     expect(screen.queryByTestId("plugin-page-back")).not.toBeInTheDocument();
 
@@ -179,7 +175,6 @@ describe("App plugin auth routing", () => {
     // The plugin view host now renders inline — proving the drain effect, not
     // the initial click, performed the navigation.
     expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
-    expect(api.window.openDetached).not.toHaveBeenCalled();
   });
 
   it("login failure keeps the plugin panel closed and surfaces a safe auth error code as a toast", async () => {
@@ -201,7 +196,6 @@ describe("App plugin auth routing", () => {
         userAction: true,
       });
     });
-    expect(api.window.openDetached).not.toHaveBeenCalled();
     await waitFor(() => {
       const statusBar = within(screen.getByTestId("composer-toast-dock")).getByTestId("status-bar");
       expect(statusBar).toHaveTextContent(/code: non-corp-network/);
@@ -216,7 +210,6 @@ describe("App plugin auth routing", () => {
         api.callPluginMethod.mock.calls.filter(([tool]) => tool === "token_status").length,
       ).toBeGreaterThan(statusCallCountBeforeAuthChanged);
     });
-    expect(api.window.openDetached).not.toHaveBeenCalled();
     const assistantBodies = screen.queryAllByTestId("assistant-message-body");
     expect(
       assistantBodies.some((body) => body.textContent?.includes("non-corp-network")),
@@ -244,7 +237,6 @@ describe("App plugin auth routing", () => {
 
     // Navigates the plugin view inline (its host renders); never opens a window.
     expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
-    expect(api.window.openDetached).not.toHaveBeenCalled();
     expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "token_login")).toBe(false);
   });
 
@@ -292,7 +284,6 @@ describe("App plugin auth routing", () => {
         userAction: true,
       });
     });
-    expect(api.window.openDetached).not.toHaveBeenCalled();
 
     authed = true;
     emitPluginEvent("oauth-plugin.auth.changed", { authenticated: true });
@@ -351,7 +342,6 @@ describe("App plugin auth routing", () => {
     expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
     // Inline, not detached; and with no loginTool declared the host must not
     // invoke one (no token_login / fabricated login bypass).
-    expect(api.window.openDetached).not.toHaveBeenCalled();
     expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "nlt_login")).toBe(false);
   });
 });

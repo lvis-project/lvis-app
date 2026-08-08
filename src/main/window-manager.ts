@@ -1240,22 +1240,6 @@ export class WindowManager {
   // ── IPC registration ──────────────────────────────────────────────────────
 
   registerIpc(auditLogger: AuditLogger): void {
-    ipcMain.handle("lvis:window:open-detached", (event: IpcMainInvokeEvent, viewKey: unknown) => {
-      if (!validateSender(event)) {
-        auditUnauthorized(auditLogger, "lvis:window:open-detached", event);
-        return UNAUTHORIZED_FRAME;
-      }
-      if (typeof viewKey !== "string" || !ALLOWED_VIEW_KEYS.test(viewKey)) {
-        return { ok: false, error: "invalid-view-key" };
-      }
-      try {
-        const win = this.openDetachedTab(viewKey);
-        return { ok: true, windowId: win.id };
-      } catch (err) {
-        return { ok: false, error: (err as Error).message };
-      }
-    });
-
     // #885 b2 — open an MCP-app card in a detached window. State-mutating +
     // host-only ⇒ validateHostRendererSender (rejects plugin-ui-shell frames),
     // mirroring close-all-detached / resize-for-mode. The payload is
