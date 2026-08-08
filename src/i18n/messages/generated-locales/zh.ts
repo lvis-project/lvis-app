@@ -1339,6 +1339,8 @@ export const zhMessages: Record<string, string> = {
   "formatIpcError.logsTailFailed": "无法读取日志。",
   "formatIpcError.managed": "更改被管理员策略阻止，或者保存时发生错误。",
   "formatIpcError.marketplaceDisabled": "市场功能被禁用。",
+  "formatIpcError.packageNotInstalled": "该软件包尚未安装。",
+  "formatIpcError.adminPluginUninstallDenied": "该插件由管理员部署，无法在应用内移除。请联系管理员。",
   "formatIpcError.missingDurableConfirm": "更改为持久模式需要用户确认。",
   "formatIpcError.missingInputOrigin": "请求的来源信息丢失。",
   "formatIpcError.missingAppEnvelope": "缺少 MCP 应用的 envelope 信息。",

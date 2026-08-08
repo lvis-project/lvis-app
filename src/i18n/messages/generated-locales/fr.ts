@@ -1323,6 +1323,8 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.lastMessageNotUser": "Le dernier message n'est pas une question de l'utilisateur, la génération ne peut donc pas continuer.",
   "formatIpcError.managed": "La modification a été bloquée par une stratégie d'administrateur ou une erreur s'est produite lors de l'enregistrement.",
   "formatIpcError.marketplaceDisabled": "La fonctionnalité Marketplace est désactivée.",
+  "formatIpcError.packageNotInstalled": "Ce paquet n'est pas installé.",
+  "formatIpcError.adminPluginUninstallDenied": "Un administrateur a installé ce plugin ; il ne peut donc pas être supprimé ici. Contactez votre administrateur.",
   "formatIpcError.missingDurableConfirm": "Le passage en mode durable nécessite une confirmation de l'utilisateur.",
   "formatIpcError.missingInputOrigin": "Les informations sur l'origine de la demande sont manquantes.",
   "formatIpcError.missingAppEnvelope": "Les informations d'envelope de l'app MCP sont manquantes.",
