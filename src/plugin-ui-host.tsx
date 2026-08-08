@@ -42,19 +42,6 @@ export type PluginUiExtensionView = {
     entry?: string;
     exportName?: string;
     page?: string;
-    /**
-     * Detached-window geometry hints. Applied only when the host opens this
-     * extension in a separate BrowserWindow; whether it detaches at all is
-     * decided solely by the app's mode (appMode), not the plugin.
-     */
-    window?: {
-      width?: number;
-      height?: number;
-      minWidth?: number;
-      minHeight?: number;
-      resizable?: boolean;
-      alwaysOnTop?: boolean;
-    };
   };
   entryUrl?: string;
   /**
