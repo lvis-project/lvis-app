@@ -101,11 +101,14 @@ export function useAppMode(api: Api): UseAppModeResult {
     }
     void api.window?.resizeForMode?.(appMode);
   }, [appMode, api]);
-  // Work mode is the inline workspace: every view renders in the main tab,
-  // so any windows that were detached in chat mode must close on the
-  // transition. The login/auth window is ALWAYS a separate window
-  // regardless of mode and is excluded by the main process (auth windows are
-  // never tracked as detached tabs). Fire-on-transition only: this depends
+  // Every view renders in the main tab now, in BOTH modes — no mode detaches
+  // anything, so this no longer closes windows the mode itself opened. It is
+  // kept as a sweep: detach is a retired feature, and a stray detached window
+  // (one opened before this behavior changed, or through the MCP path) should
+  // not outlive a return to the inline workspace. The login/auth window is
+  // ALWAYS a separate window regardless of mode and is excluded by the main
+  // process (auth windows are never tracked as detached tabs).
+  // Fire-on-transition only: this depends
   // solely on stable refs (appMode + the stable api) and never sets state, so
   // it cannot re-trigger itself (#1312 render-loop guard).
   useEffect(() => {
