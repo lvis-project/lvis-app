@@ -258,14 +258,21 @@ describe("writeUtf8FileAtomicSync", () => {
     expect(syncTotal).toBe(SYNC_UI_BLOCKING_BUDGET_MS);
     expect(asyncTotal).toBe(BACKGROUND_BUDGET_MS);
 
-    // The property that made the OLD budget wrong: 60ms could not outlast a
-    // lock class documented to clear in a few hundred milliseconds.
-    expect(syncTotal).toBeGreaterThanOrEqual(500);
-    // ...and the property that keeps the FIX from becoming a UI freeze. A
-    // sync block near a second earns the Windows "not responding" treatment,
-    // which is worse than the failed write it prevents and says nothing to the
-    // user. If someone raises this to match the background budget, this fails.
-    expect(syncTotal).toBeLessThanOrEqual(600);
+    // The property that made the ORIGINAL budget wrong: 60ms could not outlast
+    // a lock class documented to clear in a few hundred milliseconds. The 500ms
+    // that replaced it could not either — `withFileLock` serializes the
+    // settings writers, so back-to-back locked writes are normal and the OS
+    // handle outlives the lock release. That lost deterministically under load
+    // while succeeding on a quiet machine, so the contention was clearing, just
+    // later than documented. A lost settings write silently discards a
+    // permission the user granted.
+    expect(syncTotal).toBeGreaterThanOrEqual(1000);
+    // ...and the property that keeps the fix from becoming a UI freeze. This
+    // blocks the main thread, and Windows shows the unresponsive-window prompt
+    // at roughly five seconds, so the ceiling is about staying far short of
+    // that rather than about any threshold at one second. If someone raises
+    // this toward the background budget, this fails.
+    expect(syncTotal).toBeLessThanOrEqual(1200);
     expect(syncTotal).toBeLessThan(asyncTotal);
   });
 });
