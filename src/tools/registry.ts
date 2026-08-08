@@ -589,9 +589,9 @@ export class ToolRegistry {
         return false;
       })
       .map((tool) => {
-        // Copilot review: a broken toJsonSchema() must not kill the whole
-        // scope computation. Drop the offending tool with a warn instead so
-        // the rest of the turn keeps working.
+        // A broken toJsonSchema() must not kill the whole scope
+        // computation. Drop the offending tool with a warn instead so the
+        // rest of the turn keeps working.
         try {
           return schemaEntryForTool(tool, tool.toJsonSchema());
         } catch (err) {
