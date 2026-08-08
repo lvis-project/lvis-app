@@ -58,7 +58,7 @@ export const BUILTIN_VIEWS = {
 export type BuiltinViewKey = keyof typeof BUILTIN_VIEWS;
 
 /** Built-ins that may be the main window's `activeView`. */
-export type InlineBuiltinViewKey = {
+type InlineBuiltinViewKey = {
   [K in BuiltinViewKey]: (typeof BUILTIN_VIEWS)[K]["inline"] extends true ? K : never;
 }[BuiltinViewKey];
 
@@ -68,10 +68,7 @@ export type DetachableBuiltinViewKey = {
 }[BuiltinViewKey];
 
 export type PluginViewKey = `plugin:${string}:${string}`;
-export type McpAppViewKey = `mcp-app:${string}:${string}`;
-
-/** Any destination the app can name. */
-export type ViewKey = BuiltinViewKey | PluginViewKey | McpAppViewKey;
+type McpAppViewKey = `mcp-app:${string}:${string}`;
 
 /** Anything the main window can render as `activeView`. MCP-app cards are
  *  detach-only, so they are absent by construction rather than by convention. */
@@ -103,15 +100,9 @@ const STRICT_SEGMENT = "[a-z0-9][a-z0-9_.-]*";
 const HEX_SEGMENT = "[0-9a-f]+";
 
 /** Built-in keys that may be detached, in a stable order. */
-export const DETACHABLE_BUILTIN_VIEW_KEYS: readonly DetachableBuiltinViewKey[] =
+const DETACHABLE_BUILTIN_VIEW_KEYS: readonly DetachableBuiltinViewKey[] =
   (Object.keys(BUILTIN_VIEWS) as BuiltinViewKey[])
     .filter((key): key is DetachableBuiltinViewKey => BUILTIN_VIEWS[key].detachable)
-    .sort();
-
-/** Built-in keys that may render inline, in a stable order. */
-export const INLINE_BUILTIN_VIEW_KEYS: readonly InlineBuiltinViewKey[] =
-  (Object.keys(BUILTIN_VIEWS) as BuiltinViewKey[])
-    .filter((key): key is InlineBuiltinViewKey => BUILTIN_VIEWS[key].inline)
     .sort();
 
 /**
