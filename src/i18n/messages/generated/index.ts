@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 190
+ * Fragments: 191
  */
 import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
