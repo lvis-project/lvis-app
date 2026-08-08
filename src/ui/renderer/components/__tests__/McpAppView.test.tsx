@@ -41,7 +41,6 @@ function ThemeToggleButton({ toBundleId }: { toBundleId: string }) {
 }
 
 let disconnectHandler: ((serverId: string) => void) | null = null;
-let detachedClosedHandler: ((viewKey: string) => void) | null = null;
 // Main now returns a BUNDLE: the sandbox-proxy URL the <webview> navigates to,
 // plus the app HTML that is handed to the proxy over the bridge (never in the URL).
 const readUiResource = vi.fn(async (serverId: string) => ({
@@ -50,17 +49,17 @@ const readUiResource = vi.fn(async (serverId: string) => ({
 }));
 const disposeUiSession = vi.fn();
 /**
- * The EXISTING detach seam — the `onrequestdisplaymode` "fullscreen" arm reuses it.
- * Returns the host-minted `viewKey`: the identity of the detached instance the card
- * moved into, which the inline mount keeps so it can recognize its own close event.
+ * The window seams a display-mode change must NOT reach. Every mode this host advertises
+ * is a surface inside the renderer, so these stay untouched no matter what an app asks
+ * for — stubbed as working calls precisely so a regression that starts using one would
+ * SUCCEED and still be caught by the assertions below, rather than failing for the
+ * incidental reason that the surface was missing.
  */
-const DETACHED_VIEW_KEY = "mcp-app:676974687562:card-1";
 const openDetached = vi.fn(async () => ({
   ok: true as const,
   windowId: 7,
-  viewKey: DETACHED_VIEW_KEY,
+  viewKey: "mcp-app:676974687562:card-1",
 }));
-/** The SCOPED close — the `onrequestdisplaymode` "inline" arm (never closeAllDetached). */
 const closeDetached = vi.fn(async () => ({ ok: true as const }));
 /** The gated save path behind `ondownloadfile`. */
 const downloadFile = vi.fn(async () => ({ ok: true as const, disposition: "saved" as const }));
@@ -77,7 +76,6 @@ const postUiModelContext = vi.fn(
 
 function stubLvis() {
   disconnectHandler = null;
-  detachedClosedHandler = null;
   vi.stubGlobal("lvis", {
     mcp: {
       readUiResource,
@@ -90,12 +88,6 @@ function stubLvis() {
         disconnectHandler = handler;
         return () => {
           disconnectHandler = null;
-        };
-      },
-      onDetachedClosed: (handler: (viewKey: string) => void) => {
-        detachedClosedHandler = handler;
-        return () => {
-          detachedClosedHandler = null;
         };
       },
     },
@@ -137,7 +129,6 @@ beforeEach(() => {
   __resetMcpAppCardLocationStoreForTests();
   readUiResource.mockClear();
   openDetached.mockClear();
-  openDetached.mockResolvedValue({ ok: true as const, windowId: 7, viewKey: DETACHED_VIEW_KEY });
   closeDetached.mockClear();
   closeDetached.mockResolvedValue({ ok: true as const });
   stubLvis();
@@ -373,7 +364,7 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
     expect(seededDisplayDeps().getDisplayMode()).toBe("inline");
   });
 
-  it("seeds a DETACHED mount as fullscreen — the detached shell IS that presentation", async () => {
+  it("seeds a FULLSCREEN mount as fullscreen — the fullscreen panel IS that presentation", async () => {
     const { container } = render(<McpAppView payload={payload("github")} displayMode="fullscreen" />, {
       wrapper: ThemeWrapper,
     });
@@ -383,7 +374,7 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
     expect(seededDisplayDeps().getDisplayMode()).toBe("fullscreen");
   });
 
-  it("fullscreen REPLACES the card: the detach seam is called with the session binding, and THIS mount stops being a live app", async () => {
+  it("fullscreen REPLACES the card IN THIS RENDERER — no window is opened, and THIS mount stops being a live app", async () => {
     const { container } = renderCard(payload("github"));
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
     const transport = createMcpAppBridgeMock.mock.results[0]!.value.transport as {
@@ -392,19 +383,15 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
 
     const applied = await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
 
-    // No new window stack: the SAME `mcp.openDetached` the detach button uses, with the
-    // maximize flag that makes it the fullscreen presentation — and the card's ORIGIN
-    // SESSION, so the detached instance keeps a real binding (the app names neither).
-    expect(openDetached).toHaveBeenCalledWith(
-      expect.objectContaining({ serverId: "github" }),
-      { maximize: true, sessionId: "" },
-    );
+    // `fullscreen` is a surface INSIDE this renderer, not a second window: the request
+    // is served by the shared location store alone, with no window IPC whatsoever.
+    expect(openDetached).not.toHaveBeenCalled();
     expect(applied).toBe("fullscreen");
 
-    // THE FIX: replace, don't clone. The inline instance is gone — no <webview>, and its
+    // Replace, don't clone. The inline instance is gone — no <webview>, and its
     // bridge/transport were torn down. Exactly one live bridge exists for this card, and
-    // it is the one in the detached window.
-    await waitFor(() => expect(screen.getByTestId("mcp-app-detached")).toBeInTheDocument());
+    // it is the one the fullscreen panel mounts.
+    await waitFor(() => expect(screen.getByTestId("mcp-app-fullscreen")).toBeInTheDocument());
     expect(webviewNode(container)).toBeNull();
     expect(transport.close).toHaveBeenCalledTimes(1);
     // No second bridge was created in this mount.
@@ -429,74 +416,55 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
     }
   });
 
-  it("revives the inline card when the host says the detached instance is gone (the round trip)", async () => {
-    const { container } = renderCard(payload("github"));
-    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
-
-    await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
-    await waitFor(() => expect(screen.getByTestId("mcp-app-detached")).toBeInTheDocument());
-
-    // A close event for SOMEONE ELSE's detached window changes nothing.
-    act(() => {
-      detachedClosedHandler?.("mcp-app:ffff:other-card");
-    });
-    expect(screen.getByTestId("mcp-app-detached")).toBeInTheDocument();
-    expect(webviewNode(container)).toBeNull();
-
-    // The card's OWN detached instance closing (user X, the `inline` arm, or a shell
-    // navigation — one event for all three) brings the inline card back to life: a fresh
-    // <webview> and a second bridge, which is now again the ONLY live one.
-    act(() => {
-      detachedClosedHandler?.(DETACHED_VIEW_KEY);
-    });
-    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
-    expect(screen.queryByTestId("mcp-app-detached")).toBeNull();
-    expect(createMcpAppBridgeMock).toHaveBeenCalledTimes(2);
-    // Still truthfully inline at every step.
-    expect(seededDisplayDeps().getDisplayMode()).toBe("inline");
-  });
-
-  it("keeps the card where it is when the host DECLINES the detach", async () => {
-    openDetached.mockResolvedValue({ ok: false, error: "invalid-payload" } as never);
-    const { container } = renderCard(payload("github"));
-    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
-
-    const applied = await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
-
-    expect(applied).toBe("inline");
-    expect(seededDisplayDeps().getDisplayMode()).toBe("inline");
-    // The card never went dormant — the live bridge is still this one.
-    expect(webviewNode(container)).toBeTruthy();
-    expect(screen.queryByTestId("mcp-app-detached")).toBeNull();
-  });
-
-  it("inline (from fullscreen) closes ONLY this card's server's detached window — never every detached window", async () => {
+  it("fullscreen -> inline: a SECOND mount (the fullscreen surface) revives the home mount through the store — no window IPC", async () => {
     const closeAllDetached = vi.fn(async () => ({ ok: true }));
     vi.stubGlobal("lvisApi", { window: { closeAllDetached } });
-
-    const { container } = render(<McpAppView payload={payload("github")} displayMode="fullscreen" />, {
+    const locationId = "shared-loc-fullscreen-inline";
+    const home = render(<McpAppView payload={payload("github")} locationId={locationId} />, {
       wrapper: ThemeWrapper,
     });
-    await waitFor(() => expect(webviewNode(container)).toBeTruthy());
+    await waitFor(() => expect(webviewNode(home.container)).toBeTruthy());
 
-    const applied = await act(() => seededDisplayDeps().applyDisplayMode("inline"));
+    await act(() => homeDeps().applyDisplayMode("fullscreen"));
+    await waitFor(() =>
+      expect(home.container.querySelector('[data-testid="mcp-app-fullscreen"]')).toBeTruthy(),
+    );
+    expect(webviewNode(home.container)).toBeNull();
 
-    expect(closeDetached).toHaveBeenCalledWith("github");
-    // The old bug: an untrusted card could sweep shut the user's unrelated detached views.
-    expect(closeAllDetached).not.toHaveBeenCalled();
+    // The FULLSCREEN mount (McpAppFullscreenPanel's own McpAppView instance) — SAME
+    // locationId, a SEPARATE React tree, coexisting with the now-dormant home mount.
+    const full = render(
+      <McpAppView payload={payload("github")} displayMode="fullscreen" locationId={locationId} />,
+      { wrapper: ThemeWrapper },
+    );
+    await waitFor(() => expect(webviewNode(full.container)).toBeTruthy());
+
+    // The app inside the FULLSCREEN mount requests "inline".
+    const applied = await act(() => pipDeps().applyDisplayMode("inline"));
     expect(applied).toBe("inline");
-    // This mount is the DETACHED presentation and says so until its window goes away.
-    expect(seededDisplayDeps().getDisplayMode()).toBe("fullscreen");
+
+    // Reviving is a pure store move: no window IPC in either direction — and in
+    // particular never the sweeping close-every-window call, which an untrusted card
+    // must not be able to reach.
+    expect(closeDetached).not.toHaveBeenCalled();
+    expect(closeAllDetached).not.toHaveBeenCalled();
+    await waitFor(() => expect(webviewNode(home.container)).toBeTruthy());
+    expect(home.container.querySelector('[data-testid="mcp-app-fullscreen"]')).toBeNull();
   });
 
-  it("leaves the detached card where it is when the scoped close fails", async () => {
-    closeDetached.mockResolvedValue({ ok: false, error: "invalid-server-id" } as never);
+
+  it("an inline request that the store guard rejects does not claim a move that never happened", async () => {
+    // This mount has no store entry (nothing ever moved this card here), so the guarded
+    // revive declines — and the mount must report the mode it is STILL in. The inverse
+    // (returning "inline" anyway) is how a card ends up telling a spec-conformant app it
+    // is embedded in a transcript while it is still filling the window.
     const { container } = render(<McpAppView payload={payload("github")} displayMode="fullscreen" />, {
       wrapper: ThemeWrapper,
     });
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
 
     await expect(act(() => seededDisplayDeps().applyDisplayMode("inline"))).resolves.toBe("fullscreen");
+    expect(webviewNode(container)).toBeTruthy();
   });
 
   it("is a no-op when the app asks for the mode it is already in", async () => {
@@ -617,7 +585,7 @@ describe("McpAppView — pip (the shared location store, not a second window sta
     expect(getCardLocation(locationId)).toEqual({ kind: "inline" });
   });
 
-  it("pip -> fullscreen: opens the detached window and moves the STORE location to detached", async () => {
+  it("pip -> fullscreen: moves the STORE location to fullscreen, with no window IPC", async () => {
     const locationId = "loc-shared-pip-fullscreen";
     const { container } = render(
       <McpAppView payload={payload("github")} displayMode="pip" locationId={locationId} />,
@@ -627,36 +595,41 @@ describe("McpAppView — pip (the shared location store, not a second window sta
 
     const applied = await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
 
-    expect(openDetached).toHaveBeenCalledWith(
-      expect.objectContaining({ serverId: "github" }),
-      { maximize: true, sessionId: "" },
-    );
+    expect(openDetached).not.toHaveBeenCalled();
     expect(applied).toBe("fullscreen");
-    // The STORE now says this card is detached — this is what `McpAppPipPanel` (the
-    // pip mount's actual PARENT in production) reacts to by unmounting its child. An
-    // away mount does NOT self-police via its own `location` read (only the home mount
-    // does — see the `mountDisplayMode === "inline"` gate on the render branch), so THIS
-    // isolated mount keeps rendering until something ELSE unmounts it; that is exactly
-    // right, and is exercised at the panel level (McpAppPipPanel.test.tsx).
-    const { getCardLocation } = await import("../../state/mcp-app-card-location-store.js");
-    expect(getCardLocation(locationId)).toEqual({
-      kind: "detached",
-      viewKey: DETACHED_VIEW_KEY,
-    });
+    // The STORE now says this card is in the fullscreen slot — this is what
+    // `McpAppPipPanel` (the pip mount's actual PARENT in production) reacts to by
+    // unmounting its child. An away mount does NOT self-police via its own `location`
+    // read (only the home mount does — see the `mountDisplayMode === "inline"` gate on
+    // the render branch), so THIS isolated mount keeps rendering until something ELSE
+    // unmounts it; that is exactly right, and is exercised at the panel level
+    // (McpAppPipPanel.test.tsx).
+    const { getCardLocation, getSlotOccupant } = await import(
+      "../../state/mcp-app-card-location-store.js"
+    );
+    expect(getCardLocation(locationId)).toEqual({ kind: "fullscreen" });
+    // BOTH ends of the move: the pip slot the card LEFT is empty, so the pip panel tears
+    // its bridge down instead of keeping a second live copy of the card.
+    expect(getSlotOccupant("pip")).toBeNull();
+    expect(getSlotOccupant("fullscreen")?.cardId).toBe(locationId);
   });
 
-  it("fullscreen DECLINES a pip request — cross-window pip is out of scope (separate renderer process)", async () => {
-    const { container } = render(<McpAppView payload={payload("github")} displayMode="fullscreen" />, {
-      wrapper: ThemeWrapper,
-    });
+  it("fullscreen -> pip: a symmetric in-renderer move, no longer declined", async () => {
+    const locationId = "loc-shared-fullscreen-pip";
+    const { container } = render(
+      <McpAppView payload={payload("github")} displayMode="fullscreen" locationId={locationId} />,
+      { wrapper: ThemeWrapper },
+    );
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
 
     const applied = await act(() => seededDisplayDeps().applyDisplayMode("pip"));
 
-    expect(applied).toBe("fullscreen");
-    // Nothing was touched: no detach-close IPC, and the detached mount is still live.
+    // Both away surfaces live in THIS renderer's heap, so the move is the same store
+    // write in either direction — the old cross-process decline has no reason to exist.
+    expect(applied).toBe("pip");
     expect(closeDetached).not.toHaveBeenCalled();
-    expect(webviewNode(container)).toBeTruthy();
+    const { getCardLocation } = await import("../../state/mcp-app-card-location-store.js");
+    expect(getCardLocation(locationId)).toEqual({ kind: "pip" });
   });
 
 });
@@ -669,7 +642,7 @@ describe("McpAppView — home-mount unmount reclaims a leaked away entry (MAJOR-
   }
 
   it("home-mount unmount while the card is in pip reclaims the entry and tears the bridge down", async () => {
-    const { getCardLocation, getPipOccupant } = await import("../../state/mcp-app-card-location-store.js");
+    const { getCardLocation, getSlotOccupant } = await import("../../state/mcp-app-card-location-store.js");
     const locationId = "loc-unmount-reclaim";
 
     // Production topology: a transcript HOME mount + the session-independent pip panel.
@@ -690,13 +663,13 @@ describe("McpAppView — home-mount unmount reclaims a leaked away entry (MAJOR-
 
     // The leaked entry is reclaimed and the pip bridge torn down: store back to inline,
     // nobody occupies pip, and the panel renders nothing (its away McpAppView unmounted).
-    await waitFor(() => expect(getPipOccupant()).toBeNull());
+    await waitFor(() => expect(getSlotOccupant("pip")).toBeNull());
     expect(getCardLocation(locationId)).toEqual({ kind: "inline" });
     expect(pip.container.querySelector('[data-testid="mcp-app-pip-panel"]')).toBeNull();
   });
 
   it("a card in pip within a live conversation is NOT killed by an unrelated home re-render", async () => {
-    const { getCardLocation, getPipOccupant } = await import("../../state/mcp-app-card-location-store.js");
+    const { getCardLocation, getSlotOccupant } = await import("../../state/mcp-app-card-location-store.js");
     const locationId = "loc-rerender-safe";
     // Stable payload identity so a re-render does NOT re-run the payload effect (which
     // has its own fresh-card reclaim) — this isolates the unmount effect under test.
@@ -713,7 +686,7 @@ describe("McpAppView — home-mount unmount reclaims a leaked away entry (MAJOR-
     home.rerender(<McpAppView payload={p} locationId={locationId} />);
 
     expect(getCardLocation(locationId)).toEqual({ kind: "pip" });
-    expect(getPipOccupant()?.cardId).toBe(locationId);
+    expect(getSlotOccupant("pip")?.cardId).toBe(locationId);
     // The home stayed mounted throughout, showing its own dormant pip placeholder.
     expect(home.container.querySelector('[data-testid="mcp-app-pip"]')).toBeTruthy();
   });
@@ -758,15 +731,14 @@ describe("McpAppView — model-context sink is BOUND to server + session + card"
     expect(forwarded).toEqual(params);
   });
 
-  it("a DETACHED mount posts the host-threaded origin session, so its updates actually land", async () => {
+  it("a mount with no ChatContext posts the host-threaded origin session, so its updates actually land", async () => {
     postUiModelContext.mockClear();
-    // This is exactly how DetachedView mounts a card: no ChatContext anywhere in the tree
-    // (the detached window's React root has no ChatContextProvider), and the origin session
-    // threaded in from the host-owned detached record. Without the prop the card would post
-    // "" and main would drop every update on the session check — forever, silently, since
-    // `ui/update-model-context` has no error channel in the spec.
+    // This is how a card mounts outside the chat subtree: no ChatContext anywhere in the
+    // tree, and the origin session threaded in explicitly. Without the prop the card would
+    // post "" and main would drop every update on the session check — forever, silently,
+    // since `ui/update-model-context` has no error channel in the spec.
     const { container } = render(
-      <McpAppView payload={payload("github")} displayMode="fullscreen" originSessionId="sess-abc" />,
+      <McpAppView payload={payload("github")} originSessionId="sess-abc" />,
       { wrapper: ThemeWrapper },
     );
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
