@@ -18,7 +18,6 @@
  */
 import { createRequire } from "node:module";
 import { CHANNELS } from "../contract/app-contract.js";
-import { getWindowManager } from "../main/app-state.js";
 import { mcpAppPartitionName } from "../shared/mcp-app-partition.js";
 import { createLogger } from "../lib/logger.js";
 
@@ -32,8 +31,6 @@ type DisconnectSinkWindow = {
 type DisconnectSinkSession = { clearStorageData(): Promise<void> };
 
 export interface McpServerDisconnectedSinkDeps {
-  /** Resolves the WindowManager LAZILY (BootContext carries no windowManager). */
-  getWindowManager?: () => { closeDetachedMcpWindows(serverId: string): void } | null;
   getAllWindows?: () => DisconnectSinkWindow[];
   fromPartition?: (name: string) => DisconnectSinkSession;
 }
@@ -42,29 +39,25 @@ export interface McpServerDisconnectedSinkDeps {
  * Build the `onServerDisconnected` sink wired into McpManager AND
  * PluginLoopbackManager.
  *
- * On each teardown it does THREE things, in this order (broadcast → close →
- * clear) so no live detached webContents races a wiped jar:
- *   1. broadcast `serverDisconnected` to every non-destroyed window (main +
- *      detached) — the `isDestroyed()` guard + swallowed send cover the
- *      `disconnectAll`-at-shutdown case (Q4);
- *   2. `closeDetachedMcpWindows(serverId)` — scoped-close this server's detached
- *      MCP-app windows (resolved lazily; null before window creation is harmless
- *      since no `mcp-app:` window can exist yet);
- *   3. `clearStorageData()` on the ephemeral per-server partition (MAJOR-2) —
+ * On each teardown it does TWO things, in this order (broadcast → clear) so no live
+ * webContents races a wiped jar:
+ *   1. broadcast `serverDisconnected` to every non-destroyed window — the
+ *      `isDestroyed()` guard + swallowed send cover the `disconnectAll`-at-shutdown
+ *      case (Q4);
+ *   2. `clearStorageData()` on the ephemeral per-server partition (MAJOR-2) —
  *      an in-memory Session persists for the whole process lifetime, so a
  *      remove→re-add of the same id would otherwise inherit stale storage.
  *
  * The WHOLE body is wrapped in try/catch (MINOR-A): the MINOR-4 encode-time
- * length guard throws SYNCHRONOUSLY through `mcpAppViewKeyPrefix` (step 2) and
- * `mcpAppPartitionName` (step 3) — the `.catch()` on `clearStorageData()` only
- * covers the async rejection — so without the outer guard a tampered >128-char
- * id (arriving via the servers.json/loadFromConfig path that bypasses addConfig)
- * would break teardown mid-emit. Best-effort by contract anyway (Q4).
+ * length guard throws SYNCHRONOUSLY through `mcpAppPartitionName` (step 2) — the
+ * `.catch()` on `clearStorageData()` only covers the async rejection — so without
+ * the outer guard a tampered >128-char id (arriving via the
+ * servers.json/loadFromConfig path that bypasses addConfig) would break teardown
+ * mid-emit. Best-effort by contract anyway (Q4).
  */
 export function createMcpServerDisconnectedSink(
   deps: McpServerDisconnectedSinkDeps = {},
 ): (serverId: string) => void {
-  const resolveWindowManager = deps.getWindowManager ?? getWindowManager;
   const getAllWindows =
     deps.getAllWindows ??
     (() =>
@@ -78,15 +71,13 @@ export function createMcpServerDisconnectedSink(
 
   return (serverId: string) => {
     try {
-      // 1. broadcast to the main window AND every detached window.
+      // 1. broadcast to every non-destroyed window.
       for (const win of getAllWindows()) {
         if (!win.isDestroyed()) {
           win.webContents.send(CHANNELS.mcp.serverDisconnected, { serverId });
         }
       }
-      // 2. scoped close of this server's detached MCP-app windows.
-      resolveWindowManager()?.closeDetachedMcpWindows(serverId);
-      // 3. clear the ephemeral per-server partition (best-effort, awaited-with-catch).
+      // 2. clear the ephemeral per-server partition (best-effort, awaited-with-catch).
       void fromPartition(mcpAppPartitionName(serverId)).clearStorageData().catch(() => undefined);
     } catch (err) {
       log.warn("mcp: server-disconnected sink failed (%s): %s", serverId, (err as Error).message);

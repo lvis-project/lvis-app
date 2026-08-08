@@ -30,10 +30,8 @@
  * `a_b`) so it is unusable as an isolation key either.
  *
  * Hex encoding of the UTF-8 bytes is trivially injective (distinct byte
- * sequences ⇒ distinct hex), and its `[0-9a-f]` output charset is safe for the
- * partition string, the HTML `partition=` attribute value, the detach viewKey,
- * the `ALLOWED_VIEW_KEYS` regex, and the `#detached/` URL fragment
- * simultaneously.
+ * sequences ⇒ distinct hex), and its `[0-9a-f]` output charset is safe for both
+ * the partition string and the HTML `partition=` attribute value.
  */
 
 import {
@@ -194,14 +192,4 @@ export function encodeMcpServerId(serverId: string): string {
 /** Per-server ephemeral session partition (no `persist:` ⇒ in-memory). */
 export function mcpAppPartitionName(serverId: string): string {
   return `${MCP_APP_PARTITION_PREFIX}${encodeMcpServerId(serverId)}`;
-}
-
-/** Detached-window viewKey for one card of a server. `cardId` is host-minted. */
-export function mcpAppViewKey(serverId: string, cardId: string): string {
-  return `mcp-app:${encodeMcpServerId(serverId)}:${cardId}`;
-}
-
-/** Prefix matching every detached viewKey of a server (b3 scoped-close). */
-export function mcpAppViewKeyPrefix(serverId: string): string {
-  return `mcp-app:${encodeMcpServerId(serverId)}:`;
 }

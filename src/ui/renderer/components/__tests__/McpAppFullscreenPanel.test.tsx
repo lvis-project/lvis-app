@@ -34,14 +34,6 @@ const readUiResource = vi.fn(async (serverId: string) => ({
   html: "<html><body>card</body></html>",
 }));
 const disposeUiSession = vi.fn();
-/** The window seams a `fullscreen` request must never reach — stubbed as WORKING calls,
- *  so a regression that starts using one succeeds and is caught by the assertion. */
-const openDetached = vi.fn(async () => ({
-  ok: true as const,
-  windowId: 7,
-  viewKey: "mcp-app:676974687562:card-1",
-}));
-const closeDetached = vi.fn(async () => ({ ok: true as const }));
 
 const payload = (serverId: string): McpUiPayload => ({ serverId, resourceUri: "ui://card/1" });
 
@@ -60,9 +52,7 @@ function displayDeps(index: number) {
 beforeEach(() => {
   __resetMcpAppCardLocationStoreForTests();
   readUiResource.mockClear();
-  openDetached.mockClear();
-  closeDetached.mockClear();
-  stubMcpLvis({ readUiResource, disposeUiSession, openDetached, closeDetached });
+  stubMcpLvis({ readUiResource, disposeUiSession });
   createMcpAppBridgeMock.mockClear();
   createMcpAppBridgeMock.mockImplementation(() => ({
     bridge: { setHostContext: vi.fn() },
@@ -133,7 +123,7 @@ describe("McpAppFullscreenPanel — the fullscreen slot's surface", () => {
 });
 
 describe("McpAppFullscreenPanel — driven by the app, through the real request handler", () => {
-  it("an app requesting `fullscreen` is answered `fullscreen`, takes over IN THIS RENDERER, and opens no window", async () => {
+  it("an app requesting `fullscreen` is answered `fullscreen` and takes over IN THIS RENDERER", async () => {
     // Production topology: a transcript HOME mount plus the two away surfaces, exactly
     // as MainContent mounts them.
     const home = render(<McpAppView payload={payload("github")} />, { wrapper: ThemeWrapper });
@@ -160,8 +150,6 @@ describe("McpAppFullscreenPanel — driven by the app, through the real request 
 
     // The spec answer the app receives.
     expect(response).toEqual({ mode: "fullscreen" });
-    // No second window: the whole point of the remap.
-    expect(openDetached).not.toHaveBeenCalled();
     // The card is live in the fullscreen panel and dormant at home — one live bridge.
     await waitFor(() =>
       expect(panels.container.querySelector('[data-testid="mcp-app-fullscreen-panel"]')).toBeTruthy(),

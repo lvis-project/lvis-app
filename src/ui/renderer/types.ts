@@ -10,8 +10,7 @@ import type {
 import type { Locale } from "../../i18n/locale.js";
 import type { StreamEvent, ChatEntry } from "../../lib/chat-stream-state.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
-import type { McpResourceSummary, McpResourceTemplateSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiPayload, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
-import type { McpAppDetachedPayload } from "../../shared/mcp-app-detached-payload.js";
+import type { McpResourceSummary, McpResourceTemplateSummary, McpServerConfig, McpServerConfigDto, McpServerState, McpUiResourceBundle, McpUiToolCallOutcome } from "../../mcp/types.js";
 import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
 import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.js";
@@ -1310,23 +1309,12 @@ export type LvisApi = {
     };
   }) => Promise<{ ok: boolean }>;
 
-  // ─── Window management (tab detach + magnetic snap) ─────────────────────
+  // ─── Main-window management ─────────────────────────────────────────────
   window?: {
-    openDetached: (viewKey: string) => Promise<{ ok: true; windowId: number } | { ok: false; error: string }>;
-    closeDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
-    listDetached: () => Promise<Array<{ windowId: number; viewKey: string; snapped: boolean }>>;
-    /** Close all detached windows (fired on the work-mode transition). Auth/login windows are excluded. */
-    closeAllDetached: () => Promise<{ ok: true } | { ok: false; error: string }>;
-    loadSessionInMain: (sessionId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
-
     resizeForMode: (mode: "chat" | "work") => Promise<{ ok: true } | { ok: false; error: string }>;
     /** Resize the chat-mode main window when the right-side work panel opens/closes. */
     resizeForSidePanel: (open: boolean) => Promise<{ ok: true } | { ok: false; error: string }>;
     openHtmlPreview: (payload: OpenHtmlPreviewWindowPayload) => Promise<OpenHtmlPreviewWindowResult>;
-    onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => () => void;
-    /** Subscribe to in-place navigation (single-instance shell content swap). */
-    onDetachedNavigate: (handler: (viewKey: string) => void) => () => void;
-    onLoadSessionInMain: (handler: (sessionId: string) => boolean | void | Promise<boolean | void>) => () => void;
   };
   /**
    * Dev tools bridge — only useful in non-production NODE_ENV. Renderer
@@ -2000,42 +1988,8 @@ export type LvisMcpApi = {
   ) => Promise<McpUiModelContextOutcome>;
   /** Free a card's sandbox-proxy session token on unmount (fire-and-forget). */
   disposeUiSession: (token: string) => void;
-  /**
-   * #885 b2 — open an MCP-app card in a detached window (host mints cardId/viewKey).
-   *
-   * `maximize` is the `onrequestdisplaymode` "fullscreen" arm: the SAME detach seam,
-   * asked to land maximized. The user's detach button omits it and keeps the canvas
-   * default. No second window path exists for MCP-app cards.
-   */
-  openDetached: (
-    payload: McpUiPayload,
-    opts?: {
-      maximize?: boolean;
-      /**
-       * The card's ORIGIN chat session, bound by the TRUSTED renderer (the app names
-       * none). The detached window has no ChatContext, so this is the ONLY way a
-       * detached card keeps a real session binding for `ui/message` /
-       * `ui/update-model-context`. Main sanitizes it and re-checks it against the live
-       * conversation on every use — it binds, it never authorizes.
-       */
-      sessionId?: string;
-    },
-  ) => Promise<{ ok: true; windowId: number; viewKey: string } | { ok: false; error: string }>;
-  /**
-   * The `onrequestdisplaymode` "inline" arm — close THIS server's detached MCP-app
-   * window(s). Scoped: an untrusted card must never reach `window.closeAllDetached`.
-   */
-  closeDetached: (serverId: string) => Promise<{ ok: true } | { ok: false; error: string }>;
-  /** #885 b2 — detached renderer fetches its stored record (payload + origin session) on mount. */
-  getDetachedPayload: (viewKey: string) => Promise<McpAppDetachedPayload | null>;
   /** #885 b3 — subscribe to the server-disconnected broadcast; returns an unsubscribe fn. */
   onServerDisconnected: (handler: (serverId: string) => void) => () => void;
-  /**
-   * A detached MCP-app window is gone (user close / "inline" arm / shell navigation).
-   * The inline card that moved there is dormant until this fires, so exactly one live
-   * bridge exists per card. Returns an unsubscribe fn.
-   */
-  onDetachedClosed: (handler: (viewKey: string) => void) => () => void;
 };
 
 export type ExecMode = "default" | "strict" | "auto" | "allow";
