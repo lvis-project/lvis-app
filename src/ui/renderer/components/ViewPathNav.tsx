@@ -92,7 +92,10 @@ export function ViewPathNav({
         {segments.map((segment, index) => {
           const isLast = index === segments.length - 1;
           return (
-            <span key={segment.key} className="flex min-w-0 items-center gap-0.5">
+            <span
+              key={segment.key}
+              className="flex min-w-0 items-center gap-0.5"
+            >
               {index > 0 ? (
                 <ChevronRight className="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
               ) : null}

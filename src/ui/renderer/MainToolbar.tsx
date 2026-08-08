@@ -56,6 +56,8 @@ export interface MainToolbarProps {
   /** Path + history controls for the current location. `activeView` used to be
    *  passed here and thrown away; the path is what it was always for. */
   viewNav: ViewPathNavProps;
+  /** Left reserve (px) for the floating sidebar card that overlaps this band. */
+  leadClearance: number;
   streaming: boolean;
   hasApiKey: boolean | null;
   /** Current workspace mode (Chat / Work). Drives the segmented toggle. */
@@ -84,6 +86,7 @@ export interface MainToolbarProps {
 
 export function MainToolbar({
   viewNav,
+  leadClearance,
   streaming: _streaming,
   hasApiKey: _hasApiKey,
   appMode,
@@ -108,16 +111,25 @@ export function MainToolbar({
     <div
       data-testid="main-toolbar"
       className="flex min-w-0 flex-1 items-center gap-2"
+      style={{ paddingLeft: `${leadClearance}px` }}
     >
-      {/* ── Location: back / forward + the path. Capped at 45% of the band so a
-          long path truncates instead of consuming the drag region; the spacer
-          below is what the user grabs to move the window. */}
-      <NoDrag className="flex min-w-0 max-w-[45%] items-center">
+      {/* ── Spacer pushes the trailing controls to the far-right edge (stays drag) */}
+      <div className="min-w-[64px] flex-1" aria-hidden="true" data-testid="main-toolbar-drag-band" />
+
+      {/* ── Location: back / forward + the path.
+          It sits with the trailing group, NOT at the band's leading edge: the
+          floating sidebar card extends up into this band and covers the left
+          side, which is why this toolbar hosts only right-aligned controls in
+          the first place. Rendering the path there put it behind the card.
+          Width-capped so a long path truncates instead of eating the spacer
+          the user grabs to move the window. */}
+      {/* Hidden below `md`: at the 460px chat width the band is already spent
+          on the sidebar card, the mode toggle and the window controls, leaving
+          ~26px here. A 26px path is not a path, so it is withheld rather than
+          rendered as a sliver — and the space returns to the drag region. */}
+      <NoDrag className="hidden min-w-0 max-w-[45%] shrink items-center md:flex">
         <ViewPathNav {...viewNav} />
       </NoDrag>
-
-      {/* ── Spacer pushes the trailing controls to the far-right edge (stays drag) */}
-      <div className="min-w-[120px] flex-1" aria-hidden="true" />
 
       <NoDrag>
         <RemoteA2AActionButton />
