@@ -210,6 +210,11 @@ export function AppShell({
       <CustomTitleBar>
         <MainToolbar
           viewNav={viewNav}
+          // The floating sidebar card extends UP into this band, so the
+          // toolbar's own leading edge is behind it. Reserve exactly what
+          // <main> reserves below, from the same two values, so the path
+          // starts where the card ends instead of rendering underneath it.
+          leadClearance={sidebarCollapsed ? 64 : sidebarWidth + 8}
           streaming={streaming}
           hasApiKey={hasApiKey}
           appMode={appMode}
