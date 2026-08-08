@@ -680,13 +680,15 @@ export async function dispatchPermissionHooksCommand(
  * that may only pick from a table the host built. See
  * {@link ./reviewer/approval-sentence-selector.js}.
  */
-export interface PermissionAllowCommand {
+// Not exported: consumers narrow on the exported `PermissionSlashOutcome`
+// union, which carries this shape structurally.
+interface PermissionAllowCommand {
   verb: "allow";
   /** The user's words, verbatim. Untrusted; the selector sanitizes and masks. */
   sentence: string;
 }
 
-export function parsePermissionAllowCommand(
+function parsePermissionAllowCommand(
   rawArgs: string,
 ): PermissionAllowCommand | { ok: false; error: string } {
   const sentence = rawArgs.trim();
