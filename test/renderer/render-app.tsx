@@ -5,6 +5,12 @@
  * <App /> via @testing-library/react, returns the mock fns so tests can
  * assert IPC calls.
  */
+// Registers RTL's `afterEach(cleanup)` (plus the jsdom polyfills) for EVERY
+// consumer of this harness. Rendering the whole App and never unmounting it
+// leaves its effects — including real timers — running past the end of the test
+// file, and they then fire into a destroyed jsdom. Importing it here rather than
+// asking each suite to remember means a new suite cannot forget.
+import "./setup.js";
 import { render, type RenderResult } from "@testing-library/react";
 import { vi } from "vitest";
 import {
