@@ -661,6 +661,41 @@ export async function dispatchPermissionHooksCommand(
   }
 }
 
+// ─── /allow <sentence> ─────────────────────────────────────────────────
+
+/**
+ * `/allow <sentence>` — the submit gesture for describing which pending
+ * approval scope you mean in your own words.
+ *
+ * It is a slash command, not context-dependent Enter, and not freeform prose.
+ * Of seven shipping agent hosts surveyed, zero accept natural language as a
+ * permission approval; Codex CLI's `/approve` is the closest precedent and it
+ * likewise resolves a *pending* permission state from an explicit command.
+ * This app already reads `/load` and `/permission dir allow|deny` the same way.
+ *
+ * The parser deliberately does almost nothing: it does not interpret the
+ * sentence, tokenize it, or look for path-like or negation-like substrings.
+ * Every past defect in the hand-written lexicon this replaces came from doing
+ * exactly that. The sentence is carried, whole and untouched, to a selector
+ * that may only pick from a table the host built. See
+ * {@link ./reviewer/approval-sentence-selector.js}.
+ */
+export interface PermissionAllowCommand {
+  verb: "allow";
+  /** The user's words, verbatim. Untrusted; the selector sanitizes and masks. */
+  sentence: string;
+}
+
+export function parsePermissionAllowCommand(
+  rawArgs: string,
+): PermissionAllowCommand | { ok: false; error: string } {
+  const sentence = rawArgs.trim();
+  if (sentence.length === 0) {
+    return { ok: false, error: "missing sentence — usage: /allow <what you want to permit>" };
+  }
+  return { verb: "allow", sentence };
+}
+
 // ─── Top-level /permission dispatcher (trust-origin gated) ─────────────
 
 /**
@@ -685,6 +720,12 @@ export type PermissionSlashOutcome =
   | { kind: "mode"; cmd: PermissionModeCommand; needsModal: boolean }
   | { kind: "rules"; cmd: PermissionRulesCommand; needsModal: false }
   | { kind: "hooks"; cmd: PermissionHooksCommand; needsModal: boolean }
+  /**
+   * `/allow <sentence>`. `needsModal` is false because the sentence grants
+   * nothing: it only proposes which of the pending approval's own buttons the
+   * user meant, and that button still has to be pressed.
+   */
+  | { kind: "allow"; cmd: PermissionAllowCommand; needsModal: false }
   | { kind: "parse-error"; error: string };
 
 /**
@@ -711,6 +752,16 @@ export function dispatchPermissionSlash(
     };
   }
   const trimmed = rawInput.trim();
+  // `/allow` shares this dispatcher, and therefore this trust-origin gate:
+  // agent output, tool results and remote-controller text reach the composer,
+  // and none of them may submit an approval sentence on the user's behalf.
+  if (trimmed === "/allow" || trimmed.startsWith("/allow ")) {
+    const parsed = parsePermissionAllowCommand(trimmed.slice("/allow".length));
+    if ("ok" in parsed && parsed.ok === false) {
+      return { kind: "parse-error", error: parsed.error };
+    }
+    return { kind: "allow", cmd: parsed as PermissionAllowCommand, needsModal: false };
+  }
   if (trimmed === "/permission") {
     return { kind: "show-current", needsModal: false };
   }

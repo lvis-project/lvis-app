@@ -26,6 +26,17 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "role-prompt-origin-restricted": "formatIpcError.rolePromptOriginRestricted",
   "persona-prompt-origin-restricted": "formatIpcError.personaPromptOriginRestricted",
 
+  // ── `/allow <sentence>` (issue #1940) ──
+  // Every outcome other than a proposal lands here. None of these may read as
+  // a grant, a partial grant, or "try again and it might work": each one says
+  // plainly that nothing happened and points back at the card's buttons, which
+  // are the only thing that can actually approve.
+  "allow-parse-error": "formatIpcError.allowParseError",
+  "allow-no-pending-request": "formatIpcError.allowNoPendingRequest",
+  "allow-selector-unavailable": "formatIpcError.allowSelectorUnavailable",
+  "allow-no-match": "formatIpcError.allowNoMatch",
+  "allow-selection-failed": "formatIpcError.allowSelectionFailed",
+
   // ── Permission manager / audit state ──
   "no-permission-manager": "formatIpcError.noPermissionManager",
   "permission-audit-not-ready": "formatIpcError.permissionAuditNotReady",

@@ -69,6 +69,7 @@ import type { PluginTelemetryClient } from "../telemetry/client.js";
 import type { HookRunner } from "../hooks/hook-runner.js";
 import type { ScriptHookManager } from "../hooks/script-hook-manager.js";
 import type { RationaleScopeReviewer } from "../permissions/reviewer/rationale-scope-reviewer.js";
+import type { ApprovalSentenceSelector } from "../permissions/reviewer/approval-sentence-selector.js";
 import type { RationaleHostService } from "../tools/pipeline/rationale-host-service.js";
 import type { A2ARemoteRuntime } from "../main/a2a-remote-runtime.js";
 import type { RemoteA2AActionController } from "../main/remote-a2a-action-controller.js";
@@ -171,6 +172,7 @@ export class BootContext {
    */
   declare mcpAppModelContext: McpAppModelContextStore;
   declare rationaleScopeReviewer: RationaleScopeReviewer;
+  declare approvalSentenceSelector: ApprovalSentenceSelector;
   declare rationaleHostService: RationaleHostService | undefined;
   declare rewireReviewerAgent: () => void;
 
@@ -296,6 +298,7 @@ const BOOT_CONTEXT_FIELDS = [
   "subscriptionProviderFactory",
   "mcpAppModelContext",
   "rationaleScopeReviewer",
+  "approvalSentenceSelector",
   "rationaleHostService",
   "rewireReviewerAgent",
   "hookRunner",

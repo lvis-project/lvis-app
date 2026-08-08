@@ -156,6 +156,11 @@ export const en = {
   "formatIpcError.subscriptionChatUnavailable": "This subscription chat is unavailable. Verify the sign-in and runtime, then try again.",
   "formatIpcError.subscriptionLogoutNotSupported": "This provider manages sign-out outside LVIS.",
   "formatIpcError.subscriptionProviderNotSupported": "This subscription provider is not supported.",
+  "formatIpcError.allowParseError": "Type /allow followed by what you'd like to permit.",
+  "formatIpcError.allowNoPendingRequest": "No approval is waiting right now, so /allow has nothing to answer.",
+  "formatIpcError.allowSelectorUnavailable": "/allow needs a configured language model. Pick one of the buttons on the approval card instead.",
+  "formatIpcError.allowNoMatch": "That sentence didn't clearly match one of the choices offered. Pick one of the buttons on the approval card.",
+  "formatIpcError.allowSelectionFailed": "That sentence couldn't be resolved. Pick one of the buttons on the approval card.",
   "formatIpcError.unknownError": "Unknown error",
   "formatIpcError.errorSuffix": " has occurred.",
 } as const;
@@ -316,6 +321,11 @@ export const ko: Record<keyof typeof en, string> = {
   "formatIpcError.subscriptionChatUnavailable": "이 구독 채팅을 지금 사용할 수 없습니다. 로그인과 런타임을 확인한 뒤 다시 시도하세요.",
   "formatIpcError.subscriptionLogoutNotSupported": "이 제공자는 LVIS 밖에서 로그아웃을 관리합니다.",
   "formatIpcError.subscriptionProviderNotSupported": "이 구독 제공자는 지원되지 않습니다.",
+  "formatIpcError.allowParseError": "/allow 뒤에 허용하려는 내용을 적어 주세요.",
+  "formatIpcError.allowNoPendingRequest": "지금 대기 중인 승인 요청이 없어 /allow 가 답할 대상이 없습니다.",
+  "formatIpcError.allowSelectorUnavailable": "/allow 를 쓰려면 언어 모델이 설정되어 있어야 합니다. 승인 카드의 버튼 중 하나를 눌러 주세요.",
+  "formatIpcError.allowNoMatch": "그 문장이 제시된 선택지 중 하나를 분명히 가리키지 않았습니다. 승인 카드의 버튼 중 하나를 눌러 주세요.",
+  "formatIpcError.allowSelectionFailed": "그 문장을 해석하지 못했습니다. 승인 카드의 버튼 중 하나를 눌러 주세요.",
   "formatIpcError.unknownError": "알 수 없는 오류",
   "formatIpcError.errorSuffix": "가 발생했습니다.",
 };
