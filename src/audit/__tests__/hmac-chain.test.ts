@@ -17,7 +17,6 @@ import {
   chmodSync,
   mkdirSync,
   mkdtempSync,
-  rmSync,
   writeFileSync,
   existsSync,
   readdirSync,
@@ -25,6 +24,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   buildChainedEntries,
   computeDailySeal,
@@ -50,8 +50,8 @@ beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), "lvis-hmac-chain-"));
 });
 
-afterEach(() => {
-  if (existsSync(workDir)) rmSync(workDir, { recursive: true, force: true });
+afterEach(async () => {
+  if (existsSync(workDir)) await cleanupTmpDir(workDir);
 });
 
 describe("ensureAuditSecret", () => {
