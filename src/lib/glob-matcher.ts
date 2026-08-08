@@ -32,6 +32,27 @@ export function globMatch(
   return globToRegExp(pattern, { caseInsensitive }).test(normalizeGlobPath(path));
 }
 
+/**
+ * Whether `value` would be read as a pattern rather than as itself.
+ *
+ * Callers that derive a pattern from a real name — a filesystem path the user
+ * read on an approval card, say — need this before storing that string
+ * somewhere it will later be glob-matched. A directory literally named
+ * `Reports*2024` is a legal name on macOS and Linux, and storing it as a
+ * pattern silently widens whatever it authorises to every sibling matching
+ * `Reports<anything>2024`.
+ *
+ * Rejection is the only available defence, because this grammar cannot express
+ * a literal metacharacter: `globToRegExpSource` has no backslash-escape branch,
+ * and `normalizeGlobPath` rewrites `\` to `/` before it ever runs. Everything
+ * else — brackets and braces included — already reaches `escapeRegex` and is
+ * matched literally, so `*` and `?` are the whole set. `__tests__` pins that
+ * claim against the matcher itself rather than restating it.
+ */
+export function containsGlobMetacharacter(value: string): boolean {
+  return value.includes("*") || value.includes("?");
+}
+
 function globToRegExpSource(pattern: string): string {
   let out = "";
   let i = 0;
