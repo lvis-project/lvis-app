@@ -89,7 +89,8 @@ describe("parseViewKey", () => {
 describe("inline vs detachable", () => {
   it("agrees with the table for every built-in", () => {
     for (const [key, spec] of Object.entries(BUILTIN_VIEWS)) {
-      expect(isInlineViewKey(key)).toBe(spec.inline);
+      // Every built-in renders inline; only detachability varies.
+      expect(isInlineViewKey(key)).toBe(true);
       expect(isDetachableViewKey(key)).toBe(spec.detachable);
     }
   });
@@ -99,11 +100,6 @@ describe("inline vs detachable", () => {
     // that renders nothing.
     expect(isDetachableViewKey("home")).toBe(false);
     expect(isDetachableViewKey("settings")).toBe(false);
-  });
-
-  it("keeps a detach-only destination out of the inline space", () => {
-    expect(isInlineViewKey("reminders")).toBe(false);
-    expect(parseInlineViewKey("reminders")).toBeNull();
   });
 
   it("treats MCP-app cards as detach-only", () => {
@@ -136,11 +132,14 @@ describe("inline vs detachable", () => {
 });
 
 describe("DETACHABLE_VIEW_KEY_PATTERN", () => {
-  it("matches isDetachableViewKey for every built-in — one authority, two forms", () => {
-    // The pattern is what the main process validates the detach IPC against;
-    // if it and the predicate disagree, one of them is lying about the table.
-    for (const key of Object.keys(BUILTIN_VIEWS)) {
-      expect(DETACHABLE_VIEW_KEY_PATTERN.test(key)).toBe(isDetachableViewKey(key));
+  it("carries exactly the table's detachable built-ins", () => {
+    // The pattern is what the main process validates the detach IPC against,
+    // and it is BUILT from the table by string-joining the detachable keys.
+    // Compare it to the table itself: comparing it to `isDetachableViewKey`
+    // compares it to `DETACHABLE_VIEW_KEY_PATTERN.test`, which is the same
+    // expression and so could never fail.
+    for (const [key, spec] of Object.entries(BUILTIN_VIEWS)) {
+      expect(DETACHABLE_VIEW_KEY_PATTERN.test(key)).toBe(spec.detachable);
     }
   });
 
@@ -186,9 +185,10 @@ describe("the table itself", () => {
     }
   });
 
-  it("has no destination that is neither inline nor detachable", () => {
-    for (const [key, spec] of Object.entries(BUILTIN_VIEWS)) {
-      expect(spec.inline || spec.detachable, `${key} is unreachable`).toBe(true);
-    }
+  it("still excludes MCP-app cards from the inline space", () => {
+    // The inline/detach split is now carried by key SHAPE, not a table column,
+    // so this is the assertion that keeps the split real.
+    expect(isInlineViewKey("mcp-app:6162:card-1")).toBe(false);
+    expect(isDetachableViewKey("mcp-app:6162:card-1")).toBe(true);
   });
 });
