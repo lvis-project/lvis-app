@@ -93,6 +93,7 @@ import { ko as ko_defaultTourScenarios } from "../generated/defaultTourScenarios
 import { ko as ko_deferredApprovalChip } from "../generated/deferredApprovalChip.js";
 import { ko as ko_deferredQueueDialog } from "../generated/deferredQueueDialog.js";
 import { ko as ko_deferredQueuePanel } from "../generated/deferredQueuePanel.js";
+import { ko as ko_dockedApprovalCard } from "../generated/dockedApprovalCard.js";
 import { ko as ko_detachedView } from "../generated/detachedView.js";
 import { ko as ko_devToolsPanel } from "../generated/devToolsPanel.js";
 import { ko as ko_errorBoundary } from "../generated/errorBoundary.js";
@@ -121,7 +122,6 @@ import { ko as ko_messageQueuePanel } from "../generated/messageQueuePanel.js";
 import { ko as ko_messageQueueStore } from "../generated/messageQueueStore.js";
 import { ko as ko_midnight } from "../generated/midnight.js";
 import { ko as ko_nord } from "../generated/nord.js";
-import { ko as ko_outOfAllowedDirCard } from "../generated/outOfAllowedDirCard.js";
 import { ko as ko_overlayCard } from "../generated/overlayCard.js";
 import { ko as ko_overlayCardRegion } from "../generated/overlayCardRegion.js";
 import { ko as ko_permissionDecisionCard } from "../generated/permissionDecisionCard.js";
@@ -284,6 +284,7 @@ export const koMessages: Record<string, string> = {
   ...ko_deferredApprovalChip,
   ...ko_deferredQueueDialog,
   ...ko_deferredQueuePanel,
+  ...ko_dockedApprovalCard,
   ...ko_detachedView,
   ...ko_devToolsPanel,
   ...ko_errorBoundary,
@@ -312,7 +313,6 @@ export const koMessages: Record<string, string> = {
   ...ko_messageQueueStore,
   ...ko_midnight,
   ...ko_nord,
-  ...ko_outOfAllowedDirCard,
   ...ko_overlayCard,
   ...ko_overlayCardRegion,
   ...ko_permissionDecisionCard,

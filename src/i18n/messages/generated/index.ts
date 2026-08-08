@@ -98,6 +98,7 @@ import { en as en_composerPlaceholder } from "./composerPlaceholder.js";
 import { en as en_composerProjectSelector } from "./composerProjectSelector.js";
 import { en as en_constants } from "./constants.js";
 import { en as en_customTitleBar } from "./customTitleBar.js";
+import { en as en_dockedApprovalCard } from "./dockedApprovalCard.js";
 import { en as en_defaultTourScenarios } from "./defaultTourScenarios.js";
 import { en as en_deferredApprovalChip } from "./deferredApprovalChip.js";
 import { en as en_deferredQueueDialog } from "./deferredQueueDialog.js";
@@ -130,7 +131,6 @@ import { en as en_messageQueuePanel } from "./messageQueuePanel.js";
 import { en as en_messageQueueStore } from "./messageQueueStore.js";
 import { en as en_midnight } from "./midnight.js";
 import { en as en_nord } from "./nord.js";
-import { en as en_outOfAllowedDirCard } from "./outOfAllowedDirCard.js";
 import { en as en_overlayCard } from "./overlayCard.js";
 import { en as en_overlayCardRegion } from "./overlayCardRegion.js";
 import { en as en_permissionDecisionCard } from "./permissionDecisionCard.js";
@@ -200,6 +200,7 @@ import { en as en_workGroup } from "./workGroup.js";
 
 export const generatedEn: Record<string, string> = {
   ...en_actionPanel,
+  ...en_dockedApprovalCard,
   ...en_app,
   ...en_appearanceTab,
   ...en_approvalAttribution,
@@ -321,7 +322,6 @@ export const generatedEn: Record<string, string> = {
   ...en_messageQueueStore,
   ...en_midnight,
   ...en_nord,
-  ...en_outOfAllowedDirCard,
   ...en_overlayCard,
   ...en_overlayCardRegion,
   ...en_permissionDecisionCard,
