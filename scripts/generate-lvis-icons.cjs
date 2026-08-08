@@ -1,10 +1,11 @@
 const { mkdirSync, readFileSync, writeFileSync } = require("node:fs");
-const { join, resolve } = require("node:path");
+const { join, relative, resolve, sep } = require("node:path");
 const { deflateSync } = require("node:zlib");
 
 const root = resolve(__dirname, "..");
 const buildDir = join(root, "build");
 const logoSourcePath = join(root, "src", "shared", "lvis-logo.ts");
+const manifestPath = join(buildDir, "generated-assets.json");
 
 const TARGET_SIZE = 1024;
 const SUPERSAMPLE = 2;
@@ -483,6 +484,21 @@ function encodeIco(sourceRgba, sourceSize, sizes) {
   return Buffer.concat([header, ...images.map((image) => image.png)]);
 }
 
+/**
+ * Every asset write goes through `emit` so the set of generated paths has a
+ * single authority. The manifest written at the end of `main` is that set, and
+ * `scripts/check-generated-assets.mjs` reads it rather than keeping its own
+ * copy of the list — add an output here and the guard covers it with no second
+ * edit. The progress log is derived from the same record, so it can no longer
+ * drift out of sync with what was actually written.
+ */
+const emitted = [];
+
+function emit(path, contents) {
+  writeFileSync(path, contents);
+  emitted.push(path);
+}
+
 function main() {
   mkdirSync(buildDir, { recursive: true });
 
@@ -496,29 +512,31 @@ function main() {
   const installerHeaderIconPath = join(buildDir, "installerHeaderIcon.ico");
   const iconRgba = rasterizeIcon(logoPath, geometry);
   const installerIco = encodeIco(iconRgba, TARGET_SIZE, WINDOWS_ICO_SIZES);
-  writeFileSync(svgPath, buildIconSvg(logoPath, geometry));
-  writeFileSync(pngPath, encodePng(TARGET_SIZE, TARGET_SIZE, iconRgba));
-  writeFileSync(installerIconPath, installerIco);
-  writeFileSync(installerHeaderIconPath, installerIco);
+  emit(svgPath, buildIconSvg(logoPath, geometry));
+  emit(pngPath, encodePng(TARGET_SIZE, TARGET_SIZE, iconRgba));
+  emit(installerIconPath, installerIco);
+  emit(installerHeaderIconPath, installerIco);
   for (const scaleFactor of TRAY_ICON_SCALE_FACTORS) {
     const targetSize = TRAY_ICON_BASE_SIZE * scaleFactor;
     const suffix = scaleFactor === 1 ? "" : "@2x";
-    writeFileSync(
+    emit(
       join(buildDir, `tray-icon${suffix}.png`),
       encodePng(targetSize, targetSize, rasterizeTrayLineIcon(logoPath, viewBox, targetSize, [255, 255, 255, 255])),
     );
-    writeFileSync(
+    emit(
       join(buildDir, `tray-iconTemplate${suffix}.png`),
       encodePng(targetSize, targetSize, rasterizeTrayLineIcon(logoPath, viewBox, targetSize, [0, 0, 0, 255])),
     );
   }
 
-  console.log(`Generated ${svgPath}`);
-  console.log(`Generated ${pngPath}`);
-  console.log(`Generated ${installerIconPath}`);
-  console.log(`Generated ${installerHeaderIconPath}`);
-  console.log(`Generated ${join(buildDir, "tray-icon.png")}`);
-  console.log(`Generated ${join(buildDir, "tray-iconTemplate.png")}`);
+  // Repository-relative POSIX paths: the guard compares them against `git
+  // ls-files` output, which is always POSIX-separated regardless of platform.
+  const manifest = emitted
+    .map((path) => relative(root, path).split(sep).join("/"))
+    .sort();
+  writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  for (const path of emitted) console.log(`Generated ${path}`);
 }
 
 main();
