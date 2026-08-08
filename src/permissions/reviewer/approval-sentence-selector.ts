@@ -112,7 +112,7 @@ export type ApprovalSentenceSelection =
   | { outcome: "malformed" };
 
 /** Implemented by both the live selector and the no-provider stand-in. */
-interface ApprovalSentenceSelector {
+export interface ApprovalSentenceSelector {
   select(input: ApprovalSentenceSelectionInput): Promise<ApprovalSentenceSelection>;
 }
 

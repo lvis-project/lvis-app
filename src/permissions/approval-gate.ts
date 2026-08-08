@@ -567,6 +567,16 @@ interface PendingEntry {
   sourcePluginId?: string;
   approvalScope?: string;
   /**
+   * Host-resolved directory scope carried from the request. `/allow` reads it
+   * from HERE, not from the renderer's copy: the renderer sends only a request
+   * id and a sentence, so the paths an approval sentence can ever resolve to
+   * are the ones this process derived when it raised the prompt.
+   */
+  outOfAllowedDir?: {
+    candidatePath: string;
+    suggestedParent: string | null;
+  };
+  /**
    * Issue #799 — approval cache key captured server-side at request emit
    * time. The userApprovalRecord IPC handler reads this via
    * {@link ApprovalGate.getRequestSnapshot} instead of trusting the renderer
@@ -1459,6 +1469,14 @@ export class ApprovalGate {
         source: fullReq.source,
         sourcePluginId: fullReq.sourcePluginId,
         approvalScope: fullReq.approvalScope,
+        ...(fullReq.outOfAllowedDir === undefined
+          ? {}
+          : {
+              outOfAllowedDir: {
+                candidatePath: fullReq.outOfAllowedDir.candidatePath,
+                suggestedParent: fullReq.outOfAllowedDir.suggestedParent,
+              },
+            }),
         approvalCacheKey: fullReq.approvalCacheKey,
         durableApprovalRecordAllowed,
         ...(executionPlanAudit === undefined
@@ -1691,6 +1709,40 @@ export class ApprovalGate {
       trustOrigin: entry.trustOrigin,
       approvalCacheKey: entry.approvalCacheKey,
       durableApprovalRecordAllowed: entry.durableApprovalRecordAllowed,
+    };
+  }
+
+  /**
+   * Issue #1940 — the host's own view of a pending out-of-allowed-dir request,
+   * for `/allow`.
+   *
+   * The renderer sends a request id and a sentence. Everything the option
+   * table and the selector envelope are built from is read back out of THIS
+   * map, so a renderer that lies about a path, a tool name or a set of allowed
+   * choices changes nothing: it is describing a request the host resolved.
+   *
+   * Returns `null` for any other kind, and for a request that already
+   * resolved or timed out. `/allow` has no meaning without a live prompt, and
+   * a stale id must not produce one.
+   */
+  getApprovalSentenceState(requestId: string): {
+    toolName: string;
+    toolCategory: ToolCategory | undefined;
+    source: "builtin" | "plugin" | "mcp";
+    candidatePath: string;
+    suggestedParent: string | null;
+    allowedChoices: readonly ApprovalChoice[] | undefined;
+  } | null {
+    const entry = this.pending.get(requestId);
+    if (!entry || entry.kind !== "out-of-allowed-dir") return null;
+    if (!entry.outOfAllowedDir) return null;
+    return {
+      toolName: entry.toolName,
+      toolCategory: entry.toolCategory,
+      source: entry.source ?? "builtin",
+      candidatePath: entry.outOfAllowedDir.candidatePath,
+      suggestedParent: entry.outOfAllowedDir.suggestedParent,
+      allowedChoices: entry.allowedChoices,
     };
   }
 
