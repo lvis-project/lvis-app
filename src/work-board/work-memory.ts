@@ -1,5 +1,5 @@
 /**
- * Work-flow memory for the host Work Board (Hermes "Memory" pillar).
+ * Work-flow memory for the host Work Board (the "Memory" pillar).
  *
  * Markdown files under `memories/` in the work-board namespace
  * (`~/.lvis/work-board/memories/`), with per-project copies under
@@ -8,7 +8,7 @@
  *                   auto-overwritten; the user edits it freely.
  *   - `MEMORY.md` — learned work-flow patterns (recurring topics, throughput,
  *                   deadline-slip tendencies). Bounded by a HARD LINE CAP with
- *                   NO auto-compaction (Hermes rule): once the cap is hit the
+ *                   NO auto-compaction (deliberate): once the cap is hit the
  *                   oldest *body* lines are dropped (FIFO), but nothing is
  *                   summarised or rewritten behind the user's back.
  *

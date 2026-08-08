@@ -802,7 +802,7 @@ _lvis-app 측:_
 
 - **Worker.** 1 명 (single-thread). manifest + tsup config + version bump 는 충돌 위험이 가장 큰 _기반_ 변경이므로 동시 작업하지 않는다.
 - **목표 산출.** `lvis-plugin-agent-hub@0.2.0` 의 manifest 가 main 에 머지되고, `bun run build` 가 새 entry `dist/ui/agent-hub-panel-v3.js` (placeholder) 를 emit. 기존 v2.1 entry 는 _그대로 동작_.
-- **검증.** Copilot review loop (lvis-project/CLAUDE.md 의 머지 가능 조건) — 0 inline 코멘트 또는 MAJOR 0 + 3 round.
+- **검증.** 자동 코드 리뷰 루프 (lvis-project 의 머지 가능 조건) — 0 inline 코멘트 또는 MAJOR 0 + 3 round.
 - **W1 종료 조건.** plugin@0.2.0 이 host 안에서 enabled, 기존 v2.1 panel 이 여전히 정상 mount, 새 v3 panel placeholder 도 (빈 div) mount 됨.
 
 ### Wave 2 — Lane 2/3/4/7 + Lane 5 contract 정의 (4 병렬 worker)
@@ -827,11 +827,11 @@ _lvis-app 측:_
 - **검증.** Lane 9 의 Playwright e2e 가 CI 에서 green. Lane 6 의 시각적 회귀는 Playwright snapshot 으로 잡는다 (lvis-app/CLAUDE.md 의 "테마/색상/투명도 / dialog/modal / chat 흐름 변경 → e2e 필수").
 - **W3 종료 조건.** v3 UI 가 dev / prod 빌드에서 모두 mount, host §8 ApprovalGate 가 plugin → renderer modal → backend decideApproval 의 끝-끝 round-trip 성공.
 
-### Wave 4 — Lane 8 통합 + Copilot review loop
+### Wave 4 — Lane 8 통합 + 자동 코드 리뷰 루프
 
 - **Worker.** 1명 (release driver).
 - **목표 산출.** plugin v0.2.0 release tag, marketplace catalog publish, host architecture.md §10 update, RELEASING.md 갱신, lvis-app/TODO.md sweep (구 v2.1 IA 관련 row 정리, v3 GA 신호 표기).
-- **검증.** 모든 cross-repo PR 의 Copilot review loop (lvis-project/CLAUDE.md): MAJOR 0 + 3 round 또는 0 inline. 머지 후 main green smoke test.
+- **검증.** 모든 cross-repo PR 의 자동 코드 리뷰 루프 (lvis-project 머지 조건): MAJOR 0 + 3 round 또는 0 inline. 머지 후 main green smoke test.
 - **W4 종료 조건.** marketplace 에서 사용자가 agent-hub 0.2.0 install → v3 UI 정상 mount → 모든 카드 render → 승인 bridge 동작.
 
 ---
@@ -1048,8 +1048,8 @@ PR description must:
   msgraph_calendar_update) will arrive in Lane 4
 
 After PR open:
-- Run the Copilot Re-request review loop per lvis-project/CLAUDE.md until
-  Copilot returns 0 inline comments OR (MAJOR=0 AND 3 rounds reached).
+- Run the automated re-request review loop per the lvis-project merge conditions
+  until the reviewer returns 0 inline comments OR (MAJOR=0 AND 3 rounds reached).
 - Do not merge if any MAJOR is open.
 - After merge, run `bun run build` once in /tmp/agent-hub/L1/lvis-plugin-agent-hub
   to confirm dist/ui/agent-hub-panel-v3.js exists. If build does not produce

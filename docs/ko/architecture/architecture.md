@@ -468,7 +468,7 @@ flowchart TB
 
 - Bundled Skill은 `manifest.skills`에서 발견되며 instruction만 기여한다.
 - 자연어 Tool 선택은 모델과 `tool_search` 경로가 담당한다.
-- Agent Hub는 paperclip의 board와 유사한 **비동기 메시지 보드**이며, 에이전트가 백그라운드에서 자율 실행되는 서버를 의미하지 않는다.
+- Agent Hub는 **비동기 메시지 보드**이며, 에이전트가 백그라운드에서 자율 실행되는 서버를 의미하지 않는다.
 
 ### 4.4 Local Index Engine — 로컬 검색 엔진 LLD
 
@@ -1103,8 +1103,8 @@ flowchart TB
 | 시스템 | 관찰된 처리 방식 | LVIS 반영 |
 | --------------------------------- | ------------------------------------------------------- | -------------------------------------------- |
 | **Provider-neutral event stream** | tool_use / tool_result를 순서 있는 스트림 이벤트로 유지 | group card는 UI 표현 계층에서만 형성 |
-| **OpenHarness** | 실행 run 단위를 구조화해 추적 | LVIS도 tool round를 `groupId` 단위로 추적 |
-| **Paperclip / PaperclipAI** | thinking, tool call, tool result, assistant를 분리 기록 | reasoning card와 assistant round를 분리 유지 |
+| **구조화된 run 추적** | 실행 run 단위를 구조화해 추적 | LVIS도 tool round를 `groupId` 단위로 추적 |
+| **역할별 분리 기록** | thinking, tool call, tool result, assistant를 분리 기록 | reasoning card와 assistant round를 분리 유지 |
 
 Chat은 단일 `ChatView` 컴포넌트를 통해 렌더링된다 (issue #547). PR #473에서 도입된 `StackedChatView` 컴포넌트는 제거되었으며 — Kakao-style 연속 스트림, day separator, token chip, WorkGroup 등 설계 의도는 `ChatView`에 직접 흡수되었다. 태그 `v1-chat` (`24191323`)이 회귀 경계로 유지된다 — chat 동작은 해당 지점 이전으로 회귀해서는 안 된다.
 
@@ -2573,7 +2573,7 @@ SDK 에는 fallback artifact (JSON / CSS / TS const) 가 없으며, plugin 은
 
 ## 6.10 ChatSidePanel & Workspace Rail — 목표 모델
 
-> **상태 표기:** 이 섹션은 ChatSidePanel(우측 워크스페이스 레일) 재설계의 **목표(TARGET) 아키텍처**를 정의한다. 레퍼런스 이슈 **#1415**(Hermes Desktop)가 요구한 _데이터 모델 우선_ 설계 — preview-target 스토어 + 공통 open action — 을 정본으로 삼는다.
+> **상태 표기:** 이 섹션은 ChatSidePanel(우측 워크스페이스 레일) 재설계의 **목표(TARGET) 아키텍처**를 정의한다. 레퍼런스 이슈 **#1415**가 요구한 _데이터 모델 우선_ 설계 — preview-target 스토어 + 공통 open action — 을 정본으로 삼는다.
 >
 > 구현은 아래 "단계별 PR 플랜"에 따라 점진적으로 이루어진다. **PR-0**(이 섹션) + **PR-1**(state lift)이 기반(foundation)이며, PR-2~PR-6+ 가 나머지 목표를 실현한다. 각 subsection 은 별도 표기가 없으면 *목표 상태*를 기술한다. 현재 코드 상태와 다른 부분은 "현재 →目標" 로 명시한다.
 
@@ -3777,39 +3777,13 @@ graph LR
 
 **각 단계별 의존 요소:**
 
-| 단계 | 핵심 기능 | 공개 비교 참고 |
-|----------------------- |-------------------------------------------------------------- |------------------------------------------- |
-| **Work Board Pilot** | Read-only my/team work view + 호스트 Task 호환 | Warp 작업 추적, 기본 필드 정렬 |
-| **Message Board Pilot** | Direct 1:1 메시지 POC 완료, 팀 채널/수신 정책은 후속 | PaperclipAI 메시지 분류, 코드 컨텍스트 UX |
-| **Approval/Governance** | `approval_requests` verdict 상태 POC 완료, UI/정책 엔진은 후속 | PaperclipAI 워크플로우, Warp run transcript |
-| **A2A Runtime** | 에이전트 레지스트리 + 위임 proto + 합의 프로토콜 | peer agent model, A2A task lifecycle |
-| **Enterprise Rollout** | 감사 로그, SLA 추적, 롤아웃 정책, 조직 관리 | PaperclipAI 예산/감사, Warp 트리거 |
-
-### 10.0.2 Public Comparison Inputs
-
-현재 산업 구현은 UX/API 동작 비교 참고로만 사용한다. LVIS 구현은 내부 요구사항, 보안 검토, 공개 사양을 기준으로 독립 작성한다.
-
-**PaperclipAI / Paperclip** (공개 agent control-plane UX/API 비교; 구현 출처 아님):
-- Org/task workflow 승인 게이트
-- Durable audit & activity history
-- Budget/cost tracking for agent work
-- Routines & scheduled tasks
-- **참고 가능**: 승인 상태 머신, 감사 로그 구조, 정책 판별 플로우
-
-**OpenCode** (공개 코드 컨텍스트 및 권한 UX/API 비교):
-- Per-tool allow/ask/deny permission hierarchy
-- Context/config layer management (repo → file → line)
-- Undo/redo & session state persistence
-- **참고 가능**: Tool-level 범위 정책, 메시지 컨텍스트 계층
-
-**Warp/Oz** (작업 생명주기 & 관리 뷰):
-- Task lifecycle (blocked/running/completed)
-- Persistent transcript & run history
-- Management view with status, integrations, codebase context
-- Trigger/integration & team collaboration
-- **참고 가능**: Work 상태 추적, 트랜스크립트 저장, 팀 볼 수 있는 관리 패널
-
-이 비교 항목들은 우리 실제 요구사항(범위 공개, 승인, 감사)과 겹치는 부분이 많으며, 각 phase 설계 시 공개 동작 수준에서만 참고한다.
+| 단계 | 핵심 기능 |
+|----------------------- |-------------------------------------------------------------- |
+| **Work Board Pilot** | Read-only my/team work view + 호스트 Task 호환 |
+| **Message Board Pilot** | Direct 1:1 메시지 POC 완료, 팀 채널/수신 정책은 후속 |
+| **Approval/Governance** | `approval_requests` verdict 상태 POC 완료, UI/정책 엔진은 후속 |
+| **A2A Runtime** | 에이전트 레지스트리 + 위임 proto + 합의 프로토콜 |
+| **Enterprise Rollout** | 감사 로그, SLA 추적, 롤아웃 정책, 조직 관리 |
 
 ### 10.0.3 Direction Update (2026-06-16): Host-Integrated Agentic Work Board
 
@@ -3829,7 +3803,7 @@ graph LR
 
 **Agent Hub(A2A) 와의 구분:** §10 의 Agent Hub(A2A message board)는 _에이전트 간 비동기 메시징_(이영희 레플리카에게 전달)이고, Work Board(본 절)는 _사용자 자신의 작업을 자신의 서브에이전트가 자율 실행_ 하는 축이다. 두 축은 §10 우산 아래 공존한다.
 
-**Hermes 차용:** Skills = agent profile, Memory = `~/.lvis/work-board/memories/{USER,MEMORY}.md` (업무 흐름 학습), Crons = RoutinesScheduler 연동 예약 실행, Self-improvement = run 결과로 skill/memory 보정.
+**차용한 구성 요소:** Skills = agent profile, Memory = `~/.lvis/work-board/memories/{USER,MEMORY}.md` (업무 흐름 학습), Crons = RoutinesScheduler 연동 예약 실행, Self-improvement = run 결과로 skill/memory 보정.
 
 **Supersedes:** `lvis-agent-hub` 서버 + `lvis-plugin-agent-hub` 플러그인은 Work Board 기능에 대해 디커미션(서버 2026-06-15 셧다운). 저장소 `~/.lvis/plugins/agent-hub/board.json` → `~/.lvis/work-board/board.json` (부팅 1회 마이그레이션). `work_item.due_soon {itemId,title,notifiedAt}` 계약은 호스트가 계속 emit (work-assistant 소비 보존).
 
