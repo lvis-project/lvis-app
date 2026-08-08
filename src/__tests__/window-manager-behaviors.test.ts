@@ -168,7 +168,7 @@ function injectChild(
   type Children = Map<number, { window: MockWindow; viewKey: string; locked?: boolean; snappedTo?: number; snapEdge?: string }>;
   (wm as unknown as { _children: Children })._children.set(win.id, {
     window: win,
-    viewKey: "reminders",
+    viewKey: "routines",
     ...extra,
   });
 }
@@ -516,7 +516,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
       deferWm.registerMainWindow(maximizedMain as never);
 
       const bwSizeBefore = bwStore.size;
-      deferWm.openDetachedTab("reminders");
+      deferWm.openDetachedTab("routines");
 
       expect(bwStore.size).toBeGreaterThan(bwSizeBefore);
       const childId = [...bwStore.keys()].find(
@@ -594,7 +594,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
       normalWm.registerMainWindow(normalMain as never);
 
       const bwSizeBefore = bwStore.size;
-      normalWm.openDetachedTab("reminders");
+      normalWm.openDetachedTab("routines");
 
       const childId = [...bwStore.keys()].find(
         (id) => id !== normalMain.id && id !== mainWin.id && id >= 301
@@ -1140,7 +1140,7 @@ describe("WindowManager — magnetic snap behaviors", () => {
         moveWm.registerMainWindow(moveMain as never);
         const moveSpy = vi.spyOn(moveWm as unknown as { _onChildMove: (id: number) => void }, "_onChildMove");
 
-        moveWm.openDetachedTab("reminders");
+        moveWm.openDetachedTab("routines");
         const child = [...bwStore.values()].find((win) => win.id !== moveMain.id && win.id >= 1000)!;
         let childBounds = { x: 1000, y: 200, width: 400, height: 800 };
         (child.getBounds as ReturnType<typeof vi.fn>).mockImplementation(() => childBounds);

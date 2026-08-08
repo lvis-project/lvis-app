@@ -101,11 +101,6 @@ describe("inline vs detachable", () => {
     expect(isDetachableViewKey("settings")).toBe(false);
   });
 
-  it("keeps a detach-only destination out of the inline space", () => {
-    expect(isInlineViewKey("reminders")).toBe(false);
-    expect(parseInlineViewKey("reminders")).toBeNull();
-  });
-
   it("treats MCP-app cards as detach-only", () => {
     expect(isDetachableViewKey("mcp-app:6162:card-1")).toBe(true);
     expect(isInlineViewKey("mcp-app:6162:card-1")).toBe(false);
