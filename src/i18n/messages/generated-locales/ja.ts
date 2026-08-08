@@ -2643,6 +2643,8 @@ export const jaMessages: Record<string, string> = {
   "turnActionBar.retryButton": "リトライ（深さ：高）",
   "turnActionBar.sendButton": "送信",
   "turnActionBar.starButton": "ピン",
+  "viewPathNav.backTo": "{label}に戻る",
+  "viewPathNav.forwardTo": "{label}に進む",
   "viewPathNav.back": "戻る",
   "viewPathNav.forward": "進む",
   "viewPathNav.ariaLabel": "現在の場所",

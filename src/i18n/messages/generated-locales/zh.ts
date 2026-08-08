@@ -2643,6 +2643,8 @@ export const zhMessages: Record<string, string> = {
   "turnActionBar.retryButton": "重试（深度：高）",
   "turnActionBar.sendButton": "发送",
   "turnActionBar.starButton": "别针",
+  "viewPathNav.backTo": "返回{label}",
+  "viewPathNav.forwardTo": "前进到{label}",
   "viewPathNav.back": "后退",
   "viewPathNav.forward": "前进",
   "viewPathNav.ariaLabel": "当前位置",

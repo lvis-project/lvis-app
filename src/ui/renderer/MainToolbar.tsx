@@ -123,11 +123,11 @@ export function MainToolbar({
           the first place. Rendering the path there put it behind the card.
           Width-capped so a long path truncates instead of eating the spacer
           the user grabs to move the window. */}
-      {/* Hidden below `md`: at the 460px chat width the band is already spent
-          on the sidebar card, the mode toggle and the window controls, leaving
-          ~26px here. A 26px path is not a path, so it is withheld rather than
-          rendered as a sliver — and the space returns to the drag region. */}
-      <NoDrag className="hidden min-w-0 max-w-[45%] shrink items-center md:flex">
+      {/* The BUTTONS stay at every width; only the path text collapses below
+          `md`. At the 460px chat width the band cannot fit a readable path,
+          but losing the way to go back with it would leave chat mode without
+          navigation at all (owner decision). */}
+      <NoDrag className="flex min-w-0 max-w-[45%] shrink items-center">
         <ViewPathNav {...viewNav} />
       </NoDrag>
 
