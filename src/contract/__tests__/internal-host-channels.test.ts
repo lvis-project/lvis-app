@@ -44,7 +44,6 @@ describe("#1409 out-of-tree host channels are classified INTERNAL", () => {
       "lvis:settings-window:tab",
     ]);
     expect(INTERNAL_HOST_CHANNELS.detachedWindow).toEqual([
-      "lvis:window:open-detached",
       "lvis:window:close-detached",
       "lvis:window:list-detached",
       "lvis:window:close-all-detached",
