@@ -17,8 +17,7 @@ import "./setup.js";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
-import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
-import { activeSettingsTab } from "./helpers.js";
+import { activeSettingsTab, settingsWithActiveView } from "./helpers.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -42,17 +41,6 @@ function sidebarView(pluginId: string, viewId: string) {
   };
 }
 
-/** Settings as they would be on disk from a previous run. */
-function settingsWithActiveView(activeView: string, settingsTab?: string) {
-  return {
-    ...MOCK_DEFAULT_SETTINGS,
-    system: {
-      closeBehavior: "hide-to-tray",
-      activeView,
-      ...(settingsTab ? { settingsTab } : {}),
-    },
-  };
-}
 
 function isActive(container: HTMLElement, testId: string): boolean {
   return container

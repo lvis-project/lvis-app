@@ -6,7 +6,15 @@ import { MainToolbar } from "../MainToolbar.js";
 
 function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}) {
   return {
-    activeView: "home",
+    leadClearance: 64,
+    viewNav: {
+      segments: [{ key: "home", label: "홈" }],
+      canGoBack: false,
+      canGoForward: false,
+      onBack: vi.fn(),
+      onForward: vi.fn(),
+      onSelectSegment: vi.fn(),
+    },
     streaming: false,
     hasApiKey: true as boolean | null,
     appMode: "work" as const,
@@ -39,7 +47,18 @@ describe("MainToolbar", () => {
   });
 
   it("does not render a Home button (Home nav is owned by the Sidebar)", () => {
-    renderWithProvider(defaultProps({ activeView: "memory" }));
+    // The band names the current location in the path, but it never offers a
+    // Home control of its own.
+    renderWithProvider(defaultProps({
+      viewNav: {
+        segments: [{ key: "memory", label: "메모리" }],
+        canGoBack: true,
+        canGoForward: false,
+        onBack: vi.fn(),
+        onForward: vi.fn(),
+        onSelectSegment: vi.fn(),
+      },
+    }));
     expect(screen.queryByTitle("홈")).toBeNull();
   });
 
