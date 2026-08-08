@@ -39,9 +39,9 @@ import { GripHorizontal, X } from "lucide-react";
 import { McpAppView } from "./McpAppView.js";
 import { useTranslation } from "../../../i18n/react.js";
 import {
-  getPipOccupant,
+  getSlotOccupant,
   reviveCardIfAt,
-  subscribePipOccupant,
+  subscribeSlotOccupant,
 } from "../state/mcp-app-card-location-store.js";
 
 /** Panel chrome default size — the conventional picture-in-picture panel footprint. */
@@ -86,7 +86,12 @@ function clampPosition(pos: Position): Position {
 
 export function McpAppPipPanel() {
   const { t } = useTranslation();
-  const occupant = useSyncExternalStore(subscribePipOccupant, getPipOccupant);
+  const subscribe = useCallback(
+    (listener: () => void) => subscribeSlotOccupant("pip", listener),
+    [],
+  );
+  const getSnapshot = useCallback(() => getSlotOccupant("pip"), []);
+  const occupant = useSyncExternalStore(subscribe, getSnapshot);
   const [position, setPosition] = useState<Position>(defaultPosition);
   const dragCleanupRef = useRef<(() => void) | null>(null);
 
