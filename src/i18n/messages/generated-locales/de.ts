@@ -2602,6 +2602,8 @@ export const deMessages: Record<string, string> = {
   "turnActionBar.retryButton": "Wiederholen (Tiefe: hoch)",
   "turnActionBar.sendButton": "Schicken",
   "turnActionBar.starButton": "Anheften",
+  "viewPathNav.backTo": "Zurück zu {label}",
+  "viewPathNav.forwardTo": "Weiter zu {label}",
   "viewPathNav.back": "Zurück",
   "viewPathNav.forward": "Weiter",
   "viewPathNav.ariaLabel": "Aktueller Ort",

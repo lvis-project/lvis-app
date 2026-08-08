@@ -2606,6 +2606,8 @@ export const frMessages: Record<string, string> = {
   "turnActionBar.retryButton": "Réessayer (profondeur: élevée)",
   "turnActionBar.sendButton": "Envoyer",
   "turnActionBar.starButton": "Épingler",
+  "viewPathNav.backTo": "Retour à {label}",
+  "viewPathNav.forwardTo": "Aller à {label}",
   "viewPathNav.back": "Retour",
   "viewPathNav.forward": "Suivant",
   "viewPathNav.ariaLabel": "Emplacement actuel",

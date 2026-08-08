@@ -2623,6 +2623,8 @@ export const esMessages: Record<string, string> = {
   "turnActionBar.retryButton": "Reintentar (profundidad: alta)",
   "turnActionBar.sendButton": "Enviar",
   "turnActionBar.starButton": "Fijar",
+  "viewPathNav.backTo": "Volver a {label}",
+  "viewPathNav.forwardTo": "Ir a {label}",
   "viewPathNav.back": "Atrás",
   "viewPathNav.forward": "Adelante",
   "viewPathNav.ariaLabel": "Ubicación actual",
