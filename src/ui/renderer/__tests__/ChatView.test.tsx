@@ -2193,7 +2193,7 @@ describe("ChatView", () => {
     });
   });
 
-  // Regression guard for Copilot PR #545 round-1 comments ③④.
+  // Regression guard for the PR #545 review comments ③④.
   // Reasoning + tool + assistant sequence: reasoning entry must be bucketed
   // inside WorkGroup while the final assistant text stays visible standalone.
   it("keeps reasoning bucketed in WorkGroup while assistant text stays visible (reasoning+tool+end_turn)", async () => {
