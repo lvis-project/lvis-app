@@ -51,6 +51,7 @@ import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import type { McpPromptEntry } from "./components/slash-picker-data.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
+import type { InlineViewKey } from "../../shared/view-key.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
 import {
   defaultProjectFromProjects,
@@ -149,13 +150,15 @@ export function App() {
     effectiveHasApiKey,
   } = useOnboardingTourController(api);
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
-  const [activeView, setActiveView] = useState("home");
-  // Inline-settings (work mode): which tab SettingsContent opens on, and the
-  // view to return to via the back-to-home affordance. In chat mode Settings
-  // detaches to its own BrowserWindow instead (see onOpenSettings), so these
-  // only drive the work-mode activeView==="settings" inline render.
+  // Where the main window is. `InlineViewKey` (not `string`) so a destination
+  // that has no inline form — or a typo — cannot be assigned here at all.
+  const [activeView, setActiveView] = useState<InlineViewKey>("home");
+  // Inline settings: which tab SettingsContent opens on, and the view to
+  // return to via the back affordance. Settings is an inline view in EVERY
+  // appMode — there is no detached settings window on this path (see
+  // onOpenSettings below), so these drive it in both modes.
   const [settingsTab, setSettingsTab] = useState("llm");
-  const settingsReturnViewRef = useRef("home");
+  const settingsReturnViewRef = useRef<InlineViewKey>("home");
   // Workspace mode (Chat / Work) + coupled shell layout state. appMode is the
   // SOLE authority for inline-vs-detached; the hook owns the seed-before-paint
   // state, the no-op-guarded persistence, and the three appMode-transition
