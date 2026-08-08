@@ -1077,6 +1077,17 @@ export function buildInternalApiSurface() {
     /** 사용자 결정을 main으로 전송 */
     respond: async (decision: unknown) =>
       ipcRenderer.invoke(PERMISSIONS.approvalRespond, decision),
+    /**
+     * `/allow <sentence>` — ask the host which of the PENDING request's own
+     * scopes the sentence meant. Returns a choice to pre-select; it decides
+     * nothing, so `respond` above is still the only way to answer a prompt.
+     */
+    selectSentence: async (requestId: string, input: string) =>
+      ipcRenderer.invoke(PERMISSIONS.approvalSentenceSelect, {
+        requestId,
+        input,
+        intent: ipcUserKeyboardIntent(),
+      }),
   },
 
   // ─── User-Approval Store ─────────────

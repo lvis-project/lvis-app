@@ -13,7 +13,14 @@ import type {
   PermissionReviewSuggestionReason,
 } from "../../shared/permissions-events.js";
 import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import {
+  validateSender,
+  validateHostRendererSender,
+  UNAUTHORIZED_FRAME,
+  auditUnauthorized,
+} from "../gated.js";
+import { buildApprovalScopeOptions } from "../../permissions/approval-scope-options.js";
+import { buildApprovalRequestFacts } from "../../permissions/reviewer/approval-sentence-facts.js";
 import { sendToWindow } from "../safe-send.js";
 import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
 import {
@@ -391,6 +398,106 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       reviewSuggestionTracker.record(deps, honoredDecision, snapshot);
     }
     return { ok: true };
+  });
+
+  /**
+   * `/allow <sentence>` — issue #1940.
+   *
+   * The reply is a PROPOSAL and never a grant. It names one `ApprovalChoice`
+   * that the pending request's own card already renders as a button; the
+   * renderer moves focus there and the user still presses it. Nothing on this
+   * path calls `approvalGate.resolve`.
+   *
+   * Why propose rather than decide: Anthropic publish a ~17% miss rate for
+   * their auto-mode classifier on genuinely dangerous actions. A model that is
+   * wrong one time in six is a fine way to pre-fill a form and an unacceptable
+   * way to answer a permission prompt. The confirm press is that number's
+   * mitigation, so it is not optional and not skippable on a confident answer.
+   *
+   * The renderer supplies only a request id and the raw sentence. Tool name,
+   * category, source, and both paths are read out of the gate's own pending
+   * entry, so a renderer cannot describe a request that was never raised.
+   */
+  ipcMain.handle(PERMISSIONS.approvalSentenceSelect, async (e, payload: unknown) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, PERMISSIONS.approvalSentenceSelect, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const body = payloadRecord(payload);
+    // Only a keyboard-origin submission speaks for the user. Agent output,
+    // tool results and remote-controller text all reach the composer.
+    const intent = requireUserKeyboardIntent(body.intent);
+    if (!intent.ok) return intent;
+
+    const rawInput = typeof body.input === "string" ? body.input : "";
+    const requestId = typeof body.requestId === "string" ? body.requestId : "";
+    const { dispatchPermissionSlash } = await import("../../permissions/permission-slash.js");
+    const outcome = dispatchPermissionSlash(rawInput, "user-keyboard");
+    if (outcome.kind !== "allow") {
+      return {
+        ok: false,
+        error: "allow-parse-error",
+        message: outcome.kind === "parse-error" ? outcome.error : "input is not an /allow command",
+      };
+    }
+
+    const state = approvalGate?.getApprovalSentenceState(requestId) ?? null;
+    if (!state) {
+      return {
+        ok: false,
+        error: "allow-no-pending-request",
+        message: "no pending directory approval matches this request id",
+      };
+    }
+    const options = buildApprovalScopeOptions({
+      candidatePath: state.candidatePath,
+      suggestedParent: state.suggestedParent,
+      ...(state.allowedChoices ? { allowedChoices: state.allowedChoices } : {}),
+    });
+    const selector = deps.getApprovalSentenceSelector?.();
+    if (!selector) {
+      return {
+        ok: false,
+        error: "allow-selector-unavailable",
+        message: "approval sentence selector is not wired",
+      };
+    }
+    const selection = await selector.select({
+      sentence: outcome.cmd.sentence,
+      request: buildApprovalRequestFacts({
+        toolName: state.toolName,
+        toolCategory: state.toolCategory,
+        source: state.source,
+        candidatePath: state.candidatePath,
+      }),
+      options,
+    });
+    switch (selection.outcome) {
+      case "selected":
+        // Only the choice crosses back. The host-resolved path stays here —
+        // the card derives the same scope list from the same authority, so it
+        // already knows which path this choice means.
+        return { ok: true, requestId, choice: selection.option.choice };
+      case "declined":
+        return {
+          ok: false,
+          error: "allow-no-match",
+          message: "the sentence did not clearly name one of the offered scopes",
+        };
+      case "unavailable":
+        return {
+          ok: false,
+          error: "allow-selector-unavailable",
+          message: "no reviewer provider is configured",
+        };
+      case "error":
+      case "malformed":
+        return {
+          ok: false,
+          error: "allow-selection-failed",
+          message: "the approval sentence could not be resolved",
+        };
+    }
   });
 
   // read-only, sender guard optional

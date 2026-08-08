@@ -47,6 +47,11 @@ import {
   createFoundryProvider,
   createGcpPlaygroundProvider,
 } from "../../permissions/reviewer/provider-adapters.js";
+import {
+  LlmApprovalSentenceSelector,
+  UnavailableApprovalSentenceSelector,
+  type ApprovalSentenceSelector,
+} from "../../permissions/reviewer/approval-sentence-selector.js";
 import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
 import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
@@ -198,6 +203,13 @@ export type RuntimeReviewerMode =
 export interface WireReviewerResult {
   classifier: RiskClassifier;
   rationaleScopeReviewer: RationaleScopeReviewer;
+  /**
+   * Issue #1940 — resolves a `/allow` sentence onto one of the pending
+   * approval's own scopes. It rides the same provider/model as the rest of the
+   * reviewer, so configuring an LLM lights it up and every non-llm reviewer
+   * mode leaves it as the stand-in that proposes nothing.
+   */
+  approvalSentenceSelector: ApprovalSentenceSelector;
   cache: VerdictCache;
   deferredQueue: DeferredQueue;
   /** Persisted reviewer block actually loaded (post-normalisation). */
@@ -255,6 +267,8 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   let classifier: RiskClassifier;
   let rationaleScopeReviewer: RationaleScopeReviewer =
     new UnavailableRationaleScopeReviewer();
+  let approvalSentenceSelector: ApprovalSentenceSelector =
+    new UnavailableApprovalSentenceSelector();
   // Runtime classifier discriminant — diverges from persisted mode only on
   // the llm-degraded-to-rule path below.
   let runtimeMode: RuntimeReviewerMode = settings.mode;
@@ -317,6 +331,10 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
       };
       classifier = createRiskClassifier(reviewerSettings);
       rationaleScopeReviewer = new LlmRationaleScopeReviewer(
+        adapter,
+        effectiveSettings.model,
+      );
+      approvalSentenceSelector = new LlmApprovalSentenceSelector(
         adapter,
         effectiveSettings.model,
       );
@@ -388,6 +406,7 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   return {
     classifier,
     rationaleScopeReviewer,
+    approvalSentenceSelector,
     cache,
     deferredQueue,
     appliedSettings: settings,
