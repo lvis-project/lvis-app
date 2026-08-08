@@ -25,7 +25,7 @@ import type { ApprovalChoice, ApprovalRequest } from "../types.js";
 const ALLOW_PREFIX = "/allow";
 
 /** Cheap, local recognition. The host re-parses authoritatively. */
-export function isApprovalSentenceInput(text: string): boolean {
+function isApprovalSentenceInput(text: string): boolean {
   const trimmed = text.trim();
   return trimmed === ALLOW_PREFIX || trimmed.startsWith(`${ALLOW_PREFIX} `);
 }

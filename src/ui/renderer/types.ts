@@ -1482,7 +1482,7 @@ export type ApprovalDecision = {
  * failure is a kebab error code the renderer maps to plain localized text via
  * `COMMON_IPC_ERROR_MESSAGES`, so no outcome can read as an approval.
  */
-export type ApprovalSentenceSelectResult =
+type ApprovalSentenceSelectResult =
   | { ok: true; requestId: string; choice: ApprovalChoice }
   | { ok: false; error: string; message?: string };
 
