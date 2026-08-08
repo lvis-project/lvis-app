@@ -4,6 +4,7 @@
 import { act, fireEvent } from "@testing-library/react";
 import type { MessageQueueStore } from "../../src/ui/renderer/state/message-queue-store.js";
 import { SETTINGS_TABS } from "../../src/shared/settings-tabs.js";
+import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
 export { relativeLuminance } from "../contrast-helpers.js";
 
 /**
@@ -76,4 +77,24 @@ export function activeSettingsTab(container: HTMLElement): string | null {
     if (el?.getAttribute("data-state") === "active") return value;
   }
   return null;
+}
+
+/**
+ * Settings as they would be on disk from a previous run, with the location the
+ * app should resume at.
+ *
+ * Shared because the restore feature and visit history need the SAME fixture:
+ * one asserts the app lands there, the other asserts history treats landing
+ * there as arrival rather than a step. Two copies would let a change to the
+ * persisted shape fix one test and silently rot the other.
+ */
+export function settingsWithActiveView(activeView: string, settingsTab?: string) {
+  return {
+    ...MOCK_DEFAULT_SETTINGS,
+    system: {
+      closeBehavior: "hide-to-tray",
+      activeView,
+      ...(settingsTab ? { settingsTab } : {}),
+    },
+  };
 }

@@ -17,6 +17,32 @@ export const SETTINGS_TABS = [
 
 export type SettingsTab = (typeof SETTINGS_TABS)[number];
 
+/**
+ * Tab → i18n label key. The settings panel's own nav and anything OUTSIDE the
+ * panel that has to name the current tab (the top-bar path) read the same map,
+ * so a renamed tab cannot end up with two different labels depending on which
+ * surface is doing the naming.
+ *
+ * Keys only — resolving them needs the renderer's `t`, and this module is
+ * shared with the main process.
+ */
+export const SETTINGS_TAB_LABEL_KEYS: Record<SettingsTab, string> = {
+  llm: "settingsContent.tabLlm",
+  appearance: "settingsContent.tabAppearance",
+  chat: "settingsContent.tabChat",
+  web: "settingsContent.tabWeb",
+  startup: "settingsContent.tabStartup",
+  permissions: "settingsContent.tabPermissions",
+  "remote-surfaces": "settingsContent.tabRemoteSurfaces",
+  roles: "settingsContent.tabRoles",
+  usage: "settingsContent.tabUsage",
+  audit: "settingsContent.tabAudit",
+  mcp: "settingsContent.tabMcp",
+  "plugin-config": "settingsContent.tabPluginConfig",
+  marketplace: "settingsContent.tabMarketplace",
+  about: "settingsContent.tabAbout",
+};
+
 export function normalizeSettingsTab(tab: unknown): SettingsTab {
   if (tab === "privacy") return "chat";
   // The plugin-perf tab was merged into plugin-config ("성능만 병합"); keep old
