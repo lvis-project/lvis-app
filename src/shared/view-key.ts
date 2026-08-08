@@ -81,16 +81,26 @@ export type InlineViewKey = InlineBuiltinViewKey | PluginViewKey;
 export type DetachableViewKey = DetachableBuiltinViewKey | PluginViewKey | McpAppViewKey;
 
 /**
- * One id segment: lowercase alphanumeric start, then alphanumerics and
- * `_ . -`. Shared by plugin ids, view ids, and MCP card ids so the three
- * cannot drift apart.
+ * Two different questions get two different charsets, deliberately.
+ *
+ * PARSING asks what a key IS, and must accept everything the app can legally
+ * produce. A plugin id is schema-constrained (`^[a-z][a-z0-9-]*$`), but a UI
+ * extension id is declared as a bare `string` in
+ * `schemas/plugin-manifest.schema.json` — so `plugin:my-plugin:MainView` is a
+ * valid, shipping key. Parsing therefore asserts STRUCTURE only: a non-empty
+ * segment is anything without a colon, since the colon is what separates them.
+ *
+ * The DETACH ALLOW-LIST asks what may open a window, which is an input check on
+ * an IPC boundary. It stays exactly as strict as it has always been.
+ * The two are not the same set, and pretending otherwise would either loosen a
+ * security boundary or break plugins that work today: a `MainView` extension
+ * renders inline right now and has never been able to detach.
  */
-const SEGMENT = "[a-z0-9][a-z0-9_.-]*";
+const STRUCTURAL_SEGMENT_RE = /^[^:]+$/;
+/** The historical detach charset — lowercase, dots/underscores/hyphens. */
+const STRICT_SEGMENT = "[a-z0-9][a-z0-9_.-]*";
 /** `mcp-app` server ids are hex-encoded UTF-8 (see `mcp-app-partition.ts`). */
 const HEX_SEGMENT = "[0-9a-f]+";
-
-const SEGMENT_RE = new RegExp(`^${SEGMENT}$`);
-const HEX_SEGMENT_RE = new RegExp(`^${HEX_SEGMENT}$`);
 
 /** Built-in keys that may be detached, in a stable order. */
 export const DETACHABLE_BUILTIN_VIEW_KEYS: readonly DetachableBuiltinViewKey[] =
@@ -110,8 +120,8 @@ export const INLINE_BUILTIN_VIEW_KEYS: readonly InlineBuiltinViewKey[] =
  */
 export const DETACHABLE_VIEW_KEY_PATTERN = new RegExp(
   `^(${DETACHABLE_BUILTIN_VIEW_KEYS.join("|")}`
-    + `|plugin:${SEGMENT}:${SEGMENT}`
-    + `|mcp-app:${HEX_SEGMENT}:${SEGMENT})$`,
+    + `|plugin:${STRICT_SEGMENT}:${STRICT_SEGMENT}`
+    + `|mcp-app:${HEX_SEGMENT}:${STRICT_SEGMENT})$`,
 );
 
 /** A view key taken apart. `null` from `parseViewKey` means "not a view key". */
@@ -139,7 +149,7 @@ export function parseViewKey(raw: string): ParsedViewKey | null {
     if (separator <= 0) return null;
     const pluginId = rest.slice(0, separator);
     const viewId = rest.slice(separator + 1);
-    if (!SEGMENT_RE.test(pluginId) || !SEGMENT_RE.test(viewId)) return null;
+    if (!STRUCTURAL_SEGMENT_RE.test(pluginId) || !STRUCTURAL_SEGMENT_RE.test(viewId)) return null;
     return { kind: "plugin", key: raw as PluginViewKey, pluginId, viewId };
   }
 
@@ -149,7 +159,7 @@ export function parseViewKey(raw: string): ParsedViewKey | null {
     if (separator <= 0) return null;
     const serverIdHex = rest.slice(0, separator);
     const cardId = rest.slice(separator + 1);
-    if (!HEX_SEGMENT_RE.test(serverIdHex) || !SEGMENT_RE.test(cardId)) return null;
+    if (!/^[0-9a-f]+$/.test(serverIdHex) || !STRUCTURAL_SEGMENT_RE.test(cardId)) return null;
     return { kind: "mcp-app", key: raw as McpAppViewKey, serverIdHex, cardId };
   }
 
@@ -169,12 +179,13 @@ export function isInlineViewKey(raw: string): raw is InlineViewKey {
   return parsed.kind === "plugin";
 }
 
-/** True when `raw` may be opened as its own window. */
+/**
+ * True when `raw` may be opened as its own window — the check the main process
+ * applies to the detach IPC. Stricter than `parseViewKey` on purpose: see the
+ * charset note above.
+ */
 export function isDetachableViewKey(raw: string): raw is DetachableViewKey {
-  const parsed = parseViewKey(raw);
-  if (!parsed) return false;
-  if (parsed.kind === "builtin") return BUILTIN_VIEWS[parsed.key].detachable;
-  return true;
+  return DETACHABLE_VIEW_KEY_PATTERN.test(raw);
 }
 
 /** OS window title for a detached built-in, or `null` for namespaced keys
