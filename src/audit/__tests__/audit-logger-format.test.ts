@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import { vi } from "vitest";
 
 vi.mock("node:os", async (importOriginal) => {
@@ -34,8 +35,8 @@ beforeEach(() => {
   vi.mocked(homedir).mockReturnValue(testHome);
 });
 
-afterEach(() => {
-  if (existsSync(testHome)) rmSync(testHome, { recursive: true, force: true });
+afterEach(async () => {
+  if (existsSync(testHome)) await cleanupTmpDir(testHome);
   vi.restoreAllMocks();
 });
 

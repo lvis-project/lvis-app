@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import AdmZip from "adm-zip";
 import { AuditLogger } from "../audit-logger.js";
 import {
@@ -86,8 +87,8 @@ beforeEach(() => {
   mkdirSync(crashDir, { recursive: true });
 });
 
-afterEach(() => {
-  if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+afterEach(async () => {
+  if (existsSync(tmp)) await cleanupTmpDir(tmp);
 });
 
 async function build(overrides: Partial<Parameters<typeof buildDiagnosticsBundle>[0]> = {}): Promise<Buffer> {
