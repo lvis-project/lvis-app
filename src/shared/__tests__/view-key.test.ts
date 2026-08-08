@@ -132,11 +132,14 @@ describe("inline vs detachable", () => {
 });
 
 describe("DETACHABLE_VIEW_KEY_PATTERN", () => {
-  it("matches isDetachableViewKey for every built-in — one authority, two forms", () => {
-    // The pattern is what the main process validates the detach IPC against;
-    // if it and the predicate disagree, one of them is lying about the table.
-    for (const key of Object.keys(BUILTIN_VIEWS)) {
-      expect(DETACHABLE_VIEW_KEY_PATTERN.test(key)).toBe(isDetachableViewKey(key));
+  it("carries exactly the table's detachable built-ins", () => {
+    // The pattern is what the main process validates the detach IPC against,
+    // and it is BUILT from the table by string-joining the detachable keys.
+    // Compare it to the table itself: comparing it to `isDetachableViewKey`
+    // compares it to `DETACHABLE_VIEW_KEY_PATTERN.test`, which is the same
+    // expression and so could never fail.
+    for (const [key, spec] of Object.entries(BUILTIN_VIEWS)) {
+      expect(DETACHABLE_VIEW_KEY_PATTERN.test(key)).toBe(spec.detachable);
     }
   });
 
