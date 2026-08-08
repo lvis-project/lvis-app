@@ -21,16 +21,20 @@ import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import type { AppMode } from "./MainToolbar.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
+import type { InlineViewKey, PluginViewKey } from "../../shared/view-key.js";
 
 type Api = ReturnType<typeof getApi>;
 type PluginView = Parameters<typeof PluginUiHostView>[0]["view"];
 type StarredItem = Parameters<typeof StarredView>[0]["starred"][number];
 
 export interface MainContentProps {
-  activeView: string;
+  /** Where the main window is. Typed, so a destination that cannot render
+   *  inline — or a misspelling — is a compile error rather than a silent fall
+   *  through to the plugin branch. */
+  activeView: InlineViewKey;
   api: Api;
-  // inline settings (work mode) — chat mode detaches Settings to its own
-  // BrowserWindow and never routes through this branch.
+  // Settings renders inline in EVERY appMode; there is no detached settings
+  // window on this path.
   settingsTab: string;
   onSettingsSaved: () => void;
   onCloseSettings: () => void;
@@ -276,6 +280,14 @@ export function MainContent(props: MainContentProps): ReactNode {
     );
   }
 
+  // Everything above narrowed away an inline BUILT-IN key, so what is left is
+  // a plugin view — proven, not assumed. The annotation is the proof: add a
+  // built-in to `BUILTIN_VIEWS` with `inline: true` and forget a branch here,
+  // and this line stops compiling. That is what replaced the old bare
+  // fallback, which rendered ANY unrecognized string as a plugin view and so
+  // reported a misspelled destination as a missing plugin.
+  const pluginKey: PluginViewKey = activeView;
+  void pluginKey;
   return (
     <PluginUiHostView
       view={props.activePluginView ?? null}

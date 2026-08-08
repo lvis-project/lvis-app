@@ -8,6 +8,13 @@ import {
   type SetStateAction,
 } from "react";
 import { getApi, toViewKey } from "../api-client.js";
+import {
+  isDetachableViewKey,
+  parseInlineViewKey,
+  type DetachableBuiltinViewKey,
+  type InlineViewKey,
+  type PluginViewKey,
+} from "../../../shared/view-key.js";
 import { extractPluginAuthErrorCode } from "../utils/plugin-auth-error.js";
 import type { useTranslation } from "../../../i18n/react.js";
 import type { AppMode } from "../MainToolbar.js";
@@ -31,8 +38,8 @@ export interface UsePluginViewRoutingDeps {
   api: Api;
   t: TFn;
   appMode: AppMode;
-  activeView: string;
-  setActiveView: Dispatch<SetStateAction<string>>;
+  activeView: InlineViewKey;
+  setActiveView: Dispatch<SetStateAction<InlineViewKey>>;
   pluginViews: PluginViews;
   pluginCards: PluginCards;
   pluginAuthStatuses: PluginAuthStatuses;
@@ -83,7 +90,7 @@ export function usePluginViewRouting({
   // Populated by handleViewSelect when an auth plugin is selected while unauthed
   // (the host fires loginTool to open the SSO window, NOT the panel); drained
   // by the auth-transition effect below. See architecture.md §9.4a.
-  const pendingInlineAuthOpenRef = useRef<Map<string, string>>(new Map());
+  const pendingInlineAuthOpenRef = useRef<Map<string, PluginViewKey>>(new Map());
   const pluginAuthLoginInflightRef = useRef<Set<string>>(new Set());
   const failedPluginAuthOpenRef = useRef<Set<string>>(new Set());
 
@@ -93,7 +100,7 @@ export function usePluginViewRouting({
   const activePluginAuthError = activePluginView ? pluginAuthErrors.get(activePluginView.pluginId) ?? null : null;
 
   const openDetachedBuiltInView = useCallback(
-    async (viewKey: "work-board" | "routines" | "memory" | "starred" | "insights"): Promise<boolean> => {
+    async (viewKey: DetachableBuiltinViewKey): Promise<boolean> => {
       const openDetached = api.window?.openDetached;
       if (!openDetached) {
         setErrorWithThought(t("app.errorCannotOpenNewWindow"));
@@ -153,7 +160,17 @@ export function usePluginViewRouting({
   // Plugins WITHOUT `manifest.auth.loginTool` open directly.
   const handleViewSelect = useCallback(
     (key: string) => {
-      if (key.startsWith("plugin:")) {
+      // The runtime boundary. Sidebar rows, the command palette, and
+      // notification payloads all hand over a bare string; a value that is not
+      // a place the main window can BE stops here instead of becoming
+      // `activeView` and being rendered as a plugin view that does not exist.
+      const parsed = parseInlineViewKey(key);
+      if (!parsed) {
+        console.warn(`[nav] ignoring unknown view key '${key}'`);
+        return;
+      }
+
+      if (parsed.kind === "plugin") {
         const view = pluginViews.find((v) => toViewKey(v) === key);
         if (!view) return;
         const card = pluginCards.find((c) => c.id === view.pluginId);
@@ -161,7 +178,7 @@ export function usePluginViewRouting({
         const authState = pluginAuthStatuses.get(view.pluginId)?.kind;
         const openPluginView = () => {
           // Always inline, regardless of appMode.
-          setActiveView(key);
+          setActiveView(parsed.key);
         };
 
         if (!loginTool || authState === "authed") {
@@ -171,7 +188,7 @@ export function usePluginViewRouting({
           return;
         }
 
-        pendingInlineAuthOpenRef.current.set(view.pluginId, key);
+        pendingInlineAuthOpenRef.current.set(view.pluginId, parsed.key);
         clearPluginAuthError(view.pluginId);
         failedPluginAuthOpenRef.current.delete(view.pluginId);
 
@@ -207,19 +224,14 @@ export function usePluginViewRouting({
         return;
       }
       // Chat mode: built-in detachable views open in a separate window; home
-      // (and every work-mode path) stays inline.
-      if (
-        appMode === "chat" &&
-        (key === "work-board" ||
-          key === "routines" ||
-          key === "memory" ||
-          key === "starred" ||
-          key === "insights")
-      ) {
-        void openDetachedBuiltInView(key);
+      // and settings (and every work-mode path) stay inline. The set is read
+      // off the shared table instead of relisted, so a new detachable surface
+      // does not need this branch edited to behave consistently.
+      if (appMode === "chat" && isDetachableViewKey(parsed.key)) {
+        void openDetachedBuiltInView(parsed.key);
         return;
       }
-      setActiveView(key);
+      setActiveView(parsed.key);
     },
     [
       api,

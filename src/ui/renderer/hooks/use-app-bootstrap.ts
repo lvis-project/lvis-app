@@ -1,12 +1,13 @@
 import { useEffect, useRef } from "react";
 import type { LvisApi } from "../types.js";
+import { parseInlineViewKey, type InlineViewKey } from "../../../shared/view-key.js";
 
 export interface AppBootstrapDeps {
   api: LvisApi;
   refreshViews: () => Promise<unknown> | unknown;
   refreshCards: () => Promise<void> | void;
   checkApiKey: () => Promise<unknown> | unknown;
-  setActiveView: (k: string) => void;
+  setActiveView: (k: InlineViewKey) => void;
   /** Same inline-settings entry point used by in-app affordances — the main
    *  process routes settings opens through view:activate with a settings tab,
    *  and this reuses onOpenSettings so tab normalization + return-view capture
@@ -60,7 +61,14 @@ export function useAppBootstrap({
       // click so the tab is normalized and the return view is captured
       // identically; there is no detached settings window anymore.
       if (k === "settings") { onOpenSettings(settingsTab); return; }
-      setActiveView(k);
+      // `k` crosses an IPC boundary as a bare string. Vet it here rather than
+      // letting main name a destination the renderer has no rendering for.
+      const parsed = parseInlineViewKey(k);
+      if (!parsed) {
+        console.warn(`[nav] ignoring unknown view key '${k}' from onViewActivate`);
+        return;
+      }
+      setActiveView(parsed.key);
     });
     return () => { dv(); };
   }, []);
