@@ -1320,6 +1320,8 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.lastMessageNotUser": "Die letzte Nachricht ist keine Benutzerfrage, daher kann die Generierung nicht fortgesetzt werden.",
   "formatIpcError.managed": "Die Änderung wurde durch eine Administratorrichtlinie blockiert oder beim Speichern ist ein Fehler aufgetreten.",
   "formatIpcError.marketplaceDisabled": "Die Marktplatzfunktion ist deaktiviert.",
+  "formatIpcError.packageNotInstalled": "Dieses Paket ist nicht installiert.",
+  "formatIpcError.adminPluginUninstallDenied": "Ein Administrator hat dieses Plugin installiert, daher kann es hier nicht entfernt werden. Wenden Sie sich an Ihren Administrator.",
   "formatIpcError.missingDurableConfirm": "Der Wechsel in den dauerhaften Modus erfordert eine Bestätigung durch den Benutzer.",
   "formatIpcError.missingInputOrigin": "Die Herkunftsinformationen der Anfrage fehlen.",
   "formatIpcError.missingAppEnvelope": "Envelope-Informationen der MCP-App fehlen.",

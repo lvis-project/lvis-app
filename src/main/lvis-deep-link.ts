@@ -18,8 +18,10 @@ import type { AppServices } from "../boot.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { CHANNELS } from "../contract/app-contract.js";
 import {
+  ADMIN_PLUGIN_UNINSTALL_DENIED_CODE,
   buildInstallFailureResult,
   MarketplaceBackendDisabledError,
+  PACKAGE_NOT_INSTALLED_CODE,
 } from "../shared/plugin-install-result.js";
 import {
   drainPluginInstallLockOperations,
@@ -199,9 +201,10 @@ async function handleAssistantMarketplaceAction(
 ): Promise<void> {
   const channels = assistantPackageChannels(params.packageType);
   const label = marketplacePackageLabel(params.packageType);
-  // `label` is localized for dialog copy. The failure payload's fallback text
-  // is not UI copy — it lands in `error`, which the renderer treats as a stable
-  // English code, so it must not be localized here.
+  // `label` is localized for dialog copy only. Anything bound for `error` is a
+  // stable English code the renderer maps to localized copy, so it must never
+  // be built from `label` — that produced a localized noun welded to an English
+  // predicate (`에이전트 not installed`) in the status-bar toast (#1967).
   const englishLabel = params.packageType === "agent" ? "Agent" : "Skill";
   const target = await resolveMarketplaceActionTarget(activeServices, params.slug);
   if (params.action === "uninstall") {
@@ -217,7 +220,7 @@ async function handleAssistantMarketplaceAction(
       broadcastPluginLifecycleEvent(channels.uninstallResult, {
         slug: params.slug,
         success: false,
-        error: `${label} not installed`,
+        error: PACKAGE_NOT_INSTALLED_CODE,
       });
       return;
     }
@@ -569,7 +572,7 @@ export async function handleLvisUri(url: string) {
       broadcastPluginLifecycleEvent("lvis:plugins:uninstall-result", {
         slug: target.pluginId,
         success: false,
-        error: "Admin plugin cannot be uninstalled by user",
+        error: ADMIN_PLUGIN_UNINSTALL_DENIED_CODE,
       });
       return;
     }
@@ -585,7 +588,7 @@ export async function handleLvisUri(url: string) {
       broadcastPluginLifecycleEvent("lvis:plugins:uninstall-result", {
         slug: target.pluginId,
         success: false,
-        error: "Plugin not installed",
+        error: PACKAGE_NOT_INSTALLED_CODE,
       });
       return;
     }

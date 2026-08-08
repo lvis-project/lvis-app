@@ -1334,6 +1334,8 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.lastMessageNotUser": "El último mensaje no es una pregunta del usuario, por lo que la generación no puede continuar.",
   "formatIpcError.managed": "El cambio fue bloqueado por una política de administrador o se produjo un error al guardar.",
   "formatIpcError.marketplaceDisabled": "La función del mercado está deshabilitada.",
+  "formatIpcError.packageNotInstalled": "Este paquete no está instalado.",
+  "formatIpcError.adminPluginUninstallDenied": "Un administrador instaló este complemento, por lo que no se puede quitar aquí. Contacta con tu administrador.",
   "formatIpcError.missingDurableConfirm": "Cambiar al modo duradero requiere la confirmación del usuario.",
   "formatIpcError.missingInputOrigin": "Falta la información de origen de la solicitud.",
   "formatIpcError.missingAppEnvelope": "Falta la información del envelope de la app MCP.",
