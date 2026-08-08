@@ -2398,6 +2398,7 @@ export const zhMessages: Record<string, string> = {
   "sidebar.pluginDoctorRequiredTitle": "{label} 未加载。在插件设置中打开 Doctor。",
   "sidebar.pluginsLabel": "插件",
   "sidebar.projectMenuNewChat": "该项目中的新聊天",
+  "sidebar.projectMenuAdd": "添加项目…",
   "sidebar.projectMenuRemove": "删除项目",
   "sidebar.projectMenuReveal": "显示文件夹",
   "sidebar.projectsLabel": "项目",
