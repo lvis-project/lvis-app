@@ -6,6 +6,7 @@ import { MainToolbar } from "../MainToolbar.js";
 
 function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}) {
   return {
+    leadClearance: 64,
     viewNav: {
       segments: [{ key: "home", label: "홈" }],
       canGoBack: false,
