@@ -162,10 +162,9 @@ export function App() {
   // Persisted alongside the view (#1995), so a restart resumes the exact page
   // inside Settings rather than the tab it was last opened on.
   const { settingsTab, setSettingsTab } = useSettingsTab(api);
-  // Workspace mode (Chat / Work) + coupled shell layout state. appMode is the
-  // SOLE authority for inline-vs-detached; the hook owns the seed-before-paint
-  // state, the no-op-guarded persistence, and the three appMode-transition
-  // effects (rail-width coupling, resizeForMode, closeAllDetached). See
+  // Workspace mode (Chat / Work) + coupled shell layout state. The hook owns the
+  // seed-before-paint state, the no-op-guarded persistence, and the
+  // appMode-transition effects (rail-width coupling, resizeForMode). See
   // use-app-mode.ts.
   const {
     appMode, setAppMode,
@@ -414,14 +413,6 @@ export function App() {
       await handleLoadSessionAndRefresh(sessionId);
     }
   }, [handleImport, handleLoadSessionAndRefresh]);
-
-  useEffect(() => {
-    const unsubscribe = api.window?.onLoadSessionInMain?.((sessionId) => {
-      setActiveView("home");
-      return handleLoadSessionAndRefresh(sessionId);
-    });
-    return unsubscribe;
-  }, [api, handleLoadSessionAndRefresh]);
 
   // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const {
