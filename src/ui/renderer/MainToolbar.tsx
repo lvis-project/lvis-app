@@ -127,7 +127,7 @@ export function MainToolbar({
           `md`. At the 460px chat width the band cannot fit a readable path,
           but losing the way to go back with it would leave chat mode without
           navigation at all (owner decision). */}
-      <NoDrag className="flex min-w-0 max-w-[45%] shrink items-center">
+      <NoDrag className="flex min-w-0 max-w-[45%] shrink-0 items-center">
         <ViewPathNav {...viewNav} />
       </NoDrag>
 
