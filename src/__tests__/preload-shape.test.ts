@@ -562,7 +562,6 @@ describe("preload contextBridge world shape lock", () => {
             "onDetachedNavigate",
             "onLoadSessionInMain",
             "onSnapEdge",
-            "openDetached",
             "openHtmlPreview",
             "resizeForMode",
             "resizeForSidePanel",

@@ -1365,7 +1365,6 @@ describe("PluginConfigTab — auth UI", () => {
         onPluginEnabledChanged: vi.fn(() => () => undefined),
         setPluginEnabled: vi.fn(async () => ({ ok: true as const })),
         listPluginUiExtensions: vi.fn(async () => []),
-        window: { openDetached: vi.fn(async () => ({ ok: true as const, windowId: 7 })) },
       },
       writable: true,
       configurable: true,
@@ -1419,7 +1418,6 @@ describe("PluginConfigTab — auth UI", () => {
         onPluginEvent: vi.fn(() => () => undefined),
         onPluginEnabledChanged: vi.fn(() => () => undefined),
         listPluginUiExtensions: vi.fn(async () => []),
-        window: { openDetached: vi.fn(async () => ({ ok: true as const, windowId: 7 })) },
       },
       writable: true,
       configurable: true,
@@ -1476,7 +1474,6 @@ describe("PluginConfigTab — auth UI", () => {
         callPluginMethod,
         onPluginEvent: vi.fn(() => () => undefined),
         listPluginUiExtensions: vi.fn(async () => []),
-        window: { openDetached: vi.fn(async () => ({ ok: true as const, windowId: 7 })) },
       },
       writable: true,
       configurable: true,
@@ -1498,7 +1495,6 @@ describe("PluginConfigTab — auth UI", () => {
         userAction: true,
       });
     });
-    expect(window.lvisApi.window.openDetached).not.toHaveBeenCalled();
   });
 });
 
