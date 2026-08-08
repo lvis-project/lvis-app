@@ -36,6 +36,9 @@ export interface MainContentProps {
   // Settings renders inline in EVERY appMode; there is no detached settings
   // window on this path.
   settingsTab: string;
+  /** Read-back for `settingsTab`: the panel reports every in-panel tab move so
+   *  `settingsTab` tracks where the user is, not just where they entered. */
+  onSettingsTabChange: (tab: string) => void;
   onSettingsSaved: () => void;
   onCloseSettings: () => void;
   // starred
@@ -259,6 +262,7 @@ export function MainContent(props: MainContentProps): ReactNode {
           initialTab={props.settingsTab}
           onSaved={props.onSettingsSaved}
           onBack={props.onCloseSettings}
+          onTabChange={props.onSettingsTabChange}
         />
       </MainPaneShell>
     );
