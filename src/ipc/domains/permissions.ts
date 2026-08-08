@@ -408,11 +408,13 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
    * renderer moves focus there and the user still presses it. Nothing on this
    * path calls `approvalGate.resolve`.
    *
-   * Why propose rather than decide: Anthropic publish a ~17% miss rate for
-   * their auto-mode classifier on genuinely dangerous actions. A model that is
-   * wrong one time in six is a fine way to pre-fill a form and an unacceptable
-   * way to answer a permission prompt. The confirm press is that number's
-   * mitigation, so it is not optional and not skippable on a confident answer.
+   * Why propose rather than decide: published miss rates for this class of
+   * permission classifier — the share of genuinely dangerous actions they wave
+   * through — are high enough that a model verdict cannot be the final gate. A
+   * model wrong on a meaningful fraction of dangerous calls is a fine way to
+   * pre-fill a form and an unacceptable way to answer a permission prompt. The
+   * confirm press is the mitigation for that error rate, so it is not optional
+   * and not skippable on a confident answer.
    *
    * The renderer supplies only a request id and the raw sentence. Tool name,
    * category, source, and both paths are read out of the gate's own pending
