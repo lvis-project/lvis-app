@@ -11,6 +11,7 @@ import { DEFAULT_BUNDLE_ID } from "../shared/theme-bundles.js";
 import { DEFAULT_LOCALE } from "../i18n/index.js";
 import { DEFAULT_APP_MODE } from "../shared/initial-app-mode.js";
 import { DEFAULT_SIDEBAR_TAB } from "../shared/sidebar-tab.js";
+import { normalizeSettingsTab } from "../shared/settings-tabs.js";
 import { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
 import type { AppSettings } from "./settings-store.js";
 
@@ -99,6 +100,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     sidePanelSplitPreviewPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidePanelSplitSubagentPercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
     sidebarActiveTab: DEFAULT_SIDEBAR_TAB,
+    // `home` is the only built-in that is inline-only and always present.
+    activeView: "home",
+    // Ask the normalizer what an absent tab means rather than restating it.
+    settingsTab: normalizeSettingsTab(undefined),
     pinnedProjectRoots: [],
     // E4 — auto-launch defaults OFF (opt-in). Only applied on packaged builds.
     launchAtStartup: false,
