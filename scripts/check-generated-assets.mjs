@@ -35,8 +35,10 @@ const ROOT = rootArgIndex >= 0
 const MANIFEST = "build/generated-assets.json";
 const LABEL = "[generated-assets]";
 
+/** `git -C` rather than a child `cwd`: the repository is named explicitly, and
+ *  no child ever holds the directory open as its working directory. */
 function git(args) {
-  return spawnSync("git", args, { cwd: ROOT, encoding: "utf-8" });
+  return spawnSync("git", ["-C", ROOT, ...args], { encoding: "utf-8" });
 }
 
 function fail(message) {
