@@ -1,6 +1,6 @@
 const { createHash } = require("node:crypto");
 const { existsSync, readFileSync, readdirSync, rmSync, statSync } = require("node:fs");
-const { constants: fsConstants, accessSync } = require("node:fs");
+const { constants: fsConstants, accessSync, chmodSync } = require("node:fs");
 const { join } = require("node:path");
 const { gunzipSync } = require("node:zlib");
 
@@ -309,6 +309,24 @@ function assertNodePtyBinary(context) {
     if (!existsSync(helper)) {
       throw new Error(
         `packaged node-pty spawn-helper missing for ${platform}: ${helper}`,
+      );
+    }
+    // The npm-shipped prebuild is mode 644. Until 6c445205 the postinstall
+    // `electron-rebuild` compiled `build/Release` and node-gyp set the exec
+    // bit there; with that removed, `prebuilds/<platform>-<arch>` is what gets
+    // packaged and nothing else makes it executable. node-pty forks this to
+    // set the controlling TTY, so a non-executable copy means every terminal
+    // fails at runtime — and it took down the v0.6.0 tag build at this
+    // assertion.
+    //
+    // Set the bit rather than only asserting it: packaging is the last step
+    // that can, and the assertion below still catches a helper that is missing
+    // or that cannot be made executable.
+    try {
+      chmodSync(helper, 0o755);
+    } catch (err) {
+      throw new Error(
+        `packaged node-pty spawn-helper could not be made executable for ${platform}: ${helper} (${err instanceof Error ? err.message : String(err)})`,
       );
     }
     try {
