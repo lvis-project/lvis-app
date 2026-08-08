@@ -57,6 +57,23 @@ describe("App view history", () => {
     await waitFor(() => expect(path(container)).toContain("루틴"));
   });
 
+  it("names the destination on the buttons, since chat mode shows no path", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
+    await ready(container);
+    const back = () => container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement;
+
+    // Nothing behind yet: the generic label, and no destination to claim.
+    expect(back().getAttribute("aria-label")).toBe("뒤로");
+
+    await click(container, "toolbar-work-board");
+    await waitFor(() => expect(back().disabled).toBe(false));
+    // Now it can say where it goes — the only cue left at chat width.
+    await waitFor(() => expect(back().getAttribute("aria-label")).toContain("홈"));
+
+    await click(container, "sidebar-routines");
+    await waitFor(() => expect(back().getAttribute("aria-label")).toContain("업무 보드"));
+  });
+
   it("disables the buttons at each end rather than silently doing nothing", async () => {
     const { container } = await renderApp({ hasApiKey: true });
     await ready(container);

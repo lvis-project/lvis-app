@@ -20,6 +20,10 @@ export interface ViewPathNavProps {
   segments: BreadcrumbSegment[];
   canGoBack: boolean;
   canGoForward: boolean;
+  /** Destination labels, when known — the button says where it goes rather
+   *  than only that it goes back. */
+  backLabel?: string;
+  forwardLabel?: string;
   onBack: () => void;
   onForward: () => void;
   /** Navigate to an ancestor crumb. The last segment has no target. */
@@ -36,11 +40,19 @@ export function ViewPathNav({
   segments,
   canGoBack,
   canGoForward,
+  backLabel,
+  forwardLabel,
   onBack,
   onForward,
   onSelectSegment,
 }: ViewPathNavProps) {
   const { t } = useTranslation();
+  const backText = backLabel
+    ? t("viewPathNav.backTo", { label: backLabel })
+    : t("viewPathNav.back");
+  const forwardText = forwardLabel
+    ? t("viewPathNav.forwardTo", { label: forwardLabel })
+    : t("viewPathNav.forward");
 
   return (
     <div className="flex min-w-0 items-center gap-0.5" data-testid="view-path-nav">
@@ -53,14 +65,14 @@ export function ViewPathNav({
             className={ICON_BUTTON_CLASS}
             disabled={!canGoBack}
             onClick={onBack}
-            aria-label={t("viewPathNav.back")}
-            title={t("viewPathNav.back")}
+            aria-label={backText}
+            title={backText}
             data-testid="view-path-back"
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">{t("viewPathNav.back")}</TooltipContent>
+        <TooltipContent side="bottom">{backText}</TooltipContent>
       </Tooltip>
 
       <Tooltip>
@@ -72,20 +84,23 @@ export function ViewPathNav({
             className={ICON_BUTTON_CLASS}
             disabled={!canGoForward}
             onClick={onForward}
-            aria-label={t("viewPathNav.forward")}
-            title={t("viewPathNav.forward")}
+            aria-label={forwardText}
+            title={forwardText}
             data-testid="view-path-forward"
           >
             <ChevronRight className="h-4 w-4" />
           </Button>
         </TooltipTrigger>
-        <TooltipContent side="bottom">{t("viewPathNav.forward")}</TooltipContent>
+        <TooltipContent side="bottom">{forwardText}</TooltipContent>
       </Tooltip>
 
-      {/* `min-w-0` + per-crumb truncation is what keeps a long path from
-          eating the drag band; the max width itself is applied by the caller. */}
+      {/* Collapsed below `md` — the 460px chat band has no room for a readable
+          path, and a two-character stub is not one. The buttons above stay, so
+          the way back survives even where its label cannot. `min-w-0` plus
+          per-crumb truncation keeps a long path from eating the drag band at
+          the widths where it does render. */}
       <nav
-        className="ml-1 flex min-w-0 items-center gap-0.5 text-caption text-muted-foreground"
+        className="ml-1 hidden min-w-0 items-center gap-0.5 text-caption text-muted-foreground md:flex"
         aria-label={t("viewPathNav.ariaLabel")}
         data-testid="view-path-breadcrumb"
       >

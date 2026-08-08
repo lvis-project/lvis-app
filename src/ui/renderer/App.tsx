@@ -503,20 +503,30 @@ export function App() {
   // Path + history controls handed to the top bar. Labels resolve through the
   // plugin's declared title so a plugin crumb names the panel the way its own
   // sidebar entry does.
-  const viewNav = useMemo(() => ({
-    segments: viewLocationBreadcrumb(location, {
+  const viewNav = useMemo(() => {
+    const deps = {
       t,
       pluginViewLabel: (viewKey: string) => {
         const view = pluginViews.find((candidate) => toViewKey(candidate) === viewKey);
         return view ? getPluginViewLabel(view) : undefined;
       },
-    }),
-    canGoBack: viewHistory.canGoBack,
-    canGoForward: viewHistory.canGoForward,
-    onBack: viewHistory.goBack,
-    onForward: viewHistory.goForward,
-    onSelectSegment: navigateToLocation,
-  }), [location, t, pluginViews, viewHistory, navigateToLocation]);
+    };
+    // Name the destination on the buttons. In chat mode the path itself does
+    // not render, so without this the only navigation left says nothing about
+    // where it goes. The deepest crumb is the destination's own name.
+    const destinationLabel = (target: ViewLocation | null) =>
+      target ? viewLocationBreadcrumb(target, deps).at(-1)?.label : undefined;
+    return {
+      segments: viewLocationBreadcrumb(location, deps),
+      canGoBack: viewHistory.canGoBack,
+      canGoForward: viewHistory.canGoForward,
+      backLabel: destinationLabel(viewHistory.backTo),
+      forwardLabel: destinationLabel(viewHistory.forwardTo),
+      onBack: viewHistory.goBack,
+      onForward: viewHistory.goForward,
+      onSelectSegment: navigateToLocation,
+    };
+  }, [location, t, pluginViews, viewHistory, navigateToLocation]);
 
   // Build flat PluginEntry list for InputActionBar plugin grid.
   // `unauthed` is set when the owning plugin declares `manifest.auth` AND its

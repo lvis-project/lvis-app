@@ -31,6 +31,10 @@ interface HistoryState {
 export interface UseViewHistoryResult {
   canGoBack: boolean;
   canGoForward: boolean;
+  /** Where each control would land, so a caller can NAME the destination.
+   *  Matters most in chat mode, where the path itself does not render. */
+  backTo: ViewLocation | null;
+  forwardTo: ViewLocation | null;
   goBack: () => void;
   goForward: () => void;
   /** Entry count including the current location — for tests and diagnostics. */
@@ -117,6 +121,8 @@ export function useViewHistory(
   return {
     canGoBack: state.index > 0,
     canGoForward: state.index < state.entries.length - 1,
+    backTo: state.entries[state.index - 1] ?? null,
+    forwardTo: state.entries[state.index + 1] ?? null,
     goBack,
     goForward,
     depth: state.entries.length,
