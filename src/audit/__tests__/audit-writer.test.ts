@@ -8,6 +8,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 import { AuditLogger, type AuditEntry } from "../audit-logger.js";
 
@@ -44,8 +45,8 @@ beforeEach(() => {
   auditDir = mkdtempSync(join(process.cwd(), ".lvis-audit-writer-"));
 });
 
-afterEach(() => {
-  rmSync(auditDir, { recursive: true, force: true });
+afterEach(async () => {
+  await cleanupTmpDir(auditDir);
 });
 
 describe("AuditLogger ordered async writer", () => {

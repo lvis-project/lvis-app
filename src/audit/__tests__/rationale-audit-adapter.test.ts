@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import lockfile from "proper-lockfile";
 import { afterEach, describe, expect, it } from "vitest";
 import { RATIONALE_CONTROL_CONTRACT_VERSION } from "../../tools/pipeline/rationale-control.js";
@@ -113,9 +114,9 @@ function uiProjection(): RationaleUiAuditProjection {
   };
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const root of roots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupTmpDir(root);
   }
 });
 
