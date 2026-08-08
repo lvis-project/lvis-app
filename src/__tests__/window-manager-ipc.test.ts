@@ -1,9 +1,10 @@
 /**
  * Security regression tests for WindowManager IPC handlers.
  *
- * Guards:
- *   1. validateSender — unauthorized sender → UNAUTHORIZED_FRAME + auditLogger call
- *   2. viewKey allowlist — path-traversal / invalid keys → invalid-view-key error
+ * Every surviving handler is host-only and state-mutating, so each must reject a
+ * sender that is not the host renderer and audit the attempt. The detach handlers and
+ * their viewKey allow-list are retired; the assertion that no handler is registered
+ * for those channels is what keeps them from reappearing unnoticed.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
@@ -38,7 +39,6 @@ vi.mock("electron", () => ({
 
 // ── Module imports (after mock) ────────────────────────────────────────────
 
-import { ALLOWED_VIEW_KEYS } from "../main/window-manager.js";
 import { UNAUTHORIZED_FRAME } from "../ipc-bridge.js";
 import { hostFrameEvent } from "./test-helpers.js";
 
@@ -59,44 +59,6 @@ function makeAuditLogger() {
   return { log: vi.fn() };
 }
 
-// ── ALLOWED_VIEW_KEYS regex ────────────────────────────────────────────────
-
-describe("ALLOWED_VIEW_KEYS", () => {
-  it("accepts built-in view keys", () => {
-    for (const key of ["routines", "memory", "starred", "insights", "work-board"]) {
-      expect(ALLOWED_VIEW_KEYS.test(key)).toBe(true);
-    }
-  });
-
-  it("rejects 'tasks' (removed from allowlist)", () => {
-    expect(ALLOWED_VIEW_KEYS.test("tasks")).toBe(false);
-  });
-
-  it("accepts valid plugin view keys (pluginId:extensionId format)", () => {
-    // toViewKey() produces plugin:<pluginId>:<extensionId>
-    expect(ALLOWED_VIEW_KEYS.test("plugin:meeting:meeting-control")).toBe(true);
-    expect(ALLOWED_VIEW_KEYS.test("plugin:my-plugin:main-view")).toBe(true);
-    expect(ALLOWED_VIEW_KEYS.test("plugin:my_plugin.v2:panel_a")).toBe(true);
-  });
-
-  it("rejects single-segment plugin keys (missing extensionId)", () => {
-    expect(ALLOWED_VIEW_KEYS.test("plugin:my-plugin")).toBe(false);
-    expect(ALLOWED_VIEW_KEYS.test("plugin:meeting")).toBe(false);
-  });
-
-  it("rejects path traversal attempts", () => {
-    expect(ALLOWED_VIEW_KEYS.test("../etc/passwd")).toBe(false);
-    expect(ALLOWED_VIEW_KEYS.test("../../etc/shadow")).toBe(false);
-    expect(ALLOWED_VIEW_KEYS.test("plugin:../evil")).toBe(false);
-  });
-
-  it("rejects arbitrary strings", () => {
-    expect(ALLOWED_VIEW_KEYS.test("unknown-view")).toBe(false);
-    expect(ALLOWED_VIEW_KEYS.test("")).toBe(false);
-    expect(ALLOWED_VIEW_KEYS.test("TASKS")).toBe(false);
-  });
-});
-
 // ── IPC handler security ───────────────────────────────────────────────────
 
 describe("WindowManager IPC — validateSender guard", () => {
@@ -113,170 +75,25 @@ describe("WindowManager IPC — validateSender guard", () => {
     const mod = await import("../main/window-manager.js?t=" + Date.now());
     WindowManager = mod.WindowManager;
     auditLogger = makeAuditLogger();
-    wm = new WindowManager({ preloadPath: "/fake/preload.cjs", distRoot: "/fake/dist" });
+    wm = new WindowManager();
     wm.registerIpc(auditLogger as never);
   });
 
-  it("registers no `lvis:window:open-detached` handler — the channel is retired", () => {
-    expect(handleMap.has("lvis:window:open-detached")).toBe(false);
-  });
-
-  describe("lvis:window:close-detached", () => {
-    it("returns UNAUTHORIZED_FRAME and calls auditLogger for unauthorized sender", async () => {
-      const handler = handleMap.get("lvis:window:close-detached")!;
-      const result = await handler(unauthorizedEvent());
-      expect(result).toEqual(UNAUTHORIZED_FRAME);
-      expect(auditLogger.log).toHaveBeenCalledOnce();
-    });
-  });
-
-  describe("lvis:window:list-detached", () => {
-    it("returns UNAUTHORIZED_FRAME and calls auditLogger for unauthorized sender", async () => {
-      const handler = handleMap.get("lvis:window:list-detached")!;
-      const result = await handler(unauthorizedEvent());
-      expect(result).toEqual(UNAUTHORIZED_FRAME);
-      expect(auditLogger.log).toHaveBeenCalledOnce();
-    });
-  });
-
-  describe("lvis:window:close-all-detached", () => {
-    /**
-     * Build a fake detached child window and insert it directly into the
-     * manager's private `_children` map (the same registry getDetachedWindows()
-     * reads). `webContents.id` lets the auth-owned registry distinguish auth
-     * windows from ordinary detached tabs.
-     */
-    function injectChild(
-      wm: InstanceType<typeof WindowManager>,
-      id: number,
-      viewKey: string,
-    ) {
-      const win = {
-        id,
-        isDestroyed: vi.fn(() => false),
-        close: vi.fn(),
-        // `once` is needed because markAsAuthOwned() subscribes to the
-        // webContents lifecycle events for automatic registry cleanup.
-        webContents: { id, once: vi.fn() },
-      };
-      // Reach into the private children map — the production code only exposes
-      // it via getDetachedWindows()/closeAllDetached(), which is exactly what
-      // we are exercising.
-      (wm as unknown as { _children: Map<number, { window: typeof win; viewKey: string }> })
-        ._children.set(id, { window: win, viewKey });
-      return win;
-    }
-
-    it("returns UNAUTHORIZED_FRAME and audits for an unauthorized sender", async () => {
-      const handler = handleMap.get("lvis:window:close-all-detached")!;
-      const result = await handler(unauthorizedEvent());
-      expect(result).toEqual(UNAUTHORIZED_FRAME);
-      expect(auditLogger.log).toHaveBeenCalledOnce();
-    });
-
-    it("rejects a plugin-ui-shell sender (validateHostRendererSender guard)", async () => {
-      const pluginShellEvent = {
-        senderFrame: { url: "file:///Applications/Lvis.app/dist/plugin-ui-shell.html" },
-        sender: {},
-      } as unknown as IpcMainInvokeEvent;
-      const handler = handleMap.get("lvis:window:close-all-detached")!;
-      const result = await handler(pluginShellEvent);
-      expect(result).toEqual(UNAUTHORIZED_FRAME);
-      expect(auditLogger.log).toHaveBeenCalledOnce();
-    });
-
-    it("closes every tracked detached tab", async () => {
-      const a = injectChild(wm, 11, "routines");
-      const b = injectChild(wm, 12, "plugin:meeting:meeting-control");
-      const handler = handleMap.get("lvis:window:close-all-detached")!;
-      const result = await handler(hostFrameEvent());
-      expect(result).toEqual({ ok: true });
-      expect(a.close).toHaveBeenCalledOnce();
-      expect(b.close).toHaveBeenCalledOnce();
-    });
-
-    it("does NOT close auth/login windows even if they were tracked", async () => {
-      // Import the registry with the SAME bare specifier window-manager uses
-      // (no cache-bust) so we share the post-resetModules module instance — its
-      // `authOwnedIds` Set is the one window-manager's isAuthOwned() reads.
-      const { markAsAuthOwned } = await import("../main/auth-window-registry.js");
-      const detached = injectChild(wm, 21, "routines");
-      const authWin = injectChild(wm, 22, "memory");
-      // Tag the auth window's webContents as auth-owned — mirrors what
-      // auth-window-service does at creation time. The work-mode sweep MUST
-      // skip it: the login/auth window is always a separate window.
-      markAsAuthOwned(authWin.webContents as never);
-      const handler = handleMap.get("lvis:window:close-all-detached")!;
-      const result = await handler(hostFrameEvent());
-      expect(result).toEqual({ ok: true });
-      expect(detached.close).toHaveBeenCalledOnce();
-      expect(authWin.close).not.toHaveBeenCalled();
-    });
-  });
-
-  describe("lvis:window:load-session-in-main", () => {
-    it("forwards a valid session id to the registered main window and waits for renderer acknowledgement", async () => {
-      const mainWebContents = { send: vi.fn() };
-      const mainWindow = {
-        id: 7,
-        on: vi.fn(),
-        isDestroyed: vi.fn(() => false),
-        show: vi.fn(),
-        focus: vi.fn(),
-        webContents: mainWebContents,
-      };
-      wm.registerMainWindow(mainWindow as never);
-      fromId.mockReturnValueOnce(mainWindow);
-
-      const handler = handleMap.get("lvis:window:load-session-in-main")!;
-      const resultPromise = Promise.resolve(handler(hostFrameEvent(), "sess_star-1"));
-
-      expect(mainWindow.show).toHaveBeenCalledOnce();
-      expect(mainWindow.focus).toHaveBeenCalledOnce();
-      const sentPayload = mainWebContents.send.mock.calls[0]?.[1] as { sessionId: string; requestId: string };
-      expect(mainWebContents.send).toHaveBeenCalledWith(
-        "lvis:window:load-session-in-main",
-        expect.objectContaining({ sessionId: "sess_star-1", requestId: expect.any(String) }),
-      );
-      const ack = listenerMap.get("lvis:window:load-session-in-main-result");
-      expect(ack).toBeDefined();
-      ack?.({ ...hostFrameEvent(), sender: mainWebContents } as never, {
-        requestId: sentPayload.requestId,
-        ok: true,
-      });
-
-      await expect(resultPromise).resolves.toEqual({ ok: true });
-    });
-
-    it("returns a failure when the main renderer rejects detached session loading", async () => {
-      const mainWebContents = { send: vi.fn() };
-      const mainWindow = {
-        id: 7,
-        on: vi.fn(),
-        isDestroyed: vi.fn(() => false),
-        show: vi.fn(),
-        focus: vi.fn(),
-        webContents: mainWebContents,
-      };
-      wm.registerMainWindow(mainWindow as never);
-      fromId.mockReturnValueOnce(mainWindow);
-
-      const handler = handleMap.get("lvis:window:load-session-in-main")!;
-      const resultPromise = Promise.resolve(handler(hostFrameEvent(), "sess_star-1"));
-      const sentPayload = mainWebContents.send.mock.calls[0]?.[1] as { requestId: string };
-      listenerMap.get("lvis:window:load-session-in-main-result")?.(
-        { ...hostFrameEvent(), sender: mainWebContents } as never,
-        { requestId: sentPayload.requestId, ok: false, error: "load-session-failed" },
-      );
-
-      await expect(resultPromise).resolves.toEqual({ ok: false, error: "load-session-failed" });
-    });
-
-    it("rejects malformed session ids", async () => {
-      const handler = handleMap.get("lvis:window:load-session-in-main")!;
-      const result = await handler(hostFrameEvent(), "../session");
-      expect(result).toEqual({ ok: false, error: "invalid-session-id" });
-    });
+  it.each([
+    "lvis:window:open-detached",
+    "lvis:window:close-detached",
+    "lvis:window:list-detached",
+    "lvis:window:close-all-detached",
+    "lvis:window:load-session-in-main",
+    "lvis:mcp:open-detached",
+    "lvis:mcp:close-detached",
+    "lvis:mcp:detached-payload",
+  ])("registers no handler for the retired channel %s", (channel) => {
+    // Detach is retired. A handler reappearing here would be a live IPC entry point
+    // into window machinery that no longer exists, which is exactly the regression
+    // worth failing on — the channel constants are gone, so re-adding one is a
+    // deliberate act and this list is where it shows up.
+    expect(handleMap.has(channel)).toBe(false);
   });
 
   describe("lvis:window:resize-for-mode", () => {

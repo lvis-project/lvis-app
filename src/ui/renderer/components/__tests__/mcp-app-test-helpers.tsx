@@ -5,24 +5,17 @@ import { ThemeProvider, DEFAULT_BUNDLE_ID } from "../../theme/index.js";
 interface McpLvisStubDependencies {
   readUiResource: unknown;
   disposeUiSession: unknown;
-  openDetached: unknown;
-  closeDetached: unknown;
 }
 
 export function stubMcpLvis({
   readUiResource,
   disposeUiSession,
-  openDetached,
-  closeDetached,
 }: McpLvisStubDependencies): void {
   vi.stubGlobal("lvis", {
     mcp: {
       readUiResource,
       disposeUiSession,
-      openDetached,
-      closeDetached,
       onServerDisconnected: () => () => undefined,
-      onDetachedClosed: () => () => undefined,
     },
   });
   (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
