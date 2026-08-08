@@ -20,7 +20,7 @@ import {
   auditUnauthorized,
 } from "../gated.js";
 import { buildApprovalScopeOptions } from "../../permissions/approval-scope-options.js";
-import { buildApprovalRequestFacts } from "../../permissions/reviewer/approval-sentence-facts.js";
+import type { ApprovalRequestFacts } from "../../permissions/reviewer/approval-sentence-selector.js";
 import { sendToWindow } from "../safe-send.js";
 import { getWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
 import {
@@ -462,14 +462,22 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         message: "approval sentence selector is not wired",
       };
     }
+    // The reasoning-blind boundary. `ApprovalRequestFacts` is a CLOSED record,
+    // so this literal is where a future disclosure would have to be typed out
+    // deliberately — adding a field to the gate snapshot cannot leak through
+    // here, because an extra key is a compile error rather than a passenger.
+    // The selector re-derives the wire envelope field by field for the same
+    // reason; this is the caller half of that boundary, not a second copy of
+    // it. Nothing agent-authored is in scope: no `reason`, no `args`.
+    const facts: ApprovalRequestFacts = {
+      toolName: state.toolName,
+      category: state.toolCategory ?? "unknown",
+      source: state.source,
+      candidatePath: state.candidatePath,
+    };
     const selection = await selector.select({
       sentence: outcome.cmd.sentence,
-      request: buildApprovalRequestFacts({
-        toolName: state.toolName,
-        toolCategory: state.toolCategory,
-        source: state.source,
-        candidatePath: state.candidatePath,
-      }),
+      request: facts,
       options,
     });
     switch (selection.outcome) {
