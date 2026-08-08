@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 189
+ * Fragments: 190
  */
 import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
@@ -192,6 +192,7 @@ import { en as en_useStatusBarInstall } from "./useStatusBarInstall.js";
 import { en as en_useStatusBarVendor } from "./useStatusBarVendor.js";
 import { en as en_userMessageEditor } from "./userMessageEditor.js";
 import { en as en_viewModeBanner } from "./viewModeBanner.js";
+import { en as en_viewPathNav } from "./viewPathNav.js";
 import { en as en_violetDark } from "./violetDark.js";
 import { en as en_violetLight } from "./violetLight.js";
 import { en as en_webTab } from "./webTab.js";
@@ -383,6 +384,7 @@ export const generatedEn: Record<string, string> = {
   ...en_useStatusBarVendor,
   ...en_userMessageEditor,
   ...en_viewModeBanner,
+  ...en_viewPathNav,
   ...en_violetDark,
   ...en_violetLight,
   ...en_webTab,
