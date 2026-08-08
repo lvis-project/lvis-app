@@ -9,18 +9,14 @@ import {
 } from "react";
 import { getApi, toViewKey } from "../api-client.js";
 import {
-  isDetachableViewKey,
   parseInlineViewKey,
-  type DetachableBuiltinViewKey,
   type InlineViewKey,
   type PluginViewKey,
 } from "../../../shared/view-key.js";
 import { extractPluginAuthErrorCode } from "../utils/plugin-auth-error.js";
 import type { useTranslation } from "../../../i18n/react.js";
-import type { AppMode } from "../MainToolbar.js";
 import type { usePluginMarketplace } from "./use-plugin-marketplace.js";
 import type { usePluginAuthStatuses } from "./use-plugin-auth-status.js";
-import type { useChatState } from "./use-chat-state.js";
 import type { useStatusBar } from "./use-status-bar.js";
 
 type Api = ReturnType<typeof getApi>;
@@ -31,20 +27,17 @@ type PluginCards = PluginMarketplace["pluginCards"];
 type PluginView = PluginViews[number];
 type PluginAuthStatuses = ReturnType<typeof usePluginAuthStatuses>["statuses"];
 type RefreshPluginAuthStatus = ReturnType<typeof usePluginAuthStatuses>["refresh"];
-type SetErrorWithThought = ReturnType<typeof useChatState>["setErrorWithThought"];
 type PushToast = ReturnType<typeof useStatusBar>["pushToast"];
 
 export interface UsePluginViewRoutingDeps {
   api: Api;
   t: TFn;
-  appMode: AppMode;
   activeView: InlineViewKey;
   setActiveView: Dispatch<SetStateAction<InlineViewKey>>;
   pluginViews: PluginViews;
   pluginCards: PluginCards;
   pluginAuthStatuses: PluginAuthStatuses;
   refreshPluginAuthStatus: RefreshPluginAuthStatus;
-  setErrorWithThought: SetErrorWithThought;
   statusPushToast: PushToast;
 }
 
@@ -66,22 +59,21 @@ export interface UsePluginViewRoutingResult {
  * refs and the drain effects together preserves the login-first / open-on-authed
  * contract (architecture.md §9.4a).
  *
- * Plugin views always open INLINE regardless of appMode (a selected plugin
- * panel stays in the chat panel, never a separate window). appMode still drives
- * detachment for the app's own built-in tabs (work-board/routines/…), which this
- * hook reads but never changes.
+ * Selecting a view ALWAYS renders it inline, for plugin views and the app's
+ * own built-in tabs alike, in every appMode. Nothing here opens a window:
+ * a mode is a layout, not a destination, and having one mode answer a
+ * navigation click with a second window left the main window unable to say
+ * where it was.
  */
 export function usePluginViewRouting({
   api,
   t,
-  appMode,
   activeView,
   setActiveView,
   pluginViews,
   pluginCards,
   pluginAuthStatuses,
   refreshPluginAuthStatus,
-  setErrorWithThought,
   statusPushToast,
 }: UsePluginViewRoutingDeps): UsePluginViewRoutingResult {
   // Inline auth gate — plugins awaiting an unauthed→authed transition before
@@ -98,24 +90,6 @@ export function usePluginViewRouting({
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const activePluginAuthError = activePluginView ? pluginAuthErrors.get(activePluginView.pluginId) ?? null : null;
-
-  const openDetachedBuiltInView = useCallback(
-    async (viewKey: DetachableBuiltinViewKey): Promise<boolean> => {
-      const openDetached = api.window?.openDetached;
-      if (!openDetached) {
-        setErrorWithThought(t("app.errorCannotOpenNewWindow"));
-        return false;
-      }
-      const result = await openDetached(viewKey);
-      if (!result.ok) {
-        console.warn(`[window] detached built-in view ${viewKey} did not open`, result.error);
-        setErrorWithThought(t("app.errorCannotOpenNewWindowDetail", { error: result.error }));
-        return false;
-      }
-      return true;
-    },
-    [api, setErrorWithThought],
-  );
 
   const clearPluginAuthError = useCallback((pluginId: string) => {
     setPluginAuthErrors((prev) => {
@@ -140,13 +114,10 @@ export function usePluginViewRouting({
     [t],
   );
 
-  // Plugin views ALWAYS render inline in the chat panel — selecting one
-  // switches the main window's active view in every appMode (the meeting panel
-  // and every other plugin view stay alongside the conversation instead of
-  // popping into a separate window). This is the default and only behavior for
-  // plugin views; there is no per-view detach declaration. (Built-in detachable
-  // views like work-board still detach in chat mode — see below — because they
-  // are the app's own KakaoTalk-style tabs, not plugins.)
+  // Every view renders inline: selecting one switches the main window's active
+  // view in every appMode. This is the default and only behavior, for plugin
+  // views and built-in tabs alike, and there is no per-view detach
+  // declaration to opt out of it.
   //
   // Auth is a HOST-managed lifecycle (architecture.md §9.4a): the agent never
   // calls login/logout, and auth plugin view selection is login-first and
@@ -223,24 +194,13 @@ export function usePluginViewRouting({
         })();
         return;
       }
-      // Chat mode: built-in detachable views open in a separate window; home
-      // and settings (and every work-mode path) stay inline. The set is read
-      // off the shared table instead of relisted, so a new detachable surface
-      // does not need this branch edited to behave consistently.
-      if (appMode === "chat" && isDetachableViewKey(parsed.key)) {
-        void openDetachedBuiltInView(parsed.key);
-        return;
-      }
       setActiveView(parsed.key);
     },
     [
       api,
-      appMode,
       pluginViews,
       pluginCards,
       pluginAuthStatuses,
-      openDetachedBuiltInView,
-      setErrorWithThought,
       refreshPluginAuthStatus,
       clearPluginAuthError,
       formatPluginAuthLoginError,
