@@ -8,12 +8,10 @@
  * copying `makeStore` into each suite trips the `--fail-on-duplicates` gate.
  */
 import { mkdtempSync } from "node:fs";
-import { rm } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
 import {
   PluginArtifactStore,
-  retryOnTransientFsLock,
   type ArtifactStoreOptions,
 } from "../plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
@@ -46,20 +44,8 @@ export function makeTmpDir(prefix = "artifact-store-"): string {
 
 /**
  * Tear down a {@link makeTmpDir} directory, retrying the transient Windows
- * lock codes.
- *
- * A bare `rmSync(tmp, {recursive, force})` in a `finally` block is not safe on
- * Windows: an antivirus scanner or the shell indexer can still hold a handle
- * inside the tree microseconds after the test's last write, and `rm` then
- * fails `ENOTEMPTY`. The assertions have already passed at that point, so the
- * suite reports a failure for a test that did its job — and it reproduces only
- * in full-suite runs, which is what makes it read as flake.
- *
- * This delegates to the production `retryOnTransientFsLock` rather than
- * open-coding a second retry ladder: that helper already owns the list of
- * codes worth retrying, and a divergent copy here would be exactly the
- * duplicate authority the suite exists to prevent.
+ * lock codes. Re-exported so these suites keep their existing import, while the
+ * implementation — and the reasoning behind it — lives in one place for every
+ * suite that needs a scratch directory.
  */
-export async function cleanupTmpDir(dir: string): Promise<void> {
-  await retryOnTransientFsLock(() => rm(dir, { recursive: true, force: true }));
-}
+export { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
