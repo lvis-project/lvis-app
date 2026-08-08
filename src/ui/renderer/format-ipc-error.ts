@@ -197,6 +197,13 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "install-failed": "formatIpcError.installFailed",
   "uninstall-failed": "formatIpcError.uninstallFailed",
   "marketplace-disabled": "formatIpcError.marketplaceDisabled",
+  // Uninstall refusals from the `lvis://` deep link (#1967). Both used to be
+  // broadcast as English sentences with no `message` half, so the toast fell
+  // through to `${error}` and printed them verbatim in a localized UI.
+  // See `shared/plugin-install-result.ts` for why neither reuses `not-found`
+  // or `managed`.
+  "package-not-installed": "formatIpcError.packageNotInstalled",
+  "admin-plugin-uninstall-denied": "formatIpcError.adminPluginUninstallDenied",
   "invalid-provider-preset-id": "formatIpcError.invalidValue",
   "marketplace-provider-preset-install-failed": "formatIpcError.installFailed",
   "marketplace-provider-preset-uninstall-failed": "formatIpcError.uninstallFailed",
