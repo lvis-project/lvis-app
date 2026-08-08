@@ -31,7 +31,7 @@ export interface ViewPathNavProps {
 }
 
 const ICON_BUTTON_CLASS =
-  "h-7 w-7 rounded-lg text-muted-foreground transition-[color,background-color,transform] "
+  "h-7 w-7 shrink-0 rounded-lg text-muted-foreground transition-[color,background-color,transform] "
   + "duration-[var(--motion-fast)] ease-[var(--motion-ease-standard)] hover:bg-accent "
   + "hover:text-foreground active:scale-[0.96] disabled:opacity-40 motion-reduce:transition-none "
   + "motion-reduce:transform-none";
