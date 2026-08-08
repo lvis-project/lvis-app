@@ -1,6 +1,7 @@
 import "../../../../test/renderer/setup.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 
 /**
@@ -72,6 +73,47 @@ describe("App — view key guard on the activate-view IPC", () => {
 
     await waitFor(() =>
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("'plugin:token-plugin'")),
+    );
+    expect(screen.getByTestId("chat-view-root")).toBeTruthy();
+  });
+
+  it("refuses to navigate to a plugin view whose manifest yields a malformed key", async () => {
+    // `ui[].id` has no minLength in the manifest schema, so an empty extension
+    // id is a shape a real manifest can take. It produces `plugin:<id>:`,
+    // which is not a view key — it used to be set as `activeView` anyway.
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const user = userEvent.setup();
+    await renderApp({
+      pluginCards: [{
+        id: "broken-plugin",
+        name: "Broken Plugin",
+        description: "Ships a UI extension with an empty id",
+        sampleTools: [],
+        capabilities: [],
+        tools: [],
+        loadStatus: "loaded" as const,
+      }],
+      pluginUiExtensions: [{
+        pluginId: "broken-plugin",
+        extension: {
+          id: "",
+          slot: "sidebar",
+          kind: "embedded-module",
+          title: "Broken View",
+          entry: "dist/ui.js",
+        },
+        entryUrl: "file:///broken-plugin/dist/ui.js",
+      }],
+    });
+    await waitFor(() => expect(screen.getByTestId("chat-view-root")).toBeTruthy());
+
+    await user.click(screen.getByTestId("command-popover-trigger"));
+    await user.click(await screen.findByTestId("slash-picker-cat-plugin"));
+    const group = await screen.findByTestId("slash-group-plugin");
+    await user.click(await within(group).findByText("Broken View"));
+
+    await waitFor(() =>
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("'plugin:broken-plugin:'")),
     );
     expect(screen.getByTestId("chat-view-root")).toBeTruthy();
   });

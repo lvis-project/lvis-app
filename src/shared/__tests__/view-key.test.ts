@@ -59,14 +59,24 @@ describe("parseViewKey", () => {
     ["plugin:my-plugin", "one segment"],
     ["plugin::view", "an empty plugin id"],
     ["plugin:my-plugin:", "an empty view id"],
-    ["plugin:-bad:view", "a segment starting with a hyphen"],
-    ["plugin:../evil:view", "path traversal in the plugin id"],
-    ["plugin:my-plugin:../evil", "path traversal in the view id"],
+    ["plugin:a:b:c", "three segments"],
     ["mcp-app:zz:card", "a non-hex server id"],
     ["mcp-app:6162", "an MCP key with no card"],
+    ["mcp-app:6162:", "an empty card id"],
     ["../etc/passwd", "a relative path"],
   ])("refuses %j (%s)", (raw) => {
     expect(parseViewKey(raw)).toBeNull();
+  });
+
+  it("accepts a UI extension id the manifest schema permits but the detach list does not", () => {
+    // `ui[].id` is a bare `string` in schemas/plugin-manifest.schema.json, so
+    // this key ships today and renders inline. Parsing must not be the place
+    // that decides it is illegal — that would break a working plugin.
+    const key = "plugin:my-plugin:MainView";
+    expect(parseViewKey(key)).toMatchObject({ kind: "plugin", viewId: "MainView" });
+    expect(isInlineViewKey(key)).toBe(true);
+    // ...and it still cannot open a window, exactly as before this module.
+    expect(isDetachableViewKey(key)).toBe(false);
   });
 
   it("builds plugin keys through the one constructor", () => {
@@ -110,6 +120,16 @@ describe("inline vs detachable", () => {
   it("rejects unparseable keys from both spaces", () => {
     for (const raw of ["", "hom", "plugin:git", "mcp-app:zz:card"]) {
       expect(isInlineViewKey(raw)).toBe(false);
+      expect(isDetachableViewKey(raw)).toBe(false);
+    }
+  });
+
+  it("keeps the detach allow-list no looser than it was", () => {
+    // Structurally parseable, but never permitted to open a window. Pinning
+    // this stops a future "simplification" from collapsing the two charsets
+    // and quietly widening an IPC input check.
+    for (const raw of ["plugin:../evil:view", "plugin:my-plugin:../evil", "plugin:-bad:view"]) {
+      expect(parseViewKey(raw)).not.toBeNull();
       expect(isDetachableViewKey(raw)).toBe(false);
     }
   });
