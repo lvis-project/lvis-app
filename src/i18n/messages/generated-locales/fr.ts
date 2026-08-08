@@ -2371,6 +2371,7 @@ export const frMessages: Record<string, string> = {
   "composerProjectSelector.cancelButton": "Annuler",
   "sidebar.resizeHandleAriaLabel": "Redimensionner la barre latérale",
   "sidebar.projectMenuNewChat": "Nouvelle conversation dans ce projet",
+  "sidebar.projectMenuAdd": "Ajouter un projet…",
   "sidebar.projectMenuReveal": "Afficher le dossier",
   "sidebar.projectMenuRemove": "Supprimer le projet",
   "sidebar.daysAgo": "{count} j",

@@ -51,6 +51,7 @@ const NATIVE_LAYOUT: Record<
   project: [
     ["project.new-chat"],
     ["project.pin", "project.unpin", "project.reveal"],
+    ["project.add"],
     ["project.remove"],
   ],
   conversation: [
@@ -83,6 +84,7 @@ const NATIVE_LABEL: Record<NativeContextMenuCommand, () => string> = {
   "project.pin": () => t("sidebar.pinProject"),
   "project.unpin": () => t("sidebar.unpinProject"),
   "project.reveal": () => t("sidebar.projectMenuReveal"),
+  "project.add": () => t("sidebar.projectMenuAdd"),
   "project.remove": () => t("sidebar.projectMenuRemove"),
   "conversation.open": () => t("chatPreviewRail.ctxOpen"),
   "conversation.pin": () => t("sidebar.pinConversation"),
