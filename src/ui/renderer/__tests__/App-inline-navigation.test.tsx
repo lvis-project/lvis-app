@@ -20,6 +20,15 @@ import { renderApp } from "../../../../test/renderer/render-app.js";
 describe("App inline navigation", () => {
   afterEach(() => vi.restoreAllMocks());
 
+  /**
+   * `MockLvisApi` does not declare `window`, though the harness object carries
+   * it. Name the member being asserted on in one place instead of repeating an
+   * untyped reach-through at every call site.
+   */
+  function detachSpy(api: unknown) {
+    return (api as { window: { openDetached: ReturnType<typeof vi.fn> } }).window.openDetached;
+  }
+
   async function switchToChatMode(container: HTMLElement) {
     const chatBtn = await waitFor(() => {
       const el = container.querySelector('[data-testid="app-mode-chat"]');
@@ -53,7 +62,7 @@ describe("App inline navigation", () => {
     expect(container.querySelector('[data-testid="chat-view-root"]')).toBeNull();
 
     // No window was opened for it.
-    expect(api.window.openDetached).not.toHaveBeenCalled();
+    expect(detachSpy(api)).not.toHaveBeenCalled();
 
     // The sidebar entry now reports itself as the current page.
     await waitFor(() => {
@@ -81,7 +90,7 @@ describe("App inline navigation", () => {
       expect(container.querySelector('[data-testid="sidebar-routines"]')?.getAttribute("aria-current"))
         .toBe("page");
     });
-    expect(api.window.openDetached).not.toHaveBeenCalled();
+    expect(detachSpy(api)).not.toHaveBeenCalled();
   });
 
   it("keeps navigating inline after a mode switch, with no window opened either way", async () => {
@@ -108,6 +117,6 @@ describe("App inline navigation", () => {
     });
     expect(container.querySelector('[data-testid="toolbar-work-board"]')?.getAttribute("aria-current"))
       .toBeNull();
-    expect(api.window.openDetached).not.toHaveBeenCalled();
+    expect(detachSpy(api)).not.toHaveBeenCalled();
   });
 });
