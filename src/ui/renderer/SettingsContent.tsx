@@ -42,7 +42,7 @@ import { AboutTab } from "./tabs/AboutTab.js";
 import { StartupTab } from "./tabs/StartupTab.js";
 import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js";
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
-import { normalizeSettingsTab, type SettingsTab } from "../../shared/settings-tabs.js";
+import { normalizeSettingsTab, SETTINGS_TAB_LABEL_KEYS, type SettingsTab } from "../../shared/settings-tabs.js";
 import type { MarketplacePackageFilter } from "../../shared/marketplace-package-sections.js";
 
 type SettingsNavItem = { value: SettingsTab; icon: LucideIcon; labelKey: string };
@@ -58,44 +58,44 @@ const SETTINGS_NAV: { group: string; items: SettingsNavItem[] }[] = [
   {
     group: "settingsContent.groupAccountModel",
     items: [
-      { value: "llm", icon: Brain, labelKey: "settingsContent.tabLlm" },
-      { value: "usage", icon: BarChart3, labelKey: "settingsContent.tabUsage" },
+      { value: "llm", icon: Brain, labelKey: SETTINGS_TAB_LABEL_KEYS["llm"] },
+      { value: "usage", icon: BarChart3, labelKey: SETTINGS_TAB_LABEL_KEYS["usage"] },
     ],
   },
   {
     group: "settingsContent.groupApp",
     items: [
-      { value: "appearance", icon: Palette, labelKey: "settingsContent.tabAppearance" },
-      { value: "chat", icon: MessageSquare, labelKey: "settingsContent.tabChat" },
-      { value: "web", icon: Globe, labelKey: "settingsContent.tabWeb" },
-      { value: "startup", icon: Rocket, labelKey: "settingsContent.tabStartup" },
+      { value: "appearance", icon: Palette, labelKey: SETTINGS_TAB_LABEL_KEYS["appearance"] },
+      { value: "chat", icon: MessageSquare, labelKey: SETTINGS_TAB_LABEL_KEYS["chat"] },
+      { value: "web", icon: Globe, labelKey: SETTINGS_TAB_LABEL_KEYS["web"] },
+      { value: "startup", icon: Rocket, labelKey: SETTINGS_TAB_LABEL_KEYS["startup"] },
     ],
   },
   {
     group: "settingsContent.groupConnections",
     items: [
-      { value: "remote-surfaces", icon: Network, labelKey: "settingsContent.tabRemoteSurfaces" },
+      { value: "remote-surfaces", icon: Network, labelKey: SETTINGS_TAB_LABEL_KEYS["remote-surfaces"] },
     ],
   },
   {
     group: "settingsContent.groupPermRoles",
     items: [
-      { value: "permissions", icon: Shield, labelKey: "settingsContent.tabPermissions" },
-      { value: "roles", icon: UserCog, labelKey: "settingsContent.tabRoles" },
+      { value: "permissions", icon: Shield, labelKey: SETTINGS_TAB_LABEL_KEYS["permissions"] },
+      { value: "roles", icon: UserCog, labelKey: SETTINGS_TAB_LABEL_KEYS["roles"] },
     ],
   },
   {
     group: "settingsContent.groupPlugins",
     items: [
-      { value: "marketplace", icon: Store, labelKey: "settingsContent.tabMarketplace" },
-      { value: "plugin-config", icon: Puzzle, labelKey: "settingsContent.tabPluginConfig" },
-      { value: "mcp", icon: Server, labelKey: "settingsContent.tabMcp" },
+      { value: "marketplace", icon: Store, labelKey: SETTINGS_TAB_LABEL_KEYS["marketplace"] },
+      { value: "plugin-config", icon: Puzzle, labelKey: SETTINGS_TAB_LABEL_KEYS["plugin-config"] },
+      { value: "mcp", icon: Server, labelKey: SETTINGS_TAB_LABEL_KEYS["mcp"] },
     ],
   },
   {
     group: "settingsContent.groupAdvanced",
     items: [
-      { value: "audit", icon: FileSearch, labelKey: "settingsContent.tabAudit" },
+      { value: "audit", icon: FileSearch, labelKey: SETTINGS_TAB_LABEL_KEYS["audit"] },
     ],
   },
   // About is app/system info, not an "Advanced" setting — it sits on its own as
@@ -104,7 +104,7 @@ const SETTINGS_NAV: { group: string; items: SettingsNavItem[] }[] = [
   {
     group: "",
     items: [
-      { value: "about", icon: Info, labelKey: "settingsContent.tabAbout" },
+      { value: "about", icon: Info, labelKey: SETTINGS_TAB_LABEL_KEYS["about"] },
     ],
   },
 ];

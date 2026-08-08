@@ -53,7 +53,9 @@ import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import type { McpPromptEntry } from "./components/slash-picker-data.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
-import type { InlineViewKey } from "../../shared/view-key.js";
+import { toViewLocation, viewLocationBreadcrumb, type ViewLocation } from "./utils/view-location.js";
+import { useViewHistory } from "./hooks/use-view-history.js";
+import { useViewHistoryShortcuts } from "./hooks/use-view-history-shortcuts.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
 import {
   defaultProjectFromProjects,
@@ -157,8 +159,9 @@ export function App() {
   // return to via the back affordance. Settings is an inline view in EVERY
   // appMode — there is no detached settings window on this path (see
   // onOpenSettings below), so these drive it in both modes.
+  // Persisted alongside the view (#1995), so a restart resumes the exact page
+  // inside Settings rather than the tab it was last opened on.
   const { settingsTab, setSettingsTab } = useSettingsTab(api);
-  const settingsReturnViewRef = useRef<InlineViewKey>("home");
   // Workspace mode (Chat / Work) + coupled shell layout state. appMode is the
   // SOLE authority for inline-vs-detached; the hook owns the seed-before-paint
   // state, the no-op-guarded persistence, and the three appMode-transition
@@ -242,7 +245,24 @@ export function App() {
     () => pluginViews.map((view) => toViewKey(view)),
     [pluginViews],
   );
-  const { activeView, setActiveView } = useActiveView(api, loadedPluginViewKeys);
+  const { activeView, setActiveView, restoring: activeViewRestoring } =
+    useActiveView(api, loadedPluginViewKeys);
+  // Where the window IS, as one value — the pair the top-bar path renders and
+  // the unit visit history records. Settings is one view key but several
+  // places, so the tab belongs in the location or the path would say
+  // "Settings" while the user is on Permissions.
+  const location = useMemo(
+    () => toViewLocation(activeView, settingsTab),
+    [activeView, settingsTab],
+  );
+  // Applying a history entry sets BOTH halves, so replaying a settings entry
+  // lands on the page it was recorded on rather than the tab last opened.
+  const navigateToLocation = useCallback((to: ViewLocation) => {
+    if (to.settingsTab) setSettingsTab(to.settingsTab);
+    setActiveView(to.view);
+  }, [setSettingsTab, setActiveView]);
+  const viewHistory = useViewHistory(location, navigateToLocation, activeViewRestoring);
+  useViewHistoryShortcuts(viewHistory);
 
   // Auth status for every plugin that declares `manifest.auth`
 
@@ -480,6 +500,24 @@ export function App() {
     statusPushToast,
   });
 
+  // Path + history controls handed to the top bar. Labels resolve through the
+  // plugin's declared title so a plugin crumb names the panel the way its own
+  // sidebar entry does.
+  const viewNav = useMemo(() => ({
+    segments: viewLocationBreadcrumb(location, {
+      t,
+      pluginViewLabel: (viewKey: string) => {
+        const view = pluginViews.find((candidate) => toViewKey(candidate) === viewKey);
+        return view ? getPluginViewLabel(view) : undefined;
+      },
+    }),
+    canGoBack: viewHistory.canGoBack,
+    canGoForward: viewHistory.canGoForward,
+    onBack: viewHistory.goBack,
+    onForward: viewHistory.goForward,
+    onSelectSegment: navigateToLocation,
+  }), [location, t, pluginViews, viewHistory, navigateToLocation]);
+
   // Build flat PluginEntry list for InputActionBar plugin grid.
   // `unauthed` is set when the owning plugin declares `manifest.auth` AND its
   // current statusTool result is `kind: "unauthed"`. The grid renders a
@@ -601,12 +639,7 @@ export function App() {
   // re-mounts and loses its place.
   const onOpenSettings = useCallback((tab = "llm") => {
     setSettingsTab(normalizeSettingsTab(tab));
-    setActiveView((current) => {
-      // Only capture the return view on the first entry into settings; a
-      // re-click while already inline must not overwrite it with "settings".
-      if (current !== "settings") settingsReturnViewRef.current = current;
-      return "settings";
-    });
+    setActiveView("settings");
   }, []);
 
   const handleViewSelectWithDoctor = useCallback((key: string) => {
@@ -624,10 +657,20 @@ export function App() {
     handleViewSelect(key);
   }, [handleViewSelect, onOpenSettings, pluginCards, statusPushToast, t]);
 
-  const handleCloseInlineSettings = useCallback(() => {
-    const target = settingsReturnViewRef.current;
-    setActiveView(target === "settings" ? "home" : target);
-  }, []);
+  // The page-level back affordances (Settings' own, and MainPaneShell's on
+  // every other view) now mean the same thing as the top bar's back: return to
+  // where you were. They used to differ — Settings returned one step through a
+  // single-slot ref while everything else went unconditionally home — which is
+  // three controls sharing a label and an icon while behaving differently.
+  // With an empty history there is nowhere to return to, so home stays the
+  // floor and today's behavior is preserved in that degenerate case.
+  const handlePageBack = useCallback(() => {
+    if (viewHistory.canGoBack) {
+      viewHistory.goBack();
+      return;
+    }
+    setActiveView("home");
+  }, [viewHistory]);
 
   // Side panel (ChatSidePanel) is a home-view affordance: navigating away from
   // home closes it so it never lingers behind another view. Toggling from a
@@ -898,6 +941,7 @@ export function App() {
     >
       <AppShell
         api={api}
+        viewNav={viewNav}
         appMode={appMode}
         sidebarCollapsed={sidebarCollapsed}
         onToggleSidebarCollapse={() => setSidebarCollapsed((v) => !v)}
@@ -1001,7 +1045,7 @@ export function App() {
             settingsTab={settingsTab}
             onSettingsTabChange={setSettingsTab}
             onSettingsSaved={handleInlineSettingsSaved}
-            onCloseSettings={handleCloseInlineSettings}
+            onCloseSettings={handlePageBack}
             starred={starred}
             currentSessionId={currentSessionId}
             currentSessionKind={currentSessionKind}
@@ -1013,7 +1057,7 @@ export function App() {
             onRefreshProjects={refreshWorkspaceProjects}
             onRunMcpPrompt={handleRunMcpPrompt}
             refreshStarred={refreshStarred}
-            onActivateHome={() => setActiveView("home")}
+            onActivateHome={handlePageBack}
             onJumpToSession={handleLoadSessionAndRefresh}
             chatContextValue={chatContextValue}
             onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}

@@ -2,6 +2,7 @@ import { ArrowDownToLine, Download, PanelRightClose, PanelRightOpen, RefreshCw, 
 import { Button } from "../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../components/ui/tooltip.js";
 import { useTranslation } from "../../i18n/react.js";
+import { ViewPathNav, type ViewPathNavProps } from "./components/ViewPathNav.js";
 import { RemoteA2AActionButton } from "./components/RemoteA2AActionButton.js";
 
 /**
@@ -52,7 +53,9 @@ function isDevMode(): boolean {
 }
 
 export interface MainToolbarProps {
-  activeView: string;
+  /** Path + history controls for the current location. `activeView` used to be
+   *  passed here and thrown away; the path is what it was always for. */
+  viewNav: ViewPathNavProps;
   streaming: boolean;
   hasApiKey: boolean | null;
   /** Current workspace mode (Chat / Work). Drives the segmented toggle. */
@@ -80,7 +83,7 @@ export interface MainToolbarProps {
 }
 
 export function MainToolbar({
-  activeView: _activeView,
+  viewNav,
   streaming: _streaming,
   hasApiKey: _hasApiKey,
   appMode,
@@ -106,8 +109,15 @@ export function MainToolbar({
       data-testid="main-toolbar"
       className="flex min-w-0 flex-1 items-center gap-2"
     >
+      {/* ── Location: back / forward + the path. Capped at 45% of the band so a
+          long path truncates instead of consuming the drag region; the spacer
+          below is what the user grabs to move the window. */}
+      <NoDrag className="flex min-w-0 max-w-[45%] items-center">
+        <ViewPathNav {...viewNav} />
+      </NoDrag>
+
       {/* ── Spacer pushes the trailing controls to the far-right edge (stays drag) */}
-      <div className="flex-1" aria-hidden="true" />
+      <div className="min-w-[120px] flex-1" aria-hidden="true" />
 
       <NoDrag>
         <RemoteA2AActionButton />
@@ -153,8 +163,8 @@ export function MainToolbar({
       )}
 
       {/* ── Workspace mode (Chat / Work) — pinned to the FAR-RIGHT end of the
-          top bar. Work keeps views inline (sidebar expanded); Chat pops
-          detachable views into windows. */}
+          top bar. Both modes render every view inline; the mode drives the
+          shell layout (rail width, activity panel, OS window size). */}
       <NoDrag>
         <AppModeToggle mode={appMode} onToggle={onToggleAppMode} />
       </NoDrag>
