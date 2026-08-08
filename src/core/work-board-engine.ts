@@ -162,7 +162,7 @@ export interface WorkBoardEngineDeps {
    */
   transcriptStorage?: TranscriptStorage;
   /**
-   * Optional post-run learning hook (Hermes self-improvement pillar). Called
+   * Optional post-run learning hook (the self-improvement pillar). Called
    * fire-and-forget AFTER a run reaches `completed` and is persisted; a throw
    * here must never fail the already-succeeded run, so the engine swallows
    * rejections. boot wires this to append a one-line learning to the item's

@@ -45,13 +45,13 @@ exposure must never remove a tool from the registry or bypass permission checks.
 
 ## Reference Basis
 
-- OpenAI tool search guidance recommends deferring tool definitions and loading
+- Published tool-search guidance recommends deferring tool definitions and loading
   only the definitions needed at runtime. It also notes that deferring a single
   function mostly saves parameter-schema tokens, while deferring larger logical
   namespaces saves more because function names and descriptions need not be
   repeated upfront.
   - `https://developers.openai.com/api/docs/guides/tools-tool-search`
-- OpenAI function-calling guidance describes the multi-step loop: provide tools,
+- Published function-calling guidance describes the multi-step loop: provide tools,
   receive tool calls, execute them, then send results back for another model
   response. Any oversized tool schema set is therefore paid repeatedly across
   tool-use rounds, not once per user turn.
@@ -202,7 +202,7 @@ The current implementation uses `tool_search` to promote individual tools or
 small tool subsets. Bundled instruction discovery belongs to `manifest.skills`;
 the Host has no keyword-to-Tool dispatch or preload path.
 
-Do not switch the app to OpenAI-only hosted tool search as the first fix. LVIS
+Do not switch the app to a single vendor's hosted tool search as the first fix. LVIS
 currently routes tool schemas through the cross-vendor Vercel AI SDK provider
 adapter, so the stable implementation surface is client-side schema deferral in
 `ToolRegistry`, `ConversationLoop`, and `SystemPromptBuilder`.

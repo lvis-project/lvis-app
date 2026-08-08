@@ -57,31 +57,36 @@ not separated.** Fixing the boundary (#1409) creates the *refactor firewall* tha
 internals (#1411) be restructured freely, and decomposing the internals (#1411) is what makes a
 clean boundary expressible. So they are executed together.
 
-## 2. Reference host analysis (goose / gemini-cli / codex / hermes / opencode / cherry-studio / cline / claude)
+## 2. Reference host analysis
 
-The comparison converges on **one pattern across every mature host**:
+A survey of eight mature agent hosts — Rust and TypeScript, CLI-first and
+desktop-first, monorepo and single-package — converges on **one pattern across
+every one of them**:
 
 > **One transport-agnostic core, many thin surfaces.** The agent loop, tool execution, and
 > plugin/extension lifecycle live in a core with **zero UI/transport imports**. CLI, local API,
 > desktop renderer, and SDK are all *thin adapters* over the *same* published contract — never
 > parallel reimplementations.
 
-| Host | Core | Surfaces | Contract SOT | Key lesson for LVIS |
-|---|---|---|---|---|
-| **goose** (Block, Rust) | `crates/goose` | `goose-cli` (in-proc), `goose-server`/`goosed` (HTTP+SSE daemon), `ui/desktop` (Electron → HTTP client of goosed), `goose-sdk` (uniffi) | `utoipa` → `openapi.json` → `@hey-api/openapi-ts` → typed TS client | Desktop talks to core via a **local daemon (HTTP+SSE)**, not bespoke IPC; the same contract then serves CLI + remote + automation. Agent file split: `agents/agent.rs` (turn loop) / `tool_execution.rs` / `tool_confirmation_router.rs` + `permission/` / `extension_manager.rs` / `mcp_client.rs` / `subagent_*`. |
-| **gemini-cli** (Google, TS) | `packages/core` | `packages/cli`, `packages/sdk` (narrow facade) | `core` exports a **narrow, curated public API**; `Turn.run()` is an async-generator event stream | Two-tier: broad internal core + **narrow SDK facade** (not a broad barrel). Interactive vs non-interactive both over one core. |
-| **codex** (OpenAI, Rust) | `codex-core` | `codex-cli`, `codex-tui`, `codex-mcp-server/client`, `codex-exec` | **`codex-protocol` crate** = the shared contract; front-ends depend only on it | The protocol crate is a **firewall**: internals can churn as long as the protocol holds. TUI depends only on protocol, never on core internals. |
-| **hermes** (desktop MCP host) | core services | `electron/` (~25 tested `.cjs` units), `plugins/<name>/` | `turn_context` / `turn_finalizer` seams | Small, individually-tested main-process units; plugin-per-directory. |
-| **opencode** (sst, TS) | `session/` | generated SDK, TUI | **OpenAPI-as-SOT** → generated SDK | `session/{prompt,processor,llm,compaction}` module split mirrors our turn concerns. |
-| **cherry-studio** (Electron) | services | renderer, **two API layers** (internal-IPC vs external-gateway) | `LifecycleManager` phased DI | Explicit **internal-IPC vs external-gateway** split — exactly #1409's renderer-vs-external distinction. |
-| **cline** (VS Code) | core | `HostProvider` abstraction | host-provider interface | Abstract the host surface so the same core runs under different shells. |
-| **claude / single-npm agent CLIs** | one package | CLI + programmatic SDK | internal module boundaries | Even without a monorepo, a single package stays maintainable via strict internal module seams (registry / streaming-executor / permissions) and exposes an SDK alongside the CLI. |
+The structural lessons, each observed in more than one host:
+
+| Structural lesson | What it looks like in practice |
+|---|---|
+| **Desktop talks to core through a local daemon (HTTP+SSE), not bespoke IPC** | One published contract then serves desktop, CLI, remote, and automation alike. A typical agent-core file split: turn loop / tool execution / tool-confirmation routing + permissions / extension manager / MCP client / subagent lifecycle. |
+| **Two-tier API: broad internal core, narrow curated facade** | The public surface is a deliberately small facade, not a broad barrel re-export of everything. Interactive and non-interactive front-ends both run over one core. |
+| **A dedicated protocol/contract module is a firewall** | Front-ends depend only on the protocol module, never on core internals, so internals can churn freely as long as the protocol holds. |
+| **Schema-generated clients keep the contract honest** | An OpenAPI-style schema as SOT, with the typed client generated from it, makes contract drift a build failure instead of a runtime surprise. |
+| **Small, individually-tested main-process units; extension-per-directory** | Keeps a desktop main process reviewable and lets extensions be added without touching host branches. |
+| **Split the session/turn concerns into their own modules** | `{prompt, processor, llm, compaction}`-shaped separation mirrors our own turn concerns. |
+| **Explicit internal-IPC vs external-gateway API split** | Exactly #1409's renderer-vs-external distinction — the two have different trust and stability requirements and should not share one layer. |
+| **Abstract the host surface behind a provider interface** | The same core then runs under different shells. |
+| **A single package can still be maintainable** | Without a monorepo, strict internal module seams (registry / streaming-executor / permissions) plus an SDK exposed alongside the CLI achieve the same discipline. |
 
 **Adopted for LVIS (this PR):** the *seam*, not a monorepo migration. We introduce a
 `src/contract/` firewall and thin `src/api|cli|sdk/` scaffolds that consume the *same*
 transport-agnostic handlers the renderer uses — proving the pattern without breaking the esbuild
 entry contract or blowing the atomic-PR budget. Full daemon/network/publish hardening
-(goose-style `goosed`) is the explicit **#1409 follow-up**.
+is the explicit **#1409 follow-up**.
 
 ## 3. Canonical target structure
 
@@ -160,7 +165,7 @@ src/
   authenticated non-renderer authz replaces the gesture token — that authenticated authz is the
   #1409 follow-up (documented, not silently weakened here).
 - **One streaming contract.** `lvis:chat:stream` fan-out is abstracted behind an emitter in C10 so
-  api/cli consumers get an SSE/emitter bridge (goose `/reply` SSE pattern) instead of a rewrite later.
+  api/cli consumers get an SSE/emitter bridge (the daemon `/reply` SSE pattern) instead of a rewrite later.
 - **Session addressing is defined even though the impl stays singleton.** Session-scoped channels
   (get-history/session-history/checkpoint/continue-last-user) take a `sessionId` in the contract and
   **fail closed** (`session-not-active` error) when `sessionId !== active` — never silently retarget.
@@ -231,7 +236,7 @@ No-Fallback rule (each surface moves whole); esbuild entry + `boot.ts` export sh
 
 ## 9. Provenance
 
-Derived from a 17-agent analysis workflow (goose/gemini-cli/codex/hermes/opencode/cherry-studio/
-cline/claude host analysis + deep-read of all 8 target files + IPC/preload surface + existing
+Derived from a 17-agent analysis workflow (structural analysis of eight mature agent hosts +
+deep-read of all 8 target files + IPC/preload surface + existing
 architecture intent), a lead-architect synthesis, and an adversarial completeness critique
 (verdict: GO with 7 corrections, all folded in above).

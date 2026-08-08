@@ -525,7 +525,7 @@ export async function wireConversation(
       },
       );
     },
-    // Self-improvement (Hermes): after a run completes, append a one-line
+    // Self-improvement: after a run completes, append a one-line
     // learning to the item's project work memory. appendMemory enforces the
     // hard line cap; the engine fires this swallow-on-error so it never fails a run.
     onRunComplete: ({ itemId, title, projectRoot }) =>

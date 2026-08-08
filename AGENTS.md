@@ -12,11 +12,10 @@ state durable constraints here and put detailed designs in their owning docs.
   guidance. If the design conflicts with code reality, report the conflict;
   do not silently redesign the feature.
 - For host-agent product and UX precedent, start with official documentation
-  and current shipped behavior from Codex CLI/Desktop, Claude Code/Desktop,
-  Hermes Agent Desktop, goose Desktop, GitHub Copilot, and Google Antigravity.
-  IDE/workspace products are secondary references: use them for generic editor
-  or filesystem conventions, not as the primary model for agent-host lifecycle
-  or interaction behavior.
+  and current shipped behavior of comparable CLI and desktop coding-agent
+  hosts. IDE/workspace products are secondary references: use them for generic
+  editor or filesystem conventions, not as the primary model for agent-host
+  lifecycle or interaction behavior.
 - Plugin integration is defined by `src/plugins/types.ts`, manifests, schemas,
   and HostApi self-registration. Do not add plugin-specific host branches.
 - Permission behavior follows `docs/architecture/permission-policy-design.md`

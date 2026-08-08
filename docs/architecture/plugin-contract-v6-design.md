@@ -163,14 +163,14 @@ visibility — it stays host-side, exactly as today.
 |---|---|---|---|
 | method name | `tools[]` / `toolSchemas` key / `uiActions` key (3×) | `tools[].name` | — |
 | LLM-facing? | `tools[].includes(name)` | `_meta.ui.visibility ∋ "model"` | **standard** (SEP-1865) |
-| UI-invokable? | `uiActions[name]` present | `_meta.ui.visibility ∋ "app"` | **standard** (SEP-1865); OpenAI Apps SDK production analog (`openai/widgetAccessible` → migrating to the same array) |
+| UI-invokable? | `uiActions[name]` present | `_meta.ui.visibility ∋ "app"` | **standard** (SEP-1865); shipped production hosts are migrating their legacy two-field equivalents to the same array |
 | description / inputSchema / title / icons | `toolSchemas[name].*` | `tools[].*` (MCP fields) | — |
-| pathFields | `toolSchemas[name].pathFields?` | `_meta["lvisai/pathFields"]` | OpenAI `_meta["openai/fileParams"]` is a structural twin; the *gate* stays host-side (a lying declaration only adds checks, never bypasses one) |
+| pathFields | `toolSchemas[name].pathFields?` | `_meta["lvisai/pathFields"]` | a "which args are paths" hint has a structural twin in shipped production hosts; the *gate* stays host-side (a lying declaration only adds checks, never bypasses one) |
 | composite operation restrictions | none | `_meta["lvisai/operationPolicy"]` (2026-07-23 amendment) | signed Tool-local policy; `minimumRisk` is a floor, `appVisible` only narrows `_meta.ui.visibility`, and `requiresRead` only adds a prerequisite |
 | category | `toolSchemas[name].category?` | **removed** (Q3) | host-classifies-risk live; MCP MUST-untrusted rule |
-| writesToOwnSandbox | `toolSchemas[name].writesToOwnSandbox?` | **removed — host-derived.** Containment of resolved path args inside the plugin sandbox root is computed host-side per invocation (the runtime verification was always the real signal; the flag was an untrusted self-claim). LVIS already has the derivation (`sandboxFsContainedProvider` / `isActiveSandboxFilesystemContainedForPluginEffects`). | MCP MUST-untrusted rule; **Codex #7635 declined the analogous self-attested sandbox field (closed not-planned)**; census: **0 declarations** across all 6 plugins |
+| writesToOwnSandbox | `toolSchemas[name].writesToOwnSandbox?` | **removed — host-derived.** Containment of resolved path args inside the plugin sandbox root is computed host-side per invocation (the runtime verification was always the real signal; the flag was an untrusted self-claim). LVIS already has the derivation (`sandboxFsContainedProvider` / `isActiveSandboxFilesystemContainedForPluginEffects`). | MCP MUST-untrusted rule; a self-attested containment flag is not a control, so it cannot be the thing that decides; census: **0 declarations** across all 6 plugins |
 | workerId | `toolSchemas[name].workerId?` | **removed as manifest input — host-assigned runtime binding only.** The real proof mechanism already exists: `spawnWorker`'s wrapped-spawn path registers `(pluginId, workerId)` in `sandbox-capability.ts`; the manifest field was advisory-only by its own JSDoc ("not an execution proof"). | no external per-tool worker concept exists; census: **0 declarations** |
-| per-tool version | `toolSchemas[name].version?` | **removed — plugin-level `version` only.** | base MCP `Tool` has no version field; Claude Code / Codex version at package level only; census: **0 declarations** (every tool inherits the manifest version today) |
+| per-tool version | `toolSchemas[name].version?` | **removed — plugin-level `version` only.** | base MCP `Tool` has no version field, and versioning belongs to the distribution unit rather than the individual tool; census: **0 declarations** (every tool inherits the manifest version today) |
 | deprecatedSince / replacedBy | `toolSchemas[name].*` | **removed (YAGNI).** No producer exists — 0 manifest declarations AND no builtin tool sets them; only dormant Tool-level machinery in `tools/base.ts`/`registry.ts`. If ever needed, the FastMCP `_meta.fastmcp.version` precedent shows the re-introduction home (`_meta["lvisai/*"]`). | census overrides the external-research KEEP recommendation |
 | auth tool refs | `auth.*` + 2 cross-surface checks | `auth.*` → tool with visibility `["app"]` (intra-object) | — |
 
@@ -204,26 +204,28 @@ The first-pass census enumerated the projection/gate/runtime-method readers but 
 
 ### 2.5 External-reference evidence (field-minimization audit)
 
-The 2026-07-09 second-round decisions are grounded in an external audit of MCP (core + Apps SEP-1865),
-OpenAI Apps SDK, Claude Code, and Codex CLI:
+The 2026-07-09 second-round decisions are grounded in an external audit of MCP (core + Apps SEP-1865)
+and the current shipped behavior of comparable agent hosts:
 
 - **Cross-cutting rule** — MCP spec: *"clients MUST consider tool annotations to be untrusted unless they
   come from trusted servers."* Any self-declared field that flips a host verdict is the anti-pattern this
   warns against → `writesToOwnSandbox`/`workerId` removal.
 - **`model`+`ui` → `_meta.ui.visibility`** — SEP-1865 (`io.modelcontextprotocol/ui`, Stable 2026-01-26)
   defines `visibility?: Array<"model"|"app">` with normative host enforcement, and its design rationale
-  **explicitly rejected the two-boolean shape** ("Cleaner than OpenAI's two-field approach… rejected as
-  redundant") — the exact shape LVIS would otherwise have invented. OpenAI Apps SDK is migrating its legacy
-  `openai/widgetAccessible` + `openai/visibility` pair to the same array. LVIS already adopts this extension
+  **explicitly rejected the two-boolean shape** as redundant — the exact shape LVIS would otherwise have
+  invented. Shipped hosts carrying a legacy two-field equivalent are migrating to the same array.
+  LVIS already adopts this extension
   (M8 Apps permission gate shipped), so the fold adds zero new surface.
-- **`pathFields`** — no host trusts tool-declared path *safety* (Claude Code: host-side permission rules +
-  hardcoded path-arg canonicalization; Codex: `writable_roots` host config; MCP `roots`: host-declared,
-  per-connection). But the narrower concern "which args ARE paths" has a shipped production twin:
-  OpenAI `_meta["openai/fileParams"]: string[]`. Kept as a routing hint whose failure direction is safe.
-- **Codex #7635** — "MCP tools don't respect sandboxing" closed **not-planned**; Codex chose OS-sandbox +
-  approval over self-attested containment. Direct precedent for removing `writesToOwnSandbox`.
+- **`pathFields`** — no host trusts tool-declared path *safety*. Path authority is host-owned everywhere it
+  was examined: host-side permission rules plus hardcoded path-arg canonicalization, host-configured
+  writable roots, and MCP `roots` (host-declared, per-connection). But the narrower concern "which args ARE
+  paths" is a routing question, not a safety verdict, and has a shipped production twin as a plain
+  `string[]` of parameter names. Kept as a routing hint whose failure direction is safe.
+- **Self-attested sandboxing** — the ecosystem answer to "MCP tools don't respect sandboxing" is OS-level
+  sandboxing plus approval, not a tool-declared containment flag. A flag a tool sets about itself cannot
+  constrain that same tool. Direct rationale for removing `writesToOwnSandbox`.
 - **Per-tool versioning** — no MCP field; open upstream issues (#1039/#1915); FastMCP carries it as a vendor
-  `_meta` extension. Claude Code/Codex: package-level only.
+  `_meta` extension. Hosts version at the package/distribution level only.
 
 ## 3. Compat layer — strictly transitional, with a first-class removal phase
 
@@ -380,10 +382,8 @@ External:
 - MCP Apps SEP-1865 (`io.modelcontextprotocol/ui`, Stable 2026-01-26): `_meta.ui.visibility:
   Array<"model"|"app">` + normative host enforcement; design rationale explicitly rejects the two-boolean
   shape.
-- OpenAI Apps SDK reference: `_meta["openai/widgetAccessible"]`, `_meta["openai/visibility"]` (legacy,
-  migrating to `_meta.ui.visibility`), `_meta["openai/fileParams"]` (the `pathFields` structural twin).
-- Claude Code permissions/plugins reference: host-side path permission rules; no tool-declared path safety;
-  package-level version only.
-- Codex CLI: `sandbox_mode`/`writable_roots` host config; issue #7635 (self-attested sandbox field)
-  closed not-planned.
+- Shipped agent-host behavior surveyed for this audit: legacy two-field UI-visibility metadata migrating to
+  `_meta.ui.visibility`; a `string[]` file-parameter hint as the `pathFields` structural twin; host-side path
+  permission rules with no tool-declared path safety; host-configured sandbox mode and writable roots; and
+  package-level versioning only.
 - FastMCP `_meta.fastmcp.version` — vendor-extension precedent for any future per-tool metadata.

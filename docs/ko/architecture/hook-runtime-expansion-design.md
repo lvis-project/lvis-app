@@ -9,8 +9,6 @@
 > HTTP hooks (§6.3 → #1235); context-altering MCP/prompt/agent hooks + input
 > mutation (§6.4/§6.5 → #1236) — each needs its security control (host allowlist /
 > hook signing) FIRST.
-> Companion (to be added): `hook-runtime-reference-review.md` (full Codex / Claude Code /
-> OpenCode / Kilo Code / Warp / Hermes comparison).
 
 LVIS's external hook runtime is intentionally narrow: three shell-script events with a
 hash-locked, quarantine-by-default trust model. This document designs how to **expand
@@ -58,18 +56,21 @@ Discovery: `src/hooks/hook-discovery.ts` resolves `~/.config/lvis/hooks/`, globs
 
 ---
 
-## 2. Reference comparison (condensed)
+## 2. Capability ladder (condensed)
 
-| System | Handler types | Events beyond tool-use | Security controls |
+LVIS today accepts `.sh` handlers only, on no events beyond tool-use, guarded by
+a hash lockfile, quarantine, strict-deny, fail-closed defaults, and an env
+allowlist. The surrounding ecosystem spans a capability ladder:
+
+| Rung | Handler types | Events beyond tool-use | Security controls it demands |
 |---|---|---|---|
 | **LVIS (today)** | `.sh` only | none | hash lockfile, quarantine, strict-deny, fail-closed, env allowlist |
-| Codex | generic `type: "command"` | config-driven | `/hooks` review, managed hook policy |
-| Claude Code | command, HTTP, MCP-tool, prompt, agent | session/prompt/stop/compact lifecycle | `/hooks`, managed-only mode, URL/env allowlists, timeouts |
-| OpenCode / Kilo | JS/TS plugin hooks | plugin lifecycle | plugin trust + load policy |
-| Warp | delegates to integrated agent | — | delegated |
-| Hermes | Python gateway/plugin hooks | gateway lifecycle | gateway policy |
+| generic command | config-declared `type: "command"` | config-driven | reviewable config, managed hook policy |
+| in-process plugin | JS/TS plugin hooks | plugin lifecycle | plugin trust + load policy |
+| out-of-process | HTTP, MCP-tool, prompt, agent | session/prompt/stop/compact lifecycle | managed-only mode, URL/env allowlists, timeouts |
+| delegated | none of its own | — | inherited from the integrated agent |
 
-**Takeaway**: the highest-value, lowest-risk increment is **generic `command` hooks + a richer lifecycle event surface** (Codex parity). HTTP / MCP / prompt / agent hooks (Claude-Code parity) carry exfiltration and context-manipulation risk and must wait for the controls in §6.3–§6.4.
+**Takeaway**: the highest-value, lowest-risk increment is **generic `command` hooks + a richer lifecycle event surface** — same process model we already have, more declarative and more events. HTTP / MCP / prompt / agent hooks move execution or context off-process and so carry exfiltration and context-manipulation risk; they must wait for the controls in §6.3–§6.4.
 
 ---
 
