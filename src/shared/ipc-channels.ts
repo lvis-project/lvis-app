@@ -98,6 +98,12 @@ export const PERMISSIONS = {
   // escalation entry point — triggers ASRT installWindowsSandbox's single
   // self-elevating UAC prompt. Never auto-triggered.
   sandboxWindowsInstall: "lvis:permissions:sandbox-windows-install",
+  // `/allow <sentence>` — resolve a user sentence onto one of the PENDING
+  // approval's own scopes. Gesture-gated because only a keyboard-origin
+  // submission may speak for the user, but it grants nothing on its own: the
+  // reply names a button the card already renders, and that button still has
+  // to be pressed.
+  approvalSentenceSelect: "lvis:permissions:approval-sentence-select",
   // User-approval store
   userApprovalRecord: "lvis:permissions:user-approval-record",
   userApprovalRevoke: "lvis:permissions:user-approval-revoke",

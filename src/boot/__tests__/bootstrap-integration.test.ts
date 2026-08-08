@@ -621,6 +621,7 @@ describe("bootstrap() integration lock", () => {
         "conversationLoop",
         "feedbackStore",
         "forgetPluginAuthPartitionsService",
+        "getApprovalSentenceSelector",
         "getPluginToolInvoker",
         "getSubAgentRunner",
         "idleScheduler",

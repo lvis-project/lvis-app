@@ -108,6 +108,7 @@ describe("preload contextBridge world shape lock", () => {
           "approval": [
             "onRequest",
             "respond",
+            "selectSentence",
           ],
           "attach": [
             "discardClipboardImage",
@@ -224,6 +225,7 @@ describe("preload contextBridge world shape lock", () => {
           "approval": [
             "onRequest",
             "respond",
+            "selectSentence",
           ],
           "audit": [
             "getStats",

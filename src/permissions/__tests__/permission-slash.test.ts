@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   parsePermissionDirCommand,
+  dispatchPermissionSlash,
   dispatchPermissionDirCommand,
   dispatchPermissionHooksCommand,
 } from "../permission-slash.js";
@@ -482,5 +483,46 @@ describe("dispatchPermissionHooksCommand — renderer broadcast gating (FU2)", (
     expect(result.ok).toBe(false);
     maybeBroadcast(result, broadcast);
     expect(broadcast).not.toHaveBeenCalled();
+  });
+});
+
+describe("/allow — the dispatcher's trust-origin gate covers it too", () => {
+  // `/allow` shares `dispatchPermissionSlash` specifically so it inherits this
+  // boundary. Agent output, tool results, plugin text and remote-controller
+  // messages all reach the composer; none of them may submit an approval
+  // sentence on the user's behalf.
+  it.each(["llm-tool-arg", "plugin-emitted", "app-emitted", "unknown"] as const)(
+    "refuses a %s origin and hands back inert text",
+    (origin) => {
+      const outcome = dispatchPermissionSlash("/allow 이 폴더 계속 허용", origin);
+      expect(outcome.kind).toBe("rejected-non-user-origin");
+      if (outcome.kind !== "rejected-non-user-origin") return;
+      // The leading slash is stripped, so the echo cannot re-enter as a command.
+      expect(outcome.sanitized.startsWith("/")).toBe(false);
+    },
+  );
+
+  it("carries the sentence through untouched from user-keyboard input", () => {
+    const sentence = "  이 폴더는 앞으로 계속 열어도 돼  ";
+    const outcome = dispatchPermissionSlash(`/allow ${sentence}`, "user-keyboard");
+    expect(outcome.kind).toBe("allow");
+    if (outcome.kind !== "allow") return;
+    // Nothing tokenizes, path-matches or negation-scans it here. The parser's
+    // only job is to hand the words to a selector that can pick a scope but
+    // cannot author one.
+    expect(outcome.cmd.sentence).toBe(sentence.trim());
+    expect(outcome.needsModal).toBe(false);
+  });
+
+  it("asks for a sentence rather than proposing anything on a bare /allow", () => {
+    const outcome = dispatchPermissionSlash("/allow", "user-keyboard");
+    expect(outcome.kind).toBe("parse-error");
+  });
+
+  it("does not swallow a command that merely starts with the same letters", () => {
+    const outcome = dispatchPermissionSlash("/allowlist show", "user-keyboard");
+    expect(outcome.kind).toBe("parse-error");
+    if (outcome.kind !== "parse-error") return;
+    expect(outcome.error).toContain("/permission");
   });
 });
