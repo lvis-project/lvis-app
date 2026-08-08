@@ -19,7 +19,7 @@ import {
 
 const allInternal = [
   ...INTERNAL_HOST_CHANNELS.settingsWindow,
-  ...INTERNAL_HOST_CHANNELS.detachedWindow,
+  ...INTERNAL_HOST_CHANNELS.windowManager,
   ...INTERNAL_HOST_CHANNELS.autoUpdater,
 ];
 
@@ -43,19 +43,8 @@ describe("#1409 out-of-tree host channels are classified INTERNAL", () => {
       "lvis:settings-window:saved",
       "lvis:settings-window:tab",
     ]);
-    expect(INTERNAL_HOST_CHANNELS.detachedWindow).toEqual([
-      "lvis:window:close-detached",
-      "lvis:window:list-detached",
-      "lvis:window:close-all-detached",
-      "lvis:window:load-session-in-main",
-      "lvis:window:load-session-in-main-result",
+    expect(INTERNAL_HOST_CHANNELS.windowManager).toEqual([
       "lvis:window:resize-for-mode",
-      "lvis:window:snap-edge",
-      "lvis:detached:navigate",
-      // #885 b2 — MCP-app detach handlers, registered out-of-tree in window-manager.ts.
-      "lvis:mcp:open-detached",
-      "lvis:mcp:detached-payload",
-      "lvis:mcp:close-detached",
     ]);
     expect(INTERNAL_HOST_CHANNELS.autoUpdater).toEqual([
       "lvis:update:state",

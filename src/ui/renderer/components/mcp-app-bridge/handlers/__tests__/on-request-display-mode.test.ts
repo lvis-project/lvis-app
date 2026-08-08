@@ -33,7 +33,7 @@ describe("createOnRequestDisplayMode — the result is the mode ACTUALLY applied
   });
 
   it("answers with the APPLIED mode, not the requested one, when the host stayed put", async () => {
-    // e.g. `mcp.openDetached` came back `{ ok: false }` — the card never moved.
+    // For example, the store guard declined the move and the card stayed inline.
     const { handler } = build("inline", "inline");
 
     await expect(handler({ mode: "fullscreen" })).resolves.toEqual({ mode: "inline" });
