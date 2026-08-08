@@ -4,7 +4,7 @@ import { render, waitFor, act, fireEvent } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { McpAppPipPanel } from "../McpAppPipPanel.js";
 import { McpAppView } from "../McpAppView.js";
-import { ThemeWrapper } from "./mcp-app-test-helpers.js";
+import { stubMcpLvis, ThemeWrapper } from "./mcp-app-test-helpers.js";
 import {
   __resetMcpAppCardLocationStoreForTests,
   moveCard,
@@ -29,20 +29,6 @@ const openDetached = vi.fn(async () => ({
 }));
 const closeDetached = vi.fn(async () => ({ ok: true as const }));
 
-function stubLvis() {
-  vi.stubGlobal("lvis", {
-    mcp: {
-      readUiResource,
-      disposeUiSession,
-      openDetached,
-      closeDetached,
-      onServerDisconnected: () => () => undefined,
-      onDetachedClosed: () => () => undefined,
-    },
-  });
-  (window as unknown as { lvis: unknown }).lvis = (globalThis as unknown as { lvis: unknown }).lvis;
-}
-
 const payload = (serverId: string): McpUiPayload => ({ serverId, resourceUri: "ui://card/1" });
 
 function webviewNodes(container: HTMLElement): NodeListOf<Element> {
@@ -54,7 +40,7 @@ beforeEach(() => {
   readUiResource.mockClear();
   openDetached.mockClear();
   closeDetached.mockClear();
-  stubLvis();
+  stubMcpLvis({ readUiResource, disposeUiSession, openDetached, closeDetached });
   createMcpAppBridgeMock.mockClear();
   createMcpAppBridgeMock.mockImplementation(() => ({
     bridge: { setHostContext: vi.fn() },
