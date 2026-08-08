@@ -299,6 +299,34 @@ describe("approval-sentence-select — every failure lands on the buttons", () =
 });
 
 describe("approval-sentence-select — the table is the host's, not the renderer's", () => {
+  it("ignores paths the renderer supplies and uses the ones it resolved itself", async () => {
+    // Derive, never accept. The renderer is handed a request id and gets to
+    // say a sentence; if it could also name the path, a compromised renderer
+    // would be choosing what the user is about to confirm — and the confirm
+    // press would be authorising a target the host never picked.
+    const { invoke, provider } = await harness({ providerText: selected("o3") });
+    const result = await invoke({
+      requestId: "req-allow-1",
+      input: "/allow 계속 허용",
+      intent: USER_INTENT,
+      candidatePath: "/etc/shadow",
+      suggestedParent: "/etc",
+      toolName: "write_file",
+      allowedChoices: ["allow-always"],
+    });
+
+    const envelope = sentEnvelope(provider);
+    expect(envelope.request).toEqual({
+      toolName: "read_file",
+      category: "read",
+      source: "builtin",
+      candidatePath: TARGET,
+    });
+    expect(sentPrompt(provider)).not.toContain("/etc");
+    expect(result).toMatchObject({ ok: true, choice: "allow-always" });
+  });
+
+
   it("honours the request's own narrowing, so a widening scope is not even offered", async () => {
     // A remote-controller request permits one-shot or deny only. The table is
     // built from the gate's pending entry, so `allow-always` has no id to
