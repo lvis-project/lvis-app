@@ -16,15 +16,15 @@
  *
  * Not every key can appear in every place, and that is a property of the key
  * rather than of the caller:
- *   - `inline` — may be the main window's `activeView`.
- *   - `detachable` — may be opened as its own window.
- * `home` and `settings` are inline-only: they have no detached form.
+ *   - `detachable` — may be opened as its own window. `home` and `settings`
+ *     are not; they have no detached form.
+ * Every built-in renders inline, so that is a property of the key SHAPE rather
+ * than a column here: `InlineViewKey` admits built-in and plugin keys and
+ * excludes MCP-app cards, which are detach-only.
  */
 
 /** What a built-in destination is allowed to do. */
 interface BuiltinViewSpec {
-  /** May be the main window's `activeView`. */
-  readonly inline: boolean;
   /** May be opened as its own window via the detach IPC. */
   readonly detachable: boolean;
   /**
@@ -42,21 +42,16 @@ interface BuiltinViewSpec {
  * new surface is added here and nowhere else.
  */
 export const BUILTIN_VIEWS = {
-  home: { inline: true, detachable: false },
-  settings: { inline: true, detachable: false },
-  "work-board": { inline: true, detachable: true, windowTitle: "Work Board" },
-  routines: { inline: true, detachable: true, windowTitle: "Routines" },
-  memory: { inline: true, detachable: true, windowTitle: "Memory" },
-  starred: { inline: true, detachable: true, windowTitle: "Starred" },
-  insights: { inline: true, detachable: true, windowTitle: "Insights" },
+  home: { detachable: false },
+  settings: { detachable: false },
+  "work-board": { detachable: true, windowTitle: "Work Board" },
+  routines: { detachable: true, windowTitle: "Routines" },
+  memory: { detachable: true, windowTitle: "Memory" },
+  starred: { detachable: true, windowTitle: "Starred" },
+  insights: { detachable: true, windowTitle: "Insights" },
 } as const satisfies Record<string, BuiltinViewSpec>;
 
 export type BuiltinViewKey = keyof typeof BUILTIN_VIEWS;
-
-/** Built-ins that may be the main window's `activeView`. */
-type InlineBuiltinViewKey = {
-  [K in BuiltinViewKey]: (typeof BUILTIN_VIEWS)[K]["inline"] extends true ? K : never;
-}[BuiltinViewKey];
 
 /** Built-ins that may be opened as their own window. */
 type DetachableBuiltinViewKey = {
@@ -68,7 +63,7 @@ type McpAppViewKey = `mcp-app:${string}:${string}`;
 
 /** Anything the main window can render as `activeView`. MCP-app cards are
  *  detach-only, so they are absent by construction rather than by convention. */
-export type InlineViewKey = InlineBuiltinViewKey | PluginViewKey;
+export type InlineViewKey = BuiltinViewKey | PluginViewKey;
 
 /** Anything the detach IPC accepts. */
 export type DetachableViewKey = DetachableBuiltinViewKey | PluginViewKey | McpAppViewKey;
@@ -160,10 +155,8 @@ export function pluginViewKey(pluginId: string, viewId: string): PluginViewKey {
 
 /** True when `raw` can be the main window's `activeView`. */
 export function isInlineViewKey(raw: string): raw is InlineViewKey {
-  const parsed = parseViewKey(raw);
-  if (!parsed) return false;
-  if (parsed.kind === "builtin") return BUILTIN_VIEWS[parsed.key].inline;
-  return parsed.kind === "plugin";
+  const kind = parseViewKey(raw)?.kind;
+  return kind === "builtin" || kind === "plugin";
 }
 
 /**
@@ -186,7 +179,7 @@ export function detachedWindowTitle(raw: string): string | null {
 
 /** A view key that the main window can actually be AT. */
 export type ParsedInlineViewKey =
-  | { kind: "builtin"; key: InlineBuiltinViewKey }
+  | { kind: "builtin"; key: BuiltinViewKey }
   | { kind: "plugin"; key: PluginViewKey; pluginId: string; viewId: string };
 
 /**
@@ -202,8 +195,8 @@ export function parseInlineViewKey(raw: string): ParsedInlineViewKey | null {
   const parsed = parseViewKey(raw);
   if (!parsed) return null;
   if (parsed.kind === "plugin") return parsed;
+  // MCP-app cards are the only keys that name a real destination the main
+  // window cannot render.
   if (parsed.kind !== "builtin") return null;
-  const spec: BuiltinViewSpec = BUILTIN_VIEWS[parsed.key];
-  if (!spec.inline) return null;
-  return { kind: "builtin", key: parsed.key as InlineBuiltinViewKey };
+  return { kind: "builtin", key: parsed.key };
 }
