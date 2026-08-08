@@ -18,8 +18,7 @@
  * rather than of the caller:
  *   - `inline` — may be the main window's `activeView`.
  *   - `detachable` — may be opened as its own window.
- * `home` and `settings` are inline-only (they have no detached form).
- * `reminders` is detach-only. Most built-ins are both.
+ * `home` and `settings` are inline-only: they have no detached form.
  */
 
 /** What a built-in destination is allowed to do. */
@@ -50,9 +49,6 @@ export const BUILTIN_VIEWS = {
   memory: { inline: true, detachable: true, windowTitle: "Memory" },
   starred: { inline: true, detachable: true, windowTitle: "Starred" },
   insights: { inline: true, detachable: true, windowTitle: "Insights" },
-  // Detach-only: nothing renders `reminders` inline. It is carried forward
-  // exactly as the main process already accepted it.
-  reminders: { inline: false, detachable: true, windowTitle: "Reminders" },
 } as const satisfies Record<string, BuiltinViewSpec>;
 
 export type BuiltinViewKey = keyof typeof BUILTIN_VIEWS;
