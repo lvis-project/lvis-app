@@ -60,9 +60,25 @@ export interface FallbackEntry {
 
 
 
-const VENDOR_SCROLL_THRESHOLD = 10;
-const VENDOR_SELECT_MAX_HEIGHT = "max-h-[386px]";
 const MODEL_LIST_SYNC_DEBOUNCE_MS = 350;
+
+/**
+ * Layout for the provider/model dropdown popups.
+ *
+ * `SelectContent` defaults to Radix `position="item-aligned"`, which sizes the
+ * popup to its own widest row and anchors the selected row on top of the
+ * trigger. With a real provider catalog — long ids plus a provider/context/price
+ * detail line — that popup ends up a different width from its trigger and offset
+ * out of the settings column, and the list is squeezed into whatever room is
+ * left below the selected row instead of the space actually available.
+ *
+ * `position="popper"` anchors the popup under its trigger, so pinning the width
+ * to `--radix-select-trigger-width` keeps it aligned (long ids ellipsize inside
+ * the row), `min-w-64` keeps narrow triggers usable, and the height is bounded
+ * by whichever is smaller: a readable list or the room Radix reports.
+ */
+const SELECT_POPUP_LAYOUT =
+  "w-(--radix-select-trigger-width) min-w-64 max-h-[min(386px,var(--radix-select-content-available-height))]";
 
 type ModelListState =
   | {
@@ -147,9 +163,6 @@ function ProviderSelect({
       : options,
     [normalizedQuery, options],
   );
-  const scrollClassName = options.length > VENDOR_SCROLL_THRESHOLD
-    ? VENDOR_SELECT_MAX_HEIGHT
-    : "";
 
   return (
     <Select
@@ -170,7 +183,8 @@ function ProviderSelect({
         <SelectValue placeholder={placeholder} />
       </SelectTrigger>
       <SelectContent
-        className={`min-w-64 ${scrollClassName}`}
+        position="popper"
+        className={SELECT_POPUP_LAYOUT}
         data-testid="llm-tab:vendor-content"
       >
         <div className="sticky top-0 z-10 border-b border-border/(--opacity-medium) bg-popover p-2">
@@ -434,7 +448,11 @@ function ModelSelectItemContent({
       : undefined,
     modelEntryPricingLabel(entry) ?? undefined,
   ].filter((part): part is string => Boolean(part));
-  if (!isFree && !isRouter && !isLocal && detailParts.length === 0) return <>{option}</>;
+  // Even the bare id needs its own truncating box: the popup is trigger-wide, so
+  // a long id must ellipsize inside the row rather than overflow it.
+  if (!isFree && !isRouter && !isLocal && detailParts.length === 0) {
+    return <span className="min-w-0 truncate">{option}</span>;
+  }
   return (
     <span className="flex min-w-0 flex-col gap-0.5 py-0.5">
       <span className="flex min-w-0 items-center gap-1.5">
@@ -1078,7 +1096,7 @@ export function LlmTab(props: LlmTabProps) {
                 >
                   <SelectValue placeholder={vendorInfo.defaultModel} />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper" className={SELECT_POPUP_LAYOUT}>
                   {activeModelOptions.map((option) => (
                     <SelectItem key={option} value={option}>
                       <ModelSelectItemContent
@@ -1253,7 +1271,7 @@ export function LlmTab(props: LlmTabProps) {
                       <SelectTrigger className="min-w-0 flex-1 text-xs">
                         <SelectValue placeholder={fallbackVendorInfo.defaultModel} />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent position="popper" className={SELECT_POPUP_LAYOUT}>
                         {fallbackModelOptions.map((option) => (
                           <SelectItem key={option} value={option}>
                             <ModelSelectItemContent option={option} />
