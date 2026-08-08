@@ -811,7 +811,7 @@ describe("ConversationLoop onTurnSummary", () => {
   });
 
   it("does not emit a summary or notification when stopReason is context-error", async () => {
-    // Regression guard for Copilot round 10: context_error path must set
+    // Regression guard: the context_error path must set
     // stopReason="context-error" so willEmitSummary skips, preventing stale
     // lastRoundProviderInputTokens from being reported to the user.
     const toolRegistry = new ToolRegistry();
