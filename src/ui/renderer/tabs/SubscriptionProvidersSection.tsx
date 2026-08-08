@@ -29,6 +29,24 @@ type SubscriptionProviderId = SubscriptionRuntimeId;
 
 type SubscriptionProviderRuntimeState = SubscriptionRuntimeState | "checking";
 
+/**
+ * Layout for the subscription model dropdown popup.
+ *
+ * `SelectContent` defaults to Radix `position="item-aligned"`, which sizes the
+ * popup to its own widest row and anchors the selected row over the trigger. A
+ * provider catalog is wider than this card, so on a narrow window the popup grew
+ * past the settings pane and covered the app's left navigation column.
+ *
+ * `popper` + `align="start"` anchors it at the trigger's leading edge. The width
+ * bound follows the trigger's own `w-full sm:w-80` rule: below `sm` the trigger
+ * fills the pane, so matching it is the only placement that fits and long ids
+ * ellipsize; from `sm` up the trigger is a fixed-width control with room beside
+ * it, so the popup keeps its natural width and ids stay readable, bounded by the
+ * space Radix reports.
+ */
+const MODEL_POPUP_LAYOUT =
+  "w-(--radix-select-trigger-width) sm:w-auto sm:max-w-(--radix-select-content-available-width)";
+
 export type SubscriptionBusyAction =
   | "refresh"
   | "configure-runtime"
@@ -425,11 +443,15 @@ export function SubscriptionProvidersSection({
                       >
                         <SelectValue placeholder={t("subscriptionProvidersSection.modelPlaceholder")} />
                       </SelectTrigger>
-                      <SelectContent>
+                      <SelectContent
+                        position="popper"
+                        align="start"
+                        className={MODEL_POPUP_LAYOUT}
+                      >
                         {models.map((model) => (
                           <SelectItem key={model.id} value={model.id}>
-                            <span className="flex items-center gap-2">
-                              {model.label}
+                            <span className="flex min-w-0 items-center gap-2">
+                              <span className="min-w-0 truncate">{model.label}</span>
                               {model.isDefault ? (
                                 <Badge variant="outline" className="shrink-0 px-1.5 py-0 text-[10px]">
                                   {t("subscriptionProvidersSection.defaultModel")}
