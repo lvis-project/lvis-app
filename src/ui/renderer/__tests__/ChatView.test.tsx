@@ -1247,16 +1247,20 @@ describe("ChatView", () => {
       expect(container.textContent).toContain("draft-only.md");
     });
 
-    const loadSessionHandler = await waitFor(() => {
-      const calls = (api.window.onLoadSessionInMain as unknown as ReturnType<typeof vi.fn>).mock.calls;
-      expect(calls.length).toBeGreaterThan(0);
-      const handler = calls[0]?.[0] as ((sessionId: string) => Promise<unknown>) | undefined;
-      expect(typeof handler).toBe("function");
-      return handler!;
+    // Switch sessions the way a user does — the sidebar's own session row. This
+    // used to reach in through the detached-window "load this session in main"
+    // bridge, which no longer exists; the claim under test was never about that
+    // bridge, only about what a session switch does to the side panel.
+    const sessionButton = await waitFor(() => {
+      const button = Array.from(document.querySelectorAll("button")).find((el) =>
+        el.textContent?.includes("Session B"),
+      ) as HTMLButtonElement | undefined;
+      expect(button).toBeTruthy();
+      return button!;
     });
 
     await act(async () => {
-      await loadSessionHandler("session-b");
+      fireEvent.click(sessionButton);
     });
 
     await waitFor(() => {
