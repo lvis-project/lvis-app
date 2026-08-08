@@ -5,7 +5,6 @@ import { McpPromptArgsDialog } from "./dialogs/McpPromptArgsDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
-import { SnapEdgeHighlight } from "./components/SnapEdgeHighlight.js";
 
 type Api = ReturnType<typeof getApi>;
 
@@ -60,7 +59,6 @@ export function AppDialogs({
         tourCompleted={tourCompleted}
       />
       <DevConsoleToggle />
-      <SnapEdgeHighlight />
     </>
   );
 }

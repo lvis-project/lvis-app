@@ -95,14 +95,14 @@ export interface McpAppBridgeDeps {
   /**
    * `onrequestdisplaymode` applier — move the card to a SUPPORTED mode (the handler
    * never calls this for one the host does not advertise) and resolve to the mode
-   * actually applied. McpAppView maps it onto the host's EXISTING window seams:
-   * `inline` is the in-transcript <webview>, `fullscreen` is the maximized detached
-   * shell (`CHANNELS.mcp.openDetached`). No new window stack.
+   * actually applied. McpAppView maps it onto the host's surfaces, all of which live
+   * in this renderer: `inline` is the in-transcript <webview>, `fullscreen` and `pip`
+   * are sibling panels fed by the shared card-location store. No window stack at all.
    *
    * A mode change REPLACES the card's live instance, it does not clone it: the mount
-   * that loses the card tears down its bridge + <webview> (the inline card becomes a
-   * host-owned placeholder; the detached window closes). Exactly one bridge per card is
-   * connected at any moment, and no mount ever reports a mode it is not in.
+   * that loses the card tears down its bridge + <webview> and the mount that gains it
+   * builds a fresh one. Exactly one bridge per card is connected at any moment, and no
+   * mount ever reports a mode it is not in.
    */
   applyDisplayMode(mode: McpUiDisplayMode): Promise<McpUiDisplayMode>;
   /**

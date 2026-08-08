@@ -33,11 +33,11 @@ export interface UseAppModeResult {
  *     writes (#1312 render-loop guard).
  *   - `sidebarCollapsed` (owned by the shell; per-transition default coupled to
  *     appMode, NOT a lock) + `actionPanelOpen` (work-mode Tool Activity panel).
- *   - the three appMode-transition effects: rail-width coupling, OS-window
- *     resizeForMode (mount-skip via ref), and closeAllDetached on → work.
+ *   - the appMode-transition effects: rail-width coupling and OS-window
+ *     resizeForMode (mount-skip via ref).
  *
- * The IPC bridges (`api.window?.resizeForMode` / `closeAllDetached`) are
- * optional (absent in jsdom / non-Electron) and guarded accordingly.
+ * The IPC bridge (`api.window?.resizeForMode`) is optional (absent in jsdom /
+ * non-Electron) and guarded accordingly.
  */
 export function useAppMode(api: Api): UseAppModeResult {
   // Seed from the persisted workspace mode injected by the main process
@@ -100,20 +100,6 @@ export function useAppMode(api: Api): UseAppModeResult {
       return;
     }
     void api.window?.resizeForMode?.(appMode);
-  }, [appMode, api]);
-  // Every view renders in the main tab now, in BOTH modes — no mode detaches
-  // anything, so this no longer closes windows the mode itself opened. It is
-  // kept as a sweep: detach is a retired feature, and a stray detached window
-  // (one opened before this behavior changed, or through the MCP path) should
-  // not outlive a return to the inline workspace. The login/auth window is
-  // ALWAYS a separate window regardless of mode and is excluded by the main
-  // process (auth windows are never tracked as detached tabs).
-  // Fire-on-transition only: this depends
-  // solely on stable refs (appMode + the stable api) and never sets state, so
-  // it cannot re-trigger itself (#1312 render-loop guard).
-  useEffect(() => {
-    if (appMode !== "work") return;
-    void api.window?.closeAllDetached?.();
   }, [appMode, api]);
   // Side panel is a chat-mode affordance: resize the OS window when it toggles
   // (opening docks the work panel, closing restores the chat bounds). Guarded on
