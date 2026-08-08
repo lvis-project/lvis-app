@@ -98,13 +98,13 @@ import { en as en_composerPlaceholder } from "./composerPlaceholder.js";
 import { en as en_composerProjectSelector } from "./composerProjectSelector.js";
 import { en as en_constants } from "./constants.js";
 import { en as en_customTitleBar } from "./customTitleBar.js";
-import { en as en_dockedApprovalCard } from "./dockedApprovalCard.js";
 import { en as en_defaultTourScenarios } from "./defaultTourScenarios.js";
 import { en as en_deferredApprovalChip } from "./deferredApprovalChip.js";
 import { en as en_deferredQueueDialog } from "./deferredQueueDialog.js";
 import { en as en_deferredQueuePanel } from "./deferredQueuePanel.js";
 import { en as en_detachedView } from "./detachedView.js";
 import { en as en_devToolsPanel } from "./devToolsPanel.js";
+import { en as en_dockedApprovalCard } from "./dockedApprovalCard.js";
 import { en as en_errorBoundary } from "./errorBoundary.js";
 import { en as en_executiveGraphite } from "./executiveGraphite.js";
 import { en as en_fileEditDiff } from "./fileEditDiff.js";
@@ -200,7 +200,6 @@ import { en as en_workGroup } from "./workGroup.js";
 
 export const generatedEn: Record<string, string> = {
   ...en_actionPanel,
-  ...en_dockedApprovalCard,
   ...en_app,
   ...en_appearanceTab,
   ...en_approvalAttribution,
@@ -296,6 +295,7 @@ export const generatedEn: Record<string, string> = {
   ...en_deferredQueuePanel,
   ...en_detachedView,
   ...en_devToolsPanel,
+  ...en_dockedApprovalCard,
   ...en_errorBoundary,
   ...en_executiveGraphite,
   ...en_fileEditDiff,
