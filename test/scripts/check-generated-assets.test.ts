@@ -10,10 +10,29 @@ const MANIFEST = "build/generated-assets.json";
 const nodeCommand = process.env.LVIS_TEST_NODE_EXEC_PATH ?? process.execPath;
 const roots: string[] = [];
 
-function run(root: string) {
+// Git exports these to hooks, and they outrank `-C`. The suite itself runs
+// from the pre-push hook, so inheriting them would point both the fixtures and
+// the guard at this repository instead of the temporary one.
+const AMBIENT_GIT_VARS = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_PREFIX",
+] as const;
+
+function envWithout(names: readonly string[]): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const name of names) delete env[name];
+  return env;
+}
+
+function run(root: string, env: NodeJS.ProcessEnv = envWithout(AMBIENT_GIT_VARS)) {
   return spawnSync(nodeCommand, [SCRIPT, "--root", root], {
     cwd: REPO_ROOT,
     encoding: "utf-8",
+    env,
   });
 }
 
@@ -31,7 +50,7 @@ function git(root: string, args: string[]) {
       "commit.gpgsign=false",
       ...args,
     ],
-    { encoding: "utf-8" },
+    { encoding: "utf-8", env: envWithout(AMBIENT_GIT_VARS) },
   );
   if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
@@ -143,6 +162,31 @@ describe("check-generated-assets", () => {
 
     expect(result.status).toBe(1);
     expect(result.stderr).toContain("is not a list of paths");
+  });
+
+  it("reports on --root even when git names another repository in the environment", () => {
+    // The guard runs inside `bun run build`, which the pre-push hook invokes,
+    // and git exports GIT_DIR to its hooks. GIT_DIR outranks `-C`, so without
+    // this the guard would answer for whichever repository git was pushing.
+    // The fixture is left CLEAN, and the assertion is that the guard agrees.
+    // Asserting a failure would not discriminate: a guard reading this
+    // repository's HEAD would also report the fixture's bytes as divergent, and
+    // pass for the wrong reason. Only a guard actually rooted at `--root` can
+    // call this tree clean.
+    const root = createRepo();
+    // Resolved, not `REPO_ROOT/.git`: inside a worktree that path is a pointer
+    // file which git ignores, and an inert value proves nothing.
+    const gitDir = spawnSync("git", ["-C", REPO_ROOT, "rev-parse", "--absolute-git-dir"], {
+      encoding: "utf-8",
+      env: envWithout(AMBIENT_GIT_VARS),
+    }).stdout.trim();
+    expect(gitDir).not.toBe("");
+
+    const result = run(root, { ...process.env, GIT_DIR: gitDir });
+
+    expect(result.stderr).toBe("");
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("[generated-assets] OK");
   });
 
   it("skips where there is no committed state to compare against", () => {
