@@ -183,6 +183,7 @@ import { ko as ko_useStatusBarInstall } from "../generated/useStatusBarInstall.j
 import { ko as ko_useStatusBarVendor } from "../generated/useStatusBarVendor.js";
 import { ko as ko_userMessageEditor } from "../generated/userMessageEditor.js";
 import { ko as ko_viewModeBanner } from "../generated/viewModeBanner.js";
+import { ko as ko_viewPathNav } from "../generated/viewPathNav.js";
 import { ko as ko_violetDark } from "../generated/violetDark.js";
 import { ko as ko_violetLight } from "../generated/violetLight.js";
 import { ko as ko_webTab } from "../generated/webTab.js";
@@ -374,6 +375,7 @@ export const koMessages: Record<string, string> = {
   ...ko_useStatusBarVendor,
   ...ko_userMessageEditor,
   ...ko_viewModeBanner,
+  ...ko_viewPathNav,
   ...ko_violetDark,
   ...ko_violetLight,
   ...ko_webTab,

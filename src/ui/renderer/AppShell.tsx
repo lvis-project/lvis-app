@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { getApi } from "./api-client.js";
 import type { InlineViewKey } from "../../shared/view-key.js";
+import type { ViewPathNavProps } from "./components/ViewPathNav.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { Sidebar } from "./components/Sidebar.js";
@@ -43,6 +44,7 @@ export function AppShell({
   onSidebarWidthCommit,
   // toolbar
   activeView,
+  viewNav,
   streaming,
   hasApiKey,
   subscriptionUnavailable,
@@ -128,6 +130,8 @@ export function AppShell({
    *  double-click reset (Sidebar commits SIDEBAR_DEFAULT_WIDTH through this). */
   onSidebarWidthCommit: (px: number) => void;
   activeView: InlineViewKey;
+  /** Path + history controls for the top bar. */
+  viewNav: ViewPathNavProps;
   streaming: boolean;
   hasApiKey: MainToolbarProps["hasApiKey"];
   subscriptionUnavailable?: boolean;
@@ -205,7 +209,7 @@ export function AppShell({
           renders IN the band (no separate toolbar row below it). */}
       <CustomTitleBar>
         <MainToolbar
-          activeView={activeView}
+          viewNav={viewNav}
           streaming={streaming}
           hasApiKey={hasApiKey}
           appMode={appMode}

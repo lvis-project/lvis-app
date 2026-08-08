@@ -7,6 +7,18 @@ export interface UseActiveViewResult {
   activeView: InlineViewKey;
   /** Navigate — persists immediately (same durable-preference family as `sidebarActiveTab`). */
   setActiveView: (next: InlineViewKey | ((current: InlineViewKey) => InlineViewKey)) => void;
+  /**
+   * True while the stored location is still being applied — the initial read,
+   * plus any plugin restore waiting on its view list.
+   *
+   * Restoring MOVES `activeView` without the user going anywhere, so anything
+   * that records where the user has been must be able to tell the two apart.
+   * Visit history treats a change during this window as settling into the
+   * launch location rather than as a step away from `home`; otherwise a
+   * restart would leave a back button pointing at a home screen nobody
+   * visited.
+   */
+  restoring: boolean;
 }
 
 /**
@@ -47,6 +59,10 @@ export function useActiveView(
   // rightly omit it; an identity that changed once hydration finished would
   // leave those closures holding a setter that no longer persists.
   const hydratedRef = useRef(false);
+  // State as well as the ref: consumers have to RE-RENDER when the restore
+  // window closes, and the ref exists to keep `setActiveView`'s identity
+  // stable, so it cannot do that job too.
+  const [hydrated, setHydrated] = useState(false);
   // STATE, not a ref: the "has it loaded yet?" effect must re-run when EITHER
   // the pending key or the loaded list changes. Holding this in a ref made the
   // restore depend on the list changing AFTER the settings read resolved — with
@@ -83,7 +99,9 @@ export function useActiveView(
         // Non-fatal: home is a valid place to be. The next navigation persists.
       })
       .finally(() => {
-        if (!cancelled) hydratedRef.current = true;
+        if (cancelled) return;
+        hydratedRef.current = true;
+        setHydrated(true);
       });
     return () => {
       cancelled = true;
@@ -115,5 +133,5 @@ export function useActiveView(
     [api, applyView],
   );
 
-  return { activeView, setActiveView };
+  return { activeView, setActiveView, restoring: !hydrated || pendingPluginView !== null };
 }
