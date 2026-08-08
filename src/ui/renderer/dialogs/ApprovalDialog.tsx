@@ -1,4 +1,3 @@
-import { OutOfAllowedDirCard } from "../components/permissions/OutOfAllowedDirCard.js";
 import { ToolApprovalDialog } from "../components/ToolApprovalDialog.js";
 import type { ApprovalDecisionExtras } from "../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
@@ -20,15 +19,10 @@ export interface ApprovalDialogProps {
 export function ApprovalDialog({ queue, onDecide }: ApprovalDialogProps) {
   const request = queue[0] ?? null;
 
-  if (request?.kind === "out-of-allowed-dir") {
-    return (
-      <OutOfAllowedDirCard
-        open={queue.length > 0}
-        request={request}
-        onDecide={(choice, pattern) => void onDecide(choice, pattern)}
-      />
-    );
-  }
+  // Out-of-allowed-dir is served by the docked, non-modal DockedApprovalCard
+  // in the composer dock (issue #1940). Rendering a modal here too would put
+  // two surfaces on one decision.
+  if (request?.kind === "out-of-allowed-dir") return null;
 
   return (
     <ToolApprovalDialog
