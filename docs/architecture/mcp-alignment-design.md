@@ -4,7 +4,7 @@
 > this document.** #885 is narrowed to "borrow the MCP `Tool` **object** shape + MCP **isolation parity**"
 > and is owned by [`plugin-contract-v6-design.md`](./plugin-contract-v6-design.md); the full stateless
 > `2026-07-28` JSON-RPC **wire** migration of the plugin contract (`server/discover`/MRTR/per-request `_meta`)
-> is **not** the current direction (Claude Code / Codex CLI both keep plugin-contract and MCP separate; MCP
+> is **not** the current direction (comparable agent hosts keep plugin-contract and MCP separate; MCP
 > dropped fixed-version releases in 2026 → wire-migration = spec-drift risk). The **loopback topology**
 > (§3.1) already shipped and is retained. Treat the wire-migration sections below as a **deferred/aspirational**
 > direction, not an approved plan, pending a separate decision.

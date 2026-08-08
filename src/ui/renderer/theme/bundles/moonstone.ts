@@ -2,7 +2,7 @@ import type { ThemeBundle } from "./types.js";
 
 /**
  * Moonstone (문스톤) — the default light shell: a weightless white canvas with a
- * soft periwinkle sheen (inspired by the antigravity.google reference).
+ * soft periwinkle sheen.
  *
  * Pure-white canvas, near-black #121317 ink, and a soft periwinkle accent
  * family (#b7bfd9 tints for fills/focus, #dfe3ef selection) — the blue glow of

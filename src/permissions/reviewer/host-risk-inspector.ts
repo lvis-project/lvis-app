@@ -5,9 +5,9 @@
  * Rationale (docs/architecture/architecture.md §6.3/§8;
  * project_permission_review_redesign): a tool that grades its own danger is
  * structurally not a control — the MCP spec is explicit that tool annotations
- * are untrusted hints ("a server can lie"). Real agent CLIs (Claude Code,
- * Codex) all classify risk on the HOST side by parsing the command/args, and
- * default-deny mutation/network. This module is the LVIS analogue.
+ * are untrusted hints ("a server can lie"). Agent hosts therefore classify risk
+ * on the HOST side by parsing the command/args, and default-deny
+ * mutation/network. This module is the LVIS analogue.
  *
  * Design constraints honoured here:
  *  - DEFAULT-STRICT: anything NOT confidently classifiable as read-only is
@@ -38,8 +38,8 @@ import { tokenizeShell, type ShellLeaf } from "../../main/shell-tokenizer.js";
 import { hasNetworkTarget } from "./network-target.js";
 
 /**
- * Built-in read-only command set (Claude Code / Codex model). A compound shell
- * command is read-only ONLY IF every leaf command's head verb is in this set.
+ * Built-in read-only command set — the host-side allow-list model. A compound
+ * shell command is read-only ONLY IF every leaf command's head verb is in this set.
  * Anything unknown or mutating escalates to `"shell"` (default-strict).
  *
  * Kept deliberately conservative — the cost of omitting a genuinely read-only
