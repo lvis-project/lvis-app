@@ -36,6 +36,7 @@ import {
 } from "../hooks/use-native-context-menu.js";
 import { useAddProjectFolder } from "../hooks/use-add-project-folder.js";
 import { isSidebarTab } from "../../../shared/sidebar-tab.js";
+import type { InlineViewKey } from "../../../shared/view-key.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
@@ -49,8 +50,10 @@ import {
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface SidebarProps {
-  activeView: string;
-  /** Called with the view key string — same contract as handleViewSelect. */
+  activeView: InlineViewKey;
+  /** Called with the selected key — same contract as handleViewSelect, which
+   *  also accepts the `plugin-doctor:<id>` pseudo-key that is intercepted
+   *  before it can become a location. Hence `string`, not `ViewKey`. */
   onSelect: (viewKey: string) => void;
   /** Plugin views from usePluginMarketplace — same list passed to MainContent. */
   pluginViews: PluginUiExtension[];

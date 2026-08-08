@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { getApi } from "./api-client.js";
+import type { InlineViewKey } from "../../shared/view-key.js";
 import { CustomTitleBar } from "./components/CustomTitleBar.js";
 import { MainToolbar } from "./MainToolbar.js";
 import { Sidebar } from "./components/Sidebar.js";
@@ -126,7 +127,7 @@ export function AppShell({
   /** Drag-end / keyboard commit (persist). Also backs the resize bar's
    *  double-click reset (Sidebar commits SIDEBAR_DEFAULT_WIDTH through this). */
   onSidebarWidthCommit: (px: number) => void;
-  activeView: string;
+  activeView: InlineViewKey;
   streaming: boolean;
   hasApiKey: MainToolbarProps["hasApiKey"];
   subscriptionUnavailable?: boolean;
@@ -189,7 +190,7 @@ export function AppShell({
   onSearchOpen: USPProps["onOpen"];
   onSearchClose: USPProps["onClose"];
   onSearchLoadSession: (sessionId: string) => Promise<boolean | void>;
-  setActiveView: (view: string) => void;
+  setActiveView: (view: InlineViewKey) => void;
   sidePanelOpen: MainToolbarProps["sidePanelOpen"];
   onToggleSidePanel: MainToolbarProps["onToggleSidePanel"];
 }) {

@@ -44,33 +44,29 @@ import {
   computeInitialMainWindowBounds,
   computeWorkModeBounds,
 } from "./main-window-bounds.js";
+import {
+  DETACHABLE_VIEW_KEY_PATTERN,
+  detachedWindowTitle,
+  parseViewKey,
+} from "../shared/view-key.js";
 
 /**
  * Allowlist for viewKey values accepted by the detach IPC handlers.
- * Built-in view keys are listed explicitly; plugin views use the
- * `plugin:<pluginId>:<extensionId>` format (two colon-separated segments)
- * where each segment is alphanumeric with dots/underscores/hyphens.
- * toViewKey() in api-client.ts produces exactly this shape.
+ *
+ * Derived from the shared view-key table rather than restated here: the set of
+ * detachable destinations is a property of the destinations themselves, and
+ * keeping a second copy in this file is how the renderer and the main process
+ * came to disagree about what a view key even is. See `shared/view-key.ts`.
  */
-export const ALLOWED_VIEW_KEYS = /^(reminders|routines|memory|starred|insights|work-board|plugin:[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.-]*|mcp-app:[0-9a-f]+:[a-z0-9][a-z0-9_.-]*)$/;
-
-/** Human-readable window titles for built-in view keys. */
-const BUILTIN_VIEW_LABELS: Record<string, string> = {
-  reminders: "Reminders",
-  routines: "Routines",
-  memory: "Memory",
-  starred: "Starred",
-  insights: "Insights",
-  "work-board": "Work Board",
-};
+export const ALLOWED_VIEW_KEYS = DETACHABLE_VIEW_KEY_PATTERN;
 
 function isPluginViewKey(viewKey: string): boolean {
-  return viewKey.startsWith("plugin:");
+  return parseViewKey(viewKey)?.kind === "plugin";
 }
 
 /** #885 b2 — detached MCP-app card viewKey (`mcp-app:<hex>:<cardId>`). */
 function isMcpAppViewKey(viewKey: string): boolean {
-  return viewKey.startsWith("mcp-app:");
+  return parseViewKey(viewKey)?.kind === "mcp-app";
 }
 
 /**
@@ -86,14 +82,11 @@ function isFreeFloatingViewKey(viewKey: string): boolean {
 
 /** Returns a safe window title for a validated viewKey. */
 function viewKeyLabel(viewKey: string): string {
-  if (Object.prototype.hasOwnProperty.call(BUILTIN_VIEW_LABELS, viewKey)) {
-    return BUILTIN_VIEW_LABELS[viewKey];
-  }
-  // plugin:<pluginId>:<extensionId> — use the pluginId segment only
-  if (isPluginViewKey(viewKey)) {
-    const pluginId = viewKey.slice("plugin:".length).split(":")[0];
-    return pluginId;
-  }
+  const builtinTitle = detachedWindowTitle(viewKey);
+  if (builtinTitle) return builtinTitle;
+  // plugin:<pluginId>:<viewId> — use the pluginId segment only.
+  const parsed = parseViewKey(viewKey);
+  if (parsed?.kind === "plugin") return parsed.pluginId;
   return viewKey;
 }
 

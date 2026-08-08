@@ -21,16 +21,21 @@ import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import type { AppMode } from "./MainToolbar.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
+import { parseViewKey, type InlineViewKey } from "../../shared/view-key.js";
+import { useTranslation } from "../../i18n/react.js";
 
 type Api = ReturnType<typeof getApi>;
 type PluginView = Parameters<typeof PluginUiHostView>[0]["view"];
 type StarredItem = Parameters<typeof StarredView>[0]["starred"][number];
 
 export interface MainContentProps {
-  activeView: string;
+  /** Where the main window is. Typed, so a destination that cannot render
+   *  inline — or a misspelling — is a compile error rather than a silent fall
+   *  through to the plugin branch. */
+  activeView: InlineViewKey;
   api: Api;
-  // inline settings (work mode) — chat mode detaches Settings to its own
-  // BrowserWindow and never routes through this branch.
+  // Settings renders inline in EVERY appMode; there is no detached settings
+  // window on this path.
   settingsTab: string;
   onSettingsSaved: () => void;
   onCloseSettings: () => void;
@@ -197,6 +202,7 @@ function HomeChatPane(props: MainContentProps) {
  */
 export function MainContent(props: MainContentProps): ReactNode {
   const { activeView, api } = props;
+  const { t } = useTranslation();
 
   if (activeView === "memory") {
     return (
@@ -276,11 +282,33 @@ export function MainContent(props: MainContentProps): ReactNode {
     );
   }
 
+  // Plugin views are IDENTIFIED, not assumed. This used to be a bare fallback
+  // — anything that reached the end of the chain was rendered as a plugin
+  // view, so a misspelled built-in key surfaced as "plugin view not found"
+  // instead of as the mistake it was.
+  if (parseViewKey(activeView)?.kind === "plugin") {
+    return (
+      <PluginUiHostView
+        view={props.activePluginView ?? null}
+        authError={props.pluginAuthError ?? null}
+        onBack={props.onActivateHome}
+      />
+    );
+  }
+
+  // Unreachable through the typed path; reached only when an untyped boundary
+  // hands over a key the guard did not vet. Say so rather than rendering some
+  // other view's content under this key's name.
+  // Reuses the detached shell's wording for the same condition — the text is
+  // generic and duplicating it per surface only invites the two to drift.
   return (
-    <PluginUiHostView
-      view={props.activePluginView ?? null}
-      authError={props.pluginAuthError ?? null}
-      onBack={props.onActivateHome}
-    />
+    <MainPaneShell backToHome onBack={props.onActivateHome}>
+      <div
+        className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground"
+        data-testid="main-content-unknown-view"
+      >
+        {t("detachedView.unknownView", { viewKey: activeView })}
+      </div>
+    </MainPaneShell>
   );
 }
