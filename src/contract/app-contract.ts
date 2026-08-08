@@ -316,30 +316,11 @@ export const CHANNELS = {
     installFromMarketplace: "lvis:mcp:install-from-marketplace",
     importClaudeDesktopPreview: "lvis:mcp:import:claude-desktop:preview",
     importClaudeDesktopApply: "lvis:mcp:import:claude-desktop:apply",
-    // #885 b2/b3 — MCP-app detach + disconnect. ALL THREE INTERNAL: absent from
-    // PUBLIC_CHANNELS / CHANNEL_GESTURE / EXTERNAL_MUTATION_CHANNELS, so an
-    // external origin (local-api / cli / plugin frame) can never reach them
-    // (fail-closed isPublicChannel). `openDetached` (state-mutating, spawns a
-    // window) + `detachedPayload` (read) are registered in window-manager.ts and
-    // gated on validateHostRendererSender; `serverDisconnected` is a pure
-    // main→renderer event (no ipcMain.handle, renderer validates payload shape).
-    openDetached: "lvis:mcp:open-detached",
-    detachedPayload: "lvis:mcp:detached-payload",
+    // #885 b3 — INTERNAL: absent from PUBLIC_CHANNELS / CHANNEL_GESTURE /
+    // EXTERNAL_MUTATION_CHANNELS, so an external origin (local-api / cli / plugin
+    // frame) can never reach it (fail-closed isPublicChannel). A pure main→renderer
+    // event (no ipcMain.handle; the renderer validates the payload shape).
     serverDisconnected: "lvis:mcp:server-disconnected",
-    // The `ui/request-display-mode` "inline" arm — the exact inverse of `openDetached`:
-    // close the detached MCP-app window(s) of THIS card's server. SCOPED on purpose: the
-    // generic `window.closeAllDetached` sweep closes every detached window the user has
-    // open, which an untrusted card must never be able to trigger. Registered in
-    // window-manager.ts and gated on validateHostRendererSender (it closes a window);
-    // INTERNAL like the rest of this family.
-    closeDetached: "lvis:mcp:close-detached",
-    // main→renderer: an MCP-app detached window is GONE (closed, or navigated away from
-    // in the single-instance shell), so the card's stored payload has been purged. The
-    // inline card that moved into that window listens for this to come back to life —
-    // exactly one live bridge per card at any moment. A pure event (no ipcMain.handle,
-    // hence not an INTERNAL_HOST_CHANNELS handler entry); the renderer validates the
-    // payload shape and matches on the viewKey the host handed it at detach time.
-    detachedClosed: "lvis:mcp:detached-closed",
     // Renderer → main on card unmount: dispose the sandbox-proxy session so its token
     // is freed promptly instead of waiting for the global LRU to evict it. INTERNAL,
     // same posture as the three above. Idempotent and harmless — worst case a stale
@@ -513,16 +494,9 @@ export const CHANNELS = {
     syncTitleBarTheme: "window:syncTitleBarTheme",
     maximizedChanged: "window:maximizedChanged",
     fullscreenChanged: "window:fullscreenChanged",
-    closeDetached: "lvis:window:close-detached",
-    listDetached: "lvis:window:list-detached",
-    closeAllDetached: "lvis:window:close-all-detached",
-    loadSessionInMain: "lvis:window:load-session-in-main",
-    loadSessionInMainResult: "lvis:window:load-session-in-main-result",
     resizeForMode: "lvis:window:resize-for-mode",
     resizeForSidePanel: "lvis:window:resize-for-side-panel",
     openHtmlPreview: "lvis:window:open-html-preview",
-    snapEdge: "lvis:window:snap-edge",
-    detachedNavigate: "lvis:detached:navigate",
   },
   dev: {
     setPreflightOverride: "lvis:dev:setPreflightOverride",
@@ -736,7 +710,7 @@ export const EXTERNAL_MUTATION_DENIED = "external-mutation-denied";
  * Channel families whose `ipcMain.handle` / `ipcMain.on` registrations live
  * OUTSIDE `src/ipc/` — the three "out-of-tree" host surfaces:
  *   - `settingsWindow` → registered in `src/main.ts` (settings BrowserWindow).
- *   - `detachedWindow` → registered in `src/main/window-manager.ts`.
+ *   - `windowManager`  → registered in `src/main/window-manager.ts`.
  *   - `autoUpdater`    → registered in `src/main/auto-updater.ts`.
  *
  * Recorded here so the contract's public/internal classification is COMPLETE —
@@ -765,20 +739,8 @@ export const INTERNAL_HOST_CHANNELS = {
     CHANNELS.settingsWindow.saved,
     CHANNELS.settingsWindow.tab,
   ],
-  detachedWindow: [
-    CHANNELS.window.closeDetached,
-    CHANNELS.window.listDetached,
-    CHANNELS.window.closeAllDetached,
-    CHANNELS.window.loadSessionInMain,
-    CHANNELS.window.loadSessionInMainResult,
+  windowManager: [
     CHANNELS.window.resizeForMode,
-    CHANNELS.window.snapEdge,
-    CHANNELS.window.detachedNavigate,
-    // #885 b2 — MCP-app detach IPC handlers are registered in window-manager.ts
-    // (out-of-tree), so they are classified here for inventory completeness.
-    CHANNELS.mcp.openDetached,
-    CHANNELS.mcp.detachedPayload,
-    CHANNELS.mcp.closeDetached,
   ],
   autoUpdater: [
     CHANNELS.update.state,

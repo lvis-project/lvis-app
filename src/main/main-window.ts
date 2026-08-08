@@ -373,7 +373,6 @@ export function getAppWindows(): BrowserWindow[] {
   const windows = [
     getMainWindow(),
     getSettingsWindow(),
-    ...(getWindowManager()?.getDetachedWindows() ?? []),
   ];
   return windows.filter((win): win is BrowserWindow => {
     if (!win || win.isDestroyed() || seen.has(win.id)) return false;

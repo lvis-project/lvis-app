@@ -1357,7 +1357,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // Sender: `validateHostRendererSender` (NOT the base `validateSender` the read-only
   // render channel uses) — this channel RUNS A TOOL, so it takes the mutating-channel
   // validator (fails closed on an empty frame URL, rejects plugin-ui-shell frames),
-  // exactly like `plugins.call` and `mcp.openDetached`. The MCP-app <webview> itself
+  // exactly like `plugins.call` and `mcp.uiMessage`. The MCP-app <webview> itself
   // is on the `lvis-mcp-app:` scheme and could never pass either validator.
   ipcMain.handle(CHANNELS.mcp.callTool, async (e, serverId: unknown, name: unknown, args: unknown, generationId?: unknown) => {
     if (!validateHostRendererSender(e)) {
