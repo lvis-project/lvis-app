@@ -1476,11 +1476,6 @@ export function buildInternalApiSurface() {
 
   // ─── Window management (tab detach + optional magnetic snap) ─────────────
   window: {
-    /** Open viewKey in a new detached BrowserWindow. */
-    openDetached: async (viewKey: string) =>
-      ipcRenderer.invoke(CHANNELS.window.openDetached, viewKey) as Promise<
-        { ok: true; windowId: number } | { ok: false; error: string }
-      >,
     /** Close the current detached window (no-op in main window). */
     closeDetached: async () =>
       ipcRenderer.invoke(CHANNELS.window.closeDetached) as Promise<{ ok: true } | { ok: false; error: string }>,

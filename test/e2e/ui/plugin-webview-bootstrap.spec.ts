@@ -122,40 +122,14 @@ test('embedded plugin views share the flat inline host chrome', async ({ app, ma
   }
 });
 
-test('detached plugin view creates a detached host window plus plugin shell guest', async ({ app, mainWindow }) => {
-  const pluginViews = await listPluginViews(mainWindow);
-  // Detachment is driven by the app's mode (appMode === 'chat'), not a plugin
-  // flag; the host openDetached IPC is the path under test, so any sidebar view
-  // is a valid target.
-  const detachedTarget = pluginViews.find((view) => view.kind === 'embedded-module');
-
-  test.skip(!detachedTarget, 'No plugin view available in this build');
-
-  const detachedWindowPromise = app.waitForEvent('window');
-  const openResult = await mainWindow.evaluate(
-    async (viewKey) => window.lvisApi.window.openDetached(viewKey),
-    detachedTarget!.viewKey,
+test('the retired detach channel is not on the preload surface', async ({ mainWindow }) => {
+  // This spec used to drive `window.lvisApi.window.openDetached` to open a plugin view
+  // in a detached window. That channel is gone, and a spec that still called it would
+  // fail for the uninformative reason that a function is undefined. What is worth
+  // asserting instead is the removal itself, at the boundary an untrusted renderer
+  // actually sees.
+  const present = await mainWindow.evaluate(
+    () => typeof (window.lvisApi.window as Record<string, unknown>).openDetached,
   );
-  expect(openResult.ok).toBe(true);
-
-  const detachedWindow = await detachedWindowPromise;
-  await detachedWindow.waitForLoadState('domcontentloaded');
-  await expect(detachedWindow.locator('webview')).toHaveCount(1, { timeout: 15_000 });
-
-  await expect.poll(
-    () =>
-      app.evaluate(({ BrowserWindow }) =>
-        BrowserWindow.getAllWindows().some((win) => win.webContents.getURL().includes('#detached/')),
-      ),
-    { timeout: 15_000 },
-  ).toBe(true);
-  await expect.poll(
-    () =>
-      app.evaluate(({ webContents }) =>
-        webContents.getAllWebContents().some(
-          (wc) => wc.getType() === 'webview' && /plugin-ui-shell\.html$/i.test(wc.getURL()),
-        ),
-      ),
-    { timeout: 15_000 },
-  ).toBe(true);
+  expect(present).toBe('undefined');
 });
