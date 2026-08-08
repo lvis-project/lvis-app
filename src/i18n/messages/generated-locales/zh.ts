@@ -368,6 +368,7 @@ export const zhMessages: Record<string, string> = {
   "be_executor.bashAstBlock": "[Bash AST 被阻止] {reason} （模式：{patternId}）",
   "be_executor.dirPolicyBlock": "[目录策略被阻止] 工具“{name}”- {reason} ({filePath})。",
   "be_executor.dirPolicyError": "[目录策略错误] 工具 '{name}' — {error}",
+  "be_executor.allowAlwaysPatternNotLiteral": "[未保存“始终允许”] 工具 '{name}' — 目标名称 '{pattern}' 含有通配符，保存后也会允许恰好匹配的其他名称。该调用未执行。请选择“允许一次”以在不保存规则的情况下执行。",
   "be_executor.dirPolicySaveFailed": "[目录策略保存失败] 工具 '{name}' — {error}",
   "be_executor.dirPolicySessionRegFailed": "[目录策略会话注册失败] 工具“{name}” — {error}",
   "be_executor.dirPolicyUserDenied": "[目录策略被阻止] 工具“{name}” - 用户拒绝访问允许目录 ({filePath}) 之外的路径。",

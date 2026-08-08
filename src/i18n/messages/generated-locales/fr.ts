@@ -382,6 +382,7 @@ export const frMessages: Record<string, string> = {
   "be_executor.bashAstBlock": "[Bash AST bloqué] {reason} (modèle: {patternId})",
   "be_executor.dirPolicyBlock": "[Politique de répertoire bloquée] Outil '{name}' — {reason} ({filePath}).",
   "be_executor.dirPolicyError": "[Erreur de stratégie de répertoire] Outil '{name}' — {error}",
+  "be_executor.allowAlwaysPatternNotLiteral": "[Toujours autoriser non enregistré] Outil '{name}' — le nom cible '{pattern}' contient un caractère générique ; l'enregistrer autoriserait aussi les noms qui correspondent par hasard. L'appel n'a pas été exécuté. Choisissez 'Autoriser une fois' pour l'exécuter sans enregistrer de règle.",
   "be_executor.dirPolicySaveFailed": "[Échec de l'enregistrement de la politique de répertoire] Outil '{name}' — {error}",
   "be_executor.dirPolicySessionRegFailed": "[Échec de l'enregistrement de la session de stratégie d'annuaire] Outil '{name}' — {error}",
   "be_executor.dirPolicyUserDenied": "[Politique de répertoire bloquée] Outil '{name}' — l'utilisateur a refusé l'accès au chemin en dehors des répertoires autorisés ({filePath}).",

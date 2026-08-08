@@ -384,6 +384,7 @@ export const esMessages: Record<string, string> = {
   "be_executor.bashAstBlock": "[Bash AST bloqueado] {reason} (patrón: {patternId})",
   "be_executor.dirPolicyBlock": "[Política de directorio bloqueada] Herramienta '{name}' — {reason} ({filePath}).",
   "be_executor.dirPolicyError": "[Error de política de directorio] Herramienta '{name}' — {error}",
+  "be_executor.allowAlwaysPatternNotLiteral": "[Permitir siempre no guardado] Herramienta '{name}' — el nombre de destino '{pattern}' contiene un carácter comodín, por lo que guardarlo también permitiría los nombres que coincidan por casualidad. La llamada no se ejecutó. Elige 'Permitir una vez' para ejecutarla sin guardar una regla.",
   "be_executor.dirPolicySaveFailed": "[Error al guardar la política de directorio] Herramienta '{name}' — {error}",
   "be_executor.dirPolicySessionRegFailed": "[Error en el registro de la sesión de política de directorio] Herramienta '{name}' — {error}",
   "be_executor.dirPolicyUserDenied": "[Política de directorio bloqueada] Herramienta '{name}': al usuario se le negó el acceso a una ruta fuera de los directorios permitidos ({filePath}).",
