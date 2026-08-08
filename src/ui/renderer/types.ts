@@ -68,6 +68,8 @@ import type {
 } from "../../shared/render-html-preview.js";
 import type { SessionTodoItem } from "../../shared/session-todo.js";
 import type { SidebarTab } from "../../shared/sidebar-tab.js";
+import type { InlineViewKey } from "../../shared/view-key.js";
+import type { SettingsTab } from "../../shared/settings-tabs.js";
 import type { MarketplaceAnnouncementPayload } from "../../shared/marketplace-announcements.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
@@ -315,6 +317,13 @@ export type AppSettings = {
     sidePanelSplitSubagentPercent?: number;
     /** Persisted active sidebar tab ("chats" | "projects"). SOT: `SystemSettings`. */
     sidebarActiveTab?: SidebarTab;
+    /** Persisted main-window location, restored on next launch. Structural
+     *  validity only — a plugin key survives its plugin being uninstalled, so
+     *  the renderer re-checks it against the views it loaded. SOT: `SystemSettings`. */
+    activeView?: InlineViewKey;
+    /** Persisted settings tab, so restoring into `activeView: "settings"` lands
+     *  on the page the user left. SOT: `SystemSettings`. */
+    settingsTab?: SettingsTab;
     /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
     pinnedProjectRoots?: string[];
     /** E4 — auto-launch LVIS at OS login. SOT: `SystemSettings`. Default false. */
