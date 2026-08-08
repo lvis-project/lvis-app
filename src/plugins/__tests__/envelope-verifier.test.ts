@@ -1,7 +1,7 @@
 /**
  * S2 — Unit tests for envelope-verifier.
  *
- * Covers issue #104 Copilot follow-up items:
+ * Covers the issue #104 follow-up items:
  *   - envelope.version !== 1 is rejected (forward-compat guard)
  *   - when multiple signatures verify, the FIRST matching key_id is returned
  *     (documented contract, not an implementation accident)

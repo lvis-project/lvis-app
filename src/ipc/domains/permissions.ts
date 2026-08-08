@@ -630,7 +630,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
 
   // ── Permission policy — deferred queue surface ────────────────────────────
   // Returns DLP-redacted tool inputs + verdicts; gated to prevent a
-  // compromised foreign frame from harvesting them (Copilot round 3).
+  // compromised foreign frame from harvesting them.
   ipcMain.handle(PERMISSIONS.deferredList, async (e) => {
     if (!validateSender(e)) {
       auditUnauthorized(auditLogger, PERMISSIONS.deferredList, e);
@@ -837,8 +837,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
 
   // ── Permission policy — `/permission audit show|verify` IPC handlers ─────
   // Audit entries can contain DLP-redacted tool inputs and decision
-  // metadata; gated so foreign frames cannot harvest them (Copilot
-  // round 3).
+  // metadata; gated so foreign frames cannot harvest them.
   ipcMain.handle(
     PERMISSIONS.auditShow,
     async (e, args: { last?: number }) => {

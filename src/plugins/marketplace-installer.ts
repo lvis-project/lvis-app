@@ -289,8 +289,8 @@ export async function installFromMarketplace(
 
   // 3. Fetch sig envelope — always re-fetched, even on cache hits.
   //    A cached tarball byte sequence is trusted only when it passes the
-  //    current envelope signature; never short-circuit this step (Copilot
-  //    security flag: cache hits must not bypass envelope-verifier).
+  //    current envelope signature; never short-circuit this step — a cache
+  //    hit must not bypass envelope-verifier.
   let envelope: SignatureEnvelope;
   try {
     envelope = opts.signal
