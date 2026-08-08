@@ -2,11 +2,12 @@
  * AuditLogger.search() + getStats() — filter correctness, date range, pagination.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { createWriteStream, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createWriteStream, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { once } from "node:events";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { finished } from "node:stream/promises";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 // Patch homedir so AuditLogger writes to a temp dir during tests.
 import { vi } from "vitest";
@@ -44,9 +45,9 @@ beforeEach(() => {
   vi.mocked(homedir).mockReturnValue(testHome);
 });
 
-afterEach(() => {
-  // `maxRetries` is MITIGATION for an unexplained flake, and saying so matters, because the
-  // obvious fix does not apply here.
+afterEach(async () => {
+  // The retry here is MITIGATION for a flake whose mechanism was never pinned down in this
+  // file, and saying so matters, because the obvious fix does not apply.
   //
   // Every logger in this file is constructed synchronously in a test body and only ever has
   // `search()` called on it, and `search()` enqueues nothing — it only reads. So
@@ -77,8 +78,12 @@ afterEach(() => {
   // deleted. Both halves were wrong — the constructor captures `this.auditDir`, so a bound
   // write cannot be redirected, and pointing a hypothetical late writer at the user's real
   // `~/.lvis` is the failure mode to avoid, not the fix.
+  //
+  // The ladder moved off `rmSync`'s own `maxRetries` (#1983): measured against a real lock
+  // that budget is never applied at all, failing in 0ms, so it was mitigation in name only.
+  // `cleanupTmpDir` retries the same codes on a bounded ladder that does run.
   if (existsSync(testHome)) {
-    rmSync(testHome, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    await cleanupTmpDir(testHome);
   }
   vi.restoreAllMocks();
 });
