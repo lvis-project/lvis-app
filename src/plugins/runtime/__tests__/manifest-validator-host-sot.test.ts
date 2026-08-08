@@ -556,6 +556,39 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     ).toBe(false);
   });
 
+  it("rejects retired ui[] detached-window hints", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "ui-window-hints-plugin",
+        name: "UI Window Hints Plugin",
+        version: "1.0.0",
+        description: "UI extension carrying retired window hints.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        ui: [
+          {
+            id: "main",
+            slot: "sidebar",
+            kind: "embedded-page",
+            title: "Main",
+            page: "main",
+            window: { width: 640 },
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(validator.errors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          keyword: "additionalProperties",
+          params: expect.objectContaining({ additionalProperty: "window" }),
+        }),
+      ]),
+    );
+  });
+
   // ── fail-closed: an uncompilable schema aborts plugin loading ───────────────
   describe("fail-closed", () => {
     beforeEach(() => {
