@@ -501,7 +501,6 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
     openExternalUrl: vi.fn(async () => ({ ok: true })),
     window: {
-      openDetached: vi.fn(async () => ({ ok: true, windowId: 1 })),
       closeDetached: vi.fn(async () => ({ ok: true })),
       listDetached: vi.fn(async () => []),
       openHtmlPreview: vi.fn(async () => ({ ok: true, windowId: 2 })),

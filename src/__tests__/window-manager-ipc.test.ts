@@ -117,25 +117,8 @@ describe("WindowManager IPC — validateSender guard", () => {
     wm.registerIpc(auditLogger as never);
   });
 
-  describe("lvis:window:open-detached", () => {
-    it("returns UNAUTHORIZED_FRAME and calls auditLogger for unauthorized sender", async () => {
-      const handler = handleMap.get("lvis:window:open-detached")!;
-      const result = await handler(unauthorizedEvent(), "tasks");
-      expect(result).toEqual(UNAUTHORIZED_FRAME);
-      expect(auditLogger.log).toHaveBeenCalledOnce();
-    });
-
-    it("returns invalid-view-key for path traversal viewKey", async () => {
-      const handler = handleMap.get("lvis:window:open-detached")!;
-      const result = await handler(hostFrameEvent(), "../etc/passwd");
-      expect(result).toEqual({ ok: false, error: "invalid-view-key" });
-    });
-
-    it("returns invalid-view-key for empty viewKey", async () => {
-      const handler = handleMap.get("lvis:window:open-detached")!;
-      const result = await handler(hostFrameEvent(), "");
-      expect(result).toEqual({ ok: false, error: "invalid-view-key" });
-    });
+  it("registers no `lvis:window:open-detached` handler — the channel is retired", () => {
+    expect(handleMap.has("lvis:window:open-detached")).toBe(false);
   });
 
   describe("lvis:window:close-detached", () => {
