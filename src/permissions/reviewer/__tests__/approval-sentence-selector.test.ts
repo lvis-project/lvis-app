@@ -4,6 +4,7 @@ import {
   LlmApprovalSentenceSelector,
   UnavailableApprovalSentenceSelector,
   type ApprovalOption,
+  type ApprovalRequestFacts,
   type ApprovalSentenceSelection,
 } from "../approval-sentence-selector.js";
 import type { LlmReviewerProvider } from "../risk-classifier.js";
@@ -15,12 +16,14 @@ const OPTIONS: readonly ApprovalOption[] = [
   { id: "o4", choice: "allow-always", path: "C:\grant\parent" },
 ];
 
-const FACTS = {
+// Typed against the real contract, so a change to what the host may disclose
+// breaks this fixture rather than silently widening the envelope.
+const FACTS: ApprovalRequestFacts = {
   toolName: "read_file",
   category: "read",
   source: "builtin",
   candidatePath: "C:\srv\app\data\config.json",
-} as const;
+};
 
 function providerReturning(text: unknown): LlmReviewerProvider {
   return { complete: vi.fn(async () => ({ text })) } as unknown as LlmReviewerProvider;
