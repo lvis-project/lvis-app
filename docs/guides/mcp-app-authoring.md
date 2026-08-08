@@ -110,7 +110,7 @@ app.onhostcontextchanged = (next) => applyTheme(next);
 | `locale` | BCP-47, e.g. `"ko"` |
 | `timeZone` | IANA, e.g. `"Asia/Seoul"` |
 | `displayMode` | the mode this card is **currently** in |
-| `availableDisplayModes` | `["inline", "fullscreen"]` — what this host can actually apply |
+| `availableDisplayModes` | `["inline", "fullscreen", "pip"]` — what this host can actually apply |
 | `styles.variables` | the host theme, as **standard** `McpUiStyleVariableKey` CSS variables |
 
 `styles.variables` uses the spec's fixed vocabulary — `--color-background-primary`, `--color-text-secondary`, `--color-background-danger`, `--border-radius-md`, `--font-text-md-size`, … — never LVIS's internal `--lvis-*` names. Style against those keys and your card themes correctly on any MCP Apps host, not just this one. The host pushes updates on theme/locale change; re-read from `onhostcontextchanged` rather than caching at boot.
@@ -122,10 +122,12 @@ app.onhostcontextchanged = (next) => applyTheme(next);
 | `app.callServerTool(name, args)` | calls **your own plugin's** tool. See the visibility gate below. |
 | `app.sendSizeChanged({ height })` | the card resizes to fit — do this instead of guessing `height` |
 | `app.openLink({ url })` | opens an external URL through the host |
-| `app.requestDisplayMode({ mode })` | `inline` or `fullscreen`. **`pip` is not available** — the response tells you the mode actually applied, which may not be the one you asked for. Always render from the response, never assume. |
+| `app.requestDisplayMode({ mode })` | Requests `inline`, `fullscreen`, or `pip`. The response tells you the mode actually applied, which may not be the one you asked for. Always render from the response, never assume. |
 | `app.sendMessage({ role, content })` | see *Talking to the conversation* below |
 | `app.updateModelContext({ … })` | see *Talking to the model* below |
 | `app.downloadFile({ … })` | inline bytes → a save dialog. The host does **not** fetch a URL for you; a `resource_link` is rejected. |
+
+`fullscreen` fills the current renderer rather than opening a second application window. `pip` uses the renderer's draggable picture-in-picture surface. Each away surface has one slot, so a newer card can replace the current occupant; keep rendering from host context instead of assuming the requested surface remains assigned.
 
 ### The visibility gate on `callServerTool` — read this before you debug it
 
