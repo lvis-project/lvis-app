@@ -260,7 +260,7 @@ export function SessionTodoPanel({
                 data-testid={active ? "session-todo-active-row" : undefined}
                 data-status={it.status}
               >
-                {/* Warp-style leading dot — color alone communicates state
+                {/* Leading status dot — color alone communicates state
                     even when the user has dimmed text or scaled the chip
                     label below readability. */}
                 <span

@@ -46,7 +46,7 @@ const config: Config = {
         },
         // ── Ink (the brand): near-black cool neutral. Primary text + buttons + active. ──
         ink: { DEFAULT: "#14161d", soft: "#3a3d47" },
-        // ── Ambient accent: the single soft periwinkle glow (antigravity). Never text. ──
+        // ── Ambient accent: the single soft periwinkle glow. Never text. ──
         glow: { DEFAULT: "#b7bfd9", soft: "#c3ccdf" },
         // ── Legacy brand aliases — remapped to neutral so existing classes across the
         //    41 routes keep working but resolve to the monochrome system. Prefer

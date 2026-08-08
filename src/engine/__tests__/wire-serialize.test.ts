@@ -81,7 +81,7 @@ describe("prepareMarkedToolResultsForWire", () => {
     expect(out).toBe(messages); // reference-equal
   });
 
-  it("idempotent — meta.serializedStub=true prevents double-stubbing (Copilot round 2 fix)", () => {
+  it("idempotent — meta.serializedStub=true prevents double-stubbing", () => {
     const messages: GenericMessage[] = [
       {
         role: "tool_result",
