@@ -115,7 +115,8 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitRoutineFiredV2: (r: unknown) => void;
   emitPluginEvent: (eventType: string, payload: unknown) => void;
   emitWorkBoardItemChanged: (p: unknown) => void;
-  emitViewActivate: (v: string) => void;
+  /** `settingsTab` mirrors the main process's `lvis:view:activate` payload for settings opens. */
+  emitViewActivate: (v: string, settingsTab?: string) => void;
   emitAskUserQuestion: (r: unknown) => void;
   emitTourStart: (scenarioId: string) => void;
   emitBootstrapStatus: (status: unknown) => void;
@@ -168,7 +169,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const routineFiredV2Handlers = new Set<(r: unknown) => void>();
   const pluginEventHandlers = new Map<string, Set<(p: unknown) => void>>();
   const workBoardItemChangedHandlers = new Set<(p: unknown) => void>();
-  const viewHandlers = new Set<(v: string) => void>();
+  const viewHandlers = new Set<(v: string, settingsTab?: string) => void>();
   const settingsUpdatedHandlers = new Set<(settings: unknown) => void>();
   const subscriptionRuntimeStatusUpdatedHandlers = new Set<(event: SubscriptionRuntimeStatusUpdatedEvent) => void>();
   const settingsWindowSavedHandlers = new Set<() => void>();
@@ -591,7 +592,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
 
     submitFeedback: vi.fn(async () => ({ ok: true })),
 
-    onViewActivate: vi.fn((h: (v: string) => void) => {
+    onViewActivate: vi.fn((h: (v: string, settingsTab?: string) => void) => {
       viewHandlers.add(h);
       return () => viewHandlers.delete(h);
     }),
@@ -642,7 +643,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitPluginEvent: (eventType, payload) =>
       pluginEventHandlers.get(eventType)?.forEach((h) => h(payload)),
     emitWorkBoardItemChanged: (p) => workBoardItemChangedHandlers.forEach((h) => h(p)),
-    emitViewActivate: (v) => viewHandlers.forEach((h) => h(v)),
+    emitViewActivate: (v, settingsTab) => viewHandlers.forEach((h) => h(v, settingsTab)),
     emitAskUserQuestion: (r) => askUserQuestionHandlers.forEach((h) => h(r)),
     emitTourStart: (scenarioId) => tourStartHandlers.forEach((h) => h({ scenarioId })),
     emitBootstrapStatus: (status) => bootstrapStatusHandlers.forEach((h) => h(status)),

@@ -145,11 +145,26 @@ export function SettingsContent({
   onSaved,
   initialTab = "llm",
   onClose,
+  onTabChange,
 }: {
   api: LvisApi;
   onSaved: () => void;
   initialTab?: string;
   onClose?: () => void;
+  /**
+   * Reports every in-panel move to a new tab, already normalized. `initialTab`
+   * seeds (and re-seeds) the selection, so an embedder could always WRITE the
+   * tab; this is the read-back that was missing, and without it nothing outside
+   * this component can tell where the user actually is.
+   *
+   * Deliberately a notification rather than a controlled `value`/`onChange`
+   * pair. The two internal writers each move state that belongs to the same
+   * interaction — the narrow-layout depth, and the marketplace filter — so
+   * handing the tab to a parent would let that coupled state apply while the
+   * tab did not. `SettingsWindow` also embeds this panel and holds no tab state
+   * of its own, so a controlled contract would silently stop its tabs working.
+   */
+  onTabChange?: (tab: string) => void;
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
@@ -197,14 +212,21 @@ export function SettingsContent({
     flushPendingSaves();
     onClose?.();
   }, [flushPendingSaves, onClose]);
+  // Single writer for the tab so every in-panel move is reported outward; a
+  // second `setTab` call site would be a silent hole in that contract.
+  const selectTab = useCallback((nextTab: string) => {
+    const normalized = normalizeSettingsTab(nextTab);
+    setTab(normalized);
+    onTabChange?.(normalized);
+  }, [onTabChange]);
   const openMarketplaceTab = useCallback((filter: MarketplacePackageFilter = "all") => {
     setMarketplaceFilter(filter);
-    setTab("marketplace");
-  }, []);
+    selectTab("marketplace");
+  }, [selectTab]);
   const handleTabValueChange = useCallback((nextTab: string) => {
     const normalized = normalizeSettingsTab(nextTab);
     if (normalized === "marketplace") setMarketplaceFilter("all");
-    setTab(normalized);
+    selectTab(normalized);
     // Committing a category (click, or Enter in manual/narrow mode) drops into
     // depth-2 detail on narrow; inert on wide (both regions stay visible).
     setMobileDepth("detail");
