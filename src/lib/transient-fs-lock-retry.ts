@@ -44,13 +44,22 @@ function totalWaitFor(attempts: number): number {
  * is a worse outcome than the failed write it would prevent, and a silent one —
  * the failure at least surfaces an error the user can act on.
  *
- * 500ms covers the "few hundred milliseconds" this lock class is documented to
- * clear within, which is where essentially all of the reliability lives. A lock
- * still held past that is not contention clearing slowly, it is a process
- * holding the handle indefinitely — no retry budget rescues that case, it only
- * lengthens the freeze before failing anyway.
+ * 1000ms, not the 500ms this shipped with. That number rested on "a lock still
+ * held past a few hundred milliseconds is a process holding the handle
+ * indefinitely, and no budget rescues that" — which the settings store then
+ * falsified. `withFileLock` already serializes its writers, so back-to-back
+ * locked writes are the normal case, and the OS handle from the previous write
+ * outlives the lock release. Under load that lost the race at 500ms
+ * deterministically, and the same write succeeds when the machine is quiet: the
+ * contention clears, just later than the documented figure.
+ *
+ * A lost settings write silently discards a permission the user granted, which
+ * is worse than the delay. 1000ms is still far short of the point where an
+ * unresponsive-window prompt appears, so the reason the budget is small — this
+ * blocks the caller, and for the settings/secret/session writers that caller is
+ * the Electron main thread — is unchanged.
  */
-export const SYNC_UI_BLOCKING_ATTEMPTS = 5;
+export const SYNC_UI_BLOCKING_ATTEMPTS = 7;
 export const SYNC_UI_BLOCKING_BUDGET_MS = totalWaitFor(SYNC_UI_BLOCKING_ATTEMPTS);
 
 /**
