@@ -224,13 +224,23 @@ describe("approval-sentence-select — the model never sees the request's own wo
       expect(Object.keys(option).sort()).toEqual(["choice", "id"]);
     }
 
-    // NOTE on why this is a count and not `not.toContain(PARENT)`: the grant
-    // target of the widening scope is the candidate path's own parent, so it
-    // is always a textual prefix of a path the request legitimately discloses.
-    // `not.toContain` could never fail here and would be a dead assertion the
-    // moment `candidatePath` became a legitimate fact. Counting occurrences
-    // can fail: disclosing an option's path puts the parent in the envelope a
-    // second time, which is exactly the leak being ruled out.
+    // Why a count and not `not.toContain(PARENT)`: that assertion cannot be
+    // used here at all. The widening scope's grant target is the candidate
+    // path's own parent, so it is a substring of a path the request
+    // legitimately discloses — `not.toContain(PARENT)` fails against a
+    // CORRECT implementation. Unusable, note, not asleep: an assertion that
+    // can never fail says "wake this test up", one that always fails says
+    // "the property cannot be expressed this way". Dropping it as unusable
+    // would leave the property untested, hence a count — which CAN fail, for
+    // the real leak: an option's path puts the parent in the envelope a
+    // second time.
+    //
+    // The structural check above is the primary guard and cannot go hollow
+    // whatever the fixture is. These counts, by contrast, depend on it:
+    // PARENT is a prefix of TARGET, so one occurrence of each is the no-leak
+    // state and the PARENT hit is the one inside TARGET. A future fixture
+    // where PARENT is not a prefix of TARGET makes the expected PARENT count
+    // 0, not 1.
     expect(occurrences(prompt, TARGET)).toBe(1);
     expect(occurrences(prompt, PARENT)).toBe(1);
   });
