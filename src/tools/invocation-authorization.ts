@@ -20,6 +20,7 @@ import {
 } from "../shared/chat-origin.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
 import { t } from "../i18n/index.js";
+import { containsGlobMetacharacter } from "../lib/glob-matcher.js";
 import { createLogger } from "../lib/logger.js";
 import {
   hookChainFromDispatch } from "./pipeline/audit-entries.js";
@@ -1529,6 +1530,55 @@ export async function authorizeToolInvocation(
         if (decision.choice === "allow-always" && !requiresRemoteLocalOneShot && services.permissionManager) {
           const pattern =
             approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
+          // Everything in that chain is a literal name, not a pattern the user
+          // wrote: `approvalCacheKey` carries a resolved filesystem path for
+          // the file tools, `rememberPattern` carries the path shown on the
+          // approval card. `addAlwaysAllowedPersist` stores it in a field that
+          // is glob-matched, so a literal `*` or `?` in the name silently turns
+          // one consented target into a family of them. The matcher has no
+          // escape syntax, so the grant cannot be narrowed back down — refusing
+          // to store it is the only defence.
+          //
+          // Blocking the call rather than executing it once and staying quiet
+          // matches how a grant that cannot be saved is already handled for
+          // directory approvals: the user is told the grant did not happen
+          // instead of believing they hold one. Choosing "Allow once" is the
+          // stated way through, and it never reaches this branch.
+          if (containsGlobMetacharacter(pattern)) {
+            const msg = t("be_executor.allowAlwaysPatternNotLiteral", {
+              name: toolUse.name,
+              pattern,
+            });
+            const durationMs = Date.now() - startTime;
+            log.warn(msg);
+            emitToolStart(callbacks, toolUse.name, finalInput, meta);
+            callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+            await auditCurrentToolCall(
+              sessionId,
+              toolUse.name,
+              source,
+              trust,
+              finalInput,
+              msg,
+              true,
+              startTime,
+              {
+                ...permissionResult,
+                decision: "deny",
+                reason: "allow-always pattern is not a literal name",
+              },
+              Infinity,
+              invocationPermissionContext,
+              invocationCategory,
+              executionCwd,
+            );
+            return withHostShellExecutionPlan({
+              tool_use_id: toolUse.id,
+              content: msg,
+              is_error: true,
+              durationMs,
+            });
+          }
           // P2 — stamp the grant tier from the final resolved category so an
           // "Allow always" on a read tool grants read-tier (still asks on a
           // later write of the same pattern) while a write/shell/network/meta

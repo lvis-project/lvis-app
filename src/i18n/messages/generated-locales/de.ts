@@ -381,6 +381,7 @@ export const deMessages: Record<string, string> = {
   "be_executor.bashAstBlock": "[Bash AST blockiert] {reason} (Muster: {patternId})",
   "be_executor.dirPolicyBlock": "[Verzeichnisrichtlinie blockiert] Tool „{name}“ – {reason} ({filePath}).",
   "be_executor.dirPolicyError": "[Verzeichnisrichtlinienfehler] Tool „{name}“ – {error}",
+  "be_executor.allowAlwaysPatternNotLiteral": "[Immer erlauben nicht gespeichert] Tool „{name}“ – der Zielname „{pattern}“ enthält ein Platzhalterzeichen; beim Speichern würden auch zufällig passende Namen erlaubt. Der Aufruf wurde nicht ausgeführt. Wählen Sie „Einmal erlauben“, um ihn ohne gespeicherte Regel auszuführen.",
   "be_executor.dirPolicySaveFailed": "[Speichern der Verzeichnisrichtlinie fehlgeschlagen] Tool „{name}“ – {error}",
   "be_executor.dirPolicySessionRegFailed": "[Registrierung der Verzeichnisrichtliniensitzung fehlgeschlagen] Tool „{name}“ – {error}",
   "be_executor.dirPolicyUserDenied": "[Verzeichnisrichtlinie blockiert] Tool „{name}“ – Benutzer verweigert den Zugriff auf Pfade außerhalb zulässiger Verzeichnisse ({filePath}).",
