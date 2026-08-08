@@ -8,6 +8,33 @@ import {
 export const MARKETPLACE_DISABLED_CODE = "marketplace-disabled";
 
 /**
+ * Uninstall refused because the package is not installed (plugin, agent, skill).
+ *
+ * Deliberately NOT the existing `not-found` code. This condition is reached from
+ * a catalog entry the user is looking at: the package exists and is listed, it
+ * simply has no local installation. `not-found` renders "The requested item
+ * could not be found", which is a false statement about a package the user can
+ * see, and it points at the wrong remedy (search again, rather than install).
+ *
+ * One code for all three families rather than three: the toast already names
+ * the family in its `{target}` half (`useStatusBarInstall.labelAgent` etc.), so
+ * per-family codes would only duplicate that noun in every locale.
+ */
+export const PACKAGE_NOT_INSTALLED_CODE = "package-not-installed";
+
+/**
+ * Uninstall refused because an administrator deployed the plugin.
+ *
+ * Kept apart from {@link PACKAGE_NOT_INSTALLED_CODE} and from the generic
+ * `managed` code because the user's next step differs: nothing they do in the
+ * app will remove this plugin, so the copy has to send them to their
+ * administrator rather than suggest a retry. `managed` reads "blocked by an
+ * administrator policy, or an error occurred while saving" — that "or" makes a
+ * permanent refusal look like it might be a transient save failure.
+ */
+export const ADMIN_PLUGIN_UNINSTALL_DENIED_CODE = "admin-plugin-uninstall-denied";
+
+/**
  * The agent/skill marketplace backend is compiled out of this build, so the
  * artifact store the installer needs does not exist.
  *

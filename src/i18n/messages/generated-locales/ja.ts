@@ -1339,6 +1339,8 @@ export const jaMessages: Record<string, string> = {
   "formatIpcError.logsTailFailed": "ログの読み込みに失敗しました。",
   "formatIpcError.managed": "変更が管理者ポリシーによってブロックされたか、保存中にエラーが発生しました。",
   "formatIpcError.marketplaceDisabled": "マーケットプレイス機能は無効になっています。",
+  "formatIpcError.packageNotInstalled": "このパッケージはインストールされていません。",
+  "formatIpcError.adminPluginUninstallDenied": "管理者が導入したプラグインのため、アプリからは削除できません。管理者にお問い合わせください。",
   "formatIpcError.missingDurableConfirm": "耐久モードに変更するには、ユーザーの確認が必要です。",
   "formatIpcError.missingInputOrigin": "リクエストの送信元情報がありません。",
   "formatIpcError.missingAppEnvelope": "MCP アプリの envelope 情報が欠落しています。",
