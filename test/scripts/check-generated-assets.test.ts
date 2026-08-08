@@ -186,7 +186,13 @@ describe("check-generated-assets", () => {
     }).stdout.trim();
     expect(gitDir).not.toBe("");
 
-    const result = run(root, { ...process.env, GIT_DIR: gitDir });
+    // Keep the force flag: this case is about GIT_DIR overriding `--root`, and
+    // a platform skip would let it pass without ever reaching that question.
+    const result = run(root, {
+      ...process.env,
+      GIT_DIR: gitDir,
+      LVIS_GENERATED_ASSETS_FORCE: "1",
+    });
 
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
