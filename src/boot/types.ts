@@ -26,6 +26,7 @@ import type { AuditService } from "../main/audit-service.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ApprovalGate } from "../permissions/approval-gate.js";
+import type { ApprovalSentenceSelector } from "../permissions/reviewer/approval-sentence-selector.js";
 import type { StarredStore } from "../data/starred-store.js";
 import type { FeedbackStore } from "../data/feedback-store.js";
 import type { TelemetryService } from "../main/telemetry.js";
@@ -164,6 +165,13 @@ export interface AppServices {
   approvalGate?: ApprovalGate;
   /** Rebuild Layer 5 reviewer bindings after persisted reviewer settings change. */
   rewireReviewerAgent?: () => void;
+  /**
+   * Issue #1940 — current `/allow` sentence selector. A GETTER, not the
+   * instance: reviewer re-wiring replaces it (a login that finally configures
+   * a provider heals it from the no-op stand-in to the live one), and a value
+   * captured at IPC-registration time would pin the stand-in forever.
+   */
+  getApprovalSentenceSelector?: () => ApprovalSentenceSelector | undefined;
   /**
    * Re-apply the live MarketplaceTab settings to the marketplace fetcher
    * constructed at boot. Currently used for the SSRF-guard bypass toggle

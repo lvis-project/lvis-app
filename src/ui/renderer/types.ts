@@ -1476,9 +1476,23 @@ export type ApprovalDecision = {
   hmac?: string;
 };
 
+/**
+ * Result of resolving a `/allow` sentence. `ok: true` carries a scope to
+ * PRE-SELECT on the pending card — never a grant, and never a path. Every
+ * failure is a kebab error code the renderer maps to plain localized text via
+ * `COMMON_IPC_ERROR_MESSAGES`, so no outcome can read as an approval.
+ */
+type ApprovalSentenceSelectResult =
+  | { ok: true; requestId: string; choice: ApprovalChoice }
+  | { ok: false; error: string; message?: string };
+
   export type LvisApprovalApi = {
   onRequest: (cb: (req: ApprovalRequest) => void) => () => void;
   respond: (decision: ApprovalDecision) => Promise<unknown>;
+  selectSentence: (
+    requestId: string,
+    input: string,
+  ) => Promise<ApprovalSentenceSelectResult>;
 };
 
 /** User-Approval Store API */

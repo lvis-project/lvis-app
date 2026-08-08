@@ -684,6 +684,13 @@ export function makeMockLvisNamespace(overrides: LvisNamespaceOverrides = {}) {
           return () => approvalHandlers.delete(cb);
         }),
         respond: vi.fn(async () => ({ ok: true })),
+        // `/allow` selector. Defaults to "no provider configured" so a test
+        // that never opts in still exercises the failure path rather than a
+        // silently successful proposal.
+        selectSentence: vi.fn(async () => ({
+          ok: false as const,
+          error: "allow-selector-unavailable",
+        })),
       },
       policy: {
         get: vi.fn(async () => ({

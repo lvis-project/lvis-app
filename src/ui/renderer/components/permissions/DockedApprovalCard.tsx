@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "../../../../components/ui/button.js";
 import { Card } from "../../../../components/ui/card.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
+import { buildApprovalScopeOptions } from "../../../../permissions/approval-scope-options.js";
 import { useTranslation } from "../../../../i18n/react.js";
 
 export interface DockedApprovalCardProps {
@@ -9,15 +10,15 @@ export interface DockedApprovalCardProps {
   onDecide: (choice: ApprovalChoice, rememberPattern?: string) => void;
   /** Returns focus to the composer when the user shift-tabs out of the card. */
   onReturnFocus?: () => void;
+  /**
+   * Scope a `/allow` sentence proposed for this request. It moves focus onto
+   * that scope's button and nothing else — the button still has to be pressed.
+   * See {@link ../../hooks/use-approval-sentence.js}.
+   */
+  proposedChoice?: ApprovalChoice | null;
 }
 
-interface Scope {
-  choice: ApprovalChoice;
-  /** Widening scopes outlive the call being decided. */
-  widens: boolean;
-  /** Host-resolved path this scope would allow. Never user-supplied. */
-  path?: string;
-}
+type Scope = ReturnType<typeof buildApprovalScopeOptions>[number];
 
 /**
  * Docked, non-modal approval card (issue #1940).
@@ -53,6 +54,7 @@ export function DockedApprovalCard({
   request,
   onDecide,
   onReturnFocus,
+  proposedChoice = null,
 }: DockedApprovalCardProps) {
   const { t } = useTranslation();
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -65,24 +67,16 @@ export function DockedApprovalCard({
   const suggestedParent = outOfDir?.suggestedParent;
   const candidatePath = outOfDir?.candidatePath ?? "";
 
+  // Narrowest first — index 0 is also where focus lands. The list itself comes
+  // from the shared authority the host offers `/allow`, so a proposed scope
+  // always names a button that exists here.
   const scopes = useMemo<Scope[]>(() => {
     if (!request) return [];
-    const allowed = request.allowedChoices;
-    const permitted = (c: ApprovalChoice) => !allowed || allowed.includes(c);
-    const out: Scope[] = [];
-    // Narrowest first — this is also where focus lands.
-    if (permitted("allow-once")) {
-      out.push({ choice: "allow-once", widens: false, path: candidatePath });
-    }
-    if (suggestedParent && permitted("allow-session")) {
-      out.push({ choice: "allow-session", widens: true, path: candidatePath });
-    }
-    if (suggestedParent && permitted("allow-always")) {
-      out.push({ choice: "allow-always", widens: true, path: suggestedParent });
-    }
-    // Deny is a peer button, so refusing costs what allowing costs.
-    if (permitted("deny-once")) out.push({ choice: "deny-once", widens: false });
-    return out;
+    return buildApprovalScopeOptions({
+      candidatePath,
+      suggestedParent: suggestedParent ?? null,
+      ...(request.allowedChoices ? { allowedChoices: request.allowedChoices } : {}),
+    });
   }, [request, suggestedParent, candidatePath]);
 
   // New request → focus the narrowest scope, but never steal focus that is
@@ -100,6 +94,21 @@ export function DockedApprovalCard({
     });
     return () => cancelAnimationFrame(frame);
   }, [request?.id]);
+
+  // A `/allow` sentence FILLS THE FORM: it moves focus onto the scope it
+  // named, and the target line above the buttons rewrites to that scope. It
+  // does not decide — `onDecide` is reachable only from a button press, so the
+  // sentence still costs the user one deliberate confirm. A proposal naming a
+  // scope this card is not offering is ignored rather than approximated.
+  useEffect(() => {
+    if (!proposedChoice) return;
+    const index = scopes.findIndex((scope) => scope.choice === proposedChoice);
+    if (index < 0) return;
+    activeRef.current = index;
+    setActive(index);
+    const frame = requestAnimationFrame(() => buttonRefs.current[index]?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [proposedChoice, scopes]);
 
   if (!request || scopes.length === 0) return null;
 
@@ -217,6 +226,7 @@ export function DockedApprovalCard({
                 variant="outline"
                 tabIndex={i === active ? 0 : -1}
                 data-testid={`docked-approval-choice-${scope.choice}`}
+                data-proposed={scope.choice === proposedChoice ? "true" : undefined}
                 onFocus={() => setActiveIndex(i)}
                 onClick={() => commit(scope)}
                 className={

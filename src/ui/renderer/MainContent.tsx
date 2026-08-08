@@ -83,6 +83,7 @@ export interface MainContentProps {
   askQuestions: AskUserQuestionRequest[];
   approvalRequest?: ApprovalRequest | null;
   onApprovalDecide?: (choice: ApprovalChoice, rememberPattern?: string) => void;
+  onApprovalSentenceNotice?: (message: string) => void;
   /** Removes a request once the user submits or dismisses it. */
   onResolveAskQuestion: (id: string) => void;
   // plugins — surfaced inside the SlashPicker plugin category
@@ -160,6 +161,7 @@ function HomeChatPane(props: MainContentProps) {
         askQuestions={props.askQuestions}
         onResolveAskQuestion={props.onResolveAskQuestion}
         approvalRequest={props.approvalRequest}
+        onApprovalSentenceNotice={props.onApprovalSentenceNotice}
         onApprovalDecide={props.onApprovalDecide}
         plugins={props.plugins}
         onSelectPlugin={props.onSelectPlugin}
