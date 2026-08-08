@@ -153,7 +153,8 @@ export function App() {
   // Where the main window is. `InlineViewKey` (not `string`) so a destination
   // that has no inline form — or a typo — cannot be assigned here at all.
   const [activeView, setActiveView] = useState<InlineViewKey>("home");
-  // Inline settings: which tab SettingsContent opens on, and the view to
+  // Inline settings: which tab the panel is on — seeded on open and updated by
+  // the panel's own read-back as the user moves — and the view to
   // return to via the back affordance. Settings is an inline view in EVERY
   // appMode — there is no detached settings window on this path (see
   // onOpenSettings below), so these drive it in both modes.
@@ -987,6 +988,7 @@ export function App() {
             api={api}
             appMode={appMode}
             settingsTab={settingsTab}
+            onSettingsTabChange={setSettingsTab}
             onSettingsSaved={handleInlineSettingsSaved}
             onCloseSettings={handleCloseInlineSettings}
             starred={starred}
