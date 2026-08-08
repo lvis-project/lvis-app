@@ -1,9 +1,9 @@
 /**
- * #885 b2/b3 — the MCP-app detach + disconnect channels MUST stay INTERNAL.
- * They spawn/close host windows and broadcast host state, so no external origin
+ * The MCP-app channels MUST stay INTERNAL. They execute tools, write files, mutate
+ * conversation and model-facing state, and broadcast host state, so no external origin
  * (local-api / cli / plugin frame) may ever reach them. Asserts the fail-closed
- * classification and that adding them did NOT touch the public surface (so
- * CONTRACT_VERSION does not need to bump — the freeze test stays green).
+ * classification and that they did NOT touch the public surface (so CONTRACT_VERSION
+ * does not need to bump — the freeze test stays green).
  */
 import { describe, it, expect } from "vitest";
 import {
@@ -17,15 +17,8 @@ import {
 } from "../app-contract.js";
 
 const mcpAppChannels = [
-  CHANNELS.mcp.openDetached,
-  CHANNELS.mcp.detachedPayload,
   CHANNELS.mcp.serverDisconnected,
   CHANNELS.mcp.disposeUiSession,
-  // The `ui/request-display-mode` "inline" arm — CLOSES a host window (scoped to the
-  // card's own server), so it is internal for the same reason `openDetached` is.
-  CHANNELS.mcp.closeDetached,
-  // main→renderer: a detached card's window is gone. Host state, never externally reachable.
-  CHANNELS.mcp.detachedClosed,
   // `oncalltool` — an app runs a tool on its own server. The most sensitive of the
   // set (it EXECUTES), so it must never be publicly reachable either.
   CHANNELS.mcp.callTool,
@@ -42,10 +35,6 @@ const mcpAppChannels = [
 
 describe("#885 MCP-app channels are internal (fail-closed)", () => {
   it("defines the expected byte-identical channel strings", () => {
-    expect(CHANNELS.mcp.openDetached).toBe("lvis:mcp:open-detached");
-    expect(CHANNELS.mcp.detachedPayload).toBe("lvis:mcp:detached-payload");
-    expect(CHANNELS.mcp.closeDetached).toBe("lvis:mcp:close-detached");
-    expect(CHANNELS.mcp.detachedClosed).toBe("lvis:mcp:detached-closed");
     expect(CHANNELS.mcp.serverDisconnected).toBe("lvis:mcp:server-disconnected");
     expect(CHANNELS.mcp.disposeUiSession).toBe("lvis:mcp:dispose-ui-session");
     expect(CHANNELS.mcp.callTool).toBe("lvis:mcp:call-tool");
@@ -70,14 +59,14 @@ describe("#885 MCP-app channels are internal (fail-closed)", () => {
     }
   });
 
-  it("classifies the window-manager-registered handlers under detachedWindow", () => {
-    const detached = new Set<string>(INTERNAL_HOST_CHANNELS.detachedWindow);
-    expect(detached.has(CHANNELS.mcp.openDetached)).toBe(true);
-    expect(detached.has(CHANNELS.mcp.detachedPayload)).toBe(true);
-    expect(detached.has(CHANNELS.mcp.closeDetached)).toBe(true);
-    // `detachedClosed` is a pure main→renderer EVENT (no ipcMain.handle), like
-    // `serverDisconnected` — this map records out-of-tree HANDLERS only.
-    expect(detached.has(CHANNELS.mcp.detachedClosed)).toBe(false);
+  it("classifies no MCP channel as a window-manager-registered handler", () => {
+    // The window-spawning arm of this family is retired: every remaining MCP channel is
+    // either registered in-tree under `src/ipc/` or a pure main→renderer event. A new
+    // entry appearing here would mean a window handler came back.
+    const windowManager = new Set<string>(INTERNAL_HOST_CHANNELS.windowManager);
+    for (const channel of mcpAppChannels) {
+      expect(windowManager.has(channel), channel).toBe(false);
+    }
   });
 
   it("does NOT bump CONTRACT_VERSION (all three are internal)", () => {

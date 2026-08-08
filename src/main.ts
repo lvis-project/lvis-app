@@ -3,7 +3,6 @@
 
 
 import { app } from "electron";
-import { resolve } from "node:path";
 import { t } from "./i18n/index.js";
 import { registerIpcHandlers, unregisterPluginWebview } from "./ipc-bridge.js";
 import { installHtmlPreviewPartitionBlock } from "./main/html-preview-partition.js";
@@ -22,7 +21,7 @@ import {
   isAppUpdateInstallRequested,
   markAppUpdateInstallPrepared,
 } from "./main/app-update-install-intent.js";
-import { mainDir, distRoot, projectRoot } from "./main/main-paths.js";
+import { distRoot, projectRoot } from "./main/main-paths.js";
 import { applyRuntimeAppIcon, runEarlyBootEnv } from "./main/early-boot-env.js";
 import { ensureCorporateCaInjected } from "./main/corp-ca-runtime.js";
 import { loadMainStartupDependencies } from "./main/startup-dependencies.js";
@@ -31,11 +30,10 @@ import { runAppShutdownCleanup } from "./main/app-shutdown.js";
 import {
   createWindow,
   getAppWindows,
-  initialThemeArgs,
   loadMainInterface,
   showMainWindow,
 } from "./main/main-window.js";
-import { detachedWindowOptionsForViewKey, refreshApplicationMenu } from "./main/app-menu.js";
+import { refreshApplicationMenu } from "./main/app-menu.js";
 import { ensureTray, refreshTrayMenu, showOrCreateMainWindow } from "./main/app-tray.js";
 import { configureNativeWindowCoordinator } from "./main/native-window-coordinator.js";
 import { readStartupLaunchState } from "./main/startup-launch.js";
@@ -124,13 +122,7 @@ async function main() {
   });
   // Initialise WindowManager before createWindow so registerMainWindow() can
   // be called synchronously inside createWindow().
-  const preloadPath = resolve(mainDir, "..", "preload.cjs");
-  const windowManager = new WindowManager({
-    preloadPath,
-    distRoot,
-    getInitialThemeArgs: initialThemeArgs,
-    resolveDetachedWindowOptions: detachedWindowOptionsForViewKey,
-  });
+  const windowManager = new WindowManager();
   setWindowManager(windowManager);
 
 

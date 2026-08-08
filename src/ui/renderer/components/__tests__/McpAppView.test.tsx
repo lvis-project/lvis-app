@@ -48,19 +48,6 @@ const readUiResource = vi.fn(async (serverId: string) => ({
   html: "<html><body>card</body></html>",
 }));
 const disposeUiSession = vi.fn();
-/**
- * The window seams a display-mode change must NOT reach. Every mode this host advertises
- * is a surface inside the renderer, so these stay untouched no matter what an app asks
- * for — stubbed as working calls precisely so a regression that starts using one would
- * SUCCEED and still be caught by the assertions below, rather than failing for the
- * incidental reason that the surface was missing.
- */
-const openDetached = vi.fn(async () => ({
-  ok: true as const,
-  windowId: 7,
-  viewKey: "mcp-app:676974687562:card-1",
-}));
-const closeDetached = vi.fn(async () => ({ ok: true as const }));
 /** The gated save path behind `ondownloadfile`. */
 const downloadFile = vi.fn(async () => ({ ok: true as const, disposition: "saved" as const }));
 /**
@@ -80,8 +67,6 @@ function stubLvis() {
     mcp: {
       readUiResource,
       disposeUiSession,
-      openDetached,
-      closeDetached,
       downloadFile,
       postUiModelContext,
       onServerDisconnected: (handler: (serverId: string) => void) => {
@@ -128,9 +113,6 @@ beforeEach(() => {
   // McpAppPipPanel.test.tsx already do this).
   __resetMcpAppCardLocationStoreForTests();
   readUiResource.mockClear();
-  openDetached.mockClear();
-  closeDetached.mockClear();
-  closeDetached.mockResolvedValue({ ok: true as const });
   stubLvis();
   createMcpAppBridgeMock.mockClear();
   // Default fake bridge for every test in this file: a `setHostContext` spy plus
@@ -383,9 +365,7 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
 
     const applied = await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
 
-    // `fullscreen` is a surface INSIDE this renderer, not a second window: the request
-    // is served by the shared location store alone, with no window IPC whatsoever.
-    expect(openDetached).not.toHaveBeenCalled();
+    // `fullscreen` is a surface inside this renderer, served by the shared location store.
     expect(applied).toBe("fullscreen");
 
     // Replace, don't clone. The inline instance is gone — no <webview>, and its
@@ -416,9 +396,7 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
     }
   });
 
-  it("fullscreen -> inline: a SECOND mount (the fullscreen surface) revives the home mount through the store — no window IPC", async () => {
-    const closeAllDetached = vi.fn(async () => ({ ok: true }));
-    vi.stubGlobal("lvisApi", { window: { closeAllDetached } });
+  it("fullscreen -> inline: a SECOND mount (the fullscreen surface) revives the home mount through the store", async () => {
     const locationId = "shared-loc-fullscreen-inline";
     const home = render(<McpAppView payload={payload("github")} locationId={locationId} />, {
       wrapper: ThemeWrapper,
@@ -443,11 +421,7 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
     const applied = await act(() => pipDeps().applyDisplayMode("inline"));
     expect(applied).toBe("inline");
 
-    // Reviving is a pure store move: no window IPC in either direction — and in
-    // particular never the sweeping close-every-window call, which an untrusted card
-    // must not be able to reach.
-    expect(closeDetached).not.toHaveBeenCalled();
-    expect(closeAllDetached).not.toHaveBeenCalled();
+    // Reviving is a pure store move.
     await waitFor(() => expect(webviewNode(home.container)).toBeTruthy());
     expect(home.container.querySelector('[data-testid="mcp-app-fullscreen"]')).toBeNull();
   });
@@ -472,8 +446,6 @@ describe("McpAppView — display-mode applier (the EXISTING window seams, reused
     await waitFor(() => expect(webviewNode(container)).toBeTruthy());
 
     await expect(act(() => seededDisplayDeps().applyDisplayMode("inline"))).resolves.toBe("inline");
-    expect(openDetached).not.toHaveBeenCalled();
-    expect(closeDetached).not.toHaveBeenCalled();
   });
 });
 
@@ -498,8 +470,6 @@ describe("McpAppView — pip (the shared location store, not a second window sta
     const applied = await act(() => seededDisplayDeps().applyDisplayMode("pip"));
 
     expect(applied).toBe("pip");
-    // Purely in-process: no detach IPC at all.
-    expect(openDetached).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByTestId("mcp-app-pip")).toBeInTheDocument());
     expect(webviewNode(container)).toBeNull();
     expect(transport.close).toHaveBeenCalledTimes(1);
@@ -595,7 +565,6 @@ describe("McpAppView — pip (the shared location store, not a second window sta
 
     const applied = await act(() => seededDisplayDeps().applyDisplayMode("fullscreen"));
 
-    expect(openDetached).not.toHaveBeenCalled();
     expect(applied).toBe("fullscreen");
     // The STORE now says this card is in the fullscreen slot — this is what
     // `McpAppPipPanel` (the pip mount's actual PARENT in production) reacts to by
@@ -627,7 +596,6 @@ describe("McpAppView — pip (the shared location store, not a second window sta
     // Both away surfaces live in THIS renderer's heap, so the move is the same store
     // write in either direction — the old cross-process decline has no reason to exist.
     expect(applied).toBe("pip");
-    expect(closeDetached).not.toHaveBeenCalled();
     const { getCardLocation } = await import("../../state/mcp-app-card-location-store.js");
     expect(getCardLocation(locationId)).toEqual({ kind: "pip" });
   });

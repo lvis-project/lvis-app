@@ -22,12 +22,6 @@ const readUiResource = vi.fn(async (serverId: string) => ({
   html: "<html><body>card</body></html>",
 }));
 const disposeUiSession = vi.fn();
-const openDetached = vi.fn(async () => ({
-  ok: true as const,
-  windowId: 7,
-  viewKey: "mcp-app:676974687562:card-1",
-}));
-const closeDetached = vi.fn(async () => ({ ok: true as const }));
 
 const payload = (serverId: string): McpUiPayload => ({ serverId, resourceUri: "ui://card/1" });
 
@@ -38,9 +32,7 @@ function webviewNodes(container: HTMLElement): NodeListOf<Element> {
 beforeEach(() => {
   __resetMcpAppCardLocationStoreForTests();
   readUiResource.mockClear();
-  openDetached.mockClear();
-  closeDetached.mockClear();
-  stubMcpLvis({ readUiResource, disposeUiSession, openDetached, closeDetached });
+  stubMcpLvis({ readUiResource, disposeUiSession });
   createMcpAppBridgeMock.mockClear();
   createMcpAppBridgeMock.mockImplementation(() => ({
     bridge: { setHostContext: vi.fn() },

@@ -1,13 +1,12 @@
 /**
  * #885 b3 — the disconnect sink wired into McpManager at boot AND into
  * PluginLoopbackManager (see `mcp/__tests__/plugin-loopback-manager.test.ts`).
- * It now lives in `mcp/mcp-server-disconnect-sink.ts` so both arms can reach it;
- * this suite still covers it from the boot step that wires the external arm.
+ * It lives in `mcp/mcp-server-disconnect-sink.ts` so both arms can reach it;
+ * this suite covers it from the boot step that wires the external arm.
  *
- * Asserts the MAJOR-2 clearStorageData + the strict ordering broadcast → close →
- * clear (so no live detached webContents races a wiped jar), the isDestroyed()
- * guard, lazy null WindowManager tolerance, and the MINOR-A outer try/catch that
- * swallows a synchronous throw from over-length name derivation.
+ * Asserts the MAJOR-2 clearStorageData + the strict ordering broadcast → clear (so no
+ * live webContents races a wiped jar), the isDestroyed() guard, and the MINOR-A outer
+ * try/catch that swallows a synchronous throw from over-length name derivation.
  */
 import { describe, it, expect, vi } from "vitest";
 import { createMcpServerDisconnectedSink } from "../../../mcp/mcp-server-disconnect-sink.js";
@@ -18,7 +17,6 @@ function harness() {
   const order: string[] = [];
   const send = vi.fn(() => order.push("broadcast"));
   const destroyedSend = vi.fn();
-  const closeDetachedMcpWindows = vi.fn(() => order.push("close"));
   const clearStorageData = vi.fn(() => {
     order.push("clear");
     return Promise.resolve();
@@ -28,52 +26,35 @@ function harness() {
     return { clearStorageData };
   });
   const sink = createMcpServerDisconnectedSink({
-    getWindowManager: () => ({ closeDetachedMcpWindows }),
     getAllWindows: () => [
       { isDestroyed: () => false, webContents: { send } },
       { isDestroyed: () => true, webContents: { send: destroyedSend } },
     ],
     fromPartition,
   });
-  return { order, send, destroyedSend, closeDetachedMcpWindows, clearStorageData, fromPartition, sink };
+  return { order, send, destroyedSend, clearStorageData, fromPartition, sink };
 }
 
 describe("createMcpServerDisconnectedSink", () => {
-  it("broadcasts to non-destroyed windows only, then close, then clear (order)", () => {
+  it("broadcasts to non-destroyed windows only, then clears (order)", () => {
     const h = harness();
     h.sink("github");
 
     expect(h.send).toHaveBeenCalledWith(CHANNELS.mcp.serverDisconnected, { serverId: "github" });
     expect(h.destroyedSend).not.toHaveBeenCalled(); // isDestroyed() guard (Q4 shutdown)
-    expect(h.closeDetachedMcpWindows).toHaveBeenCalledWith("github");
     expect(h.clearStorageData).toHaveBeenCalledOnce();
     expect(h.fromPartition).toHaveBeenCalledWith(mcpAppPartitionName("github"));
 
-    // Order: broadcast → close → clear.
-    expect(h.order.indexOf("broadcast")).toBeLessThan(h.order.indexOf("close"));
-    expect(h.order.indexOf("close")).toBeLessThan(h.order.indexOf("clear"));
-  });
-
-  it("tolerates a null WindowManager (lazy resolution before window creation)", () => {
-    const clearStorageData = vi.fn(() => Promise.resolve());
-    const send = vi.fn();
-    const sink = createMcpServerDisconnectedSink({
-      getWindowManager: () => null,
-      getAllWindows: () => [{ isDestroyed: () => false, webContents: { send } }],
-      fromPartition: () => ({ clearStorageData }),
-    });
-    expect(() => sink("github")).not.toThrow();
-    expect(send).toHaveBeenCalledOnce();
-    expect(clearStorageData).toHaveBeenCalledOnce();
+    // Order: broadcast → clear. A card still holding a live <webview> must be told
+    // the server is gone before its partition's storage is wiped underneath it.
+    expect(h.order.indexOf("broadcast")).toBeLessThan(h.order.indexOf("clear"));
   });
 
   it("swallows a synchronous throw from an over-length id (MINOR-A) — broadcast still ran", () => {
     const send = vi.fn();
     const clearStorageData = vi.fn(() => Promise.resolve());
-    // Real closeDetachedMcpWindows would derive mcpAppViewKeyPrefix(id) and throw;
-    // even with a no-throw stub, mcpAppPartitionName(id) throws at the clear step.
+    // `mcpAppPartitionName(id)` throws at the clear step for an over-length id.
     const sink = createMcpServerDisconnectedSink({
-      getWindowManager: () => ({ closeDetachedMcpWindows: vi.fn() }),
       getAllWindows: () => [{ isDestroyed: () => false, webContents: { send } }],
       fromPartition: () => ({ clearStorageData }),
     });

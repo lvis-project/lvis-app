@@ -2,10 +2,8 @@
  * View keys — the app's location vocabulary, defined once for both processes.
  *
  * A view key names a destination: a built-in surface (`home`, `work-board`, …)
- * or a namespaced one (`plugin:<pluginId>:<viewId>`,
- * `mcp-app:<hex(serverId)>:<cardId>`). It is the value behind the renderer's
- * `activeView`, the argument to the detach IPC, and the payload of the
- * `#detached/<viewKey>` URL fragment.
+ * or a plugin one (`plugin:<pluginId>:<viewId>`). It is the value behind the
+ * renderer's `activeView`.
  *
  * Before this module the vocabulary lived in two places that disagreed: the
  * main process held a regex allow-list for the keys a window may be opened
@@ -14,103 +12,46 @@
  * was rendered as a plugin view that does not exist. Both halves now derive
  * from the one table below.
  *
- * Not every key can appear in every place, and that is a property of the key
- * rather than of the caller:
- *   - `detachable` — may be opened as its own window. `home` and `settings`
- *     are not; they have no detached form.
- * Every built-in renders inline, so that is a property of the key SHAPE rather
- * than a column here: `InlineViewKey` admits built-in and plugin keys and
- * excludes MCP-app cards, which are detach-only.
+ * The table used to carry a `detachable` column and an OS window title per
+ * built-in, because a key could also name a destination opened in its own
+ * window. Detach is retired: every destination renders inline, so a key's only
+ * question is what it IS, and the columns that answered "where may it be
+ * opened" went with the feature that asked.
  */
 
-/** What a built-in destination is allowed to do. */
-interface BuiltinViewSpec {
-  /** May be opened as its own window via the detach IPC. */
-  readonly detachable: boolean;
-  /**
-   * OS window title for the detached form. Required exactly when `detachable`
-   * — a window with no title is a defect, and an unused title is dead text.
-   * Deliberately not localized: it is the same English text the main process
-   * has always used, and moving it into the i18n catalogs is a separate change.
-   */
-  readonly windowTitle?: string;
-}
-
-/**
- * Every built-in destination. THE source of truth — the detach allow-list, the
- * window titles, and the renderer's union type are all derived from it, so a
- * new surface is added here and nowhere else.
- */
+/** Every built-in destination. THE source of truth for the renderer's union type,
+ *  so a new surface is added here and nowhere else. */
 export const BUILTIN_VIEWS = {
-  home: { detachable: false },
-  settings: { detachable: false },
-  "work-board": { detachable: true, windowTitle: "Work Board" },
-  routines: { detachable: true, windowTitle: "Routines" },
-  memory: { detachable: true, windowTitle: "Memory" },
-  starred: { detachable: true, windowTitle: "Starred" },
-  insights: { detachable: true, windowTitle: "Insights" },
-} as const satisfies Record<string, BuiltinViewSpec>;
+  home: {},
+  settings: {},
+  "work-board": {},
+  routines: {},
+  memory: {},
+  starred: {},
+  insights: {},
+} as const satisfies Record<string, Record<string, never>>;
 
-export type BuiltinViewKey = keyof typeof BUILTIN_VIEWS;
-
-/** Built-ins that may be opened as their own window. */
-type DetachableBuiltinViewKey = {
-  [K in BuiltinViewKey]: (typeof BUILTIN_VIEWS)[K]["detachable"] extends true ? K : never;
-}[BuiltinViewKey];
+type BuiltinViewKey = keyof typeof BUILTIN_VIEWS;
 
 export type PluginViewKey = `plugin:${string}:${string}`;
-type McpAppViewKey = `mcp-app:${string}:${string}`;
 
-/** Anything the main window can render as `activeView`. MCP-app cards are
- *  detach-only, so they are absent by construction rather than by convention. */
+/** Anything the main window can render as `activeView`. */
 export type InlineViewKey = BuiltinViewKey | PluginViewKey;
 
-/** Anything the detach IPC accepts. */
-export type DetachableViewKey = DetachableBuiltinViewKey | PluginViewKey | McpAppViewKey;
-
 /**
- * Two different questions get two different charsets, deliberately.
- *
- * PARSING asks what a key IS, and must accept everything the app can legally
+ * Parsing asks what a key IS, and must accept everything the app can legally
  * produce. A plugin id is schema-constrained (`^[a-z][a-z0-9-]*$`), but a UI
  * extension id is declared as a bare `string` in
  * `schemas/plugin-manifest.schema.json` — so `plugin:my-plugin:MainView` is a
  * valid, shipping key. Parsing therefore asserts STRUCTURE only: a non-empty
  * segment is anything without a colon, since the colon is what separates them.
- *
- * The DETACH ALLOW-LIST asks what may open a window, which is an input check on
- * an IPC boundary. It stays exactly as strict as it has always been.
- * The two are not the same set, and pretending otherwise would either loosen a
- * security boundary or break plugins that work today: a `MainView` extension
- * renders inline right now and has never been able to detach.
  */
 const STRUCTURAL_SEGMENT_RE = /^[^:]+$/;
-/** The historical detach charset — lowercase, dots/underscores/hyphens. */
-const STRICT_SEGMENT = "[a-z0-9][a-z0-9_.-]*";
-/** `mcp-app` server ids are hex-encoded UTF-8 (see `mcp-app-partition.ts`). */
-const HEX_SEGMENT = "[0-9a-f]+";
-
-/** Built-in keys that may be detached, in a stable order. */
-const DETACHABLE_BUILTIN_VIEW_KEYS: readonly DetachableBuiltinViewKey[] =
-  (Object.keys(BUILTIN_VIEWS) as BuiltinViewKey[])
-    .filter((key): key is DetachableBuiltinViewKey => BUILTIN_VIEWS[key].detachable)
-    .sort();
-
-/**
- * The detach allow-list, derived from the table rather than restated. The main
- * process validates every incoming `openDetached(viewKey)` against this.
- */
-export const DETACHABLE_VIEW_KEY_PATTERN = new RegExp(
-  `^(${DETACHABLE_BUILTIN_VIEW_KEYS.join("|")}`
-    + `|plugin:${STRICT_SEGMENT}:${STRICT_SEGMENT}`
-    + `|mcp-app:${HEX_SEGMENT}:${STRICT_SEGMENT})$`,
-);
 
 /** A view key taken apart. `null` from `parseViewKey` means "not a view key". */
 export type ParsedViewKey =
   | { kind: "builtin"; key: BuiltinViewKey }
-  | { kind: "plugin"; key: PluginViewKey; pluginId: string; viewId: string }
-  | { kind: "mcp-app"; key: McpAppViewKey; serverIdHex: string; cardId: string };
+  | { kind: "plugin"; key: PluginViewKey; pluginId: string; viewId: string };
 
 /**
  * The single parser. Every consumer that needs to know what a key IS goes
@@ -135,16 +76,6 @@ export function parseViewKey(raw: string): ParsedViewKey | null {
     return { kind: "plugin", key: raw as PluginViewKey, pluginId, viewId };
   }
 
-  if (raw.startsWith("mcp-app:")) {
-    const rest = raw.slice("mcp-app:".length);
-    const separator = rest.indexOf(":");
-    if (separator <= 0) return null;
-    const serverIdHex = rest.slice(0, separator);
-    const cardId = rest.slice(separator + 1);
-    if (!/^[0-9a-f]+$/.test(serverIdHex) || !STRUCTURAL_SEGMENT_RE.test(cardId)) return null;
-    return { kind: "mcp-app", key: raw as McpAppViewKey, serverIdHex, cardId };
-  }
-
   return null;
 }
 
@@ -157,24 +88,6 @@ export function pluginViewKey(pluginId: string, viewId: string): PluginViewKey {
 export function isInlineViewKey(raw: string): raw is InlineViewKey {
   const kind = parseViewKey(raw)?.kind;
   return kind === "builtin" || kind === "plugin";
-}
-
-/**
- * True when `raw` may be opened as its own window — the check the main process
- * applies to the detach IPC. Stricter than `parseViewKey` on purpose: see the
- * charset note above.
- */
-export function isDetachableViewKey(raw: string): raw is DetachableViewKey {
-  return DETACHABLE_VIEW_KEY_PATTERN.test(raw);
-}
-
-/** OS window title for a detached built-in, or `null` for namespaced keys
- *  (whose titles come from the plugin/card metadata instead). */
-export function detachedWindowTitle(raw: string): string | null {
-  const parsed = parseViewKey(raw);
-  if (parsed?.kind !== "builtin") return null;
-  const spec: BuiltinViewSpec = BUILTIN_VIEWS[parsed.key];
-  return spec.windowTitle ?? null;
 }
 
 /** A view key that the main window can actually be AT. */

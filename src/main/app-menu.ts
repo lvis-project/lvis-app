@@ -9,7 +9,6 @@
 import { app, Menu, type MenuItemConstructorOptions } from "electron";
 import { t } from "../i18n/index.js";
 import { normalizeSettingsTab } from "../shared/settings-tabs.js";
-import { type DetachedWindowOptions } from "./window-manager.js";
 import { getMainWindow, getServices } from "./app-state.js";
 import {
   requestNativeChromeRefresh,
@@ -70,17 +69,6 @@ function createViewMenu() {
       })),
     ],
   };
-}
-
-export function detachedWindowOptionsForViewKey(viewKey: string): DetachedWindowOptions | undefined {
-  const services = getServices();
-  if (!services || !viewKey.startsWith("plugin:")) return undefined;
-  const [, pluginId, extensionId, extra] = viewKey.split(":");
-  if (!pluginId || !extensionId || extra !== undefined) return undefined;
-  const view = services.pluginRuntime
-    .listUiExtensions()
-    .find((item) => item.pluginId === pluginId && item.extension.id === extensionId);
-  return view?.extension.window;
 }
 
 export function createSettingsMenuItem(): MenuItemConstructorOptions {
