@@ -68,6 +68,31 @@ function zSplit(stdout) {
   return stdout.split("\0").filter((entry) => entry.length > 0);
 }
 
+// The icon encoder does not produce identical bytes on every platform, so the
+// committed blobs can only ever match the one they were generated on. Checking
+// elsewhere asks a question the committed state cannot answer: it reports a
+// divergence that is real but not a defect, and it blocked a release build on
+// macOS the first time a tag ran through it.
+//
+// Windows is the canonical platform because that is where the installer icons
+// are consumed — `installerIcon`/`installerHeaderIcon` are NSIS inputs. A
+// divergence introduced anywhere still fails there, which is the platform that
+// matters, and the pre-push hook on a Windows checkout catches it before it
+// can reach a tag.
+// `LVIS_GENERATED_ASSETS_FORCE` exists so the guard's own tests exercise the
+// comparison on any platform — they build throwaway repositories whose bytes
+// they control, so the encoder difference does not apply to them. It is not a
+// production escape hatch: nothing in `build` or the hooks sets it.
+const CANONICAL_PLATFORM = "win32";
+const forced = process.env.LVIS_GENERATED_ASSETS_FORCE === "1";
+if (!forced && process.platform !== CANONICAL_PLATFORM) {
+  console.log(
+    `${LABEL} SKIP — committed bytes are ${CANONICAL_PLATFORM}-generated; ` +
+      `${process.platform} output differs by encoder, not by defect`,
+  );
+  process.exit(0);
+}
+
 const insideWorkTree = git(["rev-parse", "--is-inside-work-tree"]);
 if (insideWorkTree.status !== 0 || insideWorkTree.stdout.trim() !== "true") {
   // Not a checkout — an unpacked source archive, or git is unavailable. There

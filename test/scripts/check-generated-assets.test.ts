@@ -25,6 +25,10 @@ const AMBIENT_GIT_VARS = [
 function envWithout(names: readonly string[]): NodeJS.ProcessEnv {
   const env = { ...process.env };
   for (const name of names) delete env[name];
+  // These cases build throwaway repositories whose bytes they control, so the
+  // platform-specific encoder difference the guard skips for does not apply.
+  // Without this they would pass by skipping, on every platform but Windows.
+  env.LVIS_GENERATED_ASSETS_FORCE = "1";
   return env;
 }
 
@@ -182,7 +186,13 @@ describe("check-generated-assets", () => {
     }).stdout.trim();
     expect(gitDir).not.toBe("");
 
-    const result = run(root, { ...process.env, GIT_DIR: gitDir });
+    // Keep the force flag: this case is about GIT_DIR overriding `--root`, and
+    // a platform skip would let it pass without ever reaching that question.
+    const result = run(root, {
+      ...process.env,
+      GIT_DIR: gitDir,
+      LVIS_GENERATED_ASSETS_FORCE: "1",
+    });
 
     expect(result.stderr).toBe("");
     expect(result.status).toBe(0);
