@@ -15,7 +15,7 @@
 - Token telemetry should be available by default and should keep host, model, and per-project analysis separable.
 - Windows support should avoid POSIX-only assumptions and should use safe process/path handling.
 - Host-agent CLI coverage is strongest when the host surfaces are normalized while each host keeps its native escape hatch.
-- CLI-style agents commonly derive project context from the process working directory. Claude Code loads project files by walking up from the current working directory, goose CLI records the current directory as a project, and OpenCode looks for per-project config from the current directory toward the nearest git root.
+- CLI-style agents commonly derive project context from the process working directory: project instruction files are loaded by walking up from it, the current directory itself is recorded as the project, and per-project config is resolved from it toward the nearest git root.
 - Desktop applications need a different fallback. VS Code can have an empty window with no folder, but LVIS product semantics require a project identity for memory, conversations, work-board history, and permissions. Therefore "no selected project" is a transient UI state only.
 
 ## LVIS Application Mapping

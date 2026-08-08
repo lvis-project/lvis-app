@@ -614,8 +614,7 @@ export class SystemPromptBuilder {
           // Deterministic priority: user skills first, then plugin skills;
           // alphabetical within each band. Query-relevance is intentionally NOT
           // applied to the resident catalog (skill-loading-policy.md §3): the
-          // reference consensus (Claude Code / Codex / OpenCode) keeps the
-          // catalog stable and lets the model narrow via skill_load, and
+          // catalog is kept stable and the model narrows via skill_load, since
           // re-ordering it per turn would break Claude prompt-cache stable-prefix
           // reuse. Query scoring stays in the reactive skill_load/tool_search
           // path, not here.
@@ -1095,8 +1094,8 @@ function renderSkillCatalogRecord(skill: SkillCatalogEntry): string {
 
 const MAX_SKILL_CATALOG_ENTRIES = 80;
 // Authoritative bound on the always-present skill-catalog metadata cost
-// (skill-loading-policy.md §2). Anthropic Agent Skills treat each skill's
-// name+description as a few-dozen-token fixed cost paid every session, so the
+// (skill-loading-policy.md §2). Under progressive disclosure each skill's
+// name+description is a few-dozen-token fixed cost paid every session, so the
 // catalog is token-budgeted, not only entry-capped. ~6000 tokens ≈ 60–100
 // scoped skills at name+description size — comfortably above a realistic active
 // scope while capping pathological catalogs; overflow is reachable via

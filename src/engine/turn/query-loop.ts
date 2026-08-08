@@ -60,7 +60,7 @@ const log = createLogger("lvis");
 const MAX_TOOL_ROUNDS = 30;
 /**
  * Hard cap on finish_reason=length CONTINUATIONS per logical assistant answer.
- * Codex/Anthropic/OpenAI guidance converge on 2–3. AND-ed with: (a) a
+ * Published provider guidance converges on 2–3. AND-ed with: (a) a
  * zero-progress break (a round adding no text AND no reasoning ends the chain),
  * (b) the global MAX_TOOL_ROUNDS budget, and (c) the per-iteration `round < 30`
  * for-bound. Any one tripping stops the chain — defense against a model that
