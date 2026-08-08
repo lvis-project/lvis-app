@@ -825,7 +825,7 @@ describe("VercelUnifiedProvider openai-compatible", () => {
     vi.doUnmock("@ai-sdk/openai-compatible");
   });
 
-  it("routes Cline-style preset vendors through createOpenAICompatible", async () => {
+  it("routes installed preset vendors through createOpenAICompatible", async () => {
     vi.resetModules();
     const compatFactory = vi.fn(() => ({ __mock: "openrouter" }));
     const createCompatSpy = vi.fn(() => compatFactory);
