@@ -653,31 +653,11 @@ Reviewer provider/model 은 지능 설정의 active LLM provider/model 을 따�
 
 Electron preload/contextBridge. Docker 불필요.
 
-## 4. Reference matrix (verified — document-specialist findings applied)
+## 4. Source provenance guardrail
 
-| 차원 | LVIS Permission Policy | OpenCode | OpenHands | Kilo | Warp | Closed-source UX ref | OpenHarness | Hermes | Codex CLI | Copilot |
-|---|---|---|---|---|---|---|---|---|---|---|
-| Action model | 3-action allow/ask/deny + denyReasons[] ✅ | allow/ask/deny + Question.Service | LOW/MED/HIGH/UNKNOWN (4 levels) | per-tool Allow/Ask/Deny rule-based | scoped autonomy [unverified] | deny→ask→allow (first match) | rule-based + Pre/Post hooks | manual/smart/off + Tirith verdict | 5 approval types | --yolo / --allow-all / --allow-all-paths |
-| Read/Write 분리 | 5-axis read/write/shell/network/meta + input-aware ✅ | wildcard | risk level | per-tool | tool toggles | tool-level rules | path_rules | Tirith content scan | sandbox modes | --allow-all-paths flag |
-| Reviewer agent | configurable (disabled/rule/llm) + multi-vendor ✅ | — | LLM self-annotate | — | — | — | — | Tirith (rule-based) | auto_review reviewer | — |
-| Headless | reviewer agent + deferred queue ✅ | — | NeverConfirm + Docker | YOLO + per-tool toggles | — | bypass mode | path policy | manual+timeout | sandbox modes (cwd+/tmp) | branch isolation |
-| Hook system | Pre/PostToolUse + deny-only v1 + strict-deny quarantine ✅ | Question.Service | Pre/Post hooks | — | — | PreToolUse | PreToolUse / PostToolUse | — | execpolicy | — |
-| Subscription scope | routine.scope discriminated union ✅ | session approvals | — | per-tool | per-directory [unverified] | — | path-level | — | sandbox boundary | per-dir settings |
-| Persistent + runtime | settings.json + /permission slash ✅ | session approvals | dynamic | — | — | session | mode switch | /yolo | runtime config | settings.json + /yolo |
-| Allowed directories | additionalDirectories + auto-suggest ✅ | — | — | — | per-directory [unverified] | additionalDirectories | path-level | — | cwd + /tmp default | per-dir settings |
-| Path-aware (sensitive) | symlink-resolve frozen-canonical + glob ✅ | — | path traversal check | — | — | deny-list | path policy | — | path policy | — |
-| Manifest integrity | violation disable + audit now, SDK read-declared proxy cutover later ✅ NEW | — | — | — | — | — | — | — | — | — |
-| Audit tamper-evidence | HMAC chain + daily seal ✅ NEW | — | — | — | — | — | — | — | — | — |
-
-✅ = LVIS 채택. **[unverified]** = document-specialist 가 source URL 404 또는 미확인.
-
-**Additional OSS rows (document-specialist 추가 권장):**
-
-| OSS | Public behavior | LVIS reference use |
-|---|---|---|
-| **Goose** (block/goose) | 3-level Always/Ask/Never + Manual/Smart 두 modes | Layer 8 mode 의 Smart UX 참고 — read auto, state-changing ask |
-| **Cline** | Plan/Act mode + per-tool auto-approve toggles | Layer 8 의 strict mode 가 유사 |
-| **Aider** | git-boundary based (--read FILE, --subtree-only, --no-auto-commits) | Layer 1 directories 와 보완적 — git tree boundary 도 향후 검토 |
+레퍼런스 조사는 공개 동작 비교로만 사용하며, LVIS 구현은 내부 요구사항과 공개
+사양을 기준으로 독립 작성한다. 아래 표는 각 출처를 **구현 소스로 쓸 수 있는지**
+를 규정하는 라이선스/컴플라이언스 기록이므로, 출처 이름이 곧 규칙의 대상이다.
 
 **Source provenance guardrail:**
 
@@ -875,19 +855,6 @@ compat/fallback surface 는 제외하고, host/app/plugin contract 는 다음 �
 20. Confirm = ask sub-variant (auto mode 도 ask, silent skip 금지)
 21. Slash command nested grammar (`/permission mode|dir|reviewer`)
 22. Bash AST gate is executor-owned; category registry carries policy lane/risk only
-
-**Public comparison notes (9):**
-- OpenCode: public UX/API comparison only; LVIS implementation is independent.
-- OpenHands: 3 levels → 4 (LOW/MED/HIGH/UNKNOWN)
-- Kilo: `AI Safety Gatekeeper LLM` → `per-tool Allow/Ask/Deny rule-based`
-- Warp: `per-directory` marked unverified (404 URL)
-- Closed-source agent rows: public UX comparison only; not an implementation source
-- OpenHarness: 4 mode → 3 mode (Default/Auto/Plan)
-- Hermes: command-surface comparison only; LVIS implementation is independent.
-- Codex CLI: approval-surface comparison only; LVIS implementation is independent.
-- Copilot CLI: `--allow-tool/--deny-tool` → `--allow-all` / `--allow-all-paths`
-
-**Additional OSS added:** Goose / Cline / Aider rows.
 
 **Volume estimate added** (15 MB/month).
 

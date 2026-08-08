@@ -24,13 +24,13 @@ Korean source history is preserved at
 ## Reference Product Hierarchy
 
 Research for host-agent behavior starts with official documentation and current
-shipped behavior from Codex CLI/Desktop, Claude Code/Desktop, Hermes Agent
-Desktop, goose Desktop, GitHub Copilot, and Google Antigravity. These are the
-primary comparison set for agent lifecycle, project handling, interaction, and
-desktop UX. IDE and workspace products are secondary references: they may inform
-generic editor, filesystem, and multi-root conventions, but they do not override
-host-agent evidence. Record when a conclusion is an inference rather than a
-documented primary-product contract.
+shipped behavior of comparable coding-agent host products — CLI and desktop
+agent hosts whose scope matches LVIS's. Those are the primary comparison set for
+agent lifecycle, project handling, interaction, and desktop UX. IDE and
+workspace products are secondary references: they may inform generic editor,
+filesystem, and multi-root conventions, but they do not override host-agent
+evidence. Record when a conclusion is an inference rather than a documented
+primary-product contract.
 
 ## Layer Map
 
@@ -108,9 +108,8 @@ Workspace roots follow one host-owned lifecycle:
    default root. Clearing project metadata currently makes a detached session
    indistinguishable from a conversation that was unscoped from creation. This
    is an LVIS implementation choice, not a shared reference-product convention;
-   Codex, Claude, Copilot, Hermes, goose, and Antigravity evidence supports
-   transcript preservation but not automatic reclassification as a general
-   conversation. When an unscoped conversation executes, the host binds that
+   the surveyed agent hosts support transcript preservation but none of them
+   automatically reclassify such a session as a general conversation. When an unscoped conversation executes, the host binds that
    turn to the default workspace execution context.
 
 ## Conversation Loop

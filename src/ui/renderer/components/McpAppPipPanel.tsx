@@ -3,20 +3,22 @@
  * card that requested (or was moved into) `pip`.
  *
  * ─── Why in-page, not an OS window ────────────────────────────────────────────
- * Surveyed prior art (goose — an Electron desktop MCP host, our closest structural
- * analog) realizes `pip` exactly this way: an in-page draggable panel, keeping the
- * SAME container and swapping presentation via CSS rather than remounting. goose
- * DOES have a real OS `BrowserWindow` for MCP apps, but calls it `standalone` — a
- * goose-only name OUTSIDE the spec vocabulary, launched from an app launcher rather
- * than `ui/request-display-mode`, with display-mode negotiation disabled inside it.
- * ChatGPT's `pip` is a floating window INSIDE ChatGPT, not an OS window. The ext-apps
- * reference host doesn't implement `pip` at all. No surveyed host maps `pip` onto an
- * OS-level always-on-top window — so this one doesn't either.
+ * Surveyed prior art — including the Electron desktop MCP host closest to our own
+ * structure — realizes `pip` exactly this way: an in-page draggable panel, keeping
+ * the SAME container and swapping presentation via CSS rather than remounting. Hosts
+ * that DO carry a real OS `BrowserWindow` for MCP apps expose it under a separate,
+ * non-spec name, launched from an app launcher rather than
+ * `ui/request-display-mode`, with display-mode negotiation disabled inside it.
+ * Where a chat product ships `pip`, it is a floating panel INSIDE that product, not
+ * an OS window; the ext-apps reference host doesn't implement `pip` at all.
+ * NO surveyed host maps `pip` onto an OS-level always-on-top window — so this one
+ * doesn't either. (Assuming otherwise nearly produced a window-stacking misdesign.)
  *
  * ─── Why this remounts the card (does not carry the same <webview> across modes) ──
- * Ideally the SAME `<webview>` would survive an inline<->pip move (goose's approach,
- * and the reason ChatGPT's remount-on-mode-change is called out as a known bug
- * there — it re-triggers the tool call and resets widget state). That requires
+ * Ideally the SAME `<webview>` would survive an inline<->pip move (the approach the
+ * closest prior-art host takes, and the reason remount-on-mode-change is called out
+ * as a known bug where it happens — it re-triggers the tool call and resets widget
+ * state). That requires
  * either portaling the SAME DOM node between containers, or a single, ALWAYS-mounted
  * overlay layer with CSS-only repositioning (an anchor-tracking "floating UI" system).
  * Verified empirically (a throwaway React-portal probe): swapping a portal's TARGET
@@ -42,7 +44,7 @@ import {
   subscribePipOccupant,
 } from "../state/mcp-app-card-location-store.js";
 
-/** Panel chrome default size — mirrors goose's PIP_WIDTH/PIP_HEIGHT convention. */
+/** Panel chrome default size — the conventional picture-in-picture panel footprint. */
 const PIP_WIDTH = 400;
 const PIP_HEIGHT = 300;
 const PIP_MARGIN = 16;
@@ -71,7 +73,7 @@ function defaultPosition(): Position {
   };
 }
 
-/** Clamp so the panel is always fully on-screen — goose clamps to window.inner{Width,Height} too. */
+/** Clamp so the panel is always fully on-screen, against window.inner{Width,Height}. */
 function clampPosition(pos: Position): Position {
   const { width, height } = viewportSize();
   const maxX = Math.max(PIP_MARGIN, width - PIP_WIDTH - PIP_MARGIN);
@@ -128,8 +130,8 @@ export function McpAppPipPanel() {
     [position],
   );
 
-  // Arrow-key move on the drag handle — the same a11y affordance goose provides for
-  // users who cannot (or prefer not to) drag with a pointer.
+  // Arrow-key move on the drag handle — the a11y affordance for users who cannot
+  // (or prefer not to) drag with a pointer.
   const onDragKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     const deltas: Partial<Record<string, Position>> = {
       ArrowLeft: { x: -PIP_KEY_STEP, y: 0 },

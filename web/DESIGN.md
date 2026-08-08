@@ -2,7 +2,7 @@
 
 > The visual language for **docs.lvisai.xyz**, derived from the LVIS Marketplace
 > (`marketplace.lvisai.xyz`) as the structural foundation and refined with premium
-> cues from Google **Antigravity** (`antigravity.google`).
+> cues from the current generation of premium product marketing surfaces.
 >
 > **North star:** _restraint over decoration_. A calm, near‑monochrome, system‑font
 > surface where typography and whitespace — not color — carry the hierarchy.
@@ -14,9 +14,9 @@
 | Reference | Role | What we take |
 |---|---|---|
 | **Marketplace** (`marketplace.lvisai.xyz`) | **Foundation** | Neutral off‑white canvas, near‑black ink, system font, subtle hairline borders, white cards, understated hover, tight tracking on bold headings, generous whitespace. |
-| **Antigravity** (`antigravity.google`) | **Refinement** | Larger, *lighter‑weight* display type; full‑pill primary buttons; circular monochrome icon chips; a single soft periwinkle gradient glow as the only ambient color; airy, calm spacing; quiet motion. |
+| **Premium product surfaces** | **Refinement** | Larger, *lighter‑weight* display type; full‑pill primary buttons; circular monochrome icon chips; a single soft periwinkle gradient glow as the only ambient color; airy, calm spacing; quiet motion. |
 
-The result is **marketplace‑neutral with an antigravity finish**: the docs read as
+The result is **marketplace‑neutral with a premium finish**: the docs read as
 a quiet, professional product surface, with one soft cool‑blue glow reserved for hero
 moments. Brand color (the old teal / citron / coral) is retired from the interface.
 
@@ -33,13 +33,6 @@ Captured live from the two sites (computed styles), for provenance:
 - `h1` `20px/700` tracking `-0.5px` · hero `h2` `30px/700` tracking `-0.75px`
 - Outline button: white, `1px` border, radius `6px`, `14px/500`, `padding 0 12px`
 - Tabs: underline, active = `2px` solid ink bottom border
-
-**Antigravity**
-- Ink `#121317` · muted nav link `#45474d`
-- Font: `Google Sans Flex` (variable), display **weight 450**, `h1` `80px/88px`, `h2` `42px` tracking `-0.73px`
-- Primary CTA: `bg #121317`, white, `border-radius: 9999px` (pill), `padding 10px 24px`, weight `450`
-- Icon chips: circle, translucent periwinkle fill `rgba(183,191,217,0.09)`, hairline `rgba(33,34,38,0.06)`
-- Ambient accent: soft periwinkle / cool‑blue gradient glow
 
 ---
 
@@ -61,7 +54,7 @@ Captured live from the two sites (computed styles), for provenance:
 
 ### 3.1 Foundation (cool neutral)
 
-A neutral gray with a faint cool undertone — echoing antigravity's `#121317` ink and
+A neutral gray with a faint cool undertone — echoing the near‑black `#121317` ink and
 periwinkle glow, while reading as marketplace‑neutral.
 
 | Token | Hex | Use |
@@ -80,7 +73,7 @@ periwinkle glow, while reading as marketplace‑neutral.
 | Token | Value | Use |
 |---|---|---|
 | `glow` | `#c3ccdf` (periwinkle) | Hero ambient radial glow **only** |
-| `glow-tint` | `rgba(183,191,217,0.09)` | Circular icon‑chip fill (antigravity chip) |
+| `glow-tint` | `rgba(183,191,217,0.09)` | Circular icon‑chip fill |
 
 > There is intentionally **no saturated text/link accent.** Links are ink with an
 > underline affordance. If brand continuity is later required, the LVIS teal
@@ -124,7 +117,7 @@ System‑first, matching the marketplace, with Korean coverage. No web‑font do
 
 ### 4.2 Scale & weights
 
-Antigravity's move — **large but light** — softened for a docs surface. Display type is
+The **large but light** display move, softened for a docs surface. Display type is
 **semibold (600)**, not black; body is regular (400). Tracking tightens as size grows.
 
 | Role | Size | Weight | Tracking | Line‑height |
@@ -159,7 +152,7 @@ Eyebrows are `ink-soft` (or `muted-foreground`), **not** colored.
 | `--radius` | `0.625rem` (10px) | Cards, inputs, popovers (`lg`) |
 | `md` | `8px` | Inner elements |
 | `sm` | `6px` | Small controls, code chips |
-| **pill** | `9999px` | Primary/large buttons, chips (antigravity) |
+| **pill** | `9999px` | Primary/large buttons, chips |
 
 Elevation: `shadow-sm` at rest, `shadow-md` on hover. No colored shadows.
 
@@ -180,7 +173,7 @@ Elevation: `shadow-sm` at rest, `shadow-md` on hover. No colored shadows.
 - Pill, `11px`, uppercase, `tracking-wide`, `font-semibold`.
 - `default` → `bg-ink text-white` · `muted` → `bg-secondary text-muted-foreground` ·
   `outline` → `border text-ink`. Color variants map to neutral fills.
-- **Icon chip** (antigravity): circle `36–48px`, `bg-glow-tint`, hairline border,
+- **Icon chip**: circle `36–48px`, `bg-glow-tint`, hairline border,
   monochrome line icon (`lucide`), no shadow.
 
 ### Cards
@@ -237,11 +230,11 @@ All other routes inherit the new look automatically through the token remap.
 
 ---
 
-# v2 — Layout & Motion (Antigravity-level)
+# v2 — Layout & Motion (immersive tier)
 
 > v1 fixed the *palette*. v2 rebuilds the *experience*: an immersive, cinematic shell
 > with real motion, treating the old layout as disposable and keeping only the content.
-> Inspiration: `antigravity.google` — full‑bleed hero with an animated backdrop, huge
+> Inspiration: the premium-marketing pattern — full‑bleed hero with an animated backdrop, huge
 > light display type, floating monochrome icon chips, soft drifting glows, scroll‑reveal
 > pacing, pill nav. Applied to a docs product without sacrificing findability or reading.
 
@@ -282,7 +275,7 @@ Timing: entrances `450–650ms`, hovers `150–200ms`, ambient loops `6–26s`. 
 - **Display headline**: `clamp(44px, 7.5vw, 76px)`, weight **600**, tracking `-0.03em`,
   line‑height `1.02`. One ink color, no rainbow.
 - **Floating icon‑chip row**: circular monochrome chips (`icon-chip`) bobbing on varied
-  loops — the antigravity capability motif.
+  loops — the capability motif.
 - CTAs: ink **pill** + ghost. Meta stats as quiet mono dots.
 - Sub‑hero: a marquee/row of "what's inside" chips or a bento peek.
 
@@ -330,7 +323,7 @@ Timing: entrances `450–650ms`, hovers `150–200ms`, ambient loops `6–26s`. 
 
 > The landing (lvisai.xyz) and the docs are now **one Next.js app**: marketing landing
 > at `/`, the guide under `/docs/*`. With the merge, the whole surface converges harder
-> on the **marketplace's stark minimalism** — v2's antigravity flourishes are retired.
+> on the **marketplace's stark minimalism** — v2's decorative flourishes are retired.
 
 ## Rules (supersede v2 where they conflict)
 
@@ -360,7 +353,7 @@ Timing: entrances `450–650ms`, hovers `150–200ms`, ambient loops `6–26s`. 
 ### v3.1 — White canvas & one header (feedback round)
 
 - **Canvas is pure white** (`--background: 0 0% 100%`). The gray-ish `#fafafb` read
-  as dull next to antigravity — structure now comes from hairlines + whitespace only.
+  as dull beside a pure-white reference — structure now comes from hairlines + whitespace only.
   `secondary` remains for small fills (chips, code, step numbers), never page areas.
 - **One header, everywhere.** The same five items (하루 일과 · 다운로드 · 아키텍처 ·
   로드맵 · 문서) on landing and docs — landing sections via absolute `/#` anchors,

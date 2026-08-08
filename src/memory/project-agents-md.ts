@@ -2,9 +2,9 @@
  * Project AGENTS.md discovery — leaf module.
  *
  * Discovers the active project's committed `AGENTS.md` (the team-shared,
- * version-controlled instruction file that Codex / Claude Code / the AGENTS.md
- * standard all treat as the primary distribution channel) so it can be injected
- * as a distinct layer BELOW the global personal `~/.lvis/AGENTS.md`.
+ * version-controlled instruction file that the AGENTS.md standard defines as
+ * the primary distribution channel for project instructions) so it can be
+ * injected as a distinct layer BELOW the global personal `~/.lvis/AGENTS.md`.
  *
  * The first step discovers exactly `<projectRoot>/AGENTS.md`. LVIS has no per-turn
  * working-subdir signal distinct from `projectRoot`, so a genuine root-to-leaf
@@ -37,7 +37,7 @@ export interface ProjectAgentsMd {
   totalBytes: number;
 }
 
-/** Codex parity: a committed AGENTS.md is capped so it cannot flood the prompt. */
+/** A committed AGENTS.md is capped so it cannot flood the prompt. */
 export const PROJECT_AGENTS_MD_MAX_TOTAL_BYTES = 32 * 1024;
 
 /**

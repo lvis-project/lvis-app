@@ -1577,12 +1577,13 @@ Until then, messaging may expand the communication graph only.
 
 ## Cross-host implementation review and follow-on constraints
 
-A fourth review lane compared current CLI/Desktop hosts using primary sources. The detailed notes and contribution drafts live in [the upstream contribution candidates](../research/a2a-upstream-contribution-candidates.md).
+A fourth review lane compared current CLI/Desktop agent hosts using primary
+sources. The portable findings:
 
-- **Codex CLI/app-server** exposes host-native parent/child thread IDs, structured collaboration items, active-turn steering, and explicit history injection. This reinforces the split between a live steer and a durable idle delivery; it does not replace the ph1 mailbox commit/ACK transaction.
-- **Gemini CLI** isolates each local subagent's tools and confirmation label, forbids recursive agent tools, queues background completions at an inter-turn boundary, and can consume remote A2A agents through Agent Cards. It is the preferred ph3 loopback interoperability smoke target, but the test must negotiate the supported protocol version rather than assume its documentation examples are v1.
-- **goose CLI/Desktop** runs subagents as separate Agent/session instances with cancellation and structured tool notifications through a shared engine. This supports one lifecycle pipeline for foreground, background, CLI, and Desktop projections.
-- **OpenHands CLI/GUI** demonstrates a typed event stream for agent/runtime/UI interaction. Its internal delegation events are useful UI precedent, not evidence of A2A conformance.
+- Hosts that expose parent/child thread identity, structured collaboration items, active-turn steering, and explicit history injection reinforce the split between a live steer and a durable idle delivery; none of it replaces the ph1 mailbox commit/ACK transaction.
+- Hosts that isolate each local subagent's tools and confirmation label, forbid recursive agent tools, and queue background completions at an inter-turn boundary confirm the ph1 guidance boundary and the D8 creation-depth stop. Where a host can also consume remote A2A agents through Agent Cards it is a candidate ph3 loopback smoke target, but the test must negotiate the supported protocol version rather than trust documentation examples.
+- Running subagents as separate Agent/session instances with cancellation and structured tool notifications over a shared engine supports one lifecycle pipeline for foreground, background, CLI, and Desktop projections.
+- A typed event stream for agent/runtime/UI interaction is useful UI precedent; internal delegation events are not evidence of A2A conformance.
 
 Resulting constraints:
 
