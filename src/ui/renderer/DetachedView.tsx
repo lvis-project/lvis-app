@@ -23,6 +23,8 @@ import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { WorkBoardPanel } from "./components/WorkBoardPanel.js";
 import { StarredView } from "./components/StarredView.js";
 import { McpAppView } from "./components/McpAppView.js";
+import { McpAppPipPanel } from "./components/McpAppPipPanel.js";
+import { McpAppFullscreenPanel } from "./components/McpAppFullscreenPanel.js";
 import type { McpAppDetachedPayload } from "../../shared/mcp-app-detached-payload.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
@@ -110,11 +112,13 @@ function DetachedMcpApp({ viewKey }: { viewKey: string }) {
       </div>
     );
   }
-  // The detached shell IS the host's `fullscreen` presentation (see
-  // shared/mcp-app-display-mode.ts): a card mounted here starts — and stays — in that
-  // mode, so its host context reports `fullscreen` truthfully, and an `inline` request
-  // from the app closes this window (the inline card in the transcript comes back to
-  // life on the host's `detachedClosed` broadcast) rather than opening a second one.
+  // This window is a host surface like any other, and the card is embedded in ITS
+  // content flow — so the card mounts `inline` here (the default) and its display-mode
+  // moves resolve inside THIS window: `shared/mcp-app-display-mode.ts` maps `pip` and
+  // `fullscreen` onto renderer-side panels, and the location store's singletons live in
+  // one JS heap per renderer. That is why both away panels are mounted here too;
+  // without them a card that talked this window into `pip` would have no surface to
+  // move to, and its home mount would keep claiming a mode it is not in.
   //
   // `originSessionId` is the whole reason the payload is a RECORD and not a bare
   // `McpUiPayload`: this window's React root has NO ChatContextProvider (only
@@ -123,11 +127,11 @@ function DetachedMcpApp({ viewKey }: { viewKey: string }) {
   // is what keeps this card's `ui/message` / `ui/update-model-context` bound to a real
   // conversation instead of being silently dropped forever on main's session check.
   return (
-    <McpAppView
-      payload={record.payload}
-      displayMode="fullscreen"
-      originSessionId={record.originSessionId}
-    />
+    <>
+      <McpAppPipPanel />
+      <McpAppFullscreenPanel />
+      <McpAppView payload={record.payload} originSessionId={record.originSessionId} />
+    </>
   );
 }
 
