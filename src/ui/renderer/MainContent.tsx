@@ -3,10 +3,11 @@ import { PluginUiHostView } from "../../plugin-ui-host.js";
 import type { getApi } from "./api-client.js";
 import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
 import { ChatView } from "./ChatView.js";
-// The pip surface for an MCP-app card in `pip` mode — a single, always-present
-// singleton (renders nothing while no card occupies the pip slot). Mounted once here
-// rather than per-transcript-card, matching the pip slot's own single-occupant design.
+// The away surfaces for an MCP-app card that left its home mount — one singleton each
+// (each renders nothing while no card occupies its slot). Mounted once here rather than
+// per-transcript-card, matching the slots' own single-occupant design.
 import { McpAppPipPanel } from "./components/McpAppPipPanel.js";
+import { McpAppFullscreenPanel } from "./components/McpAppFullscreenPanel.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
 import type { ApprovalChoice, ApprovalRequest } from "./types.js";
@@ -148,6 +149,7 @@ function HomeChatPane(props: MainContentProps) {
   return (
     <ChatContextProvider value={props.chatContextValue}>
       <McpAppPipPanel />
+      <McpAppFullscreenPanel />
       <ChatView
         api={props.api}
         onAsk={props.onAsk}

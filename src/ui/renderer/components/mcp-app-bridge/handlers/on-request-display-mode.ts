@@ -12,11 +12,11 @@
  * it is in the host's advertised set (`MCP_APP_AVAILABLE_DISPLAY_MODES` — the same SoT
  * McpAppView publishes as the host context's `availableDisplayModes`, so what the app
  * is told it may ask for and what the host will accept can never disagree). Anything
- * else — today `pip`, tomorrow any mode a future spec adds — resolves to the card's
- * current mode. No throw: an unavailable mode is a normal, expected answer.
+ * else — any mode a future spec adds — resolves to the card's current mode. No throw:
+ * an unavailable mode is a normal, expected answer.
  *
  * The APPLY itself is McpAppView's (it owns the card's surface: the in-transcript
- * <webview> and the host's existing detach seam). This module never touches a window.
+ * <webview> and the renderer-side away surfaces). This module never touches a window.
  */
 import type { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 import {
@@ -32,8 +32,8 @@ export interface OnRequestDisplayModeDeps {
   getMode(): McpUiDisplayMode;
   /**
    * Apply a SUPPORTED mode to this card's surface. Resolves to the mode actually
-   * applied — which is the previous one when the host declined (e.g. the detached
-   * window could not be opened). Never called for an unsupported mode.
+   * applied — which is the previous one when the host declined. Never called for an
+   * unsupported mode.
    */
   applyMode(mode: McpUiDisplayMode): Promise<McpUiDisplayMode>;
 }

@@ -150,24 +150,24 @@ describe("McpAppPipPanel — draggable, clamped to the viewport", () => {
   });
 });
 
-describe("McpAppPipPanel — coexists with a detached view (independent surfaces)", () => {
-  it("a pip card (this panel) and a detached card (a separate McpAppView mount) are BOTH live at once", async () => {
+describe("McpAppPipPanel — coexists with a fullscreen card (independent slots)", () => {
+  it("a pip card (this panel) and a fullscreen card (a separate McpAppView mount) are BOTH live at once", async () => {
     // Card A is in pip.
     moveCard("card-a", { kind: "pip" }, { payload: payload("github"), originSessionId: "sess-1" });
     const pip = render(<McpAppPipPanel />, { wrapper: ThemeWrapper });
     await waitFor(() => expect(webviewNodes(pip.container)).toHaveLength(1));
 
-    // Card B is presented in the detached shell — an entirely separate McpAppView
-    // mount (mirroring DetachedView's own instance), never touching the pip slot.
-    const detached = render(
+    // Card B is presented in the fullscreen surface — an entirely separate McpAppView
+    // mount (mirroring McpAppFullscreenPanel's own instance), never touching the pip slot.
+    const fullscreen = render(
       <McpAppView payload={payload("gitlab")} displayMode="fullscreen" />,
       { wrapper: ThemeWrapper },
     );
-    await waitFor(() => expect(webviewNodes(detached.container)).toHaveLength(1));
+    await waitFor(() => expect(webviewNodes(fullscreen.container)).toHaveLength(1));
 
-    // Both remain live simultaneously — nothing about the pip surface's single-slot
-    // discipline touches an unrelated card's detached presentation.
+    // Both remain live simultaneously — the two slots are independent, so one card's
+    // single-slot discipline never disturbs an unrelated card in the other.
     expect(webviewNodes(pip.container)).toHaveLength(1);
-    expect(webviewNodes(detached.container)).toHaveLength(1);
+    expect(webviewNodes(fullscreen.container)).toHaveLength(1);
   });
 });

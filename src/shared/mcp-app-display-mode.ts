@@ -2,39 +2,40 @@
  * MCP Apps display mode — the host's SoT for `ui/request-display-mode`.
  *
  * The spec's vocabulary is `inline | fullscreen | pip`, but a host only supports what
- * its window plumbing actually gives it, and it must advertise exactly that. This
- * module owns BOTH halves so they cannot drift:
+ * it has a surface for, and it must advertise exactly that. This module owns BOTH
+ * halves so they cannot drift:
  *
  *   · `MCP_APP_AVAILABLE_DISPLAY_MODES` — what the host advertises in the
  *     `McpUiHostContext` (`availableDisplayModes`), and
  *   · `isSupportedMcpAppDisplayMode` — the ONE predicate the `onrequestdisplaymode`
  *     handler applies to an incoming request.
  *
- * ─── Why `pip` is now advertised ─────────────────────────────────────────────
- * `pip` used to be excluded here because LVIS had no second, coexisting live surface
- * for a card to move into: the detached shell is a SINGLE-INSTANCE window
- * (`WindowManager._detachedShell`, Path A policy) — at most one exists, and opening
- * another view navigates it rather than spawning a second one. That reasoning is now
- * OBSOLETE: a card's location is owned by a renderer-side location authority
+ * ─── Why all three spec modes are advertised ─────────────────────────────────
+ * A card's location is owned by a renderer-side location authority
  * (`ui/renderer/state/mcp-app-card-location-store.ts`) that tracks exactly ONE live
- * mount per card across THREE possible locations — `inline`, `pip`, `detached` — and
- * atomically moves a card between them, so a `pip` presentation can coexist with the
- * detached shell without a second copy of a card ever being live at once. Advertising
- * `pip` here is what makes that third location reachable from an app; WHICH component
- * actually renders it is a presentation choice the location authority itself does not
- * depend on, and today that component is `McpAppPipPanel` — an in-page draggable panel
- * (`ui/renderer/components/McpAppPipPanel.tsx`, mounted in `MainContent`) that
- * subscribes to the store's pip slot. `applyDisplayMode` does NOT decline a `pip`
- * request: it `moveCard`s the card into the store's `pip` slot and returns `"pip"`,
- * the panel picks it up and mounts a live `<McpAppView>`, and the losing mount goes
- * dormant — the same replace-not-clone move every other mode change makes.
+ * mount per card across THREE locations — `inline`, `pip`, `fullscreen` — and
+ * atomically moves a card between them. Every away location is a SINGLE-OCCUPANT slot
+ * with one component subscribed to it, so no mode can ever produce a second live copy
+ * of a card. `applyDisplayMode` declines nothing that is advertised here: it `moveCard`s
+ * the card into the requested slot and returns that mode, the slot's panel picks it up
+ * and mounts a live `<McpAppView>`, and the losing mount goes dormant — the same
+ * replace-not-clone move every mode change makes.
  *
  * The mapping for all three advertised modes:
  *   · `inline`     — the in-transcript <webview> card (the default every card mounts in)
- *   · `fullscreen` — the MAXIMIZED detached shell, on the existing detach seam
- *                    (`CHANNELS.mcp.openDetached` → `WindowManager.openDetachedMcpApp`)
- *   · `pip`        — the in-page `McpAppPipPanel`, via the renderer-side location store
- *                    (no window plumbing — it is a sibling mount in the same renderer)
+ *   · `fullscreen` — `McpAppFullscreenPanel`, an in-renderer surface that takes over the
+ *                    window's content area
+ *   · `pip`        — `McpAppPipPanel`, an in-renderer draggable floating panel
+ *
+ * ─── Why `fullscreen` is not a second window ─────────────────────────────────
+ * The confirmed MCP Apps revision gives `fullscreen` no normative definition at all; it
+ * defines only `inline` ("embedded within the host's content flow") and `pip`
+ * ("floating overlay"). The draft that adds `fullscreen` describes the view as TAKING
+ * OVER the full screen/window — a claim about occupied surface, not about spawning a
+ * new one. The ext-apps SDK's own documented example toggles a CSS class on the app's
+ * existing container, and the reference host implements it as an inline↔fullscreen
+ * panel toggle on the same iframe. Both away modes therefore live in the renderer, and
+ * neither needs window plumbing.
  */
 
 /**
