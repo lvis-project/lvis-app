@@ -311,6 +311,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:permission:list-rules",
         "lvis:permission:remove-rule",
         "lvis:permission:set-mode",
+        "lvis:permissions:approval-sentence-select",
         "lvis:permissions:audit-show",
         "lvis:permissions:audit-verify",
         "lvis:permissions:deferred-list",

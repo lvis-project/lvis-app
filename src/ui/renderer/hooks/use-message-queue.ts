@@ -26,6 +26,14 @@ export interface UseMessageQueueParams {
   onGuide: (text: string) => Promise<{ ok: true } | { ok: false; error: string }>;
   onGuideError: (message: string) => void;
   onAbort: () => void | Promise<void>;
+  /**
+   * First refusal on composer submissions. Returns true when it has consumed
+   * the text, in which case the composer clears and nothing is queued or sent.
+   * `/allow` uses it to answer a pending approval instead of talking to the
+   * model — see {@link ./use-approval-sentence.js}. Both submit gestures route
+   * through it, so ⌘⏎ cannot slip past what Enter honours.
+   */
+  interceptSubmit?: (text: string) => boolean;
 }
 
 export interface UseMessageQueueResult {
@@ -54,6 +62,7 @@ export function useMessageQueue({
   onGuide,
   onGuideError,
   onAbort,
+  interceptSubmit,
 }: UseMessageQueueParams): UseMessageQueueResult {
   const { t } = useTranslation();
 
@@ -240,6 +249,10 @@ export function useMessageQueue({
     (intent: UserKeyboardIntentSnapshot) => {
       const text = question;
       if (text.trim().length === 0 && attachments.length === 0) return;
+      if (interceptSubmit?.(text)) {
+        setQuestion("");
+        return;
+      }
       if (streaming) {
         // Busy: 큐에 추가. cap 초과 throw catch 해서 textarea 보존.
         if (text.trim().length > 0) {
@@ -262,12 +275,16 @@ export function useMessageQueue({
     },
     [
       question, attachments.length, streaming, messageQueueStore, onAsk,
-      setQuestion, setAttachments,
+      setQuestion, setAttachments, interceptSubmit,
     ],
   );
 
   const handleImmediateInject = useCallback(() => {
     const text = question.trim();
+    if (interceptSubmit?.(text)) {
+      setQuestion("");
+      return;
+    }
     const taken = messageQueueStore.takeSelected();
     const parts: string[] = [];
     if (taken.length > 0) parts.push(formatQueueInject(taken));
@@ -278,7 +295,7 @@ export function useMessageQueue({
     // ⌘⏎ = 사용자 명시 인터럽트 → "⚡ 중단후 새메세지" hint.
     // handleAsk 가 streaming 시 자체 abort 처리.
     void onAsk(combined, { inputOrigin: "user-keyboard", token: "" }, { injectHint: "interrupt" });
-  }, [question, messageQueueStore, onAsk, setQuestion]);
+  }, [question, messageQueueStore, onAsk, setQuestion, interceptSubmit]);
 
   const handleMessageQueueSendNow = useCallback((item: MessageQueueItem) => {
     messageQueueStore.remove(item.id);

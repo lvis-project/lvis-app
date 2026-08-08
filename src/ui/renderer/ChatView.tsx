@@ -46,6 +46,7 @@ import { TranscriptRenderer, type TurnSummary } from "./components/TranscriptRen
 import { ChatTranscript } from "./components/ChatTranscript.js";
 import { ChatComposerDock } from "./components/ChatComposerDock.js";
 import { DockedApprovalCard } from "./components/permissions/DockedApprovalCard.js";
+import { useApprovalSentence } from "./hooks/use-approval-sentence.js";
 
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
@@ -85,6 +86,11 @@ export interface ChatViewProps {
   /** Head-of-queue approval request, served by the docked card in the dock. */
   approvalRequest?: ApprovalRequest | null;
   onApprovalDecide?: (choice: ApprovalChoice, rememberPattern?: string) => void;
+  /**
+   * Plain-text sink for every `/allow` outcome that is not a proposal. Nothing
+   * sent here is ever grant-shaped.
+   */
+  onApprovalSentenceNotice?: (message: string) => void;
   /** Called when a card submits or is dismissed; removes it from `askQuestions`. */
   onResolveAskQuestion: (id: string) => void;
   /** Plugin list — surfaced inside the SlashPicker's plugin category. */
@@ -134,7 +140,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalRequest = null, onApprovalDecide, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects }: ChatViewProps) {
+export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalRequest = null, onApprovalDecide, onApprovalSentenceNotice, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -460,6 +466,13 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
   // Mid-turn message queue — per-view store + dev/e2e window hook + stream
   // brake-point drains + composer/streaming keyboard flows (Enter morph, ESC
   // inject-or-abort, ⌘⏎ immediate inject, ⌘K guide).
+  // `/allow <sentence>` — answered against the pending approval instead of
+  // being sent to the model. It only pre-selects a button on the card below.
+  const { proposedChoice, interceptSubmit } = useApprovalSentence({
+    approvalRequest,
+    ...(onApprovalSentenceNotice ? { onNotice: onApprovalSentenceNotice } : {}),
+  });
+
   const {
     messageQueueStore,
     handleComposerSend,
@@ -477,6 +490,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
     onGuide,
     onGuideError,
     onAbort,
+    interceptSubmit,
   });
 
   const handleInsertSlashCommand = useCallback((cmd: string) => {
@@ -646,6 +660,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           request={approvalRequest}
           onDecide={onApprovalDecide}
           onReturnFocus={() => composerRef.current?.focus()}
+          proposedChoice={proposedChoice}
         />
       ) : null}
       <div className="grid h-full min-h-0 min-w-0 grid-cols-1">
