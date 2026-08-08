@@ -368,6 +368,7 @@ export const jaMessages: Record<string, string> = {
   "be_executor.bashAstBlock": "[Bash AST がブロックされました] {reason} (パターン: {patternId})",
   "be_executor.dirPolicyBlock": "[ディレクトリ ポリシーはブロックされました] ツール '{name}' — {reason} ({filePath})。",
   "be_executor.dirPolicyError": "[ディレクトリ ポリシー エラー] ツール '{name}' — {error}",
+  "be_executor.allowAlwaysPatternNotLiteral": "[常に許可を保存しませんでした] ツール '{name}' — 対象名 '{pattern}' にワイルドカード文字が含まれているため、保存すると偶然一致する名前まで許可されます。呼び出しは実行されていません。ルールを保存せずに実行するには '1 回だけ許可' を選択してください。",
   "be_executor.dirPolicySaveFailed": "[ディレクトリ ポリシーの保存に失敗しました] ツール '{name}' — {error}",
   "be_executor.dirPolicySessionRegFailed": "[ディレクトリ ポリシー セッションの登録に失敗しました] ツール '{name}' — {error}",
   "be_executor.dirPolicyUserDenied": "[ディレクトリ ポリシーがブロックされました] ツール '{name}' — ユーザーは、許可されたディレクトリ ({filePath}) の外のパスへのアクセスを拒否しました。",
