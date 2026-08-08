@@ -35,10 +35,27 @@ const ROOT = rootArgIndex >= 0
 const MANIFEST = "build/generated-assets.json";
 const LABEL = "[generated-assets]";
 
+// Git exports these to the hooks it runs, and they outrank `-C`: a hook that
+// invokes `bun run build` would otherwise have this guard report on whichever
+// repository git was busy with instead of the one it was pointed at. The
+// pre-push hook runs `bun run build`, so that is the normal case, not a corner.
+// Dropping them makes ROOT the only thing that selects a repository.
+const AMBIENT_GIT_VARS = [
+  "GIT_DIR",
+  "GIT_WORK_TREE",
+  "GIT_COMMON_DIR",
+  "GIT_INDEX_FILE",
+  "GIT_OBJECT_DIRECTORY",
+  "GIT_PREFIX",
+];
+
+const GIT_ENV = { ...process.env };
+for (const name of AMBIENT_GIT_VARS) delete GIT_ENV[name];
+
 /** `git -C` rather than a child `cwd`: the repository is named explicitly, and
  *  no child ever holds the directory open as its working directory. */
 function git(args) {
-  return spawnSync("git", ["-C", ROOT, ...args], { encoding: "utf-8" });
+  return spawnSync("git", ["-C", ROOT, ...args], { encoding: "utf-8", env: GIT_ENV });
 }
 
 function fail(message) {
