@@ -17,7 +17,7 @@ import { closeSettingsWindow, openSettingsWindow } from './settings-window.js';
  * cache and renders exactly these ids.
  */
 
-const OWNERS = ['nvidia', 'deepseek', 'meta-llama', 'qwen', 'mistralai', 'google', 'x-ai', 'cohere'];
+const OWNERS = Array.from({ length: 8 }, (_, i) => `upstream-owner-${i}`);
 const SUFFIXES = [
   'instruct-preview:free',
   'instruct-2025-01-20:free',
