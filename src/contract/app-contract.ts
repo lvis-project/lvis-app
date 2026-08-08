@@ -513,7 +513,6 @@ export const CHANNELS = {
     syncTitleBarTheme: "window:syncTitleBarTheme",
     maximizedChanged: "window:maximizedChanged",
     fullscreenChanged: "window:fullscreenChanged",
-    openDetached: "lvis:window:open-detached",
     closeDetached: "lvis:window:close-detached",
     listDetached: "lvis:window:list-detached",
     closeAllDetached: "lvis:window:close-all-detached",
@@ -767,7 +766,6 @@ export const INTERNAL_HOST_CHANNELS = {
     CHANNELS.settingsWindow.tab,
   ],
   detachedWindow: [
-    CHANNELS.window.openDetached,
     CHANNELS.window.closeDetached,
     CHANNELS.window.listDetached,
     CHANNELS.window.closeAllDetached,

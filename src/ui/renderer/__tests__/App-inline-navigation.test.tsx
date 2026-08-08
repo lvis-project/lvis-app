@@ -20,15 +20,6 @@ import { renderApp } from "../../../../test/renderer/render-app.js";
 describe("App inline navigation", () => {
   afterEach(() => vi.restoreAllMocks());
 
-  /**
-   * `MockLvisApi` does not declare `window`, though the harness object carries
-   * it. Name the member being asserted on in one place instead of repeating an
-   * untyped reach-through at every call site.
-   */
-  function detachSpy(api: unknown) {
-    return (api as { window: { openDetached: ReturnType<typeof vi.fn> } }).window.openDetached;
-  }
-
   async function switchToChatMode(container: HTMLElement) {
     const chatBtn = await waitFor(() => {
       const el = container.querySelector('[data-testid="app-mode-chat"]');
@@ -42,7 +33,7 @@ describe("App inline navigation", () => {
   }
 
   it("renders a built-in view inline in chat mode and lights up its sidebar entry", async () => {
-    const { container, api } = await renderApp({ hasApiKey: true });
+    const { container } = await renderApp({ hasApiKey: true });
     await switchToChatMode(container);
 
     const workBoardNav = container.querySelector('[data-testid="toolbar-work-board"]') as HTMLButtonElement;
@@ -61,9 +52,6 @@ describe("App inline navigation", () => {
     });
     expect(container.querySelector('[data-testid="chat-view-root"]')).toBeNull();
 
-    // No window was opened for it.
-    expect(detachSpy(api)).not.toHaveBeenCalled();
-
     // The sidebar entry now reports itself as the current page.
     await waitFor(() => {
       const nav = container.querySelector('[data-testid="toolbar-work-board"]');
@@ -75,7 +63,7 @@ describe("App inline navigation", () => {
     // Work mode already behaved this way; pinning it makes the convergence the
     // assertion rather than a coincidence of which mode the test happened to
     // start in (the default is work).
-    const { container, api } = await renderApp({ hasApiKey: true });
+    const { container } = await renderApp({ hasApiKey: true });
 
     const routinesNav = await waitFor(() => {
       const el = container.querySelector('[data-testid="sidebar-routines"]');
@@ -90,11 +78,10 @@ describe("App inline navigation", () => {
       expect(container.querySelector('[data-testid="sidebar-routines"]')?.getAttribute("aria-current"))
         .toBe("page");
     });
-    expect(detachSpy(api)).not.toHaveBeenCalled();
   });
 
-  it("keeps navigating inline after a mode switch, with no window opened either way", async () => {
-    const { container, api } = await renderApp({ hasApiKey: true });
+  it("keeps navigating inline after a mode switch, in both directions", async () => {
+    const { container } = await renderApp({ hasApiKey: true });
 
     // work → select → chat → select: the previously mode-dependent branch would
     // have taken a different path on the second selection.
@@ -117,6 +104,5 @@ describe("App inline navigation", () => {
     });
     expect(container.querySelector('[data-testid="toolbar-work-board"]')?.getAttribute("aria-current"))
       .toBeNull();
-    expect(detachSpy(api)).not.toHaveBeenCalled();
   });
 });
