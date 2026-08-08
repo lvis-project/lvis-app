@@ -63,7 +63,7 @@ type InlineBuiltinViewKey = {
 }[BuiltinViewKey];
 
 /** Built-ins that may be opened as their own window. */
-export type DetachableBuiltinViewKey = {
+type DetachableBuiltinViewKey = {
   [K in BuiltinViewKey]: (typeof BUILTIN_VIEWS)[K]["detachable"] extends true ? K : never;
 }[BuiltinViewKey];
 

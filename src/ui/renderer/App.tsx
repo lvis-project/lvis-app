@@ -459,13 +459,13 @@ export function App() {
     });
   // Plugin/built-in view routing + host-managed plugin auth lifecycle (the 4
   // auth-gate refs + action guard + pluginAuthErrors + the two drain effects +
-  // the uninstalled-plugin fallback), extracted as ONE unit. appMode is the sole
-  // authority for inline-vs-detached; the hook only reads it. See
+  // the uninstalled-plugin fallback), extracted as ONE unit. Routing no longer
+  // reads appMode: every view renders inline in every mode. See
   // use-plugin-view-routing.ts.
   const { handleViewSelect, activePluginView, activePluginAuthError } = usePluginViewRouting({
-    api, t, appMode, activeView, setActiveView,
+    api, t, activeView, setActiveView,
     pluginViews, pluginCards, pluginAuthStatuses, refreshPluginAuthStatus,
-    setErrorWithThought, statusPushToast,
+    statusPushToast,
   });
 
   // Build flat PluginEntry list for InputActionBar plugin grid.
