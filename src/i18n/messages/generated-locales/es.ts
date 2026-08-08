@@ -2388,6 +2388,7 @@ export const esMessages: Record<string, string> = {
   "composerProjectSelector.cancelButton": "Cancelar",
   "sidebar.resizeHandleAriaLabel": "Redimensionar barra lateral",
   "sidebar.projectMenuNewChat": "Nuevo chat en este proyecto",
+  "sidebar.projectMenuAdd": "Agregar proyecto…",
   "sidebar.projectMenuReveal": "Mostrar carpeta",
   "sidebar.projectMenuRemove": "Eliminar proyecto",
   "sidebar.daysAgo": "{count} d",
