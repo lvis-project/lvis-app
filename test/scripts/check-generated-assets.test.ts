@@ -20,8 +20,18 @@ function run(root: string) {
 function git(root: string, args: string[]) {
   const result = spawnSync(
     "git",
-    ["-c", "user.email=guard@test.invalid", "-c", "user.name=guard", "-c", "commit.gpgsign=false", ...args],
-    { cwd: root, encoding: "utf-8" },
+    [
+      "-C",
+      root,
+      "-c",
+      "user.email=guard@test.invalid",
+      "-c",
+      "user.name=guard",
+      "-c",
+      "commit.gpgsign=false",
+      ...args,
+    ],
+    { encoding: "utf-8" },
   );
   if (result.status !== 0) {
     throw new Error(`git ${args.join(" ")} failed: ${result.stderr}`);
@@ -57,7 +67,19 @@ function createRepo(): string {
 }
 
 afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  for (const root of roots.splice(0)) {
+    // Removing a directory git has just written raises a transient EPERM on
+    // Windows — measured as intermittent for the same tree shape, so it is a
+    // handle the OS has not released yet rather than anything the test left
+    // open. Retry, then give up: a temporary directory that outlives the run
+    // is litter, not a failed assertion, and failing here would report the
+    // guard as broken when it is not.
+    try {
+      rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+    } catch {
+      // Intentionally ignored; see above.
+    }
+  }
 });
 
 describe("check-generated-assets", () => {
@@ -156,6 +178,20 @@ describe("generated-asset manifest", () => {
     expect(manifest).toContain("build/installerIcon.ico");
     expect(manifest).toContain("build/installerHeaderIcon.ico");
     expect(manifest).toContain("build/icon.svg");
+  });
+
+  it("runs the guard in the build, after the generator that feeds it", () => {
+    // Without this the guard is a script nobody calls: every assertion above
+    // would still pass while the drift it exists to catch went unnoticed.
+    const build: string = JSON.parse(
+      readFileSync(join(REPO_ROOT, "package.json"), "utf-8"),
+    ).scripts.build;
+
+    const generate = build.indexOf("bun run build:icons");
+    const check = build.indexOf("node scripts/check-generated-assets.mjs");
+
+    expect(generate).toBeGreaterThanOrEqual(0);
+    expect(check).toBeGreaterThan(generate);
   });
 
   it("leaves the repository's own tracked assets matching the generator", () => {
