@@ -41,6 +41,8 @@ import {
 } from "../i18n/index.js";
 import { normalizeAppMode } from "../shared/initial-app-mode.js";
 import { isSidebarTab } from "../shared/sidebar-tab.js";
+import { isInlineViewKey } from "../shared/view-key.js";
+import { normalizeSettingsTab } from "../shared/settings-tabs.js";
 import {
   MAX_CACHED_LLM_MODEL_ID_LENGTH,
   MAX_CACHED_LLM_MODEL_IDS,
@@ -946,6 +948,8 @@ export function normalizeSystem(input: unknown): SystemSettings {
     sidePanelWidth?: unknown;
     sidebarWidth?: unknown;
     sidebarActiveTab?: unknown;
+    activeView?: unknown;
+    settingsTab?: unknown;
     pinnedProjectRoots?: unknown;
   } & Record<(typeof SIDE_PANEL_SPLIT_KEYS)[number], unknown>;
   // Each field is normalized independently: a missing/invalid field falls
@@ -1038,6 +1042,21 @@ export function normalizeSystem(input: unknown): SystemSettings {
       `system.sidebarActiveTab invalid (received ${JSON.stringify(rawSidebarActiveTab)}), using default %s`,
       DEFAULT_SETTINGS.system.sidebarActiveTab,
     );
+  }
+  const rawActiveView = obj.activeView;
+  if (typeof rawActiveView === "string" && isInlineViewKey(rawActiveView)) {
+    result.activeView = rawActiveView;
+  } else if (rawActiveView !== undefined) {
+    log.warn(
+      `system.activeView invalid (received ${JSON.stringify(rawActiveView)}), using default %s`,
+      DEFAULT_SETTINGS.system.activeView,
+    );
+  }
+  const rawSettingsTab = obj.settingsTab;
+  if (rawSettingsTab !== undefined) {
+    // `normalizeSettingsTab` already folds retired ids and anything
+    // unrecognized onto the default, so an invalid value is not a separate arm.
+    result.settingsTab = normalizeSettingsTab(rawSettingsTab);
   }
   const rawPinnedProjectRoots = obj.pinnedProjectRoots;
   if (Array.isArray(rawPinnedProjectRoots)) {

@@ -34,6 +34,8 @@ import {
 } from "../i18n/index.js";
 import { normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
 import { isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
+import { isInlineViewKey, type InlineViewKey } from "../shared/view-key.js";
+import { normalizeSettingsTab, type SettingsTab } from "../shared/settings-tabs.js";
 import {
   type LlmModelListCache,
 } from "../shared/llm-model-list.js";
@@ -513,6 +515,24 @@ export interface SystemSettings {
    */
   sidebarActiveTab?: SidebarTab;
   /**
+   * Where the main window was when it last closed, so a restart resumes the
+   * user's location instead of always landing on home. Same durable-preference
+   * family as `sidebarActiveTab`. Default "home". SoT for the value set:
+   * `../shared/view-key.js`.
+   *
+   * Validation here is STRUCTURAL only — this process cannot know which plugins
+   * are installed, and a `plugin:<id>:<viewId>` key stays well-formed after its
+   * plugin is uninstalled. The renderer therefore re-checks a restored plugin
+   * key against the views it actually loaded before navigating there.
+   */
+  activeView?: InlineViewKey;
+  /**
+   * Which settings tab the panel was on, so restoring into `activeView:
+   * "settings"` lands on the page the user left rather than the default one.
+   * Default "llm". SoT for the value set: `../shared/settings-tabs.js`.
+   */
+  settingsTab?: SettingsTab;
+  /**
    * Pinned project roots — pinned projects sort to the top of the sidebar's
    * Projects tab. A lightweight preference list (not a project-domain
    * mutation), so it lives here rather than a dedicated IPC domain. Default
@@ -974,6 +994,21 @@ export class SettingsService {
           `system.sidebarActiveTab patch ignored (received ${JSON.stringify(rawSidebarActiveTab)}), keeping %s`,
           this.settings.system.sidebarActiveTab,
         );
+      }
+      const rawActiveView = partial.system.activeView;
+      if (typeof rawActiveView === "string" && isInlineViewKey(rawActiveView)) {
+        next.activeView = rawActiveView;
+      } else if (rawActiveView !== undefined) {
+        log.warn(
+          `system.activeView patch ignored (received ${JSON.stringify(rawActiveView)}), keeping %s`,
+          this.settings.system.activeView,
+        );
+      }
+      const rawSettingsTab = partial.system.settingsTab;
+      if (rawSettingsTab !== undefined) {
+        // `normalizeSettingsTab` folds retired ids onto their replacements and
+        // anything unrecognized onto the default, so there is no "ignored" arm.
+        next.settingsTab = normalizeSettingsTab(rawSettingsTab);
       }
       const rawPinnedProjectRoots = partial.system.pinnedProjectRoots;
       if (Array.isArray(rawPinnedProjectRoots)) {

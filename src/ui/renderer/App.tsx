@@ -16,6 +16,8 @@ import { useAppUpdate } from "./hooks/use-app-update.js";
 import { useAppMode } from "./hooks/use-app-mode.js";
 import { useSidebarWidth } from "./hooks/use-sidebar-width.js";
 import { useSidebarTab } from "./hooks/use-sidebar-tab.js";
+import { useActiveView } from "./hooks/use-active-view.js";
+import { useSettingsTab } from "./hooks/use-settings-tab.js";
 import { usePinnedProjects } from "./hooks/use-pinned-projects.js";
 import { useRoutineOverlay } from "./hooks/use-routine-overlay.js";
 import { useSendMessage } from "./hooks/use-send-message.js";
@@ -150,15 +152,12 @@ export function App() {
     effectiveHasApiKey,
   } = useOnboardingTourController(api);
   const [deferredQueueOpen, setDeferredQueueOpen] = useState(false);
-  // Where the main window is. `InlineViewKey` (not `string`) so a destination
-  // that has no inline form — or a typo — cannot be assigned here at all.
-  const [activeView, setActiveView] = useState<InlineViewKey>("home");
   // Inline settings: which tab the panel is on — seeded on open and updated by
   // the panel's own read-back as the user moves — and the view to
   // return to via the back affordance. Settings is an inline view in EVERY
   // appMode — there is no detached settings window on this path (see
   // onOpenSettings below), so these drive it in both modes.
-  const [settingsTab, setSettingsTab] = useState("llm");
+  const { settingsTab, setSettingsTab } = useSettingsTab(api);
   const settingsReturnViewRef = useRef<InlineViewKey>("home");
   // Workspace mode (Chat / Work) + coupled shell layout state. appMode is the
   // SOLE authority for inline-vs-detached; the hook owns the seed-before-paint
@@ -232,6 +231,18 @@ export function App() {
     installPlugin,
     refreshViews, refreshMarketplace, refreshCards,
   } = usePluginMarketplace(api);
+
+  // Where the main window is. `InlineViewKey` (not `string`) so a destination
+  // that has no inline form — or a typo — cannot be assigned here at all.
+  // Persisted and restored on next launch. Declared AFTER the plugin views it
+  // needs: a restored `plugin:` key is only entered once this list confirms the
+  // view still exists, so uninstalling a plugin cannot leave the app opening on
+  // a view that is gone.
+  const loadedPluginViewKeys = useMemo(
+    () => pluginViews.map((view) => toViewKey(view)),
+    [pluginViews],
+  );
+  const { activeView, setActiveView } = useActiveView(api, loadedPluginViewKeys);
 
   // Auth status for every plugin that declares `manifest.auth`
 

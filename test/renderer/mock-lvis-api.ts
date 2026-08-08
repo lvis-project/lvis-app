@@ -62,7 +62,10 @@ type ApiOverrides = {
   } | null;
 };
 
-const DEFAULT_SETTINGS = {
+/** The settings a mock app boots with. Exported so a test that needs to vary
+ *  ONE field can start from a complete, bootable object instead of a partial
+ *  one — App reads `llm.provider` during mount and throws on a bare stub. */
+export const MOCK_DEFAULT_SETTINGS = {
   llm: fakeLlmSettings({ provider: "openai", model: "gpt-4o-mini" }),
   chat: { systemPrompt: "", autoCompact: true },
   webSearch: { provider: "none" },
@@ -127,7 +130,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitNotificationClicked: (payload: unknown) => void;
   emitSubscriptionRuntimeStatusUpdated: (event: SubscriptionRuntimeStatusUpdatedEvent) => void;
 } {
-  let settings = overrides.settings ?? DEFAULT_SETTINGS;
+  let settings = overrides.settings ?? MOCK_DEFAULT_SETTINGS;
   let personaPrompts = overrides.personaPrompts ?? [];
   const sessions = (overrides.sessions ?? []).map((session) => ({
     ...session,
