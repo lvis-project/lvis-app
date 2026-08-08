@@ -25,10 +25,10 @@ import {
   readFileSync,
   readSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import { basename, join } from "node:path";
 
 vi.mock("node:os", async (importOriginal) => {
@@ -68,7 +68,10 @@ beforeEach(() => {
 afterEach(async () => {
   await Promise.all(auditLoggers.map((logger) => logger.close()));
   if (existsSync(testHome)) {
-    rmSync(testHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    // Not a bare `rmSync`: a foreign handle inside the tree refuses removal,
+    // and `rmSync`'s own maxRetries does not cover that error. See
+    // `src/testing/tmp-dir-teardown.ts`.
+    await cleanupTmpDir(testHome);
   }
   vi.restoreAllMocks();
 });
