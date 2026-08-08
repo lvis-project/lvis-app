@@ -2,7 +2,7 @@ import "../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
-import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.js";
+import { settingsWithActiveView } from "../../../../test/renderer/helpers.js";
 
 /**
  * Visit history and the top-bar path, driven the way a user drives them:
@@ -17,11 +17,12 @@ import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.j
  * nothing, so every assertion here goes through the real producers and reads
  * the rendered path.
  */
+/** The rendered path text, which is what the user actually reads. */
+const path = (container: HTMLElement) =>
+  container.querySelector('[data-testid="view-path-breadcrumb"]')?.textContent?.trim() ?? "";
+
 describe("App view history", () => {
   afterEach(() => vi.restoreAllMocks());
-
-  const path = (container: HTMLElement) =>
-    container.querySelector('[data-testid="view-path-breadcrumb"]')?.textContent?.trim() ?? "";
 
   async function click(container: HTMLElement, testid: string) {
     const el = container.querySelector(`[data-testid="${testid}"]`) as HTMLButtonElement | null;
@@ -177,20 +178,6 @@ describe("App view history", () => {
  */
 describe("App view history after a restored launch location", () => {
   afterEach(() => vi.restoreAllMocks());
-
-  const path = (container: HTMLElement) =>
-    container.querySelector('[data-testid="view-path-breadcrumb"]')?.textContent?.trim() ?? "";
-
-  function settingsWithActiveView(activeView: string, settingsTab?: string) {
-    return {
-      ...MOCK_DEFAULT_SETTINGS,
-      system: {
-        closeBehavior: "hide-to-tray",
-        activeView,
-        ...(settingsTab ? { settingsTab } : {}),
-      },
-    };
-  }
 
   it("starts with nothing behind it — the restore is arrival, not a step", async () => {
     const { container } = await renderApp({
