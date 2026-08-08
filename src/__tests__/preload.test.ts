@@ -148,40 +148,6 @@ describe("preload — plugin webview asset URLs", () => {
     expect(mockInvoke).toHaveBeenCalledWith("lvis:window:open-html-preview", payload);
   });
 
-  it("loads a main session only for a valid session id and reports the result", async () => {
-    const api = await loadLvisApi();
-    const windowApi = api["window"] as Record<string, unknown>;
-    const handler = vi.fn(() => undefined);
-    const unsubscribe = (
-      windowApi["onLoadSessionInMain"] as (
-        callback: (sessionId: string) => boolean | void | Promise<boolean | void>,
-      ) => () => void
-    )(handler);
-    const listener = mockOn.mock.calls.at(-1)?.[1] as (
-      event: unknown,
-      payload: { sessionId?: unknown; requestId?: unknown },
-    ) => void;
-
-    expect(mockOn).toHaveBeenCalledWith("lvis:window:load-session-in-main", listener);
-    listener({}, { sessionId: "session-1", requestId: "request-1" });
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(handler).toHaveBeenCalledWith("session-1");
-    expect(mockSend).toHaveBeenCalledWith("lvis:window:load-session-in-main-result", {
-      requestId: "request-1",
-      ok: true,
-    });
-
-    listener({}, { sessionId: 42, requestId: "request-2" });
-    expect(handler).toHaveBeenCalledTimes(1);
-    expect(mockSend).toHaveBeenCalledTimes(1);
-
-    unsubscribe();
-    expect(mockRemoveListener).toHaveBeenCalledWith("lvis:window:load-session-in-main", listener);
-  });
-
   it("plugin asset URLs are static strings, not functions", async () => {
     const api = await loadLvisApi();
 

@@ -1474,29 +1474,8 @@ export function buildInternalApiSurface() {
     };
   }) => ipcRenderer.invoke(CHANNELS.notification.clicked, payload),
 
-  // ─── Window management (tab detach + optional magnetic snap) ─────────────
+  // ─── Main-window management ──────────────────────────────────────────────
   window: {
-    /** Close the current detached window (no-op in main window). */
-    closeDetached: async () =>
-      ipcRenderer.invoke(CHANNELS.window.closeDetached) as Promise<{ ok: true } | { ok: false; error: string }>,
-    /** List all currently open detached windows. */
-    listDetached: async () =>
-      ipcRenderer.invoke(CHANNELS.window.listDetached) as Promise<
-        Array<{ windowId: number; viewKey: string; snapped: boolean }>
-      >,
-    /**
-     * Close ALL detached windows (fired on the work-mode transition so every
-     * view re-renders inline). Auth/login windows are excluded by the main
-     * process — they are never tracked as detached tabs.
-     */
-    closeAllDetached: async () =>
-      ipcRenderer.invoke(CHANNELS.window.closeAllDetached) as Promise<
-        { ok: true } | { ok: false; error: string }
-      >,
-    loadSessionInMain: async (sessionId: string) =>
-      ipcRenderer.invoke(CHANNELS.window.loadSessionInMain, sessionId) as Promise<
-        { ok: true } | { ok: false; error: string }
-      >,
     /**
      * Resize the main window to match the current workspace mode.
      * "work" → centered work canvas on the primary work area;
@@ -1517,55 +1496,6 @@ export function buildInternalApiSurface() {
     /** Open a render_html result in an isolated BrowserWindow. */
     openHtmlPreview: async (payload: OpenHtmlPreviewWindowPayload) =>
       ipcRenderer.invoke(CHANNELS.window.openHtmlPreview, payload) as Promise<OpenHtmlPreviewWindowResult>,
-    /**
-     * Subscribe to snap-edge highlight events sent from the main process
-     * when a child window enters/exits the snap zone.
-     * edge: "n"|"s"|"e"|"w" when entering, null when leaving.
-     */
-    onSnapEdge: (handler: (edge: "n" | "s" | "e" | "w" | null) => void) => {
-      const listener = (_event: unknown, edge: "n" | "s" | "e" | "w" | null) => handler(edge);
-      ipcRenderer.on(CHANNELS.window.snapEdge, listener);
-      return () => ipcRenderer.removeListener(CHANNELS.window.snapEdge, listener);
-    },
-    /**
-     * Subscribe to in-place navigation events sent by WindowManager when a
-     * second plugin is clicked while the detached shell is already open.
-     * The detached shell calls this to swap its displayed content without
-     * closing and reopening a window.
-     */
-    onDetachedNavigate: (handler: (viewKey: string) => void) => {
-      const listener = (_event: unknown, payload: { viewKey?: string }) => {
-        if (typeof payload?.viewKey === "string") handler(payload.viewKey);
-      };
-      ipcRenderer.on(CHANNELS.window.detachedNavigate, listener);
-      return () => ipcRenderer.removeListener(CHANNELS.window.detachedNavigate, listener);
-    },
-    onLoadSessionInMain: (handler: (sessionId: string) => boolean | void | Promise<boolean | void>) => {
-      const listener = (_event: unknown, payload: { sessionId?: unknown }) => {
-        const sessionId = payload?.sessionId;
-        if (typeof sessionId !== "string") return;
-        void Promise.resolve()
-          .then(() => handler(sessionId))
-          .then((loaded) => {
-            if (typeof (payload as { requestId?: unknown }).requestId !== "string") return;
-            ipcRenderer.send(CHANNELS.window.loadSessionInMainResult, {
-              requestId: (payload as { requestId: string }).requestId,
-              ok: loaded !== false,
-              ...(loaded === false ? { error: "load-session-failed" } : {}),
-            });
-          })
-          .catch((err: unknown) => {
-            if (typeof (payload as { requestId?: unknown }).requestId !== "string") return;
-            ipcRenderer.send(CHANNELS.window.loadSessionInMainResult, {
-              requestId: (payload as { requestId: string }).requestId,
-              ok: false,
-              error: err instanceof Error ? err.message : "load-session-failed",
-            });
-          });
-      };
-      ipcRenderer.on(CHANNELS.window.loadSessionInMain, listener);
-      return () => ipcRenderer.removeListener(CHANNELS.window.loadSessionInMain, listener);
-    },
   },
 
   /**
