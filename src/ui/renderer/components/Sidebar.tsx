@@ -34,6 +34,7 @@ import {
   useNativeContextMenu,
   type NativeContextMenuHandlers,
 } from "../hooks/use-native-context-menu.js";
+import { useAddProjectFolder } from "../hooks/use-add-project-folder.js";
 import { isSidebarTab } from "../../../shared/sidebar-tab.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
@@ -613,6 +614,28 @@ function ProjectSessionList({
 }) {
   const { t } = useTranslation();
   const openNativeContextMenu = useNativeContextMenu();
+  // Adding a project is the SAME flow the composer's project selector and the
+  // workspace file-browser tab use — `useAddProjectFolder` owns the
+  // `workspace.pickRoot` + adjacency-acknowledgement state machine, so this is
+  // a third ENTRY POINT into one implementation, not a third implementation.
+  const { pendingWarning, addFolder, confirmPendingFolder, cancelPendingFolder } = useAddProjectFolder();
+  const addProject = async (): Promise<void> => {
+    const result = await addFolder();
+    // null = canceled, failed, or awaiting acknowledgement (the warning block
+    // below renders and `confirmPendingFolder` finishes the add).
+    if (!result) return;
+    await onRefreshProjects?.();
+  };
+  const confirmAddProject = async (): Promise<void> => {
+    const result = await confirmPendingFolder();
+    if (!result) return;
+    await onRefreshProjects?.();
+  };
+  // The one command a right-click offers wherever there is no project row —
+  // the Projects tab trigger, its empty area, and the collapsed rail icon.
+  const addProjectMenuHandlers = (): NativeContextMenuHandlers => ({
+    "project.add": () => void addProject(),
+  });
   // Reveal the project folder in the OS file manager (real capability:
   // workspace.reveal).
   const revealProject = (projectRoot: string) => {
@@ -692,6 +715,11 @@ function ProjectSessionList({
   const ungroupedRecent = ungroupedSessions.slice(0, PROJECT_SESSION_LIMIT);
   const ungroupedOverflow = Math.max(0, ungroupedSessions.length - PROJECT_SESSION_LIMIT);
 
+  // Collapsed rail: deliberately NOT wired to the add-project menu. The rail
+  // renders no projects at all, and it has nowhere to host the adjacency
+  // warning `workspace.pickRoot` can demand before an add completes — a
+  // right-click "add project" there would silently do nothing for exactly the
+  // folders that most need a confirmation.
   if (collapsed) {
     return (
       <NavItem
@@ -739,7 +767,14 @@ function ProjectSessionList({
         <TabsTrigger value="chats" className="h-7 rounded-sm px-1 text-[12px]" data-testid="sidebar-tab-chats">
           {t("sidebar.chatsTab")}
         </TabsTrigger>
-        <TabsTrigger value="projects" className="h-7 rounded-sm px-1 text-[12px]" data-testid="sidebar-tab-projects">
+        {/* Right-click the tab itself → the same "add project" menu as its
+            empty area, so the shortcut is reachable even from the Chats tab. */}
+        <TabsTrigger
+          value="projects"
+          className="h-7 rounded-sm px-1 text-[12px]"
+          data-testid="sidebar-tab-projects"
+          onContextMenu={(event) => openNativeContextMenu(event, "project", addProjectMenuHandlers())}
+        >
           {t("sidebar.projectsTab")}
         </TabsTrigger>
       </TabsList>
@@ -765,7 +800,50 @@ function ProjectSessionList({
 
       {/* Projects tab — named-project groups, each with its own nested
           (pinned-first) conversation list. */}
-      <TabsContent value="projects" className="mt-2 space-y-1" data-testid="sidebar-projects">
+      {/* Right-click anywhere in this tab that is not a row (min-h keeps that
+          blank target present even with one project) → "add project". Rows
+          stop propagation once they answer, so their own menu still wins. */}
+      <TabsContent
+        value="projects"
+        className="mt-2 min-h-24 space-y-1"
+        data-testid="sidebar-projects"
+        onContextMenu={(event) => openNativeContextMenu(event, "project", addProjectMenuHandlers())}
+      >
+        {pendingWarning ? (
+          /* Same acknowledgement text the composer selector shows for the same
+             `pickRoot` warning — one flow, one wording. */
+          <div
+            data-testid="sidebar-project-root-warning"
+            className="space-y-2 rounded-md border border-destructive bg-destructive/(--opacity-muted) p-2 text-[11px]"
+          >
+            <div className="font-medium text-destructive">{t("composerProjectSelector.rootWarningTitle")}</div>
+            <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground [overflow-wrap:anywhere]">
+              {pendingWarning.warnings.map((warning) => (
+                <li key={warning}>{warning}</li>
+              ))}
+            </ul>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                data-testid="sidebar-project-root-warning-confirm"
+                onClick={() => void confirmAddProject()}
+              >
+                {t("composerProjectSelector.rootWarningConfirm")}
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                data-testid="sidebar-project-root-warning-cancel"
+                onClick={cancelPendingFolder}
+              >
+                {t("common.cancel")}
+              </Button>
+            </div>
+          </div>
+        ) : null}
         {hasNamedProjects ? sessionsByProject.map(({ project, recent, overflow }) => {
           const pinned = Boolean(isProjectPinned?.(project.projectRoot));
           return (
@@ -804,6 +882,9 @@ function ProjectSessionList({
                 ...(project.projectRoot
                   ? { "project.reveal": () => revealProject(project.projectRoot!) }
                   : {}),
+                // Also offered ON a row: someone hunting for "add a project"
+                // right-clicks the nearest project-looking thing.
+                ...addProjectMenuHandlers(),
                 ...(project.projectRoot && !project.isDefault
                   ? { "project.remove": () => void removeProject(project) }
                   : {}),

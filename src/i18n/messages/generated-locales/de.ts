@@ -2367,6 +2367,7 @@ export const deMessages: Record<string, string> = {
   "composerProjectSelector.cancelButton": "Abbrechen",
   "sidebar.resizeHandleAriaLabel": "Seitenleiste anpassen",
   "sidebar.projectMenuNewChat": "Neuer Chat in diesem Projekt",
+  "sidebar.projectMenuAdd": "Projekt hinzufügen…",
   "sidebar.projectMenuReveal": "Ordner anzeigen",
   "sidebar.projectMenuRemove": "Projekt entfernen",
   "sidebar.daysAgo": "{count} T.",

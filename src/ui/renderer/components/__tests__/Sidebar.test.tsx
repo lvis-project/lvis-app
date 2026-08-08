@@ -55,6 +55,20 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   const removeRoot = vi.fn(async (root: string) => ({
     ok: true as const, removed: root, roots: [],
   }));
+  const ADDED_ROOT = "C:\\Users\\ikcha\\workspace\\lvis-project\\gamma";
+  const pickRoot = vi.fn(async (_options?: { ackToken?: string }) => ({
+    ok: true as const,
+    roots: [{ path: ADDED_ROOT, isDefault: false }],
+    added: ADDED_ROOT,
+  } as {
+    ok: true;
+    roots?: { path: string; isDefault: boolean }[];
+    added?: string;
+    requiresAcknowledgement?: boolean;
+    pendingPath?: string;
+    ackToken?: string;
+    warnings?: string[];
+  }));
   const listRoots = vi.fn(async () => ({
     ok: true as const,
     defaultRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app",
@@ -134,6 +148,7 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     workspace: {
       removeRoot,
       listRoots,
+      pickRoot,
     },
   };
 
@@ -150,6 +165,8 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     showNativeContextMenu,
     removeRoot,
     listRoots,
+    pickRoot,
+    addedRoot: ADDED_ROOT,
     emitNativeContextCommand: (command: NativeContextMenuAction["command"]) => {
       const payload = showNativeContextMenu.mock.calls.at(-1)?.[0];
       if (!payload) throw new Error("native context menu was not requested");
@@ -573,6 +590,154 @@ describe("Sidebar project pinning", () => {
         "sidebar-project-C-Users-ikcha-workspace-lvis-project-beta",
         "sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha",
       ]);
+    } finally {
+      restore();
+    }
+  });
+});
+
+describe("Sidebar projects tab add-project context menu", () => {
+  const projects: ProjectIdentity[] = [
+    { projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\alpha", projectName: "alpha", isDefault: false },
+  ];
+
+  it("offers add-project when the Projects tab's empty area is right-clicked, and adds through workspace.pickRoot", async () => {
+    const onRefreshProjects = vi.fn();
+    const {
+      getByTestId,
+      showNativeContextMenu,
+      emitNativeContextCommand,
+      pickRoot,
+      restore,
+    } = renderSidebar({
+      sessions: [],
+      projects,
+      activeSidebarTab: "projects",
+      onRefreshProjects,
+    });
+    try {
+      const tabBody = await waitFor(() => getByTestId("sidebar-projects"));
+      fireEvent.contextMenu(tabBody);
+      expect(showNativeContextMenu).toHaveBeenCalledTimes(1);
+      expect(showNativeContextMenu).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "project",
+        commands: ["project.add"],
+      }));
+
+      emitNativeContextCommand("project.add");
+      await waitFor(() => {
+        expect(pickRoot).toHaveBeenCalledTimes(1);
+        expect(onRefreshProjects).toHaveBeenCalledTimes(1);
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("offers add-project from the Projects tab trigger", async () => {
+    const { getByTestId, showNativeContextMenu, emitNativeContextCommand, pickRoot, restore } =
+      renderSidebar({ sessions: [], projects, activeSidebarTab: "chats" });
+    try {
+      fireEvent.contextMenu(getByTestId("sidebar-tab-projects"));
+      expect(showNativeContextMenu).toHaveBeenCalledWith(expect.objectContaining({
+        kind: "project",
+        commands: ["project.add"],
+      }));
+
+      emitNativeContextCommand("project.add");
+      await waitFor(() => expect(pickRoot).toHaveBeenCalledTimes(1));
+    } finally {
+      restore();
+    }
+  });
+
+  it("keeps the per-row menu authoritative — a right-click on a project row requests exactly one menu, the row's", async () => {
+    const onRefreshProjects = vi.fn();
+    const { getByTestId, showNativeContextMenu, emitNativeContextCommand, onNewChatForProject, restore } =
+      renderSidebar({ sessions: [], projects, activeSidebarTab: "projects", onRefreshProjects });
+    try {
+      const row = await waitFor(() =>
+        getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha"));
+      fireEvent.contextMenu(row);
+
+      // The tab body's own handler must NOT also fire and replace the row's
+      // pending menu — one right-click, one menu request.
+      expect(showNativeContextMenu).toHaveBeenCalledTimes(1);
+      const payload = showNativeContextMenu.mock.calls[0]?.[0];
+      expect(payload?.commands).toEqual(expect.arrayContaining([
+        "project.new-chat",
+        "project.add",
+        "project.remove",
+      ]));
+
+      // The row's own primary action still resolves against the row's handlers.
+      emitNativeContextCommand("project.new-chat");
+      expect(onNewChatForProject).toHaveBeenCalledWith({
+        projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\alpha",
+        projectName: "alpha",
+      });
+    } finally {
+      restore();
+    }
+  });
+
+  it("holds the add behind the adjacency warning and completes it with the ack token", async () => {
+    const onRefreshProjects = vi.fn();
+    const {
+      getByTestId,
+      queryByTestId,
+      emitNativeContextCommand,
+      pickRoot,
+      addedRoot,
+      restore,
+    } = renderSidebar({ sessions: [], projects, activeSidebarTab: "projects", onRefreshProjects });
+    try {
+      pickRoot.mockResolvedValueOnce({
+        ok: true,
+        requiresAcknowledgement: true,
+        pendingPath: addedRoot,
+        ackToken: "ack-1",
+        warnings: ["close to a sensitive location"],
+      });
+
+      fireEvent.contextMenu(await waitFor(() => getByTestId("sidebar-projects")));
+      emitNativeContextCommand("project.add");
+
+      const warning = await waitFor(() => getByTestId("sidebar-project-root-warning"));
+      expect(warning.textContent).toContain("close to a sensitive location");
+      expect(onRefreshProjects).not.toHaveBeenCalled();
+
+      fireEvent.click(getByTestId("sidebar-project-root-warning-confirm"));
+      await waitFor(() => {
+        expect(pickRoot).toHaveBeenLastCalledWith({ ackToken: "ack-1" });
+        expect(onRefreshProjects).toHaveBeenCalledTimes(1);
+      });
+      await waitFor(() => expect(queryByTestId("sidebar-project-root-warning")).toBeNull());
+    } finally {
+      restore();
+    }
+  });
+
+  it("dismisses the adjacency warning without adding", async () => {
+    const onRefreshProjects = vi.fn();
+    const { getByTestId, queryByTestId, emitNativeContextCommand, pickRoot, addedRoot, restore } =
+      renderSidebar({ sessions: [], projects, activeSidebarTab: "projects", onRefreshProjects });
+    try {
+      pickRoot.mockResolvedValueOnce({
+        ok: true,
+        requiresAcknowledgement: true,
+        pendingPath: addedRoot,
+        ackToken: "ack-1",
+        warnings: ["close to a sensitive location"],
+      });
+
+      fireEvent.contextMenu(await waitFor(() => getByTestId("sidebar-projects")));
+      emitNativeContextCommand("project.add");
+
+      fireEvent.click(await waitFor(() => getByTestId("sidebar-project-root-warning-cancel")));
+      await waitFor(() => expect(queryByTestId("sidebar-project-root-warning")).toBeNull());
+      expect(pickRoot).toHaveBeenCalledTimes(1);
+      expect(onRefreshProjects).not.toHaveBeenCalled();
     } finally {
       restore();
     }
