@@ -1,7 +1,8 @@
 import "../../../../test/renderer/setup.ts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+// Named import: the default export does not survive this tsconfig's interop settings.
+import { userEvent } from "@testing-library/user-event";
 import { renderApp } from "../../../../test/renderer/render-app.js";
 
 /**

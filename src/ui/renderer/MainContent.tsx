@@ -21,8 +21,7 @@ import type { SessionSummary } from "./hooks/use-sessions.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import type { AppMode } from "./MainToolbar.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
-import { parseViewKey, type InlineViewKey } from "../../shared/view-key.js";
-import { useTranslation } from "../../i18n/react.js";
+import type { InlineViewKey, PluginViewKey } from "../../shared/view-key.js";
 
 type Api = ReturnType<typeof getApi>;
 type PluginView = Parameters<typeof PluginUiHostView>[0]["view"];
@@ -202,7 +201,6 @@ function HomeChatPane(props: MainContentProps) {
  */
 export function MainContent(props: MainContentProps): ReactNode {
   const { activeView, api } = props;
-  const { t } = useTranslation();
 
   if (activeView === "memory") {
     return (
@@ -282,33 +280,19 @@ export function MainContent(props: MainContentProps): ReactNode {
     );
   }
 
-  // Plugin views are IDENTIFIED, not assumed. This used to be a bare fallback
-  // — anything that reached the end of the chain was rendered as a plugin
-  // view, so a misspelled built-in key surfaced as "plugin view not found"
-  // instead of as the mistake it was.
-  if (parseViewKey(activeView)?.kind === "plugin") {
-    return (
-      <PluginUiHostView
-        view={props.activePluginView ?? null}
-        authError={props.pluginAuthError ?? null}
-        onBack={props.onActivateHome}
-      />
-    );
-  }
-
-  // Unreachable through the typed path; reached only when an untyped boundary
-  // hands over a key the guard did not vet. Say so rather than rendering some
-  // other view's content under this key's name.
-  // Reuses the detached shell's wording for the same condition — the text is
-  // generic and duplicating it per surface only invites the two to drift.
+  // Everything above narrowed away an inline BUILT-IN key, so what is left is
+  // a plugin view — proven, not assumed. The annotation is the proof: add a
+  // built-in to `BUILTIN_VIEWS` with `inline: true` and forget a branch here,
+  // and this line stops compiling. That is what replaced the old bare
+  // fallback, which rendered ANY unrecognized string as a plugin view and so
+  // reported a misspelled destination as a missing plugin.
+  const pluginKey: PluginViewKey = activeView;
+  void pluginKey;
   return (
-    <MainPaneShell backToHome onBack={props.onActivateHome}>
-      <div
-        className="flex flex-1 items-center justify-center p-8 text-sm text-muted-foreground"
-        data-testid="main-content-unknown-view"
-      >
-        {t("detachedView.unknownView", { viewKey: activeView })}
-      </div>
-    </MainPaneShell>
+    <PluginUiHostView
+      view={props.activePluginView ?? null}
+      authError={props.pluginAuthError ?? null}
+      onBack={props.onActivateHome}
+    />
   );
 }
