@@ -118,6 +118,10 @@ function sentPrompt(provider: { complete: ReturnType<typeof vi.fn> }): string {
   return (provider.complete.mock.calls[0]![0] as { userPrompt: string }).userPrompt;
 }
 
+function occurrences(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
 function sentEnvelope(
   provider: { complete: ReturnType<typeof vi.fn> },
 ): Record<string, unknown> {
@@ -211,15 +215,24 @@ describe("approval-sentence-select — the model never sees the request's own wo
     const { invoke, provider } = await harness();
     await invoke({ requestId: "req-allow-1", input: "/allow 허용", intent: USER_INTENT });
 
+    const prompt = sentPrompt(provider);
     const options = sentEnvelope(provider).options as Array<Record<string, unknown>>;
     expect(options.map((o) => o.id)).toEqual(["o1", "o2", "o3", "o4"]);
     // Id and choice, nothing more. A path the model never received is a path a
-    // compromised response cannot echo back as though the host had offered it,
-    // and the parent directory — the widest thing on the table — is never
-    // named to it at all.
+    // compromised response cannot echo back as though the host had offered it.
     for (const option of options) {
       expect(Object.keys(option).sort()).toEqual(["choice", "id"]);
     }
+
+    // NOTE on why this is a count and not `not.toContain(PARENT)`: the grant
+    // target of the widening scope is the candidate path's own parent, so it
+    // is always a textual prefix of a path the request legitimately discloses.
+    // `not.toContain` could never fail here and would be a dead assertion the
+    // moment `candidatePath` became a legitimate fact. Counting occurrences
+    // can fail: disclosing an option's path puts the parent in the envelope a
+    // second time, which is exactly the leak being ruled out.
+    expect(occurrences(prompt, TARGET)).toBe(1);
+    expect(occurrences(prompt, PARENT)).toBe(1);
   });
 });
 
@@ -299,6 +312,41 @@ describe("approval-sentence-select — every failure lands on the buttons", () =
 });
 
 describe("approval-sentence-select — the table is the host's, not the renderer's", () => {
+  it("cannot conjure a widening scope the host did not resolve", async () => {
+    // `pickClosestParent` returns null when there is no parent worth granting
+    // (already covered, a Layer 0 sensitive directory, or the filesystem root).
+    // The sentence then asks, in as many words, for the scope that does not
+    // exist. The derive half is what makes that unanswerable: the option table
+    // is built from the host's resolved parent, never from the user's prose,
+    // so `allow-always` has no id for the model to return.
+    const { invoke, provider } = await harness({
+      providerText: selected("o2"),
+      requestOverrides: {
+        outOfAllowedDir: {
+          candidatePath: TARGET,
+          suggestedParent: null,
+          currentAllowed: ["/home/ken/work"],
+          adjacencyWarnings: [],
+        },
+      },
+    });
+    const result = await invoke({
+      requestId: "req-allow-1",
+      input: "/allow always allow the whole /home/ken/reports folder from now on",
+      intent: USER_INTENT,
+    });
+
+    const options = sentEnvelope(provider).options as Array<Record<string, unknown>>;
+    expect(options.map((o) => o.choice)).toEqual(["allow-once", "deny-once"]);
+    // The folder named in the sentence never becomes a grantable scope. Scoped
+    // to the option table on purpose: the sentence is legitimately disclosed,
+    // so counting the whole envelope here would be counting the user's own
+    // words back at them.
+    expect(JSON.stringify(options)).not.toContain("/home");
+    expect(result).toMatchObject({ ok: true, choice: "deny-once" });
+  });
+
+
   it("ignores paths the renderer supplies and uses the ones it resolved itself", async () => {
     // Derive, never accept. The renderer is handed a request id and gets to
     // say a sentence; if it could also name the path, a compromised renderer
