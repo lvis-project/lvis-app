@@ -4,6 +4,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 import { getDlpStats } from "../dlp-stats.js";
 
@@ -48,9 +49,9 @@ beforeEach(() => {
   ]);
 });
 
-afterEach(() => {
+afterEach(async () => {
   delete process.env.LVIS_HOME;
-  rmSync(root, { recursive: true, force: true });
+  await cleanupTmpDir(root);
 });
 
 describe("getDlpStats", () => {
