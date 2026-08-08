@@ -226,7 +226,7 @@ describe("freezeBoundary — Object.freeze invariant (P7)", () => {
     }).toThrow(TypeError);
   });
 
-  it("deep-freezes nested msg.content array and elements (Copilot round 2)", () => {
+  it("deep-freezes nested msg.content array and elements", () => {
     const contentParts = [{ type: "text" as const, text: "hello" }];
     const msg: GenericMessage = { role: "user", content: contentParts };
     const b: CompactBoundary = {
@@ -238,7 +238,7 @@ describe("freezeBoundary — Object.freeze invariant (P7)", () => {
     expect(Object.isFrozen(contentParts[0])).toBe(true);
   });
 
-  it("deep-freezes msg.toolCalls array and each ToolCall input (Copilot round 2)", () => {
+  it("deep-freezes msg.toolCalls array and each ToolCall input", () => {
     const toolInput = { query: "search term" };
     const msg: GenericMessage = {
       role: "assistant",
@@ -255,7 +255,7 @@ describe("freezeBoundary — Object.freeze invariant (P7)", () => {
     expect(Object.isFrozen(toolInput)).toBe(true);
   });
 
-  it("deep-freezes msg.thinkingBlocks array (Copilot round 2)", () => {
+  it("deep-freezes msg.thinkingBlocks array", () => {
     const block = { thinking: "let me think", signature: "sig123" };
     const msg: GenericMessage = {
       role: "assistant",

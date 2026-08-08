@@ -1,5 +1,5 @@
 /**
- * Work Board reports (Hermes "reporting" surface) — host-native daily + weekly.
+ * Work Board reports (the "reporting" surface) — host-native daily + weekly.
  *
  * The board is a first-class host domain (architecture.md §10.0.3), so the HOST
  * generates the personal work reports the legacy board plugin used to: it gathers

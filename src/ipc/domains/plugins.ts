@@ -1464,8 +1464,8 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   //          · no active turn → USER-GATED. We stage an overlay card the user must
   //            CLICK; confirming inserts the `imported_trigger` marker and starts the
   //            turn with `app-emitted` origin. An app must NOT autonomously wake the
-  //            model: VS Code's MCP-Apps host only *fills* the chat box ("does not
-  //            auto-send"), ChatGPT fires only from a synchronous user gesture, and the
+  //            model: other MCP-Apps hosts either only *fill* the chat box without
+  //            auto-sending, or fire only from a synchronous user gesture, and the
   //            spec's "host SHOULD add to context, MAY request consent" is trending
   //            toward "every UI-initiated action goes through the same consent path".
   //            LVIS cannot verify a gesture claim made inside an untrusted iframe, so a

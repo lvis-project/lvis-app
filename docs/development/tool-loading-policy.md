@@ -57,13 +57,13 @@ exposure must never remove a tool from the registry or bypass permission checks.
 
 ## Reference Basis
 
-- OpenAI tool search guidance recommends deferring tool definitions and loading
+- Published tool-search guidance recommends deferring tool definitions and loading
   only the definitions needed at runtime. It also notes that deferring a single
   function mostly saves parameter-schema tokens, while deferring larger logical
   namespaces saves more because function names and descriptions need not be
   repeated upfront.
   - `https://developers.openai.com/api/docs/guides/tools-tool-search`
-- OpenAI function-calling guidance describes the multi-step loop: provide tools,
+- Published function-calling guidance describes the multi-step loop: provide tools,
   receive tool calls, execute them, then send results back for another model
   response. Any oversized tool schema set is therefore paid repeatedly across
   tool-use rounds, not once per user turn.
@@ -72,13 +72,13 @@ exposure must never remove a tool from the registry or bypass permission checks.
   substitute for a small tool surface. Cache eligibility depends on stable
   prefixes and does not make large `tools[]` payloads safe under TPM pressure.
   - `https://developers.openai.com/api/docs/guides/prompt-caching`
-- Anthropic Agent Skills establish **progressive disclosure** as the discovery
+- The Agent Skills pattern establishes **progressive disclosure** as the discovery
   pattern: at startup only each skill's name + description load (a few dozen
   tokens each); the full `SKILL.md` body loads only when a task matches, and
   bundled resources load on demand. The always-present metadata is a fixed cost,
   so it must be bounded — the same discipline this policy applies to tools is
   applied to skills in `docs/development/skill-loading-policy.md`.
-  - `https://www.anthropic.com/news/skills`, `https://agentskills.io`
+  - `https://agentskills.io`
 - Dynamic-toolset / "Tools Tax" reports converge on the same conclusion the
   local #1176 evidence reached: eager schema injection is a per-turn *token*
   overhead (~10k–60k tokens in multi-server MCP deployments), paid on every
@@ -238,7 +238,7 @@ the single budget-based policy.
  SDK v12); bundled instruction discovery belongs to `manifest.skills`
  (`docs/development/skill-loading-policy.md`).
 
-Do not switch the app to OpenAI-only hosted tool search as the first fix. LVIS
+Do not switch the app to a single vendor's hosted tool search as the first fix. LVIS
 routes tool schemas through the cross-vendor Vercel AI SDK provider adapter, so
 the stable implementation surface is client-side schema deferral in
 `ToolRegistry`, `ConversationLoop`, and `SystemPromptBuilder`.
