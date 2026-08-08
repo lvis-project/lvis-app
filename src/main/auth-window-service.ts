@@ -396,8 +396,8 @@ export function sanitizeUrlForLog(url: string): string {
 
 /**
  * Result-shape selector for `openAuthWindow`. Pulled out as a pure function so the
- * `returnFinalUrl` contract can be exercised without spinning up a BrowserWindow —
- * Copilot flagged that the branch was otherwise untested.
+ * `returnFinalUrl` contract can be exercised without spinning up a BrowserWindow;
+ * inline, that branch had no test covering it.
  */
 export function buildAuthResult(
   cookies: AuthCookie[],

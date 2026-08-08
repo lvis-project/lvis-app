@@ -4,9 +4,9 @@
  * Asserts the contract surfaced by the panel: when the user clicks the
  * "선택 해제 (플러그인 사용 안 함)" button or leaves the plugin list empty,
  * the resulting `addRoutineV2` payload uses `{ mode: "deny-all" }` per
- * spec §3 Layer 4 (RoutinePluginScope discriminated union). Catches the
- * Copilot round-2 finding: previous label said "전체 허용" but the actual
- * semantic is deny-all — copy and behavior must agree.
+ * spec §3 Layer 4 (RoutinePluginScope discriminated union). Catches a
+ * regression the panel already had once: the label said "전체 허용" while the
+ * actual semantic is deny-all — copy and behavior must agree.
  */
 import "../../../../test/renderer/setup.js";
 import { describe, expect, it, vi } from "vitest";
