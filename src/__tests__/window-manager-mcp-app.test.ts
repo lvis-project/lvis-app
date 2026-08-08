@@ -246,7 +246,7 @@ describe("openDetachedMcpApp + registry", () => {
     const viewKey = wm.listChildren()[0].viewKey;
     expect(wm.getMcpDetachedPayload(viewKey)).toBeTruthy();
 
-    wm.openDetachedTab("reminders"); // built-in → category switch → shell destroyed
+    wm.openDetachedTab("routines"); // built-in → category switch → shell destroyed
     expect(wm.getMcpDetachedPayload(viewKey)).toBeNull();
   });
 

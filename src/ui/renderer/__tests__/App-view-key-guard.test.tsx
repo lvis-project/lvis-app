@@ -48,17 +48,18 @@ describe("App — view key guard on the activate-view IPC", () => {
   });
 
   it("ignores a detach-only key, which has no inline form to render", async () => {
-    // `reminders` IS in the main process's detach allow-list, so a check that
-    // only asked "is this a known view key?" would wave it through and leave
-    // the main window claiming to be somewhere it cannot render.
+    // An MCP-app card IS a real, openable destination — it just has no inline
+    // form. A check that only asked "is this a known view key?" would wave it
+    // through and leave the main window claiming to be somewhere it cannot
+    // render.
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const { emitViewActivate } = await renderApp();
     await waitFor(() => expect(screen.getByTestId("chat-view-root")).toBeTruthy());
 
-    act(() => emitViewActivate("reminders"));
+    act(() => emitViewActivate("mcp-app:6162:card-1"));
 
     await waitFor(() =>
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining("'reminders'")),
+      expect(warn).toHaveBeenCalledWith(expect.stringContaining("'mcp-app:6162:card-1'")),
     );
     expect(screen.getByTestId("chat-view-root")).toBeTruthy();
   });

@@ -63,7 +63,7 @@ function makeAuditLogger() {
 
 describe("ALLOWED_VIEW_KEYS", () => {
   it("accepts built-in view keys", () => {
-    for (const key of ["reminders", "routines", "memory", "starred", "work-board"]) {
+    for (const key of ["routines", "memory", "starred", "insights", "work-board"]) {
       expect(ALLOWED_VIEW_KEYS.test(key)).toBe(true);
     }
   });
