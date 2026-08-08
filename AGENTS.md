@@ -55,6 +55,32 @@ state durable constraints here and put detailed designs in their owning docs.
 - Never push directly to `main`. Deliver changes through a PR and merge with
   `gh pr merge --merge`; squash merge is not allowed.
 
+## External product names
+
+- Do not commit external product or vendor names as explanatory text. This
+  covers code comments, JSDoc, module headers, `description` fields, test names
+  and `describe`/`it` strings, documentation prose, and **commit messages** —
+  messages travel with every clone and are permanent in `git log` and `blame`.
+- Keep the reason, drop the attribution. A comment that justifies a decision by
+  pointing at what another product does states the property that makes the
+  decision right instead. If the reasoning cannot survive without the name, it
+  was doing citation work rather than explanation: state the property directly.
+- A name stays only where the code would be wrong or ambiguous without it: a
+  literal the runtime needs, a provider discriminant, a secret-store key, an
+  endpoint or package name, or a feature that names what it integrates with
+  (`openai-compatible`, `llm.apiKey.anthropic`, `@anthropic-ai/sandbox-runtime`,
+  the desktop config importer). A name that identifies something the code talks
+  to stays; a name that justifies a decision goes.
+- PR bodies and GitHub issues are out of scope: they are not committed, and
+  sourcing is genuinely useful there.
+- Sweep added lines, not changed files (`git diff origin/main HEAD -U0`, `+`
+  lines). Scanning whole files yields a larger, plausible-looking diff that
+  breaks provider resolution and secret lookups while appearing to comply.
+- Before deleting a document, grep for inbound references
+  (`git grep -l "<basename>" -- src/ docs/`). A document referenced by section
+  anchor from shipped code is a specification, not a record: its comparison
+  section is removable, the document is not.
+
 ## Architecture and security invariants
 
 - Keep core logic vendor-neutral through the `GenericMessage` abstraction.
