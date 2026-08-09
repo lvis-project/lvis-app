@@ -119,7 +119,7 @@ export function createSkillLoadTool(deps: SkillLoadToolDeps): Tool {
     // behavior is mutated by attacker-controlled content. Treat as "write"
     // so the §6.3 PermissionManager lifts the auto-approve and the first
     // load of each skill — seeded built-ins included — goes through the
-    // user-confirmation modal, then the body-hash record in
+    // user-approval dock, then the body-hash record in
     // `skill-approvals-store.ts` short-circuits repeat loads of the same
     // body.
     category: "write",

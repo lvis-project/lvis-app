@@ -76,7 +76,7 @@ export async function setupWorkflowStores(ctx: BootContext): Promise<void> {
     getAskUserQuestionGate: () => askUserQuestionGate,
     // The gate is constructed up-front (before initPluginRuntime), so it is
     // held by value like every other gate wiring. skill_load reuses the same
-    // gate the executor uses so user-authored skills pop the approval modal on
+    // gate the executor uses so user-authored skills open the approval dock on
     // first load (and only on first load).
     approvalGate,
     getSubAgentRunner: () => subAgentRunnerRef.fn,

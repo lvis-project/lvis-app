@@ -22,10 +22,10 @@
  * lightweight hook; they gate on `event.streamId` (a number) BEFORE any reducer
  * runs, so they are orthogonal to the entry shape.
  *
- * Tool APPROVAL (blocking modal) is NOT handled here: the side loop shares the
+ * Tool APPROVAL is NOT handled here: the side loop shares the
  * host's global ApprovalGate, which broadcasts on the app-global
  * `lvis:approval:request` channel and surfaces in the main app-level
- * ApprovalDialog (App.tsx `useApproval`). Only the informational
+ * route-independent ApprovalDock (App.tsx `useApproval`). Only the informational
  * `permission_review` STATUS card flows through this transcript.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

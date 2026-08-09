@@ -1,5 +1,4 @@
 import type { getApi } from "./api-client.js";
-import { ApprovalDialog } from "./dialogs/ApprovalDialog.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
 import { McpPromptArgsDialog } from "./dialogs/McpPromptArgsDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
@@ -13,8 +12,6 @@ export function AppDialogs({
   api,
   deferredQueueOpen,
   onDeferredQueueOpenChange,
-  approvalQueue,
-  onApprovalDecide,
   tourCompleted,
   onTourComplete,
   onTourDismiss,
@@ -27,8 +24,6 @@ export function AppDialogs({
   api: Api;
   deferredQueueOpen: boolean;
   onDeferredQueueOpenChange: (open: boolean) => void;
-  approvalQueue: Parameters<typeof ApprovalDialog>[0]["queue"];
-  onApprovalDecide: Parameters<typeof ApprovalDialog>[0]["onDecide"];
   tourCompleted: boolean;
   onTourComplete: () => void;
   onTourDismiss: () => void;
@@ -42,7 +37,6 @@ export function AppDialogs({
   return (
     <>
       <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={onDeferredQueueOpenChange} />
-      <ApprovalDialog queue={approvalQueue} onDecide={onApprovalDecide} />
       <McpPromptArgsDialog
         onCancel={onMcpPromptArgsCancel}
         onSubmit={onMcpPromptArgsSubmit}

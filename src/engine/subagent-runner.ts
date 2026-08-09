@@ -14,7 +14,7 @@
  *     queryLoop cleanly between rounds, and the executor's per-round
  *     fan-out cap (5 calls/round) bounds total tool execution count.
  *   - An ApprovalGate wrapper that prepends "[Sub-Agent: <title>]" to the
- *     user-facing approval reason so users know an approval modal originated
+ *     user-facing approval reason so users know an approval request originated
  *     from a sub-agent.
  *
  * Per-turn updates are streamed back as events so the renderer can show a
@@ -777,7 +777,7 @@ export function resolveSubAgentModel(
  *   - working-posture line (mode.reasoningHint)
  *   - auto-skill RECOMMENDATION (not a force-load — LVIS gates every skill
  *     behind a body-hash approval; the LLM must call `skill_load` so the
- *     normal approval modal runs. See agent-mode-map.ts SECURITY MODEL).
+ *     normal approval dock runs. See agent-mode-map.ts SECURITY MODEL).
  * Returns "" for the default/inert mode so the profile body is unchanged.
  */
 export function buildModePreamble(config: AgentModeConfig): string {
@@ -802,7 +802,7 @@ export function buildModePreamble(config: AgentModeConfig): string {
 
 /**
  * ApprovalGate wrapper that prepends `[Sub-Agent: <title>] ` to the
- * `reason` text shown in the user-facing approval modal so users can
+ * `reason` text shown in the user-facing approval dock so users can
  * distinguish parent-loop approvals from sub-agent approvals at a glance.
  * No other behavior changes — the underlying gate handles HMAC/nonce, S1
  * sensitive-path block, S4 read-only short-circuit, etc.
@@ -1784,7 +1784,7 @@ export class SubAgentRunner {
       ? new Set(scopedTools.map((tool) => tool.name))
       : undefined;
 
-    // Wrap the parent ApprovalGate so approval modals from this sub-agent's
+    // Wrap the parent ApprovalGate so approval requests from this sub-agent's
     // tool calls show "[Sub-Agent: <title>]" in their reason text.
     const wrappedApprovalGate = this.deps.parentDeps.approvalGate
       ? makeSubAgentApprovalAdapter(this.deps.parentDeps.approvalGate, args.title)
@@ -2507,7 +2507,7 @@ export class SubAgentRunner {
    * @param resumeId  The `childSessionId` returned by the original spawn (also
    *                  surfaced to the parent LLM via the incomplete tool result).
    * @param continuationInstructions  The follow-up prompt for the fresh turn.
-   * @param title     Sub-agent title for the approval-modal label. Not stored
+   * @param title     Sub-agent title for the approval-dock label. Not stored
    *                  in metadata, so the caller (agent_spawn) forwards it; a
    *                  resume without a title uses the raw reason text.
    * @param originSessionId  The calling session's id (ctx.metadata.sessionId

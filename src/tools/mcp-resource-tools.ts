@@ -324,7 +324,7 @@ export function createMcpResourceReadTool(getAccess: McpResourceAccessResolver):
     // headless loops (routines) run with MCP withheld on purpose.
     requiresMcpScope: true,
     // Pure read: no filesystem mutation, no system-prompt mutation. The content
-    // lands in a tool_result, so it needs no approval modal of its own — the gates
+    // lands in a tool_result, so it needs no approval prompt of its own — the gates
     // that matter (capability approved, URI previously listed) are structural.
     category: "read",
     isReadOnly: () => true,

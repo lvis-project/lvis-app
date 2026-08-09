@@ -193,7 +193,7 @@ export interface RiskClassifier {
  * Reviewer disabled — every dispatch returns LOW so the reviewer lane is a
  * no-op. The per-tool category × source × trust matrix in
  * {@link PermissionManager} (deny rules, allowed-dir checks, overlay-trigger
- * guards, explicit approval modal) is unaffected.
+ * guards, explicit approval dock) is unaffected.
  *
  * Issue #664: pre-fix this classifier returned HIGH+"defer all" which silently
  * queued every plugin write/auth tool in the headless lane (an auth/sign-in
@@ -761,7 +761,7 @@ export type FallbackOnError = "deny" | "rule";
  * back-off + jitter; deterministic failures (parse error, abort, 4xx
  * client errors) are NOT retried. Defaults are chosen so the user-visible
  * worst-case latency (~1s for 3 attempts at 250ms / 500ms with jitter)
- * stays well under the approval modal's perceptual threshold while still
+ * stays well under the approval dock's perceptual threshold while still
  * absorbing a single transient flap.
  *
  * Issue: #865 — before this wiring, every provider failure went straight

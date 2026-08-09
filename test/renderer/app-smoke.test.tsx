@@ -88,7 +88,8 @@ describe("App smoke (Phase 1 infra)", () => {
     await waitFor(() =>
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
     );
-    expect(container.querySelector('[data-testid="settings-close"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="settings-close"]')).toBeNull();
+    expect(container.querySelector('[data-testid="settings-mobile-close"]')).toBeNull();
     expect(api.chatSend).not.toHaveBeenCalled();
   });
 
@@ -347,9 +348,9 @@ describe("Settings inline (all modes)", () => {
     });
     expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy();
 
-    // Close affordance returns to the prior/home view.
+    // The app-level navbar returns to the prior/home view.
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="settings-close"]')!);
+      fireEvent.click(container.querySelector('[data-testid="view-path-back"]')!);
     });
     await waitFor(() =>
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeFalsy(),

@@ -43,7 +43,7 @@ const MAX_HITS_PER_FILE = 4;
 const GRANDFATHERED = [
   "src/mcp/__tests__/mcp-app-download.test.ts",
   "src/shared/__tests__/mcp-app-partition.test.ts",
-  "src/ui/renderer/components/ToolApprovalDialog.tsx",
+  "src/ui/renderer/components/ToolApprovalContent.tsx",
 ];
 
 function listFiles(dir, out = []) {

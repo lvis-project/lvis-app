@@ -10,7 +10,6 @@ import { McpAppPipPanel } from "./components/McpAppPipPanel.js";
 import { McpAppFullscreenPanel } from "./components/McpAppFullscreenPanel.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
-import type { ApprovalChoice, ApprovalRequest } from "./types.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
 import { RoutinePanel } from "./components/RoutinePanel.js";
@@ -41,7 +40,6 @@ export interface MainContentProps {
    *  `settingsTab` tracks where the user is, not just where they entered. */
   onSettingsTabChange: (tab: string) => void;
   onSettingsSaved: () => void;
-  onCloseSettings: () => void;
   // starred
   starred: StarredItem[];
   currentSessionId: string;
@@ -89,9 +87,8 @@ export interface MainContentProps {
   hasAskQuestions: boolean;
   /** Pending ask_user_question requests rendered inline at the end of the chat stream. */
   askQuestions: AskUserQuestionRequest[];
-  approvalRequest?: ApprovalRequest | null;
-  onApprovalDecide?: (choice: ApprovalChoice, rememberPattern?: string) => void;
-  onApprovalSentenceNotice?: (message: string) => void;
+  /** Intercepts `/allow` while an approval is pending before it enters the message queue. */
+  approvalSentenceInterceptSubmit?: (text: string) => boolean;
   /** Removes a request once the user submits or dismisses it. */
   onResolveAskQuestion: (id: string) => void;
   // plugins — surfaced inside the SlashPicker plugin category
@@ -163,9 +160,7 @@ function HomeChatPane(props: MainContentProps) {
         hasAskQuestions={props.hasAskQuestions}
         askQuestions={props.askQuestions}
         onResolveAskQuestion={props.onResolveAskQuestion}
-        approvalRequest={props.approvalRequest}
-        onApprovalSentenceNotice={props.onApprovalSentenceNotice}
-        onApprovalDecide={props.onApprovalDecide}
+        approvalSentenceInterceptSubmit={props.approvalSentenceInterceptSubmit}
         plugins={props.plugins}
         onSelectPlugin={props.onSelectPlugin}
         appMode={props.appMode}
@@ -257,7 +252,6 @@ export function MainContent(props: MainContentProps): ReactNode {
           api={api}
           initialTab={props.settingsTab}
           onSaved={props.onSettingsSaved}
-          onBack={props.onCloseSettings}
           onTabChange={props.onSettingsTabChange}
         />
       </MainPaneShell>

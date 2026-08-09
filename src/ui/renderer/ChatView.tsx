@@ -22,7 +22,7 @@ import { hasActiveSuggestedReplies } from "./utils/composer-placeholder.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import type { QuickAction } from "./components/CommandPopover.js";
 import { type AskUserQuestionRequest } from "./components/AskUserQuestionCard.js";
-import type { ApprovalChoice, ApprovalRequest, LvisApi } from "./types.js";
+import type { LvisApi } from "./types.js";
 import type { SubAgentSpawn } from "./subagents/types.js";
 import type { SkillBadgeProps } from "./components/SkillBadge.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
@@ -45,8 +45,6 @@ import { useAttachmentPicker } from "./hooks/use-attachment-picker.js";
 import { TranscriptRenderer, type TurnSummary } from "./components/TranscriptRenderer.js";
 import { ChatTranscript } from "./components/ChatTranscript.js";
 import { ChatComposerDock } from "./components/ChatComposerDock.js";
-import { DockedApprovalCard } from "./components/permissions/DockedApprovalCard.js";
-import { useApprovalSentence } from "./hooks/use-approval-sentence.js";
 
 /**
  * ChatView — consumes cross-cutting state via `useChatContext()`. Action
@@ -83,14 +81,8 @@ export interface ChatViewProps {
   hasAskQuestions: boolean;
   /** Pending ask_user_question requests, rendered inline at the end of the entries stream. */
   askQuestions: AskUserQuestionRequest[];
-  /** Head-of-queue approval request, served by the docked card in the dock. */
-  approvalRequest?: ApprovalRequest | null;
-  onApprovalDecide?: (choice: ApprovalChoice, rememberPattern?: string) => void;
-  /**
-   * Plain-text sink for every `/allow` outcome that is not a proposal. Nothing
-   * sent here is ever grant-shaped.
-   */
-  onApprovalSentenceNotice?: (message: string) => void;
+  /** App-owned `/allow` interceptor; approval UI itself lives beside routed content. */
+  approvalSentenceInterceptSubmit?: (text: string) => boolean;
   /** Called when a card submits or is dismissed; removes it from `askQuestions`. */
   onResolveAskQuestion: (id: string) => void;
   /** Plugin list — surfaced inside the SlashPicker's plugin category. */
@@ -140,7 +132,7 @@ export interface ChatViewProps {
 
 const SIDE_PANEL_LAYOUT_TRANSITION_MS = 300;
 
-export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalRequest = null, onApprovalDecide, onApprovalSentenceNotice, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects }: ChatViewProps) {
+export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onToggleStar, onRetryEffort, onContinueFromLastUser, isEntryStarred, onAbort, onGuide, onGuideError, onFeedback, subAgentSpawns, loadedSkills, hasAskQuestions, askQuestions, onResolveAskQuestion, approvalSentenceInterceptSubmit, plugins, onSelectPlugin, appMode = "work", onOpenApprovalQueue, currentSessionKind = "main", currentSessionTitle, onLoadSession, commandActions, commandPopoverOpen, onCommandPopoverOpenChange, onPluginPrimaryAction, onRoutineAcknowledge, statusBar, onAttachmentWarning, actionPanelOpen = false, onActionPanelOpenChange, sidePanelOpen = false, onSidePanelOpenChange, blogLayout = false, activeProject, workspaceProjects, onNewChatForProject, onRefreshProjects }: ChatViewProps) {
   const { t } = useTranslation();
   // We still need the api for SessionTodoPanel; obtain it via singleton.
   const workflowApi = getApi();
@@ -466,13 +458,8 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
   // Mid-turn message queue — per-view store + dev/e2e window hook + stream
   // brake-point drains + composer/streaming keyboard flows (Enter morph, ESC
   // inject-or-abort, ⌘⏎ immediate inject, ⌘K guide).
-  // `/allow <sentence>` — answered against the pending approval instead of
-  // being sent to the model. It only pre-selects a button on the card below.
-  const { proposedChoice, interceptSubmit } = useApprovalSentence({
-    approvalRequest,
-    ...(onApprovalSentenceNotice ? { onNotice: onApprovalSentenceNotice } : {}),
-  });
-
+  // /allow <sentence> is answered against the app-owned pending approval
+  // instead of being sent to the model. It only proposes a dock choice.
   const {
     messageQueueStore,
     handleComposerSend,
@@ -490,7 +477,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
     onGuide,
     onGuideError,
     onAbort,
-    interceptSubmit,
+    interceptSubmit: approvalSentenceInterceptSubmit,
   });
 
   const handleInsertSlashCommand = useCallback((cmd: string) => {
@@ -652,17 +639,6 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         onRoutineAcknowledge={onRoutineAcknowledge}
       />
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
-      {/* Approval overlay fills the chat region and aligns its card to the
-          bottom, so the decision covers what it is about and cannot scroll
-          away. */}
-      {approvalRequest && onApprovalDecide ? (
-        <DockedApprovalCard
-          request={approvalRequest}
-          onDecide={onApprovalDecide}
-          onReturnFocus={() => composerRef.current?.focus()}
-          proposedChoice={proposedChoice}
-        />
-      ) : null}
       <div className="grid h-full min-h-0 min-w-0 grid-cols-1">
       <div className="relative min-h-0 min-w-0 overflow-hidden">
       {/* Checkpoint view-mode banner — sticky at the top of the chat scroll area */}

@@ -144,7 +144,7 @@ export interface WorkBoardEngineDeps {
    * returns `{ status: 'error' }` rather than throwing.
    */
   getRunner: () => SubAgentRunner | undefined;
-  /** Live approval gate — the coarse plan-approval modal goes through this. */
+  /** Live approval gate — the coarse plan-approval prompt goes through this. */
   approvalGate: ApprovalGate;
   /**
    * Optional agent-profile resolver. When the caller names an agent, its
@@ -459,7 +459,7 @@ export function createWorkBoardEngine(
       // ── APPROVE ────────────────────────────────────────────────────────
       // `kind: 'agent-action'` + `toolCategory: 'meta'` deliberately skips both
       // the read-only short-circuit and the sandbox-capability injection so the
-      // user ALWAYS sees an explicit plan-approval modal (not auto-approved).
+      // user ALWAYS sees an explicit plan-approval prompt (not auto-approved).
       //
       // The request `id` carries a fresh per-run UUID so no cache key can match
       // across runs, and the returned decision is clamped to allow-once

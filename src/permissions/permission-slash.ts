@@ -712,7 +712,7 @@ export type SlashTrustOrigin = TrustOriginWithUnknown;
  * Top-level dispatch result. The slash handler turns this into either a
  * parsed internal command + side-effect or plain-text echo. Built-in slash
  * commands are their own user-keyboard approval surface; they do not request a
- * second confirmation modal.
+ * second confirmation prompt.
  */
 export type PermissionSlashOutcome =
   | { kind: "rejected-non-user-origin"; sanitized: string }

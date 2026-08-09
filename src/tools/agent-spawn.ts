@@ -182,7 +182,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       // Resume path: a `resumeId` re-hydrates a previously-spawned sub-agent and
       // continues it with `instructions` as the follow-up prompt (its tool scope
       // stays frozen to the original spawn — permission is NOT re-granted). The
-      // title still labels approval modals but is not otherwise required for a
+      // title still labels approval requests but is not otherwise required for a
       // resume (the profile/allowlist come from persisted metadata), so the
       // title-required rule below is relaxed when resuming.
       const resumeId = typeof a.resumeId === "string" && a.resumeId.trim()

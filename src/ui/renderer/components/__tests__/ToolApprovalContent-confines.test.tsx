@@ -1,5 +1,5 @@
 /**
- * PR2 finding b — ToolApprovalDialog confines honesty.
+ * PR2 finding b — ToolApprovalContent confines honesty.
  *
  * The "보안 격리" (security isolation) row must reflect per-dimension confines.
  * Before the fix, the confines-BLIND `isWeakSandbox` printed a blanket
@@ -13,7 +13,7 @@
  * assertions match the Korean catalog.
  */
 import { describe, it, expect } from "vitest";
-import { approvalReviewRows } from "../ToolApprovalDialog.js";
+import { approvalReviewRows } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
 
 function makeRequest(
@@ -38,7 +38,7 @@ function sandboxRow(req: ApprovalRequest) {
   return rows.find((r) => r.testId === "tool-approval-sandbox");
 }
 
-describe("ToolApprovalDialog sandbox confines label", () => {
+describe("ToolApprovalContent sandbox confines label", () => {
   it("shows the partial breakdown for a win32 partial ASRT (process not confined)", () => {
     const row = sandboxRow(
       makeRequest({

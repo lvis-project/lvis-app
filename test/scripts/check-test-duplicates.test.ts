@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -39,6 +39,25 @@ describe("check-test-duplicates", () => {
     expect(isScannedTestSource("/tmp/test/lvis-app/test/renderer/render-app.tsx", root)).toBe(true);
     expect(isScannedTestSource("/tmp/test/lvis-app/src/main/production.ts", root)).toBe(false);
     expect(isScannedTestSource("/tmp/test/lvis-app/src/shared/__tests__/fixture-support.ts", root)).toBe(true);
+  });
+
+  it("skips transient .worktrees checkouts", () => {
+    const root = mkdtempSync(join(tmpdir(), "lvis-duplicate-worktrees-"));
+    try {
+      const nestedRoot = join(root, ".worktrees", "agent");
+      mkdirSync(nestedRoot, { recursive: true });
+      writeFileSync(join(root, "visible.test.ts"), "function makeVisible() { return { ok: true }; }\n");
+      writeFileSync(join(nestedRoot, "hidden.test.ts"), "function makeHidden() { return { ok: true }; }\n");
+
+      const result = analyzeDuplicateHelpers(root);
+
+      expect(result.files.map((file: string) => normalizeRepoPath(file, root))).toEqual([
+        "visible.test.ts",
+      ]);
+      expect(result.duplicateBodies).toHaveLength(0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("detects substantial duplicate helpers without requiring prefix names", () => {
@@ -122,7 +141,7 @@ describe("check-test-duplicates", () => {
 
       const result = analyzeDuplicateHelpers(root);
 
-      expect(result.files.map((file) => normalizeRepoPath(file, root)).sort()).toEqual([
+      expect(result.files.map((file: string) => normalizeRepoPath(file, root)).sort()).toEqual([
         "one.test.ts",
         "two.test.ts",
       ]);

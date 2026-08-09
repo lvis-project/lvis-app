@@ -126,7 +126,7 @@ an Electron `<webview>`.
 |---|---|
 | `chat-app-update` | Seeded via the real `lvis:update:state` IPC channel (`app.evaluate` → `webContents.send`), matching the shape in `src/shared/update-state.ts`. Captures the `[data-testid="app-update-badge-available"]` element. |
 | `chat-plugin-panel` | The **real** `lvis-plugin-work-assistant` detector-toggle panel (its own bundled UI in a webview), loaded via `plugins: ['work-assistant']`. |
-| `plugin-permission-grant` | The real "Approve Tool Execution" host modal fired by the meeting panel's mount-time `meeting_list_preps` read call (reviewer kept ON via `keepReviewer`). Cropped to `[data-testid="tool-approval-dialog"]`. |
+| `plugin-permission-grant` | The real "Approve Tool Execution" host dock fired by the meeting panel's mount-time `meeting_list_preps` read call (reviewer kept ON via `keepReviewer`). Cropped to `[data-testid="approval-dock"]`. |
 | `meeting-upcoming` | The **real** `lvis-plugin-meeting` panel, default "예정 회의" (upcoming) tab, empty state (no seeded calendar events). |
 | `_smoke-settings-llm` (not a docs key — smoke-only) | Opens the inline settings panel on the model tab and captures the main app window. |
 
