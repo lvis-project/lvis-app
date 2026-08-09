@@ -1,9 +1,10 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginMarketplaceService, type MarketplaceFetcher } from "../marketplace.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   makeTestPluginPaths,
   writeTestPlugin,
@@ -24,9 +25,9 @@ function makeUnusedFetcher(): MarketplaceFetcher {
 describe("PluginMarketplaceService.quarantinePlugin", () => {
   const roots: string[] = [];
 
-  afterEach(() => {
+  afterEach(async () => {
     for (const root of roots.splice(0)) {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
