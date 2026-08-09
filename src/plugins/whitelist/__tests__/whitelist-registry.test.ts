@@ -7,7 +7,7 @@
  * public CDN.
  */
 import { describe, it, expect, beforeEach, afterAll } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash, generateKeyPairSync, sign } from "node:crypto";
@@ -15,6 +15,7 @@ import { whitelistRegistry } from "../whitelist-registry.js";
 import { WhitelistCache } from "../whitelist-cache.js";
 import type { SignatureEnvelope } from "../../types.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 // ---------------------------------------------------------------------
 // Helpers
@@ -83,13 +84,9 @@ function freshUserData(): string {
   return dir;
 }
 
-afterAll(() => {
+afterAll(async () => {
   for (const root of tempRoots) {
-    try {
-      rmSync(root, { recursive: true, force: true });
-    } catch {
-      /* best-effort */
-    }
+    await cleanupTmpDir(root);
   }
 });
 

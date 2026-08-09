@@ -7,7 +7,7 @@
  *   - Manifest description remains the card summary
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -15,6 +15,7 @@ import {
   pureTool,
   TestPluginRuntime as PluginRuntime,
 } from "./test-helpers.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 function writePlugin(root: string, id: string, opts: {
   name: string;
@@ -94,8 +95,8 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     tmp = mkdtempSync(join(tmpdir(), "lvis-cards-"));
   });
 
-  afterEach(() => {
-    rmSync(tmp, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTmpDir(tmp);
   });
 
   it("returns id, name, description, sampleTools (max 3)", async () => {
