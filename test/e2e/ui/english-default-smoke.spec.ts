@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { closeSettingsWindow, openSettingsWindow } from './settings-window';
+import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 
 /**
  * English-default boot smoke.
@@ -32,14 +32,14 @@ test('boots in English: inline settings heading is "Settings"', async ({ app, ma
   // Settings is an always-inline panel now (settings-inline-overhaul); the
   // shared helper is locale-independent (it gates on the `settings-sidebar-
   // heading` testid), so it works for the English seed too.
-  const settingsWindow = await openSettingsWindow(app, mainWindow, 'llm');
+  const settingsPage = await openInlineSettings(app, mainWindow, 'llm');
 
   await expect(
-    settingsWindow.getByRole('heading', { name: 'Settings', exact: true }),
+    settingsPage.getByRole('heading', { name: 'Settings', exact: true }),
   ).toBeVisible({ timeout: 10_000 });
   await expect(
-    settingsWindow.getByRole('heading', { name: '설정', exact: true }),
+    settingsPage.getByRole('heading', { name: '설정', exact: true }),
   ).toHaveCount(0);
 
-  await closeSettingsWindow(app, settingsWindow);
+  await closeInlineSettings(app, settingsPage);
 });

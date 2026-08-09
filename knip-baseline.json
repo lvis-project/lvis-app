@@ -554,11 +554,6 @@
     },
     {
       "type": "exports",
-      "file": "src/main/settings-window.ts",
-      "name": "openSettingsWindow"
-    },
-    {
-      "type": "exports",
       "file": "src/main/shutdown-timeout.ts",
       "name": "__resetShutdownTimeoutWarnLatchesForTest"
     },

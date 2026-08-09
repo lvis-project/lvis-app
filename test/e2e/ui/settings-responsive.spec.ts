@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { openInlineSettings } from './inline-settings.js';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -47,13 +48,7 @@ async function expectSettingsBottomClearance(
 test('Settings inline shell is responsive (wide master-detail ↔ narrow 2-depth)', async ({ app, mainWindow }) => {
   mkdirSync(OUT, { recursive: true });
 
-  // Open settings INLINE (the openSettingsWindow IPC now redirects to the inline
-  // panel — no BrowserWindow is created).
-  await mainWindow.evaluate(() => {
-    const api = (window as unknown as { lvisApi: { openSettingsWindow: (t?: string) => unknown } }).lvisApi;
-    void api.openSettingsWindow('llm');
-  });
-  await expect(mainWindow.getByTestId('settings-sidebar-heading')).toBeVisible({ timeout: 15_000 });
+  await openInlineSettings(app, mainWindow, 'llm');
 
   // ---- WIDE: master-detail ----
   await setWindowSize(app, 1180, 860);
