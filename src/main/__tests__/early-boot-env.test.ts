@@ -11,7 +11,7 @@
  * itself leaves through Chromium's `net.fetch`.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setProcessPlatform } from "../../testing/process-platform.js";
@@ -53,6 +53,7 @@ vi.mock("../mcp-app-protocol.js", () => ({
 }));
 
 import { runEarlyBootEnv } from "../early-boot-env.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 describe("runEarlyBootEnv", () => {
   let userDataPath: string;
@@ -87,10 +88,10 @@ describe("runEarlyBootEnv", () => {
     vi.stubEnv("WAYLAND_DISPLAY", "wayland-0");
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.unstubAllEnvs();
     setProcessPlatform(realPlatform);
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("anchors the workspace cwd, registers protocol schemes, and pins the app identity", () => {

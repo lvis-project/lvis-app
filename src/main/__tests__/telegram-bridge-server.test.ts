@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -16,6 +16,7 @@ import {
   resolveTelegramBridgeConfig,
   stopTelegramBridgeServer,
 } from "../telegram-bridge-server.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const BOT_TOKEN = "123456789:abcdefghijklmnopqrstuvwxyz_ABCDEF";
 const WEBHOOK_SECRET = "a".repeat(43);
@@ -411,7 +412,7 @@ describe("Telegram bridge lifecycle", () => {
       expect(replay).toBe("duplicate");
       expect(second.submit).not.toHaveBeenCalled();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 

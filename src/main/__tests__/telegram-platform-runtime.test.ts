@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import { mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,6 +20,7 @@ import {
   TELEGRAM_PLATFORM_ACTOR_SECRET_NAME,
   type CreateTelegramPlatformRuntimeOptions,
 } from "../telegram-platform-runtime.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const OWNER_ID = "123456789";
 const OTHER_OWNER_ID = "987654321";
@@ -296,8 +297,8 @@ describe("TelegramPlatformRuntime", () => {
 describe("actor key rotation", () => {
   let directories: string[] = [];
 
-  afterEach(() => {
-    for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+  afterEach(async () => {
+    for (const directory of directories) await cleanupTmpDir(directory);
     directories = [];
   });
 

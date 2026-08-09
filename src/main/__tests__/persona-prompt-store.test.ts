@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { linkSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { linkSync, mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -7,6 +7,7 @@ import {
   parsePersonaPromptFrontmatter,
   renderPersonaPromptFile,
 } from "../persona-prompt-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const tempDirs: string[] = [];
 
@@ -19,9 +20,9 @@ function makeStore() {
 }
 
 describe("PersonaPromptStore", () => {
-  afterEach(() => {
+  afterEach(async () => {
     for (const dir of tempDirs.splice(0)) {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
