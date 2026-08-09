@@ -2,7 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ToolApprovalDialog } from "../ToolApprovalDialog.js";
+import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
 import {
   createElicitationResolverFactory,
@@ -37,11 +37,11 @@ function makeElicitationRequest(): ApprovalRequest {
   };
 }
 
-describe("ToolApprovalDialog MCP elicitation form", () => {
+describe("ToolApprovalContent MCP elicitation form", () => {
   it("captures requestedSchema fields as one-shot elicitation content", () => {
     const onDecide = vi.fn();
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeElicitationRequest()}
         onDecide={onDecide}
@@ -79,7 +79,7 @@ describe("ToolApprovalDialog MCP elicitation form", () => {
   it("preserves optional boolean false in elicitation content", () => {
     const onDecide = vi.fn();
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeElicitationRequest()}
         onDecide={onDecide}
@@ -112,7 +112,7 @@ describe("ToolApprovalDialog MCP elicitation form", () => {
       elicitationId: "e1",
     };
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={request}
         onDecide={onDecide}
@@ -145,7 +145,7 @@ describe("ToolApprovalDialog MCP elicitation form", () => {
         requestAndWait: async (gateRequest) => {
           let captured: { elicitationContent?: Record<string, unknown> } | undefined;
           render(
-            <ToolApprovalDialog
+            <ToolApprovalContent
               open
               request={{
                 id: gateRequest.id,
@@ -240,7 +240,7 @@ describe("ToolApprovalDialog MCP elicitation form", () => {
       },
     };
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={request}
         onDecide={onDecide}

@@ -1,5 +1,41 @@
-import { test, expect } from './fixtures';
-import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
+import { test, expect } from './fixtures.js';
+import { closeInlineSettings } from './inline-settings.js';
+
+type WindowBounds = { x: number; y: number; width: number; height: number };
+
+async function readMainWindowBounds(
+  app: import('@playwright/test').ElectronApplication,
+): Promise<WindowBounds> {
+  return app.evaluate(({ BrowserWindow }) => {
+    const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed() && window.isVisible());
+    const target = windows.sort((a, b) => b.getSize()[0] * b.getSize()[1] - a.getSize()[0] * a.getSize()[1])[0];
+    if (!target) throw new Error('main window is unavailable');
+    return target.getBounds();
+  });
+}
+
+async function restoreMainWindowBounds(
+  app: import('@playwright/test').ElectronApplication,
+  bounds: WindowBounds,
+): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, original) => {
+    const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed() && window.isVisible());
+    const target = windows.sort((a, b) => b.getSize()[0] * b.getSize()[1] - a.getSize()[0] * a.getSize()[1])[0];
+    target?.setBounds(original);
+  }, bounds);
+}
+
+async function activateSettingsWithoutResize(
+  app: import('@playwright/test').ElectronApplication,
+  settingsTab: string,
+): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, tab) => {
+    const windows = BrowserWindow.getAllWindows().filter((window) => !window.isDestroyed() && window.isVisible());
+    const target = windows.sort((a, b) => b.getSize()[0] * b.getSize()[1] - a.getSize()[0] * a.getSize()[1])[0];
+    if (!target) throw new Error('main window is unavailable');
+    target.webContents.send('lvis:view:activate', { viewKey: 'settings', settingsTab: tab });
+  }, settingsTab);
+}
 
 async function setWindowSize(app: import('@playwright/test').ElectronApplication, w: number, h: number) {
   await app.evaluate(({ BrowserWindow }, size) => {
@@ -225,6 +261,56 @@ async function readSwitchAppearanceViaCdp(
     await session.detach();
   }
 }
+
+test('Work to Chat opens Settings as a two-depth narrow list without a forced resize (CDP)', async ({ app, mainWindow }) => {
+  const originalBounds = await readMainWindowBounds(app);
+  const workMode = mainWindow.getByTestId('app-mode-work');
+  const chatMode = mainWindow.getByTestId('app-mode-chat');
+  const originalMode = await chatMode.getAttribute('aria-pressed') === 'true' ? 'chat' : 'work';
+
+  try {
+    if (await workMode.getAttribute('aria-pressed') !== 'true') await workMode.click();
+    await expect(workMode).toHaveAttribute('aria-pressed', 'true');
+    await chatMode.click();
+    await expect(chatMode).toHaveAttribute('aria-pressed', 'true');
+    await expect.poll(() => mainWindow.evaluate(() => window.innerWidth), { timeout: 10_000 }).toBeLessThan(640);
+
+    await activateSettingsWithoutResize(app, 'llm');
+    const root = mainWindow.locator('[data-settings-layout]');
+    await expect.poll(() => root.getAttribute('data-settings-layout'), { timeout: 5_000 }).toBe('narrow');
+    await expect(mainWindow.getByTestId('settings-mobile-list')).toBeVisible();
+    await expect(mainWindow.getByTestId('settings-mobile-back')).not.toBeVisible();
+
+    await root.getByRole('tab').first().click();
+    await expect(mainWindow.getByTestId('settings-mobile-back')).toBeVisible();
+    await expect(mainWindow.getByTestId('settings-mobile-list')).not.toBeVisible();
+    await expectNoHorizontalOverflow(mainWindow, 'Chat settings detail');
+
+    await mainWindow.getByTestId('settings-mobile-back').click();
+    await expect(mainWindow.getByTestId('settings-mobile-list')).toBeVisible();
+    await expect(mainWindow.getByTestId('settings-close')).toHaveCount(0);
+    await expect(mainWindow.getByTestId('settings-mobile-close')).toHaveCount(0);
+
+    await mainWindow.getByTestId('view-path-back').click();
+    await expect(root).toHaveCount(0);
+  } finally {
+    if (await mainWindow.locator('[data-settings-layout]').count()) {
+      await app.evaluate(({ BrowserWindow }) => {
+        const target = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed() && window.isVisible());
+        target?.webContents.send('lvis:view:activate', { viewKey: 'home' });
+      });
+    }
+    if (originalMode === 'work' && await workMode.getAttribute('aria-pressed') !== 'true') {
+      await workMode.click();
+      await expect(workMode).toHaveAttribute('aria-pressed', 'true');
+    } else if (originalMode === 'chat' && await chatMode.getAttribute('aria-pressed') !== 'true') {
+      await chatMode.click();
+      await expect(chatMode).toHaveAttribute('aria-pressed', 'true');
+    }
+    await restoreMainWindowBounds(app, originalBounds);
+  }
+});
+
 test('Chat-mode settings stay horizontally contained on every narrow tab (CDP)', async ({ app, mainWindow }) => {
   test.slow();
 
@@ -234,19 +320,12 @@ test('Chat-mode settings stay horizontally contained on every narrow tab (CDP)',
   }
   await expect(chatMode).toHaveAttribute('aria-pressed', 'true');
 
-  await openInlineSettings(app, mainWindow, 'llm');
-  const close = mainWindow.getByTestId('settings-close');
-  await expect(close).toBeVisible();
-  const closeAlignment = await close.evaluate((button) => {
-    const parent = button.parentElement?.getBoundingClientRect();
-    const rect = button.getBoundingClientRect();
-    return {
-      rightInset: parent ? Math.round(parent.right - rect.right) : Number.POSITIVE_INFINITY,
-    };
-  });
-  expect(closeAlignment.rightInset, 'settings close is right-aligned').toBeLessThanOrEqual(24);
-
   await setWindowSize(app, 400, 820);
+  await activateSettingsWithoutResize(app, 'llm');
+  await expect(mainWindow.getByTestId('settings-close')).toHaveCount(0);
+  await expect(mainWindow.getByTestId('settings-mobile-close')).toHaveCount(0);
+  await expect(mainWindow.getByTestId('view-path-back')).toBeEnabled();
+
   const root = mainWindow.locator('[data-settings-layout]');
   await expect.poll(async () => root.getAttribute('data-settings-layout'), { timeout: 5_000 }).toBe('narrow');
 
@@ -361,16 +440,8 @@ test('Chat-mode settings stay horizontally contained on every narrow tab (CDP)',
   }
 
   await root.getByRole('tab').first().click();
-  const mobileClose = mainWindow.getByTestId('settings-mobile-close');
-  await expect(mobileClose).toBeVisible();
-  const mobileCloseAlignment = await mobileClose.evaluate((button) => {
-    const parent = button.parentElement?.getBoundingClientRect();
-    const rect = button.getBoundingClientRect();
-    return {
-      rightInset: parent ? Math.round(parent.right - rect.right) : Number.POSITIVE_INFINITY,
-    };
-  });
-  expect(mobileCloseAlignment.rightInset, 'narrow settings close is right-aligned').toBeLessThanOrEqual(16);
+  await expect(mainWindow.getByTestId('settings-mobile-close')).toHaveCount(0);
+  await expect(mainWindow.getByTestId('settings-mobile-back')).toBeVisible();
   await closeInlineSettings(app, mainWindow);
   await expect(root).toHaveCount(0);
 });

@@ -29,7 +29,7 @@ import type { ToolResult, ToolUseBlock } from "../../tools/executor.js";
  * cosmetic slip — `llm-tool-arg` is the UNTAINTED bucket, so a replayed resource turn
  * would tell the Layer-5 reviewer that server-authored text was ordinary
  * model-generated input, write that verdict into the untainted cache partition, and
- * label the approval dialog's trust badge with it.
+ * label the approval dock's trust badge with it.
  */
 const INLINE_PASTED_TEXT_RE = /(^|\n)-{5} Pasted text #\d+ \(\d+ lines\) -{5}\n/;
 

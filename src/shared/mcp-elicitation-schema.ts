@@ -3,7 +3,7 @@
  * the host supports.
  *
  * Two consumers used to answer that question independently:
- *  - the renderer approval dialog, which decides whether to render a form at all
+ *  - the renderer approval dock, which decides whether to render a form at all
  *    (and disables approval when it cannot), and
  *  - the main-process elicitation resolver, which re-validates the captured
  *    content before returning `{ action: "accept", content }` to the server.

@@ -384,7 +384,7 @@ export function createRoutineConversationLoop(
  *
  * Model + permissions are INHERITED from the main chat by sharing the same
  * stateless deps (`settingsService` → same vendor/model; `permissionManager` +
- * `approvalGate` → same rules + approval modal). Side chat is NOT scope-isolated
+ * `approvalGate` → same rules + approval dock). Side chat is NOT scope-isolated
  * (no allow-list): it runs with the full active plugin/tool set, exactly like
  * the main chat.
  */

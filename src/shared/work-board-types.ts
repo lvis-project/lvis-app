@@ -49,7 +49,7 @@ export type WorkItemPriority = "high" | "medium" | "low";
  * run (the field is absent on disk for those — there is no fallback default,
  * consumers treat absent as "never run").
  *
- * `denied` = the user rejected (or let time out) the plan-approval modal.
+ * `denied` = the user rejected (or let time out) the plan-approval prompt.
  * `error` = the engine threw during plan or execute.
  */
 export type WorkItemRunStatus =
@@ -262,7 +262,7 @@ export interface WorkItemChangedEventPayload {
  *
  * `phase` mirrors the run lifecycle:
  *   - `planning`          — plan-mode child agent is running; `text` carries the latest turn text.
- *   - `awaiting_approval` — the plan-approval modal is shown; the run is blocked on the user.
+ *   - `awaiting_approval` — the plan-approval prompt is shown; the run is blocked on the user.
  *   - `executing`         — execute-mode child agent is running; `text` carries the latest turn text.
  *   - `denied`            — the user rejected (or timed out) the plan approval; the run stopped.
  *   - `done`              — the run finished successfully (execute output persisted).

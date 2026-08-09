@@ -6,13 +6,11 @@ export function SettingsInlineView({
   api,
   initialTab,
   onSaved,
-  onBack,
   onTabChange,
 }: {
   api: LvisApi;
   initialTab: string;
   onSaved: () => void;
-  onBack: () => void;
   /** Required here (unlike on `SettingsContent`): the inline panel is the app's
    *  own settings surface, so dropping the read-back would leave the app unable
    *  to say where the user is. A missing forward is a type error, not a silent
@@ -30,7 +28,6 @@ export function SettingsInlineView({
         api={api}
         onSaved={onSaved}
         initialTab={initialTab}
-        onClose={onBack}
         onTabChange={onTabChange}
       />
     </PageShell>

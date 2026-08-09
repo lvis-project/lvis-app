@@ -40,6 +40,15 @@ function writeUsageAudit(lvisHome: string): void {
         vendorModel: "model-alpha",
         tokenUsage: { inputTokens: 1_000, outputTokens: 250 },
       }],
+      subscriptionUsage: [{
+        provider: "codex",
+        model: "subscription-alpha",
+        source: "provider-reported",
+        billable: false,
+        inputTokens: 300,
+        outputTokens: 50,
+        totalTokens: 350,
+      }],
     },
     {
       timestamp: new Date(now.getTime() + 1_000).toISOString(),
@@ -77,7 +86,7 @@ async function readNavigationProbe(cdp: CDPSession): Promise<NavigationProbe> {
         currentPath: current?.textContent?.trim() ?? '',
         breadcrumbDisplay: breadcrumb ? getComputedStyle(breadcrumb).display : null,
         legacyBackCount: document.querySelectorAll(
-          '[data-testid="main-content-back"], [data-testid="plugin-page-back"], [data-testid="page-shell-back"]'
+          '[data-testid="main-content-back"], [data-testid="plugin-page-back"], [data-testid="page-shell-back"], [data-testid="settings-close"], [data-testid="settings-mobile-close"]'
         ).length,
         providerText: provider?.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
         modelText: model?.textContent?.replace(/\\s+/g, ' ').trim() ?? '',
@@ -102,6 +111,18 @@ async function attachCdpScreenshot(cdp: CDPSession, name: string): Promise<void>
 
 async function expectNoLegacyBack(cdp: CDPSession): Promise<void> {
   expect((await readNavigationProbe(cdp)).legacyBackCount).toBe(0);
+}
+
+async function selectSettingsTab(
+  page: import("@playwright/test").Page,
+  name: RegExp,
+): Promise<void> {
+  const tab = page.getByRole("tab", { name });
+  if (!await tab.isVisible().catch(() => false)) {
+    const mobileBack = page.getByTestId("settings-mobile-back");
+    if (await mobileBack.isVisible().catch(() => false)) await mobileBack.click();
+  }
+  await page.getByRole("tab", { name }).click();
 }
 
 test.describe("navigation and monthly insights under CDP", () => {
@@ -138,8 +159,10 @@ test.describe("navigation and monthly insights under CDP", () => {
       await expect(ctx.page.getByTestId("insights-monthly-usage-breakdown")).toBeVisible();
       await expect(ctx.page.getByTestId("insights-provider-usage")).toContainText("openai-compatible");
       await expect(ctx.page.getByTestId("insights-provider-usage")).toContainText("lmstudio");
+      await expect(ctx.page.getByTestId("insights-provider-usage")).toContainText("codex");
       await expect(ctx.page.getByTestId("insights-model-usage")).toContainText("model-alpha");
       await expect(ctx.page.getByTestId("insights-model-usage")).toContainText("model-beta");
+      await expect(ctx.page.getByTestId("insights-model-usage")).toContainText("subscription-alpha");
 
       const insights = await readNavigationProbe(cdp);
       expect(insights.backDisabled).toBe(false);
@@ -148,6 +171,7 @@ test.describe("navigation and monthly insights under CDP", () => {
       expect(insights.legacyBackCount).toBe(0);
       expect(insights.providerText).toContain("openai-compatible");
       expect(insights.modelText).toContain("model-alpha");
+      expect(insights.modelText).toContain("subscription-alpha");
       await attachCdpScreenshot(cdp, "navigation-insights-desktop-cdp.png");
 
       await ctx.page.getByTestId("view-path-back").click();
@@ -161,11 +185,22 @@ test.describe("navigation and monthly insights under CDP", () => {
 
       await ctx.page.getByTestId("sidebar-settings").click();
       await expect(ctx.page.getByTestId("view-path-current-settings:llm")).toBeVisible();
-      await ctx.page.getByRole("tab", { name: /Permissions|권한/ }).click();
+      await selectSettingsTab(ctx.page, /Usage|사용량/);
+      await expect(ctx.page.getByTestId("view-path-current-settings:usage")).toBeVisible();
+      await expect(ctx.page.getByTestId("general-tab-card-plugin")).toBeVisible();
+      await ctx.page.getByTestId("general-tab-card-plugin").click();
+      await expect(ctx.page.getByTestId("view-path-current-settings:plugin-config")).toBeVisible();
+      await ctx.page.getByTestId("view-path-back").click();
+      await expect(ctx.page.getByTestId("view-path-current-settings:usage")).toBeVisible();
+      await ctx.page.getByTestId("view-path-forward").click();
+      await expect(ctx.page.getByTestId("view-path-current-settings:plugin-config")).toBeVisible();
+      await ctx.page.getByTestId("view-path-segment-settings").click();
+      await expect(ctx.page.getByTestId("view-path-current-settings:llm")).toBeVisible();
+      await selectSettingsTab(ctx.page, /Permissions|권한/);
       await expect(ctx.page.getByTestId("view-path-current-settings:permissions")).toBeVisible();
       await ctx.page.getByTestId("view-path-segment-settings").click();
       await expect(ctx.page.getByTestId("view-path-current-settings:llm")).toBeVisible();
-      await expect(ctx.page.getByRole("tab", { name: /Model|모델/ })).toHaveAttribute("aria-selected", "true");
+      await expect(ctx.page.getByRole("tabpanel", { name: /Model|모델/ })).toBeVisible();
       await expectNoLegacyBack(cdp);
 
       // A top-navbar departure must flush the inline Settings debounce before
@@ -173,7 +208,7 @@ test.describe("navigation and monthly insights under CDP", () => {
       await ctx.page.getByTestId("sidebar-home").click();
       await expect(ctx.page.getByTestId("view-path-current-home")).toBeVisible();
       await ctx.page.getByTestId("sidebar-settings").click();
-      await ctx.page.getByRole("tab", { name: /Chat|채팅/ }).click();
+      await selectSettingsTab(ctx.page, /Chat|채팅/);
       const privacyToggle = ctx.page.getByRole("checkbox", {
         name: t("privacyTab.piiRedactToggleLabel"),
       });
@@ -188,7 +223,7 @@ test.describe("navigation and monthly insights under CDP", () => {
       await ctx.page.getByTestId("view-path-back").click();
       await expect(ctx.page.getByTestId("view-path-current-home")).toBeVisible();
       await ctx.page.getByTestId("sidebar-settings").click();
-      await ctx.page.getByRole("tab", { name: /Chat|채팅/ }).click();
+      await selectSettingsTab(ctx.page, /Chat|채팅/);
       await expect(ctx.page.getByRole("checkbox", {
         name: t("privacyTab.piiRedactToggleLabel"),
       })).toHaveAttribute("aria-checked", nextPrivacyState);
@@ -199,6 +234,13 @@ test.describe("navigation and monthly insights under CDP", () => {
       await expect(ctx.page.getByTestId("view-path-back")).toBeVisible();
       await expect(ctx.page.getByTestId("view-path-forward")).toBeVisible();
       await expect(ctx.page.getByTestId("view-path-breadcrumb")).toBeHidden();
+      // ResizeObserver/month range effects can briefly re-enter loading while
+      // the narrow layout settles; sample CDP only after the same visible data
+      // contract has returned.
+      await expect(ctx.page.getByTestId("insights-provider-usage")).toContainText(
+        "openai-compatible",
+      );
+      await expect(ctx.page.getByTestId("insights-model-usage")).toContainText("model-beta");
       const narrow = await readNavigationProbe(cdp);
       expect(narrow.breadcrumbDisplay).toBe("none");
       expect(narrow.legacyBackCount).toBe(0);

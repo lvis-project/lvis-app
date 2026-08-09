@@ -1205,12 +1205,12 @@ lvis-app/src/
 │   │                            #   use-permission-toasts, use-checkpoint-view,
 │   │                            #   use-transcript-entries, use-plugin-lifecycle-refresh, …)
 │   ├── components/              # BriefingCard, AssistantCard, UserMessageEditor,
-│   │                            #  ReasoningCard, ToolApprovalDialog, ToolGroupCard,
+│   │                            #  ReasoningCard, ToolApprovalContent, ToolGroupCard,
 │   │                            #  UnifiedSearchPanel, Sparkline, UsageDashboard,
 │   │                            #  HtmlPreview, StarredView,
 │   │                            #  MarketplaceUpdateBanner; ChatSidePanel composition plus
 │   │                            #  chat-side-panel-{preview,layout,workspaces} focused units
-│   ├── dialogs/                 # ApprovalDialog, PluginInstallDialog,
+│   ├── dialogs/                 # PluginInstallDialog and explicit workflow dialogs,
 │   │                            #  PluginUninstallDialog, CommandPaletteDialog
 │   ├── tabs/                    # LlmTab, AppearanceTab, ChatTab, WebTab,
 │   │                            #  PrivacyTab, PermissionsTab,
@@ -1648,7 +1648,7 @@ flowchart TB
 | 2 | Action 결정 (`allow / ask / deny`) + `denyReasons[]` 수집. `confirm` 은 `ask` 의 sub-variant — auto mode 도 silent skip 금지. | §3 Layer 2 | `PermissionCheckResult.denyReasons` |
 | 3 | 5-axis category × source × mode 매트릭스. Open-Closed `ToolCategoryRegistry`. | §3 Layer 3 | `src/permissions/category-registry.ts` |
 | 4 | Routine 의 `scope.pluginIds` discriminated union (`deny-all` / `allow` / `inherit`). Boot 시 `inherit` 은 active set 으로 normalize. | §3 Layer 4 | `routine.scope.*` |
-| 5 | Reviewer agent (multi-vendor) — foreground auto-review LOW allow / MED-HIGH main-owned approval modal, headless MED-HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
+| 5 | Reviewer agent (multi-vendor) — foreground auto-review LOW allow / MED-HIGH main-owned approval dock, headless MED-HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
 | 6 | Hook chain v1 (deny-only). `~/.config/lvis/hooks/{pre,post,perm}-*.sh`. Strict-deny quarantine lockfile + DLP-redacted stdin. | §3 Layer 6 | `src/hooks/script-hook-*` |
 | 7 | Discriminated-union audit (`AuditAllow`/`AuditAsk`/`AuditDeny`/`AuditDeferred`/`AuditModeChange`/`AuditManifestViolation`) + HMAC chain + daily seal. | §3 Layer 7 | `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts` |
 | 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` modal confirm. Modes: `default`, `strict`, `auto`, `allow`. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
@@ -1675,7 +1675,7 @@ classifier. 4-mode (`disabled` / `rule` / `llm` / `strict`) + multi-vendor adapt
 (default OpenAI gpt-4o-mini, Anthropic / Google 도 swap 가능). 항상
 rule classifier 가 baseline 으로 함께 실행되며 `final = max(rule, llm)`
 (LLM downgrade 불가). 현재 foreground auto-review 는 LOW 만 allow + audit 하고
-MED/HIGH 는 main-owned approval modal 로 사용자 결정을 받는다. 승인은 해당
+MED/HIGH 는 main-owned in-flow approval dock 에서 사용자 결정을 받는다. 승인은 해당
 요청의 봉인된 tool/input 에만 1회 적용되며 chat 문장 감지나 executor 재시도
 메모리를 권한 근거로 사용하지 않는다. Headless reviewer 는 LOW 만 실행하고
 MED/HIGH 는 deferred queue 에 append 되어 사용자가 큐 버튼을 열 때 surface 된다.
@@ -1684,8 +1684,8 @@ MED/HIGH 는 deferred queue 에 append 되어 사용자가 큐 버튼을 열 때
 versioned release prerequisite 가 모두 attest 된 경우에만 production 에서
 guarded-on 된다. ConversationLoop 는 ordering 과 coordinator injection 에 같은
 activation predicate 를 사용하며, runtime 준비가 없거나 실패하면 기존 batch 및
-ordinary approval modal 흐름을 유지한다. 활성 경로는 1회 rationale-only round,
-생성 결과와 reviewer 재평가 결과의 독립 기록, 실패 시 동일 approval modal
+ordinary approval dock 흐름을 유지한다. 활성 경로는 1회 rationale-only round,
+생성 결과와 reviewer 재평가 결과의 독립 기록, 실패 시 동일 approval dock
 fallback, host CAS allow-once 및 현재 권한 재검증을 모두 충족한다.
 
 **Mode semantics (post issue #664 normalization):**
@@ -2027,7 +2027,7 @@ Layer 0–8 의 permission policy 는 _어떤 도구 호출을 허용/거부_ �
   fs+network partial `confines` 가 reviewer 의 `sandboxRelaxesCategory` 를
   _비대칭_ 으로 작동시킨다 — `network` 및 filesystem-bearing
   `read`/`write`/`meta` 카테고리는 relax 하지만, `shell` 은 process 격리가
-  없으므로 relax 안 한다. ToolApprovalDialog 의 보안-격리 라벨도 동일하게 정직
+  없으므로 relax 안 한다. ToolApprovalContent 의 보안-격리 라벨도 동일하게 정직
   하다 (PR2 finding b): 이전에는 confines-blind `isWeakSandbox` 가 win32 의
   shell 도구에도 "OS 격리 활성" 을 표시했는데, 이제 `confines.process`
   가 false 면 per-dimension 라벨 ("[net:✓ fs:✓ proc:✗]") 을
@@ -2122,14 +2122,14 @@ graph TB
 | Category | 의미 | 의사결정 (default mode) | 헤들리스 (routine) | 비고 |
 | --------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------- | ------------------------------------------ |
 | `read` | 조회/검색 (자료를 변경하지 않음) | builtin: allow / plugin: scope-checked | allow | strict mode → ask |
-| `write` | 사용자 데이터 변경 | ask (auto → reviewer LOW allow + audit / MED-HIGH approval modal, allow → allow + audit) | reviewer agent unless allow mode | reviewer 미배치 시 fail-closed or user ask |
-| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 (auto → reviewer LOW allow + AST + audit / MED-HIGH approval modal, allow → allow + AST) | reviewer unless allow mode | AST 검증은 executor-owned gate |
-| `network` | 외부 네트워크 호출 | ask + endpoint surface (auto → reviewer LOW allow + audit / MED-HIGH approval modal, allow → allow + audit) | reviewer unless allow mode | endpoint 추출은 executor-owned surface |
+| `write` | 사용자 데이터 변경 | ask (auto → reviewer LOW allow + audit / MED-HIGH approval dock, allow → allow + audit) | reviewer agent unless allow mode | reviewer 미배치 시 fail-closed or user ask |
+| `shell` | 셸 명령 실행 (Bash 등) | ask + Bash AST 검증 (auto → reviewer LOW allow + AST + audit / MED-HIGH approval dock, allow → allow + AST) | reviewer unless allow mode | AST 검증은 executor-owned gate |
+| `network` | 외부 네트워크 호출 | ask + endpoint surface (auto → reviewer LOW allow + audit / MED-HIGH approval dock, allow → allow + audit) | reviewer unless allow mode | endpoint 추출은 executor-owned surface |
 | `meta` | 제어 흐름 / UI 프리미티브 | `decisionOverride` 따름 | 동일 | host builtin 전용; plugin 사용 금지 |
 
 `strict` 는 mode-first 정책이다. Headless 여부와 무관하게 `read` 포함 모든 도구가 ask 로 승격되며, reviewer routing 은 default/auto 의 mutation category 에만 적용된다.
 
-**`decisionOverride` (meta 전용):** `always-allow-with-audit` (예: `ask_user_question` — 사용자에게 질문하는 도구 자체를 한번 더 승인 모달에 거는 중복 UX 차단) / `ask` (예: `agent_spawn` — `meta` 이지만 사용자 컨펌 필요).
+**`decisionOverride` (meta 전용):** `always-allow-with-audit` (예: `ask_user_question` — 사용자에게 질문하는 도구 자체를 한번 더 승인 도크에 거는 중복 UX 차단) / `ask` (예: `agent_spawn` — `meta` 이지만 사용자 컨펌 필요).
 
 **Migration map:** v4 의 `dangerous` 단일 카테고리는 v5 에서 폐지됨. `bash` → `shell`, `agent_spawn` / `ask_user_question` → `meta`. Plugin 의 filesystem path 판정 metadata SOT 는 tool 객체의 `_meta["lvisai/pathFields"]` 이다 (#885 Phase R). Per-tool category 는 manifest 필드가 아니며 effective category 는 host-side `inspectHostRisk`/executor policy 가 invocation 별로 산출한다.
 
@@ -4622,7 +4622,7 @@ v4 §4.5 의 11-step 쿼리 루프(`onUserMessage → ... → onTurnComplete`)�
 
 LVIS 는 **모든** skill 을 body-hash 승인 게이트(§9 skill-load + skill-approvals-store) 뒤에 둔다. mode 가 `autoSkills` 를 system prompt 에 _force-load_ 하면 이 게이트를 **우회** — 보안 회귀. 따라서 `autoSkills` 는 **추천(RECOMMENDATION)이며 force-load 가 아니다**:
 
-- `buildModePreamble(config)` 는 `<lvis-agent-mode-skills>` 텍스트 블록만 emit 하여 "이 작업에 유용한 skill 목록 + `skill_load` 로 직접 로드하라(첫 로드 시 승인 모달)"을 LLM 에게 알린다.
+- `buildModePreamble(config)` 는 `<lvis-agent-mode-skills>` 텍스트 블록만 emit 하여 "이 작업에 유용한 skill 목록 + `skill_load` 로 직접 로드하라(첫 로드 시 승인 도크)"를 LLM 에게 알린다.
 - SubAgentRunner 는 mode 로부터 child SkillOverlay 에 **아무것도 등록하지 않는다**. skill body 는 사용자가 `skill_load` 를 통해 승인한 뒤에만 주입된다 — 수동 요청 skill 과 정확히 동일.
 - 결과: body-hash TOFU 게이트가 완전히 보존되며, ergonomic 이득(에이전트 mode 가 적합 skill 을 surface)만 취한다.
 

@@ -19,7 +19,6 @@ import {
   Network,
   ChevronLeft,
   ChevronRight,
-  X,
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
@@ -112,9 +111,9 @@ const SETTINGS_NAV: { group: string; items: SettingsNavItem[] }[] = [
 /**
  * Inline save bar rendered at the bottom of each tab that holds a
  * deferred-save form (llm / chat / web / marketplace). Replaces the
- * single dialog-level footer Save button so the action lives next to
+ * single page-level footer Save button so the action lives next to
  * the inputs it persists, matching the per-section save policy used
- * by the rest of the dialog.
+ * by the rest of the settings route.
  */
 function TabSaveBar({
   onSave,
@@ -144,13 +143,11 @@ export function SettingsContent({
   api,
   onSaved,
   initialTab = "llm",
-  onClose,
   onTabChange,
 }: {
   api: LvisApi;
   onSaved: () => void;
   initialTab?: string;
-  onClose?: () => void;
   /**
    * Reports every in-panel move to a new tab, already normalized. `initialTab`
    * seeds (and re-seeds) the selection, so an embedder could always WRITE the
@@ -171,7 +168,7 @@ export function SettingsContent({
   const [marketplaceFilter, setMarketplaceFilter] = useState<MarketplacePackageFilter>("all");
   const [pendingPermissions, setPendingPermissions] = useState(0);
 
-  // the dialog. Tabs whose save runs through the orchestration hook hit
+  // the settings route. Tabs whose save runs through the orchestration hook hit
   // it via the wrapped `handleSaved` below; tabs with their own IPC
   // (PluginConfigTab / AppearanceTab / RolesTab / McpTab) call
   // `notifySaved()` from useNotifySaved() after their own success.
@@ -194,12 +191,12 @@ export function SettingsContent({
   // The explicit TabSaveBar Save button calls `.cancel()` first to
   // avoid a double-write race (pending debounce + click would otherwise
   // fire `s.save` twice), then `s.save(tab)`. The save itself never
-  // closes the dialog — modern multi-tab Settings (VS Code, Linear,
-  // Raycast) keep the modal open after Save so the user can verify the
-  // change and edit a sibling tab; close lives on the Dialog X / Esc.
+  // leaves the route — modern multi-tab Settings (VS Code, Linear,
+  // Raycast) stay open after Save so the user can verify the change and edit a
+  // sibling tab; navigation belongs to the shared history navbar.
   // Settings is an inline route. Leaving through the app-level navbar
-  // unmounts this surface, so pending immediate-apply changes must flush just
-  // as they do for the local close control and window shutdown.
+  // unmounts this surface, so pending immediate-apply changes must flush before
+  // the route is discarded, just as they do for window shutdown.
   const llmSave = useDebouncedSave(() => void s.save("llm"), 200, { flushOnUnmount: true });
 
   const chatSave = useDebouncedSave(() => void s.save("chat"), 200, { flushOnUnmount: true });
@@ -211,10 +208,6 @@ export function SettingsContent({
     webSave.flush();
     marketplaceSave.flush();
   }, [llmSave, chatSave, webSave, marketplaceSave]);
-  const handleClose = useCallback(() => {
-    flushPendingSaves();
-    onClose?.();
-  }, [flushPendingSaves, onClose]);
   // Single writer for the tab so every in-panel move is reported outward; a
   // second `setTab` call site would be a silent hole in that contract.
   const selectTab = useCallback((nextTab: string) => {
@@ -233,7 +226,7 @@ export function SettingsContent({
     // Committing a category (click, or Enter in manual/narrow mode) drops into
     // depth-2 detail on narrow; inert on wide (both regions stay visible).
     setMobileDepth("detail");
-  }, []);
+  }, [selectTab]);
 
   // Flush any pending debounced save when the user closes the window or
   // quits the app. The 200ms debounce window is short, but a user who
@@ -306,9 +299,8 @@ export function SettingsContent({
 
   // Narrow-only 2-depth navigation. Depth 1 = the grouped category list;
   // depth 2 = one selected pane + a back bar. Default "list": a freshly opened
-  // narrow panel shows the category list first, and the outer return-to-app back
-  // button (PageShell, rendered above SettingsContent) stays the primary escape
-  // from depth 1. Selecting a category marks it "detail"; on wide that is inert,
+  // narrow panel shows the category list first. App-level navigation stays in
+  // the titlebar navbar. Selecting a category marks it "detail"; on wide that is inert,
   // but it means a later narrowing lands on the actively-selected pane instead
   // of bouncing back to the list. On resize narrow→wide the depth is ignored
   // (both regions show); wide→narrow reuses the retained depth.
@@ -375,7 +367,7 @@ export function SettingsContent({
       // `data-settings-layout` exposes the panel-width layout mode for tests.
       data-settings-layout={isNarrow ? "narrow" : "wide"}
       // No gap: sidebar and content share a single border (right edge of
-      // the sidebar) so the layout reads as two regions of the dialog,
+      // the sidebar) so the layout reads as two regions of the settings route,
       // not two stacked cards. Simplified per user direction
 
       className="relative flex h-full min-h-0 min-w-0 flex-1"
@@ -413,19 +405,6 @@ export function SettingsContent({
         >
           {t("settingsContent.sidebarHeading")}
         </h2>
-        {onClose ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={handleClose}
-            aria-label={t("settingsContent.closeButton")}
-            data-testid="settings-close"
-            className="size-8 shrink-0"
-          >
-            <X className="size-4" aria-hidden="true" />
-          </Button>
-        ) : null}
       </div>
       {/* VerticalTabsList bakes in the shadcn vertical-sidebar override
           (flex-col + justify-start + rounded-none + bg-transparent); only
@@ -517,8 +496,7 @@ export function SettingsContent({
           isNarrow && mobileDepth === "list" && "hidden",
         )}
       >
-      {/* Narrow depth-2 back bar — returns to the depth-1 category list. The
-          outer PageShell back button (return to app) stays above this. */}
+      {/* Narrow depth-2 back bar returns to the depth-1 category list. */}
       {isNarrow && (
         <div className="flex shrink-0 items-center border-b px-2 py-2">
           <button
@@ -532,19 +510,6 @@ export function SettingsContent({
             <ChevronLeft className="size-4 shrink-0" aria-hidden="true" />
             {t("settingsContent.sidebarHeading")}
           </button>
-          {onClose ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={handleClose}
-              aria-label={t("settingsContent.closeButton")}
-              data-testid="settings-mobile-close"
-              className="ml-auto size-8 shrink-0"
-            >
-              <X className="size-4" aria-hidden="true" />
-            </Button>
-          ) : null}
         </div>
       )}
       <div ref={rightPaneRef} className="flex min-w-0 flex-1 min-h-0 flex-col overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] px-4 pt-2 pb-12 scroll-pb-12 sm:px-8 lvis-settings-scroll">
@@ -671,7 +636,7 @@ export function SettingsContent({
           <TabsContent value="usage" className={tabContentCls}>
             <UsageDashboard
               api={api}
-              onNavigate={(nextTab) => setTab(normalizeSettingsTab(nextTab))}
+              onNavigate={handleTabValueChange}
             />
           </TabsContent>
           <TabsContent value="audit" className={tabContentCls}><AuditTab /></TabsContent>

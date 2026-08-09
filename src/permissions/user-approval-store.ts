@@ -4,7 +4,7 @@
  * Spec ref: docs/research/sandbox-isolation.md
  * Issue: #691
  *
- * Stores per-tool approval decisions made by the user in the ToolApprovalDialog
+ * Stores per-tool approval decisions made by the user in the ToolApprovalContent
  * so that subsequent calls with the same (toolName, args, source) triple can
  * skip the LLM classifier and go straight to the rule-based verdict.
  *
@@ -28,7 +28,7 @@
  *   "persistent" — approval written to disk; survives restarts.
  *
  * HIGH-verdict approvals MUST include a non-null nlJustification (enforced
- * by the ToolApprovalDialog). HIGH approvals cannot use scope "persistent"
+ * by the ToolApprovalContent). HIGH approvals cannot use scope "persistent"
  * (the dialog disables that option) — users must re-justify each session.
  *
  * Atomicity: writes use a random-suffix .tmp file + rename() so a crash
@@ -231,7 +231,7 @@ async function mutatePersistentApprovals(
  * For "session" scope, stores only in memory (no disk write).
  * For "persistent" scope, appends to ~/.lvis/permissions/user-approvals.json.
  *
- * Callers (ToolApprovalDialog via IPC) MUST:
+ * Callers (ToolApprovalContent via IPC) MUST:
  *   - Pass nlJustification !== null when verdictAtApproval === "high".
  *   - Use scope "session" (not "persistent") for high-verdict approvals.
  */

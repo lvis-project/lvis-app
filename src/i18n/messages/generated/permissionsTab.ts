@@ -3,9 +3,9 @@ export const en = {
   // Reviewer interactive options
   "permissionsTab.interactiveAutoApproveLabel": "Automatic approval threshold",
   "permissionsTab.interactiveOffLabel": "Off",
-  "permissionsTab.interactiveOffDescription": "Always shows a confirmation dialog before a tool runs.",
+  "permissionsTab.interactiveOffDescription": "Always shows the foreground approval dock before a tool runs.",
   "permissionsTab.interactiveLowLabel": "Auto-approve low risk",
-  "permissionsTab.interactiveLowDescription": "Actions judged as low risk are automatically allowed without confirmation. Medium and high risk still show a confirmation dialog.",
+  "permissionsTab.interactiveLowDescription": "Actions judged as low risk are automatically allowed without confirmation. Medium and high risk still require a decision in the foreground approval dock.",
   "permissionsTab.interactiveMediumLabel": "Auto-approve medium risk",
   "permissionsTab.interactiveMediumDescription": "Actions judged as low or medium risk are automatically allowed without confirmation. High risk still requires confirmation.",
 
@@ -86,9 +86,9 @@ export const en = {
   "permissionsTab.currentPolicySummaryDescription": "Select one of: Default, Ask All, Auto-validate, or Allow All.",
   "permissionsTab.summaryPolicyPreset": "Policy preset",
   "permissionsTab.summaryReviewer": "Permission reviewer",
-  "permissionsTab.summaryApprovalDialog": "Approval dialog",
+  "permissionsTab.summaryApprovalDialog": "Approval dock",
   "permissionsTab.summaryExplicitRequired": "Explicit action required",
-  "permissionsTab.summaryCloseDenies": "Close action denies",
+  "permissionsTab.summaryCloseDenies": "Escape denies",
 
   // Policy section
   "permissionsTab.policyTitle": "Permission Policy",
@@ -112,7 +112,7 @@ export const en = {
 
   // Auto-approve low risk
   "permissionsTab.autoApproveLowRiskLabel": "Auto-approve low risk",
-  "permissionsTab.autoApproveLowRiskDescription": "Tool executions judged as low risk are automatically allowed without confirmation. Medium and high risk executions always show a confirmation dialog.",
+  "permissionsTab.autoApproveLowRiskDescription": "Tool executions judged as low risk are automatically allowed without confirmation. Medium and high risk executions always require a decision in the foreground approval dock.",
   "permissionsTab.autoApproveLowRiskAriaLabel": "Auto-approve low risk setting",
 
   // Inline warning banners
@@ -138,10 +138,10 @@ export const en = {
   "permissionsTab.reviewerPromptTitle": "Validation Prompt",
   "permissionsTab.reviewerPromptDescription": "Auto-validate mode uses this built-in prompt for permission risk classification. Settings are changed by policy mode, not in this panel.",
 
-  // Approval dialog section
-  "permissionsTab.approvalDialogTitle": "Approval Dialog Behavior",
-  "permissionsTab.approvalDialogDescription": "When checked, clicking outside the modal and pressing Escape are blocked in the approval dialog — you must explicitly decide using a button or approval shortcut.",
-  "permissionsTab.approvalDialogCheckboxAriaLabel": "Require explicit approval or denial via button or shortcut in the approval dialog",
+  // Approval dock section
+  "permissionsTab.approvalDialogTitle": "Approval Dock Behavior",
+  "permissionsTab.approvalDialogDescription": "When checked, Escape cannot deny a pending approval — you must explicitly decide using a button or approval shortcut in the dock.",
+  "permissionsTab.approvalDialogCheckboxAriaLabel": "Require explicit approval or denial via button or shortcut in the approval dock",
   "permissionsTab.policyEnabled": "Enabled",
   "permissionsTab.policyDisabled": "Disabled",
   "permissionsTab.adminManagedTitle": "Managed by IT administrator",
@@ -226,9 +226,9 @@ export const en = {
 export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.interactiveAutoApproveLabel": "자동 허용 위험도",
   "permissionsTab.interactiveOffLabel": "끔",
-  "permissionsTab.interactiveOffDescription": "도구가 실행되기 전 항상 확인 창을 표시합니다.",
+  "permissionsTab.interactiveOffDescription": "도구가 실행되기 전 항상 전경 승인 도크를 표시합니다.",
   "permissionsTab.interactiveLowLabel": "저위험 자동 허용",
-  "permissionsTab.interactiveLowDescription": "저위험으로 판단된 작업은 확인 없이 자동으로 허용합니다. 중·고위험은 여전히 확인 창이 표시됩니다.",
+  "permissionsTab.interactiveLowDescription": "저위험으로 판단된 작업은 확인 없이 자동으로 허용합니다. 중·고위험은 전경 승인 도크에서 사용자 결정을 요구합니다.",
   "permissionsTab.interactiveMediumLabel": "중위험까지 자동 허용",
   "permissionsTab.interactiveMediumDescription": "저위험과 중위험으로 판단된 작업은 확인 없이 자동으로 허용합니다. 고위험은 계속 확인이 필요합니다.",
 
@@ -294,9 +294,9 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.currentPolicySummaryDescription": "기본, 전체 물어보기, 자동 검증, 전체 허용 중 하나를 선택합니다.",
   "permissionsTab.summaryPolicyPreset": "정책 프리셋",
   "permissionsTab.summaryReviewer": "권한 리뷰어",
-  "permissionsTab.summaryApprovalDialog": "승인 대화상자",
+  "permissionsTab.summaryApprovalDialog": "승인 도크",
   "permissionsTab.summaryExplicitRequired": "명시 액션 필수",
-  "permissionsTab.summaryCloseDenies": "닫기 동작은 거부 처리",
+  "permissionsTab.summaryCloseDenies": "Escape 키는 거부 처리",
 
   "permissionsTab.policyTitle": "권한 정책",
   "permissionsTab.policyDescription": "기본은 읽기 도구를 허용하고, 전체 물어보기는 읽기까지 확인합니다. 자동 검증은 자동(헤드리스) 실행과 대화형 채팅 모두를 권한 리뷰어 설정으로 검증하고, 전체 허용은 하드 차단 범위 밖의 도구를 자동 허용하되 허용 디렉터리 밖 접근은 별도 승인합니다.",
@@ -316,7 +316,7 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.llmProviderManagedNote": "공급자, 모델, API 키, baseUrl, Vertex 프로젝트/리전 변경은 지능 설정에서 관리합니다.",
 
   "permissionsTab.autoApproveLowRiskLabel": "저위험 자동 허용",
-  "permissionsTab.autoApproveLowRiskDescription": "위험도가 낮다고 판단된 도구 실행은 확인 없이 자동으로 허용합니다. 중간·높은 위험도의 실행은 어떤 경우에도 확인 창이 표시됩니다.",
+  "permissionsTab.autoApproveLowRiskDescription": "위험도가 낮다고 판단된 도구 실행은 확인 없이 자동으로 허용합니다. 중간·높은 위험도의 실행은 전경 승인 도크에서 항상 사용자 결정을 요구합니다.",
   "permissionsTab.autoApproveLowRiskAriaLabel": "저위험 자동 허용 설정",
 
   "permissionsTab.warnReviewerDisabledAutoApproveInactive": "⚠ 권한 리뷰어가 꺼져 있어 저위험 자동 허용이 동작하지 않습니다. 권한 리뷰어를 \"규칙 기반 검증\" 또는 \"LLM 검증\"으로 켜세요.",
@@ -339,9 +339,9 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.reviewerPromptTitle": "검증 프롬프트",
   "permissionsTab.reviewerPromptDescription": "자동 검증 모드는 이 내장 프롬프트로 권한 위험도를 분류합니다. 이 패널에서는 설정을 변경하지 않고 정책 모드만으로 동작합니다.",
 
-  "permissionsTab.approvalDialogTitle": "승인 대화상자 동작",
-  "permissionsTab.approvalDialogDescription": "체크 시 승인 대화상자에서 모달 외부 클릭과 Escape 키가 차단되어 버튼 또는 승인 단축키로 명시적으로 결정해야 합니다.",
-  "permissionsTab.approvalDialogCheckboxAriaLabel": "승인 대화상자에서 버튼 또는 단축키로 명시적 승인 또는 거부를 요구",
+  "permissionsTab.approvalDialogTitle": "승인 도크 동작",
+  "permissionsTab.approvalDialogDescription": "체크 시 Escape 키로 대기 중인 승인을 거부할 수 없으며, 도크의 버튼 또는 승인 단축키로 명시적으로 결정해야 합니다.",
+  "permissionsTab.approvalDialogCheckboxAriaLabel": "승인 도크의 버튼 또는 단축키로 명시적 승인 또는 거부를 요구",
   "permissionsTab.policyEnabled": "활성화됨",
   "permissionsTab.policyDisabled": "비활성화됨",
   "permissionsTab.adminManagedTitle": "IT 관리자 설정",
@@ -350,7 +350,7 @@ export const ko: Record<keyof typeof en, string> = {
 
   // OS Tool Sandbox section
   "permissionsTab.osSandboxTitle": "OS 도구 샌드박스",
-  "permissionsTab.osSandboxDescription": "셸 및 도구 프로세스 실행 시 OS 수준 샌드박스 안에 격리합니다. 프롬프트 인젝션에도 견디는 커널 강제 경계로, 승인 대화상자와는 별개 축입니다. 기본 비활성화이며, 켜서 사용 설정합니다.",
+  "permissionsTab.osSandboxDescription": "셸 및 도구 프로세스 실행 시 OS 수준 샌드박스 안에 격리합니다. 프롬프트 인젝션에도 견디는 커널 강제 경계로, 승인 프롬프트와는 별개 축입니다. 기본 비활성화이며, 켜서 사용 설정합니다.",
   "permissionsTab.osSandboxCheckboxAriaLabel": "OS 도구 샌드박스 사용",
   "permissionsTab.osSandboxEnabled": "활성화됨",
   "permissionsTab.osSandboxDisabled": "비활성화됨",

@@ -55,7 +55,6 @@ async function renderWithConsumer(embedder: Embedder) {
             api={api as never}
             onSaved={() => {}}
             initialTab={settingsTab}
-            onBack={() => {}}
             onTabChange={setSettingsTab}
           />
         )}
