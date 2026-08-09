@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +19,7 @@ import {
   type SubAgentSpawnResult,
 } from "../subagent-runner.js";
 import type { TurnResult } from "../turn/types.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 vi.mock("../../observability/conversation-trace.js", () => ({
   createTracer: () => ({
@@ -114,9 +115,9 @@ describe("SubAgentRunner A2A wire security contract", () => {
       .mockReturnValue(true);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
-    rmSync(tmpHome, { recursive: true, force: true });
+    await cleanupTmpDir(tmpHome);
   });
 
   function makeRunner(
