@@ -27,9 +27,9 @@ import type { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 export type OnReadResource = NonNullable<AppBridge["onreadresource"]>;
 
 /**
- * The only scheme an MCP App may read through this proxy. Same literal main's
- * open-detached validation and the `_meta.ui` contract use — a `ui://` resource IS the
- * card surface, and nothing else on the server is reachable from inside the sandbox.
+ * The only scheme an MCP App may read through this proxy. It matches the
+ * `_meta.ui` contract: a `ui://` resource IS the card surface, and nothing else
+ * on the server is reachable from inside the sandbox.
  */
 const MCP_UI_URI_PREFIX = "ui://";
 

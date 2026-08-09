@@ -15,7 +15,7 @@ import {
   launchSeededElectron,
   teardownSeededElectron,
 } from "./seeded-electron.js";
-import { openSettingsWindow } from "./settings-window.js";
+import { openInlineSettings } from "./inline-settings.js";
 
 const E2E_ENABLED = process.env.M4_E2E === "1";
 const BASE_URL = (process.env.MARKETPLACE_URL ?? "http://127.0.0.1:8765").replace(/\/$/, "");
@@ -134,7 +134,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
   });
 
   try {
-    const marketplace = await openSettingsWindow(ctx.app, ctx.page, "marketplace");
+    const marketplace = await openInlineSettings(ctx.app, ctx.page, "marketplace");
     const packageAction = marketplace.getByTestId(`marketplace:action:${slug}`);
     await expect(packageAction).toBeVisible();
     const cards = () => ctx.page.evaluate(async () => {

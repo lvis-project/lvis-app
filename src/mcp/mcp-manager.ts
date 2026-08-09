@@ -121,7 +121,7 @@ export class McpManager {
      * the 2 reconnect/replace paths (`setApiKey`, `connectServer`'s error
      * re-establish), because those re-create the same server id and the card is
      * about to become valid again. The sink (wired in `mcp-setup.ts`) broadcasts
-     * the disconnect, closes detached MCP windows, and clears the ephemeral
+     * the disconnect so renderer-owned cards retire, then clears the ephemeral
      * per-server partition. Omitted ⇒ teardown proceeds without a UI signal.
      */
     private readonly onServerDisconnected?: (serverId: string) => void,
@@ -652,8 +652,8 @@ export class McpManager {
       input: JSON.stringify({ serverId }),
     });
 
-    // b3 — teardown path (permanent retirement): signal the UI to disable cards
-    // + close detached windows + clear the ephemeral partition.
+    // b3 — teardown path (permanent retirement): signal the UI to disable
+    // renderer-owned cards, then clear the ephemeral partition.
     this.onServerDisconnected?.(serverId);
 
     log.warn(`Kill switch completed: ${serverId} — all tools unregistered`);

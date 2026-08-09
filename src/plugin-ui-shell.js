@@ -9,8 +9,8 @@
  *   …with no `'unsafe-inline'` and no nonce/hash. Electron's renderer enforces
  *   that policy, so an inline `<script type="module">` block would be silently
  *   refused — which is exactly the failure mode that produced fully blank
- *   embedded plugin areas and black detached windows: the bootstrap never
- *   ran, so even the error-text fallback paths below could not paint.
+ *   plugin surfaces: the bootstrap never ran, so even the error-text fallback
+ *   paths below could not paint.
  *
  *   `'self'` covers the file:// origin of the shell HTML (Electron treats the
  *   directory of the document as the same-origin scope for `'self'`), so this

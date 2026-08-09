@@ -8,6 +8,9 @@
 > The 2026-07-24 authority amendment places the complete public TypeScript
 > contract and JSDoc in Host `src/plugins/public-contract.ts`; the SDK is a
 > mechanical generated mirror and owns no declaration-selection or doc policy.
+> The 2026-08-09 display-surface amendment retires host-owned detached windows:
+> MCP Apps now move among renderer-native inline, fullscreen, and PiP surfaces,
+> and disconnect teardown disables those cards before clearing their partition.
 > Issue: #885 (feat(sdk): plugin contract simplification + MCP server isolation parity).
 > Scope directive: this design **formally narrows** `docs/architecture/mcp-alignment-design.md` for the
 > plugin-contract axis — LVIS adopts the **MCP `Tool` object shape verbatim** (manifest shape == wire shape)
@@ -30,8 +33,8 @@
 | **Q5 manifest form** | Authoring shape in `plugin.json` | **Pure form** — the manifest tool object IS the MCP `Tool` (including `_meta`). Manifest shape == wire shape; no top-level `model`/`ui` sugar, no translation layer for the new shape (`normalizeManifest` handles the LEGACY shape only). |
 | **Q6 visibility default** | Interpretation when `_meta.ui.visibility` is absent | **Standard SEP-1865 default `["model","app"]`** (round 3 — LVIS hosts external MCP tools with the same semantics; a host-private reinterpretation cannot be imposed on the ecosystem). Safe by construction: the default yields only governed dual routing; the ungoverned bypass requires an explicit `["app"]`-only declaration. Resolved to an explicit array once at load. |
 | b1 partition | MCP App UI partition isolation | **Per-server, ephemeral** — `lvis-mcp-app:<serverId>` (in-memory), replacing the shared `lvis-mcp-app`. |
-| b2 detach | MCP App detached windows | **Host-owned** app-mode detach with a new `mcp-app:<serverId>:<cardId>` viewKey. **No** manifest/server `defaultMode`. |
-| b3 lifecycle | Teardown on MCP disconnect | New `mcp.server.disconnected(serverId)` host event; **disable-in-place** rendered `ui://` cards + close detached `mcp-app:<serverId>:*` windows. |
+| b2 display | MCP App display surfaces | **Renderer-owned** `inline` / `fullscreen` / `pip` locations keyed by card identity. No OS child window and no manifest/server `defaultMode`. |
+| b3 lifecycle | Teardown on MCP disconnect | `mcp.server.disconnected(serverId)` disables rendered `ui://` cards in place across renderer locations, then the host clears the per-server partition. |
 | b4 permission | MCP-tool vs plugin-tool permission gate | **No behavior change — already at parity.** Both flow through the identical `ToolExecutor` pipeline. Add a regression test + document. |
 | b5 model | Unifying framing | **Ratified reality:** plugin = in-process loopback MCP-like extension; MCP server = out-of-process extension. Already the sole live registration path. |
 
@@ -286,15 +289,14 @@ Deleting the `tools` union type statically proves no fallback branch survives.
   `lvis-mcp-app`; two servers share one cookie/IndexedDB jar. Move to `lvis-mcp-app:<serverId>`
   (serverId from `McpUiPayload.serverId`), with the CDN-allowlist `webRequest` gate installed lazily per
   server (mirrors the per-plugin `persist:plugin:*` lazy install). Ephemeral pairs cleanly with b3 teardown.
-- **(b2) Host-owned detach.** Extend `ALLOWED_VIEW_KEYS` (`window-manager.ts:45`) with
-  `mcp-app:<serverId>:<cardId>`; add `lvis:mcp:open-detached` IPC → `openDetachedTab`, mounting `McpAppView`
-  in the detached shell. Widen `will-attach-webview` (`:553`) to accept the b1 partition prefix. **Detach
-  stays host-owned** — no manifest `defaultMode`. (#886 is CLOSED NOT_PLANNED; the `window.defaultMode` it
-  referenced does not exist in code.)
+- **(b2) Renderer-owned display locations (amended 2026-08-09).** `McpAppView`
+  moves a card among inline, fullscreen, and PiP renderer surfaces via the
+  card-location store. No `BrowserWindow`, view-key extension, or detach IPC is
+  involved. Display intent remains host-owned; no manifest `defaultMode` exists.
 - **(b3) Disconnect teardown.** `McpManager.killSwitch`/`removeConfig`/`disconnectAll` tear down tools only.
   Emit `mcp.server.disconnected(serverId)`; the renderer disables-in-place `ui://` cards whose
-  `payload.serverId === serverId` (placeholder, transcript preserved) and `WindowManager` closes detached
-  `mcp-app:<serverId>:*` windows (scoped sweep like `closeAllDetached`).
+  `payload.serverId === serverId` (placeholder and transcript preserved) in every renderer location, then
+  clear the ephemeral per-server partition.
 - **(b4) Permission parity — no change.** External-MCP tools (`mcpToolToTool` → `source:mcp,
   category:network, low trust`) and plugin loopback tools (`mcpToolToPluginTool` → `source:plugin`) both flow
   through the one `ToolExecutor.executeOne` pipeline and **converge at the same governed chokepoints —
@@ -327,7 +329,7 @@ can never see a `Tool[]`).
 | **a2 (SDK v6)** | MCP `Tool` type + `tools: string[] \| Tool[]` `oneOf` schema + `normalizeManifest` compat (legacy → pure form, removed fields dropped with a load-time notice) + the `engines.lvisHost`-style host-compat field | SDK tests; host validator native-field probes updated |
 | **a4** | Host: `normalizeManifest` wired into `parsePluginJson` (incl. the :391-403 string-loop rewrite); intra-object auth/visibility checks replace cross-field checks; ALL host readers migrated to the normalized `Tool[]` — `manifestToolsToMcpTools`/`declaredRuntimeMethods`/gate **+ `knownToolOwners` (MODEL-ONLY, §2.4a) + `buildPluginCard`**; `writesToOwnSandbox` verdict input replaced by the host-side containment derivation (self-invalidates the `toolPolicyIdentity` cache); host-compat gate enforced; `readCategory` warn only on present-but-malformed (silent on v6-absent) | full vitest + pre-push |
 | **a3** | Migrate 6 first-party manifests + template to the pure form; bump each to SDK v6. **Marketplace publication held until the a4 host is GA** (pre-a4 hosts cannot load pure manifests) | each loads + registers on an a4 host; per-surface SET-equality invariant (model-set == old `tools[]`, app-set == old `uiActions` keys); tsc/vitest green |
-| **b1+b2+b3** | Per-server partition + detached viewKey + disconnect teardown (b1 lands with b2 — the `will-attach-webview` allowlist couples them) | Playwright e2e (renderer) + proportionate owner review advisory (touches `src/main`, IPC trust boundary) |
+| **b1+b2+b3** | Per-server partition + renderer-owned card location + disconnect teardown (b1 lands with b2 — the `will-attach-webview` allowlist couples them) | Playwright e2e (renderer) + proportionate owner review advisory (touches `src/main`, IPC trust boundary) |
 | **b4** | Executor parity regression test + docs (no behavior change) | test asserts mcp==plugin traversal |
 | **R (removal)** | Delete legacy `toolSchemas`/`uiActions`/`PluginUiActionSpec` + removed-field plumbing + dormant deprecation machinery + compat branch (§3). **First-party-only assumption:** the removal gate verifies first-party + catalog manifests; a sideloaded third-party LEGACY manifest fails load post-R with the schema's clear reject error (accepted — the ecosystem is first-party at this stage) | removal gate §3.2 green; sweep §3.3 = 0; tsc/vitest/build green |
 

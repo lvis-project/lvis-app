@@ -180,7 +180,7 @@ const installedPluginPartitions = new Set<string>();
 /**
  * Tracked per-server MCP-app partitions (b1). Same idempotency discipline as
  * `installedPluginPartitions`: re-installing the policy for a partition that already
- * has it is a no-op, so a card re-render / detach never stacks a second
+ * has it is a no-op, so a card re-render or presentation change never stacks a second
  * `onBeforeRequest` handler on the same session.
  */
 const installedMcpAppPartitions = new Set<string>();
@@ -194,7 +194,7 @@ const installedMcpAppPartitions = new Set<string>();
  *   3. the host-owned relay preload (via `session.registerPreloadScript`).
  *
  * Called from the `lvis:mcp:ui-resource` IPC handler — the single main-side chokepoint
- * every card render (inline AND detached) passes through — BEFORE the resource is
+ * every renderer-owned card passes through — BEFORE the resource is
  * read, so all three are present before the webview mounts and issues its first
  * request. Idempotent via `installedMcpAppPartitions`.
  *

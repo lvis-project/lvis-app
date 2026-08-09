@@ -1,5 +1,5 @@
 /**
- * Common chrome options shared by every LVIS BrowserWindow (main, settings,
+ * Common chrome options shared by every LVIS BrowserWindow (main,
  * link-window, auth-window).
  *
  * The cross-window visual identity depends on the 36 px CustomTitleBar +
@@ -21,8 +21,8 @@
  *
  * NEVER inline `frame` / `titleBarStyle` / `trafficLightPosition` directly
  * in a `new BrowserWindow(...)` call — always spread this helper. The
- * helper has been validated against `mainWindow` (main.ts), `settingsWindow`
- * (main.ts), `link-window-service.ts`, and `auth-window-service.ts`.
+ * helper has been validated against `main-window.ts`,
+ * `link-window-service.ts`, and `auth-window-service.ts`.
  */
 import type { BrowserWindowConstructorOptions } from "electron";
 

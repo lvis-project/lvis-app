@@ -83,14 +83,12 @@ describe("App smoke (Phase 1 infra)", () => {
       fireEvent.click(settingsButton);
     });
 
-    // Default appMode is "work" — Settings renders INLINE in the main area
-    // (same setActiveView + MainContent path as 업무보드/루틴/메모리/별표), so
-    // the detached BrowserWindow IPC must NOT fire and chat must not send.
+    // Default appMode is "work" — Settings renders inline in the main area
+    // through the same setActiveView + MainContent path as the other views.
     await waitFor(() =>
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
     );
     expect(container.querySelector('[data-testid="settings-close"]')).toBeTruthy();
-    expect(api.openSettingsWindow).not.toHaveBeenCalled();
     expect(api.chatSend).not.toHaveBeenCalled();
   });
 
@@ -332,11 +330,10 @@ describe("Settings inline (all modes)", () => {
       fireEvent.click(sidebarSettings!);
     });
 
-    // Inline render via setActiveView + MainContent — never the detached window.
+    // Inline render via setActiveView + MainContent.
     await waitFor(() =>
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
     );
-    expect(api.openSettingsWindow).not.toHaveBeenCalled();
     // Sidebar item shows ACTIVE state (aria-current=page) while inline.
     expect(
       container
@@ -359,7 +356,7 @@ describe("Settings inline (all modes)", () => {
     );
   });
 
-  it("renders Settings inline in chat mode too (no detached window)", async () => {
+  it("renders Settings inline in chat mode too", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
@@ -370,13 +367,10 @@ describe("Settings inline (all modes)", () => {
       fireEvent.click(container.querySelector('[data-testid="sidebar-settings"]')!);
     });
 
-    // settings-inline-overhaul: Settings is an always-inline panel in EVERY app
-    // mode — chat mode no longer detaches a BrowserWindow. The inline surface
-    // renders and the detached-window IPC must never fire.
+    // Settings is an always-inline panel in every app mode.
     await waitFor(() =>
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
     );
-    expect(api.openSettingsWindow).not.toHaveBeenCalled();
   });
 });
 

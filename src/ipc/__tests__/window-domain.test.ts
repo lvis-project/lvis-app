@@ -95,12 +95,12 @@ describe("window domain IPC", () => {
   });
 
   it("closes the sender BrowserWindow instead of always closing the main window", async () => {
-    const detachedWindow = makeWindow();
-    fromWebContents.mockReturnValueOnce(detachedWindow);
+    const senderWindow = makeWindow();
+    fromWebContents.mockReturnValueOnce(senderWindow);
 
-    await handleMap.get("window:close")!(trustedEvent({ id: "detached-webcontents" }));
+    await handleMap.get("window:close")!(trustedEvent({ id: "sender-webcontents" }));
 
-    expect(detachedWindow.close).toHaveBeenCalledOnce();
+    expect(senderWindow.close).toHaveBeenCalledOnce();
     expect(mainWindow.close).not.toHaveBeenCalled();
   });
 
@@ -113,14 +113,14 @@ describe("window domain IPC", () => {
   });
 
   it("targets minimize and maximize at the sender window", async () => {
-    const detachedWindow = makeWindow();
-    fromWebContents.mockReturnValue(detachedWindow);
+    const senderWindow = makeWindow();
+    fromWebContents.mockReturnValue(senderWindow);
 
     await handleMap.get("window:minimize")!(trustedEvent());
     await handleMap.get("window:toggleMaximize")!(trustedEvent());
 
-    expect(detachedWindow.minimize).toHaveBeenCalledOnce();
-    expect(detachedWindow.maximize).toHaveBeenCalledOnce();
+    expect(senderWindow.minimize).toHaveBeenCalledOnce();
+    expect(senderWindow.maximize).toHaveBeenCalledOnce();
     expect(mainWindow.minimize).not.toHaveBeenCalled();
     expect(mainWindow.maximize).not.toHaveBeenCalled();
   });
