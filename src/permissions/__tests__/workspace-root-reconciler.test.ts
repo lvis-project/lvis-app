@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import {
   writePermissionSettings,
 } from "../permission-settings-store.js";
 import { reconcileWorkspaceRoots } from "../workspace-root-reconciler.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const cleanupDirs: string[] = [];
 
@@ -26,10 +27,10 @@ function codedError(code: string, message = "sensitive filesystem detail"): Erro
   return Object.assign(new Error(message), { code });
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
   for (const dir of cleanupDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+    await cleanupTmpDir(dir);
   }
 });
 

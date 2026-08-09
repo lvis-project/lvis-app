@@ -13,11 +13,12 @@
  *   (e) the effect record actually lands in the audit file (temp LVIS_HOME).
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emitRiskShadowLog, emitEffectShadowLog } from "../reviewer/risk-shadow-log.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 function collectingAudit(): { entries: AuditEntry[]; logger: AuditLogger } {
   const entries: AuditEntry[] = [];
@@ -204,8 +205,8 @@ describe("emitEffectShadowLog — effect shadow", () => {
 
 describe("shadow log — dedicated shadow channel sink (temp LVIS_HOME)", () => {
   let auditDir: string;
-  afterEach(() => {
-    if (auditDir) rmSync(auditDir, { recursive: true, force: true });
+  afterEach(async () => {
+    if (auditDir) await cleanupTmpDir(auditDir);
   });
 
   it("lands the effect record in the DEDICATED permission-shadow channel, NOT the telemetry channel", async () => {

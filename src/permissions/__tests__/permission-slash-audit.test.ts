@@ -15,7 +15,7 @@
  *   - verifyAllAuditFiles: detects tamper + seal mismatch.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -36,6 +36,7 @@ import {
   MemorySecretStore,
   sealDayFromFile,
 } from "../../audit/hmac-chain.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let workDir: string;
 
@@ -43,8 +44,8 @@ beforeEach(() => {
   workDir = mkdtempSync(join(tmpdir(), "lvis-perm-slash-audit-"));
 });
 
-afterEach(() => {
-  if (existsSync(workDir)) rmSync(workDir, { recursive: true, force: true });
+afterEach(async () => {
+  await cleanupTmpDir(workDir);
 });
 
 describe("parsePermissionAuditCommand", () => {
