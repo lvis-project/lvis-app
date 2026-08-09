@@ -49,11 +49,32 @@ import {
   RuleBasedRiskClassifier,
   type RiskClassifier,
 } from "../reviewer/risk-classifier.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+
+const tmpDirs: string[] = [];
+const caches = new Set<VerdictCache>();
 
 function tmpFile(name: string): string {
   const dir = mkdtempSync(join(tmpdir(), "lvis-pm-legacy-null-"));
+  tmpDirs.push(dir);
   return join(dir, name);
 }
+
+function makeCache(path: string): VerdictCache {
+  const cache = new VerdictCache(path);
+  caches.add(cache);
+  return cache;
+}
+
+afterEach(async () => {
+  for (const cache of caches) {
+    await cache.flush();
+  }
+  caches.clear();
+  for (const dir of tmpDirs.splice(0)) {
+    await cleanupTmpDir(dir);
+  }
+});
 
 function makeManager(): {
   pm: PermissionManager;
@@ -61,7 +82,7 @@ function makeManager(): {
 } {
   const pm = new PermissionManager(tmpFile("permissions.json"));
   const classifier = new RuleBasedRiskClassifier();
-  const cache = new VerdictCache(tmpFile("reviewer-cache.jsonl"));
+  const cache = makeCache(tmpFile("reviewer-cache.jsonl"));
   const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
   pm.setReviewer({ classifier, cache, deferredQueue: queue });
   return { pm, classifier };
@@ -215,7 +236,7 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
       },
       "gpt-4o-mini",
     );
-    const cache = new VerdictCache(tmpFile("reviewer-cache.jsonl"));
+    const cache = makeCache(tmpFile("reviewer-cache.jsonl"));
     const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
     pm.setReviewer({ classifier, cache, deferredQueue: queue });
 
