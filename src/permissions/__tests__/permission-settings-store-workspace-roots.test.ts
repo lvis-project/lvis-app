@@ -19,6 +19,7 @@ import {
 } from "../permission-settings-store.js";
 import * as atomicFile from "../../lib/atomic-file.js";
 import { canonicalizePathForMatch } from "../sensitive-paths.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const tempRoots: string[] = [];
 
@@ -28,10 +29,10 @@ function fixture(): { root: string; settings: string } {
   return { root, settings: join(root, "settings.json") };
 }
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
   for (const root of tempRoots.splice(0)) {
-    rmSync(root, { recursive: true, force: true });
+    await cleanupTmpDir(root);
   }
 });
 
