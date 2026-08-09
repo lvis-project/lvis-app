@@ -27,20 +27,18 @@ import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-tes
 import type { PluginManifest } from "../../plugins/types.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
 import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { PermissionTestResources } from "./test-resources.js";
 
 const BOARD_PATH = resolve(process.cwd(), "docs/design/permission-review-scenario-board-v2.html");
-const tmpDirs: string[] = [];
+const resources = new PermissionTestResources();
 
 function tmpFile(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-permission-scenarios-"));
-  tmpDirs.push(dir);
+  const dir = resources.makeTmpDir("lvis-permission-scenarios-");
   return join(dir, name);
 }
 
 afterEach(async () => {
-  for (const dir of tmpDirs.splice(0)) {
-    await cleanupTmpDir(dir);
-  }
+  await resources.cleanup();
 });
 
 function makeManager(
