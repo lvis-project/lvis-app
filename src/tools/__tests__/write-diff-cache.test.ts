@@ -12,7 +12,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
-import { mkdtempSync, existsSync, readFileSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { mkdtempSync, existsSync, readFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
