@@ -6,11 +6,12 @@
  *   from the critical section, not from plain reads — this is by design).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import lockfile from "proper-lockfile";
 import { FileLockReleaseError, withFileLock } from "../with-file-lock.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let tmpDir: string;
 let testFile: string;
@@ -21,9 +22,9 @@ beforeEach(() => {
   writeFileSync(testFile, JSON.stringify({ counter: 0 }), "utf-8");
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  rmSync(tmpDir, { recursive: true, force: true });
+  await cleanupTmpDir(tmpDir);
 });
 
 // Helper: read counter from testFile

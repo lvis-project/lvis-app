@@ -9,7 +9,6 @@ import {
   existsSync,
   mkdtempSync,
   readdirSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -27,6 +26,7 @@ import {
   LOG_MAX_TOTAL_BYTES,
 } from "../log-file-sink.js";
 import { LOG_RETENTION_DAYS as SHARED_LOG_RETENTION_DAYS } from "../../shared/log-retention.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let logDir: string;
 
@@ -41,19 +41,9 @@ afterEach(async () => {
   // in flight here. This one extra macrotask tick is defense-in-depth only —
   // destroy()'s boom.end() itself does not return a promise the caller can
   // await, so give any trailing internal callback (e.g. the stream 'close'
-  // event) a chance to settle before rmSync runs.
+  // event) a chance to settle before removing the directory.
   await new Promise((r) => setTimeout(r, 0));
-  // SonicBoom's end() closes the fd asynchronously (on the stream 'close'
-  // event), so on Windows a just-destroyed sink can still hold a handle when
-  // rmSync runs → ENOTEMPTY/EBUSY. Retry a few times with a short yield.
-  for (let attempt = 0; attempt < 10; attempt++) {
-    try {
-      rmSync(logDir, { recursive: true, force: true });
-      return;
-    } catch {
-      await new Promise((r) => setTimeout(r, 25));
-    }
-  }
+  await cleanupTmpDir(logDir);
 });
 
 function todayDateStr(): string {
@@ -170,6 +160,7 @@ describe("createLogFileSink — file creation + mode", () => {
     expect(before).toBe(22);
     const sink = createLogFileSink({ dir: logDir, retentionDays: 7 });
     try {
+      await waitForFile(sink.currentFile);
       const after = readdirSync(logDir).filter((f) => f.startsWith(`lvis-${day}`)).length;
       expect(after).toBe(20); // capped to LOG_MAX_FILES_PER_DAY at init
     } finally {
