@@ -2,7 +2,7 @@
  * Unit tests for SessionTodoStore + SkillStore.
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import {
   SessionTodoStore,
 } from "../main/session-todo-store.js";
 import { SkillStore, parseFrontmatter } from "../main/skill-store.js";
+import { cleanupTmpDir } from "../testing/tmp-dir-teardown.js";
 
 const REPO_ROOT = resolvePath(
   fileURLToPath(new URL(".", import.meta.url)),
@@ -241,7 +242,7 @@ describe("SkillStore", () => {
       const loaded = await store.load("report-writing");
       expect(loaded?.description).toBe("USER OVERRIDE");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
