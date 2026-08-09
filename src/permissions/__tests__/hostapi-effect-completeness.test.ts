@@ -20,9 +20,6 @@
  * PURE side-effect (it never alters the wrapped method's behavior).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 
 const harness = vi.hoisted(() => ({
   capturedRuntimeOptions: null as Record<string, unknown> | null,
@@ -102,20 +99,12 @@ import {
   type EffectLedger,
 } from "../effect-ledger.js";
 import type { PluginHostApi } from "../../plugins/types.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { PermissionTestResources } from "./test-resources.js";
 
-const tmpDirs: string[] = [];
-
-function makeTmpDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  tmpDirs.push(dir);
-  return dir;
-}
+const resources = new PermissionTestResources();
 
 afterEach(async () => {
-  for (const dir of tmpDirs.splice(0)) {
-    await cleanupTmpDir(dir);
-  }
+  await resources.cleanup();
 });
 
 type CreateHostApi = (
@@ -179,7 +168,7 @@ async function buildRealHostApi(): Promise<PluginHostApi> {
     createHostApi,
     "initPluginRuntime must register a createHostApi factory",
   ).toBeDefined();
-  const pluginDataDir = makeTmpDir("lvis-hostapi-completeness-");
+  const pluginDataDir = resources.makeTmpDir("lvis-hostapi-completeness-");
   // Build with the FULL capability vocabulary, not a sampled subset. A
   // namespace/method wired ONLY under a capability ABSENT from the fixture would
   // escape BOTH the non-plain-namespace assertion AND the SOT-coverage assertion

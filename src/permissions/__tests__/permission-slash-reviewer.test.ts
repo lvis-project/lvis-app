@@ -2,8 +2,7 @@
  * Permission policy Phase 3 — `/permission reviewer` slash + settings persistence tests.
  */
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   parsePermissionReviewerCommand,
@@ -16,20 +15,17 @@ import {
   normalizePermissionSettings,
   writePermissionSettings,
 } from "../permission-settings-store.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { PermissionTestResources } from "./test-resources.js";
 
-const tmpDirs: string[] = [];
+const resources = new PermissionTestResources();
 
 function tmpSettingsPath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-perm-reviewer-"));
-  tmpDirs.push(dir);
+  const dir = resources.makeTmpDir("lvis-perm-reviewer-");
   return join(dir, "settings.json");
 }
 
 afterEach(async () => {
-  for (const dir of tmpDirs.splice(0)) {
-    await cleanupTmpDir(dir);
-  }
+  await resources.cleanup();
 });
 
 describe("parsePermissionReviewerCommand", () => {

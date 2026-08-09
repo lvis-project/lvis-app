@@ -14,27 +14,18 @@
  * the new pass-through-LOW semantic at upgrade time.
  */
 import { afterEach, describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   readPermissionSettings,
   migrateLegacyDisabledMode,
 } from "../permission-settings-store.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { PermissionTestResources } from "./test-resources.js";
 
-const tmpDirs: string[] = [];
-
-function makeTmpDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  tmpDirs.push(dir);
-  return dir;
-}
+const resources = new PermissionTestResources();
 
 afterEach(async () => {
-  for (const dir of tmpDirs.splice(0)) {
-    await cleanupTmpDir(dir);
-  }
+  await resources.cleanup();
 });
 
 function writeRaw(dir: string, body: object): string {
@@ -134,7 +125,7 @@ describe("migrateLegacyDisabledMode — issue #664 idempotency", () => {
 
 describe("readPermissionSettings — issue #664 migration end-to-end", () => {
   it("persists the migrated file on first read", () => {
-    const dir = makeTmpDir("lvis-664-mig-");
+    const dir = resources.makeTmpDir("lvis-664-mig-");
     const filePath = writeRaw(dir, {
       permissions: {
         reviewer: {
@@ -164,7 +155,7 @@ describe("readPermissionSettings — issue #664 migration end-to-end", () => {
   });
 
   it("preserves user-chosen disabled after migration marker present", () => {
-    const dir = makeTmpDir("lvis-664-userpick-");
+    const dir = resources.makeTmpDir("lvis-664-userpick-");
     const filePath = writeRaw(dir, {
       permissions: {
         reviewer: {

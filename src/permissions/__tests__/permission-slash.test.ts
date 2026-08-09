@@ -1,6 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import {
   parsePermissionDirCommand,
@@ -15,25 +14,17 @@ import {
   normalizePermissionSettings,
 } from "../permission-settings-store.js";
 import { validateDirectoryAddition } from "../allowed-directories.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { PermissionTestResources } from "./test-resources.js";
 
-const tmpDirs: string[] = [];
-
-function makeTmpDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  tmpDirs.push(dir);
-  return dir;
-}
+const resources = new PermissionTestResources();
 
 function tmpSettingsPath(): string {
-  const dir = makeTmpDir("lvis-perm-slash-");
+  const dir = resources.makeTmpDir("lvis-perm-slash-");
   return join(dir, "settings.json");
 }
 
 afterEach(async () => {
-  for (const dir of tmpDirs.splice(0)) {
-    await cleanupTmpDir(dir);
-  }
+  await resources.cleanup();
 });
 
 describe("parsePermissionDirCommand", () => {
@@ -205,7 +196,7 @@ describe("dispatchPermissionDirCommand — deny", () => {
 
 describe("dispatchPermissionDirCommand — injected workspace lifecycle", () => {
   it("delegates allow with the permission-slash source and returns lifecycle persistence", async () => {
-    const directory = makeTmpDir("lvis-perm-lifecycle-allow-");
+    const directory = resources.makeTmpDir("lvis-perm-lifecycle-allow-");
     const validation = validateDirectoryAddition(directory);
     expect(validation.ok).toBe(true);
     const persisted = [directory, join(directory, "other")];
@@ -232,7 +223,7 @@ describe("dispatchPermissionDirCommand — injected workspace lifecycle", () => 
   });
 
   it("delegates deny with the permission-slash source and returns lifecycle persistence", async () => {
-    const directory = makeTmpDir("lvis-perm-lifecycle-deny-");
+    const directory = resources.makeTmpDir("lvis-perm-lifecycle-deny-");
     const persisted = [join(directory, "remaining")];
     const allowDirectory = vi.fn(async () => [] as string[]);
     const denyDirectory = vi.fn(async () => persisted);
@@ -248,7 +239,7 @@ describe("dispatchPermissionDirCommand — injected workspace lifecycle", () => 
   });
 
   it("returns a stable structured error when lifecycle allow rejects", async () => {
-    const directory = makeTmpDir("lvis-perm-lifecycle-allow-fail-");
+    const directory = resources.makeTmpDir("lvis-perm-lifecycle-allow-fail-");
     const allowDirectory = vi.fn(async () => {
       throw new Error("private allow failure");
     });
@@ -268,7 +259,7 @@ describe("dispatchPermissionDirCommand — injected workspace lifecycle", () => 
   });
 
   it("returns a stable structured error when lifecycle deny rejects", async () => {
-    const directory = makeTmpDir("lvis-perm-lifecycle-deny-fail-");
+    const directory = resources.makeTmpDir("lvis-perm-lifecycle-deny-fail-");
     const allowDirectory = vi.fn(async () => [] as string[]);
     const denyDirectory = vi.fn(async () => {
       throw new Error("private deny failure");
@@ -285,7 +276,7 @@ describe("dispatchPermissionDirCommand — injected workspace lifecycle", () => 
   });
 
   it("fails closed for persistent mutations when the host lifecycle is unavailable", async () => {
-    const directory = makeTmpDir("lvis-perm-lifecycle-missing-");
+    const directory = resources.makeTmpDir("lvis-perm-lifecycle-missing-");
 
     const allowResult = await dispatchPermissionDirCommand({
       verb: "allow",
@@ -428,7 +419,7 @@ describe("writePermissionSettings — alias is dropped on write", () => {
  */
 describe("dispatchPermissionHooksCommand — renderer broadcast gating (FU2)", () => {
   function hooksFixture() {
-    const tmpDir = makeTmpDir("lvis-hook-trust-bcast-");
+    const tmpDir = resources.makeTmpDir("lvis-hook-trust-bcast-");
     const hooksDir = join(tmpDir, "hooks");
     const disabledDir = join(hooksDir, ".disabled");
     const lockfilePath = join(hooksDir, ".lockfile.json");

@@ -17,29 +17,20 @@
  * fs-independent (darwin /var → /private/var symlink).
  */
 import { afterEach, describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { canonicalizePathForMatch } from "../sensitive-paths.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { PermissionTestResources } from "./test-resources.js";
 
-const tmpDirs: string[] = [];
-
-function makeTmpDir(prefix: string): string {
-  const dir = mkdtempSync(join(tmpdir(), prefix));
-  tmpDirs.push(dir);
-  return dir;
-}
+const resources = new PermissionTestResources();
 
 afterEach(async () => {
-  for (const dir of tmpDirs.splice(0)) {
-    await cleanupTmpDir(dir);
-  }
+  await resources.cleanup();
 });
 
 describe("canonicalizePathForMatch — security MAJOR-3 bypass vectors", () => {
   it("collapses `..` segments", () => {
-    const root = makeTmpDir("lvis-canon-dot-");
+    const root = resources.makeTmpDir("lvis-canon-dot-");
     mkdirSync(join(root, "a/b/c"), { recursive: true });
     // /<root>/a/b/c/../../b → /<root>/a/b
     const traversed = join(root, "a/b/c/../../b");
@@ -49,7 +40,7 @@ describe("canonicalizePathForMatch — security MAJOR-3 bypass vectors", () => {
   });
 
   it("collapses duplicate slashes", () => {
-    const root = makeTmpDir("lvis-canon-slash-");
+    const root = resources.makeTmpDir("lvis-canon-slash-");
     mkdirSync(join(root, "x"), { recursive: true });
     const dup = `${root}///x`;
     const canonical = canonicalizePathForMatch(dup);
@@ -59,7 +50,7 @@ describe("canonicalizePathForMatch — security MAJOR-3 bypass vectors", () => {
   });
 
   it("trailing slash does not survive resolve", () => {
-    const root = makeTmpDir("lvis-canon-trail-");
+    const root = resources.makeTmpDir("lvis-canon-trail-");
     mkdirSync(join(root, "leaf"), { recursive: true });
     const trailed = `${root}/leaf/`;
     const canonical = canonicalizePathForMatch(trailed);
@@ -72,7 +63,7 @@ describe("canonicalizePathForMatch — security MAJOR-3 bypass vectors", () => {
     // "café" — composed (NFC) e + ́ and decomposed (NFD).
     const nfc = "café"; // 4 code points (composed)
     const nfd = "café"; // 5 code points (decomposed)
-    const root = makeTmpDir("lvis-canon-nfd-");
+    const root = resources.makeTmpDir("lvis-canon-nfd-");
     const composed = canonicalizePathForMatch(`${root}/${nfc}`);
     const decomposed = canonicalizePathForMatch(`${root}/${nfd}`);
     // After NFC normalization both forms collapse to the same string.
@@ -94,7 +85,7 @@ describe("canonicalizePathForMatch — security MAJOR-3 bypass vectors", () => {
   });
 
   it("repeated canonicalize is idempotent (frozen-canonical contract)", () => {
-    const root = makeTmpDir("lvis-canon-idem-");
+    const root = resources.makeTmpDir("lvis-canon-idem-");
     mkdirSync(join(root, "deep/nest/path"), { recursive: true });
     const raw = `${root}//deep/./nest/../nest/path/`;
     const once = canonicalizePathForMatch(raw);
