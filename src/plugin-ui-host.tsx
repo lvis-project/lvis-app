@@ -109,12 +109,10 @@ export function PluginUiHostView({
   view,
   showChrome = true,
   authError = null,
-  onBack,
 }: {
   view: PluginUiExtensionView | null;
   showChrome?: boolean;
   authError?: string | null;
-  onBack?: () => void;
 }) {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -359,10 +357,9 @@ export function PluginUiHostView({
     <PageShell
       title={view ? getPluginViewLabel(view) : t("be_pluginUiHost.pluginUiTitle")}
       description={view?.extension.description ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
-      onBack={onBack}
-      backTestId="plugin-page-back"
       maxWidth="reading"
       contentClassName="flex min-h-0 flex-1 flex-col px-2 pb-2"
+      data-testid="plugin-page-shell"
     >
       {authErrorBanner}
       <div className="relative h-full w-full overflow-hidden">

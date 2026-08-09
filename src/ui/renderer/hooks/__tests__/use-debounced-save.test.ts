@@ -124,6 +124,25 @@ describe("useDebouncedSave", () => {
     expect(saveFn).not.toHaveBeenCalled();
   });
 
+  it("flushes a pending save on unmount when the owner opts in", () => {
+    const saveFn = vi.fn();
+    const { result, unmount } = renderHook(() =>
+      useDebouncedSave(saveFn, 200, { flushOnUnmount: true }),
+    );
+
+    act(() => {
+      result.current.schedule();
+      vi.advanceTimersByTime(100);
+    });
+    unmount();
+
+    expect(saveFn).toHaveBeenCalledTimes(1);
+    act(() => {
+      vi.advanceTimersByTime(200);
+    });
+    expect(saveFn).toHaveBeenCalledTimes(1);
+  });
+
   it("schedule + cancel + schedule fires exactly once for the second schedule", () => {
     const saveFn = vi.fn();
     const { result } = renderHook(() => useDebouncedSave(saveFn, 200));

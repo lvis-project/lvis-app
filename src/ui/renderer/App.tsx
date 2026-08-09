@@ -257,7 +257,7 @@ export function App() {
   // Applying a history entry sets BOTH halves, so replaying a settings entry
   // lands on the page it was recorded on rather than the tab last opened.
   const navigateToLocation = useCallback((to: ViewLocation) => {
-    if (to.settingsTab) setSettingsTab(to.settingsTab);
+    if (to.view === "settings") setSettingsTab(to.settingsTab ?? "llm");
     setActiveView(to.view);
   }, [setSettingsTab, setActiveView]);
   const viewHistory = useViewHistory(location, navigateToLocation, activeViewRestoring);
@@ -658,20 +658,12 @@ export function App() {
     handleViewSelect(key);
   }, [handleViewSelect, onOpenSettings, pluginCards, statusPushToast, t]);
 
-  // The page-level back affordances (Settings' own, and MainPaneShell's on
-  // every other view) now mean the same thing as the top bar's back: return to
-  // where you were. They used to differ — Settings returned one step through a
-  // single-slot ref while everything else went unconditionally home — which is
-  // three controls sharing a label and an icon while behaving differently.
-  // With an empty history there is nowhere to return to, so home stays the
-  // floor and today's behavior is preserved in that degenerate case.
-  const handlePageBack = useCallback(() => {
-    if (viewHistory.canGoBack) {
-      viewHistory.goBack();
-      return;
-    }
+  // Loading a conversation from Memory, Insights, or Routines is content
+  // navigation, not a history replay. The top toolbar exclusively owns visit
+  // history; result activation always reveals the loaded chat.
+  const handleActivateHome = useCallback(() => {
     setActiveView("home");
-  }, [viewHistory]);
+  }, [setActiveView]);
 
   // Side panel (ChatSidePanel) is a home-view affordance: navigating away from
   // home closes it so it never lingers behind another view. Toggling from a
@@ -1038,7 +1030,7 @@ export function App() {
             settingsTab={settingsTab}
             onSettingsTabChange={setSettingsTab}
             onSettingsSaved={handleInlineSettingsSaved}
-            onCloseSettings={handlePageBack}
+            onCloseSettings={handleActivateHome}
             starred={starred}
             currentSessionId={currentSessionId}
             currentSessionKind={currentSessionKind}
@@ -1050,7 +1042,7 @@ export function App() {
             onRefreshProjects={refreshWorkspaceProjects}
             onRunMcpPrompt={handleRunMcpPrompt}
             refreshStarred={refreshStarred}
-            onActivateHome={handlePageBack}
+            onActivateHome={handleActivateHome}
             onJumpToSession={handleLoadSessionAndRefresh}
             chatContextValue={chatContextValue}
             onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
