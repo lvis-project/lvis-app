@@ -10,11 +10,12 @@
  */
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHANNELS } from "../../contract/app-contract.js";
 import { hostFrameEvent, foreignFrameEvent } from "../../__tests__/test-helpers.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const handleMap = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
 const showSaveDialog = vi.fn();
@@ -73,8 +74,8 @@ describe("lvis:mcp:ui-download-file", () => {
     expect(invoke).toBeTypeOf("function");
   });
 
-  afterEach(() => {
-    rmSync(tempDir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTmpDir(tempDir);
   });
 
   const csvParams = {
