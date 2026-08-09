@@ -123,9 +123,8 @@ export function serializeAppContext(update: Pick<McpAppModelContextUpdate, "cont
 }
 
 /**
- * The per-card slots. Keyed `(sessionId, serverId, cardId)` — the same shape as
- * WindowManager's `_mcpDetachedPayloads` registry (a host-minted key for a host-owned
- * record about one card). The app supplies NONE of the three: the trusted renderer binds
+ * The per-card slots. Keyed `(sessionId, serverId, cardId)`, a host-owned
+ * identity for one rendered card. The app supplies NONE of the three: the trusted renderer binds
  * them, so a card can neither overwrite another card's slot nor place context into a
  * conversation the user has navigated away from.
  */

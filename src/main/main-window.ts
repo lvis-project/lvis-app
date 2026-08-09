@@ -1,6 +1,6 @@
 /**
  * Main application window — creation, (re)load, and the small window helpers
- * shared across the menu, tray, settings window, and deep-link flows.
+ * shared across the menu, tray, and deep-link flows.
  *
  * The window instance itself and the renderer-reload flags live in
  * `app-state.ts`; this module owns the wiring (bounds, chrome, event
@@ -46,7 +46,6 @@ import {
   getLastRendererReloadAt,
   getMainWindow,
   getServices,
-  getSettingsWindow,
   getTray,
   getWindowManager,
   isAppShutdownCompleted,
@@ -117,7 +116,7 @@ export function initialThemeArgs(): string[] {
   // plugin-theme payload — so they're read straight from the in-memory
   // settings service (already normalized at write time by settings-store's
   // `isValidFontFamilyOverride` + `FONT_SIZE_SCALE_VALUES` guards). Carrying
-  // them in the frame-0 prime makes a detached/new window paint at the
+  // them in the frame-0 prime makes the main renderer paint at the
   // configured size + family instead of flashing the 1.0 / HOST_FONT_STACK
   // default until React hydrates. `"system"` family + a missing/1.0 scale are
   // the defaults, so they're left off the wire (no override → omit the field).
@@ -369,16 +368,8 @@ export function toggleMainWindowVisibility(win: BrowserWindow): "shown" | "hidde
 }
 
 export function getAppWindows(): BrowserWindow[] {
-  const seen = new Set<number>();
-  const windows = [
-    getMainWindow(),
-    getSettingsWindow(),
-  ];
-  return windows.filter((win): win is BrowserWindow => {
-    if (!win || win.isDestroyed() || seen.has(win.id)) return false;
-    seen.add(win.id);
-    return true;
-  });
+  const main = getMainWindow();
+  return main && !main.isDestroyed() ? [main] : [];
 }
 
 export function registerMainWindowPluginEventBridge(win: BrowserWindow): void {

@@ -95,7 +95,6 @@ describe("ChatView", () => {
     await waitFor(() => {
       expect(container.querySelector('[data-testid="marketplace:cta:open"]')).not.toBeNull();
     });
-    expect(api.openSettingsWindow).not.toHaveBeenCalled();
   });
 
   it("renders empty-state message when no entries", async () => {

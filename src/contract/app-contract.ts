@@ -417,11 +417,6 @@ export const CHANNELS = {
     dismiss: "lvis:tour:dismiss",
     start: "lvis:tour:start",
   },
-  settingsWindow: {
-    open: "lvis:settings-window:open",
-    saved: "lvis:settings-window:saved",
-    tab: "lvis:settings-window:tab",
-  },
   prompts: {
     listSummaries: "lvis:prompts:list-summaries",
     list: "lvis:prompts:list",
@@ -708,18 +703,17 @@ export const EXTERNAL_MUTATION_DENIED = "external-mutation-denied";
 
 /**
  * Channel families whose `ipcMain.handle` / `ipcMain.on` registrations live
- * OUTSIDE `src/ipc/` — the three "out-of-tree" host surfaces:
- *   - `settingsWindow` → registered in `src/main.ts` (settings BrowserWindow).
+ * OUTSIDE `src/ipc/` — the two "out-of-tree" host surfaces:
  *   - `windowManager`  → registered in `src/main/window-manager.ts`.
  *   - `autoUpdater`    → registered in `src/main/auto-updater.ts`.
  *
  * Recorded here so the contract's public/internal classification is COMPLETE —
- * there is no longer an "unclassified" out-of-tree hole. All three are
+ * there is no longer an "unclassified" out-of-tree hole. Both are
  * INTERNAL: none appear in {@link PUBLIC_CHANNELS}, so an external
  * (local-api / cli / sdk) {@link import("./trust-origin.js").TrustOrigin} can
  * never reach them — {@link isPublicChannel} fails closed. They are host-only
- * surfaces (a first-party BrowserWindow lifecycle, detached-window management,
- * and the packaged auto-updater) with no external wire contract.
+ * surfaces (main-window layout management and the packaged auto-updater) with
+ * no external wire contract.
  *
  * BYTE-IDENTICAL: values mirror {@link CHANNELS} exactly, which already match
  * the literals at the registration sites. C12 only RECORDS the classification;
@@ -734,13 +728,9 @@ export const EXTERNAL_MUTATION_DENIED = "external-mutation-denied";
  * ONLY for the out-of-tree host surfaces above.
  */
 export const INTERNAL_HOST_CHANNELS = {
-  settingsWindow: [
-    CHANNELS.settingsWindow.open,
-    CHANNELS.settingsWindow.saved,
-    CHANNELS.settingsWindow.tab,
-  ],
   windowManager: [
     CHANNELS.window.resizeForMode,
+    CHANNELS.window.resizeForSidePanel,
   ],
   autoUpdater: [
     CHANNELS.update.state,

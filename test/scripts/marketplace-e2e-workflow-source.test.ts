@@ -218,7 +218,7 @@ describe("Marketplace E2E hostile-candidate containment", () => {
     );
     const runtimeLoaded = epAttendanceSpec.indexOf("runtimeLoaded: true", confirm);
     const closeSettings = epAttendanceSpec.indexOf(
-      "closeSettingsWindow(ctx.app, marketplace)",
+      "closeInlineSettings(ctx.app, marketplace)",
       runtimeLoaded,
     );
     const activateWebview = epAttendanceSpec.indexOf("activateEpWebview(ctx)", closeSettings);

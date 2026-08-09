@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 import path from 'node:path';
 import fs from 'node:fs';
-import { openSettingsWindow } from './settings-window';
+import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 
 /**
  * Settings → Web / Browsing 탭의 외부 URL 표시 정책 토글 e2e. (The control was
@@ -13,9 +13,9 @@ test('webView.preferredFlow toggle persists to settings.json', async ({
   userDataDir,
 }) => {
   const settingsPath = path.join(userDataDir, 'lvis-settings.json');
-  const settingsWindow = await openSettingsWindow(app, mainWindow, 'web');
+  const settingsPage = await openInlineSettings(app, mainWindow, 'web');
 
-  const radiogroup = settingsWindow.locator('[data-testid="webview-preferred-flow"]').first();
+  const radiogroup = settingsPage.locator('[data-testid="webview-preferred-flow"]').first();
   await expect(radiogroup).toBeVisible({ timeout: 10_000 });
 
   const systemBrowserBtn = radiogroup.locator('[data-value="system-browser"]').first();
@@ -55,5 +55,5 @@ test('webView.preferredFlow toggle persists to settings.json', async ({
     )
     .toBe('in-app');
 
-  await settingsWindow.close();
+  await closeInlineSettings(app, settingsPage);
 });

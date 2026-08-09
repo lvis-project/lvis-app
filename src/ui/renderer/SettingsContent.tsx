@@ -161,8 +161,8 @@ export function SettingsContent({
    * pair. The two internal writers each move state that belongs to the same
    * interaction — the narrow-layout depth, and the marketplace filter — so
    * handing the tab to a parent would let that coupled state apply while the
-   * tab did not. `SettingsWindow` also embeds this panel and holds no tab state
-   * of its own, so a controlled contract would silently stop its tabs working.
+   * tab did not. Keeping the panel's tab state local preserves those coupled
+   * transitions while the shell observes normalized tab changes.
    */
   onTabChange?: (tab: string) => void;
 }) {

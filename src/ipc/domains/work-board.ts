@@ -105,9 +105,9 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
   const { workBoardStore, workBoardEngine, workBoardReport, auditLogger, getMainWindow, getAppWindows } = deps;
 
   /**
-   * Fan the `itemChanged` event out to every renderer window so detached
-   * panels and other windows refresh in lock-step. Destroyed windows are
-   * skipped. Mirrors `broadcastPromptsUpdated` in the prompts domain.
+   * Fan the `itemChanged` event through the curated app-renderer target set.
+   * Destroyed windows are skipped. Mirrors `broadcastPromptsUpdated` in the
+   * prompts domain.
    */
   const broadcastItemChanged = (
     itemId: number,

@@ -148,7 +148,6 @@ import { ko as ko_savedToast } from "../generated/savedToast.js";
 import { ko as ko_sessionResumeDivider } from "../generated/sessionResumeDivider.js";
 import { ko as ko_sessionTodoPanel } from "../generated/sessionTodoPanel.js";
 import { ko as ko_settingsContent } from "../generated/settingsContent.js";
-import { ko as ko_settingsWindow } from "../generated/settingsWindow.js";
 import { ko as ko_sidebar } from "../generated/sidebar.js";
 import { ko as ko_skillBadge } from "../generated/skillBadge.js";
 import { ko as ko_slashPicker } from "../generated/slashPicker.js";
@@ -340,7 +339,6 @@ export const koMessages: Record<string, string> = {
   ...ko_sessionResumeDivider,
   ...ko_sessionTodoPanel,
   ...ko_settingsContent,
-  ...ko_settingsWindow,
   ...ko_sidebar,
   ...ko_skillBadge,
   ...ko_slashPicker,

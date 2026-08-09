@@ -6,7 +6,7 @@
  * with no `'unsafe-inline'`, no nonce, no hash. Historically the shell
  * embedded its bootstrap as `<script type="module">…</script>`, which the
  * renderer silently refused — producing fully blank embedded plugin areas
- * and black detached windows because even the error-text fallback paths in
+ * and blank plugin surfaces because even the error-text fallback paths in
  * the bootstrap never executed.
  *
  * These tests lock in the fix:

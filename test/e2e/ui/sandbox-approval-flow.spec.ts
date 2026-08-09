@@ -16,6 +16,7 @@ import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electro
  */
 import { test, expect } from "@playwright/test";
 import { makeTestT } from "./i18n";
+import { openInlineSettings } from "./inline-settings.js";
 import { _electron as electron, type ElectronApplication, type Page } from "playwright";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -93,7 +94,7 @@ test.describe("Sandbox approval flow", () => {
     page = await app.firstWindow();
     // The app first loads a data: splash URL, then boots and replaces it with
     // the real index.html. Waiting only for `domcontentloaded` resolves on
-    // the splash, before IPC handlers (`lvis:settings-window:open`, …) and
+    // the splash, before IPC handlers and
     // the renderer's approval listeners are wired — webContents.send / IPC
     // invocations from the test would then race against bootstrap and either
     // silently no-op or fail with "No handler registered". Wait for the
@@ -210,20 +211,7 @@ test.describe("Sandbox approval flow", () => {
       "utf-8",
     );
 
-    // Settings is now a native BrowserWindow opened via IPC (no in-DOM
-    // toolbar button to scrape). Open it through `window.lvisApi` and
-    // assert the permissions tab content there.
-    const settingsWindowPromise = app.waitForEvent("window", { timeout: 10_000 });
-    const openResult = await page.evaluate(async () => {
-      const api = (window as unknown as {
-        lvisApi?: { openSettingsWindow?: (tab?: string) => Promise<{ ok: boolean; error?: string }> };
-      }).lvisApi;
-      if (!api?.openSettingsWindow) throw new Error("window.lvisApi.openSettingsWindow unavailable");
-      return api.openSettingsWindow("permissions");
-    });
-    if (!openResult.ok) throw new Error(openResult.error ?? "openSettingsWindow failed");
-    const settingsWindow = await settingsWindowPromise;
-    await settingsWindow.waitForLoadState("domcontentloaded");
+    const settingsPage = await openInlineSettings(app, page, "permissions");
 
     // Permissions tab is selected by initialTab; the approval records section
     // heading renders "사용자 승인 기록 ({count})". Match only the static prefix
@@ -231,7 +219,7 @@ test.describe("Sandbox approval flow", () => {
     // count can't flake the check, while staying locale-agnostic via the catalog.
     const approvalsHeadingPrefix = t("permissionsTab.approvalsTitle", { count: 0 }).split("(")[0].trim();
     await expect(
-      settingsWindow.locator(`:text(${JSON.stringify(approvalsHeadingPrefix)})`),
+      settingsPage.locator(`:text(${JSON.stringify(approvalsHeadingPrefix)})`),
     ).toBeVisible({ timeout: 5000 });
   });
 });

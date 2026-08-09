@@ -56,9 +56,8 @@ describe("createOnRequestDisplayMode — an unadvertised mode is refused, once, 
   // `applyMode` like any other advertised mode; it is exercised by the "honours exactly
   // the advertised set" test below, which is drift-safe against the SoT rather than
   // hardcoding a specific example. This handler-level module has no opinion on WHICH
-  // mount can actually honour a `pip` request from where — that decision (e.g. a
-  // detached-window mount declining a `pip` request) lives in `applyMode` itself
-  // (McpAppView), not here.
+  // renderer location can actually honour a `pip` request — that decision lives
+  // in `applyMode` itself (McpAppView), not here.
 
   it("refuses garbage a non-conforming app could send", async () => {
     const { handler, applyMode } = build("inline");

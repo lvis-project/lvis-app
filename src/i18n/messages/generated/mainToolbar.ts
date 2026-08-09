@@ -15,9 +15,6 @@ export const en = {
   "mainToolbar.memory": "Memory",
   "mainToolbar.starred": "Pinned",
   "mainToolbar.insights": "Insights",
-  "mainToolbar.detachRoutines": "Open Routines in new window",
-  "mainToolbar.detachMemory": "Open Memory in new window",
-  "mainToolbar.detachStarred": "Open Pinned in new window",
   "mainToolbar.export": "Export",
   "mainToolbar.import": "Import",
   "mainToolbar.settings": "Settings",
@@ -35,7 +32,7 @@ export const en = {
   "appMode.groupAriaLabel": "Workspace mode",
   "appMode.chat": "Chat",
   "appMode.work": "Work",
-  "appMode.chatAriaLabel": "Chat mode — detachable views open in separate windows",
+  "appMode.chatAriaLabel": "Chat mode — focused layout with the sidebar collapsed",
   "appMode.workAriaLabel": "Work mode — views render inline with the sidebar expanded",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
@@ -54,9 +51,6 @@ export const ko: Record<keyof typeof en, string> = {
   "mainToolbar.memory": "메모리",
   "mainToolbar.starred": "핀",
   "mainToolbar.insights": "인사이트",
-  "mainToolbar.detachRoutines": "루틴 새 창으로 열기",
-  "mainToolbar.detachMemory": "메모리 새 창으로 열기",
-  "mainToolbar.detachStarred": "핀 새 창으로 열기",
   "mainToolbar.export": "내보내기",
   "mainToolbar.import": "가져오기",
   "mainToolbar.settings": "설정",
@@ -74,6 +68,6 @@ export const ko: Record<keyof typeof en, string> = {
   "appMode.groupAriaLabel": "워크스페이스 모드",
   "appMode.chat": "채팅",
   "appMode.work": "업무",
-  "appMode.chatAriaLabel": "채팅 모드 — 분리 가능한 뷰가 별도 창으로 열립니다",
+  "appMode.chatAriaLabel": "채팅 모드 — 사이드바가 접힌 집중형 레이아웃",
   "appMode.workAriaLabel": "업무 모드 — 뷰가 인라인으로 표시되고 사이드바가 펼쳐집니다",
 };

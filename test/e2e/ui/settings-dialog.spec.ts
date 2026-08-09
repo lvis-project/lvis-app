@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { closeSettingsWindow, openSettingsWindow } from './settings-window';
+import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 
 /**
  * Inline settings smoke (settings-inline-overhaul).
@@ -16,19 +16,19 @@ import { closeSettingsWindow, openSettingsWindow } from './settings-window';
  *     this surface.
  *
  * What remains worth pinning is that the inline panel opens to the requested
- * tab and that the title-bar close button exits it.
+ * tab and that its page-level back control exits it.
  */
 test('inline settings opens to the requested tab and closes back', async ({ app, mainWindow, t }) => {
-  const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
+  const settingsPage = await openInlineSettings(app, mainWindow, 'chat');
 
   // Scope to the settings panel — the main window's own sidebar has a "Chats"
   // tab whose accessible name would otherwise also match `name: 'Chat'` and
   // trip strict mode.
-  const settingsPanel = settingsWindow.locator('[data-settings-layout]');
+  const settingsPanel = settingsPage.locator('[data-settings-layout]');
   await expect(
     settingsPanel.getByRole('tab', { name: t('settingsContent.tabChat'), exact: true }),
   ).toHaveAttribute('data-state', 'active');
 
   // Title-bar close leaves the settings view (the sidebar heading disappears).
-  await closeSettingsWindow(app, settingsWindow);
+  await closeInlineSettings(app, settingsPage);
 });

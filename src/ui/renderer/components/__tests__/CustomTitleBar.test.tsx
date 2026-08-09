@@ -81,12 +81,11 @@ describe("CustomTitleBar", () => {
       expect(getByTestId("titlebar-close")).toBeTruthy();
     });
 
-    it("right-aligns the − □ × cluster even with no children (the settings window)", () => {
+    it("right-aligns the − □ × cluster even with no children", () => {
       // Regression guard: the band has no `justify-*`, so the control wrapper
       // must carry `ml-auto` to pin the cluster to the trailing corner. Without
-      // it, the no-children render site (SettingsWindow) strands the buttons
-      // flush-left. The main window happens to work via the child MainToolbar's
-      // own flex-1, but that child is absent here.
+      // it, a no-children render strands the buttons flush-left. The main
+      // window happens to work via the child MainToolbar's own flex-1.
       const { getByTestId } = render(<CustomTitleBar />);
       const controlWrapper = getByTestId("titlebar-minimize").parentElement;
       expect(controlWrapper?.className).toContain("ml-auto");

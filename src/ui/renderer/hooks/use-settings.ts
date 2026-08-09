@@ -76,7 +76,7 @@ function sameSubscriptionRuntime(
  *
  * Centralises the chat-input-bar's read-through cache of LLM provider/model/
  * thinking state. Settings broadcasts are authoritative so provider changes
- * from detached windows and marketplace installs take effect without a restart.
+ * and marketplace installs take effect without a restart.
  */
 export interface UseSettingsResult {
   /** Cached provider — narrowed to the LLMVendor union. */

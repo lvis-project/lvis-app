@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 
 async function setWindowSize(app: import('@playwright/test').ElectronApplication, w: number, h: number) {
   await app.evaluate(({ BrowserWindow }, size) => {
@@ -233,11 +234,7 @@ test('Chat-mode settings stay horizontally contained on every narrow tab (CDP)',
   }
   await expect(chatMode).toHaveAttribute('aria-pressed', 'true');
 
-  await mainWindow.evaluate(() => {
-    const api = (window as unknown as { lvisApi: { openSettingsWindow: (tab?: string) => unknown } }).lvisApi;
-    void api.openSettingsWindow('llm');
-  });
-  await expect(mainWindow.getByTestId('settings-sidebar-heading')).toBeVisible({ timeout: 15_000 });
+  await openInlineSettings(app, mainWindow, 'llm');
   const close = mainWindow.getByTestId('settings-close');
   await expect(close).toBeVisible();
   const closeAlignment = await close.evaluate((button) => {
@@ -374,6 +371,6 @@ test('Chat-mode settings stay horizontally contained on every narrow tab (CDP)',
     };
   });
   expect(mobileCloseAlignment.rightInset, 'narrow settings close is right-aligned').toBeLessThanOrEqual(16);
-  await mobileClose.click();
+  await closeInlineSettings(app, mainWindow);
   await expect(root).toHaveCount(0);
 });
