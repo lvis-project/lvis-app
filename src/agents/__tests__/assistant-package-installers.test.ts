@@ -1,5 +1,5 @@
 import AdmZip from "adm-zip";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import { installSkillPackageFromMarketplace } from "../../skills/skill-installer
 import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
 import { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { PluginMarketplaceItem } from "../../plugins/types.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 vi.mock("../../shared/app-version.js", () => ({
   getLvisAppVersion: () => "0.5.9",
@@ -19,14 +20,14 @@ const TEST_CACHE_ROOT = resolve(process.cwd(), ".lvis-package-cache");
 const TEST_AGENT_REGISTRY_PATH = resolve(process.cwd(), ".lvis-agent-registry.json");
 const TEST_SKILL_REGISTRY_PATH = resolve(process.cwd(), ".lvis-skill-registry.json");
 
-afterEach(() => {
+afterEach(async () => {
   for (const path of [
     TEST_INSTALL_ROOT,
     TEST_CACHE_ROOT,
     TEST_AGENT_REGISTRY_PATH,
     TEST_SKILL_REGISTRY_PATH,
   ]) {
-    rmSync(path, { recursive: true, force: true });
+    await cleanupTmpDir(path);
   }
 });
 
@@ -127,7 +128,7 @@ describe("assistant package installers", () => {
         manifestPath: join(TEST_INSTALL_ROOT, "plugin.json"),
       });
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -174,7 +175,7 @@ describe("assistant package installers", () => {
         manifestPath: join(TEST_INSTALL_ROOT, "plugin.json"),
       });
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -306,12 +307,14 @@ describe("assistant package installers", () => {
       return { zipBuffer: agentBuffer, artifactSha256: "agent-sha", signerKeyId: "test-key" };
     });
     const skillDownload = vi.mocked(skillStore.downloadVerifiedArtifact);
+    const installs: Array<Promise<unknown>> = [];
     try {
       const agentInstall = installAgentPackageFromMarketplace("reviewer", {
         fetcher: makeFetcher("agent"),
         store: agentStore,
         registryPath: join(tmp, "agents.json"),
       });
+      installs.push(agentInstall);
       await vi.waitFor(() => expect(agentDownloadEntered).toBe(true));
 
       const skillInstall = installSkillPackageFromMarketplace("audit", {
@@ -319,6 +322,7 @@ describe("assistant package installers", () => {
         store: skillStore,
         registryPath: join(tmp, "skills.json"),
       });
+      installs.push(skillInstall);
       await Promise.resolve();
       expect(skillDownload).not.toHaveBeenCalled();
 
@@ -327,7 +331,8 @@ describe("assistant package installers", () => {
       expect(skillDownload).toHaveBeenCalledOnce();
     } finally {
       releaseAgent?.();
-      rmSync(tmp, { recursive: true, force: true });
+      await Promise.allSettled(installs);
+      await cleanupTmpDir(tmp);
     }
   });
 
