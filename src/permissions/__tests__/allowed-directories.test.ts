@@ -5,7 +5,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import {
   join,
@@ -29,6 +29,7 @@ import {
   canonicalizePathForMatch,
   caseFoldForMatch,
 } from "../sensitive-paths.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 function fold(raw: string): string {
   return caseFoldForMatch(canonicalizePathForMatch(raw));
@@ -389,7 +390,7 @@ describe("sanitizeAllowedDirectories", () => {
     if (cache.ok) expect(cache.adjacencyWarnings.some((w) => w.includes("node_modules"))).toBe(true);
   });
 
-  it.runIf(process.platform === "win32")("allows a drive-letter alias after the real target directory is granted", () => {
+  it.runIf(process.platform === "win32")("allows a drive-letter alias after the real target directory is granted", async () => {
     const drive = findFreeWindowsDriveLetter();
     if (!drive) return;
 
@@ -406,13 +407,13 @@ describe("sanitizeAllowedDirectories", () => {
       } catch {
         // Cleanup best effort; CI runners sometimes detach subst drives during teardown.
       }
-      rmSync(target, { recursive: true, force: true });
+      await cleanupTmpDir(target);
     }
   });
 });
 
 describe("runtime allowed directories", () => {
-  it("preserves canonical filesystem case for native sandbox validators", () => {
+  it("preserves canonical filesystem case for native sandbox validators", async () => {
     const root = mkdtempSync(join(tmpdir(), "LVIS-Runtime-Scope-"));
     try {
       const [runtime] = sanitizeRuntimeAllowedDirectories([root]);
@@ -421,7 +422,7 @@ describe("runtime allowed directories", () => {
         expect(runtime).not.toBe(fold(root));
       }
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
