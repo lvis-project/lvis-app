@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { closeSettingsWindow, openSettingsWindow } from './settings-window.js';
+import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 
 /**
  * Settings → Model: the model dropdown's layout.
@@ -92,33 +92,33 @@ for (const bundleId of ['violet-light', 'violet-dark'] as const) {
         { cache: seededModelListCache(), bundle: bundleId },
       );
 
-      const settingsWindow = await openSettingsWindow(app, mainWindow, 'llm');
+      const settingsPage = await openInlineSettings(app, mainWindow, 'llm');
       await setWindowSize(app, width, 860);
-      const shell = settingsWindow.locator('[data-settings-layout]');
+      const shell = settingsPage.locator('[data-settings-layout]');
       await expect
         .poll(async () => shell.getAttribute('data-settings-layout'), { timeout: 5_000 })
         .toBe(sizeName === 'wide' ? 'wide' : 'narrow');
       if (sizeName === 'narrow') {
         // The narrow shell is a 2-depth stack; drill into the Model category so
         // the model dropdown is on screen.
-        await settingsWindow.getByRole('tab', { name: /Model|모델/ }).first().click();
-        await expect(settingsWindow.getByTestId('settings-mobile-back')).toBeVisible();
+        await settingsPage.getByRole('tab', { name: /Model|모델/ }).first().click();
+        await expect(settingsPage.getByTestId('settings-mobile-back')).toBeVisible();
       }
 
-      const modelSelect = settingsWindow.getByTestId('llm-model-select');
+      const modelSelect = settingsPage.getByTestId('llm-model-select');
       await expect(modelSelect).toBeVisible({ timeout: 10_000 });
       // The seeded ids only reach the dropdown once the cache-hydration effect
       // has run; the sync status line reports the hydrated catalog size.
-      await expect(settingsWindow.getByTestId('llm-tab:model-sync-status')).toBeVisible({
+      await expect(settingsPage.getByTestId('llm-tab:model-sync-status')).toBeVisible({
         timeout: 10_000,
       });
       await modelSelect.click();
 
-      const content = settingsWindow.locator('[data-slot="select-content"]');
+      const content = settingsPage.locator('[data-slot="select-content"]');
       await expect(content).toBeVisible({ timeout: 10_000 });
       await expect(content.locator('[data-slot="select-item"]').first()).toBeVisible();
 
-      const metrics = await settingsWindow.evaluate(() => {
+      const metrics = await settingsPage.evaluate(() => {
         const node = document.querySelector('[data-slot="select-content"]') as HTMLElement | null;
         const trigger = document.querySelector('#model-select') as HTMLElement | null;
         const rect = (el: HTMLElement | null) => {
@@ -179,9 +179,9 @@ for (const bundleId of ['violet-light', 'violet-dark'] as const) {
         expect(item.labelRight).toBeLessThanOrEqual(item.right + 1);
       }
 
-      await settingsWindow.keyboard.press('Escape');
+      await settingsPage.keyboard.press('Escape');
       await expect(content).toHaveCount(0);
-      if (sizeName === 'wide') await closeSettingsWindow(app, settingsWindow);
+      if (sizeName === 'wide') await closeInlineSettings(app, settingsPage);
     });
   }
 }

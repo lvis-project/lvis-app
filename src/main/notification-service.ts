@@ -191,10 +191,10 @@ export interface NotificationServiceOptions {
    */
   isTestEnv?: () => boolean;
   /**
-   * #842 — focus detection across ALL LVIS-owned BrowserWindows (settings,
-   * auth-window, link-window, auth-partition-viewer, detached children).
+   * #842 — focus detection across ALL LVIS-owned BrowserWindows (main,
+   * auth-window, link-window, auth-partition-viewer, and preview surfaces).
    * The pre-fix gate only consulted `mainWindow.isFocused()`, so an active
-   * settings window would still trigger an OS pop. Defaults to a live
+   * auxiliary window would still trigger an OS pop. Defaults to a live
    * `BrowserWindow.getAllWindows().some(w => !w.isDestroyed() && w.isFocused())`
    * scan; tests override to avoid loading Electron.
    */
@@ -282,7 +282,7 @@ function defaultIsReady(): boolean {
 
 /**
  * #842 — default multi-window focus probe. Scans every LVIS-owned
- * `BrowserWindow` (main + settings + auth + link + detached children) so
+ * `BrowserWindow` (main plus auth/link/preview auxiliary windows) so
  * "user is actively working in some LVIS window" is detected even when
  * the main window is blurred. `isDestroyed()` filtered out to avoid
  * touching a window that's already being torn down. Wrapped in try/catch
@@ -420,8 +420,8 @@ export class NotificationService {
       (opts.kind === "approval" || opts.bypassFocusGate === true);
 
     // #842 — focus gate consults EVERY LVIS-owned window. The pre-fix path
-    // checked `win.isFocused()` only, missing detached/aux windows (settings,
-    // auth, link). #843 — `bypassFocusGate` forces the OS path regardless of
+    // checked `win.isFocused()` only, missing auxiliary windows (auth, link,
+    // preview). #843 — `bypassFocusGate` forces the OS path regardless of
     // any focused window (critical surfaces like meeting.starting-soon).
     //
     // `mainAlive` semantics: "the main window is in a state where it can

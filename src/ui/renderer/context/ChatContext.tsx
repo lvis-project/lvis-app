@@ -139,8 +139,8 @@ export function useChatContext(): ChatContextValue {
 
 /**
  * Non-throwing read, for components that also mount OUTSIDE the chat subtree
- * (McpAppView: transcript card, preview rail, detached window, isolated test
- * harness). `null` means "no chat session owns this surface" — a caller must treat
+ * (McpAppView: transcript card, preview rail, fullscreen/PiP panel, isolated
+ * test harness). `null` means "no chat session owns this surface" — a caller must treat
  * that as an absent binding, never as the active session.
  */
 export function useOptionalChatContext(): ChatContextValue | null {

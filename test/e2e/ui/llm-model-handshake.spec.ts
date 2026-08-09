@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { closeSettingsWindow, openSettingsWindow } from './settings-window';
+import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 
 /**
  * Handshake-only OpenAI-compatible model list
@@ -22,30 +22,30 @@ test('openai-compatible model dropdown shows no hardcoded seed before an endpoin
   mainWindow,
   t,
 }) => {
-  const settingsWindow = await openSettingsWindow(app, mainWindow, 'llm');
+  const settingsPage = await openInlineSettings(app, mainWindow, 'llm');
 
   // Select the OpenAI-compatible provider from the searchable vendor dropdown.
-  const vendorTrigger = settingsWindow.locator('#vendor-select');
+  const vendorTrigger = settingsPage.locator('#vendor-select');
   await expect(vendorTrigger).toBeVisible({ timeout: 10_000 });
   await vendorTrigger.click();
-  const vendorSearch = settingsWindow.getByTestId('llm-tab:vendor-search');
+  const vendorSearch = settingsPage.getByTestId('llm-tab:vendor-search');
   await expect(vendorSearch).toBeVisible();
   const compatLabel = t('constants.vendorOpenAiCompatibleLabel');
   await vendorSearch.fill(compatLabel);
-  await settingsWindow.getByRole('option', { name: compatLabel }).click();
+  await settingsPage.getByRole('option', { name: compatLabel }).click();
 
   // A fresh openai-compatible block ships with no base URL, so no /models
   // handshake runs and there is nothing to populate the dropdown with yet.
-  const baseUrl = settingsWindow.getByTestId('llm-base-url-input');
+  const baseUrl = settingsPage.getByTestId('llm-base-url-input');
   await expect(baseUrl).toHaveValue('');
 
   // Open the model dropdown: the former hardcoded LVIS-cluster seed must be gone.
-  await settingsWindow.getByTestId('llm-model-select').click();
-  await expect(settingsWindow.getByText('Qwen3.6-35B-A3B-NVFP4')).toHaveCount(0);
-  await expect(settingsWindow.getByText('Nemotron-3-Nano-30B-A3B-FP8')).toHaveCount(0);
+  await settingsPage.getByTestId('llm-model-select').click();
+  await expect(settingsPage.getByText('Qwen3.6-35B-A3B-NVFP4')).toHaveCount(0);
+  await expect(settingsPage.getByText('Nemotron-3-Nano-30B-A3B-FP8')).toHaveCount(0);
 
   // Dismiss the open Select popover before leaving — its overlay would
   // otherwise intercept the settings Back-button click during teardown.
-  await settingsWindow.keyboard.press('Escape');
-  await closeSettingsWindow(app, settingsWindow);
+  await settingsPage.keyboard.press('Escape');
+  await closeInlineSettings(app, settingsPage);
 });

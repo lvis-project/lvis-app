@@ -209,8 +209,8 @@ const pluginWebviewRegistry = new Map<number, PluginWebviewBinding>();
 
 /**
  * Publish a host-owned theme change on the plugin event bus. Plugin webviews
- * still receive the direct IPC fanout below; host plugins that own detached
- * windows can subscribe through hostApi.onEvent("host.theme.changed").
+ * still receive the direct IPC fanout below; host-side subscribers can consume
+ * the same event through hostApi.onEvent("host.theme.changed").
  */
 export function publishHostThemeChanged(safe: SafeThemePayload): void {
   emitHostEvent("host.theme.changed", cloneThemePayload(safe));
@@ -1279,7 +1279,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // proxy session from a capped LRU, so a renderer looping valid `ui://` reads could evict
   // a live card's token. Both halves are true. Rate-limiting is still the wrong fix here:
   //
-  //   - This is the RENDER path. Every card, inline and detached, passes through it, and a
+  //   - This is the RENDER path. Every renderer-owned card passes through it, and a
   //     conversation may legitimately mount many at once. It must not share the
   //     user-initiated bucket with `prompts/get` and the attach channels, and a bucket
   //     sized for user actions would starve ordinary rendering.
@@ -1296,7 +1296,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.uiResource, e); return UNAUTHORIZED_FRAME; }
     // b1 — install the per-server network gate BEFORE the resource is read. (It is
     // the deny-by-default declared-origin gate now, not the old CDN allowlist.)
-    // This is the single chokepoint every card render (inline + detached) passes
+    // This is the single chokepoint every card render passes
     // through, and the webview only mounts after this promise resolves, so the
     // gate is guaranteed present before the guest's first request. Fail-closed:
     // an invalid/over-length serverId throws out of encodeMcpServerId here rather

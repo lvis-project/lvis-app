@@ -10,9 +10,8 @@
  *
  * What remains is the main window: who it is (`registerMainWindow` / `getMainWindow`,
  * the one place the rest of main asks), and the animated resizes the workspace mode and
- * the chat side panel ask for. Other windows in the app own themselves — the settings
- * window (`settings-window.ts`), the HTML preview (`ipc/domains/window.ts`), and the
- * auth windows — and none of them route through here.
+ * the chat side panel ask for. Auxiliary HTML-preview, link, and auth windows own
+ * themselves and do not route through here.
  */
 
 import { BrowserWindow, ipcMain, screen, type IpcMainInvokeEvent } from "electron";

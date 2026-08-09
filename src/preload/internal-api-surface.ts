@@ -370,8 +370,8 @@ export function buildInternalApiSurface() {
   },
   // Tutorial-C — SpotlightTour state bridge. Host stores tour completion
   // under `~/.lvis/onboarding/tour-state.json`; `tour.start` broadcasts a
-  // `lvis:tour:start` event to every open window so detached panes also
-  // launch the tour. `getState` is read-never-throws (returns the default
+  // `lvis:tour:start` event through the host's trusted renderer target set.
+  // `getState` is read-never-throws (returns the default
   // shape on any failure) per the project storage contract.
   tour: {
     getState: async () =>
@@ -428,27 +428,6 @@ export function buildInternalApiSurface() {
       ipcRenderer.on(CHANNELS.tour.start, listener);
       return () => ipcRenderer.removeListener(CHANNELS.tour.start, listener);
     },
-  },
-  // Settings no longer detaches to its own BrowserWindow — this IPC now routes
-  // the main process to the INLINE settings panel (view:activate → settings).
-  // Kept as a bridge for defence-in-depth; no window id is produced anymore.
-  openSettingsWindow: async (initialTab?: string) =>
-    ipcRenderer.invoke(CHANNELS.settingsWindow.open, initialTab) as Promise<
-      { ok: true } | { ok: false; error: string }
-    >,
-  notifySettingsWindowSaved: async () =>
-    ipcRenderer.invoke(CHANNELS.settingsWindow.saved) as Promise<{ ok: true } | { ok: false; error: string }>,
-  onSettingsWindowSaved: (handler: () => void) => {
-    const listener = () => handler();
-    ipcRenderer.on(CHANNELS.settingsWindow.saved, listener);
-    return () => ipcRenderer.removeListener(CHANNELS.settingsWindow.saved, listener);
-  },
-  onSettingsWindowTab: (handler: (initialTab: string) => void) => {
-    const listener = (_event: unknown, payload: { initialTab?: unknown }) => {
-      if (typeof payload?.initialTab === "string") handler(payload.initialTab);
-    };
-    ipcRenderer.on(CHANNELS.settingsWindow.tab, listener);
-    return () => ipcRenderer.removeListener(CHANNELS.settingsWindow.tab, listener);
   },
   // Open an http(s) URL in the system browser. Main-side validates the
   // scheme and rejects file://, javascript:, and any other handler.

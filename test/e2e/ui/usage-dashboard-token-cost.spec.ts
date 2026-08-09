@@ -3,7 +3,7 @@ import path from "node:path";
 import { test, expect } from "./fixtures";
 import { builtMainExists, launchSeededElectron, teardownSeededElectron,
 } from "./seeded-electron";
-import { closeSettingsWindow, openSettingsWindow } from "./settings-window";
+import { closeInlineSettings, openInlineSettings } from "./inline-settings.js";
 import { makeTestT } from "./i18n";
 
 // This spec launches its own Electron via launchSeededElectron (default ko
@@ -94,22 +94,22 @@ test.describe("usage dashboard token cost e2e", () => {
 
     try {
       writeUsageAudit(ctx.lvisHome);
-      const settingsWindow = await openSettingsWindow(
+      const settingsPage = await openInlineSettings(
         ctx.app,
         ctx.page,
         "usage",
       );
       try {
-        await expect(settingsWindow.getByTestId("usage-dashboard")).toBeVisible(
+        await expect(settingsPage.getByTestId("usage-dashboard")).toBeVisible(
           {
             timeout: 10_000,
           },
         );
         await expect(
-          settingsWindow.getByText(t("usageDashboard.perVendor")),
+          settingsPage.getByText(t("usageDashboard.perVendor")),
         ).toBeVisible();
 
-        const vendorTableRows = settingsWindow
+        const vendorTableRows = settingsPage
           .locator("table")
           .filter({ hasText: t("usageDashboard.colVendor") })
           .first()
@@ -140,15 +140,15 @@ test.describe("usage dashboard token cost e2e", () => {
           .pop()!
           .trim();
         await expect(
-          settingsWindow.getByText(unknownIncludedSuffix).first(),
+          settingsPage.getByText(unknownIncludedSuffix).first(),
         ).toBeVisible();
 
         await expect(
-          settingsWindow.getByText("claude-sonnet-4-6"),
+          settingsPage.getByText("claude-sonnet-4-6"),
         ).toBeVisible();
-        await expect(settingsWindow.getByText("gpt-5.4-mini")).toBeVisible();
+        await expect(settingsPage.getByText("gpt-5.4-mini")).toBeVisible();
       } finally {
-        await closeSettingsWindow(ctx.app, settingsWindow);
+        await closeInlineSettings(ctx.app, settingsPage);
       }
     } finally {
       await teardownSeededElectron(ctx);

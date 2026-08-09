@@ -52,7 +52,7 @@ export class PluginLoopbackManager {
      * #885 b3 teardown sink — the SAME factory `McpManager` gets, so a plugin's
      * in-process MCP server going away is indistinguishable, to a rendered card,
      * from an external server going away (`serverDisconnected` broadcast →
-     * detached-window close → partition clear). A loopback server's id IS its
+     * renderer card retirement → partition clear). A loopback server's id IS its
      * pluginId, so the payload needs no translation.
      *
      * It DEFAULTS to the real sink rather than being injected by boot: this arm

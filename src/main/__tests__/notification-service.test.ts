@@ -595,7 +595,7 @@ describe("NotificationService — title sanitization (M1)", () => {
 describe("NotificationService — multi-window focus gate (#842)", () => {
   it("main blurred + aux window focused → focus gate ACTIVE (in-app toast, no OS pop)", () => {
     // The pre-fix gate only consulted `win.isFocused()` on mainWindow. With
-    // a detached settings/auth/link window holding focus, the gate now
+    // an auth/link/preview auxiliary window holding focus, the gate now
     // correctly classifies as in-app via the `isAnyWindowFocused` probe.
     const win = makeMockWindow({ focused: false, minimized: false });
     const factoryStub = makeNotificationFactoryStub();

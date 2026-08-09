@@ -19,7 +19,7 @@ rules, asks the user or reviewer where required, and records the result.
 | Trust origin | User keyboard, LLM tool argument, plugin UI, local API, routine, or headless task. |
 | Project context | Normalized project root/name used for scope and audit. |
 | Policy mode | Default, strict, auto-review, or allow mode. |
-| Execution surface | Foreground chat, detached view, background routine, plugin surface, or local API. |
+| Execution surface | Foreground chat, background routine, inline plugin/MCP surface, or local API. |
 
 ## Decision Order
 

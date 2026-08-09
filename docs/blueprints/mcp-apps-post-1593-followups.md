@@ -24,7 +24,7 @@ The claim it *did* get right, and the one that drove sequencing: **zero plugins 
 | P1 — `onsizechange`, `onopenlink` | wired, plus the **handlers-table seam**: one array in `mcp-app-bridge.ts` from which BOTH the advertised capabilities and the registrations derive, so a capability cannot be advertised without its handler |
 | P1 — `oncalltool` | gated IPC through `callFromUi` → the same `inspectHostRisk` executor gate a model call takes, plus the spec's **MUST** visibility check (`_meta.ui.visibility ∋ "app"`) that neither the SDK nor the reference host implements |
 | P1 — `onsendmessage` | shipped as `onmessage` (the assessment used the wrong handler name — see *Handler names are load-bearing*): notification path + **user-gated** conversation injection with `app-emitted` provenance |
-| P1 — `onrequestdisplaymode` | `inline` / `fullscreen` on the existing detach seam. `pip` deliberately NOT advertised (it needs a second always-on-top window stack) |
+| P1 — `onrequestdisplaymode` | Originally shipped `inline` / `fullscreen` on the detach seam. The 2026-08-09 follow-up retired that seam and added renderer-native fullscreen/PiP locations. |
 | P2 — CSP authoring | `docs/guides/mcp-app-authoring.md`. (The spec's per-resource `permissions` turned out to be declared, plumbed, and then dropped at the proxy-session mint — a knob nothing honored. It is REMOVED, not documented: an opaque-origin sandboxed frame cannot be delegated a powerful feature.) |
 | (found while building) | `ondownloadfile`, `onupdatemodelcontext`, and the plugin `ui://` serving arm above |
 

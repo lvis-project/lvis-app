@@ -38,7 +38,6 @@ import { ensureTray, refreshTrayMenu, showOrCreateMainWindow } from "./main/app-
 import { configureNativeWindowCoordinator } from "./main/native-window-coordinator.js";
 import { readStartupLaunchState } from "./main/startup-launch.js";
 import { reconcileOsIntegrationOnBoot } from "./main/reconcile-os-integration.js";
-import { registerSettingsWindowHandlers } from "./main/settings-window.js";
 import { maybeStartLocalApiServer } from "./main/local-api-server.js";
 import { createConversationSurfaceRuntime } from "./engine/conversation-surface-runtime.js";
 import { createConversationCommandPort } from "./main/conversation-command-port.js";
@@ -307,7 +306,6 @@ async function main() {
     tailnetSharingOwnerService,
     telegramConnectionService,
   );
-  registerSettingsWindowHandlers(services.auditLogger);
 
   // #1436: start the OPT-IN loopback local API server (OFF by default; enabled
   // via Settings → system.localApiServer OR env LVIS_LOCAL_API=1). Wrapped in

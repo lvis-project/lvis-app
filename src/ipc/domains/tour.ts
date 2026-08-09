@@ -165,9 +165,10 @@ export function registerTourHandlers(deps: IpcDeps): void {
           message: "scenarioId must be a non-empty string",
         };
       }
-      // Fan out to every open app window so e.g. a Settings → Help button
-      // pressed in the main window can also launch the tour inside a
-      // detached pane. `fanOutToAllWindows` composes on safe-send's
+      // Fan out through the curated app-renderer target set. Keeping this on
+      // the shared helper preserves destroyed-window and send-race handling
+      // if another trusted renderer surface is added later. `fanOutToAllWindows`
+      // composes on safe-send's
       // per-window destroyed-check + send-race swallow; `log` receives the
       // per-window warn so one window's failure never blocks the others.
       const targets = deps.getAppWindows?.() ?? [deps.getMainWindow()];

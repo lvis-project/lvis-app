@@ -292,9 +292,8 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     caret,
     enabled: !disabled,
     isComposing,
-    // Read the same way the slash-picker runtime reads its tools. Absent in a detached
-    // preview window, where the menu then simply never opens — the honest outcome, not
-    // a synthesized catalogue.
+    // Read the same way the slash-picker runtime reads its tools. On reduced
+    // renderer surfaces without the MCP bridge, the menu simply never opens.
     mcp: typeof window === "undefined" ? undefined : window.lvis?.mcp,
     resourceCount,
     allocateN,
