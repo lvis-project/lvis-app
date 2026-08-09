@@ -272,8 +272,9 @@ test.describe("chat stream bottom-follow jitter", () => {
       await expect(ctx.page.getByTestId("jump-to-bottom")).toBeVisible();
 
       await ctx.page.getByTestId("sidebar-memory").click();
-      await expect(ctx.page.getByTestId("main-content-back")).toBeVisible({ timeout: 10_000 });
-      await ctx.page.getByTestId("main-content-back").click();
+      await expect(ctx.page.getByTestId("view-path-current-memory")).toBeVisible({ timeout: 10_000 });
+      await expect(ctx.page.getByTestId("main-content-back")).toHaveCount(0);
+      await ctx.page.getByTestId("view-path-back").click();
       await expect(ctx.page.locator(CHAT_VIEWPORT_SELECTOR)).toBeVisible({ timeout: 10_000 });
 
       await expect.poll(async () => (await readViewport(ctx.page)).bottomGap, { timeout: 5_000 })

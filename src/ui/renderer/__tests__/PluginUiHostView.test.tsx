@@ -12,8 +12,8 @@
  * fully exercisable in jsdom.
  */
 import "../../../../test/renderer/setup.js";
-import { describe, it, expect, afterEach, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { describe, it, expect, afterEach } from "vitest";
+import { render } from "@testing-library/react";
 import { PluginUiHostView } from "../../../plugin-ui-host.js";
 import type { PluginUiExtensionView } from "../../../plugin-ui-host.js";
 
@@ -123,13 +123,13 @@ describe("PluginUiHostView — loading state", () => {
     expect(getByText(/Plugin webview 자산 URL을 lvisApi에서 찾을 수 없습니다/)).toBeTruthy();
   });
 
-  it("renders shared page back affordance for inline plugin views", () => {
+  it("leaves app-level navigation to the shared toolbar", () => {
     stubLvisApi();
-    const onBack = vi.fn();
-    const { getByTestId } = render(<PluginUiHostView view={makeView()} onBack={onBack} />);
+    const { queryByTestId, getByText } = render(<PluginUiHostView view={makeView()} />);
 
-    fireEvent.click(getByTestId("plugin-page-back"));
-    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(getByText("미팅")).toBeTruthy();
+    expect(queryByTestId("plugin-page-back")).toBeNull();
+    expect(queryByTestId("page-shell-back")).toBeNull();
   });
 
   it("shows auth error banner for detached plugin content", () => {

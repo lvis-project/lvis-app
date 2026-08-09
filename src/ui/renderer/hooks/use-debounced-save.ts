@@ -15,6 +15,15 @@ export interface DebouncedSave {
   flush: () => void;
 }
 
+export interface DebouncedSaveOptions {
+  /**
+   * Persist a pending change when the owning surface unmounts. The default
+   * remains cancellation so callers must opt in when unmount is navigation
+   * rather than abandonment.
+   */
+  flushOnUnmount?: boolean;
+}
+
 /**
  * Trailing-edge debounced save. Returns a `{ schedule, cancel }` pair.
  *
@@ -29,7 +38,11 @@ export interface DebouncedSave {
  * arrow without thrashing the debounce when the closure identity changes
  * every render. Only the most recent `saveFn` runs when the timer fires.
  */
-export function useDebouncedSave(saveFn: () => void, ms = 200): DebouncedSave {
+export function useDebouncedSave(
+  saveFn: () => void,
+  ms = 200,
+  { flushOnUnmount = false }: DebouncedSaveOptions = {},
+): DebouncedSave {
   // Keep the latest `saveFn` in a ref so the debounced callback always
   // sees the most recent closure (with the most recent component state)
   // when the timer eventually fires. Update via `useEffect` rather than a
@@ -49,8 +62,6 @@ export function useDebouncedSave(saveFn: () => void, ms = 200): DebouncedSave {
     }
   }, []);
 
-  useEffect(() => cancel, [cancel]);
-
   const schedule = useCallback(() => {
     if (timer.current) clearTimeout(timer.current);
     timer.current = setTimeout(() => {
@@ -66,6 +77,14 @@ export function useDebouncedSave(saveFn: () => void, ms = 200): DebouncedSave {
       savedFn.current();
     }
   }, []);
+
+  useEffect(() => () => {
+    if (flushOnUnmount) {
+      flush();
+      return;
+    }
+    cancel();
+  }, [cancel, flush, flushOnUnmount]);
 
   return useMemo(() => ({ schedule, cancel, flush }), [schedule, cancel, flush]);
 }
