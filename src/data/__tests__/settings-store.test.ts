@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -24,6 +24,7 @@ import {
 } from "../../shared/log-retention.js";
 import { BUNDLE_IDS, DEFAULT_BUNDLE_ID } from "../../shared/theme-bundles.js";
 import { setProcessPlatform } from "../../testing/process-platform.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   DEFAULT_LLM_VENDOR,
   freshAllVendorBlocks,
@@ -41,8 +42,8 @@ describe("SettingsService remote A2A canonical route-control origin", () => {
     userDataPath = mkdtempSync(join(tmpdir(), "settings-store-a2a-remote-"));
   });
 
-  afterEach(() => {
-    rmSync(userDataPath, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTmpDir(userDataPath);
   });
 
   it("accepts the canonical root slash and rejects a value URL would rewrite", async () => {
@@ -71,9 +72,9 @@ describe("SettingsService marketplace defaults", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("defaults to real-cloud against the local marketplace server", () => {
@@ -522,9 +523,9 @@ describe("SettingsService removes plugin-specific legacy host settings", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("drops legacy msGraph blocks from loaded and saved settings", async () => {
@@ -555,9 +556,9 @@ describe("SettingsService removed manual host-resolver map", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   // The manual host-resolver map was removed with the private-endpoint access
@@ -612,9 +613,9 @@ describe("SettingsService plugin uninstall cleanup", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("deletes only the selected plugin config", async () => {
@@ -665,9 +666,9 @@ describe("SettingsService role presets", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("ignores unknown on-disk sections without resetting unrelated sections", () => {
@@ -739,7 +740,7 @@ describe("SettingsService role presets", () => {
       );
       expect(new SettingsService({ userDataPath: corruptPath }).get("features")?.memoryCaptureMode).toBe("off");
     } finally {
-      rmSync(corruptPath, { recursive: true, force: true });
+      await cleanupTmpDir(corruptPath);
     }
   });
 
@@ -804,7 +805,7 @@ describe("SettingsService role presets", () => {
       } finally {
         setProcessPlatform(original);
         vi.resetModules();
-        rmSync(dir, { recursive: true, force: true });
+        await cleanupTmpDir(dir);
       }
     },
   );
@@ -818,9 +819,9 @@ describe("SettingsService LLM per-vendor patching", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("fresh installs persist only default-visible provider blocks", () => {
@@ -1304,9 +1305,9 @@ describe("SettingsService webView (B1 — external URL viewer policy)", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("defaults preferredFlow to 'in-app' on a fresh install", () => {
@@ -1441,9 +1442,9 @@ describe("SettingsService system — close behavior (PR #1032)", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("defaults closeBehavior to 'hide-to-tray' on a fresh install", () => {
@@ -1528,9 +1529,9 @@ describe("SettingsService system — pinned project roots", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("de-dupes case/slash-variant roots via projectRootKey, keeping the first-seen casing", async () => {
@@ -1573,9 +1574,9 @@ describe("SettingsService system — workspace appMode", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("defaults appMode to 'work' on a fresh install", () => {
@@ -1720,9 +1721,9 @@ describe("SettingsService appearance v2 — fresh install defaults", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("fresh install returns schemaVersion:2 with DEFAULT_BUNDLE_ID", () => {
@@ -1849,9 +1850,9 @@ describe("SettingsService system locale detection", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("fresh install with systemLocale=ko-KR keeps English as the default language", () => {
@@ -1901,14 +1902,27 @@ describe("SettingsService system locale detection", () => {
 describe("SettingsService appearance v1 → v2 migration", () => {
   let userDataPath: string;
 
+  async function waitForV2WriteBack(): Promise<void> {
+    const settingsPath = join(userDataPath, "lvis-settings.json");
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      const onDisk = JSON.parse(readFileSync(settingsPath, "utf-8")) as {
+        appearance?: { schemaVersion?: unknown };
+      };
+      if (onDisk.appearance?.schemaVersion === 2) return;
+      await new Promise<void>((resolveWait) => setTimeout(resolveWait, 50));
+    }
+    throw new Error("Settings migration write-back did not settle before teardown");
+  }
+
   beforeEach(() => {
     userDataPath = mkdtempSync(join(tmpdir(), "settings-appearance-migration-"));
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
+    await waitForV2WriteBack();
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   function writeV1(appearance: Record<string, unknown>): void {
@@ -2046,8 +2060,8 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
   beforeEach(() => {
     userDataPath = mkdtempSync(join(tmpdir(), "settings-store-font-"));
   });
-  afterEach(() => {
-    rmSync(userDataPath, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTmpDir(userDataPath);
   });
 
   function writeAppearance(font: unknown): void {
@@ -2082,16 +2096,19 @@ describe("SettingsService appearance.font — Track A user-configurable font", (
     expect(s.get("appearance").font?.family).toBeUndefined();
   });
 
-  it("accepts each preset sizeScale value", () => {
+  it("accepts each preset sizeScale value", async () => {
     for (const value of [0.875, 1, 1.125, 1.25]) {
       const dir = mkdtempSync(join(tmpdir(), `settings-store-size-${value}-`));
-      writeFileSync(
-        join(dir, "lvis-settings.json"),
-        JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: value } } }),
-      );
-      const s = new SettingsService({ userDataPath: dir });
-      expect(s.get("appearance")).toMatchObject({ font: { sizeScale: value } });
-      rmSync(dir, { recursive: true, force: true });
+      try {
+        writeFileSync(
+          join(dir, "lvis-settings.json"),
+          JSON.stringify({ appearance: { schemaVersion: 2, language: "en", bundleId: "tokyo-night", font: { sizeScale: value } } }),
+        );
+        const s = new SettingsService({ userDataPath: dir });
+        expect(s.get("appearance")).toMatchObject({ font: { sizeScale: value } });
+      } finally {
+        await cleanupTmpDir(dir);
+      }
     }
   });
 
@@ -2182,9 +2199,9 @@ describe("SettingsService E4 — shortcuts + launch-at-startup", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("defaults shortcuts OFF with no accelerator + launch flags false", () => {
@@ -2259,8 +2276,8 @@ describe("SettingsService diagnostics (#1499 E2)", () => {
   beforeEach(() => {
     userDataPath = mkdtempSync(join(tmpdir(), "settings-store-diagnostics-"));
   });
-  afterEach(() => {
-    rmSync(userDataPath, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTmpDir(userDataPath);
   });
 
   it("defaults: includeCrashDumps false, logRetentionDays = LOG_RETENTION_DAYS SOT", () => {
@@ -2308,8 +2325,8 @@ describe("SettingsService — persisted main-window location", () => {
     userDataPath = mkdtempSync(join(tmpdir(), "lvis-settings-active-view-"));
   });
 
-  afterEach(() => {
-    rmSync(userDataPath, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTmpDir(userDataPath);
   });
 
   it("round-trips an inline view key across restart", async () => {

@@ -29,12 +29,12 @@ const {
   mkdtempSync,
   openSync,
   readFileSync,
-  rmSync,
   writeFileSync,
   writeSync,
 } = await import("node:fs");
 const { tmpdir } = await import("node:os");
 const { join } = await import("node:path");
+const { cleanupTmpDir } = await import("../../testing/tmp-dir-teardown.js");
 const { SecretDocumentStore, SecretDocumentValidationError } = await import(
   "../secret-document-store.js"
 );
@@ -80,10 +80,10 @@ describe("stable secret read against equal-size in-place mutation", () => {
     onReadSync = null;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     onReadSync = null;
     vi.restoreAllMocks();
-    rmSync(root, { recursive: true, force: true });
+    await cleanupTmpDir(root);
   });
 
   it("fixture keeps size, so metadata identity cannot distinguish the two documents", () => {
