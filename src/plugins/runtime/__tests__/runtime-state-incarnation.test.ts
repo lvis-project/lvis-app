@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,10 +6,41 @@ import type { PluginHostApiIncarnation } from "../index.js";
 import { PluginRuntime, type PluginRuntimeOptions } from "../index.js";
 import { createNoopHostApi } from "../sandbox.js";
 import type { PluginManifest } from "../../types.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+
+type IncarnationCleanup = {
+  disposers: Array<() => void>;
+  deactivate: () => void;
+  drainOperations: () => Promise<void>;
+};
+
+const incarnationCleanups: IncarnationCleanup[] = [];
+const tempDataDirs: string[] = [];
+
+function makeTempDataDir(): string {
+  const directory = mkdtempSync(join(tmpdir(), "lvis-incarnation-data-"));
+  tempDataDirs.push(directory);
+  return directory;
+}
+
+afterEach(async () => {
+  for (const incarnation of incarnationCleanups.splice(0)) {
+    await incarnation.deactivate();
+    for (const dispose of incarnation.disposers.splice(0)) {
+      await dispose();
+    }
+    await incarnation.drainOperations();
+  }
+  for (const directory of tempDataDirs.splice(0)) {
+    await cleanupTmpDir(directory);
+  }
+});
 
 class IncarnationTestRuntime extends PluginRuntime {
   buildPending(pluginId: string, manifest: PluginManifest, dataDir: string) {
-    return this.buildHostApiIncarnation(pluginId, manifest, dataDir, undefined, null);
+    const incarnation = this.buildHostApiIncarnation(pluginId, manifest, dataDir, undefined, null);
+    incarnationCleanups.push(incarnation);
+    return incarnation;
   }
 
   invalidate(pluginId: string): void {
@@ -50,7 +81,7 @@ describe("pending HostApi incarnation lifecycle", () => {
     expect(() => runtime.buildPending(
       "plugin-a",
       manifest,
-      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+      makeTempDataDir(),
     )).toThrow(/incomplete HostApi without storage: plugin-a/);
   });
 
@@ -76,7 +107,7 @@ describe("pending HostApi incarnation lifecycle", () => {
     const pending = runtime.buildPending(
       "plugin-a",
       manifest,
-      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+      makeTempDataDir(),
     );
     expect(captured.isActive()).toBe(true);
 
@@ -106,7 +137,7 @@ describe("pending HostApi incarnation lifecycle", () => {
     const pending = runtime.buildPending(
       "plugin-a",
       manifest,
-      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+      makeTempDataDir(),
     );
 
     runtime.invalidate("plugin-a");
@@ -134,7 +165,7 @@ describe("pending HostApi incarnation lifecycle", () => {
     const committed = runtime.buildPending(
       "plugin-a",
       manifest,
-      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+      makeTempDataDir(),
     );
     committed.commit();
 
@@ -161,7 +192,7 @@ describe("pending HostApi incarnation lifecycle", () => {
     const pending = runtime.buildPending(
       "plugin-a",
       manifest,
-      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+      makeTempDataDir(),
     );
 
     runtime.resetState();
@@ -183,7 +214,7 @@ describe("pending HostApi incarnation lifecycle", () => {
     const first = runtime.buildPending(
       "plugin-a",
       manifest,
-      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+      makeTempDataDir(),
     );
     void runtime.runHook(first.lifecycleHookScope, () => new Promise<never>(() => undefined));
     await Promise.resolve();
@@ -193,7 +224,7 @@ describe("pending HostApi incarnation lifecycle", () => {
     const replacement = runtime.buildPending(
       "plugin-a",
       manifest,
-      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+      makeTempDataDir(),
     );
 
     expect(first.lifecycleHookScope.depth).toBe(0);
@@ -217,7 +248,7 @@ describe("pending HostApi incarnation lifecycle", () => {
     const pending = runtime.buildPending(
       "plugin-a",
       manifest,
-      mkdtempSync(join(tmpdir(), "lvis-incarnation-data-")),
+      makeTempDataDir(),
     );
     let release!: () => void;
     const operation = new Promise<void>((resolve) => { release = resolve; });

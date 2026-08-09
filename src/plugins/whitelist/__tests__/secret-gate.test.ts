@@ -12,10 +12,19 @@
  * allowlists the requested key so the Tier-3/Tier-4 ordering is what is
  * under test.
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runSecretGate } from "../secret-gate.js";
 import type { SecretGateInput } from "../secret-gate.js";
 import { whitelistRegistry } from "../whitelist-registry.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+
+const tempCacheRoots: string[] = [];
+
+afterEach(async () => {
+  for (const root of tempCacheRoots.splice(0)) {
+    await cleanupTmpDir(root);
+  }
+});
 
 /** Ask the gate for `llm.apiKey.openai` with the key allowlisted. */
 function gate(
@@ -172,6 +181,7 @@ describe("runSecretGate — admin-install bypass (#955)", () => {
       ],
     };
     const cacheRoot = mkdtempSync(join(tmpdir(), "lvis-secret-gate-"));
+    tempCacheRoots.push(cacheRoot);
     const cache = new WhitelistCache(cacheRoot);
     await cache.store({
       body,
