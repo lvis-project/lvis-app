@@ -7,7 +7,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 
 // Mock must be declared BEFORE the import under test so vi.mock hoists correctly.
@@ -24,6 +24,7 @@ vi.mock("../../core/network-guard.js", () => ({
 import { fetchPublicHttpResponse, NetworkGuardError } from "../../core/network-guard.js";
 import { CloudMarketplaceFetcher } from "../cloud-marketplace-fetcher.js";
 import { installFromMarketplace } from "../marketplace-installer.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const mockedFetchPublic = fetchPublicHttpResponse as unknown as ReturnType<typeof vi.fn>;
 
@@ -921,7 +922,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
       })).rejects.toThrow(/no readable body/);
       expect(mockedFetchPublic).toHaveBeenCalledOnce();
     } finally {
-      rmSync(downloadRoot, { recursive: true, force: true });
+      await cleanupTmpDir(downloadRoot);
     }
   });
 
@@ -948,7 +949,7 @@ describe("CloudMarketplaceFetcher — actual server response shape", () => {
       expect(mockedFetchPublic).toHaveBeenCalledOnce();
       expect(onCancel).toHaveBeenCalledOnce();
     } finally {
-      rmSync(downloadRoot, { recursive: true, force: true });
+      await cleanupTmpDir(downloadRoot);
     }
   });
 

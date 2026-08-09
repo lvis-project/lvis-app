@@ -6,7 +6,7 @@
  * latest versions in the catalog.
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { writeFile, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {resolve, join} from "node:path";
@@ -14,6 +14,7 @@ import { PluginUpdateDetector, isUpdateCheckEnabled } from "../update-detector.j
 import { isNewerPluginVersion } from "../update-condition.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -115,8 +116,8 @@ describe("PluginUpdateDetector", () => {
     tmpDir = mkdtempSync(join(tmpdir(), "update-detector-"));
   });
 
-  afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTmpDir(tmpDir);
   });
 
   async function successfulUpdates(detector: PluginUpdateDetector) {
