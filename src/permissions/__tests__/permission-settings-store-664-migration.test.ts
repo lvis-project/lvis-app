@@ -13,14 +13,20 @@
  * Defends the migration against silently flipping a fail-closed user to
  * the new pass-through-LOW semantic at upgrade time.
  */
-import { describe, it, expect } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterEach, describe, it, expect } from "vitest";
+import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   readPermissionSettings,
   migrateLegacyDisabledMode,
 } from "../permission-settings-store.js";
+import { PermissionTestResources } from "./test-resources.js";
+
+const resources = new PermissionTestResources();
+
+afterEach(async () => {
+  await resources.cleanup();
+});
 
 function writeRaw(dir: string, body: object): string {
   const p = join(dir, "settings.json");
@@ -119,7 +125,7 @@ describe("migrateLegacyDisabledMode — issue #664 idempotency", () => {
 
 describe("readPermissionSettings — issue #664 migration end-to-end", () => {
   it("persists the migrated file on first read", () => {
-    const dir = mkdtempSync(join(tmpdir(), "lvis-664-mig-"));
+    const dir = resources.makeTmpDir("lvis-664-mig-");
     const filePath = writeRaw(dir, {
       permissions: {
         reviewer: {
@@ -149,7 +155,7 @@ describe("readPermissionSettings — issue #664 migration end-to-end", () => {
   });
 
   it("preserves user-chosen disabled after migration marker present", () => {
-    const dir = mkdtempSync(join(tmpdir(), "lvis-664-userpick-"));
+    const dir = resources.makeTmpDir("lvis-664-userpick-");
     const filePath = writeRaw(dir, {
       permissions: {
         reviewer: {

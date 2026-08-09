@@ -19,10 +19,7 @@
  * fail-closed `unclassifiedHostApiMethod` WRITE for an unmapped path, and is a
  * PURE side-effect (it never alters the wrapped method's behavior).
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const harness = vi.hoisted(() => ({
   capturedRuntimeOptions: null as Record<string, unknown> | null,
@@ -102,6 +99,13 @@ import {
   type EffectLedger,
 } from "../effect-ledger.js";
 import type { PluginHostApi } from "../../plugins/types.js";
+import { PermissionTestResources } from "./test-resources.js";
+
+const resources = new PermissionTestResources();
+
+afterEach(async () => {
+  await resources.cleanup();
+});
 
 type CreateHostApi = (
   pluginId: string,
@@ -164,9 +168,7 @@ async function buildRealHostApi(): Promise<PluginHostApi> {
     createHostApi,
     "initPluginRuntime must register a createHostApi factory",
   ).toBeDefined();
-  const pluginDataDir = mkdtempSync(
-    join(tmpdir(), "lvis-hostapi-completeness-"),
-  );
+  const pluginDataDir = resources.makeTmpDir("lvis-hostapi-completeness-");
   // Build with the FULL capability vocabulary, not a sampled subset. A
   // namespace/method wired ONLY under a capability ABSENT from the fixture would
   // escape BOTH the non-plain-namespace assertion AND the SOT-coverage assertion

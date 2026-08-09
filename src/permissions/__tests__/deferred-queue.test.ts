@@ -1,13 +1,19 @@
-import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
+import { PermissionTestResources } from "./test-resources.js";
+
+const resources = new PermissionTestResources();
 
 function tmpQueuePath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-deferred-queue-"));
+  const dir = resources.makeTmpDir("lvis-deferred-queue-");
   return join(dir, "deferred-queue.jsonl");
 }
+
+afterEach(async () => {
+  await resources.cleanup();
+});
 
 const SAMPLE = {
   toolName: "fs_write",
