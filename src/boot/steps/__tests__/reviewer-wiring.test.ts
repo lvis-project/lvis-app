@@ -5,9 +5,10 @@
  * §11 v2.1 binding decisions.
  */
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 import {
   wireReviewerAgent,
   LlmReviewerProviderAdapter,
@@ -37,9 +38,9 @@ beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "permission-policy-p4-rw-"));
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+  if (tmpDir) await cleanupTmpDir(tmpDir);
 });
 
 /** Factory for a stub LLMProvider that yields the supplied StreamEvents. */

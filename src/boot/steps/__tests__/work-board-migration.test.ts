@@ -16,10 +16,11 @@
  *     object with an items array).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { migrateAgentHubBoardToWorkBoard } from "../work-board-migration.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 const SAMPLE_BOARD = { version: 1, nextId: 3, items: [{ id: 1, title: "legacy task", status: "planned", priority: "medium", created_at: "x", updated_at: "x" }] };
 
@@ -47,10 +48,10 @@ describe("work-board migration", () => {
     destPath = join(home, "work-board", "board.json");
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
     else process.env.LVIS_HOME = prevLvisHome;
-    rmSync(home, { recursive: true, force: true });
+    await cleanupTmpDir(home);
   });
 
   it("migrates once: dest absent + exactly one legacy board → copies + returns true", async () => {
