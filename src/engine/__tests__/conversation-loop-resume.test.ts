@@ -8,7 +8,7 @@
  * - manualCompact returns compacted:true when history is long enough to compact
  * - manualCompact returns compacted:false when history is short
  */
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync,
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,6 +19,7 @@ import type { GenericMessage } from "../llm/types.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
 import { t } from "../../i18n/index.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   makeConversationLoopDeps,
   makeConversationLoopLongHistory,
@@ -609,7 +610,7 @@ describe("ConversationLoop command routing", () => {
       expect(boot.manager.size()).toBe(1);
       expect(existsSync(join(hooksDir, "pre-demo.sh"))).toBe(true);
     } finally {
-      rmSync(tmpDir, { recursive: true, force: true });
+      await cleanupTmpDir(tmpDir);
     }
   });
 });

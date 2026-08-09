@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -33,6 +33,7 @@ import type {
   StreamTurnParams,
 } from "../../llm/types.js";
 import { RATIONALE_SIBLING_CANCELLED_RESULT } from "../rationale-conversation-orchestration.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 const RAW_ANCHOR_SECRET = "alice@example.com";
 
@@ -428,7 +429,7 @@ describe("foreground rationale real-stack integration", () => {
     } finally {
       hostService.shutdown();
       await auditLogger.close();
-      rmSync(directory, { recursive: true, force: true });
+      await cleanupTmpDir(directory);
     }
   });
 
@@ -605,7 +606,7 @@ describe("foreground rationale real-stack integration", () => {
     } finally {
       hostService.shutdown();
       await auditLogger.close();
-      rmSync(directory, { recursive: true, force: true });
+      await cleanupTmpDir(directory);
     }
   });
 
@@ -726,7 +727,7 @@ describe("foreground rationale real-stack integration", () => {
         approvalAuditLogger.close(),
         executorAuditLogger.close(),
       ]);
-      rmSync(directory, { recursive: true, force: true });
+      await cleanupTmpDir(directory);
     }
   });
 });
