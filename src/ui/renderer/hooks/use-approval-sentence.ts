@@ -40,8 +40,15 @@ export function useApprovalSentence({
   approvalRequest,
   onNotice,
 }: UseApprovalSentenceOptions) {
-  const [proposedChoice, setProposedChoice] = useState<ApprovalChoice | null>(null);
+  const [proposal, setProposal] = useState<{
+    requestId: string;
+    choice: ApprovalChoice;
+  } | null>(null);
   const requestId = approvalRequest?.id ?? null;
+  // Filter during render, before passive effects run. This prevents a proposal
+  // from the previous FIFO head from reaching the next card for even one
+  // commit when the acknowledged head is shifted.
+  const proposedChoice = proposal?.requestId === requestId ? proposal.choice : null;
   const requestIdRef = useRef<string | null>(null);
   requestIdRef.current = requestId;
 
@@ -49,7 +56,7 @@ export function useApprovalSentence({
   // being answered — drops it, so a stale proposal can never pre-select a
   // button on a request it was not about.
   useEffect(() => {
-    setProposedChoice(null);
+    setProposal(null);
   }, [requestId]);
 
   const notice = useCallback(
@@ -82,7 +89,7 @@ export function useApprovalSentence({
           // would pre-select a button for a different request.
           if (requestIdRef.current !== pendingId) return;
           if (result?.ok) {
-            setProposedChoice(result.choice);
+            setProposal({ requestId: pendingId, choice: result.choice });
             return;
           }
           notice(result?.error ?? "allow-selection-failed");

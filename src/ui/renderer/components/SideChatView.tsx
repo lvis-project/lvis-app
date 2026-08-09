@@ -15,7 +15,7 @@
  * The composer + New-session chrome stay bespoke (compact rail affordances). All
  * streaming is driven by `useSideChat`, which subscribes to the DEDICATED
  * side-chat IPC channel so main-chat frames never appear here. Tool APPROVAL
- * modals surface in the app-level ApprovalDialog (shared global ApprovalGate),
+ * requests surface in the app-level ApprovalDock (shared global ApprovalGate),
  * never inside this tab.
  */
 import { useLayoutEffect, useRef, useState } from "react";

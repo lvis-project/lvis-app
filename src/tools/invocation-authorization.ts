@@ -686,7 +686,7 @@ export async function authorizeToolInvocation(
       permissionResult = {
         decision: "allow",
         reason:
-          "plugin panel user action - standard agent approval modal suppressed",
+          "plugin panel user action - standard agent approval dock suppressed",
         layer: permissionResult.layer,
       };
     }
@@ -1065,7 +1065,7 @@ export async function authorizeToolInvocation(
     // ── Store B: explicit-approval memory skip (foreground only) ──────────
     // checkDetailed (sync) consults Store A — durable glob rules + the
     // alwaysAllowed Map (Layers 3/5). It cannot see Store B, the exact-tuple
-    // user-approval memory written by ToolApprovalDialog for DURABLE
+    // user-approval memory written by ToolApprovalContent for DURABLE
     // choices only (allow-session / allow-always; allow-once never
     // records). Pre-fix, choosing "allow this session" still
     // re-showed the modal on the next call because the foreground ask path

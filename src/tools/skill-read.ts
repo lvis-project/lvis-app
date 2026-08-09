@@ -54,7 +54,7 @@ export function createSkillReadTool(deps: SkillReadToolDeps): Tool {
     source: "builtin",
     // Pure read: no filesystem mutation and — unlike `skill_load` — no mutation
     // of the model's trusted system prompt either. The content lands in a
-    // tool_result, so it needs no approval modal of its own; the gate is that
+    // tool_result, so it needs no approval prompt of its own; the gate is that
     // the owning skill was already approved and loaded.
     category: "read",
     isReadOnly: () => true,

@@ -15,6 +15,7 @@ import { PermissionsTab } from "../PermissionsTab.js";
 import { makeHookTrustRow as hook } from "./test-helpers.js";
 import type { HookTrustRow } from "../../types.js";
 import { isPolicyUserEditable, type PolicySource } from "../../../../shared/policy-editability.js";
+import { t } from "../../../../i18n/runtime.js";
 
 /**
  * Mirrors the `PERMISSIONS.policyGet` handler: the host attaches `editable`
@@ -731,7 +732,7 @@ describe("PermissionsTab hook quarantine notice", () => {
 });
 
 describe("PermissionsTab — explicit-approval policy editability", () => {
-  const CHECKBOX_LABEL = "승인 대화상자에서 버튼 또는 단축키로 명시적 승인 또는 거부를 요구";
+  const CHECKBOX_LABEL = t("permissionsTab.approvalDialogCheckboxAriaLabel");
 
   it("enables the checkbox when no admin policy is deployed", async () => {
     installApi([[]]);

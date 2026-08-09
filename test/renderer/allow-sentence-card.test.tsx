@@ -47,7 +47,7 @@ async function appWithPendingApproval() {
     app.emitApproval(approvalRequest());
   });
   await waitFor(() =>
-    expect(app.container.querySelector('[data-testid="docked-approval-overlay"]')).toBeTruthy(),
+    expect(app.container.querySelector('[data-testid="approval-dock"]')).toBeTruthy(),
   );
   return app;
 }
@@ -94,7 +94,7 @@ describe("/allow — the sentence fills the form", () => {
 
     // THE point: nothing has been decided. The card is still up.
     expect(ns.approval.respond).not.toHaveBeenCalled();
-    expect(app.container.querySelector('[data-testid="docked-approval-overlay"]')).toBeTruthy();
+    expect(app.container.querySelector('[data-testid="approval-dock"]')).toBeTruthy();
 
     // Only the press decides.
     await act(async () => {
@@ -140,7 +140,7 @@ describe("/allow — the sentence fills the form", () => {
       );
     });
     await waitFor(() =>
-      expect(app.container.querySelector('[data-testid="docked-approval-overlay"]')).toBeTruthy(),
+      expect(app.container.querySelector('[data-testid="approval-dock"]')).toBeTruthy(),
     );
     const ns = window.lvis as unknown as {
       approval: { selectSentence: ReturnType<typeof vi.fn>; respond: ReturnType<typeof vi.fn> };
@@ -155,12 +155,39 @@ describe("/allow — the sentence fills the form", () => {
 
     await waitFor(() => expect(ns.approval.selectSentence).toHaveBeenCalledTimes(1));
     expect(choice(app.container, "allow-always")).toBeNull();
-    expect(document.activeElement).toBe(choice(app.container, "allow-once"));
+    expect(choice(app.container, "allow-once")?.tabIndex).toBe(0);
+    expect(app.container.querySelector('[data-testid="approval-dock"]')?.contains(document.activeElement)).toBe(false);
     expect(ns.approval.respond).not.toHaveBeenCalled();
   });
 });
 
 describe("/allow — every failure is plain, and none of it is a grant", () => {
+  it("does not invoke the filesystem scope selector for a generic tool approval", async () => {
+    const app = await renderApp({ hasApiKey: true });
+    const ns = window.lvis as unknown as {
+      approval: { selectSentence: ReturnType<typeof vi.fn>; respond: ReturnType<typeof vi.fn> };
+    };
+    await act(async () => {
+      app.emitApproval(approvalRequest({
+        id: "req-generic-tool",
+        kind: "tool",
+        toolName: "bash",
+        outOfAllowedDir: undefined,
+      }));
+    });
+    await waitFor(() =>
+      expect(app.container.querySelector('[data-testid="tool-approval-panel"]')).toBeTruthy(),
+    );
+
+    await submitChatMessage(app.container, "/allow this folder");
+
+    expect(ns.approval.selectSentence).not.toHaveBeenCalled();
+    expect(ns.approval.respond).not.toHaveBeenCalled();
+    expect(app.api.chatSend).not.toHaveBeenCalled();
+    expect(app.container.querySelector("[data-proposed]")).toBeNull();
+    expect(app.container.querySelector('[data-testid="approval-dock"]')).toBeTruthy();
+  });
+
   it.each([
     ["no clear match", "allow-no-match"],
     ["no provider configured", "allow-selector-unavailable"],
@@ -179,7 +206,8 @@ describe("/allow — every failure is plain, and none of it is a grant", () => {
     // Nothing decided, nothing pre-selected, card untouched.
     await waitFor(() => expect(ns.approval.respond).not.toHaveBeenCalled());
     expect(app.container.querySelector("[data-proposed]")).toBeNull();
-    expect(document.activeElement).toBe(choice(app.container, "allow-once"));
+    expect(choice(app.container, "allow-once")?.tabIndex).toBe(0);
+    expect(app.container.querySelector('[data-testid="approval-dock"]')?.contains(document.activeElement)).toBe(false);
     // The raw kebab code never reaches the user.
     expect(systemText(app.container)).not.toContain(code);
   });
@@ -227,6 +255,53 @@ describe("/allow — every failure is plain, and none of it is a grant", () => {
       await Promise.resolve();
     });
     expect(app.container.querySelector("[data-proposed]")).toBeNull();
+    expect(ns.approval.respond).toHaveBeenCalledTimes(1);
+  });
+
+  it("never carries a proposal from one FIFO head onto the next request", async () => {
+    const app = await appWithPendingApproval();
+    const ns = window.lvis as unknown as {
+      approval: { selectSentence: ReturnType<typeof vi.fn>; respond: ReturnType<typeof vi.fn> };
+    };
+    ns.approval.selectSentence.mockResolvedValueOnce({
+      ok: true,
+      requestId: "req-allow-1",
+      choice: "allow-always",
+    });
+
+    await act(async () => {
+      app.emitApproval(approvalRequest({
+        id: "req-allow-2",
+        outOfAllowedDir: {
+          candidatePath: "/home/ken/reports/q4.md",
+          suggestedParent: "/home/ken/reports",
+          currentAllowed: ["/home/ken/work"],
+          adjacencyWarnings: [],
+        },
+      }));
+    });
+
+    await submitChatMessage(app.container, "/allow continue for this folder");
+    await waitFor(() =>
+      expect(choice(app.container, "allow-always")?.dataset.proposed).toBe("true"),
+    );
+
+    await act(async () => {
+      choice(app.container, "deny-once")!.click();
+    });
+    await waitFor(() =>
+      expect(
+        app.container.querySelector('[data-testid="approval-dock"]')
+          ?.getAttribute("data-approval-request-id"),
+      ).toBe("req-allow-2"),
+    );
+
+    expect(app.container.querySelector("[data-proposed]")).toBeNull();
+    expect(choice(app.container, "allow-once")?.tabIndex).toBe(0);
+    expect(choice(app.container, "allow-always")?.tabIndex).toBe(-1);
+    expect(
+      app.container.querySelector('[data-testid="docked-approval-target"]')?.textContent,
+    ).toContain("/home/ken/reports/q4.md");
     expect(ns.approval.respond).toHaveBeenCalledTimes(1);
   });
 });

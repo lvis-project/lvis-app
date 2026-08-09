@@ -45,7 +45,7 @@ export type ToolCategory = "read" | "write" | "shell" | "network" | "meta";
  *   audit-log every invocation (used by `ask_user_question` so the user
  *   prompt itself never needs another permission prompt)
  * - `ask` — same as `write` (sub-agent dispatch creates state, so warrants
- *   an approval modal but not Bash AST)
+ *   an approval dock but not Bash AST)
  */
 export type ToolDecisionOverride = "always-allow-with-audit" | "ask";
 

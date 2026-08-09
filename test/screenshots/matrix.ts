@@ -37,8 +37,8 @@ export interface ScenarioEntry {
   /**
    * Keep the LLM permission reviewer ON for this scenario (default: it is
    * disabled whenever `plugins` is set, so panel mount-time read tools don't
-   * pop the approval modal). Set true only for `plugin-permission-grant`, whose
-   * capture target IS that approval modal.
+   * open the approval dock). Set true only for `plugin-permission-grant`, whose
+   * capture target IS that approval dock.
    */
   keepReviewer?: boolean;
   /** Navigate/seed steps run before capture. Required unless `skip` is set. */
@@ -195,17 +195,16 @@ export const scenarios: Record<string, ScenarioEntry> = {
     topic: 'plugins',
     plugins: ['meeting'],
     keepReviewer: true,
-    locator: '[data-testid="tool-approval-dialog"]',
+    locator: '[data-testid="approval-dock"]',
     steps: async ({ page }) => {
       // With the reviewer left ON (keepReviewer), the real meeting panel's
       // mount-time `meeting_list_preps` read call is deferred to the host's
-      // "Approve Tool Execution" permission modal — the plugin-first-tool-call
-      // permission grant this docs key depicts. Navigate to the panel; the modal
-      // appears over it. (openPluginPanel's own webview wait still succeeds — the
-      // webview attaches under the modal — then we assert the modal.)
+      // "Approve Tool Execution" permission dock — the plugin-first-tool-call
+      // permission grant this docs key depicts. Navigate to the panel; the dock
+      // appears below it, then assert the dock content.
       await openPluginPanel(page, '미팅');
       await page
-        .locator('[data-testid="tool-approval-dialog"]')
+        .locator('[data-testid="approval-dock"]')
         .first()
         .waitFor({ state: 'visible', timeout: 20_000 });
     },

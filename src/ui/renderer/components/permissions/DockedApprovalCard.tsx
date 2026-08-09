@@ -8,7 +8,7 @@ import { useTranslation } from "../../../../i18n/react.js";
 export interface DockedApprovalCardProps {
   request: ApprovalRequest | null;
   onDecide: (choice: ApprovalChoice, rememberPattern?: string) => void;
-  /** Returns focus to the composer when the user shift-tabs out of the card. */
+  /** Optional explicit focus return for legacy embedders. */
   onReturnFocus?: () => void;
   /**
    * Scope a `/allow` sentence proposed for this request. It moves focus onto
@@ -23,32 +23,13 @@ type Scope = ReturnType<typeof buildApprovalScopeOptions>[number];
 /**
  * Docked, non-modal approval card (issue #1940).
  *
- * Replaces the modal `OutOfAllowedDirCard`. Rendered as a bottom-anchored
- * overlay inside the composer dock — the placement `QuestionOverlay` uses — so
- * it grows upward over the chat surface and cannot scroll out of view.
+ * This content lives inside the shared in-flow approval dock. It does not
+ * create a backdrop or cover the routed page, and its own scroll container
+ * keeps every scope reachable within the dock's bounded height.
  *
- * ## Reading order, and where safety comes from
- *
- * Content first, buttons after: what is being asked, **what this scope would
- * actually grant**, any warning — then the scopes. Moving between scopes
- * rewrites the target line, because the target is the only thing that differs
- * between them (`항상` grants the parent folder, not the file). Duration is not
- * a separate field; the button's own label is the duration.
- *
- Enter alone is enough here because there is no Enter chain to inherit: no
- * Enter brings the user into the card, and there are no steps inside it, so the
- * repeated-Enter momentum this design guards against cannot occur. Reaching a
- * widening scope means deliberately arrowing to it, and the target line changes
- * as you arrive — widening is "move, then press", not "press twice".
- *
- * Two properties carry the safety, and neither is a swallowed key:
- *
- *  1. Focus lands on the NARROWEST scope.
- *  2. What would be granted is on screen above the buttons at all times, and
- *     visibly changes as focus moves.
- *
- * Every scope is a real `<button>`; nothing intercepts Enter or Space, so
- * screen readers, switch access and voice control keep working (WCAG 2.1.1).
+ * Content comes before the real button controls. The narrowest scope is the
+ * first tab stop, arrow keys move deliberately between scopes, and Enter or
+ * Space retains native button activation for assistive technology.
  */
 export function DockedApprovalCard({
   request,
@@ -67,7 +48,7 @@ export function DockedApprovalCard({
   const suggestedParent = outOfDir?.suggestedParent;
   const candidatePath = outOfDir?.candidatePath ?? "";
 
-  // Narrowest first — index 0 is also where focus lands. The list itself comes
+  // Narrowest first: index 0 is also the first tab stop. The list comes
   // from the shared authority the host offers `/allow`, so a proposed scope
   // always names a button that exists here.
   const scopes = useMemo<Scope[]>(() => {
@@ -79,20 +60,12 @@ export function DockedApprovalCard({
     });
   }, [request, suggestedParent, candidatePath]);
 
-  // New request → focus the narrowest scope, but never steal focus that is
-  // already inside the card (a re-render must not move the user's place).
+  // A new request selects the narrowest scope without stealing focus from the
+  // routed page. A later `/allow` proposal may move focus deliberately.
   useEffect(() => {
     if (!request) return;
     setActive(0);
     activeRef.current = 0;
-    const frame = requestAnimationFrame(() => {
-      const el = document.activeElement;
-      if (el instanceof HTMLElement && buttonRefs.current.includes(el as HTMLButtonElement)) {
-        return;
-      }
-      buttonRefs.current[0]?.focus();
-    });
-    return () => cancelAnimationFrame(frame);
   }, [request?.id]);
 
   // A `/allow` sentence FILLS THE FORM: it moves focus onto the scope it
@@ -138,11 +111,9 @@ export function DockedApprovalCard({
     if (e.defaultPrevented) return;
 
     if (e.key === "Escape") {
-      // Deliberately NOT `AskUserQuestionCard`'s dismiss: Escape keeps the
-      // fail-closed `deny-once` the modal already had.
-      if (request.requireExplicit) return;
       e.preventDefault();
-      onDecide("deny-once");
+      e.stopPropagation();
+      if (!request.requireExplicit) onDecide("deny-once");
       return;
     }
 
@@ -164,7 +135,10 @@ export function DockedApprovalCard({
       moveBy(-1);
       return;
     }
-    if (e.key === "Tab" && e.shiftKey) onReturnFocus?.();
+    if (e.key === "Tab" && e.shiftKey && onReturnFocus) {
+      e.preventDefault();
+      onReturnFocus();
+    }
   };
 
   const label = (scope: Scope) =>
@@ -183,14 +157,14 @@ export function DockedApprovalCard({
 
   return (
     <div
-      className="pointer-events-auto absolute inset-0 z-40 flex items-end justify-center bg-background/(--opacity-strong) p-2"
-      data-testid="docked-approval-overlay"
+      className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2 [scrollbar-gutter:stable]"
+      data-testid="docked-approval-panel"
       onKeyDown={onKeyDown}
     >
-      <div className="w-full min-w-0">
+      <div className="w-full min-w-0 max-w-full">
         <Card className="flex flex-col gap-2 p-2.5">
           <div className="flex flex-col gap-0.5">
-            <p className="m-0 text-xs">
+            <p className="m-0 break-all text-xs">
               {t("dockedApprovalCard.headline", { toolName: request.toolName })}
             </p>
             <p
