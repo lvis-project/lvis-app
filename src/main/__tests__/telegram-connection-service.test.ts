@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SecretEncryptionUnavailableError } from "../../data/secret-document-store.js";
@@ -23,6 +23,7 @@ import {
 } from "../telegram-connection-store.js";
 import { mintTelegramPairingCode, telegramPairingCodeDigest } from "../telegram-pairing-code.js";
 import { conversationDigestFor, namespaceAt } from "./telegram-connection-namespace.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 /** The service must mint codes the ingress-side authority can redeem. */
 function redeemableDigest(code: string): string {
@@ -49,8 +50,8 @@ const ACTOR_KEY_DIGEST = createHash("sha256").update("actor-key", "utf8")
 
 let directories: string[] = [];
 
-afterEach(() => {
-  for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+afterEach(async () => {
+  for (const directory of directories) await cleanupTmpDir(directory);
   directories = [];
 });
 

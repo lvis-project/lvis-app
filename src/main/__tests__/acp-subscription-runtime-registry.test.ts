@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,6 +13,7 @@ import type { AcpSubscriptionPromptHandle } from "../acp-subscription-session-cl
 import type { AcpSubscriptionProviderId } from "../../shared/acp-subscription.js";
 import type { AcpSubscriptionMcpServerConfig } from "../acp-subscription-runtime-config.js";
 import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const roots: string[] = [];
 
@@ -62,8 +63,8 @@ class FakeSession implements AcpSubscriptionSessionTransport {
   }
 }
 
-afterEach(() => {
-  for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  for (const root of roots.splice(0)) await cleanupTmpDir(root);
   vi.restoreAllMocks();
 });
 

@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { AgentProfileStore } from "../agent-profile-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 describe("AgentProfileStore", () => {
   it("loads flat markdown agent profiles", async () => {
@@ -23,7 +24,7 @@ describe("AgentProfileStore", () => {
       expect(agent?.mode).toBe("subagent");
       expect(agent?.body).toContain("without editing");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -63,7 +64,7 @@ describe("AgentProfileStore", () => {
       expect(agent?.sourceTools).toEqual(["agent_list"]);
       expect(agent?.body).toContain("Map files");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });

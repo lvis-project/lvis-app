@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -9,6 +9,7 @@ import {
   markScenarioComplete,
   dismissScenario,
 } from "../tour-state-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 /**
  * Tutorial-C — `~/.lvis/onboarding/tour-state.json` storage tests.
@@ -33,13 +34,13 @@ describe("tour-state-store", () => {
     process.env.LVIS_HOME = tempDir;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (prevLvisHome === undefined) {
       delete process.env.LVIS_HOME;
     } else {
       process.env.LVIS_HOME = prevLvisHome;
     }
-    rmSync(tempDir, { recursive: true, force: true });
+    await cleanupTmpDir(tempDir);
   });
 
   it("returns the default state when no file exists", async () => {

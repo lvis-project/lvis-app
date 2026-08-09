@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -9,6 +9,7 @@ import {
   registerPluginAssetProtocolScheme,
   resolvePluginAssetRequest,
 } from "../plugin-asset-protocol.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const tempDirs: string[] = [];
 
@@ -23,9 +24,9 @@ function fixture(): { root: string; entry: string; asset: string } {
   return { root, entry, asset };
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const dir of tempDirs.splice(0)) {
-    rmSync(dir, { recursive: true, force: true });
+    await cleanupTmpDir(dir);
   }
 });
 

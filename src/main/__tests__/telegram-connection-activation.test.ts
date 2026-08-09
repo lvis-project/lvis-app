@@ -4,7 +4,7 @@
  * leaves egress attached, so this suite drives the real activation against a
  * rejecting provider and asserts the teardown it is supposed to trigger.
  */
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -25,6 +25,7 @@ import {
 } from "../telegram-connection-store.js";
 import { telegramConversationDigest } from "../telegram-platform-runtime.js";
 import { namespaceAt } from "./telegram-connection-namespace.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const BOT_TOKEN = "8112233445:activation-suite-bot-token";
 /** The store only ever holds digests, so the fingerprint is what it is given. */
@@ -32,10 +33,10 @@ const BOT_FINGERPRINT = "f".repeat(64);
 
 let directories: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   resetTelegramBridgeServerForTests();
   vi.unstubAllGlobals();
-  for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+  for (const directory of directories) await cleanupTmpDir(directory);
   directories = [];
 });
 

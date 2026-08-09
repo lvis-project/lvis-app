@@ -8,7 +8,7 @@
  * one restored on the next launch.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -26,6 +26,7 @@ vi.mock("electron", () => ({
 
 import { readPersistedAppModeSync } from "../persisted-app-mode.js";
 import { SettingsService } from "../../data/settings-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 describe("readPersistedAppModeSync", () => {
   let userDataPath: string;
@@ -35,9 +36,9 @@ describe("readPersistedAppModeSync", () => {
     mockedElectron.safeStorage.isEncryptionAvailable.mockReturnValue(false);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.clearAllMocks();
-    rmSync(userDataPath, { recursive: true, force: true });
+    await cleanupTmpDir(userDataPath);
   });
 
   it("defaults to 'work' when no settings file exists", () => {

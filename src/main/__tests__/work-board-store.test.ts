@@ -18,7 +18,6 @@
 import { describe, it, expect } from "vitest";
 import {
   mkdtempSync,
-  rmSync,
   readFileSync,
   writeFileSync,
   readdirSync,
@@ -26,12 +25,13 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WorkBoardStore, MAX_ITEMS } from "../work-board-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 function tempBoard(now?: () => number) {
   const dir = mkdtempSync(join(tmpdir(), "lvis-wb-"));
   const path = join(dir, "board.json");
   const store = new WorkBoardStore(path, now);
-  const cleanup = () => rmSync(dir, { recursive: true, force: true });
+  const cleanup = () => cleanupTmpDir(dir);
   return { store, dir, path, cleanup };
 }
 
@@ -102,7 +102,7 @@ describe("WorkBoardStore — CRUD round-trip", () => {
       if (afterRemove.status !== "ok") throw new Error("unreachable");
       expect(afterRemove.items).toHaveLength(0);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -114,7 +114,7 @@ describe("WorkBoardStore — CRUD round-trip", () => {
       expect((await store.transition(999, "completed")).status).toBe("not_found");
       expect((await store.remove(999)).status).toBe("not_found");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -141,7 +141,7 @@ describe("WorkBoardStore — CRUD round-trip", () => {
       if (c.status !== "created") throw new Error("unreachable");
       expect(c.itemId).toBeGreaterThan(b.itemId);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -176,7 +176,7 @@ describe("WorkBoardStore — overdue projection", () => {
       expect(byId.get(inProg.itemId)?.status_resolved).toBe("overdue");
       expect(byId.get(doneItem.itemId)?.status_resolved).toBe("completed");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -188,7 +188,7 @@ describe("WorkBoardStore — overdue projection", () => {
       if (r.status !== "created") throw new Error("setup failed");
       expect(r.item.status_resolved).toBe("planned");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -209,7 +209,7 @@ describe("WorkBoardStore — overdue projection", () => {
       expect(raw).not.toContain("status_resolved");
       expect(raw).not.toContain("overdue");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -247,7 +247,7 @@ describe("WorkBoardStore — project scope", () => {
       if (defaultWithLegacy.status !== "ok") throw new Error("unreachable");
       expect(defaultWithLegacy.items.map((item) => item.title)).toEqual(["legacy"]);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -279,7 +279,7 @@ describe("WorkBoardStore — MAX_ITEMS cap", () => {
       if (overflow.status !== "invalid") throw new Error("unreachable");
       expect(overflow.reason).toMatch(/cap reached/);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -306,7 +306,7 @@ describe("WorkBoardStore — corrupt board.json recovery", () => {
       if (created.status !== "created") throw new Error("unreachable");
       expect(created.itemId).toBe(1);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -337,7 +337,7 @@ describe("WorkBoardStore — corrupt board.json recovery", () => {
       if (created.status !== "created") throw new Error("unreachable");
       expect(created.itemId).toBe(6);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
