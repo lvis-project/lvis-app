@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 import { UNAUTHORIZED_FRAME } from "../../gated.js";
 import { setWorkspaceRootLifecycle } from "../../../permissions/workspace-root-lifecycle.js";
 
@@ -407,7 +408,7 @@ describe("permissions IPC handlers", () => {
         "permission-slash",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -426,7 +427,7 @@ describe("permissions IPC handlers", () => {
         error: "workspace lifecycle unavailable",
       });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 

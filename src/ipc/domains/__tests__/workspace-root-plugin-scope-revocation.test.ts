@@ -16,9 +16,10 @@
  * removal runs through the real `workspace:removeRoot` IPC handler.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 const {
   handlers,
@@ -115,9 +116,9 @@ beforeAll(() => {
   registerWorkspaceHandlers(deps);
 });
 
-afterAll(() => {
+afterAll(async () => {
   setActivePluginSurfacePermissionScope(undefined);
-  rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+  await cleanupTmpDir(root);
 });
 
 beforeEach(() => {
