@@ -19,7 +19,7 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import { request as httpRequest } from "node:http";
-import { writeFileSync, mkdtempSync, rmSync, statSync, existsSync } from "node:fs";
+import { writeFileSync, mkdtempSync, statSync, existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -31,6 +31,7 @@ import {
 import { spawnWorker, type SpawnedWorker } from "../worker-spawn.js";
 import { __resetWrappedPluginWorkersForTest } from "../sandbox-capability.js";
 import { asrtCanInitialize } from "./test-helpers.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 /** GET over a UDS from the HOST (outside the sandbox). */
 function udsGet(
@@ -122,7 +123,7 @@ afterEach(async () => {
   worker = undefined;
   if (isAsrtSandboxActive()) await resetAsrtSandbox();
   __resetWrappedPluginWorkersForTest();
-  if (tmpRoot && existsSync(tmpRoot)) rmSync(tmpRoot, { recursive: true, force: true });
+  if (tmpRoot) await cleanupTmpDir(tmpRoot);
   tmpRoot = undefined;
 });
 

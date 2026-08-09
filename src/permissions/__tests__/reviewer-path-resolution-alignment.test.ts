@@ -18,7 +18,7 @@
  * sides read the same real global cannot catch re-divergence.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, mkdirSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join, dirname, resolve as pathResolve } from "node:path";
 import { RuleBasedRiskClassifier } from "../reviewer/risk-classifier.js";
@@ -33,6 +33,7 @@ import { dispatchReviewerForHeadless } from "../../tools/pipeline/reviewer-dispa
 import type { Tool } from "../../tools/base.js";
 import type { ToolPermissionContext } from "../../tools/executor.js";
 import { makeRiskClassifierContext } from "./test-helpers.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const rb = new RuleBasedRiskClassifier();
 
@@ -61,8 +62,8 @@ function makeRoot(): string {
   return dir;
 }
 
-afterEach(() => {
-  for (const dir of roots) rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  for (const dir of roots) await cleanupTmpDir(dir);
   roots = [];
 });
 

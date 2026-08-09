@@ -18,7 +18,7 @@
  * deferred queue, the sandbox audit or the verdict cache.
  */
 import { describe, it, expect, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -32,6 +32,7 @@ import { VerdictCache } from "../reviewer/verdict-cache.js";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
 import { maskToolInputForDisplay } from "../../tools/pipeline/display-mask.js";
 import { makeRiskClassifierContext } from "./test-helpers.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const rb = new RuleBasedRiskClassifier();
 
@@ -105,8 +106,8 @@ describe("both lanes classify the same object", () => {
     return { pm, seen, dir };
   };
 
-  afterEach(() => {
-    for (const d of dirs) rmSync(d, { recursive: true, force: true });
+  afterEach(async () => {
+    for (const d of dirs) await cleanupTmpDir(d);
     dirs = [];
   });
 
@@ -195,7 +196,7 @@ describe("DLP is preserved at the sinks", () => {
       expect(pending?.inputSummary).not.toContain("alice@example.com");
       expect(pending?.inputSummary).toContain("***@example.com");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
