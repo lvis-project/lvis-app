@@ -1,4 +1,4 @@
-// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/ToolApprovalDialog.tsx. Do not edit by hand.
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/components/ToolApprovalContent.tsx. Do not edit by hand.
 export const en = {
   "toolApprovalDialog.agentActionTitle": "Approve Agent Action",
   "toolApprovalDialog.toolApprovalTitle": "Approve Tool Execution",

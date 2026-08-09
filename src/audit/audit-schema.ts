@@ -275,7 +275,7 @@ export interface AuditModeChange extends AuditCommon {
   durable: boolean;
   /**
    * Present when an explicit user action is the confirmation surface for a
-   * durable mode change, so no secondary tool approval dialog was shown:
+   * durable mode change, so no secondary tool approval surface was shown:
    *   - `"settings-ui"` / `"builtin-slash"` — a first-party renderer user action
    *     (Settings toggle / built-in `/permission mode` slash).
    *   - `"local-api-approval"` — an external origin (local-api / cli, #1409)

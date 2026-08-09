@@ -123,4 +123,26 @@ describe("ChatView ⌘K guide", () => {
     });
     expect(api.chatGuide).not.toHaveBeenCalled();
   });
+
+  it("does not route global guide shortcuts through an open approval dock", async () => {
+    const { container, api } = await renderApp({ hasApiKey: true });
+    await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
+
+    const textarea = container.querySelector('[data-testid="composer-textarea"]') as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "keep this draft" } });
+    const dock = document.createElement("section");
+    dock.dataset.testid = "approval-dock";
+    document.body.append(dock);
+
+    try {
+      fireEvent.keyDown(textarea, { key: "k", code: "KeyK", ctrlKey: true });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(api.chatGuide).not.toHaveBeenCalled();
+      expect(textarea.value).toBe("keep this draft");
+    } finally {
+      dock.remove();
+    }
+  });
 });

@@ -77,14 +77,14 @@ function maskApprovalPurposeForDisplay(
 /**
  * Permission mode hint passed alongside an ApprovalRequest. Drives the
  * §S4 isReadOnly short-circuit: in "ask_all" and "plan" modes even
- * read-only tools must still show the approval dialog.
+ * read-only tools must still show the approval dock.
  *
  * `undefined` → treat as "default" (standard read-only auto-approve).
  */
 export type ApprovalMode = "default" | "ask_all" | "plan" | "full_auto";
 
 /**
- * Permission policy P2.5 — discriminated kinds for the approval modal.
+ * Permission policy P2.5 — discriminated kinds for the approval dock.
  * Default `"tool"` is the normal §6.3 Layer 3 ask;
  * `"out-of-allowed-dir"` is the Layer 1 directory-confirm variant; and
  * `"agent-action"` is a plugin-origin host approval request that does
@@ -110,7 +110,7 @@ export interface ApprovalRequest {
   reviewerVerdict?: RiskVerdict;
   /** Single captured tool-call evaluation context shown to the user. */
   evaluationContext?: PermissionEvaluationContext;
-  /** Suggested natural-language purpose shown in the approval dialog. */
+  /** Suggested natural-language purpose shown in the approval dock. */
   approvalPurpose?: ApprovalPurposeSuggestion;
   args: unknown;
   reason: string;
@@ -142,7 +142,7 @@ export interface ApprovalRequest {
   trustOrigin?: string;
   /**
    * Issue #691 round-1 user request — OS-level execution sandbox SOT,
-   * surfaced to the approval dialog so the user can see whether the
+   * surfaced to the approval dock so the user can see whether the
    * tool will run under the ASRT OS sandbox (macOS Seatbelt / Linux bwrap)
    * or with no isolation. Captured at request build time by the executor
    * (and by {@link ApprovalGate} for non-tool approvals) from
@@ -163,21 +163,21 @@ export interface ApprovalRequest {
   /**
    * §S1: absolute filesystem path the tool intends to touch. When set and
    * matched against SENSITIVE_PATH_PATTERNS, the request is hard-blocked
-   * BEFORE the user dialog is shown. Cannot be overridden.
+   * BEFORE the user approval surface is shown. Cannot be overridden.
    */
   target?: {
     filePath?: string;
   };
   /**
    * §S4: tool self-declares it does not mutate state. When true and the
-   * current mode is not "plan", the dialog is skipped and the call is
+   * current mode is not "plan", the approval dock is skipped and the call is
    * auto-approved with reason "read-only auto-approve".
    */
   isReadOnly?: boolean;
   /**
    * §S4: current permission mode. Drives the isReadOnly short-circuit:
    *   - "default" / "full_auto" / undefined → read-only tools auto-approve
-   *   - "ask_all" / "plan" → still show the approval dialog
+   *   - "ask_all" / "plan" → still show the approval dock
    */
   mode?: ApprovalMode;
   /**
@@ -188,7 +188,7 @@ export interface ApprovalRequest {
    * path is not sensitive.
    *
    * Note: the authoritative hard-block is enforced inside
-   * {@link ApprovalGate.requestAndWait} before any approval dialog is
+   * {@link ApprovalGate.requestAndWait} before any approval dock is
    * shown, using the same {@link isSensitivePath} function. As a result,
    * the renderer should not rely on this field to display blocked-state UI
    * for the sensitive-path denial path.
@@ -205,8 +205,8 @@ export interface ApprovalRequest {
   approvalCacheKey?: string;
   /**
    * Host-owned attribution: the conversation (session) whose turn raised this
-   * approval. Side chats and sub-agents block on approval modals while the
-   * user is looking at a different conversation, so the dialog and the audit
+   * approval. Side chats and sub-agents block on approval docks while the
+   * user is looking at a different conversation, so the dock and the audit
    * trail both need to name the asking conversation.
    *
    * It is set by the host tool path from the session id it already carries;
@@ -305,7 +305,7 @@ export function signApprovalRequest(
  * Input accepted by {@link ApprovalGate.requestAndWait} before the host seals
  * nonce/HMAC and derives the renderer-facing `requireExplicit` field.
  *
- * `forceExplicit` is deliberately one-way: callers can only make a dialog
+ * `forceExplicit` is deliberately one-way: callers can only make a prompt
  * stricter than the current policy, never relax it. It is used by execution
  * routes whose substrate requires per-invocation, affirmative consent.
  */
@@ -359,7 +359,7 @@ export type ApprovalRequestInput = Omit<
   readonly remoteControllerAuthority?: RemoteControllerAuthority;
   /**
    * Host-only: EVERY path this call would touch, for scope checks that must not
-   * be satisfied by the single path the modal happens to display.
+   * be satisfied by the single path the dock happens to display.
    *
    * `target.filePath` is a display field and is the FIRST extracted path only.
    * A tool declaring more than one path field — `move_file` names a source and
@@ -607,7 +607,7 @@ interface PendingEntry {
  * second one a one-line change here rather than a retrofit across every row.
  */
 const APPROVAL_ANSWERER_AUDIT_TOKENS = {
-  /** The app window: a renderer response to the approval modal. */
+  /** The app window: a renderer response to the approval dock. */
   desk: "desk",
   /**
    * The desk-armed {@link AwayAuthority}: no window was involved, and the
@@ -1009,7 +1009,7 @@ export class ApprovalGate {
     // Rationale is a host-owned, one-shot approval surface. Validate its
     // narrow explanatory card before any enrichment, notification, nonce
     // minting, or renderer IPC so a malformed/mismatched request cannot turn
-    // into a clickable approval dialog.
+    // into a clickable approval dock.
     if (req.kind === "rationale" && rationaleDisplay === null) {
       this.auditLogger?.log({
         timestamp: new Date().toISOString(),
@@ -1217,7 +1217,7 @@ export class ApprovalGate {
     }
 
     // §S4: isReadOnly short-circuit — if the tool self-declares read-only
-    // and we are NOT in plan mode, skip the confirmation dialog. Plan
+    // and we are NOT in plan mode, skip the approval dock. Plan
     // mode still blocks (plan = dry-run / inspect only).
     //
     // Permission policy P2.5: directory-confirm requests (kind="out-of-allowed-dir")
@@ -1310,7 +1310,7 @@ export class ApprovalGate {
     // answer cannot re-open any of them. It sits below the `[approval:requested]`
     // row so every away-answered call has a requested row too, and above the OS
     // notification and the renderer send so a call it answers never rings a
-    // phone or paints a modal nobody is there to see.
+    // phone or paints a foreground dock nobody is there to see.
     //
     // It reads only the request and its own grant. No inbound message reaches
     // this decision, which is the entire difference between this and a relay.
@@ -1632,7 +1632,7 @@ export class ApprovalGate {
     // answer from a surface inside the app window, so `desk` describes them
     // both today. When a second answerer exists, the plugin host-API route is
     // the one to look at first: it is host code relaying a plugin's response
-    // rather than a user clicking the modal, so it is the site most likely to
+    // rather than a user clicking the dock, so it is the site most likely to
     // need its own answerer rather than this default.
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),

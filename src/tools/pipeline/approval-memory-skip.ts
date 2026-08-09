@@ -13,7 +13,7 @@
  *     Only the dialog's `allow-always` choice writes here
  *     (addAlwaysAllowedPersist).
  *   • Store B — exact-tuple user-approval memory written by
- *     ToolApprovalDialog for DURABLE choices only (allow-session /
+ *     ToolApprovalContent for DURABLE choices only (allow-session /
  *     allow-always — allow-once never records, so "this time" cannot
  *     widen into a remembered grant) via the
  *     `userApprovalRecord` IPC. Keyed on the canonical
@@ -25,7 +25,7 @@
  * path. This function mirrors the reviewer lane's lookup so a prior,
  * non-revoked session/persistent approval skips the modal.
  *
- * The lookup args MUST match what ToolApprovalDialog stored:
+ * The lookup args MUST match what ToolApprovalContent stored:
  * `canonicalStringify(finalInput)` (the dialog records
  * `canonicalStringify(request.args)` where `request.args === finalInput`).
  * The IPC handler re-canonicalizes the same way, so identity is stable.
@@ -85,7 +85,7 @@ export async function tryUserApprovalMemorySkip(
    */
   disclose?: (payload: UserApprovalHitPayload) => void,
 ): Promise<PermissionCheckResult | null> {
-  // Identity = exactly what ToolApprovalDialog stored (canonical finalInput).
+  // Identity = exactly what ToolApprovalContent stored (canonical finalInput).
   const canonicalArgs = canonicalStringify(finalInput);
   const approval = await lookupApproval(
     toolName,

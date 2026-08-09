@@ -116,7 +116,7 @@ function formatDue(iso: string | undefined): string {
 //
 // `awaiting_approval` is intentionally surfaced as a passive notice: the engine
 // drives plan approval through the host ApprovalGate (`requestAndWait`), which
-// already renders the standard §8 approval dialog. The board does NOT fork a
+// already renders the standard §8 approval dock. The board does NOT fork a
 // second approve/reject control — doing so would mean two competing gates for
 // one decision. The notice points the user at the surfaced approval prompt.
 

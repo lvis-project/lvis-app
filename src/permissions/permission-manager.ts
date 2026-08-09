@@ -427,7 +427,7 @@ export class PermissionManager {
   private reviewerDegradedToRule = false;
   /**
    * Issue #690 — interactive auto-approve setting. "low"/"medium" are auto-mode
-   * foreground reviewer thresholds that skip the approval modal for LOW /
+   * foreground reviewer thresholds that skip the approval dock for LOW /
    * LOW+MEDIUM respectively. Read by {@link categoryBasedDecision} to
    * decide whether to set `reviewer.route='foreground-auto'`.
    */
@@ -577,7 +577,7 @@ export class PermissionManager {
    * Predicate ONLY (behavior-neutral move from `executor.ts`). It returns raw
    * hits, NOT a {@link PermissionCheckResult}: the executor still owns the
    * layer-0 deny (message + audit + return) and the layer-1 out-of-directory
-   * approval modal + scope mutation, and just drives them off these hits. The
+   * approval dock + scope mutation, and just drives them off these hits. The
    * audit `layer` field values are unchanged (sensitive = 0, out-of-dir = 1).
    *
    * Frozen-canonical contract: `canonicalTargets[].canonicalPath` MUST already
@@ -1261,7 +1261,7 @@ export class PermissionManager {
     }
 
     // Local durable memory is an app-owned, user-requested capability. It
-    // needs no normal approval dialog, but the hard gates above must still
+    // needs no normal approval prompt, but the hard gates above must still
     // win so an explicit deny, strict session, or staged/untrusted origin
     // cannot silently persist data.
     if (

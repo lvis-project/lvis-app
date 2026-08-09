@@ -7,7 +7,7 @@ import { buildE2eBaseSettings, buildIsolatedElectronEnv } from "./seeded-electro
  * Covers:
  *   1. HIGH verdict requires NL justification before Approve is enabled.
  *   2. LOW/MEDIUM verdict shows scope selector (session / persistent).
- *   3. Approval dialog shows correct Korean sandbox isolation label for partial.
+ *   3. Approval dock shows correct Korean sandbox isolation label for partial.
  *   4. PermissionsTab lists user approvals and allows revocation.
  *
  * Prerequisites: `bun run build` must produce dist/src/main/main.js.
@@ -123,7 +123,7 @@ test.describe("Sandbox approval flow", () => {
     }, buildApprovalRequest({ reviewerVerdict: { level: "high", reason: "shell destructive verb" } }));
 
     // Dialog should appear
-    const dialog = page.getByTestId("tool-approval-dialog");
+    const dialog = page.getByTestId("approval-dock");
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // Approve button should be disabled (HIGH verdict, no NL text)
@@ -153,7 +153,7 @@ test.describe("Sandbox approval flow", () => {
       reviewerVerdict: { level: "low", reason: "read inside allowed dirs" },
     }));
 
-    const dialog = page.getByTestId("tool-approval-dialog");
+    const dialog = page.getByTestId("approval-dock");
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // NL field should NOT be visible for LOW verdict
@@ -169,7 +169,7 @@ test.describe("Sandbox approval flow", () => {
     await expect(page.getByText(t("toolApprovalDialog.scopePersistent"))).toBeVisible();
   });
 
-  test("partial sandbox shows correct Korean label in approval dialog", async () => {
+  test("partial sandbox shows correct Korean label in approval dock", async () => {
     // Electron main-process `evaluate` is loaded as ESM in this build — the
     // CommonJS `require()` shim is not available, so use the destructured
     // `electron` arg (`BrowserWindow`) that Playwright already injects.
@@ -185,7 +185,7 @@ test.describe("Sandbox approval flow", () => {
       },
     }));
 
-    const dialog = page.getByTestId("tool-approval-dialog");
+    const dialog = page.getByTestId("approval-dock");
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
     // Sandbox row should show partial isolation label

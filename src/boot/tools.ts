@@ -182,7 +182,7 @@ export interface WorkflowToolDeps {
   skillOverlay?: SkillOverlay;
   /** C2(d): persistent skill-approval allowlist. */
   skillApprovalsStore?: SkillApprovalsStore;
-  /** C2(d): ApprovalGate for first-use skill approval modal. */
+  /** C2(d): ApprovalGate for the first-use skill approval dock. */
   approvalGate?: ApprovalGate;
   /**
    * Electron network-stack fetch (`net.fetch`) — routes builtin tool traffic

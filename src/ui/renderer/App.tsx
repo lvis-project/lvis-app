@@ -5,6 +5,7 @@ import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { AppProviders } from "./AppProviders.js";
 import { AppDialogs } from "./AppDialogs.js";
 import { AppShell } from "./AppShell.js";
+import { ApprovalDock } from "./components/permissions/ApprovalDock.js";
 
 // ─── Imports: types / constants / helpers / components / tabs ────────
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
@@ -32,6 +33,7 @@ import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
 import { estimateOutgoingUserMessageTokens } from "../../shared/multimodal-token-estimate.js";
 import { useChatState } from "./hooks/use-chat-state.js";
 import { useApproval } from "./hooks/use-approval.js";
+import { useApprovalSentence } from "./hooks/use-approval-sentence.js";
 import { useSearch } from "./hooks/use-search.js";
 import { useContextBudget } from "./hooks/use-context-budget.js";
 import { useCostEstimate } from "./hooks/use-cost-estimate.js";
@@ -213,6 +215,18 @@ export function App() {
   const { announcements: marketplaceAnnouncements, dismiss: dismissMarketplaceAnnouncement } = useMarketplaceAnnouncements(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
+  const {
+    proposedChoice: approvalProposedChoice,
+    interceptSubmit: interceptApprovalSentence,
+  } = useApprovalSentence({
+    // `/allow <sentence>` proposes a filesystem scope and is meaningful only
+    // for the out-of-directory card. Other approval kinds keep their own
+    // explicit decision form and must never consume a proposal they cannot
+    // display.
+    approvalRequest:
+      approvalQueue[0]?.kind === "out-of-allowed-dir" ? approvalQueue[0] : null,
+    onNotice: appendSystemEntry,
+  });
 
   // Routine + plugin-overlay IPC pipeline. Owns runningRoutines, the addFireRef
   // surfaced to OverlayContextProvider (populated during that provider's render),
@@ -1004,7 +1018,7 @@ export function App() {
       >
         {/* Inner ErrorBoundary scoped to MainContent so a single failing
               plugin (e.g. stale manifest schema mismatch — issue #736) does
-              NOT bring down MainToolbar / Settings dialog / Marketplace tab.
+              NOT bring down MainToolbar / Settings page / Marketplace tab.
               The user must remain able to update / uninstall the broken
               plugin via Settings, otherwise they are locked out and the only
               recovery is manually rm-ing ~/.lvis/plugins/<id>/.
@@ -1030,7 +1044,6 @@ export function App() {
             settingsTab={settingsTab}
             onSettingsTabChange={setSettingsTab}
             onSettingsSaved={handleInlineSettingsSaved}
-            onCloseSettings={handleActivateHome}
             starred={starred}
             currentSessionId={currentSessionId}
             currentSessionKind={currentSessionKind}
@@ -1062,11 +1075,7 @@ export function App() {
             loadedSkills={loadedSkills}
             hasAskQuestions={askQuestions.length > 0}
             askQuestions={askQuestions}
-            approvalRequest={
-              approvalQueue[0]?.kind === "out-of-allowed-dir" ? approvalQueue[0] : null
-            }
-            onApprovalDecide={(choice, pattern) => void handleApprovalDecide(choice, pattern)}
-            onApprovalSentenceNotice={appendSystemEntry}
+            approvalSentenceInterceptSubmit={interceptApprovalSentence}
             onResolveAskQuestion={dismissAskQuestion}
             plugins={pluginEntries}
             onSelectPlugin={handleViewSelectWithDoctor}
@@ -1092,14 +1101,17 @@ export function App() {
             onSidePanelOpenChange={setSidePanelOpen}
           />
           </ErrorBoundary>
+          <ApprovalDock
+            queue={approvalQueue}
+            proposedChoice={approvalProposedChoice}
+            onDecide={handleApprovalDecide}
+          />
       </AppShell>
 
       <AppDialogs
         api={api}
         deferredQueueOpen={deferredQueueOpen}
         onDeferredQueueOpenChange={setDeferredQueueOpen}
-        approvalQueue={approvalQueue}
-        onApprovalDecide={handleApprovalDecide}
         tourCompleted={tourCompleted}
         onTourComplete={onTourComplete}
         onTourDismiss={onTourDismiss}

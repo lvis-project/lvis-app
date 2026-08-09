@@ -2,6 +2,8 @@ import { test, expect } from './fixtures';
 import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 
 /**
+ * Compatibility filename: Settings is an inline route, not a dialog.
+ *
  * Inline settings smoke (settings-inline-overhaul).
  *
  * Settings no longer detaches to its own BrowserWindow in any app mode — it is
@@ -16,7 +18,7 @@ import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
  *     this surface.
  *
  * What remains worth pinning is that the inline panel opens to the requested
- * tab and that its page-level back control exits it.
+ * tab and that the shared history navbar exits it.
  */
 test('inline settings opens to the requested tab and closes back', async ({ app, mainWindow, t }) => {
   const settingsPage = await openInlineSettings(app, mainWindow, 'chat');
@@ -29,6 +31,6 @@ test('inline settings opens to the requested tab and closes back', async ({ app,
     settingsPanel.getByRole('tab', { name: t('settingsContent.tabChat'), exact: true }),
   ).toHaveAttribute('data-state', 'active');
 
-  // Title-bar close leaves the settings view (the sidebar heading disappears).
+  // Shared history navigation leaves the settings view (the sidebar heading disappears).
   await closeInlineSettings(app, settingsPage);
 });

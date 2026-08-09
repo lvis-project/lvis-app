@@ -225,7 +225,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
       // temporary handler so an immediately rejected IPC call is still
       // observed before the caller asserts its rejection.
       void invocation.catch(() => undefined);
-      const approvalDialog = ctx.page.getByTestId("tool-approval-dialog");
+      const approvalDialog = ctx.page.getByTestId("approval-dock");
       const approvalVisible = await approvalDialog
         .waitFor({
           state: "visible",
@@ -343,7 +343,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
         );
       }, { serverId: mcpTool!.mcpServerId!, text: probe });
 
-      const approvalDialog = ctx.page.getByTestId("tool-approval-dialog");
+      const approvalDialog = ctx.page.getByTestId("approval-dock");
       const approvalVisible = await approvalDialog
         .waitFor({
           state: "visible",

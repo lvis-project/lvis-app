@@ -2,7 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ToolApprovalDialog } from "../ToolApprovalDialog.js";
+import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
 
 function makeReadyDisplay() {
@@ -50,13 +50,13 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("ToolApprovalDialog rationale card", () => {
+describe("ToolApprovalContent rationale card", () => {
   it("renders only parsed host-sealed facts and keeps the model suggestion separate", () => {
     const onDecide = vi.fn();
     const record = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("lvis", { userApproval: { record } });
     const { container } = render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeRationaleRequest(makeReadyDisplay())}
         onDecide={onDecide}
@@ -96,10 +96,10 @@ describe("ToolApprovalDialog rationale card", () => {
     expect(screen.queryByText("/untrusted/raw-target")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tool-approval-input")).not.toBeInTheDocument();
     expect(container.querySelector("details")).toBeNull();
-    const dialog = screen.getByTestId("tool-approval-dialog");
-    expect(dialog).not.toHaveAttribute("data-approval-request-id");
-    expect(dialog).not.toHaveAttribute("data-approval-tool-name");
-    expect(dialog).not.toHaveAttribute("data-approval-args");
+    const panel = screen.getByTestId("tool-approval-panel");
+    expect(panel).not.toHaveAttribute("data-approval-request-id");
+    expect(panel).not.toHaveAttribute("data-approval-tool-name");
+    expect(panel).not.toHaveAttribute("data-approval-args");
 
     expect(screen.queryByText("항상 허용")).not.toBeInTheDocument();
     expect(screen.queryByText("항상 거부")).not.toBeInTheDocument();
@@ -113,6 +113,28 @@ describe("ToolApprovalDialog rationale card", () => {
     expect(record).not.toHaveBeenCalled();
   });
 
+  it("wraps the full host-sealed tool identity instead of clipping it", () => {
+    const display = {
+      ...makeReadyDisplay(),
+      toolName: `host-sealed-${"very-long-tool-name-".repeat(12)}`,
+    };
+    vi.stubGlobal("lvis", {
+      userApproval: { record: vi.fn().mockResolvedValue({ ok: true }) },
+    });
+    render(
+      <ToolApprovalContent
+        open
+        request={makeRationaleRequest(display)}
+        onDecide={vi.fn()}
+      />,
+    );
+
+    const identity = screen.getByTestId("rationale-approval-tool");
+    expect(identity).toHaveTextContent(display.toolName);
+    expect(identity.className).toContain("break-all");
+    expect(identity.className).toContain("max-w-full");
+  });
+
   it("shows a safe fallback instead of model text when the rationale round failed", () => {
     const onDecide = vi.fn();
     const ready = makeReadyDisplay();
@@ -124,7 +146,7 @@ describe("ToolApprovalDialog rationale card", () => {
       modalFallbackRequired: true,
     };
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeRationaleRequest(failed)}
         onDecide={onDecide}
@@ -148,7 +170,7 @@ describe("ToolApprovalDialog rationale card", () => {
       unexpected: '<img data-testid="raw-injection" src="x" />',
     };
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeRationaleRequest(malformed)}
         onDecide={onDecide}

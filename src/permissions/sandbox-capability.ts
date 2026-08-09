@@ -41,7 +41,7 @@ import {
   type HostShellExecutionPlanAuditProjection,
 } from "./host-shell-execution-plan.js";
 
-// RENDERER-SAFETY: this module is imported by the renderer (ToolApprovalDialog
+// RENDERER-SAFETY: this module is imported by the renderer (ToolApprovalContent
 // uses isWeakSandbox / the types), so it MUST NOT statically import
 // `asrt-sandbox.js` — that package (`@anthropic-ai/sandbox-runtime`) pulls Node
 // built-ins (`fs`/`child_process`/`net`) into the renderer webpack bundle. The

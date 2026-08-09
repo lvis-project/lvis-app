@@ -43,15 +43,17 @@ does not make an invalid tool definition valid.
 | --- | --- |
 | Default | Allows low-risk workspace reads; asks for mutation, network, shell, and out-of-scope access. |
 | Strict | Asks for reads as well as mutation. Useful for high-control sessions. |
-| Auto-review | Uses the reviewer for eligible write/network/shell calls and host-built-in `meta` calls declared with `decisionOverride: "ask"`. The same configured enabled threshold (low or medium) applies to every eligible call; higher verdicts ask or defer, while `off` keeps the existing modal path. |
+| Auto-review | Uses the reviewer for eligible write/network/shell calls and host-built-in `meta` calls declared with `decisionOverride: "ask"`. The same configured enabled threshold (low or medium) applies to every eligible call; higher verdicts ask or defer, while `off` keeps the explicit foreground approval path. |
 | Allow | Allows after hard gates and audit. It does not bypass sensitive paths, invalid manifests, or sandbox rules. |
 
 ## Foreground And Headless Behavior
 
-Foreground requests can show an approval modal because the user is present.
-Headless requests must not interrupt the user with surprise modals. Non-low
-headless requests move to the deferred queue and surface through a queue button
-or history view.
+Foreground requests use one in-flow approval dock because the user is present.
+The dock shares the routed canvas, does not create a backdrop or focus trap, and
+keeps the surrounding page readable and operable while execution remains
+blocked on an explicit decision. Headless requests must not interrupt the user
+with a surprise foreground surface. Non-low headless requests move to the
+deferred queue and surface through a queue button or history view.
 
 Closing a deferred modal does not grant permission and does not delete the audit
 record. It leaves the item pending or closed according to the queue state.

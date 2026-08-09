@@ -59,7 +59,7 @@ export function createTodoSessionWriteTool(store: SessionTodoStore): Tool {
     // category="read" — the assistant's own current-turn checklist lives
     // entirely in an in-memory store this conversation owns; there is no
     // external mutation, no on-disk persistence, no cross-session impact.
-    // Treating each tick as a write would pop an approval modal for every
+    // Treating each tick as a write would open the approval dock for every
     // status change, which is a UX regression with zero security gain.
     // The tool does not declare isReadOnly() because the §S4 short-circuit
     // is only consulted when category=read AND ApprovalGate is engaged;

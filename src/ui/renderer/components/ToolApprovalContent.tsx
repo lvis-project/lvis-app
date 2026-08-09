@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
@@ -7,13 +13,6 @@ import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../../../components/ui/dialog.js";
 import { SOURCE_BADGE } from "../constants.js";
 import type { ApprovalDecisionExtras } from "../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
@@ -104,7 +103,7 @@ function buildEnumOptions(values: readonly ElicitationEnumValue[]): ElicitationE
 /**
  * Adapt the shared parse result into display fields. Support is decided by
  * {@link parseElicitationSchema} alone; this must not add rejections of its own,
- * or the dialog can once again refuse a schema the resolver would accept.
+ * or the approval surface can once again refuse a schema the resolver accepts.
  */
 function parseElicitationFields(args: unknown): ElicitationSchemaParseResult {
   if (!isRecord(args)) return UNSUPPORTED_ELICITATION_SCHEMA;
@@ -286,9 +285,14 @@ function RationaleApprovalCard({
       className="min-w-0 overflow-hidden rounded-md border"
       data-testid="rationale-approval-card"
     >
-      <h4 className="flex items-center justify-between gap-2 border-b px-3 py-2 text-xs font-semibold">
-        <span>Host-sealed action</span>
-        <code data-testid="rationale-approval-tool">{display.toolName}</code>
+      <h4 className="flex min-w-0 flex-wrap items-start justify-between gap-2 border-b px-3 py-2 text-xs font-semibold">
+        <span className="shrink-0">Host-sealed action</span>
+        <code
+          className="min-w-0 max-w-full break-all text-right font-mono"
+          data-testid="rationale-approval-tool"
+        >
+          {display.toolName}
+        </code>
       </h4>
       <div className="divide-y">
         <ReviewRow label={t("toolApprovalDialog.rowTarget")}>
@@ -355,7 +359,7 @@ function RationaleApprovalCard({
   );
 }
 
-export function ToolApprovalDialog({
+export function ToolApprovalContent({
   open,
   request,
   pendingCount = 1,
@@ -376,7 +380,6 @@ export function ToolApprovalDialog({
   const [nlJustification, setNlJustification] = useState("");
   // Scope selector ("session" | "persistent"). HIGH forces "session".
   const [scopeChoice, setScopeChoice] = useState<UserApprovalScope>("session");
-  const nlInputRef = useRef<HTMLInputElement>(null);
   const suggestedPurpose =
     request?.approvalPurpose?.source === "conversation" &&
     request.approvalPurpose.confidence === "sufficient"
@@ -420,20 +423,6 @@ export function ToolApprovalDialog({
     request.kind === "agent-action" &&
     (request.source ?? "builtin") === "builtin" &&
     (request.trustOrigin === "a2a-remote-wire" || request.toolName.startsWith("a2a-remote-"));
-
-  // HIGH verdict → focus NL field when dialog opens.
-  useEffect(() => {
-    if (
-      open &&
-      !isRationaleApproval &&
-      finalVerdict === "high" &&
-      suggestedPurpose.length === 0
-    ) {
-      // Small delay so the dialog animation completes first.
-      const t = setTimeout(() => nlInputRef.current?.focus(), 100);
-      return () => clearTimeout(t);
-    }
-  }, [open, isRationaleApproval, finalVerdict, suggestedPurpose.length]);
 
   const elicitationInvalid = isElicitationFormInvalid(elicitationFields, elicitationValues);
   const elicitationContent = useMemo(
@@ -554,23 +543,34 @@ export function ToolApprovalDialog({
         : tHook("toolApprovalDialog.shortcutA"));
 
 
-  useEffect(() => {
-    if (!open || !request) return;
-    const handler = (e: KeyboardEvent) => {
-      if (isTextEntryShortcutTarget(e.target)) return;
-      if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault();
-        if (!approveDisabled) void handleApprove(primaryApproveChoice, undefined, approvalExtras);
-      } else if (e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey) {
-        e.preventDefault();
-        onDecide("deny-once");
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [open, request, onDecide, approveDisabled, handleApprove, primaryApproveChoice, approvalExtras]);
+  const handlePanelKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (e.nativeEvent.isComposing) return;
+    if (isTextEntryShortcutTarget(e.target)) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!request?.requireExplicit) onDecide("deny-once");
+      return;
+    }
+    if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!approveDisabled) void handleApprove(primaryApproveChoice, undefined, approvalExtras);
+    } else if (e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey) {
+      e.preventDefault();
+      e.stopPropagation();
+      onDecide("deny-once");
+    }
+  }, [
+    request?.requireExplicit,
+    onDecide,
+    approveDisabled,
+    handleApprove,
+    primaryApproveChoice,
+    approvalExtras,
+  ]);
 
-  if (!request) return null;
+  if (!open || !request) return null;
 
   const title = request.kind === "agent-action" ? tHook("toolApprovalDialog.agentActionTitle") : tHook("toolApprovalDialog.toolApprovalTitle");
   // NOTE: argsStr uses JSON.stringify for human-readable display (pretty-printed,
@@ -594,44 +594,26 @@ export function ToolApprovalDialog({
     : approvalReviewRows(request, category, argsStr, originLabel, source, sourceBadge);
 
   return (
-    <Dialog open={open} onOpenChange={() => {}}>
-      <DialogContent
-        size="lg"
-        className="flex min-w-0 flex-col gap-0 overflow-hidden p-0"
-        data-testid="tool-approval-dialog"
-        data-approval-request-id={isRationaleApproval ? undefined : request.id}
-        data-approval-tool-name={isRationaleApproval ? undefined : request.toolName}
-        data-approval-args={
-          isRationaleApproval ? undefined : canonicalStringifyForRenderer(request.args)
-        }
-        onInteractOutside={(e) => {
-          if (request.requireExplicit) {
-            e.preventDefault();
-          } else {
-            void onDecide("deny-once");
-          }
-        }}
-        onEscapeKeyDown={(e) => {
-          if (request.requireExplicit) {
-            e.preventDefault();
-          } else {
-            void onDecide("deny-once");
-          }
-        }}
-      >
-        <DialogHeader className="sr-only">
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{tHook("toolApprovalDialog.dialogDescription")}</DialogDescription>
-        </DialogHeader>
-
-        <section className="min-h-0 flex-1 overflow-y-auto px-5 py-4" data-testid="tool-approval-card">
+    <div
+      className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+      data-testid="tool-approval-panel"
+      data-approval-request-id={isRationaleApproval ? undefined : request.id}
+      data-approval-tool-name={isRationaleApproval ? undefined : request.toolName}
+      data-approval-args={
+        isRationaleApproval ? undefined : canonicalStringifyForRenderer(request.args)
+      }
+      tabIndex={-1}
+      onKeyDown={handlePanelKeyDown}
+    >
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="tool-approval-card">
+        <section className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-3 [scrollbar-gutter:stable] sm:px-5 sm:py-4">
           <div className="flex min-w-0 items-start pb-3">
             <div className="min-w-0 flex-1">
               <div className="flex min-w-0 flex-wrap items-center gap-2">
                 {/* Round-6 UX MAJOR — risk badge translated to Korean.
                     Raw English `LOW`/`MEDIUM`/`HIGH` is opaque to non-
                     technical Korean users and was the most prominent
-                    visual element in the dialog. */}
+                    visual element in the approval surface. */}
                 <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
                   {riskLevelKoLabel(finalVerdict as RiskLevel)}
                 </Badge>
@@ -644,7 +626,7 @@ export function ToolApprovalDialog({
                   </Badge>
                 )}
               </div>
-              {/* Attribution — sub-agents and side chats raise this modal from a
+              {/* Attribution — sub-agents and side chats raise this request from a
                   conversation the user is not looking at. Host-owned id only;
                   never conversation content. */}
               <div className="mt-1 flex min-w-0 items-baseline gap-1.5 text-[11px] text-muted-foreground">
@@ -661,13 +643,14 @@ export function ToolApprovalDialog({
               <div className="grid min-w-0 gap-2 sm:grid-cols-2">
               <SummaryTile label={tHook("toolApprovalDialog.tileToolSource")}>
                 {/* Compact `source:tool` token (builtin:bash / {pluginId}:{tool})
-                    — one line so the dialog fits without scrolling. Origin +
+                    — one line so the dock content fits without scrolling. Origin +
                     category still shown in the review box's 출처/판단 rows. */}
-                <code>{sourceToolToken(request)}</code>
+                <code className="break-all font-mono">{sourceToolToken(request)}</code>
                 {request.kind === "agent-action" && request.approvalScope && (
                   <>
                     <br />
-                    {tHook("toolApprovalDialog.approvalScopePrefix")}: <code>{request.approvalScope}</code>
+                    {tHook("toolApprovalDialog.approvalScopePrefix")}: {" "}
+                    <code className="break-all font-mono">{request.approvalScope}</code>
                   </>
                 )}
               </SummaryTile>
@@ -731,7 +714,6 @@ export function ToolApprovalDialog({
                 </Label>
                 <Input
                   id="nl-justification"
-                  ref={nlInputRef}
                   type="text"
                   value={nlJustification}
                   onChange={(e) => setNlJustification(e.target.value)}
@@ -875,21 +857,23 @@ export function ToolApprovalDialog({
               <RadioGroup
                 value={scopeChoice}
                 onValueChange={(v) => setScopeChoice(v as UserApprovalScope)}
-                className="flex gap-4"
+                className="flex min-w-0 flex-wrap gap-x-4 gap-y-2"
+                data-testid="approval-scope-options"
               >
-                <div className="flex items-center gap-1.5">
+                <div className="flex min-w-0 items-center gap-1.5">
                   <RadioGroupItem value="session" id="scope-session" />
-                  <Label htmlFor="scope-session" className="text-xs">{tHook("toolApprovalDialog.scopeSession")}</Label>
+                  <Label htmlFor="scope-session" className="min-w-0 break-words text-xs">{tHook("toolApprovalDialog.scopeSession")}</Label>
                 </div>
-                <div className="flex items-center gap-1.5">
+                <div className="flex min-w-0 items-center gap-1.5">
                   <RadioGroupItem value="persistent" id="scope-persistent" />
-                  <Label htmlFor="scope-persistent" className="text-xs">{tHook("toolApprovalDialog.scopePersistent")}</Label>
+                  <Label htmlFor="scope-persistent" className="min-w-0 break-words text-xs">{tHook("toolApprovalDialog.scopePersistent")}</Label>
                 </div>
               </RadioGroup>
             </div>
           )}
 
-          <div className="mt-4 flex flex-wrap justify-end gap-2 border-t pt-3">
+        </section>
+          <div className="flex min-w-0 shrink-0 flex-wrap justify-end gap-2 border-t bg-card px-3 py-2 sm:px-5 [&>button]:min-w-[7rem] [&>button]:flex-1 sm:[&>button]:flex-none">
             {!approvalIsOneShot && (
               <Button
                 size="sm"
@@ -938,9 +922,8 @@ export function ToolApprovalDialog({
               </span>
             )}
           </div>
-        </section>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }
 
@@ -1038,7 +1021,7 @@ export function approvalReviewRows(
   }
 
   // Elaboration rows render ONLY when they carry actual per-invocation data —
-  // pickSummary's hardcoded "…not specified" fallback is dropped so the dialog
+  // pickSummary's hardcoded "…not specified" fallback is dropped so the dock
   // shows real args, not boilerplate. The primary data row (target / command /
   // endpoint) + the reviewer verdict always render. Always-hardcoded/redundant
   // rows (write impact = source·category·note; read scope = source·category·…;
@@ -1104,7 +1087,7 @@ export function approvalReviewRows(
  * Compact `source:tool` identity for the Tool/Source tile — `builtin:bash`,
  * `mcp:<tool>`, or `<pluginId>:<tool>` for a plugin (agent-action) call. One
  * short token instead of the old three-line source/plugin/scope stack, so the
- * approval dialog fits without scrolling. The origin + risk are still shown in
+ * approval content fits without scrolling. The origin + risk are still shown in
  * the review box's 출처/판단 rows.
  */
 function sourceToolToken(request: ApprovalRequest): string {

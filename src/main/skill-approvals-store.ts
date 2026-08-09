@@ -1,7 +1,7 @@
 /**
  * SkillApprovalsStore — persistent allowlist for user-authored skills the
  * user has already approved at least once. Without this, every `skill_load`
- * call would pop an approval modal even after the user said "yes" 30
+ * call would reopen the approval dock even after the user said "yes" 30
  * seconds ago, which is a clear UX regression.
  *
  * File: `~/.lvis/skill-approvals.json`

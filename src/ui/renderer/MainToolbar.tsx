@@ -110,11 +110,11 @@ export function MainToolbar({
   return (
     <div
       data-testid="main-toolbar"
-      className="flex min-w-0 flex-1 items-center gap-2"
+      className="flex min-w-0 flex-1 items-center gap-1 sm:gap-2"
       style={{ paddingLeft: `${leadClearance}px` }}
     >
       {/* ── Spacer pushes the trailing controls to the far-right edge (stays drag) */}
-      <div className="min-w-[64px] flex-1" aria-hidden="true" data-testid="main-toolbar-drag-band" />
+      <div className="min-w-0 flex-1 sm:min-w-[64px]" aria-hidden="true" data-testid="main-toolbar-drag-band" />
 
       {/* ── Location: back / forward + the path.
           It sits with the trailing group, NOT at the band's leading edge: the
@@ -152,7 +152,7 @@ export function MainToolbar({
       {/* ── Dev badge — only visible in non-production (LVIS_DEV). Stays next to
           the mode toggle at the far-right end. */}
       {isDevMode() && onOpenDevTools !== undefined && (
-        <NoDrag>
+        <NoDrag className="hidden sm:inline-flex">
           <Tooltip>
             <TooltipTrigger asChild>
               <Button

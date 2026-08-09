@@ -8,7 +8,7 @@ import { resolve as pathResolve } from "node:path";
  * -------------------------------------
  * This string decides which file the PERMISSION layer judges AND which file
  * the TOOL opens. If the two sides expand differently, the Layer-0 sensitive
- * verdict, the approval modal text, the persisted grant pattern, and the audit
+ * verdict, the approval dock text, the persisted grant pattern, and the audit
  * row are all computed about a file that is never touched. Agreement between
  * the sides IS the capability — there is no "stricter" variant that is also
  * correct, because a stricter-but-different answer still describes the wrong

@@ -1333,7 +1333,7 @@ export type ApprovalChoice = "allow-once" | "allow-session" | "allow-always" | "
 
 /**
  * Permission policy — discriminated approval kinds. Renderer routes on this to
- * pick the right card. Default `"tool"` is the standard approval dialog.
+ * pick the right card. Default `"tool"` is the standard approval dock content.
  */
 export type ApprovalKind = "tool" | "out-of-allowed-dir" | "agent-action" | "rationale";
 /**
@@ -1375,7 +1375,7 @@ export type ApprovalRequest = {
   reviewerVerdict?: { level: "low" | "medium" | "high"; reason: string };
   /** Captured policy/sandbox context for user review. */
   evaluationContext?: PermissionEvaluationContextShape;
-  /** Suggested natural-language purpose shown in the approval dialog. */
+  /** Suggested natural-language purpose shown in the approval dock. */
   approvalPurpose?: ApprovalPurposeSuggestion;
   args: unknown;
   reason: string;
@@ -1391,8 +1391,8 @@ export type ApprovalRequest = {
   mode?: "default" | "ask_all" | "plan" | "full_auto";
   /**
    * Host-owned id of the conversation that raised this approval. Sub-agents
-   * and side chats block on modals the user is not currently looking at, so
-   * the dialog and the queue name the asking conversation. Main-process
+   * and side chats can raise requests from another route, so the dock and the
+   * queue name the asking conversation. Main-process
    * value only — the renderer displays it and never supplies it.
    */
   sessionId?: string;
@@ -1448,9 +1448,9 @@ export type ApprovalRequest = {
     /**
      * Per-dimension confinement (filesystem / process / network) for the
      * substrate this capability describes. Mirrors the optional `confines`
-     * field on the canonical SandboxCapability so the approval dialog can show
+     * field on the canonical SandboxCapability so the approval dock can show
      * an HONEST label — e.g. Windows ASRT confines filesystem + network but not
-     * process, and the dialog must not show a blanket full-isolation label.
+     * process, and the approval dock must not show a blanket full-isolation label.
      * Absent ⇒ "not declared";
      * callers MUST NOT read absence as "all confined".
      */

@@ -15,10 +15,12 @@ const ROOT = process.cwd();
 
 const SKIP_DIRS = new Set([
   ".git",
-  // Agent worktrees (`.claude/worktrees/**`) are transient checkouts of this very
+  // Agent worktrees (`.claude/worktrees/**` and `.worktrees/**`) are transient
+  // checkouts of this very
   // repo — scanning them reports every helper as a 2-3x "duplicate" of itself, and
   // they never exist in CI's clean checkout. Skip so a local run matches CI.
   ".claude",
+  ".worktrees",
   "coverage",
   "dist",
   "node_modules",
