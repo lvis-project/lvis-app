@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WORK_BOARD } from "../../../shared/ipc-channels.js";
 import { registerWorkBoardHandlers } from "../work-board.js";
 import type { IpcDeps } from "../../types.js";
 import type { WorkItemResolved } from "../../../main/work-board-store.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 const ipc = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -70,11 +71,11 @@ beforeEach(() => {
   ipc.handle.mockClear();
 });
 
-afterEach(() => {
+afterEach(async () => {
   process.chdir(oldCwd);
   if (oldHome === undefined) delete process.env.LVIS_HOME;
   else process.env.LVIS_HOME = oldHome;
-  rmSync(root, { recursive: true, force: true });
+  await cleanupTmpDir(root);
 });
 
 describe("work-board project authorization", () => {
