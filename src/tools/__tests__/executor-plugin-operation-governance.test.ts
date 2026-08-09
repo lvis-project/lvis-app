@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { PluginOperationGrantCoordinator } from "../../permissions/plugin-operation-grant.js";
 import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
@@ -316,8 +317,8 @@ describe("ToolExecutor plugin operation governance", () => {
       );
       expect(pending?.inputSummary).not.toContain(outsideFile);
     } finally {
-      rmSync(directory, { recursive: true, force: true });
-      rmSync(outsideDirectory, { recursive: true, force: true });
+      await cleanupTmpDir(directory);
+      await cleanupTmpDir(outsideDirectory);
     }
   });
 

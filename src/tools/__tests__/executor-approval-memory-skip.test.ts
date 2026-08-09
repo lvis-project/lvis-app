@@ -22,7 +22,8 @@
  *       for foreground plugin asks, while hard/forceModal asks still prompt
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeWriteProbeTool } from "./approval-memory-test-fixtures.js";
@@ -726,7 +727,7 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
     expect(broadcast).not.toHaveBeenCalled();
   });
 
-  afterEach(() => {
-    rmSync(dir, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTmpDir(dir);
   });
 });

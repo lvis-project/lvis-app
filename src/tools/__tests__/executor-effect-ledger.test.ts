@@ -14,7 +14,8 @@
  * (both tools execute identically); it only records the signal.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ToolExecutor } from "../executor.js";
@@ -88,7 +89,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
   });
   afterEach(async () => {
     await auditLogger.close();
-    rmSync(auditDir, { recursive: true, force: true });
+    await cleanupTmpDir(auditDir);
   });
 
   function newExecutor(registry: ToolRegistry): ToolExecutor {
@@ -292,7 +293,7 @@ describe("executor effect ledger — host-observed read/write shadow", () => {
         ]),
       );
     } finally {
-      rmSync(storageDir, { recursive: true, force: true });
+      await cleanupTmpDir(storageDir);
     }
   });
 

@@ -7,7 +7,8 @@
  * `execute(rawInput, ctx)` contract directly — no Electron / IPC.
  */
 import { describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -158,7 +159,7 @@ describe("ask_user_question tool", () => {
 });
 
 describe("routine_schedule tool", () => {
-  it("declares a literal-aware approval cache key for plugin scope", () => {
+  it("declares a literal-aware approval cache key for plugin scope", async () => {
     const tmp = mkdtempSync(join(tmpdir(), "lvis-rt-"));
     try {
       const store = new RoutinesStore(join(tmp, "routines.json"));
@@ -172,7 +173,7 @@ describe("routine_schedule tool", () => {
       );
       expect(tool.approvalCacheKey?.({ allowedPlugins: [] })).toBe("scope:deny-all");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -187,7 +188,7 @@ describe("routine_schedule tool", () => {
       );
       expect(r.isError).toBe(true);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -213,7 +214,7 @@ describe("routine_schedule tool", () => {
       expect(list[0].notificationTitle).toBe("year-end");
       expect(list[0].scope?.pluginIds).toEqual({ mode: "deny-all" });
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -231,7 +232,7 @@ describe("routine_schedule tool", () => {
       // 2030-01-01 09:00 KST = 2030-01-01 00:00 UTC
       expect(list[0].schedule?.at).toBe("2030-01-01T00:00:00.000Z");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -247,7 +248,7 @@ describe("routine_schedule tool", () => {
       expect(r.isError).toBe(true);
       expect(r.output).toContain("prePrompt");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 });
@@ -1265,7 +1266,7 @@ describe("agent_spawn tool", () => {
       expect(captured?.instructions).toContain("check this diff");
       expect(captured?.sourceTools).toEqual(["web_search"]);
     } finally {
-      rmSync(agentDir, { recursive: true, force: true });
+      await cleanupTmpDir(agentDir);
     }
   });
 
@@ -1403,7 +1404,7 @@ describe("skill_list and agent_list tools", () => {
       expect(parsed.skills[0]).not.toHaveProperty("triggers");
       expect(r.output).not.toContain("secret body");
     } finally {
-      rmSync(skillDir, { recursive: true, force: true });
+      await cleanupTmpDir(skillDir);
     }
   });
 
@@ -1425,7 +1426,7 @@ describe("skill_list and agent_list tools", () => {
       );
       expect(r.output).not.toContain("secret profile body");
     } finally {
-      rmSync(agentDir, { recursive: true, force: true });
+      await cleanupTmpDir(agentDir);
     }
   });
 });

@@ -11,7 +11,8 @@
  *   - no session id ⇒ refuse.
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -92,7 +93,7 @@ describe("skill_read — access control", () => {
       expect(r.isError).toBe(true);
       expect(r.output).toContain("skill not loaded");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -108,7 +109,7 @@ describe("skill_read — access control", () => {
       expect(r.isError).toBe(false);
       expect(JSON.parse(r.output).content).toBe("API DOC");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -127,7 +128,7 @@ describe("skill_read — access control", () => {
       expect(r.isError).toBe(true);
       expect(r.output).toContain("not listed");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -145,7 +146,7 @@ describe("skill_read — access control", () => {
       expect(noSession.isError).toBe(true);
       expect(noSession.output).toContain("sessionId");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
@@ -176,7 +177,7 @@ describe("skill_read — plugin generation binding", () => {
       expect(JSON.parse(r.output).content).toBe("POLICY");
       expect(released).toBe(1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -206,7 +207,7 @@ describe("skill_read — plugin generation binding", () => {
       expect(r.output).toContain("generation changed");
       expect(released).toBe(1); // lease released even on refusal
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -228,7 +229,7 @@ describe("skill_read — plugin generation binding", () => {
       );
       expect(r.isError).toBe(true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
@@ -272,7 +273,7 @@ describe("skill_load — approval covers the bundled manifest", () => {
       expect(third.isError).toBe(false);
       expect(prompts).toBe(2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
@@ -296,7 +297,7 @@ describe("skill_read — manifest fidelity", () => {
       expect(r.isError).toBe(false);
       expect(JSON.parse(r.output).content).toBe("QA DOC");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -331,7 +332,7 @@ describe("skill_read — manifest fidelity", () => {
       expect(seen).toEqual(["FLAT BODY"]);
       expect(prompts).toBe(0); // existing approval still honored
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
@@ -377,7 +378,7 @@ describe("skill_load — approval key domains", () => {
       expect(approvedMaterial[0]).toContain("FLAT BODY");
       expect(approvedMaterial[1]).toMatch(/^[0-9a-f]{64}\|[0-9a-f]{64}$/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
