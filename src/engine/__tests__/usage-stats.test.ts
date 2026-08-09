@@ -1,8 +1,9 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
-import { appendFileSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { appendFileSync, mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const auditStatGate = vi.hoisted(() => ({
   target: undefined as string | undefined,
@@ -742,7 +743,7 @@ describe("usage-stats", () => {
       expect(read.length).toBe(2);
       expect(read.every((e) => e.type === "turn")).toBe(true);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
   it("reads canonical gzip archives and excludes non-telemetry channels", async () => {
@@ -774,7 +775,7 @@ describe("usage-stats", () => {
       expect(entries.map((entry) => entry.sessionId)).toEqual(["archived", "raw"]);
       expect(computeUsageSummary(entries, now).today.inputTokens).toBe(300);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -796,7 +797,7 @@ describe("usage-stats", () => {
       const entries = await readAuditEntries(dir, 2, now);
       expect(entries.map((entry) => entry.sessionId)).toEqual(["valid"]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
@@ -897,7 +898,7 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
       expect(summary.trend[0].inputTokens).toBe(100);
       expect(summary.trend[1].inputTokens).toBe(200);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -940,7 +941,7 @@ describe("getUsageRange (via readAuditEntries + filter)", () => {
       } else {
         process.env.LVIS_HOME = originalHome;
       }
-      rmSync(home, { recursive: true, force: true });
+      await cleanupTmpDir(home);
     }
   });
 });
@@ -976,7 +977,7 @@ describe("usage summary cache wiring", () => {
       } else {
         process.env.LVIS_HOME = originalHome;
       }
-      rmSync(home, { recursive: true, force: true });
+      await cleanupTmpDir(home);
     }
   });
 
@@ -1015,7 +1016,7 @@ describe("usage summary cache wiring", () => {
       } else {
         process.env.LVIS_HOME = originalHome;
       }
-      rmSync(home, { recursive: true, force: true });
+      await cleanupTmpDir(home);
     }
   });
 
@@ -1053,7 +1054,7 @@ describe("usage summary cache wiring", () => {
       } else {
         process.env.LVIS_HOME = originalHome;
       }
-      rmSync(home, { recursive: true, force: true });
+      await cleanupTmpDir(home);
     }
   });
 
@@ -1088,7 +1089,7 @@ describe("usage summary cache wiring", () => {
       } else {
         process.env.LVIS_HOME = originalHome;
       }
-      rmSync(home, { recursive: true, force: true });
+      await cleanupTmpDir(home);
     }
   });
 
@@ -1125,7 +1126,7 @@ describe("usage summary cache wiring", () => {
       } else {
         process.env.LVIS_HOME = originalHome;
       }
-      rmSync(home, { recursive: true, force: true });
+      await cleanupTmpDir(home);
     }
   });
 
@@ -1169,7 +1170,7 @@ describe("usage summary cache wiring", () => {
       } else {
         process.env.LVIS_HOME = originalHome;
       }
-      rmSync(home, { recursive: true, force: true });
+      await cleanupTmpDir(home);
     }
   });
 });
