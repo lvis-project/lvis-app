@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { MemoryManager, type SessionMetadata } from "../memory-manager.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const SESSION_A = "workspace-detach-a";
 const SESSION_B = "workspace-detach-b";
@@ -18,9 +19,9 @@ beforeEach(() => {
   memory = new MemoryManager({ lvisDir: dir });
 });
 
-afterEach(() => {
+afterEach(async () => {
   memory.closeSearchIndex();
-  rmSync(dir, { recursive: true, force: true });
+  await cleanupTmpDir(dir);
 });
 
 async function seed(

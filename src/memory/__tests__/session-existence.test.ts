@@ -6,10 +6,11 @@
  * would tell a caller a conversation exists that does not, or the reverse.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, unlinkSync } from "node:fs";
+import { mkdtempSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager } from "../memory-manager.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const SESSION_A = "aaaaaaaa-1111-2222-3333-444444444444";
 const SESSION_B = "bbbbbbbb-1111-2222-3333-444444444444";
@@ -23,8 +24,8 @@ beforeEach(() => {
   mm = new MemoryManager({ lvisDir: dir });
 });
 
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  await cleanupTmpDir(dir);
 });
 
 /** What `listSessions` reports, which is what the user's conversation list shows. */

@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { MAX_TOOL_RESULT_ARTIFACT_BYTES, MemoryManager } from "../memory-manager.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const SESSION_ID = "artifact-session-0001";
 const TRUNCATED = {
@@ -22,8 +23,8 @@ beforeEach(() => {
   mm = new MemoryManager({ lvisDir: dir });
 });
 
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  await cleanupTmpDir(dir);
 });
 
 function artifactMessage(content: string) {
