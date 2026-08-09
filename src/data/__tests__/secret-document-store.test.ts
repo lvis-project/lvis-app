@@ -4,7 +4,6 @@ import {
   lstatSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -16,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { writeUtf8FileAtomicSync } from "../../lib/atomic-file.js";
 import { FileLockReleaseError } from "../../lib/with-file-lock.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   SecretDocumentStore,
   SecretDocumentDecryptionError,
@@ -88,9 +88,9 @@ describe("SecretDocumentStore atomicity and policy", () => {
     path = join(root, "lvis-secrets.json");
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
-    rmSync(root, { recursive: true, force: true });
+    await cleanupTmpDir(root);
   });
 
   it("serializes same-process set/set without losing either key", async () => {
