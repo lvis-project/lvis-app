@@ -12,9 +12,10 @@ import {
   isStrictPathDescendant,
 } from "../permission-manager.js";
 import { updatePermissionsFile } from "../permissions-store.js";
-import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 // ─── Mock permissions-store ───────────────────────────
 // We mock the store module so tests don't touch the real filesystem.
@@ -947,8 +948,8 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
     root = realpathSync.native(mkdtempSync(join(tmpdir(), "lvis-prune-")));
   });
 
-  afterEach(() => {
-    rmSync(root, { recursive: true, force: true });
+  afterEach(async () => {
+    await cleanupTmpDir(root);
     vi.clearAllMocks();
   });
 
@@ -1083,7 +1084,7 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
       expect(pruned).toHaveLength(0);
       expect(mockStore.rules).toHaveLength(1);
     } finally {
-      rmSync(sibling, { recursive: true, force: true });
+      await cleanupTmpDir(sibling);
     }
   });
 
@@ -1156,7 +1157,7 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
       linkOk = false; // no symlink privilege (Windows without admin) → skip body
     }
     if (!linkOk) {
-      rmSync(realRoot, { recursive: true, force: true });
+      await cleanupTmpDir(realRoot);
       return;
     }
     try {
@@ -1169,8 +1170,8 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
       expect(pruned).toHaveLength(1);
       expect(mockStore.rules).toHaveLength(0);
     } finally {
-      rmSync(linkRoot, { recursive: true, force: true });
-      rmSync(realRoot, { recursive: true, force: true });
+      await cleanupTmpDir(linkRoot);
+      await cleanupTmpDir(realRoot);
     }
   });
 
@@ -1193,8 +1194,8 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
       linkOk = false; // no symlink privilege → skip body (workspace-preview precedent)
     }
     if (!linkOk) {
-      rmSync(realRoot, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(realRoot);
+      await cleanupTmpDir(outside);
       return;
     }
     try {
@@ -1207,9 +1208,9 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
       expect(pruned[0]!.path).toBe(lexicalUnderRoot);
       expect(mockStore.rules).toHaveLength(0);
     } finally {
-      rmSync(linkInside, { recursive: true, force: true });
-      rmSync(realRoot, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(linkInside);
+      await cleanupTmpDir(realRoot);
+      await cleanupTmpDir(outside);
     }
   });
 });

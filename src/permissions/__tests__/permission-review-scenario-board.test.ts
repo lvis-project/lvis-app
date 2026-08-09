@@ -7,7 +7,7 @@
  * tied to executable behavior instead of letting it drift into a static mockup.
  */
 import { describe, expect, it, vi } from "vitest";
-import { readFileSync, mkdtempSync, rmSync } from "node:fs";
+import { readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
@@ -26,6 +26,7 @@ import type { ToolCategory, ToolSource } from "../../tools/types.js";
 import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const BOARD_PATH = resolve(process.cwd(), "docs/design/permission-review-scenario-board-v2.html");
 
@@ -37,7 +38,7 @@ function tmpFile(name: string): string {
 function makeManager(
   mode: "default" | "strict" | "auto" | "allow" = "default",
   classifier: RiskClassifier = new RuleBasedRiskClassifier(),
-): { pm: PermissionManager; queue: DeferredQueue; cleanup: () => void } {
+): { pm: PermissionManager; queue: DeferredQueue; cleanup: () => Promise<void> } {
   const dir = mkdtempSync(join(tmpdir(), "lvis-permission-scenarios-"));
   const pm = new PermissionManager(join(dir, "permissions.json"));
   const queue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
@@ -53,7 +54,7 @@ function makeManager(
     cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
     deferredQueue: queue,
   });
-  return { pm, queue, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { pm, queue, cleanup: () => cleanupTmpDir(dir) };
 }
 
 function fixedClassifier(verdict: RiskVerdict): RiskClassifier {
@@ -161,7 +162,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       expect(execute).toHaveBeenCalledOnce();
       expect(gate.requestAndWait).not.toHaveBeenCalled();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -181,7 +182,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       expect(gate.requestAndWait).toHaveBeenCalledOnce();
       expect(classifier.classify).not.toHaveBeenCalled();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -202,7 +203,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         kind: "out-of-allowed-dir",
       }));
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -221,7 +222,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       expect(execute).toHaveBeenCalledOnce();
       expect(gate.requestAndWait).not.toHaveBeenCalled();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -250,7 +251,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         reviewerVerdict: expect.objectContaining({ level: "medium" }),
       }));
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -274,7 +275,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         reviewerVerdict: expect.objectContaining({ level: "high" }),
       }));
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -297,7 +298,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         reason: expect.not.stringContaining("reviewer"),
       }));
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -399,7 +400,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
           }),
         );
       } finally {
-        cleanup();
+        await cleanup();
       }
     },
   );
@@ -433,7 +434,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       };
       expect(request.reviewerVerdict).toBeUndefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
   it("overlay ask-meta bypasses MEDIUM auto-review and opens the common modal", async () => {
@@ -467,7 +468,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       };
       expect(request.reviewerVerdict).toBeUndefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -500,7 +501,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         }),
       );
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -533,7 +534,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         reviewerVerdict: expect.objectContaining({ level: "high" }),
       }));
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -596,7 +597,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         reason: expect.not.stringContaining("reviewer"),
       }));
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -620,7 +621,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       expect(execute).toHaveBeenCalledOnce();
       expect(gate.requestAndWait).not.toHaveBeenCalled();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -654,7 +655,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         }),
       }));
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -681,7 +682,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
         reviewerVerdict: expect.objectContaining({ level: "high" }),
       }));
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -710,7 +711,7 @@ describe("permission-review-scenario-board-v2.html contract", () => {
       expect(queue.listPending()).toHaveLength(1);
       expect(queue.listPending()[0].verdict.level).toBe("medium");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });

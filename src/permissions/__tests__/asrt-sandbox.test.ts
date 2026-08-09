@@ -27,7 +27,7 @@ import {
   vi,
 } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -62,6 +62,7 @@ import {
   unregisterWorkerUnixSocketDir,
 } from "../asrt-sandbox.js";
 import { asrtCanInitialize } from "./test-helpers.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 // ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
 // the host-side fixes are proven against ASRT's ACTUAL semantics (not a
 // re-implementation that could drift from the package).
@@ -82,7 +83,7 @@ beforeAll(() => {
   process.env.LVIS_HOME = join(isolatedWindowsHome, ".lvis");
 });
 
-afterAll(() => {
+afterAll(async () => {
   if (process.platform !== "win32" || isolatedWindowsHome === undefined) return;
 
   if (originalAsrtTestHome === undefined) {
@@ -95,7 +96,7 @@ afterAll(() => {
   } else {
     process.env.LVIS_HOME = originalLvisHome;
   }
-  rmSync(isolatedWindowsHome, { recursive: true, force: true });
+  await cleanupTmpDir(isolatedWindowsHome);
 });
 
 afterEach(async () => {
@@ -185,7 +186,7 @@ describe("asrt-sandbox — gate ON wraps a real command under the OS sandbox", (
         /vendor.*not found|cannot find module|MODULE_NOT_FOUND|no such file.*vendor/i,
       );
     } finally {
-      rmSync(writeDir, { recursive: true, force: true });
+      await cleanupTmpDir(writeDir);
     }
   });
 });
