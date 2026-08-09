@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { openSettingsWindow } from './settings-window.js';
+import { openInlineSettings } from './inline-settings.js';
 import type { ElectronApplication, Page } from '@playwright/test';
 
 /**
@@ -116,7 +116,7 @@ async function openSubscriptionModelPopup(
   width: number,
 ): Promise<Page> {
   await stubSubscriptionRuntime(app);
-  const w = await openSettingsWindow(app, mainWindow, 'llm');
+  const w = await openInlineSettings(app, mainWindow, 'llm');
   await setWindowSize(app, width);
   await w.waitForTimeout(700);
   await gotoModelTab(w);

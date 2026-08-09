@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures.js';
-import { closeSettingsWindow, openSettingsWindow } from './settings-window.js';
+import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 
 /**
  * Away Authority's desk gesture, in the real window.
@@ -24,22 +24,22 @@ test('renders no away-authority control while nothing is shared', async ({
   app,
   mainWindow,
 }) => {
-  const settingsWindow = await openSettingsWindow(app, mainWindow, 'remote-surfaces');
+  const settingsPage = await openInlineSettings(app, mainWindow, 'remote-surfaces');
 
   // Non-vacuous anchor: the tab really did render, so the absences below are
   // about the guard and not about a pane that never loaded.
-  await expect(settingsWindow.getByTestId('telegram-connection-content')).toBeVisible();
-  await expect(settingsWindow.getByTestId('telegram-connection-connect')).toBeVisible();
+  await expect(settingsPage.getByTestId('telegram-connection-content')).toBeVisible();
+  await expect(settingsPage.getByTestId('telegram-connection-connect')).toBeVisible();
 
   // The whole surface is withheld — not the button alone. A disabled control
   // would still tell a reader that arming is a thing this desktop can do, and
   // would be one regression away from being enabled with no share behind it.
-  await expect(settingsWindow.getByTestId('away-authority-content')).toHaveCount(0);
-  await expect(settingsWindow.getByTestId('away-authority-open-arm-dialog')).toHaveCount(0);
-  await expect(settingsWindow.getByTestId('away-authority-arm-dialog')).toHaveCount(0);
-  await expect(settingsWindow.getByTestId('away-authority-disarm')).toHaveCount(0);
+  await expect(settingsPage.getByTestId('away-authority-content')).toHaveCount(0);
+  await expect(settingsPage.getByTestId('away-authority-open-arm-dialog')).toHaveCount(0);
+  await expect(settingsPage.getByTestId('away-authority-arm-dialog')).toHaveCount(0);
+  await expect(settingsPage.getByTestId('away-authority-disarm')).toHaveCount(0);
 
-  await closeSettingsWindow(app, settingsWindow);
+  await closeInlineSettings(app, settingsPage);
 });
 
 /**
@@ -53,12 +53,12 @@ test('reaches the remote surfaces tab by its current id', async ({
   mainWindow,
   t,
 }) => {
-  const settingsWindow = await openSettingsWindow(app, mainWindow, 'remote-surfaces');
+  const settingsPage = await openInlineSettings(app, mainWindow, 'remote-surfaces');
 
-  const panel = settingsWindow.locator('[data-settings-layout]');
+  const panel = settingsPage.locator('[data-settings-layout]');
   await expect(
     panel.getByRole('tab', { name: t('settingsContent.tabRemoteSurfaces'), exact: true }),
   ).toHaveAttribute('data-state', 'active');
 
-  await closeSettingsWindow(app, settingsWindow);
+  await closeInlineSettings(app, settingsPage);
 });

@@ -1,5 +1,5 @@
 import { test, expect } from './fixtures';
-import { openSettingsWindow, closeSettingsWindow } from './settings-window';
+import { openInlineSettings, closeInlineSettings } from './inline-settings.js';
 
 test.use({ seedTogglePlugin: true, seedRepositoryPlugins: false });
 
@@ -13,7 +13,7 @@ test.use({ seedTogglePlugin: true, seedRepositoryPlugins: false });
  * note is scoped to that same plugin.
  */
 test('plugin-config Switch toggles a loaded plugin active/inactive and back', async ({ app, mainWindow, t }) => {
-  const settings = await openSettingsWindow(app, mainWindow, 'plugin-config');
+  const settings = await openInlineSettings(app, mainWindow, 'plugin-config');
   try {
     const anyToggle = settings.locator('[data-testid^="plugin-config:enabled-toggle:"]').first();
     const hasToggle = await anyToggle
@@ -45,6 +45,6 @@ test('plugin-config Switch toggles a loaded plugin active/inactive and back', as
     await expect(detailStatus).toHaveText(t('pluginConfigTab.statusLoaded'), { timeout: 15_000 });
     await expect(hiddenNote).toHaveCount(0);
   } finally {
-    await closeSettingsWindow(app, settings).catch(() => {});
+    await closeInlineSettings(app, settings).catch(() => {});
   }
 });

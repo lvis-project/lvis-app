@@ -27,7 +27,7 @@ export interface UseAppModeResult {
  * Workspace-mode (Chat / Work) state + its coupled shell layout side-effects.
  *
  * Extracted verbatim from App.tsx. Owns:
- *   - `appMode` (SOLE authority for inline-vs-detached), seeded before first
+ *   - `appMode` (SOLE authority for chat-vs-work shell layout), seeded before first
  *     paint from the persisted mode so the shell renders the right layout on
  *     frame 0. `setAppMode` persists to host settings, guarded against no-op
  *     writes (#1312 render-loop guard).
@@ -78,7 +78,7 @@ export function useAppMode(api: Api): UseAppModeResult {
   }, [api]);
   // appMode drives the rail's default width on each mode transition: work
   // mode expands it (wide working layout — inline views need the room), chat
-  // mode collapses it to the focused icon rail (views detach to windows). This
+  // mode collapses it to the focused icon rail. This
   // makes toggling visibly widen/narrow the shell. It is a per-transition
   // default, NOT a lock — the user may still collapse/expand manually within a
   // mode without it snapping back until the next mode switch. On the initial

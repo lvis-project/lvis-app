@@ -4,9 +4,8 @@
  * Partition naming is the original concern and most of this file; it also holds the two
  * other things the READ PATH must agree on: what a server id may be
  * ({@link isUsableMcpServerId}) and what a card URI may be ({@link isMcpAppUiUri}).
- * Deliberately not every surface — `window-manager`'s detach check and the renderer's
- * bridge handler each keep their own weaker literal, for reasons recorded at those
- * sites.
+ * The client and governance layers both consume these predicates so the read
+ * boundary has one fail-closed spelling.
  *
  * Every MCP server's UI card (`ui://` resource) runs in a dedicated,
  * per-server Electron session partition for storage isolation. Main registers

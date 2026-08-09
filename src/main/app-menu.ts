@@ -22,8 +22,8 @@ function activateView(viewKey: string) {
 /**
  * Route a settings-open request to the INLINE settings panel. Settings no
  * longer detaches to its own BrowserWindow (settings-inline-overhaul), so every
- * main-process entry point — the app menu, the tray, `lvis://` MCP-login deep
- * links, and the `lvis:settings-window:open` IPC — funnels through here.
+ * main-process entry point — the app menu, the tray, and `lvis://` MCP-login
+ * deep links — funnels through here.
  *
  * Surfaces the main window (creating/restoring it if missing so the entry point
  * never dead-ends), then sends `lvis:view:activate` with the requested tab. The

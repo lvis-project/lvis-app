@@ -242,9 +242,9 @@ export interface McpAppHostContextInput {
   /** IANA time zone (e.g. "America/New_York"). */
   timeZone: string;
   /**
-   * The card's CURRENT display mode. McpAppView owns it (a card mounts inline; a
-   * detached window IS the fullscreen presentation) and re-publishes the context
-   * through `bridge.setHostContext(...)` after every applied change, which is how the
+   * The card's CURRENT display mode. McpAppView owns the renderer location
+   * (inline, fullscreen, or PiP) and re-publishes the context through
+   * `bridge.setHostContext(...)` after every applied change, which is how the
    * app learns the mode actually took effect.
    */
   displayMode: McpUiDisplayMode;

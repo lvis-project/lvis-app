@@ -55,9 +55,6 @@ export const en = {
   "be_main.menuSelectAll": "Select All",
   "be_main.menuApp": "App",
 
-  // settings window title
-  "be_main.settingsWindowTitle": "LVIS Settings",
-
   // bootstrap status messages
   "be_main.bootstrapStatus0": "Preparing runtime...",
   "be_main.bootstrapStatus1": "Loading user settings and memory...",
@@ -122,8 +119,6 @@ export const ko: Record<keyof typeof en, string> = {
   "be_main.menuDelete": "삭제",
   "be_main.menuSelectAll": "전체 선택",
   "be_main.menuApp": "앱",
-
-  "be_main.settingsWindowTitle": "LVIS 설정",
 
   "be_main.bootstrapStatus0": "런타임을 준비하는 중...",
   "be_main.bootstrapStatus1": "사용자 설정과 메모리를 불러오는 중...",
