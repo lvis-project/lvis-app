@@ -21,10 +21,11 @@
  * touched).
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WorkBoardStore } from "../../main/work-board-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import { createWorkBoardEngine } from "../work-board-engine.js";
 import type { SubAgentRunner } from "../../engine/subagent-runner.js";
 import type {
@@ -35,13 +36,17 @@ import type {
 import type { LoadedAgentProfile } from "../../main/agent-profile-store.js";
 import type { WorkBoardRunEvent } from "../../shared/work-board-types.js";
 
-function tempBoard(): { store: WorkBoardStore; path: string; cleanup: () => void } {
+function tempBoard(): {
+  store: WorkBoardStore;
+  path: string;
+  cleanup: () => Promise<void>;
+} {
   const dir = mkdtempSync(join(tmpdir(), "lvis-wbrf-"));
   const path = join(dir, "board.json");
   return {
     store: new WorkBoardStore(path),
     path,
-    cleanup: () => rmSync(dir, { recursive: true, force: true }),
+    cleanup: () => cleanupTmpDir(dir),
   };
 }
 
@@ -196,7 +201,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(execCall.profileMode).toBe("execute");
       expect(execCall.sourceTools).toBeUndefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -244,7 +249,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(done.phase).toBe("done");
       expect(done.runSessionId).toBe(`work-board:${id}::exec`);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -285,7 +290,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(got.item.runStatus).toBe("denied");
       expect(got.item.output).toBeUndefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -321,7 +326,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(got.item.output).toBe("OUTPUT: completed step 1; step 2");
       expect(got.item.runUpdatedAt).toBeDefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -350,7 +355,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(calls[0].profileModel).toBe("high");
       expect(calls[1].profileModel).toBe("high");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -381,7 +386,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       if (got.status !== "found") throw new Error("missing item");
       expect(got.item.runStatus).toBe("error");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -425,7 +430,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(got.item.runStatus).toBe("error");
       expect(got.item.output).toBeUndefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -469,7 +474,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(got.item.runStatus).toBe("error");
       expect(got.item.output).toBeUndefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -517,7 +522,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       // Exactly the first run's plan + execute spawns — never a second agent.
       expect(calls).toHaveLength(2);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -546,7 +551,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(calls).toHaveLength(0);
       expect(requests).toHaveLength(0);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -599,7 +604,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
       expect(afterDeny.item.output).toBeUndefined();
       expect(afterDeny.item.runSessionId).not.toBe(completedSession);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -644,7 +649,7 @@ describe("WorkBoardEngine — run-flow contracts", () => {
         expect((r as { durableApprovalRecordAllowed?: unknown }).durableApprovalRecordAllowed).toBe(false);
       }
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
