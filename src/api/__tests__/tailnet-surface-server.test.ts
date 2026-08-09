@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { request as httpRequest } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,6 +18,7 @@ import { createPlatformConversationTimeline } from "../../engine/conversation-pl
 import { createSharedConversationProjectionStore } from "../../engine/shared-conversation-projection.js";
 import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
 import type { TailnetPairedShareAuthorizer } from "../../main/tailnet-paired-share-authorizer.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const CAPABILITY = "lvis.example.com/cap/conversation-observer";
 const CONVERSATION_ID = "owner-session-do-not-expose";
@@ -48,8 +49,7 @@ afterEach(async () => {
   await Promise.all(active.map((server) => server.close()));
   for (const store of stores) store.stop();
   stores = [];
-  for (const directory of receiptDirs) rmSync(directory, { recursive: true, force: true });
-  receiptDirs = [];
+  for (const directory of receiptDirs.splice(0)) await cleanupTmpDir(directory);
 });
 
 interface FixtureOptions {
