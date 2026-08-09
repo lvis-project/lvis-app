@@ -6,9 +6,11 @@
  * vi.resetModules() + dynamic import.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 // Sentinel to detect "not passed" vs "passed undefined/null"
 const NOT_SET = Symbol("NOT_SET");
@@ -270,7 +272,8 @@ describe("initFileLogSink — fail-closed lifecycle (#1499)", () => {
     // regular FILE, so ensureLogDir's mkdirSync(recursive) fails with ENOTDIR/
     // EEXIST. initFileLogSink must catch this and return null — the boot path
     // (`if (sink) { … }` in boot/services.ts) then simply skips file logging.
-    const parentFile = join(mkdtempSync(join(tmpdir(), "lvis-logfail-")), "not-a-dir");
+    const dir = mkdtempSync(join(tmpdir(), "lvis-logfail-"));
+    const parentFile = join(dir, "not-a-dir");
     writeFileSync(parentFile, "x");
     const badDir = join(parentFile, "logs"); // parent is a file → mkdir fails
 
@@ -283,6 +286,7 @@ describe("initFileLogSink — fail-closed lifecycle (#1499)", () => {
       threw = true;
     } finally {
       closeFileLogSink();
+      await cleanupTmpDir(dir);
     }
     // The contract: no throw escapes, and the sink is null (fail-closed).
     expect(threw).toBe(false);
@@ -297,18 +301,18 @@ describe("initFileLogSink — fail-closed lifecycle (#1499)", () => {
       expect(sink).not.toBeNull();
       expect(typeof sink?.currentFile).toBe("string");
       expect(sink?.currentFile.startsWith(dir)).toBe(true);
+      if (sink) {
+        await vi.waitFor(() => {
+          expect(existsSync(sink.currentFile)).toBe(true);
+        });
+      }
     } finally {
       closeFileLogSink();
-      // Retry rm — SonicBoom's async fd close can briefly hold the handle on
-      // Windows (mirrors log-file-sink.test.ts's own cleanup guard).
-      for (let attempt = 0; attempt < 10; attempt++) {
-        try {
-          rmSync(dir, { recursive: true, force: true });
-          break;
-        } catch {
-          await new Promise((r) => setTimeout(r, 25));
-        }
-      }
+      // The file-ready wait above prevents a deferred open from racing
+      // teardown. Give end() a turn to deliver its close callback, then use the
+      // shared bounded retry policy for any remaining filesystem lock.
+      await new Promise((r) => setTimeout(r, 0));
+      await cleanupTmpDir(dir);
     }
   });
 });
