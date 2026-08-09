@@ -5,8 +5,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { rm, mkdir, readFile } from "node:fs/promises";
+import { mkdir, readFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const TEST_HOME = join(tmpdir(), `lvis-test-sink-${randomBytes(4).toString("hex")}`);
 process.env.LVIS_HOME = TEST_HOME;
@@ -19,7 +20,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
-  await rm(TEST_HOME, { recursive: true, force: true });
+  await cleanupTmpDir(TEST_HOME);
 });
 
 function makeEntry(toolName = "bash_run") {
