@@ -200,6 +200,8 @@ export class VerdictCache {
   private readonly filePath: string;
   /** In-memory mirror of the file. Loaded lazily on first read. */
   private entries: VerdictCacheEntry[] | null = null;
+  /** Best-effort rewrites scheduled by synchronous lookup pruning. */
+  private readonly pendingRewrites = new Set<Promise<void>>();
 
   constructor(filePath?: string) {
     this.filePath = filePath ?? defaultPath();
@@ -330,6 +332,19 @@ export class VerdictCache {
     return dropped;
   }
 
+  /**
+   * Wait for background rewrites scheduled by lookup pruning to finish.
+   *
+   * Lookup stays synchronous, so stale and expired entries are rewritten on a
+   * best-effort background path. Lifecycle owners can await this boundary
+   * before removing the cache directory or otherwise retiring the instance.
+   */
+  async flush(): Promise<void> {
+    while (this.pendingRewrites.size > 0) {
+      await Promise.all([...this.pendingRewrites]);
+    }
+  }
+
   /** Reset in-memory mirror (test helper). */
   resetForTests(): void {
     this.entries = null;
@@ -345,9 +360,15 @@ export class VerdictCache {
   }
 
   private scheduleRewrite(): void {
-    void this.rewriteFromMemory().catch((err) => {
-      log.warn(`failed to rewrite pruned cache: %s`, (err as Error).message);
-    });
+    let pending: Promise<void>;
+    pending = this.rewriteFromMemory()
+      .catch((err) => {
+        log.warn(`failed to rewrite pruned cache: %s`, (err as Error).message);
+      })
+      .finally(() => {
+        this.pendingRewrites.delete(pending);
+      });
+    this.pendingRewrites.add(pending);
   }
 
   private async appendLine(entry: VerdictCacheEntry): Promise<void> {

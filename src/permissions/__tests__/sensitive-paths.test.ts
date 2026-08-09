@@ -5,7 +5,7 @@
  * canonicalizePathForMatch (frozen-canonical + bounded walk-up), and
  * caseFoldForMatch.
  */
-import { describe, it, expect } from "vitest";
+import { afterEach, describe, it, expect } from "vitest";
 import { mkdtempSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
@@ -17,6 +17,21 @@ import {
   caseFoldForMatch,
   MAX_WALK_UP,
 } from "../sensitive-paths.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+
+const tmpDirs: string[] = [];
+
+function makeTmpDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tmpDirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  for (const dir of tmpDirs.splice(0)) {
+    await cleanupTmpDir(dir);
+  }
+});
 
 describe("SENSITIVE_PATH_PATTERNS", () => {
   it("is a non-empty readonly list", () => {
@@ -339,7 +354,7 @@ describe("canonicalizePathForMatch", () => {
     // Stage a self-symlink in a temp dir; canonicalize a child path and
     // confirm we get a string back (no hang, no throw). On platforms that
     // forbid self-symlinks, the test still passes via the bounded cap.
-    const root = mkdtempSync(join(tmpdir(), "lvis-canonical-"));
+    const root = makeTmpDir("lvis-canonical-");
     const linkDir = join(root, "loop");
     try {
       symlinkSync(linkDir, linkDir); // self-loop

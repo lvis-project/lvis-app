@@ -19,7 +19,7 @@
  * fail-closed `unclassifiedHostApiMethod` WRITE for an unmapped path, and is a
  * PURE side-effect (it never alters the wrapped method's behavior).
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -102,6 +102,21 @@ import {
   type EffectLedger,
 } from "../effect-ledger.js";
 import type { PluginHostApi } from "../../plugins/types.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+
+const tmpDirs: string[] = [];
+
+function makeTmpDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tmpDirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  for (const dir of tmpDirs.splice(0)) {
+    await cleanupTmpDir(dir);
+  }
+});
 
 type CreateHostApi = (
   pluginId: string,
@@ -164,9 +179,7 @@ async function buildRealHostApi(): Promise<PluginHostApi> {
     createHostApi,
     "initPluginRuntime must register a createHostApi factory",
   ).toBeDefined();
-  const pluginDataDir = mkdtempSync(
-    join(tmpdir(), "lvis-hostapi-completeness-"),
-  );
+  const pluginDataDir = makeTmpDir("lvis-hostapi-completeness-");
   // Build with the FULL capability vocabulary, not a sampled subset. A
   // namespace/method wired ONLY under a capability ABSENT from the fixture would
   // escape BOTH the non-plain-namespace assertion AND the SOT-coverage assertion

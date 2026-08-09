@@ -9,7 +9,7 @@
  *   - HIGH verdicts are cached too
  *   - Persistence to file across instances
  */
-import { describe, it, expect, beforeEach } from "vitest";
+import { afterEach, describe, it, expect, beforeEach } from "vitest";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,11 +23,32 @@ import {
   type VerdictCacheContext,
 } from "../reviewer/verdict-cache.js";
 import type { RiskVerdict } from "../reviewer/risk-classifier.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+
+const tmpDirs: string[] = [];
+const caches = new Set<VerdictCache>();
 
 function tmpCachePath(): string {
   const dir = mkdtempSync(join(tmpdir(), "lvis-verdict-cache-"));
+  tmpDirs.push(dir);
   return join(dir, "reviewer-cache.jsonl");
 }
+
+function makeCache(path: string): VerdictCache {
+  const cache = new VerdictCache(path);
+  caches.add(cache);
+  return cache;
+}
+
+afterEach(async () => {
+  for (const cache of caches) {
+    await cache.flush();
+  }
+  caches.clear();
+  for (const dir of tmpDirs.splice(0)) {
+    await cleanupTmpDir(dir);
+  }
+});
 
 const CTX: VerdictCacheContext = {
   allowedDirectories: ["/Users/ken/work", "/Users/ken/.lvis"],
@@ -205,7 +226,7 @@ describe("VerdictCache lookup states", () => {
 
   beforeEach(() => {
     path = tmpCachePath();
-    cache = new VerdictCache(path);
+    cache = makeCache(path);
   });
 
   it("returns miss-not-found for empty cache", () => {
@@ -251,10 +272,26 @@ describe("VerdictCache lookup states", () => {
       invalidationKey: computeInvalidationKey(CTX),
     });
     writeFileSync(path, expired + "\n", "utf-8");
-    cache = new VerdictCache(path);
+    cache = makeCache(path);
     const r = cache.lookup(LOOKUP, CTX);
     expect(r.hit).toBe(false);
     expect(r.reason).toBe("miss-expired");
+  });
+
+  it("flush waits for the expired-entry rewrite", async () => {
+    const expired = JSON.stringify({
+      key: computeCacheKey(LOOKUP),
+      verdict: { level: "low", reason: "ok" },
+      expiresAt: Date.now() - 1000,
+      invalidationKey: computeInvalidationKey(CTX),
+    });
+    writeFileSync(path, expired + "\n", "utf-8");
+    cache = makeCache(path);
+
+    expect(cache.lookup(LOOKUP, CTX).reason).toBe("miss-expired");
+    await cache.flush();
+
+    expect(readFileSync(path, "utf-8")).toBe("");
   });
 
   it("prunes stale entries and can still hit an older current entry", async () => {
@@ -274,9 +311,9 @@ describe("VerdictCache lookup states", () => {
 describe("VerdictCache persistence", () => {
   it("entry survives across cache instances", async () => {
     const path = tmpCachePath();
-    const a = new VerdictCache(path);
+    const a = makeCache(path);
     await a.store(LOOKUP, CTX, { level: "medium", reason: "x" });
-    const b = new VerdictCache(path);
+    const b = makeCache(path);
     const r = b.lookup(LOOKUP, CTX);
     expect(r.hit).toBe(true);
     expect(r.verdict?.level).toBe("medium");
@@ -284,7 +321,7 @@ describe("VerdictCache persistence", () => {
 
   it("file format is JSONL", async () => {
     const path = tmpCachePath();
-    const cache = new VerdictCache(path);
+    const cache = makeCache(path);
     await cache.store(LOOKUP, CTX, { level: "low", reason: "a" });
     await cache.store({ ...LOOKUP, toolName: "other" }, CTX, { level: "high", reason: "b" });
     const lines = readFileSync(path, "utf-8").trim().split("\n");
@@ -300,7 +337,7 @@ describe("VerdictCache persistence", () => {
 
   it("caps stored entries to the newest cache window", async () => {
     const path = tmpCachePath();
-    const cache = new VerdictCache(path);
+    const cache = makeCache(path);
     for (let i = 0; i < MAX_VERDICT_CACHE_ENTRIES + 3; i += 1) {
       await cache.store({ ...LOOKUP, toolName: `tool_${i}` }, CTX, {
         level: "low",
@@ -317,7 +354,7 @@ describe("VerdictCache persistence", () => {
 describe("VerdictCache invalidateMismatching (selective by invalidationKey)", () => {
   it("drops only entries with mismatching invalidationKey", async () => {
     const path = tmpCachePath();
-    const cache = new VerdictCache(path);
+    const cache = makeCache(path);
     const ctxA: VerdictCacheContext = {
       allowedDirectories: ["/A"],
       scope: { mode: "deny-all" },
@@ -340,7 +377,7 @@ describe("VerdictCache invalidateMismatching (selective by invalidationKey)", ()
 
   it("returns 0 when no entries are stale", async () => {
     const path = tmpCachePath();
-    const cache = new VerdictCache(path);
+    const cache = makeCache(path);
     await cache.store(LOOKUP, CTX, { level: "low", reason: "a" });
     const dropped = await cache.invalidateMismatching(CTX);
     expect(dropped).toBe(0);
@@ -349,7 +386,7 @@ describe("VerdictCache invalidateMismatching (selective by invalidationKey)", ()
 
   it("settings change invalidates only mismatching entries (cache integrity)", async () => {
     const path = tmpCachePath();
-    const cache = new VerdictCache(path);
+    const cache = makeCache(path);
     const old: VerdictCacheContext = {
       allowedDirectories: ["/old"],
       scope: { x: 1 },

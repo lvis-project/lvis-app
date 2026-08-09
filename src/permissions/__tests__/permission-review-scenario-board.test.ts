@@ -6,7 +6,7 @@
  * permission policy path. The board is a PR artifact, but these tests keep it
  * tied to executable behavior instead of letting it drift into a static mockup.
  */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -29,11 +29,19 @@ import type { PluginRuntime } from "../../plugins/runtime.js";
 import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const BOARD_PATH = resolve(process.cwd(), "docs/design/permission-review-scenario-board-v2.html");
+const tmpDirs: string[] = [];
 
 function tmpFile(name: string): string {
   const dir = mkdtempSync(join(tmpdir(), "lvis-permission-scenarios-"));
+  tmpDirs.push(dir);
   return join(dir, name);
 }
+
+afterEach(async () => {
+  for (const dir of tmpDirs.splice(0)) {
+    await cleanupTmpDir(dir);
+  }
+});
 
 function makeManager(
   mode: "default" | "strict" | "auto" | "allow" = "default",
