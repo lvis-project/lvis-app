@@ -4,7 +4,6 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
-  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -24,6 +23,7 @@ import {
   transientFsLockDelayMs,
 } from "../transient-fs-lock-retry.js";
 import { retryOnTransientFsLock } from "../../plugins/plugin-artifact-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let dir: string;
 
@@ -31,8 +31,8 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "lvis-atomic-file-"));
 });
 
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  await cleanupTmpDir(dir);
 });
 
 describe("writeUtf8FileAtomicSync", () => {
