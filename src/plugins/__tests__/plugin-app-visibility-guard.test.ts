@@ -1,5 +1,5 @@
 /** Pure Tool app-visibility and runtime invocation-scope enforcement. */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -8,9 +8,17 @@ import {
   pureTool,
   TestPluginRuntime as PluginRuntime,
 } from "./test-helpers.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
+const tempPluginRoots: string[] = [];
+
+afterEach(async () => {
+  for (const root of tempPluginRoots.splice(0)) {
+    await cleanupTmpDir(root);
+  }
+});
 
 async function writeTempPlugin(opts: {
   installPolicy: "admin" | "user";
@@ -18,6 +26,7 @@ async function writeTempPlugin(opts: {
   appTools: string[];
 }): Promise<string> {
   const root = mkdtempSync(join(tmpdir(), "lvis-ui-actions-"));
+  tempPluginRoots.push(root);
   const manifest = {
     id: `test-${Math.random().toString(36).slice(2, 8)}`,
     name: "App visibility test",
