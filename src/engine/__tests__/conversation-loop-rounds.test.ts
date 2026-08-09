@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -20,6 +20,7 @@ import { SkillStore } from "../../main/skill-store.js";
 import { createSkillLoadTool } from "../../tools/skill-load.js";
 import { MCP_RESOURCE_FENCE_OPEN } from "../../shared/mcp-resource-bounds.js";
 import type { SubscriptionRuntimeId } from "../../shared/subscription-runtime.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -511,7 +512,7 @@ describe("ConversationLoop queryLoop", () => {
       expect(JSON.stringify(loop.getHistory().getMessages())).not.toContain("BODY ONLY THIS TURN",
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -575,7 +576,7 @@ describe("ConversationLoop queryLoop", () => {
       expect(provider.systemPrompts[0]).not.toContain("CHILD BODY ONLY");
       expect(provider.systemPrompts[1]).toContain("CHILD BODY ONLY");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -1188,7 +1189,7 @@ describe("ConversationLoop queryLoop", () => {
         chunk: longContent.slice(500, 1000),
       });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 

@@ -24,7 +24,7 @@
  *     `queryLoop` and cleared in `runTurn`'s `finally`.
  */
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -37,6 +37,7 @@ import { createDynamicTool } from "../../tools/base.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { MemoryManager } from "../../memory/memory-manager.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -311,7 +312,7 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
         }),
       );
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -923,7 +924,7 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
           ),
         ).toBe(false);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        await cleanupTmpDir(dir);
       }
     },
   );
