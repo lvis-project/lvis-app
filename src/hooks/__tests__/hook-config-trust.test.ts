@@ -14,11 +14,11 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   loadHookConfig,
   syntheticConfigHook,
@@ -45,8 +45,8 @@ beforeEach(() => {
   mkdirSync(hooksDir, { recursive: true });
 });
 
-afterEach(() => {
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+afterEach(async () => {
+  if (tmpDir) await cleanupTmpDir(tmpDir);
 });
 
 function opts() {
