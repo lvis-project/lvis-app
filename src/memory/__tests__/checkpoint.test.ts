@@ -2,11 +2,12 @@
  * Tests for checkpoint chain fields (parentSessionId, summaryPreamble, checkpoints[]).
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager } from "../memory-manager.js";
 import type { Checkpoint, SessionMetadata } from "../memory-manager.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 // ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -36,8 +37,8 @@ beforeEach(() => {
   mm = new MemoryManager({ lvisDir: dir });
 });
 
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  await cleanupTmpDir(dir);
 });
 
 // ── 1. appendCheckpoint ───────────────────────────────────────────────────────
