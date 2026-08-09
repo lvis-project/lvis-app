@@ -9,10 +9,11 @@
  * temp path (the namespace is never touched).
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WorkBoardStore } from "../../main/work-board-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import { createWorkBoardEngine } from "../work-board-engine.js";
 import type {
   SubAgentRunner,
@@ -31,7 +32,7 @@ import { memTranscriptStorage } from "../../work-board/__tests__/board-test-fixt
 function tempBoard() {
   const dir = mkdtempSync(join(tmpdir(), "lvis-wbe-"));
   const store = new WorkBoardStore(join(dir, "board.json"));
-  return { store, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { store, cleanup: () => cleanupTmpDir(dir) };
 }
 
 interface SpawnCall {
@@ -149,7 +150,7 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
       expect(phases).toContain("executing");
       expect(phases[phases.length - 1]).toBe("done");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -186,7 +187,7 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
 
       expect(events[events.length - 1].phase).toBe("denied");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -208,7 +209,7 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
       expect(calls).toHaveLength(0);
       expect(requests).toHaveLength(0);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -234,7 +235,7 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
       if (got.status !== "found") throw new Error("missing item");
       expect(got.item.runStatus).toBe("error");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -376,7 +377,7 @@ describe("WorkBoardEngine — plan→approve→execute", () => {
       const recordedKeys = recordedTurns.map((e) => `${e.phase}:${e.turn}`);
       expect(new Set(recordedKeys).size).toBe(recordedKeys.length); // no dupes
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
