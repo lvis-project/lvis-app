@@ -1,8 +1,9 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { ActivePluginGeneration } from "../../plugins/plugin-generation-coordinator.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import { ScriptHookManager } from "../script-hook-manager.js";
 import { PluginHookTrustStore, preparePluginHookGeneration } from "../plugin-hook-projection.js";
 
@@ -10,7 +11,9 @@ const payloadRoot = mkdtempSync(join(tmpdir(), "lvis-plugin-hook-projection-"));
 mkdirSync(join(payloadRoot, "hooks"), { recursive: true });
 writeFileSync(join(payloadRoot, "hooks", "policy.mjs"), "process.stdout.write(JSON.stringify({ action: 'allow', reason: 'ok' }))");
 
-afterAll(() => rmSync(payloadRoot, { recursive: true, force: true }));
+afterAll(async () => {
+  await cleanupTmpDir(payloadRoot);
+});
 
 function generation(version: string, generationId: string, fingerprint = "a".repeat(64)): ActivePluginGeneration {
   return {
