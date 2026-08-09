@@ -16,6 +16,7 @@ import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, delimiter } from "node:path";
 
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   resolvePowerShellExecutable,
   binShellForExecutable,
@@ -25,14 +26,25 @@ import { setProcessPlatform } from "../../testing/process-platform.js";
 const ORIGINAL_PLATFORM = process.platform;
 const ORIGINAL_PATH = process.env["PATH"];
 const ORIGINAL_PATHEXT = process.env["PATHEXT"];
+const testDirs = new Set<string>();
 
-afterEach(() => {
+function createTestDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  testDirs.add(dir);
+  return dir;
+}
+
+afterEach(async () => {
   setProcessPlatform(ORIGINAL_PLATFORM);
   if (ORIGINAL_PATH === undefined) delete process.env["PATH"];
   else process.env["PATH"] = ORIGINAL_PATH;
   if (ORIGINAL_PATHEXT === undefined) delete process.env["PATHEXT"];
   else process.env["PATHEXT"] = ORIGINAL_PATHEXT;
   vi.restoreAllMocks();
+  for (const dir of testDirs) {
+    await cleanupTmpDir(dir);
+  }
+  testDirs.clear();
 });
 
 describe("binShellForExecutable", () => {
@@ -62,7 +74,7 @@ describe("resolvePowerShellExecutable off-win32", () => {
 describe("resolvePowerShellExecutable on win32", () => {
   it("prefers pwsh.exe when it is on PATH (sandboxed flavor == unsandboxed)", () => {
     setProcessPlatform("win32");
-    const dir = mkdtempSync(join(tmpdir(), "lvis-pwsh-"));
+    const dir = createTestDir("lvis-pwsh-");
     const pwshPath = join(dir, "pwsh.exe");
     writeFileSync(pwshPath, "");
     chmodSync(pwshPath, 0o755);
@@ -78,7 +90,7 @@ describe("resolvePowerShellExecutable on win32", () => {
   it("falls back to powershell.exe when pwsh.exe is absent from PATH", () => {
     setProcessPlatform("win32");
     // A directory with no pwsh.exe in it.
-    const dir = mkdtempSync(join(tmpdir(), "lvis-nopwsh-"));
+    const dir = createTestDir("lvis-nopwsh-");
     process.env["PATH"] = dir;
     process.env["PATHEXT"] = ".COM;.EXE;.BAT;.CMD";
 
@@ -89,7 +101,7 @@ describe("resolvePowerShellExecutable on win32", () => {
 
   it("finds pwsh via a bare PATHEXT suffix entry (pwsh + .EXE)", () => {
     setProcessPlatform("win32");
-    const dir = mkdtempSync(join(tmpdir(), "lvis-pwshext-"));
+    const dir = createTestDir("lvis-pwshext-");
     // Only the suffix-appended form exists; the bare 'pwsh.exe' literal probe
     // and the PATHEXT loop both look at the same path here, but assert the
     // suffix branch resolves when PATH lists a directory containing pwsh.exe.
