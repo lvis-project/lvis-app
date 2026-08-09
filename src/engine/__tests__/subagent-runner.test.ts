@@ -18,7 +18,7 @@
  *      regardless of whether the registry strip succeeded.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readdirSync } from "node:fs";
+import { mkdtempSync, existsSync, readdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,6 +62,7 @@ import { A2A_ROLE_AGENT, A2ATaskState, type A2AMessage,
 } from "../../shared/a2a.js";
 import { A2ASubAgentMessageBus } from "../a2a-subagent-message-bus.js";
 import { SubAgentMessageMailbox } from "../subagent-message-mailbox.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 
@@ -1574,10 +1575,10 @@ describe("SubAgentRunner — subagent session namespace isolation (PR-A)", () =>
     process.env.LVIS_HOME = tmpHome;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
     else process.env.LVIS_HOME = prevLvisHome;
-    rmSync(tmpHome, { recursive: true, force: true });
+    await cleanupTmpDir(tmpHome);
   });
 
   it("persists the child JSONL under ~/.lvis/subagent/, keeps it out of the main session list, and returns a regex-valid childSessionId", async () => {
@@ -1741,10 +1742,10 @@ describe("SubAgentRunner — resume metadata + subagent SessionKind (PR-B)", () 
     process.env.LVIS_HOME = tmpHome;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
     else process.env.LVIS_HOME = prevLvisHome;
-    rmSync(tmpHome, { recursive: true, force: true });
+    await cleanupTmpDir(tmpHome);
   });
 
   function makeCleanProvider(): ScriptedProvider {
