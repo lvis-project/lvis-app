@@ -17,11 +17,14 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PluginTelemetryClient } from "../telemetry/client.js";
 import { scrubPii } from "../telemetry/client.js";
 import type { TelemetrySettings } from "../data/settings-store.js";
+import { cleanupTmpDir } from "../testing/tmp-dir-teardown.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { randomUUID } from "node:crypto";
+import { mkdtempSync } from "node:fs";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+let telemetryTmpDir: string;
 
 function makeDeps(overrides: {
   enabled?: boolean;
@@ -39,7 +42,7 @@ function makeDeps(overrides: {
     settings: () => settings,
     marketplaceBaseUrl: () => overrides.marketplaceBaseUrl ?? "https://marketplace.lvis.local",
     installToken: () => overrides.installToken ?? null,
-    deviceUuidPath: join(tmpdir(), `lvis-test-uuid-${randomUUID()}`),
+    deviceUuidPath: join(telemetryTmpDir, "device-uuid"),
     fetchImpl: overrides.fetchImpl,
     flushIntervalMs: overrides.flushIntervalMs ?? 99_999
   };
@@ -52,7 +55,14 @@ function okFetch(): typeof fetch {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe("PluginTelemetryClient", () => {
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => {
+    telemetryTmpDir = mkdtempSync(join(tmpdir(), "lvis-telemetry-"));
+  });
+
+  afterEach(async () => {
+    vi.useRealTimers();
+    await cleanupTmpDir(telemetryTmpDir);
+  });
 
   // 1. Opt-out skips emission
   it("track() is a no-op when enabled=false", async () => {
