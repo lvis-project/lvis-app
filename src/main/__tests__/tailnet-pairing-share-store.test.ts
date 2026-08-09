@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
@@ -7,6 +7,7 @@ import {
   createTailnetPairingShareStore,
   type TailnetShareActorId,
 } from "../tailnet-pairing-share-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const ACTOR = ("tailnet:" + "a".repeat(64)) as TailnetShareActorId;
 const OTHER_ACTOR = ("tailnet:" + "b".repeat(64)) as TailnetShareActorId;
@@ -15,8 +16,8 @@ const OTHER_CONVERSATION = "different-private-session-id";
 
 let directories: string[] = [];
 
-afterEach(() => {
-  for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+afterEach(async () => {
+  for (const directory of directories) await cleanupTmpDir(directory);
   directories = [];
 });
 

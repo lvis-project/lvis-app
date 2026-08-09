@@ -1,16 +1,17 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemorySecretStore } from "../../audit/hmac-chain.js";
 import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
 import { createTailnetPairedSharingRuntime } from "../tailnet-paired-sharing-runtime.js";
 import { createTailnetSharingOwnerService } from "../tailnet-sharing-owner-service.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let directories: string[] = [];
 
-afterEach(() => {
-  for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+afterEach(async () => {
+  for (const directory of directories) await cleanupTmpDir(directory);
   directories = [];
 });
 

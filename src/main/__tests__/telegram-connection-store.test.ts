@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createHash, createHmac } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
@@ -9,6 +9,7 @@ import {
   type TelegramConnectionStore,
 } from "../telegram-connection-store.js";
 import { conversationDigestFor, namespaceAt } from "./telegram-connection-namespace.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 /**
  * Distinct raw values that must never reach the file. Each one is what the
@@ -26,8 +27,8 @@ const HOUR_MS = 60 * 60 * 1_000;
 
 let directories: string[] = [];
 
-afterEach(() => {
-  for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+afterEach(async () => {
+  for (const directory of directories) await cleanupTmpDir(directory);
   directories = [];
 });
 

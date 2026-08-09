@@ -13,7 +13,7 @@
  *   - openFeatureNamespace rejects path-traversal feature ids.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, statSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -22,6 +22,7 @@ import {
   writeJsonAtomic,
   writeFileAtomicAtPath,
 } from "../feature-namespace.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 const POSIX = process.platform !== "win32";
 
@@ -35,13 +36,13 @@ describe("feature-namespace", () => {
     process.env.LVIS_HOME = tempDir;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (prevLvisHome === undefined) {
       delete process.env.LVIS_HOME;
     } else {
       process.env.LVIS_HOME = prevLvisHome;
     }
-    rmSync(tempDir, { recursive: true, force: true });
+    await cleanupTmpDir(tempDir);
   });
 
   it("resolves dir to ~/.lvis/<feature>/", () => {
