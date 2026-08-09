@@ -11,11 +11,11 @@ import {
   mkdirSync,
   writeFileSync,
   symlinkSync,
-  rmSync,
   realpathSync
 } from "node:fs";
 import { join } from "node:path";
 import { homedir, tmpdir } from "node:os";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import { validateSandboxPath } from "../path-validator.js";
 
 const dirLinkType = process.platform === "win32" ? "junction" : "dir";
@@ -33,14 +33,10 @@ describe("validateSandboxPath", () => {
     cleanup.push(sandboxCwd, outsideDir);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     while (cleanup.length > 0) {
       const dir = cleanup.pop()!;
-      try {
-        rmSync(dir, { recursive: true, force: true });
-      } catch {
-        /* ignore */
-      }
+      await cleanupTmpDir(dir);
     }
   });
 
