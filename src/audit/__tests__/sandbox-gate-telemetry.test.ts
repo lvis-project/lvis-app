@@ -17,6 +17,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 import { AuditLogger, type SandboxGateAuditEntry } from "../audit-logger.js";
 
@@ -26,8 +27,8 @@ beforeEach(() => {
   auditDir = mkdtempSync(join(tmpdir(), "lvis-sandbox-gate-tel-"));
 });
 
-afterEach(() => {
-  if (existsSync(auditDir)) rmSync(auditDir, { recursive: true, force: true });
+afterEach(async () => {
+  if (existsSync(auditDir)) await cleanupTmpDir(auditDir);
 });
 
 function readGateLines(): SandboxGateAuditEntry[] {
