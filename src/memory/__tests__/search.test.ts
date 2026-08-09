@@ -6,6 +6,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager } from "../memory-manager.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let dir: string;
 let mm: MemoryManager;
@@ -15,10 +16,10 @@ beforeEach(() => {
   mm = new MemoryManager({ lvisDir: dir });
 });
 
-afterEach(() => {
+afterEach(async () => {
   mm.stopPersistentContextWatcher();
   mm.closeSearchIndex();
-  rmSync(dir, { recursive: true, force: true });
+  await cleanupTmpDir(dir);
 });
 
 describe("MemoryManager.searchMemoryEntries", () => {

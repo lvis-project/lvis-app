@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager } from "../memory-manager.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let dir: string;
 let memoryManager: MemoryManager;
@@ -12,10 +13,10 @@ beforeEach(() => {
   memoryManager = new MemoryManager({ lvisDir: dir });
 });
 
-afterEach(() => {
+afterEach(async () => {
   memoryManager.stopPersistentContextWatcher();
   memoryManager.closeSearchIndex();
-  rmSync(dir, { recursive: true, force: true });
+  await cleanupTmpDir(dir);
 });
 
 describe("MemoryManager — scoped long-term memory governance", () => {
