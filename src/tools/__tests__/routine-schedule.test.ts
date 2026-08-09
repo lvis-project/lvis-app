@@ -6,7 +6,8 @@
  * that the length cap is enforced at the tool boundary.
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -19,7 +20,7 @@ const ctx = (): ToolExecutionContext => ({ cwd: "/tmp", extraAllowedDirectories:
 function tempStore() {
   const dir = mkdtempSync(join(tmpdir(), "lvis-routine-tool-"));
   const store = new RoutinesStore(join(dir, "routines.json"));
-  const cleanup = () => rmSync(dir, { recursive: true, force: true });
+  const cleanup = () => cleanupTmpDir(dir);
   return { store, cleanup };
 }
 
@@ -46,7 +47,7 @@ describe("routine_schedule tool — source marker", () => {
       const record = store.list().find((r) => r.id === routineId);
       expect(record?.source).toBe("suggestion:local-indexer:nightly-rescan");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -66,7 +67,7 @@ describe("routine_schedule tool — source marker", () => {
       const routineId = JSON.parse(result.output).routineId as string;
       expect(store.list().find((r) => r.id === routineId)?.source).toBeUndefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -88,7 +89,7 @@ describe("routine_schedule tool — source marker", () => {
       // Nothing should have been persisted.
       expect(store.list()).toHaveLength(0);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });

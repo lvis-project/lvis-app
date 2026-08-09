@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,7 +24,7 @@ beforeEach(() => {
 afterEach(async () => {
   await Promise.all(auditLoggers.map((logger) => logger.close()));
   if (existsSync(testHome)) {
-    rmSync(testHome, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+    await cleanupTmpDir(testHome);
   }
   vi.restoreAllMocks();
 });

@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 import { createDynamicTool } from "../base.js";
 import { ToolExecutor, type ToolPermissionContext } from "../executor.js";
@@ -83,7 +84,7 @@ describe("ToolExecutor foreground reviewer free-form retry boundaries", () => {
       expect(executeSpy).not.toHaveBeenCalled();
       expect(classifySpy).toHaveBeenCalledTimes(2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -130,7 +131,7 @@ describe("ToolExecutor foreground reviewer free-form retry boundaries", () => {
       expect(retry[0].is_error).toBe(true);
       expect(executeSpy).not.toHaveBeenCalled();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -177,7 +178,7 @@ describe("ToolExecutor foreground reviewer free-form retry boundaries", () => {
       expect(executeSpy).not.toHaveBeenCalled();
       expect(classifySpy).toHaveBeenCalledTimes(2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -223,7 +224,7 @@ describe("ToolExecutor foreground reviewer free-form retry boundaries", () => {
       expect(executeSpy).not.toHaveBeenCalled();
       expect(classifySpy).toHaveBeenCalledTimes(2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -293,7 +294,7 @@ describe("ToolExecutor foreground reviewer free-form retry boundaries", () => {
       expect(requestAndWait).not.toHaveBeenCalled();
       expect(statuses.filter((status) => status === "failed")).toHaveLength(2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });

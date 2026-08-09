@@ -20,7 +20,8 @@
  *       (the cache key dimensions are load-bearing).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -90,8 +91,8 @@ describe("ToolExecutor — Store B memory skip end-to-end (real PermissionManage
     if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
     else process.env.LVIS_HOME = prevLvisHome;
     __resetSessionStoreForTest();
-    rmSync(dir, { recursive: true, force: true });
-    rmSync(lvisHomeDir, { recursive: true, force: true });
+    await cleanupTmpDir(dir);
+    await cleanupTmpDir(lvisHomeDir);
   });
 
   it("(a) deny rule wins over a prior approval — Layer 1, Store B never consulted", async () => {

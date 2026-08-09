@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 import { PermissionManager } from "../../../permissions/permission-manager.js";
 import { DeferredQueue } from "../../../permissions/reviewer/deferred-queue.js";
 import { RuleBasedRiskClassifier } from "../../../permissions/reviewer/risk-classifier.js";
@@ -58,7 +59,7 @@ describe("headless reviewer governed audit projection", () => {
         "must-never-reach-deferred-storage",
       );
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      await cleanupTmpDir(directory);
     }
   });
 });
