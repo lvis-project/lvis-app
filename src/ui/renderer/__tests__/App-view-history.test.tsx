@@ -129,9 +129,19 @@ describe("App view history", () => {
     // The path visibly changed, so back must undo exactly that step.
     await click(container, "view-path-back");
     await waitFor(() => expect(path(container)).toContain("모델"));
+
+    // Re-enter a child page, then use the ancestor breadcrumb. The destination
+    // is Settings / Model, not the current child tab again.
+    await act(async () => {
+      fireEvent.mouseDown(screen.getByRole("tab", { name: /권한/ }), { button: 0 });
+    });
+    await waitFor(() => expect(path(container)).toContain("권한"));
+    await click(container, "view-path-segment-settings");
+    await waitFor(() => expect(path(container)).toContain("모델"));
+    expect(screen.getByRole("tab", { name: /모델/ }).getAttribute("aria-selected")).toBe("true");
   });
 
-  it("makes the page's own back button mean the same thing as the toolbar's", async () => {
+  it("keeps visit history exclusively in the toolbar", async () => {
     const { container } = await renderApp({ hasApiKey: true });
     await ready(container);
 
@@ -140,9 +150,9 @@ describe("App view history", () => {
     await click(container, "sidebar-routines");
     await waitFor(() => expect(path(container)).toContain("루틴"));
 
-    // Before this change the in-page back went unconditionally home, which
-    // disagreed with the toolbar's back sitting inches away.
-    await click(container, "main-content-back");
+    expect(container.querySelector('[data-testid="main-content-back"]')).toBeNull();
+    expect(container.querySelector('[data-testid="page-shell-back"]')).toBeNull();
+    await click(container, "view-path-back");
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
   });
 
@@ -162,7 +172,7 @@ describe("App view history", () => {
     expect(forward.disabled).toBe(true);
 
     // ...and back now returns to home, not to the discarded work board.
-    await click(container, "main-content-back");
+    await click(container, "view-path-back");
     await waitFor(() => expect(path(container)).toContain("홈"));
   });
 

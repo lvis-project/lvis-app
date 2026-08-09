@@ -1,8 +1,5 @@
 import { type ReactNode } from "react";
-import { ArrowLeft } from "lucide-react";
-import { Button } from "../../../components/ui/button.js";
 import { cn } from "../../../lib/utils.js";
-import { useTranslation } from "../../../i18n/react.js";
 import { SettingsHelpPopover } from "./SettingsHelpPopover.js";
 
 export interface PageShellProps {
@@ -10,9 +7,6 @@ export interface PageShellProps {
   description?: ReactNode;
   actions?: ReactNode;
   children: ReactNode;
-  onBack?: () => void;
-  backLabel?: string;
-  backTestId?: string;
   padded?: boolean;
   maxWidth?: "none" | "reading" | "5xl" | "6xl" | "7xl";
   className?: string;
@@ -37,9 +31,6 @@ export function PageShell({
   description,
   actions,
   children,
-  onBack,
-  backLabel,
-  backTestId = "page-shell-back",
   padded = true,
   maxWidth = "6xl",
   className,
@@ -47,9 +38,7 @@ export function PageShell({
   headerClassName,
   "data-testid": testId,
 }: PageShellProps) {
-  const { t } = useTranslation();
-  const resolvedBackLabel = backLabel ?? t("settingsContent.backToHome");
-  const hasHeader = title || description || actions || onBack;
+  const hasHeader = title || description || actions;
 
   return (
     <div
@@ -63,18 +52,6 @@ export function PageShell({
       <div className={cn("mx-auto flex min-h-0 w-full flex-1 flex-col overflow-hidden", maxWidthClass[maxWidth])}>
         {hasHeader ? (
           <header className={cn("shrink-0 pb-4", headerClassName)}>
-            {onBack ? (
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={onBack}
-                className="mb-2 gap-2 px-2"
-                data-testid={backTestId}
-              >
-                <ArrowLeft className="size-4" aria-hidden="true" />
-                {resolvedBackLabel}
-              </Button>
-            ) : null}
             {title || description || actions ? (
               <div className="flex min-w-0 items-start justify-between gap-4">
                 <div className="min-w-0 space-y-1.5">

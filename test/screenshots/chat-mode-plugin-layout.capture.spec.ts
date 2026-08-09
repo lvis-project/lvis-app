@@ -10,14 +10,14 @@
  *
  * This spec drives the real plugin bundles inside the isolated Electron app via
  * Playwright (CDP under the hood), opens each panel in each mode, and dumps a
- * per-(mode,plugin) layout report: whether the plugin host chrome
- * (`plugin-page-back`) renders INLINE in the MAIN window, the <webview> +
+ * per-(mode,plugin) layout report: whether the plugin page shell
+ * (`plugin-page-shell`) renders INLINE in the MAIN window, the <webview> +
  * content-region bounding boxes / computed styles, and clipping / zero-size /
  * horizontal-overflow diagnostics. The slash picker's rendered rows are dumped
  * too so a missing row is diagnosable rather than an opaque timeout.
  *
  * Inline proof (post-#1703): the plugin host chrome renders in the MAIN window
- * (page.evaluate only sees the main window's DOM, so finding plugin-page-back +
+ * (page.evaluate only sees the main window's DOM, so finding plugin-page-shell +
  * the webview there IS proof it did not detach). The old window-count / URL
  * heuristic is unreliable — a detached plugin window and the inline webview
  * guest BOTH load plugin-ui-shell.html — so it is not used for the assertion.
@@ -153,28 +153,16 @@ async function collectLayout(page: Page): Promise<unknown> {
     const vw = { w: window.innerWidth, h: window.innerHeight };
     const webviewCount = document.querySelectorAll("webview").length;
     const webview = document.querySelector("webview");
-    const back = document.querySelector('[data-testid="plugin-page-back"]');
-    // The plugin host page shell is the closest ancestor of the back button
-    // whose subtree also holds the plugin content (webview, when present).
-    let shell: Element | null = back;
-    while (shell && !shell.querySelector("webview")) shell = shell.parentElement;
-    // Fallback: if no webview (error/placeholder content), the shell is the
-    // page-shell ancestor of the back button that fills the pane.
-    if (!shell && back) {
-      let node: Element | null = back.parentElement;
-      while (node && node.getBoundingClientRect().width < vw.w * 0.4) node = node.parentElement;
-      shell = node;
-    }
+    const shell = document.querySelector('[data-testid="plugin-page-shell"]');
     const chatRoot = document.querySelector('[data-testid="chat-view-root"]');
     const webviewBox = box(webview);
     const shellBox = box(shell);
-    // The content region under the back button carries whatever renders when
+    // The content region in the page shell carries whatever renders when
     // there is no webview (a doctor / entry-not-found / preparing placeholder),
     // so capture its text to make a webview-less panel diagnosable.
     let contentText: string | null = null;
-    if (!webview && back) {
-      const pane = back.closest('[data-testid="main-pane-shell"]') ?? back.parentElement;
-      contentText = pane ? (pane as HTMLElement).innerText.replace(/\s+/g, " ").trim().slice(0, 300) : null;
+    if (!webview && shell) {
+      contentText = (shell as HTMLElement).innerText.replace(/\s+/g, " ").trim().slice(0, 300);
     }
     const within = (inner: { x: number; y: number; w: number; h: number } | null,
                     outer: { x: number; y: number; w: number; h: number } | null) =>
@@ -231,15 +219,15 @@ async function inspectOne(
   const urlsBefore = urls();
   const open = await openPlugin(page, plugin.label);
 
-  // Inline render proof: the plugin host chrome renders in the MAIN window
+  // Inline render proof: the plugin page shell renders in the MAIN window
   // (page.evaluate/this locator only see the main window's DOM).
-  const back = page.locator('[data-testid="plugin-page-back"]').first();
-  let inlineChromeVisible = false;
+  const pluginShell = page.locator('[data-testid="plugin-page-shell"]').first();
+  let inlineShellVisible = false;
   try {
-    await back.waitFor({ state: "visible", timeout: 20_000 });
-    inlineChromeVisible = true;
+    await pluginShell.waitFor({ state: "visible", timeout: 20_000 });
+    inlineShellVisible = true;
   } catch {
-    inlineChromeVisible = false;
+    inlineShellVisible = false;
   }
   const webview = page.locator("webview").first();
   let webviewAttached = false;
@@ -381,7 +369,7 @@ async function inspectOne(
       windowsAfter,
       urlsBefore,
       urlsAfter,
-      inlineChromeVisible, // MUST be true — plugin host renders in the main window
+      inlineShellVisible, // MUST be true — plugin host renders in the main window
       webviewAttached,
       approvalModalsCleared,
     },
@@ -408,7 +396,7 @@ for (const mode of MODES) {
         JSON.stringify(r, null, 2),
       );
       const open = r.open as OpenResult;
-      const inline = r.inline as { inlineChromeVisible: boolean };
+      const inline = r.inline as { inlineShellVisible: boolean };
       // local-indexer needs a provisioned Python runtime (boot.ts
       // PythonRuntimeBootstrapper injects `pythonExecutable`); that bootstrap
       // does not run in this isolated capture harness, so the plugin loads but
@@ -427,7 +415,7 @@ for (const mode of MODES) {
         "local-indexer cannot start without a provisioned Python runtime in the capture harness (degrades to a Doctor entry); its live panel layout is not observable here. Orthogonal to #1703.",
       );
       expect(open.rowFound, `${mode}/${plugin.id} slash-picker row not found; rows=${JSON.stringify(open.pickerRows)}`).toBe(true);
-      expect(inline.inlineChromeVisible, `${mode}/${plugin.id} plugin host chrome not visible inline`).toBe(true);
+      expect(inline.inlineShellVisible, `${mode}/${plugin.id} plugin page shell not visible inline`).toBe(true);
     });
   }
 }
