@@ -12,7 +12,7 @@
  *   - vendor alias normalization (SDK "anthropic" → host "claude")
  *   - azure-foundry baseUrl resolution
  */
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { afterEach, describe, it, expect, beforeEach, vi } from "vitest";
 import { generateKeyPairSync, sign, createHash } from "node:crypto";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -23,13 +23,18 @@ import { WhitelistCache } from "../../../plugins/whitelist/whitelist-cache.js";
 import { canonicalJSON } from "../../../plugins/whitelist/canonical-json.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../../plugins/marketplace-keys.js";
 import { resetHostSecretCountersForTesting } from "../../../telemetry/host-secret-counters.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 import type { SignatureEnvelope } from "../../../plugins/types.js";
 import type { PluginManifest } from "../../../plugins/types.js";
 
 // -------- helpers --------
 
+const registryCacheRoots: string[] = [];
+
 function freshTmpDir(prefix: string): string {
-  return mkdtempSync(join(tmpdir(), prefix));
+  const root = mkdtempSync(join(tmpdir(), prefix));
+  registryCacheRoots.push(root);
+  return root;
 }
 
 let testPrivateKey: ReturnType<typeof generateKeyPairSync>["privateKey"];
@@ -161,6 +166,13 @@ function makeSettingsService(overrides: SettingsOverrides) {
 beforeEach(() => {
   resetHostSecretCountersForTesting();
   whitelistRegistry.resetForTesting();
+});
+
+afterEach(async () => {
+  whitelistRegistry.resetForTesting();
+  for (const root of registryCacheRoots.splice(0)) {
+    await cleanupTmpDir(root);
+  }
 });
 
 describe("resolveApiKey — signal.aborted at entry", () => {
