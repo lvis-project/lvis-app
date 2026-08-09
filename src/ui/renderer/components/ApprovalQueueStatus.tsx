@@ -4,11 +4,11 @@
  * Renders a small floating badge showing the number of pending approval
  * requests plus a compact list of waiting requests (tool name + source).
  * Appears only when the queue has 2+ entries (the head-of-queue is already
- * shown by ToolApprovalDialog; this surfaces what is queued BEHIND it).
+ * shown by ApprovalDock; this surfaces what is queued BEHIND it).
  *
  * Order-preserving: items render in the same FIFO order as the underlying
  * queue state, so the "next up" is the first entry shown here (index 1 in
- * the queue; entry 0 is in the modal).
+ * the queue; entry 0 is in the approval dock).
  */
 import { Badge } from "../../../components/ui/badge.js";
 import { DEFAULT_APPROVAL_QUEUE_MAX } from "../../../lib/approval-queue-reducer.js";
@@ -28,7 +28,7 @@ export function ApprovalQueueStatus({
 }: ApprovalQueueStatusProps) {
   const { t } = useTranslation();
   if (queue.length < 2) return null;
-  // Head-of-queue is shown by the modal; list the rest.
+  // Head-of-queue is shown by the approval dock; list the rest.
   const waiting = queue.slice(1);
   const isFull = queue.length >= max;
 

@@ -472,12 +472,12 @@ async function readGuestGrant(
 }
 
 function openApprovalDialog(page: Page) {
-  return page.locator('[data-testid="tool-approval-dialog"][data-state="open"]');
+  return page.locator('[data-testid="approval-dock"]');
 }
 
 function openApprovalDialogForRequestId(page: Page, requestId: string) {
   return page.locator(
-    `[data-testid="tool-approval-dialog"][data-state="open"][data-approval-request-id=${JSON.stringify(requestId)}]`,
+    `[data-testid="approval-dock"][data-approval-request-id=${JSON.stringify(requestId)}]`,
   );
 }
 
@@ -487,7 +487,7 @@ function openApprovalDialogForTool(
   expectedArgs: Record<string, unknown>,
 ) {
   return page.locator(
-    `[data-testid="tool-approval-dialog"][data-state="open"][data-approval-tool-name=${JSON.stringify(expectedToolName)}][data-approval-args=${JSON.stringify(canonicalStringify(expectedArgs))}]`,
+    `[data-testid="approval-dock"][data-approval-tool-name=${JSON.stringify(expectedToolName)}][data-approval-args=${JSON.stringify(canonicalStringify(expectedArgs))}]`,
   );
 }
 
@@ -830,7 +830,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
         providerEvidence: { verification: { verified: true } },
       },
     });
-    await expect(ctx.page.getByTestId("tool-approval-dialog")).toBeHidden();
+    await expect(ctx.page.getByTestId("approval-dock")).toBeHidden();
     expect(fake.requests.filter((entry) => entry.method === "POST")).toHaveLength(1);
 
     const after = await invokeGuestTool<{

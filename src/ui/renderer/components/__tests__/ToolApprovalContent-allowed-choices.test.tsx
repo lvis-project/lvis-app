@@ -2,7 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ToolApprovalDialog } from "../ToolApprovalDialog.js";
+import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
 
 function makeOneShotPluginRequest(): ApprovalRequest {
@@ -24,13 +24,13 @@ function makeOneShotPluginRequest(): ApprovalRequest {
   };
 }
 
-describe("ToolApprovalDialog allowed choices", () => {
+describe("ToolApprovalContent allowed choices", () => {
   it("honors a host one-shot approval contract", () => {
     const onDecide = vi.fn();
     const record = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal("lvis", { userApproval: { record } });
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeOneShotPluginRequest()}
         onDecide={onDecide}

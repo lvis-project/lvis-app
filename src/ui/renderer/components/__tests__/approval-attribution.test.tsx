@@ -9,7 +9,7 @@
 import "../../../../../test/renderer/setup.js";
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
-import { ToolApprovalDialog } from "../ToolApprovalDialog.js";
+import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import { ApprovalQueueStatus } from "../ApprovalQueueStatus.js";
 import type { ApprovalRequest } from "../../types.js";
 
@@ -30,10 +30,10 @@ function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest 
   };
 }
 
-describe("ToolApprovalDialog conversation attribution", () => {
+describe("ToolApprovalContent conversation attribution", () => {
   it("names the conversation that raised the modal", () => {
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeRequest({ sessionId: "side-chat-7f21" })}
         onDecide={vi.fn()}
@@ -48,7 +48,7 @@ describe("ToolApprovalDialog conversation attribution", () => {
 
   it("distinguishes two conversations asking for the same tool", () => {
     const { unmount } = render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeRequest({ id: "a", sessionId: "conv-a" })}
         onDecide={vi.fn()}
@@ -58,7 +58,7 @@ describe("ToolApprovalDialog conversation attribution", () => {
     unmount();
 
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeRequest({ id: "b", sessionId: "conv-b" })}
         onDecide={vi.fn()}
@@ -71,7 +71,7 @@ describe("ToolApprovalDialog conversation attribution", () => {
 
   it("marks a host request that belongs to no conversation", () => {
     render(
-      <ToolApprovalDialog open request={makeRequest()} onDecide={vi.fn()} />,
+      <ToolApprovalContent open request={makeRequest()} onDecide={vi.fn()} />,
     );
 
     expect(screen.getByTestId("approval-conversation")).toHaveTextContent(

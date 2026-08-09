@@ -33,7 +33,7 @@
  *     SkillOverlay from a mode: `buildModePreamble` only emits a
  *     `<lvis-agent-mode-skills>` text block naming the candidates and
  *     telling the LLM to call `skill_load` itself — which runs the normal
- *     body-hash approval modal. The gate is therefore fully preserved; a
+ *     body-hash approval dock. The gate is therefore fully preserved; a
  *     skill body is only ever injected after the user approves it through
  *     `skill_load`, exactly as for a manually requested skill. The
  *     ergonomic win is that the agent's mode surfaces the right skills so
@@ -63,7 +63,7 @@ export interface AgentModeConfig {
    * Candidate skill names (must match seeded builtin skills under
    * `~/.lvis/skills/`). Surfaced to the sub-agent as a recommendation only
    * (never auto-registered); the LLM calls `skill_load` to load one, which
-   * runs the normal body-hash approval modal. See the SECURITY MODEL note.
+   * runs the normal body-hash approval dock. See the SECURITY MODEL note.
    */
   autoSkills: readonly string[];
   /**

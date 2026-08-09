@@ -2,7 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
-import { ToolApprovalDialog } from "../ToolApprovalDialog.js";
+import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
 
 function makeAgentActionRequest(
@@ -28,11 +28,11 @@ function makeAgentActionRequest(
   };
 }
 
-describe("ToolApprovalDialog external agent-action affordances", () => {
+describe("ToolApprovalContent external agent-action affordances", () => {
   it("shows only one-shot approve/deny controls for local-api agent actions", () => {
     const onDecide = vi.fn();
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeAgentActionRequest("local-api")}
         onDecide={onDecide}
@@ -53,7 +53,7 @@ describe("ToolApprovalDialog external agent-action affordances", () => {
 
   it("keeps durable controls for user-keyboard agent actions", () => {
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeAgentActionRequest("user-keyboard")}
         onDecide={vi.fn()}
@@ -72,7 +72,7 @@ describe("ToolApprovalDialog external agent-action affordances", () => {
   ] as const)("forces one-shot approval for remote-wire agent actions with %s", (_label, source) => {
     const onDecide = vi.fn();
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeAgentActionRequest("a2a-remote-wire", "a2a-send", source)}
         onDecide={onDecide}
@@ -90,7 +90,7 @@ describe("ToolApprovalDialog external agent-action affordances", () => {
   it("keeps durable controls for an explicit plugin source with remote-wire metadata", () => {
     const onDecide = vi.fn();
     render(
-      <ToolApprovalDialog
+      <ToolApprovalContent
         open
         request={makeAgentActionRequest("a2a-remote-wire", "a2a-send", "plugin")}
         onDecide={onDecide}

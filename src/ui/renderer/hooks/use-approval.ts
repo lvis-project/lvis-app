@@ -21,7 +21,7 @@ export function useApproval() {
   // Guard late setQueue from async `respond()` callbacks resolving after
   // unmount.
   const aliveRef = useRef(true);
-  // A queued request becomes clickable as soon as its dialog is committed.
+  // A queued request becomes clickable as soon as its dock is committed.
   // Synchronize the imperative head-of-queue ref before paint so a fast
   // click cannot observe the previous (or empty) queue.
   useLayoutEffect(() => {

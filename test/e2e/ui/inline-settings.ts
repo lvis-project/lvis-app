@@ -20,16 +20,37 @@ import type { ElectronApplication, Page } from 'playwright';
 
 const WIDE_CONTENT_WIDTH = 1200;
 const WIDE_CONTENT_HEIGHT = 860;
+type MainWindowBounds = { x: number; y: number; width: number; height: number };
+const originalMainWindowBounds = new WeakMap<ElectronApplication, MainWindowBounds>();
 
 /** Resize the largest visible app window (the main window) to a wide size. */
 async function forceWideMainWindow(app: ElectronApplication): Promise<void> {
-  await app.evaluate(({ BrowserWindow }, size) => {
+  const originalBounds = await app.evaluate(({ BrowserWindow }, size) => {
     const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && w.isVisible());
     const target = wins.sort(
       (a, b) => b.getSize()[0] * b.getSize()[1] - a.getSize()[0] * a.getSize()[1],
     )[0];
-    if (target) target.setContentSize(size.w, size.h);
+    if (!target) return null;
+    const bounds = target.getBounds();
+    target.setContentSize(size.w, size.h);
+    return bounds;
   }, { w: WIDE_CONTENT_WIDTH, h: WIDE_CONTENT_HEIGHT });
+  if (originalBounds && !originalMainWindowBounds.has(app)) {
+    originalMainWindowBounds.set(app, originalBounds);
+  }
+}
+
+async function restoreMainWindowBounds(app: ElectronApplication): Promise<void> {
+  const bounds = originalMainWindowBounds.get(app);
+  if (!bounds) return;
+  await app.evaluate(({ BrowserWindow }, original) => {
+    const wins = BrowserWindow.getAllWindows().filter((w) => !w.isDestroyed() && w.isVisible());
+    const target = wins.sort(
+      (a, b) => b.getSize()[0] * b.getSize()[1] - a.getSize()[0] * a.getSize()[1],
+    )[0];
+    target?.setBounds(original);
+  }, bounds);
+  originalMainWindowBounds.delete(app);
 }
 
 /**
@@ -69,7 +90,7 @@ export async function openInlineSettings(
 }
 
 /**
- * Leave the inline settings panel through its page-level back control. Settings
+ * Leave the inline settings panel through the shared history navbar. Settings
  * tab moves are first-class view-history entries, so a spec that visited several
  * tabs needs more than one back step before it reaches the preceding app view.
  * Replaying at most the history cap plus its fallback step makes cleanup
@@ -78,26 +99,28 @@ export async function openInlineSettings(
  * persisted state.
  */
 export async function closeInlineSettings(
-  _app: ElectronApplication,
+  app: ElectronApplication,
   settingsPage: Page,
 ): Promise<void> {
   const layout = settingsPage.locator('[data-settings-layout]');
-  const activeTab = settingsPage.locator('[role="tab"][aria-selected="true"]').first();
+  const currentPath = settingsPage.locator('[data-testid^="view-path-current-"]').first();
 
-  for (let step = 0; step < 52; step += 1) {
-    if (await layout.count() === 0) return;
+  try {
+    for (let step = 0; step < 52; step += 1) {
+      if (await layout.count() === 0) return;
 
-    const before = (await activeTab.textContent())?.trim() ?? `settings-step-${step}`;
-    const mobileBack = settingsPage.getByTestId('settings-mobile-close');
-    const back = await mobileBack.isVisible()
-      ? mobileBack
-      : settingsPage.getByTestId('settings-close');
-    await back.click();
-    await expect.poll(async () => {
-      if (await layout.count() === 0) return '__settings_closed__';
-      return (await activeTab.textContent())?.trim() ?? '__settings_open__';
-    }, { timeout: 10_000 }).not.toBe(before);
+      const before = await currentPath.getAttribute('data-testid') ?? `settings-step-${step}`;
+      const back = settingsPage.getByTestId('view-path-back');
+      await expect(back).toBeEnabled();
+      await back.click();
+      await expect.poll(async () => {
+        if (await layout.count() === 0) return '__settings_closed__';
+        return await currentPath.getAttribute('data-testid') ?? '__settings_open__';
+      }, { timeout: 10_000 }).not.toBe(before);
+    }
+
+    throw new Error('settings history did not reach a non-settings view within 52 back steps');
+  } finally {
+    await restoreMainWindowBounds(app);
   }
-
-  throw new Error('settings history did not reach a non-settings view within 52 back steps');
 }

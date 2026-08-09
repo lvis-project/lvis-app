@@ -2,9 +2,9 @@
  * Pre-release verification for the docked approval card (#1973).
  *
  * It landed with unit coverage only. The failure mode unit tests cannot see is
- * a wiring one: the overlay is threaded App -> MainContent -> ChatView, and if
- * it never mounts, or never takes focus, every tool call needing an approval
- * times out into a deny and the app looks dead. So this drives the real
+ * a wiring one: the dock is mounted once by App beside the routed content, and
+ * if it never mounts every tool call needing an approval times out into a deny
+ * and the app looks dead. So this drives the real
  * Electron build, pushes a real approval request down the real IPC channel,
  * and asserts the card is on screen, keyboard-driven, and that its target line
  * tracks the focused scope — the property the whole design rests on.
@@ -77,7 +77,11 @@ test.describe("release check — docked approval card", () => {
     );
 
     app = await electron.launch({
-      args: [MAIN_ENTRY],
+      // Isolate Chromium's profile before app startup. LVIS_USER_DATA_DIR is
+      // also passed for the app's own settings, but that environment variable
+      // alone is too late to prevent Electron's process-singleton lock from
+      // colliding with the canonical app intentionally left open for CDP.
+      args: [MAIN_ENTRY, `--user-data-dir=${userDataDir}`, "--no-sandbox"],
       env: buildIsolatedElectronEnv({
         LVIS_HOME: tempHome,
         LVIS_USER_DATA_DIR: userDataDir,
@@ -124,7 +128,7 @@ test.describe("release check — docked approval card", () => {
       });
     });
 
-    const overlay = page.getByTestId("docked-approval-overlay");
+    const overlay = page.getByTestId("approval-dock");
     for (let attempt = 0; attempt < 5; attempt += 1) {
       await app.evaluate(({ BrowserWindow }, payload) => {
         const win = BrowserWindow.getAllWindows()[0];
@@ -151,13 +155,16 @@ test.describe("release check — docked approval card", () => {
       await expect(page.getByTestId(`docked-approval-choice-${choice}`)).toBeVisible();
     }
 
-    // Focus must land on the card without a click — a card that needs the
-    // mouse first is the regression this check exists for.
+    // A non-modal surface must not steal focus from the routed page on mount.
+    // Keyboard users enter it deliberately, then the roving option group
+    // exposes every scope without requiring a mouse.
     const focusedInCard = await page.evaluate(() => {
       const el = document.activeElement;
-      return !!el?.closest('[data-testid="docked-approval-overlay"]');
+      return !!el?.closest('[data-testid="approval-dock"]');
     });
-    expect(focusedInCard, "card did not take focus on mount").toBe(true);
+    expect(focusedInCard, "non-modal card stole route focus on mount").toBe(false);
+
+    await page.getByTestId("docked-approval-choice-allow-once").focus();
 
     // Arrowing must move focus AND rewrite the target line. This is the
     // property the design rests on: what will be granted is always on screen.
