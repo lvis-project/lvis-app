@@ -52,7 +52,7 @@ export function ReviewRow({
 
 /**
  * Round-7 architect MAJOR — canonical Korean label for a {@link RiskLevel}.
- * Centralized here so every risk-display site (ToolApprovalDialog
+ * Centralized here so every risk-display site (ToolApprovalContent
  * badge / reviewer-verdict row, DeferredQueuePanel header + review
  * row, future surfaces) reads the same translation. Round-6 partial
  * fix translated only the primary badge; the two remaining

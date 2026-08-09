@@ -48,15 +48,15 @@ async function renderCard(request = makeRequest()) {
   return { onDecide, onReturnFocus, container };
 }
 
-const card = () => screen.getByTestId("docked-approval-overlay");
+const card = () => screen.getByTestId("docked-approval-panel");
 const targetLine = () => screen.getByTestId("docked-approval-target").textContent ?? "";
 
 describe("DockedApprovalCard — what will be granted is always on screen", () => {
-  it("opens on the narrowest scope and shows the file it would allow", async () => {
+  it("starts on the narrowest scope without stealing route focus", async () => {
     await renderCard();
-    expect(document.activeElement).toBe(
-      screen.getByTestId("docked-approval-choice-allow-once"),
-    );
+    const narrowest = screen.getByTestId("docked-approval-choice-allow-once");
+    expect(document.activeElement).not.toBe(narrowest);
+    expect(narrowest.tabIndex).toBe(0);
     expect(targetLine()).toContain(TARGET);
   });
 
@@ -243,6 +243,6 @@ describe("DockedApprovalCard — navigation and option table", () => {
         <DockedApprovalCard request={null} onDecide={vi.fn()} />,
       ).container;
     });
-    expect(container.querySelector('[data-testid="docked-approval-overlay"]')).toBeNull();
+    expect(container.querySelector('[data-testid="docked-approval-panel"]')).toBeNull();
   });
 });

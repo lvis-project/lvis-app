@@ -106,7 +106,7 @@ export function useOnboardingTourController(
       if (!(event.metaKey || event.ctrlKey) || !event.shiftKey || event.isComposing) return;
       if (
         document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
         )
       ) {
         return;

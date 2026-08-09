@@ -106,26 +106,26 @@ async function openPlugin(page: Page, label: string): Promise<OpenResult> {
 /**
  * A plugin panel fires several READ tools on mount (index_folders,
  * index_scan_status, index_documents, index_get_settings / meeting_list_preps);
- * the host classifies them write-category, so each raises an "Approve Tool
- * Execution" modal that covers the panel — they queue one after another. Approve
+ * the host classifies them write-category, so each raises an in-flow approval
+ * dock below the panel — they queue one after another. Approve
  * each (this-session scope; they are the panel's own empty-index reads, so this
  * is non-destructive) until none remains, so the panel loads its real empty
- * state for the capture instead of being covered by — or erroring under — a
- * modal. Returns the number of modals cleared.
+ * state for the capture instead of remaining blocked behind queued approvals.
+ * Returns the number of docks cleared.
  */
-async function clearMountApprovalModals(page: Page): Promise<number> {
-  const dialog = page.locator('[data-testid="tool-approval-dialog"]').first();
+async function clearMountApprovalDocks(page: Page): Promise<number> {
+  const dock = page.locator('[data-testid="approval-dock"]').first();
   let cleared = 0;
   for (let i = 0; i < 12; i++) {
-    if (!(await dialog.count()) || !(await dialog.isVisible().catch(() => false))) break;
-    const approve = dialog.locator('[data-testid="approve-button"]').first();
+    if (!(await dock.count()) || !(await dock.isVisible().catch(() => false))) break;
+    const approve = dock.locator('[data-testid="approve-button"]').first();
     if (await approve.count()) {
       await approve.click().catch(() => {});
     } else {
       break;
     }
     cleared++;
-    await page.waitForTimeout(500); // let the next queued modal (if any) surface
+    await page.waitForTimeout(500); // let the next queued dock entry surface
   }
   return cleared;
 }
@@ -238,14 +238,14 @@ async function inspectOne(
     webviewAttached = false;
   }
   await page.waitForTimeout(1_800); // let the guest bundle settle
-  // Approve the panel's mount-time read calls so the modals clear and the panel
+  // Approve the panel's mount-time read calls so the dock queue clears and the panel
   // loads its real empty state (layout metrics are read off the DOM either way).
-  const approvalModalsCleared = await clearMountApprovalModals(page);
+  const approvalDocksCleared = await clearMountApprovalDocks(page);
   await page.waitForTimeout(3_000); // let the panel settle (a worker-backed plugin
   // can restart once after its runtime provisions, remounting the webview)
 
   // Opt-in: index the seeded fixtures folder so the 문서 list has real document
-  // rows (to check them for overflow at the panel width), then re-clear modals.
+  // rows (to check them for overflow at the panel width), then re-clear the dock.
   if (plugin.id === "local-indexer" && process.env.LVIS_SCREENSHOT_SCAN) {
     const gp = app.windows().find((w) => {
       try { return w.url().includes("plugin-ui-shell.html"); } catch { return false; }
@@ -255,9 +255,9 @@ async function inspectOne(
       if (await start.count()) {
         await start.click().catch(() => {});
         await page.waitForTimeout(600);
-        await clearMountApprovalModals(page); // approve index_scan
+        await clearMountApprovalDocks(page); // approve index_scan
         await page.waitForTimeout(9_000); // let the worker index the 2 md files
-        await clearMountApprovalModals(page); // approve any follow-up reads
+        await clearMountApprovalDocks(page); // approve any follow-up reads
         await page.waitForTimeout(1_500);
       }
     }
@@ -371,7 +371,7 @@ async function inspectOne(
       urlsAfter,
       inlineShellVisible, // MUST be true — plugin host renders in the main window
       webviewAttached,
-      approvalModalsCleared,
+      approvalDocksCleared,
     },
     guest,
     layout,

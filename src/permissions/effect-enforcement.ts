@@ -173,7 +173,7 @@ export const GATED_EFFECT_PATHS: ReadonlySet<string> = (() => {
 export interface EffectGateContext {
   /** True iff this invocation runs in a headless/routine lane (no interactive approver). */
   readonly headless: boolean;
-  /** The executing tool's name — surfaced in the approval modal. */
+  /** The executing tool's name — surfaced in the approval dock. */
   readonly toolName: string;
   /** Invocation-scoped `allow-once` descriptor keys (discarded when the frame pops). */
   readonly onceGrants: Set<string>;

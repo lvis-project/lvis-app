@@ -2,7 +2,7 @@
  * Tool pipeline — high-risk approval purpose-suggestion cluster.
  *
  * Pure helpers factored out of `executor.ts` (C7 decomposition). Derives the
- * pre-filled "purpose" string shown on the high-risk approval modal from the
+ * pre-filled "purpose" string shown on the high-risk approval dock from the
  * recent user turn text (preferred) or a purpose-bearing tool-input field.
  */
 import { maskSensitiveData } from "../../audit/dlp-filter.js";

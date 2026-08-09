@@ -849,11 +849,6 @@
     },
     {
       "type": "exports",
-      "file": "src/shared/network-access.ts",
-      "name": "normalizeNetworkAccessGrant"
-    },
-    {
-      "type": "exports",
       "file": "src/shared/openrouter-free-models.ts",
       "name": "OPENROUTER_FREE_MODEL_VARIANT_SUFFIX"
     },

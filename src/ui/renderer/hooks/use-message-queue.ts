@@ -313,7 +313,7 @@ export function useMessageQueue({
       if (e.key !== "Escape") return;
       if (
         document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
         )
       ) {
         return;
@@ -350,7 +350,7 @@ export function useMessageQueue({
       // 미확정 음절 손실은 마이너 — 사용자 의도 (인터럽트) 가 명확.
       if (
         document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
         )
       ) {
         return;
@@ -374,7 +374,7 @@ export function useMessageQueue({
       if (e.isComposing) return;
       if (
         document.querySelector(
-          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+          '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
         )
       ) {
         return;

@@ -27,7 +27,7 @@ import { cn } from "../../lib/utils.js";
  *    2xl  max-w-5xl (1024px) — settings (plugin detail / per-section saves)
  *
  *  Consumers normally just write `<DialogContent size="lg">`. Specialized
- *  dialogs (e.g. ToolApprovalDialog) that need edge-to-edge inner sections
+ *  dialogs that need edge-to-edge inner sections
  *  can pass `className="p-0"` to drop the outer padding while keeping the
  *  card surface intact.
  */

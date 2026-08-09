@@ -37,7 +37,7 @@ This research documents the integration points where sandbox capability will plu
 | **Rule baseline** | `src/permissions/reviewer/risk-classifier.ts:512` | `const ruleVerdict = this.rule.classify(input);` — rule verdict established first |
 | **No-downgrade enforcement** | `src/permissions/reviewer/risk-classifier.ts:547` | `return maxVerdict(ruleVerdict, llmVerdict);` — LLM cannot lower the rule verdict |
 | **Fail-safe policy** | `src/permissions/permission-manager.ts:186-208` | `setReviewer()` wires classifier; `hasReviewer()` gating; `dispatchReviewer()` checks `!this.hasReviewer()` and returns HIGH+defer when reviewer absent |
-| **UI rendering** | `src/ui/renderer/components/ToolApprovalDialog.tsx:283-296` | Sandbox capability card renders when `request.sandboxCapability` present; testId `tool-approval-sandbox`; displays "⚠ OS 격리 없음" or "OS 격리 활성 (kind)" |
+| **UI rendering** | `src/ui/renderer/components/ToolApprovalContent.tsx` | The shared approval dock renders the sandbox capability card when `request.sandboxCapability` is present; testId `tool-approval-sandbox`; displays "⚠ OS 격리 없음" or "OS 격리 활성 (kind)" |
 
 ### Evaluation Context Integration Gap
 
@@ -623,8 +623,8 @@ Reviewer flow integration:
 Pattern matching: exact (toolName + args SHA-256 + source). Argument-prefix or
 fuzzy matching deferred to future epic.
 
-Default scope: "session". User selects "persistent" via approval dialog
-checkbox. UI revocation list lives in PermissionsTab.
+Default scope: "session". The user selects "persistent" with the approval
+dock's scope controls. The UI revocation list lives in PermissionsTab.
 
 ---
 
@@ -655,7 +655,7 @@ preventing argument-narrowing exploit.
 
 Trigger: composition rule finalVerdict = HIGH.
 
-UI requirement (`src/ui/renderer/components/ToolApprovalDialog.tsx`):
+UI requirement (`src/ui/renderer/components/ToolApprovalContent.tsx`):
 - Display tool + args + reviewer reason + expected impact
 - **Natural-language input field** with placeholder "이 작업의 목적을 한 문장으로 입력"
 - Approve button disabled until NL field is non-empty

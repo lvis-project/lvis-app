@@ -107,11 +107,11 @@ function readRect(selector: string): SpotlightRect | null {
  * top because the user would see the violet ring float above a still-
  * visible Radix Dialog (the bug from the 2026-05-19 screenshot).
  */
-function anyModalDialogOpen(): boolean {
+function anyBlockingSurfaceOpen(): boolean {
   if (typeof document === "undefined") return false;
   return Boolean(
     document.querySelector(
-      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]',
+      '[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"], [data-testid="approval-dock"]',
     ),
   );
 }
@@ -286,7 +286,7 @@ export function SpotlightTour({
         // Same scenario already running — ignore the re-broadcast.
         return;
       }
-      if (anyModalDialogOpen()) {
+      if (anyBlockingSurfaceOpen()) {
         // Queue the scenario; the MutationObserver below will pick it up
         // when the offending dialog unmounts.
         pendingScenarioRef.current = scenarioId;
@@ -305,7 +305,7 @@ export function SpotlightTour({
       return;
     }
     const observer = new MutationObserver(() => {
-      if (pendingScenarioRef.current && !anyModalDialogOpen()) {
+      if (pendingScenarioRef.current && !anyBlockingSurfaceOpen()) {
         const next = pendingScenarioRef.current;
         pendingScenarioRef.current = null;
         // Same-scenario guard — see the onStart subscriber comment above.
@@ -315,6 +315,7 @@ export function SpotlightTour({
     });
     observer.observe(document.body, {
       attributes: true,
+      childList: true,
       subtree: true,
       attributeFilter: ["data-state"],
     });

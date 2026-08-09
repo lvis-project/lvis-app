@@ -1,13 +1,13 @@
 /**
- * ApprovalDialog unit tests.
+ * ApprovalDock unit tests.
  *
- * ApprovalDialog wraps ToolApprovalDialog (Radix Dialog) which portals content
- * to document.body — assertions must query document.body, not the render container.
+ * The route-independent dock renders in flow and never portals or applies
+ * modal semantics. Security and durable-decision assertions stay colocated.
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, fireEvent, waitFor } from "@testing-library/react";
-import { ApprovalDialog } from "../dialogs/ApprovalDialog.js";
+import { ApprovalDock } from "../components/permissions/ApprovalDock.js";
 import type { ApprovalRequest, PermissionEvaluationContext } from "../types.js";
 
 function makeEvaluationContext(overrides: Partial<PermissionEvaluationContext> = {}): PermissionEvaluationContext {
@@ -42,8 +42,8 @@ function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest 
   };
 }
 
-describe("ApprovalDialog", () => {
-  // HIGH-1 CI fix: ToolApprovalDialog.handleApprove calls window.lvis.userApproval.record.
+describe("ApprovalDock", () => {
+  // HIGH-1 CI fix: ToolApprovalContent.handleApprove calls window.lvis.userApproval.record.
   // Without this mock the IPC bridge throws synchronously before onDecide is reached.
   // The fire-and-await pattern calls onDecide synchronously before awaiting record,
   // so the test's fireEvent.click assertion is always synchronous — but the record
@@ -61,14 +61,14 @@ describe("ApprovalDialog", () => {
 
   it("renders without crashing with empty queue", () => {
     const { container } = render(
-      <ApprovalDialog queue={[]} onDecide={vi.fn()} />,
+      <ApprovalDock queue={[]} onDecide={vi.fn()} />,
     );
     expect(container).toBeTruthy();
   });
 
-  it("renders approval dialog content to document.body when queue has one item", async () => {
+  it("renders one named non-modal approval dock with request identity", async () => {
     render(
-      <ApprovalDialog queue={[makeRequest()]} onDecide={vi.fn()} />,
+      <ApprovalDock queue={[makeRequest()]} onDecide={vi.fn()} />,
     );
     // Radix Dialog portals to document.body
     await waitFor(() => {
@@ -76,15 +76,58 @@ describe("ApprovalDialog", () => {
       expect(document.body.textContent).toContain("도구 / 출처");
       expect(document.body.textContent).toContain("읽기 판단근거");
     });
-    const dialog = document.body.querySelector('[data-testid="tool-approval-dialog"]');
-    expect(dialog?.getAttribute("data-approval-request-id")).toBe("req-1");
-    expect(dialog?.getAttribute("data-approval-tool-name")).toBe("read_file");
-    expect(dialog?.getAttribute("data-approval-args")).toBe('{"path":"/tmp/test.txt"}');
+    const dock = document.body.querySelector('[data-testid="approval-dock"]');
+    expect(dock?.getAttribute("role")).toBe("region");
+    expect(dock?.getAttribute("aria-modal")).toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull();
+    expect(dock?.getAttribute("data-approval-request-id")).toBe("req-1");
+    expect(dock?.getAttribute("data-approval-tool-name")).toBe("read_file");
+    expect(dock?.getAttribute("data-approval-args")).toBe('{"path":"/tmp/test.txt"}');
+  });
+
+  it("never exposes untrusted generic request identity for rationale approvals", () => {
+    const rawToolName = "untrusted-request-tool";
+    const { container } = render(
+      <ApprovalDock
+        queue={[makeRequest({
+          id: "rationale-1",
+          kind: "rationale",
+          allowedChoices: ["allow-once", "deny-once"],
+          toolName: rawToolName,
+          reason: "UNTRUSTED request reason: do not render this",
+          requireExplicit: true,
+          args: {
+            contractVersion: 1,
+            display: "rationale-approval-display",
+            toolName: "host-sealed-tool",
+            canonicalTargets: ["/workspace/project/status.txt"],
+            requestedEffects: ["Create a status file"],
+            affectedResources: ["/workspace/project"],
+            requiredAuthority: "Project workspace write access",
+            effectiveVerdict: { level: "medium", reason: "Host-sealed rationale" },
+            scopeAlignment: "aligned",
+            scopeReasons: ["Inside the current workspace"],
+            rationaleStatus: "ready",
+            suggestion: "Review the host-sealed facts",
+            modalFallbackRequired: false,
+          },
+        })]}
+        onDecide={vi.fn()}
+      />,
+    );
+
+    const dock = container.querySelector('[data-testid="approval-dock"]');
+    expect(container.textContent).toContain("host-sealed-tool");
+    expect(container.textContent).not.toContain(rawToolName);
+    expect(container.textContent).not.toContain("UNTRUSTED request reason");
+    expect(dock?.getAttribute("data-approval-request-id")).toBeNull();
+    expect(dock?.getAttribute("data-approval-tool-name")).toBeNull();
+    expect(dock?.getAttribute("data-approval-args")).toBeNull();
   });
 
   it("labels agent-action approval requests separately from tool execution", async () => {
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[
           makeRequest({
             category: "agent-action",
@@ -109,7 +152,7 @@ describe("ApprovalDialog", () => {
 
   it("warns when approval trust origin is missing", async () => {
     render(
-      <ApprovalDialog queue={[makeRequest()]} onDecide={vi.fn()} />,
+      <ApprovalDock queue={[makeRequest()]} onDecide={vi.fn()} />,
     );
     await waitFor(() => {
       expect(document.body.textContent).toContain("출처 미확인");
@@ -120,7 +163,7 @@ describe("ApprovalDialog", () => {
   it("calls onDecide when 허용 button clicked", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
     );
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
@@ -135,7 +178,7 @@ describe("ApprovalDialog", () => {
   it("does not convert Enter on a focused deny button into allow-once", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog queue={[makeRequest({
+      <ApprovalDock queue={[makeRequest({
         toolName: "bash",
         toolCategory: "shell",
         reviewerVerdict: { level: "low", reason: "test fixture — exercise A/D shortcut path, not R-4 HIGH NL gate" },
@@ -160,7 +203,7 @@ describe("ApprovalDialog", () => {
   it("keeps advertised A/D shortcuts active when an action button has focus", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog queue={[makeRequest({
+      <ApprovalDock queue={[makeRequest({
         toolName: "bash",
         toolCategory: "shell",
         reviewerVerdict: { level: "low", reason: "test fixture — exercise A/D shortcut path, not R-4 HIGH NL gate" },
@@ -187,9 +230,105 @@ describe("ApprovalDialog", () => {
     expect(onDecide).toHaveBeenCalledWith("deny-once", undefined);
   });
 
+  it("keeps route controls interactive and scopes decision shortcuts to the dock", async () => {
+    const onDecide = vi.fn();
+    const { container } = render(
+      <main data-testid="background-route">
+        <button type="button" data-testid="background-action">Background action</button>
+        <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />
+      </main>,
+    );
+
+    const background = container.querySelector<HTMLButtonElement>('[data-testid="background-action"]')!;
+    const dock = container.querySelector<HTMLElement>('[data-testid="approval-dock"]')!;
+    const panel = container.querySelector<HTMLElement>('[data-testid="tool-approval-panel"]')!;
+    expect(dock).toBeTruthy();
+    expect(container.querySelector('[data-testid="background-route"]')?.hasAttribute("inert")).toBe(false);
+    expect(container.querySelector('[data-testid="background-route"]')?.getAttribute("aria-hidden")).toBeNull();
+    expect(document.body.getAttribute("data-scroll-locked")).toBeNull();
+
+    background.focus();
+    fireEvent.keyDown(background, { key: "a", code: "KeyA" });
+    fireEvent.keyDown(background, { key: "d", code: "KeyD" });
+    fireEvent.keyDown(background, { key: "Escape", code: "Escape" });
+    expect(onDecide).not.toHaveBeenCalled();
+
+    panel.focus();
+    fireEvent.keyDown(panel, { key: "d", code: "KeyD" });
+    expect(onDecide).toHaveBeenCalledWith("deny-once", undefined);
+  });
+
+  it("does not treat approval-form typing as a decision shortcut", async () => {
+    const onDecide = vi.fn();
+    const { container } = render(
+      <ApprovalDock
+        queue={[makeRequest({
+          toolName: "bash",
+          toolCategory: "shell",
+          requireExplicit: true,
+          reviewerVerdict: { level: "high", reason: "destructive command" },
+        })]}
+        onDecide={onDecide}
+      />,
+    );
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="nl-justification-input"]')!;
+    expect(input).toBeTruthy();
+    input.focus();
+    fireEvent.keyDown(input, { key: "a", code: "KeyA" });
+    fireEvent.keyDown(input, { key: "d", code: "KeyD" });
+    fireEvent.keyDown(input, { key: "Escape", code: "Escape" });
+    expect(onDecide).not.toHaveBeenCalled();
+  });
+
+  it("preserves route focus on first mount, advances FIFO into an active keyboard surface, then restores it", async () => {
+    const onDecide = vi.fn();
+    const first = makeRequest({ id: "req-focus-1" });
+    const second = makeRequest({ id: "req-focus-2", toolName: "write_file" });
+    const { container, rerender } = render(
+      <main>
+        <button type="button" data-testid="return-target">Return target</button>
+        <ApprovalDock queue={[]} onDecide={onDecide} />
+      </main>,
+    );
+    const returnTarget = container.querySelector<HTMLButtonElement>('[data-testid="return-target"]')!;
+    returnTarget.focus();
+
+    rerender(
+      <main>
+        <button type="button" data-testid="return-target">Return target</button>
+        <ApprovalDock queue={[first, second]} onDecide={onDecide} />
+      </main>,
+    );
+    expect(document.activeElement).toBe(returnTarget);
+
+    container.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!.focus();
+    rerender(
+      <main>
+        <button type="button" data-testid="return-target">Return target</button>
+        <ApprovalDock queue={[second]} onDecide={onDecide} />
+      </main>,
+    );
+    await waitFor(() => {
+      expect(document.activeElement).toBe(container.querySelector('[data-testid="tool-approval-panel"]'));
+    });
+    const secondPanel = container.querySelector<HTMLElement>('[data-testid="tool-approval-panel"]')!;
+    expect(secondPanel.className).toContain("focus-visible:ring-2");
+    fireEvent.keyDown(secondPanel, { key: "d", code: "KeyD" });
+    expect(onDecide).toHaveBeenCalledWith("deny-once", undefined);
+
+    rerender(
+      <main>
+        <button type="button" data-testid="return-target">Return target</button>
+        <ApprovalDock queue={[]} onDecide={onDecide} />
+      </main>,
+    );
+    await waitFor(() => expect(document.activeElement).toBe(returnTarget));
+  });
+
   it("does not show tool name when queue is empty", () => {
     render(
-      <ApprovalDialog queue={[]} onDecide={vi.fn()} />,
+      <ApprovalDock queue={[]} onDecide={vi.fn()} />,
     );
     expect(document.body.textContent).not.toContain("read_file");
   });
@@ -200,18 +339,20 @@ describe("ApprovalDialog", () => {
       makeRequest({ id: "req-2", toolName: "write_file", toolCategory: "write" }),
     ];
     render(
-      <ApprovalDialog queue={queue} onDecide={vi.fn()} />,
+      <ApprovalDock queue={queue} onDecide={vi.fn()} />,
     );
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
+    expect(document.body.querySelector('[data-testid="approval-queue-depth"]')?.textContent)
+      .toContain("1 / 2");
     expect(document.body.textContent).toContain("대기 중 1개");
     expect(document.body.textContent).not.toContain("모두 허용");
   });
 
   it("renders the sandbox capability row with ⚠ when kind=none (#691 round-1 user request)", async () => {
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -238,7 +379,7 @@ describe("ApprovalDialog", () => {
 
   it("renders the sandbox capability row WITHOUT ⚠ when kind=asrt + confidence=verified", async () => {
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -264,7 +405,7 @@ describe("ApprovalDialog", () => {
 
   it("renders ⚠ weak when kind=partial (HIGH-1 SOT consumer regression guard)", async () => {
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -290,7 +431,7 @@ describe("ApprovalDialog", () => {
 
   it("renders ℹ fs-only label when kind=fs-only + confidence=verified", async () => {
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -316,7 +457,7 @@ describe("ApprovalDialog", () => {
 
   it("omits the sandbox row entirely when sandboxCapability is undefined", async () => {
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[makeRequest({ toolName: "read_file", toolCategory: "read" })]}
         onDecide={vi.fn()}
       />,
@@ -328,7 +469,7 @@ describe("ApprovalDialog", () => {
 
   it("surfaces captured permission evaluation context instead of reconstructing sandbox details from args", async () => {
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[makeRequest({
           toolName: "powershell",
           toolCategory: "shell",
@@ -358,7 +499,7 @@ describe("ApprovalDialog", () => {
     // surfaces on one decision.
     const onDecide = vi.fn();
     const { container } = render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[
           makeRequest({
             kind: "out-of-allowed-dir",
@@ -377,15 +518,17 @@ describe("ApprovalDialog", () => {
       />,
     );
 
-    expect(container.firstChild).toBeNull();
-    expect(document.body.textContent).not.toContain("/Users/example/Documents/project/notes.md");
+    expect(container.querySelector('[data-testid="approval-dock"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="docked-approval-panel"]')).toBeTruthy();
+    expect(container.querySelector('[role="dialog"]')).toBeNull();
+    expect(document.body.textContent).toContain("/Users/example/Documents/project/notes.md");
     expect(onDecide).not.toHaveBeenCalled();
   });
 
   it("prefills HIGH approval purpose from a sufficient suggestion and enables approval", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -425,7 +568,7 @@ describe("ApprovalDialog", () => {
   it("requires manual HIGH purpose when no sufficient purpose is available, then records it", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[makeRequest({
           toolName: "bash",
           toolCategory: "shell",
@@ -469,7 +612,7 @@ describe("ApprovalDialog", () => {
   it("does not prefill HIGH purpose from tool input even if it is marked sufficient", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[makeRequest({
           toolName: "plugin_send",
           toolCategory: "network",
@@ -503,7 +646,7 @@ describe("ApprovalDialog", () => {
     // that drops the spread won't pass via TypeScript-only optional shape.
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[makeRequest({ trustOrigin: "user-keyboard", approvalCacheKey: "test-key-r5" })]}
         onDecide={onDecide}
       />,
@@ -541,7 +684,7 @@ describe("ApprovalDialog", () => {
   it("primary approve records scope=session by default (allow-session)", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
     const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
@@ -555,7 +698,7 @@ describe("ApprovalDialog", () => {
   it("primary approve records scope=persistent when the persistent scope radio is selected", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
     // Select the "영구 허용" (persistent) scope radio before approving.
@@ -573,7 +716,7 @@ describe("ApprovalDialog", () => {
   it("'항상 허용' records a persistent grant", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
     const alwaysBtn = Array.from(document.body.querySelectorAll("button")).find(
@@ -592,7 +735,7 @@ describe("ApprovalDialog", () => {
     // scope=session so the user must re-justify the HIGH action next session.
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog
+      <ApprovalDock
         queue={[
           makeRequest({
             reviewerVerdict: { level: "high", reason: "destructive write" },
@@ -622,7 +765,7 @@ describe("ApprovalDialog", () => {
   it("deny choices never write Store B (no record IPC)", async () => {
     const onDecide = vi.fn();
     render(
-      <ApprovalDialog queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
     const denyBtn = Array.from(document.body.querySelectorAll("button")).find(

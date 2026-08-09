@@ -3,7 +3,7 @@
  *
  * Used by:
  *   - src/permissions/user-approval-store.ts (main process)
- *   - src/ui/renderer/components/ToolApprovalDialog.tsx (renderer process)
+ *   - src/ui/renderer/components/ToolApprovalContent.tsx (renderer process)
  *
  * Produces a deterministic JSON string where object keys are sorted so that
  * {a, b} and {b, a} produce identical output. This prevents key-ordering

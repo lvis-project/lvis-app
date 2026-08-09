@@ -114,9 +114,9 @@ export type ScreenshotOptions = {
   installPlugins: readonly string[];
   /**
    * Keep the LLM permission reviewer ON. By default seeding plugins disables it
-   * (so panel mount-time read tools don't pop the approval modal). The
+   * (so panel mount-time read tools don't open the approval dock). The
    * `plugin-permission-grant` scenario sets this true because its capture target
-   * IS that approval modal.
+   * IS that approval dock.
    */
   keepReviewer: boolean;
 };
