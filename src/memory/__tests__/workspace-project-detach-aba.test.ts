@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,6 +62,7 @@ vi.mock("../../lib/with-file-lock.js", () => ({
 }));
 
 import { MemoryManager } from "../memory-manager.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const SESSION_ID = "workspace-detach-aba-wire";
 const ROOT = "C:\\Work\\Alpha";
@@ -76,9 +77,9 @@ beforeEach(() => {
   memory = new MemoryManager({ lvisDir: dir });
 });
 
-afterEach(() => {
+afterEach(async () => {
   memory.closeSearchIndex();
-  rmSync(dir, { recursive: true, force: true });
+  await cleanupTmpDir(dir);
   vi.clearAllMocks();
 });
 
