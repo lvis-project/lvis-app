@@ -18,7 +18,7 @@
  * Every started server is torn down in afterEach so vitest exits clean.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -33,6 +33,7 @@ import type { IpcDeps } from "../../ipc/types.js";
 import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { LOCAL_API_INFO_FILE, type LocalApiServerInfoFile } from "../../main/local-api-server.js";
 import { makeDeepProxy } from "../../testing/deep-proxy.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import { createLvisClient } from "../../sdk/index.js";
 import { CHANNELS, PERMISSIONS } from "../../contract/app-contract.js";
 import {
@@ -121,10 +122,10 @@ describe("readLocalApiConnection — discovery via LVIS_HOME override", () => {
     process.env.LVIS_HOME = homeDir;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     if (prevHome === undefined) delete process.env.LVIS_HOME;
     else process.env.LVIS_HOME = prevHome;
-    rmSync(homeDir, { recursive: true, force: true });
+    await cleanupTmpDir(homeDir);
   });
 
   it("returns null when the discovery file is missing", async () => {
