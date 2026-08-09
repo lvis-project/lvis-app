@@ -37,7 +37,8 @@
  * inaccurate claim to pass.
  */
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -148,7 +149,7 @@ interface ParityRun {
   pluginExecuted: ReturnType<typeof vi.fn>;
   mcpExecuted: ReturnType<typeof vi.fn>;
   metas: ToolCallMeta[];
-  cleanup: () => void;
+  cleanup: () => Promise<void>;
 }
 
 /** Run the SAME network probe as plugin and as mcp through ONE shared permission
@@ -197,9 +198,10 @@ async function runParityPair(opts: { deny?: boolean } = {}): Promise<ParityRun> 
   return {
     dir, auditDir, classifySpy, gate, pluginResult, mcpResult,
     pluginExecuted, mcpExecuted, metas,
-    cleanup: () => {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(auditDir, { recursive: true, force: true });
+    cleanup: async () => {
+      await auditLogger.close();
+      await cleanupTmpDir(dir);
+      await cleanupTmpDir(auditDir);
     },
   };
 }
@@ -255,7 +257,7 @@ describe("ToolExecutor MCP↔plugin permission parity (regression lock)", () => 
       expect(run.mcpExecuted).not.toHaveBeenCalled();
       expect(effectShadowRows(run.auditDir)).toHaveLength(0);
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   });
 
@@ -294,7 +296,7 @@ describe("ToolExecutor MCP↔plugin permission parity (regression lock)", () => 
       expect(pluginReq.reviewerVerdict).toMatchObject({ level: "medium" });
       expect(mcpReq.reviewerVerdict).toBeUndefined();
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   });
 
@@ -327,7 +329,7 @@ describe("ToolExecutor MCP↔plugin permission parity (regression lock)", () => 
       // shared chokepoint even though the pre-gate lane forks on trust).
       expect(run.gate.requestAndWait).toHaveBeenCalledTimes(2);
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   });
 
@@ -403,7 +405,7 @@ describe("ToolExecutor MCP↔plugin permission parity (regression lock)", () => 
       };
       expect(stripSanctioned(pluginShadow)).toEqual(stripSanctioned(mcpShadow));
     } finally {
-      run.cleanup();
+      await run.cleanup();
     }
   });
 });

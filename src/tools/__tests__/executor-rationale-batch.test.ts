@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 import { HookRunner } from "../../hooks/hook-runner.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
@@ -282,7 +283,7 @@ describe("ToolExecutor rationale conversation batches", () => {
         executionCwd: process.cwd(),
       });
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      await cleanupTmpDir(directory);
     }
   });
 
@@ -332,7 +333,7 @@ describe("ToolExecutor rationale conversation batches", () => {
       expect(classify).toHaveBeenCalledOnce();
       expect(execute).not.toHaveBeenCalled();
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      await cleanupTmpDir(directory);
     }
   });
 
@@ -388,7 +389,7 @@ describe("ToolExecutor rationale conversation batches", () => {
         expect(onToolStart).not.toHaveBeenCalled();
         expect(onToolEnd).not.toHaveBeenCalled();
       } finally {
-        rmSync(directory, { recursive: true, force: true });
+        await cleanupTmpDir(directory);
       }
     },
   );

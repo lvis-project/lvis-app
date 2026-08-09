@@ -11,10 +11,11 @@
  * made on the file that lands on disk and on whether a sibling is still asked
  * about afterwards.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
@@ -103,7 +104,7 @@ function withTempDir(run: (dir: string) => Promise<void>): () => Promise<void> {
     try {
       await run(dir);
     } finally {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
+      await cleanupTmpDir(dir);
     }
   };
 }
