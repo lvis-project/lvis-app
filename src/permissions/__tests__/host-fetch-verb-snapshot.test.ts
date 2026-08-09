@@ -24,7 +24,7 @@
  * verb-snapshot flow from the DNS/SSRF/allow-list gate (which is unchanged and
  * covered by host-fetch-guard.test.ts).
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -117,6 +117,21 @@ import {
   type EffectEntry,
 } from "../effect-ledger.js";
 import type { PluginHostApi } from "../../plugins/types.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+
+const tmpDirs: string[] = [];
+
+function makeTmpDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  tmpDirs.push(dir);
+  return dir;
+}
+
+afterEach(async () => {
+  for (const dir of tmpDirs.splice(0)) {
+    await cleanupTmpDir(dir);
+  }
+});
 
 type CreateHostApi = (
   pluginId: string,
@@ -186,7 +201,7 @@ async function buildRealHostApi(): Promise<{
     createHostApi,
     "initPluginRuntime must register a createHostApi factory",
   ).toBeDefined();
-  const pluginDataDir = mkdtempSync(join(tmpdir(), "lvis-hostfetch-verb-"));
+  const pluginDataDir = makeTmpDir("lvis-hostfetch-verb-");
   const hostApi = createHostApi!(
     "verb-snapshot-plugin",
     {

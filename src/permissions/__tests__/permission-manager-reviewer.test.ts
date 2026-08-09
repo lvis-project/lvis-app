@@ -29,11 +29,32 @@ import {
   unmarkPluginWorkerWrapped,
   setActiveSandboxCapability,
 } from "../sandbox-capability.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+
+const tmpDirs: string[] = [];
+const caches = new Set<VerdictCache>();
 
 function tmpFile(name: string): string {
   const dir = mkdtempSync(join(tmpdir(), "lvis-pm-reviewer-"));
+  tmpDirs.push(dir);
   return join(dir, name);
 }
+
+function makeCache(path: string): VerdictCache {
+  const cache = new VerdictCache(path);
+  caches.add(cache);
+  return cache;
+}
+
+afterEach(async () => {
+  for (const cache of caches) {
+    await cache.flush();
+  }
+  caches.clear();
+  for (const dir of tmpDirs.splice(0)) {
+    await cleanupTmpDir(dir);
+  }
+});
 
 function allowedDir(path: string): string {
   return caseFoldForMatch(canonicalizePathForMatch(path));
@@ -46,7 +67,7 @@ function makeManager(): {
   classifier: RiskClassifier;
 } {
   const pm = new PermissionManager(tmpFile("permissions.json"));
-  const cache = new VerdictCache(tmpFile("reviewer-cache.jsonl"));
+  const cache = makeCache(tmpFile("reviewer-cache.jsonl"));
   const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
   const classifier = new RuleBasedRiskClassifier();
   pm.setReviewer({ classifier, cache, deferredQueue: queue });
@@ -670,7 +691,7 @@ describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.
       },
     );
 
-    const cache = new VerdictCache(tmpFile("reviewer-cache.jsonl"));
+    const cache = makeCache(tmpFile("reviewer-cache.jsonl"));
     const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
     pm.setReviewer({ classifier: llmClassifier, cache, deferredQueue: queue });
 
@@ -708,7 +729,7 @@ describe("MAJOR-1 R2: dispatchReviewer threads abortSignal to LlmRiskClassifier.
       }),
     };
     const llmClassifier = new LlmRiskClassifier(providerStub, "gpt-4o-mini", "deny");
-    const cache = new VerdictCache(tmpFile("reviewer-cache.jsonl"));
+    const cache = makeCache(tmpFile("reviewer-cache.jsonl"));
     const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
     pm.setReviewer({ classifier: llmClassifier, cache, deferredQueue: queue });
 
@@ -761,6 +782,8 @@ describe("#664 flood guard — degraded rule reviewer does not over-defer headle
       verdictCachePath: tmpFile("flood-cache.jsonl"),
       deferredQueuePath: tmpFile("flood-queue.jsonl"),
     });
+    const wiredCache = pm.getVerdictCache();
+    if (wiredCache) caches.add(wiredCache);
     expect(wiring.runtimeMode).toBe("llm-degraded-to-rule");
     expect(pm.isReviewerDegradedToRule()).toBe(true);
 
@@ -830,7 +853,7 @@ describe("reviewer outcome provenance and base-cache safety", () => {
     complete: () => Promise<import("../reviewer/risk-classifier.js").LlmCompletionResult>,
   ) {
     const pm = new PermissionManager(tmpFile("permissions.json"));
-    const cache = new VerdictCache(tmpFile("reviewer-cache.jsonl"));
+    const cache = makeCache(tmpFile("reviewer-cache.jsonl"));
     const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
     const provider = { complete: vi.fn(complete) };
     pm.setReviewer({
@@ -933,7 +956,7 @@ describe("reviewer outcome provenance and base-cache safety", () => {
     const pm = new PermissionManager(tmpFile("permissions.json"));
     pm.setReviewer({
       classifier: { classify },
-      cache: new VerdictCache(tmpFile("reviewer-cache.jsonl")),
+      cache: makeCache(tmpFile("reviewer-cache.jsonl")),
       deferredQueue: queue,
     });
 

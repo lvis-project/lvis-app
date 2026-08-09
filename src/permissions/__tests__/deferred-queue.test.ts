@@ -1,13 +1,23 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+
+const tmpDirs: string[] = [];
 
 function tmpQueuePath(): string {
   const dir = mkdtempSync(join(tmpdir(), "lvis-deferred-queue-"));
+  tmpDirs.push(dir);
   return join(dir, "deferred-queue.jsonl");
 }
+
+afterEach(async () => {
+  for (const dir of tmpDirs.splice(0)) {
+    await cleanupTmpDir(dir);
+  }
+});
 
 const SAMPLE = {
   toolName: "fs_write",
