@@ -35,6 +35,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool, type Tool } from "../base.js";
@@ -493,20 +494,24 @@ describe("plugin read-relaxation — explicit deny still wins", () => {
     const spy = { ran: false };
     const { gate, requests } = makeGate("allow-once");
     const dir = mkdtempSync(join(tmpdir(), "lvis-relax-deny-"));
-    const permMgr = new PermissionManager(join(dir, "permissions.json"));
-    // Models the executor's deny-always handling — a prior user "deny always"
-    // persists exactly this rule, which checkDetailed reads as a layer-1 deny.
-    await permMgr.addAlwaysDeniedPersist("plugin_noeffect");
-    const { executor } = makeExecutor(makePluginNoEffectTool(spy), gate, () => true, permMgr);
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      // Models the executor's deny-always handling — a prior user "deny always"
+      // persists exactly this rule, which checkDetailed reads as a layer-1 deny.
+      await permMgr.addAlwaysDeniedPersist("plugin_noeffect");
+      const { executor } = makeExecutor(makePluginNoEffectTool(spy), gate, () => true, permMgr);
 
-    const [result] = await executor.executeAll(
-      [{ id: "t1", name: "plugin_noeffect", input: {} }],
-      { sessionId: "s", permissionContext: userPermissionContext() },
-    );
+      const [result] = await executor.executeAll(
+        [{ id: "t1", name: "plugin_noeffect", input: {} }],
+        { sessionId: "s", permissionContext: userPermissionContext() },
+      );
 
-    expect(spy.ran).toBe(false);
-    expect(requests).toHaveLength(0);
-    expect(result.is_error).toBe(true);
+      expect(spy.ran).toBe(false);
+      expect(requests).toHaveLength(0);
+      expect(result.is_error).toBe(true);
+    } finally {
+      await cleanupTmpDir(dir);
+    }
   });
 });
 

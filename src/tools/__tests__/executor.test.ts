@@ -418,73 +418,81 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     __resetActiveSandboxCapabilityForTest();
     setSandboxRequestedAtBoot(false);
 
-    const permissionPath = join(mkdtempSync(join(tmpdir(), "lvis-shell-approval-")), "permissions.json");
-    const permMgr = new PermissionManager(permissionPath);
-    const firstInput = { command: "echo safe", timeoutSeconds: 1 };
-    const secondInput = { command: "echo different", timeoutSeconds: 1 };
-    const firstApprovalCacheKey = approvalCacheKeyFor(
-      bash,
-      firstInput,
-      process.cwd(),
-      getHostShellExecutionPlanAuditProjection(getHostShellExecutionPlan()),
-    );
-    if (firstApprovalCacheKey === undefined) {
-      throw new Error("Bash must provide a sealed-plan approval cache key");
+    const dir = mkdtempSync(join(tmpdir(), "lvis-shell-approval-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      const firstInput = { command: "echo safe", timeoutSeconds: 1 };
+      const secondInput = { command: "echo different", timeoutSeconds: 1 };
+      const firstApprovalCacheKey = approvalCacheKeyFor(
+        bash,
+        firstInput,
+        process.cwd(),
+        getHostShellExecutionPlanAuditProjection(getHostShellExecutionPlan()),
+      );
+      if (firstApprovalCacheKey === undefined) {
+        throw new Error("Bash must provide a sealed-plan approval cache key");
+      }
+      await permMgr.addAlwaysAllowedPersist(firstApprovalCacheKey);
+
+      const approvalGate = {
+        requestAndWait: vi.fn(async (req: { id: string }) => ({
+          requestId: req.id,
+          choice: "deny-once" as const,
+        })),
+      };
+      const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
+
+      const first = await executor.executeAll(
+        [{ id: "tu-shell-1", name: "bash", input: firstInput }],
+        { sessionId: "sess-shell-approval", permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }) },
+      );
+      expect(first[0].is_error).toBeUndefined();
+      expect(first[0].content).toContain("safe");
+      expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+
+      const second = await executor.executeAll(
+        [{ id: "tu-shell-2", name: "bash", input: secondInput }],
+        { sessionId: "sess-shell-approval", permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }) },
+      );
+      expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
+      expect(second[0].is_error).toBe(true);
+      expect(second[0].content).toContain("승인 거부");
+    } finally {
+      await cleanupTmpDir(dir);
     }
-    await permMgr.addAlwaysAllowedPersist(firstApprovalCacheKey);
-
-    const approvalGate = {
-      requestAndWait: vi.fn(async (req: { id: string }) => ({
-        requestId: req.id,
-        choice: "deny-once" as const,
-      })),
-    };
-    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
-
-    const first = await executor.executeAll(
-      [{ id: "tu-shell-1", name: "bash", input: firstInput }],
-      { sessionId: "sess-shell-approval", permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }) },
-    );
-    expect(first[0].is_error).toBeUndefined();
-    expect(first[0].content).toContain("safe");
-    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
-
-    const second = await executor.executeAll(
-      [{ id: "tu-shell-2", name: "bash", input: secondInput }],
-      { sessionId: "sess-shell-approval", permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }) },
-    );
-    expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
-    expect(second[0].is_error).toBe(true);
-    expect(second[0].content).toContain("승인 거부");
   });
 
   it("hard-blocks sensitive shell paths before approval prompts or allow-always persistence", async () => {
     const registry = new ToolRegistry();
     registry.register(new BashTool());
-    const permissionPath = join(mkdtempSync(join(tmpdir(), "lvis-shell-path-policy-")), "permissions.json");
-    const permMgr = new PermissionManager(permissionPath);
-    permMgr.checkDetailed = () => ({
-      decision: "ask",
-      reason: "would otherwise ask",
-      layer: 6,
-    });
-    const approvalGate = {
-      requestAndWait: vi.fn(async (req: { id: string }) => ({
-        requestId: req.id,
-        choice: "allow-always" as const,
-      })),
-    };
-    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
+    const dir = mkdtempSync(join(tmpdir(), "lvis-shell-path-policy-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.checkDetailed = () => ({
+        decision: "ask",
+        reason: "would otherwise ask",
+        layer: 6,
+      });
+      const approvalGate = {
+        requestAndWait: vi.fn(async (req: { id: string }) => ({
+          requestId: req.id,
+          choice: "allow-always" as const,
+        })),
+      };
+      const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
 
-    const result = await executor.executeAll(
-      [{ id: "tu-shell-path-policy", name: "bash", input: { command: "cat ~/.ssh/id_rsa", timeoutSeconds: 1 } }],
-      { sessionId: "sess-shell-path-policy", permissionContext: userPermissionContext() },
-    );
+      const result = await executor.executeAll(
+        [{ id: "tu-shell-path-policy", name: "bash", input: { command: "cat ~/.ssh/id_rsa", timeoutSeconds: 1 } }],
+        { sessionId: "sess-shell-path-policy", permissionContext: userPermissionContext() },
+      );
 
-    expect(result[0].is_error).toBe(true);
-    expect(result[0].content).toContain("Shell 경로 정책 차단");
-    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
-    await expect(permMgr.listPersistedRules()).resolves.toEqual([]);
+      expect(result[0].is_error).toBe(true);
+      expect(result[0].content).toContain("Shell 경로 정책 차단");
+      expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+      await expect(permMgr.listPersistedRules()).resolves.toEqual([]);
+    } finally {
+      await cleanupTmpDir(dir);
+    }
   });
 
   it("queues headless shell out-of-allowed-dir access instead of executing after a LOW reviewer verdict", async () => {
@@ -562,30 +570,34 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
   ])("runs PowerShell path policy before approval prompts or allow-always persistence: %s", async (_label, command) => {
     const registry = new ToolRegistry();
     registry.register(new PowerShellTool());
-    const permissionPath = join(mkdtempSync(join(tmpdir(), "lvis-powershell-path-policy-")), "permissions.json");
-    const permMgr = new PermissionManager(permissionPath);
-    permMgr.checkDetailed = () => ({
-      decision: "ask",
-      reason: "would otherwise ask",
-      layer: 6,
-    });
-    const approvalGate = {
-      requestAndWait: vi.fn(async (req: { id: string }) => ({
-        requestId: req.id,
-        choice: "allow-always" as const,
-      })),
-    };
-    const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
+    const dir = mkdtempSync(join(tmpdir(), "lvis-powershell-path-policy-"));
+    try {
+      const permMgr = new PermissionManager(join(dir, "permissions.json"));
+      permMgr.checkDetailed = () => ({
+        decision: "ask",
+        reason: "would otherwise ask",
+        layer: 6,
+      });
+      const approvalGate = {
+        requestAndWait: vi.fn(async (req: { id: string }) => ({
+          requestId: req.id,
+          choice: "allow-always" as const,
+        })),
+      };
+      const executor = new ToolExecutor(registry, undefined, permMgr, undefined, approvalGate as never);
 
-    const result = await executor.executeAll(
-      [{ id: "tu-powershell-path-policy", name: "powershell", input: { command, timeoutSeconds: 1 } }],
-      { sessionId: "sess-powershell-path-policy", permissionContext: userPermissionContext() },
-    );
+      const result = await executor.executeAll(
+        [{ id: "tu-powershell-path-policy", name: "powershell", input: { command, timeoutSeconds: 1 } }],
+        { sessionId: "sess-powershell-path-policy", permissionContext: userPermissionContext() },
+      );
 
-    expect(result[0].is_error).toBe(true);
-    expect(result[0].content).toContain("Shell 경로 정책 차단");
-    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
-    await expect(permMgr.listPersistedRules()).resolves.toEqual([]);
+      expect(result[0].is_error).toBe(true);
+      expect(result[0].content).toContain("Shell 경로 정책 차단");
+      expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+      await expect(permMgr.listPersistedRules()).resolves.toEqual([]);
+    } finally {
+      await cleanupTmpDir(dir);
+    }
   });
 
   it("passes non-keyboard trustOrigin to ApprovalGate and permission audit entries", async () => {
