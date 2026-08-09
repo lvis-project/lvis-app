@@ -9,7 +9,7 @@
  * un-trusted config spawns a command.
  */
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHookRunner } from "../boot/conversation.js";
@@ -17,6 +17,7 @@ import { wireHookSystem } from "../boot/steps/hook-system-wiring.js";
 import { acceptHookTrust } from "../hooks/hook-trust-commands.js";
 import { HOOKS_CONFIG_FILENAME } from "../hooks/hook-config-trust.js";
 import { writeJsonConfig } from "../hooks/__tests__/test-helpers.js";
+import { cleanupTmpDir } from "../testing/tmp-dir-teardown.js";
 
 describe("boot hook runner wiring", () => {
   it("creates an in-process HookRunner with no external hook surface", async () => {
@@ -62,8 +63,8 @@ describe("boot wireHookSystem — hooks.json rides the TOFU quarantine gate (#81
     chmodSync(p, 0o755);
   });
 
-  afterEach(() => {
-    if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+  afterEach(async () => {
+    if (tmpDir) await cleanupTmpDir(tmpDir);
   });
 
   function opts() {
