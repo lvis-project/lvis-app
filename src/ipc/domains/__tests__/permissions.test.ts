@@ -365,16 +365,19 @@ describe("permissions IPC handlers", () => {
   it("dirDispatch applies session additions returned by the slash command", async () => {
     const { deps } = await setup();
     const dir = mkdtempSync(join(tmpdir(), "lvis-session-dir-"));
+    try {
+      const result = await invoke(PERMISSIONS.dirDispatch, {
+        rawArgs: `allow --session ${dir}`,
+        intent: USER_INTENT,
+      });
 
-    const result = await invoke(PERMISSIONS.dirDispatch, {
-      rawArgs: `allow --session ${dir}`,
-      intent: USER_INTENT,
-    });
-
-    expect(result).toMatchObject({ ok: true, verb: "allow", sessionOnly: true });
-    expect(deps.conversationLoop.addSessionAdditionalDirectory).toHaveBeenCalledWith(
-      (result as { sessionDirectory: string }).sessionDirectory,
-    );
+      expect(result).toMatchObject({ ok: true, verb: "allow", sessionOnly: true });
+      expect(deps.conversationLoop.addSessionAdditionalDirectory).toHaveBeenCalledWith(
+        (result as { sessionDirectory: string }).sessionDirectory,
+      );
+    } finally {
+      await cleanupTmpDir(dir);
+    }
   });
 
   it("dirDispatch routes persistent Settings allow and deny through the workspace lifecycle", async () => {
@@ -471,8 +474,9 @@ describe("permissions IPC handlers", () => {
 
   it("reviewerDispatch restores reviewer settings when runtime rewire fails", async () => {
     const oldHome = process.env.HOME;
-    process.env.HOME = mkdtempSync(join(tmpdir(), "lvis-reviewer-ipc-home-"));
+    const reviewerHome = mkdtempSync(join(tmpdir(), "lvis-reviewer-ipc-home-"));
     try {
+      process.env.HOME = reviewerHome;
       const { deps } = await setup();
       await invoke(PERMISSIONS.reviewerDispatch, {
         rawArgs: "mode rule",
@@ -503,6 +507,7 @@ describe("permissions IPC handlers", () => {
       } else {
         process.env.HOME = oldHome;
       }
+      await cleanupTmpDir(reviewerHome);
     }
   });
 
