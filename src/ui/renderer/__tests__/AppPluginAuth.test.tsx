@@ -105,8 +105,8 @@ describe("App plugin auth routing", () => {
     expect(await within(group).findByText("로컬 인덱서")).toBeInTheDocument();
   });
 
-  // Plugin views ALWAYS render inline, so these auth-lifecycle tests assert on the
-  // inline view host's own back affordance rather than on a window that never opens.
+  // Plugin views ALWAYS render inline. The shared top toolbar owns navigation;
+  // the plugin page heading proves the inline host rendered.
   it("unauthenticated auth plugin → host fires loginTool and does NOT navigate the panel (login-first)", async () => {
     const user = userEvent.setup();
     const { api } = await renderApp(authPluginFixture);
@@ -125,7 +125,7 @@ describe("App plugin auth routing", () => {
     });
     // ...and does not navigate the inline view until the plugin reports authed
     // (login-first).
-    expect(screen.queryByTestId("plugin-page-back")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Token Plugin" })).not.toBeInTheDocument();
   });
 
   it("authenticated auth plugin → navigates the panel inline without firing loginTool", async () => {
@@ -138,10 +138,10 @@ describe("App plugin auth routing", () => {
     await selectPluginView(user, "Token Plugin");
 
     // Already authed → navigate inline directly, no login round-trip. Assert the
-    // plugin view host actually rendered (its back
-    // affordance) — not merely that the picker closed (it closes on every
-    // selection regardless of navigation).
-    expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
+    // plugin view host actually rendered — not merely that the picker closed
+    // (it closes on every selection regardless of navigation).
+    expect(await screen.findByRole("heading", { name: "Token Plugin" })).toBeInTheDocument();
+    expect(screen.queryByTestId("plugin-page-back")).not.toBeInTheDocument();
     expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "token_login")).toBe(false);
   });
 
@@ -163,7 +163,7 @@ describe("App plugin auth routing", () => {
       });
     });
     // Deferred: the inline view is NOT navigated yet (still unauthed).
-    expect(screen.queryByTestId("plugin-page-back")).not.toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Token Plugin" })).not.toBeInTheDocument();
 
     // Login completes: status flips to authed and the plugin emits
     // `<pluginId>.auth.changed`, which re-fetches status. The host's one-shot
@@ -174,7 +174,7 @@ describe("App plugin auth routing", () => {
 
     // The plugin view host now renders inline — proving the drain effect, not
     // the initial click, performed the navigation.
-    expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Token Plugin" })).toBeInTheDocument();
   });
 
   it("login failure keeps the plugin panel closed and surfaces a safe auth error code as a toast", async () => {
@@ -236,7 +236,7 @@ describe("App plugin auth routing", () => {
     await user.click(await screen.findByText("Token Plugin 열기"));
 
     // Navigates the plugin view inline (its host renders); never opens a window.
-    expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Token Plugin" })).toBeInTheDocument();
     expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "token_login")).toBe(false);
   });
 
@@ -289,7 +289,7 @@ describe("App plugin auth routing", () => {
     emitPluginEvent("oauth-plugin.auth.changed", { authenticated: true });
 
     // The deferred inline view is navigated once authed (its host renders).
-    expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "OAuth Plugin" })).toBeInTheDocument();
   });
 
   it("navigates an unauthenticated plugin view inline in work mode even with no loginTool (no silent abort)", async () => {
@@ -339,7 +339,7 @@ describe("App plugin auth routing", () => {
     await selectPluginView(user, "No-LoginTool Plugin");
 
     // Navigated inline directly (no loginTool): the plugin view host renders.
-    expect(await screen.findByTestId("plugin-page-back")).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "No-LoginTool Plugin" })).toBeInTheDocument();
     // Inline, not detached; and with no loginTool declared the host must not
     // invoke one (no token_login / fabricated login bypass).
     expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "nlt_login")).toBe(false);

@@ -46,10 +46,13 @@ describe("App inline navigation", () => {
       fireEvent.click(workBoardNav);
     });
 
-    // Inline: the main pane switched off the chat surface onto a back-affordance pane.
+    // Inline: the main pane switched off the chat surface. Visit history is
+    // owned by the top toolbar, so the content surface has no duplicate back.
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="main-content-back"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="main-pane-shell"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="view-path-current-work-board"]')).not.toBeNull();
     });
+    expect(container.querySelector('[data-testid="main-content-back"]')).toBeNull();
     expect(container.querySelector('[data-testid="chat-view-root"]')).toBeNull();
 
     // The sidebar entry now reports itself as the current page.
