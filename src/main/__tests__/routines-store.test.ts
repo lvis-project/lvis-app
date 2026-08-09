@@ -9,15 +9,16 @@
  * - markFired advances daily/weekly/monthly/interval repeat.
  */
 import { describe, it, expect } from "vitest";
-import { mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import { RoutinesStore, MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES, MAX_ROUTINE_SOURCE_LENGTH } from "../routines-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 function tempStore() {
   const dir = mkdtempSync(join(tmpdir(), "lvis-rs-v2-"));
   const store = new RoutinesStore(join(dir, "routines.json"));
-  const cleanup = () => rmSync(dir, { recursive: true, force: true });
+  const cleanup = () => cleanupTmpDir(dir);
   return { store, dir, cleanup };
 }
 
@@ -39,7 +40,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
       expect(store.listActive()).toHaveLength(1);
       expect(r.scope?.pluginIds).toEqual({ mode: "deny-all" });
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -56,7 +57,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
       expect(r.execution).toBe("llm-session");
       expect(r.prePrompt).toBe("daily briefing");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -83,7 +84,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
       expect(current?.lastRoutineSessionId).toBe("routine-session-2");
       expect(store.list()[0].lastRoutineSessionId).toBe("routine-session-2");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -108,7 +109,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
 
       expect(store.list()).toEqual([]);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -137,7 +138,7 @@ describe("RoutinesStore v2 — basic persistence", () => {
 
       expect(store.list()).toEqual([]);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -163,7 +164,7 @@ describe("RoutinesStore v2 — cap enforcement", () => {
         }),
       ).rejects.toThrow(/cap reached/);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -181,7 +182,7 @@ describe("RoutinesStore v2 — invalid at", () => {
         }),
       ).rejects.toThrow(/invalid schedule.at/);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -205,7 +206,7 @@ describe("RoutinesStore v2 — non-cron repeat requires schedule.at", () => {
           }),
         ).rejects.toThrow(/schedule.at is required/);
       } finally {
-        cleanup();
+        await cleanup();
       }
     });
   }
@@ -225,7 +226,7 @@ describe("RoutinesStore v2 — atomic write", () => {
       const { existsSync } = await import("node:fs");
       expect(existsSync(`${path}.tmp`)).toBe(false);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -244,7 +245,7 @@ describe("RoutinesStore v2 — atomic write", () => {
         const mode = statSync(path).mode & 0o777;
         expect(mode).toBe(0o600);
       } finally {
-        cleanup();
+        await cleanup();
       }
     },
   );
@@ -265,7 +266,7 @@ describe("RoutinesStore v2 — dismiss / remove", () => {
       expect(store.listActive()).toHaveLength(0);
       expect(store.list()).toHaveLength(1);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -281,7 +282,7 @@ describe("RoutinesStore v2 — dismiss / remove", () => {
       await store.remove(r.id);
       expect(store.list()).toHaveLength(0);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -299,7 +300,7 @@ describe("RoutinesStore v2 — markFired repeat advancement", () => {
       const updated = await store.markFired(r.id);
       expect(updated?.dismissedAt).toBeTruthy();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -318,7 +319,7 @@ describe("RoutinesStore v2 — markFired repeat advancement", () => {
       const newAt = new Date(updated!.schedule!.at!).getTime();
       expect(newAt).toBeGreaterThan(Date.now());
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -338,7 +339,7 @@ describe("RoutinesStore v2 — markFired repeat advancement", () => {
       // nextAt should be in Feb or later (not overflowing into March)
       expect(nextAt.getMonth()).not.toBe(2); // not March (month index 2)
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -356,7 +357,7 @@ describe("RoutinesStore v2 — markFired repeat advancement", () => {
       const newAt = new Date(updated!.schedule!.at!).getTime();
       expect(newAt).toBeGreaterThan(Date.now());
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -379,7 +380,7 @@ describe("RoutinesStore v2 — schedule.at ISO normalization", () => {
       // and must be in the canonical UTC "Z" form
       expect(r.schedule!.at).toMatch(/Z$/);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -397,7 +398,7 @@ describe("RoutinesStore v2 — cron validation", () => {
         }),
       ).rejects.toThrow(/invalid cron expression/);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -413,7 +414,7 @@ describe("RoutinesStore v2 — cron validation", () => {
         }),
       ).rejects.toThrow(/too long/);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -428,7 +429,7 @@ describe("RoutinesStore v2 — cron validation", () => {
       });
       expect(r.id).toBeTruthy();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -446,7 +447,7 @@ describe("RoutinesStore v2 — execution validation", () => {
         }),
       ).rejects.toThrow(/prePrompt/);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -462,7 +463,7 @@ describe("RoutinesStore v2 — execution validation", () => {
         }),
       ).rejects.toThrow(/notificationTitle/);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -488,7 +489,7 @@ describe("RoutinesStore v2 — LLM session sub-cap", () => {
         }),
       ).rejects.toThrow(/LLM session routine cap/);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -513,7 +514,7 @@ describe("RoutinesStore v2 — LLM session sub-cap", () => {
       });
       expect(r.id).toBeTruthy();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -540,7 +541,7 @@ describe("RoutinesStore v2 — advanceInterval far-past (no loop)", () => {
       const newAt = new Date(updated!.schedule!.at!).getTime();
       expect(newAt).toBeGreaterThan(farPastMs);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -577,7 +578,7 @@ describe("RoutinesStore v2 — advanceMonthly UTC correctness (DST-independence)
       } else {
         process.env.TZ = origTZ;
       }
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -617,7 +618,7 @@ describe("RoutinesStore v2 — advanceMonthly originalDay preservation (C-critic
         expect(actualDay).toBeGreaterThanOrEqual(30);
       }
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -637,7 +638,7 @@ describe("RoutinesStore v2 — advanceMonthly originalDay preservation (C-critic
       // Day should be 28 (originalDay), not clamped higher
       expect(nextAt.getUTCDate()).toBe(28);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -660,7 +661,7 @@ describe("RoutinesStore v2 — source marker", () => {
       const found = reloaded.list().find((x) => x.id === r.id);
       expect(found?.source).toBe("suggestion:local-indexer:nightly-rescan");
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -675,7 +676,7 @@ describe("RoutinesStore v2 — source marker", () => {
       });
       expect(r.source).toBeUndefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -691,7 +692,7 @@ describe("RoutinesStore v2 — source marker", () => {
       });
       expect(r.source).toBeUndefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -708,7 +709,7 @@ describe("RoutinesStore v2 — source marker", () => {
         }),
       ).rejects.toThrow(/source must be a string of at most/);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -735,7 +736,7 @@ describe("RoutinesStore v2 — source marker", () => {
       await store.load();
       expect(store.list()).toHaveLength(0);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -787,7 +788,7 @@ describe("RoutinesStore workspace scope revocation", () => {
       expect(byTitle.get("first")?.scope?.directories).toEqual([segmentSibling]);
       expect(byTitle.get("second")?.scope?.directories).toEqual([unrelated]);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
   it("preserves routine directories owned by a separately registered child root", async () => {
@@ -833,7 +834,7 @@ describe("RoutinesStore workspace scope revocation", () => {
         unrelated,
       ]);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -857,7 +858,7 @@ describe("RoutinesStore workspace scope revocation", () => {
         directoriesRemoved: 0,
       });
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });

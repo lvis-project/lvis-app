@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import type { SpawnOptionsWithoutStdio } from "node:child_process";
 import type { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import { gzipSync } from "node:zlib";
@@ -19,16 +19,20 @@ vi.mock("electron", () => ({
 }));
 
 // ─── node:fs/promises mock ────────────────────────────────────────────────────
-vi.mock("node:fs/promises", () => ({
-  access: vi.fn(),
-  readFile: vi.fn(),
-  mkdir: vi.fn().mockResolvedValue(undefined),
-  appendFile: vi.fn().mockResolvedValue(undefined),
-  writeFile: vi.fn().mockResolvedValue(undefined),
-  rename: vi.fn().mockResolvedValue(undefined),
-  chmod: vi.fn().mockResolvedValue(undefined),
-  readdir: vi.fn().mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" })),
-}));
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    access: vi.fn(),
+    readFile: vi.fn(),
+    mkdir: vi.fn().mockResolvedValue(undefined),
+    appendFile: vi.fn().mockResolvedValue(undefined),
+    writeFile: vi.fn().mockResolvedValue(undefined),
+    rename: vi.fn().mockResolvedValue(undefined),
+    chmod: vi.fn().mockResolvedValue(undefined),
+    readdir: vi.fn().mockRejectedValue(Object.assign(new Error("ENOENT"), { code: "ENOENT" })),
+  };
+});
 
 // ─── node:child_process mock ──────────────────────────────────────────────────
 vi.mock("node:child_process", () => ({
@@ -145,6 +149,7 @@ function setupPythonRuntimeSetupSpawns(): void {
 // ─── 테스트 대상 import (mock 설정 이후) ──────────────────────────────────────
 // dynamic import를 사용하지 않고 상단에서 import → vi.mock hoisting에 의존
 import { PythonRuntimeBootstrapper } from "../python-runtime.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 // ─── BrowserWindow stub ───────────────────────────────────────────────────────
 function makeBrowserWindow() {
@@ -185,10 +190,10 @@ describe("PythonRuntimeBootstrapper", () => {
     });
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks();
     while (registryTempRoots.length > 0) {
-      rmSync(registryTempRoots.pop()!, { recursive: true, force: true });
+      await cleanupTmpDir(registryTempRoots.pop()!);
     }
   });
 
@@ -591,9 +596,9 @@ describe("PythonRuntimeBootstrapper", () => {
       Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
       (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
       (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
-      rmSync(resourcesPath, { recursive: true, force: true });
-      rmSync(uvRuntimeDir, { recursive: true, force: true });
-      rmSync(manifestRoot, { recursive: true, force: true });
+      await cleanupTmpDir(resourcesPath);
+      await cleanupTmpDir(uvRuntimeDir);
+      await cleanupTmpDir(manifestRoot);
     }
   });
 
@@ -625,8 +630,8 @@ describe("PythonRuntimeBootstrapper", () => {
     } finally {
       (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
       (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
-      rmSync(resourcesPath, { recursive: true, force: true });
-      rmSync(uvRuntimeDir, { recursive: true, force: true });
+      await cleanupTmpDir(resourcesPath);
+      await cleanupTmpDir(uvRuntimeDir);
     }
   });
 
@@ -656,8 +661,8 @@ describe("PythonRuntimeBootstrapper", () => {
     } finally {
       (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
       (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
-      rmSync(resourcesPath, { recursive: true, force: true });
-      rmSync(uvRuntimeDir, { recursive: true, force: true });
+      await cleanupTmpDir(resourcesPath);
+      await cleanupTmpDir(uvRuntimeDir);
     }
   });
 
@@ -702,9 +707,9 @@ describe("PythonRuntimeBootstrapper", () => {
     } finally {
       (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
       (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
-      rmSync(resourcesPath, { recursive: true, force: true });
-      rmSync(uvRuntimeDir, { recursive: true, force: true });
-      rmSync(pluginRoot, { recursive: true, force: true });
+      await cleanupTmpDir(resourcesPath);
+      await cleanupTmpDir(uvRuntimeDir);
+      await cleanupTmpDir(pluginRoot);
     }
   });
 
@@ -1044,9 +1049,9 @@ describe("PythonRuntimeBootstrapper", () => {
       } finally {
         (process as { defaultApp?: boolean }).defaultApp = originalDefaultApp;
         (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath = originalResourcesPath;
-        rmSync(resourcesPath, { recursive: true, force: true });
-        rmSync(uvRuntimeDir, { recursive: true, force: true });
-        rmSync(manifestRoot, { recursive: true, force: true });
+        await cleanupTmpDir(resourcesPath);
+        await cleanupTmpDir(uvRuntimeDir);
+        await cleanupTmpDir(manifestRoot);
       }
     });
 

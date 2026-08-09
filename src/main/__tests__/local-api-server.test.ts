@@ -15,7 +15,7 @@
  * with no leaked handles.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -37,6 +37,7 @@ import type { FeatureFlags, SystemSettings } from "../../data/settings-store.js"
 import type { ApprovalGate } from "../../permissions/approval-gate.js";
 import type { A2AHttpRouter } from "../../api/a2a-router.js";
 import { PERMISSIONS, EXTERNAL_MUTATION_DENIED } from "../../contract/app-contract.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 /** Minimal SettingsService stub for the independently snapshotted route gates. */
 function stubSettings(
@@ -158,7 +159,7 @@ describe("local-api-server", () => {
     else process.env.LVIS_LOCAL_API = prevEnvFlag;
     if (prevA2AEnvFlag === undefined) delete process.env.LVIS_A2A;
     else process.env.LVIS_A2A = prevA2AEnvFlag;
-    rmSync(home, { recursive: true, force: true });
+    await cleanupTmpDir(home);
   });
 
   describe("gate", () => {

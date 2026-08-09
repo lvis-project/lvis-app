@@ -9,7 +9,7 @@
  * share changed", and only the real document has a poll offset in it.
  */
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -19,6 +19,7 @@ import {
 import { createTelegramShareChangeWatcher } from "../telegram-share-identity.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
 import { conversationDigestFor, namespaceAt } from "./telegram-connection-namespace.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const RAW_CONVERSATION_ID = "sentinel-share-identity-conversation-7c19";
 const AWAY_SCOPE = "/srv/away-share-scope";
@@ -38,9 +39,9 @@ const CODE_AGAIN = "c1".repeat(32);
 
 let scratchDirectories: string[] = [];
 
-afterEach(() => {
+afterEach(async () => {
   for (const directory of scratchDirectories) {
-    rmSync(directory, { recursive: true, force: true });
+    await cleanupTmpDir(directory);
   }
   scratchDirectories = [];
 });

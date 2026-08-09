@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writePermissionSettings } from "../../permissions/permission-settings-store.js";
@@ -9,6 +9,7 @@ import {
   resolveAuthorizedWorkspaceProject,
 } from "../project-root-authorization.js";
 import { projectRootEquals } from "../../shared/project-identity.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let oldHome: string | undefined;
 let oldCwd: string;
@@ -26,11 +27,11 @@ beforeEach(() => {
   process.chdir(workspace);
 });
 
-afterEach(() => {
+afterEach(async () => {
   process.chdir(oldCwd);
   if (oldHome === undefined) delete process.env.LVIS_HOME;
   else process.env.LVIS_HOME = oldHome;
-  rmSync(root, { recursive: true, force: true });
+  await cleanupTmpDir(root);
 });
 
 describe("project root authorization", () => {
