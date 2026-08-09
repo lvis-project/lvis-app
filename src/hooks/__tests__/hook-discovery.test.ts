@@ -9,11 +9,11 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   buildAcceptedAtMap,
   diffAgainstLockfile,
@@ -33,8 +33,8 @@ beforeEach(() => {
   tmpDir = mkdtempSync(join(tmpdir(), "permission-policy-p4-hd-"));
 });
 
-afterEach(() => {
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+afterEach(async () => {
+  if (tmpDir) await cleanupTmpDir(tmpDir);
 });
 
 function writeHook(dir: string, name: string, body: string): string {

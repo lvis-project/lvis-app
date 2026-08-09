@@ -1,7 +1,8 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   acceptHookTrust,
   disableHookTrust,
@@ -23,8 +24,8 @@ beforeEach(() => {
   lockfilePath = join(hooksDir, ".lockfile.json");
 });
 
-afterEach(() => {
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+afterEach(async () => {
+  if (tmpDir) await cleanupTmpDir(tmpDir);
 });
 
 function opts() {

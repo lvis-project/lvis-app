@@ -9,10 +9,10 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
-  rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   runHookTrustWorkflow,
   type TrustPromptDecision,
@@ -33,8 +33,8 @@ beforeEach(() => {
   disabledDir = join(hooksDir, ".disabled");
 });
 
-afterEach(() => {
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+afterEach(async () => {
+  if (tmpDir) await cleanupTmpDir(tmpDir);
 });
 
 function makeDispatcher(decisions: TrustPromptDecision[]): TrustPromptDispatcher {
