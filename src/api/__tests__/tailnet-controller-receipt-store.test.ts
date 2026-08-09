@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import {
   TailnetControllerReceiptStore,
   type TailnetControllerReceiptReservation,
 } from "../tailnet-controller-receipt-store.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const OWNER_ONE = "00000000-0000-4000-8000-000000000001";
 const OWNER_TWO = "00000000-0000-4000-8000-000000000002";
@@ -36,8 +37,8 @@ function reservation(overrides: Partial<TailnetControllerReceiptReservation> = {
   };
 }
 
-afterEach(() => {
-  for (const directory of scratchDirs.splice(0)) rmSync(directory, { recursive: true, force: true });
+afterEach(async () => {
+  for (const directory of scratchDirs.splice(0)) await cleanupTmpDir(directory);
 });
 
 describe("Tailnet controller receipt store", () => {
