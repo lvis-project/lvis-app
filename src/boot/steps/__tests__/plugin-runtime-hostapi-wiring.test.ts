@@ -14,11 +14,20 @@
  * The captured-runtime-options pattern mirrors the sibling harness so the
  * initPluginRuntime call shape stays type-compatible.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+
+const tmpDirs = new Set<string>();
+
+function trackTmpDir(dir: string): string {
+  tmpDirs.add(dir);
+  return dir;
+}
 
 const runtimeTestState = vi.hoisted(() => ({
   browserWindows: [] as Array<{ isDestroyed: () => boolean; webContents: { send: (channel: string, payload: unknown) => void };
@@ -259,6 +268,13 @@ beforeEach(() => {
   runtimeTestState.spawnWorker.mockReset();
 });
 
+afterEach(async () => {
+  for (const dir of tmpDirs) {
+    await cleanupTmpDir(dir);
+  }
+  tmpDirs.clear();
+});
+
 describe("HostApi.config.get merged-read precedence", () => {
   it("fails clearly when immutable install provenance is omitted", async () => {
     const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
@@ -272,7 +288,7 @@ describe("HostApi.config.get merged-read precedence", () => {
     expect(() => invokeWithoutInstallId(
       "plugin-a",
       { id: "plugin-a", config: {} },
-      mkdtempSync("/tmp/lvis-missing-provenance-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-missing-provenance-")),
       activeIncarnation(),
     )).toThrow(/HostApi install provenance missing: plugin-a/);
     expect(runtimeTestState.runtime.resolvePluginInstallId).not.toHaveBeenCalled();
@@ -290,7 +306,7 @@ describe("HostApi.config.get merged-read precedence", () => {
     const api = createHostApi(
       "plugin-a",
       { id: "plugin-a", config: { a: "m", shared: "m" } },
-      mkdtempSync("/tmp/lvis-cfg-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-cfg-")),
       activeIncarnation(),
       "plugin-a",
     );
@@ -320,7 +336,7 @@ describe("HostApi.config.get merged-read precedence", () => {
           },
         },
       },
-      mkdtempSync("/tmp/lvis-cfg-def-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-cfg-def-")),
       activeIncarnation(),
       "plugin-a",
     );
@@ -342,8 +358,12 @@ describe("HostApi.storage containment refusals reach the boot audit log", () => 
 
   it("routes a symlink escape through the shared plugin-runtime audit sink", async () => {
     const createHostApi = await initAndGetFactory(makeSettingsService(new Map()));
-    const dataDir = mkdtempSync(join(tmpdir(), "lvis-storage-audit-boot-"));
-    const outsideDir = mkdtempSync(join(tmpdir(), "lvis-storage-audit-boot-out-"));
+    const dataDir = trackTmpDir(
+      mkdtempSync(join(tmpdir(), "lvis-storage-audit-boot-")),
+    );
+    const outsideDir = trackTmpDir(
+      mkdtempSync(join(tmpdir(), "lvis-storage-audit-boot-out-")),
+    );
     writeFileSync(join(outsideDir, "secret.txt"), "shhh", "utf-8");
     symlinkSync(outsideDir, join(dataDir, "escape"), dirLinkType);
 
@@ -384,7 +404,7 @@ describe("HostApi.storage containment refusals reach the boot audit log", () => 
     const api = createHostApi(
       "plugin-a",
       { id: "plugin-a", config: {} },
-      mkdtempSync(join(tmpdir(), "lvis-storage-audit-ok-")),
+      trackTmpDir(mkdtempSync(join(tmpdir(), "lvis-storage-audit-ok-"))),
       activeIncarnation(),
       "plugin-a",
     );
@@ -415,7 +435,7 @@ describe("HostApi.config.set round-trip", () => {
     return createHostApi(
       "plugin-a",
       activeManifest,
-      mkdtempSync("/tmp/lvis-cfg-set-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-cfg-set-")),
       {
         registerDisposer: vi.fn(),
         trackOperation: <T>(operation: Promise<T>) => operation,
@@ -463,7 +483,7 @@ describe("HostApi.config.set round-trip", () => {
     const api = createHostApi(
       "plugin-a",
       activeManifest,
-      mkdtempSync("/tmp/lvis-cfg-secret-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-cfg-secret-")),
       activeIncarnation(),
       "plugin-a",
     );
@@ -493,15 +513,19 @@ describe("HostApi.config.set round-trip", () => {
     await lockEntered;
 
     const write = api.config.set("k", "stale");
-    await Promise.resolve();
-    expect(settings.setPluginConfig).not.toHaveBeenCalled();
+    try {
+      await Promise.resolve();
+      expect(settings.setPluginConfig).not.toHaveBeenCalled();
 
-    runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
-    expect(() => api.config.get("k")).toThrow(
-      /plugin instance is no longer active/,
-    );
-    release();
-    await uninstall;
+      runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
+      expect(() => api.config.get("k")).toThrow(
+        /plugin instance is no longer active/,
+      );
+    } finally {
+      release();
+      await uninstall;
+      await write.catch(() => {});
+    }
     await expect(write).rejects.toThrow(/plugin instance is no longer active/);
     expect(settings.setPluginConfig).not.toHaveBeenCalled();
     expect(runtimeTestState.runtime.restartPlugin).not.toHaveBeenCalled();
@@ -516,7 +540,7 @@ describe("HostApi.config.set round-trip", () => {
     const api = createHostApi(
       "plugin-a",
       activeManifest,
-      mkdtempSync("/tmp/lvis-cfg-lifecycle-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-cfg-lifecycle-")),
       {
         registerDisposer: vi.fn(),
         trackOperation,
@@ -596,7 +620,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     const api = createHostApi(
       "ms-graph",
       { id: "ms-graph", config: {}, capabilities: [] },
-      mkdtempSync("/tmp/lvis-candidate-event-grant-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-candidate-event-grant-")),
       activeIncarnation(),
       "ms-graph",
       { installSource: "admin", manifestSha256: "candidate-sha" },
@@ -646,7 +670,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     const api = createHostApi(
       pluginId,
       manifest,
-      mkdtempSync("/tmp/lvis-hostapi-alias-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-alias-")),
       activeIncarnation(),
       installAlias,
     );
@@ -675,7 +699,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     const api = createHostApi(
       pluginId,
       manifest,
-      mkdtempSync("/tmp/lvis-hostapi-fresh-admin-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-fresh-admin-")),
       activeIncarnation(),
       "marketplace-fresh-admin",
       { installSource: "admin", manifestSha256 },
@@ -692,7 +716,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     const api = createHostApi(
       "plugin-a",
       { id: "plugin-a", config: {}, capabilities: [] },
-      mkdtempSync("/tmp/lvis-evt-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-evt-")),
       activeIncarnation(),
       "plugin-a",
     );
@@ -734,7 +758,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     const api = createHostApi(
       "plugin-a",
       { id: "plugin-a", config: {} },
-      mkdtempSync("/tmp/lvis-issued-capabilities-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-issued-capabilities-")),
       {
         registerDisposer: (dispose) => disposers.push(dispose),
         trackOperation: <T>(operation: Promise<T>) => operation,
@@ -805,7 +829,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
         capabilities: ["mail-source"],
         emittedEvents: ["plugin-a.updated"],
       },
-      mkdtempSync("/tmp/lvis-emit-denied-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-emit-denied-")),
       activeIncarnation(),
       "plugin-a",
     );
@@ -845,7 +869,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
     const api = createHostApi(
       "plugin-a",
       { id: "plugin-a", config: {}, emittedEvents: ["plugin-a.updated"] },
-      mkdtempSync("/tmp/lvis-revoked-hostapi-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-revoked-hostapi-")),
       {
         registerDisposer: vi.fn(),
         trackOperation: <T>(operation: Promise<T>) => operation,

@@ -8,8 +8,17 @@
  * CURRENT observable behavior: capability-denied throws, invalid-partition
  * throws, and a valid clearAuthPartition delegates to the injected service.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
+
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+
+const tmpDirs = new Set<string>();
+
+function trackTmpDir(dir: string): string {
+  tmpDirs.add(dir);
+  return dir;
+}
 
 const runtimeTestState = vi.hoisted(() => ({
   capturedRuntimeOptions: null as Record<string, unknown> | null,
@@ -158,13 +167,20 @@ beforeEach(() => {
   runtimeTestState.clearAuthPartitionService.mockClear();
 });
 
+afterEach(async () => {
+  for (const dir of tmpDirs) {
+    await cleanupTmpDir(dir);
+  }
+  tmpDirs.clear();
+});
+
 describe("HostApi openAuthWindow capability gate", () => {
   it("rejects when the manifest has not declared external-auth-consumer", async () => {
     const createHostApi = await initAndGetFactory();
     const api = createHostApi(
       "plugin-a",
       { id: "plugin-a", config: {}, capabilities: [] },
-      mkdtempSync("/tmp/lvis-auth-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-auth-")),
       ACTIVE_INCARNATION,
       "plugin-a",
     );
@@ -180,7 +196,7 @@ describe("HostApi clearAuthPartition capability + partition gates", () => {
     const api = createHostApi(
       "plugin-a",
       { id: "plugin-a", config: {}, capabilities: [] },
-      mkdtempSync("/tmp/lvis-auth-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-auth-")),
       ACTIVE_INCARNATION,
       "plugin-a",
     );
@@ -195,7 +211,7 @@ describe("HostApi clearAuthPartition capability + partition gates", () => {
     const api = createHostApi(
       "plugin-a",
       { id: "plugin-a", config: {}, capabilities: ["external-auth-consumer"] },
-      mkdtempSync("/tmp/lvis-auth-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-auth-")),
       ACTIVE_INCARNATION,
       "plugin-a",
     );
@@ -210,7 +226,7 @@ describe("HostApi clearAuthPartition capability + partition gates", () => {
     const api = createHostApi(
       "plugin-a",
       { id: "plugin-a", config: {}, capabilities: ["external-auth-consumer"] },
-      mkdtempSync("/tmp/lvis-auth-"),
+      trackTmpDir(mkdtempSync("/tmp/lvis-auth-")),
       ACTIVE_INCARNATION,
       "plugin-a",
     );

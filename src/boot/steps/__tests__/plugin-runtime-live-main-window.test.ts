@@ -14,10 +14,19 @@
  * `createHostApiFactory` directly, so deleting `getMainWindow` from the
  * `createHostApiFactory({...})` call site is caught here.
  */
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+
+const tmpDirs = new Set<string>();
+
+function trackTmpDir(dir: string): string {
+  tmpDirs.add(dir);
+  return dir;
+}
 
 const runtimeTestState = vi.hoisted(() => ({
   browserWindows: [] as unknown[],
@@ -178,7 +187,7 @@ async function overlayHostApi(input: {
   return createHostApi!(
     "plugin-a",
     { id: "plugin-a", capabilities: ["host:overlay"] },
-    mkdtempSync(join(tmpdir(), "lvis-overlay-win-")),
+    trackTmpDir(mkdtempSync(join(tmpdir(), "lvis-overlay-win-"))),
     {
       registerDisposer: vi.fn(),
       trackOperation: <T>(operation: Promise<T>) => operation,
@@ -193,6 +202,13 @@ beforeEach(() => {
   runtimeTestState.readPluginRegistry.mockReset();
   runtimeTestState.readPluginRegistry.mockResolvedValue({ version: 1, plugins: [] });
   runtimeTestState.runtime.getPluginManifest.mockReturnValue(null);
+});
+
+afterEach(async () => {
+  for (const dir of tmpDirs) {
+    await cleanupTmpDir(dir);
+  }
+  tmpDirs.clear();
 });
 
 describe("hostApi.triggerConversation overlay send targets the live main window", () => {
