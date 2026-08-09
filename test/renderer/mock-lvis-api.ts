@@ -175,9 +175,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const viewHandlers = new Set<(v: string, settingsTab?: string) => void>();
   const settingsUpdatedHandlers = new Set<(settings: unknown) => void>();
   const subscriptionRuntimeStatusUpdatedHandlers = new Set<(event: SubscriptionRuntimeStatusUpdatedEvent) => void>();
-  const settingsWindowSavedHandlers = new Set<() => void>();
   const personaPromptsUpdatedHandlers = new Set<() => void>();
-  const settingsWindowTabHandlers = new Set<(tab: string) => void>();
   const askUserQuestionHandlers = new Set<(r: unknown) => void>();
   const tourStartHandlers = new Set<(payload: { scenarioId: string }) => void>();
   const bootstrapStatusHandlers = new Set<(status: unknown) => void>();
@@ -269,22 +267,6 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     setMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
     hasMarketplaceApiKey: vi.fn(async () => false),
     deleteMarketplaceApiKey: vi.fn(async () => ({ ok: true })),
-    openSettingsWindow: vi.fn(async (initialTab?: string) => {
-      if (initialTab) settingsWindowTabHandlers.forEach((handler) => handler(initialTab));
-      return { ok: true, windowId: 2 };
-    }),
-    notifySettingsWindowSaved: vi.fn(async () => {
-      settingsWindowSavedHandlers.forEach((handler) => handler());
-      return { ok: true };
-    }),
-    onSettingsWindowSaved: vi.fn((handler: () => void) => {
-      settingsWindowSavedHandlers.add(handler);
-      return () => settingsWindowSavedHandlers.delete(handler);
-    }),
-    onSettingsWindowTab: vi.fn((handler: (tab: string) => void) => {
-      settingsWindowTabHandlers.add(handler);
-      return () => settingsWindowTabHandlers.delete(handler);
-    }),
     listMcpCatalog: vi.fn(async () => []),
     installMcpFromMarketplace: vi.fn(async (slug: string) => ({
       ok: true,
@@ -501,15 +483,9 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     }),
     openExternalUrl: vi.fn(async () => ({ ok: true })),
     window: {
-      closeDetached: vi.fn(async () => ({ ok: true })),
-      listDetached: vi.fn(async () => []),
       openHtmlPreview: vi.fn(async () => ({ ok: true, windowId: 2 })),
-      onSnapEdge: vi.fn(() => () => {}),
-      onDetachedNavigate: vi.fn(() => () => {}),
-      loadSessionInMain: vi.fn(async () => ({ ok: true })),
       resizeForMode: vi.fn(async () => ({ ok: true })),
       resizeForSidePanel: vi.fn(async () => ({ ok: true })),
-      onLoadSessionInMain: vi.fn(() => () => {}),
     },
 
     getRecentNotes: vi.fn(async () => []),

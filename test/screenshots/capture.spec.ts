@@ -51,26 +51,6 @@ for (const [key, entry] of Object.entries(scenarios)) {
       throw new Error(`scenario "${key}" has neither "skip" nor "steps" — matrix.ts entry is incomplete`);
     }
 
-    // The settings scenario opens a NATIVE second window (not a view inside
-    // mainWindow) — capture it via the window that steps() causes to open,
-    // mirroring test/e2e/ui/settings-window.ts's openSettingsWindow helper.
-    if (key === '_smoke-settings-llm') {
-      const settingsWindowPromise = app.waitForEvent('window', { timeout: 10_000 });
-      await entry.steps({ app, page: mainWindow });
-      const settingsWindow = await settingsWindowPromise;
-      await settingsWindow.waitForLoadState('domcontentloaded');
-      await settingsWindow.setViewportSize({ width: 1200, height: 800 });
-      await settingsWindow.getByTestId('settings-sidebar-heading').waitFor({
-        state: 'visible',
-        timeout: 10_000,
-      });
-      await settingsWindow.addStyleTag({
-        content: `*, *::before, *::after { transition-duration: 0ms !important; animation-duration: 0ms !important; caret-color: transparent !important; }`,
-      });
-      await settingsWindow.screenshot({ path: path.join(OUT_DIR, `${key}.png`) });
-      return;
-    }
-
     await entry.steps({ app, page: mainWindow });
 
     const target = entry.locator ? mainWindow.locator(entry.locator).first() : mainWindow;

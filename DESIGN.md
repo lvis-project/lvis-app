@@ -121,7 +121,7 @@ Plugin UIs are **free**: the SDK ships no UI components, tokens, or style checks
 
 ### Chrome ownership
 - The host draws the page chrome: sidebar entry, `PageShell` title/back control for plugin pages, and panel framing. **Do not draw a second page title bar or back button inside your panel** — your surface starts inside the content area.
-- Detached windows and side-panel docking are host decisions; the same panel markup must work in both.
+- Inline, fullscreen, picture-in-picture, and side-panel presentation are host decisions; the same panel markup must work across them.
 
 ### Mandatory / recommended / free
 | Level | Items |

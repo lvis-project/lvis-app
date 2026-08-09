@@ -1,7 +1,7 @@
 import { test, expect } from './fixtures';
 import path from 'node:path';
 import fs from 'node:fs';
-import { closeSettingsWindow, openSettingsWindow } from './settings-window';
+import { closeInlineSettings, openInlineSettings } from './inline-settings.js';
 
 /**
  * Settings save + reload persistence through the always-inline settings panel
@@ -29,8 +29,8 @@ test('immediate-apply toggle persists privacy redaction without explicit Save', 
   t,
 }) => {
   const settingsPath = path.join(userDataDir, 'lvis-settings.json');
-  const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
-  const redactToggle = settingsWindow.getByRole('checkbox', {
+  const settingsPage = await openInlineSettings(app, mainWindow, 'chat');
+  const redactToggle = settingsPage.getByRole('checkbox', {
     name: t('privacyTab.piiRedactToggleLabel'),
   });
 
@@ -59,17 +59,17 @@ test('immediate-apply toggle persists privacy redaction without explicit Save', 
 
   // PR #780 design: save does NOT close the surface. Close it explicitly before
   // reopening so the rehydrate assertion sees a fresh mount.
-  // (settingsWindow === mainWindow now, so a raw `.close()` would tear down
+  // (settingsPage === mainWindow now, so a raw `.close()` would tear down
   // the whole app — use the title-bar close button instead.)
-  await closeSettingsWindow(app, settingsWindow);
+  await closeInlineSettings(app, settingsPage);
 
-  const reopenedSettingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
+  const reopenedSettingsPage = await openInlineSettings(app, mainWindow, 'chat');
   await expect(
-    reopenedSettingsWindow.getByRole('checkbox', {
+    reopenedSettingsPage.getByRole('checkbox', {
       name: t('privacyTab.piiRedactToggleLabel'),
     }),
   ).toHaveAttribute('aria-checked', 'true');
-  await closeSettingsWindow(app, reopenedSettingsWindow);
+  await closeInlineSettings(app, reopenedSettingsPage);
 });
 
 
@@ -78,8 +78,8 @@ test('inline close flushes a pending immediate-apply setting', async ({
   mainWindow,
   t,
 }) => {
-  const settingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
-  const redactToggle = settingsWindow.getByRole('checkbox', {
+  const settingsPage = await openInlineSettings(app, mainWindow, 'chat');
+  const redactToggle = settingsPage.getByRole('checkbox', {
     name: t('privacyTab.piiRedactToggleLabel'),
   });
 
@@ -92,13 +92,13 @@ test('inline close flushes a pending immediate-apply setting', async ({
 
   // Do not wait for the 200ms debounce: the inline close path must flush it
   // before unmount cleanup can cancel the pending timer.
-  await closeSettingsWindow(app, settingsWindow);
+  await closeInlineSettings(app, settingsPage);
 
-  const reopenedSettingsWindow = await openSettingsWindow(app, mainWindow, 'chat');
+  const reopenedSettingsPage = await openInlineSettings(app, mainWindow, 'chat');
   await expect(
-    reopenedSettingsWindow.getByRole('checkbox', {
+    reopenedSettingsPage.getByRole('checkbox', {
       name: t('privacyTab.piiRedactToggleLabel'),
     }),
   ).toHaveAttribute('aria-checked', nextState);
-  await closeSettingsWindow(app, reopenedSettingsWindow);
+  await closeInlineSettings(app, reopenedSettingsPage);
 });

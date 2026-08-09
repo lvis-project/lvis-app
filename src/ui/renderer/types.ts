@@ -753,10 +753,6 @@ export type LvisApi = {
     >;
     onStart: (handler: (payload: { scenarioId: string }) => void) => () => void;
   };
-  openSettingsWindow: (initialTab?: string) => Promise<{ ok: true } | { ok: false; error: string }>;
-  notifySettingsWindowSaved: () => Promise<{ ok: true } | { ok: false; error: string }>;
-  onSettingsWindowSaved: (handler: () => void) => () => void;
-  onSettingsWindowTab: (handler: (initialTab: string) => void) => () => void;
   /** Open an http(s) URL in the system browser. Main-side rejects any other scheme. */
   openExternalUrl: (url: string) => Promise<{
     ok: boolean;
@@ -1905,7 +1901,7 @@ export type LvisMcpApi = {
    */
   // OPTIONAL for the same reason `listResourceTemplates` is: the picker guards each
   // channel per row KIND, and a required type makes that guard unreachable — dead code
-  // by the type, on a surface tests and detached windows really do build partially.
+  // by the type, while tests and reduced harness surfaces build the API partially.
   attachResource?: (
     serverId: string,
     uri: string,

@@ -101,63 +101,6 @@ describe("PluginAuthSection", () => {
     expect(onRefresh).toHaveBeenCalled();
   });
 
-  it("opens provided login UI instead of invoking loginTool", async () => {
-    const api = pluginAuthSectionApi();
-    const onOpenLoginUi = vi.fn(async () => ({ ok: true }));
-    const onRefresh = vi.fn();
-    render(
-      <PluginAuthSection
-        api={api}
-        pluginId="detached-plugin"
-        pluginName="Detached Plugin"
-        auth={{ ...baseAuth, loginTool: "detached_login" }}
-        state={{ kind: "unauthed" }}
-        onOpenLoginUi={onOpenLoginUi}
-        onRefresh={onRefresh}
-      />,
-    );
-
-    expect(screen.getByTestId("plugin-auth-login-detached-plugin")).toHaveTextContent("로그인 창 열기");
-    fireEvent.click(screen.getByTestId("plugin-auth-login-detached-plugin"));
-    await waitFor(() => {
-      expect(onOpenLoginUi).toHaveBeenCalledOnce();
-    });
-    expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "detached_login")).toBe(
-      false,
-    );
-    expect(onRefresh).not.toHaveBeenCalled();
-  });
-
-  it("renders an error when the provided login UI opener returns ok=false", async () => {
-    const api = pluginAuthSectionApi();
-    const onOpenLoginUi = vi.fn(async () => ({ ok: false as const, error: "window denied" }));
-    const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    try {
-      render(
-        <PluginAuthSection
-          api={api}
-          pluginId="detached-plugin"
-          pluginName="Detached Plugin"
-          auth={{ ...baseAuth, loginTool: "detached_login" }}
-          state={{ kind: "unauthed" }}
-          onOpenLoginUi={onOpenLoginUi}
-          onRefresh={() => undefined}
-        />,
-      );
-
-      fireEvent.click(screen.getByTestId("plugin-auth-login-detached-plugin"));
-      await waitFor(() => {
-        expect(screen.getByText(/로그인에 실패했습니다/)).toBeInTheDocument();
-      });
-      expect(onOpenLoginUi).toHaveBeenCalledOnce();
-      expect(api.callPluginMethod.mock.calls.some(([tool]) => tool === "detached_login")).toBe(
-        false,
-      );
-    } finally {
-      consoleSpy.mockRestore();
-    }
-  });
-
   it("invokes logoutTool + onRefresh when 로그아웃 clicked", async () => {
     const api = pluginAuthSectionApi();
     const onRefresh = vi.fn();

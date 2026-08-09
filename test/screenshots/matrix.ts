@@ -1,4 +1,5 @@
 import type { ElectronApplication, Page } from 'playwright';
+import { openInlineSettings } from '../e2e/ui/inline-settings.js';
 
 /**
  * Data-driven scenario matrix: one entry per docs-site screenshot key
@@ -64,8 +65,8 @@ async function openWorkMode(page: Page): Promise<void> {
  * `slash-picker-cat-plugin` category → the plugin's row (matched by its
  * manifest displayName label) → `onSelectPlugin(viewKey)`. In WORK mode (the
  * harness default) `handleViewSelect` opens the panel INLINE via `setActiveView`
- * (chat mode would detach into a separate window), so the webview mounts inside
- * mainWindow and is screenshottable.
+ * in the main renderer, so the webview mounts inside mainWindow and is
+ * screenshottable in either workspace mode.
  *
  * The plugin UI loads inside an Electron <webview> (plugin-ui-host.tsx) whose
  * guest content is the plugin's real bundle served over `lvis-plugin://asset`.
@@ -376,19 +377,9 @@ export const scenarios: Record<string, ScenarioEntry> = {
   // settings surface renders. Not written into the docs `shots` map.
   '_smoke-settings-llm': {
     topic: '_smoke',
-    steps: async ({ page }) => {
-      const result = await page.evaluate(async () => {
-        const api = (window as unknown as {
-          lvisApi?: { openSettingsWindow?: (tab?: string) => Promise<{ ok: boolean; error?: string }> };
-        }).lvisApi;
-        if (!api?.openSettingsWindow) return { ok: false, error: 'lvisApi.openSettingsWindow missing' };
-        return api.openSettingsWindow('llm');
-      });
-      if (!result.ok) throw new Error(`openSettingsWindow failed: ${result.error ?? 'unknown'}`);
+    steps: async ({ app, page }) => {
+      await openInlineSettings(app, page, 'llm');
     },
-    // This scenario opens a NEW window (native settings window), so its
-    // capture is handled specially in capture.spec.ts rather than via the
-    // generic page-locator path other entries use.
   },
 };
 

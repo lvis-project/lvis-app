@@ -47,7 +47,6 @@ function makeCapturedApi(): CapturedApi {
       };
     },
     onChatFallback: noop,
-    onLoadSessionInMain: noop,
     onLogEntry: noop,
     onPluginInstallProgress: noop,
     onPluginInstallResult: noop,

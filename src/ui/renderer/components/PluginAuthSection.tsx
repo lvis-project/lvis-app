@@ -4,23 +4,12 @@ import { useTranslation } from "../../../i18n/react.js";
 import type { PluginAuthState } from "../hooks/use-plugin-auth-status.js";
 import type { LvisApi, PluginAuthSummary } from "../types.js";
 
-function isOpenLoginUiFailure(result: unknown): result is { ok: false; error?: string } {
-  return typeof result === "object" && result !== null && (result as { ok?: unknown }).ok === false;
-}
-
 interface PluginAuthSectionProps {
   api: LvisApi;
   pluginId: string;
   pluginName: string;
   auth: PluginAuthSummary;
   state: PluginAuthState;
-  /**
-   * Optional opener for plugins whose login surface lives inside a declared
-   * detached plugin UI. When present, the login button opens that UI instead
-   * of invoking loginTool without the payload the plugin UI is meant to
-   * collect.
-   */
-  onOpenLoginUi?: () => Promise<unknown> | unknown;
   /**
    * Called after a successful login/logout invocation. Owner is expected to
    * re-fetch the auth status — typically a thin wrapper around the
@@ -37,7 +26,6 @@ export function PluginAuthSection({
   pluginName,
   auth,
   state,
-  onOpenLoginUi,
   onRefresh,
 }: PluginAuthSectionProps) {
   const { t } = useTranslation();
@@ -57,15 +45,8 @@ export function PluginAuthSection({
     setLocalError(null);
     setWorking(true);
     try {
-      if (onOpenLoginUi) {
-        const result = await onOpenLoginUi();
-        if (isOpenLoginUiFailure(result)) {
-          throw new Error(result.error?.trim() || "detached login window failed");
-        }
-      } else {
-        await api.callPluginMethod(auth.loginTool, undefined, { userAction: true });
-        onRefresh();
-      }
+      await api.callPluginMethod(auth.loginTool, undefined, { userAction: true });
+      onRefresh();
     } catch (err) {
       // Generic user-facing copy + log raw error to the console for support
       // triage. Avoids leaking IPC reject internals (e.g.
@@ -75,7 +56,7 @@ export function PluginAuthSection({
     } finally {
       setWorking(false);
     }
-  }, [api, auth.loginTool, onOpenLoginUi, onRefresh, pluginId, t]);
+  }, [api, auth.loginTool, onRefresh, pluginId, t]);
 
   const handleLogout = useCallback(async () => {
     if (!auth.logoutTool) return;
@@ -145,7 +126,7 @@ export function PluginAuthSection({
               disabled={working}
               data-testid={`plugin-auth-login-${pluginId}`}
             >
-              {working ? t("pluginAuthSection.loggingIn") : onOpenLoginUi ? t("pluginAuthSection.openLoginWindow") : t("pluginAuthSection.loginButton")}
+              {working ? t("pluginAuthSection.loggingIn") : t("pluginAuthSection.loginButton")}
             </Button>
           )}
         </div>

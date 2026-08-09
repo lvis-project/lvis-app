@@ -690,20 +690,12 @@ export function App() {
     setSidePanelOpen((open) => !open);
   }, [activeView, setSidePanelOpen]);
 
-  // Inline settings save → refresh the same live state the detached window's
-  // onSettingsWindowSaved listener refreshes (api key + LLM settings), without
-  // an IPC round-trip since the content renders in-process.
+  // Settings renders in-process, so a successful save refreshes the live API
+  // key and model state directly without a cross-window notification hop.
   const handleInlineSettingsSaved = useCallback(() => {
     void checkApiKey();
     void refreshLlmSettings();
   }, [checkApiKey, refreshLlmSettings]);
-
-  useEffect(() => {
-    return api.onSettingsWindowSaved(() => {
-      void checkApiKey();
-      void refreshLlmSettings();
-    });
-  }, [api, checkApiKey, refreshLlmSettings]);
 
   // Composer send pipeline. Owns handleAsk (+ its turnRequestRef guard) and
   // writes handleAskRef.current each render so the forward-ref cycle with

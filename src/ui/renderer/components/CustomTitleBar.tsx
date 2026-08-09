@@ -211,9 +211,9 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
           still span the FULL band height (h-11) so their hover fill reaches the
           band's top and bottom edges. `ml-auto` pins the cluster to the trailing
           corner directly — robust whether or not `children` are present. The
-          main window passes a `flex-1` MainToolbar that eats the leading slack,
-          and the detached / settings windows pass NO children, so without this
-          the cluster would strand flush-left in those windows. */}
+          main window passes a `flex-1` MainToolbar that eats the leading slack;
+          without children, `ml-auto` still prevents the cluster from stranding
+          flush-left. */}
       <div
         className="ml-auto flex h-11 items-stretch"
         style={{

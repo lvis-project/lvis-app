@@ -18,8 +18,8 @@ import type { BrowserWindow, Tray } from "electron";
 import type { WindowManager } from "./window-manager.js";
 import type { AppServices } from "../boot.js";
 
-// Tab detach + magnetic snap — created before createWindow() so it is ready
-// when the main window is registered.
+// Main-window identity and mode-driven bounds manager. Created before
+// createWindow() so it is ready when the main window is registered.
 let windowManager: WindowManager | null = null;
 export function getWindowManager(): WindowManager | null {
   return windowManager;
@@ -34,14 +34,6 @@ export function getMainWindow(): BrowserWindow | null {
 }
 export function setMainWindow(value: BrowserWindow | null): void {
   mainWindow = value;
-}
-
-let settingsWindow: BrowserWindow | null = null;
-export function getSettingsWindow(): BrowserWindow | null {
-  return settingsWindow;
-}
-export function setSettingsWindow(value: BrowserWindow | null): void {
-  settingsWindow = value;
 }
 
 let tray: Tray | null = null;

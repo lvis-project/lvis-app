@@ -25,7 +25,7 @@ const ThemeContext = createContext<ThemeContextValue | null>(null);
  * also paints documentElement tokens for the same payload before React
  * mounts, so reading bundleId here lets ThemeProvider's first render agree
  * with what's already on screen — eliminating the async hydrate race that
- * left detached BrowserWindows with the wrong tokens.
+ * could flash the default tokens before settings loaded.
  *
  * Type imported from `src/shared/initial-theme.ts` (single SoT shared with
  * `main.ts` + `preload.ts`).

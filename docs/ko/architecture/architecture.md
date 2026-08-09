@@ -1172,7 +1172,7 @@ error다. 부팅 단계가 채우는 `BootContext`는
 lvis-app/src/
 ├── main.ts        # thin Electron entry — single-instance/whenReady/main() only;
 │                  #  setup extracted to src/main/* (C17: app-state, main-window,
-│                  #  app-menu, app-tray, settings-window, lvis-deep-link, corp-ca-runtime,
+│                  #  app-menu, app-tray, lvis-deep-link, corp-ca-runtime,
 │                  #  bootstrap-splash, early-boot-env, app-shutdown, main-paths)
 ├── boot.ts        # thin bootstrap orchestrator — builds BootContext, runs ordered
 │                  #  steps, returns assembleAppServices(ctx) (C18)
@@ -2406,11 +2406,10 @@ useTheme) 그대로. plugin-ui-shell 에서 한 번 pull 한 후 useTheme 가 �
 broadcast 만 처리.
 
 **Race window = 0 — main 캐시를 BrowserWindow 생성 시점 inject (PR-1)**:
-detached BrowserWindow 가 cold mount 될 때 host renderer 의 ThemeProvider 가
-`api.getSettings()` 를 async hydrate 하는 동안, 그 안의 plugin webview 가
-먼저 attach 되면 renderer 의 첫 `notifyPluginTheme` broadcast 를 놓쳐
-잘못된 토큰으로 paint 됐다. 정공법은 main process 가 이미 들고 있는
-`lastThemePayload` 를 BrowserWindow 생성 시점에 동기 inject:
+main renderer 가 cold mount 될 때 ThemeProvider 가 `api.getSettings()` 를
+async hydrate 하는 동안 plugin webview 가 먼저 attach 되면 첫
+`notifyPluginTheme` broadcast 를 놓칠 수 있다. main process 가 이미 들고
+있는 `lastThemePayload` 를 BrowserWindow 생성 시점에 동기 inject 한다:
 
 ```
 main.ts:initialThemeArgs()
@@ -2431,14 +2430,11 @@ main.ts:initialThemeArgs()
      첫 render 가 main 캐시와 일치 — async hydrate window = 0
 ```
 
-- 호스트 main window 와 모든 detached window 가 같은 경로. plugin webview
-  의 register-webview replay 도 항상 정확한 payload 를 받게 됨.
+- 호스트 main window 가 이 경로를 사용하며, embedded plugin webview 의
+  register-webview replay 도 항상 정확한 payload 를 받는다.
 - 적용 범위: `lastThemePayload` 가 비어 있으면 (true 첫 cold boot)
   `additionalArguments` 가 빈 배열 → 기존 async hydrate 경로로 1 프레임만
-  fallback. 이후 main → detached 흐름은 항상 race-free.
-- `WindowManager` 는 `getInitialThemeArgs: () => string[]` 콜백을 받아
-  `openDetachedTab` 내부에서 호출 — main 의 캐시는 BrowserWindow 생성
-  시점에 stale 하지 않음.
+  fallback. 이후 main renderer 와 embedded plugin replay 흐름은 race-free다.
 
 **Defense-in-depth (보조 layer, 머지된 상태 유지)**:
 - `register-webview` 시점 replay (`replayThemeToWebview`) — pull 이 어떤
@@ -2451,8 +2447,8 @@ main.ts:initialThemeArgs()
 **Removed (lvis-app#667, SDK v5.4.0)** — `lvis-plugin-sdk` 의
 `lvis-tokens-fallback` `<style>` / `_FALLBACK_CSS` / `fallback-dark.json` /
 `lvis-tokens.css` artifact 4 종은 모두 제거되었다. `initialThemeArgs`
-(commit `1696f92`) 가 모든 BrowserWindow 에 primed token payload 를
-실어보내므로 SDK fallback 이 보호하던 cold-boot race window 가 닫혀
+(commit `1696f92`) 가 main BrowserWindow 에 primed token payload 를
+실어보내고 embedded shell 이 pull/replay 하므로 cold-boot race window 가 닫혀
 fallback 자체가 dead code 였다. 플러그인은 `primeTheme(bridge, opts?)`
 로 live broadcast 에 가입하면 충분하다.
 
@@ -2460,7 +2456,7 @@ fallback 자체가 dead code 였다. 플러그인은 `primeTheme(bridge, opts?)`
 - `recordValidatedTheme(payload)` 가 validation 통과 시에만 갱신, 실패 시 기존 값
   유지 (잘못된 broadcast 가 캐시를 오염시키지 않음)
 - 호스트 부팅 직후 ThemeProvider 가 처음 broadcast 하기 전에 pull 하면 `null`
-  반환. 이 경우 BrowserWindow 가 이미 `additionalArguments` 의 primed payload
+  반환. 이 경우 main BrowserWindow 는 이미 `additionalArguments` 의 primed payload
   로 페인트 중이므로 추가 처리 없이 ThemeProvider mount-time push 를 기다린다
 - 같은 키/값 화이트리스트 검증을 거치므로 pull / replay / broadcast 모두
   동일한 보안 게이트 통과
@@ -2471,8 +2467,8 @@ fallback 자체가 dead code 였다. 플러그인은 `primeTheme(bridge, opts?)`
 **Plugin-side API 표준 (Decision 2026-05-12)** — SDK `primeTheme(bridge, opts?)`
 한 헬퍼가 `getTheme()` pull + `applyThemeFromHostEvent` paint + `host.theme.changed`
 구독 3 경로 모두를 캡슐화한다. React 측 `useTheme(bridge, opts?)` 는 `primeTheme`
-위의 얇은 wrapper로 재구현되고, `opts.target` 으로 detached BrowserWindow / scoped
-sidebar 의 별도 document/element 를 가리킬 수 있다. `opts.onPayload` 콜백이 sidebar
+위의 얇은 wrapper로 재구현되고, `opts.target` 으로 embedded/scoped surface 의
+별도 document/element 를 가리킬 수 있다. `opts.onPayload` 콜백이 sidebar
 custom 토큰 매핑 같은 use-case 를 흡수해, 같은 `host.theme.changed` 를 두 번
 구독할 필요가 사라진다. 모든 플러그인의 `mount()` contract 는 **첫 await 가
 `primeTheme(bridge, opts?)`** 호출이다 (`docs/references/plugin-tool-schema-design.md`
@@ -2495,7 +2491,7 @@ SDK 가 보조 fallback artifact 를 들고 있지 않으므로 lockstep 부담�
 | **SoT** ThemeBundle | `lvis-app/src/ui/renderer/theme/bundles/*.ts` | `--lvis-*` 토큰 값의 단일 출처. 디자인 팔레트가 바뀌면 **여기만** 수정 | 손-편집 |
 | Host `_INVARIANT` | `lvis-app/src/ui/renderer/theme/plugin-token-map.ts` | 번들 무관 invariant 토큰 16 개 (radius/text/weight/space/motion) | 손-편집 |
 | `bundleToPluginTokens` | `lvis-app/src/ui/renderer/theme/plugin-token-map.ts` | active bundle + `_INVARIANT` → 전체 `--lvis-*` token map (invariant 16 + bundle-derived 20) derive | 함수 호출 (`ThemeProvider`, `getInitialThemeArgs`) |
-| `additionalArguments` priming | `lvis-app/src/main.ts:initialThemeArgs` (`1696f92`) | 모든 BrowserWindow webPreferences 에 primed token payload 주입 | `WindowManager.openDetachedTab` 콜백 |
+| `additionalArguments` priming | `lvis-app/src/main/main-window.ts:initialThemeArgs` (`1696f92`) | main BrowserWindow webPreferences 에 primed token payload 주입 | `createWindow` 호출 |
 | `host.theme.changed` broadcast | `EventBus` (`channels.ts`) | 런타임 테마 변경시 plugin webview 에 live payload 전파 | `ThemeProvider` 가 bundle 변경시 호출 |
 
 SDK 에는 fallback artifact (JSON / CSS / TS const) 가 없으며, plugin 은
