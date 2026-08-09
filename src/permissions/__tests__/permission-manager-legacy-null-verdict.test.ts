@@ -11,8 +11,6 @@
  * guard for that gate.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 // vi.mock must be at top level (hoisted). We feed the mock from a
@@ -42,38 +40,23 @@ vi.mock("../../audit/sandbox-audit-sink.js", async () => {
 });
 
 import { PermissionManager } from "../permission-manager.js";
-import { VerdictCache } from "../reviewer/verdict-cache.js";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
 import {
   LlmRiskClassifier,
   RuleBasedRiskClassifier,
   type RiskClassifier,
 } from "../reviewer/risk-classifier.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { PermissionTestResources } from "./test-resources.js";
 
-const tmpDirs: string[] = [];
-const caches = new Set<VerdictCache>();
+const resources = new PermissionTestResources();
 
 function tmpFile(name: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-pm-legacy-null-"));
-  tmpDirs.push(dir);
+  const dir = resources.makeTmpDir("lvis-pm-legacy-null-");
   return join(dir, name);
 }
 
-function makeCache(path: string): VerdictCache {
-  const cache = new VerdictCache(path);
-  caches.add(cache);
-  return cache;
-}
-
 afterEach(async () => {
-  for (const cache of caches) {
-    await cache.flush();
-  }
-  caches.clear();
-  for (const dir of tmpDirs.splice(0)) {
-    await cleanupTmpDir(dir);
-  }
+  await resources.cleanup();
 });
 
 function makeManager(): {
@@ -82,7 +65,7 @@ function makeManager(): {
 } {
   const pm = new PermissionManager(tmpFile("permissions.json"));
   const classifier = new RuleBasedRiskClassifier();
-  const cache = makeCache(tmpFile("reviewer-cache.jsonl"));
+  const cache = resources.makeVerdictCache(tmpFile("reviewer-cache.jsonl"));
   const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
   pm.setReviewer({ classifier, cache, deferredQueue: queue });
   return { pm, classifier };
@@ -236,7 +219,7 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
       },
       "gpt-4o-mini",
     );
-    const cache = makeCache(tmpFile("reviewer-cache.jsonl"));
+    const cache = resources.makeVerdictCache(tmpFile("reviewer-cache.jsonl"));
     const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
     pm.setReviewer({ classifier, cache, deferredQueue: queue });
 

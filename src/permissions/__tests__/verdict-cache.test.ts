@@ -10,9 +10,8 @@
  *   - Persistence to file across instances
  */
 import { afterEach, describe, it, expect, beforeEach } from "vitest";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import {
   MAX_VERDICT_CACHE_ENTRIES,
   VerdictCache,
@@ -23,31 +22,17 @@ import {
   type VerdictCacheContext,
 } from "../reviewer/verdict-cache.js";
 import type { RiskVerdict } from "../reviewer/risk-classifier.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { PermissionTestResources } from "./test-resources.js";
 
-const tmpDirs: string[] = [];
-const caches = new Set<VerdictCache>();
+const resources = new PermissionTestResources();
 
 function tmpCachePath(): string {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-verdict-cache-"));
-  tmpDirs.push(dir);
+  const dir = resources.makeTmpDir("lvis-verdict-cache-");
   return join(dir, "reviewer-cache.jsonl");
 }
 
-function makeCache(path: string): VerdictCache {
-  const cache = new VerdictCache(path);
-  caches.add(cache);
-  return cache;
-}
-
 afterEach(async () => {
-  for (const cache of caches) {
-    await cache.flush();
-  }
-  caches.clear();
-  for (const dir of tmpDirs.splice(0)) {
-    await cleanupTmpDir(dir);
-  }
+  await resources.cleanup();
 });
 
 const CTX: VerdictCacheContext = {
@@ -62,6 +47,15 @@ const LOOKUP: VerdictCacheLookupKey = {
   trustOrigin: "user-keyboard",
   finalInput: { path: "/Users/ken/work/a.md", count: 5 },
 };
+
+function expiredCacheLine(lookup: VerdictCacheLookupKey = LOOKUP): string {
+  return JSON.stringify({
+    key: computeCacheKey(lookup),
+    verdict: { level: "low", reason: "ok" },
+    expiresAt: Date.now() - 1000,
+    invalidationKey: computeInvalidationKey(CTX),
+  });
+}
 
 describe("canonicalInputShape", () => {
   it("replaces values with type names", () => {
@@ -226,7 +220,7 @@ describe("VerdictCache lookup states", () => {
 
   beforeEach(() => {
     path = tmpCachePath();
-    cache = makeCache(path);
+    cache = resources.makeVerdictCache(path);
   });
 
   it("returns miss-not-found for empty cache", () => {
@@ -265,33 +259,53 @@ describe("VerdictCache lookup states", () => {
   });
 
   it("miss-expired when expiresAt < now", () => {
-    const expired = JSON.stringify({
-      key: computeCacheKey(LOOKUP),
-      verdict: { level: "low", reason: "ok" },
-      expiresAt: Date.now() - 1000,
-      invalidationKey: computeInvalidationKey(CTX),
-    });
-    writeFileSync(path, expired + "\n", "utf-8");
-    cache = makeCache(path);
+    writeFileSync(path, expiredCacheLine() + "\n", "utf-8");
+    cache = resources.makeVerdictCache(path);
     const r = cache.lookup(LOOKUP, CTX);
     expect(r.hit).toBe(false);
     expect(r.reason).toBe("miss-expired");
   });
 
   it("flush waits for the expired-entry rewrite", async () => {
-    const expired = JSON.stringify({
-      key: computeCacheKey(LOOKUP),
-      verdict: { level: "low", reason: "ok" },
-      expiresAt: Date.now() - 1000,
-      invalidationKey: computeInvalidationKey(CTX),
-    });
-    writeFileSync(path, expired + "\n", "utf-8");
-    cache = makeCache(path);
+    writeFileSync(path, expiredCacheLine() + "\n", "utf-8");
+    cache = resources.makeVerdictCache(path);
 
     expect(cache.lookup(LOOKUP, CTX).reason).toBe("miss-expired");
     await cache.flush();
 
     expect(readFileSync(path, "utf-8")).toBe("");
+  });
+
+  it("flush drains consecutive expired-entry rewrites", async () => {
+    const secondLookup: VerdictCacheLookupKey = {
+      ...LOOKUP,
+      toolName: "fs_delete",
+      finalInput: { path: "/Users/ken/work/b.md" },
+    };
+    writeFileSync(
+      path,
+      `${expiredCacheLine(LOOKUP)}\n${expiredCacheLine(secondLookup)}\n`,
+      "utf-8",
+    );
+    cache = resources.makeVerdictCache(path);
+
+    expect(cache.lookup(LOOKUP, CTX).reason).toBe("miss-expired");
+    expect(cache.lookup(secondLookup, CTX).reason).toBe("miss-expired");
+    await cache.flush();
+
+    expect(readFileSync(path, "utf-8")).toBe("");
+  });
+
+  it("does not recreate the cache directory after flush and cleanup", async () => {
+    writeFileSync(path, expiredCacheLine() + "\n", "utf-8");
+    cache = resources.makeVerdictCache(path);
+
+    expect(cache.lookup(LOOKUP, CTX).reason).toBe("miss-expired");
+    await cache.flush();
+    await resources.cleanup();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(existsSync(dirname(path))).toBe(false);
   });
 
   it("prunes stale entries and can still hit an older current entry", async () => {
@@ -311,9 +325,9 @@ describe("VerdictCache lookup states", () => {
 describe("VerdictCache persistence", () => {
   it("entry survives across cache instances", async () => {
     const path = tmpCachePath();
-    const a = makeCache(path);
+    const a = resources.makeVerdictCache(path);
     await a.store(LOOKUP, CTX, { level: "medium", reason: "x" });
-    const b = makeCache(path);
+    const b = resources.makeVerdictCache(path);
     const r = b.lookup(LOOKUP, CTX);
     expect(r.hit).toBe(true);
     expect(r.verdict?.level).toBe("medium");
@@ -321,7 +335,7 @@ describe("VerdictCache persistence", () => {
 
   it("file format is JSONL", async () => {
     const path = tmpCachePath();
-    const cache = makeCache(path);
+    const cache = resources.makeVerdictCache(path);
     await cache.store(LOOKUP, CTX, { level: "low", reason: "a" });
     await cache.store({ ...LOOKUP, toolName: "other" }, CTX, { level: "high", reason: "b" });
     const lines = readFileSync(path, "utf-8").trim().split("\n");
@@ -337,7 +351,7 @@ describe("VerdictCache persistence", () => {
 
   it("caps stored entries to the newest cache window", async () => {
     const path = tmpCachePath();
-    const cache = makeCache(path);
+    const cache = resources.makeVerdictCache(path);
     for (let i = 0; i < MAX_VERDICT_CACHE_ENTRIES + 3; i += 1) {
       await cache.store({ ...LOOKUP, toolName: `tool_${i}` }, CTX, {
         level: "low",
@@ -354,7 +368,7 @@ describe("VerdictCache persistence", () => {
 describe("VerdictCache invalidateMismatching (selective by invalidationKey)", () => {
   it("drops only entries with mismatching invalidationKey", async () => {
     const path = tmpCachePath();
-    const cache = makeCache(path);
+    const cache = resources.makeVerdictCache(path);
     const ctxA: VerdictCacheContext = {
       allowedDirectories: ["/A"],
       scope: { mode: "deny-all" },
@@ -377,7 +391,7 @@ describe("VerdictCache invalidateMismatching (selective by invalidationKey)", ()
 
   it("returns 0 when no entries are stale", async () => {
     const path = tmpCachePath();
-    const cache = makeCache(path);
+    const cache = resources.makeVerdictCache(path);
     await cache.store(LOOKUP, CTX, { level: "low", reason: "a" });
     const dropped = await cache.invalidateMismatching(CTX);
     expect(dropped).toBe(0);
@@ -386,7 +400,7 @@ describe("VerdictCache invalidateMismatching (selective by invalidationKey)", ()
 
   it("settings change invalidates only mismatching entries (cache integrity)", async () => {
     const path = tmpCachePath();
-    const cache = makeCache(path);
+    const cache = resources.makeVerdictCache(path);
     const old: VerdictCacheContext = {
       allowedDirectories: ["/old"],
       scope: { x: 1 },
