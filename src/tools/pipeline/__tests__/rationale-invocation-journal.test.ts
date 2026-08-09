@@ -2,7 +2,6 @@ import {
   mkdtempSync,
   existsSync,
   readFileSync,
-  rmSync,
   statSync,
   symlinkSync,
   unlinkSync,
@@ -12,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { platform } from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 import {
   MemorySecretStore,
   type SecretStore,
@@ -247,11 +247,11 @@ function terminal(
   );
 }
 
-afterEach(() => {
+afterEach(async () => {
   controlsByInvocation.clear();
   sealStoresByPath.clear();
   for (const value of directories.splice(0)) {
-    rmSync(value, { recursive: true, force: true });
+    await cleanupTmpDir(value);
   }
 });
 

@@ -1,10 +1,10 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -52,8 +52,8 @@ beforeEach(() => {
   writeFileSync(join(workDir, "README.md"), "# LVIS\nneedle docs\n", "utf8");
 });
 
-afterEach(() => {
-  rmSync(workDir, { recursive: true, force: true });
+afterEach(async () => {
+  await cleanupTmpDir(workDir);
 });
 
 describe("view_image tool", () => {
@@ -418,7 +418,7 @@ describe("file native tools", () => {
       expect(result.isError).toBe(true);
       expect(result.output).toContain("Sandbox:");
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(outside);
     }
   });
 
@@ -436,7 +436,7 @@ describe("file native tools", () => {
       expect(result.isError).toBe(false);
       expect(parse(result.output).content).toBe("outside but authorized");
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(outside);
     }
   });
 
@@ -464,7 +464,7 @@ describe("file native tools", () => {
       expect(result.isError).toBe(false);
       expect(parse(result.output).content).toBe("slash authorized");
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(outside);
     }
   });
 
@@ -504,9 +504,9 @@ describe("WriteFileTool pre-image guard (MAJOR 1)", () => {
     process.env.LVIS_HOME = testHome;
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     delete process.env.LVIS_HOME;
-    rmSync(testHome, { recursive: true, force: true });
+    await cleanupTmpDir(testHome);
   });
 
   it("skips pre-image read and sets skipSidecar for a file exceeding MAX_TEXT_FILE_BYTES", async () => {

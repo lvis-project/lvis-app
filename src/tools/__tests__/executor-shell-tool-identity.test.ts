@@ -29,7 +29,8 @@
  * shrinks the covered prefix set, widens the ASRT set, or deletes the call site.
  */
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -93,7 +94,7 @@ function allowingExecutor(toolName: string) {
     permMgr,
     new BashAstValidator({ mode: "deny" }),
   );
-  return { executor, executeSpy, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { executor, executeSpy, cleanup: () => cleanupTmpDir(dir) };
 }
 
 async function runProbe(toolName: string) {
@@ -105,7 +106,7 @@ async function runProbe(toolName: string) {
     );
     return { result: results[0], executeSpy };
   } finally {
-    cleanup();
+    await cleanup();
   }
 }
 
