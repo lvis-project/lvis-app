@@ -23,6 +23,7 @@ import {
   type TraceEntry,
 } from "../../observability/conversation-trace.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
@@ -204,23 +205,27 @@ describe("ConversationTracer — §4.5 11-step", () => {
 
   it("writes valid JSONL entries to the trace file when enabled", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-trace-"));
-    const sessionId = "test-session-abc";
-    const tracer = createTracer(sessionId, { enabled: true, traceDir: dir });
-    expect(tracer.enabled).toBe(true);
-    expect(tracer.filePath).toBe(join(dir, `${sessionId}.jsonl`));
+    try {
+      const sessionId = "test-session-abc";
+      const tracer = createTracer(sessionId, { enabled: true, traceDir: dir });
+      expect(tracer.enabled).toBe(true);
+      expect(tracer.filePath).toBe(join(dir, `${sessionId}.jsonl`));
 
-    tracer.step("REQUEST_ENTRY", { inputLen: 5 });
-    tracer.step("POST_TURN", { toolCallCount: 0 });
+      tracer.step("REQUEST_ENTRY", { inputLen: 5 });
+      tracer.step("POST_TURN", { toolCallCount: 0 });
 
-    const raw = readFileSync(tracer.filePath!, "utf-8");
-    const lines = raw.trim().split("\n");
-    expect(lines).toHaveLength(2);
-    const parsed: TraceEntry[] = lines.map((l) => JSON.parse(l) as TraceEntry);
-    expect(parsed[0].step).toBe("REQUEST_ENTRY");
-    expect(parsed[0].sessionId).toBe(sessionId);
-    expect(typeof parsed[0].ts).toBe("string");
-    expect(parsed[0].meta).toEqual({ inputLen: 5 });
-    expect(parsed[1].step).toBe("POST_TURN");
+      const raw = readFileSync(tracer.filePath!, "utf-8");
+      const lines = raw.trim().split("\n");
+      expect(lines).toHaveLength(2);
+      const parsed: TraceEntry[] = lines.map((l) => JSON.parse(l) as TraceEntry);
+      expect(parsed[0].step).toBe("REQUEST_ENTRY");
+      expect(parsed[0].sessionId).toBe(sessionId);
+      expect(typeof parsed[0].ts).toBe("string");
+      expect(parsed[0].meta).toEqual({ inputLen: 5 });
+      expect(parsed[1].step).toBe("POST_TURN");
+    } finally {
+      await cleanupTmpDir(dir);
+    }
   });
 
   it("is no-op when disabled (production fallback)", () => {
