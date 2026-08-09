@@ -1,10 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { PermissionManager } from "../../../permissions/permission-manager.js";
 import type { LLMProvider } from "../../../engine/llm/types.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 describe("wireReviewerAndPermissions subscription runtime", () => {
   it("uses the shared active subscription factory and a transport-scoped reviewer identity", async () => {
@@ -79,7 +80,7 @@ describe("wireReviewerAndPermissions subscription runtime", () => {
       vi.doUnmock("../reviewer-wiring.js");
       vi.doUnmock("../../../ipc/domains/permissions.js");
       vi.resetModules();
-      rmSync(tempDir, { recursive: true, force: true });
+      await cleanupTmpDir(tempDir);
     }
   });
 });
