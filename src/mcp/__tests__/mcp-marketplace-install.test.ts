@@ -10,7 +10,7 @@
 import AdmZip from "adm-zip";
 import { describe, expect, it, vi } from "vitest";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import {
@@ -24,6 +24,7 @@ import { MAX_MCP_MANIFEST_BYTES } from "../safe-names.js";
 import type { McpRuntimeSpec, PluginMarketplaceItem } from "../../plugins/types.js";
 import { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 vi.mock("../../shared/app-version.js", () => ({
   getLvisAppVersion: () => "0.5.9",
@@ -211,7 +212,7 @@ describe("readRuntimeFromInstalledManifest", () => {
         auth: "none",
       });
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -252,7 +253,7 @@ describe("readRuntimeFromInstalledManifest", () => {
         },
       });
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -283,7 +284,7 @@ describe("readRuntimeFromInstalledManifest", () => {
         apiKeyEnv: "OPENAI_API_KEY",
       });
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -299,7 +300,7 @@ describe("readRuntimeFromInstalledManifest", () => {
         /missing a valid `runtime` block/,
       );
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -308,7 +309,7 @@ describe("readRuntimeFromInstalledManifest", () => {
     try {
       await expect(readRuntimeFromInstalledManifest(tmp)).rejects.toThrow(/manifest not found/);
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -323,7 +324,7 @@ describe("readRuntimeFromInstalledManifest", () => {
         /exceeds.*byte cap/,
       );
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -342,7 +343,7 @@ describe("readRuntimeFromInstalledManifest", () => {
       const runtime = await readRuntimeFromInstalledManifest(tmp);
       expect(runtime.transport).toBe("stdio");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 });
@@ -493,7 +494,7 @@ describe("installMcpFromMarketplace", () => {
         /is a plugin entry/,
       );
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -510,7 +511,7 @@ describe("installMcpFromMarketplace", () => {
         /no entry for slug/,
       );
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -539,7 +540,7 @@ describe("installMcpFromMarketplace", () => {
       })).rejects.toMatchObject({ required: "1.2.3", current: "0.5.9" });
       expect(store.withVerifiedArtifactTransaction).not.toHaveBeenCalled();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -603,7 +604,7 @@ describe("installMcpFromMarketplace", () => {
         expect.any(Function),
       );
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -643,7 +644,7 @@ describe("installMcpFromMarketplace", () => {
       expect(store.extractZipWithCommit).not.toHaveBeenCalled();
       expect(registerConfig).not.toHaveBeenCalled();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -670,7 +671,7 @@ describe("installMcpFromMarketplace", () => {
       );
       expect(fetcher.getPluginDetail).not.toHaveBeenCalled();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -710,7 +711,7 @@ describe("installMcpFromMarketplace", () => {
       expect(store.extractZipWithCommit).not.toHaveBeenCalled();
       expect(registerConfig).not.toHaveBeenCalled();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -746,7 +747,7 @@ describe("installMcpFromMarketplace", () => {
         })).rejects.toThrow(/must pin the executed package/);
         expect(store.extractZipWithCommit).not.toHaveBeenCalled();
       } finally {
-        rmSync(tmp, { recursive: true, force: true });
+        await cleanupTmpDir(tmp);
       }
     }
   });
@@ -793,7 +794,7 @@ describe("installMcpFromMarketplace", () => {
         expect.any(Function),
       );
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -822,7 +823,7 @@ describe("installMcpFromMarketplace", () => {
       })).rejects.toThrow(/duplicate MCP id/);
       expect(store.appendHistory).not.toHaveBeenCalled();
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 
@@ -877,7 +878,7 @@ describe("installMcpFromMarketplace", () => {
       expect(result.needsCredential).toBe(true);
       expect(result.authMode).toBe("oauth");
     } finally {
-      rmSync(tmp, { recursive: true, force: true });
+      await cleanupTmpDir(tmp);
     }
   });
 });
