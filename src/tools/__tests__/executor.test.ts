@@ -17,7 +17,8 @@
  * an approval-denial error.
  */
 import { describe, it, expect, vi } from "vitest";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 
@@ -548,8 +549,8 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         }),
       });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(outsideDir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
+      await cleanupTmpDir(outsideDir);
     }
   });
 
@@ -875,7 +876,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         },
       });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -945,7 +946,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         reviewerVerdict: undefined,
       }));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -1045,7 +1046,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         payload: "send alice@example.com with sk-abcdefghijklmnopqrstuvwxyz",
       });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -1131,7 +1132,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       expect(requestAndWait).toHaveBeenCalledTimes(1);
       expect(classifySpy).toHaveBeenCalledOnce();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -1200,7 +1201,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       expect(queue.listPending()).toHaveLength(1);
       expect(queue.listPending()[0].verdict.level).toBe("medium");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -1271,7 +1272,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       expect(executeSpy).not.toHaveBeenCalled();
       expect(classifySpy).toHaveBeenCalledTimes(2);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -1344,7 +1345,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         }),
       }));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -2846,7 +2847,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       await auditLogger.close();
       if (previousHome === undefined) delete process.env.LVIS_HOME;
       else process.env.LVIS_HOME = previousHome;
-      rmSync(isolatedHome, { recursive: true, force: true });
+      await cleanupTmpDir(isolatedHome);
     }
   });
 
@@ -3013,7 +3014,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(executeSpy).toHaveBeenCalled();
       expect(results[0].is_error).toBeUndefined();
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(outside);
     }
   });
 
@@ -3047,7 +3048,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(results[0].is_error).toBeUndefined();
       expect(readFileSync(target, "utf8")).toBe("outside approved\n");
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(outside);
     }
   });
 
@@ -3093,7 +3094,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(results[0].content).toContain("디렉토리 정책 차단");
       expect(comparablePath(results[0].content)).toContain(comparablePath(canonicalTarget));
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(outside);
     }
   });
 
@@ -3138,7 +3139,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(results[0].is_error).toBeUndefined();
       expect(results[0].content).toContain("outside shell approved");
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(outside);
     }
   });
 
@@ -3184,7 +3185,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(results[0].is_error).toBeUndefined();
       expect(results[0].content).toContain("outside shell approved with null device");
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(outside);
     }
   });
 
@@ -3254,7 +3255,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(results[0].is_error).toBeUndefined();
       expect(existsSync(target)).toBe(false);
     } finally {
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(outside);
     }
   });
 
@@ -3329,7 +3330,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(results[0].content).toContain("strict 모드");
       expect(queue.listPending()).toHaveLength(1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -3425,7 +3426,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         }),
       }));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -3493,7 +3494,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
       expect(classifier.classify).toHaveBeenCalledOnce();
       expect(seenSandbox[0]).toContain("plugin worker 'ms-graph/graph-worker' ASRT-wrapped");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
       __resetActiveSandboxCapabilityForTest();
       __resetWrappedPluginWorkersForTest();
     }
@@ -3587,7 +3588,7 @@ describe("ToolExecutor — Layer 1 allowed-directories", () => {
         reason: expect.stringContaining("overlay trigger 출처"),
       }));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -4321,7 +4322,7 @@ describe("ToolExecutor — script hook denial surfaces in audit hookChain (#811 
       // A clean policy-deny (ran fine, exit 0) carries NO failureReason.
       expect(chain[0].failureReason).toBeUndefined();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
@@ -4393,7 +4394,7 @@ describe("ToolExecutor — #811 m2 lifecycle events (PostToolUseFailure / Permis
       expect(payload.errorMessage).toContain("boom went the tool");
       expect(typeof payload.durationMs).toBe("number");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -4424,7 +4425,7 @@ describe("ToolExecutor — #811 m2 lifecycle events (PostToolUseFailure / Permis
       const ptuf = mgr.runLifecycleEvent.mock.calls.find((c) => c[0] === "PostToolUseFailure");
       expect(ptuf).toBeUndefined();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -4465,7 +4466,7 @@ describe("ToolExecutor — #811 m2 lifecycle events (PostToolUseFailure / Permis
       expect(payload.toolName).toBe("denied_probe");
       expect(payload.denyReason.source).toBe("tool-executor");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -4494,7 +4495,7 @@ describe("ToolExecutor — #811 m2 lifecycle events (PostToolUseFailure / Permis
       expect(result[0].is_error).toBe(true);
       expect(result[0].content).toContain("boom");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
@@ -4572,7 +4573,7 @@ describe("ToolExecutor — host-classifies-risk enforcement scope", () => {
       if (!ctx) throw new Error("reviewer was not invoked");
       return ctx.category;
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   }
 
@@ -5087,7 +5088,7 @@ describe("ToolExecutor — Tailnet controller local one-shot boundary", () => {
       expect(executed).not.toHaveBeenCalled();
       expect(result[0]).toMatchObject({ is_error: true });
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });

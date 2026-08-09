@@ -1,7 +1,8 @@
-import { mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 import {
   validateShellCommandPathPolicy,
@@ -9,13 +10,18 @@ import {
 } from "../shell-path-policy.js";
 
 describe("shell-path-policy", () => {
+  const roots: string[] = [];
+
+  afterEach(async () => {
+    for (const root of roots.splice(0)) {
+      await cleanupTmpDir(root);
+    }
+  });
+
   function withRoot<T>(fn: (root: string) => T): T {
     const root = mkdtempSync(join(tmpdir(), "lvis-shell-policy-"));
-    try {
-      return fn(root);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
+    roots.push(root);
+    return fn(root);
   }
 
   it("allows command operands inside the sandbox after canonicalization", () => {

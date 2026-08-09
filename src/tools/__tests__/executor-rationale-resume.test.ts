@@ -1,7 +1,8 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 import type { AuditLogger } from "../../audit/audit-logger.js";
 import { HookRunner } from "../../hooks/hook-runner.js";
@@ -423,7 +424,7 @@ describe("ToolExecutor sealed rationale resume", () => {
         "tool-end",
       ]);
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 
@@ -447,7 +448,7 @@ describe("ToolExecutor sealed rationale resume", () => {
       expect(f.execute).not.toHaveBeenCalled();
       expect(f.order).not.toContain("tool-start");
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 
@@ -464,7 +465,7 @@ describe("ToolExecutor sealed rationale resume", () => {
       expect(policy.loadReceipt).not.toHaveBeenCalled();
       expect(policy.execute).not.toHaveBeenCalled();
     } finally {
-      rmSync(policy.directory, { recursive: true, force: true });
+      await cleanupTmpDir(policy.directory);
     }
 
     const sandbox = await fixture();
@@ -507,7 +508,7 @@ describe("ToolExecutor sealed rationale resume", () => {
       expect(sandbox.loadReceipt).not.toHaveBeenCalled();
       expect(sandbox.execute).not.toHaveBeenCalled();
     } finally {
-      rmSync(sandbox.directory, { recursive: true, force: true });
+      await cleanupTmpDir(sandbox.directory);
     }
   });
 
@@ -535,7 +536,7 @@ describe("ToolExecutor sealed rationale resume", () => {
       ]);
       expect(f.approvalGate.requestAndWait).not.toHaveBeenCalled();
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 
@@ -558,7 +559,7 @@ describe("ToolExecutor sealed rationale resume", () => {
       expect(f.order).not.toContain("start-cas");
       expect(f.execute).not.toHaveBeenCalled();
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 
@@ -578,7 +579,7 @@ describe("ToolExecutor sealed rationale resume", () => {
         "failed",
       ]);
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 
@@ -606,7 +607,7 @@ describe("ToolExecutor sealed rationale resume", () => {
         "failed",
       ]);
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 
@@ -626,7 +627,7 @@ describe("ToolExecutor sealed rationale resume", () => {
       expect(f.execute).not.toHaveBeenCalled();
       expect(f.invocationAudits).toEqual([]);
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
   it("fails closed before start when the invocation audit sink is missing", async () => {
@@ -647,7 +648,7 @@ describe("ToolExecutor sealed rationale resume", () => {
       expect(f.execute).not.toHaveBeenCalled();
       expect(f.invocationAudits).toEqual([]);
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 
@@ -665,7 +666,7 @@ describe("ToolExecutor sealed rationale resume", () => {
       expect(result.content).toContain("ActionIdentity resolver is unavailable");
       expect(f.execute).not.toHaveBeenCalled();
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 
@@ -721,7 +722,7 @@ describe("ToolExecutor sealed rationale resume", () => {
           "started",
         ]);
       } finally {
-        rmSync(f.directory, { recursive: true, force: true });
+        await cleanupTmpDir(f.directory);
       }
     },
   );
@@ -770,7 +771,7 @@ describe("ToolExecutor sealed rationale resume", () => {
         "started",
       ]);
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 
@@ -809,7 +810,7 @@ describe("ToolExecutor sealed rationale resume", () => {
         "started",
       ]);
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 
@@ -851,7 +852,7 @@ describe("ToolExecutor sealed rationale resume", () => {
       expect(onToolEnd).toHaveBeenCalledOnce();
       expect(onToolEnd.mock.calls[0]?.[1]).toBe("resume-ok");
     } finally {
-      rmSync(f.directory, { recursive: true, force: true });
+      await cleanupTmpDir(f.directory);
     }
   });
 });
