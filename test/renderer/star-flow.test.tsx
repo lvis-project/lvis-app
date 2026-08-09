@@ -149,7 +149,17 @@ describe("Star flow (Phase 3 regression net)", () => {
       starred,
     });
     await waitFor(() => expect(api.starredList).toHaveBeenCalled());
-    // Navigation moved from the hamburger menu to the persistent sidebar.
+    // Put another page behind Insights. Opening a result must activate Chat,
+    // not replay history back to this intermediate page.
+    await user.click(await waitFor(() => {
+      const el = container.querySelector('[data-testid="toolbar-work-board"]');
+      if (!el) throw new Error("work board nav item not found");
+      return el as HTMLElement;
+    }));
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="view-path-current-work-board"]')).not.toBeNull();
+    });
+
     await user.click(await waitFor(() => {
       const el = container.querySelector('[data-testid="sidebar-starred"]');
       if (!el) throw new Error("sidebar starred nav item not found");
@@ -169,6 +179,7 @@ describe("Star flow (Phase 3 regression net)", () => {
     await waitFor(() => {
       expect(container.textContent).toContain("LVIS 에이전트가 준비되었습니다.");
       expect(container.textContent).not.toContain("remembered answer");
+      expect(container.querySelector('[data-testid="view-path-current-home"]')).not.toBeNull();
     });
   });
 

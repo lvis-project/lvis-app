@@ -120,20 +120,14 @@ export interface MainContentProps {
 function MainPaneShell({
   children,
   padded = true,
-  backToHome = false,
-  onBack,
 }: {
   children: ReactNode;
   padded?: boolean;
-  backToHome?: boolean;
-  onBack?: () => void;
 }) {
   return (
     <PageShell
       padded={padded}
       maxWidth={padded ? "6xl" : "none"}
-      onBack={backToHome ? onBack : undefined}
-      backTestId="main-content-back"
       contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
       data-testid="main-pane-shell"
     >
@@ -209,7 +203,7 @@ export function MainContent(props: MainContentProps): ReactNode {
 
   if (activeView === "memory") {
     return (
-      <MainPaneShell backToHome onBack={props.onActivateHome}>
+      <MainPaneShell>
         <MemorySearchPanel
           api={api}
           project={props.activeProject}
@@ -225,7 +219,7 @@ export function MainContent(props: MainContentProps): ReactNode {
 
   if (activeView === "insights" || activeView === "starred") {
     return (
-      <MainPaneShell backToHome onBack={props.onActivateHome}>
+      <MainPaneShell>
         <StarredView
           api={api}
           starred={props.starred}
@@ -242,7 +236,7 @@ export function MainContent(props: MainContentProps): ReactNode {
 
   if (activeView === "routines") {
     return (
-      <MainPaneShell backToHome onBack={props.onActivateHome}>
+      <MainPaneShell>
         <RoutinePanel
           api={api}
           onOpenSession={(sessionId) => {
@@ -272,7 +266,7 @@ export function MainContent(props: MainContentProps): ReactNode {
 
   if (activeView === "work-board") {
     return (
-      <MainPaneShell backToHome onBack={props.onActivateHome}>
+      <MainPaneShell>
         <WorkBoardPanel api={api} project={props.activeProject} />
       </MainPaneShell>
     );
@@ -298,7 +292,6 @@ export function MainContent(props: MainContentProps): ReactNode {
     <PluginUiHostView
       view={props.activePluginView ?? null}
       authError={props.pluginAuthError ?? null}
-      onBack={props.onActivateHome}
     />
   );
 }

@@ -27,8 +27,8 @@ describe("App — view key guard on the activate-view IPC", () => {
 
     act(() => emitViewActivate("memory"));
 
-    // The memory view is a back-affordance pane; home is a chat pane.
-    await waitFor(() => expect(screen.getByTestId("main-content-back")).toBeTruthy());
+    await waitFor(() => expect(screen.getByTestId("view-path-current-memory")).toBeTruthy());
+    expect(screen.queryByTestId("main-content-back")).toBeNull();
     expect(screen.queryByTestId("chat-view-root")).toBeNull();
   });
 

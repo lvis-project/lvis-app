@@ -197,11 +197,14 @@ export function SettingsContent({
   // closes the dialog — modern multi-tab Settings (VS Code, Linear,
   // Raycast) keep the modal open after Save so the user can verify the
   // change and edit a sibling tab; close lives on the Dialog X / Esc.
-  const llmSave = useDebouncedSave(() => void s.save("llm"));
+  // Settings is an inline route. Leaving through the app-level navbar
+  // unmounts this surface, so pending immediate-apply changes must flush just
+  // as they do for the local close control and window shutdown.
+  const llmSave = useDebouncedSave(() => void s.save("llm"), 200, { flushOnUnmount: true });
 
-  const chatSave = useDebouncedSave(() => void s.save("chat"));
-  const webSave = useDebouncedSave(() => void s.save("web"));
-  const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"));
+  const chatSave = useDebouncedSave(() => void s.save("chat"), 200, { flushOnUnmount: true });
+  const webSave = useDebouncedSave(() => void s.save("web"), 200, { flushOnUnmount: true });
+  const marketplaceSave = useDebouncedSave(() => void s.save("marketplace"), 200, { flushOnUnmount: true });
   const flushPendingSaves = useCallback(() => {
     llmSave.flush();
     chatSave.flush();

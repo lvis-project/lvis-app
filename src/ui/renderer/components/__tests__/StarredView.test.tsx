@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.ts";
 import { describe, it, expect, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render, waitFor, within } from "@testing-library/react";
 import { StarredView } from "../StarredView.js";
 
 const KOREA_DATE_KEY_FORMATTER = new Intl.DateTimeFormat("en-US", {
@@ -184,6 +184,59 @@ describe("StarredView", () => {
     expect(row.closest("button")?.textContent).toContain("1,000");
     fireEvent.click(row);
     await waitFor(() => expect(onJumpToSession).toHaveBeenCalledWith("audit-only-session"));
+  });
+
+  it("shows provider and model usage for the displayed month without mixing subscription pricing", async () => {
+    const todayKey = koreaDateKey(new Date());
+    const monthKey = todayKey.slice(0, 7);
+    const [year, month] = monthKey.split("-").map(Number);
+    const monthRange = {
+      dateFrom: `${monthKey}-01`,
+      dateTo: `${monthKey}-${String(new Date(Date.UTC(year!, month!, 0)).getUTCDate()).padStart(2, "0")}`,
+    };
+    const getUsageRange = vi.fn(async (range: { dateFrom: string; dateTo: string }) => {
+      if (range.dateFrom === monthRange.dateFrom && range.dateTo === monthRange.dateTo) {
+        return {
+          perVendor: [{ vendor: "api-provider", model: "*", totalTokens: 1_500 }],
+          perModel: [{ vendor: "api-provider", model: "api-model", totalTokens: 1_200 }],
+          subscription: {
+            perRuntime: [{ provider: "codex", model: "*", totalTokens: 900 }],
+            perModel: [{ provider: "codex", model: "subscription-model", totalTokens: 800 }],
+          },
+        };
+      }
+      return { trend: [] };
+    });
+    const api = {
+      starredRemove: vi.fn(async () => ({ ok: true })),
+      getUsageRange,
+    } as unknown as Parameters<typeof StarredView>[0]["api"];
+
+    const { findByTestId } = render(
+      <StarredView
+        api={api}
+        starred={[]}
+        sessions={[]}
+        currentSessionId=""
+        refreshStarred={vi.fn()}
+        onJumpToSession={vi.fn()}
+        onActivateHome={vi.fn()}
+      />,
+    );
+
+    const providerPanel = await findByTestId("insights-provider-usage");
+    const modelPanel = await findByTestId("insights-model-usage");
+    await waitFor(() => expect(getUsageRange).toHaveBeenCalledWith(monthRange));
+    await waitFor(() => {
+      expect(within(providerPanel).getByText("api-provider")).toBeTruthy();
+      expect(within(providerPanel).getByText("codex")).toBeTruthy();
+      expect(within(modelPanel).getByText("api-model")).toBeTruthy();
+      expect(within(modelPanel).getByText("subscription-model")).toBeTruthy();
+    });
+    expect(within(providerPanel).getByTestId("insights-api-provider-usage").textContent).toContain("1,500");
+    expect(within(providerPanel).getByTestId("insights-subscription-provider-usage").textContent).toContain("900");
+    expect(within(modelPanel).getByTestId("insights-api-model-usage").textContent).not.toContain("$");
+    expect(within(modelPanel).getByTestId("insights-subscription-model-usage").textContent).not.toContain("$");
   });
 
   it("keeps scrollable insights sections in normal flow with stable list height", () => {

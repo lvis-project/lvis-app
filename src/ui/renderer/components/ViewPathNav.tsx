@@ -125,12 +125,14 @@ export function ViewPathNav({
                 </button>
               ) : (
                 <span
-                  className="min-w-0 truncate px-1 py-0.5 font-medium text-foreground"
+                  className={isLast
+                    ? "min-w-0 truncate px-1 py-0.5 font-medium text-foreground"
+                    : "min-w-0 truncate px-1 py-0.5"}
                   // The deepest crumb is where you already are, so it is text,
                   // not a control — and it is what a screen reader should
                   // announce as current.
-                  aria-current="page"
-                  data-testid={`view-path-current-${segment.key}`}
+                  aria-current={isLast ? "page" : undefined}
+                  data-testid={`${isLast ? "view-path-current" : "view-path-segment"}-${segment.key}`}
                 >
                   {segment.label}
                 </span>

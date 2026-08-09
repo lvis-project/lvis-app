@@ -78,7 +78,7 @@ export function viewLocationBreadcrumb(
   if (location.view === "settings") {
     const tab = location.settingsTab ?? "llm";
     return [
-      { key: "settings", label: t("mainToolbar.settings"), target: { view: "settings" } },
+      { key: "settings", label: t("mainToolbar.settings"), target: { view: "settings", settingsTab: "llm" } },
       { key: `settings:${tab}`, label: t(SETTINGS_TAB_LABEL_KEYS[tab]) },
     ];
   }
