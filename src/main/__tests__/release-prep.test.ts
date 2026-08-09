@@ -4,7 +4,7 @@
  * All three modules default OFF and must produce zero side-effects when the
  * user hasn't opted in. These tests lock in that invariant.
  */
-import { beforeEach, describe, it, expect, vi } from "vitest";
+import { afterEach, beforeEach, describe, it, expect, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -22,6 +22,7 @@ import {
   hasPluginInstallInFlight,
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 function fakeWindow() {
   const sent: Array<{ channel: string; payload: unknown }> = [];
@@ -544,8 +545,22 @@ describe("auto-updater", () => {
 });
 
 describe("crash-reporter", () => {
+  const userDataRoots: string[] = [];
+
+  function createUserDataRoot(): string {
+    const root = mkdtempSync(join(tmpdir(), "lvis-crash-"));
+    userDataRoots.push(root);
+    return root;
+  }
+
+  afterEach(async () => {
+    for (const root of userDataRoots.splice(0)) {
+      await cleanupTmpDir(root);
+    }
+  });
+
   it("creates local dump dir and does not upload by default", () => {
-    const userData = mkdtempSync(join(tmpdir(), "lvis-crash-"));
+    const userData = createUserDataRoot();
     const started: Array<{ uploadToServer?: boolean }> = [];
     const pathsSet: string[] = [];
     const handle = startCrashReporter({
@@ -566,7 +581,7 @@ describe("crash-reporter", () => {
   });
 
   it("enables upload when user opts in", () => {
-    const userData = mkdtempSync(join(tmpdir(), "lvis-crash-"));
+    const userData = createUserDataRoot();
     const started: Array<{ uploadToServer?: boolean; submitURL?: string }> = [];
     startCrashReporter({
       userDataPath: userData,
@@ -583,7 +598,7 @@ describe("crash-reporter", () => {
   });
 
   it("inits sentry only when DSN configured and loader returns module", () => {
-    const userData = mkdtempSync(join(tmpdir(), "lvis-crash-"));
+    const userData = createUserDataRoot();
     const dsnSeen: string[] = [];
     const handle = startCrashReporter({
       userDataPath: userData,
