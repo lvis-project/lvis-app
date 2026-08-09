@@ -7,13 +7,11 @@
  * tied to executable behavior instead of letting it drift into a static mockup.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { readFileSync, mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 import { PermissionManager } from "../permission-manager.js";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
-import { VerdictCache } from "../reviewer/verdict-cache.js";
 import {
   RuleBasedRiskClassifier,
   type RiskClassifier,
@@ -26,7 +24,6 @@ import type { ToolCategory, ToolSource } from "../../tools/types.js";
 import { buildPluginToolsForTest } from "../../plugins/__tests__/plugin-tool-test-fixture.js";
 import type { PluginManifest } from "../../plugins/types.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 import { PermissionTestResources } from "./test-resources.js";
 
 const BOARD_PATH = resolve(process.cwd(), "docs/design/permission-review-scenario-board-v2.html");
@@ -45,7 +42,7 @@ function makeManager(
   mode: "default" | "strict" | "auto" | "allow" = "default",
   classifier: RiskClassifier = new RuleBasedRiskClassifier(),
 ): { pm: PermissionManager; queue: DeferredQueue; cleanup: () => Promise<void> } {
-  const dir = mkdtempSync(join(tmpdir(), "lvis-permission-scenarios-"));
+  const dir = resources.makeTmpDir("lvis-permission-scenarios-");
   const pm = new PermissionManager(join(dir, "permissions.json"));
   const queue = new DeferredQueue(join(dir, "deferred-queue.jsonl"));
   pm.setMode(mode);
@@ -57,10 +54,10 @@ function makeManager(
   }
   pm.setReviewer({
     classifier,
-    cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
+    cache: resources.makeVerdictCache(join(dir, "reviewer-cache.jsonl")),
     deferredQueue: queue,
   });
-  return { pm, queue, cleanup: () => cleanupTmpDir(dir) };
+  return { pm, queue, cleanup: () => resources.cleanup() };
 }
 
 function fixedClassifier(verdict: RiskVerdict): RiskClassifier {
