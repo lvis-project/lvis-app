@@ -2,7 +2,7 @@
  * Sandboxed PluginStorage — verifies path-traversal guards, ENOENT handling,
  * and JSON helpers stay scoped to pluginDataDir.
  */
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -31,6 +31,7 @@ vi.mock("electron", () => ({ safeStorage: mockedElectron.safeStorage }));
 
 import { createPluginStorage } from "../storage.js";
 import { PluginStorageEncryptionUnavailableError } from "../types.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const dirLinkType = process.platform === "win32" ? "junction" : "dir";
 
@@ -42,9 +43,8 @@ beforeEach(() => {
   outsideDir = mkdtempSync(join(tmpdir(), "lvis-plugin-storage-outside-"));
 });
 
-afterEach(() => {
-  rmSync(dataDir, { recursive: true, force: true });
-  rmSync(outsideDir, { recursive: true, force: true });
+afterEach(async () => {
+  await Promise.all([cleanupTmpDir(dataDir), cleanupTmpDir(outsideDir)]);
 });
 
 describe("createPluginStorage path guards", () => {

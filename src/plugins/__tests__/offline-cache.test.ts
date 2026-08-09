@@ -5,7 +5,7 @@
  * LRU eviction, feature flag, network fallback in list().
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import {resolve, join} from "node:path";
 import {
@@ -16,6 +16,7 @@ import {
   setCachedTarball
 } from "../offline-cache.js";
 import type { PluginMarketplaceItem } from "../types.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 function makeItem(id: string): PluginMarketplaceItem {
   return {
@@ -35,8 +36,8 @@ beforeEach(() => {
   tmpDir = mkdtempSync(join(process.cwd(), ".offline-cache-test-"));
 });
 
-afterEach(() => {
-  rmSync(tmpDir, { recursive: true, force: true });
+afterEach(async () => {
+  await cleanupTmpDir(tmpDir);
 });
 
 // ---------------------------------------------------------------------------
