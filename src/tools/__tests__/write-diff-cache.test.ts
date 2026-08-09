@@ -11,7 +11,8 @@
  *   7. purgeStaleSessionDiffDirs: removes dirs older than maxAgeMs
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, existsSync, readFileSync, mkdirSync, writeFileSync, utimesSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdtempSync, existsSync, readFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -23,9 +24,9 @@ beforeEach(() => {
   process.env.LVIS_HOME = testHome;
 });
 
-afterEach(() => {
+afterEach(async () => {
   delete process.env.LVIS_HOME;
-  rmSync(testHome, { recursive: true, force: true });
+  await cleanupTmpDir(testHome);
 });
 
 // Dynamic import AFTER env override so lvisHome() picks up LVIS_HOME.

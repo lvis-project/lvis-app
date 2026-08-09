@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -162,7 +163,7 @@ describe("PowerShellTool — policy surface", () => {
       expect(result.isError).toBe(true);
       expect(result.output).toContain("Sensitive path:");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -180,7 +181,7 @@ describe("PowerShellTool — policy surface", () => {
       expect(result.isError).toBe(true);
       expect(result.output).toContain("Sensitive path:");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -196,7 +197,7 @@ describe("PowerShellTool — policy surface", () => {
       expect(result.isError).toBe(true);
       expect(result.output).toContain("Sensitive path:");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 

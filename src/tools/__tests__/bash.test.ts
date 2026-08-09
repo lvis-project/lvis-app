@@ -9,7 +9,8 @@
  * {@link ../registry.js ToolRegistry} uses in production — no adapter.
  */
 import { describe, it, expect } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -184,7 +185,7 @@ describe("BashTool — sandbox violation", () => {
       expect(result.isError).toBe(true);
       expect(result.output).toContain("Sensitive path:");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -201,7 +202,7 @@ describe("BashTool — sandbox violation", () => {
       expect(result.isError).toBe(true);
       expect(result.output).toContain("Sensitive path:");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -216,7 +217,7 @@ describe("BashTool — sandbox violation", () => {
       expect(result.isError).toBe(true);
       expect(result.output).toContain("Sensitive path:");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -257,7 +258,7 @@ describe("BashTool — sandbox violation", () => {
       expect(result.isError).toBe(true);
       expect(result.output).toContain("Sandbox:");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 
@@ -271,7 +272,7 @@ describe("BashTool — sandbox violation", () => {
       expect(result.isError).toBe(true);
       expect(result.output).toContain("recursive shell filesystem traversal");
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 });
