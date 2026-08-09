@@ -2,6 +2,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vites
 import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 const {
   handlers,
@@ -105,7 +106,9 @@ beforeAll(() => {
   registerPreviewHandlers(deps);
   registerWorkspaceHandlers(deps);
 });
-afterAll(() => rmSync(root, { recursive: true, force: true }));
+afterAll(async () => {
+  await cleanupTmpDir(root);
+});
 beforeEach(() => {
   showOpenDialogMock.mockReset();
   showItemInFolderMock.mockReset();
@@ -198,7 +201,7 @@ describe("preview:read-file handler", () => {
       error?: string;
     };
     expect(res).toMatchObject({ ok: false, error: "path-not-allowed" });
-    rmSync(outside, { recursive: true, force: true });
+    await cleanupTmpDir(outside);
   });
 
   it("refuses a binary file", async () => {
@@ -241,8 +244,8 @@ describe("preview:read-file handler", () => {
       error?: string;
     };
     expect(res).toMatchObject({ ok: false, error: "path-not-allowed" });
-    rmSync(link, { recursive: true, force: true });
-    rmSync(outside, { recursive: true, force: true });
+    await cleanupTmpDir(link);
+    await cleanupTmpDir(outside);
   });
 
   it("writes an audit entry for a successful preview read", async () => {
@@ -377,7 +380,7 @@ describe("workspace handlers", () => {
       error?: string;
     };
     expect(res).toMatchObject({ ok: false, error: "path-not-allowed" });
-    rmSync(outside, { recursive: true, force: true });
+    await cleanupTmpDir(outside);
   });
 
   it("pickRoot persists the chosen directory to additionalDirectories", async () => {
@@ -389,7 +392,7 @@ describe("workspace handlers", () => {
     };
     expect(res).toMatchObject({ ok: true, added: canonicalizePathForMatch(picked) });
     expect(addAllowedDirectoryPersistMock).toHaveBeenCalledWith(canonicalizePathForMatch(picked));
-    rmSync(picked, { recursive: true, force: true });
+    await cleanupTmpDir(picked);
   });
 
   it("central allow lifecycle rejects files and missing folders for picker/slash/Settings parity", async () => {
@@ -482,7 +485,7 @@ describe("workspace handlers", () => {
       );
     } finally {
       registerWorkspaceHandlers(deps);
-      rmSync(picked, { recursive: true, force: true });
+      await cleanupTmpDir(picked);
     }
   });
 
@@ -520,7 +523,7 @@ describe("workspace handlers", () => {
       expect(addAllowedDirectoryPersistMock).toHaveBeenCalledWith(canonicalParent);
     } finally {
       registerWorkspaceHandlers(deps);
-      rmSync(parentRoot, { recursive: true, force: true });
+      await cleanupTmpDir(parentRoot);
     }
   });
 
@@ -568,7 +571,7 @@ describe("workspace handlers", () => {
     expect(showOpenDialogMock).not.toHaveBeenCalled();
     expect(addAllowedDirectoryPersistMock).toHaveBeenCalledWith(canonicalizePathForMatch(warnDir));
 
-    rmSync(base, { recursive: true, force: true });
+    await cleanupTmpDir(base);
   });
 
   it("pickRoot REFUSES an ack token that was never issued by a dialog pick (forged/unknown)", async () => {
@@ -608,7 +611,7 @@ describe("workspace handlers", () => {
     expect(replay).toMatchObject({ ok: false, error: "ack-unknown" });
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
 
-    rmSync(base, { recursive: true, force: true });
+    await cleanupTmpDir(base);
   });
 
   it("pickRoot REFUSES an expired ack token (TTL elapsed)", async () => {
@@ -634,7 +637,7 @@ describe("workspace handlers", () => {
       expect(res.added).toBeUndefined();
       expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
 
-      rmSync(base, { recursive: true, force: true });
+      await cleanupTmpDir(base);
     } finally {
       vi.useRealTimers();
     }
@@ -654,7 +657,7 @@ describe("workspace handlers", () => {
         input: expect.stringContaining(CHANNELS.workspace.pickRoot),
       }),
     );
-    rmSync(picked, { recursive: true, force: true });
+    await cleanupTmpDir(picked);
   });
 
   it("listDir omits Layer 0 sensitive entries inside an allowed root", async () => {
@@ -747,7 +750,7 @@ describe("workspace handlers", () => {
       expect(detachSessionsFromProject).not.toHaveBeenCalledWith(canonicalChild);
     } finally {
       registerWorkspaceHandlers(deps);
-      rmSync(parentRoot, { recursive: true, force: true });
+      await cleanupTmpDir(parentRoot);
     }
   });
 
@@ -1376,7 +1379,7 @@ describe("workspace handlers", () => {
     };
     expect(res).toMatchObject({ ok: false, error: "path-not-allowed" });
     expect(showItemInFolderMock).not.toHaveBeenCalled();
-    rmSync(outside, { recursive: true, force: true });
+    await cleanupTmpDir(outside);
   });
 
   it("reveal hard-blocks a Layer 0 sensitive path", async () => {
@@ -1435,7 +1438,7 @@ describe("workspace:drop-prepare handler (#1458 drag-drop add-root)", () => {
     // happens on the pickRoot ack pass. (added is not returned by dropPrepare.)
     expect((res as { added?: string }).added).toBeUndefined();
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
-    rmSync(dropped, { recursive: true, force: true });
+    await cleanupTmpDir(dropped);
   });
 
   it("HARD-DENIES a Layer 0 sensitive dropped path and mints NO token", async () => {
@@ -1478,7 +1481,7 @@ describe("workspace:drop-prepare handler (#1458 drag-drop add-root)", () => {
     expect(res).toMatchObject({ ok: false, error: "not-a-dir" });
     expect(res.ackToken).toBeUndefined();
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
-    rmSync(base, { recursive: true, force: true });
+    await cleanupTmpDir(base);
   });
 
   it("rejects a non-existent dropped path (not-found)", async () => {
@@ -1517,7 +1520,7 @@ describe("workspace:drop-prepare handler (#1458 drag-drop add-root)", () => {
         input: expect.stringContaining('"gesture":"drop"'),
       }),
     );
-    rmSync(dropped, { recursive: true, force: true });
+    await cleanupTmpDir(dropped);
   });
 
   it("a drop ack token is ONE-TIME — a replay is refused after first use", async () => {
@@ -1536,7 +1539,7 @@ describe("workspace:drop-prepare handler (#1458 drag-drop add-root)", () => {
     };
     expect(replay).toMatchObject({ ok: false, error: "ack-unknown" });
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
-    rmSync(dropped, { recursive: true, force: true });
+    await cleanupTmpDir(dropped);
   });
 
   it("re-checks is-a-directory at the ack pass — a dir swapped for a file after prepare is refused (TOCTOU)", async () => {
@@ -1562,7 +1565,7 @@ describe("workspace:drop-prepare handler (#1458 drag-drop add-root)", () => {
     };
     expect(done).toMatchObject({ ok: false, error: "not-a-dir" });
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
-    rmSync(base, { recursive: true, force: true });
+    await cleanupTmpDir(base);
   });
 
   it("re-checks existence at the ack pass — a path deleted after prepare is refused (not-found)", async () => {

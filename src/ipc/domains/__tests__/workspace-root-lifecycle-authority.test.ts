@@ -16,7 +16,7 @@
  * and child loops got none of them.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -43,6 +43,7 @@ import { createDynamicTool } from "../../../tools/base.js";
 import { readPermissionSettings } from "../../../permissions/permission-settings-store.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../../../permissions/sensitive-paths.js";
 import { makeMockWebContents } from "../../../__tests__/test-helpers.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 const workspaceDeps = {
   auditLogger: { log: vi.fn() },
@@ -115,21 +116,11 @@ beforeAll(() => {
   registerWorkspaceHandlers(workspaceDeps);
 });
 
-afterAll(() => {
+afterAll(async () => {
   if (previousHome === undefined) delete process.env.LVIS_HOME;
   else process.env.LVIS_HOME = previousHome;
-  // The lifecycle persists settings.json behind an async file lock whose lock
-  // file can outlive the suite, so temp-dir cleanup is best effort: a Windows
-  // ENOTEMPTY here must not fail a suite whose assertions already passed.
-  const drop = (dir: string): void => {
-    try {
-      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
-    } catch {
-      // Leftover under the OS temp dir; the OS reclaims it.
-    }
-  };
-  drop(home);
-  drop(grantRoot);
+  await cleanupTmpDir(home);
+  await cleanupTmpDir(grantRoot);
 });
 
 describe("workspace-root lifecycle authority", () => {

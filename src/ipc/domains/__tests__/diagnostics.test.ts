@@ -6,10 +6,11 @@
  *   - export → build + save-dialog path (dialog mocked)
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { invokeRegisteredHandlerWithEvent } from "../../../__tests__/test-helpers.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const showSaveDialog = vi.fn();
@@ -83,7 +84,7 @@ beforeEach(() => {
 afterEach(async () => {
   await auditLogger.close();
   delete process.env.LVIS_HOME;
-  if (existsSync(tmp)) rmSync(tmp, { recursive: true, force: true });
+  await cleanupTmpDir(tmp);
 });
 
 describe("diagnostics IPC — fail-closed sender guard", () => {
@@ -187,7 +188,7 @@ describe("lvis:diagnostics:crash-list", () => {
     };
     expect(r.ok).toBe(true);
     expect(r.dumps.some((d) => d.name === "x.dmp")).toBe(true);
-    rmSync(crashDir, { recursive: true, force: true });
+    await cleanupTmpDir(crashDir);
   });
 });
 
@@ -235,7 +236,7 @@ describe("lvis:diagnostics:export", () => {
     expect(names).not.toContain("crash-dumps/boom.dmp");
     const allText = zip.getEntries().map((e) => e.getData().toString("utf-8")).join("\n");
     expect(allText).not.toContain("RAWCRASHBINARYSECRET");
-    rmSync(crashDir, { recursive: true, force: true });
+    await cleanupTmpDir(crashDir);
   });
 
   it("persisted setting true + renderer opts out → crash-dump binary NOT included (M2 narrows)", async () => {
@@ -254,7 +255,7 @@ describe("lvis:diagnostics:export", () => {
     const AdmZip = (await import("adm-zip")).default;
     const names = new AdmZip(readFileSync(out)).getEntries().map((e) => e.entryName);
     expect(names).not.toContain("crash-dumps/boom.dmp");
-    rmSync(crashDir, { recursive: true, force: true });
+    await cleanupTmpDir(crashDir);
   });
 
   it("emits a diagnostics-export audit row on success (m2 forensics)", async () => {
