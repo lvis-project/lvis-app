@@ -18,6 +18,7 @@
  */
 import { describe, it, expect } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import {
   existsSync,
   mkdirSync,
@@ -42,6 +43,14 @@ function makeTree(): { dir: string; file: string } {
   const file = join(inner, "permission-audit.jsonl");
   writeFileSync(file, "line\n", "utf-8");
   return { dir, file };
+}
+
+/** Stop the lock owner and wait until its non-share-delete handle is gone. */
+async function stopForeignLock(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = once(child, "exit");
+  child.kill();
+  await exited;
 }
 
 /**
@@ -76,9 +85,11 @@ async function holdForeignLock(file: string, holdMs: number): Promise<ChildProce
 describe.skipIf(!isWindows)("scratch-directory teardown under a foreign lock", () => {
   it("is refused outright by a bare rmSync, retries included", async () => {
     const { dir, file } = makeTree();
-    const child = await holdForeignLock(file, 1_500);
+    let child: ChildProcess | undefined;
     try {
+      child = await holdForeignLock(file, 1_500);
       const started = Date.now();
+      // Intentional behavior probe; fixture teardown stays in the finally block.
       expect(() =>
         rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }),
       ).toThrow(/EPERM|EBUSY|EACCES/);
@@ -87,8 +98,8 @@ describe.skipIf(!isWindows)("scratch-directory teardown under a foreign lock", (
       expect(Date.now() - started).toBeLessThan(200);
       expect(existsSync(dir)).toBe(true);
     } finally {
-      child.kill();
-      await cleanupTmpDir(dir).catch(() => {});
+      if (child) await stopForeignLock(child);
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -96,13 +107,14 @@ describe.skipIf(!isWindows)("scratch-directory teardown under a foreign lock", (
     const { dir, file } = makeTree();
     // Long enough to outlast what the old teardown could wait for, short
     // enough to sit inside the ladder's budget.
-    const child = await holdForeignLock(file, 800);
+    let child: ChildProcess | undefined;
     try {
+      child = await holdForeignLock(file, 800);
       await cleanupTmpDir(dir);
       expect(existsSync(dir)).toBe(false);
     } finally {
-      child.kill();
-      if (existsSync(dir)) await cleanupTmpDir(dir).catch(() => {});
+      if (child) await stopForeignLock(child);
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -117,15 +129,18 @@ describe.skipIf(!isWindows)("scratch-directory teardown under a foreign lock", (
     const fd = openSync(file, "a");
     let code: string | undefined;
     try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch (err) {
-      code = (err as NodeJS.ErrnoException).code;
+      try {
+        // Intentional behavior probe; fixture teardown stays in the finally block.
+        rmSync(dir, { recursive: true, force: true });
+      } catch (err) {
+        code = (err as NodeJS.ErrnoException).code;
+      }
+    } finally {
+      closeSync(fd);
+      await cleanupTmpDir(dir);
     }
-    closeSync(fd);
 
     expect(code).not.toBe("EPERM");
-
-    await cleanupTmpDir(dir);
     expect(existsSync(dir)).toBe(false);
   });
 });
