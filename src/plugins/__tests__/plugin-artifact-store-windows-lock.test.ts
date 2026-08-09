@@ -25,11 +25,10 @@
  */
 import AdmZip from "adm-zip";
 import { describe, expect, it } from "vitest";
-import { rmSync } from "node:fs";
 import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { isTransientFsLockError, retryOnTransientFsLock } from "../plugin-artifact-store.js";
-import { makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
+import { cleanupTmpDir, makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
 
 const TMP_PREFIX = "artifact-store-winlock-";
 
@@ -130,7 +129,7 @@ describe.skipIf(process.platform !== "win32")(
           await handle.close().catch(() => undefined);
         }
       } finally {
-        rmSync(tmp, { recursive: true, force: true });
+        await cleanupTmpDir(tmp);
       }
     });
 
@@ -172,7 +171,7 @@ describe.skipIf(process.platform !== "win32")(
           await handle.close().catch(() => undefined);
         }
       } finally {
-        rmSync(tmp, { recursive: true, force: true });
+        await cleanupTmpDir(tmp);
       }
     });
   },
