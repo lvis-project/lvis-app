@@ -3,7 +3,7 @@ import { CalendarDays, ChevronLeft, ChevronRight, MessageSquareText, Pin, Refres
 import { Button } from "../../../components/ui/button.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
-import type { LvisApi } from "../types.js";
+import type { LvisApi, UsageSummaryShape } from "../types.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { SessionSummary } from "../hooks/use-sessions.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
@@ -11,6 +11,7 @@ import { projectLabelForSession } from "../utils/insights-project-groups.js";
 import { CalendarFallback, LazyCalendar } from "./LazyCalendar.js";
 import { kstDateKey } from "../../../shared/kst-date.js";
 import { formatCost } from "../../../lib/cost-format.js";
+import { InsightsUsageBreakdown } from "./InsightsUsageBreakdown.js";
 
 export interface StarredItem {
   id: string;
@@ -48,6 +49,13 @@ interface DailyUsageResult {
   conversations: UsageConversation[];
 }
 
+interface MonthlyUsageResult {
+  source: Partial<LvisApi>["getUsageRange"];
+  monthKey: string;
+  summary: Partial<UsageSummaryShape> | null;
+  error: boolean;
+}
+
 interface HeatmapCell {
   key: string;
   dateKey?: string;
@@ -81,6 +89,17 @@ interface HeatmapMonthLabel {
 function dateFromKey(dateKey: string): Date {
   const [year = "0", month = "1", day = "1"] = dateKey.split("-");
   return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), 12));
+}
+
+function monthRange(date: Date): { monthKey: string; dateFrom: string; dateTo: string } {
+  const monthKey = kstDateKey(date).slice(0, 7);
+  const [year = 0, month = 1] = monthKey.split("-").map(Number);
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return {
+    monthKey,
+    dateFrom: `${monthKey}-01`,
+    dateTo: `${monthKey}-${String(lastDay).padStart(2, "0")}`,
+  };
 }
 
 function formatTokenCount(value: number | undefined): string {
@@ -174,6 +193,7 @@ export function StarredView({
     () => Number(kstDateKey(new Date()).slice(0, 4)),
   );
   const [dailyUsageResult, setDailyUsageResult] = useState<DailyUsageResult | null>(null);
+  const [monthlyUsageResult, setMonthlyUsageResult] = useState<MonthlyUsageResult | null>(null);
   const [discoveredSessions, setDiscoveredSessions] = useState<SessionSummary[]>([]);
   const [yearlyUsageByDate, setYearlyUsageByDate] = useState<Map<string, number>>(() => new Map());
   const [llmSummary, setLlmSummary] = useState<string | null>(null);
@@ -182,6 +202,16 @@ export function StarredView({
   const todayKey = kstDateKey(new Date());
   const currentYear = Number(todayKey.slice(0, 4));
   const getUsageRange = (api as Partial<LvisApi>).getUsageRange;
+  const monthlyRange = useMemo(() => monthRange(calendarMonth), [calendarMonth]);
+  const monthlyLabel = useMemo(
+    () => new Intl.DateTimeFormat(locale, { year: "numeric", month: "long", timeZone: "UTC" })
+      .format(dateFromKey(monthlyRange.dateFrom)),
+    [locale, monthlyRange.dateFrom],
+  );
+  const currentMonthlyUsageResult = (
+    monthlyUsageResult?.source === getUsageRange
+      && monthlyUsageResult?.monthKey === monthlyRange.monthKey
+  ) ? monthlyUsageResult : null;
   const currentDailyUsageResult = (
     dailyUsageResult?.source === getUsageRange && dailyUsageResult?.dateKey === selectedKey
   ) ? dailyUsageResult : null;
@@ -295,6 +325,34 @@ export function StarredView({
       cancelled = true;
     };
   }, [getUsageRange, selectedKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!getUsageRange) return;
+    void getUsageRange({
+      dateFrom: monthlyRange.dateFrom,
+      dateTo: monthlyRange.dateTo,
+    }).then((summary) => {
+      if (cancelled) return;
+      setMonthlyUsageResult({
+        source: getUsageRange,
+        monthKey: monthlyRange.monthKey,
+        summary,
+        error: false,
+      });
+    }).catch(() => {
+      if (cancelled) return;
+      setMonthlyUsageResult({
+        source: getUsageRange,
+        monthKey: monthlyRange.monthKey,
+        summary: null,
+        error: true,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [getUsageRange, monthlyRange.dateFrom, monthlyRange.dateTo, monthlyRange.monthKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -536,6 +594,13 @@ export function StarredView({
           </div>
         </div>
       </section>
+
+      <InsightsUsageBreakdown
+        summary={currentMonthlyUsageResult?.summary ?? null}
+        monthLabel={monthlyLabel}
+        loading={Boolean(getUsageRange && !currentMonthlyUsageResult)}
+        error={currentMonthlyUsageResult?.error ?? false}
+      />
 
       <div data-testid="insights-lists-grid" className="mt-4 grid shrink-0 gap-4 lg:h-[22rem] lg:min-h-[22rem] lg:grid-cols-2">
         <section data-testid="insights-conversations-panel" className="flex h-[22rem] min-h-0 flex-col overflow-hidden rounded-md border bg-background lg:h-full">
