@@ -2,7 +2,7 @@
  * Project AGENTS.md discovery leaf — unit tests.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, symlinkSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,7 @@ import {
   discoverProjectAgentsMd,
   PROJECT_AGENTS_MD_MAX_TOTAL_BYTES,
 } from "../project-agents-md.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 describe("discoverProjectAgentsMd", () => {
   let root: string;
@@ -17,8 +18,8 @@ describe("discoverProjectAgentsMd", () => {
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), "lvis-proj-agents-"));
   });
-  afterEach(() => {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ }
+  afterEach(async () => {
+    await cleanupTmpDir(root);
   });
 
   it("(a) returns the layer for <root>/AGENTS.md", () => {
@@ -58,7 +59,7 @@ describe("discoverProjectAgentsMd", () => {
     expect(content).toContain("line1\nline2");
   });
 
-  it("(f) skips an AGENTS.md symlink whose realpath escapes the root", () => {
+  it("(f) skips an AGENTS.md symlink whose realpath escapes the root", async () => {
     // Write the real target OUTSIDE the project root.
     const outside = mkdtempSync(join(tmpdir(), "lvis-outside-"));
     const secret = join(outside, "secret.md");
@@ -76,7 +77,7 @@ describe("discoverProjectAgentsMd", () => {
         expect(found.layers).toHaveLength(0); // escaping symlink not read
       }
     } finally {
-      try { rmSync(outside, { recursive: true, force: true }); } catch { /* ignore */ }
+      await cleanupTmpDir(outside);
     }
   });
 
