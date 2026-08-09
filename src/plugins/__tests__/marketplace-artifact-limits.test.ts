@@ -1,9 +1,10 @@
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { readCompressedArtifactFile } from "../marketplace-artifact-limits.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 describe("readCompressedArtifactFile", () => {
   it.runIf(process.platform !== "win32")(
@@ -18,7 +19,7 @@ describe("readCompressedArtifactFile", () => {
           readCompressedArtifactFile(fifoPath, 1024, "cached marketplace artifact"),
         ).rejects.toThrow(/not a regular file/);
       } finally {
-        rmSync(tmp, { recursive: true, force: true });
+        await cleanupTmpDir(tmp);
       }
     },
     2_000,
