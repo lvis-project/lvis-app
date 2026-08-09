@@ -30,8 +30,10 @@ import { UNAUTHORIZED_FRAME } from "../gated.js";
 import { onEvent } from "../../boot/types.js";
 import { HOST_ONLY_EMIT_NAMESPACES } from "../../plugins/capabilities.js";
 import type { IpcDeps } from "../types.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 type IpcHandler = (...args: unknown[]) => unknown;
+const pluginFixtureRoots: string[] = [];
 
 function handleSpy(): ReturnType<typeof vi.fn> {
   return ipcMain.handle as unknown as ReturnType<typeof vi.fn>;
@@ -57,6 +59,7 @@ function pluginEvent(webContentsId: number): unknown {
 
 function createPluginFixture(): { root: string; entryUrl: string } {
   const root = mkdtempSync(join(tmpdir(), "lvis-plugin-ipc-"));
+  pluginFixtureRoots.push(root);
   const entry = join(root, "index.html");
   writeFileSync(entry, "<!doctype html>");
   return {
@@ -64,6 +67,10 @@ function createPluginFixture(): { root: string; entryUrl: string } {
     entryUrl: `${pathToFileURL(entry).toString()}?lvisPluginVersion=1.0.0&lvisRuntimeRevision=1`,
   };
 }
+
+afterEach(async () => {
+  await Promise.all(pluginFixtureRoots.splice(0).map((root) => cleanupTmpDir(root)));
+});
 
 function createDeps(pluginRoot: string): {
   deps: IpcDeps;
