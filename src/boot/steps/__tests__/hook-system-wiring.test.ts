@@ -8,13 +8,13 @@ import {
   existsSync,
   mkdtempSync,
   readdirSync,
-  rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { wireHookSystem } from "../hook-system-wiring.js";
 import type { HookDiff } from "../../../hooks/hook-discovery.js";
 import { writeExecutableHook } from "../../../hooks/__tests__/test-helpers.js";
+import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 
 let tmpDir: string;
 let hooksDir: string;
@@ -24,8 +24,8 @@ beforeEach(() => {
   hooksDir = join(tmpDir, "hooks");
 });
 
-afterEach(() => {
-  if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
+afterEach(async () => {
+  if (tmpDir) await cleanupTmpDir(tmpDir);
 });
 
 describe("wireHookSystem permission hook policy", () => {

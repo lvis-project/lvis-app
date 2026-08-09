@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager } from "../../memory/memory-manager.js";
 import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let home: string;
 let prevHome: string | undefined;
@@ -20,10 +21,10 @@ beforeEach(() => {
   process.env.LVIS_HOME = home;
 });
 
-afterEach(() => {
+afterEach(async () => {
   if (prevHome === undefined) delete process.env.LVIS_HOME;
   else process.env.LVIS_HOME = prevHome;
-  rmSync(home, { recursive: true, force: true });
+  await cleanupTmpDir(home);
 });
 
 describe("side-chat storage isolation", () => {
