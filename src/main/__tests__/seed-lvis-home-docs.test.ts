@@ -35,7 +35,6 @@ import {
   readdirSync,
   lstatSync,
   statSync,
-  rmSync,
   symlinkSync,
   unlinkSync,
   constants as fsConstants,
@@ -52,6 +51,7 @@ import {
   seedLvisHomeDocs,
 } from "../seed-lvis-home-docs.js";
 import * as atomicFile from "../../lib/atomic-file.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let fixtures: string;
 let home: string;
@@ -94,10 +94,10 @@ beforeEach(() => {
   writeRes(join("prompts", "summarizer.md"), "summarizer v1\n");
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  rmSync(fixtures, { recursive: true, force: true });
-  rmSync(home, { recursive: true, force: true });
+  await cleanupTmpDir(fixtures);
+  await cleanupTmpDir(home);
   if (prevLvisHome === undefined) delete process.env.LVIS_HOME;
   else process.env.LVIS_HOME = prevLvisHome;
   if (prevResourceRoot === undefined) delete process.env.LVIS_RESOURCE_ROOT;
@@ -132,7 +132,7 @@ describe("seedLvisHomeDocs — first boot", () => {
     );
   });
 
-  it("resolves dev resources independent of process.cwd() (regression: chdir-before-seed)", () => {
+  it("resolves dev resources independent of process.cwd() (regression: chdir-before-seed)", async () => {
     // ensureWorkspaceCwd() chdir()s the main process to ~/.lvis/workspace before
     // boot. Seeding must still find the repo's resources/ via the module-anchored
     // walk-up, not a cwd-relative join (and not app.getAppPath(), which points at
@@ -149,7 +149,7 @@ describe("seedLvisHomeDocs — first boot", () => {
       );
     } finally {
       process.chdir(originalCwd);
-      rmSync(elsewhere, { recursive: true, force: true });
+      await cleanupTmpDir(elsewhere);
     }
   });
 
@@ -170,7 +170,7 @@ describe("seedLvisHomeDocs — first boot", () => {
     expect(existsSync(join(home, "AGENTS.md.new"))).toBe(false);
   });
 
-  it("uses process.resourcesPath when Electron is packaged", () => {
+it("uses process.resourcesPath in a packaged runtime", async () => {
     const resourcesPath = mkdtempSync(join(tmpdir(), "lvis-packaged-resources-"));
     try {
       (app as { isPackaged: boolean }).isPackaged = true;
@@ -189,7 +189,7 @@ describe("seedLvisHomeDocs — first boot", () => {
       expect(readFileSync(join(home, "AGENTS.md"), "utf8")).toBe("PACKAGED AGENTS\n");
       expect(readFileSync(join(home, "skills", "report-writing.md"), "utf8")).toBe("packaged report\n");
     } finally {
-      rmSync(resourcesPath, { recursive: true, force: true });
+      await cleanupTmpDir(resourcesPath);
     }
   });
 });

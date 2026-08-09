@@ -1,6 +1,6 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, win32 } from "node:path";
 import { PassThrough } from "node:stream";
@@ -16,6 +16,7 @@ import {
   GROK_BUILD_REQUIRED_MINIMUM_VERSION,
   grokBuildGovernedAgentDefinitionPath,
 } from "../acp-subscription-runtime-config.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 type Spawn = NonNullable<AcpSubscriptionRuntimeClientOptions["spawn"]>;
 
@@ -77,7 +78,7 @@ afterEach(async () => {
     harness.child.stdin.destroy();
     harness.child.stdout.destroy();
     harness.child.stderr.destroy();
-    rmSync(harness.runtimeRoot, { recursive: true, force: true });
+    await cleanupTmpDir(harness.runtimeRoot);
   }
   vi.restoreAllMocks();
 });
@@ -200,7 +201,7 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
       probeChild.stdin.destroy();
       probeChild.stdout.destroy();
       probeChild.stderr.destroy();
-      rmSync(runtimeRoot, { recursive: true, force: true });
+      await cleanupTmpDir(runtimeRoot);
     }
   });
 
@@ -302,7 +303,7 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
       probeChild.stdin.destroy();
       probeChild.stdout.destroy();
       probeChild.stderr.destroy();
-      rmSync(runtimeRoot, { recursive: true, force: true });
+      await cleanupTmpDir(runtimeRoot);
     }
   });
 
@@ -345,7 +346,7 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
       versionChild.stdin.destroy();
       versionChild.stdout.destroy();
       versionChild.stderr.destroy();
-      rmSync(runtimeRoot, { recursive: true, force: true });
+      await cleanupTmpDir(runtimeRoot);
     }
   });
   it("rejects a Grok Build prerelease at the governed minimum", async () => {
@@ -469,7 +470,7 @@ describe("AcpSubscriptionRuntimeClient security boundary", () => {
         code: "acp-runtime-invalid-executable",
       });
     } finally {
-      rmSync(root, { recursive: true, force: true });
+      await cleanupTmpDir(root);
     }
   });
 

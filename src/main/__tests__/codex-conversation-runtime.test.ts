@@ -1,6 +1,6 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { existsSync, mkdirSync, mkdtempSync, promises as fs, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, promises as fs, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -11,6 +11,7 @@ import {
   sanitizedCodexConversationEnvironment,
   type CodexConversationRuntimeOptions,
 } from "../codex-conversation-runtime.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 type Spawn = NonNullable<CodexConversationRuntimeOptions["spawn"]>;
 type JsonRecord = Record<string, unknown>;
@@ -103,13 +104,13 @@ function requestId(message: JsonRecord): number {
   return message.id as number;
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const harness of harnesses.splice(0)) {
     harness.runtime.stop();
     harness.child.stdin.destroy();
     harness.child.stdout.destroy();
     harness.child.stderr.destroy();
-    rmSync(harness.runtimeRoot, { recursive: true, force: true });
+    await cleanupTmpDir(harness.runtimeRoot);
   }
   vi.restoreAllMocks();
 });

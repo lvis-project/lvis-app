@@ -15,6 +15,7 @@ import {
 } from "../acp-subscription-session-client.js";
 import type { AcpSubscriptionMcpServerConfig } from "../acp-subscription-runtime-config.js";
 import { MAX_SUBSCRIPTION_ATTACHMENT_BYTES } from "../subscription-attachment-input.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 interface RpcMessage {
   jsonrpc?: unknown;
@@ -208,7 +209,7 @@ afterEach(async () => {
   for (const harness of harnesses.splice(0)) {
     await harness.client.stop();
     harness.agent.dispose();
-    rmSync(harness.runtimeRoot, { recursive: true, force: true });
+    await cleanupTmpDir(harness.runtimeRoot);
   }
   vi.restoreAllMocks();
 });

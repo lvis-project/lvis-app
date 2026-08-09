@@ -14,7 +14,7 @@
  * namespace, the real paired runtime — because the defect lived exactly in the
  * seam between them.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -36,6 +36,7 @@ import {
   telegramConversationDigest,
 } from "../telegram-platform-runtime.js";
 import { namespaceAt } from "./telegram-connection-namespace.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const OWNER_ID = "776655443322";
 const BOT_FINGERPRINT = "a".repeat(64);
@@ -45,8 +46,8 @@ const CODE_DIGEST = "c".repeat(64);
 
 let directories: string[] = [];
 
-afterEach(() => {
-  for (const directory of directories) rmSync(directory, { recursive: true, force: true });
+afterEach(async () => {
+  for (const directory of directories) await cleanupTmpDir(directory);
   directories = [];
 });
 

@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import { mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ensureWorkspaceCwd } from "../ensure-workspace-cwd.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 describe("ensureWorkspaceCwd", () => {
   let prevCwd: string;
@@ -19,10 +20,10 @@ describe("ensureWorkspaceCwd", () => {
     vi.stubEnv("LVIS_HOME", tmpHome);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     process.chdir(prevCwd);
     vi.unstubAllEnvs();
-    rmSync(tmpHome, { recursive: true, force: true });
+    await cleanupTmpDir(tmpHome);
   });
 
   it("creates ~/.lvis/workspace and anchors process.cwd() to it", () => {
@@ -47,7 +48,7 @@ describe("ensureWorkspaceCwd", () => {
     expect(mode).toBe(0o700);
   });
 
-  it("honors LVIS_HOME env override", () => {
+  it("honors LVIS_HOME env override", async () => {
     const customHome = realpathSync(mkdtempSync(join(tmpdir(), "lvis-custom-home-")));
     vi.stubEnv("LVIS_HOME", customHome);
     try {
@@ -55,7 +56,7 @@ describe("ensureWorkspaceCwd", () => {
       expect(workspaceDir).toBe(join(customHome, "workspace"));
     } finally {
       process.chdir(prevCwd);
-      rmSync(customHome, { recursive: true, force: true });
+      await cleanupTmpDir(customHome);
     }
   });
 });

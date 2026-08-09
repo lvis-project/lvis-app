@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ import {
   ensureAcpSubscriptionNativePolicy,
   validateAcpSubscriptionMcpServerConfigs,
 } from "../acp-subscription-runtime-config.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const runtimeRoots: string[] = [];
 
@@ -22,8 +23,8 @@ function createRuntimeHome(name: string): string {
   return runtimeHome;
 }
 
-afterEach(() => {
-  for (const root of runtimeRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+afterEach(async () => {
+  for (const root of runtimeRoots.splice(0)) await cleanupTmpDir(root);
 });
 
 describe("ACP subscription native policies", () => {
