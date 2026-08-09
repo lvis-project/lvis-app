@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager } from "../memory-manager.js";
 import { estimateTokens } from "../../shared/token-estimate.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let dir: string;
 let memoryManager: MemoryManager;
@@ -17,10 +18,10 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   memoryManager.stopPersistentContextWatcher();
   memoryManager.closeSearchIndex();
-  rmSync(dir, { recursive: true, force: true });
+  await cleanupTmpDir(dir);
 });
 
 describe("MemoryManager long-term-memory consolidation", () => {
