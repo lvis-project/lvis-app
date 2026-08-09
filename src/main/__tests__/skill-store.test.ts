@@ -8,13 +8,14 @@
  *   4. Bodies larger than SKILL_MAX_BODY_BYTES are rejected.
  */
 import { describe, it, expect } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync, symlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import { resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SkillStore, SKILL_MAX_BODY_BYTES } from "../skill-store.js";
 import type { ActivePluginGeneration } from "../../plugins/plugin-generation-coordinator.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 function pluginGeneration(pluginId: string, generationId: string, body: string): ActivePluginGeneration {
   const fingerprint = (generationId === "g1" ? "a" : "b").repeat(64);
@@ -59,7 +60,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
         "plugin:plugin-two:attendance",
       ]);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -78,7 +79,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       store.removePluginGeneration("plugin-one", "g2");
       expect(await store.load("plugin:plugin-one:attendance")).toBeNull();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -110,8 +111,8 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       // Only the BUILTIN_SKILLS should appear; the symlinked entry is dropped.
       expect(all.find((s) => s.name === "evil")).toBeUndefined();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
+      await cleanupTmpDir(outside);
     }
   });
 
@@ -133,7 +134,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       expect(all.find((s) => s.name === "x")).toBeUndefined();
       expect(all.find((s) => s.name === "good-skill")).toBeDefined();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -149,7 +150,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       const all = await store.list();
       expect(all.find((s) => s.name.includes(".."))).toBeUndefined();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -167,7 +168,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       expect(store.listCatalogSync()).toEqual([]);
       expect(await store.load("actual-id")).toBeNull();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -184,7 +185,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       const all = await store.list();
       expect(all.find((s) => s.name === "huge")).toBeUndefined();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -218,7 +219,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
     }
   });
 
-  it("returns a lightweight catalog without exposing skill bodies", () => {
+  it("returns a lightweight catalog without exposing skill bodies", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
     try {
       writeFileSync(
@@ -234,11 +235,11 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       }]);
       expect(JSON.stringify(catalog)).not.toContain("SECRET BODY");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
-  it("catalog reads only frontmatter and keeps metadata for oversized bodies", () => {
+  it("catalog reads only frontmatter and keeps metadata for oversized bodies", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
     try {
       writeFileSync(
@@ -251,7 +252,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       expect(catalog).toEqual([{ name: "huge", description: "Huge but discoverable" }]);
       expect(JSON.stringify(catalog)).not.toContain("x".repeat(100));
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -269,7 +270,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
       expect(skill?.description).toBe("Create releases");
       expect(skill?.body).toContain("Ship it.");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -291,7 +292,7 @@ describe("SkillStore — C2 traversal & allowlist", () => {
 
       expect(await store.load("duplicate")).toBeNull();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });
@@ -338,7 +339,7 @@ describe("SkillStore — bundled resources (stage-3)", () => {
       expect(read.content).toBe("# API reference");
       expect(read.bytes).toBeGreaterThan(0);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -351,7 +352,7 @@ describe("SkillStore — bundled resources (stage-3)", () => {
       expect(skill?.resources).toEqual([]);
       await expect(store.readUserResource(skill!, "SKILL.md")).rejects.toThrow();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -365,7 +366,7 @@ describe("SkillStore — bundled resources (stage-3)", () => {
         await expect(store.readUserResource(skill!, bad)).rejects.toThrow();
       }
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -381,7 +382,7 @@ describe("SkillStore — bundled resources (stage-3)", () => {
       expect(flat?.resources).toEqual([]);
       await expect(store.readUserResource(flat!, "secret/SKILL.md")).rejects.toThrow();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -399,7 +400,7 @@ describe("SkillStore — bundled resources (stage-3)", () => {
       await expect(store.readUserResource(attacker!, "secret/SKILL.md")).rejects.toThrow();
       await expect(store.readUserResource(attacker!, "secret/references/x.md")).rejects.toThrow();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -421,7 +422,7 @@ describe("SkillStore — bundled resources (stage-3)", () => {
       expect(new Set(paths).size).toBe(paths.length);
       if (looped) expect(paths.filter((p) => p === "api.md")).toHaveLength(1);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -434,7 +435,7 @@ describe("SkillStore — bundled resources (stage-3)", () => {
       const skill = await store.load("guide");
       await expect(store.readUserResource(skill!, "logo.png")).rejects.toThrow(/not UTF-8 text/);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -448,7 +449,7 @@ describe("SkillStore — bundled resources (stage-3)", () => {
       expect(skill?.resources.map((r) => r.path)).toContain("..notes.md");
       expect((await store.readUserResource(skill!, "..notes.md")).content).toBe("dotted");
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -471,7 +472,7 @@ describe("SkillStore — bundled resources (stage-3)", () => {
       }
       expect(skill).not.toBeNull();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 
@@ -495,12 +496,12 @@ describe("SkillStore — bundled resources (stage-3)", () => {
         await expect(store.readUserResource(skill!, "leak.txt")).rejects.toThrow();
       }
     } finally {
-      rmSync(dir, { recursive: true, force: true });
-      rmSync(outside, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
+      await cleanupTmpDir(outside);
     }
   });
 
-  it("serves plugin resources from verified memory and refuses unknown paths", () => {
+  it("serves plugin resources from verified memory and refuses unknown paths", async () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-skills-"));
     try {
       const generation = pluginGeneration("plugin-one", "g1", "body");
@@ -525,7 +526,7 @@ describe("SkillStore — bundled resources (stage-3)", () => {
         store.readPluginResource(generation, "plugin:plugin-one:attendance", "../../escape.md"),
       ).toThrow();
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await cleanupTmpDir(dir);
     }
   });
 });

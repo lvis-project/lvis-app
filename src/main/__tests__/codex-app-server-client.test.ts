@@ -1,6 +1,6 @@
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
@@ -9,6 +9,7 @@ import {
   CodexAppServerClient,
   type CodexAppServerClientOptions,
 } from "../codex-app-server-client.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 interface RpcRequest {
   id?: unknown;
@@ -152,11 +153,11 @@ function standardInitialize(request: RpcRequest): unknown {
   throw new Error(`Unexpected JSON-RPC request: ${String(request.method)}`);
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const harness of harnesses.splice(0)) {
     harness.client.stop();
     harness.server.dispose();
-    rmSync(harness.runtimeRoot, { recursive: true, force: true });
+    await cleanupTmpDir(harness.runtimeRoot);
   }
   vi.unstubAllEnvs();
   vi.restoreAllMocks();

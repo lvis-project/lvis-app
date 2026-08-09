@@ -5,16 +5,17 @@
  * cron lastFiredMinuteUTC dedup persistence, and dispatchNow (trigger-now IPC path).
  */
 import { describe, it, expect, vi } from "vitest";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { RoutinesStore } from "../routines-store.js";
 import { RoutinesScheduler } from "../routines-scheduler.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 function tempStore() {
   const dir = mkdtempSync(join(tmpdir(), "lvis-sched-"));
   const store = new RoutinesStore(join(dir, "routines.json"));
-  const cleanup = () => rmSync(dir, { recursive: true, force: true });
+  const cleanup = () => cleanupTmpDir(dir);
   return { store, cleanup };
 }
 
@@ -45,7 +46,7 @@ describe("RoutinesScheduler — llm-session dispatch", () => {
       await scheduler.checkAndFire();
       expect(fired).toHaveLength(1);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -66,7 +67,7 @@ describe("RoutinesScheduler — llm-session dispatch", () => {
       await scheduler.checkAndFire();
       expect(notifFired).toHaveLength(0);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -89,7 +90,7 @@ describe("RoutinesScheduler — notification-only dispatch", () => {
       await scheduler.checkAndFire();
       expect(fired).toHaveLength(1);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -110,7 +111,7 @@ describe("RoutinesScheduler — notification-only dispatch", () => {
       await scheduler.checkAndFire();
       expect(llmFired).toHaveLength(0);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -133,7 +134,7 @@ describe("RoutinesScheduler — future routine not fired", () => {
       await scheduler.checkAndFire();
       expect(fired).toHaveLength(0);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -156,7 +157,7 @@ describe("RoutinesScheduler — markFired persistence", () => {
       expect(store.listActive()).toHaveLength(0);
       expect(store.list()[0].lastFiredAt).toBeTruthy();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -180,7 +181,7 @@ describe("RoutinesScheduler — dispatchNow (trigger-now IPC)", () => {
       expect(ok).toBe(true);
       expect(fired).toContain(r.id);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -191,7 +192,7 @@ describe("RoutinesScheduler — dispatchNow (trigger-now IPC)", () => {
       const ok = await scheduler.dispatchNow("nonexistent-id");
       expect(ok).toBe(false);
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 
@@ -212,7 +213,7 @@ describe("RoutinesScheduler — dispatchNow (trigger-now IPC)", () => {
       const updated = store.list().find((x) => x.id === r.id);
       expect(updated?.lastFiredAt).toBeTruthy();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });
@@ -238,7 +239,7 @@ describe("RoutinesScheduler — per-tick error isolation", () => {
       // Promise must resolve (not reject) — per-handler errors are swallowed.
       await expect(scheduler.checkAndFire()).resolves.toBeUndefined();
     } finally {
-      cleanup();
+      await cleanup();
     }
   });
 });

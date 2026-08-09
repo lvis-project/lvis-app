@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import {
   type PlatformBridgeRawWebhookRequest,
   type PlatformBridgeVerifiedEnvelope,
 } from "../platform-bridge-inbound.js";
+import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 const ACTOR_DIGEST = "a".repeat(64);
 const CONVERSATION_DIGEST = "b".repeat(64);
@@ -110,9 +111,9 @@ function createFixture(options: Readonly<{
   return { gateway, verify, authorize, submit, receiptStore, filePath };
 }
 
-afterEach(() => {
+afterEach(async () => {
   for (const directory of scratchDirectories.splice(0)) {
-    rmSync(directory, { recursive: true, force: true });
+    await cleanupTmpDir(directory);
   }
 });
 
