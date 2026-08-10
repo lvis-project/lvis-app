@@ -26,7 +26,7 @@
 5. [Memory — 경량 기억 구조](#5-memory--경량-기억-구조)
    - 5.1 설계 원칙 · 5.2 Memory 파일 구조
 6. [Client Core Engines](#6-client-core-engines)
-   - 6.1 Input Classification & Tool Discovery · 6.2 Agent Route Engine · **6.3 Tool Permission Model** · **6.4 Tool Registry & Taxonomy** · **6.5 Command Safety** · **6.6 Observability & Audit** · **6.7 Theme & Design Tokens** · **6.8 Floating Question Panel** · **6.9 Settings Dialog Tab Layout** · **6.10 ChatSidePanel & Workspace Rail**
+   - 6.1 Input Classification & Tool Discovery · 6.2 Agent Route Engine · **6.3 Tool Permission Model** · **6.4 Tool Registry & Taxonomy** · **6.5 Command Safety** · **6.6 Observability & Audit** · **6.7 Theme & Design Tokens** · **6.8 Question Overlay** · **6.9 Settings Dialog Tab Layout** · **6.10 ChatSidePanel & Workspace Rail**
 7. [Overlay Trigger Surface](#7-overlay-trigger-surface)
 8. [Agent Approval System — 에이전트 요청 승인](#8-agent-approval-system--에이전트-요청-승인)
 9. [Plugin System & UI Extension](#9-plugin-system--ui-extension)
@@ -1342,7 +1342,7 @@ host-owned `ConversationCommandPort`를 거친다. Loopback 입력은 언제나
 Bearer secret authenticates the CALLER (loopback, per-boot, constant-time
 compare) — it does NOT authorize a mutation by itself. There is no token
 bypass: authorization for a mutating channel comes only from the user's own
-"Allow" click on the in-app `ApprovalGate` modal at the moment of the request,
+"Allow" click on the in-app `ApprovalGate` dock at the moment of the request,
 which IS the explicit user action, mirroring the repo's "headless must not
 bypass approvals" posture (Permission Policy §Headless/routine 실행 rule
 above). Scope is intentionally narrow:
@@ -1364,9 +1364,9 @@ above). Scope is intentionally narrow:
   fail-closed default is preserved for everything outside the allowlist.
   `src/permissions/permission-mode-apply.ts` records the approval as a
   `PermissionModeApprovalBypass` with `source: "local-api-approval"` so the
-  handler applies the change WITHOUT a second in-app modal — the ApprovalGate
+  handler applies the change WITHOUT a second in-app prompt — the ApprovalGate
   click the user already made is the only confirmation, end-to-end exactly
-  ONE modal.
+  ONE prompt.
 - **Denial** — a decline or a timed-out/errored approval resolves as the
   dispatcher's `external-mutation-denied` code, which the HTTP transport maps
   to `403` (same JSON envelope as every other rejected dispatch).
@@ -1651,7 +1651,7 @@ flowchart TB
 | 5 | Reviewer agent (multi-vendor) — foreground auto-review LOW allow / MED-HIGH main-owned approval dock, headless MED-HIGH defer. `final = max(rule, llm)`. | §3 Layer 5 | `src/permissions/reviewer/*` |
 | 6 | Hook chain v1 (deny-only). `~/.config/lvis/hooks/{pre,post,perm}-*.sh`. Strict-deny quarantine lockfile + DLP-redacted stdin. | §3 Layer 6 | `src/hooks/script-hook-*` |
 | 7 | Discriminated-union audit (`AuditAllow`/`AuditAsk`/`AuditDeny`/`AuditDeferred`/`AuditModeChange`/`AuditManifestViolation`) + HMAC chain + daily seal. | §3 Layer 7 | `src/audit/audit-schema.ts`, `src/audit/hmac-chain.ts` |
-| 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` modal confirm. Modes: `default`, `strict`, `auto`, `allow`. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
+| 8 | `/permission` 슬래시 + user-keyboard origin gate + `--durable` explicit confirm. Modes: `default`, `strict`, `auto`, `allow`. Mode change emits `AuditModeChange`. | §3 Layer 8 | `src/permissions/permission-slash.ts` |
 | 9 | Electron preload / contextBridge 기존 sandbox — permission policy 변경 없음. | §3 Layer 9 | `src/preload.ts` |
 
 #### 6.3.3 — Trust origin classification
@@ -1675,7 +1675,7 @@ classifier. 4-mode (`disabled` / `rule` / `llm` / `strict`) + multi-vendor adapt
 (default OpenAI gpt-4o-mini, Anthropic / Google 도 swap 가능). 항상
 rule classifier 가 baseline 으로 함께 실행되며 `final = max(rule, llm)`
 (LLM downgrade 불가). 현재 foreground auto-review 는 LOW 만 allow + audit 하고
-MED/HIGH 는 main-owned in-flow approval dock 에서 사용자 결정을 받는다. 승인은 해당
+MED/HIGH 는 main-owned bottom-floating approval dock 에서 사용자 결정을 받는다. 승인은 해당
 요청의 봉인된 tool/input 에만 1회 적용되며 chat 문장 감지나 executor 재시도
 메모리를 권한 근거로 사용하지 않는다. Headless reviewer 는 LOW 만 실행하고
 MED/HIGH 는 deferred queue 에 append 되어 사용자가 큐 버튼을 열 때 surface 된다.
@@ -2502,31 +2502,29 @@ SDK 에는 fallback artifact (JSON / CSS / TS const) 가 없으며, plugin 은
 
 ---
 
-## 6.8 Floating Question Panel (PR #334)
+## 6.8 Question Overlay
 
-`ask_user_question` 도구가 발생시키는 사용자 질문은 메시지 스트림 안에서 스크롤에
-파묻히기 쉬웠다. **FloatingQuestionPanel** 은 이 문제를 해결하기 위해 ChatScroll
-**위쪽**(메시지 영역 상단, ScrollArea viewport 바깥)에 anchor 되는 floating
-오버레이로, 항상 즉시 보이도록 설계되었다.
+`ask_user_question` 요청은 `ChatComposerDock`의 질문 전용 dock에 비모달 카드로
+표시된다. 메시지 이력에 섞거나 viewport 전역 modal로 띄우지 않고, 현재 대화의
+composer/status 영역에 붙여 사용자가 질문과 선택지를 즉시 확인하도록 한다.
 
-- **위치**: `src/ui/renderer/components/FloatingQuestionPanel.tsx`
-- **렌더 트리**: `App.tsx` → `ChatView.tsx` 안에서 `SessionTodoPanel`의 sibling
-  으로 배치. `ChatScroll` 위, `MessageInput` 아래 영역에 absolute positioning.
-  부모는 `position: relative` (ChatView 외곽 div가 이미 그렇다).
-- **큐 시멘틱**: 최대 3장(`MAX_VISIBLE`) 카드를 stack으로 표시. 초과분은 마지막
-  카드의 `+N more` 칩으로 표시. 각 카드는 독립 dismiss.
-- **반응형**: `< 480px`에서는 bottom-sheet 모드로 전환되어 메시지 입력을 가리지
-  않는다.
-- **데이터 경로**: ChatView의 기존 `askQuestions` / `dismissAskQuestion` / `api`
-  props를 그대로 받는다. 새 IPC 채널 없음. 내부 `AskUserQuestionCard` 가
-  `respondAskUserQuestion` 을 처리하고 본 컴포넌트는 visibility/animation만 관리.
-- **접근성**: 외곽 wrapper `role="region" aria-label="질문 대기열"
-  aria-live="polite"`, focus trap, Esc dismiss(부분 입력 시 confirm),
-  `prefers-reduced-motion` 시 translate 제거.
+- **위치**: `src/ui/renderer/components/QuestionOverlay.tsx` 및
+  `src/ui/renderer/components/AskUserQuestionCard.tsx`.
+- **렌더 트리**: `ChatView` → `ChatComposerDock` 안에서 composer 영역의 sibling으로
+  배치한다. `QuestionOverlay`는 dock의 아래쪽에 고정된 비모달 surface이며 배경을
+  inert 처리하거나 focus trap을 만들지 않는다.
+- **큐 시멘틱**: `requests[0]` 한 건만 FIFO head로 표시한다. 응답이 성공하거나
+  사용자가 Skip한 뒤에만 해당 id를 제거하며, 다음 id는 `key` 기반으로 새 카드에
+  마운트되어 이전 draft가 섞이지 않는다.
+- **응답 계약**: 각 질문은 1~3개의 고유한 선택지를 제공한다. 라벨은 앞뒤 공백을
+  제거한 뒤에도 서로 달라야 하고 항목당 최대 20자다. 단일 선택은 `choice`, 다중
+  선택은 `choices`로 전송하며 사용자 수기 입력 필드는 제공하지 않는다.
+- **데이터 경로**: 기존 `lvis:ask-user-question:request/respond` 채널을 사용한다.
+  renderer, IPC, main gate가 요청 id와 제시된 선택지 membership/order를 검증하며
+  잘못된 응답은 카드를 닫지 않고 fail-closed한다.
 
-테스트는 `src/ui/renderer/components/__tests__/FloatingQuestionPanel.test.tsx`
-
-- snapshot.
+회귀 검증은 `AskUserQuestionCard.test.tsx`, `WorkflowComponents.test.tsx`,
+`ask-user-question-layout.spec.ts`, `ask-user-question-interaction.spec.ts`가 담당한다.
 
 ---
 

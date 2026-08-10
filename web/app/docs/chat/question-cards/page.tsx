@@ -12,7 +12,7 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="질문 카드 — 더 묻거나 선택지를 제시할 때"
-        description="에이전트가 사용자에게 ‘더 물어봐야 하는 상황’ 이거나 ‘여러 선택지 중 골라야 하는 상황’ 에서 인라인 카드로 띄웁니다. 추천 선택지가 강조되고, 비슷하게 좋은 대안도 함께 표시됩니다."
+        description="에이전트가 사용자에게 더 물어보거나 여러 후보 중 결정을 요청할 때, 채팅 composer dock에 비모달 선택 카드를 표시합니다. 추천 선택지가 강조되고 비슷하게 좋은 대안도 함께 보입니다."
       />
 
       <ScreenshotGallery columns={1}>
@@ -31,9 +31,9 @@ export default function Page() {
       <ul>
         <li><strong>추천 선택지</strong> 는 색상으로 강조됩니다.</li>
         <li><strong>비슷하게 좋은 대안</strong> 도 함께 표시되어 사용자가 빠르게 비교할 수 있습니다.</li>
-        <li><strong>자유 입력</strong> 이 허용되면 옆에 입력 박스가 함께 나옵니다.</li>
-        <li><strong>다중 선택</strong> 이 허용되면 체크박스 형태로 변합니다.</li>
-        <li>이미 선택한 카드는 잠긴 상태로 대화 기록에 보존되어 어떤 선택이 어떤 결과를 만들었는지 추적할 수 있습니다.</li>
+        <li>모든 질문은 <strong>1~3개의 구체적 선택지</strong> 로 답하며 수기 입력 필드는 표시되지 않습니다.</li>
+        <li><strong>다중 선택</strong> 질문은 같은 선택 버튼 목록에서 여러 항목을 토글할 수 있습니다.</li>
+        <li>응답이 완료되면 질문 카드는 닫히고, 선택한 답은 읽기 전용 답변 회고 버블로 대화 기록에 보존됩니다.</li>
       </ul>
 
       <Callout tone="info" title="요점">

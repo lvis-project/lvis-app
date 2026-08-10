@@ -25,7 +25,6 @@ function makeRequest(overrides: Partial<AskUserQuestionRequest> = {}): AskUserQu
       {
         question: "색상을 선택하세요",
         choices: ["빨강", "파랑", "초록"],
-        allowFreeText: false,
       },
     ],
     createdAt: Date.now(),
@@ -125,8 +124,8 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
     const onResolved = vi.fn();
     const request = makeRequest({
       questions: [
-        { question: "첫 번째 질문", choices: ["A", "B"], allowFreeText: false },
-        { question: "두 번째 질문", choices: ["X", "Y"], allowFreeText: false },
+        { question: "첫 번째 질문", choices: ["A", "B"] },
+        { question: "두 번째 질문", choices: ["X", "Y"] },
       ],
     });
 
@@ -159,8 +158,8 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
     const onResolved = vi.fn();
     const request = makeRequest({
       questions: [
-        { question: "Q1", choices: ["A", "B"], allowFreeText: false },
-        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+        { question: "Q1", choices: ["A", "B"] },
+        { question: "Q2", choices: ["X", "Y"] },
       ],
     });
 
@@ -205,8 +204,8 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
     const onResolved = vi.fn();
     const request = makeRequest({
       questions: [
-        { question: "Q1", choices: ["A", "B"], allowFreeText: false },
-        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+        { question: "Q1", choices: ["A", "B"] },
+        { question: "Q2", choices: ["X", "Y"] },
       ],
     });
 
@@ -237,135 +236,8 @@ describe("AskUserQuestionCard — multi-step keyboard Enter (intermediate step)"
   });
 });
 
-describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () => {
-  it("does not advance while Korean IME composition is being committed", async () => {
-    const api = askUserQuestionApi();
-    const request = makeRequest({
-      questions: [
-        { question: "참석자", allowFreeText: true },
-        { question: "의제", allowFreeText: true },
-      ],
-    });
-
-    const { getByTestId, getByText, queryByText } = render(
-      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
-    );
-
-    const input = getByTestId("ask-freetext-input") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "알루우" } });
-    await act(async () => {
-      fireEvent.keyDown(input, { key: "Enter", keyCode: 229 });
-    });
-
-    expect(getByText("참석자")).toBeTruthy();
-    expect(queryByText("의제")).toBeNull();
-    expect(input.value).toBe("알루우");
-
-    await act(async () => {
-      fireEvent.keyDown(input, { key: "Enter" });
-    });
-
-    expect(getByText("의제")).toBeTruthy();
-    expect((getByTestId("ask-freetext-input") as HTMLInputElement).value).toBe("");
-  });
-
-  it("keeps arrow keys inside free-text editing and moves questions from the card surface", async () => {
-    const api = askUserQuestionApi();
-    const request = makeRequest({
-      questions: [
-        { question: "참석자", allowFreeText: true },
-        { question: "의제", allowFreeText: true },
-      ],
-    });
-
-    const { getByTestId, getByText } = render(
-      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
-    );
-
-    expect(getByTestId("ask-keyboard-hint").textContent).toContain("Enter");
-    expect(getByTestId("ask-keyboard-hint").textContent).toContain("질문 이동");
-
-    const firstInput = getByTestId("ask-freetext-input") as HTMLInputElement;
-    fireEvent.change(firstInput, { target: { value: "알루우" } });
-    await act(async () => {
-      fireEvent.keyDown(firstInput, { key: "ArrowDown" });
-    });
-
-    expect(getByText("참석자")).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.keyDown(firstInput, { key: "ArrowRight" });
-    });
-
-    expect(getByText("참석자")).toBeTruthy();
-
-    const card = getByTestId("ask-user-question-card");
-    card.focus();
-    expect(document.activeElement).toBe(card);
-    await act(async () => {
-      fireEvent.keyDown(card, { key: "ArrowRight" });
-    });
-
-    expect(getByText("의제")).toBeTruthy();
-
-    const secondInput = getByTestId("ask-freetext-input") as HTMLInputElement;
-    await act(async () => {
-      fireEvent.keyDown(secondInput, { key: "ArrowLeft" });
-    });
-
-    expect(getByText("의제")).toBeTruthy();
-
-    card.focus();
-    expect(document.activeElement).toBe(card);
-    await act(async () => {
-      fireEvent.keyDown(card, { key: "ArrowLeft" });
-    });
-
-    expect(getByText("참석자")).toBeTruthy();
-  });
-
-  it("moves choice answers with ArrowUp and ArrowDown before ArrowRight changes question", async () => {
-    const api = askUserQuestionApi();
-    const request = makeRequest({
-      questions: [
-        { question: "첫 번째 질문", choices: ["A", "B"], allowFreeText: false },
-        { question: "두 번째 질문", choices: ["X", "Y"], allowFreeText: false },
-      ],
-    });
-
-    const { getByTestId, getByText, queryByText } = render(
-      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
-    );
-
-    expect(getByTestId("ask-keyboard-hint").textContent).toContain("답변/수동입력 이동");
-    expect(getByTestId("ask-keyboard-hint").textContent).toContain("질문 이동");
-
-    const answerA = getByText("A").closest("button")!;
-    answerA.focus();
-    await act(async () => {
-      fireEvent.keyDown(answerA, { key: "ArrowDown" });
-    });
-
-    expect(document.activeElement?.textContent).toContain("B");
-    expect(queryByText("두 번째 질문")).toBeNull();
-
-    await act(async () => {
-      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
-    });
-
-    expect(document.activeElement?.textContent).toContain("A");
-
-    await act(async () => {
-      fireEvent.click(answerA);
-    });
-    await act(async () => {
-      fireEvent.keyDown(answerA, { key: "ArrowRight" });
-    });
-
-    expect(getByText("두 번째 질문")).toBeTruthy();
-  });
-
-  it("includes free-text input in the answer arrow loop and commits it with Enter", async () => {
+describe("AskUserQuestionCard — choice-only answers", () => {
+  it("does not render a manual input for a legacy request payload", async () => {
     const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
@@ -374,41 +246,63 @@ describe("AskUserQuestionCard — multi-step free-text keyboard navigation", () 
           choices: ["알루우", "지수"],
           allowFreeText: true,
           placeholder: "직접입력",
-        },
-        { question: "의제", allowFreeText: true },
+        } as never,
       ],
     });
 
-    const { getByPlaceholderText, getByText } = render(
+    const { getByText, queryByTestId, queryByPlaceholderText } = render(
       <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
     );
 
-    const firstChoice = getByText("알루우").closest("button")!;
-    firstChoice.focus();
-    await act(async () => {
-      fireEvent.keyDown(firstChoice, { key: "ArrowUp" });
-    });
-
-    const manualInput = getByPlaceholderText("직접입력") as HTMLInputElement;
-    expect(document.activeElement).toBe(manualInput);
+    expect(queryByTestId("ask-freetext-input")).toBeNull();
+    expect(queryByPlaceholderText("직접입력")).toBeNull();
 
     await act(async () => {
-      fireEvent.keyDown(manualInput, { key: "ArrowUp" });
+      fireEvent.click(getByText("알루우").closest("button")!);
+    });
+    expect(api.respondAskUserQuestion).toHaveBeenCalledWith(
+      expect.objectContaining({ answers: [{ choice: "알루우" }] }),
+    );
+  });
+
+  it("moves choice answers with ArrowUp and ArrowDown before ArrowRight changes question", async () => {
+    const api = askUserQuestionApi();
+    const request = makeRequest({
+      questions: [
+        { question: "첫 번째 질문", choices: ["A", "B"] },
+        { question: "두 번째 질문", choices: ["X", "Y"] },
+      ],
     });
 
-    expect(document.activeElement?.textContent).toContain("지수");
+    const { getByTestId, getByText, queryByText } = render(
+      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
+    );
+
+    expect(getByTestId("ask-keyboard-hint").textContent).toContain("답변 이동");
+    expect(getByTestId("ask-keyboard-hint").textContent).toContain("질문 이동");
+
+    const answerA = getByText("A").closest("button")!;
+    answerA.focus();
+    await act(async () => {
+      fireEvent.keyDown(answerA, { key: "ArrowDown" });
+    });
+    expect(document.activeElement?.textContent).toContain("B");
+    expect(queryByText("두 번째 질문")).toBeNull();
 
     await act(async () => {
-      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
     });
+    expect(document.activeElement?.textContent).toContain("A");
 
-    expect(document.activeElement).toBe(manualInput);
-    fireEvent.change(manualInput, { target: { value: "찬우" } });
     await act(async () => {
-      fireEvent.keyDown(manualInput, { key: "Enter" });
+      fireEvent.click(answerA);
     });
-
-    expect(getByText("의제")).toBeTruthy();
+    const card = getByTestId("ask-user-question-card");
+    card.focus();
+    await act(async () => {
+      fireEvent.keyDown(card, { key: "ArrowRight" });
+    });
+    expect(getByText("두 번째 질문")).toBeTruthy();
   });
 });
 
@@ -451,8 +345,8 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
     const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
-        { question: "Q1", choices: ["A", "B"], allowFreeText: false },
-        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+        { question: "Q1", choices: ["A", "B"] },
+        { question: "Q2", choices: ["X", "Y"] },
       ],
     });
 
@@ -485,7 +379,7 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
     const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
-        { question: "색상 선택", choices: ["빨강", "파랑", "초록"], allowFreeText: false },
+        { question: "색상 선택", choices: ["빨강", "파랑", "초록"] },
       ],
     });
 
@@ -513,7 +407,7 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
     const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
-        { question: "색상 선택", choices: ["빨강", "파랑", "초록"], allowFreeText: false },
+        { question: "색상 선택", choices: ["빨강", "파랑", "초록"] },
       ],
     });
 
@@ -541,8 +435,8 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
     const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
-        { question: "Q1", choices: ["A", "B"], allowFreeText: false },
-        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+        { question: "Q1", choices: ["A", "B"] },
+        { question: "Q2", choices: ["X", "Y"] },
       ],
     });
 
@@ -571,63 +465,6 @@ describe("AskUserQuestionCard — 4-direction card-level arrow navigation", () =
 });
 
 // ---------------------------------------------------------------------------
-// Med-2: free-text textarea focused — ArrowUp/Down must NOT reach card handler
-// ---------------------------------------------------------------------------
-
-describe("AskUserQuestionCard — ArrowUp/Down suppressed when free-text input is focused", () => {
-  /**
-   * When allowFreeText:true and the user is typing in the input, ArrowDown/Up
-   * inside the input must stay on the input (for cursor movement) and must NOT
-   * trigger card-level arrowNav delegation.
-   * The input's own onKeyDown calls stopPropagation, so document.activeElement
-   * must remain the input after the keydown.
-   */
-  it("ArrowDown inside free-text input keeps focus on the input", async () => {
-    const api = askUserQuestionApi();
-    const request = makeRequest({
-      questions: [
-        { question: "의제", allowFreeText: true },
-      ],
-    });
-
-    const { getByTestId } = render(
-      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
-    );
-
-    const input = getByTestId("ask-freetext-input") as HTMLInputElement;
-    input.focus();
-    expect(document.activeElement).toBe(input);
-
-    await act(async () => { fireEvent.keyDown(input, { key: "ArrowDown" }); });
-
-    // Focus must remain on the input — card-level arrowNav must not fire.
-    expect(document.activeElement).toBe(input);
-  });
-
-  it("ArrowUp inside free-text input keeps focus on the input", async () => {
-    const api = askUserQuestionApi();
-    const request = makeRequest({
-      questions: [
-        { question: "의제", allowFreeText: true },
-      ],
-    });
-
-    const { getByTestId } = render(
-      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
-    );
-
-    const input = getByTestId("ask-freetext-input") as HTMLInputElement;
-    input.focus();
-    expect(document.activeElement).toBe(input);
-
-    await act(async () => { fireEvent.keyDown(input, { key: "ArrowUp" }); });
-
-    // Focus must remain on the input.
-    expect(document.activeElement).toBe(input);
-  });
-});
-
-// ---------------------------------------------------------------------------
 // Med-3: confirm step — ArrowDown must NOT jump into prior question choices
 // ---------------------------------------------------------------------------
 
@@ -641,8 +478,8 @@ describe("AskUserQuestionCard — ArrowDown suppressed on confirm step", () => {
     const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
-        { question: "Q1", choices: ["A", "B"], allowFreeText: false },
-        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+        { question: "Q1", choices: ["A", "B"] },
+        { question: "Q2", choices: ["X", "Y"] },
       ],
     });
 
@@ -695,7 +532,7 @@ describe("AskUserQuestionCard — auto-focus on mount enables arrow nav", () => 
     const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
-        { question: "색상", choices: ["빨강", "파랑"], allowFreeText: false },
+        { question: "색상", choices: ["빨강", "파랑"] },
       ],
     });
 
@@ -713,8 +550,8 @@ describe("AskUserQuestionCard — auto-focus on mount enables arrow nav", () => 
     const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
-        { question: "Q1", choices: ["A"], allowFreeText: false },
-        { question: "Q2", choices: ["X", "Y"], allowFreeText: false },
+        { question: "Q1", choices: ["A"] },
+        { question: "Q2", choices: ["X", "Y"] },
       ],
     });
 
@@ -748,15 +585,16 @@ describe("AskUserQuestionCard — multi-select", () => {
         {
           question: "관심 분야 (복수)",
           choices: ["AI", "보안", "UX"],
-          allowFreeText: false,
           allowMultiple: true,
         },
       ],
     });
 
-    const { getByText } = render(
+    const { getByRole, getByText } = render(
       <AskUserQuestionCard api={api as never} request={request} onResolved={onResolved} />,
     );
+
+    expect(getByRole("listbox")).toHaveAttribute("aria-multiselectable", "true");
 
     await act(async () => { fireEvent.click(getByText("AI").closest("button")!); });
     // Multi-select must not auto-submit on single-question cards either.
@@ -779,7 +617,6 @@ describe("AskUserQuestionCard — multi-select", () => {
         {
           question: "관심 분야 (복수)",
           choices: ["AI", "보안", "UX"],
-          allowFreeText: false,
           allowMultiple: true,
         },
       ],
@@ -811,7 +648,6 @@ describe("AskUserQuestionCard — multi-select", () => {
         {
           question: "관심 분야 (복수)",
           choices: ["AI", "보안"],
-          allowFreeText: false,
           allowMultiple: true,
         },
       ],
@@ -846,10 +682,9 @@ describe("AskUserQuestionCard — multi-select", () => {
         {
           question: "Q1",
           choices: ["A", "B"],
-          allowFreeText: false,
           allowMultiple: true,
         },
-        { question: "Q2", choices: ["X"], allowFreeText: false },
+        { question: "Q2", choices: ["X"] },
       ],
     });
 
@@ -866,40 +701,6 @@ describe("AskUserQuestionCard — multi-select", () => {
     expect(btnA.getAttribute("aria-selected")).toBe("true");
   });
 
-  it("multi-select preserves picks when typing into the free-text input", async () => {
-    const api = askUserQuestionApi();
-    const request = makeRequest({
-      questions: [
-        {
-          question: "도구 (복수)",
-          choices: ["vim", "vscode"],
-          allowFreeText: true,
-          allowMultiple: true,
-          placeholder: "그 외",
-        },
-      ],
-    });
-
-    const { getByText, getByPlaceholderText, getByRole } = render(
-      <AskUserQuestionCard api={api as never} request={request} onResolved={vi.fn()} />,
-    );
-
-    await act(async () => { fireEvent.click(getByText("vim").closest("button")!); });
-    const input = getByPlaceholderText("그 외") as HTMLInputElement;
-    fireEvent.change(input, { target: { value: "emacs" } });
-
-    // Chip still selected — free text didn't blow away the multi-select set.
-    expect(getByText("vim").closest("button")!.getAttribute("aria-selected")).toBe("true");
-
-    const submit = getByRole("button", { name: "보내기" });
-    await act(async () => { fireEvent.click(submit); });
-
-    expect(api.respondAskUserQuestion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        answers: [expect.objectContaining({ choices: ["vim"], freeText: "emacs" })],
-      }),
-    );
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -911,10 +712,10 @@ describe("AskUserQuestionCard — 4-question pagination", () => {
     const api = askUserQuestionApi();
     const request = makeRequest({
       questions: [
-        { question: "Q1", choices: ["A"], allowFreeText: false },
-        { question: "Q2", choices: ["B"], allowFreeText: false },
-        { question: "Q3", choices: ["C"], allowFreeText: false },
-        { question: "Q4", choices: ["D"], allowFreeText: false },
+        { question: "Q1", choices: ["A"] },
+        { question: "Q2", choices: ["B"] },
+        { question: "Q3", choices: ["C"] },
+        { question: "Q4", choices: ["D"] },
       ],
     });
 

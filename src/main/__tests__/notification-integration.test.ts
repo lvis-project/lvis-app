@@ -25,7 +25,7 @@ describe("Trigger 3: AskUserQuestionGate fires `ask-user` on requestAndWait entr
     const gate = new AskUserQuestionGate(wc as never, 60_000, svc);
     // We only care that fire was called — drop the resulting promise.
     void gate.ask({
-      questions: [{ question: "프로젝트 진행 상태가 어떤가요?", allowFreeText: true }],
+      questions: [{ question: "프로젝트 진행 상태가 어떤가요?", choices: ["진행 중", "완료", "중단"] }],
     });
     expect(svc.fire).toHaveBeenCalledWith(
       expect.objectContaining({

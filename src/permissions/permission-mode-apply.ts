@@ -23,18 +23,18 @@ export type PermissionModeApplyResult =
  * The explicit-user-action confirmation an out-of-band caller has ALREADY
  * obtained for a durable permission set-mode mutation, so
  * {@link applyPermissionModeCommand} does NOT show a second in-app approval
- * modal. Two discriminated variants for the two confirmation surfaces:
+ * prompt. Two discriminated variants for the two confirmation surfaces:
  *
  *   - `built-in` (`"settings-ui"` / `"builtin-slash"`) — a first-party renderer
  *     user action. `trustOrigin` is `"user-keyboard"` (the physical key/click).
  *
  *   - `local-api-approval` (#1409) — an EXTERNAL origin (local-api / cli)
  *     initiated the change and the user consented via the in-app ApprovalGate
- *     modal at the transport-lifecycle layer (see
+ *     dock at the transport-lifecycle layer (see
  *     `src/main/local-api-server.ts`) BEFORE the handler ran. The ApprovalGate
  *     "Allow" click IS the explicit user action; the {@link ExternalOrigin}
  *     records WHO initiated it. Widening the guard for this variant is what
- *     prevents a DOUBLE modal — the consent already happened.
+ *     prevents a DOUBLE prompt — the consent already happened.
  *
  * Fail-closed: any other source/trustOrigin combination does NOT satisfy the
  * built-in-confirmation guard and falls through to the normal ApprovalGate ask.
@@ -65,7 +65,7 @@ export interface LoosePermissionModeApprovalBypass {
 
 /**
  * THE narrowing authority for "may this permission-mode change skip the
- * ApprovalGate modal". Every caller — the IPC set-mode handler, the
+ * ApprovalGate prompt". Every caller — the IPC set-mode handler, the
  * builtin-slash command path, and `applyPermissionModeCommand` itself — decides
  * through this one function, so the fail-closed trust conditions exist exactly
  * once.
@@ -114,9 +114,9 @@ export async function applyPermissionModeCommand(
   //   - first-party renderer built-in (settings-ui / builtin-slash) with a
   //     "user-keyboard" gesture, OR
   //   - "local-api-approval" (#1409): an external origin whose durable change
-  //     the user ALREADY consented to via the ApprovalGate modal at the
+  //     the user ALREADY consented to via the ApprovalGate dock at the
   //     transport-lifecycle layer. Honoring it here is deliberate — it prevents
-  //     a SECOND modal for a mutation the human just approved. It is NOT a
+  //     a SECOND prompt for a mutation the human just approved. It is NOT a
   //     silent bypass: no "local-api-approval" bypass is ever constructed unless
   //     `local-api-server.ts` observed a real ApprovalGate "allow" decision.
   const trustedConfirmation = resolvePermissionModeApprovalBypass(deps.approvalBypass);

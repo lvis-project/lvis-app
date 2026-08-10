@@ -78,6 +78,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-payload": "formatIpcError.invalidPayload",
   "invalid-params": "formatIpcError.invalidParams",
   "invalid-input": "formatIpcError.invalidInput",
+  "invalid-answer": "formatIpcError.invalidInput",
   "invalid-operation-input": "formatIpcError.invalidInput",
   "invalid-plugin-id": "formatIpcError.invalidInput",
   "invalid-contribution-trust-request": "formatIpcError.invalidInput",

@@ -14,11 +14,11 @@
  *     `checkDetailed` (Layers 3 glob / 5 exact). Only the dialog's
  *     `allow-always` choice writes to Store A (addAlwaysAllowedPersist).
  *   • Store B — THIS store. Exact-tuple approval MEMORY, args-scoped, written
- *     for DURABLE dialog choices only (allow-session / allow-always) via the
+ *     for DURABLE approval-surface choices only (allow-session / allow-always) via the
  *     `userApprovalRecord` IPC. Read by the reviewer lane
- *     (PermissionManager.dispatchReviewer) AND by the foreground modal-skip
+ *     (PermissionManager.dispatchReviewer) AND by the foreground dock-skip
  *     path (ToolExecutor.tryUserApprovalMemorySkip). A session/persistent
- *     approval here lets a repeat call with the same tuple skip the modal.
+ *     approval here lets a repeat call with the same tuple skip the prompt.
  *
  * File: ~/.lvis/permissions/user-approvals.json
  * Permissions: directory 0o700, file 0o600 (per CLAUDE.md storage namespace rule)

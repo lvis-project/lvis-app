@@ -11,7 +11,7 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Chat", href: "/en/docs/chat/layout", title: "Chat Screen Layout", snippet: "App.tsx · MainToolbar · ChatView · MessageQueuePanel · SessionTodoPanel" },
   { group: "Chat", href: "/en/docs/chat/message-queue", title: "Message Queue & TODO", snippet: "MessageQueuePanel + SessionTodoPanel · emitEvent → host UI render" },
   { group: "Chat", href: "/en/docs/chat/tool-thinking", title: "Tool & Thinking Display", snippet: "Tool Registry · ToolSource builtin/plugin/mcp · 5 categories" },
-  { group: "Chat", href: "/en/docs/chat/question-cards", title: "Question Cards", snippet: "AskUserQuestionItem · choices · recommendedIndex · altIndices · allowFreeText" },
+  { group: "Chat", href: "/en/docs/chat/question-cards", title: "Question Cards", snippet: "AskUserQuestionItem · choice-only · choice/choices · recommendedIndex · altIndices" },
   { group: "Chat", href: "/en/docs/chat/plugin-panel", title: "Plugin Panel", snippet: "manifest ui[] slots · bundled Skills · pure Tools · regex ^[a-zA-Z_][a-zA-Z0-9_]*$" },
   { group: "Chat", href: "/en/docs/chat/permissions/directory", title: "Permissions — Directory", snippet: "storage sandbox + host grant · ~/.lvis/permissions.json (0o600)" },
   { group: "Chat", href: "/en/docs/chat/permissions/llm-review", title: "Permissions — LLM Autonomous Review", snippet: "Reviewer 4 modes: disabled/rule/llm/strict" },

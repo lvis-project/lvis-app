@@ -267,7 +267,7 @@ export interface ReviewerDispatchInput {
    * Deliberately NOT pre-redacted. A verdict computed on masked text is a
    * verdict about data that does not exist: DLP masking can break a URL parse
    * or hide a trusted hostname, so the same call graded LOW by the foreground
-   * modal lane (`tryUserApprovalMemorySkip`, which has always classified raw
+   * approval-dock lane (`tryUserApprovalMemorySkip`, which has always classified raw
    * input) graded HIGH here. Redaction is applied at each SINK instead —
    * {@link buildUserPrompt} for the reviewer LLM, {@link summariseInput} for the
    * deferred queue, `maskSensitiveData` for the sandbox audit — so no lane can
@@ -653,7 +653,7 @@ export class PermissionManager {
    * SINGLE PRODUCER of the memory-hit auto-approve disclosure.
    *
    * A stored user approval can skip the ask from TWO lanes: the reviewer lane
-   * ({@link dispatchReviewer}) and the foreground modal lane
+   * ({@link dispatchReviewer}) and the foreground approval lane
    * (`tools/pipeline/approval-memory-skip.ts`). Both read the SAME Store B
    * entry under the same key, so both owe the user the same disclosure — one
    * lane announcing it while the other silently auto-approves is the bug this
@@ -1322,10 +1322,10 @@ export class PermissionManager {
     // an unconditional allow from layers 3/5/6. The layer-agnostic post-guard
     // routes foreground calls through the same reviewer lane used by
     // write/shell/network when interactive auto-review is enabled. Otherwise it
-    // retains the per-invocation force-modal contract.
+    // retains the per-invocation force-prompt contract.
     //
     //   layer 3 (allow rule)    — user added agent_spawn to their allow-list
-    //   layer 5 (alwaysAllowed) — user clicked "Allow always" on the modal
+    //   layer 5 (alwaysAllowed) — user clicked "Allow always" on the approval dock
     //   layer 6 (override case) — the normal first-invocation path
     //
     // Allow-all remains the sole exception: it is the user's explicit global
@@ -1732,7 +1732,7 @@ export class PermissionManager {
    *
    * The reviewer agent IS wired (default mode "llm", degrading to the rule
    * classifier when no provider is configured — see reviewer-wiring.ts). It
-   * acts as a BACKGROUND adjudicator, not a modal text-filler:
+   * acts as a BACKGROUND adjudicator, not a foreground prompt text-filler:
    *   - headless lane: "reviewer" routes to dispatchReviewer (defer policy
    *     queues HIGH verdicts);
    *   - foreground lane: in `mode="auto"`, an enabled inclusive threshold stamps eligible

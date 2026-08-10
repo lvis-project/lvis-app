@@ -1,10 +1,9 @@
 import type { ElectronApplication, Page } from 'playwright';
-import { test, expect } from './fixtures';
+import { test, expect } from './fixtures.js';
 
 type AskQuestionItem = {
   question: string;
   choices?: string[];
-  allowFreeText: boolean;
   suggestedAnswers?: string[];
 };
 
@@ -35,7 +34,6 @@ async function ensureQuestionOverlayVisible(
   item: AskQuestionItem = {
     question: '계속 진행할까요?',
     choices: ['계속', '중단'],
-    allowFreeText: true,
   },
 ): Promise<boolean> {
   const injected = await injectAskQuestion(app, id, item);
@@ -47,11 +45,10 @@ async function ensureQuestionOverlayVisible(
 }
 
 test.describe('ask_user_question overlay layout', () => {
-  test('choice list stays between question text and free-text input', async ({ app, mainWindow }) => {
+  test('choice list follows the question and no manual input is rendered', async ({ app, mainWindow }) => {
     const visible = await ensureQuestionOverlayVisible(app, mainWindow, 'e2e-question-order', {
       question: '기간과 언어를 선택하세요.',
       choices: ['최근 24시간 / 한국어', '최근 7일 / 한국어', '최근 30일 / 영어(글로벌)'],
-      allowFreeText: true,
     });
     expect(visible, 'ask_user_question injection must render the overlay').toBe(true);
 
@@ -59,15 +56,12 @@ test.describe('ask_user_question overlay layout', () => {
       const questionText = document.querySelector<HTMLElement>('[data-testid="ask-question-text"]');
       const listbox = document.querySelector<HTMLElement>('[data-testid="ask-user-question-card"] [role="listbox"]');
       const input = document.querySelector<HTMLElement>('[data-testid="ask-freetext-input"]');
-      if (!questionText || !listbox || !input) return 'missing-elements';
+      if (!questionText || !listbox) return 'missing-elements';
+      if (input) return 'manual-input-present';
 
       const questionBeforeList =
         (questionText.compareDocumentPosition(listbox) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-      const listBeforeInput =
-        (listbox.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
-
       if (!questionBeforeList) return 'list-before-question';
-      if (!listBeforeInput) return 'input-before-list';
       return 'ok';
     });
 
@@ -94,8 +88,9 @@ test.describe('ask_user_question overlay layout', () => {
       const geometry = await mainWindow.evaluate(() => {
         const overlay = document.querySelector<HTMLElement>('[data-testid="question-overlay"]');
         const card = document.querySelector<HTMLElement>('[data-testid="ask-user-question-card"]');
-        const dock = overlay.parentElement as HTMLElement | null;
-        if (!overlay || !card || !dock) return null;
+        if (!overlay || !card) return null;
+        const dock = overlay.parentElement;
+        if (!dock) return null;
         const o = overlay.getBoundingClientRect();
         const c = card.getBoundingClientRect();
         const d = dock.getBoundingClientRect();
@@ -124,13 +119,11 @@ test.describe('ask_user_question overlay layout', () => {
     const visible = await ensureQuestionOverlayVisible(app, mainWindow, 'e2e-question-choice-priority', {
       question: '기간과 언어를 선택하세요.',
       choices: ['최근 24시간 / 한국어', '최근 7일 / 한국어'],
-      allowFreeText: false,
       suggestedAnswers: ['레거시 추천 1', '레거시 추천 2'],
     });
     expect(visible, 'ask_user_question injection must render the overlay').toBe(true);
 
     await expect(mainWindow.getByRole('option', { name: '최근 24시간 / 한국어' })).toBeVisible();
     await expect(mainWindow.getByText('레거시 추천 1')).toBeHidden();
-    await expect(mainWindow.locator('[data-testid="fqp-chips-row"]')).toBeHidden();
   });
 });
