@@ -309,7 +309,9 @@ describe("PythonRuntimeBootstrapper", () => {
   it("Windows cached sync failure retries once with a no-cache copy fallback", async () => {
     const manifestPath = "/installed/local-indexer/plugin.json";
     const originalPlatform = process.platform;
+    const originalArch = process.arch;
     Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    Object.defineProperty(process, "arch", { value: "x64", configurable: true });
     mockedAccess
       .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
       .mockResolvedValueOnce(undefined)
@@ -343,6 +345,7 @@ describe("PythonRuntimeBootstrapper", () => {
       expect(fallbackEnv.UV_CACHE_DIR).toBe(firstEnv.UV_CACHE_DIR);
     } finally {
       Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+      Object.defineProperty(process, "arch", { value: originalArch, configurable: true });
     }
   });
 
