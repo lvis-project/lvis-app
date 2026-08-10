@@ -43,10 +43,6 @@
     max-width: 560px;
     margin: 8px 0;
   }
-  .ask-card.resolved {
-    opacity: 0.55;
-    pointer-events: none;
-  }
   .ask-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px 6px 12px; }
   .ask-title { font-size: 12px; font-weight: 500; color: #8b949e; }
   .ask-step { font-size: 10px; color: rgba(139,148,158,0.7); }
@@ -67,9 +63,6 @@
   .badge-recommend { flex-shrink: 0; font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em; background: rgba(47,129,247,0.15); color: #58a6ff; padding: 1px 6px; border-radius: 3px; }
   .badge-alt { flex-shrink: 0; font-size: 9.5px; font-weight: 600; letter-spacing: 0.04em; background: rgba(139,148,158,0.15); color: #8b949e; padding: 1px 6px; border-radius: 3px; }
 
-  .free-text { width: 100%; height: 32px; padding: 0 8px; background: #0a0e1a; border: 1px solid #2a3245; border-radius: 6px; color: #e6edf3; font-size: 12px; margin-top: 6px; }
-  .free-text::placeholder { color: rgba(139,148,158,0.5); }
-  .free-text:focus { outline: none; border-color: #2f81f7; }
 
   .ask-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 8px; margin-top: 8px; border-top: 1px dashed #2a3245; }
   .btn { height: 28px; padding: 0 12px; border-radius: 6px; font-size: 11px; cursor: pointer; transition: background 0.12s, border-color 0.12s, opacity 0.12s; }
@@ -108,9 +101,9 @@
   <header class="border-b border-[#2a3245] pb-4">
     <h1 class="text-2xl font-semibold">LVIS 질문 카드 (Ask-User-Question Card) — 디자인 목업</h1>
     <p class="text-sm text-[#8b949e] mt-1">
-      <code>ask_user_question</code> LLM 도구가 발생시키는 인라인 질문 카드의 디자인 의도 기록.
-      구현체는 <code>src/ui/renderer/components/AskUserQuestionCard.tsx</code> 에 존재하며, 채팅 스트림 끝에 인라인으로 렌더된다
-      (PR #334 의 floating panel 은 폐기되고 인라인으로 통합됨).
+      <code>ask_user_question</code> LLM 도구가 발생시키는 비모달 질문 카드의 디자인 의도 기록.
+      구현체는 <code>QuestionOverlay.tsx</code> 와 <code>AskUserQuestionCard.tsx</code> 에 존재하며,
+      채팅 composer dock의 아래쪽 surface에 렌더된다.
     </p>
   </header>
 
@@ -128,8 +121,8 @@
       <tbody>
         <tr>
           <td>1개</td>
-          <td>단일 폼: 질문 텍스트 + 선택지 칩 + 선택적 자유 입력</td>
-          <td>선택지 클릭 시 즉시 <code>respond</code>. 자유 입력은 "보내기" 버튼으로 전송.</td>
+          <td>단일 폼: 질문 텍스트 + 선택지 칩</td>
+          <td>단일 선택은 선택지 클릭 시 즉시 <code>respond</code>. 다중 선택은 "보내기" 버튼으로 전송.</td>
           <td>"건너뛰기" → <code>dismissed: true</code> 로 LLM 에 전달, LLM 은 기본값으로 fallback.</td>
         </tr>
         <tr>
@@ -149,7 +142,7 @@
     <h2 class="text-base font-semibold mb-3">2. 시나리오 A — 단일 질문 (1/1)</h2>
     <p class="scenario-note">
       가장 흔한 경로. LLM 이 3개 선택지를 emit, <code>recommendedIndex: 1</code> · <code>altIndices: [2]</code> 로 표기.
-      어느 선택지든 클릭하면 즉시 응답하고 카드가 resolved 상태로 전환된다. 자유 입력은 <code>allowFreeText: true</code> 일 때만 노출.
+      어느 선택지든 클릭하면 즉시 응답하고 활성 카드는 큐에서 제거되며, 답변 회고 버블이 materialize된다. 사용자 수기 입력 필드는 노출하지 않는다.
     </p>
 
     <div class="panel p-4">
@@ -165,7 +158,6 @@
           <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">전체 발언 그대로</span></button>
           <button type="button" class="choice selected"><span class="badge-recommend">Recommend</span><span class="flex-1 text-left">주제별 요약 + 액션 아이템</span></button>
           <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">10줄 미만 핵심만</span></button>
-          <input type="text" class="free-text" placeholder="다른 형식이 있다면 입력" />
           <div class="ask-footer">
             <button class="btn btn-ghost">건너뛰기</button>
             <div class="flex items-center gap-2"><button class="btn btn-primary">보내기</button></div>
@@ -179,8 +171,8 @@
       <ul class="list-disc pl-5 mt-2 space-y-1">
         <li><span class="pill-neutral">Recommend</span> — 질문당 1개. <code>recommendedIndex</code> 가 둘 이상이어도 첫 번째만 사용.</li>
         <li><span class="pill-neutral">대안</span> — 보조 추천. Recommend 와 disjoint, 회색 톤.</li>
-        <li>선택된 칩 = 파란색 배경. 같은 라벨이 중복돼도 인덱스로 구분 (label 비교 시 동시 활성화 버그가 있어 인덱스 비교로 변경됨).</li>
-        <li>답변/선택지 길이 제한 없음 — UI 는 입력값을 그대로 보존하고 줄바꿈/wrap 으로 처리.</li>
+        <li>선택된 칩 = 파란색 배경. 선택지 라벨은 trim 후 고유해야 하며, UI 상태는 안정적인 키보드 탐색을 위해 인덱스로 추적한다.</li>
+        <li>선택지는 질문당 1~3개, 각 20자 이하로 제한한다. UI 는 허용 범위 안의 긴 라벨을 줄바꿈해 표시한다.</li>
       </ul>
     </div>
   </section>
@@ -218,7 +210,6 @@
             <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">전체 발언 그대로</span></button>
             <button type="button" class="choice selected"><span class="badge-recommend">Recommend</span><span class="flex-1 text-left">주제별 요약 + 액션 아이템</span></button>
             <button type="button" class="choice"><span class="badge-alt">대안</span><span class="flex-1 text-left">10줄 미만 핵심만</span></button>
-            <input type="text" class="free-text" placeholder="다른 형식" />
             <div class="ask-footer">
               <button class="btn btn-ghost">건너뛰기</button>
               <div class="flex items-center gap-2">
@@ -278,11 +269,11 @@
   </section>
 
   <section>
-    <h2 class="text-base font-semibold mb-3">4. 시나리오 C — 답변 완료 후 채팅 노출</h2>
+    <h2 class="text-base font-semibold mb-3">4. 시나리오 C — 답변 완료 후 회고 버블</h2>
     <p class="scenario-note">
-      <strong>핵심 변경점</strong>: 답변 후 카드만 사라지면 <em>무엇을 답했는지</em> 가 채팅 history 에 남지 않아 사용자가 회상하기 어렵다.
-      답변 시점에 카드를 resolved 상태로 어둡게 비활성화하고, 그 아래에 한 줄짜리 <em>답변 회고 칩</em> 을 user-bubble 우측 정렬로 추가해서
-      향후 스크롤 / 세션 reload 후에도 응답 내용이 보존되도록 한다.
+      <strong>현행 계약</strong>: 응답 성공 시 활성 질문 카드는 큐에서 제거되고,
+      <code>ask_user_answer</code> entry가 읽기 전용 <em>답변 회고 버블</em> 로 user-bubble 우측에 렌더된다.
+      이 entry는 채팅 history에 저장되어 스크롤 / 세션 reload 후에도 응답 내용이 보존된다.
     </p>
 
     <div class="panel p-4">
@@ -308,14 +299,7 @@
 
       <div class="arrow">↓ "보내기" 클릭</div>
 
-      <div class="scenario-label">상태 2 — 응답 완료 (resolved + 답변 회고 칩)</div>
-      <div class="ask-card resolved">
-        <div class="ask-header"><span class="ask-title">✅ 응답 완료</span></div>
-        <div class="ask-body">
-          <div class="ask-question text-[#8b949e]">출력 형식을 골라주세요.</div>
-          <button type="button" class="choice selected"><span class="badge-recommend">Recommend</span><span class="flex-1 text-left">주제별 요약 + 액션 아이템</span></button>
-        </div>
-      </div>
+      <div class="scenario-label">상태 2 — 활성 카드 제거 + 답변 회고 버블</div>
 
       <div class="answer-bubble">
         <div class="label">↳ 내 답변 · 형식</div>
@@ -342,7 +326,7 @@
     </div>
 
     <div class="scenario-note mt-4">
-      <strong>긴 답변 케이스</strong> — 자유 입력으로 길이가 긴 답변이 들어와도 라벨 고정폭 + 값 가변폭 구조로 자연스럽게 wrap.
+      <strong>긴 선택지 케이스</strong> — 선택지 라벨이 길어져도 라벨 고정폭 + 값 가변폭 구조로 자연스럽게 wrap.
     </div>
 
     <div class="panel p-4 mt-2">
@@ -366,10 +350,10 @@
     <div class="scenario-note mt-4">
       <strong>구현 메모</strong>:
       <ul class="list-disc pl-5 mt-2 space-y-1">
-        <li>현재 구현은 <code>onResolved(request.id)</code> 시점에 카드를 askQuestions 큐에서 제거 → DOM 에서 사라짐. 답변 회고 칩 미존재 = 본 시나리오 추가 분.</li>
-        <li>답변 회고 칩은 <code>kind: "ask_user_answer"</code> (또는 <code>system</code> 변형) 새 ChatEntry 종류로 entries 에 push 하면 자연스러움. 채팅 history JSON 에 저장되어 새로고침 / 세션 reload 후에도 유지.</li>
-        <li>Resolved 카드는 entries 에 그대로 두되 시각적으로 비활성화. 이전 페이지로 스크롤하면 사용자가 어떤 질문에 어떻게 답했는지 그대로 확인 가능.</li>
-        <li>다중 질문은 <code>respondAskUserQuestion</code> 한 번 호출 → 답변 칩 N개 push.</li>
+        <li><code>onResolved(request.id)</code>는 활성 카드를 askQuestions 큐에서 제거한다.</li>
+        <li><code>chat-stream-state.ts</code>가 tool result를 <code>kind: "ask_user_answer"</code> entry로 materialize하고, <code>AskUserAnswerBubble</code>이 이를 렌더한다.</li>
+        <li>카드의 resolved 복제본은 남기지 않는다. 사용자가 다시 보는 영구 표면은 답변 회고 버블 하나다.</li>
+        <li>다중 질문은 한 번의 <code>respondAskUserQuestion</code> 호출과 한 개의 회고 버블 안 라벨/값 행 N개로 보존된다.</li>
       </ul>
     </div>
   </section>
@@ -388,22 +372,22 @@
         <tr>
           <td><code>ask_user_question</code> 도구 emit</td>
           <td><code>{id, questions[], createdAt}</code></td>
-          <td>ChatView 의 <code>askQuestions</code> 큐 끝에 카드 마운트.</td>
+          <td>FIFO 큐에 추가하고 <code>QuestionOverlay</code>가 head 한 건을 composer dock에 마운트.</td>
         </tr>
         <tr>
           <td>단일 질문에서 선택지 클릭</td>
           <td><code>respondAskUserQuestion({requestId, answers: [{choice}]})</code></td>
-          <td>카드 resolved → 답변 회고 칩 push (시나리오 D 적용 시).</td>
+          <td>응답 성공 시 활성 카드 제거 → <code>ask_user_answer</code> 회고 버블 생성.</td>
         </tr>
         <tr>
           <td>다중 질문 보내기</td>
-          <td><code>respondAskUserQuestion({requestId, answers: [{choice or freeText}, ...]})</code></td>
-          <td>한 번의 IPC 호출로 모든 답변 일괄 전송. 답변 칩 N개 push.</td>
+          <td><code>respondAskUserQuestion({requestId, answers: [{choice or choices}, ...]})</code></td>
+          <td>한 번의 IPC 호출로 모든 답변 일괄 전송. 회고 버블 한 개에 행 N개 표시.</td>
         </tr>
         <tr>
           <td>건너뛰기</td>
           <td><code>respondAskUserQuestion({requestId, dismissed: true})</code></td>
-          <td>LLM tool_result <code>dismissed: true</code> → 기본값 fallback. dismissed 마커 push.</td>
+          <td>LLM tool_result <code>dismissed: true</code> → 기본값 fallback 및 dismissed 회고 버블 표시.</td>
         </tr>
       </tbody>
     </table>
@@ -412,12 +396,12 @@
   <section>
     <h2 class="text-base font-semibold mb-3">6. 미해결 디자인 메모</h2>
     <ul class="text-sm text-[#c9d1d9] list-disc pl-6 space-y-1.5">
-      <li><strong>한 줄 입력 고정</strong>. 기존 popup 은 Textarea 라 세로로 비대했음 — 카드가 modal 처럼 느껴짐. 자유 입력은 단일 라인 input 으로만 받고, 길이 제한 없이 wrap 처리.</li>
-      <li><strong>label 자체에 뱃지 baked-in 금지</strong>. 모델은 평문 답변만 emit, Recommend / 대안 표기는 <code>recommendedIndex</code> · <code>altIndices</code> 로 시각만 분리. 길이 제한이 없으므로 label 의 답변 텍스트는 자연스러운 길이로 emit 가능.</li>
-      <li><strong>인덱스 기반 선택 비교</strong>. 같은 라벨 중복 시 string 비교로 모두 활성화되는 버그가 있어 <code>choiceIndex</code> 로 변경.</li>
+      <li><strong>선택형 응답 고정</strong>. 질문마다 구체적인 선택지 1~3개를 제공하고 사용자 수기 입력 필드는 두지 않는다.</li>
+      <li><strong>label 자체에 뱃지 baked-in 금지</strong>. 모델은 20자 이하의 고유한 평문 선택지만 emit하고, Recommend / 대안 표기는 <code>recommendedIndex</code> · <code>altIndices</code> 로 시각만 분리한다.</li>
+      <li><strong>인덱스 기반 선택 상태</strong>. 라벨 문자열과 렌더 순서를 분리해 키보드 이동과 선택 상태를 안정적으로 유지한다.</li>
       <li><strong><code>request.id</code> 별 상태 보존</strong>. 같은 id 로 재마운트되면 step + drafts 보존, 새 id 면 초기화.</li>
-      <li><strong>인라인 배치</strong>. 카드는 chat 스트림 끝 (활성 turn 의 entries 직후) 에 위치. PR #334 의 <code>FloatingQuestionPanel</code> 은 폐기 — 질문 흐름을 layered modal 이 아니라 conversation history 의 일부로 유지하기 위함.</li>
-      <li><strong>답변 회고 칩 (시나리오 D)</strong>: 미구현. 새 entry kind 추가 필요. 우선순위 medium — 사용자가 무엇을 답했는지 기억 못 하는 UX 갭 해소용.</li>
+      <li><strong>비모달 dock 배치</strong>. 카드는 <code>ChatComposerDock</code>의 아래쪽 <code>QuestionOverlay</code>에 위치한다. viewport 전역 modal, backdrop, focus trap 없이 현재 대화 맥락과 composer를 함께 유지한다.</li>
+      <li><strong>답변 회고 버블</strong>. <code>ask_user_answer</code> entry로 현재 구현되어 응답/건너뛰기 결과를 세션 reload 후에도 보여준다.</li>
     </ul>
   </section>
 

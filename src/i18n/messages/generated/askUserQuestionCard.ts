@@ -9,11 +9,10 @@ export const en = {
   "askUserQuestionCard.nextButton": "Next",
   "askUserQuestionCard.sendButton": "Send",
   "askUserQuestionCard.nextReviewLabel": "Next / Review",
-  "askUserQuestionCard.answerNavHint": "Navigate answers / manual input",
+  "askUserQuestionCard.answerNavHint": "Navigate answers",
   "askUserQuestionCard.questionNavHint": "Navigate questions",
   "askUserQuestionCard.badgeRecommend": "Recommended",
   "askUserQuestionCard.badgeAlt": "Alternative",
-  "askUserQuestionCard.freeTextPlaceholder": "Type your answer",
   "askUserQuestionCard.confirmReviewInstruction": "Review all your answers, then press Send. Click an item or use ←/→ to navigate between questions.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
@@ -26,10 +25,9 @@ export const ko: Record<keyof typeof en, string> = {
   "askUserQuestionCard.nextButton": "다음",
   "askUserQuestionCard.sendButton": "보내기",
   "askUserQuestionCard.nextReviewLabel": "다음/검토",
-  "askUserQuestionCard.answerNavHint": "답변/수동입력 이동",
+  "askUserQuestionCard.answerNavHint": "답변 이동",
   "askUserQuestionCard.questionNavHint": "질문 이동",
   "askUserQuestionCard.badgeRecommend": "추천",
   "askUserQuestionCard.badgeAlt": "대안",
-  "askUserQuestionCard.freeTextPlaceholder": "직접입력하기",
   "askUserQuestionCard.confirmReviewInstruction": "모든 답변을 확인한 뒤 보내기를 누르세요. 항목 클릭 또는 ←/→로 질문을 이동할 수 있습니다.",
 };

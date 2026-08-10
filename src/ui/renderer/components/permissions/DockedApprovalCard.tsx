@@ -23,7 +23,7 @@ type Scope = ReturnType<typeof buildApprovalScopeOptions>[number];
 /**
  * Docked, non-modal approval card (issue #1940).
  *
- * This content lives inside the shared in-flow approval dock. It does not
+ * This content lives inside the shared bottom-floating approval dock. It does not
  * create a backdrop or cover the routed page, and its own scroll container
  * keeps every scope reachable within the dock's bounded height.
  *

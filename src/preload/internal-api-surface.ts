@@ -1140,19 +1140,17 @@ export function buildInternalApiSurface() {
   },
 
   // ─── Workflow tools (S1+S2) ──────────────────────
-  // ask_user_question — main process pushes inline question requests; the
-  // renderer card resolves via the respond channel.
+  // ask_user_question — main process pushes FIFO question requests to the
+  // renderer's non-modal composer dock; the card resolves via this channel.
   onAskUserQuestion: (
     handler: (req: {
       id: string;
       questions: Array<{
         question: string;
-        choices?: string[];
+        choices: string[];
         recommendedIndex?: number;
         altIndices?: number[];
-        allowFreeText: boolean;
         allowMultiple?: boolean;
-        placeholder?: string;
         summaryHint?: string;
       }>;
       createdAt: number;
@@ -1164,7 +1162,7 @@ export function buildInternalApiSurface() {
   },
   respondAskUserQuestion: async (response: {
     requestId: string;
-    answers?: Array<{ choice?: string; choices?: string[]; freeText?: string }>;
+    answers?: Array<{ choice?: string; choices?: string[] }>;
     dismissed?: boolean;
   }) => ipcRenderer.invoke(CHANNELS.askUserQuestion.respond, response),
   // Timeout side-channel — main process notifies the renderer when an
