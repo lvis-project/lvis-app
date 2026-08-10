@@ -280,7 +280,7 @@ export interface AuditModeChange extends AuditCommon {
    *     (Settings toggle / built-in `/permission mode` slash).
    *   - `"local-api-approval"` — an external origin (local-api / cli, #1409)
    *     initiated the change and the user consented via the in-app ApprovalGate
-   *     modal at the transport-lifecycle layer BEFORE the handler ran. The
+   *     approval dock at the transport-lifecycle layer BEFORE the handler ran. The
    *     `trustOrigin` field stays on the permission axis (`"user-keyboard"`,
    *     the human's Allow click), so `confirmationSource` is the sole forensic
    *     marker that the request was externally initiated.

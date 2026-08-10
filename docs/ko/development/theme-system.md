@@ -256,7 +256,7 @@ Rules:
 - Plugin webview tokens — deferred. Plugins eventually need their iframes
   to consume host tokens; planned as a separate PR adding a CSS-variable
   bridge in `plugin-ui-shell.html`.
-- TODO panel, floating question window, plugin install policy chips —
+- TODO panel, question composer dock, plugin install policy chips —
   parallel UX-track PRs own these surfaces; the migration there will land
   on top of this token base.
 - Spacing/typography tokens — colors, motion, and surface elevation are now

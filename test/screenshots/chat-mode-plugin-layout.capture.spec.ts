@@ -106,7 +106,7 @@ async function openPlugin(page: Page, label: string): Promise<OpenResult> {
 /**
  * A plugin panel fires several READ tools on mount (index_folders,
  * index_scan_status, index_documents, index_get_settings / meeting_list_preps);
- * the host classifies them write-category, so each raises an in-flow approval
+ * the host classifies them write-category, so each raises a floating approval
  * dock below the panel — they queue one after another. Approve
  * each (this-session scope; they are the panel's own empty-index reads, so this
  * is non-destructive) until none remains, so the panel loads its real empty

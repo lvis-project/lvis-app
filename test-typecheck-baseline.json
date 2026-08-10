@@ -237,8 +237,6 @@
     "test/e2e/ui/file-edit-diff.spec.ts": 5,
     "test/e2e/ui/first-boot-optional-tour.spec.ts": 3,
     "test/e2e/ui/fixtures.ts": 2,
-    "test/e2e/ui/floating-question-panel.spec.ts": 5,
-    "test/e2e/ui/fqp-layout.spec.ts": 8,
     "test/e2e/ui/llm-model-handshake.spec.ts": 4,
     "test/e2e/ui/marketplace-assets.spec.ts": 4,
     "test/e2e/ui/mcp-app-csp.spec.ts": 1,

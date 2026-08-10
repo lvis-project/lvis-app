@@ -80,20 +80,38 @@ describe("ask_user_question tool", () => {
     expect(r.isError).toBe(true);
   });
 
-  it("rejects an unanswerable question (no choices and allowFreeText:false)", async () => {
-    // Without choices AND with free-text disabled the renderer would
-    // show no inputs at all; user could only dismiss. Guard at tool layer.
+  it("rejects a question without non-empty choices", async () => {
     const tool = createAskUserQuestionTool({
       getGate: () => ({
         ask: () => Promise.resolve({ requestId: "r", answers: [] }),
       }) as never,
     });
     const r = await tool.execute(
-      { questions: [{ question: "Pick", allowFreeText: false }] },
+      { questions: [{ question: "Pick" }] },
       ctx(),
     );
     expect(r.isError).toBe(true);
-    expect(r.output).toContain("at least one input");
+    expect(r.output).toContain("at least one non-empty choice");
+  });
+
+  it("rejects duplicate, oversized, and overlong choices before opening the gate", async () => {
+    const ask = vi.fn().mockResolvedValue({ requestId: "r", answers: [] });
+    const tool = createAskUserQuestionTool({
+      getGate: () => ({ ask }) as never,
+    });
+
+    for (const choices of [
+      ["same", " same "],
+      ["A", "B", "C", "D"],
+      ["x".repeat(21)],
+    ]) {
+      const result = await tool.execute(
+        { questions: [{ question: "Pick", choices }] },
+        ctx(),
+      );
+      expect(result.isError).toBe(true);
+    }
+    expect(ask).not.toHaveBeenCalled();
   });
 
   it("rejects when more than 4 questions are supplied", async () => {
@@ -114,7 +132,7 @@ describe("ask_user_question tool", () => {
   it("forwards questions + returns answers[] verbatim", async () => {
     const ask = vi.fn().mockResolvedValue({
       requestId: "r1",
-      answers: [{ choice: "yes" }, { freeText: "later" }],
+      answers: [{ choice: "yes" }, { choice: "later" }],
       dismissed: false,
     });
     const tool = createAskUserQuestionTool({
@@ -124,19 +142,19 @@ describe("ask_user_question tool", () => {
       {
         questions: [
           { question: "Continue?", choices: ["yes", "no"] },
-          { question: "When?" },
+          { question: "When?", choices: ["now", "later"] },
         ],
       },
       ctx(),
     );
     expect(r.isError).toBe(false);
     const parsed = JSON.parse(r.output);
-    expect(parsed.answers).toEqual([{ choice: "yes" }, { freeText: "later" }]);
+    expect(parsed.answers).toEqual([{ choice: "yes" }, { choice: "later" }]);
     expect(parsed.dismissed).toBe(false);
     expect(ask).toHaveBeenCalledWith({
       questions: [
-        { question: "Continue?", choices: ["yes", "no"], allowFreeText: true },
-        { question: "When?", choices: undefined, allowFreeText: true },
+        { question: "Continue?", choices: ["yes", "no"] },
+        { question: "When?", choices: ["now", "later"] },
       ],
       abortSignal: undefined,
     });
@@ -149,7 +167,7 @@ describe("ask_user_question tool", () => {
     });
     const ac = new AbortController();
     await tool.execute(
-      { questions: [{ question: "x" }] },
+      { questions: [{ question: "x", choices: ["yes", "no"] }] },
       { ...ctx(), abortSignal: ac.signal },
     );
     expect(ask).toHaveBeenCalledWith(

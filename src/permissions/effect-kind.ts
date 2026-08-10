@@ -201,7 +201,7 @@ export interface HostApiEffectSpec {
   /**
    * DECLARED async-ness of the hostApi method at this path (it returns a
    * Promise). This is a CONTRACT property of the method, not a runtime guess —
-   * the effect-boundary ENFORCEMENT layer awaits a user modal, which is only
+   * the effect-boundary ENFORCEMENT layer awaits a user prompt, which is only
    * possible at an ALREADY-async chokepoint, so it derives its gated set
    * MECHANICALLY from the write-classified paths that declare `async: true`
    * (see {@link writeClassifiedPaths} + `GATED_EFFECT_PATHS` in

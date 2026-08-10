@@ -197,84 +197,6 @@
 @keyframes cellPulse { 0%, 100% { opacity: 0.85; } 50% { opacity: 1; } }
 .cell-installing { animation: cellPulse 1.6s ease-in-out infinite; }
 
-/* ─── FloatingQuestionPanel animations ─────────────────────────────────────
-   Class names are referenced from FloatingQuestionPanel.tsx.
-   We use @keyframes outside @layer so they are always available at highest
-   specificity. The .fqp-* utility classes are placed in @layer components so
-   Tailwind's purge doesn't strip them (they are dynamic class names).
-   prefers-reduced-motion: collapse translate → opacity-only fade.
-──────────────────────────────────────────────────────────────────────────── */
-
-@keyframes fqp-slide-in-top {
-  from { opacity: 0; transform: translateY(-18px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes fqp-slide-out-top {
-  from { opacity: 1; transform: translateY(0); }
-  to   { opacity: 0; transform: translateY(-18px); }
-}
-@keyframes fqp-slide-in-bottom {
-  from { opacity: 0; transform: translateY(18px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-@keyframes fqp-slide-out-bottom {
-  from { opacity: 1; transform: translateY(0); }
-  to   { opacity: 0; transform: translateY(18px); }
-}
-@keyframes fqp-fade-in {
-  from { opacity: 0; }
-  to   { opacity: 1; }
-}
-@keyframes fqp-fade-out {
-  from { opacity: 1; }
-  to   { opacity: 0; }
-}
-
-@layer components {
-  /* Positioning roots */
-  .fqp-root-top {
-    top: 0.5rem;
-  }
-  .fqp-root-bottom {
-    bottom: 0.5rem;
-    top: auto;
-  }
-
-  /* Card shell — elevation + subtle primary tint */
-  .fqp-card-shell {
-    background-color: hsl(var(--card));
-    box-shadow: var(--elevation-floating);
-  }
-
-  /* Slot enter/exit — top-sheet */
-  .fqp-slot-enter-top {
-    animation: fqp-slide-in-top var(--motion-slow) var(--motion-ease-out) both;
-  }
-  .fqp-slot-exit-top {
-    animation: fqp-slide-out-top var(--motion-base) var(--motion-ease-standard) both;
-  }
-
-  /* Slot enter/exit — bottom-sheet */
-  .fqp-slot-enter-bottom {
-    animation: fqp-slide-in-bottom var(--motion-slow) var(--motion-ease-out) both;
-  }
-  .fqp-slot-exit-bottom {
-    animation: fqp-slide-out-bottom var(--motion-base) var(--motion-ease-standard) both;
-  }
-}
-
-/* Reduced motion: replace translate animations with simple fades */
-@media (prefers-reduced-motion: reduce) {
-  .fqp-slot-enter-top,
-  .fqp-slot-enter-bottom {
-    animation: fqp-fade-in var(--motion-base) var(--motion-ease-standard) both;
-  }
-  .fqp-slot-exit-top,
-  .fqp-slot-exit-bottom {
-    animation: fqp-fade-out var(--motion-base) var(--motion-ease-standard) both;
-  }
-}
-
 /* ─── lvis-anim-* — shared micro-interaction primitives ────────────────────
    Reusable keyframes + utility classes for chat message entry, toggle pops,
    star throbs, banner slides, modal stagger, and expand/collapse height
@@ -1888,7 +1810,7 @@
     scrollbar-color: hsl(var(--scrollbar-thumb)) hsl(var(--scrollbar-track));
   }
 
-  /* ── Settings dialog body — gutter always reserved (G2) ─────────────────
+  /* ── Settings inline scroll body — gutter always reserved (G2) ──────────
      macOS with default "Show scrollbars: Automatically based on mouse or
      trackpad" treats `overflow-y: scroll` as an OVERLAY scrollbar — no
      gutter reserved, indistinguishable from `auto`. `scrollbar-gutter:

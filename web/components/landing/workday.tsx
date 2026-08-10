@@ -167,7 +167,7 @@ function getMoments(locale: Locale): Moment[] {
           <>
             LVIS combines the afternoon's signals into kanban cards for tomorrow's to-dos. Writing
             to the board also has to pass an{" "}
-            <em className="not-italic font-semibold text-ink">approval dialog</em>. The
+            <em className="not-italic font-semibold text-ink">approval dock</em>. The
             higher the risk, the clearer it's shown.
           </>
         ),

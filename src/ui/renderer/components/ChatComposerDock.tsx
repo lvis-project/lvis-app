@@ -1,5 +1,5 @@
 import type React from "react";
-import { useCallback, useEffect, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { SessionTodoPanel } from "./SessionTodoPanel.js";
 import { MessageQueuePanel } from "./MessageQueuePanel.js";
 import { DeferredApprovalChip } from "./DeferredApprovalChip.js";
@@ -172,6 +172,88 @@ export function ChatComposerDock({
   projectSelectorOpen,
   onProjectSelectorOpenChange,
 }: ChatComposerDockProps) {
+  const dockRootRef = useRef<HTMLDivElement>(null);
+
+  // ApprovalDock is a route-canvas overlay, not part of this flex layout. Give
+  // it the real, variable visual top edge so it can float immediately above
+  // TODO/queue/status/attachments, the absolute question card, and the
+  // `/allow` input. The value lives on the nearest route canvas and disappears
+  // with ChatView, so plugin/settings routes naturally fall back to the bottom
+  // inset.
+  useEffect(() => {
+    const dock = dockRootRef.current;
+    const canvas = dock?.closest<HTMLElement>('[data-testid="route-canvas"]');
+    if (!dock || !canvas) return;
+
+    const updateApprovalInset = () => {
+      const canvasRect = canvas.getBoundingClientRect();
+      const dockRect = dock.getBoundingClientRect();
+      const questionOverlay = dock.querySelector<HTMLElement>('[data-testid="question-overlay"]');
+      const visualTop = Math.min(
+        dockRect.top,
+        questionOverlay?.getBoundingClientRect().top ?? Number.POSITIVE_INFINITY,
+      );
+      const inset = Math.max(12, canvasRect.bottom - visualTop + 8);
+      canvas.style.setProperty("--approval-overlay-bottom", `${Math.ceil(inset)}px`);
+    };
+
+    let observedQuestionOverlay: HTMLElement | null = null;
+    let transitionFrame: number | null = null;
+    const observer = new ResizeObserver(updateApprovalInset);
+    const observeQuestionOverlay = () => {
+      const next = dock.querySelector<HTMLElement>('[data-testid="question-overlay"]');
+      if (next === observedQuestionOverlay) return;
+      if (observedQuestionOverlay) observer.unobserve(observedQuestionOverlay);
+      observedQuestionOverlay = next;
+      if (observedQuestionOverlay) observer.observe(observedQuestionOverlay);
+    };
+    const mutationObserver = new MutationObserver(() => {
+      observeQuestionOverlay();
+      updateApprovalInset();
+    });
+    const trackTransition = () => {
+      updateApprovalInset();
+      transitionFrame = requestAnimationFrame(trackTransition);
+    };
+    const startTransitionTracking = (event: TransitionEvent) => {
+      if (event.target !== dock || transitionFrame !== null) return;
+      transitionFrame = requestAnimationFrame(trackTransition);
+    };
+    const stopTransitionTracking = (event: TransitionEvent) => {
+      if (event.target !== dock) return;
+      if (transitionFrame !== null) cancelAnimationFrame(transitionFrame);
+      transitionFrame = null;
+      updateApprovalInset();
+    };
+
+    const initialFrame = requestAnimationFrame(updateApprovalInset);
+    observer.observe(canvas);
+    observer.observe(dock);
+    observeQuestionOverlay();
+    mutationObserver.observe(dock, {
+      attributes: true,
+      attributeFilter: ["class", "style"],
+      childList: true,
+      subtree: true,
+    });
+    dock.addEventListener("transitionrun", startTransitionTracking);
+    dock.addEventListener("transitionend", stopTransitionTracking);
+    dock.addEventListener("transitioncancel", stopTransitionTracking);
+    window.addEventListener("resize", updateApprovalInset);
+
+    return () => {
+      cancelAnimationFrame(initialFrame);
+      if (transitionFrame !== null) cancelAnimationFrame(transitionFrame);
+      observer.disconnect();
+      mutationObserver.disconnect();
+      dock.removeEventListener("transitionrun", startTransitionTracking);
+      dock.removeEventListener("transitionend", stopTransitionTracking);
+      dock.removeEventListener("transitioncancel", stopTransitionTracking);
+      window.removeEventListener("resize", updateApprovalInset);
+      canvas.style.removeProperty("--approval-overlay-bottom");
+    };
+  }, []);
+
   // Linger the project-selector slot mounted for one composer-descent cycle
   // after `centered` flips false (first message sent), so ComposerProjectSelector
   // — including its own forceMount + data-state fade/scale-out — has time to
@@ -254,6 +336,7 @@ export function ChatComposerDock({
     || draftHasUnsupportedAttachment;
   return (
     <div
+      ref={dockRootRef}
       className={[
         "relative z-30 w-full max-w-full min-w-0 overflow-visible transition-[margin,transform] duration-[var(--motion-layout)] ease-[var(--motion-ease-out)] motion-reduce:transition-none",
         centeredMarginClass,

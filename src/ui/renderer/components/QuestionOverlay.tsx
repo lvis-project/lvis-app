@@ -21,6 +21,7 @@ export function QuestionOverlay({ api, requests, onResolved }: QuestionOverlayPr
          status bar; StatusBar owns the only separator line. */}
       <div className="max-h-[min(360px,calc(100%_+_20dvh))] w-full min-w-0 overflow-y-auto rounded-t-lg">
         <AskUserQuestionCard
+          key={current.id}
           api={api}
           request={current}
           onResolved={onResolved}

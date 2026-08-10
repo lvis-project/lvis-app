@@ -19,7 +19,7 @@ export const searchIndex: SearchEntry[] = [
   { group: "채팅", href: "/docs/chat/layout", title: "채팅 화면 구성", snippet: "App.tsx · MainToolbar · ChatView · MessageQueuePanel · SessionTodoPanel" },
   { group: "채팅", href: "/docs/chat/message-queue", title: "메시지 큐 & TODO", snippet: "MessageQueuePanel + SessionTodoPanel · emitEvent → host UI 렌더" },
   { group: "채팅", href: "/docs/chat/tool-thinking", title: "Tool & Thinking 표시", snippet: "Tool Registry · ToolSource builtin/plugin/mcp · Category 5종" },
-  { group: "채팅", href: "/docs/chat/question-cards", title: "질문 카드", snippet: "AskUserQuestionItem · choices · recommendedIndex · altIndices · allowFreeText" },
+  { group: "채팅", href: "/docs/chat/question-cards", title: "질문 카드", snippet: "AskUserQuestionItem · choice-only · choice/choices · recommendedIndex · altIndices" },
   { group: "채팅", href: "/docs/chat/plugin-panel", title: "플러그인 패널", snippet: "manifest ui[] 슬롯 · 번들 Skill · 순수 Tool · 정규식 ^[a-zA-Z_][a-zA-Z0-9_]*$" },
   { group: "채팅", href: "/docs/chat/permissions/directory", title: "권한 — 디렉토리", snippet: "storage sandbox + 호스트 grant · ~/.lvis/permissions.json (0o600)" },
   { group: "채팅", href: "/docs/chat/permissions/llm-review", title: "권한 — LLM 자율검토", snippet: "Reviewer 4모드 disabled/rule/llm/strict" },

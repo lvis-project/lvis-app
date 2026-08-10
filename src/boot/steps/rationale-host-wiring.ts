@@ -111,10 +111,10 @@ export async function wireRationaleHost(
     // Fail closed without exposing raw errors or filesystem paths. With no
     // service/factory, the query loop retains legacy batching; a
     // `requestedSandbox=true` operation with effective sandbox `none` takes
-    // the cross-platform force-modal one-shot permit path.
+    // the cross-platform force-prompt one-shot permit path.
     ctx.rationaleHostService = undefined;
     log.warn(
-      "boot: foreground rationale authority unavailable; force-modal one-shot sandbox permit fallback remains active",
+      "boot: foreground rationale authority unavailable; force-prompt one-shot sandbox permit fallback remains active",
     );
   }
 }
