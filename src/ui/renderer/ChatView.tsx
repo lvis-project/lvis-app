@@ -79,7 +79,7 @@ export interface ChatViewProps {
   loadedSkills: SkillBadgeProps[];
   /** True when there are pending ask_user_question requests — used to suppress routine overlay */
   hasAskQuestions: boolean;
-  /** Pending ask_user_question requests, rendered inline at the end of the entries stream. */
+  /** Pending ask_user_question requests rendered in the non-modal composer dock. */
   askQuestions: AskUserQuestionRequest[];
   /** App-owned `/allow` interceptor; approval UI itself lives beside routed content. */
   approvalSentenceInterceptSubmit?: (text: string) => boolean;
@@ -560,8 +560,8 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
   const onOpenModelSettings = useCallback(() => onOpenSettings("llm"), [onOpenSettings]);
   const onOpenInputPermissions = useCallback(() => onOpenSettings("permissions"), [onOpenSettings]);
 
-  // No auto-scroll needed for floating panel — it is positioned outside
-  // the scroll viewport so it is always visible regardless of scroll position.
+  // No transcript auto-scroll is needed for the composer-dock question overlay:
+  // it stays visible independently of the transcript scroll position.
 
   // B4: Ctrl/Cmd+C while streaming and no text selected → abort
   useEffect(() => {

@@ -73,7 +73,7 @@
   .chat-shell,
   .scenario,
   .matrix,
-  .modal,
+  .approval-card,
   .mini,
   .queue-list,
   .setting-shell {
@@ -269,13 +269,13 @@
     background: rgba(3, 3, 3, .66);
   }
 
-  .modal {
+  .approval-card {
     width: min(760px, 100%);
     overflow: hidden;
     box-shadow: var(--shadow);
   }
-  .modal.wide { width: min(900px, 100%); }
-  .modal-head {
+  .approval-card.wide { width: min(900px, 100%); }
+  .approval-card-head {
     display: flex;
     gap: 12px;
     align-items: flex-start;
@@ -294,11 +294,11 @@
     color: #dce8ff;
     font-weight: 840;
   }
-  .modal-title { flex: 1; min-width: 0; }
-  .modal-title h3 { font-size: 15px; margin-bottom: 5px; }
-  .modal-title p { color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
-  .modal-body { display: grid; gap: 11px; padding: 14px; }
-  .modal-actions {
+  .approval-card-title { flex: 1; min-width: 0; }
+  .approval-card-title h3 { font-size: 15px; margin-bottom: 5px; }
+  .approval-card-title p { color: var(--ink-soft); font-size: 12px; line-height: 1.5; }
+  .approval-card-body { display: grid; gap: 11px; padding: 14px; }
+  .approval-card-actions {
     display: flex;
     justify-content: flex-end;
     gap: 8px;
@@ -583,16 +583,16 @@
           <h2>네트워크 전송 검증 결과</h2>
         </div>
         <div class="chat-body">
-          <div class="modal">
-            <div class="modal-head">
+          <div class="approval-card">
+            <div class="approval-card-head">
               <div class="glyph">N</div>
-              <div class="modal-title">
-                <h3>외부 서비스 전송 — 사용자 승인 모달</h3>
+              <div class="approval-card-title">
+                <h3>외부 서비스 전송 — 사용자 승인 dock</h3>
                 <p>LLM reviewer 가 endpoint, auth scope, payload class, retention risk 를 평가했습니다. (Phase 0) 이 verdict 를 승인 모달로 보여 사용자가 직접 허용/거부를 결정합니다.</p>
               </div>
               <span class="tag amber">MEDIUM</span>
             </div>
-            <div class="modal-body">
+            <div class="approval-card-body">
               <div class="mini-grid">
                 <div class="mini"><div class="label">도구 / 출처</div><div class="value"><code>teams_send</code><br>source=plugin</div></div>
                 <div class="mini"><div class="label">권한 category</div><div class="value">network<br>external send</div></div>
@@ -607,7 +607,7 @@
                 <div class="review-row"><b>다음 단계</b><span>도구는 실행되지 않습니다. 사용자가 같은 endpoint + payload class 를 명시 승인하면 메인 LLM 이 재요청합니다.</span></div>
               </div>
             </div>
-            <div class="modal-actions">
+            <div class="approval-card-actions">
               <button class="button">메인 LLM 으로 반환</button>
             </div>
           </div>
@@ -620,16 +620,16 @@
           <h2>Headless 네트워크 전송 보류</h2>
         </div>
         <div class="chat-body">
-          <div class="modal">
-            <div class="modal-head">
+          <div class="approval-card">
+            <div class="approval-card-head">
               <div class="glyph">승</div>
-              <div class="modal-title">
+              <div class="approval-card-title">
                 <h3>사용자가 보지 않는 외부 전송이 보류되었습니다</h3>
                 <p>루틴 실행 중 네트워크 전송 요청이 발생했습니다. 승인 전에는 전송하지 않고 큐 버튼의 pending count 로만 알립니다.</p>
               </div>
               <span class="tag red">pending</span>
             </div>
-            <div class="modal-body">
+            <div class="approval-card-body">
               <div class="review-box red">
                 <h4>보류된 전송</h4>
                 <div class="review-row"><b>surface</b><span>headless routine · source=plugin · category=network</span></div>
@@ -644,7 +644,7 @@
                 <div class="mini"><div class="label">허용 범위</div><div class="value">endpoint + payload class<br>narrow rule only</div></div>
               </div>
             </div>
-            <div class="modal-actions">
+            <div class="approval-card-actions">
               <button class="button">나중에 보기</button>
               <button class="button danger">전송 거부</button>
               <button class="button primary">검토 후 전송</button>
@@ -680,16 +680,16 @@
           </div>
 
           <div class="overlay">
-            <div class="modal wide">
-              <div class="modal-head">
+            <div class="approval-card wide">
+              <div class="approval-card-head">
                 <div class="glyph">승</div>
-                <div class="modal-title">
+                <div class="approval-card-title">
                   <h3>보류된 권한 요청 검토</h3>
                   <p>사용자가 권한 큐 버튼을 눌렀을 때만 열리는 모달입니다. 작업 중 자동으로 전면 노출되지 않습니다.</p>
                 </div>
                 <span class="tag red">3 pending</span>
               </div>
-              <div class="modal-body">
+              <div class="approval-card-body">
                 <div class="mini-grid">
                   <div class="mini"><div class="label">주 승인 표면</div><div class="value">권한 큐 버튼<br>수동 모달</div></div>
                   <div class="mini"><div class="label">Settings 역할</div><div class="value">정책/LLM 설정<br>처리 이력 조회</div></div>
@@ -703,7 +703,7 @@
                   <div class="review-row"><b>선택</b><span>첫 항목 검토, 모두 거부, 닫기. 닫기는 새 tool 실행을 막지 않고 큐 count 를 유지합니다.</span></div>
                 </div>
               </div>
-              <div class="modal-actions">
+              <div class="approval-card-actions">
                 <button class="button">나중에 보기</button>
                 <button class="button danger">모두 거부</button>
                 <button class="button primary">첫 항목 검토</button>
@@ -791,7 +791,7 @@
       </article>
 
       <article class="scenario">
-        <div class="scenario-head"><span class="tag amber">S5</span><h2>auto-review MED → approval modal</h2></div>
+        <div class="scenario-head"><span class="tag amber">S5</span><h2>auto-review MED → approval dock</h2></div>
         <div class="scenario-body">
           <p class="scenario-copy">데이터 전송, overwrite, 다중 파일 변경처럼 사용자가 알아야 하는 영향범위는 (Phase 0) 조용한 거부 대신 사용자 승인 모달로 라우팅합니다. 사용자가 권한입니다 — 허용하면 실행, 거부하면 차단.</p>
           <div class="scenario-list">
@@ -803,7 +803,7 @@
       </article>
 
       <article class="scenario">
-        <div class="scenario-head"><span class="tag red">S6</span><h2>auto-review HIGH → approval modal</h2></div>
+        <div class="scenario-head"><span class="tag red">S6</span><h2>auto-review HIGH → approval dock</h2></div>
         <div class="scenario-body">
           <p class="scenario-copy">shell, 삭제, 대량 변경, 민감 데이터 전송 가능성은 (Phase 0) HIGH reviewer verdict 를 모달로 보여 주고 사용자에게 결정을 묻습니다. deny-by-default 유지 — 거부하면 차단.</p>
           <div class="scenario-list">
@@ -955,7 +955,7 @@
           <tr>
             <td>workspace read</td>
             <td>allow + inline audit</td>
-            <td>ask modal</td>
+            <td>approval dock</td>
             <td>allow + inline audit</td>
             <td>allow + audit</td>
             <td>allow unless strict asks</td>
@@ -970,33 +970,33 @@
           </tr>
           <tr>
             <td>write LOW</td>
-            <td>ask modal</td>
-            <td>ask modal</td>
+            <td>approval dock</td>
+            <td>approval dock</td>
             <td>allow + “LLM reviewed LOW” inline</td>
             <td>allow + audit</td>
             <td>allow + audit if reviewer LOW</td>
           </tr>
           <tr>
             <td>write MED</td>
-            <td>ask modal</td>
-            <td>ask modal</td>
-            <td>ask modal (reviewer verdict)</td>
+            <td>approval dock</td>
+            <td>approval dock</td>
+            <td>approval dock (reviewer verdict)</td>
             <td>allow + audit</td>
             <td>deferred queue</td>
           </tr>
           <tr>
             <td>network trusted metadata</td>
-            <td>endpoint ask modal</td>
-            <td>endpoint ask modal</td>
+            <td>endpoint approval dock</td>
+            <td>endpoint approval dock</td>
             <td>LOW allow with endpoint/auth-scope audit</td>
             <td>allow + endpoint audit</td>
             <td>LOW allow; otherwise deferred</td>
           </tr>
           <tr>
             <td>network data egress</td>
-            <td>endpoint + payload ask modal</td>
-            <td>endpoint + payload ask modal</td>
-            <td>MED ask modal (reviewer verdict)</td>
+            <td>endpoint + payload approval dock</td>
+            <td>endpoint + payload approval dock</td>
+            <td>MED approval dock (reviewer verdict)</td>
             <td>allow + payload-class audit</td>
             <td>deferred queue before transmission</td>
           </tr>
@@ -1004,7 +1004,7 @@
             <td>network unknown/sensitive</td>
             <td>HIGH ask or hard deny</td>
             <td>HIGH ask or hard deny</td>
-            <td>HIGH ask modal or deny if hard gate trips</td>
+            <td>HIGH approval dock or deny if hard gate trips</td>
             <td>hard gates then allow only when policy permits</td>
             <td>deferred or deny, no background send</td>
           </tr>
@@ -1012,7 +1012,7 @@
             <td>shell/HIGH</td>
             <td>AST/path checks then ask</td>
             <td>AST/path checks then ask</td>
-            <td>HIGH ask modal (reviewer verdict)</td>
+            <td>HIGH approval dock (reviewer verdict)</td>
             <td>hard gates then allow + audit</td>
             <td>deferred queue</td>
           </tr>
@@ -1043,16 +1043,16 @@
           <h2>LLM reviewer 없이 발생한 권한 요청 상세 모달</h2>
         </div>
         <div class="chat-body">
-          <div class="modal">
-            <div class="modal-head">
+          <div class="approval-card">
+            <div class="approval-card-head">
               <div class="glyph">!</div>
-              <div class="modal-title">
+              <div class="approval-card-title">
                 <h3>도구 승인 필요</h3>
                 <p>현재 정책은 LLM reviewer 를 사용하지 않습니다. 자동 영향범위 판단 없이 도구 정의와 실제 인자를 직접 확인합니다.</p>
               </div>
               <span class="tag amber">explicit ask</span>
             </div>
-            <div class="modal-body">
+            <div class="approval-card-body">
               <div class="mini-grid">
                 <div class="mini"><div class="label">정책</div><div class="value">default<br>write 는 승인 필요</div></div>
                 <div class="mini"><div class="label">도구</div><div class="value"><code>write_file</code><br>source=builtin</div></div>
@@ -1066,7 +1066,7 @@
                 <div class="review-row"><b>LLM 상태</b><span>reviewer disabled. 영향범위 요약은 제공되지 않습니다.</span></div>
               </div>
             </div>
-            <div class="modal-actions">
+            <div class="approval-card-actions">
               <button class="button danger">거부</button>
               <button class="button">이번 세션에서 같은 경로 허용</button>
               <button class="button primary">이번만 허용</button>
@@ -1081,16 +1081,16 @@
           <h2>도구 정의/행동 결과가 불일치한 경우</h2>
         </div>
         <div class="chat-body">
-          <div class="modal">
-            <div class="modal-head">
+          <div class="approval-card">
+            <div class="approval-card-head">
               <div class="glyph">X</div>
-              <div class="modal-title">
+              <div class="approval-card-title">
                 <h3>도구 정의 오류로 실행 차단</h3>
                 <p>이 호출은 사용자 승인을 받아도 실행하지 않습니다. 플러그인 또는 MCP 도구 정의가 권한 SOT 를 만족하지 않습니다.</p>
               </div>
               <span class="tag red">blocked</span>
             </div>
-            <div class="modal-body">
+            <div class="approval-card-body">
               <div class="review-box red">
                 <h4>차단 사유</h4>
                 <div class="review-row"><b>도구</b><span><code>plugin_export_report</code> · source=plugin</span></div>
@@ -1099,7 +1099,7 @@
                 <div class="review-row"><b>다음 단계</b><span>플러그인 manifest 의 category/pathFields 를 수정해야 합니다.</span></div>
               </div>
             </div>
-            <div class="modal-actions">
+            <div class="approval-card-actions">
               <button class="button">감사 이력 보기</button>
               <button class="button primary">닫기</button>
             </div>

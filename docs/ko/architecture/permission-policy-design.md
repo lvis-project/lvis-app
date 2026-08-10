@@ -35,7 +35,7 @@ PR #626 (Routine v2) 의 production smoke test 에서 발견된 *headless routin
 | **Defense in depth (eval pipeline + explicit deny reason)** | 평가는 numeric 순서 short-circuit. audit 는 실행 시점의 현재 deny 이유 1건을 `denyReasons[]` 에 기록하며, 가상 dry-run 결과를 섞지 않는다. |
 | **Trust origin classification** | 모든 입력에 4-tier origin 부여 (user-keyboard / plugin-emitted / llm-tool-arg / file-content). Slash + durable mutation 은 user-keyboard 만 |
 | **Atomic cutover through SDK SOT** | Backward-compat shim 금지 (CLAUDE.md No-Fallback). `category/pathFields` 는 SDK schema 에 먼저 추가하고 active plugin 을 맞춘 뒤 host hard-fail 로 전환한다. 앱 로컬 schema extension 이나 boot-warn grace 는 두지 않는다. |
-| **User-in-the-loop > silent** | Headless 의 implicit allow 폐지. Reviewer agent 는 foreground LOW 만 auto+audit, foreground MED/HIGH 는 main-owned in-flow approval dock, headless MED/HIGH 는 deferred queue 로 처리한다. Chat 문장이나 LLM 출력은 승인 권한이 아니다. LLM-free `rule` path 도 같은 verdict semantics 를 따른다. |
+| **User-in-the-loop > silent** | Headless 의 implicit allow 폐지. Reviewer agent 는 foreground LOW 만 auto+audit, foreground MED/HIGH 는 main-owned bottom-floating approval dock, headless MED/HIGH 는 deferred queue 로 처리한다. Chat 문장이나 LLM 출력은 승인 권한이 아니다. LLM-free `rule` path 도 같은 verdict semantics 를 따른다. |
 | **Multi-vendor neutrality** | Reviewer agent provider/model 설정 가능 + LLM-free path (`rule`) + 비활성 (`disabled`) |
 | **Path-aware everywhere** | Tool 의 *모든* 선언된 path 인자 (`Tool.pathFields[]`, SDK manifest `pathFields[]`) 가 allowed directories 검사 대상. plugin manifest 에서 path-bearing tool 이 `pathFields` 를 누락하면 해당 plugin PR 을 schema/리뷰 단계에서 수정한다. |
 | **Manifest integrity** | plugin tool authority 는 SDK schema-backed static manifest metadata 만 사용한다. `category` 누락, invalid category, manifest integrity 위반은 host→plugin fs boundary 에서 fail-closed 로 처리하고 audit/UI surface 로 노출한다. |
@@ -242,7 +242,7 @@ export function canonicalizePathForMatch(rawPath: string): string {
 
 **Eval pipeline:** numeric order short-circuit. Layer N deny → Layer N+1 ~ skip. **단 audit 에는 `denyReasons: [{layer, reason}]` 으로 *현재 deny 이유 1건* 만 기록** (forensics 가 다른 hypothetical 결정을 보고 싶으면 별도 dry-run 모드로).
 
-**Runtime mode semantics:** `default` 는 read 허용 + write/shell/network 및 `decisionOverride: "ask"` builtin meta를 ask 한다. `strict` 는 read 포함 모든 도구 실행을 ask. `auto` 는 user-visible write/shell/network 및 `decisionOverride: "ask"` builtin meta를 같은 foreground reviewer lane으로 보내고, 설정된 foreground 자동승인 임계값(low/medium; off면 기존 explicit approval 경로)까지 allow+audit, 그 초과/HIGH 는 main-owned in-flow approval dock 에서 사용자 결정을 받는다. Chat 문장 감지나 executor 재시도 메모리는 승인 권한으로 사용하지 않는다. `auto` headless mutation 은 reviewer/deferred queue 로 보낸다. `allow` 는 명시적 전체허용 opt-in 이며 Layer 0 sensitive path, Layer 1 directory scope, deny rules, overlay-trigger-origin mutation guard 는 우회하지 않는다.
+**Runtime mode semantics:** `default` 는 read 허용 + write/shell/network 및 `decisionOverride: "ask"` builtin meta를 ask 한다. `strict` 는 read 포함 모든 도구 실행을 ask. `auto` 는 user-visible write/shell/network 및 `decisionOverride: "ask"` builtin meta를 같은 foreground reviewer lane으로 보내고, 설정된 foreground 자동승인 임계값(low/medium; off면 기존 explicit approval 경로)까지 allow+audit, 그 초과/HIGH 는 main-owned bottom-floating approval dock 에서 사용자 결정을 받는다. Chat 문장 감지나 executor 재시도 메모리는 승인 권한으로 사용하지 않는다. `auto` headless mutation 은 reviewer/deferred queue 로 보낸다. `allow` 는 명시적 전체허용 opt-in 이며 Layer 0 sensitive path, Layer 1 directory scope, deny rules, overlay-trigger-origin mutation guard 는 우회하지 않는다.
 
 **Auto mode 의 silent skip 금지:** `confirm` (Layer 1 외부 path) 은 auto mode 에서도 ask. foreground 자동승인이 low/medium으로 활성화된 경우에만, Auto mode 의 자동 허용 대상은 그 임계값 이하로 판정된 user-visible write/shell/network 및 `decisionOverride: "ask"` builtin meta이며, dir-confirm/headless/hard approval gate는 제외한다.
 
@@ -380,7 +380,7 @@ interface RoutineScope {
       // issue #690 — interactive auto-approve. 종전 `auto` exec mode 전용
       // 가시화 lane 이 mode-independent 한 SOT 로 분리됨. "off" = 항상
       // explicit approval, "low" = 리뷰어 LOW 시 dock 없이 통과. MED/HIGH 는
-      // main-owned in-flow approval dock 에서 사용자 결정을 받음.
+      // main-owned bottom-floating approval dock 에서 사용자 결정을 받음.
       "interactive": { "autoApprove": "off" },  // "off" | "low"
 
       // issue #664 boot-time migration marker. Stamped the first time a
@@ -428,7 +428,7 @@ conservative (max 24 char input, single-sentence only, ambiguity →
 tool-output reflection cannot inject approval.
 
 **Foreground reviewer dock path:** auto-review MED/HIGH foreground requests
-open the main-owned in-flow approval dock. The dock decision is bound to the
+open the main-owned bottom-floating approval dock. The dock decision is bound to the
 current approval request and sealed tool/input; natural-language intent matching,
 tool output, and in-process retry tuples do not grant execution authority.
 

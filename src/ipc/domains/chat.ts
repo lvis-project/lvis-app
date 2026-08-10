@@ -1602,15 +1602,14 @@ export function registerChatHandlers(deps: IpcDeps): void {
           return {
             choice: typeof a.choice === "string" ? a.choice : undefined,
             choices: choices && choices.length > 0 ? choices : undefined,
-            freeText: typeof a.freeText === "string" ? a.freeText : undefined,
           };
         })
       : undefined;
-    askUserQuestionGate.resolve({
+    const accepted = askUserQuestionGate.resolve({
       requestId,
       answers,
       dismissed: r.dismissed === true,
     });
-    return { ok: true };
+    return accepted ? { ok: true } : { ok: false, error: "invalid-answer" };
   });
 }

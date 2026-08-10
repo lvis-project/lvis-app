@@ -77,7 +77,7 @@ export function App() {
   // (the drag-drop indexing feature was removed; this guard is all that remains).
   useWindowFileDropGuard();
 
-  // Workflow tools (S1+S2) — lifted to App level so FloatingQuestionPanel
+  // Workflow tools (S1+S2) — lifted to App level so the question request queue
   // survives view navigation (question state persists across view changes).
   const {
     askQuestions,

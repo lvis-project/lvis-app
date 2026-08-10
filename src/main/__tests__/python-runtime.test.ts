@@ -148,7 +148,11 @@ function setupPythonRuntimeSetupSpawns(): void {
 
 // ─── 테스트 대상 import (mock 설정 이후) ──────────────────────────────────────
 // dynamic import를 사용하지 않고 상단에서 import → vi.mock hoisting에 의존
-import { PythonRuntimeBootstrapper } from "../python-runtime.js";
+import {
+  buildPipSyncArgs,
+  buildPipSyncFallbackArgs,
+  PythonRuntimeBootstrapper,
+} from "../python-runtime.js";
 import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 // ─── BrowserWindow stub ───────────────────────────────────────────────────────
@@ -159,6 +163,32 @@ function makeBrowserWindow() {
     },
   } as unknown as import("electron").BrowserWindow;
 }
+
+describe("buildPipSyncArgs", () => {
+  it("keeps the co-located cache first and only builds a Windows fallback", () => {
+    const lockFile = "/installed/local-indexer/python-requirements.lock";
+    const pythonPath = "/runtime/python.exe";
+
+    expect(buildPipSyncArgs(lockFile, pythonPath)).toEqual([
+      "pip",
+      "sync",
+      lockFile,
+      "--python",
+      pythonPath,
+    ]);
+    expect(buildPipSyncFallbackArgs(lockFile, pythonPath, "win32")).toEqual([
+      "pip",
+      "sync",
+      lockFile,
+      "--python",
+      pythonPath,
+      "--no-cache",
+      "--link-mode",
+      "copy",
+    ]);
+    expect(buildPipSyncFallbackArgs(lockFile, pythonPath, "darwin")).toBeNull();
+  });
+});
 
 // ─── 테스트 ───────────────────────────────────────────────────────────────────
 
@@ -274,6 +304,46 @@ describe("PythonRuntimeBootstrapper", () => {
     // result 유효
     expect(result.pythonPath).toBeTruthy();
     expect(result.venvPath).toBeTruthy();
+  });
+
+  it("Windows cached sync failure retries once with a no-cache copy fallback", async () => {
+    const manifestPath = "/installed/local-indexer/plugin.json";
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, "platform", { value: "win32", configurable: true });
+    mockedAccess
+      .mockRejectedValueOnce(Object.assign(new Error("ENOENT"), { code: "ENOENT" }))
+      .mockResolvedValueOnce(undefined)
+      .mockResolvedValueOnce(undefined);
+    mockedSpawn
+      .mockReturnValueOnce(makeSpawnMock("uv 0.7.3\n"))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnFailMock(1, "cached wheel build failed"))
+      .mockReturnValueOnce(makeSpawnMock(""))
+      .mockReturnValueOnce(makeSpawnMock("3.12.3\n"));
+
+    try {
+      const bootstrapper = new PythonRuntimeBootstrapper({ pluginManifestPaths: [manifestPath] });
+      await bootstrapper.ensureReady(makeBrowserWindow());
+
+      const pipSyncCalls = mockedSpawn.mock.calls.filter(
+        ([, args]) => (args as string[]).includes("pip") && (args as string[]).includes("sync"),
+      );
+      expect(pipSyncCalls).toHaveLength(2);
+      expect(pipSyncCalls[0][1] as string[]).not.toContain("--no-cache");
+      expect(pipSyncCalls[1][1] as string[]).toEqual(expect.arrayContaining([
+        "--no-cache",
+        "--link-mode",
+        "copy",
+      ]));
+
+      const firstEnv = (pipSyncCalls[0][2] as { env: NodeJS.ProcessEnv }).env;
+      const fallbackEnv = (pipSyncCalls[1][2] as { env: NodeJS.ProcessEnv }).env;
+      expect(firstEnv.UV_CACHE_DIR).toBeDefined();
+      expect(fallbackEnv.UV_LINK_MODE).toBe("copy");
+      expect(fallbackEnv.UV_CACHE_DIR).toBe(firstEnv.UV_CACHE_DIR);
+    } finally {
+      Object.defineProperty(process, "platform", { value: originalPlatform, configurable: true });
+    }
   });
 
   it("uv stderr 다운로드 로그를 chunk 단위로 main log에 증폭하지 않는다", async () => {

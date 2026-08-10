@@ -17,11 +17,12 @@ export interface ApprovalDockProps {
 }
 
 /**
- * Route-independent, in-flow foreground approval surface.
+ * Route-independent, bottom-floating foreground approval surface.
  *
- * The dock is deliberately a sibling of routed content inside AppShell. It
- * reserves its own space instead of portalling over the viewport, so the user
- * can keep reading and navigating the route that raised the request. All
+ * The dock is deliberately an absolutely positioned sibling of routed content
+ * inside AppShell's padded route canvas. It never changes the route's measured
+ * height and it does not portal over the viewport, so the user can keep reading
+ * and navigating the route that raised the request around the card. All
  * ApprovalRequest variants share this one queue head and no approval surface
  * uses role=dialog, aria-modal, a backdrop, a focus trap, or body scroll lock.
  */
@@ -102,8 +103,16 @@ export function ApprovalDock({ queue, proposedChoice = null, onDecide }: Approva
   return (
     <section
       ref={rootRef}
-      className="relative z-30 flex max-h-[min(48dvh,28rem)] w-full min-w-0 max-w-full shrink-0 flex-col overflow-hidden border-t bg-card text-card-foreground shadow-2xl"
+      className="pointer-events-auto absolute z-40 mx-auto flex min-w-0 max-w-[58rem] flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-2xl"
+      style={{
+        left: "max(0.75rem, env(safe-area-inset-left, 0px))",
+        right: "max(0.75rem, env(safe-area-inset-right, 0px))",
+        width: "auto",
+        bottom: "max(var(--approval-overlay-bottom, 0.75rem), env(safe-area-inset-bottom, 0px))",
+        maxHeight: "min(48dvh, 28rem, max(8rem, calc(100% - max(var(--approval-overlay-bottom, 0.75rem), env(safe-area-inset-bottom, 0px)) - 0.75rem)))",
+      }}
       data-testid="approval-dock"
+      data-overlay-position="bottom"
       data-approval-request-id={isRationale ? undefined : request.id}
       data-approval-tool-name={isRationale ? undefined : request.toolName}
       data-approval-args={isRationale ? undefined : canonicalStringify(request.args)}

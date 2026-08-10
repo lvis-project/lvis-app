@@ -32,7 +32,7 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
           description: t("be_askUserQuestion.questionsDesc", { max: MAX_QUESTIONS_PER_CARD }),
           items: {
             type: "object",
-            required: ["question"],
+            required: ["question", "choices"],
             properties: {
               question: {
                 type: "string",
@@ -40,8 +40,10 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
               },
               choices: {
                 type: "array",
-                items: { type: "string" },
+                items: { type: "string", minLength: 1, maxLength: 20 },
+                minItems: 1,
                 maxItems: 3,
+                uniqueItems: true,
                 description: t("be_askUserQuestion.choicesDesc"),
               },
               recommendedIndex: {
@@ -56,17 +58,9 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
                 items: { type: "integer", minimum: 0, maximum: 2 },
                 description: t("be_askUserQuestion.altIndicesDesc"),
               },
-              allowFreeText: {
-                type: "boolean",
-                description: t("be_askUserQuestion.allowFreeTextDesc"),
-              },
               allowMultiple: {
                 type: "boolean",
                 description: t("be_askUserQuestion.allowMultipleDesc"),
-              },
-              placeholder: {
-                type: "string",
-                description: t("be_askUserQuestion.placeholderDesc"),
               },
               summaryHint: {
                 type: "string",
@@ -117,21 +111,35 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
             isError: true,
           };
         }
-        // Cap choices at 3 per spec; the rest is covered by free-text.
-        const filteredChoices = Array.isArray(q.choices)
-          ? (q.choices as unknown[]).filter(
-              (c): c is string => typeof c === "string" && c.trim().length > 0,
-            ).slice(0, 3)
-          : undefined;
-        const allowFreeText = q.allowFreeText !== false;
-        // Refuse an unanswerable shape: no choices AND no free-text
-        // input would render a question with no inputs at all and the
-        // user would only be able to dismiss the card.
-        if ((!filteredChoices || filteredChoices.length === 0) && !allowFreeText) {
+        if (!Array.isArray(q.choices) || q.choices.length === 0) {
           return {
             output: JSON.stringify({
-              error:
-                "each question must allow at least one input — provide choices[] or set allowFreeText:true (default)",
+              error: "each question must provide at least one non-empty choice",
+            }),
+            isError: true,
+          };
+        }
+        if (
+          q.choices.length > 3 ||
+          q.choices.some(
+            (choice) =>
+              typeof choice !== "string" ||
+              choice.trim().length === 0 ||
+              choice.trim().length > 20,
+          )
+        ) {
+          return {
+            output: JSON.stringify({
+              error: "each question must provide 1 to 3 non-empty choices of at most 20 characters",
+            }),
+            isError: true,
+          };
+        }
+        const filteredChoices = (q.choices as string[]).map((choice) => choice.trim());
+        if (new Set(filteredChoices).size !== filteredChoices.length) {
+          return {
+            output: JSON.stringify({
+              error: "each question must provide unique choices",
             }),
             isError: true,
           };
@@ -161,10 +169,6 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
           }
           return seen.size > 0 ? [...seen] : undefined;
         })();
-        const placeholder =
-          typeof q.placeholder === "string" && q.placeholder.trim().length > 0
-            ? q.placeholder.trim()
-            : undefined;
         const summaryHint =
           typeof q.summaryHint === "string" && q.summaryHint.trim().length > 0
             ? q.summaryHint.trim()
@@ -180,12 +184,10 @@ export function createAskUserQuestionTool(deps: AskUserQuestionToolDeps): Tool {
             : undefined;
         questions.push({
           question,
-          choices: filteredChoices && filteredChoices.length > 0 ? filteredChoices : undefined,
+          choices: filteredChoices,
           recommendedIndex,
           altIndices,
-          allowFreeText,
           allowMultiple,
-          placeholder,
           summaryHint,
         });
       }

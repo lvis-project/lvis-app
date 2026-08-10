@@ -1,7 +1,7 @@
 /**
  * useWorkflowTools — consolidates renderer-side state for the 5 workflow
  * system tools (S1+S2):
- *   - askUserQuestionRequests: queue of inline questions awaiting user input
+ *   - askUserQuestionRequests: FIFO queue for the non-modal composer-dock card
  *   - subAgentSpawns: live list of in-flight + recently-completed sub-agents
  *   - loadedSkills: badges shown inline for `skill_load` calls
  *

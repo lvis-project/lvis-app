@@ -81,11 +81,11 @@
       <article class="scenario"><h2><span class="tag amber">S2</span>Strict read asks</h2><p>Strict mode asks for reads without invoking the reviewer.</p></article>
       <article class="scenario"><h2><span class="tag amber">S3</span>Out-of-directory read</h2><p>Reads outside the allowed directory switch to directory-scope approval.</p></article>
       <article class="scenario"><h2><span class="tag green">S4</span>Auto-review LOW mutation</h2><p>Low-risk foreground mutation can run inline with reviewer and audit disclosure.</p></article>
-      <article class="scenario"><h2><span class="tag amber">S5</span>Auto-review MED mutation</h2><p>Medium foreground mutation routes to the approval modal; the user remains the authority.</p></article>
+      <article class="scenario"><h2><span class="tag amber">S5</span>Auto-review MED mutation</h2><p>Medium foreground mutation routes to the non-modal approval dock; the user remains the authority.</p></article>
       <article class="scenario"><h2><span class="tag red">S6</span>Auto-review HIGH shell</h2><p>High-risk shell or deletion routes to approval and deny-once blocks execution.</p></article>
       <article class="scenario"><h2><span class="tag amber">S7</span>Reviewer disabled</h2><p>Modes without the LLM reviewer ask directly with clearer tool arguments.</p></article>
       <article class="scenario"><h2><span class="tag amber">S8</span>Reviewer missing</h2><p>Missing provider/model/key never silently allows; foreground asks and headless defers or denies.</p></article>
-      <article class="scenario"><h2><span class="tag red">S9</span>Reviewer timeout/error</h2><p>Reviewer failure is fail-closed HIGH and routes through the approval modal.</p></article>
+      <article class="scenario"><h2><span class="tag red">S9</span>Reviewer timeout/error</h2><p>Reviewer failure is fail-closed HIGH and routes through the approval dock.</p></article>
       <article class="scenario"><h2><span class="tag red">S10</span>Category-less plugin tool</h2><p>Invalid tool definitions fail closed at the host baseline and cannot hide behind user approval.</p></article>
       <article class="scenario"><h2><span class="tag blue">S11</span>Overlay prompt import</h2><p>overlay:... uses prompt import approval, then normal tool permission. The overlay lane stays separate from tool permission.</p></article>
       <article class="scenario"><h2><span class="tag amber">S12</span>MCP remote tool</h2><p>MCP tools use the same category policy with MCP source and low-trust floor.</p></article>

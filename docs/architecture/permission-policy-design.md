@@ -48,7 +48,7 @@ does not make an invalid tool definition valid.
 
 ## Foreground And Headless Behavior
 
-Foreground requests use one in-flow approval dock because the user is present.
+Foreground requests use one bottom-floating, non-modal approval dock because the user is present.
 The dock shares the routed canvas, does not create a backdrop or focus trap, and
 keeps the surrounding page readable and operable while execution remains
 blocked on an explicit decision. Headless requests must not interrupt the user
