@@ -68,11 +68,11 @@ export type ReviewerFallbackOnError = "deny" | "rule";
  * Interactive auto-approve policy — issue #690.
  *
  *   - "off"  : reviewer never auto-approves in interactive (foreground)
- *              flow. Every ask hits the modal.
+ *              flow. Every ask hits the approval dock.
  *   - "low"  : reviewer's LOW verdict in interactive flow silently
- *              allows the call without showing the modal. MEDIUM/HIGH ask.
+ *              allows the call without showing the prompt. MEDIUM/HIGH ask.
  *   - "medium": reviewer LOW and MEDIUM verdicts in interactive flow silently
- *              allow the call without showing the modal. HIGH still asks.
+ *              allow the call without showing the prompt. HIGH still asks.
  *
  * This inclusive threshold applies only to the foreground reviewer route.
  * Headless review remains fail-closed for MEDIUM and HIGH.
@@ -140,7 +140,7 @@ const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
   // rewire path re-fires wiring and the reviewer returns to "llm".
   //
   // `interactive.autoApprove: "medium"` lets LOW and MEDIUM verdicts in the
-  // foreground chat flow silently allow without a modal. HIGH still returns to
+  // foreground chat flow silently allow without a prompt. HIGH still returns to
   // the main LLM as a blocked tool result. This threshold applies in auto mode;
   // the headless lane remains unaffected.
   //

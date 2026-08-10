@@ -1202,7 +1202,7 @@ export async function queryLoop(
           sessionId: bounds?.sessionIdOverride ?? self.sessionId,
           // Forward the turn's overlay trigger origin so write/shell/network tools
           // bypass `allow-always` cache and force a user-confirmation
-          // modal — the hard gate for the overlay trigger's propose-only contract.
+          // approval prompt — the hard gate for the overlay trigger's propose-only contract.
           overlayTriggerOrigin: stagedOrigin ?? null,
           // C3(b): carry spawn depth into ToolExecutionContext.metadata.
           // The executor uses this to refuse `agent_spawn` calls inside an

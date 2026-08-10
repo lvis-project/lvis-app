@@ -286,6 +286,12 @@ describe("chat-stream-state", () => {
             question: "몇 개로 정리할까요?",
             summaryHint: "개수",
           },
+          {
+            question: "관심 분야는요?",
+            summaryHint: "분야",
+            choices: ["AI", "보안", "UX"],
+            allowMultiple: true,
+          },
         ],
       },
     });
@@ -293,7 +299,11 @@ describe("chat-stream-state", () => {
       groupId: "round-ask",
       toolUseId: "ask-1",
       result: JSON.stringify({
-        answers: [{ choice: "IT/경제" }, { freeText: "10개" }],
+        answers: [
+          { choice: "IT/경제" },
+          { freeText: "10개" },
+          { choices: ["AI", "UX"], freeText: "기타 도구" },
+        ],
         dismissed: false,
       }),
       isError: false,
@@ -306,6 +316,7 @@ describe("chat-stream-state", () => {
       rows: [
         { label: "범위", value: "IT/경제" },
         { label: "개수", value: "10개" },
+        { label: "분야", value: "AI, UX, 기타 도구" },
       ],
     });
   });

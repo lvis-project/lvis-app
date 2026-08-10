@@ -270,7 +270,7 @@ async function initializeA2ARouter(
  * the IPC-language convention. `requireExplicit` is NOT (and CANNOT be) passed
  * here — the gate's signature is `Omit<ApprovalRequest, "requireExplicit">` and
  * it derives `requireExplicit` from the active policy
- * (`PolicyFile.requireExplicitApproval`). The gate ALWAYS shows this modal
+ * (`PolicyFile.requireExplicitApproval`). The gate ALWAYS shows this approval dock
  * because the request is an `agent-action` (its `isReadOnly` short-circuit
  * explicitly excludes `kind === "agent-action"`, so it is never auto-approved).
  * We only ever treat an `allow-*` choice as approval and NEVER persist an
@@ -284,7 +284,7 @@ async function initializeA2ARouter(
  *
  * ATTENTION-DoS HARDENING (security MINOR-1, #1441 cluster review), fail-closed:
  * an in-flight cap prevents an external caller from flooding the user with
- * concurrent ApprovalGate modals for the same approver instance. While a
+ * concurrent ApprovalGate prompts for the same approver instance. While a
  * previous external-mutation approval is still pending, a new ask returns
  * `false` IMMEDIATELY — WITHOUT calling `approvalGate.requestAndWait` again —
  * so the user only ever faces one live external-mutation prompt at a time.

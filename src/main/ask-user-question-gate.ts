@@ -1,8 +1,8 @@
 /**
  * AskUserQuestionGate — main-process broker for the `ask_user_question`
- * tool. The tool execution awaits a Promise; this gate sends an inline
- * question payload to the renderer (channel `lvis:ask-user-question:request`)
- * and resolves the promise when the user submits or dismisses.
+ * tool. The tool execution awaits a Promise; this gate sends a FIFO question
+ * payload to the renderer's non-modal composer dock via
+ * `lvis:ask-user-question:request` and resolves on submit or dismiss.
  *
  * Mirrors {@link ApprovalGate} structurally but does NOT enforce permission
  * policy — the question is rendered as a chat-side card, not a modal,
@@ -23,19 +23,13 @@ const log = createLogger("lvis");
  */
 export interface AskUserQuestionItem {
   question: string;
-  /** Up to 3 visible choices, each ≤ 20 Korean chars. */
-  choices?: string[];
+  /** One to 3 visible choices, each ≤ 20 Korean chars. */
+  choices: string[];
   /** Index of the model's top recommendation in `choices` (0 or 1 across the array). */
   recommendedIndex?: number;
   /** Indices in `choices` of secondary recommendations (disjoint with recommendedIndex). */
   altIndices?: number[];
-  allowFreeText: boolean;
-
-
-
   allowMultiple?: boolean;
-  /** Single-line placeholder text for the free-text input (≤ 20 Korean chars). */
-  placeholder?: string;
   /** Confirm-step row label override (≤ 10 Korean chars). Falls back to a truncated question. */
   summaryHint?: string;
 }
@@ -56,7 +50,6 @@ export interface AskUserQuestionAnswer {
    * empty array is normalized to undefined upstream.
    */
   choices?: string[];
-  freeText?: string;
 }
 
 export interface AskUserQuestionResponse {
@@ -77,6 +70,7 @@ export const IPC_ASK_USER_QUESTION_REQUEST = "lvis:ask-user-question:request";
 export const IPC_ASK_USER_QUESTION_RESPOND = "lvis:ask-user-question:respond";
 
 interface PendingEntry {
+  request: AskUserQuestionRequest;
   resolve: (response: AskUserQuestionResponse) => void;
   /**
    * Centralized teardown — clears the timer, removes the abort listener,
@@ -86,6 +80,89 @@ interface PendingEntry {
    * questions never leaks listeners.
    */
   cleanup: () => void;
+}
+
+function normalizeQuestion(value: unknown): AskUserQuestionItem | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const question = value as Record<string, unknown>;
+  if (typeof question.question !== "string" || question.question.trim().length === 0) return null;
+  if (!Array.isArray(question.choices) || question.choices.length === 0 || question.choices.length > 3) {
+    return null;
+  }
+  if (
+    question.choices.some(
+      (choice) =>
+        typeof choice !== "string" ||
+        choice.trim().length === 0 ||
+        choice.trim().length > 20,
+    )
+  ) {
+    return null;
+  }
+
+  const choices = question.choices.map((choice) => (choice as string).trim());
+  if (new Set(choices).size !== choices.length) return null;
+  const recommendedIndex =
+    Number.isInteger(question.recommendedIndex) &&
+    Number(question.recommendedIndex) >= 0 &&
+    Number(question.recommendedIndex) < choices.length
+      ? Number(question.recommendedIndex)
+      : undefined;
+  const altIndices = Array.isArray(question.altIndices)
+    ? [...new Set(question.altIndices.filter(
+        (index): index is number =>
+          Number.isInteger(index) &&
+          Number(index) >= 0 &&
+          Number(index) < choices.length &&
+          Number(index) !== recommendedIndex,
+      ).map(Number))]
+    : undefined;
+
+  return {
+    question: question.question.trim(),
+    choices,
+    recommendedIndex,
+    altIndices: altIndices && altIndices.length > 0 ? altIndices : undefined,
+    allowMultiple: question.allowMultiple === true ? true : undefined,
+    summaryHint:
+      typeof question.summaryHint === "string" && question.summaryHint.trim().length > 0
+        ? question.summaryHint.trim()
+        : undefined,
+  };
+}
+
+function normalizeResponse(
+  request: AskUserQuestionRequest,
+  response: AskUserQuestionResponse,
+): AskUserQuestionResponse | null {
+  if (response.dismissed === true) {
+    return { requestId: request.id, dismissed: true };
+  }
+  if (!Array.isArray(response.answers) || response.answers.length !== request.questions.length) {
+    return null;
+  }
+
+  const answers: AskUserQuestionAnswer[] = [];
+  for (const [index, question] of request.questions.entries()) {
+    const answer = response.answers[index];
+    if (!answer || typeof answer !== "object" || Array.isArray(answer)) return null;
+
+    if (question.allowMultiple) {
+      if (!Array.isArray(answer.choices) || answer.choices.length === 0) return null;
+      if (answer.choices.some((choice) => typeof choice !== "string" || !question.choices.includes(choice))) {
+        return null;
+      }
+      const selected = new Set(answer.choices);
+      if (selected.size !== answer.choices.length) return null;
+      answers.push({ choices: question.choices.filter((choice) => selected.has(choice)) });
+      continue;
+    }
+
+    if (typeof answer.choice !== "string" || !question.choices.includes(answer.choice)) return null;
+    answers.push({ choice: answer.choice });
+  }
+
+  return { requestId: request.id, answers };
 }
 
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -133,7 +210,7 @@ export class AskUserQuestionGate {
 
   ask(input: {
     /**
-     * 1–4 questions to ask in a single inline card. Anything outside that
+     * 1–4 questions to ask in a single composer-dock card. Anything outside that
      * range is rejected up-front so the renderer never has to defend
      * against malformed multi-question shapes.
      */
@@ -143,28 +220,19 @@ export class AskUserQuestionGate {
 
     abortSignal?: AbortSignal;
   }): Promise<AskUserQuestionResponse> {
-    if (
-      !Array.isArray(input.questions) ||
-      input.questions.length === 0 ||
-      input.questions.length > MAX_QUESTIONS_PER_CARD
-    ) {
+    if (!Array.isArray(input.questions) || input.questions.length === 0 || input.questions.length > MAX_QUESTIONS_PER_CARD) {
       return Promise.resolve({
         requestId: "",
         dismissed: true,
       });
     }
+    const normalizedQuestions = input.questions.map(normalizeQuestion);
+    if (normalizedQuestions.some((question) => question === null)) {
+      return Promise.resolve({ requestId: "", dismissed: true });
+    }
     const req: AskUserQuestionRequest = {
       id: randomUUID(),
-      questions: input.questions.map((q) => ({
-        question: q.question,
-        choices: q.choices,
-        recommendedIndex: q.recommendedIndex,
-        altIndices: q.altIndices,
-        allowFreeText: q.allowFreeText !== false,
-        allowMultiple: q.allowMultiple === true ? true : undefined,
-        placeholder: q.placeholder,
-        summaryHint: q.summaryHint,
-      })),
+      questions: normalizedQuestions as AskUserQuestionItem[],
       createdAt: Date.now(),
     };
     // Enforce concurrent-pending cap before scheduling anything.
@@ -233,7 +301,7 @@ export class AskUserQuestionGate {
       if (abortListener) {
         input.abortSignal?.addEventListener("abort", abortListener, { once: true });
       }
-      this.pending.set(req.id, { resolve, cleanup });
+      this.pending.set(req.id, { request: req, resolve, cleanup });
       try {
         wc.send(IPC_ASK_USER_QUESTION_REQUEST, req);
       } catch (err) {
@@ -247,11 +315,14 @@ export class AskUserQuestionGate {
     });
   }
 
-  resolve(response: AskUserQuestionResponse): void {
+  resolve(response: AskUserQuestionResponse): boolean {
     const entry = this.pending.get(response.requestId);
-    if (!entry) return;
+    if (!entry) return false;
+    const normalized = normalizeResponse(entry.request, response);
+    if (!normalized) return false;
     entry.cleanup();
-    entry.resolve(response);
+    entry.resolve(normalized);
+    return true;
   }
 
   disposeAll(): void {

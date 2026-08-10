@@ -1794,7 +1794,6 @@ describe("ChatView", () => {
           {
             question: "지역 기준을 알려주세요",
             choices: ["서울", "경기"],
-            allowFreeText: true,
           },
         ],
       });

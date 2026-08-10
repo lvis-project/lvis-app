@@ -194,7 +194,7 @@ export async function prepareRationaleConversationRuntime(
       ? runtime
       : null;
   } catch {
-    // No control was materialized. Preserve the existing permission/modal path.
+    // No control was materialized. Preserve the existing permission/prompt path.
     return null;
   }
 }
@@ -312,7 +312,7 @@ export async function executeRationaleAwareConversationBatch(
     }
 
     // The reviewer auto-approve-on-aligned terminal already minted the one-shot
-    // authorization; it must SKIP the user modal and go straight to the shared,
+    // authorization; it must SKIP the user prompt and go straight to the shared,
     // unchanged sealed-resume execution chokepoint. Every other outcome still
     // opens exactly one host ApprovalGate request for this ticket.
     if (!roundResolution.autoApproved) {

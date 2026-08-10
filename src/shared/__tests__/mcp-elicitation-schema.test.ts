@@ -1,5 +1,5 @@
 /**
- * The single authority for elicitation-schema support. Both the approval dialog
+ * The single authority for elicitation-schema support. Both the approval dock
  * and the main-process resolver consume this parser; anything it accepts must be
  * renderable, and anything it rejects must be refused end to end.
  */

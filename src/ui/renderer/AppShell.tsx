@@ -371,7 +371,16 @@ export function AppShell({
             />
           )}
 
-          {children}
+          {/* Routed content and route-independent foreground surfaces share a
+              content-box positioning context. Floating surfaces can anchor to
+              this canvas without ignoring <main>'s sidebar padding or taking
+              flex space away from the active route. */}
+          <div
+            className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+            data-testid="route-canvas"
+          >
+            {children}
+          </div>
           {/* StatusBar notifications render inside ChatView, directly above
               the composer. The composer's own status sub-row keeps showing
               the ring / permission / model cells. The 도구 활동 (Tool Activity)
