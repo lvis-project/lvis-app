@@ -85,7 +85,7 @@ export interface MainContentProps {
   subAgentSpawns: Parameters<typeof ChatView>[0]["subAgentSpawns"];
   loadedSkills: Parameters<typeof ChatView>[0]["loadedSkills"];
   hasAskQuestions: boolean;
-  /** Pending ask_user_question requests rendered inline at the end of the chat stream. */
+  /** Pending ask_user_question requests rendered in the chat composer dock. */
   askQuestions: AskUserQuestionRequest[];
   /** Intercepts `/allow` while an approval is pending before it enters the message queue. */
   approvalSentenceInterceptSubmit?: (text: string) => boolean;

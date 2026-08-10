@@ -674,7 +674,7 @@ export const CHANNEL_GESTURE: Record<string, "required" | "none"> = {
  * credential, a stored gesture token, or any header to satisfy the gesture
  * requirement. The ONLY thing that unblocks a channel listed here is the user's
  * own approval click inside the running app: the human pressing "Allow" on the
- * ApprovalGate modal IS the explicit user action that authorizes this single
+ * ApprovalGate dock IS the explicit user action that authorizes this single
  * mutation. If the user declines or the request times out, the caller receives
  * {@link EXTERNAL_MUTATION_DENIED}.
  *

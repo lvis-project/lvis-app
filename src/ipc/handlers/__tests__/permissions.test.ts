@@ -6,7 +6,7 @@
  * (`src/permissions/permission-mode-apply.ts`) is the ONLY place a
  * transport-agnostic {@link SetPermissionModeBypass} is narrowed into the strict
  * {@link PermissionModeApprovalBypass} that lets `applyPermissionModeCommand`
- * skip the in-app approval modal. These tests pin down every rejected shape
+ * skip the in-app approval surface. These tests pin down every rejected shape
  * as well as the two accepted surfaces, plus a behavior-level guard that a
  * rejected bypass never short-circuits the durable-mode approval flow in
  * {@link handleSetPermissionMode}.

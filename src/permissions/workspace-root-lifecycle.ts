@@ -14,7 +14,7 @@
  * out by value therefore required a hand-written assignment per holder, and
  * every holder that nobody remembered to assign (sub-agent child loops, routine
  * loops) silently degraded to `undefined` — the user was offered "allow-always"
- * in the modal and then got `workspace lifecycle unavailable`. Consumers read
+ * in the approval dock and then got `workspace lifecycle unavailable`. Consumers read
  * through `getWorkspaceRootLifecycle` at approval time, so a consumer created
  * before the producer resolves correctly without any wiring of its own.
  *

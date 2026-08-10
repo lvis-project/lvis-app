@@ -1228,12 +1228,10 @@ export type LvisApi = {
       id: string;
       questions: Array<{
         question: string;
-        choices?: string[];
+        choices: string[];
         recommendedIndex?: number;
         altIndices?: number[];
-        allowFreeText: boolean;
         allowMultiple?: boolean;
-        placeholder?: string;
         summaryHint?: string;
       }>;
       createdAt: number;
@@ -1245,7 +1243,6 @@ export type LvisApi = {
       choice?: string;
       /** Multi-select selections (only set when the question allowMultiple). */
       choices?: string[];
-      freeText?: string;
     }>;
     dismissed?: boolean;
   }) => Promise<{ ok: boolean; error?: string }>;

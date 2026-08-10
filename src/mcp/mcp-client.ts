@@ -269,7 +269,7 @@ interface McpToolCallResult {
 
 /**
  * Resolves ONE MRTR `inputRequest` (§8). The host wires this to its capability
- * surfaces — elicitation → the approval-gate modal, sampling → the host LLM —
+ * surfaces — elicitation → the approval-gate dock, sampling → the host LLM —
  * and returns the response value placed under `inputResponses[id]` on retry. The
  * client owns the LOOP (detect / gather / echo `requestState` / retry / bound);
  * the resolver owns WHAT each request means. Absent ⇒ the client cannot satisfy

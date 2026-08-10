@@ -1,12 +1,12 @@
 /**
- * Tool pipeline — Store-B explicit-approval memory skip (foreground modal path).
+ * Tool pipeline — Store-B explicit-approval memory skip (foreground dock path).
  *
  * Extracted from `executor.ts` (C7 decomposition). Pure aside from the
  * user-approval store lookup + sandbox-audit sink it drives. Behaviour is locked
  * by `executor-approval-memory-skip*.test.ts`.
  *
  * Background — two approval stores, asymmetric reads (root cause of the
- * "I chose 'allow this session' but the modal keeps reappearing" bug):
+ * "I chose 'allow this session' but the prompt keeps reappearing" bug):
  *   • Store A — durable glob allow/deny rules + the `alwaysAllowed` Map,
  *     managed by PermissionsTab and consulted by the SYNC
  *     {@link PermissionManager.checkDetailed} (Layers 3 glob / 5 exact).
@@ -21,9 +21,9 @@
  *
  * Pre-fix, the foreground ask path never read Store B — only the reviewer
  * lane ({@link PermissionManager.dispatchReviewer}) did. So a "session"
- * approval was recorded but never honored on re-entry through the modal
- * path. This function mirrors the reviewer lane's lookup so a prior,
- * non-revoked session/persistent approval skips the modal.
+ * approval was recorded but never honored on re-entry through the foreground
+ * dock path. This function mirrors the reviewer lane's lookup so a prior,
+ * non-revoked session/persistent approval skips the prompt.
  *
  * The lookup args MUST match what ToolApprovalContent stored:
  * `canonicalStringify(finalInput)` (the dialog records
@@ -38,8 +38,8 @@
  * (provenance lost) is rejected → re-prompt (mirrors the dispatchReviewer
  * fail-closed gate).
  *
- * @returns an `allow` {@link PermissionCheckResult} when the modal should be
- *   skipped, or `null` to fall through to the modal.
+ * @returns an `allow` {@link PermissionCheckResult} when the prompt should be
+ *   skipped, or `null` to fall through to the approval dock.
  */
 import type { ToolSource, ToolCategory } from "../types.js";
 import type { PermissionCheckResult } from "../../permissions/permission-manager.js";
@@ -95,7 +95,7 @@ export async function tryUserApprovalMemorySkip(
     approvalCacheKey,
   ).catch(() => null); // storage failure must never block tool execution
 
-  // No active (non-revoked) approval → fall through to the modal.
+  // No active (non-revoked) approval → fall through to the approval dock.
   if (!approval) return null;
 
   // Legacy-null guard: an entry without a recorded verdict has lost its
@@ -156,7 +156,7 @@ export async function tryUserApprovalMemorySkip(
     return null;
   }
 
-  // Memory hit — skip the modal. Emit an audit entry recording the skip so
+  // Memory hit — skip the approval dock. Emit an audit entry recording the skip so
   // forensics can see the auto-allow + its provenance. Swallow-on-failure:
   // an audit write must never block tool execution.
   try {

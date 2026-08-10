@@ -174,7 +174,7 @@ export function createLocalApi(deps: LocalApiDeps): LocalApi {
    * BYPASS: `explicitUserAction` is `true` BECAUSE the user just clicked Allow in
    * the app — the ApprovalGate consent IS the explicit user action. `source:
    * "local-api-approval"` + `trustOrigin: origin` let `handleSetPermissionMode`
-   * complete the durable mode change WITHOUT a second in-app modal (the strict
+   * complete the durable mode change WITHOUT a second in-app prompt (the strict
    * bypass guard is widened for exactly this externally-approved shape).
    */
   async function routeExternalMutation(

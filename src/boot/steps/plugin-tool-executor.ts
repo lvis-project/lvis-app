@@ -560,7 +560,7 @@ export async function setupPluginToolExecutor(ctx: BootContext): Promise<void> {
             permissionContext: pluginSurfacePermissionScope.createPermissionContext(context, {
               // THE approval lane for this surface, and the only input to it:
               // `false` lets a Layer-1 out-of-allowed-dir target raise the
-              // directory modal, `true` hard-denies it into the deferred queue.
+              // directory approval prompt, `true` hard-denies it into the deferred queue.
               //
               // It follows the *effective* chain origin (#664 P2), so a UI-rooted
               // chain keeps `headless: false` at every depth and the user's outer

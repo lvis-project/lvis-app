@@ -1,8 +1,9 @@
 /**
  * ApprovalDock unit tests.
  *
- * The route-independent dock renders in flow and never portals or applies
- * modal semantics. Security and durable-decision assertions stay colocated.
+ * The route-independent dock floats at the route canvas bottom and never
+ * portals or applies modal semantics. Security and durable-decision assertions
+ * stay colocated.
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";

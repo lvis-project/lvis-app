@@ -100,6 +100,22 @@ export interface PythonRuntimeBootstrapperOptions {
   onStatus?: (status: BootstrapStatus) => void;
 }
 
+export function buildPipSyncArgs(
+  lockFile: string,
+  pythonPath: string,
+): string[] {
+  return ["pip", "sync", lockFile, "--python", pythonPath];
+}
+
+export function buildPipSyncFallbackArgs(
+  lockFile: string,
+  pythonPath: string,
+  platform: NodeJS.Platform = process.platform,
+): string[] | null {
+  if (platform !== "win32") return null;
+  return [...buildPipSyncArgs(lockFile, pythonPath), "--no-cache", "--link-mode", "copy"];
+}
+
 function isWithinDirectory(candidatePath: string, directoryPath: string): boolean {
   const relativePath = path.relative(directoryPath, candidatePath);
   return relativePath === "" || (!!relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath));
@@ -289,12 +305,22 @@ export class PythonRuntimeBootstrapper {
     this.sendStatus({ phase: "installing-deps", msg: t("be_pythonRuntime.statusInstallingDeps"), pct: 40 });
     await this.log("[python-runtime] Step 3: uv pip sync");
     const lockFile = await this.findLockFile();
-    await this.runUv(uvBin, [
-      "pip", "sync", lockFile,
-      "--python", this.getPythonPath(),
-    ], {
-      UV_PYTHON_INSTALL_DIR: this.pythonInstallDir(),
-    });
+    const pythonPath = this.getPythonPath();
+    const syncEnv = { UV_PYTHON_INSTALL_DIR: this.pythonInstallDir() };
+    try {
+      await this.runUv(uvBin, buildPipSyncArgs(lockFile, pythonPath), syncEnv);
+    } catch (error) {
+      const fallbackArgs = buildPipSyncFallbackArgs(lockFile, pythonPath);
+      if (!fallbackArgs) throw error;
+
+      await this.log(
+        `[python-runtime] cached dependency sync failed on Windows; retrying once with a fresh temporary cache in copy mode: ${(error as Error).message}`,
+      );
+      await this.runUv(uvBin, fallbackArgs, {
+        ...syncEnv,
+        UV_LINK_MODE: "copy",
+      });
+    }
 
     // Step 5: import 검증
     this.sendStatus({ phase: "verifying", msg: t("be_pythonRuntime.statusVerifying"), pct: 85 });

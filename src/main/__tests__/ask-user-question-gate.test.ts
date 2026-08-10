@@ -17,7 +17,7 @@ import { makeMockWebContents } from "../../__tests__/test-helpers.js";
 
 /** Convenience — most tests only care about the wait/abort/timeout shape. */
 function single(question: string) {
-  return { questions: [{ question, allowFreeText: true }] };
+  return { questions: [{ question, choices: ["Continue", "Stop"] }] };
 }
 
 describe("AskUserQuestionGate — timeout path", () => {
@@ -89,7 +89,7 @@ describe("AskUserQuestionGate — timeout path", () => {
     expect(gate.pendingCount).toBe(0);
 
     // Renderer must be told the card is gone, same channel as the timeout
-    // path, so the inline card disappears even if the user never clicked.
+    // path, so the composer-dock card disappears even if the user never clicked.
     const timeoutCall = wc.send.mock.calls.find(
       (call) => call[0] === IPC_ASK_USER_QUESTION_TIMEOUT,
     );
@@ -114,9 +114,9 @@ describe("AskUserQuestionGate — timeout path", () => {
     const requestId = (reqCall![1] as { id: string }).id;
 
     // User confirms — this is what `ipcMain.handle("lvis:ask-user-question:respond")` calls.
-    gate.resolve({ requestId, answers: [{ choice: "yes" }] });
+    gate.resolve({ requestId, answers: [{ choice: "Continue" }] });
     const response = await slot;
-    expect(response.answers).toEqual([{ choice: "yes" }]);
+    expect(response.answers).toEqual([{ choice: "Continue" }]);
 
     // The listener registered on the controller's signal must have been cleaned up,
     // so a later abort on the same controller does not invoke a stale handler.
@@ -176,10 +176,41 @@ describe("AskUserQuestionGate — multi-question contract", () => {
     expect(gate.pendingCount).toBe(0);
     expect(wc.send).not.toHaveBeenCalled();
 
+    const noChoices = await gate.ask({
+      questions: [{ question: "Pick one" } as never],
+    });
+    expect(noChoices.dismissed).toBe(true);
+    expect(gate.pendingCount).toBe(0);
+    expect(wc.send).not.toHaveBeenCalled();
+
+    const tooManyChoices = await gate.ask({
+      questions: [{ question: "Pick one", choices: ["A", "B", "C", "D"] }],
+    });
+    expect(tooManyChoices.dismissed).toBe(true);
+    expect(gate.pendingCount).toBe(0);
+
+    const nonStringChoice = await gate.ask({
+      questions: [{ question: "Pick one", choices: ["A", 7] } as never],
+    });
+    expect(nonStringChoice.dismissed).toBe(true);
+    expect(gate.pendingCount).toBe(0);
+
+    const duplicateChoices = await gate.ask({
+      questions: [{ question: "Pick one", choices: ["A", " A "] }],
+    });
+    expect(duplicateChoices.dismissed).toBe(true);
+    expect(gate.pendingCount).toBe(0);
+
+    const overlongChoice = await gate.ask({
+      questions: [{ question: "Pick one", choices: ["x".repeat(21)] }],
+    });
+    expect(overlongChoice.dismissed).toBe(true);
+    expect(gate.pendingCount).toBe(0);
+
     const oversized = await gate.ask({
       questions: Array.from({ length: 5 }, (_, i) => ({
         question: `q-${i}`,
-        allowFreeText: true,
+        choices: ["A", "B"],
       })),
     });
     expect(oversized.dismissed).toBe(true);
@@ -193,9 +224,9 @@ describe("AskUserQuestionGate — multi-question contract", () => {
 
     const slot = gate.ask({
       questions: [
-        { question: "Where?", choices: ["A", "B"], allowFreeText: false },
-        { question: "When?", allowFreeText: true },
-        { question: "Why?", allowFreeText: true },
+        { question: "Where?", choices: ["A", "B"] },
+        { question: "When?", choices: ["Now", "Later"] },
+        { question: "Why?", choices: ["Required", "Optional"] },
       ],
     });
 
@@ -221,8 +252,6 @@ describe("AskUserQuestionGate — multi-question contract", () => {
           choices: ["국내", "국제", "IT/경제"],
           recommendedIndex: 2,
           altIndices: [0, 1],
-          allowFreeText: true,
-          placeholder: "직접 입력",
           summaryHint: "범위",
         },
       ],
@@ -239,8 +268,6 @@ describe("AskUserQuestionGate — multi-question contract", () => {
           choices: ["국내", "국제", "IT/경제"],
           recommendedIndex: 2,
           altIndices: [0, 1],
-          allowFreeText: true,
-          placeholder: "직접 입력",
           summaryHint: "범위",
         },
       ],
@@ -256,8 +283,8 @@ describe("AskUserQuestionGate — multi-question contract", () => {
 
     const slot = gate.ask({
       questions: [
-        { question: "Where?", choices: ["서울", "부산"], allowFreeText: false },
-        { question: "When?", choices: ["오늘", "내일"], allowFreeText: false },
+        { question: "Where?", choices: ["서울", "부산"] },
+        { question: "When?", choices: ["오늘", "내일"] },
       ],
     });
     const reqCall = wc.send.mock.calls.find(
@@ -273,5 +300,45 @@ describe("AskUserQuestionGate — multi-question contract", () => {
     const response = await slot;
     expect(response.answers).toEqual([{ choice: "서울" }, { choice: "내일" }]);
     expect(response.dismissed).toBeFalsy();
+  });
+
+  it("keeps the request pending until every answer is bound to its declared choices", async () => {
+    const wc = makeMockWebContents();
+    const gate = new AskUserQuestionGate(wc as never, 60_000);
+
+    const slot = gate.ask({
+      questions: [
+        { question: "Where?", choices: ["서울", "부산"] },
+        { question: "Tags?", choices: ["AI", "보안", "UX"], allowMultiple: true },
+      ],
+    });
+    const reqCall = wc.send.mock.calls.find(
+      (c) => c[0] === "lvis:ask-user-question:request",
+    );
+    const requestId = (reqCall![1] as { id: string }).id;
+
+    expect(gate.resolve({
+      requestId,
+      answers: [{ freeText: "수기 응답" }, { choices: ["AI"] }] as never,
+    })).toBe(false);
+    expect(gate.resolve({
+      requestId,
+      answers: [{ choice: "임의 입력" }, { choices: ["AI"] }],
+    })).toBe(false);
+    expect(gate.resolve({
+      requestId,
+      answers: [{ choice: "서울" }, { choices: ["AI", "AI"] }],
+    })).toBe(false);
+    expect(gate.pendingCount).toBe(1);
+
+    expect(gate.resolve({
+      requestId,
+      answers: [{ choice: "부산" }, { choices: ["UX", "AI"] }],
+    })).toBe(true);
+    await expect(slot).resolves.toEqual({
+      requestId,
+      answers: [{ choice: "부산" }, { choices: ["AI", "UX"] }],
+    });
+    expect(gate.pendingCount).toBe(0);
   });
 });

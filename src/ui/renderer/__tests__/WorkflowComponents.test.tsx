@@ -8,6 +8,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent, act, waitFor, within } from "@testing-library/react";
 import { TooltipProvider } from "../../../components/ui/tooltip.js";
 import { AskUserQuestionCard } from "../components/AskUserQuestionCard.js";
+import { QuestionOverlay } from "../components/QuestionOverlay.js";
 import { RoutinePanel } from "../components/RoutinePanel.js";
 import { SessionTodoPanel } from "../components/SessionTodoPanel.js";
 import { SkillBadge } from "../components/SkillBadge.js";
@@ -46,7 +47,7 @@ describe("AskUserQuestionCard — single question", () => {
         request={{
           id: "q1",
           questions: [
-            { question: "Continue?", choices: ["yes", "no"], allowFreeText: true },
+            { question: "Continue?", choices: ["yes", "no"] },
           ],
           createdAt: 0,
         }}
@@ -79,7 +80,6 @@ describe("AskUserQuestionCard — single question", () => {
               question: "수정 방향?",
               choices: ["A안", "B안", "C안"],
               recommendedIndex: 1,
-              allowFreeText: true,
             },
           ],
           createdAt: 0,
@@ -93,6 +93,32 @@ describe("AskUserQuestionCard — single question", () => {
     // walking up to the surrounding button text.
     const button = recommendBadges[0]?.closest("button");
     expect(button?.textContent).toContain("B안");
+  });
+
+  it("keeps the card pending when main rejects a stale or invalid answer", async () => {
+    const respond = vi.fn().mockResolvedValue({ ok: false, error: "invalid-answer" });
+    const api = fakeApi({ respondAskUserQuestion: respond as never });
+    const onResolved = vi.fn();
+    const { getByText, getByTestId } = render(
+      <AskUserQuestionCard
+        api={api}
+        request={{
+          id: "q-rejected",
+          questions: [{ question: "Continue?", choices: ["yes", "no"] }],
+          createdAt: 0,
+        }}
+        onResolved={onResolved}
+      />,
+    );
+
+    await act(async () => {
+      fireEvent.click(getByText("yes"));
+    });
+
+    expect(respond).toHaveBeenCalledTimes(1);
+    expect(onResolved).not.toHaveBeenCalled();
+    expect(getByTestId("ask-user-question-card")).toBeInTheDocument();
+    expect(getByText("no").closest("button")).not.toBeDisabled();
   });
 
   it("renders 대안 badges only on altIndices chips and skips the recommend slot", async () => {
@@ -109,7 +135,6 @@ describe("AskUserQuestionCard — single question", () => {
               recommendedIndex: 0,
               // 0 is the recommend slot — UI must dedupe and not double-tag.
               altIndices: [0, 2],
-              allowFreeText: true,
             },
           ],
           createdAt: 0,
@@ -123,38 +148,9 @@ describe("AskUserQuestionCard — single question", () => {
     expect(altBadges[0]?.closest("button")?.textContent).toContain("C");
   });
 
-  it("renders duplicate choice strings without React key collisions", async () => {
+  it("does not render a manual input for legacy free-text metadata", async () => {
     const api = fakeApi();
-    // Reusing the same label is a defensive case — model output should be
-    // unique but the UI must not mis-reconcile if it isn't.
-    const { container } = render(
-      <AskUserQuestionCard
-        api={api}
-        request={{
-          id: "q-dup",
-          questions: [
-            {
-              question: "?",
-              choices: ["같음", "같음", "같음"],
-              allowFreeText: false,
-            },
-          ],
-          createdAt: 0,
-        }}
-        onResolved={vi.fn()}
-      />,
-    );
-    const buttons = container.querySelectorAll("button");
-    // 3 choice buttons + 1 dismiss button
-    const choiceButtons = Array.from(buttons).filter(
-      (b) => b.textContent?.trim() === "같음",
-    );
-    expect(choiceButtons).toHaveLength(3);
-  });
-
-  it("uses placeholder when provided on the free-text input", async () => {
-    const api = fakeApi();
-    const { getByTestId } = render(
+    const { queryByTestId, queryByPlaceholderText } = render(
       <AskUserQuestionCard
         api={api}
         request={{
@@ -162,17 +158,18 @@ describe("AskUserQuestionCard — single question", () => {
           questions: [
             {
               question: "?",
+              choices: ["A", "B"],
               allowFreeText: true,
               placeholder: "다른 방향을 한 줄로",
-            },
+            } as never,
           ],
           createdAt: 0,
         }}
         onResolved={vi.fn()}
       />,
     );
-    const input = getByTestId("ask-freetext-input") as HTMLInputElement;
-    expect(input.placeholder).toBe("다른 방향을 한 줄로");
+    expect(queryByTestId("ask-freetext-input")).toBeNull();
+    expect(queryByPlaceholderText("다른 방향을 한 줄로")).toBeNull();
   });
 
   it("dismiss surfaces dismissed:true with no answers", async () => {
@@ -183,7 +180,7 @@ describe("AskUserQuestionCard — single question", () => {
         api={api}
         request={{
           id: "q-dismiss",
-          questions: [{ question: "?", allowFreeText: true }],
+          questions: [{ question: "?", choices: ["계속", "중단"] }],
           createdAt: 0,
         }}
         onResolved={vi.fn()}
@@ -193,6 +190,42 @@ describe("AskUserQuestionCard — single question", () => {
       fireEvent.click(getByText("건너뛰기"));
     });
     expect(respond).toHaveBeenCalledWith({ requestId: "q-dismiss", dismissed: true });
+  });
+});
+
+describe("QuestionOverlay — FIFO request identity", () => {
+  it("remounts the card when a one-question head advances to a two-question head", async () => {
+    const respond = vi.fn().mockResolvedValue({ ok: true });
+    const api = fakeApi({ respondAskUserQuestion: respond as never });
+    const onResolved = vi.fn();
+    const first = {
+      id: "fifo-first",
+      questions: [{ question: "First?", choices: ["A", "B"] }],
+      createdAt: 1,
+    };
+    const second = {
+      id: "fifo-second",
+      questions: [
+        { question: "Second one?", choices: ["C", "D"] },
+        { question: "Second two?", choices: ["E", "F"] },
+      ],
+      createdAt: 2,
+    };
+    const view = render(
+      <QuestionOverlay api={api} requests={[first]} onResolved={onResolved} />,
+    );
+
+    await act(async () => {
+      fireEvent.click(view.getByText("A"));
+    });
+    await waitFor(() => expect(onResolved).toHaveBeenCalledWith("fifo-first"));
+
+    view.rerender(
+      <QuestionOverlay api={api} requests={[second]} onResolved={onResolved} />,
+    );
+    expect(view.getByText("Second one?")).toBeInTheDocument();
+    expect(view.getByTestId("ask-step-label")).toHaveTextContent("1 / 2");
+    expect(view.queryByText("A")).toBeNull();
   });
 });
 
@@ -206,8 +239,8 @@ describe("AskUserQuestionCard — multi-question", () => {
         request={{
           id: "multi",
           questions: [
-            { question: "Where?", choices: ["서울", "부산"], allowFreeText: false },
-            { question: "When?", choices: ["오늘", "내일"], allowFreeText: false },
+            { question: "Where?", choices: ["서울", "부산"] },
+            { question: "When?", choices: ["오늘", "내일"] },
           ],
           createdAt: 0,
         }}

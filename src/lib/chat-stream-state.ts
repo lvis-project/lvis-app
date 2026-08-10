@@ -863,13 +863,21 @@ function askUserAnswerEntryFromTool(
   const rows = result.answers
     .map((answer, index) => {
       if (!answer || typeof answer !== "object" || Array.isArray(answer)) return null;
-      const record = answer as { choice?: unknown; freeText?: unknown };
-      const value =
+      const record = answer as { choice?: unknown; choices?: unknown; freeText?: unknown };
+      const selectedChoices = Array.isArray(record.choices)
+        ? record.choices
+            .filter((choice): choice is string => typeof choice === "string" && choice.trim().length > 0)
+            .map((choice) => choice.trim())
+        : [];
+      const primaryChoices =
         typeof record.choice === "string" && record.choice.trim().length > 0
-          ? record.choice.trim()
-          : typeof record.freeText === "string" && record.freeText.trim().length > 0
-            ? record.freeText.trim()
-            : "";
+          ? [record.choice.trim()]
+          : selectedChoices;
+      const legacyFreeText =
+        typeof record.freeText === "string" && record.freeText.trim().length > 0
+          ? [record.freeText.trim()]
+          : [];
+      const value = [...primaryChoices, ...legacyFreeText].join(", ");
       if (!value) return null;
       return {
         label: answerLabel(questions[index], index),
