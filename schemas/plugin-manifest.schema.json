@@ -22,6 +22,7 @@
       "type": "string",
       "description": "Plugin unique identifier. Kebab-case (lowercase letters, digits, hyphens). Min 3 chars — 2-char names reserved for future system namespaces. Example: \"my-plugin\".",
       "pattern": "^[a-z][a-z0-9-]*$",
+      "not": { "pattern": "[\\r\\n]" },
       "minLength": 3,
       "maxLength": 128
     },
@@ -41,6 +42,7 @@
     "version": {
       "type": "string",
       "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "not": { "pattern": "[\\r\\n]" },
       "description": "Stable SemVer (MAJOR.MINOR.PATCH, no leading zeros). Pre-release / build-metadata suffixes are not supported on the marketplace publish channel — the per-plugin publish.yml rejects them at tag time. Aligning the schema with that gate so AJV fails earlier."
     },
     "entry": {
@@ -121,6 +123,7 @@
             "type": "string",
             "description": "ui://<pluginId>/<path>. Authority MUST equal the declaring plugin's id (re-checked fail-closed at serve time).",
             "pattern": "^ui://[a-z0-9][a-z0-9.-]*/.+",
+            "not": { "pattern": "[\\r\\n]" },
             "maxLength": 512
           },
           "csp": { "$ref": "#/definitions/mcpUiResourceCsp" },
@@ -151,7 +154,8 @@
       "description": "Free-form capability declarations (format-validated, NOT a closed enum). The host ENFORCES only two at runtime — 'external-auth-consumer' and 'host:overlay' (see src/plugins/capabilities.ts KNOWN_CAPABILITY_IDS). Every other string is a harmless self-declaration (e.g. the live 'worker-client' host discovery key, or legacy strings on already-installed manifests). Kept free-form — rather than an enum — so an installed manifest declaring a removed/legacy capability still validates and loads instead of being rejected at schema validation. Emit authorization for event-source namespaces (email/calendar/meeting/index) is inferred from emittedEvents, not from a capability here. The pattern is format hygiene only (blocks uppercase/whitespace/garbage), not a vocabulary.",
       "items": {
         "type": "string",
-        "pattern": "^[a-z][a-z0-9:-]*$"
+        "pattern": "^[a-z][a-z0-9:-]*$",
+        "not": { "pattern": "[\\r\\n]" }
       }
     },
     "networkAccess": {
@@ -171,6 +175,7 @@
               {
                 "type": "string",
                 "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$",
+                "not": { "pattern": "[\\r\\n]" },
                 "minLength": 3,
                 "maxLength": 253
               },
@@ -272,6 +277,7 @@
           "items": {
             "type": "string",
             "pattern": "^(?:llm\\.apiKey\\.[a-z]+(-[a-z]+)*|llm\\.marketplaceProvider\\.[A-Za-z0-9][A-Za-z0-9._-]{0,79}\\.apiKey)$",
+            "not": { "pattern": "[\\r\\n]" },
             "maxLength": 111
           },
           "maxItems": 32,
@@ -304,18 +310,21 @@
           "type": "string",
           "description": "Name of an app-visible tool in `tools[]` (its `_meta.ui.visibility` includes `\"app\"`) returning `{ authenticated: boolean, account?: string }`. Host invokes on Settings tab mount and after every `<pluginId>.auth.changed` event.",
           "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "not": { "pattern": "[\\r\\n]" },
           "maxLength": 64
         },
         "loginTool": {
           "type": "string",
           "description": "Name of an app-visible tool in `tools[]` (its `_meta.ui.visibility` includes `\"app\"`) the host invokes when the user clicks the '로그인' button. The plugin owns the actual auth flow (e.g. MSAL interactive, openAuthWindow); the host only triggers it.",
           "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "not": { "pattern": "[\\r\\n]" },
           "maxLength": 64
         },
         "logoutTool": {
           "type": "string",
           "description": "Optional name of an app-visible tool in `tools[]` (its `_meta.ui.visibility` includes `\"app\"`) the host invokes when the user clicks the '로그아웃' button. Omit to render a sign-in-only surface (e.g. plugins that don't support runtime sign-out).",
           "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "not": { "pattern": "[\\r\\n]" },
           "maxLength": 64
         },
         "partitionDomains": {
@@ -329,6 +338,7 @@
               {
                 "type": "string",
                 "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$",
+                "not": { "pattern": "[\\r\\n]" },
                 "minLength": 3,
                 "maxLength": 253
               },
@@ -450,7 +460,8 @@
           "items": {
             "type": "string",
             "minLength": 1,
-            "pattern": "^[a-z][a-z0-9_]*$"
+            "pattern": "^[a-z][a-z0-9_]*$",
+            "not": { "pattern": "[\\r\\n]" }
           },
           "uniqueItems": true
         }
@@ -469,6 +480,7 @@
         "minAppVersion": {
           "type": "string",
           "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "not": { "pattern": "[\\r\\n]" },
           "description": "Minimum LVIS app version (plain SemVer MAJOR.MINOR.PATCH, not a range) required to load this plugin. The host refuses to install (hard block before download) and refuses to activate (skips start(), surfaces a non-dismissable \"needs newer app\" state) when the running app is older. Omit for no minimum (compatible with all app versions)."
         }
       },
@@ -676,6 +688,7 @@
       "items": {
         "type": "string",
         "pattern": "^[a-z][a-z0-9-]*$",
+        "not": { "pattern": "[\\r\\n]" },
         "maxLength": 64
       },
       "description": "Top-level advertisement of UI slot names this plugin participates in. Marketplace metadata only — actual extension binding lives in `ui[].slot`. Kebab-case identifiers, ≤32 entries."
@@ -704,6 +717,7 @@
               "required": ["en"],
               "propertyNames": {
                 "pattern": "^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$",
+                "not": { "pattern": "[\\r\\n]" },
                 "maxLength": 35
               },
               "additionalProperties": {
@@ -733,6 +747,7 @@
         "id": {
           "type": "string",
           "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "not": { "pattern": "[\\r\\n]" },
           "minLength": 1,
           "maxLength": 128
         },
@@ -796,6 +811,7 @@
         "name": {
           "type": "string",
           "pattern": "^[a-zA-Z_][a-zA-Z0-9_]*$",
+          "not": { "pattern": "[\\r\\n]" },
           "maxLength": 64
         },
         "title": {
@@ -863,7 +879,8 @@
               "items": {
                 "type": "string",
                 "minLength": 1,
-                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$"
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)*$",
+                "not": { "pattern": "[\\r\\n]" }
               }
             },
             "lvisai/operationPolicy": {

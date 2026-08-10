@@ -24,6 +24,36 @@ import type { PluginManifest } from "../../types.js";
 import { MCP_APP_PERMISSION_FEATURES } from "../../../shared/mcp-app-permissions.js";
 import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
 
+const CRLF_GUARD_PATTERN = "[\\r\\n]";
+
+function patternNodesMissingCrlfGuard(value: unknown, path = "$"): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      patternNodesMissingCrlfGuard(item, `${path}[${index}]`));
+  }
+  if (value === null || typeof value !== "object") return [];
+
+  const node = value as Record<string, unknown>;
+  const missing: string[] = [];
+  if (typeof node.pattern === "string" && node.pattern !== "(^|\\.)xn--") {
+    const negative = node.not;
+    if (
+      negative === null
+      || typeof negative !== "object"
+      || Array.isArray(negative)
+      || (negative as Record<string, unknown>).pattern !== CRLF_GUARD_PATTERN
+    ) {
+      missing.push(path);
+    }
+  }
+  for (const [key, child] of Object.entries(node)) {
+    if (key !== "not") {
+      missing.push(...patternNodesMissingCrlfGuard(child, `${path}.${key}`));
+    }
+  }
+  return missing;
+}
+
 function manifestWithFirstTask(firstTask: Record<string, unknown>,
 ): Record<string, unknown> {
   return {
@@ -54,6 +84,24 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("compiles the host schema into a working validator", async () => {
     const validator = await buildManifestValidator();
     expect(typeof validator).toBe("function");
+  });
+
+  it("rejects terminal CR/LF at every pattern-constrained manifest field", async () => {
+    expect(patternNodesMissingCrlfGuard(manifestSchema)).toEqual([]);
+
+    const validator = await buildManifestValidator();
+    const base = {
+      id: "line-safe-plugin",
+      version: "1.0.0",
+      description: "Terminal line fixture.",
+      entry: "dist/index.js",
+      tools: [],
+    };
+    expect(validator({ ...base, id: "line-safe-plugin\n" })).toBe(false);
+    expect(validator({
+      ...base,
+      requires: { minAppVersion: "1.0.0\r" },
+    })).toBe(false);
   });
 
   it("accepts structured plugin-owned Skill, Hook, and MCP declarations", async () => {
