@@ -22,6 +22,7 @@ import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
 import type { AppMode } from "./MainToolbar.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
 import type { InlineViewKey, PluginViewKey } from "../../shared/view-key.js";
+import type { ExactDenyDraft } from "./exact-permission-decision.js";
 
 type Api = ReturnType<typeof getApi>;
 type PluginView = Parameters<typeof PluginUiHostView>[0]["view"];
@@ -40,6 +41,9 @@ export interface MainContentProps {
    *  `settingsTab` tracks where the user is, not just where they entered. */
   onSettingsTabChange: (tab: string) => void;
   onSettingsSaved: () => void;
+  exactDenyDraft?: ExactDenyDraft | null;
+  onExactDenySaved?: (requestId: string) => void;
+  onDiscardExactDeny?: () => void;
   // starred
   starred: StarredItem[];
   currentSessionId: string;
@@ -253,6 +257,9 @@ export function MainContent(props: MainContentProps): ReactNode {
           initialTab={props.settingsTab}
           onSaved={props.onSettingsSaved}
           onTabChange={props.onSettingsTabChange}
+          exactDenyDraft={props.exactDenyDraft ?? null}
+          onExactDenySaved={props.onExactDenySaved ?? (() => undefined)}
+          onDiscardExactDeny={props.onDiscardExactDeny ?? (() => undefined)}
         />
       </MainPaneShell>
     );

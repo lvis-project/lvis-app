@@ -83,7 +83,10 @@ import {
 import { createInvocationContext, returnUserAbort } from "./pipeline/invocation-context.js";
 import type { RationaleHostRuntime } from "./pipeline/rationale-orchestrator.js";
 import type { RationaleExecutorControlOutcome } from "./pipeline/rationale-pr1-contract.js";
-import { canonicalStringify } from "../permissions/user-approval-store.js";
+import {
+  canonicalStringify,
+  lookupUserDecision,
+} from "../permissions/user-approval-store.js";
 import type { SealedRationaleResumeRequest } from "./pipeline/rationale-resume-contract.js";
 import {
   type AuthorizedRationaleResume,
@@ -735,6 +738,70 @@ export async function runToolInvocation(
       executionCwd,
       hostShellExecutionPlanAudit,
     );
+    // Exact Settings decisions are evaluated at the first point where every
+    // identity component is host-finalized. This is deliberately before shell
+    // and allowed-directory prompts: a persistent exact deny must block the
+    // matching invocation without asking the user to grant a prerequisite
+    // directory scope first.
+    if (!rationaleResumeContext) {
+      let exactDecisionBlockReason: string | null = null;
+      try {
+        const storedDecision = await lookupUserDecision(
+          toolUse.name,
+          canonicalStringify(finalInput),
+          source,
+          permissionContext.trustOrigin,
+          approvalCacheKey,
+        );
+        if ((storedDecision?.decision ?? "allow") === "deny") {
+          exactDecisionBlockReason = "exact tool and input denied in permission settings";
+        }
+      } catch (err) {
+        log.warn(
+          "exact permission decision lookup failed; blocking invocation: %s",
+          err instanceof Error ? err.message : String(err),
+        );
+        exactDecisionBlockReason = "exact permission decision store unavailable";
+      }
+
+      if (exactDecisionBlockReason) {
+        const blockedPermission: PermissionCheckResult = {
+          decision: "deny",
+          reason: exactDecisionBlockReason,
+          layer: 5,
+        };
+        const msg = t("be_executor.permBlockDeny", {
+          name: toolUse.name,
+          source,
+          trust,
+          reason: exactDecisionBlockReason,
+        });
+        const durationMs = Date.now() - startTime;
+        emitToolStart(callbacks, toolUse.name, finalInput, meta);
+        callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+        await auditCurrentToolCall(
+          sessionId,
+          toolUse.name,
+          source,
+          trust,
+          finalInput,
+          msg,
+          true,
+          startTime,
+          blockedPermission,
+          Infinity,
+          permissionContext,
+          invocationCategory,
+          executionCwd,
+        );
+        return withHostShellExecutionPlan({
+          tool_use_id: toolUse.id,
+          content: msg,
+          is_error: true,
+          durationMs,
+        });
+      }
+    }
     const invocationPermissionContext: ToolPermissionContext = {
       ...permissionContext,
       ...(approvalCacheKey ? { approvalCacheKey } : {}),

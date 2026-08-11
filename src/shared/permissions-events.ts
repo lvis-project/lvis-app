@@ -18,6 +18,15 @@
 export type UserApprovalScope = "session" | "persistent";
 
 /**
+ * Exact-tuple decision stored for a user-reviewed tool invocation.
+ *
+ * Legacy entries pre-date this field and therefore normalize to `"allow"`.
+ * A stored deny is created only from Settings and is matched against the same
+ * tool + canonical input + source/trust tuple as an exact allow.
+ */
+export type UserApprovalDecision = "allow" | "deny";
+
+/**
  * Approval-verdict literal. Same rationale as `UserApprovalScope`.
  *
  * NOTE: this is the verdict captured at approval time. Older on-disk
@@ -28,6 +37,27 @@ export type UserApprovalScope = "session" | "persistent";
  * concrete verdict literal.
  */
 export type UserApprovalVerdict = "low" | "medium" | "high";
+
+/**
+ * Resolve the host-sealed risk level used by exact permission decisions.
+ *
+ * Approval surfaces use this same function when they hand a live request to
+ * Settings. Keeping the fallback here prevents renderer wording or a missing
+ * reviewer verdict from drifting away from the host snapshot (`shell=high`,
+ * `read=low`, everything else=medium).
+ */
+export function resolveUserApprovalVerdict(input: {
+  reviewerVerdict?: { level?: unknown };
+  toolCategory?: string;
+}): UserApprovalVerdict {
+  const reviewed = input.reviewerVerdict?.level;
+  if (reviewed === "low" || reviewed === "medium" || reviewed === "high") {
+    return reviewed;
+  }
+  if (input.toolCategory === "shell") return "high";
+  if (input.toolCategory === "read") return "low";
+  return "medium";
+}
 
 /**
  * Emitted on the `PERMISSIONS.userApprovalHit` channel when a

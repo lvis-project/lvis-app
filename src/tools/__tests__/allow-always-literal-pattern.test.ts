@@ -1,15 +1,13 @@
 /**
- * An "Allow always" grant is derived from a literal name — the resolved
- * filesystem path a file tool reports as its `approvalCacheKey`, or the path
- * the approval card showed as `rememberPattern` — and then stored in a field
- * that is glob-matched. A target whose name genuinely contains `*` or `?`
- * therefore grants every sibling the wildcard happens to match, which is not
- * what the user read before consenting.
+ * "Allow always" is an exact Store-B decision, keyed by the canonical
+ * (tool, args, source, trustOrigin, approvalCacheKey) tuple. Cache keys and
+ * legacy `rememberPattern` values must never become glob-matched Store-A
+ * rules: a literal `*` or `?` in a user-approved target is data, not syntax
+ * that widens the grant to siblings.
  *
- * These drive the real executor: a real `PermissionManager` writing a real
- * `permissions.json`, an approval answered `allow-always`, and the assertion
- * made on the file that lands on disk and on whether a sibling is still asked
- * about afterwards.
+ * These drive the real executor plus the real user-approval store. The gate
+ * fixture models ToolApprovalContent's production ordering by recording the
+ * exact persistent tuple before resolving `allow-always`.
  */
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,8 +19,15 @@ import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import { createDynamicTool } from "../base.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
+import type { ApprovalRequestInput } from "../../permissions/approval-gate.js";
 import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
 import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
+import { AuditLogger } from "../../audit/audit-logger.js";
+import {
+  __resetSessionStoreForTest,
+  recordApproval,
+} from "../../permissions/user-approval-store.js";
+import { canonicalStringify } from "../../shared/canonical-json.js";
 
 const TOOL_NAME = "wildcard_probe";
 
@@ -41,6 +46,7 @@ interface Harness {
  */
 function harness(
   dir: string,
+  auditLogger: AuditLogger,
   opts: {
     approvalCacheKey?: (input: unknown) => string;
     rememberPattern?: string;
@@ -54,7 +60,13 @@ function harness(
     source: "plugin",
     pluginId: "test-plugin",
     category: "network",
-    jsonSchema: { type: "object", properties: { path: { type: "string" } } },
+    jsonSchema: {
+      type: "object",
+      properties: {
+        path: { type: "string" },
+        url: { type: "string" },
+      },
+    },
     ...(opts.approvalCacheKey ? { approvalCacheKey: opts.approvalCacheKey } : {}),
     execute: async () => ({ output: await executeSpy(), isError: false }),
   }));
@@ -71,14 +83,40 @@ function harness(
     deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
   });
 
-  const requestAndWait = vi.fn(async (req: { id: string }) => ({
-    requestId: req.id,
-    choice: "allow-always" as const,
-    ...(opts.rememberPattern === undefined ? {} : { rememberPattern: opts.rememberPattern }),
-  }));
+  const requestAndWait = vi.fn(async (req: ApprovalRequestInput) => {
+    // Production ToolApprovalContent awaits this exact persistent record before
+    // resolving the gate. A gate-only unit double must model that renderer
+    // side-effect or the next call correctly has nothing to remember.
+    await recordApproval(
+      req.toolName,
+      canonicalStringify(req.args ?? {}),
+      req.source ?? "builtin",
+      {
+        decision: "allow",
+        scope: "persistent",
+        verdictAtApproval: req.reviewerVerdict?.level ?? "low",
+        nlJustification: null,
+        trustOrigin: req.trustOrigin,
+        approvalCacheKey: req.approvalCacheKey,
+      },
+    );
+    return {
+      requestId: req.id,
+      choice: "allow-always" as const,
+      ...(opts.rememberPattern === undefined ? {} : { rememberPattern: opts.rememberPattern }),
+    };
+  });
 
   return {
-    executor: new ToolExecutor(registry, undefined, permMgr, undefined, { requestAndWait } as never),
+    executor: new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait } as never,
+      undefined,
+      auditLogger,
+    ),
     executeSpy,
     requestAndWait,
     rules: () => {
@@ -93,56 +131,67 @@ function harness(
 
 function call(executor: ToolExecutor, id: string, path: string) {
   return executor.executeAll(
-    [{ id, name: TOOL_NAME, input: { path } }],
+    // Keep the network target deterministically LOW so the test isolates exact
+    // identity instead of exercising the independent risk-escalation guard.
+    [{ id, name: TOOL_NAME, input: { path, url: "https://api.openai.com" } }],
     { sessionId: "sess-wildcard", permissionContext: { trustOrigin: "user-keyboard" } },
   );
 }
 
-function withTempDir(run: (dir: string) => Promise<void>): () => Promise<void> {
+function withTempDir(
+  run: (dir: string, auditLogger: AuditLogger) => Promise<void>,
+): () => Promise<void> {
   return async () => {
     const dir = mkdtempSync(join(tmpdir(), "lvis-allow-always-literal-"));
+    const previousLvisHome = process.env.LVIS_HOME;
+    process.env.LVIS_HOME = dir;
+    __resetSessionStoreForTest();
+    const auditLogger = new AuditLogger(join(dir, "audit"));
     try {
-      await run(dir);
+      await run(dir, auditLogger);
     } finally {
+      await auditLogger.close();
+      if (previousLvisHome === undefined) delete process.env.LVIS_HOME;
+      else process.env.LVIS_HOME = previousLvisHome;
+      __resetSessionStoreForTest();
       await cleanupTmpDir(dir);
     }
   };
 }
 
-describe("allow-always with a non-literal derived pattern", () => {
-  it("persists the grant when the derived name is literal", withTempDir(async (dir) => {
-    // Positive control. Without it, a guard that refused everything would look
-    // identical to a guard that refuses only wildcards.
-    const h = harness(dir, {
+describe("allow-always exact identity", () => {
+  it("records and recalls the exact tuple when the cache key is literal", withTempDir(async (dir, auditLogger) => {
+    const h = harness(dir, auditLogger, {
       approvalCacheKey: () => "path:/work/Reports-2024/notes.md",
     });
 
-    const results = await call(h.executor, "tu-literal", "/work/Reports-2024/notes.md");
+    const first = await call(h.executor, "tu-literal-1", "/work/Reports-2024/notes.md");
+    const second = await call(h.executor, "tu-literal-2", "/work/Reports-2024/notes.md");
 
-    expect(results[0].is_error).toBeUndefined();
-    expect(h.executeSpy).toHaveBeenCalledTimes(1);
-    expect(h.rules()).toContainEqual(
-      expect.objectContaining({ pattern: `${TOOL_NAME}:path:/work/Reports-2024/notes.md`, action: "allow" }),
-    );
-  }));
-
-  it("refuses to persist an approvalCacheKey carrying a wildcard, and blocks the call", withTempDir(async (dir) => {
-    const h = harness(dir, {
-      approvalCacheKey: () => "path:/work/Reports*2024/notes.md",
-    });
-
-    const results = await call(h.executor, "tu-wildcard-key", "/work/Reports*2024/notes.md");
-
-    expect(results[0].is_error).toBe(true);
-    expect(results[0].content).toContain("Reports*2024");
-    expect(h.executeSpy).not.toHaveBeenCalled();
+    expect(first[0].is_error).toBeUndefined();
+    expect(second[0].is_error).toBeUndefined();
+    expect(h.executeSpy).toHaveBeenCalledTimes(2);
+    expect(h.requestAndWait).toHaveBeenCalledTimes(1);
     expect(h.rules().filter((rule) => rule.action === "allow")).toEqual([]);
   }));
 
-  it("leaves a sibling the wildcard would have matched still requiring approval", withTempDir(async (dir) => {
-    // The consequence that matters. `Reports*2024` stored as a pattern matches
-    // `Reports-secret2024`, so the second call would never reach the user.
-    const h = harness(dir, {
+  it("treats a wildcard-bearing cache key as opaque exact data", withTempDir(async (dir, auditLogger) => {
+    const h = harness(dir, auditLogger, {
+      approvalCacheKey: () => "path:/work/Reports*2024/notes.md",
+    });
+
+    const first = await call(h.executor, "tu-wildcard-key-1", "/work/Reports*2024/notes.md");
+    const second = await call(h.executor, "tu-wildcard-key-2", "/work/Reports*2024/notes.md");
+
+    expect(first[0].is_error).toBeUndefined();
+    expect(second[0].is_error).toBeUndefined();
+    expect(h.executeSpy).toHaveBeenCalledTimes(2);
+    expect(h.requestAndWait).toHaveBeenCalledTimes(1);
+    expect(h.rules().filter((rule) => rule.action === "allow")).toEqual([]);
+  }));
+
+  it("leaves a sibling the wildcard would have matched still requiring approval", withTempDir(async (dir, auditLogger) => {
+    const h = harness(dir, auditLogger, {
       approvalCacheKey: (input) => `path:${(input as { path: string }).path}`,
     });
 
@@ -151,32 +200,35 @@ describe("allow-always with a non-literal derived pattern", () => {
 
     expect(h.requestAndWait).toHaveBeenCalledTimes(2);
     expect(sibling[0].is_error).toBeUndefined();
-    expect(h.executeSpy).toHaveBeenCalledTimes(1);
-  }));
-
-  it("refuses a rememberPattern carrying a wildcard when no cache key is derived", withTempDir(async (dir) => {
-    // The lower-priority half of the same `??` chain: no `approvalCacheKey`, so
-    // the card's own path is what would have been stored.
-    const h = harness(dir, { rememberPattern: "/work/Reports?2024" });
-
-    const results = await call(h.executor, "tu-wildcard-remember", "/work/anything");
-
-    expect(results[0].is_error).toBe(true);
-    expect(results[0].content).toContain("Reports?2024");
-    expect(h.executeSpy).not.toHaveBeenCalled();
+    expect(h.executeSpy).toHaveBeenCalledTimes(2);
     expect(h.rules().filter((rule) => rule.action === "allow")).toEqual([]);
   }));
 
-  it("still persists a plain tool-name grant when neither derivation applies", withTempDir(async (dir) => {
-    // Tool names hold no metacharacters, so the ordinary always-grant — the
-    // overwhelmingly common case — must be untouched by the guard.
-    const h = harness(dir, {});
+  it("ignores a legacy wildcard rememberPattern instead of turning it into a glob rule", withTempDir(async (dir, auditLogger) => {
+    const h = harness(dir, auditLogger, { rememberPattern: "/work/Reports?2024" });
 
-    const results = await call(h.executor, "tu-toolname", "/work/notes.md");
+    const first = await call(h.executor, "tu-wildcard-remember-1", "/work/anything");
+    const second = await call(h.executor, "tu-wildcard-remember-2", "/work/anything");
 
-    expect(results[0].is_error).toBeUndefined();
-    expect(h.rules()).toContainEqual(
-      expect.objectContaining({ pattern: TOOL_NAME, action: "allow" }),
-    );
+    expect(first[0].is_error).toBeUndefined();
+    expect(second[0].is_error).toBeUndefined();
+    expect(h.executeSpy).toHaveBeenCalledTimes(2);
+    expect(h.requestAndWait).toHaveBeenCalledTimes(1);
+    expect(h.rules().filter((rule) => rule.action === "allow")).toEqual([]);
+  }));
+
+  it("does not widen a no-cache-key approval into a tool-wide grant", withTempDir(async (dir, auditLogger) => {
+    const h = harness(dir, auditLogger, {});
+
+    const first = await call(h.executor, "tu-toolname-1", "/work/notes.md");
+    const same = await call(h.executor, "tu-toolname-2", "/work/notes.md");
+    const different = await call(h.executor, "tu-toolname-3", "/work/other.md");
+
+    expect(first[0].is_error).toBeUndefined();
+    expect(same[0].is_error).toBeUndefined();
+    expect(different[0].is_error).toBeUndefined();
+    expect(h.executeSpy).toHaveBeenCalledTimes(3);
+    expect(h.requestAndWait).toHaveBeenCalledTimes(2);
+    expect(h.rules().filter((rule) => rule.action === "allow")).toEqual([]);
   }));
 });

@@ -1,12 +1,16 @@
 import { PageShell } from "./components/PageShell.js";
 import { SettingsContent } from "./SettingsContent.js";
 import type { LvisApi } from "./types.js";
+import type { ExactDenyDraft } from "./exact-permission-decision.js";
 
 export function SettingsInlineView({
   api,
   initialTab,
   onSaved,
   onTabChange,
+  exactDenyDraft = null,
+  onExactDenySaved,
+  onDiscardExactDeny,
 }: {
   api: LvisApi;
   initialTab: string;
@@ -16,6 +20,9 @@ export function SettingsInlineView({
    *  to say where the user is. A missing forward is a type error, not a silent
    *  regression. */
   onTabChange: (tab: string) => void;
+  exactDenyDraft?: ExactDenyDraft | null;
+  onExactDenySaved?: (requestId: string) => void;
+  onDiscardExactDeny?: () => void;
 }) {
   return (
     <PageShell
@@ -29,6 +36,9 @@ export function SettingsInlineView({
         onSaved={onSaved}
         initialTab={initialTab}
         onTabChange={onTabChange}
+        exactDenyDraft={exactDenyDraft}
+        onExactDenySaved={onExactDenySaved}
+        onDiscardExactDeny={onDiscardExactDeny}
       />
     </PageShell>
   );

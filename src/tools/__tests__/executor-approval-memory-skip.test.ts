@@ -1,5 +1,5 @@
 /**
- * Foreground modal-skip via explicit-approval memory (Store B).
+ * Foreground approval-dock skip via explicit-approval memory (Store B).
  *
  * Root cause this guards: approving with "allow this session" recorded the
  * decision in Store B (the exact-tuple user-approval memory) but the
@@ -31,10 +31,11 @@ import { makeWriteProbeTool } from "./approval-memory-test-fixtures.js";
 // Store B lookup + audit sink — shaped per-test. vi.mock factories are
 // hoisted above all imports, so the mock fns must be created via vi.hoisted
 // (which runs even earlier) to be referenceable inside the factories.
-const { lookupApprovalMock, emitSandboxAuditMock, state } = vi.hoisted(() => ({
+const { lookupApprovalMock, lookupUserDecisionMock, emitSandboxAuditMock, state } = vi.hoisted(() => ({
   lookupApprovalMock: vi.fn(async (): Promise<unknown> => state.lookupResult),
+  lookupUserDecisionMock: vi.fn(async (): Promise<unknown> => state.decisionResult),
   emitSandboxAuditMock: vi.fn(async () => {}),
-  state: { lookupResult: null as unknown },
+  state: { lookupResult: null as unknown, decisionResult: null as unknown },
 }));
 
 vi.mock("../../permissions/user-approval-store.js", async () => {
@@ -43,6 +44,7 @@ vi.mock("../../permissions/user-approval-store.js", async () => {
   return {
     ...actual,
     lookupApproval: lookupApprovalMock,
+    lookupUserDecision: lookupUserDecisionMock,
   };
 });
 
@@ -79,7 +81,9 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
   beforeEach(() => {
     dir = mkdtempSync(join(tmpdir(), "lvis-memory-skip-"));
     state.lookupResult = null;
+    state.decisionResult = null;
     lookupApprovalMock.mockClear();
+    lookupUserDecisionMock.mockClear();
     emitSandboxAuditMock.mockClear();
   });
 
@@ -138,6 +142,79 @@ describe("ToolExecutor — explicit-approval memory skips the foreground modal (
     expect(entry.reviewer.llmVerdict).toBeNull();
     expect(entry.reviewer.userApprovalUsed?.memoryHit).toBe(true);
     expect(entry.reviewer.userApprovalUsed?.verdictAtApproval).toBe("low");
+  });
+
+  it("an exact persistent deny blocks the matching tool and input before the approval dock", async () => {
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(makeWriteProbeTool(executeSpy));
+    const permMgr = pmReturning({ decision: "ask", reason: "needs confirm", layer: 6 });
+    state.decisionResult = {
+      decision: "deny",
+      scope: "persistent",
+      verdictAtApproval: "medium",
+      nlJustification: null,
+      revokedAt: null,
+    };
+    const requestAndWait = vi.fn();
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-exact-deny", name: "write_probe", input: { path: join(dir, "file.txt") } }],
+      {
+        sessionId: "sess-exact-deny",
+        // Deliberately do not allow the temp directory. The exact deny must
+        // block before the Layer-1 out-of-directory card can appear.
+        permissionContext: userPermissionContext(),
+      },
+    );
+
+    expect(result[0].is_error).toBe(true);
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(requestAndWait).not.toHaveBeenCalled();
+    expect(lookupUserDecisionMock).toHaveBeenCalledWith(
+      "write_probe",
+      expect.stringContaining("file.txt"),
+      "builtin",
+      "user-keyboard",
+      undefined,
+    );
+    expect(lookupApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed before any approval prompt when the exact-decision store cannot be read", async () => {
+    const executeSpy = vi.fn(async () => "wrote");
+    const registry = new ToolRegistry();
+    registry.register(makeWriteProbeTool(executeSpy));
+    const permMgr = pmReturning({ decision: "allow", reason: "ordinary allow", layer: 6 });
+    lookupUserDecisionMock.mockRejectedValueOnce(new Error("decision store unreadable"));
+    const requestAndWait = vi.fn();
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      { requestAndWait } as never,
+    );
+
+    const result = await executor.executeAll(
+      [{ id: "tu-decision-store-error", name: "write_probe", input: { path: join(dir, "file.txt") } }],
+      {
+        sessionId: "sess-decision-store-error",
+        permissionContext: userPermissionContext({ additionalDirectories: [dir] }),
+      },
+    );
+
+    expect(requestAndWait).not.toHaveBeenCalled();
+    expect(result[0].is_error).toBe(true);
+    expect(executeSpy).not.toHaveBeenCalled();
+    expect(lookupApprovalMock).not.toHaveBeenCalled();
   });
 
   it("approval-memory audit persists the Host-owned governed projection", async () => {

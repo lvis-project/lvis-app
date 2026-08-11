@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup } from "@testing-library/react";
 
@@ -175,6 +175,11 @@ function installApi(disabledBatches: HookTrustRow[][]) {
       })),
       set: vi.fn(async () => ({ ok: true })),
     },
+    userApproval: {
+      list: vi.fn(async () => []),
+      record: vi.fn(async () => ({ ok: true })),
+      revokeByKey: vi.fn(async () => ({ ok: true })),
+    },
   };
   (globalThis as unknown as { window: typeof window }).window.lvis = lvis as never;
   (globalThis as unknown as { window: typeof window }).window.lvisApi = {
@@ -194,6 +199,137 @@ afterEach(() => {
 });
 
 describe("PermissionsTab hook quarantine notice", () => {
+  it("saves a permanent deny for the exact pending tool and canonical input", async () => {
+    const api = installApi([[]]);
+    const onExactDenySaved = vi.fn();
+    const onDiscardExactDeny = vi.fn();
+
+    await act(async () => {
+      render(
+        <PermissionsTab
+          exactDenyDraft={{
+            requestId: "approval-exact-1",
+            toolName: "plugin:meeting_list_preps",
+            args: { z: 2, a: 1 },
+            source: "plugin",
+            trustOrigin: "plugin-emitted",
+            approvalCacheKey: "meeting:list-preps",
+            verdictAtApproval: "medium",
+          }}
+          onExactDenySaved={onExactDenySaved}
+          onDiscardExactDeny={onDiscardExactDeny}
+        />,
+      );
+    });
+
+    expect(screen.getByTestId("exact-deny-draft")).toHaveTextContent("plugin:meeting_list_preps");
+    expect(screen.getByTestId("exact-deny-draft")).toHaveTextContent("이후의 정확한 일치 요청을 거절");
+    await waitFor(() => expect(screen.getByTestId("exact-deny-focus-target")).toHaveFocus());
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("save-exact-deny"));
+    });
+
+    expect(api.userApproval.record).toHaveBeenCalledWith(expect.objectContaining({
+      requestId: "approval-exact-1",
+      toolName: "plugin:meeting_list_preps",
+      args: '{"a":1,"z":2}',
+      source: "plugin",
+      decision: "deny",
+      scope: "persistent",
+      trustOrigin: "plugin-emitted",
+      approvalCacheKey: "meeting:list-preps",
+    }));
+    expect(onExactDenySaved).toHaveBeenCalledWith("approval-exact-1");
+    expect(onDiscardExactDeny).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByTestId("settings-page-title")).toHaveFocus());
+    expect(screen.getByRole("status")).toHaveTextContent("plugin:meeting_list_preps");
+  });
+
+  it("keeps an exact-deny draft focused and cancellable when unrelated Settings loading fails", async () => {
+    const api = installApi([[]]);
+    api.permission.getMode.mockRejectedValueOnce(new Error("settings unavailable"));
+    const onDiscardExactDeny = vi.fn();
+
+    render(
+      <PermissionsTab
+        exactDenyDraft={{
+          requestId: "approval-exact-load-failure",
+          toolName: "bash",
+          args: { command: "Remove-Item C:\\tmp\\artifact" },
+          source: "builtin",
+          verdictAtApproval: "high",
+        }}
+        onDiscardExactDeny={onDiscardExactDeny}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("permissions-load-error"))
+      .toHaveTextContent("settings unavailable"));
+    expect(screen.getByTestId("exact-deny-draft")).toHaveTextContent("bash");
+    await waitFor(() => expect(screen.getByTestId("exact-deny-focus-target")).toHaveFocus());
+
+    fireEvent.click(screen.getByRole("button", { name: t("permissionsTab.cancelButton") }));
+    expect(onDiscardExactDeny).toHaveBeenCalledTimes(1);
+  });
+
+  it("refocuses the editor when the same pending request re-enters from the dock", async () => {
+    installApi([[]]);
+    const draft = {
+      requestId: "approval-exact-reenter",
+      toolName: "read_file",
+      args: { path: "C:\\workspace\\notes.md" },
+      source: "builtin" as const,
+      verdictAtApproval: "low" as const,
+    };
+    const { rerender } = render(<PermissionsTab exactDenyDraft={draft} />);
+    await waitFor(() => expect(screen.getByTestId("exact-deny-focus-target")).toHaveFocus());
+
+    screen.getByTestId("settings-page-title").focus();
+    expect(screen.getByTestId("settings-page-title")).toHaveFocus();
+    rerender(<PermissionsTab exactDenyDraft={{ ...draft }} />);
+
+    await waitFor(() => expect(screen.getByTestId("exact-deny-focus-target")).toHaveFocus());
+  });
+
+  it("returns focus to the live dock Settings link after exact-deny cancellation", async () => {
+    installApi([[]]);
+
+    function FocusHarness() {
+      const [draft, setDraft] = useState<{
+        requestId: string;
+        toolName: string;
+        args: unknown;
+        source: "builtin";
+        verdictAtApproval: "low";
+      } | null>({
+        requestId: "approval-exact-cancel-focus",
+        toolName: "read_file",
+        args: { path: "C:\\workspace\\notes.md" },
+        source: "builtin" as const,
+        verdictAtApproval: "low" as const,
+      });
+      return (
+        <>
+          <button type="button" data-testid="open-permanent-deny-settings">
+            Return to exact deny
+          </button>
+          <PermissionsTab
+            exactDenyDraft={draft}
+            onDiscardExactDeny={() => setDraft(null)}
+          />
+        </>
+      );
+    }
+
+    render(<FocusHarness />);
+    await waitFor(() => expect(screen.getByTestId("exact-deny-focus-target")).toHaveFocus());
+    fireEvent.click(screen.getByRole("button", { name: t("permissionsTab.cancelButton") }));
+
+    await waitFor(() => expect(screen.getByTestId("open-permanent-deny-settings")).toHaveFocus());
+    expect(screen.queryByTestId("exact-deny-draft")).toBeNull();
+  });
+
   it("shows the four user-facing permission policy choices and their read behavior", async () => {
     installApi([[]]);
 
