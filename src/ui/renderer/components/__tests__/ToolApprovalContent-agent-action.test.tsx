@@ -29,9 +29,9 @@ function makeAgentActionRequest(
 }
 
 describe("ToolApprovalContent external agent-action affordances", () => {
-  it("shows only one-shot approve/deny controls for local-api agent actions", () => {
+  it("keeps the three decisions visible but disables persistence for local-api actions", () => {
     const onDecide = vi.fn();
-    render(
+    const { container } = render(
       <ToolApprovalContent
         open
         request={makeAgentActionRequest("local-api")}
@@ -39,10 +39,11 @@ describe("ToolApprovalContent external agent-action affordances", () => {
       />,
     );
 
-    expect(screen.queryByText("항상 허용")).not.toBeInTheDocument();
-    expect(screen.queryByText("항상 거부")).not.toBeInTheDocument();
-    expect(screen.queryByText("승인 범위")).not.toBeInTheDocument();
-    expect(screen.queryByText("지속 허용")).not.toBeInTheDocument();
+    expect(screen.getByTestId("deny-button")).toHaveTextContent("거절");
+    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
+    expect(container.querySelector('input, textarea, [contenteditable="true"], [role="textbox"]'))
+      .toBeNull();
 
     const approve = screen.getByTestId("approve-button");
     expect(approve).toHaveTextContent("한 번만 허용");
@@ -51,7 +52,7 @@ describe("ToolApprovalContent external agent-action affordances", () => {
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
 
-  it("keeps durable controls for user-keyboard agent actions", () => {
+  it("keeps persistence visible but disabled for user-keyboard agent actions", () => {
     render(
       <ToolApprovalContent
         open
@@ -60,10 +61,10 @@ describe("ToolApprovalContent external agent-action affordances", () => {
       />,
     );
 
-    expect(screen.getByText("항상 허용")).toBeInTheDocument();
-    expect(screen.getByText("승인 범위")).toBeInTheDocument();
-    expect(screen.getByText("지속 허용")).toBeInTheDocument();
-    expect(screen.getByTestId("approve-button")).toHaveTextContent("허용");
+    expect(screen.getByTestId("deny-button")).toHaveTextContent("거절");
+    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
+    expect(screen.getByTestId("approve-button")).toHaveTextContent("한 번만 허용");
   });
 
   it.each([
@@ -79,15 +80,15 @@ describe("ToolApprovalContent external agent-action affordances", () => {
       />,
     );
 
-    expect(screen.queryByText("항상 허용")).not.toBeInTheDocument();
-    expect(screen.queryByText("승인 범위")).not.toBeInTheDocument();
+    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
     const approve = screen.getByTestId("approve-button");
     expect(approve).toHaveTextContent("한 번만 허용");
     fireEvent.click(approve);
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
 
-  it("keeps durable controls for an explicit plugin source with remote-wire metadata", () => {
+  it("keeps persistence visible but disabled for plugin agent actions", () => {
     const onDecide = vi.fn();
     render(
       <ToolApprovalContent
@@ -97,11 +98,11 @@ describe("ToolApprovalContent external agent-action affordances", () => {
       />,
     );
 
-    expect(screen.getByText("항상 허용")).toBeInTheDocument();
-    expect(screen.getByText("승인 범위")).toBeInTheDocument();
+    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
     const approve = screen.getByTestId("approve-button");
-    expect(approve).toHaveTextContent("허용");
+    expect(approve).toHaveTextContent("한 번만 허용");
     fireEvent.click(approve);
-    expect(onDecide).toHaveBeenCalledWith("allow-session", undefined);
+    expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
   });
 });

@@ -37,10 +37,9 @@ describe("ToolApprovalContent allowed choices", () => {
       />,
     );
 
-    expect(screen.queryByText("항상 허용")).not.toBeInTheDocument();
-    expect(screen.queryByText("항상 거부")).not.toBeInTheDocument();
-    expect(screen.queryByText("승인 범위")).not.toBeInTheDocument();
-    expect(screen.queryByText("지속 허용")).not.toBeInTheDocument();
+    expect(screen.getByTestId("deny-button")).toHaveTextContent("거절");
+    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
 
     const approve = screen.getByTestId("approve-button");
     expect(approve).toHaveTextContent("한 번만 허용");

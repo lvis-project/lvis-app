@@ -651,20 +651,26 @@ preventing argument-narrowing exploit.
 
 ---
 
-### R-4 — Natural-language explicit approval for HIGH risk
+### R-4 — Read-only reason + explicit one-shot approval for HIGH risk
 
 Trigger: composition rule finalVerdict = HIGH.
 
 UI requirement (`src/ui/renderer/components/ToolApprovalContent.tsx`):
 - Display tool + args + reviewer reason + expected impact
-- **Natural-language input field** with placeholder "이 작업의 목적을 한 문장으로 입력"
-- Approve button disabled until NL field is non-empty
-- NL text saved as `nlJustification` in R-2 memory + appended to audit.log
+- Render a short read-only reason from the originating user request when it is
+  sufficient; otherwise use the permission-reviewer reason and then the
+  host-derived reason as a fail-closed fallback
+- Render no text, number, textarea, or contenteditable control in the approval
+  surface
+- Offer only explicit `allow-once` / `deny-once` decisions for HIGH; never
+  write a HIGH exact allow to R-2 memory
+- If the owner wants to provide the wording, it must already be present in the
+  originating chat request, not typed into the approval surface
 
 MEDIUM/LOW: existing button-only approval remains.
 
-R-2 memory match for HIGH verdict: NL field still shown each time (no silent
-re-approval). R-2 memory caches LOW/MEDIUM aggressively; HIGH always prompts NL.
+R-2 memory never auto-allows a HIGH verdict. HIGH always shows the read-only
+reason and requires an explicit one-shot click.
 
 ---
 

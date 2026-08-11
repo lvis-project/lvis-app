@@ -220,7 +220,7 @@ describe("ApprovalGate", () => {
     });
 
     const promise = gate.requestAndWait(req);
-    const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+    const sent = (wc.send.mock.calls[0] as unknown as [string, ApprovalRequest])[1];
     expect(sent).toMatchObject({
       executionPlan: getHostShellExecutionPlanAuditProjection(plan),
       allowedChoices: ["allow-once", "deny-once"],
@@ -616,6 +616,35 @@ describe("ApprovalGate", () => {
     expect(r2.choice).toBe("deny-once");
     expect(r1.requestId).toBe("req-a");
     expect(r2.requestId).toBe("req-b");
+  });
+
+  it("seals HIGH requests to explicit one-shot choices at the host boundary", async () => {
+    const wc = makeMockWebContents();
+    const gate = new ApprovalGate(wc as never);
+    const req = makeRequest({
+      id: "req-high-one-shot",
+      toolCategory: "shell",
+      reviewerVerdict: { level: "high", reason: "permission audit summary" },
+    });
+
+    const promise = gate.requestAndWait(req);
+    const sent = (wc.send.mock.calls[0] as [string, ApprovalRequest])[1];
+    expect(sent.allowedChoices).toEqual(["allow-once", "deny-once"]);
+    // Restrictive exact deny remains available through Settings even though
+    // the foreground approval itself is one-shot.
+    expect(gate.getRequestSnapshot(req.id)?.durableApprovalRecordAllowed).toBe(true);
+
+    const resolved = gate.resolve(req.id, {
+      requestId: req.id,
+      choice: "allow-always",
+      nonce: sent.nonce,
+      hmac: sent.hmac,
+    });
+    expect(resolved).toMatchObject({
+      choice: "deny-once",
+      rememberPattern: "approval choice not allowed",
+    });
+    await expect(promise).resolves.toMatchObject({ choice: "deny-once" });
   });
 
   it("webContents.send is called with the correct channel and payload shape", async () => {
@@ -1658,7 +1687,9 @@ describe("ApprovalGate", () => {
       const sent = (wc.send.mock.calls[0] as unknown as [string, ApprovalRequest])[1];
       expect(sent).not.toHaveProperty("durableApprovalRecordAllowed");
       expect(gate.getRequestSnapshot(req.id)).toMatchObject({
+        args: req.args,
         durableApprovalRecordAllowed: false,
+        verdictAtApproval: "medium",
       });
 
       const { nonce, hmac } = lastSentNonceHmac(wc);

@@ -152,8 +152,9 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "invalid-shell": "formatIpcError.invalidShell",
   "invalid-slug": "formatIpcError.invalidSlug",
   "parse-error": "formatIpcError.parseError",
-  "high-requires-session-scope": "formatIpcError.highRequiresSessionScope",
-  "high-requires-justification": "formatIpcError.highRequiresJustification",
+  "high-is-one-shot": "formatIpcError.highIsOneShot",
+  "deny-requires-persistent-scope": "formatIpcError.denyRequiresPersistentScope",
+  "verdict-mismatch": "formatIpcError.verdictMismatch",
   "add-failed": "formatIpcError.addFailed",
   "remove-failed": "formatIpcError.removeFailed",
 

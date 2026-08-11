@@ -22,8 +22,8 @@ function makeElicitationRequest(): ApprovalRequest {
         type: "object",
         required: ["date", "count"],
         properties: {
-          date: { type: "string", title: "Date" },
-          count: { type: "integer", title: "Count" },
+          date: { type: "string", title: "Date", default: "2026-07-01" },
+          count: { type: "integer", title: "Count", default: 2 },
           includeNotes: { type: "boolean", title: "Include notes" },
         },
       },
@@ -38,9 +38,9 @@ function makeElicitationRequest(): ApprovalRequest {
 }
 
 describe("ToolApprovalContent MCP elicitation form", () => {
-  it("captures requestedSchema fields as one-shot elicitation content", () => {
+  it("uses pre-supplied values and explicit choices without rendering typeable controls", () => {
     const onDecide = vi.fn();
-    render(
+    const { container } = render(
       <ToolApprovalContent
         open
         request={makeElicitationRequest()}
@@ -49,22 +49,12 @@ describe("ToolApprovalContent MCP elicitation form", () => {
     );
 
     const approve = screen.getByTestId("approve-button");
-    expect(approve).toBeDisabled();
-
-    fireEvent.change(screen.getByTestId("mcp-elicitation-field-date"), {
-      target: { value: "2026-07-01" },
-    });
-    fireEvent.change(screen.getByTestId("mcp-elicitation-field-count"), {
-      target: { value: "1e2" },
-    });
-    expect(approve).toBeDisabled();
-
-    fireEvent.change(screen.getByTestId("mcp-elicitation-field-count"), {
-      target: { value: "2" },
-    });
+    expect(container.querySelector('input:not([type="checkbox"]):not([type="radio"]), textarea, [contenteditable="true"], [role="textbox"]')).toBeNull();
+    expect(screen.getByTestId("mcp-elicitation-field-date")).toHaveTextContent("2026-07-01");
+    expect(screen.getByTestId("mcp-elicitation-field-count")).toHaveTextContent("2");
+    expect(approve).toBeEnabled();
     fireEvent.click(screen.getByTestId("mcp-elicitation-field-includeNotes"));
 
-    expect(approve).toBeEnabled();
     fireEvent.click(approve);
 
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined, {
@@ -86,12 +76,6 @@ describe("ToolApprovalContent MCP elicitation form", () => {
       />,
     );
 
-    fireEvent.change(screen.getByTestId("mcp-elicitation-field-date"), {
-      target: { value: "2026-07-01" },
-    });
-    fireEvent.change(screen.getByTestId("mcp-elicitation-field-count"), {
-      target: { value: "2" },
-    });
     fireEvent.click(screen.getByTestId("approve-button"));
 
     expect(onDecide).toHaveBeenCalledWith("allow-once", undefined, {
@@ -101,6 +85,31 @@ describe("ToolApprovalContent MCP elicitation form", () => {
         includeNotes: false,
       },
     });
+  });
+
+  it("fails closed when required free-form values were not supplied before approval", () => {
+    const onDecide = vi.fn();
+    const request = makeElicitationRequest();
+    request.args = {
+      message: "Pick a date",
+      requestedSchema: {
+        type: "object",
+        required: ["date", "count"],
+        properties: {
+          date: { type: "string", title: "Date" },
+          count: { type: "integer", title: "Count" },
+        },
+      },
+    };
+    const { container } = render(
+      <ToolApprovalContent open request={request} onDecide={onDecide} />,
+    );
+
+    expect(container.querySelector('input, textarea, [contenteditable="true"], [role="textbox"]')).toBeNull();
+    expect(screen.getByTestId("mcp-elicitation-input-unavailable")).toBeVisible();
+    expect(screen.getByTestId("approve-button")).toBeDisabled();
+    fireEvent.click(screen.getByTestId("approve-button"));
+    expect(onDecide).not.toHaveBeenCalled();
   });
 
   it("treats URL-mode elicitation as one-shot even without renderable fields", () => {
@@ -119,8 +128,8 @@ describe("ToolApprovalContent MCP elicitation form", () => {
       />,
     );
 
-    const buttonLabels = Array.from(document.body.querySelectorAll("button")).map((button) => button.textContent);
-    expect(buttonLabels).not.toContain("항상 허용");
+    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
     expect(screen.queryByTestId("mcp-elicitation-form")).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("approve-button"));

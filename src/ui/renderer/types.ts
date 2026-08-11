@@ -1494,6 +1494,7 @@ type ApprovalSentenceSelectResult =
  */
 import type {
   PermissionReviewSuggestionPayload,
+  UserApprovalDecision,
   UserApprovalHitPayload,
   UserApprovalScope,
   UserApprovalVerdict,
@@ -1509,6 +1510,7 @@ export type LvisUserApprovalApi = {
     toolName: string;
     args: string;
     source: string;
+    decision?: UserApprovalDecision;
     scope: UserApprovalScope;
     verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
@@ -1520,12 +1522,13 @@ export type LvisUserApprovalApi = {
   revokeByKey: (key: string) => Promise<{ ok: boolean; error?: string; message?: string }>;
   list: () => Promise<Array<{
     key: string;
+    decision?: UserApprovalDecision;
     approvedAt: string;
     scope: UserApprovalScope;
     verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
     revokedAt: string | null;
-    /** Display metadata stored alongside the entry. */
+    /** Safe display metadata. Exact input/trust/cache identity never crosses IPC. */
     toolName?: string;
     source?: string;
   }>>;

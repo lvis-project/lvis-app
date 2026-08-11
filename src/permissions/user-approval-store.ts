@@ -1,24 +1,23 @@
 /**
- * User-Approval Memory Layer — persistent + session-scoped approval store.
+ * Exact User-Decision Memory Layer — persistent + session-scoped store.
  *
  * Spec ref: docs/research/sandbox-isolation.md
  * Issue: #691
  *
- * Stores per-tool approval decisions made by the user in the ToolApprovalContent
- * so that subsequent calls with the same (toolName, args, source) triple can
- * skip the LLM classifier and go straight to the rule-based verdict.
+ * Stores exact per-invocation allow/deny decisions so subsequent calls with the
+ * same tool + canonical input + source/trust tuple can be handled consistently.
  *
  * Two-store role separation (do NOT merge — migration is out of scope):
  *   • Store A — durable glob allow/deny RULES + the `alwaysAllowed` Map in
  *     PermissionManager, managed by PermissionsTab and consulted by the SYNC
- *     `checkDetailed` (Layers 3 glob / 5 exact). Only the dialog's
- *     `allow-always` choice writes to Store A (addAlwaysAllowedPersist).
- *   • Store B — THIS store. Exact-tuple approval MEMORY, args-scoped, written
- *     for DURABLE approval-surface choices only (allow-session / allow-always) via the
- *     `userApprovalRecord` IPC. Read by the reviewer lane
+ *     `checkDetailed` (Layers 3 glob / 5 exact). It is edited explicitly in
+ *     Settings and is never widened implicitly by a foreground approval card.
+ *   • Store B — THIS store. Exact-tuple user DECISIONS, args-scoped, written
+ *     for persistent allow or deny choices via the `userApprovalRecord` IPC.
+ *     Exact allows are read by the reviewer lane
  *     (PermissionManager.dispatchReviewer) AND by the foreground dock-skip
- *     path (ToolExecutor.tryUserApprovalMemorySkip). A session/persistent
- *     approval here lets a repeat call with the same tuple skip the prompt.
+ *     path (ToolExecutor.tryUserApprovalMemorySkip). Exact denies are checked
+ *     before either lane and block the matching invocation.
  *
  * File: ~/.lvis/permissions/user-approvals.json
  * Permissions: directory 0o700, file 0o600 (per CLAUDE.md storage namespace rule)
@@ -27,9 +26,9 @@
  *   "session"    — approval held in this process only; revoked on restart.
  *   "persistent" — approval written to disk; survives restarts.
  *
- * HIGH-verdict approvals MUST include a non-null nlJustification (enforced
- * by the ToolApprovalContent). HIGH approvals cannot use scope "persistent"
- * (the dialog disables that option) — users must re-justify each session.
+ * HIGH-verdict ALLOW decisions MUST include a non-null nlJustification and
+ * cannot use scope "persistent". Exact deny decisions are configured in
+ * Settings and may persist regardless of the risk that triggered the review.
  *
  * Atomicity: writes use a random-suffix .tmp file + rename() so a crash
  * during write does not corrupt the store (same pattern as SkillApprovalsStore).
@@ -40,7 +39,11 @@ import { createHash, randomBytes } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
 import { createLogger } from "../lib/logger.js";
-import type { UserApprovalScope, UserApprovalVerdict } from "../shared/permissions-events.js";
+import type {
+  UserApprovalDecision,
+  UserApprovalScope,
+  UserApprovalVerdict,
+} from "../shared/permissions-events.js";
 
 const log = createLogger("user-approval-store");
 let persistentWriteQueue: Promise<void> = Promise.resolve();
@@ -48,6 +51,8 @@ let persistentWriteQueue: Promise<void> = Promise.resolve();
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface UserApprovalEntry {
+  /** Legacy entries omit this field and are interpreted as an allow. */
+  decision?: UserApprovalDecision;
   /** ISO 8601 wall-clock time the approval was granted. */
   approvedAt: string;
   /** "session" approvals are held in-memory only; "persistent" are written to disk. */
@@ -74,10 +79,10 @@ export interface UserApprovalEntry {
   toolName?: string;
   source?: string;
   /**
-   * Raw pre-canonicalized args string stored for migration support.
-   * Required by {@link migrateCanonicalization} (issue #837) to re-derive the
-   * entryKey after the canonicalStringify deep-recursion upgrade (PR #828).
-   * Optional for backward compat with entries written before this field existed.
+   * Legacy pre-canonicalized args retained only until the v1 migration runs.
+   * New entries never persist input text: exact identity is represented solely
+   * by the hashed map key so DLP-masked values cannot be recovered through the
+   * renderer-readable list API.
    */
   args?: string;
   /**
@@ -231,7 +236,7 @@ async function mutatePersistentApprovals(
  * For "session" scope, stores only in memory (no disk write).
  * For "persistent" scope, appends to ~/.lvis/permissions/user-approvals.json.
  *
- * Callers (ToolApprovalContent via IPC) MUST:
+ * Callers recording an allow (ToolApprovalContent via IPC) MUST:
  *   - Pass nlJustification !== null when verdictAtApproval === "high".
  *   - Use scope "session" (not "persistent") for high-verdict approvals.
  */
@@ -240,6 +245,7 @@ export async function recordApproval(
   args: string,
   source: string,
   entry: {
+    decision?: UserApprovalDecision;
     scope: UserApprovalScope;
     verdictAtApproval: UserApprovalVerdict;
     nlJustification: string | null;
@@ -250,6 +256,7 @@ export async function recordApproval(
 ): Promise<void> {
   const key = entryKey(toolName, args, source, entry.trustOrigin, entry.approvalCacheKey);
   const full: UserApprovalEntry = {
+    decision: entry.decision ?? "allow",
     approvedAt: entry.approvedAt ?? new Date().toISOString(),
     scope: entry.scope,
     verdictAtApproval: entry.verdictAtApproval,
@@ -259,10 +266,9 @@ export async function recordApproval(
     // without re-parsing the hash key.
     toolName,
     source,
-    // Store key components for boot-time migration (issue #837): if
-    // canonicalStringify changes behavior, migrateCanonicalization() can
-    // re-derive the correct key from these stored values.
-    args,
+    // Raw canonical args are intentionally used only for `key` above. Never
+    // persist them as metadata: listApprovals is renderer-readable and the
+    // approval card may have DLP-masked the same values before display.
     ...(entry.trustOrigin !== undefined ? { trustOrigin: entry.trustOrigin } : {}),
     ...(entry.approvalCacheKey !== undefined ? { approvalCacheKey: entry.approvalCacheKey } : {}),
   };
@@ -291,7 +297,7 @@ export async function recordApproval(
  *
  * Returns null when no approval is found or the approval is revoked.
  */
-export async function lookupApproval(
+export async function lookupUserDecision(
   toolName: string,
   args: string,
   source: string,
@@ -316,6 +322,29 @@ export async function lookupApproval(
   // Warm the session cache.
   sessionStore.set(key, entry);
   return entry;
+}
+
+/**
+ * Backward-compatible allow-only lookup used by the existing reviewer and
+ * foreground memory-skip lanes. Exact denies are deliberately invisible here:
+ * the authorization choke point reads them through {@link lookupUserDecision}
+ * and returns a deny before either auto-allow lane can run.
+ */
+export async function lookupApproval(
+  toolName: string,
+  args: string,
+  source: string,
+  trustOrigin?: string,
+  approvalCacheKey?: string,
+): Promise<UserApprovalEntry | null> {
+  const entry = await lookupUserDecision(
+    toolName,
+    args,
+    source,
+    trustOrigin,
+    approvalCacheKey,
+  );
+  return entry && (entry.decision ?? "allow") === "allow" ? entry : null;
 }
 
 /**
@@ -369,17 +398,43 @@ export async function revokeApprovalByKey(rawKey: string): Promise<void> {
  * Returned entries include the composite key so the UI can pass it back
  * for targeted revocation.
  */
-export async function listApprovals(): Promise<Array<{ key: string } & UserApprovalEntry>> {
+export type UserApprovalListEntry = {
+  key: string;
+  decision?: UserApprovalDecision;
+  approvedAt: string;
+  scope: UserApprovalScope;
+  verdictAtApproval: UserApprovalVerdict;
+  nlJustification: string | null;
+  revokedAt: string | null;
+  toolName?: string;
+  source?: string;
+};
+
+function projectApprovalForList(key: string, entry: UserApprovalEntry): UserApprovalListEntry {
+  return {
+    key,
+    ...(entry.decision === undefined ? {} : { decision: entry.decision }),
+    approvedAt: entry.approvedAt,
+    scope: entry.scope,
+    verdictAtApproval: entry.verdictAtApproval,
+    nlJustification: entry.nlJustification,
+    revokedAt: entry.revokedAt,
+    ...(entry.toolName === undefined ? {} : { toolName: entry.toolName }),
+    ...(entry.source === undefined ? {} : { source: entry.source }),
+  };
+}
+
+export async function listApprovals(): Promise<UserApprovalListEntry[]> {
   const file = await readApprovalsFile();
 
-  const result: Array<{ key: string } & UserApprovalEntry> = Object.entries(
+  const result: UserApprovalListEntry[] = Object.entries(
     file.approvals,
-  ).map(([key, entry]) => ({ key, ...entry }));
+  ).map(([key, entry]) => projectApprovalForList(key, entry));
 
   // Include session-only entries not persisted to disk.
   for (const [key, entry] of sessionStore.entries()) {
     if (entry.scope === "session" && !file.approvals[key]) {
-      result.push({ key, ...entry });
+      result.push(projectApprovalForList(key, entry));
     }
   }
 
@@ -391,6 +446,15 @@ export async function listApprovals(): Promise<Array<{ key: string } & UserAppro
  */
 export async function readApprovals(): Promise<ApprovalsFile> {
   return readApprovalsFile();
+}
+
+async function scrubLegacyArgsMetadata(): Promise<void> {
+  const file = await readApprovalsFile();
+  if (!Object.values(file.approvals).some((entry) => entry.args !== undefined)) return;
+  await mutatePersistentApprovals((current) => {
+    for (const entry of Object.values(current.approvals)) delete entry.args;
+  });
+  for (const entry of sessionStore.values()) delete entry.args;
 }
 
 // ─── Migration helpers ────────────────────────────────────────────────────────
@@ -439,12 +503,28 @@ function chooseSurvivor(existing: UserApprovalEntry, incoming: UserApprovalEntry
 export async function migrateCanonicalization(): Promise<void> {
   const markerPath = migrationMarkerPath();
 
-  // Idempotency check — skip if migration already completed.
+  // Idempotency check — skip re-keying if migration already completed, while
+  // still removing legacy input metadata under its own best-effort boundary.
+  let migrationAlreadyCompleted = false;
   try {
     await access(markerPath, constants.F_OK);
-    return; // marker exists → already migrated
+    migrationAlreadyCompleted = true;
   } catch {
     // marker absent → proceed
+  }
+  if (migrationAlreadyCompleted) {
+    try {
+      // The migration no longer needs raw args after the marker exists. Scrub
+      // legacy metadata before returning so future host reads cannot expose
+      // values that the approval card deliberately masked.
+      await scrubLegacyArgsMetadata();
+    } catch (err) {
+      log.warn({
+        event: "user-approval-args-scrub-failed",
+        error: (err as Error).message ?? String(err),
+      });
+    }
+    return;
   }
 
   // MAJOR-1: wrap entire migration body so a corrupt approvals file or
@@ -560,6 +640,7 @@ export async function migrateCanonicalization(): Promise<void> {
       skipped,
       total,
     });
+    await scrubLegacyArgsMetadata();
   } catch (err) {
     // MAJOR-1: log failure but do NOT write the marker — next boot will retry.
     log.warn({

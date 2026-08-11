@@ -53,11 +53,13 @@ const targetLine = () => screen.getByTestId("docked-approval-target").textConten
 
 describe("DockedApprovalCard — what will be granted is always on screen", () => {
   it("starts on the narrowest scope without stealing route focus", async () => {
-    await renderCard();
+    const { container } = await renderCard();
     const narrowest = screen.getByTestId("docked-approval-choice-allow-once");
     expect(document.activeElement).not.toBe(narrowest);
     expect(narrowest.tabIndex).toBe(0);
     expect(targetLine()).toContain(TARGET);
+    expect(container.querySelector('input, textarea, [contenteditable="true"], [role="textbox"]'))
+      .toBeNull();
   });
 
   it("rewrites the target as focus moves to a wider scope", async () => {
@@ -89,7 +91,7 @@ describe("DockedApprovalCard — what will be granted is always on screen", () =
     );
     expect(screen.queryByTestId("docked-approval-warning")).toBeNull();
     await act(async () => {
-      fireEvent.keyDown(card(), { key: "3" });
+      fireEvent.keyDown(card(), { key: "2" });
     });
     expect(screen.getByTestId("docked-approval-warning").textContent).toContain(".git");
   });
@@ -97,7 +99,7 @@ describe("DockedApprovalCard — what will be granted is always on screen", () =
   it("says plainly that deny grants nothing", async () => {
     await renderCard();
     await act(async () => {
-      fireEvent.keyDown(card(), { key: "4" });
+      fireEvent.keyDown(card(), { key: "1" });
     });
     expect(targetLine()).toContain("거부");
   });
@@ -137,7 +139,7 @@ describe("DockedApprovalCard — widening requires moving there first", () => {
   it("applies the widening scope, with the host path, once moved there", async () => {
     const { onDecide } = await renderCard();
     await act(async () => {
-      fireEvent.keyDown(card(), { key: "3" });
+      fireEvent.keyDown(card(), { key: "2" });
     });
     await act(async () => {
       fireEvent.click(screen.getByTestId("docked-approval-choice-allow-always"));
@@ -145,16 +147,6 @@ describe("DockedApprovalCard — widening requires moving there first", () => {
     expect(onDecide).toHaveBeenCalledWith("allow-always", PARENT);
   });
 
-  it("applies session scope with the file it was asked about", async () => {
-    const { onDecide } = await renderCard();
-    await act(async () => {
-      fireEvent.keyDown(card(), { key: "2" });
-    });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("docked-approval-choice-allow-session"));
-    });
-    expect(onDecide).toHaveBeenCalledWith("allow-session", TARGET);
-  });
 });
 
 describe("DockedApprovalCard — Escape", () => {
@@ -182,17 +174,17 @@ describe("DockedApprovalCard — navigation and option table", () => {
       fireEvent.keyDown(card(), { key: "2" });
     });
     expect(
-      screen.getByTestId("docked-approval-choice-allow-session").getAttribute("tabindex"),
+      screen.getByTestId("docked-approval-choice-allow-always").getAttribute("tabindex"),
     ).toBe("0");
     expect(
       screen.getByTestId("docked-approval-choice-allow-once").getAttribute("tabindex"),
     ).toBe("-1");
   });
 
-  it("wraps backwards from the narrowest scope to deny", async () => {
+  it("moves forward from allow-once to reject", async () => {
     await renderCard();
     await act(async () => {
-      fireEvent.keyDown(card(), { key: "ArrowLeft" });
+      fireEvent.keyDown(card(), { key: "ArrowRight" });
     });
     expect(document.activeElement).toBe(
       screen.getByTestId("docked-approval-choice-deny-once"),
@@ -207,7 +199,7 @@ describe("DockedApprovalCard — navigation and option table", () => {
     expect(onReturnFocus).toHaveBeenCalled();
   });
 
-  it("offers no widening scopes when the host resolved no parent", async () => {
+  it("keeps Always allow visible but disabled when the host resolved no parent", async () => {
     const { container } = await renderCard(
       makeRequest({
         outOfAllowedDir: {
@@ -218,22 +210,54 @@ describe("DockedApprovalCard — navigation and option table", () => {
         },
       }),
     );
-    expect(
-      container.querySelector('[data-testid="docked-approval-choice-allow-session"]'),
-    ).toBeNull();
-    expect(
-      container.querySelector('[data-testid="docked-approval-choice-allow-always"]'),
-    ).toBeNull();
+    const always = container.querySelector<HTMLButtonElement>('[data-testid="docked-approval-choice-allow-always"]');
+    expect(always).toBeTruthy();
+    expect(always).toBeDisabled();
+    expect(always).toHaveAttribute(
+      "title",
+      "지속 허용할 안전한 검토 상위 폴더가 없습니다.",
+    );
+    expect(screen.getByTestId("docked-persistent-unavailable-reason"))
+      .toHaveTextContent("지속 허용할 안전한 검토 상위 폴더가 없습니다.");
     expect(screen.getByTestId("docked-approval-choice-deny-once")).toBeTruthy();
   });
 
-  it("honours allowedChoices from the host", async () => {
+  it("keeps host-forbidden persistence visible but disabled", async () => {
     const { container } = await renderCard(
       makeRequest({ allowedChoices: ["allow-once", "deny-once"] }),
     );
-    expect(
-      container.querySelector('[data-testid="docked-approval-choice-allow-always"]'),
-    ).toBeNull();
+    const always = container.querySelector<HTMLButtonElement>('[data-testid="docked-approval-choice-allow-always"]');
+    expect(always).toBeTruthy();
+    expect(always).toBeDisabled();
+    expect(always).toHaveAttribute(
+      "title",
+      "호스트가 이 요청을 일회성 결정으로 제한했습니다.",
+    );
+    expect(screen.getByTestId("docked-persistent-unavailable-reason"))
+      .toHaveTextContent("호스트가 이 요청을 일회성 결정으로 제한했습니다.");
+  });
+
+  it("locks path decisions while an exact reject is being managed in Settings", async () => {
+    const onDecide = vi.fn();
+    const onOpenPermanentDeny = vi.fn();
+    await act(async () => {
+      render(
+        <DockedApprovalCard
+          request={makeRequest()}
+          onDecide={onDecide}
+          onOpenPermanentDeny={onOpenPermanentDeny}
+          interactionLocked
+        />,
+      );
+    });
+    expect(screen.getByTestId("approval-decision-locked")).toBeTruthy();
+    expect(screen.getByTestId("docked-approval-choice-deny-once")).toBeDisabled();
+    expect(screen.getByTestId("docked-approval-choice-allow-always")).toBeDisabled();
+    expect(screen.getByTestId("docked-approval-choice-allow-once")).toBeDisabled();
+    fireEvent.keyDown(card(), { key: "Escape" });
+    expect(onDecide).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("open-permanent-deny-settings"));
+    expect(onOpenPermanentDeny).toHaveBeenCalled();
   });
 
   it("renders nothing without a request", async () => {

@@ -343,6 +343,10 @@ describe("ConversationLoop onTurnSummary", () => {
     }),
     );
     let primaryCalls = 0;
+    let signalRetryRoundStarted!: () => void;
+    const retryRoundStarted = new Promise<void>((resolve) => {
+      signalRetryRoundStarted = resolve;
+    });
     const primary: LLMProvider = {
       vendor: "claude",
       streamTurn: async function* () {
@@ -354,6 +358,7 @@ describe("ConversationLoop onTurnSummary", () => {
           };
           return;
         }
+        signalRetryRoundStarted();
         yield { type: "error", error: "500 internal server error", classification: "network",
         };
       },
@@ -394,7 +399,13 @@ describe("ConversationLoop onTurnSummary", () => {
       },
     }, undefined, { inputOrigin: "user-keyboard" },
     );
-    await vi.advanceTimersByTimeAsync(5_000);
+    // The first round executes a real async permission-store read before the
+    // fallback retry timers exist. Wait for round two so fake time cannot race
+    // ahead of that I/O, then advance each retry window independently.
+    await retryRoundStarted;
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await vi.advanceTimersByTimeAsync(1_000);
+    }
     await pending;
     vi.useRealTimers();
 

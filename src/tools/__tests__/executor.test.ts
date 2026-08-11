@@ -29,7 +29,12 @@ import { BashTool } from "../bash.js";
 import { PowerShellTool } from "../powershell.js";
 import { ReadFileTool } from "../file-tools.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
-import { ApprovalGate } from "../../permissions/approval-gate.js";
+import { ApprovalGate, type ApprovalRequestInput } from "../../permissions/approval-gate.js";
+import {
+  __resetSessionStoreForTest,
+  recordApproval,
+} from "../../permissions/user-approval-store.js";
+import { canonicalStringify } from "../../shared/canonical-json.js";
 import { DeferredQueue } from "../../permissions/reviewer/deferred-queue.js";
 import { VerdictCache } from "../../permissions/reviewer/verdict-cache.js";
 import type { RiskClassifier } from "../../permissions/reviewer/risk-classifier.js";
@@ -745,7 +750,10 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       category: "write",
       jsonSchema: {
         type: "object",
-        properties: { payload: { type: "string" } },
+        properties: {
+          payload: { type: "string" },
+          url: { type: "string" },
+        },
       },
       execute: async (rawInput) => ({
         output: await executeSpy(rawInput),
@@ -1081,6 +1089,10 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       }),
     }));
     const dir = mkdtempSync(join(tmpdir(), "lvis-executor-interactive-retry-"));
+    const previousLvisHome = process.env.LVIS_HOME;
+    process.env.LVIS_HOME = dir;
+    __resetSessionStoreForTest();
+    const auditLogger = new AuditLogger(join(dir, "audit"));
     try {
       const permMgr = new PermissionManager(join(dir, "permissions.json"));
       permMgr.setMode("auto");
@@ -1094,21 +1106,43 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         cache: new VerdictCache(join(dir, "reviewer-cache.jsonl")),
         deferredQueue: new DeferredQueue(join(dir, "deferred-queue.jsonl")),
       });
-      // The user picks "allow-always" at the modal — the executor persists an
-      // always-allow rule so the next identical call short-circuits before the
-      // reviewer/modal lane (no re-prompt).
-      const requestAndWait = vi.fn(async (req: { id: string }) => ({
-        requestId: req.id,
-        choice: "allow-always" as const,
-      }));
+      // ToolApprovalContent records the exact persistent tuple before it
+      // resolves `allow-always`. Model that renderer side-effect explicitly;
+      // the executor deliberately no longer creates a broad Store-A rule.
+      const requestAndWait = vi.fn(async (req: ApprovalRequestInput) => {
+        await recordApproval(
+          req.toolName,
+          canonicalStringify(req.args ?? {}),
+          req.source ?? "builtin",
+          {
+            decision: "allow",
+            scope: "persistent",
+            verdictAtApproval: req.reviewerVerdict?.level ?? "low",
+            nlJustification: null,
+            trustOrigin: req.trustOrigin,
+            approvalCacheKey: req.approvalCacheKey,
+          },
+        );
+        return {
+          requestId: req.id,
+          choice: "allow-always" as const,
+        };
+      });
       const executor = new ToolExecutor(
         registry,
         undefined,
         permMgr,
         undefined,
         { requestAndWait } as never,
+        undefined,
+        auditLogger,
       );
-      const input = { payload: "send release notice" };
+      // Use a trusted network target so the deterministic rule classifier does
+      // not escalate above the stored MEDIUM reviewer verdict on re-check.
+      const input = {
+        payload: "send release notice",
+        url: "https://api.openai.com",
+      };
 
       const first = await executor.executeAll(
         [{ id: "tu-retry-first", name: "reviewed_network_probe_retry", input }],
@@ -1137,13 +1171,18 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
         },
       );
 
-      // Second identical call: allow-always rule satisfies it without re-prompting.
+      // Second identical call: the exact Store-B record satisfies it without
+      // re-prompting or creating a tool-wide glob rule.
       expect(second[0].is_error).toBeUndefined();
       expect(second[0].content).toBe("sent");
       expect(executeSpy).toHaveBeenCalledTimes(2);
       expect(requestAndWait).toHaveBeenCalledTimes(1);
       expect(classifySpy).toHaveBeenCalledOnce();
     } finally {
+      await auditLogger.close();
+      if (previousLvisHome === undefined) delete process.env.LVIS_HOME;
+      else process.env.LVIS_HOME = previousLvisHome;
+      __resetSessionStoreForTest();
       await cleanupTmpDir(dir);
     }
   });
