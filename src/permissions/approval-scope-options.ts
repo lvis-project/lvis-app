@@ -35,9 +35,9 @@ export interface ApprovalScopeInput {
 }
 
 /**
- * Build the scope list, narrowest first. Order is part of the contract: the
- * card focuses index 0, and a widening scope is always something the user
- * moved to on purpose.
+ * Build the host-authorized choices, narrowest first. The renderer may present
+ * those choices in a different visual order, but it focuses allow-once and can
+ * only commit one of the exact host-provided choice/path pairs.
  */
 export function buildApprovalScopeOptions(
   input: ApprovalScopeInput,
@@ -51,9 +51,6 @@ export function buildApprovalScopeOptions(
 
   if (permitted("allow-once")) {
     push({ choice: "allow-once", widens: false, path: candidatePath });
-  }
-  if (suggestedParent && permitted("allow-session")) {
-    push({ choice: "allow-session", widens: true, path: candidatePath });
   }
   if (suggestedParent && permitted("allow-always")) {
     push({ choice: "allow-always", widens: true, path: suggestedParent });

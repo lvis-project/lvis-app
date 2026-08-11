@@ -18,7 +18,11 @@ export function SettingsPageHeader({ title, description }: SettingsPageHeaderPro
           h2 uses `leading-9` so its line-box (36px) matches the sidebar
           trigger row height. */}
       <div className="flex min-w-0 items-center gap-2">
-        <h2 className="min-w-0 truncate text-xl font-semibold leading-9 tracking-normal">
+        <h2
+          tabIndex={-1}
+          className="min-w-0 truncate rounded-sm text-xl font-semibold leading-9 tracking-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="settings-page-title"
+        >
           {title}
         </h2>
         {description ? (

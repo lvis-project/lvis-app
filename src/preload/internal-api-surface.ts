@@ -1071,13 +1071,14 @@ export function buildInternalApiSurface() {
 
   // ─── User-Approval Store ─────────────
   userApproval: {
-    /** Record a user approval decision (scope: session | persistent). */
+    /** Record an exact user decision (legacy callers default to allow). */
     record: async (entry: {
       /** Server-side ApprovalRequest binding — required for IPC handler validation. */
       requestId: string;
       toolName: string;
       args: string;
       source: string;
+      decision?: "allow" | "deny";
       scope: UserApprovalScope;
       verdictAtApproval: UserApprovalVerdict;
       nlJustification: string | null;

@@ -187,9 +187,13 @@ This document specifies how to validate that the sandbox implementation from `sa
 - Verdict card shows ruleVerdict (MEDIUM) + composition rule blocking LLM downgrade (if applicable)
 
 **R-4 HIGH verdict UI assertion** (new per R-4 directive):
-- When finalVerdict=HIGH: ApprovalDock/ToolApprovalContent shows the NL input field ("이 작업의 목적을 한 문장으로 입력")
-- Approve button disabled until NL field non-empty
-- On approve: NL text captured in audit.log `reviewer.userApprovalUsed.nlJustification`
+- When finalVerdict=HIGH: ApprovalDock/ToolApprovalContent shows a short,
+  read-only reason from the originating user request or permission reviewer
+- No typeable control exists in the approval surface
+- `Always allow` is unavailable; the only positive decision is explicit
+  `Allow once`
+- The host rejects any HIGH exact-allow memory write, even from a compromised
+  renderer; a restrictive exact deny can still be managed in Settings
 
 **Observability**: S2 audit log entry emitted (see §3.6).
 

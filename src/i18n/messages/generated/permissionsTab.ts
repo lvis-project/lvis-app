@@ -38,9 +38,9 @@ export const en = {
   "permissionsTab.errorLoadFailed": "Failed to load data.",
 
   // Revoke approval messages
-  "permissionsTab.confirmRevokePersistent": "[{toolName}] Cancel persistent approval?\n\nThis cannot be undone. The next tool call will require approval again.",
+  "permissionsTab.confirmRevokePersistent": "[{toolName}] Remove this exact permission decision?\n\nThe next exactly matching call will follow the current policy and may ask again.",
   "permissionsTab.errorRevokeFailed": "Revoke failed: {message}",
-  "permissionsTab.successRevokeApproval": "[{toolName}] Approval has been revoked.",
+  "permissionsTab.successRevokeApproval": "[{toolName}] The exact permission decision was removed.",
   "permissionsTab.errorRevokeRefreshFailed": "[{toolName}] Approval revoked but list refresh failed: {message}",
 
   // Mode change messages
@@ -202,20 +202,29 @@ export const en = {
   "permissionsTab.directoryWarningConfirmButton": "Confirm warnings and add",
   "permissionsTab.cancelButton": "Cancel",
 
+  "permissionsTab.exactDenyDraftTitle": "Review exact permanent rejection",
+  "permissionsTab.exactDenyDraftDescription": "This draft applies only to the reviewed tool, canonical input, source, and trust origin. It does not deny the whole tool.",
+  "permissionsTab.exactDenyReviewInput": "Review the exact input",
+  "permissionsTab.exactDenyScopeNotice": "Saving rejects the pending request and future exact matches. Edit broad tool or glob rules separately below.",
+  "permissionsTab.saveExactDeny": "Save exact rejection",
+  "permissionsTab.exactDenySaved": "Saved an exact rejection for {toolName}.",
+  "permissionsTab.exactDenySaveFailed": "Could not save the exact rejection.",
+
   // User approvals section
-  "permissionsTab.approvalsTitle": "User Approval Records ({count})",
-  "permissionsTab.approvalsDescription": "List of tool approvals recorded for this session or persistently.",
-  "permissionsTab.approvalsEmpty": "No recorded approvals.",
+  "permissionsTab.approvalsTitle": "Exact Permission Decisions ({count})",
+  "permissionsTab.approvalsDescription": "Exact tool-and-input allow and reject decisions recorded for this session or persistently.",
+  "permissionsTab.approvalsEmpty": "No exact permission decisions recorded.",
   "permissionsTab.approvalsColTool": "Tool",
+  "permissionsTab.approvalsColDecision": "Decision",
   "permissionsTab.approvalsColScope": "Scope",
   "permissionsTab.approvalsColRisk": "Risk",
-  "permissionsTab.approvalsColApprovedAt": "Approved at",
+  "permissionsTab.approvalsColApprovedAt": "Recorded at",
   "permissionsTab.approvalsColReason": "Reason",
   "permissionsTab.approvalsColAction": "Action",
   "permissionsTab.scopePersistent": "Persistent",
   "permissionsTab.scopeSession": "Session",
   "permissionsTab.verdictHighFixed": " (HIGH fixed)",
-  "permissionsTab.revokeButton": "Revoke",
+  "permissionsTab.revokeButton": "Remove",
 
   // Audit log section
   "permissionsTab.auditLogTitle": "Audit Log",
@@ -256,9 +265,9 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.loading": "로딩 중...",
   "permissionsTab.errorLoadFailed": "데이터를 불러오지 못했습니다.",
 
-  "permissionsTab.confirmRevokePersistent": "[{toolName}] 지속 승인을 취소하시겠습니까?\n\n취소 후 복구할 수 없으며, 다음 도구 호출 시 다시 승인 요청됩니다.",
+  "permissionsTab.confirmRevokePersistent": "[{toolName}] 이 정확 일치 권한 결정을 삭제하시겠습니까?\n\n다음 정확 일치 호출은 현재 정책을 따르며 다시 물을 수 있습니다.",
   "permissionsTab.errorRevokeFailed": "취소 실패: {message}",
-  "permissionsTab.successRevokeApproval": "[{toolName}] 승인이 취소되었습니다.",
+  "permissionsTab.successRevokeApproval": "[{toolName}] 정확 일치 권한 결정을 삭제했습니다.",
   "permissionsTab.errorRevokeRefreshFailed": "[{toolName}] 승인이 취소되었으나 목록 새로고침 실패: {message}",
 
   "permissionsTab.errorModeChangeFailed": "실행 모드 변경에 실패했습니다.",
@@ -397,19 +406,28 @@ export const ko: Record<keyof typeof en, string> = {
   "permissionsTab.directoryWarningConfirmButton": "경고 확인 후 추가",
   "permissionsTab.cancelButton": "취소",
 
-  "permissionsTab.approvalsTitle": "사용자 승인 기록 ({count})",
-  "permissionsTab.approvalsDescription": "세션 또는 지속적으로 기록된 도구 승인 목록입니다.",
-  "permissionsTab.approvalsEmpty": "기록된 승인이 없습니다.",
+  "permissionsTab.exactDenyDraftTitle": "정확 일치 영구 거절 검토",
+  "permissionsTab.exactDenyDraftDescription": "검토한 도구·정규화 입력·출처·신뢰 발원에만 적용됩니다. 도구 전체를 거절하지 않습니다.",
+  "permissionsTab.exactDenyReviewInput": "정확한 입력 검토",
+  "permissionsTab.exactDenyScopeNotice": "저장하면 현재 요청과 이후의 정확한 일치 요청을 거절합니다. 광범위한 도구·glob 규칙은 아래에서 별도로 편집하세요.",
+  "permissionsTab.saveExactDeny": "정확 일치 거절 저장",
+  "permissionsTab.exactDenySaved": "{toolName}의 정확 일치 거절을 저장했습니다.",
+  "permissionsTab.exactDenySaveFailed": "정확 일치 거절을 저장하지 못했습니다.",
+
+  "permissionsTab.approvalsTitle": "정확 일치 권한 결정 ({count})",
+  "permissionsTab.approvalsDescription": "세션 또는 지속적으로 기록된 정확한 도구·입력 허용 및 거절 결정입니다.",
+  "permissionsTab.approvalsEmpty": "기록된 정확 일치 권한 결정이 없습니다.",
   "permissionsTab.approvalsColTool": "도구",
+  "permissionsTab.approvalsColDecision": "결정",
   "permissionsTab.approvalsColScope": "범위",
   "permissionsTab.approvalsColRisk": "위험도",
-  "permissionsTab.approvalsColApprovedAt": "승인 일시",
+  "permissionsTab.approvalsColApprovedAt": "기록 일시",
   "permissionsTab.approvalsColReason": "사유",
   "permissionsTab.approvalsColAction": "액션",
   "permissionsTab.scopePersistent": "지속",
   "permissionsTab.scopeSession": "세션",
   "permissionsTab.verdictHighFixed": " (HIGH 고정)",
-  "permissionsTab.revokeButton": "취소",
+  "permissionsTab.revokeButton": "삭제",
 
   "permissionsTab.auditLogTitle": "감사 로그",
   "permissionsTab.auditLogDescription": "최근 권한 감사 기록과 체인 검증 상태를 확인합니다.",
