@@ -25,7 +25,7 @@ const OUT_OF_DIR_REQUEST = {
   id: "release-check-1",
   category: "tool",
   kind: "out-of-allowed-dir",
-  allowedChoices: ["allow-once", "allow-session", "allow-always", "deny-once"],
+  allowedChoices: ["allow-once", "allow-always", "deny-once"],
   toolName: "read_file",
   toolCategory: "read",
   args: { path: "C:/ProgramData/lvis/config.json" },
@@ -151,7 +151,7 @@ test.describe("release check — docked approval card", () => {
     expect(firstTarget.length).toBeGreaterThan(0);
 
     // Every scope must be rendered as its own button.
-    for (const choice of ["allow-once", "allow-session", "allow-always", "deny-once"]) {
+    for (const choice of ["deny-once", "allow-always", "allow-once"]) {
       await expect(page.getByTestId(`docked-approval-choice-${choice}`)).toBeVisible();
     }
 

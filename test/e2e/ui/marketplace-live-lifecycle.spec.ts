@@ -237,10 +237,8 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
         expect(approvalVisible).toBe(true);
       }
       if (approvalVisible) {
-        const justification = ctx.page.getByTestId("nl-justification-input");
-        if (await justification.isVisible().catch(() => false)) {
-          await justification.fill("Verify the installed bundle plugin generation.");
-        }
+        await expect(approvalDialog.locator('input, textarea, [contenteditable="true"], [role="textbox"]'))
+          .toHaveCount(0);
         const approve = ctx.page.getByTestId("approve-button");
         await expect(approve).toBeEnabled();
         await approve.click();
@@ -355,10 +353,8 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
         expect(approvalVisible).toBe(true);
       }
       if (approvalVisible) {
-        const justification = ctx.page.getByTestId("nl-justification-input");
-        if (await justification.isVisible().catch(() => false)) {
-          await justification.fill("Verify the installed bundle MCP generation.");
-        }
+        await expect(approvalDialog.locator('input, textarea, [contenteditable="true"], [role="textbox"]'))
+          .toHaveCount(0);
         const approve = ctx.page.getByTestId("approve-button");
         await expect(approve).toBeEnabled();
         await approve.click();

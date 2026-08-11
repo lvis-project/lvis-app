@@ -84,6 +84,8 @@ function makeDeps(options: {
   hasReviewer?: boolean;
   workspaceLifecycleAvailable?: boolean;
   durableApprovalRecordAllowed?: boolean;
+  snapshotArgs?: unknown;
+  snapshotVerdict?: "low" | "medium" | "high";
 } = {}) {
   const appWindows = [
     {
@@ -131,16 +133,17 @@ function makeDeps(options: {
       })),
       resolve: vi.fn((_requestId: string, decision: unknown) => decision),
       // #799 + CRITICAL-2 ralph iter 4: server-side ApprovalRequest binding.
-      // userApprovalRecord handler reads trustOrigin/source/approvalCacheKey
-      // from this snapshot; tests use a static snapshot that mirrors the
-      // payload's claimed values (works because handler validates HIGH
-      // verdict rules BEFORE reading snapshot for record fields).
+      // userApprovalRecord handler reads identity, raw args, and verdict from
+      // this host snapshot. Tests opt into HIGH explicitly; renderer claims
+      // cannot downgrade it into a persistent allow.
       getRequestSnapshot: vi.fn((_requestId: string) => ({
         toolName: "bash_run",
+        args: options.snapshotArgs ?? { command: "ls" },
         source: "user-keyboard" as const,
         trustOrigin: "user-keyboard",
         approvalCacheKey: undefined,
         durableApprovalRecordAllowed: options.durableApprovalRecordAllowed ?? true,
+        verdictAtApproval: options.snapshotVerdict ?? "medium",
       })),
     },
     auditLogger: {
@@ -1133,80 +1136,28 @@ describe("Minor-3 R2: REVIEWER_PROVIDERS_SET is the single SOT for allowed provi
   });
 });
 
-// ─── CRITICAL-2: HIGH verdict IPC enforcement (scope + nlJustification) ──────
+// ─── HIGH verdict IPC enforcement: explicit one-shot only ───────────────────
 
 describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => {
-  it("rejects HIGH verdict with persistent scope (must use session)", async () => {
-    await setup();
+  it.each([
+    ["session", null],
+    ["session", "권한 감사 에이전트가 생성한 사유"],
+    ["persistent", "권한 감사 에이전트가 생성한 사유"],
+  ] as const)("rejects HIGH exact allow memory for %s scope regardless of justification", async (scope, nlJustification) => {
+    await setup({ snapshotVerdict: "high" });
 
     const result = await invoke(PERMISSIONS.userApprovalRecord, {
-      requestId: "req-test-1",
+      requestId: `req-high-${scope}-${nlJustification === null ? "none" : "reason"}`,
       toolName: "bash_run",
       args: '{"command":"rm -rf /tmp"}',
       source: "user-keyboard",
-      scope: "persistent",
+      scope,
       verdictAtApproval: "high",
-      nlJustification: "some justification",
+      nlJustification,
     });
 
-    expect(result).toMatchObject({
-      ok: false,
-      error: "high-requires-session-scope",
-    });
-  });
-
-  it("rejects HIGH verdict with empty nlJustification", async () => {
-    await setup();
-
-    const result = await invoke(PERMISSIONS.userApprovalRecord, {
-      requestId: "req-test-2",
-      toolName: "bash_run",
-      args: '{"command":"rm -rf /tmp"}',
-      source: "user-keyboard",
-      scope: "session",
-      verdictAtApproval: "high",
-      nlJustification: "",
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      error: "high-requires-justification",
-    });
-  });
-
-  it("rejects HIGH verdict with null nlJustification", async () => {
-    await setup();
-
-    const result = await invoke(PERMISSIONS.userApprovalRecord, {
-      requestId: "req-test-3",
-      toolName: "bash_run",
-      args: '{"command":"rm -rf /tmp"}',
-      source: "user-keyboard",
-      scope: "session",
-      verdictAtApproval: "high",
-      nlJustification: null,
-    });
-
-    expect(result).toMatchObject({
-      ok: false,
-      error: "high-requires-justification",
-    });
-  });
-
-  it("accepts HIGH verdict with session scope and non-empty nlJustification", async () => {
-    await setup();
-
-    const result = await invoke(PERMISSIONS.userApprovalRecord, {
-      requestId: "req-test-4",
-      toolName: "bash_run",
-      args: '{"command":"rm -rf /tmp"}',
-      source: "user-keyboard",
-      scope: "session",
-      verdictAtApproval: "high",
-      nlJustification: "사용자 요청에 따른 삭제",
-    });
-
-    expect(result).toMatchObject({ ok: true });
+    expect(result).toMatchObject({ ok: false, error: "high-is-one-shot" });
+    expect(recordApprovalMock).not.toHaveBeenCalled();
   });
 
   it("allows MEDIUM verdict with persistent scope (no HIGH restriction)", async () => {
@@ -1223,6 +1174,45 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     });
 
     expect(result).toMatchObject({ ok: true });
+  });
+
+  it("records a persistent exact deny without turning it into a HIGH approval", async () => {
+    await setup({ snapshotArgs: { command: "rm build.tmp" }, snapshotVerdict: "high" });
+
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-exact-deny",
+      toolName: "renderer-spoofed-tool",
+      args: '{"renderer":"spoofed"}',
+      source: "plugin",
+      decision: "deny",
+      scope: "persistent",
+      verdictAtApproval: "high",
+      nlJustification: null,
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(recordApprovalMock).toHaveBeenCalledWith(
+      "bash_run",
+      '{"command":"rm build.tmp"}',
+      "user-keyboard",
+      expect.objectContaining({ decision: "deny", scope: "persistent" }),
+    );
+  });
+
+  it("rejects a non-persistent exact deny", async () => {
+    await setup();
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-exact-deny-session",
+      toolName: "bash_run",
+      args: '{"command":"ls"}',
+      source: "user-keyboard",
+      decision: "deny",
+      scope: "session",
+      verdictAtApproval: "medium",
+      nlJustification: null,
+    });
+    expect(result).toMatchObject({ ok: false, error: "deny-requires-persistent-scope" });
+    expect(recordApprovalMock).not.toHaveBeenCalled();
   });
 
   it("rejects a one-shot approval record at the Host boundary", async () => {
@@ -1245,8 +1235,8 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
     expect(recordApprovalMock).not.toHaveBeenCalled();
   });
 
-  it("rejects non-JSON args with args-not-json error (security-M2 No Fallback Code)", async () => {
-    await setup();
+  it("ignores spoofed renderer args and records the host-bound input", async () => {
+    await setup({ snapshotVerdict: "low" });
 
     const result = await invoke(PERMISSIONS.userApprovalRecord, {
       requestId: "req-test-6",
@@ -1257,19 +1247,39 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
       verdictAtApproval: "low",
     });
 
-    expect(result).toMatchObject({
-      ok: false,
-      error: "args-not-json",
-    });
+    expect(result).toMatchObject({ ok: true });
+    expect(recordApprovalMock).toHaveBeenCalledWith(
+      "bash_run",
+      '{"command":"ls"}',
+      "user-keyboard",
+      expect.objectContaining({ decision: "allow" }),
+    );
   });
 
-  it("rejects non-object JSON args with args-not-object error (security-M2)", async () => {
-    await setup();
+  it("rejects a renderer attempt to downgrade the host verdict", async () => {
+    await setup({ snapshotVerdict: "high" });
+
+    const result = await invoke(PERMISSIONS.userApprovalRecord, {
+      requestId: "req-verdict-downgrade",
+      toolName: "bash_run",
+      args: '{"command":"rm -rf build"}',
+      source: "user-keyboard",
+      scope: "persistent",
+      verdictAtApproval: "medium",
+      nlJustification: null,
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "verdict-mismatch" });
+    expect(recordApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-object host-bound input with args-not-object error", async () => {
+    await setup({ snapshotArgs: "just a string", snapshotVerdict: "low" });
 
     const result = await invoke(PERMISSIONS.userApprovalRecord, {
       requestId: "req-test-7",
       toolName: "bash_run",
-      args: '"just a string"',
+      args: '{"renderer":"cannot-replace-host-input"}',
       source: "user-keyboard",
       scope: "session",
       verdictAtApproval: "low",
@@ -1279,6 +1289,7 @@ describe("CRITICAL-2: user-approval-record HIGH verdict IPC enforcement", () => 
       ok: false,
       error: "args-not-object",
     });
+    expect(recordApprovalMock).not.toHaveBeenCalled();
   });
 });
 

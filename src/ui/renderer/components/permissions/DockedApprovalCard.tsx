@@ -4,12 +4,19 @@ import { Card } from "../../../../components/ui/card.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
 import { buildApprovalScopeOptions } from "../../../../permissions/approval-scope-options.js";
 import { useTranslation } from "../../../../i18n/react.js";
+import { ChevronDown } from "lucide-react";
+import {
+  resolveUserApprovalVerdict,
+  type UserApprovalVerdict,
+} from "../../../../shared/permissions-events.js";
 
 export interface DockedApprovalCardProps {
   request: ApprovalRequest | null;
   onDecide: (choice: ApprovalChoice, rememberPattern?: string) => void;
   /** Optional explicit focus return for legacy embedders. */
   onReturnFocus?: () => void;
+  onOpenPermanentDeny?: (request: ApprovalRequest, verdict: UserApprovalVerdict) => void;
+  interactionLocked?: boolean;
   /**
    * Scope a `/allow` sentence proposed for this request. It moves focus onto
    * that scope's button and nothing else — the button still has to be pressed.
@@ -18,7 +25,7 @@ export interface DockedApprovalCardProps {
   proposedChoice?: ApprovalChoice | null;
 }
 
-type Scope = ReturnType<typeof buildApprovalScopeOptions>[number];
+type Scope = ReturnType<typeof buildApprovalScopeOptions>[number] & { available: boolean };
 
 /**
  * Docked, non-modal approval card (issue #1940).
@@ -35,7 +42,9 @@ export function DockedApprovalCard({
   request,
   onDecide,
   onReturnFocus,
+  onOpenPermanentDeny,
   proposedChoice = null,
+  interactionLocked = false,
 }: DockedApprovalCardProps) {
   const { t } = useTranslation();
   const buttonRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -48,15 +57,27 @@ export function DockedApprovalCard({
   const suggestedParent = outOfDir?.suggestedParent;
   const candidatePath = outOfDir?.candidatePath ?? "";
 
-  // Narrowest first: index 0 is also the first tab stop. The list comes
-  // from the shared authority the host offers `/allow`, so a proposed scope
-  // always names a button that exists here.
+  // Render the same three decisions as every other approval card. The shared
+  // authority still supplies the host-resolved candidate/parent paths; only
+  // the obsolete session-wide intermediate scope is omitted.
   const scopes = useMemo<Scope[]>(() => {
     if (!request) return [];
-    return buildApprovalScopeOptions({
+    const available = buildApprovalScopeOptions({
       candidatePath,
       suggestedParent: suggestedParent ?? null,
       ...(request.allowedChoices ? { allowedChoices: request.allowedChoices } : {}),
+    });
+    const order: ApprovalChoice[] = ["deny-once", "allow-always", "allow-once"];
+    return order.map((choice, index) => {
+      const scope = available.find((candidate) => candidate.choice === choice);
+      if (scope) return { ...scope, available: true };
+      return {
+        id: `unavailable-${index}`,
+        choice,
+        widens: choice === "allow-always",
+        ...(choice === "allow-once" ? { path: candidatePath } : {}),
+        available: false,
+      } satisfies Scope;
     });
   }, [request, suggestedParent, candidatePath]);
 
@@ -64,9 +85,11 @@ export function DockedApprovalCard({
   // routed page. A later `/allow` proposal may move focus deliberately.
   useEffect(() => {
     if (!request) return;
-    setActive(0);
-    activeRef.current = 0;
-  }, [request?.id]);
+    const onceIndex = scopes.findIndex((scope) => scope.choice === "allow-once");
+    const nextIndex = onceIndex >= 0 ? onceIndex : 0;
+    setActive(nextIndex);
+    activeRef.current = nextIndex;
+  }, [request?.id, scopes]);
 
   // A `/allow` sentence FILLS THE FORM: it moves focus onto the scope it
   // named, and the target line above the buttons rewrites to that scope. It
@@ -75,7 +98,7 @@ export function DockedApprovalCard({
   // scope this card is not offering is ignored rather than approximated.
   useEffect(() => {
     if (!proposedChoice) return;
-    const index = scopes.findIndex((scope) => scope.choice === proposedChoice);
+    const index = scopes.findIndex((scope) => scope.available && scope.choice === proposedChoice);
     if (index < 0) return;
     activeRef.current = index;
     setActive(index);
@@ -93,7 +116,11 @@ export function DockedApprovalCard({
   };
 
   const moveBy = (delta: number) => {
-    const wrapped = (activeRef.current + delta + scopes.length) % scopes.length;
+    let wrapped = activeRef.current;
+    for (let i = 0; i < scopes.length; i += 1) {
+      wrapped = (wrapped + delta + scopes.length) % scopes.length;
+      if (scopes[wrapped]?.available) break;
+    }
     setActiveIndex(wrapped);
     buttonRefs.current[wrapped]?.focus();
   };
@@ -104,11 +131,23 @@ export function DockedApprovalCard({
   };
 
   const commit = (scope: Scope) => {
+    if (interactionLocked || !scope.available) return;
     onDecide(scope.choice, scope.widens ? scope.path : undefined);
   };
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
     if (e.defaultPrevented) return;
+    if (interactionLocked) {
+      if (
+        e.key === "Escape" ||
+        e.key.startsWith("Arrow") ||
+        (Number.parseInt(e.key, 10) >= 1 && Number.parseInt(e.key, 10) <= scopes.length)
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
 
     if (e.key === "Escape") {
       e.preventDefault();
@@ -122,7 +161,8 @@ export function DockedApprovalCard({
     const digit = Number.parseInt(e.key, 10);
     if (!Number.isNaN(digit) && digit >= 1 && digit <= scopes.length) {
       e.preventDefault();
-      moveTo(digit - 1);
+      const index = digit - 1;
+      if (scopes[index]?.available) moveTo(index);
       return;
     }
     if (e.key === "ArrowRight" || e.key === "ArrowDown") {
@@ -144,9 +184,7 @@ export function DockedApprovalCard({
   const label = (scope: Scope) =>
     scope.choice === "allow-once"
       ? t("dockedApprovalCard.choiceOnce")
-      : scope.choice === "allow-session"
-        ? t("dockedApprovalCard.choiceSession")
-        : scope.choice === "allow-always"
+      : scope.choice === "allow-always"
           ? t("dockedApprovalCard.choiceAlways")
           : t("dockedApprovalCard.choiceDeny");
 
@@ -154,10 +192,18 @@ export function DockedApprovalCard({
   // adjacency warning — the warning is about the directory being added.
   const showWarning =
     current.choice === "allow-always" && (outOfDir?.adjacencyWarnings.length ?? 0) > 0;
+  const alwaysScope = scopes.find((scope) => scope.choice === "allow-always");
+  const persistentUnavailableReason = alwaysScope?.available === false
+    ? suggestedParent
+      ? t("toolApprovalDialog.persistentUnavailableOneShot")
+      : t("toolApprovalDialog.persistentUnavailableNoParent")
+    : null;
+  const approvalIsOneShot =
+    request.allowedChoices !== undefined && !request.allowedChoices.includes("allow-always");
 
   return (
     <div
-      className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2 [scrollbar-gutter:stable]"
+      className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2"
       data-testid="docked-approval-panel"
       onKeyDown={onKeyDown}
     >
@@ -177,15 +223,50 @@ export function DockedApprovalCard({
                   ? t("dockedApprovalCard.targetParent", { path: current.path ?? "" })
                   : current.path}
             </p>
-            {showWarning ? (
-              <p className="m-0 text-xs text-warning" data-testid="docked-approval-warning">
-                {`⚠ ${outOfDir?.adjacencyWarnings.join(" · ")}`}
-              </p>
-            ) : null}
+          </div>
+
+          <details className="group min-w-0 overflow-hidden rounded-md border bg-muted/(--opacity-light)" data-testid="docked-review-details">
+            <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+              <span className="min-w-0 flex-1">
+                <span className="block font-semibold">{t("toolApprovalDialog.reviewDetails")}</span>
+                <span className="block text-[10px] text-muted-foreground">{t("toolApprovalDialog.reviewDetailsHint")}</span>
+              </span>
+              <ChevronDown aria-hidden="true" className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180" />
+            </summary>
+            <div className="space-y-1 border-t px-3 py-2 text-[11px]">
+              <p className="break-all"><span className="font-semibold">{t("dockedApprovalCard.choiceOnce")}: </span><code>{candidatePath}</code></p>
+              {suggestedParent ? (
+                <p className="break-all"><span className="font-semibold">{t("dockedApprovalCard.choiceAlways")}: </span><code>{suggestedParent}</code></p>
+              ) : null}
+              {showWarning ? (
+                <p className="m-0 text-warning" data-testid="docked-approval-warning">
+                  {`⚠ ${outOfDir?.adjacencyWarnings.join(" · ")}`}
+                </p>
+              ) : null}
+            </div>
+          </details>
+
+          <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span>{t("toolApprovalDialog.permanentDenyInSettings")}</span>
+            <Button
+              type="button"
+              size="sm"
+              variant="link"
+              className="h-auto min-w-0 max-w-full shrink p-0 text-right text-[11px] whitespace-normal break-words"
+              disabled={approvalIsOneShot || !onOpenPermanentDeny}
+              title={approvalIsOneShot ? t("toolApprovalDialog.persistentUnavailableOneShot") : undefined}
+              onClick={() => onOpenPermanentDeny?.(
+                request,
+                resolveUserApprovalVerdict(request),
+              )}
+              data-testid="open-permanent-deny-settings"
+            >
+              {t("toolApprovalDialog.openPermissionSettings")}
+            </Button>
           </div>
 
           <div
-            className="flex flex-wrap items-center gap-1.5"
+            className="flex min-w-0 flex-wrap gap-2 [&>button]:min-w-0 [&>button]:h-auto [&>button]:flex-[1_1_10rem] [&>button]:whitespace-normal [&>button]:break-words [&>button]:py-2 [&>button]:leading-tight"
             role="group"
             aria-label={t("dockedApprovalCard.groupAriaLabel")}
           >
@@ -198,24 +279,53 @@ export function DockedApprovalCard({
                 type="button"
                 size="sm"
                 variant="outline"
-                tabIndex={i === active ? 0 : -1}
-                data-testid={`docked-approval-choice-${scope.choice}`}
-                data-proposed={scope.choice === proposedChoice ? "true" : undefined}
-                onFocus={() => setActiveIndex(i)}
-                onClick={() => commit(scope)}
-                className={
-                  scope.choice === "deny-once"
-                    ? "border-destructive/(--opacity-half) text-destructive"
+                disabled={!scope.available || interactionLocked}
+                title={
+                  !scope.available
+                    ? scope.choice === "allow-always" && !suggestedParent
+                      ? t("toolApprovalDialog.persistentUnavailableNoParent")
+                      : t("toolApprovalDialog.persistentUnavailableOneShot")
                     : undefined
                 }
+                tabIndex={i === active ? 0 : -1}
+                aria-describedby={
+                  interactionLocked
+                    ? "docked-approval-decision-locked"
+                    : scope.choice === "allow-always" && persistentUnavailableReason
+                      ? "docked-persistent-unavailable-reason"
+                      : undefined
+                }
+                data-testid={`docked-approval-choice-${scope.choice}`}
+                data-proposed={scope.available && scope.choice === proposedChoice ? "true" : undefined}
+                onFocus={() => setActiveIndex(i)}
+                onClick={() => commit(scope)}
+                className={scope.choice === "deny-once" ? "border-destructive/(--opacity-half) text-destructive" : ""}
               >
                 {label(scope)}
               </Button>
             ))}
-            <span className="ml-auto text-[11px] text-muted-foreground">
-              {t("dockedApprovalCard.keyHint")}
-            </span>
           </div>
+          {persistentUnavailableReason ? (
+            <p
+              id="docked-persistent-unavailable-reason"
+              className="text-[10px] text-muted-foreground"
+              data-testid="docked-persistent-unavailable-reason"
+            >
+              {persistentUnavailableReason}
+            </p>
+          ) : null}
+          {interactionLocked ? (
+            <p
+              id="docked-approval-decision-locked"
+              className="text-[10px] text-muted-foreground"
+              data-testid="approval-decision-locked"
+            >
+              {t("toolApprovalDialog.decisionPendingInSettings")}
+            </p>
+          ) : null}
+          <span className="text-[11px] text-muted-foreground">
+            {t("dockedApprovalCard.keyHint")}
+          </span>
         </Card>
       </div>
     </div>

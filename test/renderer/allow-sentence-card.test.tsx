@@ -154,9 +154,11 @@ describe("/allow — the sentence fills the form", () => {
     await submitChatMessage(app.container, "/allow 앞으로 계속 허용");
 
     await waitFor(() => expect(ns.approval.selectSentence).toHaveBeenCalledTimes(1));
-    expect(choice(app.container, "allow-always")).toBeNull();
-    expect(choice(app.container, "allow-once")?.tabIndex).toBe(0);
-    expect(app.container.querySelector('[data-testid="approval-dock"]')?.contains(document.activeElement)).toBe(false);
+    expect(choice(app.container, "allow-always")).toBeDisabled();
+    expect(choice(app.container, "allow-always")).not.toHaveAttribute("data-proposed");
+    expect(choice(app.container, "deny-once")?.tabIndex).toBe(0);
+    expect(choice(app.container, "allow-once")?.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(choice(app.container, "deny-once"));
     expect(ns.approval.respond).not.toHaveBeenCalled();
   });
 });
@@ -203,11 +205,12 @@ describe("/allow — every failure is plain, and none of it is a grant", () => {
     await submitChatMessage(app.container, "/allow 허용해줘");
 
     await waitFor(() => expect(ns.approval.selectSentence).toHaveBeenCalledTimes(1));
-    // Nothing decided, nothing pre-selected, card untouched.
+    // Nothing decided or proposed; the fail-closed Reject decision remains active.
     await waitFor(() => expect(ns.approval.respond).not.toHaveBeenCalled());
     expect(app.container.querySelector("[data-proposed]")).toBeNull();
-    expect(choice(app.container, "allow-once")?.tabIndex).toBe(0);
-    expect(app.container.querySelector('[data-testid="approval-dock"]')?.contains(document.activeElement)).toBe(false);
+    expect(choice(app.container, "deny-once")?.tabIndex).toBe(0);
+    expect(choice(app.container, "allow-once")?.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(choice(app.container, "deny-once"));
     // The raw kebab code never reaches the user.
     expect(systemText(app.container)).not.toContain(code);
   });
@@ -297,10 +300,12 @@ describe("/allow — every failure is plain, and none of it is a grant", () => {
     );
 
     expect(app.container.querySelector("[data-proposed]")).toBeNull();
-    expect(choice(app.container, "allow-once")?.tabIndex).toBe(0);
+    expect(choice(app.container, "deny-once")?.tabIndex).toBe(0);
+    expect(choice(app.container, "allow-once")?.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(choice(app.container, "deny-once"));
     expect(choice(app.container, "allow-always")?.tabIndex).toBe(-1);
     expect(
-      app.container.querySelector('[data-testid="docked-approval-target"]')?.textContent,
+      app.container.querySelector('[data-testid="docked-review-details"]')?.textContent,
     ).toContain("/home/ken/reports/q4.md");
     expect(ns.approval.respond).toHaveBeenCalledTimes(1);
   });

@@ -2,17 +2,20 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
 } from "react";
-import type { UserApprovalScope, UserApprovalVerdict } from "../../../shared/permissions-events.js";
+import {
+  resolveUserApprovalVerdict,
+  type UserApprovalVerdict,
+} from "../../../shared/permissions-events.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
-import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
-import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
+import { ChevronDown } from "lucide-react";
 import { SOURCE_BADGE } from "../constants.js";
 import type { ApprovalDecisionExtras } from "../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
@@ -23,7 +26,6 @@ import {
 } from "../../../shared/rationale-approval-display.js";
 import { isNonUserTrustOrigin, trustOriginLabel } from "../utils/trust-origin-label.js";
 import {
-  SummaryTile,
   ReviewRow,
   categoryLabel,
   levelBadgeClass,
@@ -85,6 +87,14 @@ const UNSUPPORTED_ELICITATION_SCHEMA: ElicitationSchemaParseResult = { supported
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isBoilerplateApprovalReason(value: string): boolean {
+  const normalized = value.trim();
+  return /^user confirmation required(?:\s*\([^)]*\))?[.!]?$/i.test(normalized)
+    || /^approval required(?:\s*\([^)]*\))?[.!]?$/i.test(normalized)
+    || /^상태 변경 도구\s*\([^)]*\)$/.test(normalized)
+    || /\(\s*(?:category|trust)\s*:[^)]+\)\s*$/i.test(normalized);
 }
 
 function enumOptionLabel(value: ElicitationEnumValue): string {
@@ -364,6 +374,8 @@ export function ToolApprovalContent({
   request,
   pendingCount = 1,
   onDecide,
+  onOpenPermanentDeny,
+  interactionLocked = false,
 }: {
   open: boolean;
   request: ApprovalRequest | null;
@@ -373,14 +385,20 @@ export function ToolApprovalContent({
     pattern?: string,
     extras?: ApprovalDecisionExtras,
   ) => void;
+  onOpenPermanentDeny?: (request: ApprovalRequest, verdict: UserApprovalVerdict) => void;
+  /** Settings owns the current exact-deny decision until it is saved or cancelled. */
+  interactionLocked?: boolean;
 }) {
   const { t: tHook } = useTranslation();
   const [expanded, setExpanded] = useState(false);
-  // NL justification (required for HIGH verdict approvals)
-  const [nlJustification, setNlJustification] = useState("");
-  // Scope selector ("session" | "persistent"). HIGH forces "session".
-  const [scopeChoice, setScopeChoice] = useState<UserApprovalScope>("session");
-  const suggestedPurpose =
+  const [recordingDecision, setRecordingDecision] = useState(false);
+  const [recordError, setRecordError] = useState<string | null>(null);
+  const activeRequestIdRef = useRef<string | null>(request?.id ?? null);
+  const recordingRequestIdRef = useRef<string | null>(null);
+  const decisionButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  const [decisionIndex, setDecisionIndex] = useState(0);
+  activeRequestIdRef.current = request?.id ?? null;
+  const userProvidedPurpose =
     request?.approvalPurpose?.source === "conversation" &&
     request.approvalPurpose.confidence === "sufficient"
       ? request.approvalPurpose.text.trim()
@@ -404,25 +422,32 @@ export function ToolApprovalContent({
   const isUnsupportedElicitationForm = hasElicitationSchema && !elicitationParse.supported;
   const [elicitationValues, setElicitationValues] = useState<Record<string, ElicitationFormValue>>({});
 
-  // Reset NL/scope state when a new request arrives.
+  // Reset the async decision lock only when the queue head itself changes.
+  // Other request-local form updates must never reopen controls while the
+  // exact decision record is still in flight.
   useEffect(() => {
-    setNlJustification(suggestedPurpose);
-    setScopeChoice("session");
+    recordingRequestIdRef.current = null;
+    setRecordingDecision(false);
+    setRecordError(null);
+  }, [request?.id]);
+
+  useEffect(() => () => {
+    activeRequestIdRef.current = null;
+    recordingRequestIdRef.current = null;
+  }, []);
+
+  // Reset request-local choice state when the queue head changes. Approval
+  // cards never collect typed prose; an explicit user reason must already be
+  // part of the originating conversation and is projected read-only below.
+  useEffect(() => {
     setElicitationValues(initialElicitationValues(elicitationFields));
-  }, [request?.id, suggestedPurpose, elicitationFields]);
+  }, [request?.id, elicitationFields]);
 
   const finalVerdict = isRationaleApproval
     ? rationaleDisplay?.effectiveVerdict.level ?? "high"
-    : request?.reviewerVerdict?.level ?? riskLevelForCategory(request?.toolCategory ?? "meta");
-  const isExternalOriginAgentAction =
-    request?.category === "agent-action" &&
-    request.kind === "agent-action" &&
-    (request.trustOrigin === "local-api" || request.trustOrigin === "cli");
-  const isRemoteA2AAction =
-    request?.category === "agent-action" &&
-    request.kind === "agent-action" &&
-    (request.source ?? "builtin") === "builtin" &&
-    (request.trustOrigin === "a2a-remote-wire" || request.toolName.startsWith("a2a-remote-"));
+    : resolveUserApprovalVerdict(request ?? {});
+  const isAgentAction =
+    request?.category === "agent-action" && request.kind === "agent-action";
 
   const elicitationInvalid = isElicitationFormInvalid(elicitationFields, elicitationValues);
   const elicitationContent = useMemo(
@@ -430,102 +455,158 @@ export function ToolApprovalContent({
     [elicitationFields, elicitationValues],
   );
 
-  // Rationale cards are one-shot host-sealed decisions: they never ask for a
-  // durable NL justification. A malformed rationale display fails closed.
-  // Other approvals retain the existing HIGH / MCP form constraints.
-  const requiresNarrativeJustification = finalVerdict === "high" && !isRationaleApproval;
+  // HIGH approval is itself the explicit act. The explanatory text is a
+  // read-only, one-shot audit summary from host-owned context; it is never a
+  // renderer-authored prerequisite for the decision.
+  const showsHighRiskReason = finalVerdict === "high" && !isRationaleApproval;
+  const highRiskReasonSource = userProvidedPurpose.length > 0
+    ? tHook("toolApprovalDialog.reasonFromRequest")
+    : tHook("toolApprovalDialog.reasonFromPermissionAudit");
   const approveDisabled =
     rationaleDisplayInvalid ||
-    (requiresNarrativeJustification && nlJustification.trim().length === 0) ||
     isUnsupportedElicitationForm ||
     elicitationInvalid;
 
+  // Host-constrained and sealed approvals remain per-invocation. The
+  // "Always allow" control stays visible for layout/decision consistency but
+  // is disabled with an explicit explanation.
+  const isHostConstrainedToOneShot =
+    request?.allowedChoices !== undefined &&
+    !request.allowedChoices.includes("allow-always");
+  const approvalIsOneShot =
+    isRationaleApproval ||
+    isMcpElicitation ||
+    isAgentAction ||
+    isHostConstrainedToOneShot;
+  const alwaysAllowUnavailable = approvalIsOneShot || finalVerdict === "high";
+  const persistentUnavailableReason = alwaysAllowUnavailable
+    ? finalVerdict === "high"
+      ? tHook("toolApprovalDialog.persistentUnavailableHighRisk")
+      : tHook("toolApprovalDialog.persistentUnavailableOneShot")
+    : null;
+  const denyDecisionDisabled = recordingDecision || interactionLocked;
+  const alwaysAllowDecisionDisabled =
+    approveDisabled || alwaysAllowUnavailable || recordingDecision || interactionLocked;
+  const allowOnceDecisionDisabled =
+    approveDisabled || recordingDecision || interactionLocked;
+
+  // Exactly one enabled decision must remain in the tab order. Default to the
+  // fail-closed Reject action so a pending Enter/Space from the covered
+  // composer can never become an accidental approval.
+  useEffect(() => {
+    const disabled = [
+      denyDecisionDisabled,
+      alwaysAllowDecisionDisabled,
+      allowOnceDecisionDisabled,
+    ];
+    const preferredIndex = disabled.findIndex((value) => !value);
+    setDecisionIndex(preferredIndex >= 0 ? preferredIndex : 0);
+  }, [
+    allowOnceDecisionDisabled,
+    alwaysAllowDecisionDisabled,
+    denyDecisionDisabled,
+    request?.id,
+  ]);
+
+  const moveDecisionFocus = useCallback((direction: 1 | -1) => {
+    const buttons = decisionButtonRefs.current;
+    const disabled = [
+      denyDecisionDisabled,
+      alwaysAllowDecisionDisabled,
+      allowOnceDecisionDisabled,
+    ];
+    const focusedIndex = buttons.findIndex((button) => button === document.activeElement);
+    let nextIndex = focusedIndex >= 0 ? focusedIndex : decisionIndex;
+
+    for (let step = 0; step < buttons.length; step += 1) {
+      nextIndex = (nextIndex + direction + buttons.length) % buttons.length;
+      const button = buttons[nextIndex];
+      if (button && !disabled[nextIndex]) {
+        setDecisionIndex(nextIndex);
+        button.focus();
+        return;
+      }
+    }
+  }, [
+    allowOnceDecisionDisabled,
+    alwaysAllowDecisionDisabled,
+    decisionIndex,
+    denyDecisionDisabled,
+  ]);
+
   // Wrap onDecide("allow-*") to record durable approval before deciding.
   //
-  // Only DURABLE choices (allow-session / allow-always) write to the
-  // explicit-approval memory store (Store B). Any future per-call approval
-  // choice must stay unrecorded so a one-time grant cannot widen into a
-  // remembered foreground memory-skip.
+  // Only the explicit `allow-always` choice writes an exact persistent tuple.
+  // `allow-once` never records, and the card no longer creates a glob rule or
+  // a session-wide grant.
   //
   // CRITICAL: use canonicalStringify for args + propagate trustOrigin
   // + approvalCacheKey so that the record key matches the lookup key in
   // dispatchReviewer. Without this, user-approval memory hit rate is 0%.
-  // Fire-and-await pattern: onDecide is called synchronously so the UI
-  // responds immediately; the record IPC is awaited in the background so
-  // test assertions on onDecide do not need to drain microtask queues.
   const handleApprove = useCallback(async (
     choice: ApprovalChoice,
     pattern?: string,
     extras?: ApprovalDecisionExtras,
   ) => {
-    let recordPromise: Promise<unknown> | undefined;
-    const isDurable = choice === "allow-session" || choice === "allow-always";
-    if (request && isDurable && !isMcpElicitation && !isRationaleApproval) {
+    if (interactionLocked || recordingRequestIdRef.current !== null) return;
+    const requestIdAtStart = request?.id ?? null;
+    setRecordError(null);
+    if (request && choice === "allow-always" && !alwaysAllowUnavailable) {
       // canonicalStringify: sort object keys so {a,b} and {b,a} produce the
       // same string — matching how dispatchReviewer builds the lookup key.
       const canonicalArgs = canonicalStringifyForRenderer(request.args ?? {});
-      // HIGH verdicts never persist across sessions — even when the user
-      // picks "allow-always", the grant is clamped to this session (the
-      // scope radio is likewise hidden for HIGH). Re-justifying a HIGH
-      // action on the next session is the intended friction.
-      const recordedScope: UserApprovalScope =
-        choice === "allow-always" && finalVerdict !== "high"
-          ? "persistent"
-          : "session";
-      recordPromise = window.lvis?.userApproval?.record({
-        requestId: request.id,
-        toolName: request.toolName,
-        args: canonicalArgs,
-        source: request.source ?? "builtin",
-        scope: recordedScope,
-        verdictAtApproval: finalVerdict as UserApprovalVerdict,
-        nlJustification: finalVerdict === "high" ? nlJustification.trim() : null,
-        trustOrigin: request.trustOrigin,
-        approvalCacheKey: request.approvalCacheKey,
-      }).catch((err: unknown) => {
-        console.warn("[user-approval] record failed (non-fatal):", err);
-      });
+      recordingRequestIdRef.current = request.id;
+      setRecordingDecision(true);
+      try {
+        const result = await window.lvis?.userApproval?.record({
+          requestId: request.id,
+          toolName: request.toolName,
+          args: canonicalArgs,
+          source: request.source ?? "builtin",
+          decision: "allow",
+          scope: "persistent",
+          verdictAtApproval: finalVerdict as UserApprovalVerdict,
+          nlJustification: null,
+          trustOrigin: request.trustOrigin,
+          approvalCacheKey: request.approvalCacheKey,
+        });
+        if (!result?.ok) {
+          if (activeRequestIdRef.current === request.id) {
+            setRecordError(result?.message ?? result?.error ?? tHook("toolApprovalDialog.exactDecisionSaveFailed"));
+          }
+          return;
+        }
+      } catch (err) {
+        if (activeRequestIdRef.current === request.id) {
+          setRecordError(err instanceof Error ? err.message : tHook("toolApprovalDialog.exactDecisionSaveFailed"));
+        }
+        return;
+      } finally {
+        if (recordingRequestIdRef.current === request.id) {
+          recordingRequestIdRef.current = null;
+          if (activeRequestIdRef.current === request.id) {
+            setRecordingDecision(false);
+          }
+        }
+      }
     }
-    // Call onDecide synchronously so the UI responds immediately.
+    // The parent decision callback addresses the current FIFO head. An async
+    // exact-record completion from a request that was cancelled/replaced must
+    // never resolve the next request.
+    if (activeRequestIdRef.current !== requestIdAtStart) return;
     if (extras === undefined) {
       onDecide(choice, pattern);
     } else {
       onDecide(choice, pattern, extras);
     }
-    // Await the record promise in the background (non-blocking for the user).
-    await recordPromise;
   }, [
     request,
     finalVerdict,
-    nlJustification,
     onDecide,
-    isMcpElicitation,
-    isRationaleApproval,
+    alwaysAllowUnavailable,
+    interactionLocked,
+    tHook,
   ]);
-
-  // Host-constrained approvals must not offer a durable choice that the
-  // approval gate will reject. The one-shot pair is used for operations such
-  // as governed plugin writes and host-shell execution permits.
-  const isHostConstrainedToOneShot =
-    request?.allowedChoices?.length === 2 &&
-    request.allowedChoices.includes("allow-once") &&
-    request.allowedChoices.includes("deny-once");
-
-  // The primary Approve button grants for the scope selected in the radio.
-  // HIGH verdict forces session (no persistent grant for HIGH-risk actions).
-  // This is the durable choice that the memory store records.
-  const approvalIsOneShot =
-    isRationaleApproval ||
-    isMcpElicitation ||
-    isExternalOriginAgentAction ||
-    isRemoteA2AAction ||
-    isHostConstrainedToOneShot;
-  const primaryApproveChoice: ApprovalChoice =
-    approvalIsOneShot
-      ? "allow-once"
-      : (finalVerdict !== "high" && scopeChoice === "persistent"
-          ? "allow-always"
-          : "allow-session");
   const approvalExtras = useMemo<ApprovalDecisionExtras | undefined>(
     () => hasElicitationSchema && elicitationParse.supported
       ? { elicitationContent }
@@ -535,17 +616,41 @@ export function ToolApprovalContent({
 
   const approveDisabledDescriptionId = rationaleDisplayInvalid
     ? "rationale-approval-invalid"
-    : (requiresNarrativeJustification ? "nl-justification-hint" : undefined);
+    : (isUnsupportedElicitationForm || elicitationInvalid
+        ? "mcp-elicitation-input-unavailable"
+        : undefined);
   const approveButtonTitle = rationaleDisplayInvalid
     ? RATIONALE_INVALID_APPROVAL_MESSAGE
     : (approveDisabled
-        ? tHook("toolApprovalDialog.enterReason")
+        ? tHook("toolApprovalDialog.completeRequiredChoices")
         : tHook("toolApprovalDialog.shortcutA"));
 
 
   const handlePanelKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
     if (e.nativeEvent.isComposing) return;
     if (isTextEntryShortcutTarget(e.target)) return;
+    const decisionNavigationTarget = e.target === e.currentTarget || (
+      e.target instanceof Element &&
+      e.target.closest('[data-testid="approval-decision-actions"]') !== null
+    );
+    if (interactionLocked || recordingRequestIdRef.current !== null) {
+      if (
+        e.key === "Escape" ||
+        e.key.toLowerCase() === "a" ||
+        e.key.toLowerCase() === "d" ||
+        (decisionNavigationTarget && (e.key === "ArrowLeft" || e.key === "ArrowRight"))
+      ) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+      return;
+    }
+    if (decisionNavigationTarget && (e.key === "ArrowLeft" || e.key === "ArrowRight")) {
+      e.preventDefault();
+      e.stopPropagation();
+      moveDecisionFocus(e.key === "ArrowRight" ? 1 : -1);
+      return;
+    }
     if (e.key === "Escape") {
       e.preventDefault();
       e.stopPropagation();
@@ -555,7 +660,7 @@ export function ToolApprovalContent({
     if (e.key.toLowerCase() === "a" && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
       e.stopPropagation();
-      if (!approveDisabled) void handleApprove(primaryApproveChoice, undefined, approvalExtras);
+      if (!approveDisabled) void handleApprove("allow-once", undefined, approvalExtras);
     } else if (e.key.toLowerCase() === "d" && !e.metaKey && !e.ctrlKey) {
       e.preventDefault();
       e.stopPropagation();
@@ -566,13 +671,13 @@ export function ToolApprovalContent({
     onDecide,
     approveDisabled,
     handleApprove,
-    primaryApproveChoice,
     approvalExtras,
+    interactionLocked,
+    moveDecisionFocus,
   ]);
 
   if (!open || !request) return null;
 
-  const title = request.kind === "agent-action" ? tHook("toolApprovalDialog.agentActionTitle") : tHook("toolApprovalDialog.toolApprovalTitle");
   // NOTE: argsStr uses JSON.stringify for human-readable display (pretty-printed,
   // insertion-order keys). The IPC approval record uses canonicalStringify (#828)
   // which sorts object keys — key ordering may differ between what is shown here
@@ -584,7 +689,6 @@ export function ToolApprovalContent({
   const argsDisplay = argsTruncated ? argsStr.slice(0, 500) + "\n…" : argsStr;
   const source = request.source ?? "unknown";
   const sourceBadge = request.source ? SOURCE_BADGE[request.source] ?? request.source : tHook("toolApprovalDialog.unknown");
-  const hasPending = pendingCount > 1;
   const originLabel = trustOriginLabel(request.trustOrigin);
   const category = request.toolCategory ?? "meta";
   // finalVerdict already computed above (before the null-check guard) — use it here.
@@ -592,11 +696,36 @@ export function ToolApprovalContent({
   const rows = isRationaleApproval
     ? []
     : approvalReviewRows(request, category, argsStr, originLabel, source, sourceBadge);
+  const sandboxSummary = isRationaleApproval ? null : approvalSandboxSummary(request);
+  const categoryImpact = category === "read"
+    ? tHook("toolApprovalDialog.impactRead")
+    : category === "write"
+      ? tHook("toolApprovalDialog.impactWrite")
+      : category === "network"
+        ? tHook("toolApprovalDialog.impactNetwork")
+        : category === "shell"
+          ? tHook("toolApprovalDialog.impactShell")
+          : tHook("toolApprovalDialog.impactMeta");
+  const specificReviewerReason = request.reviewerVerdict?.reason.trim() ?? "";
+  const specificHostReason = request.reason.trim();
+  const reviewedImpact = !isBoilerplateApprovalReason(specificReviewerReason)
+    ? specificReviewerReason
+    : !isBoilerplateApprovalReason(specificHostReason)
+      ? specificHostReason
+      : categoryImpact;
+  const highRiskReason = (userProvidedPurpose || reviewedImpact || categoryImpact).slice(0, 220);
+  const impactSummary = isRationaleApproval
+    ? ""
+    : (showsHighRiskReason
+        ? highRiskReason
+        : (request.approvalPurpose?.text.trim() || reviewedImpact || categoryImpact)
+      ).slice(0, 220);
 
   return (
     <div
       className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
       data-testid="tool-approval-panel"
+      data-pending-count={pendingCount}
       data-approval-request-id={isRationaleApproval ? undefined : request.id}
       data-approval-tool-name={isRationaleApproval ? undefined : request.toolName}
       data-approval-args={
@@ -606,129 +735,156 @@ export function ToolApprovalContent({
       onKeyDown={handlePanelKeyDown}
     >
       <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="tool-approval-card">
-        <section className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-3 [scrollbar-gutter:stable] sm:px-5 sm:py-4">
-          <div className="flex min-w-0 items-start pb-3">
-            <div className="min-w-0 flex-1">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                {/* Round-6 UX MAJOR — risk badge translated to Korean.
-                    Raw English `LOW`/`MEDIUM`/`HIGH` is opaque to non-
-                    technical Korean users and was the most prominent
-                    visual element in the approval surface. */}
-                <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
-                  {riskLevelKoLabel(finalVerdict as RiskLevel)}
-                </Badge>
-                <h3 className="min-w-0 flex-1 text-base font-semibold">
-                  {title}
-                </h3>
-                {hasPending && (
-                  <Badge variant="outline" className="shrink-0 text-[11px] text-muted-foreground">
-                    {tHook("toolApprovalDialog.pendingCount", { count: pendingCount - 1 })}
-                  </Badge>
-                )}
-              </div>
-              {/* Attribution — sub-agents and side chats raise this request from a
-                  conversation the user is not looking at. Host-owned id only;
-                  never conversation content. */}
-              <div className="mt-1 flex min-w-0 items-baseline gap-1.5 text-[11px] text-muted-foreground">
-                <span className="shrink-0">{tHook("approvalAttribution.rowConversation")}</span>
-                <code className="min-w-0 truncate font-mono" data-testid="approval-conversation">
-                  {request.sessionId ?? tHook("approvalAttribution.unattributed")}
-                </code>
-              </div>
-            </div>
-          </div>
-
-          <div className="space-y-3">
+        <section className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2 sm:px-4 sm:py-3">
+          <div className="space-y-2">
             {!isRationaleApproval && (
-              <div className="grid min-w-0 gap-2 sm:grid-cols-2">
-              <SummaryTile label={tHook("toolApprovalDialog.tileToolSource")}>
-                {/* Compact `source:tool` token (builtin:bash / {pluginId}:{tool})
-                    — one line so the dock content fits without scrolling. Origin +
-                    category still shown in the review box's 출처/판단 rows. */}
-                <code className="break-all font-mono">{sourceToolToken(request)}</code>
-                {request.kind === "agent-action" && request.approvalScope && (
-                  <>
-                    <br />
-                    {tHook("toolApprovalDialog.approvalScopePrefix")}: {" "}
-                    <code className="break-all font-mono">{request.approvalScope}</code>
-                  </>
-                )}
-              </SummaryTile>
-              <SummaryTile label={tHook("toolApprovalDialog.tilePermissionCategory")}>
-                {/* Round-6 UX MINOR — drop the raw English `category`
-                    token; `categoryLabel()` already conveys it in
-                    Korean and the duplicate looked like a code leak. */}
-                {categoryLabel(category)}
-              </SummaryTile>
-              </div>
-            )}
-
-            {isRationaleApproval ? (
-              <RationaleApprovalCard display={rationaleDisplay} />
-            ) : (
-              <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(finalVerdict as RiskLevel)}`}>
-              <h4 className="border-b px-3 py-2 text-xs font-semibold">
-                {reviewTitleForCategory(category)}
-              </h4>
-              {rows.map((row) => (
-                <ReviewRow
-                  key={row.label}
-                  label={row.label}
-                  // Round-3 UX MAJOR — prose rows now carry the testId
-                  // on the row wrapper so we don't have to force human-
-                  // readable text through `<pre>`.
-                  testId={row.monospace ? undefined : row.testId}
-                >
-                  {row.monospace ? (
-                    <pre
-                      className="max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
-                      data-testid={row.testId}
+              <>
+                <div className="min-w-0 space-y-1">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
+                      {riskLevelKoLabel(finalVerdict as RiskLevel)}
+                    </Badge>
+                    <code
+                      className="min-w-0 flex-1 break-all font-mono text-xs font-semibold"
+                      data-testid="approval-tool-identity"
                     >
-                      {row.value}
-                    </pre>
-                  ) : (
-                    row.value
-                  )}
-                </ReviewRow>
-              ))}
-              </div>
-            )}
+                      {sourceToolToken(request)}
+                    </code>
+                    {(pendingCount ?? 0) > 1 ? (
+                      <span
+                        className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground"
+                        data-testid="approval-inline-queue-depth"
+                      >
+                        1 / {pendingCount}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
+                    <span>{request.sourcePluginId ?? sourceBadge}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{categoryLabel(category)}</span>
+                    <span aria-hidden="true">·</span>
+                    <span>{originLabel}</span>
+                    <span aria-hidden="true">·</span>
+                    <code className="min-w-0 break-all font-mono" data-testid="approval-conversation">
+                      {request.sessionId ?? tHook("approvalAttribution.unattributed")}
+                    </code>
+                  </div>
+                  {request.kind === "agent-action" && request.approvalScope ? (
+                    <p className="break-words text-[10px] text-muted-foreground">
+                      {tHook("toolApprovalDialog.approvalScopePrefix")}: {request.approvalScope}
+                    </p>
+                  ) : null}
+                </div>
 
-            {!isRationaleApproval && (
-              <PermissionEvaluationContextPanel context={request.evaluationContext} />
-            )}
-
-            {/* MAJOR 1.6: NL justification moved above collapsible details so it's
-                visible without scrolling when the HIGH verdict disables Approve. */}
-            {/* NL justification — required for HIGH verdict */}
-            {requiresNarrativeJustification && (
-              <div className="mt-3 rounded-md border border-destructive/(--opacity-muted) bg-destructive/(--opacity-faint) p-3">
-                <Label
-                  htmlFor="nl-justification"
-                  className="mb-1.5 block text-xs font-semibold text-destructive"
+                <div
+                  className={`min-w-0 rounded-md border-l-2 px-3 py-2 ${
+                    showsHighRiskReason
+                      ? "border-destructive bg-destructive/(--opacity-faint)"
+                      : "border-warning bg-warning/(--opacity-subtle)"
+                  }`}
+                  data-testid="approval-impact-summary"
                 >
-                  {suggestedPurpose.length > 0 ? tHook("toolApprovalDialog.nlLabelAutoFilled") : tHook("toolApprovalDialog.nlLabelEnterPurpose")}
-                  <span className="ml-1.5 text-[10px] font-normal text-muted-foreground">
-                    {tHook("toolApprovalDialog.nlScopeSessionFixed")}
-                  </span>
-                </Label>
-                <Input
-                  id="nl-justification"
-                  type="text"
-                  value={nlJustification}
-                  onChange={(e) => setNlJustification(e.target.value)}
-                  placeholder={tHook("toolApprovalDialog.nlPlaceholder")}
-                  maxLength={500}
-                  className="h-8 text-xs"
-                  data-testid="nl-justification-input"
-                />
-                <p className="mt-1 text-[10px] text-muted-foreground">
-                  {suggestedPurpose.length > 0
-                    ? tHook("toolApprovalDialog.nlHintAutoFilled")
-                    : tHook("toolApprovalDialog.nlHintHighRisk")}
-                </p>
-              </div>
+                  {showsHighRiskReason ? (
+                    <span className="text-[10px] font-semibold text-destructive">
+                      {highRiskReasonSource}
+                    </span>
+                  ) : null}
+                  <p
+                    className="break-words text-xs leading-relaxed"
+                    data-testid={showsHighRiskReason ? "high-risk-audit-reason" : undefined}
+                  >
+                    {impactSummary}
+                  </p>
+                  {sandboxSummary ? (
+                    <p
+                      className="mt-0.5 break-words text-[10px] text-muted-foreground"
+                      data-testid={sandboxSummary.testId}
+                    >
+                      {sandboxSummary.value}
+                    </p>
+                  ) : null}
+                  {showsHighRiskReason ? (
+                    <p className="mt-0.5 text-[10px] text-muted-foreground">
+                      {tHook("toolApprovalDialog.highRiskExplicitApproval")}
+                    </p>
+                  ) : null}
+                </div>
+              </>
             )}
+
+            <details
+              className="group min-w-0 overflow-hidden rounded-lg border border-border-strong bg-muted/(--opacity-light)"
+              data-testid="approval-review-details"
+            >
+              <summary className="flex min-w-0 cursor-pointer list-none items-center gap-2 px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&::-webkit-details-marker]:hidden">
+                <span className="min-w-0 flex-1">
+                  <span className="block text-xs font-semibold">
+                    {tHook("toolApprovalDialog.reviewDetails")}
+                  </span>
+                  <span className="block text-[10px] font-normal text-muted-foreground">
+                    {tHook("toolApprovalDialog.reviewDetailsHint")}
+                  </span>
+                </span>
+                <ChevronDown
+                  aria-hidden="true"
+                  className="h-4 w-4 shrink-0 transition-transform group-open:rotate-180"
+                />
+              </summary>
+              <div className="space-y-3 border-t p-3">
+                {isRationaleApproval ? (
+                  <RationaleApprovalCard display={rationaleDisplay} />
+                ) : (
+                  <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(finalVerdict as RiskLevel)}`}>
+                    <h4 className="border-b px-3 py-2 text-xs font-semibold">
+                      {reviewTitleForCategory(category)}
+                    </h4>
+                    {rows.map((row) => (
+                      <ReviewRow
+                        key={row.label}
+                        label={row.label}
+                        testId={row.monospace ? undefined : row.testId}
+                      >
+                        {row.monospace ? (
+                          <pre
+                            className="max-h-40 max-w-full overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed"
+                            data-testid={row.testId}
+                          >
+                            {row.value}
+                          </pre>
+                        ) : row.value}
+                      </ReviewRow>
+                    ))}
+                  </div>
+                )}
+
+                {!isRationaleApproval && (
+                  <PermissionEvaluationContextPanel context={request.evaluationContext} />
+                )}
+
+                {!isRationaleApproval && (
+                  <div className="min-w-0 overflow-hidden rounded-md border bg-background">
+                    <p className="border-b px-3 py-2 text-xs font-semibold">
+                      {tHook("toolApprovalDialog.showFullInput")}
+                    </p>
+                    <pre className="max-h-56 max-w-full overflow-auto px-3 py-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
+                      {argsDisplay}
+                    </pre>
+                    {argsStr.length > 500 && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-auto px-3 pb-2 pt-0 text-[11px] text-primary underline hover:bg-transparent"
+                        onClick={() => setExpanded((v) => !v)}
+                      >
+                        {expanded ? tHook("toolApprovalDialog.collapse") : tHook("toolApprovalDialog.showAll")}
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+            </details>
 
             {!isRationaleApproval && isElicitationForm && (
               <div
@@ -739,13 +895,18 @@ export function ToolApprovalContent({
                 <div className="grid gap-3">
                   {elicitationFields.map((field) => {
                     const inputId = `mcp-elicitation-${field.name}`;
+                    const labelId = `${inputId}-label`;
                     const value = elicitationValues[field.name];
                     const invalid =
                       isRequiredElicitationValueMissing(field, value) ||
                       isNumericFieldInvalid(field, value);
                     return (
                       <div key={field.name} className="grid gap-1.5">
-                        <Label htmlFor={inputId} className="text-xs">
+                        <Label
+                          id={labelId}
+                          htmlFor={field.enumOptions || field.kind === "boolean" ? inputId : undefined}
+                          className="text-xs"
+                        >
                           {field.label}
                           {field.required && <span className="ml-1 text-destructive">*</span>}
                         </Label>
@@ -790,21 +951,23 @@ export function ToolApprovalContent({
                             </Label>
                           </div>
                         ) : (
-                          <Input
+                          <div
                             id={inputId}
-                            type={field.kind === "string" ? "text" : "number"}
-                            step={field.kind === "integer" ? "1" : "any"}
-                            value={typeof value === "string" ? value : ""}
+                            className="min-w-0 rounded-md border bg-muted/(--opacity-light) px-3 py-2 text-xs"
+                            role="group"
+                            aria-labelledby={labelId}
                             aria-invalid={invalid || undefined}
                             data-testid={`mcp-elicitation-field-${field.name}`}
-                            onChange={(event) => {
-                              const nextValue = event.target.value;
-                              setElicitationValues((current) => ({
-                                ...current,
-                                [field.name]: nextValue,
-                              }));
-                            }}
-                          />
+                            data-readonly="true"
+                          >
+                            {typeof value === "string" && value.trim().length > 0 ? (
+                              <code className="break-all font-mono">{value}</code>
+                            ) : (
+                              <span className="text-muted-foreground">
+                                {tHook("toolApprovalDialog.noTypedValueProvided")}
+                              </span>
+                            )}
+                          </div>
                         )}
                         {field.description && (
                           <p className="text-[11px] text-muted-foreground">
@@ -827,101 +990,139 @@ export function ToolApprovalContent({
               </div>
             )}
 
-            {!isRationaleApproval && (
-              <details className="min-w-0 rounded-md border bg-muted/(--opacity-light)">
-              <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
-                {tHook("toolApprovalDialog.showFullInput")}
-              </summary>
-              <pre className="max-h-56 max-w-full overflow-auto border-t px-3 py-2 whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
-                {argsDisplay}
-              </pre>
-              {argsStr.length > 500 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto px-3 pb-2 pt-0 text-[11px] text-primary underline hover:bg-transparent"
-                  onClick={() => setExpanded((v) => !v)}
-                >
-                  {expanded ? tHook("toolApprovalDialog.collapse") : tHook("toolApprovalDialog.showAll")}
-                </Button>
-              )}
-              </details>
+            {!isRationaleApproval && (isUnsupportedElicitationForm || elicitationInvalid) && (
+              <p
+                id="mcp-elicitation-input-unavailable"
+                className="mt-2 text-[10px] text-muted-foreground"
+                data-testid="mcp-elicitation-input-unavailable"
+              >
+                {tHook("toolApprovalDialog.typedInputOutsideApproval")}
+              </p>
             )}
+
           </div>
 
-          {/* Scope selector — LOW/MEDIUM only (HIGH is always session) */}
-          {finalVerdict !== "high" && !approvalIsOneShot && (
-            <div className="mt-3">
-              <p className="mb-1.5 text-xs font-semibold">{tHook("toolApprovalDialog.approvalScope")}</p>
-              <RadioGroup
-                value={scopeChoice}
-                onValueChange={(v) => setScopeChoice(v as UserApprovalScope)}
-                className="flex min-w-0 flex-wrap gap-x-4 gap-y-2"
-                data-testid="approval-scope-options"
-              >
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <RadioGroupItem value="session" id="scope-session" />
-                  <Label htmlFor="scope-session" className="min-w-0 break-words text-xs">{tHook("toolApprovalDialog.scopeSession")}</Label>
-                </div>
-                <div className="flex min-w-0 items-center gap-1.5">
-                  <RadioGroupItem value="persistent" id="scope-persistent" />
-                  <Label htmlFor="scope-persistent" className="min-w-0 break-words text-xs">{tHook("toolApprovalDialog.scopePersistent")}</Label>
-                </div>
-              </RadioGroup>
-            </div>
-          )}
-
         </section>
-          <div className="flex min-w-0 shrink-0 flex-wrap justify-end gap-2 border-t bg-card px-3 py-2 sm:px-5 [&>button]:min-w-[7rem] [&>button]:flex-1 sm:[&>button]:flex-none">
-            {!approvalIsOneShot && (
+          <footer className="min-w-0 shrink-0 space-y-1.5 border-t bg-card px-3 py-2 sm:px-4">
+            <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+              <span>{tHook("toolApprovalDialog.permanentDenyInSettings")}</span>
               <Button
+                type="button"
+                size="sm"
+                variant="link"
+                className="h-auto min-w-0 max-w-full shrink p-0 text-right text-[11px] whitespace-normal break-words"
+                disabled={recordingDecision || approvalIsOneShot || !onOpenPermanentDeny}
+                title={approvalIsOneShot ? tHook("toolApprovalDialog.persistentUnavailableOneShot") : undefined}
+                onClick={() => {
+                  if (recordingRequestIdRef.current === null) {
+                    onOpenPermanentDeny?.(request, finalVerdict as UserApprovalVerdict);
+                  }
+                }}
+                data-testid="open-permanent-deny-settings"
+              >
+                {tHook("toolApprovalDialog.openPermissionSettings")}
+              </Button>
+            </div>
+            <div
+              className="grid min-w-0 grid-cols-3 gap-2 [&>button]:min-w-0 [&>button]:h-auto [&>button]:whitespace-normal [&>button]:break-words [&>button]:px-1 [&>button]:py-2 [&>button]:text-[11px] [&>button]:leading-tight"
+              data-testid="approval-decision-actions"
+            >
+              <Button
+                ref={(element) => {
+                  decisionButtonRefs.current[0] = element;
+                }}
                 size="sm"
                 variant="outline"
                 className="border-destructive text-destructive hover:bg-destructive/(--opacity-soft)"
-                onClick={() => onDecide("deny-always", request.toolName)}
+                onClick={() => {
+                  if (recordingRequestIdRef.current === null) onDecide("deny-once");
+                }}
+                title={tHook("toolApprovalDialog.shortcutD")}
+                disabled={denyDecisionDisabled}
+                tabIndex={decisionIndex === 0 && !denyDecisionDisabled ? 0 : -1}
+                onFocus={() => setDecisionIndex(0)}
+                aria-describedby={interactionLocked ? "approval-decision-locked" : undefined}
+                data-testid="deny-button"
               >
-                {tHook("toolApprovalDialog.denyAlways")}
+                {tHook("toolApprovalDialog.denyOnce")}
               </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => onDecide("deny-once")}
-              title={tHook("toolApprovalDialog.shortcutD")}
-              data-testid="deny-button"
-            >
-              {tHook("toolApprovalDialog.denyOnce")}
-            </Button>
-            {!approvalIsOneShot && (
               <Button
+                ref={(element) => {
+                  decisionButtonRefs.current[1] = element;
+                }}
                 size="sm"
                 variant="outline"
-                onClick={() => void handleApprove("allow-always", request.toolName)}
-                disabled={approveDisabled}
-                title={approveDisabled ? tHook("toolApprovalDialog.enterReason") : undefined}
-                aria-describedby={approveDisabled ? approveDisabledDescriptionId : undefined}
+                onClick={() => void handleApprove("allow-always")}
+                disabled={alwaysAllowDecisionDisabled}
+                tabIndex={decisionIndex === 1 && !alwaysAllowDecisionDisabled ? 0 : -1}
+                onFocus={() => setDecisionIndex(1)}
+                title={
+                  alwaysAllowUnavailable
+                    ? (finalVerdict === "high"
+                        ? tHook("toolApprovalDialog.persistentUnavailableHighRisk")
+                        : tHook("toolApprovalDialog.persistentUnavailableOneShot"))
+                    : approveDisabled ? tHook("toolApprovalDialog.completeRequiredChoices") : undefined
+                }
+                aria-describedby={
+                  interactionLocked
+                    ? "approval-decision-locked"
+                    : persistentUnavailableReason
+                      ? "allow-always-unavailable-reason"
+                      : approveDisabled
+                        ? approveDisabledDescriptionId
+                        : undefined
+                }
+                data-testid="allow-always-button"
               >
                 {tHook("toolApprovalDialog.allowAlways")}
               </Button>
-            )}
-            <Button
-              size="sm"
-              variant="default"
-              onClick={() => void handleApprove(primaryApproveChoice, undefined, approvalExtras)}
-              disabled={approveDisabled}
-              title={approveButtonTitle}
-              aria-describedby={approveDisabled ? approveDisabledDescriptionId : undefined}
-              data-testid="approve-button"
-            >
-              {approvalIsOneShot ? tHook("toolApprovalDialog.allowOnce") : tHook("toolApprovalDialog.allow")}
-            </Button>
-            {!isRationaleApproval && (
-              <span id="nl-justification-hint" className="sr-only">
-                {tHook("toolApprovalDialog.highRiskNlRequired")}
-              </span>
-            )}
-          </div>
+              <Button
+                ref={(element) => {
+                  decisionButtonRefs.current[2] = element;
+                }}
+                size="sm"
+                variant="default"
+                onClick={() => void handleApprove("allow-once", undefined, approvalExtras)}
+                disabled={allowOnceDecisionDisabled}
+                tabIndex={decisionIndex === 2 && !allowOnceDecisionDisabled ? 0 : -1}
+                onFocus={() => setDecisionIndex(2)}
+                title={approveButtonTitle}
+                aria-describedby={
+                  interactionLocked
+                    ? "approval-decision-locked"
+                    : approveDisabled
+                      ? approveDisabledDescriptionId
+                      : undefined
+                }
+                data-testid="approve-button"
+              >
+                {tHook("toolApprovalDialog.allowOnce")}
+              </Button>
+            </div>
+            {persistentUnavailableReason ? (
+              <p
+                id="allow-always-unavailable-reason"
+                className="text-[10px] text-muted-foreground"
+                data-testid="allow-always-unavailable-reason"
+              >
+                {persistentUnavailableReason}
+              </p>
+            ) : null}
+            {interactionLocked ? (
+              <p
+                id="approval-decision-locked"
+                className="text-[10px] text-muted-foreground"
+                data-testid="approval-decision-locked"
+              >
+                {tHook("toolApprovalDialog.decisionPendingInSettings")}
+              </p>
+            ) : null}
+            {recordError ? (
+              <p className="text-[11px] text-destructive" role="alert" data-testid="exact-decision-save-error">
+                {recordError}
+              </p>
+            ) : null}
+          </footer>
       </div>
     </div>
   );
@@ -934,85 +1135,59 @@ function isTextEntryShortcutTarget(target: EventTarget | null): boolean {
   ) !== null;
 }
 
-function riskLevelForCategory(category: PermissionDecisionCategory): RiskLevel {
-  if (category === "shell") return "high";
-  if (category === "write" || category === "network" || category === "meta") return "medium";
-  return "low";
-}
-
 function parseArgs(args: unknown): ParsedSummary | null {
   if (!args || typeof args !== "object" || Array.isArray(args)) return null;
   return args as ParsedSummary;
 }
 
-export function approvalReviewRows(
+function approvalSandboxSummary(request: ApprovalRequest): ReviewBasisRow | null {
+  const cap = request.executionPlan?.capability ?? request.sandboxCapability;
+  if (!cap) return null;
+
+  let value: string;
+  if (cap.kind === "partial") {
+    value = t("toolApprovalDialog.sandboxPartial");
+  } else if (cap.kind === "fs-only") {
+    value = t("toolApprovalDialog.sandboxFsOnly");
+  } else if (cap.kind === "none" || cap.confidence === "assumed") {
+    value = t("toolApprovalDialog.sandboxNone");
+  } else if (
+    cap.confines &&
+    !(cap.confines.filesystem && cap.confines.process && cap.confines.network)
+  ) {
+    value = t("toolApprovalDialog.sandboxNetworkOnly", {
+      net: cap.confines.network ? "✓" : "✗",
+      fs: cap.confines.filesystem ? "✓" : "✗",
+      proc: cap.confines.process ? "✓" : "✗",
+    });
+  } else {
+    value = t("toolApprovalDialog.sandboxActive", { kind: cap.kind });
+  }
+  if (request.executionPlan?.requiresExplicitUserApproval === true) {
+    value += ` · ${t("toolApprovalDialog.allowOnce")}`;
+  }
+  return {
+    label: t("toolApprovalDialog.rowSandbox"),
+    value,
+    testId: request.executionPlan ? "tool-approval-execution-plan" : "tool-approval-sandbox",
+  };
+}
+
+function approvalReviewRows(
   request: ApprovalRequest,
   category: PermissionDecisionCategory,
   inputSummary: string,
   originLabel: string,
   _source: string,
-  sourceBadge: string,
+  _sourceBadge: string,
 ): ReviewBasisRow[] {
   const parsed = parseArgs(request.args);
   const reviewer = request.reviewerVerdict
     ? `${riskLevelKoLabel(request.reviewerVerdict.level)} · ${request.reviewerVerdict.reason}`
     : request.reason;
-  const rows: ReviewBasisRow[] = [
-    {
-      label: t("toolApprovalDialog.rowSource"),
-      value: `${sourceBadge} · ${originLabel}`,
-    },
-  ];
-  // Issue #691 round-1 user request — surface the OS-level execution
-  // sandbox so the user sees how this tool will be isolated (or not).
-  // `kind: "none"` is the current real-world state; the row stays
-  // present so users learn to look for it once isolation lands.
-  const displayedSandbox = request.executionPlan?.capability ?? request.sandboxCapability;
-  if (displayedSandbox) {
-    const cap = displayedSandbox;
-    // MAJOR-2.1 SOT consumer fix: per-kind Korean labels instead of
-    // binary weak/strong. "partial" was incorrectly shown as "OS 격리
-    // 없음" (factually wrong — partial isolation IS present), and
-    // "fs-only" showed the raw English token "OS 격리 활성 (fs-only)".
-    // Labels mirror formatSandboxCapabilityForPrompt() in sandbox-capability.ts
-    // (the SOT) so UI and reviewer prompt agree.
-    let sandboxValue: string;
-    if (cap.kind === "partial") {
-      sandboxValue = t("toolApprovalDialog.sandboxPartial");
-    } else if (cap.kind === "fs-only") {
-      sandboxValue = t("toolApprovalDialog.sandboxFsOnly");
-    } else if (
-      cap.kind === "none" ||
-      cap.confidence === "assumed"
-    ) {
-      sandboxValue = t("toolApprovalDialog.sandboxNone");
-    } else if (
-      cap.confines &&
-      !(cap.confines.filesystem && cap.confines.process && cap.confines.network)
-    ) {
-      // Confines honesty: a verified non-none capability can still be partial.
-      // For example, Windows srt-win lacks process confinement. Show the
-      // per-dimension breakdown whenever the active substrate is not full.
-      sandboxValue = t("toolApprovalDialog.sandboxNetworkOnly", {
-        net: cap.confines.network ? "✓" : "✗",
-        fs: cap.confines.filesystem ? "✓" : "✗",
-        proc: cap.confines.process ? "✓" : "✗",
-      });
-    } else {
-      sandboxValue = t("toolApprovalDialog.sandboxActive", { kind: cap.kind });
-    }
-    // A sealed plain-shell fallback can require a one-shot decision on any
-    // platform. Show only that host-owned approval fact, never a raw fallback
-    // reason or private permit binding.
-    if (request.executionPlan?.requiresExplicitUserApproval === true) {
-      sandboxValue += ` · ${t("toolApprovalDialog.allowOnce")}`;
-    }
-    rows.push({
-      label: t("toolApprovalDialog.rowSandbox"),
-      value: sandboxValue,
-      testId: request.executionPlan ? "tool-approval-execution-plan" : "tool-approval-sandbox",
-    });
-  }
+  // Source, trust origin, category, conversation and sandbox now live in the
+  // compact always-visible summary. Details contain only additional evidence.
+  const rows: ReviewBasisRow[] = [];
   if (isNonUserTrustOrigin(request.trustOrigin)) {
     rows.push({
       label: t("toolApprovalDialog.rowCaution"),
@@ -1026,7 +1201,7 @@ export function approvalReviewRows(
   // endpoint) + the reviewer verdict always render. Always-hardcoded/redundant
   // rows (write impact = source·category·note; read scope = source·category·…;
   // read volume) are removed — origin + category already live in the tiles + 판단.
-  const NO_DATA = " nd ";
+  const NO_DATA = "__LVIS_NO_APPROVAL_DATA__";
   const optRow = (
     label: string,
     keys: string[],

@@ -43,7 +43,6 @@ describe("ToolApprovalContent conversation attribution", () => {
     expect(screen.getByTestId("approval-conversation")).toHaveTextContent(
       "side-chat-7f21",
     );
-    expect(screen.getByText("대화")).toBeInTheDocument();
   });
 
   it("distinguishes two conversations asking for the same tool", () => {

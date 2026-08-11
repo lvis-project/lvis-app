@@ -105,7 +105,9 @@ describe("migrateCanonicalization — Case 1: nested-array-of-objects entry re-k
     const file = await readApprovals();
     expect(file.approvals[oldKey]).toBeUndefined();
     expect(file.approvals[newKey]).toBeDefined();
-    expect(file.approvals[newKey].args).toBe(newArgs);
+    // Raw args are migration-only material and are scrubbed after the new key
+    // has been derived so renderer-readable history cannot recover them.
+    expect(file.approvals[newKey].args).toBeUndefined();
 
     // Marker file must exist.
     await expect(access(MARKER_PATH)).resolves.toBeUndefined();
@@ -175,8 +177,8 @@ describe("migrateCanonicalization — Case 2: idempotency", () => {
 
 // ─── Case 3: entries without nested-array-of-objects are unchanged ─────────────
 
-describe("migrateCanonicalization — Case 3: flat entries are not spuriously rewritten", () => {
-  it("flat args (no nested-array-of-objects) are unchanged after migration", async () => {
+describe("migrateCanonicalization — Case 3: flat entries keep their key while raw metadata is scrubbed", () => {
+  it("keeps the flat canonical key and removes migration-only args", async () => {
     const toolName = "file_read";
     const source = "builtin";
     // Flat object — canonicalStringify and JSON.stringify produce the same result.
@@ -201,8 +203,13 @@ describe("migrateCanonicalization — Case 3: flat entries are not spuriously re
     await migrateCanonicalization();
     const fileAfter = await readFile(APPROVALS_PATH, "utf8");
 
-    // File must be unchanged (no rewrite for flat entries).
-    expect(fileAfter).toBe(fileBefore);
+    // The identity key remains unchanged, but raw input metadata is removed
+    // after migration even when no re-keying was necessary.
+    expect(fileAfter).not.toBe(fileBefore);
+    const parsedAfter = JSON.parse(fileAfter) as {
+      approvals: Record<string, { args?: string }>;
+    };
+    expect(parsedAfter.approvals[key]?.args).toBeUndefined();
 
     // Key must still resolve.
     const hit = await lookupApproval(toolName, argsStr, source);

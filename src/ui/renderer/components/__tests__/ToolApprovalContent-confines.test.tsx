@@ -1,7 +1,9 @@
+// @vitest-environment jsdom
+
 /**
  * PR2 finding b — ToolApprovalContent confines honesty.
  *
- * The "보안 격리" (security isolation) row must reflect per-dimension confines.
+ * The always-visible security-isolation summary must reflect per-dimension confines.
  * Before the fix, the confines-BLIND `isWeakSandbox` printed a blanket
  * "OS 격리 활성" for ANY verified non-none ASRT — so a write/shell tool on
  * Windows (partial srt-win, process not confined) wrongly read
@@ -12,8 +14,10 @@
  * Locale is pinned to Korean for renderer tests (vitest-locale-ko.ts), so the
  * assertions match the Korean catalog.
  */
+import "../../../../../test/renderer/setup.js";
+import { render } from "@testing-library/react";
 import { describe, it, expect } from "vitest";
-import { approvalReviewRows } from "../ToolApprovalContent.js";
+import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
 
 function makeRequest(
@@ -33,14 +37,21 @@ function makeRequest(
   };
 }
 
-function sandboxRow(req: ApprovalRequest) {
-  const rows = approvalReviewRows(req, "shell", "Get-ChildItem", "user", "builtin", "BUILTIN");
-  return rows.find((r) => r.testId === "tool-approval-sandbox");
+function renderSandboxSummary(req: ApprovalRequest) {
+  const { container } = render(
+    <ToolApprovalContent open request={req} onDecide={() => undefined} />,
+  );
+  return {
+    container,
+    summary: container.querySelector<HTMLElement>(
+      '[data-testid="tool-approval-sandbox"], [data-testid="tool-approval-execution-plan"]',
+    ),
+  };
 }
 
 describe("ToolApprovalContent sandbox confines label", () => {
   it("shows the partial breakdown for a win32 partial ASRT (process not confined)", () => {
-    const row = sandboxRow(
+    const { summary } = renderSandboxSummary(
       makeRequest({
         kind: "asrt",
         confidence: "verified",
@@ -49,18 +60,18 @@ describe("ToolApprovalContent sandbox confines label", () => {
         confines: { filesystem: true, process: false, network: true },
       }),
     );
-    expect(row).toBeDefined();
+    expect(summary).toBeTruthy();
     // KO: "⚠ OS 격리 부분적 … [net:✓ fs:✓ proc:✗]"
-    expect(row?.value).toContain("OS 격리 부분적");
-    expect(row?.value).toContain("net:✓");
-    expect(row?.value).toContain("fs:✓");
-    expect(row?.value).toContain("proc:✗");
+    expect(summary?.textContent).toContain("OS 격리 부분적");
+    expect(summary?.textContent).toContain("net:✓");
+    expect(summary?.textContent).toContain("fs:✓");
+    expect(summary?.textContent).toContain("proc:✗");
     // It must NOT print the blanket "OS 격리 활성" full-isolation label.
-    expect(row?.value).not.toContain("OS 격리 활성");
+    expect(summary?.textContent).not.toContain("OS 격리 활성");
   });
 
   it("shows full-isolation active for a mac/linux full-confine ASRT", () => {
-    const row = sandboxRow(
+    const { summary } = renderSandboxSummary(
       makeRequest({
         kind: "asrt",
         confidence: "verified",
@@ -69,12 +80,12 @@ describe("ToolApprovalContent sandbox confines label", () => {
         confines: { filesystem: true, process: true, network: true },
       }),
     );
-    expect(row?.value).toContain("OS 격리 활성");
-    expect(row?.value).not.toContain("OS 격리 부분적");
+    expect(summary?.textContent).toContain("OS 격리 활성");
+    expect(summary?.textContent).not.toContain("OS 격리 부분적");
   });
 
   it("shows no-isolation for a kind:none capability", () => {
-    const row = sandboxRow(
+    const { summary } = renderSandboxSummary(
       makeRequest({
         kind: "none",
         confidence: "verified",
@@ -82,7 +93,7 @@ describe("ToolApprovalContent sandbox confines label", () => {
         reason: "gate off",
       }),
     );
-    expect(row?.value).toContain("OS 격리 없음");
+    expect(summary?.textContent).toContain("OS 격리 없음");
   });
   it("uses the safe host execution plan instead of a contradictory process capability", () => {
     const request = makeRequest({
@@ -115,15 +126,15 @@ describe("ToolApprovalContent sandbox confines label", () => {
       reason: "HOST-ONLY-reason",
     } as unknown as NonNullable<ApprovalRequest["executionPlan"]>;
 
-    const rows = approvalReviewRows(request, "shell", "Get-ChildItem", "user", "builtin", "BUILTIN");
-    const planRow = rows.find((row) => row.testId === "tool-approval-execution-plan");
-    expect(planRow?.value).toContain("OS 격리 없음");
-    expect(planRow?.value).toContain("한 번만 허용");
-    expect(rows.some((row) => row.testId === "tool-approval-sandbox")).toBe(false);
-    expect(planRow?.value).not.toContain("HOST-ONLY-binding");
-    expect(planRow?.value).not.toContain("HOST-ONLY-command");
-    expect(planRow?.value).not.toContain("HOST-ONLY-cwd");
-    expect(planRow?.value).not.toContain("HOST-ONLY-reason");
+    const { container, summary } = renderSandboxSummary(request);
+    expect(summary).toHaveAttribute("data-testid", "tool-approval-execution-plan");
+    expect(summary?.textContent).toContain("OS 격리 없음");
+    expect(summary?.textContent).toContain("한 번만 허용");
+    expect(container.querySelector('[data-testid="tool-approval-sandbox"]')).toBeNull();
+    expect(summary?.textContent).not.toContain("HOST-ONLY-binding");
+    expect(summary?.textContent).not.toContain("HOST-ONLY-command");
+    expect(summary?.textContent).not.toContain("HOST-ONLY-cwd");
+    expect(summary?.textContent).not.toContain("HOST-ONLY-reason");
   });
 
   it("shows one-shot approval for a generic requested-unavailable plan without exposing its reason", () => {
@@ -150,16 +161,16 @@ describe("ToolApprovalContent sandbox confines label", () => {
       reason: "HOST-ONLY-requested-unavailable-reason",
     } as unknown as NonNullable<ApprovalRequest["executionPlan"]>;
 
-    const rows = approvalReviewRows(request, "shell", "Get-ChildItem", "user", "builtin", "BUILTIN");
-    const planRow = rows.find((row) => row.testId === "tool-approval-execution-plan");
-    expect(planRow?.value).toContain("OS 격리 없음");
-    expect(planRow?.value).toContain("한 번만 허용");
-    expect(planRow?.value).not.toContain("HOST-ONLY-requested-unavailable-reason");
+    const { summary } = renderSandboxSummary(request);
+    expect(summary).toHaveAttribute("data-testid", "tool-approval-execution-plan");
+    expect(summary?.textContent).toContain("OS 격리 없음");
+    expect(summary?.textContent).toContain("한 번만 허용");
+    expect(summary?.textContent).not.toContain("HOST-ONLY-requested-unavailable-reason");
   });
   it("falls back to full-active label when confines is absent (legacy)", () => {
     // A verified non-none ASRT with no declared confines keeps the old
     // all-or-nothing label — preserving existing fixtures.
-    const row = sandboxRow(
+    const { summary } = renderSandboxSummary(
       makeRequest({
         kind: "asrt",
         confidence: "verified",
@@ -167,6 +178,6 @@ describe("ToolApprovalContent sandbox confines label", () => {
         reason: "legacy",
       }),
     );
-    expect(row?.value).toContain("OS 격리 활성");
+    expect(summary?.textContent).toContain("OS 격리 활성");
   });
 });
