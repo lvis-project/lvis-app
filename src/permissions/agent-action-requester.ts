@@ -12,8 +12,10 @@
  *     ApprovalGate which mints nonce + HMAC.
  *   - Plugin MUST NOT compute nonce/HMAC — those are gate-internal confused-deputy fields.
  *
- * Returns only the ApprovalChoice so callers don't need to unwrap
+ * Returns only a one-shot ApprovalChoice so callers don't need to unwrap
  * ApprovalDecision (nonce/hmac fields are verification artefacts, not outputs).
+ * Agent-action requests do not have a durable decision consumer, so injected
+ * or legacy gates cannot upgrade them to a persistent grant.
  *
  * Security: ApprovalIssuerRegistry records
  * (requestId -> { issuerPluginId, scope }) at request time. The respond path
@@ -155,8 +157,8 @@ export function verifyApprovalRequestScope(
  * verify origin + scope without a race.
  *
  * The gate generates nonce + HMAC internally (confused-deputy defense).
- * On timeout the gate returns deny-once; this function propagates that
- * choice without masking the error path. If `gate.requestAndWait` throws,
+ * On timeout the gate returns deny-once. Any non-one-shot response is clamped
+ * fail-closed to deny-once. If `gate.requestAndWait` throws,
  * the registry entry recorded above is removed in the `finally` block so
  * a thrown gate cannot leak issuer entries (AC1.4).
  *
@@ -185,6 +187,8 @@ export async function requestAgentApproval(
       id: requestId,
       category: "agent-action",
       kind: "agent-action",
+      allowedChoices: ["allow-once", "deny-once"],
+      durableApprovalRecordAllowed: false,
       toolName: input.toolName,
       toolCategory: "meta",
       args: input.args,
@@ -195,7 +199,7 @@ export async function requestAgentApproval(
       createdAt: Date.now(),
     });
     settled = true;
-    return decision.choice;
+    return decision.choice === "allow-once" ? "allow-once" : "deny-once";
   } finally {
     // On gate throw (settled=false) we must purge the entry we just
     // recorded, otherwise a subsequent malicious respond() with the same

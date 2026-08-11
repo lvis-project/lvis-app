@@ -43,6 +43,7 @@ import { useSettingsOrchestration } from "./hooks/use-settings-orchestration.js"
 import { useDebouncedSave } from "./hooks/use-debounced-save.js";
 import { normalizeSettingsTab, SETTINGS_TAB_LABEL_KEYS, type SettingsTab } from "../../shared/settings-tabs.js";
 import type { MarketplacePackageFilter } from "../../shared/marketplace-package-sections.js";
+import type { ExactDenyDraft } from "./exact-permission-decision.js";
 
 type SettingsNavItem = { value: SettingsTab; icon: LucideIcon; labelKey: string };
 
@@ -144,6 +145,9 @@ export function SettingsContent({
   onSaved,
   initialTab = "llm",
   onTabChange,
+  exactDenyDraft = null,
+  onExactDenySaved,
+  onDiscardExactDeny,
 }: {
   api: LvisApi;
   onSaved: () => void;
@@ -162,6 +166,9 @@ export function SettingsContent({
    * transitions while the shell observes normalized tab changes.
    */
   onTabChange?: (tab: string) => void;
+  exactDenyDraft?: ExactDenyDraft | null;
+  onExactDenySaved?: (requestId: string) => void;
+  onDiscardExactDeny?: () => void;
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState(() => normalizeSettingsTab(initialTab));
@@ -630,7 +637,13 @@ export function SettingsContent({
           </TabsContent>
 
           <TabsContent value="startup" className={tabContentCls}><StartupTab /></TabsContent>
-          <TabsContent value="permissions" className={tabContentCls}><PermissionsTab /></TabsContent>
+          <TabsContent value="permissions" className={tabContentCls}>
+            <PermissionsTab
+              exactDenyDraft={exactDenyDraft}
+              onExactDenySaved={onExactDenySaved}
+              onDiscardExactDeny={onDiscardExactDeny}
+            />
+          </TabsContent>
           <TabsContent value="remote-surfaces" className={tabContentCls}><RemoteSurfacesTab api={api} /></TabsContent>
           <TabsContent value="roles" className={tabContentCls}><RolesTab api={api} /></TabsContent>
           <TabsContent value="usage" className={tabContentCls}>

@@ -7,7 +7,7 @@
  */
 import "../../../../test/renderer/setup.js";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, waitFor } from "@testing-library/react";
+import { act, render, fireEvent, waitFor } from "@testing-library/react";
 import { ApprovalDock } from "../components/permissions/ApprovalDock.js";
 import type { ApprovalRequest, PermissionEvaluationContext } from "../types.js";
 
@@ -44,11 +44,8 @@ function makeRequest(overrides: Partial<ApprovalRequest> = {}): ApprovalRequest 
 }
 
 describe("ApprovalDock", () => {
-  // HIGH-1 CI fix: ToolApprovalContent.handleApprove calls window.lvis.userApproval.record.
-  // Without this mock the IPC bridge throws synchronously before onDecide is reached.
-  // The fire-and-await pattern calls onDecide synchronously before awaiting record,
-  // so the test's fireEvent.click assertion is always synchronous — but the record
-  // mock must exist so the optional-chain doesn't return undefined and throw.
+  // ToolApprovalContent persists an exact allow before resolving the gate.
+  // Without this mock the card correctly stays open with a save error.
   // vi.stubGlobal is used so the outer afterEach's vi.unstubAllGlobals() handles cleanup.
   beforeEach(() => {
     vi.stubGlobal("lvis", {
@@ -71,10 +68,11 @@ describe("ApprovalDock", () => {
     render(
       <ApprovalDock queue={[makeRequest()]} onDecide={vi.fn()} />,
     );
-    // Radix Dialog portals to document.body
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
-      expect(document.body.textContent).toContain("도구 / 출처");
+      expect(document.body.querySelector('[data-testid="approval-tool-identity"]'))
+        .toHaveTextContent("read_file");
+      expect(document.body.textContent).toContain("읽기");
       expect(document.body.textContent).toContain("읽기 판단근거");
     });
     const dock = document.body.querySelector('[data-testid="approval-dock"]');
@@ -190,7 +188,7 @@ describe("ApprovalDock", () => {
     });
 
     const denyBtn = Array.from(document.body.querySelectorAll("button")).find(
-      (button) => button.textContent === "거부",
+      (button) => button.textContent === "거절",
     );
     expect(denyBtn).toBeTruthy();
     denyBtn!.focus();
@@ -215,20 +213,64 @@ describe("ApprovalDock", () => {
     });
 
     const denyBtn = Array.from(document.body.querySelectorAll("button")).find(
-      (button) => button.textContent === "거부",
+      (button) => button.textContent === "거절",
     );
     expect(denyBtn).toBeTruthy();
     denyBtn!.focus();
 
-    // The "a" shortcut grants for the selected scope (default session →
-    // allow-session), not a literal allow-once — durable grants record to
-    // Store B; allow-once would not, so it must not be the primary action.
+    // The advertised A shortcut is the narrow, non-durable decision.
     fireEvent.keyDown(denyBtn!, { key: "a", code: "KeyA" });
-    expect(onDecide).toHaveBeenCalledWith("allow-session", undefined);
+    expect(onDecide).toHaveBeenCalledWith("allow-once", undefined);
 
     onDecide.mockClear();
     fireEvent.keyDown(denyBtn!, { key: "d", code: "KeyD" });
     expect(onDecide).toHaveBeenCalledWith("deny-once", undefined);
+  });
+
+  it("moves across the three decision buttons with Left and Right arrows", async () => {
+    render(
+      <ApprovalDock queue={[makeRequest()]} onDecide={vi.fn()} />,
+    );
+    await waitFor(() => expect(document.body.textContent).toContain("read_file"));
+
+    const deny = document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!;
+    const always = document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!;
+    const once = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]')!;
+
+    once.focus();
+    fireEvent.keyDown(once, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(always);
+    fireEvent.keyDown(always, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(deny);
+    fireEvent.keyDown(deny, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(always);
+    fireEvent.keyDown(always, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(once);
+  });
+
+  it("skips a disabled Always allow decision during arrow navigation", async () => {
+    render(
+      <ApprovalDock
+        queue={[makeRequest({
+          toolName: "bash",
+          toolCategory: "shell",
+          reviewerVerdict: { level: "high", reason: "shell command" },
+          allowedChoices: ["allow-once", "deny-once"],
+        })]}
+        onDecide={vi.fn()}
+      />,
+    );
+
+    const deny = document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!;
+    const always = document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!;
+    const once = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]')!;
+    expect(always).toBeDisabled();
+
+    once.focus();
+    fireEvent.keyDown(once, { key: "ArrowLeft" });
+    expect(document.activeElement).toBe(deny);
+    fireEvent.keyDown(deny, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(once);
   });
 
   it("keeps route controls interactive and scopes decision shortcuts to the dock", async () => {
@@ -259,7 +301,7 @@ describe("ApprovalDock", () => {
     expect(onDecide).toHaveBeenCalledWith("deny-once", undefined);
   });
 
-  it("does not treat approval-form typing as a decision shortcut", async () => {
+  it("renders HIGH approval without any typeable approval control", async () => {
     const onDecide = vi.fn();
     const { container } = render(
       <ApprovalDock
@@ -273,16 +315,14 @@ describe("ApprovalDock", () => {
       />,
     );
 
-    const input = container.querySelector<HTMLInputElement>('[data-testid="nl-justification-input"]')!;
-    expect(input).toBeTruthy();
-    input.focus();
-    fireEvent.keyDown(input, { key: "a", code: "KeyA" });
-    fireEvent.keyDown(input, { key: "d", code: "KeyD" });
-    fireEvent.keyDown(input, { key: "Escape", code: "Escape" });
+    expect(container.querySelector('input, textarea, [contenteditable="true"], [role="textbox"]'))
+      .toBeNull();
+    expect(container.querySelector('[data-testid="high-risk-audit-reason"]'))
+      .toHaveTextContent("destructive command");
     expect(onDecide).not.toHaveBeenCalled();
   });
 
-  it("preserves route focus on first mount, advances FIFO into an active keyboard surface, then restores it", async () => {
+  it("focuses an enabled decision on first mount and FIFO advance, then restores route focus", async () => {
     const onDecide = vi.fn();
     const first = makeRequest({ id: "req-focus-1" });
     const second = makeRequest({ id: "req-focus-2", toolName: "write_file" });
@@ -301,7 +341,11 @@ describe("ApprovalDock", () => {
         <ApprovalDock queue={[first, second]} onDecide={onDecide} />
       </main>,
     );
-    expect(document.activeElement).toBe(returnTarget);
+    await waitFor(() => {
+      expect(document.activeElement).toBe(
+        container.querySelector('[data-testid="deny-button"]'),
+      );
+    });
 
     container.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!.focus();
     rerender(
@@ -311,11 +355,10 @@ describe("ApprovalDock", () => {
       </main>,
     );
     await waitFor(() => {
-      expect(document.activeElement).toBe(container.querySelector('[data-testid="tool-approval-panel"]'));
+      expect(document.activeElement).toBe(container.querySelector('[data-testid="deny-button"]'));
     });
-    const secondPanel = container.querySelector<HTMLElement>('[data-testid="tool-approval-panel"]')!;
-    expect(secondPanel.className).toContain("focus-visible:ring-2");
-    fireEvent.keyDown(secondPanel, { key: "d", code: "KeyD" });
+    const secondDecision = container.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!;
+    fireEvent.keyDown(secondDecision, { key: "d", code: "KeyD" });
     expect(onDecide).toHaveBeenCalledWith("deny-once", undefined);
 
     rerender(
@@ -325,6 +368,144 @@ describe("ApprovalDock", () => {
       </main>,
     );
     await waitFor(() => expect(document.activeElement).toBe(returnTarget));
+  });
+
+  it("obscures only the covered composer and restores it with focus after approval", async () => {
+    const request = makeRequest({ id: "req-covered-composer" });
+    const { container, rerender } = render(
+      <main data-testid="route-canvas">
+        <button type="button" data-testid="background-action">Background action</button>
+        <div data-composer-placement="bottom">
+          <textarea data-testid="composer-textarea" />
+        </div>
+        <ApprovalDock queue={[]} onDecide={vi.fn()} />
+      </main>,
+    );
+    const composer = container.querySelector<HTMLElement>('[data-composer-placement]')!;
+    const textarea = container.querySelector<HTMLTextAreaElement>('[data-testid="composer-textarea"]')!;
+    const background = container.querySelector<HTMLElement>('[data-testid="background-action"]')!;
+    textarea.focus();
+
+    rerender(
+      <main data-testid="route-canvas">
+        <button type="button" data-testid="background-action">Background action</button>
+        <div data-composer-placement="bottom">
+          <textarea data-testid="composer-textarea" />
+        </div>
+        <ApprovalDock queue={[request]} onDecide={vi.fn()} />
+      </main>,
+    );
+    await waitFor(() => {
+      expect(composer).toHaveAttribute("inert");
+      expect(composer).toHaveAttribute("aria-hidden", "true");
+      expect(document.activeElement).toBe(container.querySelector('[data-testid="deny-button"]'));
+    });
+    expect(background).not.toHaveAttribute("inert");
+    expect(background).not.toHaveAttribute("aria-hidden");
+
+    rerender(
+      <main data-testid="route-canvas">
+        <button type="button" data-testid="background-action">Background action</button>
+        <div data-composer-placement="bottom">
+          <textarea data-testid="composer-textarea" />
+        </div>
+        <ApprovalDock queue={[]} onDecide={vi.fn()} />
+      </main>,
+    );
+    await waitFor(() => {
+      expect(composer).not.toHaveAttribute("inert");
+      expect(composer).not.toHaveAttribute("aria-hidden");
+      expect(document.activeElement).toBe(textarea);
+    });
+  });
+
+  it("hands focus to a question that arrived beneath the approval overlay", async () => {
+    const request = makeRequest({ id: "req-question-focus-handoff" });
+    const { container, rerender } = render(
+      <main data-testid="route-canvas">
+        <div data-composer-placement="bottom">
+          <textarea data-testid="composer-textarea" />
+        </div>
+        <ApprovalDock queue={[]} onDecide={vi.fn()} />
+      </main>,
+    );
+    const textarea = container.querySelector<HTMLTextAreaElement>('[data-testid="composer-textarea"]')!;
+    textarea.focus();
+
+    rerender(
+      <main data-testid="route-canvas">
+        <div data-composer-placement="bottom">
+          <textarea data-testid="composer-textarea" />
+          <div data-testid="question-overlay">
+            <button type="button" role="option" tabIndex={0} data-testid="question-choice">
+              Today
+            </button>
+          </div>
+        </div>
+        <ApprovalDock queue={[request]} onDecide={vi.fn()} />
+      </main>,
+    );
+    await waitFor(() => {
+      expect(document.activeElement).toBe(container.querySelector('[data-testid="deny-button"]'));
+    });
+
+    rerender(
+      <main data-testid="route-canvas">
+        <div data-composer-placement="bottom">
+          <textarea data-testid="composer-textarea" />
+          <div data-testid="question-overlay">
+            <button type="button" role="option" tabIndex={0} data-testid="question-choice">
+              Today
+            </button>
+          </div>
+        </div>
+        <ApprovalDock queue={[]} onDecide={vi.fn()} />
+      </main>,
+    );
+    // Real IPC resolution can cause a second empty-queue render before the
+    // browser's next frame; that rerender must not cancel the focus handoff.
+    rerender(
+      <main data-testid="route-canvas">
+        <div data-composer-placement="bottom">
+          <textarea data-testid="composer-textarea" />
+          <div data-testid="question-overlay">
+            <button type="button" role="option" tabIndex={0} data-testid="question-choice">
+              Today
+            </button>
+          </div>
+        </div>
+        <ApprovalDock queue={[]} onDecide={vi.fn()} />
+      </main>,
+    );
+
+    await waitFor(() => {
+      expect(document.activeElement).toBe(container.querySelector('[data-testid="question-choice"]'));
+      expect(document.activeElement).not.toBe(textarea);
+    });
+  });
+
+  it("keeps Reject as the sole tab stop when approval is invalid", async () => {
+    render(
+      <ApprovalDock
+        queue={[makeRequest({
+          kind: "rationale",
+          toolCategory: "shell",
+          args: { malformed: true },
+        })]}
+        onDecide={vi.fn()}
+      />,
+    );
+
+    const deny = document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!;
+    const always = document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!;
+    const once = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]')!;
+    await waitFor(() => expect(deny.tabIndex).toBe(0));
+    expect(deny).toBeEnabled();
+    expect(always).toBeDisabled();
+    expect(always.tabIndex).toBe(-1);
+    expect(once).toBeDisabled();
+    expect(once.tabIndex).toBe(-1);
+    expect(document.activeElement).toBe(deny);
   });
 
   it("does not show tool name when queue is empty", () => {
@@ -345,7 +526,7 @@ describe("ApprovalDock", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
-    expect(document.body.querySelector('[data-testid="approval-queue-depth"]')?.textContent)
+    expect(document.body.querySelector('[data-testid="approval-inline-queue-depth"]')?.textContent)
       .toContain("1 / 2");
     expect(document.body.textContent).toContain("대기 중 1개");
     expect(document.body.textContent).not.toContain("모두 허용");
@@ -499,6 +680,7 @@ describe("ApprovalDock", () => {
     // lives in the chat region. Rendering a modal here as well would put two
     // surfaces on one decision.
     const onDecide = vi.fn();
+    const onOpenPermanentDeny = vi.fn();
     const { container } = render(
       <ApprovalDock
         queue={[
@@ -516,6 +698,7 @@ describe("ApprovalDock", () => {
           }),
         ]}
         onDecide={onDecide}
+        onOpenPermanentDeny={onOpenPermanentDeny}
       />,
     );
 
@@ -523,10 +706,46 @@ describe("ApprovalDock", () => {
     expect(container.querySelector('[data-testid="docked-approval-panel"]')).toBeTruthy();
     expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(document.body.textContent).toContain("/Users/ken/Documents/project/notes.md");
+    fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')!);
+    expect(onOpenPermanentDeny).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "out-of-allowed-dir", toolName: "read_file" }),
+      "low",
+    );
     expect(onDecide).not.toHaveBeenCalled();
   });
 
-  it("prefills HIGH approval purpose from a sufficient suggestion and enables approval", async () => {
+  it("uses the host fallback verdict for a shell out-of-dir exact deny", async () => {
+    const onOpenPermanentDeny = vi.fn();
+    const { container } = render(
+      <ApprovalDock
+        queue={[makeRequest({
+          kind: "out-of-allowed-dir",
+          toolName: "bash",
+          toolCategory: "shell",
+          reason: "out-of-allowed-dir",
+          requireExplicit: true,
+          outOfAllowedDir: {
+            candidatePath: "/Users/ken/Documents/project/output.txt",
+            suggestedParent: "/Users/ken/Documents/project",
+            currentAllowed: ["/Users/ken/workspace/GIT/github/lvis-project"],
+            adjacencyWarnings: [],
+          },
+        })]}
+        onDecide={vi.fn()}
+        onOpenPermanentDeny={onOpenPermanentDeny}
+      />,
+    );
+
+    fireEvent.click(
+      container.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')!,
+    );
+    expect(onOpenPermanentDeny).toHaveBeenCalledWith(
+      expect.objectContaining({ toolName: "bash", toolCategory: "shell" }),
+      "high",
+    );
+  });
+
+  it("shows a read-only HIGH reason from the originating request and enables explicit approval", async () => {
     const onDecide = vi.fn();
     render(
       <ApprovalDock
@@ -545,28 +764,22 @@ describe("ApprovalDock", () => {
       />,
     );
 
-    await waitFor(() => {
-      const input = document.body.querySelector<HTMLInputElement>('[data-testid="nl-justification-input"]');
-      expect(input?.value).toBe("사용자 요청에 따라 프로젝트 빌드 결과를 확인합니다.");
-      expect(document.body.textContent).toContain("자동 작성된 작업 목적");
-    });
+    expect(document.body.querySelector('[data-testid="nl-justification-input"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="high-risk-audit-reason"]')).toHaveTextContent(
+      "사용자 요청에 따라 프로젝트 빌드 결과를 확인합니다.",
+    );
+    expect(document.body.textContent).toContain("사용자 요청에서 가져온 사유");
 
     const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
     expect(approve).toBeTruthy();
     expect(approve!.disabled).toBe(false);
     fireEvent.click(approve!);
 
-    // HIGH forces session scope → durable allow-session grant (records).
-    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-session", undefined));
-    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        scope: "session",
-        nlJustification: "사용자 요청에 따라 프로젝트 빌드 결과를 확인합니다.",
-      }),
-    );
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-once", undefined));
+    expect(window.lvis.userApproval.record).not.toHaveBeenCalled();
   });
 
-  it("requires manual HIGH purpose when no sufficient purpose is available, then records it", async () => {
+  it("uses the permission-audit reason for HIGH without asking the user to type", async () => {
     const onDecide = vi.fn();
     render(
       <ApprovalDock
@@ -584,33 +797,20 @@ describe("ApprovalDock", () => {
       />,
     );
 
-    let input: HTMLInputElement | null = null;
-    let approve: HTMLButtonElement | null = null;
-    await waitFor(() => {
-      input = document.body.querySelector<HTMLInputElement>('[data-testid="nl-justification-input"]');
-      approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
-      expect(input?.value).toBe("");
-      expect(approve?.disabled).toBe(true);
-      expect(document.body.textContent).toContain("이 작업의 목적을 한 문장으로 입력하세요");
-    });
-
-    fireEvent.change(input!, { target: { value: "사용자 요청에 따라 로컬 빌드 로그를 확인합니다." } });
-    await waitFor(() => {
-      expect(approve?.disabled).toBe(false);
-    });
+    expect(document.body.querySelector('[data-testid="nl-justification-input"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="high-risk-audit-reason"]')).toHaveTextContent(
+      "shell command",
+    );
+    expect(document.body.textContent).toContain("권한 감사 요약");
+    const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    expect(approve?.disabled).toBe(false);
     fireEvent.click(approve!);
 
-    // HIGH forces session scope → durable allow-session grant (records).
-    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-session", undefined));
-    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        scope: "session",
-        nlJustification: "사용자 요청에 따라 로컬 빌드 로그를 확인합니다.",
-      }),
-    );
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-once", undefined));
+    expect(window.lvis.userApproval.record).not.toHaveBeenCalled();
   });
 
-  it("does not prefill HIGH purpose from tool input even if it is marked sufficient", async () => {
+  it("does not treat tool input as a user-provided HIGH reason", async () => {
     const onDecide = vi.fn();
     render(
       <ApprovalDock
@@ -629,17 +829,16 @@ describe("ApprovalDock", () => {
       />,
     );
 
-    await waitFor(() => {
-      const input = document.body.querySelector<HTMLInputElement>('[data-testid="nl-justification-input"]');
-      const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
-      expect(input?.value).toBe("");
-      expect(approve?.disabled).toBe(true);
-      expect(document.body.textContent).toContain("이 작업의 목적을 한 문장으로 입력하세요");
-      expect(document.body.textContent).not.toContain("자동 작성된 작업 목적");
-    });
+    expect(document.body.querySelector('[data-testid="nl-justification-input"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="high-risk-audit-reason"]')).toHaveTextContent(
+      "external send",
+    );
+    expect(document.body.textContent).toContain("권한 감사 요약");
+    expect(document.body.textContent).not.toContain("사용자 요청에서 가져온 사유");
+    expect(document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]')).toBeEnabled();
   });
 
-  it("record IPC call receives 5-component payload with canonical JSON args (critic MAJOR-5)", async () => {
+  it("Always allow records the exact host-bound tuple with canonical JSON args", async () => {
     // Verifies that window.lvis.userApproval.record is called with a payload
     // containing all 5 required fields: toolName, args (canonical JSON string),
     // source, trustOrigin, approvalCacheKey. Catches future regression of any field.
@@ -655,7 +854,7 @@ describe("ApprovalDock", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
-    const allowBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
+    const allowBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]');
     expect(allowBtn).toBeTruthy();
     fireEvent.click(allowBtn!);
     await waitFor(() => expect(onDecide).toHaveBeenCalled());
@@ -666,6 +865,8 @@ describe("ApprovalDock", () => {
         toolName: expect.any(String),
         args: expect.any(String),
         source: expect.any(String),
+        decision: "allow",
+        scope: "persistent",
         trustOrigin: "user-keyboard",
         approvalCacheKey: "test-key-r5",
       }),
@@ -676,13 +877,7 @@ describe("ApprovalDock", () => {
     expect(parsedArgs !== null && typeof parsedArgs === "object" && !Array.isArray(parsedArgs)).toBe(true);
   });
 
-  // ── critic MAJOR-1: durable-only recording ─────────────────────────────
-  // Only durable choices (allow-session / allow-always) may write Store B.
-  // The primary "허용" button grants for the scope selected in the radio so
-  // the recorded scope always matches the user's explicit choice — it never
-  // silently records a session grant under an ephemeral "이번만" label.
-
-  it("primary approve records scope=session by default (allow-session)", async () => {
+  it("Allow once never writes exact decision memory", async () => {
     const onDecide = vi.fn();
     render(
       <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
@@ -690,28 +885,39 @@ describe("ApprovalDock", () => {
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
     const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
     fireEvent.click(approve!);
-    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-session", undefined));
-    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
-      expect.objectContaining({ scope: "session" }),
-    );
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-once", undefined));
+    expect(window.lvis.userApproval.record).not.toHaveBeenCalled();
   });
 
-  it("primary approve records scope=persistent when the persistent scope radio is selected", async () => {
+  it("shows compact write summary, collapsed review affordance, and exact-deny Settings link", async () => {
+    const onOpenPermanentDeny = vi.fn();
     const onDecide = vi.fn();
     render(
-      <ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />,
+      <ApprovalDock
+        queue={[makeRequest({
+          toolCategory: "write",
+          reason: "user confirmation required (category: write, trust: medium)",
+        })]}
+        onDecide={onDecide}
+        onOpenPermanentDeny={onOpenPermanentDeny}
+      />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
-    // Select the "영구 허용" (persistent) scope radio before approving.
-    const persistentRadio = document.body.querySelector<HTMLElement>("#scope-persistent");
-    expect(persistentRadio).toBeTruthy();
-    fireEvent.click(persistentRadio!);
-    const approve = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]');
-    fireEvent.click(approve!);
-    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-always", undefined));
-    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
-      expect.objectContaining({ scope: "persistent" }),
+    const impact = document.body.querySelector<HTMLElement>('[data-testid="approval-impact-summary"]');
+    expect(impact).toBeTruthy();
+    expect(impact).not.toHaveTextContent("user confirmation required");
+    expect(impact).not.toHaveTextContent("category: write");
+    expect(document.body.textContent).toContain("쓰기");
+    const details = document.body.querySelector<HTMLDetailsElement>('[data-testid="approval-review-details"]');
+    expect(details).toBeTruthy();
+    expect(details!.open).toBe(false);
+    expect(document.body.textContent).toContain("대상·영향·보호 조치·전체 입력을 펼쳐서 확인");
+    fireEvent.click(document.body.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')!);
+    expect(onOpenPermanentDeny).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "req-1", toolName: "read_file" }),
+      "medium",
     );
+    expect(onDecide).not.toHaveBeenCalled();
   });
 
   it("'항상 허용' records a persistent grant", async () => {
@@ -725,15 +931,128 @@ describe("ApprovalDock", () => {
     );
     expect(alwaysBtn).toBeTruthy();
     fireEvent.click(alwaysBtn!);
-    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-always", "read_file"));
+    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-always", undefined));
     expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
-      expect.objectContaining({ scope: "persistent" }),
+      expect.objectContaining({ decision: "allow", scope: "persistent" }),
     );
   });
 
-  it("HIGH verdict + '항상 허용' clamps the recorded grant to session scope", async () => {
-    // HIGH grants never persist across sessions — even allow-always records
-    // scope=session so the user must re-justify the HIGH action next session.
+  it("locks every decision path while an exact allow record is in flight", async () => {
+    let resolveRecord!: (value: { ok: true }) => void;
+    const record = window.lvis.userApproval.record as ReturnType<typeof vi.fn>;
+    record.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveRecord = resolve;
+    }));
+    const onDecide = vi.fn();
+    const onOpenPermanentDeny = vi.fn();
+    render(
+      <ApprovalDock
+        queue={[makeRequest()]}
+        onDecide={onDecide}
+        onOpenPermanentDeny={onOpenPermanentDeny}
+      />,
+    );
+
+    fireEvent.click(document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!);
+    await waitFor(() => {
+      expect(document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')).toBeDisabled();
+      expect(document.body.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')).toBeDisabled();
+    });
+    const panel = document.body.querySelector<HTMLElement>('[data-testid="tool-approval-panel"]')!;
+    fireEvent.keyDown(panel, { key: "d" });
+    fireEvent.keyDown(panel, { key: "Escape" });
+    expect(onDecide).not.toHaveBeenCalled();
+    expect(onOpenPermanentDeny).not.toHaveBeenCalled();
+
+    await act(async () => resolveRecord({ ok: true }));
+    await waitFor(() => expect(onDecide).toHaveBeenCalledTimes(1));
+    expect(onDecide).toHaveBeenCalledWith("allow-always", undefined);
+  });
+
+  it("locks decisions but keeps the Settings return path available while exact deny is edited", async () => {
+    const onDecide = vi.fn();
+    const onOpenPermanentDeny = vi.fn();
+    render(
+      <ApprovalDock
+        queue={[makeRequest()]}
+        onDecide={onDecide}
+        onOpenPermanentDeny={onOpenPermanentDeny}
+        interactionLocked
+      />,
+    );
+
+    expect(document.body.querySelector('[data-testid="approval-decision-locked"]'))
+      .toHaveTextContent("설정에서 이 정확한 거절을 저장하거나 취소");
+    expect(document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')).toBeDisabled();
+    expect(document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')).toBeDisabled();
+    expect(document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]')).toBeDisabled();
+
+    const panel = document.body.querySelector<HTMLElement>('[data-testid="tool-approval-panel"]')!;
+    fireEvent.keyDown(panel, { key: "a" });
+    fireEvent.keyDown(panel, { key: "d" });
+    fireEvent.keyDown(panel, { key: "Escape" });
+    expect(onDecide).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      document.body.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')!,
+    );
+    expect(onOpenPermanentDeny).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "req-1" }),
+      "low",
+    );
+  });
+
+  it("never applies an old async record completion to the next FIFO head", async () => {
+    let resolveRecord!: (value: { ok: true }) => void;
+    const record = window.lvis.userApproval.record as ReturnType<typeof vi.fn>;
+    record.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveRecord = resolve;
+    }));
+    const onDecide = vi.fn();
+    const first = makeRequest({ id: "req-old" });
+    const next = makeRequest({ id: "req-next", toolName: "write_file", args: { path: "/tmp/next" } });
+    const { rerender } = render(<ApprovalDock queue={[first]} onDecide={onDecide} />);
+
+    fireEvent.click(document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!);
+    await waitFor(() => expect(record).toHaveBeenCalledTimes(1));
+    rerender(<ApprovalDock queue={[next]} onDecide={onDecide} />);
+    expect(document.body.querySelector('[data-testid="approval-dock"]'))
+      .toHaveAttribute("data-approval-request-id", "req-next");
+
+    await act(async () => resolveRecord({ ok: true }));
+    expect(onDecide).not.toHaveBeenCalled();
+  });
+
+  it("starts every FIFO head with review details collapsed", async () => {
+    const first = makeRequest({ id: "req-details-1" });
+    const next = makeRequest({ id: "req-details-2", toolName: "write_file" });
+    const { rerender } = render(<ApprovalDock queue={[first]} onDecide={vi.fn()} />);
+    const firstDetails = document.body.querySelector<HTMLDetailsElement>('[data-testid="approval-review-details"]')!;
+    fireEvent.click(firstDetails.querySelector("summary")!);
+    expect(firstDetails.open).toBe(true);
+
+    rerender(<ApprovalDock queue={[next]} onDecide={vi.fn()} />);
+    expect(document.body.querySelector<HTMLDetailsElement>('[data-testid="approval-review-details"]')?.open)
+      .toBe(false);
+  });
+
+  it("keeps the request open when the exact allow cannot be saved", async () => {
+    const onDecide = vi.fn();
+    const record = window.lvis.userApproval.record as ReturnType<typeof vi.fn>;
+    record.mockResolvedValueOnce({ ok: false, error: "managed", message: "disk unavailable" });
+    render(<ApprovalDock queue={[makeRequest()]} onDecide={onDecide} />);
+
+    fireEvent.click(document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!);
+
+    await waitFor(() => {
+      expect(document.body.querySelector('[data-testid="exact-decision-save-error"]')?.textContent)
+        .toContain("disk unavailable");
+    });
+    expect(onDecide).not.toHaveBeenCalled();
+    expect(document.body.querySelector('[data-testid="approval-dock"]')).toBeTruthy();
+  });
+
+  it("keeps Always allow visible but disabled for HIGH verdicts", async () => {
     const onDecide = vi.fn();
     render(
       <ApprovalDock
@@ -746,21 +1065,14 @@ describe("ApprovalDock", () => {
       />,
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
-    // HIGH requires a non-empty NL justification before approval enables.
-    const nlInput = document.body.querySelector<HTMLTextAreaElement>(
-      '[data-testid="nl-justification-input"]',
-    );
-    expect(nlInput).toBeTruthy();
-    fireEvent.change(nlInput!, { target: { value: "필요한 작업입니다" } });
-    const alwaysBtn = Array.from(document.body.querySelectorAll("button")).find(
-      (b) => b.textContent === "항상 허용",
-    );
+    const alwaysBtn = document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]');
     expect(alwaysBtn).toBeTruthy();
-    fireEvent.click(alwaysBtn!);
-    await waitFor(() => expect(onDecide).toHaveBeenCalledWith("allow-always", "read_file"));
-    expect(window.lvis.userApproval.record).toHaveBeenCalledWith(
-      expect.objectContaining({ scope: "session", verdictAtApproval: "high" }),
-    );
+    expect(alwaysBtn!.disabled).toBe(true);
+    expect(alwaysBtn!.title).toContain("세션마다 다시 검토");
+    expect(document.body.querySelector('[data-testid="allow-always-unavailable-reason"]'))
+      .toHaveTextContent("세션마다 다시 검토");
+    expect(onDecide).not.toHaveBeenCalled();
+    expect(window.lvis.userApproval.record).not.toHaveBeenCalled();
   });
 
   it("deny choices never write Store B (no record IPC)", async () => {
@@ -770,7 +1082,7 @@ describe("ApprovalDock", () => {
     );
     await waitFor(() => expect(document.body.textContent).toContain("read_file"));
     const denyBtn = Array.from(document.body.querySelectorAll("button")).find(
-      (b) => b.textContent === "거부",
+      (b) => b.textContent === "거절",
     );
     expect(denyBtn).toBeTruthy();
     fireEvent.click(denyBtn!);

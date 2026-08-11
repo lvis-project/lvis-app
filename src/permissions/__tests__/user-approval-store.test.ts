@@ -17,6 +17,7 @@ process.env.LVIS_HOME = TEST_HOME;
 import {
   recordApproval,
   lookupApproval,
+  lookupUserDecision,
   revokeApproval,
   revokeApprovalByKey,
   listApprovals,
@@ -82,6 +83,60 @@ describe("recordApproval + lookupApproval (persistent scope)", () => {
     const hit = await lookupApproval("memory_write", '{"content":"x"}', "builtin");
     expect(hit).not.toBeNull();
     expect(hit!.scope).toBe("persistent");
+  });
+
+  it("keeps an exact deny visible to policy checks but never returns it as an approval", async () => {
+    await recordApproval("bash_run", '{"command":"rm build.tmp"}', "user-keyboard", {
+      decision: "deny",
+      scope: "persistent",
+      verdictAtApproval: "medium",
+      nlJustification: null,
+      trustOrigin: "user-keyboard",
+    });
+
+    const decision = await lookupUserDecision(
+      "bash_run",
+      '{"command":"rm build.tmp"}',
+      "user-keyboard",
+      "user-keyboard",
+    );
+    expect(decision?.decision).toBe("deny");
+    await expect(lookupApproval(
+      "bash_run",
+      '{"command":"rm build.tmp"}',
+      "user-keyboard",
+      "user-keyboard",
+    )).resolves.toBeNull();
+  });
+
+  it("uses raw input only for exact matching and never persists or lists it", async () => {
+    const secret = "sk-live-super-secret-value";
+    const args = canonicalStringify({ token: secret, path: "/tmp/report.txt" });
+    await recordApproval("file_read", args, "builtin", {
+      decision: "deny",
+      scope: "persistent",
+      verdictAtApproval: "medium",
+      nlJustification: null,
+      trustOrigin: "plugin-local-indexer",
+      approvalCacheKey: "/tmp/report.txt",
+    });
+
+    const file = await readApprovals();
+    expect(JSON.stringify(file)).not.toContain(secret);
+    const list = await listApprovals();
+    expect(JSON.stringify(list)).not.toContain(secret);
+    expect(list[0]).not.toHaveProperty("args");
+    expect(list[0]).not.toHaveProperty("trustOrigin");
+    expect(list[0]).not.toHaveProperty("approvalCacheKey");
+
+    const hit = await lookupUserDecision(
+      "file_read",
+      args,
+      "builtin",
+      "plugin-local-indexer",
+      "/tmp/report.txt",
+    );
+    expect(hit?.decision).toBe("deny");
   });
 
   it("HIGH verdict with nlJustification persists the justification", async () => {
