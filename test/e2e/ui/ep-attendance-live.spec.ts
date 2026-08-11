@@ -549,16 +549,14 @@ async function approveVisibleToolDialog(
   expectedToolName: string,
   expectedArgs: Record<string, unknown>,
   expectedRequestId: string,
-  reason: string,
+  _reason: string,
 ): Promise<void> {
   const dialog = openApprovalDialogForRequestId(page, expectedRequestId);
   await expect(dialog).toBeVisible({ timeout: 10_000 });
   await expect(dialog).toHaveAttribute("data-approval-tool-name", expectedToolName);
   await expect(dialog).toHaveAttribute("data-approval-args", canonicalStringify(expectedArgs));
-  const justification = dialog.getByTestId("nl-justification-input");
-  if (await justification.isVisible().catch(() => false)) {
-    await justification.fill(reason);
-  }
+  await expect(dialog.locator('input, textarea, [contenteditable="true"], [role="textbox"]'))
+    .toHaveCount(0);
   const approve = dialog.getByTestId("approve-button");
   await expect(approve).toBeEnabled();
   await approve.click();

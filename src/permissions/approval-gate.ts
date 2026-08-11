@@ -17,6 +17,7 @@ import {
 } from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
+import { resolveUserApprovalVerdict } from "../shared/permissions-events.js";
 import type {
   RemoteControllerAuthority,
   RemoteControllerOrigin,
@@ -559,10 +560,14 @@ interface PendingEntry {
    */
   remoteControllerOrigin?: RemoteControllerOrigin;
   toolName: string;
+  /** Raw host-owned finalized input; never forwarded from this pending entry. */
+  args: unknown;
   category: "tool" | "agent-action";
   kind?: ApprovalKind;
   allowedChoices?: readonly ApprovalChoice[];
   toolCategory?: ToolCategory;
+  /** Host-derived verdict shown by the renderer and enforced for recording. */
+  verdictAtApproval: RiskVerdict["level"];
   source?: "builtin" | "plugin" | "mcp";
   sourcePluginId?: string;
   approvalScope?: string;
@@ -1047,6 +1052,8 @@ export class ApprovalGate {
     }
 
     const requestedChoices = req.allowedChoices;
+    const verdictAtApproval = resolveUserApprovalVerdict(req);
+    const highRiskOneShot = verdictAtApproval === "high";
     const hasOneShotApprovalChoiceContract =
       requestedChoices?.length === 2 &&
       requestedChoices.includes("allow-once") &&
@@ -1180,7 +1187,7 @@ export class ApprovalGate {
           }
         : {}),
       allowedChoices:
-        req.kind === "rationale"
+        req.kind === "rationale" || highRiskOneShot
           ? ["allow-once", "deny-once"]
           : req.allowedChoices,
       requireExplicit:
@@ -1462,10 +1469,12 @@ export class ApprovalGate {
         // rows can read.
         remoteControllerOrigin,
         toolName: fullReq.toolName,
+        args: fullReq.args,
         category: fullReq.category,
         kind: fullReq.kind,
         allowedChoices: fullReq.allowedChoices,
         toolCategory: fullReq.toolCategory,
+        verdictAtApproval,
         source: fullReq.source,
         sourcePluginId: fullReq.sourcePluginId,
         approvalScope: fullReq.approvalScope,
@@ -1692,15 +1701,18 @@ export class ApprovalGate {
    */
   getRequestSnapshot(requestId: string): {
     toolName: string;
+    args: unknown;
     source: "builtin" | "plugin" | "mcp";
     trustOrigin: string;
     approvalCacheKey: string | undefined;
     durableApprovalRecordAllowed: boolean;
+    verdictAtApproval: RiskVerdict["level"];
   } | null {
     const entry = this.pending.get(requestId);
     if (!entry || entry.kind === "rationale") return null;
     return {
       toolName: entry.toolName,
+      args: entry.args,
       // PendingEntry.source can be undefined for legacy callers — default
       // to "builtin" so cache identity is conservative (high-trust source).
       // The strict-record handler additionally validates against the SOT
@@ -1709,6 +1721,7 @@ export class ApprovalGate {
       trustOrigin: entry.trustOrigin,
       approvalCacheKey: entry.approvalCacheKey,
       durableApprovalRecordAllowed: entry.durableApprovalRecordAllowed,
+      verdictAtApproval: entry.verdictAtApproval,
     };
   }
 

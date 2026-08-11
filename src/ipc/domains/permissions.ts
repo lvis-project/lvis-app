@@ -926,7 +926,8 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     const intent = requireUserKeyboardIntent(body.intent);
     if (!intent.ok) return intent;
     const scope = body.scope;
-    const verdictAtApproval = body.verdictAtApproval;
+    const decision = body.decision ?? "allow";
+    const displayedVerdictAtApproval = body.verdictAtApproval;
     const nlJustification = body.nlJustification;
     const args = body.args;
     // Issue #799 — server-side ApprovalRequest binding.
@@ -942,30 +943,23 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     // ApprovalRequest.id). The handler reads the canonical
     // toolName/source/trustOrigin/approvalCacheKey from the in-flight
     // ApprovalGate entry via `getRequestSnapshot()`. The renderer can no
-    // longer spoof identity fields — it can only contribute the parts
-    // that are semantically the user's decision (scope, verdict at
-    // approval, NL justification) and the args/intent freshness gates.
+    // longer spoof identity fields or the input — it can only contribute the
+    // user's decision metadata (decision, scope, displayed verdict and NL
+    // justification) plus the user-intent freshness gate.
     const requestId = body.requestId;
     if (typeof requestId !== "string" || requestId.length === 0) {
       return { ok: false, error: "invalid-request-id", message: "user-approval record: requestId required (server-side ApprovalRequest binding)" };
     }
     if (
       typeof args !== "string" ||
+      (decision !== "allow" && decision !== "deny") ||
       (scope !== "session" && scope !== "persistent") ||
-      (verdictAtApproval !== "low" && verdictAtApproval !== "medium" && verdictAtApproval !== "high")
+      (displayedVerdictAtApproval !== "low" && displayedVerdictAtApproval !== "medium" && displayedVerdictAtApproval !== "high")
     ) {
       return { ok: false, error: "invalid-payload", message: "user-approval record: invalid payload" };
     }
-    // HIGH verdict enforcement: HIGH approvals must use session scope and
-    // include a non-empty NL justification. Enforced here in the IPC handler
-    // (renderer-side XSS bypass protection) in addition to dialog-level guards.
-    if (verdictAtApproval === "high") {
-      if (scope !== "session") {
-        return { ok: false, error: "high-requires-session-scope", message: "HIGH verdict approvals must use session scope" };
-      }
-      if (typeof nlJustification !== "string" || nlJustification.trim().length === 0) {
-        return { ok: false, error: "high-requires-justification", message: "HIGH verdict approvals require non-empty NL justification" };
-      }
+    if (decision === "deny" && scope !== "persistent") {
+      return { ok: false, error: "deny-requires-persistent-scope", message: "Exact deny decisions are managed persistently in Settings" };
     }
     // Server-side SOT lookup. If the approval already resolved/timed out
     // or never existed, reject — we never silently create an orphan entry
@@ -977,24 +971,35 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
     if (!snapshot.durableApprovalRecordAllowed) {
       return { ok: false, error: "one-shot-not-recordable", message: "user-approval record: one-shot approvals cannot be recorded" };
     }
+    if (displayedVerdictAtApproval !== snapshot.verdictAtApproval) {
+      return { ok: false, error: "verdict-mismatch", message: "user-approval record: displayed verdict does not match the host request" };
+    }
+    const verdictAtApproval = snapshot.verdictAtApproval;
+    // HIGH verdict enforcement uses the host-owned snapshot, never a renderer
+    // claim. HIGH allows are explicit one-shot decisions and therefore never
+    // enter exact decision memory. Exact deny is a more restrictive Settings
+    // policy and remains eligible regardless of the risk that raised the card.
+    if (decision === "allow" && verdictAtApproval === "high") {
+      return { ok: false, error: "high-is-one-shot", message: "HIGH verdict approvals are explicit one-shot decisions and cannot be recorded" };
+    }
     try {
-      // Canonicalize at IPC handler to catch any non-renderer
-      // callers that bypass the renderer-side canonicalization. Non-JSON or
-      // non-object args are explicitly rejected (CLAUDE.md No Fallback Code).
+      // Canonicalize the host-owned raw input from ApprovalGate. The renderer
+      // still sends `args` for wire compatibility and display, but it cannot
+      // swap the exact tuple that is persisted from Settings or the card.
       let canonicalArgs: string;
       try {
-        const parsed = JSON.parse(args);
-        if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+        if (snapshot.args === null || typeof snapshot.args !== "object" || Array.isArray(snapshot.args)) {
           return { ok: false, error: "args-not-object", message: "user-approval record: args must be a JSON object" };
         }
-        canonicalArgs = canonicalStringify(parsed);
+        canonicalArgs = canonicalStringify(snapshot.args);
       } catch {
-        return { ok: false, error: "args-not-json", message: "user-approval record: args must be valid JSON" };
+        return { ok: false, error: "args-not-json", message: "user-approval record: args must be canonicalizable JSON" };
       }
       // Authority fields come from the main-process snapshot, never the
-      // renderer body. The renderer contribution is reduced to
-      // (scope, verdictAtApproval, nlJustification, args).
+      // renderer body. The renderer contribution is reduced to decision
+      // metadata; the exact tool/input identity remains host-owned.
       await recordApproval(snapshot.toolName, canonicalArgs, snapshot.source, {
+        decision,
         scope,
         verdictAtApproval,
         nlJustification: typeof nlJustification === "string" ? nlJustification : null,

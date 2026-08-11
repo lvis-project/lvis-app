@@ -134,7 +134,7 @@ beforeEach(() => {
 
 describe("approval-sentence-select — it proposes, it does not decide", () => {
   it("resolves a sentence onto a scope while leaving the request pending", async () => {
-    const { invoke, gate } = await harness({ providerText: selected("o3") });
+    const { invoke, gate } = await harness({ providerText: selected("o2") });
 
     const result = await invoke({
       requestId: "req-allow-1",
@@ -142,8 +142,8 @@ describe("approval-sentence-select — it proposes, it does not decide", () => {
       intent: USER_INTENT,
     });
 
-    // o3 is `allow-always` in the host's own narrowest-first table:
-    // allow-once, allow-session, allow-always, deny-once.
+    // o2 is `allow-always` in the host's own three-decision table:
+    // allow-once, allow-always, deny-once.
     expect(result).toEqual({
       ok: true,
       requestId: "req-allow-1",
@@ -156,7 +156,7 @@ describe("approval-sentence-select — it proposes, it does not decide", () => {
   });
 
   it("returns no path, so nothing here can widen what the card already knows", async () => {
-    const { invoke } = await harness({ providerText: selected("o3") });
+    const { invoke } = await harness({ providerText: selected("o2") });
     const result = await invoke({
       requestId: "req-allow-1",
       input: "/allow 계속 허용",
@@ -217,7 +217,7 @@ describe("approval-sentence-select — the model never sees the request's own wo
 
     const prompt = sentPrompt(provider);
     const options = sentEnvelope(provider).options as Array<Record<string, unknown>>;
-    expect(options.map((o) => o.id)).toEqual(["o1", "o2", "o3", "o4"]);
+    expect(options.map((o) => o.id)).toEqual(["o1", "o2", "o3"]);
     // Id and choice, nothing more. A path the model never received is a path a
     // compromised response cannot echo back as though the host had offered it.
     for (const option of options) {
@@ -362,7 +362,7 @@ describe("approval-sentence-select — the table is the host's, not the renderer
     // say a sentence; if it could also name the path, a compromised renderer
     // would be choosing what the user is about to confirm — and the confirm
     // press would be authorising a target the host never picked.
-    const { invoke, provider } = await harness({ providerText: selected("o3") });
+    const { invoke, provider } = await harness({ providerText: selected("o2") });
     const result = await invoke({
       requestId: "req-allow-1",
       input: "/allow 계속 허용",

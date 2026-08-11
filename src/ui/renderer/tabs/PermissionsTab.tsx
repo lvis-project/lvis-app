@@ -35,6 +35,8 @@ import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { getApi } from "../api-client.js";
 import { isIpcErrorResult } from "../types.js";
+import { canonicalStringify } from "../../../shared/canonical-json.js";
+import type { ExactDenyDraft } from "../exact-permission-decision.js";
 
 const DEFAULT_REVIEWER_SETTINGS: PermissionReviewerSettings = {
   mode: "disabled",
@@ -76,7 +78,15 @@ function preserveSettingsScrollPosition(): () => void {
   };
 }
 
-export function PermissionsTab() {
+export function PermissionsTab({
+  exactDenyDraft = null,
+  onExactDenySaved,
+  onDiscardExactDeny,
+}: {
+  exactDenyDraft?: ExactDenyDraft | null;
+  onExactDenySaved?: (requestId: string) => void;
+  onDiscardExactDeny?: () => void;
+} = {}) {
   const { t } = useTranslation();
 
   const [loading, setLoading] = useState(true);
@@ -119,6 +129,7 @@ export function PermissionsTab() {
   const [auditOpen, setAuditOpen] = useState(false);
   const [userApprovals, setUserApprovals] = useState<Array<{
     key: string;
+    decision?: "allow" | "deny";
     approvedAt: string;
     scope: UserApprovalScope;
     verdictAtApproval: UserApprovalVerdict;
@@ -126,8 +137,11 @@ export function PermissionsTab() {
     revokedAt: string | null;
     toolName?: string;
     source?: string;
+    args?: string;
   }>>([]);
   const [approvalsBusy, setApprovalsBusy] = useState(false);
+  const [exactDenyBusy, setExactDenyBusy] = useState(false);
+  const exactDenyFocusRef = useRef<HTMLDivElement>(null);
   const [reviewer, setReviewer] = useState<PermissionReviewerSettings>(DEFAULT_REVIEWER_SETTINGS);
 
   // ── OS Tool Sandbox ───────────────────────────────
@@ -205,8 +219,65 @@ export function PermissionsTab() {
 
   useEffect(() => { void fetchApprovals(); }, [fetchApprovals]);
 
+  useEffect(() => {
+    if (!exactDenyDraft) return;
+    const frame = requestAnimationFrame(() => {
+      const target = exactDenyFocusRef.current;
+      target?.scrollIntoView({ block: "start" });
+      target?.focus({ preventScroll: true });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [exactDenyDraft]);
+
+  const handleDiscardExactDeny = useCallback(() => {
+    onDiscardExactDeny?.();
+    requestAnimationFrame(() => {
+      const opener = document.querySelector<HTMLButtonElement>(
+        '[data-testid="open-permanent-deny-settings"]',
+      );
+      if (opener && !opener.disabled) {
+        opener.focus();
+        return;
+      }
+      document.querySelector<HTMLElement>('[data-testid="settings-page-title"]')?.focus();
+    });
+  }, [onDiscardExactDeny]);
+
+  const handleSaveExactDeny = useCallback(async () => {
+    if (!exactDenyDraft || !window.lvis?.userApproval) return;
+    setExactDenyBusy(true);
+    try {
+      const result = await window.lvis.userApproval.record({
+        requestId: exactDenyDraft.requestId,
+        toolName: exactDenyDraft.toolName,
+        args: canonicalStringify(exactDenyDraft.args),
+        source: exactDenyDraft.source,
+        decision: "deny",
+        scope: "persistent",
+        verdictAtApproval: exactDenyDraft.verdictAtApproval,
+        nlJustification: null,
+        trustOrigin: exactDenyDraft.trustOrigin,
+        approvalCacheKey: exactDenyDraft.approvalCacheKey,
+      });
+      if (!result.ok) {
+        showBanner("error", result.message ?? result.error ?? t("permissionsTab.exactDenySaveFailed"));
+        return;
+      }
+      await fetchApprovals();
+      showBanner("warn", t("permissionsTab.exactDenySaved", { toolName: exactDenyDraft.toolName }));
+      onExactDenySaved?.(exactDenyDraft.requestId);
+      requestAnimationFrame(() => {
+        document.querySelector<HTMLElement>('[data-testid="settings-page-title"]')?.focus();
+      });
+    } catch (err) {
+      showBanner("error", t("permissionsTab.errorRevokeFailed", { message: (err as Error).message }));
+    } finally {
+      setExactDenyBusy(false);
+    }
+  }, [exactDenyDraft, fetchApprovals, onExactDenySaved, showBanner]);
+
   // Auto-refresh on cross-window directory/rule/user-approval config changes
-  // (allow-session grants from out-of-allowed-dir dialog, addRule/removeRule
+  // (persistent directory grants from the out-of-allowed-dir approval card, addRule/removeRule
   // through PermissionManager SOT, userApprovalRecord/Revoke in another
   // window). Refresh BOTH `fetchAll` (rules + directories + mode) AND
   // `fetchApprovals` (active approvals) so every PermissionsTab section
@@ -550,13 +621,6 @@ export function PermissionsTab() {
     }
   };
 
-  if (loading) {
-    return <div className="py-8 text-center text-sm text-muted-foreground">{t("permissionsTab.loading")}</div>;
-  }
-  if (error) {
-    return <div className="py-4 text-sm text-destructive">{error}</div>;
-  }
-
   const sandboxPotentialReason = sandboxCapability?.potentialReason ?? sandboxCapability?.reason ?? "";
   const sandboxRuntimeReason = sandboxCapability?.runtime?.reason ?? "";
 
@@ -570,7 +634,12 @@ export function PermissionsTab() {
 
         {/* ── 인라인 배너 (§F9 — alert 대체) ── */}
         {banner && (
-          <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${banner.type === "error" ? "border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) text-destructive" : "border-warning/(--opacity-medium) bg-warning/(--opacity-soft) text-warning"}`}>
+          <div
+            role={banner.type === "error" ? "alert" : "status"}
+            aria-live={banner.type === "error" ? "assertive" : "polite"}
+            aria-atomic="true"
+            className={`flex items-start gap-2 rounded-md border px-3 py-2 text-[12px] ${banner.type === "error" ? "border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) text-destructive" : "border-warning/(--opacity-medium) bg-warning/(--opacity-soft) text-warning"}`}
+          >
             <span className="mt-0.5 flex-shrink-0">{banner.type === "error" ? "⚠" : "🔒"}</span>
             <span>{banner.msg}</span>
             <Button
@@ -585,6 +654,85 @@ export function PermissionsTab() {
             </Button>
           </div>
         )}
+
+        {exactDenyDraft ? (
+          <div
+            ref={exactDenyFocusRef}
+            tabIndex={-1}
+            className="scroll-mt-3 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            data-testid="exact-deny-focus-target"
+          >
+            <SettingsSection
+              title={t("permissionsTab.exactDenyDraftTitle")}
+              description={t("permissionsTab.exactDenyDraftDescription")}
+            >
+              <div className="rounded-md border border-destructive/(--opacity-muted) bg-destructive/(--opacity-faint) p-3" data-testid="exact-deny-draft">
+              <div className="grid gap-2 text-xs sm:grid-cols-2">
+                <div>
+                  <p className="text-[10px] text-muted-foreground">{t("permissionsTab.approvalsColTool")}</p>
+                  <code className="break-all font-mono">{exactDenyDraft.toolName}</code>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground">{t("permissionsTab.rulesColSource")}</p>
+                  <code className="break-all font-mono">{exactDenyDraft.source}</code>
+                </div>
+              </div>
+              <details className="group mt-3 overflow-hidden rounded-md border bg-background">
+                <summary className="cursor-pointer px-3 py-2 text-xs font-semibold">
+                  {t("permissionsTab.exactDenyReviewInput")}
+                </summary>
+                <pre className="max-h-48 overflow-auto border-t px-3 py-2 whitespace-pre-wrap break-all font-mono text-[11px]">
+                  {JSON.stringify(exactDenyDraft.args, null, 2)}
+                </pre>
+              </details>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                {t("permissionsTab.exactDenyScopeNotice")}
+              </p>
+              <div className="mt-3 flex flex-wrap justify-end gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={exactDenyBusy}
+                  onClick={handleDiscardExactDeny}
+                >
+                  {t("permissionsTab.cancelButton")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  disabled={exactDenyBusy}
+                  onClick={() => void handleSaveExactDeny()}
+                  data-testid="save-exact-deny"
+                >
+                  {t("permissionsTab.saveExactDeny")}
+                </Button>
+              </div>
+              </div>
+            </SettingsSection>
+          </div>
+        ) : null}
+
+        {loading ? (
+          <div
+            className="py-8 text-center text-sm text-muted-foreground"
+            data-testid="permissions-loading"
+          >
+            {t("permissionsTab.loading")}
+          </div>
+        ) : error ? (
+          <div
+            className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-sm text-destructive"
+            data-testid="permissions-load-error"
+          >
+            <span className="min-w-0 break-words">{error}</span>
+            <Button type="button" size="sm" variant="outline" onClick={() => void fetchAll()}>
+              {t("permissionsTab.refreshButton")}
+            </Button>
+          </div>
+        ) : (
+          <>
 
         {quarantinedHooks.length > 0 && (
           <div
@@ -1083,10 +1231,11 @@ export function PermissionsTab() {
             <p className="text-[11px] text-muted-foreground">{t("permissionsTab.approvalsEmpty")}</p>
           ) : (
             <div className="min-w-0 overflow-x-auto rounded-md border">
-              <table data-testid="permissions-approvals-table" className="min-w-[720px] w-full text-xs">
+              <table data-testid="permissions-approvals-table" className="min-w-[780px] w-full text-xs">
                 <thead className="border-b bg-muted/(--opacity-medium)">
                   <tr>
                     <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColTool")}</th>
+                    <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColDecision")}</th>
                     <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColScope")}</th>
                     <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColRisk")}</th>
                     <th className="px-3 py-2 text-left whitespace-nowrap font-medium">{t("permissionsTab.approvalsColApprovedAt")}</th>
@@ -1099,6 +1248,14 @@ export function PermissionsTab() {
                     <tr key={a.key} className="border-b last:border-0">
                       <td className="max-w-[120px] truncate px-3 py-2 font-mono">
                         {a.toolName ?? a.key.slice(0, 12)}
+                      </td>
+                      <td className="px-3 py-2">
+                        <Badge
+                          variant={(a.decision ?? "allow") === "deny" ? "secondary" : "default"}
+                          className={`text-[10px] ${(a.decision ?? "allow") === "deny" ? "text-destructive" : ""}`}
+                        >
+                          {(a.decision ?? "allow") === "deny" ? t("permissionsTab.actionDeny") : t("permissionsTab.actionAllow")}
+                        </Badge>
                       </td>
                       <td className="px-3 py-2">
                         <span className={`inline-flex h-5 items-center whitespace-nowrap rounded px-1.5 text-[10px] font-medium ${a.scope === "persistent" ? "bg-warning/(--opacity-soft) text-warning" : "bg-muted text-muted-foreground"}`}>
@@ -1144,6 +1301,9 @@ export function PermissionsTab() {
         >
           <p className="text-[11px] text-muted-foreground">{t("permissionsTab.auditLogHelp")}</p>
         </SettingsSection>
+
+          </>
+        )}
 
       </div>
       <AuditPanel open={auditOpen} onClose={() => setAuditOpen(false)} />

@@ -112,7 +112,7 @@ test.describe("Sandbox approval flow", () => {
     rmSync(tempHome, { recursive: true, force: true });
   });
 
-  test("HIGH verdict requires NL justification before Approve button is enabled", async () => {
+  test("HIGH verdict shows a read-only audit reason and requires explicit Allow once", async () => {
     // Inject a HIGH-verdict approval request via IPC
     // Electron main-process `evaluate` is loaded as ESM in this build — the
     // CommonJS `require()` shim is not available, so use the destructured
@@ -126,22 +126,20 @@ test.describe("Sandbox approval flow", () => {
     const dialog = page.getByTestId("approval-dock");
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
-    // Approve button should be disabled (HIGH verdict, no NL text)
+    // HIGH uses the host/reviewer reason and never asks the user to type in
+    // the approval surface. The explicit one-shot decision is immediately
+    // available while durable allow stays unavailable.
     const approveBtn = page.getByTestId("approve-button");
-    await expect(approveBtn).toBeDisabled();
-
-    // NL input should be visible
-    const nlInput = page.getByTestId("nl-justification-input");
-    await expect(nlInput).toBeVisible();
-
-    // Type justification
-    await nlInput.fill("테스트용 임시 파일 정리 작업입니다");
-
-    // Now Approve should be enabled
     await expect(approveBtn).toBeEnabled();
+    await expect(approveBtn).toHaveText(t("toolApprovalDialog.allowOnce"));
+    await expect(dialog.getByTestId("allow-always-button")).toBeDisabled();
+    await expect(dialog.getByTestId("high-risk-audit-reason"))
+      .toContainText("shell destructive verb");
+    await expect(dialog.locator('input, textarea, [contenteditable="true"], [role="textbox"]'))
+      .toHaveCount(0);
   });
 
-  test("LOW verdict shows scope selector and Approve is enabled without NL", async () => {
+  test("LOW verdict shows exactly three decisions and Allow once is enabled without NL", async () => {
     // Electron main-process `evaluate` is loaded as ESM in this build — the
     // CommonJS `require()` shim is not available, so use the destructured
     // `electron` arg (`BrowserWindow`) that Playwright already injects.
@@ -156,17 +154,18 @@ test.describe("Sandbox approval flow", () => {
     const dialog = page.getByTestId("approval-dock");
     await expect(dialog).toBeVisible({ timeout: 5000 });
 
-    // NL field should NOT be visible for LOW verdict
-    const nlInput = page.getByTestId("nl-justification-input");
-    await expect(nlInput).not.toBeVisible();
+    // No approval verdict renders a typeable field.
+    await expect(dialog.locator('input, textarea, [contenteditable="true"], [role="textbox"]'))
+      .toHaveCount(0);
 
     // Approve button should be enabled immediately
     const approveBtn = page.getByTestId("approve-button");
     await expect(approveBtn).toBeEnabled();
 
-    // Scope selector should be visible
-    await expect(page.getByText(t("toolApprovalDialog.scopeSession"))).toBeVisible();
-    await expect(page.getByText(t("toolApprovalDialog.scopePersistent"))).toBeVisible();
+    // The obsolete scope selector is replaced by three explicit decisions.
+    await expect(page.getByTestId("deny-button")).toHaveText(t("toolApprovalDialog.denyOnce"));
+    await expect(page.getByTestId("allow-always-button")).toHaveText(t("toolApprovalDialog.allowAlways"));
+    await expect(page.getByTestId("approve-button")).toHaveText(t("toolApprovalDialog.allowOnce"));
   });
 
   test("partial sandbox shows correct Korean label in approval dock", async () => {
@@ -193,7 +192,7 @@ test.describe("Sandbox approval flow", () => {
     await expect(sandboxRow).toContainText(t("toolApprovalDialog.sandboxPartial"));
   });
 
-  test("PermissionsTab shows user approval records section", async () => {
+  test("PermissionsTab shows the exact permission decisions section", async () => {
     // Pre-populate an approval record
     writeFileSync(
       resolve(tempHome, ".lvis", "permissions", "user-approvals.json"),
@@ -213,13 +212,12 @@ test.describe("Sandbox approval flow", () => {
 
     const settingsPage = await openInlineSettings(app, page, "permissions");
 
-    // Permissions tab is selected by initialTab; the approval records section
-    // heading renders "사용자 승인 기록 ({count})". Match only the static prefix
-    // (count-agnostic, as the pre-migration assertion did) so the live record
-    // count can't flake the check, while staying locale-agnostic via the catalog.
+    // Permissions tab is selected by initialTab. Match the first section title
+    // rather than the empty-state copy, which deliberately shares the same
+    // exact-decision phrase.
     const approvalsHeadingPrefix = t("permissionsTab.approvalsTitle", { count: 0 }).split("(")[0].trim();
     await expect(
-      settingsPage.locator(`:text(${JSON.stringify(approvalsHeadingPrefix)})`),
+      settingsPage.locator(`:text(${JSON.stringify(approvalsHeadingPrefix)})`).first(),
     ).toBeVisible({ timeout: 5000 });
   });
 });

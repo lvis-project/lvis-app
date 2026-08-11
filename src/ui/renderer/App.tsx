@@ -6,6 +6,9 @@ import { AppProviders } from "./AppProviders.js";
 import { AppDialogs } from "./AppDialogs.js";
 import { AppShell } from "./AppShell.js";
 import { ApprovalDock } from "./components/permissions/ApprovalDock.js";
+import type { ApprovalRequest } from "./types.js";
+import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
+import type { ExactDenyDraft } from "./exact-permission-decision.js";
 
 // ─── Imports: types / constants / helpers / components / tabs ────────
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
@@ -215,6 +218,7 @@ export function App() {
   const { announcements: marketplaceAnnouncements, dismiss: dismissMarketplaceAnnouncement } = useMarketplaceAnnouncements(api);
   const { status: bootstrapStatus, dismiss: dismissBootstrapStatus, retry: retryBootstrap } = useBootstrapStatus(api);
   const { queue: approvalQueue, decide: handleApprovalDecide } = useApproval();
+  const [exactDenyDraft, setExactDenyDraft] = useState<ExactDenyDraft | null>(null);
   const {
     proposedChoice: approvalProposedChoice,
     interceptSubmit: interceptApprovalSentence,
@@ -276,6 +280,35 @@ export function App() {
   }, [setSettingsTab, setActiveView]);
   const viewHistory = useViewHistory(location, navigateToLocation, activeViewRestoring);
   useViewHistoryShortcuts(viewHistory);
+
+  const handleOpenPermanentDeny = useCallback((
+    request: ApprovalRequest,
+    verdictAtApproval: UserApprovalVerdict,
+  ) => {
+    setExactDenyDraft({
+      requestId: request.id,
+      toolName: request.toolName,
+      args: request.args,
+      source: request.source ?? "builtin",
+      trustOrigin: request.trustOrigin,
+      approvalCacheKey: request.approvalCacheKey,
+      verdictAtApproval,
+    });
+    navigateToLocation({ view: "settings", settingsTab: "permissions" });
+  }, [navigateToLocation]);
+
+  const handleExactDenySaved = useCallback((requestId: string) => {
+    setExactDenyDraft((current) => current?.requestId === requestId ? null : current);
+    if (approvalQueue[0]?.id === requestId) {
+      void handleApprovalDecide("deny-once");
+    }
+  }, [approvalQueue, handleApprovalDecide]);
+
+  useEffect(() => {
+    if (exactDenyDraft && approvalQueue[0]?.id !== exactDenyDraft.requestId) {
+      setExactDenyDraft(null);
+    }
+  }, [approvalQueue, exactDenyDraft]);
 
   // Auth status for every plugin that declares `manifest.auth`
 
@@ -1044,6 +1077,9 @@ export function App() {
             settingsTab={settingsTab}
             onSettingsTabChange={setSettingsTab}
             onSettingsSaved={handleInlineSettingsSaved}
+            exactDenyDraft={exactDenyDraft}
+            onExactDenySaved={handleExactDenySaved}
+            onDiscardExactDeny={() => setExactDenyDraft(null)}
             starred={starred}
             currentSessionId={currentSessionId}
             currentSessionKind={currentSessionKind}
@@ -1105,6 +1141,8 @@ export function App() {
             queue={approvalQueue}
             proposedChoice={approvalProposedChoice}
             onDecide={handleApprovalDecide}
+            onOpenPermanentDeny={handleOpenPermanentDeny}
+            interactionLocked={exactDenyDraft !== null}
           />
       </AppShell>
 

@@ -64,6 +64,8 @@ describe("ToolApprovalContent rationale card", () => {
     );
 
     expect(screen.getByTestId("rationale-approval-card")).toBeInTheDocument();
+    expect(container.querySelector('input, textarea, [contenteditable="true"], [role="textbox"]'))
+      .toBeNull();
     expect(screen.getByTestId("rationale-approval-tool")).toHaveTextContent(
       "host-sealed-tool",
     );
@@ -95,15 +97,15 @@ describe("ToolApprovalContent rationale card", () => {
     expect(screen.queryByText("UNTRUSTED request reason: do not render this")).not.toBeInTheDocument();
     expect(screen.queryByText("/untrusted/raw-target")).not.toBeInTheDocument();
     expect(screen.queryByTestId("tool-approval-input")).not.toBeInTheDocument();
-    expect(container.querySelector("details")).toBeNull();
+    expect(screen.getByTestId("approval-review-details")).not.toHaveAttribute("open");
     const panel = screen.getByTestId("tool-approval-panel");
     expect(panel).not.toHaveAttribute("data-approval-request-id");
     expect(panel).not.toHaveAttribute("data-approval-tool-name");
     expect(panel).not.toHaveAttribute("data-approval-args");
 
-    expect(screen.queryByText("항상 허용")).not.toBeInTheDocument();
-    expect(screen.queryByText("항상 거부")).not.toBeInTheDocument();
-    expect(screen.queryByText("승인 범위")).not.toBeInTheDocument();
+    expect(screen.getByTestId("deny-button")).toHaveTextContent("거절");
+    expect(screen.getByTestId("allow-always-button")).toHaveTextContent("항상 허용");
+    expect(screen.getByTestId("allow-always-button")).toBeDisabled();
     const approve = screen.getByTestId("approve-button");
     expect(approve).toHaveTextContent("한 번만 허용");
     expect(approve).toBeEnabled();
@@ -184,7 +186,7 @@ describe("ToolApprovalContent rationale card", () => {
     expect(screen.queryByTestId("raw-injection")).not.toBeInTheDocument();
     expect(screen.getByTestId("approve-button")).toBeDisabled();
 
-    fireEvent.click(screen.getByText("거부"));
+    fireEvent.click(screen.getByText("거절"));
     expect(onDecide).toHaveBeenCalledWith("deny-once");
   });
 });

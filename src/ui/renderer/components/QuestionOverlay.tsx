@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { AskUserQuestionCard, type AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import type { LvisApi } from "../types.js";
 
@@ -9,10 +10,33 @@ export interface QuestionOverlayProps {
 
 export function QuestionOverlay({ api, requests, onResolved }: QuestionOverlayProps) {
   const current = requests[0];
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!current) return;
+    const root = rootRef.current;
+    const composer = root?.closest<HTMLElement>('[data-composer-placement]');
+    if (!root || !composer) return;
+
+    const focusFirstChoiceWhenExposed = () => {
+      if (composer.inert || composer.getAttribute("aria-hidden") === "true") return;
+      if (root.contains(document.activeElement)) return;
+      root.querySelector<HTMLElement>(
+        '[role="option"][tabindex="0"]:not(:disabled), [role="option"]:not(:disabled)',
+      )?.focus();
+    };
+
+    focusFirstChoiceWhenExposed();
+    const observer = new MutationObserver(focusFirstChoiceWhenExposed);
+    observer.observe(composer, { attributes: true, attributeFilter: ["inert", "aria-hidden"] });
+    return () => observer.disconnect();
+  }, [current?.id]);
+
   if (!current) return null;
 
   return (
     <div
+      ref={rootRef}
       className="pointer-events-auto absolute inset-x-0 bottom-0 z-40 flex justify-center"
       data-testid="question-overlay"
     >

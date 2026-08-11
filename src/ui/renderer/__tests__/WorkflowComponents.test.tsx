@@ -227,6 +227,34 @@ describe("QuestionOverlay — FIFO request identity", () => {
     expect(view.getByTestId("ask-step-label")).toHaveTextContent("1 / 2");
     expect(view.queryByText("A")).toBeNull();
   });
+
+  it("focuses its first choice when a covering approval releases the composer", async () => {
+    const api = fakeApi();
+    const view = render(
+      <div data-composer-placement="bottom" inert aria-hidden="true">
+        <QuestionOverlay
+          api={api}
+          requests={[{
+            id: "question-beneath-approval",
+            questions: [{ question: "Range?", choices: ["Today", "This week"] }],
+            createdAt: 1,
+          }]}
+          onResolved={vi.fn()}
+        />
+      </div>,
+    );
+    const composer = view.container.querySelector<HTMLElement>('[data-composer-placement]')!;
+    const firstChoice = view.getByRole("option", { name: "Today", hidden: true });
+    expect(firstChoice).not.toHaveFocus();
+
+    act(() => {
+      composer.inert = false;
+      composer.removeAttribute("inert");
+      composer.removeAttribute("aria-hidden");
+    });
+
+    await waitFor(() => expect(firstChoice).toHaveFocus());
+  });
 });
 
 describe("AskUserQuestionCard — multi-question", () => {
