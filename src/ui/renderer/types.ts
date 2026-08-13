@@ -251,7 +251,7 @@ export type AppSettings = {
     fallbackChain: Array<{ provider: string; model: string }>;
     modelListCache?: LlmModelListCache;
   };
-  chat: { systemPrompt: string; autoCompact: boolean };
+  chat: { systemPrompt: string; autoCompact: boolean; subAgentMaxRounds?: number };
   webSearch: { provider: string };
   routine?: Record<string, unknown>;
   privacy?: { piiRedactEnabled: boolean };
@@ -345,6 +345,7 @@ export type AppSettings = {
     memoryCaptureMode?: MemoryCaptureMode;
     /** Idle parents may start a gated turn for queued background sub-agent messages. Default false. */
     subAgentAutonomousWake?: boolean;
+    subAgentMaxRounds?: number;
     /** #893 — `true` after the user has dismissed the first-boot onboarding. */
     onboardingCompleted?: boolean;
     /**

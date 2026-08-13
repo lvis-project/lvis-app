@@ -1,3 +1,8 @@
+import {
+  SUBAGENT_MAX_ROUNDS_DEFAULT,
+  SUBAGENT_MAX_ROUNDS_MAX,
+  SUBAGENT_MAX_ROUNDS_MIN,
+} from "../../../shared/subagent-rounds.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isIpcErrorResult,
@@ -67,6 +72,8 @@ export interface SettingsOrchestrationState {
   memoryCaptureMode: MemoryCaptureMode;
   setMemoryCaptureMode: (v: MemoryCaptureMode) => void;
   subAgentAutonomousWake: boolean;
+  subAgentMaxRounds: number;
+  setSubAgentMaxRounds: (next: number) => void;
   setSubAgentAutonomousWake: (v: boolean) => void;
   // Marketplace
   marketplaceBaseUrl: string;
@@ -142,6 +149,7 @@ export function useSettingsOrchestration(
   const [idleMemoryConsolidation, setIdleMemoryConsolidation] = useState(false);
   const [memoryCaptureMode, setMemoryCaptureMode] = useState<MemoryCaptureMode>("off");
   const [subAgentAutonomousWake, setSubAgentAutonomousWake] = useState(false);
+  const [subAgentMaxRounds, setSubAgentMaxRounds] = useState(SUBAGENT_MAX_ROUNDS_DEFAULT);
   const [marketplaceBaseUrl, setMarketplaceBaseUrl] = useState("");
   const [marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork] = useState(true);
   const [hasMarketplaceApiKey, setHasMarketplaceApiKey] = useState(false);
@@ -200,6 +208,7 @@ export function useSettingsOrchestration(
       setIdleMemoryConsolidation(s.features?.idleMemoryConsolidation ?? false);
       setMemoryCaptureMode(s.features?.memoryCaptureMode ?? "off");
       setSubAgentAutonomousWake(s.features?.subAgentAutonomousWake ?? false);
+      setSubAgentMaxRounds(s.chat?.subAgentMaxRounds ?? SUBAGENT_MAX_ROUNDS_DEFAULT);
       setMarketplaceBaseUrl(s.marketplace?.cloudBaseUrl ?? "");
       setMarketplaceAllowPrivateNetwork(s.marketplace?.cloudAllowPrivateNetwork ?? false);
       setHasMarketplaceApiKey(marketplaceKeySet);
@@ -219,6 +228,7 @@ export function useSettingsOrchestration(
       setIdleMemoryConsolidation(next.features?.idleMemoryConsolidation ?? false);
       setMemoryCaptureMode(next.features?.memoryCaptureMode ?? "off");
       setSubAgentAutonomousWake(next.features?.subAgentAutonomousWake ?? false);
+      setSubAgentMaxRounds(next.chat?.subAgentMaxRounds ?? SUBAGENT_MAX_ROUNDS_DEFAULT);
       const nextProvider = isLLMVendor(next.llm.provider)
         ? next.llm.provider
         : DEFAULT_LLM_VENDOR;
@@ -505,6 +515,29 @@ export function useSettingsOrchestration(
         setSubAgentAutonomousWake(previous);
       });
   }, [api, onSaved, settingsLoaded, subAgentAutonomousWake]);
+
+  const setSubAgentMaxRoundsLive = useCallback((next: number) => {
+    const previous = subAgentMaxRounds;
+    // Clamp in the UI as well as the engine: the engine clamp is the security
+    // boundary, this one keeps the persisted value from looking valid when it
+    // is not (a stored 9999 that silently runs as 60 is a lie in the file).
+    const clamped = Math.max(
+      SUBAGENT_MAX_ROUNDS_MIN,
+      Math.min(SUBAGENT_MAX_ROUNDS_MAX, Math.floor(next)),
+    );
+    setSubAgentMaxRounds(clamped);
+    if (!settingsLoaded) return;
+    void api
+      .updateSettings({ chat: { subAgentMaxRounds: clamped } })
+      .then((updated) => {
+        if (isIpcErrorResult(updated)) throw new Error(updated.message ?? updated.error);
+        setSettingsSnapshot(updated);
+        onSaved();
+      })
+      .catch(() => {
+        setSubAgentMaxRounds(previous);
+      });
+  }, [api, onSaved, settingsLoaded, subAgentMaxRounds]);
   return {
     lastSaveError,
     clearLastSaveError,
@@ -530,6 +563,7 @@ export function useSettingsOrchestration(
     idleMemoryConsolidation, setIdleMemoryConsolidation: setIdleMemoryConsolidationLive,
     memoryCaptureMode, setMemoryCaptureMode: setMemoryCaptureModeLive,
     subAgentAutonomousWake, setSubAgentAutonomousWake: setSubAgentAutonomousWakeLive,
+    subAgentMaxRounds, setSubAgentMaxRounds: setSubAgentMaxRoundsLive,
     marketplaceBaseUrl, setMarketplaceBaseUrl,
     marketplaceAllowPrivateNetwork, setMarketplaceAllowPrivateNetwork,
     hasMarketplaceApiKey, setHasMarketplaceApiKey,
