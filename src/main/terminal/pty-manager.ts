@@ -299,7 +299,11 @@ async function spawnNewTerminal(
   const rows = clampDim(options.rows, 24, MAX_ROWS);
 
   let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
-  let cleanupSandboxHome = (): void => {};
+  // No initializer, matching `sandboxHome` above: the catch below returns, so
+  // reaching past the try means both were assigned. A no-op placeholder would
+  // be dead — never observable — and would read as if a missing cleanup were a
+  // supported state (CodeQL: useless assignment to local variable).
+  let cleanupSandboxHome: () => void;
   try {
     sandboxHome = createSandboxProcessHome();
     let homeCleanupRequested = false;
