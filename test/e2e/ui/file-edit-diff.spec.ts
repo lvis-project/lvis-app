@@ -95,6 +95,27 @@ test.describe('FileEditDiff e2e', () => {
     await expect(card).toContainText('Edit');
     await expect(card).toContainText('hello');
     await expect(card).toContainText('annyeong');
+
+    // Regression: light themes previously rendered status-foreground white on
+    // translucent pastel hunks (~1.2:1). Verify the actual browser-composited
+    // colors, not only the token/class contract.
+    for (const kind of ['removed', 'added'] as const) {
+      const line = card.locator(`[data-diff-kind="${kind}"]`).first();
+      await expect(line).toBeVisible();
+      const colors = await line.evaluate((element: HTMLElement) => {
+        const style = getComputedStyle(element);
+        const card = element.closest('[data-testid="file-edit-diff"]');
+        return {
+          foreground: style.color,
+          background: style.backgroundColor,
+          backdrop: card ? getComputedStyle(card).backgroundColor : 'rgb(255, 255, 255)',
+        };
+      });
+      expect(wcagContrast(
+        colors.foreground,
+        composite(colors.background, colors.backdrop),
+      )).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   test('write_file (new file): renders Create verb without before content', async ({ mainWindow }) => {
@@ -225,3 +246,48 @@ test.describe('FileEditDiff e2e', () => {
     await expect(card).toContainText('truncated');
   });
 });
+
+function wcagContrast(foreground: string, background: [number, number, number]): number {
+  const fg = parseRgb(foreground);
+  const luminance = ([r, g, b]: [number, number, number]): number => {
+    const linear = (channel: number): number => {
+      const value = channel / 255;
+      return value <= 0.04045
+        ? value / 12.92
+        : Math.pow((value + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+  };
+  const foregroundLuminance = luminance(fg);
+  const backgroundLuminance = luminance(background);
+  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05)
+    / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
+}
+
+function composite(
+  foreground: string,
+  background: string,
+): [number, number, number] {
+  const foregroundChannels = parseRgba(foreground);
+  const backgroundChannels = parseRgba(background);
+  return foregroundChannels.slice(0, 3).map((channel, index) => (
+    channel * foregroundChannels[3]
+      + backgroundChannels[index]! * (1 - foregroundChannels[3])
+  )) as [number, number, number];
+}
+
+function parseRgb(color: string): [number, number, number] {
+  return parseRgba(color).slice(0, 3) as [number, number, number];
+}
+
+function parseRgba(color: string): [number, number, number, number] {
+  const channels = color.match(/[\d.]+/g)?.map(Number);
+  if (
+    !channels
+    || (channels.length !== 3 && channels.length !== 4)
+    || channels.some(Number.isNaN)
+  ) {
+    throw new Error(`unsupported computed color: ${color}`);
+  }
+  return [channels[0]!, channels[1]!, channels[2]!, channels[3] ?? 1];
+}

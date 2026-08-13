@@ -64,6 +64,7 @@ import { lvisHome } from "../shared/lvis-home.js";
 import { shellQuote } from "../lib/shell-resolver.js";
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "../tools/safe-env.js";
 import { trackManagedChildProcess } from "../main/managed-child-processes.js";
+import { createSandboxProcessHome } from "./sandbox-process-home.js";
 import {
   isAsrtSandboxActive,
   wrapWorkerCommand,
@@ -318,6 +319,13 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       stopWindowsAclGrantHolder(holder);
       throw new Error("[worker-spawn] Windows ACL grant holder started without a pid");
     }
+    let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
+    try {
+      sandboxHome = createSandboxProcessHome();
+    } catch (err) {
+      stopWindowsAclGrantHolder(holder);
+      throw err instanceof Error ? err : new Error(String(err));
+    }
     let grant: WindowsWorkerFilesystemGrant | undefined;
     let wrapped = false;
     let marked = false;
@@ -347,6 +355,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
         holderStopped = true;
         stopWindowsAclGrantHolder(holder);
       }
+      sandboxHome.cleanup();
     };
     const holderDied = (first?: unknown, second?: unknown): void => {
       if (holderStopped) return;
@@ -368,8 +377,8 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     try {
       grant = await grantWindowsWorkerFilesystemAccess({
         holderPid,
-        allowRead: spec.allowReadPaths,
-        allowWrite: spec.allowWritePaths,
+        allowRead: [sandboxHome.path, ...(spec.allowReadPaths ?? [])],
+        allowWrite: [sandboxHome.path, ...(spec.allowWritePaths ?? [])],
       });
       assertHolderAlive();
 
@@ -393,7 +402,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
         windowsHide: true,
-        env: buildWrappedWorkerEnv(baseEnv, env),
+        env: buildWrappedWorkerEnv(baseEnv, env, { ...sandboxHome.env }),
       });
       trackManagedChildProcess(child, { label: `worker:${safePlugin}:${safeWorker}:asrt-win` });
       assertHolderAlive();
@@ -435,6 +444,14 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     throw new Error(`[worker-spawn] refusing symlinked control dir: ${socketDir}`);
   }
 
+  let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
+  try {
+    sandboxHome = createSandboxProcessHome();
+  } catch (err) {
+    removeSocketArtifacts(socketPath, socketDir);
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+
   // Tell the worker where to bind. Either append `[name, path]` to argv or set
   // an env var; the higher-level worker protocol remains plugin-specific.
   if (typeof spec.udsArgName === "string") {
@@ -446,10 +463,11 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   // FAIL-CLOSED write jail: socketDir (so the Linux `--bind` exposes it + the
   // socket file can be created on macOS) ∪ the host-supplied write paths. The
   // worker also needs to READ its socketDir + tmp.
-  const allowWrite = [socketDir, ...(spec.allowWritePaths ?? [])];
+  const allowWrite = [socketDir, sandboxHome.path, ...(spec.allowWritePaths ?? [])];
   const tmpDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
   const allowRead = [
     socketDir,
+    sandboxHome.path,
     ...(spec.allowReadPaths ?? []),
     ...(spec.allowWritePaths ?? []),
     ...(tmpDir ? [tmpDir] : []),
@@ -507,7 +525,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       windowsHide: true,
       // Overlay the ASRT proxy env (none on mac/linux — proxy is baked into the
       // command string) onto the secret-stripped base env.
-      env: buildWrappedWorkerEnv(baseEnv, env),
+      env: buildWrappedWorkerEnv(baseEnv, env, { ...sandboxHome.env }),
     });
     trackManagedChildProcess(child, { label: `worker:${safePlugin}:${safeWorker}:asrt` });
 
@@ -522,6 +540,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       unmarkPluginWorkerWrapped(safePlugin, safeWorker);
       void unregisterWorkerUnixSocketDir(socketDir);
       void cleanupAsrtSandboxAfterCommand();
+      sandboxHome.cleanup();
       removeSocketArtifacts(socketPath, socketDir);
     };
     child.once("exit", cleanupOnce);
@@ -540,6 +559,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       void cleanupAsrtSandboxAfterCommand();
     }
     if (registered) void unregisterWorkerUnixSocketDir(socketDir);
+    sandboxHome.cleanup();
     removeSocketArtifacts(socketPath, socketDir);
     throw err instanceof Error ? err : new Error(String(err));
   }
@@ -554,6 +574,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
 function buildWrappedWorkerEnv(
   baseEnv: NodeJS.ProcessEnv,
   wrappedEnv: NodeJS.ProcessEnv,
+  sandboxHomeEnv: Record<string, string>,
 ): NodeJS.ProcessEnv {
   const asrtComposed = buildSandboxedChildEnv(wrappedEnv);
   const safeBaseline = buildSandboxedChildEnv(process.env);
@@ -563,7 +584,7 @@ function buildWrappedWorkerEnv(
     if (safeBaseline[key] === value) continue;
     proxyOverlay[key] = value;
   }
-  return { ...baseEnv, ...proxyOverlay };
+  return { ...baseEnv, ...proxyOverlay, ...sandboxHomeEnv };
 }
 
 /** Build the {@link SpawnedWorker} handle around a spawned child. */

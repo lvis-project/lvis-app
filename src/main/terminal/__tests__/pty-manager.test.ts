@@ -51,7 +51,21 @@ vi.mock("../../../permissions/sandbox-write-jail.js", () => ({
 
 // ─── env sanitizer (identity-ish) ───────────────────────────
 vi.mock("../../../tools/safe-env.js", () => ({
-  buildSandboxedChildEnv: (env: NodeJS.ProcessEnv) => ({ ...env, PATH: "/usr/bin" }),
+  buildSandboxedChildEnv: (env: NodeJS.ProcessEnv, extra: Record<string, string> = {}) => ({
+    ...env,
+    PATH: "/usr/bin",
+    ...extra,
+  }),
+}));
+
+const SANDBOX_HOME = "/tmp/lvis-sandbox-home-test";
+const sandboxHomeCleanupMock = vi.fn();
+vi.mock("../../../permissions/sandbox-process-home.js", () => ({
+  createSandboxProcessHome: () => ({
+    path: SANDBOX_HOME,
+    env: { HOME: SANDBOX_HOME, XDG_CONFIG_HOME: `${SANDBOX_HOME}/config` },
+    cleanup: sandboxHomeCleanupMock,
+  }),
 }));
 
 vi.mock("../../../lib/shell-resolver.js", () => ({
@@ -122,6 +136,7 @@ beforeEach(() => {
   lastPty = null;
   wrapWorkerCommandMock.mockClear();
   cleanupMock.mockClear();
+  sandboxHomeCleanupMock.mockClear();
   ptySpawnMock.mockClear();
   __resetTerminalsForTest();
   setTerminalEmitter(emit);
@@ -179,6 +194,8 @@ describe("pty-manager happy path (fs-contained)", () => {
     // write jail anchored on the WORKSPACE ROOT — NOT $HOME (cluster-review MAJOR).
     expect(options.filesystem.allowWrite).toContain(ROOT);
     expect(options.filesystem.allowRead).toContain(ROOT);
+    expect(options.filesystem.allowWrite).toContain(SANDBOX_HOME);
+    expect(options.filesystem.allowRead).toContain(SANDBOX_HOME);
 
     // spawned the WRAPPED argv[0] + argv.slice(1).
     expect(ptySpawnMock).toHaveBeenCalledTimes(1);
@@ -189,6 +206,7 @@ describe("pty-manager happy path (fs-contained)", () => {
     expect(opts.cols).toBe(120);
     expect(opts.rows).toBe(40);
     expect(opts.env.TERM).toBe("xterm-256color");
+    expect(opts.env.HOME).toBe(SANDBOX_HOME);
   });
 
   it("honors a renderer-supplied cwd that is WITHIN the workspace root", async () => {
@@ -220,6 +238,7 @@ describe("pty-manager happy path (fs-contained)", () => {
     lastPty?.emitExit(0);
     expect(emitted.some((e) => e.event === "exit")).toBe(true);
     expect(cleanupMock).toHaveBeenCalled();
+    expect(sandboxHomeCleanupMock).toHaveBeenCalled();
     // session dropped after exit.
     expect(__terminalSessionCountForTest()).toBe(0);
   });
@@ -244,6 +263,7 @@ describe("pty-manager lifecycle", () => {
     killTerminal("terminal:1");
     expect(lastPty?.killed).toBe(true);
     expect(cleanupMock).toHaveBeenCalled();
+    expect(sandboxHomeCleanupMock).toHaveBeenCalled();
     expect(__terminalSessionCountForTest()).toBe(0);
   });
 

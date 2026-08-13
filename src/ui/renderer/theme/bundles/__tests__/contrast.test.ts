@@ -58,6 +58,20 @@ function ratioFor(bgHsl: string, fgHsl: string): number {
   return contrastRatio(hslToRgb(bg.h, bg.s, bg.l), hslToRgb(fg.h, fg.s, fg.l));
 }
 
+function blendHslOver(
+  overlayHsl: string,
+  backdropHsl: string,
+  alpha: number,
+): [number, number, number] {
+  const overlay = parseHsl(overlayHsl);
+  const backdrop = parseHsl(backdropHsl);
+  const overlayRgb = hslToRgb(overlay.h, overlay.s, overlay.l);
+  const backdropRgb = hslToRgb(backdrop.h, backdrop.s, backdrop.l);
+  return overlayRgb.map((channel, index) => (
+    channel * alpha + backdropRgb[index]! * (1 - alpha)
+  )) as [number, number, number];
+}
+
 /* Two tiers — body text needs WCAG AA 4.5, chip/badge surfaces used for
  * shorter labels can pass at 3.0 (WCAG AA large). The thresholds are
  * intentionally generous so the test surfaces regressions without
@@ -139,6 +153,32 @@ describe("Theme contrast — visible UI line token (non-text 3:1)", () => {
           ratio,
           `${bundle.id} ${String(bgKey)}=${bundle.tokens[bgKey]} vs ui-line=${bundle.tokens["ui-line"]} ratio ${ratio.toFixed(2)}`,
         ).toBeGreaterThanOrEqual(3.0);
+      });
+    }
+  }
+});
+
+describe("Theme contrast — translucent diff hunk body text (WCAG AA 4.5:1)", () => {
+  for (const bundleId of BUNDLE_IDS) {
+    for (const stateKey of ["success", "destructive"] as const) {
+      it(`${bundleId}: foreground over ${stateKey} diff wash ≥ 4.5`, async () => {
+        const bundle = await loadThemeBundle(bundleId);
+        expect(bundle).toBeDefined();
+        if (!bundle) return;
+        const background = blendHslOver(
+          bundle.tokens[stateKey],
+          bundle.tokens.background,
+          0.15,
+        );
+        const foreground = parseHsl(bundle.tokens.foreground);
+        const ratio = contrastRatio(
+          background,
+          hslToRgb(foreground.h, foreground.s, foreground.l),
+        );
+        expect(
+          ratio,
+          `${bundle.id} foreground over ${stateKey} diff wash ratio ${ratio.toFixed(2)}`,
+        ).toBeGreaterThanOrEqual(4.5);
       });
     }
   }

@@ -258,4 +258,21 @@ describe("buildSandboxedChildEnv — ASRT env composition (PR #1356 allow-list)"
     expect(env.PATH).toBe("/usr/bin:/bin");
     expect(env.HOME).toBe("/home/testuser");
   });
+
+  it("lets a host-created isolated profile override inherited HOME without leaking secrets", () => {
+    const env = buildSandboxedChildEnv(
+      { ...process.env, HTTP_PROXY: "http://localhost:8080" },
+      {
+        HOME: "/tmp/lvis-sandbox-home-test",
+        XDG_CONFIG_HOME: "/tmp/lvis-sandbox-home-test/config",
+      },
+    );
+
+    expect(env.HOME).toBe("/tmp/lvis-sandbox-home-test");
+    expect(env.XDG_CONFIG_HOME).toBe("/tmp/lvis-sandbox-home-test/config");
+    expect(env.HTTP_PROXY).toBe("http://localhost:8080");
+    for (const key of SECRET_KEYS) {
+      expect(Object.prototype.hasOwnProperty.call(env, key)).toBe(false);
+    }
+  });
 });

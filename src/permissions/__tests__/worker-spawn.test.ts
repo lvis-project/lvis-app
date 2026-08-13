@@ -47,6 +47,22 @@ vi.mock("node:fs", () => ({
   lstatSync: (path: unknown) => lstatSyncMock(path),
 }));
 
+const SANDBOX_HOME = "/tmp/lvis-sandbox-home-test";
+const sandboxHomeCleanupMock = vi.fn();
+vi.mock("../sandbox-process-home.js", () => ({
+  createSandboxProcessHome: () => ({
+    path: SANDBOX_HOME,
+    env: {
+      HOME: SANDBOX_HOME,
+      USERPROFILE: SANDBOX_HOME,
+      APPDATA: `${SANDBOX_HOME}/AppData/Roaming`,
+      LOCALAPPDATA: `${SANDBOX_HOME}/AppData/Local`,
+      XDG_CONFIG_HOME: `${SANDBOX_HOME}/config`,
+    },
+    cleanup: sandboxHomeCleanupMock,
+  }),
+}));
+
 // ─── child_process mock ─────────────────────────────────────
 const spawnMock = vi.fn<
   (cmd: string, args?: readonly string[], opts?: unknown) => unknown
@@ -153,6 +169,7 @@ beforeEach(() => {
   spawnMock.mockReset();
   wrapWorkerCommandMock.mockReset();
   cleanupMock.mockClear();
+  sandboxHomeCleanupMock.mockClear();
   registerUdsMock.mockClear();
   unregisterUdsMock.mockClear();
   grantReleaseMock.mockClear();
@@ -263,6 +280,8 @@ describe("spawnWorker — gate ON (macOS)", () => {
       { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead?: string[]; denyWrite?: string[] }; allowUnixSocketPath?: string; allowAllUnixSockets?: boolean },
     ];
     expect(options.filesystem.allowWrite[0]).toBe(socketDir);
+    expect(options.filesystem.allowWrite).toContain(SANDBOX_HOME);
+    expect(options.filesystem.allowRead).toContain(SANDBOX_HOME);
     expect(options.filesystem.allowWrite).toContain("/data/index");
     expect(options.filesystem.allowRead).toContain("/opt/worker");
     expect(options.filesystem.allowRead).toContain("/opt/scripts/embed.py");
@@ -323,6 +342,7 @@ describe("spawnWorker — gate ON (macOS)", () => {
 
     const socketPath = join(lvisHome(), "plugins", "local-indexer", "run", "embed", "control.sock");
     expect(capturedEnv.LVIS_CONTROL_SOCKET).toBe(socketPath);
+    expect(capturedEnv.HOME).toBe(SANDBOX_HOME);
   });
 });
 
@@ -515,8 +535,8 @@ describe("spawnWorker — Windows with gate ON", () => {
     expect(unregisterUdsMock).not.toHaveBeenCalled();
     expect(grantWindowsWorkerFilesystemAccessMock).toHaveBeenCalledWith({
       holderPid: 5101,
-      allowRead: [pythonExecutable, workerScript],
-      allowWrite: [indexDir],
+      allowRead: [SANDBOX_HOME, pythonExecutable, workerScript],
+      allowWrite: [SANDBOX_HOME, indexDir],
     });
 
     expect(wrapWorkerCommandMock).toHaveBeenCalledTimes(1);
@@ -556,7 +576,9 @@ describe("spawnWorker — Windows with gate ON", () => {
     expect(workerOpts.env?.WINDIR).toBe("C:\\Windows");
     expect(workerOpts.env?.COMSPEC).toBe("C:\\Windows\\System32\\cmd.exe");
     expect(workerOpts.env?.PATHEXT).toBe(".COM;.EXE;.BAT;.CMD");
-    expect(workerOpts.env?.LOCALAPPDATA).toBe("C:\\Users\\test\\AppData\\Local");
+    expect(workerOpts.env?.HOME).toBe(SANDBOX_HOME);
+    expect(workerOpts.env?.USERPROFILE).toBe(SANDBOX_HOME);
+    expect(workerOpts.env?.LOCALAPPDATA).toBe(`${SANDBOX_HOME}/AppData/Local`);
     expect(workerOpts.env?.TEMP).toBe("C:\\Users\\test\\AppData\\Local\\Temp");
     expect(workerOpts.env?.TMP).toBe("C:\\Users\\test\\AppData\\Local\\Temp");
     expect(workerOpts.env?.HTTPS_PROXY).toBe("http://127.0.0.1:60080");
