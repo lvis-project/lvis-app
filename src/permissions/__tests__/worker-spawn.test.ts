@@ -422,7 +422,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
     expect(unregisterUdsMock).toHaveBeenCalledTimes(1);
   });
 
-  it("stop() before exit runs cleanup once; a later exit does not re-run it", async () => {
+  it("stop() releases security state but defers HOME cleanup until exit", async () => {
     withPlatformForTest("linux");
     gateActive = true;
     wrapWorkerCommandMock.mockResolvedValueOnce({
@@ -441,9 +441,11 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
     worker.stop();
     expect(cleanupMock).toHaveBeenCalledTimes(1);
     expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
+    expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
 
     child.emit("exit", 0, "SIGTERM");
     expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
   });
 
   it("onExit forwards the child's exit (code + signal) to the consumer", async () => {

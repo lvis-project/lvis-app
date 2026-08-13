@@ -19,6 +19,7 @@ import {
   type ToolResult,
 } from "./base.js";
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
+import { terminateChildProcess } from "./terminate-child-process.js";
 import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
 import {
   validateShellCommandPathPolicy,
@@ -659,7 +660,7 @@ async function spawnPowerShellWithSandbox(
     const timer = setTimeout(() => {
       timedOut = true;
       abortController.abort();
-      terminateProcess(child);
+      terminateChildProcess(child);
     }, timeoutSeconds * 1000);
 
     const finish = (code: number | null): void => {
@@ -726,7 +727,7 @@ async function spawnPowerShell(
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      terminateProcess(child);
+      terminateChildProcess(child);
     }, timeoutSeconds * 1000);
 
     const finish = (code: number | null): void => {
@@ -757,15 +758,6 @@ async function spawnPowerShell(
       });
     });
   });
-}
-
-function terminateProcess(child: PipedChild): void {
-  child.kill("SIGTERM");
-  setTimeout(() => {
-    if (child.exitCode === null && !child.killed) {
-      child.kill("SIGKILL");
-    }
-  }, 2000);
 }
 
 function formatOutput(raw: string): string {

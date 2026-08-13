@@ -418,6 +418,45 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     expect(isMcpServerWrapped("crash")).toBe(false); // still gone
   });
 
+  it("explicit disconnect defers HOME cleanup until the child exits", async () => {
+    gateActive = true;
+    const sandboxRoot = join(lvisHome(), "mcp", "stubborn-cleanup", "sandbox");
+    class StubbornChild extends FakeChildProcess {
+      override kill(): boolean {
+        return true;
+      }
+    }
+    const fake = new StubbornChild();
+    fake.responses = handshakeResponses("stubborn-cleanup");
+    wrapWorkerCommandMock.mockResolvedValueOnce({
+      argv: ["/bin/bash", "-c", "sandbox-exec ... lvis-mcp-stubborn"],
+      env: { ...process.env },
+    });
+    spawnMock.mockReturnValueOnce(fake);
+
+    const client = new McpClient(
+      {
+        id: "stubborn-cleanup",
+        transport: "stdio",
+        command: "lvis-mcp-stubborn",
+        sandboxRoot,
+      },
+      governanceWithPolicy(buildPolicy([
+        stdioApproval("stubborn-cleanup", "lvis-mcp-stubborn"),
+      ])),
+      new ToolRegistry(),
+    );
+    await client.connect();
+
+    await client.disconnect();
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
+
+    fake.exitCode = 0;
+    fake.emit("exit", 0, "SIGTERM");
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
+  });
+
   it("win32 fails closed before passing unsupported per-exec allow grants to ASRT", async () => {
     withPlatformForTest("win32");
     gateActive = true;
