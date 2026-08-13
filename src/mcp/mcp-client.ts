@@ -1813,6 +1813,7 @@ class StdioTransport implements McpTransport {
     } catch (err) {
       if (this.wrappedThroughAsrt) {
         this.runAsrtCleanupOnce();
+        this.cleanupSandboxHome();
       } else {
         if (wrapped) void cleanupAsrtSandboxAfterCommand();
         sandboxHome.cleanup();
@@ -1860,10 +1861,9 @@ class StdioTransport implements McpTransport {
 
   /**
    * Release the per-command ASRT state exactly ONCE per wrapped worker lifetime,
-   * regardless of how the child process ends (explicit close(), unexpected crash,
-   * OS kill, spawn error). Idempotency is guaranteed by the `asrtCleanupRan`
-   * flag: whoever fires first (the process 'exit'/'error' handler OR close())
-   * runs the cleanup; the second caller is a no-op.
+   * regardless of how the child process ends. This releases security state
+   * immediately on explicit close, but the disposable HOME is removed only by
+   * the confirmed process exit/error handlers.
    *
    * Consequences of running this:
    *   1. Drops the no-leak reviewer marker (`unmarkMcpServerWrapped`) so a later
@@ -1878,8 +1878,10 @@ class StdioTransport implements McpTransport {
     this.wrappedThroughAsrt = false;
     unmarkMcpServerWrapped(this.config.id);
     void cleanupAsrtSandboxAfterCommand();
+  }
+
+  private cleanupSandboxHome(): void {
     this.sandboxHomeCleanup?.();
-    this.sandboxHomeCleanup = null;
   }
 
   async send(message: JsonRpcMessage): Promise<void> {
@@ -1955,6 +1957,7 @@ class StdioTransport implements McpTransport {
       // including unexpected crashes/kills. The idempotent one-shot helper ensures
       // this and the explicit close() path do not double-run the cleanup.
       this.runAsrtCleanupOnce();
+      this.cleanupSandboxHome();
       if (!this.closedExternally) {
         this.closeHandler?.(t("be_mcpClient.processExitedUnexpectedly"));
       }
@@ -1964,7 +1967,15 @@ class StdioTransport implements McpTransport {
       log.error(`${this.config.id} process error: %s`, err.message);
       // Same idempotent cleanup for the error path (spawn failure, broken pipe).
       this.runAsrtCleanupOnce();
+      this.cleanupSandboxHome();
       this.closeHandler?.(t("be_mcpClient.processError", { message: err.message }));
+    });
+
+    // Node emits `close` after `exit` once stdio has closed. A transient
+    // Windows lock can make the first HOME removal fail; the cleanup helper
+    // deliberately remains retryable until deletion succeeds.
+    this.process.on("close", () => {
+      this.cleanupSandboxHome();
     });
   }
 

@@ -373,17 +373,16 @@ export function killTerminal(tabId: string): void {
   sessions.delete(tabId);
   try {
     session.disposeData();
-    session.disposeExit();
     if (!session.exited) {
       session.pty.kill();
-      // The exit handler was disposed, so decrement ASRT state here (the exit
-      // event will not run our cleanup for this explicit kill path).
-      void cleanupAsrtSandboxAfterCommand();
     }
   } catch (err) {
-    log.warn({ tabId, err: err instanceof Error ? err.message : String(err) }, "terminal: kill failed");
-  } finally {
+    // If kill itself fails, no exit event is guaranteed; release all resources
+    // here. Successful kills finalize from the definitive PTY exit callback.
+    session.disposeExit();
+    void cleanupAsrtSandboxAfterCommand();
     session.cleanupSandboxHome();
+    log.warn({ tabId, err: err instanceof Error ? err.message : String(err) }, "terminal: kill failed");
   }
 }
 

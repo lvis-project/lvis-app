@@ -36,6 +36,11 @@ function profileEnvironment(
     if (/^[A-Za-z]:$/.test(drive)) {
       env.HOMEDRIVE = drive;
       env.HOMEPATH = homePath.slice(2) || "\\";
+    } else {
+      // Never inherit the real profile pair when TEMP is UNC-backed. Programs
+      // that use %HOMEDRIVE%%HOMEPATH% still resolve the isolated profile.
+      env.HOMEDRIVE = "";
+      env.HOMEPATH = homePath;
     }
     return env;
   }
@@ -75,6 +80,7 @@ function createProfileDirectories(env: Readonly<Record<string, string>>): void {
  */
 export function createSandboxProcessHome(
   platform: NodeJS.Platform = process.platform,
+  removeHome: typeof rmSync = rmSync,
 ): SandboxProcessHome {
   const tempRoot = realpathSync.native(tmpdir());
   const createdPath = mkdtempSync(join(tempRoot, SANDBOX_HOME_PREFIX));
@@ -114,7 +120,6 @@ export function createSandboxProcessHome(
     env,
     cleanup(): void {
       if (cleaned) return;
-      cleaned = true;
       if (
         dirname(homePath) !== tempRoot ||
         !basename(homePath).startsWith(SANDBOX_HOME_PREFIX)
@@ -123,7 +128,8 @@ export function createSandboxProcessHome(
         return;
       }
       try {
-        rmSync(homePath, { recursive: true, force: true });
+        removeHome(homePath, { recursive: true, force: true });
+        cleaned = true;
       } catch (err) {
         log.warn(
           { homePath, err: err instanceof Error ? err.message : String(err) },

@@ -262,8 +262,11 @@ describe("pty-manager lifecycle", () => {
     await spawnTerminal({ tabId: "terminal:1" });
     killTerminal("terminal:1");
     expect(lastPty?.killed).toBe(true);
-    expect(cleanupMock).toHaveBeenCalled();
-    expect(sandboxHomeCleanupMock).toHaveBeenCalled();
+    expect(cleanupMock).not.toHaveBeenCalled();
+    expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
+    lastPty?.emitExit(0);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
     expect(__terminalSessionCountForTest()).toBe(0);
   });
 

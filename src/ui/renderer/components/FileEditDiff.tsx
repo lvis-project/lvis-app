@@ -144,7 +144,7 @@ function DiffLine({
   // Status foreground tokens are designed for solid buttons/badges. Reusing
   // them on a translucent diff wash can produce white-on-pastel text in light
   // themes. Keep body text on the normal foreground pair and reserve the
-  // status color for the redundant border + sigil state cues.
+  // status color for the redundant border state cue.
   const colors = kind === "added"
     ? { background: "var(--diff-add)", accent: "var(--diff-add-fg)" }
     : { background: "var(--diff-remove)", accent: "var(--diff-remove-fg)" };
