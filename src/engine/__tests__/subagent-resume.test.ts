@@ -1871,10 +1871,10 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     restore();
     const resumeId = spawn.childSessionId;
     const meta = subStore.loadSessionMetadata(resumeId)!;
-    // 4 * MAX_TURNS_CAP(30) = 120. Set exactly at the ceiling.
+    // 4 * MAX_TURNS_CAP(60) = 240. Set exactly at the ceiling.
     await subStore.saveSessionMetadata(resumeId, {
       ...meta,
-      cumulativeRounds: 120,
+      cumulativeRounds: 240,
     });
 
     const guard = new ScriptedProvider([
@@ -1920,7 +1920,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       budgetResumeCount: 0,
       questionAnswerCount: 4,
       resumeCount: 0,
-      cumulativeRounds: 119,
+      cumulativeRounds: 239,
     });
 
     let observedMaxRounds: number | undefined;
@@ -1958,7 +1958,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(observedMaxRounds).toBe(1);
 
       const atCeiling = subStore.loadSessionMetadata(resumeId)!;
-      expect(atCeiling.cumulativeRounds).toBe(120);
+      expect(atCeiling.cumulativeRounds).toBe(240);
       expect(atCeiling.budgetResumeCount).toBe(1);
       expect(atCeiling.resumeCount).toBe(1);
       expect(atCeiling.questionAnswerCount).toBe(4);
@@ -1973,7 +1973,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(refused.turnCount).toBe(0);
       expect(runTurnSpy).toHaveBeenCalledTimes(1);
       expect(subStore.loadSessionMetadata(resumeId)?.cumulativeRounds).toBe(
-        120,
+        240,
       );
     } finally {
       runTurnSpy.mockRestore();

@@ -57,7 +57,7 @@ import { createSubscriptionUsageCollector, recordSubscriptionRoundTelemetry } fr
 import { appendUsageForServingModel } from "./usage-by-model.js";
 
 const log = createLogger("lvis");
-const MAX_TOOL_ROUNDS = 30;
+const MAX_TOOL_ROUNDS = 60; // main chat + sub-agents; rationale at MAX_TURNS_DEFAULT
 /**
  * Hard cap on finish_reason=length CONTINUATIONS per logical assistant answer.
  * Published provider guidance converges on 2–3. AND-ed with: (a) a
