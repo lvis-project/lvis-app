@@ -51,7 +51,21 @@ vi.mock("../../../permissions/sandbox-write-jail.js", () => ({
 
 // ─── env sanitizer (identity-ish) ───────────────────────────
 vi.mock("../../../tools/safe-env.js", () => ({
-  buildSandboxedChildEnv: (env: NodeJS.ProcessEnv) => ({ ...env, PATH: "/usr/bin" }),
+  buildSandboxedChildEnv: (env: NodeJS.ProcessEnv, extra: Record<string, string> = {}) => ({
+    ...env,
+    PATH: "/usr/bin",
+    ...extra,
+  }),
+}));
+
+const SANDBOX_HOME = "/tmp/lvis-sandbox-home-test";
+const sandboxHomeCleanupMock = vi.fn();
+vi.mock("../../../permissions/sandbox-process-home.js", () => ({
+  createSandboxProcessHome: () => ({
+    path: SANDBOX_HOME,
+    env: { HOME: SANDBOX_HOME, XDG_CONFIG_HOME: `${SANDBOX_HOME}/config` },
+    cleanup: sandboxHomeCleanupMock,
+  }),
 }));
 
 vi.mock("../../../lib/shell-resolver.js", () => ({
@@ -66,6 +80,7 @@ class FakePty {
   written: string[] = [];
   resized: Array<[number, number]> = [];
   killed = false;
+  killSignals: Array<string | undefined> = [];
   private dataCb: DataCb | null = null;
   private exitCb: ExitCb | null = null;
   onData(cb: DataCb) {
@@ -78,14 +93,19 @@ class FakePty {
   }
   write(d: string) { this.written.push(d); }
   resize(c: number, r: number) { this.resized.push([c, r]); }
-  kill() { this.killed = true; }
+  kill(signal?: string) {
+    this.killed = true;
+    this.killSignals.push(signal);
+  }
   // test helpers
   emitData(chunk: string) { this.dataCb?.(chunk); }
   emitExit(exitCode: number) { this.exitCb?.({ exitCode }); }
 }
 let lastPty: FakePty | null = null;
+let spawnedPtys: FakePty[] = [];
 const ptySpawnMock = vi.fn<(cmd: string, args: string[], opts: unknown) => FakePty>(() => {
   lastPty = new FakePty();
+  spawnedPtys.push(lastPty);
   return lastPty;
 });
 vi.mock("node-pty", () => ({
@@ -99,6 +119,7 @@ import {
   resizeTerminal,
   killTerminal,
   killAllTerminals,
+  forceKillAllTerminalsForShutdown,
   setTerminalEmitter,
   __resetTerminalsForTest,
   __terminalSessionCountForTest,
@@ -120,8 +141,10 @@ beforeEach(() => {
   shellContained = true;
   emitted = [];
   lastPty = null;
+  spawnedPtys = [];
   wrapWorkerCommandMock.mockClear();
   cleanupMock.mockClear();
+  sandboxHomeCleanupMock.mockClear();
   ptySpawnMock.mockClear();
   __resetTerminalsForTest();
   setTerminalEmitter(emit);
@@ -179,6 +202,8 @@ describe("pty-manager happy path (fs-contained)", () => {
     // write jail anchored on the WORKSPACE ROOT — NOT $HOME (cluster-review MAJOR).
     expect(options.filesystem.allowWrite).toContain(ROOT);
     expect(options.filesystem.allowRead).toContain(ROOT);
+    expect(options.filesystem.allowWrite).toContain(SANDBOX_HOME);
+    expect(options.filesystem.allowRead).toContain(SANDBOX_HOME);
 
     // spawned the WRAPPED argv[0] + argv.slice(1).
     expect(ptySpawnMock).toHaveBeenCalledTimes(1);
@@ -189,6 +214,7 @@ describe("pty-manager happy path (fs-contained)", () => {
     expect(opts.cols).toBe(120);
     expect(opts.rows).toBe(40);
     expect(opts.env.TERM).toBe("xterm-256color");
+    expect(opts.env.HOME).toBe(SANDBOX_HOME);
   });
 
   it("honors a renderer-supplied cwd that is WITHIN the workspace root", async () => {
@@ -220,6 +246,7 @@ describe("pty-manager happy path (fs-contained)", () => {
     lastPty?.emitExit(0);
     expect(emitted.some((e) => e.event === "exit")).toBe(true);
     expect(cleanupMock).toHaveBeenCalled();
+    expect(sandboxHomeCleanupMock).toHaveBeenCalled();
     // session dropped after exit.
     expect(__terminalSessionCountForTest()).toBe(0);
   });
@@ -236,6 +263,41 @@ describe("pty-manager happy path (fs-contained)", () => {
     // ring replayed.
     expect(emitted).toContainEqual({ event: "data", payload: { tabId: "terminal:1", chunk: "scrollback" } });
   });
+
+  it("shares an in-flight same-tab spawn instead of creating two PTYs", async () => {
+    let releaseWrap: ((value: { argv: string[]; env: NodeJS.ProcessEnv }) => void) | undefined;
+    wrapWorkerCommandMock.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseWrap = resolve;
+    }));
+
+    const first = spawnTerminal({ tabId: "terminal:1" });
+    const overlapping = spawnTerminal({ tabId: "terminal:1" });
+    expect(wrapWorkerCommandMock).toHaveBeenCalledTimes(1);
+    releaseWrap?.({ argv: ["sandbox-exec", "/bin/bash"], env: {} });
+
+    const [firstResult, overlappingResult] = await Promise.all([first, overlapping]);
+    expect(firstResult).toMatchObject({ ok: true, replayed: false });
+    expect(overlappingResult).toMatchObject({ ok: true, replayed: true });
+    expect(ptySpawnMock).toHaveBeenCalledTimes(1);
+    expect(__terminalSessionCountForTest()).toBe(1);
+  });
+
+  it("cancels an in-flight spawn when its tab closes", async () => {
+    let releaseWrap: ((value: { argv: string[]; env: NodeJS.ProcessEnv }) => void) | undefined;
+    wrapWorkerCommandMock.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseWrap = resolve;
+    }));
+
+    const spawn = spawnTerminal({ tabId: "terminal:closing" });
+    killTerminal("terminal:closing");
+    releaseWrap?.({ argv: ["sandbox-exec", "/bin/bash"], env: {} });
+
+    await expect(spawn).resolves.toMatchObject({ ok: false, reason: "spawn-failed" });
+    expect(ptySpawnMock).not.toHaveBeenCalled();
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
+    expect(__terminalSessionCountForTest()).toBe(0);
+  });
 });
 
 describe("pty-manager lifecycle", () => {
@@ -243,8 +305,42 @@ describe("pty-manager lifecycle", () => {
     await spawnTerminal({ tabId: "terminal:1" });
     killTerminal("terminal:1");
     expect(lastPty?.killed).toBe(true);
-    expect(cleanupMock).toHaveBeenCalled();
+    expect(cleanupMock).not.toHaveBeenCalled();
+    expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
+    expect(__terminalSessionCountForTest()).toBe(1);
+    writeTerminal("terminal:1", "stale input\n");
+    resizeTerminal("terminal:1", 140, 50);
+    expect(lastPty?.written).toEqual([]);
+    expect(lastPty?.resized).toEqual([]);
+    const replay = await spawnTerminal({ tabId: "terminal:1" });
+    expect(replay.ok).toBe(true);
+    if (replay.ok) expect(replay.replayed).toBe(true);
+    expect(ptySpawnMock).toHaveBeenCalledTimes(1);
+    lastPty?.emitExit(0);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
     expect(__terminalSessionCountForTest()).toBe(0);
+  });
+
+  it("retains a closing session and force-kills a PTY that ignores SIGHUP", async () => {
+    vi.useFakeTimers();
+    try {
+      await spawnTerminal({ tabId: "terminal:1" });
+      const pty = lastPty;
+      killTerminal("terminal:1");
+      expect(pty?.killSignals).toEqual([undefined]);
+      expect(__terminalSessionCountForTest()).toBe(1);
+
+      vi.advanceTimersByTime(3_000);
+      expect(pty?.killSignals).toEqual([undefined, "SIGKILL"]);
+      expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
+
+      pty?.emitExit(137);
+      expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
+      expect(__terminalSessionCountForTest()).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("killAllTerminals kills every live session", async () => {
@@ -253,7 +349,41 @@ describe("pty-manager lifecycle", () => {
     expect(__terminalSessionCountForTest()).toBe(2);
     const killed = killAllTerminals();
     expect(killed).toBe(2);
+    expect(__terminalSessionCountForTest()).toBe(2);
+    for (const pty of spawnedPtys) pty.emitExit(0);
     expect(__terminalSessionCountForTest()).toBe(0);
+  });
+
+  it("app shutdown sends SIGKILL immediately and awaits definitive exits", async () => {
+    await spawnTerminal({ tabId: "terminal:1" });
+    const pty = lastPty;
+    const shutdown = forceKillAllTerminalsForShutdown();
+    expect(pty?.killSignals).toEqual(["SIGKILL"]);
+    expect(__terminalSessionCountForTest()).toBe(1);
+    pty?.emitExit(137);
+    await shutdown;
+    expect(__terminalSessionCountForTest()).toBe(0);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("app shutdown cancels and drains an in-flight spawn", async () => {
+    let releaseWrap: ((value: { argv: string[]; env: NodeJS.ProcessEnv }) => void) | undefined;
+    wrapWorkerCommandMock.mockImplementationOnce(() => new Promise((resolve) => {
+      releaseWrap = resolve;
+    }));
+
+    const spawn = spawnTerminal({ tabId: "terminal:starting" });
+    const shutdown = forceKillAllTerminalsForShutdown();
+    releaseWrap?.({ argv: ["sandbox-exec", "/bin/bash"], env: {} });
+
+    await expect(spawn).resolves.toMatchObject({ ok: false, reason: "spawn-failed" });
+    await expect(shutdown).resolves.toBe(0);
+    expect(ptySpawnMock).not.toHaveBeenCalled();
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
+    expect(__terminalSessionCountForTest()).toBe(0);
+    await expect(spawnTerminal({ tabId: "terminal:late" }))
+      .resolves.toMatchObject({ ok: false, reason: "spawn-failed" });
   });
 });
 

@@ -29,6 +29,8 @@ import {
   type ToolResult,
 } from "./base.js";
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
+import { terminateChildProcess } from "./terminate-child-process.js";
+import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
 import {
   validateShellCommandPathPolicy,
   validateShellWorkingDirectory,
@@ -54,7 +56,10 @@ import {
 } from "../permissions/host-shell-execution-permit.js";
 import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
-import { trackManagedChildProcess } from "../main/managed-child-processes.js";
+import {
+  assertManagedChildProcessAdmissionOpen,
+  trackManagedChildProcess,
+} from "../main/managed-child-processes.js";
 import { backgroundShellManager } from "./background-shell-manager.js";
 
 export const BashToolInputSchema = z.object({
@@ -290,6 +295,7 @@ function withBackgroundUnavailable(result: SpawnResult, requested: boolean): Spa
  */
 function spawnBackground(command: string, cwd: string, sessionId: string): SpawnResult {
   const shell = resolveShell();
+  assertManagedChildProcessAdmissionOpen("tool:bash:background");
   const child: PipedChild = spawn(shell.cmd, shell.shellArgs(command), {
     cwd,
     stdio: ["ignore", "pipe", "pipe"],
@@ -374,17 +380,28 @@ export async function spawnWithSandbox(
   writePaths: readonly string[],
   timeoutSeconds: number,
 ): Promise<SpawnResult> {
+  let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
+  try {
+    sandboxHome = createSandboxProcessHome();
+  } catch (err) {
+    return {
+      output: `spawn failed: could not create isolated HOME: ${(err as Error).message}`,
+      isError: true,
+      metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
+    };
+  }
   const home = process.env["HOME"];
   // Read-jail HOME-leak fix: deny the whole home dir, then re-allow the working
   // tree (cwd + write paths). Omitting denyRead when HOME is unset avoids
   // denying nothing-meaningful; the write paths are always re-allowed for read.
-  const allowRead = [resolvedCwd, ...writePaths];
+  const sandboxWritePaths = [...writePaths, sandboxHome.path];
+  const allowRead = [resolvedCwd, ...sandboxWritePaths];
   const denyRead = [
     ...getDefaultSensitiveReadDenyPaths(),
     ...(home !== undefined && home !== "" ? [home] : []),
   ];
   const filesystem = {
-    allowWrite: [...writePaths],
+    allowWrite: sandboxWritePaths,
     allowRead,
     denyRead,
     denyWrite: getDefaultSensitiveWriteDenyPaths(),
@@ -416,6 +433,7 @@ export async function spawnWithSandbox(
       ...(binShell !== undefined ? { binShell } : {}),
     });
   } catch (err) {
+    sandboxHome.cleanup();
     return {
       output: `spawn failed: ${(err as Error).message}`,
       isError: true,
@@ -425,6 +443,8 @@ export async function spawnWithSandbox(
 
   const [cmd, ...args] = wrapped.argv;
   if (cmd === undefined) {
+    void cleanupAsrtSandboxAfterCommand();
+    sandboxHome.cleanup();
     return {
       output: "spawn failed: ASRT returned an empty argv",
       isError: true,
@@ -439,17 +459,30 @@ export async function spawnWithSandbox(
   // safe whitelist baseline + ONLY the allow-listed proxy/CA/SANDBOX_RUNTIME
   // keys ASRT set/changed. So the Windows proxy set is propagated (the "spread")
   // while mac/linux gains nothing extra, and host secrets stay stripped on both.
-  const childEnv = buildSandboxedChildEnv(wrapped.env);
+  const childEnv = buildSandboxedChildEnv(wrapped.env, { ...sandboxHome.env });
 
   return await new Promise<SpawnResult>((resolveResult) => {
     // CRITICAL: shell:false — the wrapper argv is the literal program+args; a
     // shell here would re-parse and break quoting / inject a second shell.
-    const child: PipedChild = spawn(cmd, args, {
-      cwd: resolvedCwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
-      env: childEnv,
-    });
+    let child: PipedChild;
+    try {
+      assertManagedChildProcessAdmissionOpen("tool:bash:asrt");
+      child = spawn(cmd, args, {
+        cwd: resolvedCwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        env: childEnv,
+      });
+    } catch (err) {
+      void cleanupAsrtSandboxAfterCommand();
+      sandboxHome.cleanup();
+      resolveResult({
+        output: `spawn failed: ${(err as Error).message}`,
+        isError: true,
+        metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
+      });
+      return;
+    }
     trackManagedChildProcess(child, { label: "tool:bash:asrt" });
 
     const chunks: Buffer[] = [];
@@ -461,18 +494,25 @@ export async function spawnWithSandbox(
 
     let settled = false;
     let timedOut = false;
+    let lifecycleCleaned = false;
+    const cleanupAfterTermination = (): void => {
+      if (lifecycleCleaned) return;
+      lifecycleCleaned = true;
+      void cleanupAsrtSandboxAfterCommand();
+      sandboxHome.cleanup();
+    };
     const timer = setTimeout(() => {
       timedOut = true;
       abortController.abort();
-      terminateProcess(child);
+      terminateChildProcess(child);
     }, timeoutSeconds * 1000);
 
     const finish = (code: number | null): void => {
+      cleanupAfterTermination();
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       // Per-command cleanup (proxy/helper state) after the wrapped command ends.
-      void cleanupAsrtSandboxAfterCommand();
       const combined = Buffer.concat(chunks).toString("utf-8");
       const formatted = formatOutput(combined);
       if (timedOut) {
@@ -495,7 +535,8 @@ export async function spawnWithSandbox(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      void cleanupAsrtSandboxAfterCommand();
+      // Node can emit `error` for a failed process operation while the child
+      // remains alive. The later `close` event owns ASRT/HOME finalization.
       resolveResult({
         output: `spawn failed: ${err.message}`,
         isError: true,
@@ -512,6 +553,7 @@ async function spawnWithTimeout(
 ): Promise<SpawnResult> {
   return new Promise((resolve) => {
     const shell = resolveShell();
+    assertManagedChildProcessAdmissionOpen("tool:bash");
     const child: PipedChild = spawn(shell.cmd, shell.shellArgs(command), {
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
@@ -533,7 +575,7 @@ async function spawnWithTimeout(
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      terminateProcess(child);
+      terminateChildProcess(child);
     }, timeoutSeconds * 1000);
 
     const finish = (code: number | null): void => {
@@ -569,15 +611,6 @@ async function spawnWithTimeout(
       });
     });
   });
-}
-
-function terminateProcess(child: PipedChild): void {
-  child.kill("SIGTERM");
-  setTimeout(() => {
-    if (child.exitCode === null && !child.killed) {
-      child.kill("SIGKILL");
-    }
-  }, 2000);
 }
 
 function formatOutput(raw: string): string {
