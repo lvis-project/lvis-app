@@ -57,7 +57,17 @@ import { createSubscriptionUsageCollector, recordSubscriptionRoundTelemetry } fr
 import { appendUsageForServingModel } from "./usage-by-model.js";
 
 const log = createLogger("lvis");
-const MAX_TOOL_ROUNDS = 30;
+/**
+ * Global per-turn tool-round ceiling, for the main chat loop AND every
+ * sub-agent (a child runs on this same loop, so this is its hard limit too).
+ *
+ * Raised 30 → 60. At 30 a multi-agent review would exhaust its budget
+ * mid-investigation and terminate on `round-cap` with only partial output,
+ * which reads to the user as an agent that stopped without reporting. The
+ * per-mode split that used to subdivide this (explore/execute/research hints)
+ * is gone: one budget, one number, easier to reason about and to configure.
+ */
+const MAX_TOOL_ROUNDS = 60;
 /**
  * Hard cap on finish_reason=length CONTINUATIONS per logical assistant answer.
  * Published provider guidance converges on 2–3. AND-ed with: (a) a
