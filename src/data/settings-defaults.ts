@@ -1,3 +1,4 @@
+import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-rounds.js";
 import {
   SIDE_PANEL_DEFAULT_WIDTH,
   SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
@@ -34,7 +35,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // on the work: a deep multi-repo review needs far more rounds than a
     // single-file lookup, and guessing wrong shows up as an agent that stops
     // mid-investigation with partial output.
-    subAgentMaxRounds: 60,
+    subAgentMaxRounds: SUBAGENT_MAX_ROUNDS_DEFAULT,
   },
   a2aRemote: {
     routeControlBaseUrl: "",
