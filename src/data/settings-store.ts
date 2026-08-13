@@ -156,6 +156,12 @@ export interface LLMSettingsPatch {
 export interface ChatSettings {
   systemPrompt: string;
   autoCompact: boolean;
+  /**
+   * Tool rounds a sub-agent may run before `round-cap` suspends it.
+   * SubAgentRunner clamps this to its own hard ceiling, so a value larger than
+   * the loop limit is safely narrowed rather than honoured.
+   */
+  subAgentMaxRounds: number;
 }
 
 export interface A2ARemoteTargetSettings {

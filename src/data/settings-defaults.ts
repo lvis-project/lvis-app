@@ -28,6 +28,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
     systemPrompt:
       "You are LVIS, a local knowledge assistant. You provide accurate, helpful answers grounded in the user's documents and context. Respond in the user's language.",
     autoCompact: true,
+    // Tool rounds a sub-agent may run before it hits `round-cap` and suspends.
+    // Clamped to MAX_TURNS_CAP by SubAgentRunner, so a large value here cannot
+    // exceed the loop's hard ceiling. Exposed because the right budget depends
+    // on the work: a deep multi-repo review needs far more rounds than a
+    // single-file lookup, and guessing wrong shows up as an agent that stops
+    // mid-investigation with partial output.
+    subAgentMaxRounds: 60,
   },
   a2aRemote: {
     routeControlBaseUrl: "",
@@ -124,9 +131,18 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // Existing installs do not start a new provider-backed capture path until
     // the user chooses review or auto in Settings.
     memoryCaptureMode: "off",
-    // A2A child Message delivery is manual-by-default. Opt-in wake still uses
-    // the normal parent runTurn path and its fail-closed UserPromptSubmit gate.
-    subAgentAutonomousWake: false,
+    // A background child that finishes must be able to reach its parent. With
+    // wake off, its message lands in the mailbox and nothing reads it: the
+    // parent has already ended its turn, so the work completes and is silently
+    // discarded — strictly worse than a foreground run, which at least returns
+    // partial output. Since `background` is the model's per-spawn choice, the
+    // host cannot know in advance whether a given run needs delivery, so wake
+    // has to be on for the channel to be trustworthy at all.
+    //
+    // Wake is not a new authority path: it runs the normal parent `runTurn` and
+    // is still subject to the fail-closed UserPromptSubmit gate, exactly as a
+    // user-typed message is.
+    subAgentAutonomousWake: true,
     // External A2A wire routes are independently opt-in and default OFF.
     a2aLoopbackServer: false,
     a2aRemoteRouting: false,

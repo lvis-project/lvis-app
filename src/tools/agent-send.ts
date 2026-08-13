@@ -114,7 +114,21 @@ export function createAgentSendTool(deps: AgentSendToolDeps): Tool {
     source: "builtin",
     category: "meta",
     decisionOverride: "always-allow-with-audit",
-    modelVisible: false,
+    // The A2A bus, mailbox, envelope codec and routing are fully wired, but
+    // this flag was the one thing standing between them and ever being used:
+    // hidden from the model, the only LLM-facing entry point to the bus was
+    // unreachable, so no agent ever attempted a send. The sub-agent runner
+    // re-registered it visible for children only (`buildChildDeps`), which made
+    // the channel structurally ONE-WAY — a child could reach its parent, but the
+    // parent had no tool with which to answer, so `waitForReply` could never be
+    // satisfied. Visible on both sides now: a sub-agent must always be able to
+    // talk to its parent, and a parent must be able to reply.
+    //
+    // This grants no new authority. `agent_send` moves a message; it mutates no
+    // file and touches no network. Whatever the recipient does with the message
+    // re-enters this same permission pipeline at the recipient's own tool calls,
+    // which is where effects are gated.
+    modelVisible: true,
     jsonSchema: {
       type: "object",
       additionalProperties: false,

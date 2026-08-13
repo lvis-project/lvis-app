@@ -611,6 +611,22 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     if (!allInside) return null;
     return { level: "low", reason: "write inside owner plugin sandbox" };
   },
+  // `skill_load` declares `write` because a skill body mutates the assistant's
+  // future behavior, not the filesystem. It therefore has NO path field by
+  // construction and would permanently trip the "write path not declared" HIGH
+  // rule below — and HIGH is un-persistable, so the user is re-asked on every
+  // single load. That duplicate gate is also redundant: skill_load carries its
+  // own durable control in `tools/skill-load.ts`, an approval record hash-bound
+  // to the exact body + bundle, which prompts once per distinct body and
+  // re-prompts the moment the body changes. That gate is strictly STRONGER than
+  // a level here (content-bound, not tool-bound), so the reviewer defers to it
+  // rather than stacking a second, weaker prompt in front of it. Scoped to the
+  // builtin tool by name: a plugin/MCP tool cannot reach this rule.
+  (ctx) => {
+    if (ctx.category !== "write") return null;
+    if (ctx.source !== "builtin" || ctx.toolName !== "skill_load") return null;
+    return { level: "low", reason: "skill load governed by body-hash approval" };
+  },
   (ctx) => {
     if (ctx.category !== "write") return null;
     const paths = extractDeclaredPaths(ctx);
@@ -633,6 +649,29 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   (ctx) => {
     if (ctx.category !== "write") return null;
     return { level: "low", reason: "write at allowed-dir leaf" };
+  },
+
+  // ── meta rules (1) ──────────────────────────────────────
+  //
+  // `agent_spawn` alone. Before this rule the `meta` category matched NOTHING
+  // and fell through to the fail-safe MEDIUM at the bottom of `classify()` —
+  // a rule GAP, not a judgement. `resolveReviewerDecision` asks on MEDIUM
+  // unless the threshold is itself `medium`, so every spawn raised a modal,
+  // which serialized parallel spawns behind one-at-a-time approvals and
+  // defeated `parallelSafe` batching entirely.
+  //
+  // Spawning confers NO new authority: the child's every effectful tool call is
+  // re-checked by this same PermissionManager, under the parent's scoped
+  // registry minus the fork-bomb blocklist. The dangerous act is what the child
+  // DOES, and that is gated where it happens.
+  //
+  // Deliberately name-scoped rather than category-scoped: a blanket LOW for
+  // `meta` would also cover every other builtin meta tool, present and future.
+  // Every other meta tool keeps its existing fail-safe MEDIUM.
+  (ctx) => {
+    if (ctx.category !== "meta") return null;
+    if (ctx.source !== "builtin" || ctx.toolName !== "agent_spawn") return null;
+    return { level: "low", reason: "agent spawn (child tool effects gated separately)" };
   },
 
   // ── read rules (2) — read shouldn't usually reach reviewer ──
