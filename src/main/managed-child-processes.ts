@@ -16,9 +16,22 @@ interface ManagedChildProcess {
   disposalStartedAt?: number;
   dispose: () => void;
   onSettled: () => void;
+  onError: () => void;
 }
 
 const managedChildren = new Set<ManagedChildProcess>();
+let managedChildProcessAdmissionSealed = false;
+
+export function sealManagedChildProcessAdmission(reason: string): void {
+  if (managedChildProcessAdmissionSealed) return;
+  managedChildProcessAdmissionSealed = true;
+  log.info({ reason }, "shutdown: sealed managed child process admission");
+}
+
+export function assertManagedChildProcessAdmissionOpen(label: string): void {
+  if (!managedChildProcessAdmissionSealed) return;
+  throw new Error(`[managed-child] refusing to spawn '${label}' after shutdown started`);
+}
 
 export interface TrackManagedChildProcessOptions {
   label?: string;
@@ -43,6 +56,8 @@ export function spawnManaged(
   spawnOptions: SpawnOptions,
   trackOptions: TrackManagedChildProcessOptions = {},
 ): ChildProcess {
+  const label = trackOptions.label ?? "child-process";
+  assertManagedChildProcessAdmissionOpen(label);
   // ESLint-style guardrail: callers MUST go through this helper. Direct
   // `spawn()` imports outside of `managed-child-processes.ts` should be
   // flagged by a future lint rule (`no-restricted-imports` allowlisting
@@ -72,6 +87,7 @@ export function trackManagedChildProcess(
     processGroupId: resolveProcessGroupId(child, options),
     dispose: () => {},
     onSettled: () => {},
+    onError: () => {},
   };
 
   const dispose = (): void => {
@@ -79,7 +95,7 @@ export function trackManagedChildProcess(
     if (entry.disposeTimer) clearTimeout(entry.disposeTimer);
     child.off("exit", entry.onSettled);
     child.off("close", entry.onSettled);
-    child.off("error", entry.onSettled);
+    child.off("error", entry.onError);
   };
   const onSettled = (): void => {
     if (entry.processGroupId !== undefined && processGroupExists(entry.processGroupId)) {
@@ -88,13 +104,38 @@ export function trackManagedChildProcess(
     }
     entry.dispose();
   };
+  const onError = (): void => {
+    // A spawn failure has no live pid and will never emit a meaningful exit.
+    // Signal-delivery errors on an already spawned process are not termination
+    // evidence; retain those children for the shutdown force-kill/drain sweep.
+    if (typeof child.pid !== "number" || child.pid <= 0) entry.dispose();
+  };
   entry.dispose = dispose;
   entry.onSettled = onSettled;
+  entry.onError = onError;
 
   managedChildren.add(entry);
   child.once("exit", onSettled);
   child.once("close", onSettled);
-  child.once("error", onSettled);
+  child.once("error", onError);
+  if (managedChildProcessAdmissionSealed && isKillable(entry)) {
+    try {
+      forceKillProcessTree(child, entry.killProcessGroup, entry.processGroupId);
+      log.warn(
+        { pid: child.pid ?? null, label: entry.label },
+        "shutdown: force killed child registered after admission seal",
+      );
+    } catch (err) {
+      log.warn(
+        {
+          pid: child.pid ?? null,
+          label: entry.label,
+          err: err instanceof Error ? err.message : String(err),
+        },
+        "shutdown: failed to kill child registered after admission seal",
+      );
+    }
+  }
   return dispose;
 }
 
@@ -164,6 +205,95 @@ export function forceKillManagedChildProcesses(reason: string): number {
   return killed;
 }
 
+export interface ManagedChildDrainResult {
+  killedCount: number;
+  unresolvedCount: number;
+}
+
+/**
+ * Graceful-shutdown backstop: force-kill every child that remained after its
+ * runtime stop hook, then wait a bounded interval for definitive exit/close.
+ * Unlike the emergency synchronous sweep, entries stay owned until their
+ * lifecycle event fires so ASRT and disposable-HOME finalizers can run first.
+ */
+export async function forceKillAndDrainManagedChildProcesses(
+  reason: string,
+  timeoutMs = 1_000,
+): Promise<ManagedChildDrainResult> {
+  sealManagedChildProcessAdmission(reason);
+  const targets = [...managedChildren];
+  let killedCount = 0;
+
+  for (const entry of targets) {
+    const { child, label, killProcessGroup } = entry;
+    if (!isKillable(entry)) {
+      entry.dispose();
+      continue;
+    }
+    try {
+      const pid = child.pid;
+      forceKillProcessTree(child, killProcessGroup, entry.processGroupId);
+      killedCount += 1;
+      log.warn(
+        { pid: pid ?? null, label, killProcessGroup, reason },
+        "shutdown: force killed managed child process before drain",
+      );
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === "ESRCH") {
+        killedCount += 1;
+        entry.dispose();
+      } else {
+        const fields = {
+          pid: child.pid ?? null,
+          label,
+          killProcessGroup,
+          reason,
+          code: code ?? null,
+          err: err instanceof Error ? err.message : String(err),
+        };
+        if (code === "EPERM") {
+          log.error(fields, "shutdown: managed child process drain kill blocked by EPERM");
+        } else {
+          log.warn(fields, "shutdown: managed child process drain kill failed");
+        }
+      }
+    }
+  }
+
+  const pending = (): ManagedChildProcess[] =>
+    targets.filter((entry) => managedChildren.has(entry));
+  if (pending().length > 0) {
+    await new Promise<void>((resolve) => {
+      const startedAt = Date.now();
+      const poll = (): void => {
+        if (pending().length === 0 || Date.now() - startedAt >= timeoutMs) {
+          resolve();
+          return;
+        }
+        setTimeout(poll, 10);
+      };
+      poll();
+    });
+  }
+
+  const unresolved = pending();
+  if (unresolved.length > 0) {
+    log.warn(
+      {
+        timeoutMs,
+        reason,
+        unresolved: unresolved.map((entry) => ({
+          pid: entry.child.pid ?? null,
+          label: entry.label,
+        })),
+      },
+      "shutdown: managed child drain deadline expired",
+    );
+  }
+  return { killedCount, unresolvedCount: unresolved.length };
+}
+
 /**
  * Immediately terminate one tracked child and its descendants/process group.
  *
@@ -202,6 +332,7 @@ export function forceKillManagedChildProcess(child: ChildProcess, reason: string
 export function __resetManagedChildProcessesForTest(): void {
   for (const entry of [...managedChildren]) entry.dispose();
   managedChildren.clear();
+  managedChildProcessAdmissionSealed = false;
 }
 
 function isKillable(entry: ManagedChildProcess): boolean {

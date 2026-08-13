@@ -6,6 +6,7 @@ import {
   clearWrappedMcpServers,
   clearWrappedPluginWorkers,
   getSandboxGeneration,
+  isMcpServerWrapped,
   markMcpServerWrapped,
   markPluginWorkerWrapped,
   setActiveSandboxCapability,
@@ -71,14 +72,17 @@ describe("rationale action generation inputs", () => {
     clearWrappedPluginWorkers();
     expect(getSandboxGeneration()).toBe(empty);
 
-    markMcpServerWrapped("mcp-a");
+    const firstMcpOwner = markMcpServerWrapped("mcp-a");
     const mcpAdded = getSandboxGeneration();
     expect(mcpAdded).not.toBe(empty);
-    markMcpServerWrapped("mcp-a");
-    unmarkMcpServerWrapped("missing-mcp");
+    const secondMcpOwner = markMcpServerWrapped("mcp-a");
+    unmarkMcpServerWrapped("missing-mcp", Symbol("missing"));
     expect(getSandboxGeneration()).toBe(mcpAdded);
 
-    unmarkMcpServerWrapped("mcp-a");
+    unmarkMcpServerWrapped("mcp-a", firstMcpOwner);
+    expect(getSandboxGeneration()).toBe(mcpAdded);
+    expect(isMcpServerWrapped("mcp-a")).toBe(true);
+    unmarkMcpServerWrapped("mcp-a", secondMcpOwner);
     const mcpRemoved = getSandboxGeneration();
     expect(mcpRemoved).not.toBe(mcpAdded);
 

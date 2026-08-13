@@ -63,7 +63,12 @@ import { join, resolve as pathResolve } from "node:path";
 import { lvisHome } from "../shared/lvis-home.js";
 import { shellQuote } from "../lib/shell-resolver.js";
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "../tools/safe-env.js";
-import { trackManagedChildProcess } from "../main/managed-child-processes.js";
+import { terminateChildProcess } from "../tools/terminate-child-process.js";
+import {
+  assertManagedChildProcessAdmissionOpen,
+  trackManagedChildProcess,
+} from "../main/managed-child-processes.js";
+import { createSandboxProcessHome } from "./sandbox-process-home.js";
 import {
   isAsrtSandboxActive,
   wrapWorkerCommand,
@@ -123,6 +128,33 @@ export interface SpawnWorkerSpec {
   readonly udsArgName?: string | { readonly env: string };
 }
 
+const activeWrappedWorkerKeys = new Set<string>();
+
+function wrappedWorkerKey(pluginId: string, workerId: string): string {
+  return `${pluginId.length}:${pluginId}:${workerId}`;
+}
+
+function reserveWrappedWorker(pluginId: string, workerId: string): () => void {
+  const key = wrappedWorkerKey(pluginId, workerId);
+  if (activeWrappedWorkerKeys.has(key)) {
+    throw new Error(
+      `[worker-spawn] worker ${pluginId}/${workerId} is already running or stopping`,
+    );
+  }
+  activeWrappedWorkerKeys.add(key);
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    activeWrappedWorkerKeys.delete(key);
+  };
+}
+
+/** Test-only reset for mocked children that do not emit a definitive exit. */
+export function __resetActiveWrappedWorkersForTest(): void {
+  activeWrappedWorkerKeys.clear();
+}
+
 /**
  * The handle {@link spawnWorker} returns. `socketPath` is the host-side path to
  * connect to (undici `Agent({ connect: { socketPath } })` / `http.request({
@@ -149,15 +181,17 @@ export interface SpawnedWorker {
   onExit(listener: (info: { code: number | null; signal: NodeJS.Signals | null }) => void): void;
 }
 
-/** Sanitize an id to a single safe path segment (mirrors mcp-manager). */
+const SAFE_WORKER_SEGMENT = /^[a-z0-9][a-z0-9._-]{0,127}$/;
+
+/** Validate an id as one unambiguous path/registry segment. */
 function safeSegment(id: string, kind: string): string {
-  const safe = id.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "");
-  if (safe.length === 0) {
+  if (typeof id !== "string" || !SAFE_WORKER_SEGMENT.test(id)) {
     throw new Error(
-      `[worker-spawn] cannot derive a path segment for ${kind} '${id}' (empty after sanitization)`,
+      `[worker-spawn] invalid ${kind} '${String(id)}' ` +
+        "(expected 1-128 lowercase characters matching [a-z0-9][a-z0-9._-]*)",
     );
   }
-  return safe;
+  return id;
 }
 
 /**
@@ -222,6 +256,7 @@ function windowsHolderEnv(): NodeJS.ProcessEnv {
 
 function startWindowsAclGrantHolder(label: string): ChildProcess {
   const system32 = windowsSystem32Path();
+  assertManagedChildProcessAdmissionOpen(label);
   const child = spawn(windowsSystem32Path("more.com"), [], {
     cwd: system32,
     stdio: ["pipe", "ignore", "ignore"],
@@ -251,16 +286,16 @@ function stopWindowsAclGrantHolder(child: ChildProcess): void {
   } catch {
     // Already closed.
   }
-  try {
-    if (!child.killed) child.kill("SIGTERM");
-  } catch {
-    // Already gone.
-  }
+  terminateChildBestEffort(child);
 }
 
-function killChildBestEffort(child: ChildProcess, signal: NodeJS.Signals): void {
+function terminateChildBestEffort(child: ChildProcess): void {
+  if (child.exitCode !== null || child.signalCode !== null) return;
   try {
-    if (!child.killed) child.kill(signal);
+    const forceTimer = terminateChildProcess(child, 3_000);
+    const clearForceTimer = (): void => clearTimeout(forceTimer);
+    child.once("exit", clearForceTimer);
+    child.once("close", clearForceTimer);
   } catch {
     // Already gone.
   }
@@ -295,6 +330,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
 
   // ── Gate OFF → plain unwrapped spawn ────────────────────────────────
   if (!isAsrtSandboxActive()) {
+    assertManagedChildProcessAdmissionOpen(`worker:${safePlugin}:${safeWorker}`);
     const child = spawn(spec.command, args, {
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
@@ -302,21 +338,39 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       env: baseEnv,
     });
     trackManagedChildProcess(child, { label: `worker:${safePlugin}:${safeWorker}` });
-    return makeHandle(child, null, () => {
-      /* no ASRT/UDS state to release on the legacy path */
-    });
+    return makeHandle(child, null);
   }
+
+  // A wrapped worker owns a stable per-(plugin,worker) control path. Keep that
+  // key reserved while it is running OR stopping; otherwise a replacement can
+  // lose its marker, shared UDS allowance, and socket when the old exit arrives.
+  const releaseWorkerReservation = reserveWrappedWorker(safePlugin, safeWorker);
 
   if (process.platform === "win32") {
     const denyRead = getDefaultSensitiveReadDenyPaths();
     const denyWrite = getDefaultSensitiveWriteDenyPaths();
-    const holder = startWindowsAclGrantHolder(
-      `worker:${safePlugin}:${safeWorker}:asrt-win-acl`,
-    );
+    let holder: ChildProcess;
+    try {
+      holder = startWindowsAclGrantHolder(
+        `worker:${safePlugin}:${safeWorker}:asrt-win-acl`,
+      );
+    } catch (err) {
+      releaseWorkerReservation();
+      throw err;
+    }
     const holderPid = holder.pid;
     if (holderPid === undefined) {
       stopWindowsAclGrantHolder(holder);
+      releaseWorkerReservation();
       throw new Error("[worker-spawn] Windows ACL grant holder started without a pid");
+    }
+    let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
+    try {
+      sandboxHome = createSandboxProcessHome();
+    } catch (err) {
+      stopWindowsAclGrantHolder(holder);
+      releaseWorkerReservation();
+      throw err instanceof Error ? err : new Error(String(err));
     }
     let grant: WindowsWorkerFilesystemGrant | undefined;
     let wrapped = false;
@@ -348,8 +402,14 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
         stopWindowsAclGrantHolder(holder);
       }
     };
+    const finalizeResources = (): void => {
+      cleanupResources();
+      sandboxHome.cleanup();
+      releaseWorkerReservation();
+    };
     const holderDied = (first?: unknown, second?: unknown): void => {
       if (holderStopped) return;
+      holderStopped = true;
       holderFailure =
         first instanceof Error
           ? first
@@ -357,8 +417,13 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
               `[worker-spawn] Windows ACL grant holder exited before worker cleanup ` +
                 `(code=${String(first ?? "null")} signal=${String(second ?? "null")})`,
             );
-      cleanupResources();
-      if (child !== undefined) killChildBestEffort(child, "SIGTERM");
+      if (child !== undefined) {
+        terminateChildBestEffort(child);
+      } else {
+        cleanupResources();
+        sandboxHome.cleanup();
+        releaseWorkerReservation();
+      }
     };
     const assertHolderAlive = (): void => {
       if (holderFailure !== undefined) throw holderFailure;
@@ -368,8 +433,8 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     try {
       grant = await grantWindowsWorkerFilesystemAccess({
         holderPid,
-        allowRead: spec.allowReadPaths,
-        allowWrite: spec.allowWritePaths,
+        allowRead: [sandboxHome.path, ...(spec.allowReadPaths ?? [])],
+        allowWrite: [sandboxHome.path, ...(spec.allowWritePaths ?? [])],
       });
       assertHolderAlive();
 
@@ -389,24 +454,31 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       markPluginWorkerWrapped(safePlugin, safeWorker);
       marked = true;
 
+      assertManagedChildProcessAdmissionOpen(`worker:${safePlugin}:${safeWorker}:asrt-win`);
       child = spawn(cmd, wrappedArgs, {
         stdio: ["ignore", "pipe", "pipe"],
         shell: false,
         windowsHide: true,
-        env: buildWrappedWorkerEnv(baseEnv, env),
+        env: buildWrappedWorkerEnv(baseEnv, env, { ...sandboxHome.env }),
       });
       trackManagedChildProcess(child, { label: `worker:${safePlugin}:${safeWorker}:asrt-win` });
+      child.once("exit", finalizeResources);
+      child.once("error", () => {
+        // `error` can mean signal/message delivery failed while the child is
+        // still alive. Definitive resource finalization stays on exit/close.
+      });
+      child.once("close", finalizeResources);
       assertHolderAlive();
 
-      child.once("exit", cleanupResources);
-      child.once("error", cleanupResources);
-      child.once("close", cleanupResources);
-      assertHolderAlive();
-
-      return makeHandle(child, null, cleanupResources);
+      return makeHandle(child, null);
     } catch (err) {
-      if (child !== undefined) killChildBestEffort(child, "SIGTERM");
-      cleanupResources();
+      if (child !== undefined) {
+        terminateChildBestEffort(child);
+      } else {
+        cleanupResources();
+        sandboxHome.cleanup();
+        releaseWorkerReservation();
+      }
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -424,15 +496,29 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   const socketPath = join(socketDir, "control.sock");
   // Crash-safe: unlink any stale socket from a previous worker that died
   // without cleanup BEFORE recreating the dir.
-  removeSocketArtifacts(socketPath, socketDir);
-  await mkdir(socketDir, { recursive: true, mode: 0o700 });
-  // `mkdir({recursive,mode})` only applies `mode` to dirs it CREATES — a
-  // pre-existing leaf (e.g. left by an older build under a looser umask) keeps
-  // its old mode. Force 0o700 unconditionally, and reject a symlinked socketDir
-  // (a same-user attacker pre-seeding the path can't redirect the bind/binds).
-  chmodSync(socketDir, 0o700);
-  if (lstatSync(socketDir).isSymbolicLink()) {
-    throw new Error(`[worker-spawn] refusing symlinked control dir: ${socketDir}`);
+  try {
+    removeSocketArtifacts(socketPath, socketDir);
+    await mkdir(socketDir, { recursive: true, mode: 0o700 });
+    // `mkdir({recursive,mode})` only applies `mode` to dirs it CREATES — a
+    // pre-existing leaf (e.g. left by an older build under a looser umask) keeps
+    // its old mode. Force 0o700 unconditionally, and reject a symlinked socketDir
+    // (a same-user attacker pre-seeding the path can't redirect the bind/binds).
+    chmodSync(socketDir, 0o700);
+    if (lstatSync(socketDir).isSymbolicLink()) {
+      throw new Error(`[worker-spawn] refusing symlinked control dir: ${socketDir}`);
+    }
+  } catch (err) {
+    releaseWorkerReservation();
+    throw err instanceof Error ? err : new Error(String(err));
+  }
+
+  let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
+  try {
+    sandboxHome = createSandboxProcessHome();
+  } catch (err) {
+    removeSocketArtifacts(socketPath, socketDir);
+    releaseWorkerReservation();
+    throw err instanceof Error ? err : new Error(String(err));
   }
 
   // Tell the worker where to bind. Either append `[name, path]` to argv or set
@@ -446,10 +532,11 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   // FAIL-CLOSED write jail: socketDir (so the Linux `--bind` exposes it + the
   // socket file can be created on macOS) ∪ the host-supplied write paths. The
   // worker also needs to READ its socketDir + tmp.
-  const allowWrite = [socketDir, ...(spec.allowWritePaths ?? [])];
+  const allowWrite = [socketDir, sandboxHome.path, ...(spec.allowWritePaths ?? [])];
   const tmpDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
   const allowRead = [
     socketDir,
+    sandboxHome.path,
     ...(spec.allowReadPaths ?? []),
     ...(spec.allowWritePaths ?? []),
     ...(tmpDir ? [tmpDir] : []),
@@ -501,18 +588,20 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     // (e.g. "main") cannot collide into a false `asrt` no-leak signal.
     markPluginWorkerWrapped(safePlugin, safeWorker);
 
+    assertManagedChildProcessAdmissionOpen(`worker:${safePlugin}:${safeWorker}:asrt`);
     const child = spawn(cmd, wrappedArgs, {
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,
       windowsHide: true,
       // Overlay the ASRT proxy env (none on mac/linux — proxy is baked into the
       // command string) onto the secret-stripped base env.
-      env: buildWrappedWorkerEnv(baseEnv, env),
+      env: buildWrappedWorkerEnv(baseEnv, env, { ...sandboxHome.env }),
     });
     trackManagedChildProcess(child, { label: `worker:${safePlugin}:${safeWorker}:asrt` });
 
-    // Idempotent any-exit cleanup (mirrors mcp-client runAsrtCleanupOnce):
-    // whoever fires first (process exit/error/close OR stop()) runs it once.
+    // Idempotent definitive-termination cleanup (mirrors mcp-client): exit or
+    // close runs it once. A stop request and process-operation error retain
+    // ownership because neither proves the child is dead.
     // Drops the reviewer marker, releases the shared-config UDS allow + the
     // per-command ASRT state, and removes the socket artifacts (crash-safe).
     let cleanupRan = false;
@@ -524,11 +613,19 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       void cleanupAsrtSandboxAfterCommand();
       removeSocketArtifacts(socketPath, socketDir);
     };
-    child.once("exit", cleanupOnce);
-    child.once("error", cleanupOnce);
-    child.once("close", cleanupOnce);
+    const finalizeOnce = (): void => {
+      cleanupOnce();
+      sandboxHome.cleanup();
+      releaseWorkerReservation();
+    };
+    child.once("exit", finalizeOnce);
+    child.once("error", () => {
+      // A process-operation error is not proof of death. `close` is the
+      // asynchronous-spawn-failure finalizer; live children finalize on exit.
+    });
+    child.once("close", finalizeOnce);
 
-    return makeHandle(child, socketPath, cleanupOnce);
+    return makeHandle(child, socketPath);
   } catch (err) {
     // FAIL CLOSED: wrap/spawn setup failed. Roll back the shared-config UDS
     // allow + socket artifacts so a failed spawn leaves no lingering allowance.
@@ -540,7 +637,9 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       void cleanupAsrtSandboxAfterCommand();
     }
     if (registered) void unregisterWorkerUnixSocketDir(socketDir);
+    sandboxHome.cleanup();
     removeSocketArtifacts(socketPath, socketDir);
+    releaseWorkerReservation();
     throw err instanceof Error ? err : new Error(String(err));
   }
 }
@@ -554,6 +653,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
 function buildWrappedWorkerEnv(
   baseEnv: NodeJS.ProcessEnv,
   wrappedEnv: NodeJS.ProcessEnv,
+  sandboxHomeEnv: Record<string, string>,
 ): NodeJS.ProcessEnv {
   const asrtComposed = buildSandboxedChildEnv(wrappedEnv);
   const safeBaseline = buildSandboxedChildEnv(process.env);
@@ -563,14 +663,13 @@ function buildWrappedWorkerEnv(
     if (safeBaseline[key] === value) continue;
     proxyOverlay[key] = value;
   }
-  return { ...baseEnv, ...proxyOverlay };
+  return { ...baseEnv, ...proxyOverlay, ...sandboxHomeEnv };
 }
 
 /** Build the {@link SpawnedWorker} handle around a spawned child. */
 function makeHandle(
   child: ChildProcess,
   socketPath: string | null,
-  cleanup: () => void,
 ): SpawnedWorker {
   let stopped = false;
   return {
@@ -588,21 +687,9 @@ function makeHandle(
     stop(): void {
       if (stopped) return;
       stopped = true;
-      // Release ASRT/UDS state up front (idempotent with the exit handlers).
-      cleanup();
-      try {
-        child.kill("SIGTERM");
-        const force = setTimeout(() => {
-          try {
-            child.kill("SIGKILL");
-          } catch {
-            // Already gone.
-          }
-        }, 3000);
-        child.once("exit", () => clearTimeout(force));
-      } catch {
-        // Already gone.
-      }
+      // Keep ASRT/UDS/HOME ownership until definitive child termination.
+      // A TERM-ignoring worker is escalated without releasing its confinement.
+      terminateChildBestEffort(child);
     },
   };
 }

@@ -23,7 +23,10 @@ import { readPluginRegistry, resolveManifestPathsFromRegistry } from "../plugins
 import type { PluginManifest } from "../plugins/types.js";
 import { resolveUvTarget, type UvTarget } from "../../scripts/uv-targets.mjs";
 import { lvisHome } from "../shared/lvis-home.js";
-import { trackManagedChildProcess } from "./managed-child-processes.js";
+import {
+  assertManagedChildProcessAdmissionOpen,
+  trackManagedChildProcess,
+} from "./managed-child-processes.js";
 import { resolveBundledUvBinaryPath } from "./uv-runtime.js";
 const log = createLogger("python-runtime");
 
@@ -492,6 +495,7 @@ export class PythonRuntimeBootstrapper {
         env.UV_CACHE_DIR = this.uvCacheDir();
       }
 
+      assertManagedChildProcessAdmissionOpen("python-runtime:uv");
       const proc = spawn(uvBin, args, { env, stdio: ["ignore", "pipe", "pipe"] });
       trackManagedChildProcess(proc, { label: "python-runtime:uv" });
 
@@ -570,6 +574,7 @@ export class PythonRuntimeBootstrapper {
         const value = process.env[key];
         if (value !== undefined) safeEnv[key] = value;
       }
+      assertManagedChildProcessAdmissionOpen("python-runtime:python");
       const proc = spawn(pythonBin, args, { env: safeEnv, stdio: ["ignore", "pipe", "pipe"] });
       trackManagedChildProcess(proc, { label: "python-runtime:python" });
 

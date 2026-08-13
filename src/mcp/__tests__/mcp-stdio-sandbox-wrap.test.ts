@@ -38,6 +38,19 @@ vi.mock("node:child_process", () => ({
     execFileSyncMock(cmd, args, opts),
 }));
 
+const SANDBOX_HOME = "/tmp/lvis-sandbox-home-test";
+const sandboxHomeCleanupMock = vi.fn();
+vi.mock("../../permissions/sandbox-process-home.js", () => ({
+  createSandboxProcessHome: () => ({
+    path: SANDBOX_HOME,
+    env: {
+      HOME: SANDBOX_HOME,
+      XDG_CONFIG_HOME: `${SANDBOX_HOME}/config`,
+    },
+    cleanup: sandboxHomeCleanupMock,
+  }),
+}));
+
 // ─── ASRT mock — gate + wrap controllable per test ──────────
 let gateActive = false;
 const wrapWorkerCommandMock = vi.fn<
@@ -127,6 +140,7 @@ beforeEach(() => {
   });
   wrapWorkerCommandMock.mockReset();
   cleanupMock.mockClear();
+  sandboxHomeCleanupMock.mockClear();
   gateActive = false;
   __resetActiveSandboxCapabilityForTest();
   __resetWrappedMcpServersForTest();
@@ -216,8 +230,9 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     expect(cmdline).toContain("'lvis-mcp-fs'");
     expect(cmdline).toContain("'--root'");
     expect(cmdline).toContain("'/tmp'");
-    // Write-jail = ONLY the per-server sandbox root.
-    expect(options.filesystem.allowWrite).toEqual([sandboxRoot]);
+    // Write-jail = the fresh process HOME + per-server sandbox root.
+    expect(options.filesystem.allowWrite).toEqual([SANDBOX_HOME, sandboxRoot]);
+    expect(options.filesystem.allowRead).toContain(SANDBOX_HOME);
     // The root + tmp are re-allowed for read; HOME is never re-allowed wholesale.
     expect(options.filesystem.allowRead).toContain(sandboxRoot);
     // The worker wrap applies the CENTRALIZED sensitive read DENY-LIST (deny-list,
@@ -257,7 +272,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     expect(isMcpServerWrapped("fs")).toBe(false);
   });
 
-  it("absent sandboxRoot ⇒ DENY-ALL-WRITES wrap (fail-closed, never HOME/cwd)", async () => {
+  it("absent sandboxRoot grants only the fresh process HOME (never real HOME/cwd)", async () => {
     gateActive = true;
     const fake = new FakeChildProcess();
     fake.responses = handshakeResponses("nojail");
@@ -271,7 +286,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
       buildPolicy([stdioApproval("nojail", "lvis-mcp-nojail")]),
     );
     // Directly construct WITHOUT sandboxRoot (simulates the host invariant not
-    // holding) — the wrap must grant NO writable path.
+    // holding) — only the host-created, empty process HOME may be writable.
     const config: McpStdioServerConfig = {
       id: "nojail",
       transport: "stdio",
@@ -285,8 +300,8 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
       string,
       { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead: string[] } },
     ];
-    expect(options.filesystem.allowWrite).toEqual([]); // deny-all-writes
-    // No HOME / cwd ever re-allowed for write.
+    expect(options.filesystem.allowWrite).toEqual([SANDBOX_HOME]);
+    // No real HOME / cwd ever re-allowed for write.
     expect(options.filesystem.allowWrite).not.toContain(process.env.HOME);
     expect(options.filesystem.allowWrite).not.toContain(process.cwd());
 
@@ -346,6 +361,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     expect(env.MCP_API_KEY).toBe("secret-key");
     // A non-allow-listed host secret ASRT carried is NOT propagated.
     expect(env.SOME_HOST_SECRET).toBeUndefined();
+    expect(env.HOME).toBe(SANDBOX_HOME);
 
     await client.disconnect();
   });
@@ -384,6 +400,7 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     expect(isMcpServerWrapped("crash")).toBe(false);
     // Per-command ASRT cleanup (bwrap teardown / ref-count decrement) ran.
     expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
     // Reviewer now reports none — no stale asrt for the dead server id.
     setActiveSandboxCapability({
       kind: "asrt",
@@ -399,6 +416,118 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     await client.disconnect();
     expect(cleanupMock).toHaveBeenCalledTimes(1); // still exactly once
     expect(isMcpServerWrapped("crash")).toBe(false); // still gone
+  });
+
+  it("explicit disconnect defers HOME cleanup until the child exits", async () => {
+    gateActive = true;
+    const sandboxRoot = join(lvisHome(), "mcp", "stubborn-cleanup", "sandbox");
+    class StubbornChild extends FakeChildProcess {
+      override kill(): boolean {
+        return true;
+      }
+    }
+    const fake = new StubbornChild();
+    fake.responses = handshakeResponses("stubborn-cleanup");
+    wrapWorkerCommandMock.mockResolvedValueOnce({
+      argv: ["/bin/bash", "-c", "sandbox-exec ... lvis-mcp-stubborn"],
+      env: { ...process.env },
+    });
+    spawnMock.mockReturnValueOnce(fake);
+
+    const client = new McpClient(
+      {
+        id: "stubborn-cleanup",
+        transport: "stdio",
+        command: "lvis-mcp-stubborn",
+        sandboxRoot,
+      },
+      governanceWithPolicy(buildPolicy([
+        stdioApproval("stubborn-cleanup", "lvis-mcp-stubborn"),
+      ])),
+      new ToolRegistry(),
+    );
+    await client.connect();
+
+    await client.disconnect();
+    expect(cleanupMock).not.toHaveBeenCalled();
+    expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
+
+    fake.exitCode = 0;
+    fake.emit("exit", 0, "SIGTERM");
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains confinement and HOME ownership when a live child emits error", async () => {
+    gateActive = true;
+    const fake = new FakeChildProcess();
+    fake.responses = handshakeResponses("live-error");
+    wrapWorkerCommandMock.mockResolvedValueOnce({
+      argv: ["/bin/bash", "-c", "sandbox-exec ... lvis-mcp-live-error"],
+      env: { ...process.env },
+    });
+    spawnMock.mockReturnValueOnce(fake);
+
+    const client = new McpClient(
+      {
+        id: "live-error",
+        transport: "stdio",
+        command: "lvis-mcp-live-error",
+        sandboxRoot: join(lvisHome(), "mcp", "live-error", "sandbox"),
+      },
+      governanceWithPolicy(buildPolicy([stdioApproval("live-error", "lvis-mcp-live-error")])),
+      new ToolRegistry(),
+    );
+    await client.connect();
+
+    fake.emit("error", new Error("signal delivery failed"));
+    expect(isMcpServerWrapped("live-error")).toBe(true);
+    expect(cleanupMock).not.toHaveBeenCalled();
+    expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
+
+    fake.emit("close", null, null);
+    expect(isMcpServerWrapped("live-error")).toBe(false);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("an old same-id exit cannot clear a replacement transport's wrapped marker", async () => {
+    gateActive = true;
+    class StubbornChild extends FakeChildProcess {
+      override kill(): boolean {
+        return true;
+      }
+    }
+    const oldChild = new StubbornChild();
+    oldChild.responses = handshakeResponses("overlap");
+    const replacementChild = new FakeChildProcess();
+    replacementChild.responses = handshakeResponses("overlap");
+    wrapWorkerCommandMock
+      .mockResolvedValueOnce({ argv: ["/bin/bash", "-c", "old"], env: { ...process.env } })
+      .mockResolvedValueOnce({ argv: ["/bin/bash", "-c", "replacement"], env: { ...process.env } });
+    spawnMock.mockReturnValueOnce(oldChild).mockReturnValueOnce(replacementChild);
+
+    const config: McpStdioServerConfig = {
+      id: "overlap",
+      transport: "stdio",
+      command: "lvis-mcp-overlap",
+      sandboxRoot: join(lvisHome(), "mcp", "overlap", "sandbox"),
+    };
+    const governance = governanceWithPolicy(buildPolicy([stdioApproval("overlap", "lvis-mcp-overlap")]));
+    const oldClient = new McpClient(config, governance, new ToolRegistry());
+    await oldClient.connect();
+    await oldClient.disconnect();
+    expect(isMcpServerWrapped("overlap")).toBe(true);
+
+    const replacement = new McpClient(config, governance, new ToolRegistry());
+    await replacement.connect();
+    oldChild.exitCode = 0;
+    oldChild.emit("exit", 0, "SIGKILL");
+    oldChild.emit("close", 0, "SIGKILL");
+
+    expect(isMcpServerWrapped("overlap")).toBe(true);
+    await replacement.disconnect();
+    expect(isMcpServerWrapped("overlap")).toBe(false);
   });
 
   it("win32 fails closed before passing unsupported per-exec allow grants to ASRT", async () => {
