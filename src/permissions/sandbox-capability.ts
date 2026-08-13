@@ -232,8 +232,10 @@ export function isIssuedHostShellExecutionPlan(
 const ASRT_WRAPPED_SHELL_TOOLS: ReadonlySet<string> = new Set(["bash", "powershell"]);
 
 /**
- * The set of EXTERNAL MCP stdio server ids whose worker was ACTUALLY spawned
- * through the ASRT wrap in THIS process.
+ * Per-server ownership tokens for EXTERNAL MCP stdio workers actually spawned
+ * through the ASRT wrap in THIS process. Multiple generations with the same id
+ * may overlap while an old process is terminating; each exit removes only its
+ * own token, never a replacement transport's marker.
  *
  * Populated by {@link markMcpServerWrapped} from `StdioTransport.openWrapped`
  * only on the wrapped path, and cleared by {@link unmarkMcpServerWrapped} on
@@ -245,31 +247,45 @@ const ASRT_WRAPPED_SHELL_TOOLS: ReadonlySet<string> = new Set(["bash", "powershe
  * re-checks {@link detectSandboxCapability} so a torn-down sandbox cannot leave
  * a stale `asrt` report.
  */
-const _wrappedMcpServerIds = new Set<string>();
+const _wrappedMcpServerOwners = new Map<string, Set<symbol>>();
+
+export type McpWrappedOwner = symbol;
 
 /**
- * Record that `serverId`'s stdio worker was spawned through the ASRT wrap.
+ * Record one transport generation of `serverId` as ASRT-wrapped.
  * @internal — only StdioTransport's wrapped-spawn path and tests call this.
  */
-export function markMcpServerWrapped(serverId: string): void {
-  if (!_wrappedMcpServerIds.has(serverId)) _sandboxGeneration += 1;
-  _wrappedMcpServerIds.add(serverId);
+export function markMcpServerWrapped(serverId: string): McpWrappedOwner {
+  const owner = Symbol(serverId);
+  const owners = _wrappedMcpServerOwners.get(serverId);
+  if (owners === undefined) {
+    _wrappedMcpServerOwners.set(serverId, new Set([owner]));
+    _sandboxGeneration += 1;
+  } else {
+    owners.add(owner);
+  }
+  return owner;
 }
 
 /**
- * Drop `serverId`'s wrapped marker (transport closed or wrap failed). Idempotent.
+ * Drop one transport generation's wrapped marker. Idempotent and owner-scoped.
  * @internal — only StdioTransport and tests call this.
  */
-export function unmarkMcpServerWrapped(serverId: string): void {
-  if (_wrappedMcpServerIds.delete(serverId)) _sandboxGeneration += 1;
+export function unmarkMcpServerWrapped(serverId: string, owner: McpWrappedOwner): void {
+  const owners = _wrappedMcpServerOwners.get(serverId);
+  if (owners === undefined || !owners.delete(owner)) return;
+  if (owners.size === 0) {
+    _wrappedMcpServerOwners.delete(serverId);
+    _sandboxGeneration += 1;
+  }
 }
 
 /**
- * Whether `serverId`'s worker is currently wrapped through ASRT.
+ * Whether any live `serverId` transport generation is wrapped through ASRT.
  * @internal — exported for the reviewer resolver + tests.
  */
 export function isMcpServerWrapped(serverId: string): boolean {
-  return _wrappedMcpServerIds.has(serverId);
+  return _wrappedMcpServerOwners.has(serverId);
 }
 
 /**
@@ -278,8 +294,8 @@ export function isMcpServerWrapped(serverId: string): boolean {
  * @internal
  */
 export function clearWrappedMcpServers(): void {
-  if (_wrappedMcpServerIds.size > 0) _sandboxGeneration += 1;
-  _wrappedMcpServerIds.clear();
+  if (_wrappedMcpServerOwners.size > 0) _sandboxGeneration += 1;
+  _wrappedMcpServerOwners.clear();
 }
 
 /**
@@ -294,7 +310,7 @@ export function __resetWrappedMcpServersForTest(): void {
  * The set of PLUGIN WORKER ids whose long-lived worker was ACTUALLY spawned
  * through the ASRT wrap in THIS process (worker-confinement via UDS — PR D-1).
  *
- * This mirrors {@link _wrappedMcpServerIds} for the OTHER long-lived worker
+ * This mirrors the wrapped MCP owner registry for the OTHER long-lived worker
  * substrate: a `source === 'plugin'` tool whose side-effects run in a
  * host-spawned, ASRT-wrapped plugin worker ({@link spawnWorker} in
  * worker-spawn.ts). Populated by {@link markPluginWorkerWrapped} from the

@@ -12,6 +12,7 @@ import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("sandbox-process-home");
 const SANDBOX_HOME_PREFIX = "lvis-sandbox-home-";
+const CLEANUP_RETRY_DELAYS_MS = [50, 250, 1_000] as const;
 
 export interface SandboxProcessHome {
   readonly path: string;
@@ -19,7 +20,7 @@ export interface SandboxProcessHome {
   cleanup(): void;
 }
 
-function profileEnvironment(
+export function sandboxProcessProfileEnvironment(
   homePath: string,
   platform: NodeJS.Platform,
 ): Record<string, string> {
@@ -98,7 +99,7 @@ export function createSandboxProcessHome(
       throw new Error(`refusing unsafe sandbox process HOME: ${homePath}`);
     }
 
-    env = Object.freeze(profileEnvironment(homePath, platform));
+    env = Object.freeze(sandboxProcessProfileEnvironment(homePath, platform));
     createProfileDirectories(env);
   } catch (err) {
     if (
@@ -115,6 +116,29 @@ export function createSandboxProcessHome(
   }
 
   let cleaned = false;
+  let failedAttempts = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | null = null;
+  const attemptCleanup = (): void => {
+    try {
+      removeHome(homePath, { recursive: true, force: true });
+      cleaned = true;
+      failedAttempts = 0;
+    } catch (err) {
+      failedAttempts += 1;
+      log.warn(
+        { homePath, err: err instanceof Error ? err.message : String(err) },
+        "sandbox process HOME cleanup failed",
+      );
+      const delay = CLEANUP_RETRY_DELAYS_MS[failedAttempts - 1];
+      if (delay === undefined) return;
+      retryTimer = setTimeout(() => {
+        retryTimer = null;
+        attemptCleanup();
+      }, delay);
+      const nodeTimer = retryTimer as ReturnType<typeof setTimeout> & { unref?: () => void };
+      nodeTimer.unref?.();
+    }
+  };
   return Object.freeze({
     path: homePath,
     env,
@@ -127,15 +151,13 @@ export function createSandboxProcessHome(
         log.error({ homePath }, "sandbox process HOME cleanup refused unsafe path");
         return;
       }
-      try {
-        removeHome(homePath, { recursive: true, force: true });
-        cleaned = true;
-      } catch (err) {
-        log.warn(
-          { homePath, err: err instanceof Error ? err.message : String(err) },
-          "sandbox process HOME cleanup failed",
-        );
+      // A later definitive lifecycle event may arrive before the scheduled
+      // retry. Let that call retry immediately instead of waiting for backoff.
+      if (retryTimer !== null) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
       }
+      attemptCleanup();
     },
   });
 }

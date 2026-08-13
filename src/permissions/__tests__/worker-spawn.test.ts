@@ -74,6 +74,7 @@ vi.mock("node:child_process", () => ({
 
 // ─── managed-child tracker is a no-op stub here ─────────────
 vi.mock("../../main/managed-child-processes.js", () => ({
+  assertManagedChildProcessAdmissionOpen: () => {},
   trackManagedChildProcess: () => () => {},
 }));
 
@@ -117,7 +118,7 @@ vi.mock("../asrt-sandbox.js", () => ({
 }));
 
 // Module imports AFTER the mocks.
-import { spawnWorker } from "../worker-spawn.js";
+import { __resetActiveWrappedWorkersForTest, spawnWorker } from "../worker-spawn.js";
 import { lvisHome } from "../../shared/lvis-home.js";
 import {
   resolveReviewerSandboxCapability,
@@ -134,6 +135,7 @@ class StubWorkerChild extends EventEmitter {
   stdout = new PassThrough();
   stderr = new PassThrough();
   exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
   pid = 4242;
   killed = false;
   killCalls: Array<string | undefined> = [];
@@ -164,6 +166,7 @@ const REAL_SYSTEM_ROOT = process.env.SystemRoot;
 const REAL_WINDIR = process.env.WINDIR;
 
 beforeEach(() => {
+  __resetActiveWrappedWorkersForTest();
   process.env.SystemRoot = "C:\\Windows";
   process.env.WINDIR = "C:\\Windows";
   spawnMock.mockReset();
@@ -183,6 +186,8 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  __resetActiveWrappedWorkersForTest();
+  vi.useRealTimers();
   if (REAL_SYSTEM_ROOT === undefined) {
     delete process.env.SystemRoot;
   } else {
@@ -201,6 +206,25 @@ afterEach(() => {
 // ─── Gate OFF — plain unwrapped spawn ───────────────────────
 
 describe("spawnWorker — gate OFF (default)", () => {
+  it("rejects ambiguous path aliases instead of silently normalizing them", async () => {
+    await expect(spawnWorker({
+      pluginId: "local-indexer",
+      workerId: "embed:primary",
+      command: "/opt/worker",
+    })).rejects.toThrow(/invalid workerId/);
+    await expect(spawnWorker({
+      pluginId: "local-indexer",
+      workerId: "embed?primary",
+      command: "/opt/worker",
+    })).rejects.toThrow(/invalid workerId/);
+    await expect(spawnWorker({
+      pluginId: "local-indexer",
+      workerId: "Embed",
+      command: "/opt/worker",
+    })).rejects.toThrow(/invalid workerId/);
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
   it("plain-spawns the worker UNCHANGED, no wrap, no UDS, socketPath null, reviewer none", async () => {
     const child = new StubWorkerChild();
     spawnMock.mockReturnValueOnce(child);
@@ -422,7 +446,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
     expect(unregisterUdsMock).toHaveBeenCalledTimes(1);
   });
 
-  it("stop() releases security state but defers HOME cleanup until exit", async () => {
+  it("stop() retains confinement and HOME ownership until exit", async () => {
     withPlatformForTest("linux");
     gateActive = true;
     wrapWorkerCommandMock.mockResolvedValueOnce({
@@ -439,12 +463,13 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
     });
 
     worker.stop();
-    expect(cleanupMock).toHaveBeenCalledTimes(1);
-    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
+    expect(cleanupMock).not.toHaveBeenCalled();
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(true);
     expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
 
     child.emit("exit", 0, "SIGTERM");
     expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
     expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
   });
 
@@ -477,6 +502,60 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
     worker.onExit((info) => exits.push(info));
     child.emit("exit", 3, null);
     expect(exits).toEqual([{ code: 3, signal: null }]);
+  });
+
+  it("keeps a live worker confined when a process operation emits error", async () => {
+    withPlatformForTest("darwin");
+    gateActive = true;
+    wrapWorkerCommandMock.mockResolvedValueOnce({
+      argv: ["/bin/bash", "-c", "wrapped"],
+      env: { ...process.env },
+    });
+    const child = new StubWorkerChild();
+    spawnMock.mockReturnValueOnce(child);
+
+    await spawnWorker({
+      pluginId: "local-indexer",
+      workerId: "embed",
+      command: "/opt/worker",
+    });
+
+    child.emit("error", new Error("kill failed"));
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(true);
+    expect(cleanupMock).not.toHaveBeenCalled();
+    expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
+
+    child.emit("close", null, null);
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a same-key replacement until the old wrapped worker exits", async () => {
+    withPlatformForTest("darwin");
+    gateActive = true;
+    wrapWorkerCommandMock
+      .mockResolvedValueOnce({ argv: ["/bin/bash", "-c", "old"], env: { ...process.env } })
+      .mockResolvedValueOnce({ argv: ["/bin/bash", "-c", "replacement"], env: { ...process.env } });
+    const oldChild = new StubWorkerChild();
+    const replacementChild = new StubWorkerChild();
+    spawnMock.mockReturnValueOnce(oldChild).mockReturnValueOnce(replacementChild);
+    const spec = {
+      pluginId: "local-indexer",
+      workerId: "embed",
+      command: "/opt/worker",
+    };
+
+    const oldWorker = await spawnWorker(spec);
+    oldWorker.stop();
+    await expect(spawnWorker(spec)).rejects.toThrow(/already running or stopping/);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+
+    oldChild.emit("exit", 0, "SIGTERM");
+    const replacement = await spawnWorker(spec);
+    expect(replacement.pid).toBe(replacementChild.pid);
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    replacementChild.emit("exit", 0, null);
   });
 });
 
@@ -596,6 +675,13 @@ describe("spawnWorker — Windows with gate ON", () => {
     expect(cap.kind).toBe("asrt");
 
     worker.stop();
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(true);
+    expect(cleanupMock).not.toHaveBeenCalled();
+    expect(grantReleaseMock).not.toHaveBeenCalled();
+    expect(holder.killed).toBe(false);
+    expect(child.killCalls).toEqual(["SIGTERM"]);
+
+    child.emit("exit", 0, "SIGTERM");
     expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
     expect(cleanupMock).toHaveBeenCalledTimes(1);
     expect(grantReleaseMock).toHaveBeenCalledTimes(1);
@@ -608,6 +694,7 @@ describe("spawnWorker — Windows with gate ON", () => {
   });
 
   it("terminates the Windows worker and releases grants when the holder exits first", async () => {
+    vi.useFakeTimers();
     withPlatformForTest("win32");
     gateActive = true;
     setActiveSandboxCapability({
@@ -639,12 +726,17 @@ describe("spawnWorker — Windows with gate ON", () => {
     expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(true);
     holder.emit("exit", 1, null);
 
-    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
-    expect(cleanupMock).toHaveBeenCalledTimes(1);
-    expect(grantReleaseMock).toHaveBeenCalledTimes(1);
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(true);
+    expect(cleanupMock).not.toHaveBeenCalled();
+    expect(grantReleaseMock).not.toHaveBeenCalled();
     expect(child.killed).toBe(true);
+    expect(child.killCalls).toEqual(["SIGTERM"]);
+
+    vi.advanceTimersByTime(3_000);
+    expect(child.killCalls).toEqual(["SIGTERM", "SIGKILL"]);
 
     child.emit("exit", 0, null);
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
     expect(cleanupMock).toHaveBeenCalledTimes(1);
     expect(grantReleaseMock).toHaveBeenCalledTimes(1);
   });
@@ -737,6 +829,9 @@ describe("spawnWorker — Windows with gate ON", () => {
     });
 
     expect(() => worker.stop()).not.toThrow();
+    expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(true);
+    expect(holder.killed).toBe(false);
+    child.emit("exit", 0, "SIGTERM");
     expect(isPluginWorkerWrapped("local-indexer", "embed")).toBe(false);
     expect(holder.killed).toBe(true);
   });

@@ -13,10 +13,22 @@ export function terminateChildProcess(
   child: TerminableChild,
   forceAfterMs = 2_000,
 ): ReturnType<typeof setTimeout> {
-  child.kill("SIGTERM");
-  return setTimeout(() => {
+  try {
+    child.kill("SIGTERM");
+  } catch {
+    // A failed graceful signal does not prove the child is gone. Keep the
+    // escalation timer so a later force signal still has a chance to stop it.
+  }
+  const forceTimer = setTimeout(() => {
     if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The caller retains lifecycle ownership until exit/close.
+      }
     }
   }, forceAfterMs);
+  const nodeTimer = forceTimer as ReturnType<typeof setTimeout> & { unref?: () => void };
+  nodeTimer.unref?.();
+  return forceTimer;
 }
