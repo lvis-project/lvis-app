@@ -624,6 +624,14 @@ describe("ToolGroupCard", () => {
     expect(container.textContent).toContain(t("fileEditDiff.verbEdit"));
     expect(container.textContent).toContain("const y = 2;");
     expect(container.textContent).toContain("const y = 3;");
+    const removed = container.querySelector('[data-diff-kind="removed"]');
+    const added = container.querySelector('[data-diff-kind="added"]');
+    expect(removed?.className).toContain("text-foreground");
+    expect(added?.className).toContain("text-foreground");
+    expect(removed?.getAttribute("style")).toContain("--diff-remove");
+    expect(added?.getAttribute("style")).toContain("--diff-add");
+    expect(removed?.className).not.toContain("text-destructive-foreground");
+    expect(added?.className).not.toContain("text-success-foreground");
   });
 
   it("single apply_patch with 2 replacements: renders 2 hunks", () => {

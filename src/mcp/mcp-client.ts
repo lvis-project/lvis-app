@@ -61,6 +61,7 @@ import {
   getDefaultSensitiveWriteDenyPaths,
 } from "../permissions/asrt-sandbox.js";
 import { buildSandboxedChildEnv } from "../tools/safe-env.js";
+import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
 import {
   markMcpServerWrapped,
   unmarkMcpServerWrapped,
@@ -1641,6 +1642,7 @@ class StdioTransport implements McpTransport {
    * violating the no-leak invariant and leaking the bwrap ref-count).
    */
   private asrtCleanupRan = false;
+  private sandboxHomeCleanup: (() => void) | null = null;
 
   constructor(private readonly config: McpStdioServerConfig) {}
 
@@ -1737,16 +1739,20 @@ class StdioTransport implements McpTransport {
       );
     }
 
+    const sandboxHome = createSandboxProcessHome();
+
     // FAIL-CLOSED filesystem jail (deny-by-default A.a): the host populates
     // `sandboxRoot` at connect time. If it is somehow still absent (e.g. a
     // direct StdioTransport construction in a test), grant NO writable path at
-    // all — NEVER cwd / NEVER HOME / NEVER any pre-existing dir.
+    // all — NEVER cwd / NEVER the real HOME / NEVER any pre-existing dir. The
+    // fresh process HOME is the only host-created writable compatibility path.
     const sandboxRoot = this.config.sandboxRoot;
-    const allowWrite = sandboxRoot ? [sandboxRoot] : [];
+    const allowWrite = [sandboxHome.path, ...(sandboxRoot ? [sandboxRoot] : [])];
     // Runtime dirs the worker legitimately needs to READ to start (its own jail
     // root + the system temp dir). HOME is NOT re-allowed for read.
     const tmpDir = process.env.TMPDIR ?? process.env.TEMP ?? process.env.TMP;
     const allowRead = [
+      sandboxHome.path,
       ...(sandboxRoot ? [sandboxRoot] : []),
       ...(tmpDir ? [tmpDir] : []),
     ];
@@ -1778,28 +1784,41 @@ class StdioTransport implements McpTransport {
       .map((part) => shellQuote(part))
       .join(" ");
 
-    const { argv, env } = await wrapWorkerCommand(cmdline, {
-      filesystem: { allowWrite, allowRead, denyRead, denyWrite },
-    });
+    let wrapped = false;
+    try {
+      const { argv, env } = await wrapWorkerCommand(cmdline, {
+        filesystem: { allowWrite, allowRead, denyRead, denyWrite },
+      });
+      wrapped = true;
 
-    const [cmd, ...args] = argv;
-    if (cmd === undefined) {
-      throw new Error("[mcp-client] ASRT returned an empty argv for the MCP worker wrap");
+      const [cmd, ...args] = argv;
+      if (cmd === undefined) {
+        throw new Error("[mcp-client] ASRT returned an empty argv for the MCP worker wrap");
+      }
+
+      this.wrappedThroughAsrt = true;
+      this.sandboxHomeCleanup = sandboxHome.cleanup;
+      markMcpServerWrapped(this.config.id);
+
+      this.process = spawn(cmd, args, {
+        // stdin pipe MUST stay writable for JSON-RPC Content-Length framing.
+        stdio: ["pipe", "pipe", "pipe"],
+        shell: false,
+        windowsHide: true,
+        env: this.buildWrappedStdioEnv(baseEnv, env, { ...sandboxHome.env }),
+      });
+
+      trackManagedChildProcess(this.process, { label: `mcp:${this.config.id}:asrt` });
+      this.setupProcessHandlers();
+    } catch (err) {
+      if (this.wrappedThroughAsrt) {
+        this.runAsrtCleanupOnce();
+      } else {
+        if (wrapped) void cleanupAsrtSandboxAfterCommand();
+        sandboxHome.cleanup();
+      }
+      throw err;
     }
-
-    this.wrappedThroughAsrt = true;
-    markMcpServerWrapped(this.config.id);
-
-    this.process = spawn(cmd, args, {
-      // stdin pipe MUST stay writable for JSON-RPC Content-Length framing.
-      stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
-      windowsHide: true,
-      env: this.buildWrappedStdioEnv(baseEnv, env),
-    });
-
-    trackManagedChildProcess(this.process, { label: `mcp:${this.config.id}:asrt` });
-    this.setupProcessHandlers();
   }
 
   /**
@@ -1819,6 +1838,7 @@ class StdioTransport implements McpTransport {
   private buildWrappedStdioEnv(
     baseEnv: NodeJS.ProcessEnv,
     wrappedEnv: NodeJS.ProcessEnv,
+    sandboxHomeEnv: Record<string, string>,
   ): NodeJS.ProcessEnv {
     // buildSandboxedChildEnv (safe-env.ts) returns a safe-whitelist baseline PLUS
     // ONLY the ASRT proxy/CA/SANDBOX_RUNTIME keys ASRT changed relative to
@@ -1835,7 +1855,7 @@ class StdioTransport implements McpTransport {
       if (safeBaseline[key] === value) continue; // part of the static baseline, not an ASRT injection
       proxyOverlay[key] = value;
     }
-    return { ...baseEnv, ...proxyOverlay };
+    return { ...baseEnv, ...proxyOverlay, ...sandboxHomeEnv };
   }
 
   /**
@@ -1858,6 +1878,8 @@ class StdioTransport implements McpTransport {
     this.wrappedThroughAsrt = false;
     unmarkMcpServerWrapped(this.config.id);
     void cleanupAsrtSandboxAfterCommand();
+    this.sandboxHomeCleanup?.();
+    this.sandboxHomeCleanup = null;
   }
 
   async send(message: JsonRpcMessage): Promise<void> {

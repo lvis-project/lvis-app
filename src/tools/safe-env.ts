@@ -147,8 +147,9 @@ const ASRT_SANDBOX_ENV_KEYS: ReadonlySet<string> = new Set([
  */
 export function buildSandboxedChildEnv(
   wrappedEnv: NodeJS.ProcessEnv,
+  extra: Record<string, string> = {},
 ): Record<string, string> {
-  const env = buildSafeChildEnv();
+  const env = buildSafeChildEnv(extra);
   for (const key of ASRT_SANDBOX_ENV_KEYS) {
     const value = wrappedEnv[key];
     if (value === undefined) continue;
