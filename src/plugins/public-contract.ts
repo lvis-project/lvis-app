@@ -886,7 +886,11 @@ export type PluginLifecycleEvent =
  * the bound `pluginId`.)
  */
 export interface PluginWorkerSpec {
-  /** Stable per-worker id — names the control dir + the reviewer registry key. */
+  /**
+   * Stable per-worker id — names the control dir + reviewer registry key.
+   * Must match `[a-z0-9][a-z0-9._-]{0,127}`; uppercase and other invalid
+   * ids fail closed so case-insensitive filesystems cannot alias workers.
+   */
   readonly workerId: string;
   /** The worker executable to spawn (absolute path or PATH-resolved name). */
   readonly command: string;

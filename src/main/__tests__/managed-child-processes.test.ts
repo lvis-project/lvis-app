@@ -3,9 +3,12 @@ import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   __resetManagedChildProcessesForTest,
+  assertManagedChildProcessAdmissionOpen,
+  forceKillAndDrainManagedChildProcesses,
   forceKillManagedChildProcesses,
   forceKillManagedChildProcess,
   getManagedChildProcessCount,
+  sealManagedChildProcessAdmission,
   trackManagedChildProcess,
 } from "../managed-child-processes.js";
 
@@ -39,6 +42,51 @@ describe("managed child process tracking", () => {
     expect(getManagedChildProcessCount()).toBe(0);
   });
 
+  it("keeps a live spawned child tracked after a signal-delivery error", async () => {
+    const child = makeChild();
+    child.pid = 4321;
+    trackManagedChildProcess(child, { label: "stubborn-mcp" });
+
+    child.emit("error", new Error("signal delivery failed"));
+    expect(getManagedChildProcessCount()).toBe(1);
+
+    const drain = forceKillAndDrainManagedChildProcesses("clean-shutdown");
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    child.exitCode = 137;
+    child.emit("exit", 137, "SIGKILL");
+    await expect(drain).resolves.toEqual({ killedCount: 1, unresolvedCount: 0 });
+  });
+
+  it("seals admission before a deferred producer can spawn", async () => {
+    let releaseSetup: (() => void) | undefined;
+    const setup = new Promise<void>((resolve) => { releaseSetup = resolve; });
+    let spawnAttempted = false;
+    const deferredProducer = (async () => {
+      await setup;
+      assertManagedChildProcessAdmissionOpen("tool:bash:asrt");
+      spawnAttempted = true;
+    })();
+
+    sealManagedChildProcessAdmission("before-quit");
+    releaseSetup?.();
+    await expect(deferredProducer).rejects.toThrow(/refusing to spawn.*after shutdown started/);
+    expect(spawnAttempted).toBe(false);
+  });
+
+  it("force-kills a child registered after the admission seal and retains it until exit", () => {
+    const child = makeChild();
+    child.pid = 5432;
+    sealManagedChildProcessAdmission("before-quit");
+
+    trackManagedChildProcess(child, { label: "late-unmigrated-producer" });
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(getManagedChildProcessCount()).toBe(1);
+
+    child.exitCode = 137;
+    child.emit("exit", 137, "SIGKILL");
+    expect(getManagedChildProcessCount()).toBe(0);
+  });
+
   it("force kills tracked running child processes", () => {
     const child = makeChild();
     trackManagedChildProcess(child, { label: "test-child" });
@@ -47,6 +95,35 @@ describe("managed child process tracking", () => {
 
     expect(child.kill).toHaveBeenCalledWith("SIGKILL");
     expect(getManagedChildProcessCount()).toBe(0);
+  });
+
+  it("force kills and drains a child only after its definitive exit", async () => {
+    const child = makeChild();
+    trackManagedChildProcess(child, { label: "stubborn-mcp" });
+
+    const drain = forceKillAndDrainManagedChildProcesses("clean-shutdown");
+    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
+    expect(getManagedChildProcessCount()).toBe(1);
+
+    child.exitCode = 137;
+    child.emit("exit", 137, "SIGKILL");
+    await expect(drain).resolves.toEqual({ killedCount: 1, unresolvedCount: 0 });
+    expect(getManagedChildProcessCount()).toBe(0);
+  });
+
+  it("returns a bounded unresolved result when a child never exits", async () => {
+    vi.useFakeTimers();
+    try {
+      const child = makeChild();
+      trackManagedChildProcess(child, { label: "unkillable-mcp" });
+
+      const drain = forceKillAndDrainManagedChildProcesses("clean-shutdown", 20);
+      await vi.advanceTimersByTimeAsync(20);
+      await expect(drain).resolves.toEqual({ killedCount: 1, unresolvedCount: 1 });
+      expect(getManagedChildProcessCount()).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("skips the kill call when the tracked child already exited (exitCode set)", () => {

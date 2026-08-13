@@ -46,7 +46,10 @@ import {
 } from "../permissions/host-shell-execution-permit.js";
 import { deriveSandboxWritePaths } from "../permissions/sandbox-write-jail.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
-import { trackManagedChildProcess } from "../main/managed-child-processes.js";
+import {
+  assertManagedChildProcessAdmissionOpen,
+  trackManagedChildProcess,
+} from "../main/managed-child-processes.js";
 
 type PipedChild = ChildProcessByStdio<null, Readable, Readable>;
 type PowerShellParser = (command: string) => Promise<PowerShellAstSummary>;
@@ -414,6 +417,7 @@ export function binShellForExecutable(executable: string): "pwsh" | "powershell"
 async function parsePowerShellAst(command: string): Promise<PowerShellAstSummary> {
   return new Promise<PowerShellAstSummary>((resolve, reject) => {
     const executable = resolvePowerShellExecutable();
+    assertManagedChildProcessAdmissionOpen("tool:powershell-parser");
     const parser = spawn(
       executable,
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", POWER_SHELL_AST_PARSER],
@@ -608,6 +612,7 @@ async function spawnPowerShellWithSandbox(
 
   const [cmd, ...args] = wrapped.argv;
   if (cmd === undefined) {
+    void cleanupAsrtSandboxAfterCommand();
     sandboxHome.cleanup();
     return {
       output: "PowerShell spawn failed: ASRT returned an empty argv",
@@ -630,6 +635,7 @@ async function spawnPowerShellWithSandbox(
   return await new Promise<ToolResult>((resolveResult) => {
     let child: PipedChild;
     try {
+      assertManagedChildProcessAdmissionOpen("tool:powershell:asrt");
       child = spawn(cmd, args, {
         cwd,
         stdio: ["ignore", "pipe", "pipe"],
@@ -657,6 +663,13 @@ async function spawnPowerShellWithSandbox(
 
     let settled = false;
     let timedOut = false;
+    let lifecycleCleaned = false;
+    const cleanupAfterTermination = (): void => {
+      if (lifecycleCleaned) return;
+      lifecycleCleaned = true;
+      void cleanupAsrtSandboxAfterCommand();
+      sandboxHome.cleanup();
+    };
     const timer = setTimeout(() => {
       timedOut = true;
       abortController.abort();
@@ -664,11 +677,10 @@ async function spawnPowerShellWithSandbox(
     }, timeoutSeconds * 1000);
 
     const finish = (code: number | null): void => {
+      cleanupAfterTermination();
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      void cleanupAsrtSandboxAfterCommand();
-      sandboxHome.cleanup();
       const output = formatOutput(Buffer.concat(chunks).toString("utf-8"));
       resolveResult({
         output: timedOut
@@ -684,8 +696,8 @@ async function spawnPowerShellWithSandbox(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      void cleanupAsrtSandboxAfterCommand();
-      sandboxHome.cleanup();
+      // `error` may be a failed operation on a live process. The definitive
+      // `close` event retains ASRT/HOME cleanup ownership.
       resolveResult({
         output: err && "code" in err && err.code === "ENOENT"
           ? `PowerShell executable not found: ${executable}`
@@ -704,6 +716,7 @@ async function spawnPowerShell(
 ): Promise<ToolResult> {
   return new Promise((resolve) => {
     const executable = resolvePowerShellExecutable();
+    assertManagedChildProcessAdmissionOpen("tool:powershell");
     const child: PipedChild = spawn(
       executable,
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],

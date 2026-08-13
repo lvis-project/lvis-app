@@ -59,4 +59,16 @@ describe("terminateChildProcess", () => {
     vi.advanceTimersByTime(25);
     expect(child.kill).toHaveBeenCalledTimes(1);
   });
+
+  it("still attempts SIGKILL when sending SIGTERM throws", () => {
+    vi.useFakeTimers();
+    const child = fakeChild();
+    child.kill.mockImplementationOnce(() => {
+      throw new Error("signal delivery failed");
+    });
+
+    expect(() => terminateChildProcess(child, 25)).not.toThrow();
+    vi.advanceTimersByTime(25);
+    expect(child.kill).toHaveBeenLastCalledWith("SIGKILL");
+  });
 });

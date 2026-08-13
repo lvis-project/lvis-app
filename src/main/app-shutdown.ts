@@ -17,8 +17,12 @@ import { stopTelegramBridgeServer } from "./telegram-bridge-server.js";
 import { stopRemoteA2AReceiverServer } from "./a2a-remote-receiver-server.js";
 import { stopSubscriptionRuntimes } from "./subscription-runtime-service.js";
 import { unregisterAllGlobalShortcuts } from "./global-shortcuts.js";
-import { forceKillManagedChildProcesses } from "./managed-child-processes.js";
-import { killAllTerminals } from "./terminal/pty-manager.js";
+import {
+  forceKillAndDrainManagedChildProcesses,
+  forceKillManagedChildProcesses,
+  sealManagedChildProcessAdmission,
+} from "./managed-child-processes.js";
+import { forceKillAllTerminalsForShutdown } from "./terminal/pty-manager.js";
 import {
   resolveShutdownCleanupTimeoutMs,
   runCleanupWithHardTimeout,
@@ -79,6 +83,7 @@ export async function runAppShutdownCleanup(options: {
   if (appShutdownCleanupPromise) return appShutdownCleanupPromise;
 
   setAppShutdownStarted(true);
+  sealManagedChildProcessAdmission(options.reason);
   const svc = services;
   const cleanupTimeoutMs = resolveShutdownCleanupTimeoutMs();
   appShutdownCleanupPromise = (async () => {
@@ -135,8 +140,13 @@ export async function runAppShutdownCleanup(options: {
       // Kill any live interactive PTY terminals (#1444). The pty children are
       // NOT in the managed-child tracker (node-pty's IPty is not a
       // ChildProcess), so force them down here on the graceful path.
-      killAllTerminals();
+      await forceKillAllTerminalsForShutdown();
       await svc.pluginRuntime.stopAll();
+      if (signal.aborted) return;
+      // Runtime stop hooks can return after scheduling TERM→KILL. Keep the app
+      // alive for a bounded definitive-exit drain so ASRT/HOME finalizers run
+      // before Electron completes an otherwise clean shutdown.
+      await forceKillAndDrainManagedChildProcesses(`${options.reason} graceful shutdown`);
       } finally {
         if (!subscriptionRuntimesStopped) {
           try {

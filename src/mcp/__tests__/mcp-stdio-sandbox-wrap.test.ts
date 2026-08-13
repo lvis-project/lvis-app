@@ -449,12 +449,85 @@ describe("StdioTransport ASRT wrap — gate ON", () => {
     await client.connect();
 
     await client.disconnect();
-    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(cleanupMock).not.toHaveBeenCalled();
     expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
 
     fake.exitCode = 0;
     fake.emit("exit", 0, "SIGTERM");
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
     expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains confinement and HOME ownership when a live child emits error", async () => {
+    gateActive = true;
+    const fake = new FakeChildProcess();
+    fake.responses = handshakeResponses("live-error");
+    wrapWorkerCommandMock.mockResolvedValueOnce({
+      argv: ["/bin/bash", "-c", "sandbox-exec ... lvis-mcp-live-error"],
+      env: { ...process.env },
+    });
+    spawnMock.mockReturnValueOnce(fake);
+
+    const client = new McpClient(
+      {
+        id: "live-error",
+        transport: "stdio",
+        command: "lvis-mcp-live-error",
+        sandboxRoot: join(lvisHome(), "mcp", "live-error", "sandbox"),
+      },
+      governanceWithPolicy(buildPolicy([stdioApproval("live-error", "lvis-mcp-live-error")])),
+      new ToolRegistry(),
+    );
+    await client.connect();
+
+    fake.emit("error", new Error("signal delivery failed"));
+    expect(isMcpServerWrapped("live-error")).toBe(true);
+    expect(cleanupMock).not.toHaveBeenCalled();
+    expect(sandboxHomeCleanupMock).not.toHaveBeenCalled();
+
+    fake.emit("close", null, null);
+    expect(isMcpServerWrapped("live-error")).toBe(false);
+    expect(cleanupMock).toHaveBeenCalledTimes(1);
+    expect(sandboxHomeCleanupMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("an old same-id exit cannot clear a replacement transport's wrapped marker", async () => {
+    gateActive = true;
+    class StubbornChild extends FakeChildProcess {
+      override kill(): boolean {
+        return true;
+      }
+    }
+    const oldChild = new StubbornChild();
+    oldChild.responses = handshakeResponses("overlap");
+    const replacementChild = new FakeChildProcess();
+    replacementChild.responses = handshakeResponses("overlap");
+    wrapWorkerCommandMock
+      .mockResolvedValueOnce({ argv: ["/bin/bash", "-c", "old"], env: { ...process.env } })
+      .mockResolvedValueOnce({ argv: ["/bin/bash", "-c", "replacement"], env: { ...process.env } });
+    spawnMock.mockReturnValueOnce(oldChild).mockReturnValueOnce(replacementChild);
+
+    const config: McpStdioServerConfig = {
+      id: "overlap",
+      transport: "stdio",
+      command: "lvis-mcp-overlap",
+      sandboxRoot: join(lvisHome(), "mcp", "overlap", "sandbox"),
+    };
+    const governance = governanceWithPolicy(buildPolicy([stdioApproval("overlap", "lvis-mcp-overlap")]));
+    const oldClient = new McpClient(config, governance, new ToolRegistry());
+    await oldClient.connect();
+    await oldClient.disconnect();
+    expect(isMcpServerWrapped("overlap")).toBe(true);
+
+    const replacement = new McpClient(config, governance, new ToolRegistry());
+    await replacement.connect();
+    oldChild.exitCode = 0;
+    oldChild.emit("exit", 0, "SIGKILL");
+    oldChild.emit("close", 0, "SIGKILL");
+
+    expect(isMcpServerWrapped("overlap")).toBe(true);
+    await replacement.disconnect();
+    expect(isMcpServerWrapped("overlap")).toBe(false);
   });
 
   it("win32 fails closed before passing unsupported per-exec allow grants to ASRT", async () => {

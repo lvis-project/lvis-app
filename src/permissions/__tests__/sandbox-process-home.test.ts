@@ -1,7 +1,14 @@
 import { existsSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { createSandboxProcessHome } from "../sandbox-process-home.js";
+import {
+  createSandboxProcessHome,
+  sandboxProcessProfileEnvironment,
+} from "../sandbox-process-home.js";
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe("createSandboxProcessHome", () => {
   it("creates a unique private profile and removes it idempotently", () => {
@@ -40,13 +47,10 @@ describe("createSandboxProcessHome", () => {
   });
 
   it("overrides the Windows HOME drive pair for a non-drive temp path", () => {
-    const profile = createSandboxProcessHome("win32");
-    try {
-      expect(profile.env.HOMEDRIVE).toBe("");
-      expect(profile.env.HOMEPATH).toBe(profile.path);
-    } finally {
-      profile.cleanup();
-    }
+    const path = "\\\\server\\temp\\lvis-sandbox-home-test";
+    const env = sandboxProcessProfileEnvironment(path, "win32");
+    expect(env.HOMEDRIVE).toBe("");
+    expect(env.HOMEPATH).toBe(path);
   });
 
   it("keeps cleanup retryable until the profile is actually absent", () => {
@@ -63,6 +67,26 @@ describe("createSandboxProcessHome", () => {
     profile.cleanup();
     expect(existsSync(profile.path)).toBe(true);
     profile.cleanup();
+    expect(attempts).toBe(2);
+    expect(existsSync(profile.path)).toBe(false);
+  });
+
+  it("automatically retries a transient cleanup failure", () => {
+    vi.useFakeTimers();
+    let attempts = 0;
+    const profile = createSandboxProcessHome(process.platform, (path, options) => {
+      attempts += 1;
+      if (attempts === 1) {
+        const err = new Error("busy") as NodeJS.ErrnoException;
+        err.code = "EBUSY";
+        throw err;
+      }
+      rmSync(path, options);
+    });
+
+    profile.cleanup();
+    expect(existsSync(profile.path)).toBe(true);
+    vi.advanceTimersByTime(50);
     expect(attempts).toBe(2);
     expect(existsSync(profile.path)).toBe(false);
   });

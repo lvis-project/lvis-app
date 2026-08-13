@@ -32,6 +32,16 @@ const forceKillManagedChildProcesses = vi.fn((_reason: string) => {
   calls.push("forceKillManagedChildren");
   return 1;
 });
+const sealManagedChildProcessAdmission = vi.fn((_reason: string) => {
+});
+const forceKillAndDrainManagedChildProcesses = vi.fn(async (_reason: string) => {
+  calls.push("drainManagedChildren");
+  return { killedCount: 1, unresolvedCount: 0 };
+});
+const forceKillAllTerminalsForShutdown = vi.fn(async () => {
+  calls.push("forceKillTerminals");
+  return 1;
+});
 
 vi.mock("electron", () => ({ app: { exit: vi.fn() } }));
 vi.mock("../../lib/logger.js", () => ({
@@ -57,9 +67,13 @@ vi.mock("../global-shortcuts.js", () => ({
   unregisterAllGlobalShortcuts: (...a: unknown[]) => unregisterAllGlobalShortcuts(...a),
 }));
 vi.mock("../managed-child-processes.js", () => ({
+  forceKillAndDrainManagedChildProcesses: (...a: [string]) => forceKillAndDrainManagedChildProcesses(...a),
   forceKillManagedChildProcesses: (...a: [string]) => forceKillManagedChildProcesses(...a),
+  sealManagedChildProcessAdmission: (...a: [string]) => sealManagedChildProcessAdmission(...a),
 }));
-vi.mock("../terminal/pty-manager.js", () => ({ killAllTerminals: vi.fn() }));
+vi.mock("../terminal/pty-manager.js", () => ({
+  forceKillAllTerminalsForShutdown: () => forceKillAllTerminalsForShutdown(),
+}));
 vi.mock("../shutdown-timeout.js", () => ({
   resolveShutdownCleanupTimeoutMs: () => 5000,
   // Run the cleanup body with a never-aborted signal and report completion.
@@ -88,7 +102,7 @@ function makeServices() {
   return {
     runPluginShutdownHandlers: vi.fn(async () => { calls.push("pluginShutdownHandlers"); }),
     shutdown: vi.fn(async () => { calls.push("servicesShutdown"); }),
-    pluginRuntime: { stopAll: vi.fn(async () => undefined) },
+    pluginRuntime: { stopAll: vi.fn(async () => { calls.push("stopPluginRuntime"); }) },
   };
 }
 
@@ -109,6 +123,7 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
     const { runAppShutdownCleanup } = await import("../app-shutdown.js");
     const outcome = await runAppShutdownCleanup({ reason: "before-quit", exitOnTimeout: false });
     expect(outcome).toBe("completed");
+    expect(sealManagedChildProcessAdmission).toHaveBeenCalledWith("before-quit");
     expect(calls[0]).toBe("unregister");
     expect(calls.at(-1)).toBe("closeFileLogSink");
     expect(calls.indexOf("unregister")).toBeLessThan(calls.indexOf("closeFileLogSink"));
@@ -129,6 +144,11 @@ describe("runAppShutdownCleanup ordering (critic M1)", () => {
     expect(calls.indexOf("pluginShutdownHandlers")).toBeLessThan(calls.indexOf("shutdownRoutines"));
     expect(calls.indexOf("shutdownRoutines")).toBeLessThan(calls.indexOf("stopSubscriptionRuntimes"));
     expect(calls.indexOf("stopSubscriptionRuntimes")).toBeLessThan(calls.indexOf("servicesShutdown"));
+    expect(calls.indexOf("servicesShutdown")).toBeLessThan(calls.indexOf("forceKillTerminals"));
+    expect(calls.indexOf("forceKillTerminals")).toBeLessThan(calls.indexOf("stopPluginRuntime"));
+    expect(calls.indexOf("stopPluginRuntime")).toBeLessThan(calls.indexOf("drainManagedChildren"));
+    expect(forceKillAndDrainManagedChildProcesses)
+      .toHaveBeenCalledWith("before-quit graceful shutdown");
     expect(calls.indexOf("stopRemoteReceiver")).toBeLessThan(calls.indexOf("stopSubscriptionRuntimes"));
   });
 
