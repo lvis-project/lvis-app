@@ -6,7 +6,9 @@ export const en = {
     "(pick a fitting agentName for the work); you do not set it. " +
     "If agentName is specified, the ~/.lvis/agents/<name>.md or ~/.lvis/agents/<name>/AGENTS.md profile is merged in as the profile prompt. " +
     "Returns a summary text + tool call count. If the sub-agent hits its round budget before finishing, the result is marked incomplete " +
-    "(with the partial output) so you can decide whether to continue it. " +
+    "and carries a resumeId; call this tool again with that resumeId to continue the SAME sub-agent from where it stopped, and keep " +
+    "resuming until the result comes back without the incomplete marker. An incomplete result is not an answer — never report one to " +
+    "the user as if the sub-agent had finished. " +
     "Do not use as a fallback path for directly calling a specific tool/plugin. If the target tool is visible, call it directly; if not, activate it via request_plugin.",
   "be_agentSpawn.propTitleDescription":
     "Short title for the sub-agent (shown in the UI card header). Required when agentName is not provided.",
@@ -19,7 +21,7 @@ export const en = {
   "be_agentSpawn.propResumeIdDescription":
     "Optional: resume a previously-spawned sub-agent by its resumeId (returned in an incomplete result). When set, the sub-agent's history is re-hydrated and continued with instructions as the follow-up prompt; its tool scope stays frozen to the original spawn (not re-granted). Omit to start a fresh sub-agent.",
   "be_agentSpawn.incompleteNotice":
-    "The sub-agent reached its round budget before finishing — the summary above is PARTIAL, not a completed result. Review it and, if the task still needs work, spawn the sub-agent again to continue from where it left off (or take over the remaining steps yourself).",
+    "This run is NOT finished. The sub-agent hit its round budget mid-task, so the summary above is a partial snapshot, not an answer — do not report it to the user as a result. Call agent_spawn again with resumeId=\"{resumeId}\" and instructions naming what still needs doing; the sub-agent keeps its history and continues from exactly where it stopped. Repeat until it returns without this notice. If you deliberately stop resuming, say so explicitly and tell the user the work was left incomplete.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "be_agentSpawn.toolDescription":
@@ -27,8 +29,9 @@ export const ko: Record<keyof typeof en, string> = {
     "지정한 sourceTools 만 사용 가능. sub-agent 의 라운드 예산은 호스트가 agent 의 mode 로 자동 배정합니다 " +
     "(작업에 맞는 agentName 을 고르세요) — 직접 지정하지 않습니다. " +
     "agentName 을 지정하면 ~/.lvis/agents/<name>.md 또는 ~/.lvis/agents/<name>/AGENTS.md 프로필을 profile prompt 로 결합합니다. " +
-    "결과로 요약 텍스트 + tool call 수 반환. sub-agent 가 완료 전에 라운드 예산에 도달하면 결과가 미완료로 표시되며 " +
-    "(부분 출력 포함) 이어서 진행할지 판단할 수 있습니다. " +
+    "결과로 요약 텍스트 + tool call 수 반환. sub-agent 가 완료 전에 라운드 예산에 도달하면 결과가 미완료로 표시되고 resumeId 가 함께 반환됩니다. " +
+    "그 resumeId 로 이 도구를 다시 호출해 같은 sub-agent 를 중단 지점부터 이어가고, 미완료 표시가 사라질 때까지 재개를 반복하세요. " +
+    "미완료 결과는 답이 아니므로 sub-agent 가 끝난 것처럼 사용자에게 보고하면 안 됩니다. " +
     "특정 tool/plugin 을 직접 호출하라는 요청의 대체 경로로 사용하지 마세요. 요청 대상 도구가 현재 보이면 직접 호출하고, 보이지 않으면 request_plugin 으로 활성화하세요.",
   "be_agentSpawn.propTitleDescription":
     "sub-agent 의 짧은 제목 (UI 카드 헤더에 표시). agentName 이 없으면 필수입니다.",
@@ -41,5 +44,5 @@ export const ko: Record<keyof typeof en, string> = {
   "be_agentSpawn.propResumeIdDescription":
     "선택: 이전에 띄운 sub-agent 를 resumeId (미완료 결과에 반환됨) 로 이어서 실행합니다. 지정 시 sub-agent 히스토리를 재수화하고 instructions 를 후속 프롬프트로 이어갑니다. tool 범위는 최초 spawn 시점으로 고정되어 재부여되지 않습니다. 생략하면 새 sub-agent 를 시작합니다.",
   "be_agentSpawn.incompleteNotice":
-    "sub-agent 가 완료 전에 라운드 예산에 도달했습니다 — 위 요약은 완성된 결과가 아니라 부분 출력입니다. 검토 후 작업이 더 필요하면 sub-agent 를 다시 띄워 중단된 지점부터 이어가거나 (또는 남은 단계를 직접 처리하세요).",
+    "이 실행은 끝나지 않았습니다. sub-agent 가 작업 도중 라운드 예산에 도달했으므로 위 요약은 답이 아니라 중간 스냅샷입니다 — 사용자에게 결과로 보고하지 마세요. agent_spawn 을 resumeId=\"{resumeId}\" 와 남은 작업을 명시한 instructions 로 다시 호출하세요. sub-agent 는 히스토리를 유지한 채 중단된 지점부터 정확히 이어갑니다. 이 안내가 사라질 때까지 반복하세요. 의도적으로 재개를 중단한다면 그 사실을 명시하고 작업이 미완료로 남았음을 사용자에게 알리세요.",
 };
