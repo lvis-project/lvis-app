@@ -355,6 +355,9 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
         holderStopped = true;
         stopWindowsAclGrantHolder(holder);
       }
+    };
+    const finalizeResources = (): void => {
+      cleanupResources();
       sandboxHome.cleanup();
     };
     const holderDied = (first?: unknown, second?: unknown): void => {
@@ -367,7 +370,11 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
                 `(code=${String(first ?? "null")} signal=${String(second ?? "null")})`,
             );
       cleanupResources();
-      if (child !== undefined) killChildBestEffort(child, "SIGTERM");
+      if (child !== undefined) {
+        killChildBestEffort(child, "SIGTERM");
+      } else {
+        sandboxHome.cleanup();
+      }
     };
     const assertHolderAlive = (): void => {
       if (holderFailure !== undefined) throw holderFailure;
@@ -405,17 +412,17 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
         env: buildWrappedWorkerEnv(baseEnv, env, { ...sandboxHome.env }),
       });
       trackManagedChildProcess(child, { label: `worker:${safePlugin}:${safeWorker}:asrt-win` });
+      child.once("exit", finalizeResources);
+      child.once("error", finalizeResources);
+      child.once("close", finalizeResources);
       assertHolderAlive();
-
-      child.once("exit", cleanupResources);
-      child.once("error", cleanupResources);
-      child.once("close", cleanupResources);
       assertHolderAlive();
 
       return makeHandle(child, null, cleanupResources);
     } catch (err) {
       if (child !== undefined) killChildBestEffort(child, "SIGTERM");
       cleanupResources();
+      if (child === undefined) sandboxHome.cleanup();
       throw err instanceof Error ? err : new Error(String(err));
     }
   }
@@ -540,12 +547,15 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       unmarkPluginWorkerWrapped(safePlugin, safeWorker);
       void unregisterWorkerUnixSocketDir(socketDir);
       void cleanupAsrtSandboxAfterCommand();
-      sandboxHome.cleanup();
       removeSocketArtifacts(socketPath, socketDir);
     };
-    child.once("exit", cleanupOnce);
-    child.once("error", cleanupOnce);
-    child.once("close", cleanupOnce);
+    const finalizeOnce = (): void => {
+      cleanupOnce();
+      sandboxHome.cleanup();
+    };
+    child.once("exit", finalizeOnce);
+    child.once("error", finalizeOnce);
+    child.once("close", finalizeOnce);
 
     return makeHandle(child, socketPath, cleanupOnce);
   } catch (err) {
