@@ -52,7 +52,10 @@ import {
 import { isMcpAppUiUri } from "../shared/mcp-app-partition.js";
 import { createLogger } from "../lib/logger.js";
 import { resolveStdioSpawnCommand } from "./uvx-command.js";
-import { trackManagedChildProcess } from "../main/managed-child-processes.js";
+import {
+  assertManagedChildProcessAdmissionOpen,
+  trackManagedChildProcess,
+} from "../main/managed-child-processes.js";
 import {
   isAsrtSandboxActive,
   wrapWorkerCommand,
@@ -61,10 +64,12 @@ import {
   getDefaultSensitiveWriteDenyPaths,
 } from "../permissions/asrt-sandbox.js";
 import { buildSandboxedChildEnv } from "../tools/safe-env.js";
+import { terminateChildProcess } from "../tools/terminate-child-process.js";
 import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
 import {
   markMcpServerWrapped,
   unmarkMcpServerWrapped,
+  type McpWrappedOwner,
 } from "../permissions/sandbox-capability.js";
 import { shellQuote } from "../lib/shell-resolver.js";
 import { scrubShortError } from "../shared/dlp.js";
@@ -1634,14 +1639,15 @@ class StdioTransport implements McpTransport {
    */
   private wrappedThroughAsrt = false;
   /**
-   * One-shot guard for the ASRT cleanup that fires on ANY child termination
-   * (unexpected crash, OS kill, or the explicit close() path). Ensures
+   * One-shot guard for the ASRT cleanup that fires on definitive child
+   * termination (unexpected crash, OS kill, or close after a spawn error). Ensures
    * `unmarkMcpServerWrapped` + `cleanupAsrtSandboxAfterCommand` run EXACTLY
    * ONCE per wrapped worker lifetime regardless of exit cause (worker-egress
    * Unexpected child death previously bypassed cleanup,
    * violating the no-leak invariant and leaking the bwrap ref-count).
    */
   private asrtCleanupRan = false;
+  private wrappedOwner: McpWrappedOwner | null = null;
   private sandboxHomeCleanup: (() => void) | null = null;
 
   constructor(private readonly config: McpStdioServerConfig) {}
@@ -1697,11 +1703,15 @@ class StdioTransport implements McpTransport {
         // defeat the gate the operator turned on. Surface the error so connect
         // fails and the server stays down until the sandbox is healthy.
         this.wrappedThroughAsrt = false;
-        unmarkMcpServerWrapped(this.config.id);
+        if (this.wrappedOwner !== null) {
+          unmarkMcpServerWrapped(this.config.id, this.wrappedOwner);
+          this.wrappedOwner = null;
+        }
         throw err instanceof Error ? err : new Error(String(err));
       }
     }
 
+    assertManagedChildProcessAdmissionOpen(`mcp:${this.config.id}`);
     this.process = spawn(spawnCommand.command, spawnCommand.args, {
       stdio: ["pipe", "pipe", "pipe"],
       // Windows: 콘솔 창 생성 방지 (창이 뜨면 stdout 파이프 동작이 달라짐)
@@ -1732,7 +1742,7 @@ class StdioTransport implements McpTransport {
     if (process.platform === "win32") {
       throw new Error(
         "[mcp-client] ASRT-wrapped MCP stdio on Windows is disabled because " +
-          "ASRT 0.0.66 cannot apply per-server filesystem.allowRead/allowWrite " +
+          "ASRT 0.0.67 cannot apply per-server filesystem.allowRead/allowWrite " +
           "grants per exec; only denyRead/denyWrite are supported. Keep MCP " +
           "stdio fail-closed until a Windows session-grant/control-channel " +
           "design lands.",
@@ -1798,8 +1808,9 @@ class StdioTransport implements McpTransport {
 
       this.wrappedThroughAsrt = true;
       this.sandboxHomeCleanup = sandboxHome.cleanup;
-      markMcpServerWrapped(this.config.id);
+      this.wrappedOwner = markMcpServerWrapped(this.config.id);
 
+      assertManagedChildProcessAdmissionOpen(`mcp:${this.config.id}:asrt`);
       this.process = spawn(cmd, args, {
         // stdin pipe MUST stay writable for JSON-RPC Content-Length framing.
         stdio: ["pipe", "pipe", "pipe"],
@@ -1860,10 +1871,9 @@ class StdioTransport implements McpTransport {
   }
 
   /**
-   * Release the per-command ASRT state exactly ONCE per wrapped worker lifetime,
-   * regardless of how the child process ends. This releases security state
-   * immediately on explicit close, but the disposable HOME is removed only by
-   * the confirmed process exit/error handlers.
+   * Release the per-command ASRT state exactly ONCE after the wrapped worker
+   * has definitively exited or closed. Shutdown intent alone must not release
+   * confinement while a TERM-ignoring child is still alive.
    *
    * Consequences of running this:
    *   1. Drops the no-leak reviewer marker (`unmarkMcpServerWrapped`) so a later
@@ -1876,7 +1886,10 @@ class StdioTransport implements McpTransport {
     if (!this.wrappedThroughAsrt || this.asrtCleanupRan) return;
     this.asrtCleanupRan = true;
     this.wrappedThroughAsrt = false;
-    unmarkMcpServerWrapped(this.config.id);
+    if (this.wrappedOwner !== null) {
+      unmarkMcpServerWrapped(this.config.id, this.wrappedOwner);
+      this.wrappedOwner = null;
+    }
     void cleanupAsrtSandboxAfterCommand();
   }
 
@@ -1899,11 +1912,6 @@ class StdioTransport implements McpTransport {
 
   async close(): Promise<void> {
     this.closedExternally = true;
-    // Release the per-command ASRT state via the idempotent
-    // one-shot helper. This is the EXPLICIT-CLOSE path; the unexpected-exit path
-    // (process 'exit'/'error' handlers in setupProcessHandlers) calls the same
-    // helper. Whichever fires first wins; the second is a no-op.
-    this.runAsrtCleanupOnce();
     // Capture the process reference BEFORE nulling `this.process` so the
     // SIGKILL fallback timer can still reach it. Without this, `close()` used
     // to null the field synchronously and the 3-second timer would dereference
@@ -1913,19 +1921,13 @@ class StdioTransport implements McpTransport {
     if (!proc) return;
     try {
       proc.stdin?.end();
-      proc.kill("SIGTERM");
-      // SIGTERM 후 3초 내 종료 안 되면 SIGKILL
-      const forceKillTimer = setTimeout(() => {
-        try {
-          proc.kill("SIGKILL");
-        } catch {
-          // 이미 종료됨
-        }
-      }, 3000);
-      proc.once("exit", () => clearTimeout(forceKillTimer));
     } catch {
-      // 이미 종료됨
+      // A broken stdin must not suppress process termination below.
     }
+    const forceKillTimer = terminateChildProcess(proc, 3_000);
+    const clearForceKill = (): void => clearTimeout(forceKillTimer);
+    proc.once("exit", clearForceKill);
+    proc.once("close", clearForceKill);
   }
 
   isAlive(): boolean {
@@ -1955,7 +1957,7 @@ class StdioTransport implements McpTransport {
       log.warn(`${this.config.id} process exited: code=${code}, signal=${signal}`);
       // Fire ASRT cleanup on ANY child termination,
       // including unexpected crashes/kills. The idempotent one-shot helper ensures
-      // this and the explicit close() path do not double-run the cleanup.
+      // exit and the later close event do not double-run the cleanup.
       this.runAsrtCleanupOnce();
       this.cleanupSandboxHome();
       if (!this.closedExternally) {
@@ -1965,9 +1967,8 @@ class StdioTransport implements McpTransport {
 
     this.process.on("error", (err) => {
       log.error(`${this.config.id} process error: %s`, err.message);
-      // Same idempotent cleanup for the error path (spawn failure, broken pipe).
-      this.runAsrtCleanupOnce();
-      this.cleanupSandboxHome();
+      // `error` is not definitive termination: signal or IPC delivery can fail
+      // while the child remains alive. `exit`/`close` retain cleanup ownership.
       this.closeHandler?.(t("be_mcpClient.processError", { message: err.message }));
     });
 
@@ -1975,6 +1976,7 @@ class StdioTransport implements McpTransport {
     // Windows lock can make the first HOME removal fail; the cleanup helper
     // deliberately remains retryable until deletion succeeds.
     this.process.on("close", () => {
+      this.runAsrtCleanupOnce();
       this.cleanupSandboxHome();
     });
   }

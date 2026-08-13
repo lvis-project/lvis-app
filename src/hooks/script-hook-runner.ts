@@ -45,7 +45,10 @@ import {
   ShellMismatchError,
 } from "../lib/shell-resolver.js";
 import { createLogger } from "../lib/logger.js";
-import { trackManagedChildProcess } from "../main/managed-child-processes.js";
+import {
+  assertManagedChildProcessAdmissionOpen,
+  trackManagedChildProcess,
+} from "../main/managed-child-processes.js";
 import {
   DEFAULT_HOOK_TIMEOUT_MS,
   MAX_HOOK_STDOUT_BYTES,
@@ -262,6 +265,7 @@ export async function runOneHookScript(
   }
 
   return new Promise<ScriptHookInvocationResult>((resolve) => {
+    assertManagedChildProcessAdmissionOpen("hook:script");
     const child = spawn(spawnCmd, spawnArgs, {
       cwd,
       // Allowlist env — do not leak ANTHROPIC_API_KEY, AWS_*, GITHUB_TOKEN
