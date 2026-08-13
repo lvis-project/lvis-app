@@ -912,6 +912,7 @@ describe("StdioTransport — regression", () => {
           },
         };
         exitCode: number | null = null;
+        signalCode: NodeJS.Signals | null = null;
 
         kill(signal?: string): boolean {
           killCalls.push(signal ?? "SIGTERM");
@@ -971,6 +972,60 @@ describe("StdioTransport — regression", () => {
       fake.exitCode = 0;
       fake.emit("exit", 0, "SIGKILL");
       await disconnectPromise;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("still terminates when closing stdin throws", async () => {
+    vi.useFakeTimers();
+    try {
+      const killCalls: string[] = [];
+      class BrokenStdinChild extends EventEmitter {
+        stdout = new PassThrough();
+        stderr = new PassThrough();
+        stdin = {
+          writable: true,
+          write: (_chunk: string) => true,
+          end: () => {
+            throw new Error("stdin already destroyed");
+          },
+        };
+        exitCode: number | null = null;
+        signalCode: NodeJS.Signals | null = null;
+        kill(signal?: string): boolean {
+          killCalls.push(signal ?? "SIGTERM");
+          return true;
+        }
+      }
+      const fake = new BrokenStdinChild();
+      spawnMock.mockReturnValueOnce(fake);
+      const client = new McpClient(
+        { id: "broken-stdin", transport: "stdio", command: "lvis-mcp-broken-stdin" },
+        governanceWithPolicy(buildPolicy([stdioApproval("broken-stdin", "lvis-mcp-broken-stdin")])),
+        new ToolRegistry(),
+      );
+
+      const connectPromise = client.connect();
+      await Promise.resolve();
+      const reply = (id: number, result: unknown): void => {
+        const payload = JSON.stringify({ jsonrpc: "2.0", id, result });
+        fake.stdout.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
+      };
+      reply(1, {
+        protocolVersion: "2024-11-05",
+        capabilities: { tools: {} },
+        serverInfo: { name: "broken-stdin", version: "0.0.1" },
+      });
+      await vi.advanceTimersByTimeAsync(0);
+      reply(2, { tools: [] });
+      await vi.advanceTimersByTimeAsync(0);
+      await connectPromise;
+
+      await client.disconnect();
+      expect(killCalls).toContain("SIGTERM");
+      await vi.advanceTimersByTimeAsync(3_500);
+      expect(killCalls).toContain("SIGKILL");
     } finally {
       vi.useRealTimers();
     }

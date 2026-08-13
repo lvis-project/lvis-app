@@ -48,6 +48,7 @@ import {
 import { isActiveSandboxShellContained } from "../../permissions/sandbox-capability.js";
 import { deriveSandboxWritePaths } from "../../permissions/sandbox-write-jail.js";
 import { canonicalizePathForMatch } from "../../permissions/sensitive-paths.js";
+import { createSandboxProcessHome } from "../../permissions/sandbox-process-home.js";
 
 const log = createLogger("lvis");
 
@@ -104,10 +105,21 @@ interface TerminalSession {
   ringBytes: number;
   disposeData: () => void;
   disposeExit: () => void;
+  cleanupSandboxHome: () => void;
+  forceKillTimer: ReturnType<typeof setTimeout> | null;
+  closing: boolean;
   exited: boolean;
 }
 
+interface TerminalSpawnInFlight {
+  promise: Promise<SpawnTerminalResult>;
+  cancelled: boolean;
+  cleanupSandboxHome?: () => void;
+}
+
 const sessions = new Map<string, TerminalSession>();
+const terminalSpawnsInFlight = new Map<string, TerminalSpawnInFlight>();
+let terminalShutdownStarted = false;
 
 /** Lazy, cached ESM import of the native (external, asarUnpack'd) node-pty. Kept
  * dynamic like ASRT's loadSandboxManager so merely importing this module pulls
@@ -188,10 +200,17 @@ function pushRing(session: TerminalSession, chunk: string): void {
  * same `tabId` and receives the buffered scrollback rather than a fresh shell —
  * the PTY survives ChatSidePanel unmount (redesign "state survives" goal).
  */
-export async function spawnTerminal(options: SpawnTerminalOptions): Promise<SpawnTerminalResult> {
+export function spawnTerminal(options: SpawnTerminalOptions): Promise<SpawnTerminalResult> {
   const tabId = typeof options.tabId === "string" ? options.tabId : "";
   if (!tabId) {
-    return { ok: false, reason: "bad-request", message: "missing tabId" };
+    return Promise.resolve({ ok: false, reason: "bad-request", message: "missing tabId" });
+  }
+  if (terminalShutdownStarted) {
+    return Promise.resolve({
+      ok: false,
+      reason: "spawn-failed",
+      message: "Terminal shutdown is already in progress",
+    });
   }
 
   // Idempotent replay for a remounting renderer.
@@ -200,7 +219,47 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
     if (existing.ring.length > 0) {
       _emit("data", { tabId, chunk: existing.ring.join("") });
     }
-    return { ok: true, tabId, replayed: true };
+    return Promise.resolve({ ok: true, tabId, replayed: true });
+  }
+
+  // Reserve the tab before the first async boundary. Concurrent renderer IPC
+  // calls for one tab must share the in-flight spawn; otherwise both can create
+  // a PTY and the later sessions.set() strands the first process and its HOME.
+  const inFlight = terminalSpawnsInFlight.get(tabId);
+  if (inFlight) {
+    return inFlight.promise.then((result) =>
+      result.ok ? { ok: true, tabId, replayed: true } : result,
+    );
+  }
+
+  let resolveTracked!: (result: SpawnTerminalResult) => void;
+  let rejectTracked!: (reason?: unknown) => void;
+  const tracked = new Promise<SpawnTerminalResult>((resolve, reject) => {
+    resolveTracked = resolve;
+    rejectTracked = reject;
+  });
+  const owner: TerminalSpawnInFlight = { promise: tracked, cancelled: false };
+  terminalSpawnsInFlight.set(tabId, owner);
+  void spawnNewTerminal(options, tabId, owner).then(
+    (result) => {
+      if (terminalSpawnsInFlight.get(tabId) === owner) terminalSpawnsInFlight.delete(tabId);
+      resolveTracked(result);
+    },
+    (err) => {
+      if (terminalSpawnsInFlight.get(tabId) === owner) terminalSpawnsInFlight.delete(tabId);
+      rejectTracked(err);
+    },
+  );
+  return tracked;
+}
+
+async function spawnNewTerminal(
+  options: SpawnTerminalOptions,
+  tabId: string,
+  owner: TerminalSpawnInFlight,
+): Promise<SpawnTerminalResult> {
+  if (owner.cancelled) {
+    return { ok: false, reason: "spawn-failed", message: "terminal spawn cancelled" };
   }
 
   // ── FAIL CLOSED: an interactive arbitrary-command shell may spawn ONLY when
@@ -220,7 +279,7 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
 
   // Anti-DoS: bound concurrent PTYs. A remount of an EXISTING tab was replayed
   // above and does not reach here; only a genuinely NEW session counts.
-  if (sessions.size >= MAX_TERMINALS) {
+  if (sessions.size + terminalSpawnsInFlight.size > MAX_TERMINALS) {
     return {
       ok: false,
       reason: "too-many-terminals",
@@ -239,6 +298,29 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
   const cols = clampDim(options.cols, 80, MAX_COLS);
   const rows = clampDim(options.rows, 24, MAX_ROWS);
 
+  let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
+  // No initializer, matching `sandboxHome` above: the catch below returns, so
+  // reaching past the try means both were assigned. A no-op placeholder would
+  // be dead — never observable — and would read as if a missing cleanup were a
+  // supported state (CodeQL: useless assignment to local variable).
+  let cleanupSandboxHome: () => void;
+  try {
+    sandboxHome = createSandboxProcessHome();
+    let homeCleanupRequested = false;
+    cleanupSandboxHome = () => {
+      if (homeCleanupRequested) return;
+      homeCleanupRequested = true;
+      sandboxHome.cleanup();
+    };
+    owner.cleanupSandboxHome = cleanupSandboxHome;
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "spawn-failed",
+      message: `Could not create isolated terminal HOME: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
   // Filesystem jail (mirrors worker-spawn): write = cwd ∪ authorized dirs;
   // read = jail ∪ cwd; denyRead = the RESTATED shared sensitive read floor (a
   // per-command denyRead REPLACES ASRT's boot array, so omit-it-and-leak).
@@ -247,7 +329,10 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
   // denyWithinAllow with PRECEDENCE over allowWrite, so even if the write-jail
   // ever covers $HOME the shell can never write these re-exec vectors
   // (cluster-review MAJOR).
-  const allowWrite = deriveSandboxWritePaths({ allowedDirectories: [cwd] });
+  const allowWrite = [
+    ...deriveSandboxWritePaths({ allowedDirectories: [cwd] }),
+    sandboxHome.path,
+  ];
   const allowRead = [cwd, ...allowWrite];
   const denyRead = getDefaultSensitiveReadDenyPaths();
   const denyWrite = getDefaultSensitiveWriteDenyPaths();
@@ -259,6 +344,7 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
       filesystem: { allowWrite, allowRead, denyRead, denyWrite },
     });
     wrapped = true;
+    if (owner.cancelled) throw new Error("terminal spawn cancelled");
 
     const [cmd, ...wrappedArgs] = argv;
     if (cmd === undefined) {
@@ -269,13 +355,14 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
     // plus the TTY hints the shell/xterm expect. buildSandboxedChildEnv already
     // strips LVIS_*/*_API_KEY/GITHUB_TOKEN/AWS_* and overlays the proxy.
     const childEnv: Record<string, string> = {
-      ...buildSandboxedChildEnv(env),
+      ...buildSandboxedChildEnv(env, { ...sandboxHome.env }),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       LANG: process.env.LANG ?? "en_US.UTF-8",
     };
 
     const { spawn: ptySpawn } = await loadPty();
+    if (owner.cancelled) throw new Error("terminal spawn cancelled");
     const pty = ptySpawn(cmd, wrappedArgs, {
       name: "xterm-256color",
       cols,
@@ -290,6 +377,9 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
       ringBytes: 0,
       disposeData: () => {},
       disposeExit: () => {},
+      cleanupSandboxHome,
+      forceKillTimer: null,
+      closing: false,
       exited: false,
     };
 
@@ -301,13 +391,15 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
 
     const exitSub = pty.onExit(({ exitCode, signal }) => {
       session.exited = true;
+      if (session.forceKillTimer !== null) clearTimeout(session.forceKillTimer);
       _emit("exit", { tabId, exitCode, signal });
       // Per-command ASRT state decrement (mirrors worker-spawn cleanupOnce) +
       // drop the session so a later spawn for the same tab starts fresh.
       void cleanupAsrtSandboxAfterCommand();
+      session.cleanupSandboxHome();
       session.disposeData();
       session.disposeExit();
-      sessions.delete(tabId);
+      if (sessions.get(tabId) === session) sessions.delete(tabId);
     });
     session.disposeExit = () => exitSub.dispose();
 
@@ -319,8 +411,13 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
     // per-command state so a failed spawn leaves no lingering ref (mirrors
     // worker-spawn's catch).
     if (wrapped) void cleanupAsrtSandboxAfterCommand();
+    cleanupSandboxHome();
     const message = err instanceof Error ? err.message : String(err);
-    log.error({ tabId, err: message }, "terminal: spawn failed");
+    if (owner.cancelled) {
+      log.info({ tabId }, "terminal: cancelled in-flight spawn");
+    } else {
+      log.error({ tabId, err: message }, "terminal: spawn failed");
+    }
     return { ok: false, reason: "spawn-failed", message };
   }
 }
@@ -330,7 +427,7 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
  * buggy renderer must not flood an unbounded buffer into the shell (anti-DoS). */
 export function writeTerminal(tabId: string, data: string): void {
   const session = sessions.get(tabId);
-  if (!session || session.exited) return;
+  if (!session || session.exited || session.closing) return;
   if (typeof data !== "string") return;
   const bytes = Buffer.byteLength(data, "utf-8");
   if (bytes > MAX_INPUT_BYTES) {
@@ -343,34 +440,128 @@ export function writeTerminal(tabId: string, data: string): void {
 /** Resize the PTY (FitAddon / ResizeObserver). Clamped, no-op for unknown tab. */
 export function resizeTerminal(tabId: string, cols: number, rows: number): void {
   const session = sessions.get(tabId);
-  if (!session || session.exited) return;
+  if (!session || session.exited || session.closing) return;
   session.pty.resize(clampDim(cols, 80, MAX_COLS), clampDim(rows, 24, MAX_ROWS));
 }
 
 /** Kill + tear down one terminal (tab close / teardown). Idempotent. */
 export function killTerminal(tabId: string): void {
+  const inFlight = terminalSpawnsInFlight.get(tabId);
+  if (inFlight) {
+    inFlight.cancelled = true;
+    inFlight.cleanupSandboxHome?.();
+  }
   const session = sessions.get(tabId);
-  if (!session) return;
-  sessions.delete(tabId);
+  if (!session || session.closing) return;
+  session.closing = true;
+  session.disposeData();
   try {
-    session.disposeData();
-    session.disposeExit();
-    if (!session.exited) {
-      session.pty.kill();
-      // The exit handler was disposed, so decrement ASRT state here (the exit
-      // event will not run our cleanup for this explicit kill path).
-      void cleanupAsrtSandboxAfterCommand();
-    }
+    if (!session.exited) session.pty.kill();
   } catch (err) {
     log.warn({ tabId, err: err instanceof Error ? err.message : String(err) }, "terminal: kill failed");
   }
+  if (session.exited) return;
+  session.forceKillTimer = setTimeout(() => {
+    if (session.exited) return;
+    try {
+      // node-pty defaults to SIGHUP. A shell may trap/ignore it, so retain
+      // ownership until this definitive escalation or the exit callback.
+      session.pty.kill("SIGKILL");
+    } catch (err) {
+      // Keep the session registered even when signal delivery fails. Losing
+      // the only owner here would allow a replacement PTY while this one may
+      // still be alive and would strand its ASRT/HOME finalizers.
+      log.warn(
+        { tabId, err: err instanceof Error ? err.message : String(err) },
+        "terminal: force kill failed",
+      );
+    }
+  }, 3_000);
 }
 
 /** Force-kill every live terminal (app shutdown). Returns the count killed. */
 export function killAllTerminals(): number {
-  const ids = [...sessions.keys()];
+  const ids = [...sessions.entries()]
+    .filter(([, session]) => !session.closing)
+    .map(([id]) => id);
   for (const id of ids) killTerminal(id);
   return ids.length;
+}
+
+/**
+ * App-shutdown path: signal every PTY immediately and wait only until all exit
+ * callbacks run or the bounded deadline expires. Unlike a tab close, shutdown
+ * cannot rely on a later timer after Electron has already quit.
+ */
+export async function forceKillAllTerminalsForShutdown(timeoutMs = 1_000): Promise<number> {
+  terminalShutdownStarted = true;
+  const startedAt = Date.now();
+  const inFlight = [...terminalSpawnsInFlight.values()];
+  for (const owner of inFlight) {
+    owner.cancelled = true;
+    owner.cleanupSandboxHome?.();
+  }
+
+  // Snapshot and signal live PTYs synchronously before yielding to any pending
+  // setup promise. Shutdown must not give an existing shell extra runtime just
+  // because another tab is still resolving its wrapper/native module.
+  const sessionsToKill = [...sessions.entries()].filter(([, session]) => !session.exited);
+  for (const [tabId, session] of sessionsToKill) {
+    session.closing = true;
+    session.disposeData();
+    if (session.forceKillTimer !== null) {
+      clearTimeout(session.forceKillTimer);
+      session.forceKillTimer = null;
+    }
+    try {
+      session.pty.kill("SIGKILL");
+    } catch (err) {
+      // Keep ownership until a late exit callback; the bounded wait below
+      // prevents a broken native PTY from hanging application shutdown.
+      log.warn(
+        { tabId, err: err instanceof Error ? err.message : String(err) },
+        "terminal: shutdown SIGKILL failed",
+      );
+    }
+  }
+  if (sessionsToKill.length === 0 && inFlight.length === 0) return 0;
+
+  let inFlightSettled = inFlight.length === 0;
+  if (!inFlightSettled) {
+    void Promise.allSettled(inFlight.map((owner) => owner.promise)).then(() => {
+      inFlightSettled = true;
+    });
+  }
+
+  await new Promise<void>((resolve) => {
+    const poll = (): void => {
+      const liveSessionsExited = sessionsToKill.every(([, session]) => session.exited);
+      if (inFlightSettled && liveSessionsExited) {
+        resolve();
+        return;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        if (!inFlightSettled) {
+          log.warn(
+            { unresolved: terminalSpawnsInFlight.size, timeoutMs },
+            "terminal: shutdown deadline expired with in-flight spawns",
+          );
+        }
+        const unresolvedSessions = sessionsToKill.filter(([, session]) => !session.exited).length;
+        if (unresolvedSessions > 0) {
+          log.warn(
+            { unresolved: unresolvedSessions, timeoutMs },
+            "terminal: shutdown deadline expired with live PTYs",
+          );
+        }
+        resolve();
+        return;
+      }
+      setTimeout(poll, 10);
+    };
+    poll();
+  });
+  return sessionsToKill.length;
 }
 
 /** Test-only: number of live sessions. */
@@ -380,7 +571,14 @@ export function __terminalSessionCountForTest(): number {
 
 /** Test-only: reset module state between tests. */
 export function __resetTerminalsForTest(): void {
-  for (const id of [...sessions.keys()]) killTerminal(id);
+  for (const session of sessions.values()) {
+    if (session.forceKillTimer !== null) clearTimeout(session.forceKillTimer);
+    session.disposeData();
+    session.disposeExit();
+  }
   sessions.clear();
+  for (const owner of terminalSpawnsInFlight.values()) owner.cancelled = true;
+  terminalSpawnsInFlight.clear();
+  terminalShutdownStarted = false;
   _emit = () => {};
 }

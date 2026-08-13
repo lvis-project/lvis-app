@@ -81,6 +81,7 @@ export class FakeChildProcess extends EventEmitter {
     },
   };
   exitCode: number | null = null;
+  signalCode: NodeJS.Signals | null = null;
   private stdinBuffer = "";
 
   /** Prepared responses keyed by method name. */
