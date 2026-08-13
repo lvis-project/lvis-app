@@ -418,20 +418,31 @@ export class ToolExecutor {
     const batchId = randomUUID();
     const originalToolUseIds = toolUses.map((toolUse) => toolUse.id);
     const completedResults: ToolResult[] = [];
-    for (let displayOrder = 0; displayOrder < toolUses.length; displayOrder += 1) {
-      const toolUse = toolUses[displayOrder];
-      const registeredTool = this.toolRegistry.findByName(toolUse.name);
-      const interceptedMetaToolHandler = opts.interceptedMetaToolHandler;
-      const shouldInterceptMetaTool =
-        interceptedMetaToolHandler !== undefined &&
-        registeredTool?.source === "builtin" &&
-        (toolUse.name === "request_plugin" ||
-          toolUse.name === "tool_search");
-      let result: ToolResult | RationaleRequiredExecuteOneOutcome;
-      if (shouldInterceptMetaTool && interceptedMetaToolHandler) {
+
+    const interceptedMetaToolHandler = opts.interceptedMetaToolHandler;
+    // A meta tool the handler owns mutates session-wide activation state
+    // (plugin activation, tool exposure) that later tools in the same batch
+    // read. It must stay strictly ordered and can never join a parallel
+    // segment, regardless of the registry's `parallelSafe` flag.
+    const isInterceptedMetaTool = (toolUse: ToolUseBlock): boolean =>
+      interceptedMetaToolHandler !== undefined &&
+      this.toolRegistry.findByName(toolUse.name)?.source === "builtin" &&
+      (toolUse.name === "request_plugin" || toolUse.name === "tool_search");
+    // Parallel eligibility on the rationale path is strictly narrower than on
+    // `executeAll`: the registry flag is necessary but not sufficient, because
+    // an intercepted meta tool is ordered by the rule above.
+    const isBatchParallelSafe = (toolUse: ToolUseBlock): boolean =>
+      this.isParallelSafeToolUse(toolUse) && !isInterceptedMetaTool(toolUse);
+
+    const runOne = async (
+      toolUse: ToolUseBlock,
+      displayOrder: number,
+      completedToolUseIds: string[],
+    ): Promise<ToolResult | RationaleRequiredExecuteOneOutcome> => {
+      if (isInterceptedMetaTool(toolUse) && interceptedMetaToolHandler) {
         try {
           const intercepted = await interceptedMetaToolHandler(toolUse);
-          result = intercepted?.tool_use_id === toolUse.id
+          return intercepted?.tool_use_id === toolUse.id
             ? intercepted
             : {
                 tool_use_id: toolUse.id,
@@ -440,37 +451,79 @@ export class ToolExecutor {
                 durationMs: 0,
               };
         } catch {
-          result = {
+          return {
             tool_use_id: toolUse.id,
             content: "Intercepted meta-tool handling failed closed",
             is_error: true,
             durationMs: 0,
           };
         }
-      } else if (runtime?.requestAnchor) {
-        result = await this.executeOne(
-          toolUse,
+      }
+      if (runtime?.requestAnchor) {
+        return this.executeOne(toolUse, batchId, displayOrder, opts, {
+          runtime,
           batchId,
+          originalToolUseIds,
+          completedToolUseIds,
+        });
+      }
+      return this.executeOne(toolUse, batchId, displayOrder, opts);
+    };
+
+    for (let displayOrder = 0; displayOrder < toolUses.length;) {
+      // Ordered (single) execution — the common case, and the only path an
+      // intercepted meta tool or a non-`parallelSafe` tool ever takes.
+      if (!isBatchParallelSafe(toolUses[displayOrder])) {
+        const result = await runOne(
+          toolUses[displayOrder],
           displayOrder,
-          opts,
-          {
-            runtime,
-            batchId,
-            originalToolUseIds,
-            completedToolUseIds: completedResults.map((item) => item.tool_use_id),
-          },
+          completedResults.map((item) => item.tool_use_id),
         );
-      } else {
-        result = await this.executeOne(toolUse, batchId, displayOrder, opts);
+        if (isRationaleRequiredExecuteOneOutcome(result)) {
+          return { outcome: "rationale-required", completedResults, control: result.control };
+        }
+        completedResults.push(result);
+        displayOrder += 1;
+        continue;
       }
-      if (isRationaleRequiredExecuteOneOutcome(result)) {
-        return {
-          outcome: "rationale-required",
-          completedResults,
-          control: result.control,
-        };
+
+      // Contiguous parallel-safe segment. Every member sees the SAME
+      // `completedToolUseIds` snapshot — the ids finished strictly before the
+      // segment opened — because siblings inside a segment have no defined
+      // order relative to one another and must not observe each other.
+      const start = displayOrder;
+      while (displayOrder < toolUses.length && isBatchParallelSafe(toolUses[displayOrder])) {
+        displayOrder += 1;
       }
-      completedResults.push(result);
+      const segment = toolUses.slice(start, displayOrder);
+      const snapshot = completedResults.map((item) => item.tool_use_id);
+      const segmentOutcomes = await Promise.all(
+        segment.map((toolUse, offset) => runOne(toolUse, start + offset, snapshot)),
+      );
+
+      // Rationale collision inside a parallel segment. Siblings ran
+      // concurrently, so a member demanding a rationale does NOT mean the
+      // others were skipped — their effects have already landed. Dropping
+      // their results would leave a tool that ran with no result the model can
+      // observe, and the model would re-request the same spawn. So settled
+      // results are KEPT, in display order, and only the rationale demand is
+      // deferred. `completedToolUseIds` on the resume therefore stays truthful:
+      // it names exactly the tools whose effects happened.
+      const settled: ToolResult[] = [];
+      let pendingControl: RationaleRequiredExecuteOneOutcome["control"] | null = null;
+      for (const outcome of segmentOutcomes) {
+        if (isRationaleRequiredExecuteOneOutcome(outcome)) {
+          // Lowest display order wins — segmentOutcomes is already in display
+          // order, so the first demand encountered is the earliest one.
+          pendingControl ??= outcome.control;
+          continue;
+        }
+        settled.push(outcome);
+      }
+      completedResults.push(...settled);
+      if (pendingControl) {
+        return { outcome: "rationale-required", completedResults, control: pendingControl };
+      }
     }
 
     return { outcome: "completed", results: completedResults };

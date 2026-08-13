@@ -556,20 +556,24 @@ export interface SubAgentRunnerDeps {
   agentMessageBus?: A2AAgentMessageBus;
 }
 
-// Sub-agent round budget. The child runs on the same ConversationLoop whose
-// per-run hard limit is MAX_TOOL_ROUNDS (30) — a child can never exceed it —
-// so the ceiling is pinned to 30. The budget is HOST-ASSIGNED, not LLM-picked:
-// `agent_spawn` no longer exposes a `maxTurns` schema field. Resolution order
-// (see `spawn()`): explicit host `input.maxRounds` (fixed-shape host callers
-// like WorkBoardEngine) → profile `mode.maxToolRoundsHint` → MAX_TURNS_DEFAULT.
-// Default 30 covers most multi-step research/edit flows; the mode map assigns
-// lower budgets for lighter postures (explore=15, execute=20, research=25).
-const MAX_TURNS_DEFAULT = 30;
-// Internal ceiling only — the child ConversationLoop's own MAX_TOOL_ROUNDS (30)
+// Sub-agent round budget — ONE number, not a per-posture split. The child runs
+// on the same ConversationLoop whose per-run hard limit is MAX_TOOL_ROUNDS (60),
+// so the ceiling is pinned to that. The budget is HOST-ASSIGNED, not LLM-picked:
+// `agent_spawn` exposes no `maxTurns` schema field. Resolution order (see
+// `spawn()`): explicit host `input.maxRounds` (fixed-shape host callers like
+// WorkBoardEngine) → the user's configured budget → MAX_TURNS_DEFAULT.
+//
+// The old `mode.maxToolRoundsHint` split (explore=15, execute=20, research=25)
+// is deliberately NOT consulted any more. Those per-mode numbers were the direct
+// cause of agents dying mid-investigation: an "explore" agent got 15 rounds for
+// work that needed far more, hit `round-cap`, and returned partial output that
+// read as a silent failure. A single budget is both more generous and easier to
+// reason about — and it is now user-configurable, which is the right lever.
+const MAX_TURNS_DEFAULT = 60;
+// Internal ceiling only — the child ConversationLoop's own MAX_TOOL_ROUNDS (60)
 // is the real hard limit, so any resolved budget is clamped to this before
-// being passed as `maxRounds`. No longer exported: agent-spawn.ts used to
-// import it to clamp an LLM-supplied maxTurns, but that schema field is gone.
-const MAX_TURNS_CAP = 30;
+// being passed as `maxRounds`.
+const MAX_TURNS_CAP = 60;
 /**
  * C3(b): tools that must NEVER appear in a sub-agent's registry, regardless
  * of `sourceTools`. Adding `agent_spawn` here is the primary fork-bomb
@@ -1732,6 +1736,20 @@ export class SubAgentRunner {
    * The blocklist (agent_spawn) is ALWAYS stripped so a sub-agent — spawned or
    * resumed — cannot recurse.
    */
+  /**
+   * The user's configured sub-agent round budget, or `null` when it is unset or
+   * not a usable number. Returning `null` rather than a substituted default
+   * keeps the resolution order in `spawn()` readable as a single `??` chain and
+   * leaves MAX_TURNS_DEFAULT as the one place the fallback value is written.
+   * The caller clamps to MAX_TURNS_CAP, so an out-of-range setting is narrowed
+   * rather than trusted.
+   */
+  private configuredRoundBudget(): number | null {
+    const configured = this.deps.parentDeps.settingsService.get("chat")?.subAgentMaxRounds;
+    if (typeof configured !== "number" || !Number.isFinite(configured)) return null;
+    return Math.floor(configured);
+  }
+
   private buildChildDeps(args: {
     /**
      * The frozen source-tool allowlist. `null` ⇒ full parent surface minus the
@@ -1985,10 +2003,13 @@ export class SubAgentRunner {
         }
 
         // Host-assigned round budget. Resolution: an explicit host `maxRounds`
-        // wins; otherwise use the profile hint, then the default. The LLM cannot
-        // change this policy because agent_spawn exposes no raw maxTurns field.
+        // wins; otherwise the user's configured budget; otherwise the default.
+        // The LLM cannot change this policy because agent_spawn exposes no raw
+        // maxTurns field. The profile's `mode.maxToolRoundsHint` is intentionally
+        // NOT consulted — see MAX_TURNS_DEFAULT for why the per-mode split was
+        // removed.
         const requestedRounds =
-          input.maxRounds ?? modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
+          input.maxRounds ?? this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT;
         const cappedRounds = Math.max(1, Math.min(MAX_TURNS_CAP, requestedRounds));
 
         // sourceTools empty/absent retains the historical full parent surface
@@ -3140,6 +3161,15 @@ export class SubAgentRunner {
       frozenSourceTools,
       title: meta.subAgentTitle,
       profileModel: meta.profileModel,
+      // Spawn passes this; resume used to omit it, so a re-hydrated child came
+      // back WITHOUT the ability to reach its parent unless `agent_send` happened
+      // to survive in the persisted scope — and spawn deliberately filters it out
+      // of `sourceTools` before registering it separately, so it usually did not.
+      // A resumed sub-agent is the same agent as before the suspension; losing
+      // its channel to the parent on re-hydration is a capability regression, not
+      // a scope narrowing. This does NOT widen the frozen tool scope: every other
+      // tool still comes from persisted metadata.
+      includeAgentSend: true,
     });
 
     child = new ConversationLoop(childDeps);
