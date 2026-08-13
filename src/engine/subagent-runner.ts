@@ -26,6 +26,10 @@
  * shared state (`sessionId`, `history`, `cumulativeUsage`), and lets each
  * spawn audit-log under a child sessionId tagged with the origin session id.
  */
+import {
+  SUBAGENT_MAX_ROUNDS_DEFAULT,
+  SUBAGENT_MAX_ROUNDS_MAX,
+} from "../shared/subagent-rounds.js";
 import { createHash } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import { canonicalizePathForMatch } from "../permissions/sensitive-paths.js";
@@ -569,11 +573,11 @@ export interface SubAgentRunnerDeps {
 // work that needed far more, hit `round-cap`, and returned partial output that
 // read as a silent failure. A single budget is both more generous and easier to
 // reason about — and it is now user-configurable, which is the right lever.
-const MAX_TURNS_DEFAULT = 60;
+const MAX_TURNS_DEFAULT = SUBAGENT_MAX_ROUNDS_DEFAULT;
 // Internal ceiling only — the child ConversationLoop's own MAX_TOOL_ROUNDS (60)
 // is the real hard limit, so any resolved budget is clamped to this before
 // being passed as `maxRounds`.
-const MAX_TURNS_CAP = 60;
+const MAX_TURNS_CAP = SUBAGENT_MAX_ROUNDS_MAX;
 /**
  * C3(b): tools that must NEVER appear in a sub-agent's registry, regardless
  * of `sourceTools`. Adding `agent_spawn` here is the primary fork-bomb

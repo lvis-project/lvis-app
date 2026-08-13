@@ -602,6 +602,8 @@ export function SettingsContent({
               memoryCaptureMode={s.memoryCaptureMode}
               setMemoryCaptureMode={s.setMemoryCaptureMode}
               subAgentAutonomousWake={s.subAgentAutonomousWake}
+              subAgentMaxRounds={s.subAgentMaxRounds}
+              setSubAgentMaxRounds={s.setSubAgentMaxRounds}
               setSubAgentAutonomousWake={s.setSubAgentAutonomousWake}
               piiRedactEnabled={s.piiRedactEnabled}
               settingsLoaded={s.settingsLoaded}
