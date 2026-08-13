@@ -29,6 +29,7 @@ import {
   type ToolResult,
 } from "./base.js";
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "./safe-env.js";
+import { createSandboxProcessHome } from "../permissions/sandbox-process-home.js";
 import {
   validateShellCommandPathPolicy,
   validateShellWorkingDirectory,
@@ -374,17 +375,28 @@ export async function spawnWithSandbox(
   writePaths: readonly string[],
   timeoutSeconds: number,
 ): Promise<SpawnResult> {
+  let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
+  try {
+    sandboxHome = createSandboxProcessHome();
+  } catch (err) {
+    return {
+      output: `spawn failed: could not create isolated HOME: ${(err as Error).message}`,
+      isError: true,
+      metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
+    };
+  }
   const home = process.env["HOME"];
   // Read-jail HOME-leak fix: deny the whole home dir, then re-allow the working
   // tree (cwd + write paths). Omitting denyRead when HOME is unset avoids
   // denying nothing-meaningful; the write paths are always re-allowed for read.
-  const allowRead = [resolvedCwd, ...writePaths];
+  const sandboxWritePaths = [...writePaths, sandboxHome.path];
+  const allowRead = [resolvedCwd, ...sandboxWritePaths];
   const denyRead = [
     ...getDefaultSensitiveReadDenyPaths(),
     ...(home !== undefined && home !== "" ? [home] : []),
   ];
   const filesystem = {
-    allowWrite: [...writePaths],
+    allowWrite: sandboxWritePaths,
     allowRead,
     denyRead,
     denyWrite: getDefaultSensitiveWriteDenyPaths(),
@@ -416,6 +428,7 @@ export async function spawnWithSandbox(
       ...(binShell !== undefined ? { binShell } : {}),
     });
   } catch (err) {
+    sandboxHome.cleanup();
     return {
       output: `spawn failed: ${(err as Error).message}`,
       isError: true,
@@ -425,6 +438,7 @@ export async function spawnWithSandbox(
 
   const [cmd, ...args] = wrapped.argv;
   if (cmd === undefined) {
+    sandboxHome.cleanup();
     return {
       output: "spawn failed: ASRT returned an empty argv",
       isError: true,
@@ -439,17 +453,29 @@ export async function spawnWithSandbox(
   // safe whitelist baseline + ONLY the allow-listed proxy/CA/SANDBOX_RUNTIME
   // keys ASRT set/changed. So the Windows proxy set is propagated (the "spread")
   // while mac/linux gains nothing extra, and host secrets stay stripped on both.
-  const childEnv = buildSandboxedChildEnv(wrapped.env);
+  const childEnv = buildSandboxedChildEnv(wrapped.env, { ...sandboxHome.env });
 
   return await new Promise<SpawnResult>((resolveResult) => {
     // CRITICAL: shell:false — the wrapper argv is the literal program+args; a
     // shell here would re-parse and break quoting / inject a second shell.
-    const child: PipedChild = spawn(cmd, args, {
-      cwd: resolvedCwd,
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
-      env: childEnv,
-    });
+    let child: PipedChild;
+    try {
+      child = spawn(cmd, args, {
+        cwd: resolvedCwd,
+        stdio: ["ignore", "pipe", "pipe"],
+        shell: false,
+        env: childEnv,
+      });
+    } catch (err) {
+      void cleanupAsrtSandboxAfterCommand();
+      sandboxHome.cleanup();
+      resolveResult({
+        output: `spawn failed: ${(err as Error).message}`,
+        isError: true,
+        metadata: { sandboxed: false, sandboxAttempted: true, isolation: "unavailable" },
+      });
+      return;
+    }
     trackManagedChildProcess(child, { label: "tool:bash:asrt" });
 
     const chunks: Buffer[] = [];
@@ -473,6 +499,7 @@ export async function spawnWithSandbox(
       clearTimeout(timer);
       // Per-command cleanup (proxy/helper state) after the wrapped command ends.
       void cleanupAsrtSandboxAfterCommand();
+      sandboxHome.cleanup();
       const combined = Buffer.concat(chunks).toString("utf-8");
       const formatted = formatOutput(combined);
       if (timedOut) {
@@ -496,6 +523,7 @@ export async function spawnWithSandbox(
       settled = true;
       clearTimeout(timer);
       void cleanupAsrtSandboxAfterCommand();
+      sandboxHome.cleanup();
       resolveResult({
         output: `spawn failed: ${err.message}`,
         isError: true,

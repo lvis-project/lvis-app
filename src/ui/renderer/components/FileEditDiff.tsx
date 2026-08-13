@@ -54,7 +54,7 @@ export function FileEditDiff({ data }: { data: FileEditDiffData }) {
         <span className="ml-auto flex shrink-0 items-center gap-2 text-[10px] text-muted-foreground">
           {totals.added > 0 && (
             <span
-              className="text-success"
+              className="rounded bg-success/(--opacity-subtle) px-1 font-semibold text-foreground"
               aria-label={t("fileEditDiff.addedLinesAriaLabel", {
                 count: String(totals.added),
               })}
@@ -64,7 +64,7 @@ export function FileEditDiff({ data }: { data: FileEditDiffData }) {
           )}
           {totals.removed > 0 && (
             <span
-              className="text-destructive"
+              className="rounded bg-destructive/(--opacity-subtle) px-1 font-semibold text-foreground"
               aria-label={t("fileEditDiff.removedLinesAriaLabel", {
                 count: String(totals.removed),
               })}
@@ -80,7 +80,7 @@ export function FileEditDiff({ data }: { data: FileEditDiffData }) {
         </span>
       </button>
       {open && (
-        <div className="font-mono text-[11px] leading-[1.55]">
+        <div className="font-mono text-xs leading-[1.55]">
           {data.hunks.map((hunk, i) => (
             <DiffHunk
               key={i}
@@ -141,20 +141,26 @@ function DiffLine({
   lineNo: number;
   text: string;
 }) {
-  // Theme-adaptive backgrounds — `success` / `destructive` tokens both have
-  // dark + light variants defined in styles.css and adjust automatically.
-  const palette =
-    kind === "added"
-      ? "bg-success/(--opacity-subtle) text-success-foreground/(--opacity-near)"
-      : "bg-destructive/(--opacity-subtle) text-destructive-foreground/(--opacity-near)";
-  const accent = kind === "added" ? "text-success" : "text-destructive";
+  // Status foreground tokens are designed for solid buttons/badges. Reusing
+  // them on a translucent diff wash can produce white-on-pastel text in light
+  // themes. Keep body text on the normal foreground pair and reserve the
+  // status color for the redundant border + sigil state cues.
+  const colors = kind === "added"
+    ? { background: "var(--diff-add)", accent: "var(--diff-add-fg)" }
+    : { background: "var(--diff-remove)", accent: "var(--diff-remove-fg)" };
   const sigil = kind === "added" ? "+" : "−";
   return (
-    <div className={`${palette} flex min-w-0 gap-2 px-3`}>
-      <span className="w-8 shrink-0 select-none text-right text-[10px] opacity-50">
+    <div
+      className="flex min-w-0 gap-2 border-l-[3px] px-3 text-foreground"
+      style={{ backgroundColor: colors.background, borderLeftColor: colors.accent }}
+      data-diff-kind={kind}
+    >
+      <span className="w-10 shrink-0 select-none text-right text-[10px] text-foreground">
         {lineNo}
       </span>
-      <span className={`${accent} shrink-0 select-none`}>{sigil}</span>
+      <span className="shrink-0 select-none font-semibold text-foreground">
+        {sigil}
+      </span>
       <span className="min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
         {text.length > 0 ? text : " "}
       </span>

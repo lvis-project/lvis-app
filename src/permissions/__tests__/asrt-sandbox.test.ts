@@ -27,7 +27,7 @@ import {
   vi,
 } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -63,6 +63,7 @@ import {
 } from "../asrt-sandbox.js";
 import { asrtCanInitialize } from "./test-helpers.js";
 import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { spawnWithSandbox } from "../../tools/bash.js";
 // ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
 // the host-side fixes are proven against ASRT's ACTUAL semantics (not a
 // re-implementation that could drift from the package).
@@ -189,6 +190,29 @@ describe("asrt-sandbox — gate ON wraps a real command under the OS sandbox", (
       await cleanupTmpDir(writeDir);
     }
   });
+
+  it.runIf(process.platform === "darwin" || process.platform === "linux")(
+    "runs git with a disposable HOME instead of probing the denied real .gitconfig",
+    async () => {
+      if (!(await asrtCanInitialize())) return;
+
+      const cwd = process.cwd();
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+      const result = await spawnWithSandbox(
+        `printf '%s\\n' "$HOME"; git -C '${cwd.replace(/'/g, `'\\''`)}' log --oneline -n 1`,
+        cwd,
+        [cwd],
+        15,
+      );
+
+      expect(result.isError, result.output).toBe(false);
+      const [sandboxHome, logLine] = result.output.split("\n");
+      expect(sandboxHome).toContain("lvis-sandbox-home-");
+      expect(sandboxHome).not.toBe(process.env.HOME);
+      expect(logLine).toMatch(/^[0-9a-f]+\s+\S/);
+      expect(existsSync(sandboxHome ?? "")).toBe(false);
+    },
+  );
 });
 
 /**

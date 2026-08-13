@@ -37,7 +37,9 @@ function expectPreSpawnFailuresToBeUnavailable(
   expect(emptyArgvFailure).toContain(unavailableMetadata);
   expect(spawnFailure).toContain(unavailableMetadata);
   const unavailableMetadataOccurrences = implementation.split(unavailableMetadata).length - 1;
-  expect(unavailableMetadataOccurrences).toBe(3);
+  // Isolated-HOME allocation, ASRT wrap, empty argv, synchronous spawn, and
+  // asynchronous spawn errors all happen before a workload is proven confined.
+  expect(unavailableMetadataOccurrences).toBe(5);
 }
 
 describe("ASRT unavailable metadata", () => {

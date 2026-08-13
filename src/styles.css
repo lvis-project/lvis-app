@@ -516,7 +516,9 @@
    *  Each value is a fully-formed CSS color/gradient (hsl() wrapper included)
    *  so call sites reference `var(--diff-add)` / `var(--gradient-brand)`
    *  directly. The alpha-bearing diff-fill tokens keep the hunk wash subtle
-   *  while the -fg tokens carry the full-strength accent for the +/− sigils.
+   *  while the -fg tokens carry the full-strength accent for borders and +/−
+   *  sigils. Diff body text must use `--foreground`: status foreground tokens
+   *  are paired with solid status fills and can become white-on-pastel here.
    * ─────────────────────────────────────────────────────────────────── */
   :root {
     /* Diff hunks — add/remove fills + sigil accents */

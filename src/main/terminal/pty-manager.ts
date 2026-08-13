@@ -48,6 +48,7 @@ import {
 import { isActiveSandboxShellContained } from "../../permissions/sandbox-capability.js";
 import { deriveSandboxWritePaths } from "../../permissions/sandbox-write-jail.js";
 import { canonicalizePathForMatch } from "../../permissions/sensitive-paths.js";
+import { createSandboxProcessHome } from "../../permissions/sandbox-process-home.js";
 
 const log = createLogger("lvis");
 
@@ -104,6 +105,7 @@ interface TerminalSession {
   ringBytes: number;
   disposeData: () => void;
   disposeExit: () => void;
+  cleanupSandboxHome: () => void;
   exited: boolean;
 }
 
@@ -239,6 +241,17 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
   const cols = clampDim(options.cols, 80, MAX_COLS);
   const rows = clampDim(options.rows, 24, MAX_ROWS);
 
+  let sandboxHome: ReturnType<typeof createSandboxProcessHome>;
+  try {
+    sandboxHome = createSandboxProcessHome();
+  } catch (err) {
+    return {
+      ok: false,
+      reason: "spawn-failed",
+      message: `Could not create isolated terminal HOME: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+
   // Filesystem jail (mirrors worker-spawn): write = cwd ∪ authorized dirs;
   // read = jail ∪ cwd; denyRead = the RESTATED shared sensitive read floor (a
   // per-command denyRead REPLACES ASRT's boot array, so omit-it-and-leak).
@@ -247,7 +260,10 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
   // denyWithinAllow with PRECEDENCE over allowWrite, so even if the write-jail
   // ever covers $HOME the shell can never write these re-exec vectors
   // (cluster-review MAJOR).
-  const allowWrite = deriveSandboxWritePaths({ allowedDirectories: [cwd] });
+  const allowWrite = [
+    ...deriveSandboxWritePaths({ allowedDirectories: [cwd] }),
+    sandboxHome.path,
+  ];
   const allowRead = [cwd, ...allowWrite];
   const denyRead = getDefaultSensitiveReadDenyPaths();
   const denyWrite = getDefaultSensitiveWriteDenyPaths();
@@ -269,7 +285,7 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
     // plus the TTY hints the shell/xterm expect. buildSandboxedChildEnv already
     // strips LVIS_*/*_API_KEY/GITHUB_TOKEN/AWS_* and overlays the proxy.
     const childEnv: Record<string, string> = {
-      ...buildSandboxedChildEnv(env),
+      ...buildSandboxedChildEnv(env, { ...sandboxHome.env }),
       TERM: "xterm-256color",
       COLORTERM: "truecolor",
       LANG: process.env.LANG ?? "en_US.UTF-8",
@@ -290,6 +306,7 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
       ringBytes: 0,
       disposeData: () => {},
       disposeExit: () => {},
+      cleanupSandboxHome: sandboxHome.cleanup,
       exited: false,
     };
 
@@ -305,6 +322,7 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
       // Per-command ASRT state decrement (mirrors worker-spawn cleanupOnce) +
       // drop the session so a later spawn for the same tab starts fresh.
       void cleanupAsrtSandboxAfterCommand();
+      session.cleanupSandboxHome();
       session.disposeData();
       session.disposeExit();
       sessions.delete(tabId);
@@ -319,6 +337,7 @@ export async function spawnTerminal(options: SpawnTerminalOptions): Promise<Spaw
     // per-command state so a failed spawn leaves no lingering ref (mirrors
     // worker-spawn's catch).
     if (wrapped) void cleanupAsrtSandboxAfterCommand();
+    sandboxHome.cleanup();
     const message = err instanceof Error ? err.message : String(err);
     log.error({ tabId, err: message }, "terminal: spawn failed");
     return { ok: false, reason: "spawn-failed", message };
@@ -363,6 +382,8 @@ export function killTerminal(tabId: string): void {
     }
   } catch (err) {
     log.warn({ tabId, err: err instanceof Error ? err.message : String(err) }, "terminal: kill failed");
+  } finally {
+    session.cleanupSandboxHome();
   }
 }
 
