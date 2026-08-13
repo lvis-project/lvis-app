@@ -15,6 +15,8 @@ export const en = {
   "be_conversationLoop.manualCompactFailed": "Compaction failed: {message}",
   "be_conversationLoop.contentTruncatedSummary": "{count} messages partially truncated",
   "be_conversationLoop.roundCapError": "Round limit ({max}) reached — the task was interrupted. Send a new message to continue.",
+  "be_conversationLoop.roundCapFinalizePrompt":
+    "You have run out of tool rounds and cannot act further. Do not attempt any more tools. Write a hand-off for whoever picks this up: what you established (with the concrete findings, not a description of them), what you were in the middle of, and the specific next steps that remain. Be direct and specific — this is the only report of your work that survives.",
   "be_conversationLoop.guidanceTruncationMarker": "[Some direction instructions omitted — {count} items discarded due to length]\n\n{joined}",
   "be_conversationLoop.guidanceInjectionHeader": "[Direction instruction — additional input while in progress]\n{joined}",
   "be_conversationLoop.contextErrorUserMessage": "The conversation history has exceeded the model's limit. Send a new message to retry automatic compaction.",
@@ -98,6 +100,8 @@ export const ko: Record<keyof typeof en, string> = {
   "be_conversationLoop.manualCompactFailed": "압축 실패: {message}",
   "be_conversationLoop.contentTruncatedSummary": "{count}개 메시지 부분 절단됨",
   "be_conversationLoop.roundCapError": "라운드 한도 ({max}) 도달 — 작업이 중단됐습니다. 더 진행하려면 새 메시지를 보내세요.",
+  "be_conversationLoop.roundCapFinalizePrompt":
+    "도구 라운드를 모두 소진해 더 이상 행동할 수 없습니다. 도구를 추가로 호출하지 마세요. 이어받을 사람을 위한 인계문을 작성하세요: 확인한 사실(설명이 아니라 구체적 발견 내용), 진행 중이던 작업, 남은 구체적 다음 단계. 직접적이고 구체적으로 — 이것이 당신 작업에 대해 남는 유일한 보고입니다.",
   "be_conversationLoop.guidanceTruncationMarker": "[일부 방향 지시 생략 — {count}개 항목 길이 초과로 폐기됨]\n\n{joined}",
   "be_conversationLoop.guidanceInjectionHeader": "[방향 지시 — 진행 중 추가 입력]\n{joined}",
   "be_conversationLoop.contextErrorUserMessage": "대화 이력이 모델 한도를 초과했습니다. 새 메시지를 보내면 자동 압축이 다시 시도됩니다.",
