@@ -2,8 +2,14 @@ import { useCallback } from "react";
 import { PrivacyTab } from "./PrivacyTab.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
+import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
+import {
+  SUBAGENT_MAX_ROUNDS_DEFAULT,
+  SUBAGENT_MAX_ROUNDS_MAX,
+  SUBAGENT_MAX_ROUNDS_MIN,
+} from "../../../shared/subagent-rounds.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
 import { SettingsSection } from "../components/SettingsSection.js";
 import { useTranslation } from "../../../i18n/react.js";
@@ -44,6 +50,8 @@ export interface ChatTabProps {
   memoryCaptureMode?: MemoryCaptureMode;
   setMemoryCaptureMode?: (v: MemoryCaptureMode) => void;
   subAgentAutonomousWake?: boolean;
+  subAgentMaxRounds?: number;
+  setSubAgentMaxRounds?: (next: number) => void;
   setSubAgentAutonomousWake?: (v: boolean) => void;
   piiRedactEnabled: boolean;
   onPiiRedactToggle: () => void;
@@ -64,6 +72,8 @@ export function ChatTab({
   memoryCaptureMode,
   setMemoryCaptureMode,
   subAgentAutonomousWake,
+  subAgentMaxRounds,
+  setSubAgentMaxRounds,
   setSubAgentAutonomousWake,
   piiRedactEnabled,
   onPiiRedactToggle,
@@ -221,6 +231,32 @@ export function ChatTab({
             <p className="text-sm font-medium">{t("chatTab.subAgentWakeLabel")}</p>
             <p className="text-[11px] text-muted-foreground">
               {t("chatTab.subAgentWakeHint")}
+            </p>
+          </div>
+        </div>
+        <div className="mt-3 flex items-center gap-3 rounded-md border px-3 py-3">
+          <Input
+            type="number"
+            min={SUBAGENT_MAX_ROUNDS_MIN}
+            max={SUBAGENT_MAX_ROUNDS_MAX}
+            // Commit on blur, not per keystroke: typing "12" passes through
+            // "1", and a per-keystroke write would persist that and clamp it
+            // back into the field mid-edit. `key` remounts the field when the
+            // stored value changes, so a clamped value is reflected back.
+            key={subAgentMaxRounds ?? SUBAGENT_MAX_ROUNDS_DEFAULT}
+            defaultValue={subAgentMaxRounds ?? SUBAGENT_MAX_ROUNDS_DEFAULT}
+            disabled={!settingsLoaded}
+            data-testid="subagent-max-rounds-input"
+            className="w-20"
+            onBlur={(e) => {
+              const parsed = Number.parseInt(e.target.value, 10);
+              if (Number.isFinite(parsed)) setSubAgentMaxRounds?.(parsed);
+            }}
+          />
+          <div className="space-y-0.5">
+            <p className="text-sm font-medium">{t("chatTab.subAgentMaxRoundsLabel")}</p>
+            <p className="text-[11px] text-muted-foreground">
+              {t("chatTab.subAgentMaxRoundsHint")}
             </p>
           </div>
         </div>

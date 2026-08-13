@@ -454,7 +454,12 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             ...(result.incomplete
               ? {
                   incomplete: true,
-                  incompleteReason: t("be_agentSpawn.incompleteNotice"),
+                  // The id is interpolated into the notice, not just returned
+                  // beside it: a parent that reads the prose and not the
+                  // sibling field is the failure mode this exists to prevent.
+                  incompleteReason: t("be_agentSpawn.incompleteNotice", {
+                    resumeId: result.childSessionId,
+                  }),
                   resumeId: result.childSessionId,
                 }
               : {}),

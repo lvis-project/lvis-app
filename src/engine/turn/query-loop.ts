@@ -55,6 +55,7 @@ import {
 import { gateCrossAgentInterceptedMetaTools } from "./intercepted-meta-gate.js";
 import { createSubscriptionUsageCollector, recordSubscriptionRoundTelemetry } from "./subscription-usage-telemetry.js";
 import { appendUsageForServingModel } from "./usage-by-model.js";
+import { finalizeAfterRoundCap, mergeFinalizeUsage, resolveRoundCapText } from "./round-cap-finalize.js";
 
 const log = createLogger("lvis");
 const MAX_TOOL_ROUNDS = 60; // main chat + sub-agents; rationale at MAX_TURNS_DEFAULT
@@ -373,22 +374,21 @@ export async function queryLoop(
         callbacks?.onError?.(
           t("be_conversationLoop.roundCapError", { max: effectiveMaxRounds }),
         );
-        // stopReason "round-cap" flags this as a BUDGET-hit termination, not a
-        // natural end_turn: the returned text is the partial work so far. The
-        // sub-agent runner reads this to mark its result `incomplete`, and the
-        // main-chat renderer / notification path can treat it as "cut off, can
-        // continue" rather than a finished answer. Return the last real
-        // assistant text verbatim (not a synthetic wrapper) so the partial
-        // output is preserved for the parent / a follow-up round.
-        const lastAssistantText =
-          self.history
-            .getMessages()
-            .filter((m) => m.role === "assistant")
-            .slice(-1)[0]?.content ?? "";
+        // stopReason "round-cap" flags a BUDGET-hit termination, not a natural
+        // end_turn: the runner marks the result `incomplete` and the renderer
+        // shows "cut off, can continue". `resolveRoundCapText` picks the text.
+        const finalized = await finalizeAfterRoundCap({
+          provider: turnProvider, model, systemPrompt,
+          messages: self.history.getMessages(),
+          ...(abortSignal ? { abortSignal } : {}),
+        });
+        turnUsage = mergeFinalizeUsage(turnUsage, finalized);
         return withServingIdentity({
-          text: lastAssistantText.length > 0
-            ? lastAssistantText
-            : t("be_conversationLoop.roundCapError", { max: effectiveMaxRounds }),
+          text: resolveRoundCapText(
+            finalized,
+            self.history.getMessages(),
+            t("be_conversationLoop.roundCapError", { max: effectiveMaxRounds }),
+          ),
           toolCalls: allToolCalls,
           usage: turnUsage,
           stopReason: "round-cap",
