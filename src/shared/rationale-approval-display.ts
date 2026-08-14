@@ -265,13 +265,17 @@ function sealText(
   // never re-normalize after — the mask token is plain ASCII and a second
   // pass could only disturb what the detectors already approved.
   const masked = maskText(normalizeRationaleApprovalDisplayText(value));
-  if (isDisplayText(masked, maxLength)) return masked;
+  // Plain boolean, not the type-guard: `isDisplayText` narrows its argument to
+  // string, so on a value that is ALREADY a string the false branch narrows to
+  // `never` and the length check below stops compiling.
+  const fits = (candidate: string): boolean => isDisplayText(candidate, maxLength);
+  if (fits(masked)) return masked;
   // Visible truncation repairs LENGTH violations only. Any other invalidity
   // (emptied, unsafe characters) is total loss, and dressing total loss as a
   // truncation — "…" — would claim a prefix survived when nothing did.
   if (masked.length > maxLength) {
     const truncated = truncateVisibly(masked, maxLength);
-    if (isDisplayText(truncated, maxLength)) return truncated;
+    if (fits(truncated)) return truncated;
   }
   return REDACTED_DISPLAY_TEXT;
 }
