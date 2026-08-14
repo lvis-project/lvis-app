@@ -25,11 +25,21 @@ import type { ToolCategory } from "../tools/types.js";
 /**
  * What the parent is shown. Every field is host-composed.
  *
- * Child-authored text is absent by construction: the only prose here is the
- * task the PARENT wrote when it spawned the child, and tool arguments the host
- * already masked for display. A child that could write into this evidence
- * could argue for its own approval, which is the whole attack this shape
- * exists to prevent.
+ * Child-authored PROSE is absent by construction: the only sentence here is the
+ * task the PARENT wrote when it spawned the child. A child that could write
+ * into this evidence could argue for its own approval, which is the whole
+ * attack this shape exists to prevent.
+ *
+ * The arguments are the one unavoidable exception — they ARE the call being
+ * judged, so they cannot be withheld — and they are labelled as the child's own
+ * words in the prompt rather than presented as neutral fact.
+ *
+ * The dock's purpose sentence is deliberately NOT here. It reads as a host
+ * summary but is not one: for a sub-agent turn the conversation-derived variant
+ * is unreachable (`summarizePermissionUserIntent` returns nothing for a
+ * non-keyboard origin), so the only sentence the pipeline can produce is one
+ * lifted out of the child's own tool arguments. Omitting the field is what
+ * makes that unexpressible rather than a rule someone has to keep in mind.
  */
 export interface ParentAdjudicationEvidence {
   toolName: string;
@@ -39,8 +49,6 @@ export interface ParentAdjudicationEvidence {
   maskedArgs: unknown;
   /** Tier-1 reviewer verdict. Its absence is a human-only condition upstream. */
   verdict: RiskVerdict;
-  /** Host-masked purpose sentence, when the pipeline produced one. */
-  approvalPurpose?: string;
   targetFilePath?: string;
   allowedDirectories: readonly string[];
   child: {
@@ -63,8 +71,17 @@ export type ParentAdjudicationEscalationCause =
   | "rate-limited"
   /** No adjudicator is configured — typically no reviewer LLM. */
   | "adjudicator-unavailable"
-  /** The provider call failed or the turn was aborted. */
-  | "llm-error";
+  /** The provider call failed. */
+  | "llm-error"
+  /**
+   * The turn the ask belongs to was stopped while the parent was thinking.
+   *
+   * Raised by the gate, which watches the abort signal alongside the answer:
+   * an adapter that ignores the signal would otherwise hold the ask until the
+   * deadline, and a user who pressed Stop would keep waiting for a judgement
+   * about a turn that no longer exists.
+   */
+  | "turn-aborted";
 
 export type ParentAdjudicationResult =
   | { outcome: "allow-once"; reason: string }
@@ -302,9 +319,12 @@ export class LlmParentAdjudicator implements ParentAdjudicator {
             toolName: evidence.toolName,
             toolCategory: evidence.toolCategory ?? null,
             source: evidence.source ?? null,
-            arguments: evidence.maskedArgs,
+            // Named for who wrote it. The arguments are the sub-agent's own
+            // output, and a key called `arguments` invites the model to read
+            // them as a neutral description of the call rather than as the
+            // claim of the party asking for permission.
+            argumentsAuthoredBySubAgent: evidence.maskedArgs,
             targetFilePath: evidence.targetFilePath ?? null,
-            statedPurpose: evidence.approvalPurpose ?? null,
           },
           hostReview: {
             level: evidence.verdict.level,
