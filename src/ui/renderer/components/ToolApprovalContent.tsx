@@ -20,6 +20,10 @@ import { DockedApprovalCard } from "./permissions/DockedApprovalCard.js";
 import { SOURCE_BADGE } from "../constants.js";
 import type { ApprovalDecisionExtras } from "../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
+import type {
+  ParentEscalationCause,
+  ParentEscalationNotice,
+} from "../../../shared/parent-escalation-notice.js";
 import { canonicalStringify as canonicalStringifyForRenderer } from "../../../shared/canonical-json.js";
 import {
   parseRationaleApprovalDisplay,
@@ -367,6 +371,91 @@ function RationaleApprovalCard({
         )}
       </div>
     </section>
+  );
+}
+
+/**
+ * Dock label for every cause the parent-adjudication stage can end on.
+ *
+ * Keyed by the host's own union, so a cause added there fails to compile until
+ * this dock has a sentence for it. That is deliberate: the band exists because
+ * the user never saw the stage run, and an unlabelled cause would leave exactly
+ * that gap open.
+ */
+const PARENT_ESCALATION_CAUSE_KEY: Record<ParentEscalationCause, string> = {
+  "parent-escalated": "toolApprovalDialog.parentEscalationCauseParentEscalated",
+  timeout: "toolApprovalDialog.parentEscalationCauseTimeout",
+  "malformed-output": "toolApprovalDialog.parentEscalationCauseMalformedOutput",
+  "rate-limited": "toolApprovalDialog.parentEscalationCauseRateLimited",
+  "adjudicator-unavailable":
+    "toolApprovalDialog.parentEscalationCauseAdjudicatorUnavailable",
+  "llm-error": "toolApprovalDialog.parentEscalationCauseLlmError",
+  "turn-aborted": "toolApprovalDialog.parentEscalationCauseTurnAborted",
+  "repeated-denial": "toolApprovalDialog.parentEscalationCauseRepeatedDenial",
+};
+
+/**
+ * Tells the user that a stage they never saw already ran on this ask, and how
+ * it ended.
+ *
+ * Reading order is the trust order: the host-owned cause first, then the two
+ * pieces of text a model wrote — the child's title and the parent's sentence —
+ * both quoted and attributed, because model text rendered as dock prose reads
+ * like an instruction from the app rather than a quote from a party to the
+ * request. The reason arrives already bounded by the adjudicator that parsed
+ * it; cutting it again here would silently drop the end of a sentence whose
+ * point is usually at the end.
+ */
+function ParentEscalationBand({ notice }: { notice: ParentEscalationNotice }) {
+  const { t: tBand } = useTranslation();
+  const reason = notice.reason.trim();
+  const causeKey: string | undefined = PARENT_ESCALATION_CAUSE_KEY[notice.cause];
+  return (
+    <div
+      className="min-w-0 rounded-md border border-info/(--opacity-medium) bg-info/(--opacity-faint) px-3 py-2"
+      data-testid="parent-escalation-band"
+      data-parent-escalation-cause={notice.cause}
+    >
+      <p className="text-xs font-semibold text-info">
+        {tBand("toolApprovalDialog.parentEscalationTitle")}
+      </p>
+      <p
+        className="mt-0.5 break-words text-[11px] leading-relaxed"
+        data-testid="parent-escalation-cause"
+      >
+        {/* A cause this build has no sentence for says so, rather than
+            rendering an empty line: the band's whole job is to account for a
+            stage the user did not see, and a blank account is worse than an
+            unfamiliar one. */}
+        {causeKey
+          ? tBand(causeKey)
+          : tBand("toolApprovalDialog.parentEscalationCauseUnrecognized")}
+      </p>
+      <p
+        className="mt-0.5 break-words text-[10px] text-muted-foreground"
+        data-testid="parent-escalation-child"
+      >
+        <span className="font-medium">
+          {tBand("toolApprovalDialog.parentEscalationChildLabel")}
+        </span>{" "}
+        {/* The title came from the parent's own spawn arguments, so it is
+            quoted for the same reason the parent's sentence below is: a
+            model's words must not wear the app's voice on the one surface
+            where the user decides whether to trust them. */}
+        <q>{notice.childTitle}</q>
+      </p>
+      {reason ? (
+        <p
+          className="mt-1 break-words text-[10px] text-muted-foreground"
+          data-testid="parent-escalation-reason"
+        >
+          <span className="font-medium">
+            {tBand("toolApprovalDialog.parentEscalationReasonLabel")}
+          </span>{" "}
+          <q className="italic">{reason}</q>
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -820,6 +909,14 @@ export function ToolApprovalContent({
                     </p>
                   ) : null}
                 </div>
+
+            {/* Above the impact summary, and outside every kind-specific
+                branch: the fact that a parent agent already looked at this ask
+                and could not settle it is context for the decision itself, so
+                it must not sit below a fold or inside one card variant. */}
+            {request.parentEscalation ? (
+              <ParentEscalationBand notice={request.parentEscalation} />
+            ) : null}
 
             {!isRationaleApproval && !isOutOfDir && (
               <>
