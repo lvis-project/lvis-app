@@ -614,8 +614,12 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
           unknown
         >;
         expect(handleResult.isError).toBe(false);
+        // A structural refusal is a host POLICY rejection, so it projects
+        // REJECTED — the same state an exhausted resume projects. The renderer
+        // maps FAILED and REJECTED to the identical `error` run status, so this
+        // unification is invisible to the user and honest on the wire.
         expect(handle.status).toBe("error");
-        expect(handle.taskState).toBe("TASK_STATE_FAILED");
+        expect(handle.taskState).toBe("TASK_STATE_REJECTED");
         expect(handle).not.toHaveProperty("childSessionId");
 
         await vi.waitFor(() =>
@@ -933,7 +937,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     try {
       const resumed = await runner.resume(resumeId, "continue", "exhaust");
       expect(resumed.ok).toBe(false);
-      expect(resumed.resumeExhausted).toBe(true);
+      expect(resumed.resumeRefusal).toBe("exhausted");
       expect(resumed.turnCount).toBe(0);
       // No turn ran → provider never streamed.
       expect(guard.turnsServed).toBe(0);
@@ -1888,7 +1892,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     try {
       const resumed = await runner.resume(resumeId, "continue", "ceiling");
       expect(resumed.ok).toBe(false);
-      expect(resumed.resumeExhausted).toBe(true);
+      expect(resumed.resumeRefusal).toBe("exhausted");
       expect(guard.turnsServed).toBe(0);
     } finally {
       restore2();
@@ -1970,7 +1974,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         "near-ceiling",
       );
       expect(refused.ok).toBe(false);
-      expect(refused.resumeExhausted).toBe(true);
+      expect(refused.resumeRefusal).toBe("exhausted");
       expect(refused.turnCount).toBe(0);
       expect(runTurnSpy).toHaveBeenCalledTimes(1);
       expect(subStore.loadSessionMetadata(resumeId)?.cumulativeRounds).toBe(
@@ -2033,7 +2037,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
 
     try {
       const resumed = await runner.resume(resumeId, "continue", "scaled-ceiling");
-      expect(resumed.resumeExhausted).toBeFalsy();
+      expect(resumed.resumeRefusal).toBeUndefined();
       expect(resumed.ok).toBe(true);
       expect(runTurnSpy).toHaveBeenCalledTimes(1);
 
@@ -2046,7 +2050,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       });
       const refused = await runner.resume(resumeId, "continue", "scaled-ceiling");
       expect(refused.ok).toBe(false);
-      expect(refused.resumeExhausted).toBe(true);
+      expect(refused.resumeRefusal).toBe("exhausted");
       expect(runTurnSpy).toHaveBeenCalledTimes(1);
     } finally {
       runTurnSpy.mockRestore();
@@ -2269,7 +2273,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(retry.error).toMatch(/not in INPUT_REQUIRED|already terminal/i);
       // Structural policy rejection: retrying the same id can never succeed,
       // and the marker is what stops agent_spawn from emitting retry guidance.
-      expect(retry.resumeInvalid).toBe(true);
+      expect(retry.resumeRefusal).toBe("invalid");
       expect(terminalGuard.turnsServed).toBe(0);
       expect(onLinked).not.toHaveBeenCalled();
       expect(subStore.loadSessionMetadata(resumeId)).toMatchObject({
@@ -3056,7 +3060,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(result.error).toMatch(/empty frozen tool scope/i);
       // No turn was run.
       expect(guardProvider.turnsServed).toBe(0);
-      expect(result.resumeExhausted).toBeUndefined();
+      expect(result.resumeRefusal).toBeUndefined();
     } finally {
       restore();
     }
@@ -3414,7 +3418,7 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
             entries: [],
             ok: false,
             error: "sub-agent resume: exhausted (resumeCount=3 >= 3)",
-            resumeExhausted: true,
+            resumeRefusal: "exhausted" as const,
           }),
         }) as never,
       emit: () => undefined,

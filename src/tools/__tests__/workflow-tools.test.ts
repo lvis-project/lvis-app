@@ -624,15 +624,22 @@ describe("agent_spawn tool", () => {
     const events: AgentSpawnEvent[] = [];
     const tool = createAgentSpawnTool({
       getRunner: () => ({
-        spawn: async () => ({
-          summary: "prompt refused",
-          toolCallCount: 0,
-          turnCount: 0,
-          childSessionId: "child-blocked",
-          entries: [],
-          ok: true,
-          stopReason: "blocked" as const,
-        }),
+        spawn: async (_input: unknown, callbacks?: {
+          onLinked?: (link: { childSessionId: string }) => void;
+        }) => {
+          // A real spawn links the child before it can produce any result, and
+          // the terminal frame's join key is that AUTHORIZED link.
+          callbacks?.onLinked?.({ childSessionId: "child-blocked" });
+          return {
+            summary: "prompt refused",
+            toolCallCount: 0,
+            turnCount: 0,
+            childSessionId: "child-blocked",
+            entries: [],
+            ok: true,
+            stopReason: "blocked" as const,
+          };
+        },
       }) as never,
       emit: (event) => events.push(event),
     });
@@ -757,7 +764,7 @@ describe("agent_spawn tool", () => {
             childSessionId: "child-resume-exhausted",
             entries: [],
             ok: false,
-            resumeExhausted: true,
+            resumeRefusal: "exhausted" as const,
           };
         },
       }) as never,
@@ -780,7 +787,7 @@ describe("agent_spawn tool", () => {
     });
     // An exhausted chain must say so and must NOT offer the dead resumeId back.
     const exhaustedPayload = JSON.parse(result.output);
-    expect(exhaustedPayload.resumeExhausted).toBe(true);
+    expect(exhaustedPayload.resumeRefusal).toBe("exhausted");
     expect(exhaustedPayload.resumeGuidance).toContain("재개할 수 없습니다");
     expect(exhaustedPayload.resumeId).toBeUndefined();
     const terminalEvents = events.filter(
@@ -1022,7 +1029,7 @@ describe("agent_spawn tool", () => {
         childSessionId: "child-state",
         entries: [],
         ok: false,
-        resumeExhausted: true,
+        resumeRefusal: "exhausted" as const,
       },
       "TASK_STATE_REJECTED",
     ],
@@ -1256,11 +1263,11 @@ describe("agent_spawn tool", () => {
     // agents and silently discarded the child's context.
     expect(payload.resumeId).toBe("child-transient");
     expect(payload.resumeGuidance).toContain("재개 가능");
-    expect(payload.resumeExhausted).toBeUndefined();
+    expect(payload.resumeRefusal).toBeUndefined();
   });
 
   it("a structural resume rejection never offers the resumeId back for retry", async () => {
-    // resumeInvalid marks policy rejections (wrong task state, ownership,
+    // `resumeRefusal: "invalid"` marks policy rejections (wrong task state, ownership,
     // tampered metadata) that fail identically forever. Emitting the retry
     // guidance there guided the model into an infinite retry against the
     // runner's INPUT_REQUIRED-only gate.
@@ -1274,7 +1281,7 @@ describe("agent_spawn tool", () => {
           childSessionId: "child-structural",
           entries: [],
           ok: false,
-          resumeInvalid: true,
+          resumeRefusal: "invalid" as const,
         }),
       }) as never,
       emit: () => {},
@@ -1287,9 +1294,51 @@ describe("agent_spawn tool", () => {
 
     expect(result.isError).toBe(true);
     const payload = JSON.parse(result.output);
-    expect(payload.resumeInvalid).toBe(true);
+    expect(payload.resumeRefusal).toBe("invalid");
     expect(payload.resumeId).toBeUndefined();
     expect(payload.resumeGuidance).toContain("재시도하지 마세요");
+  });
+
+  it("keeps the unvalidated resumeId off the terminal frame when the resume never linked", async () => {
+    // The runner calls onLinked only AFTER origin + durable-state checks pass,
+    // so a structurally refused resume has no authorized link — its
+    // `result.childSessionId` is just the caller-supplied id that failed those
+    // checks. The terminal frame must not hand the viewer that join key.
+    const events: AgentSpawnEvent[] = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        resume: async () => ({
+          summary: "sub-agent resume: origin session metadata does not match caller",
+          error: "sub-agent resume: origin session metadata does not match caller",
+          toolCallCount: 0,
+          turnCount: 0,
+          childSessionId: "sub-deadbeef-cafebabe-other-session",
+          entries: [],
+          ok: false,
+          resumeRefusal: "invalid" as const,
+        }),
+      }) as never,
+      emit: (event) => events.push(event),
+    });
+
+    await tool.execute(
+      {
+        title: "t",
+        instructions: "continue",
+        resumeId: "sub-deadbeef-cafebabe-other-session",
+      },
+      foregroundCtx(),
+    );
+
+    const terminal = events.filter(
+      (event) => event.type === "done" || event.type === "error",
+    );
+    expect(terminal).toHaveLength(1);
+    expect(terminal[0]).toMatchObject({
+      type: "error",
+      taskState: "TASK_STATE_REJECTED",
+    });
+    expect(terminal[0]).not.toHaveProperty("childSessionId");
   });
 
   it("emits the child entries snapshot on done and activity events without embedding it in the tool result", async () => {
