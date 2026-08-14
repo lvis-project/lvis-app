@@ -1,0 +1,104 @@
+import { describe, expect, it, vi } from "vitest";
+import {
+  LlmRiskClassifier,
+  type LlmReviewerProvider,
+} from "../reviewer/risk-classifier.js";
+import { isReviewerAutoDecisionOutcome } from "../permission-manager.js";
+import { makeRiskClassifierContext as ctx } from "./test-helpers.js";
+
+/**
+ * Host-determined bypass: `agent_spawn`'s risk is settled by system structure
+ * (every effectful call the child makes re-enters PermissionManager), a fact
+ * absent from the reviewer prompt — so the LLM is a question it cannot answer,
+ * and its habitual HIGH kept overriding the host's LOW through max(rule, llm).
+ * These cases pin that the LLM is never consulted for it, and ONLY for it.
+ */
+function alwaysHighProvider(): { provider: LlmReviewerProvider; spy: ReturnType<typeof vi.fn> } {
+  const spy = vi.fn(async () => ({
+    text: '{"level":"high","reason":"in-process execution without sandbox isolation"}',
+    tokensIn: 10,
+    tokensOut: 5,
+    costUsd: 0,
+  }));
+  return { provider: { complete: spy }, spy };
+}
+
+const SPAWN = ctx({
+  toolName: "agent_spawn",
+  source: "builtin",
+  category: "meta",
+  pathFields: [],
+  finalInput: { title: "t", instructions: "do" },
+});
+
+describe("host-determined risk bypass", () => {
+  it("never calls the LLM provider for builtin agent_spawn", async () => {
+    const { provider, spy } = alwaysHighProvider();
+    const classifier = new LlmRiskClassifier(provider, "test-model");
+
+    await classifier.classify(SPAWN);
+
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the rule verdict as final — the composition cannot raise it", async () => {
+    const { provider } = alwaysHighProvider();
+    const classifier = new LlmRiskClassifier(provider, "test-model");
+
+    const trace = await classifier.classifyWithTrace(SPAWN);
+
+    // The meta rule for agent_spawn is LOW; had the provider been consulted,
+    // max(rule, llm) would have produced HIGH.
+    expect(trace.finalVerdict.level).toBe("low");
+    expect(trace.finalVerdict).toEqual(trace.ruleVerdict);
+    expect(trace.llmVerdict).toBeNull();
+    expect(trace.outcome).toBe("host-determined");
+  });
+
+  it("host-determined may auto-decide — it is a deterministic host verdict", () => {
+    expect(isReviewerAutoDecisionOutcome("host-determined")).toBe(true);
+  });
+
+  it("does NOT bypass a non-builtin tool that shares the name", async () => {
+    const { provider, spy } = alwaysHighProvider();
+    const classifier = new LlmRiskClassifier(provider, "test-model");
+
+    const trace = await classifier.classifyWithTrace(
+      ctx({ ...SPAWN, source: "plugin" }),
+    );
+
+    // A plugin claiming the builtin's name gets no host authority: the full
+    // composed path runs and the LLM's HIGH stands.
+    expect(spy).toHaveBeenCalled();
+    expect(trace.outcome).toBe("fresh");
+    expect(trace.finalVerdict.level).toBe("high");
+  });
+
+  it("does NOT bypass agent_spawn under a non-meta category", async () => {
+    const { provider, spy } = alwaysHighProvider();
+    const classifier = new LlmRiskClassifier(provider, "test-model");
+
+    // The bypass is co-scoped with the meta rule that justifies it: a category
+    // drift must send the call down the full composed path, never hand the
+    // final verdict to a different rule with no LLM cross-check.
+    const trace = await classifier.classifyWithTrace(
+      ctx({ ...SPAWN, category: "shell" }),
+    );
+
+    expect(spy).toHaveBeenCalled();
+    expect(trace.outcome).toBe("fresh");
+  });
+
+  it("does NOT bypass other builtin tools — write still composes with the LLM", async () => {
+    const { provider, spy } = alwaysHighProvider();
+    const classifier = new LlmRiskClassifier(provider, "test-model");
+
+    const trace = await classifier.classifyWithTrace(
+      ctx({ toolName: "write_file", category: "write", finalInput: { path: "/tmp/x" } }),
+    );
+
+    expect(spy).toHaveBeenCalled();
+    expect(trace.outcome).toBe("fresh");
+    expect(trace.finalVerdict.level).toBe("high");
+  });
+});

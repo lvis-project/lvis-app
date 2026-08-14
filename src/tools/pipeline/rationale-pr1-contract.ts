@@ -18,10 +18,7 @@ import {
 } from "./rationale-control.js";
 
 /** Frozen PR(1) contracts only. This module grants no execution authority. */
-export type ReviewerReevaluationOutcome = Exclude<
-  ReviewerDispatchOutcome,
-  "cache" | "approval-memory"
->;
+export type ReviewerReevaluationOutcome = Exclude<ReviewerDispatchOutcome, "cache" | "approval-memory" | "host-determined">;
 
 export type ReviewerReevaluationFailureOutcome = Exclude<
   ReviewerReevaluationOutcome,
