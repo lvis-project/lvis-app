@@ -1819,6 +1819,8 @@ export const esMessages: Record<string, string> = {
   "permissionModeBadge.queueLabelError": "La verificación de aprobación falló",
   "permissionReviewStatusCard.approvalRequired": "Se requiere aprobación · {level}",
   "permissionReviewStatusCard.autoApproved": "Revisión de permiso completa · Bajo riesgo",
+  "permissionReviewStatusCard.parentApproved": "Aprobado por el agente principal",
+  "permissionReviewStatusCard.parentDenied": "Rechazado por el agente principal",
   "permissionReviewStatusCard.failed": "Error en la revisión del permiso",
   "permissionReviewStatusCard.purposeLabel": "Objetivo:",
   "permissionReviewStatusCard.reviewComplete": "Revisión completa",

@@ -3380,8 +3380,15 @@ export class SubAgentRunner {
       approvalProvenance: buildSubAgentApprovalProvenance({
         childSessionId: resumeId,
         originSessionId,
-        task: continuationInstructions,
-        wireBound: executionPolicy !== undefined,
+        // The canonical form, which is what this segment actually runs on: a
+        // question-answer resume masks the continuation before using it.
+        task: canonicalContinuationInstructions,
+        // Both the door this resume came through AND what the session itself
+        // records. The guard above already refuses a wire-bound session
+        // resumed through the local entry point, so these agree today — but
+        // "which door" is an inference and `hasWireBinding` is the fact, and
+        // the fact is what decides whether a remote peer wrote this framing.
+        wireBound: executionPolicy !== undefined || hasWireBinding,
       }),
       // Spawn passes this; resume used to omit it, so a re-hydrated child came
       // back WITHOUT the ability to reach its parent unless `agent_send` happened
