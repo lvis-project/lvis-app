@@ -2603,6 +2603,7 @@ export const zhMessages: Record<string, string> = {
   "toolApprovalDialog.tilePermissionCategory": "权限类别",
   "toolApprovalDialog.tileToolSource": "工具/来源",
   "toolApprovalDialog.toolApprovalTitle": "批准工具执行",
+  "toolApprovalDialog.identityUnverified": "未验证",
   "toolApprovalDialog.unknown": "未知",
   "toolDisplay.agentSpawn": "运行子代理",
   "toolDisplay.applyPatch": "补丁文件",

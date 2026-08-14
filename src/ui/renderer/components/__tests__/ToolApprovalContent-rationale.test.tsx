@@ -184,7 +184,10 @@ describe("ToolApprovalContent rationale card", () => {
     );
     expect(screen.queryByTestId("rationale-approval-card")).not.toBeInTheDocument();
     expect(screen.queryByTestId("raw-injection")).not.toBeInTheDocument();
-    expect(screen.getByTestId("approve-button")).toBeDisabled();
+    // Fail-closed is now BY OMISSION: an approval whose sealed evidence
+    // cannot be verified does not offer allow options at all.
+    expect(screen.queryByTestId("approve-button")).toBeNull();
+    expect(screen.queryByTestId("allow-always-button")).toBeNull();
 
     fireEvent.click(screen.getByText("거절"));
     expect(onDecide).toHaveBeenCalledWith("deny-once");

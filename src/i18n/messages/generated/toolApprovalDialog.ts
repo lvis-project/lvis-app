@@ -2,6 +2,7 @@
 export const en = {
   "toolApprovalDialog.agentActionTitle": "Approve Agent Action",
   "toolApprovalDialog.toolApprovalTitle": "Approve Tool Execution",
+  "toolApprovalDialog.identityUnverified": "unverified",
   "toolApprovalDialog.unknown": "Unknown",
   "toolApprovalDialog.dialogDescription": "A tool request in the current conversation loop that requires user approval before execution.",
   "toolApprovalDialog.pendingCount": "{count} more pending",
@@ -87,6 +88,7 @@ export const en = {
 export const ko: Record<keyof typeof en, string> = {
   "toolApprovalDialog.agentActionTitle": "에이전트 작업 승인",
   "toolApprovalDialog.toolApprovalTitle": "도구 실행 승인",
+  "toolApprovalDialog.identityUnverified": "미검증",
   "toolApprovalDialog.unknown": "알 수 없음",
   "toolApprovalDialog.dialogDescription": "현재 대화 루프에서 실행 전 사용자 승인이 필요한 도구 요청입니다.",
   "toolApprovalDialog.pendingCount": "대기 중 {count}개",
