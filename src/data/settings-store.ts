@@ -77,6 +77,12 @@ import {
 } from "./settings-normalization.js";
 const log = createLogger("settings");
 
+/**
+ * Marker for the one-time subAgentAutonomousWake un-fossilize migration in
+ * `loadSettings`. Delete together with that block — target 2026-10.
+ */
+const SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION = "subagent-autonomous-wake-default-flip";
+
 export type { LLMVendor, LLMVendorSettings };
 export { LLM_VENDORS };
 export type { ShortcutSettings, ShortcutSettingsPatch };
@@ -343,6 +349,11 @@ export interface AppSettings {
   pluginConfigs: Record<string, PluginConfigRecord>;
   /** Experimental feature flags. All default false. */
   features?: FeatureFlags;
+  /**
+   * Host-owned ids of one-time settings migrations already applied to this
+   * file. Never patched from the renderer; only `loadSettings` appends.
+   */
+  appliedMigrations?: string[];
 }
 
 export interface PluginSettings {}
@@ -1323,6 +1334,30 @@ export class SettingsService {
       };
 
       const appearance = normalizeAppearance(parsed.appearance);
+
+      // One-time migration: un-fossilize subAgentAutonomousWake.
+      //
+      // saveSettings() writes the merged settings — defaults included — back
+      // to disk, so installs from the era when this flag defaulted to false
+      // carry an explicit `false` the user never chose, and the later default
+      // flip to `true` can never reach them (explicit false beats the default
+      // merge below). Drop exactly that fossil once. A `false` written AFTER
+      // this migration ran is a real opt-out and sticks, because the marker
+      // suppresses any re-run. Remove this block (and the marker constant)
+      // once no pre-flip installs remain — target 2026-10.
+      const appliedMigrations = Array.isArray(parsed.appliedMigrations)
+        ? parsed.appliedMigrations.filter((m): m is string => typeof m === "string")
+        : [];
+      const normalizedFeatures = normalizeFeatureFlags(parsed.features);
+      let migrationWriteBack = false;
+      if (!appliedMigrations.includes(SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION)) {
+        if (normalizedFeatures.subAgentAutonomousWake === false) {
+          delete normalizedFeatures.subAgentAutonomousWake;
+        }
+        appliedMigrations.push(SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION);
+        migrationWriteBack = true;
+      }
+
       const result: AppSettings & { __needsV2WriteBack?: boolean } = {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
@@ -1341,9 +1376,10 @@ export class SettingsService {
         shortcuts: normalizeShortcuts(parsed.shortcuts, DEFAULT_SETTINGS.shortcuts),
         plugins: {},
         pluginConfigs: { ...DEFAULT_SETTINGS.pluginConfigs, ...pluginConfigs },
-        features: { ...DEFAULT_SETTINGS.features, ...normalizeFeatureFlags(parsed.features) },
+        features: { ...DEFAULT_SETTINGS.features, ...normalizedFeatures },
+        appliedMigrations,
       };
-      if (needsV2WriteBack) result.__needsV2WriteBack = true;
+      if (needsV2WriteBack || migrationWriteBack) result.__needsV2WriteBack = true;
       return result;
     } catch {
       return structuredClone(DEFAULT_SETTINGS);

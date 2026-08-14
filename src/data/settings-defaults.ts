@@ -133,12 +133,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // the user chooses review or auto in Settings.
     memoryCaptureMode: "off",
     // A background child that finishes must be able to reach its parent. With
-    // wake off, its message lands in the mailbox and nothing reads it: the
-    // parent has already ended its turn, so the work completes and is silently
-    // discarded — strictly worse than a foreground run, which at least returns
-    // partial output. Since `background` is the model's per-spawn choice, the
-    // host cannot know in advance whether a given run needs delivery, so wake
-    // has to be on for the channel to be trustworthy at all.
+    // wake off, its message lands in the mailbox and waits there until the
+    // user happens to type another message in that session (the next user
+    // turn drains the mailbox as guidance) — the result is not lost, but the
+    // parent never acts on it autonomously, and nothing tells the user a
+    // result is waiting. Since `background` is the model's per-spawn choice,
+    // the host cannot know in advance whether a given run needs autonomous
+    // delivery, so wake has to be on for the channel to be trustworthy.
     //
     // Wake is not a new authority path: it runs the normal parent `runTurn` and
     // is still subject to the fail-closed UserPromptSubmit gate, exactly as a
