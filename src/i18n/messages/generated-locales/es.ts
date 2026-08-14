@@ -166,6 +166,7 @@ export const esMessages: Record<string, string> = {
   "assistantCard.systemNoticeContextError": "Aviso del sistema: límite de modelo excedido",
   "assistantCard.systemNoticeStreamError": "Aviso del sistema: error en el flujo de respuesta",
   "assistantCard.title": "Respuesta del LVIS",
+  "assistantCard.interruptedBadge": "Detenido por el usuario",
   "assistantCard.titleStreaming": "",
   "attachmentChip.chipAriaLabel": "Adjunto {label}: ver información o abrir archivo",
   "attachmentChip.chipTitle": "Ver información del archivo adjunto/abrir archivo",

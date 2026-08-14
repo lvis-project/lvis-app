@@ -697,6 +697,32 @@ export function useChatState(api: LvisApi) {
     }
   }, []);
 
+  /**
+   * Mark the entry the aborted turn was streaming into as interrupted.
+   *
+   * The live counterpart of the persisted `meta.interrupted`: the abort
+   * INITIATOR (stop button, or a new message interrupting the turn) calls this
+   * after `chatAbort` settles, so the badge appears without the engine pushing
+   * a "[중단됨]" literal through the text-delta stream. Marks the LAST assistant
+   * entry — the turn that just settled is by definition the newest — and never
+   * touches earlier turns.
+   */
+  const markLastAssistantInterrupted = useCallback(() => {
+    setEntries((prev) => {
+      for (let i = prev.length - 1; i >= 0; i--) {
+        const entry = prev[i];
+        if (entry.kind !== "assistant") continue;
+        if (entry.interrupted) return prev;
+        const next = [...prev];
+        next[i] = { ...entry, interrupted: true, streaming: false };
+        return next;
+      }
+      // Tool-abort with no streamed text yet: nothing to mark; the reload
+      // path (persisted meta) still carries the badge.
+      return prev;
+    });
+  }, []);
+
   const handleEditSave = useCallback(
     async (entryIdx: number, newText: string) => {
       const histIdx = entryIndexToHistoryIndex.get(entryIdx);
@@ -931,6 +957,7 @@ export function useChatState(api: LvisApi) {
     isRecoveryExhausted,
     beginStreamingRequest,
     finishStreamingRequest,
+    markLastAssistantInterrupted,
     editingEntryIdx,
     setEditingEntryIdx,
     editBusy,

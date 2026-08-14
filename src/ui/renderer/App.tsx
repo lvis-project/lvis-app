@@ -93,7 +93,7 @@ export function App() {
 
   // Chat state + stream lifecycle (useChatState is the sole owner of entries).
   const {
-    entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted, beginStreamingRequest, finishStreamingRequest, editingEntryIdx, setEditingEntryIdx, editBusy,
+    entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted, beginStreamingRequest, finishStreamingRequest, markLastAssistantInterrupted, editingEntryIdx, setEditingEntryIdx, editBusy,
     entryIndexToHistoryIndex, handleEditSave, handleRetryEffort, handleContinueFromLastUser,
     resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
     clearForNewChat, appendUserEntry, dropUserEntry, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
@@ -440,6 +440,7 @@ export function App() {
     handleAbort, handleGuide, handleFeedback, handleExport, handleImport,
   } = useChatActions({
     api, streaming, currentSessionId, entries, entryIndexToHistoryIndex,
+    markLastAssistantInterrupted,
     applyLoadedSession, truncateToEntry, sessionLoad, sessionFork,
     starredIsEntry, starredToggle,
   });
@@ -744,6 +745,7 @@ export function App() {
   const { handleAsk } = useSendMessage({
     api, t, streaming, checkApiKey, composeOutgoing,
     appendUserEntry, dropUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
+    markLastAssistantInterrupted,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
     llmVendor, llmModel, llmReadyWithoutApiKey: chatReadyWithoutApiKey,

@@ -114,10 +114,33 @@ const SubAgentRow = memo(function SubAgentRow({
   );
 });
 
+/**
+ * The task text inside a profile-composed spawn prompt.
+ *
+ * `renderAgentProfilePrompt` wraps the user-facing task in
+ * `<lvis-agent-task>…</lvis-agent-task>` after a `<lvis-agent-profile>` block,
+ * and `neutralizeAgentProfileFence` guarantees neither fence can occur inside
+ * the wrapped content — so the first match IS the task, not a lookalike.
+ * Returns null for a prompt that was never composed (plain spawns pass
+ * instructions through verbatim, with no wrapper to strip).
+ */
+const AGENT_TASK_SECTION = /<lvis-agent-task>\n?([\s\S]*?)\n?<\/lvis-agent-task>/;
+export function agentTaskFromComposedPrompt(text: string): string | null {
+  const match = AGENT_TASK_SECTION.exec(text);
+  const task = match?.[1]?.trim();
+  return task && task.length > 0 ? task : null;
+}
+
 function subAgentTranscriptEntries(spawn: SubAgentSpawn, sourceEntries: ChatEntry[] = spawn.entries): ChatEntry[] {
-  const prompt = spawn.instructions?.trim();
+  const first = sourceEntries[0];
+  // Prefer the live spawn's own instructions; a RESTORED row has none, so fall
+  // back to extracting the task from the persisted first user message — which
+  // is the composed profile prompt, and showing it raw leaks the profile
+  // preamble the live path never displays.
+  const prompt = spawn.instructions?.trim()
+    || (first?.kind === "user" ? agentTaskFromComposedPrompt(first.text) : null);
   if (!prompt) return sourceEntries;
-  const bodyEntries = sourceEntries[0]?.kind === "user" ? sourceEntries.slice(1) : sourceEntries;
+  const bodyEntries = first?.kind === "user" ? sourceEntries.slice(1) : sourceEntries;
   return [{ kind: "user", text: prompt }, ...bodyEntries];
 }
 

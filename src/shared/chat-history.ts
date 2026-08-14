@@ -59,6 +59,8 @@ export type SerializedHistoryMessage = {
   /** Issue #911 system-notice marker — assistant entries that are host
    *  notifications, rendered with destructive styling in the UI. */
   systemNotice?: NonNullable<MessageMeta["systemNotice"]>;
+  /** User aborted the turn mid-stream; rendered as a badge, never as prose. */
+  interrupted?: boolean;
 };
 
 export function serializeHistoryMessage(
@@ -88,6 +90,7 @@ export function serializeHistoryMessage(
     ...(m.meta?.turnSummary !== undefined ? { turnSummary: m.meta.turnSummary } : {}),
     ...(m.meta?.checkpointMeta !== undefined ? { checkpointMeta: m.meta.checkpointMeta } : {}),
     ...(systemNotice !== undefined ? { systemNotice } : {}),
+    ...(meta?.interrupted === true ? { interrupted: true } : {}),
   };
   const base = {
     index,

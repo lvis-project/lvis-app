@@ -47,6 +47,7 @@ export interface UseSendMessageDeps {
   resetStreamAccumulators: ChatState["resetStreamAccumulators"];
   beginStreamingRequest: ChatState["beginStreamingRequest"];
   finishStreamingRequest: ChatState["finishStreamingRequest"];
+  markLastAssistantInterrupted?: ChatState["markLastAssistantInterrupted"];
   setErrorWithThought: ChatState["setErrorWithThought"];
   handleCompactCommand: ChatState["handleCompactCommand"];
   sessionLoad: Sessions["handleLoadSession"];
@@ -121,6 +122,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
   const {
     api, t, streaming, checkApiKey, composeOutgoing,
     appendUserEntry, dropUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
+    markLastAssistantInterrupted,
     setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
     refreshSessionId, refreshSessions, attachments, setAttachments,
     llmVendor, llmModel, llmReadyWithoutApiKey, subscriptionRuntimePolicy,
@@ -167,6 +169,9 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
         // stopReason="interrupted".
         if (debugStreamEnabled) debugLog("handleAsk", "interrupt:abort-and-proceed");
         try { await api.chatAbort(); } catch { /* no-op */ }
+        // Same contract as the stop button: the initiator marks the settled
+        // turn interrupted; the engine no longer streams a literal marker.
+        markLastAssistantInterrupted?.();
       }
       // Renderer only performs UX-level shortcuts for typed composer input.
       // Main owns the authoritative trust-origin classification.
