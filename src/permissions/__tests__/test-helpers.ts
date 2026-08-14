@@ -17,6 +17,22 @@ const DEFAULT_ALLOWED_DIRECTORIES = ["/Users/ken/work", "/Users/ken/.lvis"].map(
   caseFoldForMatch(canonicalizePathForMatch(dir)),
 );
 
+/**
+ * The audit rows a gate wrote, in order, whichever field carried them.
+ *
+ * `AuditLogger.log` takes the row on `input` for a phase that is starting and
+ * on `output` for one that ended, and a test reading the trail wants both in
+ * the order they were written.
+ */
+export function auditRowTexts(auditLogger: {
+  log: { mock: { calls: unknown[][] } };
+}): string[] {
+  return auditLogger.log.mock.calls.map(([entry]) => {
+    const row = entry as { input?: string; output?: string };
+    return row.input ?? row.output ?? "";
+  });
+}
+
 export function makeTestPolicy(overrides: Partial<PolicyFile> = {}): PolicyFile {
   return {
     version: 1,
