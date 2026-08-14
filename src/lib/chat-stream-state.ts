@@ -177,7 +177,7 @@ export type ToolEntryItem = {
 export type ChatEntry =
   | { kind: "user"; text: string; injectHint?: "queue" | "interrupt"; createdAt?: number }
   | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
-  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number; systemNotice?: "context-error" | "stream-error" }
+  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number; systemNotice?: "context-error" | "stream-error"; interrupted?: boolean }
   | {
       kind: "permission_review";
       status: PermissionReviewStatus;
