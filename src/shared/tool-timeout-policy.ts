@@ -48,7 +48,12 @@
  *    `ui://` MCP App card) is capped by `pluginUiResourceReadMs` — a render-path
  *    call, not a tool execution.
  *  - `agent_spawn` carries its own sub-agent execution loop and is capped by
- *    `subAgentCeilingMs` instead of `globalCeilingMs`.
+ *    `resolveSubAgentCeilingMs(configured round budget)` instead of
+ *    `globalCeilingMs`. The round budget is user-configurable and has no
+ *    maximum (see shared/subagent-rounds.ts), so a fixed wall clock would
+ *    silently re-impose the cap the round setting exists to remove: at 600s
+ *    and a 600-round budget the agent dies of the clock long before its
+ *    rounds. The ceiling therefore scales with the budget.
  *  - User-input gates (e.g. ApprovalGate) are exempt from the tool execution
  *    cap — they have their own `approvalGateUserWaitMs` because the user is
  *    actively present, not the runtime hanging.
@@ -58,6 +63,8 @@
  * `shellDefaultMs`; a model that times out escalates by retrying with a
  * larger `timeoutSeconds`.
  */
+import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "./subagent-rounds.js";
+
 export const TOOL_TIMEOUT_POLICY = {
   shellDefaultMs: 120_000,
   globalCeilingMs: 120_000,
@@ -70,7 +77,18 @@ export const TOOL_TIMEOUT_POLICY = {
   // (the user is waiting on a card, not on work a tool was asked to do), so it is
   // bounded far tighter than `globalCeilingMs`. Fail-closed on expiry: no card.
   pluginUiResourceReadMs: 10_000,
-  subAgentCeilingMs: 600_000,
+  // FLOOR for the `agent_spawn` wall clock — see `resolveSubAgentCeilingMs`.
+  // A sub-agent whose configured round budget is small still gets this much
+  // wall clock, so shrinking the budget never shrinks the deadline below the
+  // value every release before the scaling change shipped with.
+  subAgentCeilingFloorMs: 600_000,
+  // Wall clock granted per configured sub-agent round. Derived from the pair
+  // this policy already shipped: the 600s ceiling was chosen against the 60-
+  // round default budget (SUBAGENT_MAX_ROUNDS_DEFAULT), i.e. 10s per round.
+  // Keeping that ratio is what makes the scaled ceiling a generalization of
+  // the old constant rather than a new number: at the default budget the two
+  // agree exactly.
+  subAgentPerRoundAllowanceMs: 10_000,
   mcpRequestDefaultMs: 60_000,
   mcpRequestMaxMs: 120_000,
   networkFetchDefaultMs: 15_000,
@@ -100,6 +118,24 @@ export const TOOL_TIMEOUT_POLICY = {
   processGroupDisposalMaxMs: 5 * 60 * 1000,
 } as const;
 
+/**
+ * Wall-clock ceiling for ONE `agent_spawn` invocation, scaled to the round
+ * budget that invocation may actually run.
+ *
+ * `max(floor, rounds × allowance)` — never below the shipped 600s, so this is
+ * a widening of the previous constant and can only turn a killed-by-the-clock
+ * run into a completed one. A deadline still always exists and is still
+ * finite: the budget is a bounded host setting, not model input, so a tool
+ * call cannot buy itself unbounded wall clock by asking for it.
+ */
+export function resolveSubAgentCeilingMs(configuredRounds: number): number {
+  const rounds = Number.isFinite(configuredRounds) ? Math.floor(configuredRounds) : 0;
+  return Math.max(
+    TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs,
+    rounds * TOOL_TIMEOUT_POLICY.subAgentPerRoundAllowanceMs,
+  );
+}
+
 // Load-time invariant — fail loudly if the shell default drifts to a
 // non-divisible value. The bash/powershell Zod schema does
 // `.default(shellDefaultMs / 1000)`; if `shellDefaultMs` were e.g. 120_500,
@@ -113,4 +149,22 @@ for (const key of ["shellDefaultMs"] as const) {
         "and a non-divisible ms value yields a fractional default the integer schema rejects.",
     );
   }
+}
+
+// Load-time invariant — the per-round allowance is DERIVED from the shipped
+// pair (600s ceiling for the 60-round default budget), not independently
+// chosen. If either side is retuned without the other, `resolveSubAgentCeilingMs`
+// silently stops agreeing with the constant it generalizes at the default
+// budget, so pin the derivation here rather than in a comment alone.
+if (
+  TOOL_TIMEOUT_POLICY.subAgentPerRoundAllowanceMs * SUBAGENT_MAX_ROUNDS_DEFAULT
+  !== TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs
+) {
+  throw new Error(
+    "TOOL_TIMEOUT_POLICY.subAgentPerRoundAllowanceMs "
+      + `(${TOOL_TIMEOUT_POLICY.subAgentPerRoundAllowanceMs}) × SUBAGENT_MAX_ROUNDS_DEFAULT `
+      + `(${SUBAGENT_MAX_ROUNDS_DEFAULT}) must equal subAgentCeilingFloorMs `
+      + `(${TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs}) — the per-round allowance is derived `
+      + "from that pair, so the scaled ceiling must agree with the floor at the default budget.",
+  );
 }

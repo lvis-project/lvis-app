@@ -28,6 +28,12 @@ import {
   createAgentStatusTool,
 } from "../agent-spawn.js";
 import type { AgentSpawnEvent } from "../../shared/subagent-events.js";
+import { resolveEffectiveCeilingMs } from "../executor-ceiling.js";
+import {
+  TOOL_TIMEOUT_POLICY,
+  resolveSubAgentCeilingMs,
+} from "../../shared/tool-timeout-policy.js";
+import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../../shared/subagent-rounds.js";
 import { createSkillLoadTool } from "../skill-load.js";
 import { createSkillListTool } from "../skill-list.js";
 import { createAgentListTool } from "../agent-list.js";
@@ -1297,6 +1303,31 @@ describe("agent_spawn tool", () => {
     expect(payload.resumeRefusal).toBe("invalid");
     expect(payload.resumeId).toBeUndefined();
     expect(payload.resumeGuidance).toContain("재시도하지 마세요");
+  });
+
+  it("sizes its executor wall clock from the configured round budget", () => {
+    // The round budget has no maximum, so a fixed ceiling would let the clock
+    // kill a long agent well before its rounds ran out — the setting would be
+    // silently inert above the default. Small budgets still get the shipped
+    // floor, so this can only ever widen a deadline.
+    const toolFor = (roundBudget: number) =>
+      createAgentSpawnTool({
+        getRunner: () => ({ roundBudget: () => roundBudget }) as never,
+        emit: () => {},
+      });
+
+    expect(resolveEffectiveCeilingMs(toolFor(SUBAGENT_MAX_ROUNDS_DEFAULT), {})).toBe(
+      TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs,
+    );
+    expect(resolveEffectiveCeilingMs(toolFor(600), {})).toBe(
+      resolveSubAgentCeilingMs(600),
+    );
+    expect(resolveEffectiveCeilingMs(toolFor(600), {})).toBeGreaterThan(
+      TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs,
+    );
+    expect(resolveEffectiveCeilingMs(toolFor(2), {})).toBe(
+      TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs,
+    );
   });
 
   it("keeps the unvalidated resumeId off the terminal frame when the resume never linked", async () => {

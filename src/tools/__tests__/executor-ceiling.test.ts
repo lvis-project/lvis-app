@@ -20,10 +20,18 @@ describe("resolveEffectiveCeilingMs — per-invocation ceiling", () => {
     expect(ceiling).toBeGreaterThan(TOOL_TIMEOUT_POLICY.shellDefaultMs);
   });
 
-  it("agent_spawn keeps the sub-agent ceiling", () => {
+  it("uses a builtin's own host-derived ceiling when it declares one", () => {
     expect(
-      resolveEffectiveCeilingMs({ name: "agent_spawn", source: "builtin", category: "meta" }, {}),
-    ).toBe(TOOL_TIMEOUT_POLICY.subAgentCeilingMs);
+      resolveEffectiveCeilingMs(
+        {
+          name: "agent_spawn",
+          source: "builtin",
+          category: "meta",
+          resolveHostCeilingMs: () => 1_800_000,
+        },
+        {},
+      ),
+    ).toBe(1_800_000);
   });
 
   it("a non-builtin tool cannot raise its own ceiling by declaring timeoutSeconds", () => {
@@ -31,6 +39,23 @@ describe("resolveEffectiveCeilingMs — per-invocation ceiling", () => {
       resolveEffectiveCeilingMs(
         { name: "plugin_thing", source: "plugin", category: "shell" },
         { timeoutSeconds: 100_000 },
+      ),
+    ).toBe(TOOL_TIMEOUT_POLICY.globalCeilingMs);
+  });
+
+  it("a non-builtin tool cannot raise its own ceiling by declaring resolveHostCeilingMs", () => {
+    // The escalation hook is host-owned. Neither the MCP adapter nor the
+    // plugin loopback copies anything from the wire into it, and this check is
+    // the structural reason a forged one would still be inert.
+    expect(
+      resolveEffectiveCeilingMs(
+        {
+          name: "plugin_thing",
+          source: "plugin",
+          category: "write",
+          resolveHostCeilingMs: () => 86_400_000,
+        },
+        {},
       ),
     ).toBe(TOOL_TIMEOUT_POLICY.globalCeilingMs);
   });

@@ -414,6 +414,7 @@ export const esMessages: Record<string, string> = {
   "be_executor.shellPathPolicyBlock": "[Política de ruta de Shell bloqueada] Herramienta '{name}' — {reason}",
   "be_executor.toolExecutionCancelled": "Se canceló la ejecución de la herramienta.",
   "be_executor.toolExecutionUnknownError": "Error de ejecución de herramienta desconocida",
+  "be_executor.toolCeilingExceeded": "La herramienta '{name}' fue detenida por el host de LVIS tras {seconds}s: es el límite de ejecución del host, no el tiempo de espera propio de la herramienta. El resultado es desconocido: la llamada pudo terminar su trabajo justo antes del corte, así que comprueba el estado actual antes de dar por hecho lo contrario. Repetir la llamada sin cambios alcanzará el mismo límite. Si esta herramienta acepta su propio argumento de tiempo de espera, reintenta con uno mayor; si no, divide el trabajo en pasos más pequeños.",
   "be_executor.toolNotFound": "Herramienta no encontrada: {name}",
   "be_executor.toolNotFoundAudit": "herramienta no encontrada",
   "be_hookRunner.blockedByHook": "{name} bloqueó la ejecución de la herramienta",
