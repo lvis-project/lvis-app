@@ -1,3 +1,4 @@
+import type { RestoredSubAgentRow } from "./use-workflow-tools.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
@@ -53,6 +54,13 @@ export function useSessions(
   api: LvisApi,
   applyInitialSession?: (entries: ChatEntry[]) => void,
   onLoadedSession?: () => void,
+  /**
+   * Seed the sub-agent panel from rows the load handlers rebuilt on disk. The
+   * panel is otherwise fed only by the live `agent_spawn` event stream, which
+   * is empty after a restart. Called on EVERY path that establishes a session's
+   * entries, so a restored conversation and a switched-to one behave alike.
+   */
+  restoreSubAgents?: (rows: readonly RestoredSubAgentRow[]) => void,
 ) {
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [currentSessionKind, setCurrentSessionKind] = useState<"main" | "routine">("main");
@@ -117,6 +125,7 @@ export function useSessions(
         // persisted session replay both enter ChatView as ChatEntry[]. Hydrate
         // only the exact active main session so routine re-entry never replaces
         // the persisted main active state.
+        restoreSubAgents?.(h.restoredSubAgents ?? []);
         applyInitialSession?.(historyToEntries(h.messages));
         return;
       }
@@ -136,6 +145,7 @@ export function useSessions(
       setCurrentSessionKind("main");
       setCurrentSessionTitle(persisted.sessionTitle);
       setCurrentSessionProject(sessionProjectFromHistory(persisted));
+      restoreSubAgents?.(persisted.restoredSubAgents ?? []);
       applyInitialSession?.(sessionHistoryToEntries(persisted));
     } catch { /* ignore */ }
   }, [api, applyInitialSession]);
@@ -168,6 +178,7 @@ export function useSessions(
         const h = await api.chatSessionHistory(sessionId);
         if (token !== sessionReadTokenRef.current) return false;
         if (!h.ok) return false;
+        restoreSubAgents?.(h.restoredSubAgents ?? []);
         applyLoadedSession(sessionHistoryToEntries(h));
         onLoadedSession?.();
         setCurrentSessionId(sessionId);
