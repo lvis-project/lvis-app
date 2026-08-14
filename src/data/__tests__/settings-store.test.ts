@@ -2387,3 +2387,44 @@ describe("SettingsService — persisted main-window location", () => {
     expect(new SettingsService({ userDataPath }).get("system").settingsTab).toBe("permissions");
   });
 });
+
+describe("subAgentAutonomousWake un-fossilize migration", () => {
+  let userDataPath: string;
+
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-wake-migration-"));
+  });
+
+  afterEach(async () => {
+    await cleanupTmpDir(userDataPath);
+  });
+
+  it("drops a pre-flip fossil false once so the flipped default reaches the install", async () => {
+    // saveSettings() materializes merged defaults, so installs from the era
+    // when the flag defaulted to false carry an explicit false the user never
+    // chose — and the default flip to true could never reach them.
+    const path = join(userDataPath, "lvis-settings.json");
+    writeFileSync(path, JSON.stringify({ features: { subAgentAutonomousWake: false } }), "utf-8");
+
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("features")?.subAgentAutonomousWake).toBe(true);
+
+    // Any save persists the marker; afterwards the migration never re-runs.
+    await service.patch({} as never);
+    const onDisk = JSON.parse(readFileSync(path, "utf-8")) as {
+      appliedMigrations?: string[];
+    };
+    expect(onDisk.appliedMigrations).toContain("subagent-autonomous-wake-default-flip");
+  });
+
+  it("respects an explicit opt-out written after the migration ran", () => {
+    const path = join(userDataPath, "lvis-settings.json");
+    writeFileSync(path, JSON.stringify({
+      appliedMigrations: ["subagent-autonomous-wake-default-flip"],
+      features: { subAgentAutonomousWake: false },
+    }), "utf-8");
+
+    const service = new SettingsService({ userDataPath });
+    expect(service.get("features")?.subAgentAutonomousWake).toBe(false);
+  });
+});
