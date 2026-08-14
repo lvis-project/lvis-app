@@ -53,6 +53,17 @@ function stubProvider(events: StreamEvent[]): LLMProvider {
   };
 }
 
+
+/**
+ * Tier-2 parent-adjudication policy is inert for these cases; every reviewer
+ * settings literal reuses the shipped default so the block stays one value.
+ */
+const PARENT_ADJUDICATION = {
+  maxVerdict: "medium",
+  timeoutMs: 30_000,
+  maxPerChildRun: 200,
+} as const;
+
 describe("Permission policy P4 reviewer-wiring", () => {
   it("settings mode=rule wires RuleBasedRiskClassifier", () => {
     const pm = new PermissionManager(join(tmpDir, "permissions.json"));
@@ -65,6 +76,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "rule",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       verdictCachePath: join(tmpDir, "cache.jsonl"),
       deferredQueuePath: join(tmpDir, "queue.jsonl"),
@@ -85,6 +97,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "rule",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       verdictCachePath: join(tmpDir, "cache.jsonl"),
       deferredQueuePath: join(tmpDir, "queue.jsonl"),
@@ -114,6 +127,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "rule",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       streamProviderFor: factorySpy,
       verdictCachePath: join(tmpDir, "cache.jsonl"),
@@ -158,6 +172,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       readActiveLlm: () => ({
         provider: "openai-compatible",
@@ -206,6 +221,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       readActiveLlm: () => ({
         provider: "vertex-ai",
@@ -244,6 +260,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
           model: "gpt-4o-mini",
           fallbackOnError: "deny",
           interactive: { autoApprove: "low" },
+          parentAdjudication: PARENT_ADJUDICATION,
         }),
         verdictCachePath: join(tmpDir, "cache-degrade.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-degrade.jsonl"),
@@ -261,6 +278,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "claude-haiku-4-5",
         fallbackOnError: "deny",
         interactive: { autoApprove: "low" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       streamProviderFor: () => null,
       verdictCachePath: join(tmpDir, "cache-degrade-null.jsonl"),
@@ -288,6 +306,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
         interactive: { autoApprove: "low" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       streamProviderFor: () => null,
       verdictCachePath: join(tmpDir, "cache-degrade-fa.jsonl"),
@@ -310,6 +329,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
           model: "gpt-4o-mini",
           fallbackOnError: "deny",
           interactive: { autoApprove: "low" },
+          parentAdjudication: PARENT_ADJUDICATION,
         }),
         streamProviderFor: () => null,
         verdictCachePath: join(tmpDir, "cache-degrade-warn.jsonl"),
@@ -335,6 +355,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
         interactive: { autoApprove: "low" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       streamProviderFor: () => null,
       verdictCachePath: join(tmpDir, "cache-heal-1.jsonl"),
@@ -355,6 +376,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
         interactive: { autoApprove: "low" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       streamProviderFor: () => provider,
       verdictCachePath: join(tmpDir, "cache-heal-2.jsonl"),
@@ -397,6 +419,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
       model: "gpt-4o-mini",
       fallbackOnError: "deny" as const,
       interactive: { autoApprove: "low" as const },
+      parentAdjudication: PARENT_ADJUDICATION,
     };
   }
 
@@ -516,6 +539,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
             model: "gemini-2.5-flash",
             fallbackOnError: "deny",
             interactive: { autoApprove: "off" },
+            parentAdjudication: PARENT_ADJUDICATION,
           },
         },
       }),
@@ -529,6 +553,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gemini-2.5-flash",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       verdictCachePath: join(tmpDir, "cache.jsonl"),
       deferredQueuePath: join(tmpDir, "queue.jsonl"),
@@ -547,6 +572,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
         interactive: { autoApprove: "low" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       verdictCachePath: join(tmpDir, "cache.jsonl"),
       deferredQueuePath: join(tmpDir, "queue.jsonl"),
@@ -571,6 +597,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
           model: "gpt-4o-mini",
           fallbackOnError: "deny",
           interactive: { autoApprove: "off" },
+          parentAdjudication: PARENT_ADJUDICATION,
         }),
         verdictCachePath: join(tmpDir, "cache-warn-auto-off.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-warn-auto-off.jsonl"),
@@ -597,6 +624,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
           model: "gpt-4o-mini",
           fallbackOnError: "deny",
           interactive: { autoApprove },
+          parentAdjudication: PARENT_ADJUDICATION,
         }),
         verdictCachePath: join(tmpDir, "cache-warn-strict.jsonl"),
         deferredQueuePath: join(tmpDir, "queue-warn-strict.jsonl"),
@@ -620,6 +648,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
         interactive: { autoApprove: "low" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       verdictCachePath: join(tmpDir, "cache-1.jsonl"),
       deferredQueuePath: join(tmpDir, "queue-1.jsonl"),
@@ -633,6 +662,7 @@ describe("Permission policy P4 reviewer-wiring", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       verdictCachePath: join(tmpDir, "cache-2.jsonl"),
       deferredQueuePath: join(tmpDir, "queue-2.jsonl"),
@@ -706,6 +736,7 @@ describe("wireReviewerAndPermissions marketplace preset endpoint binding", () =>
               model: "ignored",
               fallbackOnError: "rule",
               interactive: { autoApprove: "off" },
+              parentAdjudication: PARENT_ADJUDICATION,
             },
           };
         }
@@ -842,6 +873,7 @@ describe("wireReviewerAndPermissions self-hosted direct endpoint binding", () =>
               model: "ignored",
               fallbackOnError: "rule",
               interactive: { autoApprove: "off" },
+              parentAdjudication: PARENT_ADJUDICATION,
             },
           };
         }
@@ -937,6 +969,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
           model: "gpt-4o",
           fallbackOnError: "deny",
           interactive: { autoApprove: "off" },
+          parentAdjudication: PARENT_ADJUDICATION,
         }),
         // getSecret intentionally omitted — contract violation
         getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
@@ -956,6 +989,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
         model: "gpt-4o",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       getSecret: () => null,
       getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
@@ -977,6 +1011,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
         model: "gpt-4o",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       getSecret: (key) => {
         if (key === "llm.apiKey.azure-foundry") return "az-api-key";
@@ -1002,6 +1037,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
           model: "gemini-1.5-flash",
           fallbackOnError: "deny",
           interactive: { autoApprove: "off" },
+          parentAdjudication: PARENT_ADJUDICATION,
         }),
         // getSecret intentionally omitted — contract violation
         verdictCachePath: join(tmpDir, "cache-gcp-nosecret.jsonl"),
@@ -1020,6 +1056,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
         model: "gemini-1.5-flash",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       getSecret: () => null,
       verdictCachePath: join(tmpDir, "cache-gcp-nokey.jsonl"),
@@ -1040,6 +1077,7 @@ describe("Permission policy C3 foundry/gcp wiring paths", () => {
         model: "gemini-1.5-flash",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       getSecret: (key) => {
         if (key === "llm.apiKey.gemini") return "AIza-gemini-key";
@@ -1065,6 +1103,7 @@ describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
         model: "gpt-4o",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       getSecret: (key) => (key === "llm.apiKey.azure-foundry" ? "az-api-key" : null),
       getFoundryEndpoint: () => "https://proj.services.ai.azure.com",
@@ -1087,6 +1126,7 @@ describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
         model: "gemini-1.5-flash",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       getSecret: (key) => (key === "llm.apiKey.gemini" ? "AIza-key" : null),
       verdictCachePath: join(tmpDir, "cache-m2-gcp.jsonl"),
@@ -1111,6 +1151,7 @@ describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       streamProviderFor: () => upstream,
       verdictCachePath: join(tmpDir, "cache-m2-openai.jsonl"),
@@ -1132,6 +1173,7 @@ describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
         model: "gpt-4o",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       getSecret: (key) => (key === "llm.apiKey.azure-foundry" ? "az-key" : null),
       getFoundryEndpoint: () => "https://proj-a.services.ai.azure.com",
@@ -1146,6 +1188,7 @@ describe("MAJOR-2: cacheScope includes Foundry endpoint", () => {
         model: "gpt-4o",
         fallbackOnError: "deny",
         interactive: { autoApprove: "off" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       getSecret: (key) => (key === "llm.apiKey.azure-foundry" ? "az-key" : null),
       getFoundryEndpoint: () => "https://proj-b.services.ai.azure.com",
