@@ -651,6 +651,13 @@ export function handleChatGetHistory(deps: IpcDeps) {
     // vs a "Select project" placeholder for the ACTIVE (not-yet-persisted)
     // session.
     ...(conversationLoop.getSessionProjectIsDefault() ? { projectIsDefault: true } : {}),
+    // Same restore payload as `session-history`. Both are load paths: startup
+    // hydrates the active session through THIS handler, which is exactly the
+    // app-restart case where the live event stream is empty, so omitting it
+    // here would leave the panel blank in the one scenario that motivated it.
+    restoredSubAgents: memoryManager
+      .listSubAgentSessionsForOrigin(conversationLoop.getSessionId())
+      .map((entry) => ({ ...entry, modifiedAt: entry.modifiedAt.toISOString() })),
     messages: messages.map(serializeHistoryMessage),
   };
 }
@@ -728,6 +735,16 @@ export function handleChatSessionHistory(deps: IpcDeps, sessionId: string) {
     ...(routineFiredAt ? { routineFiredAt } : {}),
     ...(projectRoot ? { projectRoot } : {}),
     ...(projectName ? { projectName } : {}),
+    // Sub-agent rows rebuilt from disk. The renderer's panel is fed by the live
+    // `agent_spawn` event stream, which does not survive an app restart — the
+    // process that emitted those events is gone. Riding along with the history
+    // load puts restore on exactly the same trigger as the conversation it
+    // belongs to, rather than a second channel the renderer must remember to
+    // call. Rows only: a child's transcript loads on demand through this same
+    // handler, keyed by its own session id.
+    restoredSubAgents: memoryManager
+      .listSubAgentSessionsForOrigin(sessionId)
+      .map((entry) => ({ ...entry, modifiedAt: entry.modifiedAt.toISOString() })),
     messages: raw.map(serializeHistoryMessage),
     preambleChars,
   };

@@ -70,6 +70,16 @@ export function buildPublicSurface() {
       /** True when projectRoot/projectName reflect the ambient default
        *  directory binding rather than an explicit project selection. */
       projectIsDefault?: boolean;
+      /** Sub-agent rows rebuilt from persisted metadata; empty when none. The
+       *  panel's live event stream does not survive an app restart. */
+      restoredSubAgents?: Array<{
+        spawnId: string;
+        childSessionId: string;
+        title: string;
+        modifiedAt: string;
+        taskState?: string;
+        toolUseId?: string;
+      }>;
       messages: SerializedHistoryMessage[];
     }>,
   chatMainActiveState: async () =>
@@ -88,6 +98,16 @@ export function buildPublicSurface() {
       routineFiredAt?: string;
       projectRoot?: string;
       projectName?: string;
+      /** Sub-agent rows rebuilt from persisted metadata; empty when none. The
+       *  panel's live event stream does not survive an app restart. */
+      restoredSubAgents?: Array<{
+        spawnId: string;
+        childSessionId: string;
+        title: string;
+        modifiedAt: string;
+        taskState?: string;
+        toolUseId?: string;
+      }>;
       messages: SerializedHistoryMessage[];
       /** Chars in the rolling summary preamble applied to this session. 0 = no preamble. */
       preambleChars?: number;
