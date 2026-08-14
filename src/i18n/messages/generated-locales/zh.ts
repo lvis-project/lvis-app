@@ -1823,6 +1823,8 @@ export const zhMessages: Record<string, string> = {
   "permissionModeBadge.queueLabelError": "审批检查失败",
   "permissionReviewStatusCard.approvalRequired": "需要批准 · {level}",
   "permissionReviewStatusCard.autoApproved": "权限审核完成 · 风险低",
+  "permissionReviewStatusCard.parentApproved": "上级代理已批准",
+  "permissionReviewStatusCard.parentDenied": "上级代理已拒绝",
   "permissionReviewStatusCard.failed": "权限审核失败",
   "permissionReviewStatusCard.purposeLabel": "目的：",
   "permissionReviewStatusCard.reviewComplete": "审核完成",

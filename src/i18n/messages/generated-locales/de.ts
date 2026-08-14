@@ -1803,6 +1803,8 @@ export const deMessages: Record<string, string> = {
   "permissionModeBadge.queueLabelError": "Die Genehmigungsprüfung ist fehlgeschlagen",
   "permissionReviewStatusCard.approvalRequired": "Genehmigung erforderlich · {level}",
   "permissionReviewStatusCard.autoApproved": "Berechtigungsüberprüfung abgeschlossen · Geringes Risiko",
+  "permissionReviewStatusCard.parentApproved": "Von der übergeordneten Agentin genehmigt",
+  "permissionReviewStatusCard.parentDenied": "Von der übergeordneten Agentin abgelehnt",
   "permissionReviewStatusCard.failed": "Die Berechtigungsüberprüfung ist fehlgeschlagen",
   "permissionReviewStatusCard.purposeLabel": "Zweck:",
   "permissionReviewStatusCard.reviewComplete": "Überprüfung abgeschlossen",
