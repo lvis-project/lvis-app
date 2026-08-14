@@ -287,6 +287,11 @@ describe("normalizePermissionSettings — reviewer block", () => {
       model: "gpt-4o-mini",
       fallbackOnError: "deny",
       interactive: { autoApprove: "medium" },
+      parentAdjudication: {
+        maxVerdict: "medium",
+        timeoutMs: 30_000,
+        maxPerChildRun: 200,
+      },
     });
   });
 
@@ -327,6 +332,11 @@ describe("normalizePermissionSettings — reviewer block", () => {
       fallbackOnError: "deny",
       // Only absent fields take the new default; explicit fields above are kept.
       interactive: { autoApprove: "medium" },
+      parentAdjudication: {
+        maxVerdict: "medium",
+        timeoutMs: 30_000,
+        maxPerChildRun: 200,
+      },
     });
   });
 
