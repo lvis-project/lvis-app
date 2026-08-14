@@ -1823,6 +1823,8 @@ export const jaMessages: Record<string, string> = {
   "permissionModeBadge.queueLabelError": "承認チェックに失敗しました",
   "permissionReviewStatusCard.approvalRequired": "承認が必要 · {level}",
   "permissionReviewStatusCard.autoApproved": "許可のレビューが完了しました · 低リスク",
+  "permissionReviewStatusCard.parentApproved": "親エージェントが承認",
+  "permissionReviewStatusCard.parentDenied": "親エージェントが拒否",
   "permissionReviewStatusCard.failed": "権限のレビューに失敗しました",
   "permissionReviewStatusCard.purposeLabel": "目的：",
   "permissionReviewStatusCard.reviewComplete": "レビュー完了",

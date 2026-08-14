@@ -1806,6 +1806,8 @@ export const frMessages: Record<string, string> = {
   "permissionModeBadge.queueLabelError": "Échec du contrôle d'approbation",
   "permissionReviewStatusCard.approvalRequired": "Approbation requise · {level}",
   "permissionReviewStatusCard.autoApproved": "Examen des autorisations terminé · Faible risque",
+  "permissionReviewStatusCard.parentApproved": "Approuvé par l'agent parent",
+  "permissionReviewStatusCard.parentDenied": "Refusé par l'agent parent",
   "permissionReviewStatusCard.failed": "Échec de l'examen des autorisations",
   "permissionReviewStatusCard.purposeLabel": "But:",
   "permissionReviewStatusCard.reviewComplete": "Examen terminé",
