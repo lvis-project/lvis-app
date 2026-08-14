@@ -8,6 +8,7 @@ import type { LoopContext } from "./loop-context.js";
 import type { TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
 import type { GenericMessage, LLMVendor, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
+import type { PermissionReviewEvent } from "../../shared/permission-review-status.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
 import type { RequestAnchor } from "../../tools/pipeline/rationale-control.js";
 import {
@@ -56,14 +57,17 @@ import { gateCrossAgentInterceptedMetaTools } from "./intercepted-meta-gate.js";
 import { createSubscriptionUsageCollector, recordSubscriptionRoundTelemetry } from "./subscription-usage-telemetry.js";
 import { appendUsageForServingModel } from "./usage-by-model.js";
 import { finalizeAfterRoundCap, mergeFinalizeUsage, resolveRoundCapText } from "./round-cap-finalize.js";
+import { toolResultMeta } from "./tool-result-meta.js";
 
 const log = createLogger("lvis");
-const MAX_TOOL_ROUNDS = 60; // main chat + sub-agents; rationale at MAX_TURNS_DEFAULT
+// No caller-assigned `maxRounds` = PARENT session: unbounded — a turn ends
+// at natural end_turn or user interrupt. Child loops always get a budget.
+const PARENT_UNLIMITED_ROUNDS = Number.MAX_SAFE_INTEGER;
 /**
  * Hard cap on finish_reason=length CONTINUATIONS per logical assistant answer.
  * Published provider guidance converges on 2–3. AND-ed with: (a) a
  * zero-progress break (a round adding no text AND no reasoning ends the chain),
- * (b) the global MAX_TOOL_ROUNDS budget, and (c) the per-iteration `round < 30`
+ * (b) the caller-assigned round budget, and (c) the per-iteration `round < 30`
  * for-bound. Any one tripping stops the chain — defense against a model that
  * always returns "max_tokens".
  */
@@ -224,6 +228,9 @@ export async function queryLoop(
       : self.provider!;
     const allToolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }> = [];
     const toolMetaByUseId = new Map<string, ToolCallMeta>();
+    // Last review event per tool call — the verdict the user saw live, stamped
+    // onto the tool_result so reload rebuilds the same row.
+    const permissionReviewByUseId = new Map<string, PermissionReviewEvent>();
     let turnUsage: TokenUsage | undefined;
     const recordProviderUsage = (
       usage: TokenUsage,
@@ -313,14 +320,14 @@ export async function queryLoop(
     let continuationCarryText = "";
     let continuationCarryThought = "";
     let continuationPrefillText: string | undefined = undefined;
-    // C3(a): effective round budget. Default = MAX_TOOL_ROUNDS (30); when a
-    // caller supplies maxRounds (sub-agent runner) clamp to it. Negative or
-    // zero falls back to default so callers keep working unchanged.
+    // C3(a): effective round budget. A host-assigned `maxRounds` (the sub-agent
+    // runner, carrying the user's configured budget) is HONOURED exactly, above
+    // the default too; narrowing it only shows up as an agent stopped mid-task.
     const requestedMaxRounds = bounds?.maxRounds;
     const effectiveMaxRounds =
       typeof requestedMaxRounds === "number" && Number.isFinite(requestedMaxRounds) && requestedMaxRounds > 0
-        ? Math.min(MAX_TOOL_ROUNDS, Math.floor(requestedMaxRounds))
-        : MAX_TOOL_ROUNDS;
+        ? Math.floor(requestedMaxRounds)
+        : PARENT_UNLIMITED_ROUNDS;
 
     type PendingGuidanceDelivery = {
       entries: Array<(typeof self.guidanceQueue)[number]>;
@@ -361,8 +368,9 @@ export async function queryLoop(
         len: delivery.joined.length,
       });
     };
+    const loopRoundBound = effectiveMaxRounds;
     try {
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; round < loopRoundBound; round++) {
       // C3(a): hard guard between rounds — if we have already executed
       // `effectiveMaxRounds` assistant turns, stop cleanly and return the
       // last text. This is the loop-boundary defense for agent_spawn
@@ -702,7 +710,7 @@ export async function queryLoop(
           });
           // Retry the round with the offending tool removed. Does NOT count as
           // an assistant round (assistantRoundsRun is unchanged); the for-loop
-          // `round` counter + MAX_TOOL_ROUNDS still bound total iterations.
+          // `round` counter + the round budget still bound total iterations.
           continue;
         }
 
@@ -1184,7 +1192,10 @@ export async function queryLoop(
               toolMetaByUseId.set(meta.toolUseId, meta);
               callbacks?.onToolStart?.(name, input, meta);
             },
-            onPermissionReview: callbacks?.onPermissionReview,
+            onPermissionReview: (event) => {
+              permissionReviewByUseId.set(event.toolUseId, event);
+              callbacks?.onPermissionReview?.(event);
+            },
             onToolEnd: (name, result, isError, meta, uiPayload, durationMs) => {
               toolMetaByUseId.set(meta.toolUseId, meta);
               callbacks?.onToolEnd?.(name, result, isError, meta, uiPayload, durationMs);
@@ -1455,17 +1466,11 @@ export async function queryLoop(
       // tool_result 히스토리 append → loop back
       const allResults = [...toolResults, ...capResult.blocked];
       for (const tr of allResults) {
-        const meta = toolMetaByUseId.get(tr.tool_use_id);
-        const toolDisplay = "durationMs" in tr
-          ? {
-              durationMs: tr.durationMs,
-              ...(meta?.source ? { source: meta.source } : {}),
-              ...(meta?.category ? { category: meta.category } : {}),
-              ...(meta?.pluginId ? { pluginId: meta.pluginId } : {}),
-              ...(meta?.mcpServerId ? { mcpServerId: meta.mcpServerId } : {}),
-              ...("uiPayload" in tr && tr.uiPayload ? { uiPayload: tr.uiPayload } : {}),
-            }
-          : undefined;
+        const meta = toolResultMeta(
+          tr,
+          toolMetaByUseId.get(tr.tool_use_id),
+          permissionReviewByUseId.get(tr.tool_use_id),
+        );
         self.history.append({
           role: "tool_result",
           toolUseId: tr.tool_use_id,
@@ -1473,7 +1478,7 @@ export async function queryLoop(
           content: tr.content,
           ...(tr.is_error && { isError: true }),
           ...("image" in tr && tr.image ? { image: tr.image } : {}),
-          ...(toolDisplay ? { meta: { toolDisplay } } : {}),
+          ...(meta ? { meta } : {}),
         });
       }
       if (abortSignal?.aborted) {
@@ -1582,7 +1587,7 @@ export async function queryLoop(
       }
     }
 
-    // Outer for-loop bound (MAX_TOOL_ROUNDS) exhausted — reachable when
+    // Outer for-loop bound (`loopRoundBound`) exhausted — reachable when
     // meta-tool refunds (`round--`) iterate the loop past 30 while
     // assistantRoundsRun stays under the cap. Same class as the assistantRounds
     // early-exit above: a budget-hit, not a natural end_turn — flag it so the

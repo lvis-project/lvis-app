@@ -1259,6 +1259,39 @@ describe("agent_spawn tool", () => {
     expect(payload.resumeExhausted).toBeUndefined();
   });
 
+  it("a structural resume rejection never offers the resumeId back for retry", async () => {
+    // resumeInvalid marks policy rejections (wrong task state, ownership,
+    // tampered metadata) that fail identically forever. Emitting the retry
+    // guidance there guided the model into an infinite retry against the
+    // runner's INPUT_REQUIRED-only gate.
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        resume: async () => ({
+          summary: "sub-agent resume: task is not in INPUT_REQUIRED",
+          error: "sub-agent resume: task is not in INPUT_REQUIRED",
+          toolCallCount: 0,
+          turnCount: 0,
+          childSessionId: "child-structural",
+          entries: [],
+          ok: false,
+          resumeInvalid: true,
+        }),
+      }) as never,
+      emit: () => {},
+    });
+
+    const result = await tool.execute(
+      { title: "t", instructions: "continue", resumeId: "child-structural" },
+      foregroundCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse(result.output);
+    expect(payload.resumeInvalid).toBe(true);
+    expect(payload.resumeId).toBeUndefined();
+    expect(payload.resumeGuidance).toContain("재시도하지 마세요");
+  });
+
   it("emits the child entries snapshot on done and activity events without embedding it in the tool result", async () => {
     const spawnEvents: Array<{ type: string; entries?: unknown[] }> = [];
     const tool = createAgentSpawnTool({

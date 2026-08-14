@@ -352,6 +352,84 @@ describe("SubAgentRunner — maxRounds bound", () => {
       stopReason: "end_turn",
     });
   });
+
+  it("runs the Settings-configured round budget unclamped — 500 reaches the child loop", async () => {
+    const toolRegistry = new ToolRegistry();
+    const parentDeps = {
+      ...buildLoopDeps(toolRegistry),
+      settingsService: {
+        get: (key: string) =>
+          key === "chat" ? { subAgentMaxRounds: 500 } : fakeLlmSettings(),
+        getSecret: () => "test-key",
+      },
+    } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["parentDeps"];
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockResolvedValue({
+        text: "done",
+        toolCalls: [],
+        route: "default",
+        stopReason: "end_turn",
+      });
+    try {
+      await runner.spawn({ title: "budget", instructions: "do" });
+      const options = runTurnSpy.mock.calls[0]?.[3] as { maxRounds?: number } | undefined;
+      expect(options?.maxRounds).toBe(500);
+    } finally {
+      runTurnSpy.mockRestore();
+      hasProviderSpy.mockRestore();
+    }
+  });
+
+  it("floors a nonsense configured budget at 1 instead of refusing to run", async () => {
+    const toolRegistry = new ToolRegistry();
+    const parentDeps = {
+      ...buildLoopDeps(toolRegistry),
+      settingsService: {
+        get: (key: string) =>
+          key === "chat" ? { subAgentMaxRounds: 0 } : fakeLlmSettings(),
+        getSecret: () => "test-key",
+      },
+    } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["parentDeps"];
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager: fakeSubAgentMemoryManager(),
+    });
+    const hasProviderSpy = vi
+      .spyOn(
+        ConversationLoop.prototype as unknown as { hasProvider: () => boolean },
+        "hasProvider",
+      )
+      .mockReturnValue(true);
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockResolvedValue({
+        text: "done",
+        toolCalls: [],
+        route: "default",
+        stopReason: "end_turn",
+      });
+    try {
+      await runner.spawn({ title: "floor", instructions: "do" });
+      const options = runTurnSpy.mock.calls[0]?.[3] as { maxRounds?: number } | undefined;
+      expect(options?.maxRounds).toBe(1);
+    } finally {
+      runTurnSpy.mockRestore();
+      hasProviderSpy.mockRestore();
+    }
+  });
 });
 
 // ─── 2) sourceTools allowlist ─────────────────────────

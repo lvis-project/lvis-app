@@ -79,7 +79,7 @@ export function prepareMarkedToolResultsForWire(messages: GenericMessage[]): Gen
       //     value contractually.
       //   - When only `compactedAt` is set (no truncated meta), the
       //     pre-PR behaviour is preserved: use the in-memory length.
-      const stubContent =
+      const compactedResultText =
         msg.meta.compactedAt !== undefined
           ? buildToolResultStub(msg.toolName, msg.meta.truncated?.originalBytes ?? msg.content.length)
           : buildToolResultTruncatedStubForWire(msg.toolUseId, msg.toolName, msg.meta.truncated!);
@@ -88,7 +88,7 @@ export function prepareMarkedToolResultsForWire(messages: GenericMessage[]): Gen
         toolUseId: msg.toolUseId,
         toolName: msg.toolName,
         isError: msg.isError,
-        content: stubContent,
+        content: compactedResultText,
         meta: { ...msg.meta, serializedStub: true },
       } as GenericMessage);
     } else {

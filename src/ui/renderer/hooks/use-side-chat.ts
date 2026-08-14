@@ -33,7 +33,6 @@ import { t } from "../../../i18n/runtime.js";
 import {
   applyToolEnd,
   applyToolStart,
-  dropPermissionReviewEntries,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
   setAssistantError,
@@ -204,7 +203,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
       } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
         const { groupId, toolUseId, displayOrder = 0, name, input, source, toolCategory, pluginId, mcpServerId } = ev;
         setEntries((p) =>
-          applyToolStart(dropPermissionReviewEntries(p, { groupId, toolUseId }), {
+          applyToolStart(p, {
             groupId,
             toolUseId,
             displayOrder,
@@ -219,7 +218,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
       } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
         const { groupId, toolUseId, result, isError, durationMs, source, toolCategory, pluginId, mcpServerId, executionPlan } = ev;
         setEntries((p) =>
-          applyToolEnd(dropPermissionReviewEntries(p, { groupId, toolUseId }), {
+          applyToolEnd(p, {
             groupId,
             toolUseId,
             result,
@@ -273,7 +272,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
       } else if (ev.type === "error") {
         setEntries((p) =>
           setAssistantError(
-            dropPermissionReviewEntries(p),
+            p,
             t("useChatState.errorPrefix", { error: ev.error || t("useChatState.unknownError") }),
             thoughtRef.current,
             ev.systemNotice,
@@ -282,19 +281,14 @@ export function useSideChat(api: LvisApi): UseSideChat {
         setIsStreaming(false);
         resetStreamState();
       } else if (ev.type === "done") {
-        if (finalAssistantRoundClosedRef.current) {
-          setEntries((p) => dropPermissionReviewEntries(p));
-        } else if (streamRef.current || thoughtRef.current) {
+        if (!finalAssistantRoundClosedRef.current && (streamRef.current || thoughtRef.current)) {
           const detected = detectFromStream(streamRef.current);
           const finalText = visibleText(detected.cleanedText);
           setEntries((p) => {
-            const base = dropPermissionReviewEntries(p);
-            let next = finalizeStreamingReasoning(base, thoughtRef.current);
+            let next = finalizeStreamingReasoning(p, thoughtRef.current);
             next = finalizeStreamingAssistant(next, finalText, { overrideText: finalText });
             return next;
           });
-        } else {
-          setEntries((p) => dropPermissionReviewEntries(p));
         }
         setIsStreaming(false);
         resetStreamState();
@@ -346,7 +340,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
           // the same map; side chat is the same transcript to the person reading it.
           setEntries((p) =>
             setAssistantError(
-              dropPermissionReviewEntries(p),
+              p,
               formatIpcError(result.error, undefined),
               thoughtRef.current,
               "stream-error",
@@ -361,7 +355,7 @@ export function useSideChat(api: LvisApi): UseSideChat {
         // nothing to look up and the message is the only diagnostic.
         setEntries((p) =>
           setAssistantError(
-            dropPermissionReviewEntries(p),
+            p,
             (err as Error).message,
             thoughtRef.current,
             "stream-error",
