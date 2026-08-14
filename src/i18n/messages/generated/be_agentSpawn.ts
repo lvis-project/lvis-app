@@ -22,6 +22,10 @@ export const en = {
     "Optional: resume a previously-spawned sub-agent by its resumeId (returned in an incomplete result). When set, the sub-agent's history is re-hydrated and continued with instructions as the follow-up prompt; its tool scope stays frozen to the original spawn (not re-granted). Omit to start a fresh sub-agent.",
   "be_agentSpawn.incompleteNotice":
     "This run is NOT finished. The sub-agent hit its round budget mid-task, so the summary above is a partial snapshot, not an answer — do not report it to the user as a result. Call agent_spawn again with resumeId=\"{resumeId}\" and instructions naming what still needs doing; the sub-agent keeps its history and continues from exactly where it stopped. Repeat until it returns without this notice. If you deliberately stop resuming, say so explicitly and tell the user the work was left incomplete.",
+  "be_agentSpawn.resumeRetryGuidance":
+    "The sub-agent is STILL RESUMABLE — this failure did not consume its history. Retry agent_spawn with the SAME resumeId (transient provider errors usually clear on retry). Do NOT spawn a fresh agent for this work: that discards everything the suspended sub-agent already established.",
+  "be_agentSpawn.resumeExhaustedGuidance":
+    "This sub-agent's cumulative round ceiling is spent and it can NEVER be resumed again. Do not retry this resumeId. Read its last summary, finish the remaining steps yourself or in a NEW narrower sub-agent, and tell the user the original agent was cut short.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "be_agentSpawn.toolDescription":
@@ -45,4 +49,8 @@ export const ko: Record<keyof typeof en, string> = {
     "선택: 이전에 띄운 sub-agent 를 resumeId (미완료 결과에 반환됨) 로 이어서 실행합니다. 지정 시 sub-agent 히스토리를 재수화하고 instructions 를 후속 프롬프트로 이어갑니다. tool 범위는 최초 spawn 시점으로 고정되어 재부여되지 않습니다. 생략하면 새 sub-agent 를 시작합니다.",
   "be_agentSpawn.incompleteNotice":
     "이 실행은 끝나지 않았습니다. sub-agent 가 작업 도중 라운드 예산에 도달했으므로 위 요약은 답이 아니라 중간 스냅샷입니다 — 사용자에게 결과로 보고하지 마세요. agent_spawn 을 resumeId=\"{resumeId}\" 와 남은 작업을 명시한 instructions 로 다시 호출하세요. sub-agent 는 히스토리를 유지한 채 중단된 지점부터 정확히 이어갑니다. 이 안내가 사라질 때까지 반복하세요. 의도적으로 재개를 중단한다면 그 사실을 명시하고 작업이 미완료로 남았음을 사용자에게 알리세요.",
+  "be_agentSpawn.resumeRetryGuidance":
+    "이 sub-agent 는 여전히 재개 가능합니다 — 이번 실패로 히스토리가 소실되지 않았습니다. 같은 resumeId 로 agent_spawn 을 재시도하세요 (일시적 provider 오류는 대개 재시도로 해소됩니다). 이 작업을 위해 새 에이전트를 띄우지 마세요: 중단된 sub-agent 가 이미 쌓은 것을 전부 버리게 됩니다.",
+  "be_agentSpawn.resumeExhaustedGuidance":
+    "이 sub-agent 는 누적 라운드 상한을 소진해 다시는 재개할 수 없습니다. 이 resumeId 를 재시도하지 마세요. 마지막 요약을 읽고 남은 단계를 직접 또는 더 좁은 새 sub-agent 로 마무리하고, 원래 에이전트가 중단됐음을 사용자에게 알리세요.",
 };
