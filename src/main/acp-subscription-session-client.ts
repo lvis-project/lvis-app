@@ -68,7 +68,7 @@ const MAX_SESSION_ID_LENGTH = 512;
 const MAX_RPC_METHOD_LENGTH = 256;
 const MAX_RPC_ID_LENGTH = 512;
 const DEFAULT_REQUEST_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.mcpRequestDefaultMs;
-const DEFAULT_PROMPT_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.subAgentCeilingMs;
+const DEFAULT_PROMPT_TIMEOUT_MS = TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs;
 const DEFAULT_ABORT_GRACE_MS = TOOL_TIMEOUT_POLICY.processTreeKillMs;
 const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 
@@ -366,7 +366,7 @@ function promptStopReason(value: unknown): AcpSubscriptionPromptStopReason | nul
 
 function timeoutWithin(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isInteger(value) || value <= 0) return fallback;
-  return Math.min(value, TOOL_TIMEOUT_POLICY.subAgentCeilingMs);
+  return Math.min(value, TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs);
 }
 
 function approvedRuntimeArgs(

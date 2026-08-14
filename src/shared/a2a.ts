@@ -225,14 +225,21 @@ export interface A2ASubAgentResultLike {
   suspension?: SubAgentSuspension;
   /** Temporary compatibility alias for pre-suspension results. */
   incomplete?: boolean;
-  resumeExhausted?: boolean;
+  /**
+   * Set when a resume was refused before running a turn. Either kind projects
+   * REJECTED: both are host POLICY refusals, not the child failing at its work,
+   * and the renderer maps FAILED and REJECTED to the same `error` run status
+   * (A2A_TASK_STATE_RUN_STATUS_MAP) so the unification costs no display
+   * fidelity while making the wire state honest about who refused.
+   */
+  resumeRefusal?: "invalid" | "exhausted";
 }
 /** Approval/plugin-auth waits remain running/WORKING and never project AUTH_REQUIRED. */
 export function projectSubAgentResultState(
   result: A2ASubAgentResultLike,
 ): A2AProjectedTaskState {
   let runState: A2ASubAgentRunState;
-  if (result.resumeExhausted || result.stopReason === "blocked") {
+  if (result.resumeRefusal !== undefined || result.stopReason === "blocked") {
     runState = "rejected";
   } else if (result.stopReason === "interrupted") {
     runState = "interrupted";

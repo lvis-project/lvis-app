@@ -12,6 +12,7 @@ import { CHOKEPOINT_EFFECT } from "../permissions/effect-kind.js";
 import type { HostShellExecutionPermitBinding } from "../permissions/host-shell-execution-permit.js";
 import { mintHostShellExecutionPermit } from "../permissions/host-shell-execution-permit.js";
 import { resolveEffectiveCeilingMs, runWithCeiling } from "./executor-ceiling.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import { isRemoteControllerAuthorityCurrent } from "../shared/chat-origin.js";
 import {
   A2A_CAUSAL_CONTEXT_METADATA_KEY,
@@ -645,10 +646,29 @@ export async function executeAuthorizedToolInvocation(
   // Global ceiling via `runWithCeiling` helper — last-resort cap with a
   // linked AbortController so the underlying tool work actually stops
   // (tools that participate in `executionContext.abortSignal` propagate
-  // the cancellation). `agent_spawn` runs a full sub-agent loop and uses
-  // the larger `subAgentCeilingMs`; a builtin shell invocation follows its own
-  // `timeoutSeconds` so an escalated retry is not cut short by the ceiling.
+  // the cancellation). A builtin that supervises a bounded loop of its own
+  // (agent_spawn) sizes its wall clock from the host setting that bounds that
+  // loop; a builtin shell invocation follows its own `timeoutSeconds` so an
+  // escalated retry is not cut short by the ceiling.
   const effectiveCeilingMs = resolveEffectiveCeilingMs(tool, finalInput);
+  // A host-derived raise is invisible at the call site — it comes from a
+  // setting, not from anything in this invocation's input — so record it.
+  // (A shell raise needs no separate entry: the `timeoutSeconds` the model
+  // asked for is already in this call's audited input.)
+  if (
+    tool.resolveHostCeilingMs !== undefined
+    && effectiveCeilingMs > TOOL_TIMEOUT_POLICY.globalCeilingMs
+  ) {
+    services.auditLogger.log({
+      timestamp: new Date().toISOString(),
+      sessionId: sessionId ?? "unknown",
+      type: "info",
+      input: `tool=${tool.name} source=${tool.source}`,
+      output:
+        `host ceiling raised to ${effectiveCeilingMs}ms `
+        + `(base ${TOOL_TIMEOUT_POLICY.globalCeilingMs}ms)`,
+    });
+  }
   const outcome = await runWithCeiling(
     async (signal) => {
       const ctx: ToolExecutionContext = { ...executionContext, abortSignal: signal };
@@ -789,9 +809,18 @@ export async function executeAuthorizedToolInvocation(
       interruptionReason = outcome.reason;
     }
     if (!outcome.settlement) terminationReason = outcome.reason;
+    // Ceiling expiry is a RETRYABLE tool error, never a throw that ends the
+    // turn. Shell tools recover by naming a larger `timeoutSeconds`; no other
+    // tool — builtin, plugin, or MCP — has such a field (audited: only
+    // bash/powershell expose one), so for them the guidance has to carry the
+    // recovery instead: say the HOST bound the call, and that the way through
+    // is narrower work, not a longer wait it has no way to ask for.
     content =
       outcome.reason === "ceiling"
-        ? `tool execution exceeded global ceiling (${effectiveCeilingMs}ms): ${toolUse.name}`
+        ? t("be_executor.toolCeilingExceeded", {
+            name: toolUse.name,
+            seconds: String(Math.round(effectiveCeilingMs / 1000)),
+          })
         : outcome.reason === "user-abort"
           ? t("be_executor.toolExecutionCancelled")
           : outcome.error.message || t("be_executor.toolExecutionUnknownError");

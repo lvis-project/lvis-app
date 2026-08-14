@@ -230,23 +230,28 @@ export interface SubAgentSpawnResult {
    */
   incomplete?: boolean;
   /**
-   * `true` when a `resume()` was REFUSED before running any turn because the
-   * session hit a resume-axis loop guard (`resumeCount >= MAX_RESUMES` or
-   * `cumulativeRounds >= cumulativeRoundsCeiling()`). Distinct from `incomplete`
-   * (a run that started but hit its per-turn round budget): a resume-exhausted
-   * result never ran a turn at all. Always paired with `ok === false`. Absent on
-   * spawn results and on resumes that were allowed to run.
+   * Why a `resume()` was REFUSED before running any turn. ABSENT means the
+   * failure is transient (or the result is not a resume at all), so retrying
+   * the SAME resumeId is the correct move.
+   *
+   *  - `"exhausted"` — a resume-axis loop guard fired
+   *    (`budgetResumeCount >= MAX_RESUMES` or
+   *    `cumulativeRounds >= cumulativeRoundsCeiling()`). Distinct from
+   *    `incomplete` (a run that STARTED and hit its per-turn round budget):
+   *    an exhausted refusal never ran a turn at all.
+   *  - `"invalid"` — a structural policy check that can never pass for this
+   *    resumeId: wrong task state, origin mismatch, missing or tampered
+   *    persisted metadata.
+   *
+   * Both refusals are permanent for that id, so the caller must NOT emit
+   * retry-same-id guidance; they differ only in the recovery advice. A single
+   * discriminant instead of two optional booleans makes the impossible
+   * "both true" state unrepresentable — that combination used to be masked
+   * only by the object-spread ORDER in agent_spawn's error path, where the
+   * second guidance key silently overwrote the first. Always paired with
+   * `ok === false`; absent on spawn results and on resumes allowed to run.
    */
-  resumeExhausted?: boolean;
-  /**
-   * `true` when a `resume()` was REFUSED by a structural policy check that
-   * can never pass for this resumeId — wrong task state, origin mismatch,
-   * missing or tampered persisted metadata. Unlike a transient provider
-   * failure, retrying the same resumeId fails identically forever, so the
-   * caller must NOT emit retry-same-id guidance. Always paired with
-   * `ok === false`; never ran a turn.
-   */
-  resumeInvalid?: boolean;
+  resumeRefusal?: "invalid" | "exhausted";
 }
 
 /**
@@ -639,7 +644,7 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
  *     to be able to run.
  *
  * A resume that would breach either guard is refused BEFORE any turn runs
- * (`{ ok:false, resumeExhausted:true }`), so no LLM round is spent.
+ * (`{ ok:false, resumeRefusal:"exhausted" }`), so no LLM round is spent.
  */
 const MAX_RESUMES = 3;
 const CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER = 4;
@@ -1821,13 +1826,23 @@ export class SubAgentRunner {
   }
 
   /**
+   * The normalized round budget one invocation may run — the same resolution
+   * `spawn()` and `resume()` use. The `agent_spawn` tool reads it to size its
+   * executor wall clock: the round setting has no maximum, so a FIXED ceiling
+   * silently reinstates the bound that setting exists to remove, killing a
+   * long agent by the clock instead of by its budget.
+   */
+  roundBudget(): number {
+    return normalizeRoundBudget(this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT);
+  }
+
+  /**
    * Resume-axis cumulative ceiling, scaled to the CONFIGURED budget so the
    * resume-loop protection stays proportional instead of becoming an absolute
    * ceiling that binds below what one spawn is allowed to run.
    */
   private cumulativeRoundsCeiling(): number {
-    const budget = normalizeRoundBudget(this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT);
-    return CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER * budget;
+    return CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER * this.roundBudget();
   }
 
   private buildChildDeps(args: {
@@ -2599,7 +2614,7 @@ export class SubAgentRunner {
    *     resumable by a no-origin caller, keeping the invariant consistent.
    *
    * ── Loop guards (Commit 2) ──
-   * Refused BEFORE any turn (`{ ok:false, resumeExhausted:true }`) when the
+   * Refused BEFORE any turn (`{ ok:false, resumeRefusal:"exhausted" }`) when the
    * session already hit `MAX_RESUMES` or the cumulative-rounds ceiling. A
    * per-`childSessionId` in-flight lock fail-closes a second concurrent resume
    * of the same id (the load→run→save transaction is not covered by the
@@ -3074,12 +3089,12 @@ export class SubAgentRunner {
     };
 
     // Structural policy refusals: retrying the SAME resumeId can never
-    // succeed, so each carries the resumeInvalid marker that suppresses
-    // agent_spawn's retry guidance. Contrast the question-answer length check
-    // below, which stays UNMARKED on purpose — fixing the answer and retrying
-    // the same id is the correct move there.
+    // succeed, so each carries the `resumeRefusal: "invalid"` marker that
+    // suppresses agent_spawn's retry guidance. Contrast the question-answer
+    // length check below, which stays UNMARKED on purpose — fixing the answer
+    // and retrying the same id is the correct move there.
     const refuseStructurally = (message: string) =>
-      finishAttemptFailure(message, { resumeInvalid: true });
+      finishAttemptFailure(message, { resumeRefusal: "invalid" });
 
     if (!isValidSessionId(resumeId)) {
       return refuseStructurally(
@@ -3219,7 +3234,7 @@ export class SubAgentRunner {
       return await finishAuthorizedFailure(
         "sub-agent resume: exhausted (budgetResumeCount="
           + priorBudgetResumeCount + " >= " + MAX_RESUMES + ")",
-        { resumeExhausted: true },
+        { resumeRefusal: "exhausted" },
       );
     }
     const cumulativeRoundsCeiling = this.cumulativeRoundsCeiling();
@@ -3227,7 +3242,7 @@ export class SubAgentRunner {
       return await finishAuthorizedFailure(
         "sub-agent resume: cumulative-rounds ceiling reached ("
           + priorCumulativeRounds + " >= " + cumulativeRoundsCeiling + ")",
-        { resumeExhausted: true },
+        { resumeRefusal: "exhausted" },
       );
     }
 
