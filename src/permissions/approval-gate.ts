@@ -391,7 +391,54 @@ export type ApprovalRequestInput = Omit<
    * stopped, and the request then behaves exactly as it did without it.
    */
   readonly abortSignal?: AbortSignal;
+  /**
+   * Host-only: the sub-agent run behind this ask, and the task its parent
+   * wrote for it.
+   *
+   * Presence is what makes an ask a candidate for parent adjudication at all,
+   * so it is a fact only the host may state. It is attached by the sub-agent
+   * approval adapter from the tracked run it wraps — never from tool arguments,
+   * never from `reason`, and never from anything a child or a renderer wrote.
+   *
+   * `spawnTaskSummary` is a host truncation of the task the PARENT authored
+   * when it spawned the child. Child-authored text is deliberately absent:
+   * evidence a child can write is evidence a child can use to argue for its own
+   * approval.
+   *
+   * Like the host-only fields above it, it lives on the input type rather than
+   * on {@link ApprovalRequest} — the renderer neither supplies it nor receives
+   * it, so there is no copy for a compromised renderer to author or alter.
+   */
+  readonly childProvenance?: ChildAgentProvenance;
+  /**
+   * Host-only: the caller's assertion that this ask cleared the preconditions
+   * for tier 2 that only the caller can see — the permission layer it came
+   * from, and whether policy forced it to a modal.
+   *
+   * It is a NECESSARY condition, never a sufficient one. The gate re-derives
+   * every check it can see for itself (request kind, one-shot high-risk plan,
+   * remote origin, verdict ceiling) regardless of this value, so a caller that
+   * set it wrongly widens nothing the gate owns.
+   */
+  readonly parentAdjudicationEligible?: boolean;
 };
+
+/**
+ * The sub-agent run behind an approval ask.
+ *
+ * Every field is host-owned: the ids come from the run registry and the summary
+ * from the parent's own spawn input.
+ */
+interface ChildAgentProvenance {
+  /** Session id of the child run whose turn raised the ask. */
+  childSessionId: string;
+  /** Display title of the child run, as the dock already labels it. */
+  childTitle: string;
+  /** Session the child was spawned from — the parent that would adjudicate. */
+  originSessionId: string;
+  /** Host truncation of the parent-authored spawn task. */
+  spawnTaskSummary: string;
+}
 
 export type ApprovalChoice =
   "allow-once" | "allow-session" | "allow-always" | "deny-once" | "deny-always";
@@ -622,6 +669,16 @@ const APPROVAL_ANSWERER_AUDIT_TOKENS = {
    * from "the owner pre-authorized a class of calls and this was one".
    */
   "away-authority": "away-authority",
+  /**
+   * The parent agent of the sub-agent whose turn raised this ask (tier 2 of the
+   * sub-agent approval chain). Distinct from both of the above for the reason
+   * the dimension exists at all: a row a reviewer reads later must say whether
+   * a person decided this call or whether a model the person delegated to did,
+   * and neither `desk` nor `away-authority` can carry that fact. A parent
+   * answer is one-shot by construction, so a row bearing this token can never
+   * be the origin of a durable approval record.
+   */
+  "parent-agent": "parent-agent",
 } as const;
 
 /**
@@ -996,6 +1053,8 @@ export class ApprovalGate {
       remoteControllerAuthority,
       scopeTargetFilePaths,
       abortSignal,
+      childProvenance,
+      parentAdjudicationEligible,
       ...request
     } = req;
     // Do not forward the host-only binding to renderer or audit payloads.
@@ -1012,6 +1071,14 @@ export class ApprovalGate {
     // capability that decided it. `abortSignal` is destructured out for the
     // first of those reasons and one more: it is a live object carrying a
     // listener list, and the renderer payload crosses a structured clone.
+    //
+    // `childProvenance` and `parentAdjudicationEligible` are destructured out
+    // here for the first reason, and the destructuring is the whole mechanism:
+    // they are inputs to a host-internal decision, and a renderer that received
+    // them could report which asks the host is about to route away from the
+    // dock. They have no reader yet — the parent-adjudication stage that
+    // consumes them lands separately — and removing them from the spread now is
+    // what makes that stage unable to introduce a leak when it arrives.
     const auditFieldsFor = (
       fields: ApprovalAuditFields,
       executionPlan?: HostShellExecutionPlanAuditProjection,

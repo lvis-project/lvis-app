@@ -144,6 +144,15 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // is still subject to the fail-closed UserPromptSubmit gate, exactly as a
     // user-typed message is.
     subAgentAutonomousWake: true,
+    // A child ask that the automatic reviewer left at `ask` goes to the child's
+    // own parent agent before it goes to the user. Ships ON: the parent wrote
+    // the child's task and is the only party besides the user who knows whether
+    // a given call serves it, and a user who delegated the work did not ask to
+    // arbitrate each step of it. The lane can only narrow to a ONE-SHOT allow,
+    // under a host-enforced verdict ceiling, after every hard check in the
+    // approval gate — and anything it cannot decide still becomes the same user
+    // modal as before.
+    subAgentParentAdjudication: true,
     // External A2A wire routes are independently opt-in and default OFF.
     a2aLoopbackServer: false,
     a2aRemoteRouting: false,
