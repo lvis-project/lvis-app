@@ -687,4 +687,30 @@ describe("historyToEntries", () => {
       expect(entries.find((e) => e.kind === "checkpoint")).toBeUndefined();
     });
   });
+
+  describe("sub-agent report replay", () => {
+    it("rebuilds the sub-agent box from persisted provenance, matching the live frame", () => {
+      const entries = historyToEntries([
+        {
+          index: 0,
+          role: "user",
+          content: "[Sub-Agent: Contract audit] (task child-1, message m-1)\nfound 3 issues",
+          subAgentReport: { title: "Contract audit" },
+        },
+      ]);
+      expect(entries[0]).toMatchObject({
+        kind: "user",
+        injectHint: "sub-agent",
+        subAgentTitle: "Contract audit",
+      });
+    });
+
+    it("leaves an ordinary user message unmarked", () => {
+      const entries = historyToEntries([
+        { index: 0, role: "user", content: "직접 쓴 메시지" },
+      ]);
+      expect(entries[0]).toMatchObject({ kind: "user" });
+      expect((entries[0] as { injectHint?: string }).injectHint).toBeUndefined();
+    });
+  });
 });

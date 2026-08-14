@@ -27,6 +27,8 @@ export type SerializedTurnSummary = NonNullable<MessageMeta["turnSummary"]>;
 
 /** Checkpoint metrics carried on the compactBoundary user message. */
 export type SerializedCheckpointMeta = NonNullable<MessageMeta["checkpointMeta"]>;
+/** Sub-agent report provenance carried on an injected child-delivery message. */
+type SerializedSubAgentReportMeta = NonNullable<MessageMeta["subAgentReport"]>;
 export type SerializedImportedTriggerMeta = NonNullable<MessageMeta["importedTrigger"]>;
 export type SerializedToolDisplayMeta = {
   durationMs?: number;
@@ -60,6 +62,8 @@ export type SerializedHistoryMessage = {
   turnSummary?: SerializedTurnSummary;
   /** Checkpoint metrics — only on compactBoundary user messages. */
   checkpointMeta?: SerializedCheckpointMeta;
+  /** Sub-agent report provenance — only on injected child-delivery messages. */
+  subAgentReport?: SerializedSubAgentReportMeta;
   /** Issue #911 system-notice marker — assistant entries that are host
    *  notifications, rendered with destructive styling in the UI. */
   systemNotice?: NonNullable<MessageMeta["systemNotice"]>;
@@ -93,6 +97,7 @@ export function serializeHistoryMessage(
     ...(toolDisplay !== undefined ? { toolDisplay } : {}),
     ...(m.meta?.turnSummary !== undefined ? { turnSummary: m.meta.turnSummary } : {}),
     ...(m.meta?.checkpointMeta !== undefined ? { checkpointMeta: m.meta.checkpointMeta } : {}),
+    ...(meta?.subAgentReport !== undefined ? { subAgentReport: meta.subAgentReport } : {}),
     ...(systemNotice !== undefined ? { systemNotice } : {}),
     ...(meta?.interrupted === true ? { interrupted: true } : {}),
   };

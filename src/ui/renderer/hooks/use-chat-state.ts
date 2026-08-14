@@ -133,7 +133,23 @@ export function useChatState(api: LvisApi) {
         // 사용자 피드백 (2026-05-15): system entry → user bubble + 작은 hint 배지.
         const text = typeof ev.text === "string" ? ev.text : "";
         if (text.length === 0) return;
-        setEntries((p) => [...p, { kind: "user", text, injectHint: "queue", createdAt: Date.now() }]);
+        // A sub-agent report is not the user's own queued message — it gets its
+        // own box, carrying the child title so the user knows who reported.
+        const subAgentReport = ev.subAgentReport;
+        setEntries((p) => [
+          ...p,
+          subAgentReport
+            ? {
+                kind: "user",
+                text,
+                injectHint: "sub-agent",
+                ...(subAgentReport.title !== undefined
+                  ? { subAgentTitle: subAgentReport.title }
+                  : {}),
+                createdAt: Date.now(),
+              }
+            : { kind: "user", text, injectHint: "queue", createdAt: Date.now() },
+        ]);
         return;
       }
       if (ev.type === "guidance_dropped") {

@@ -128,6 +128,17 @@ export function historyToEntries(
       out.push({
         kind: "user",
         text: visibleUserText(m),
+        // Reload parity with the live `guidance_injected` frame: a persisted
+        // child delivery rebuilds as the sub-agent report box, never as a plain
+        // user bubble that reads as if the user pasted the envelope.
+        ...(m.subAgentReport
+          ? {
+              injectHint: "sub-agent" as const,
+              ...(m.subAgentReport.title !== undefined
+                ? { subAgentTitle: m.subAgentReport.title }
+                : {}),
+            }
+          : {}),
         ...(m.createdAt !== undefined ? { createdAt: m.createdAt } : {}),
       });
     } else if (m.role === "assistant") {
