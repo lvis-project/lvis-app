@@ -1545,7 +1545,20 @@ export function registerChatHandlers(deps: IpcDeps): void {
         originSessionId,
         conversationLoop.getHistory().getMessages(),
       ) as GenericMessage[];
-      if (!hasParentSubAgentReference(messages, childSessionId)) {
+      // Ownership is established either by the parent's transcript still
+      // referencing the child, or by the child's own persisted
+      // `originSessionId` — the value the HOST wrote at spawn time, naming the
+      // parent that owns it.
+      //
+      // The metadata check is not a relaxation, it is the stronger of the two.
+      // The transcript scan reads a tool_result that compaction is free to
+      // strip (`[tool_result stripped: tool=agent_spawn, …]`), at which point a
+      // genuinely owned child becomes unreachable — which is exactly what
+      // happens to a restored panel row, whose transcript has no in-memory copy
+      // to fall back on. Host-written metadata cannot be edited by the model
+      // and does not decay with the conversation.
+      const ownedByOrigin = runner.isPersistedSpawnOfOrigin?.(originSessionId, childSessionId) === true;
+      if (!ownedByOrigin && !hasParentSubAgentReference(messages, childSessionId)) {
         return { ok: false, error: "sub-agent-reference-not-found" };
       }
       return runner.getPersistedTranscript({

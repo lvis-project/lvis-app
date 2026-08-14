@@ -628,6 +628,24 @@ export function handleChatSessions(
   };
 }
 
+/**
+ * Sub-agent rows for a parent session, serialized for the renderer.
+ *
+ * Routed through the SubAgentRunner because children are persisted in their own
+ * `~/.lvis/subagent/` namespace — the main MemoryManager's sessions directory
+ * holds none of them, so reading it returns an empty list no matter how many
+ * agents the session ran. Returns `[]` when the runner is not wired.
+ */
+function restoredSubAgentRows(deps: IpcDeps, originSessionId: string) {
+  const runner = deps.getSubAgentRunner?.() as
+    | { listPersistedSpawnsForOrigin?: (id: string) => Array<{ modifiedAt: Date }> }
+    | undefined;
+  if (typeof runner?.listPersistedSpawnsForOrigin !== "function") return [];
+  return runner
+    .listPersistedSpawnsForOrigin(originSessionId)
+    .map((entry) => ({ ...entry, modifiedAt: entry.modifiedAt.toISOString() }));
+}
+
 /** PUBLIC `lvis:chat:get-history` — the active session's serialized history. */
 export function handleChatGetHistory(deps: IpcDeps) {
   const { conversationLoop, memoryManager } = deps;
@@ -655,9 +673,7 @@ export function handleChatGetHistory(deps: IpcDeps) {
     // hydrates the active session through THIS handler, which is exactly the
     // app-restart case where the live event stream is empty, so omitting it
     // here would leave the panel blank in the one scenario that motivated it.
-    restoredSubAgents: memoryManager
-      .listSubAgentSessionsForOrigin(conversationLoop.getSessionId())
-      .map((entry) => ({ ...entry, modifiedAt: entry.modifiedAt.toISOString() })),
+    restoredSubAgents: restoredSubAgentRows(deps, conversationLoop.getSessionId()),
     messages: messages.map(serializeHistoryMessage),
   };
 }
@@ -742,9 +758,7 @@ export function handleChatSessionHistory(deps: IpcDeps, sessionId: string) {
     // belongs to, rather than a second channel the renderer must remember to
     // call. Rows only: a child's transcript loads on demand through this same
     // handler, keyed by its own session id.
-    restoredSubAgents: memoryManager
-      .listSubAgentSessionsForOrigin(sessionId)
-      .map((entry) => ({ ...entry, modifiedAt: entry.modifiedAt.toISOString() })),
+    restoredSubAgents: restoredSubAgentRows(deps, sessionId),
     messages: raw.map(serializeHistoryMessage),
     preambleChars,
   };
