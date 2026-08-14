@@ -229,6 +229,8 @@ export const zhMessages: Record<string, string> = {
   "be_agentModeMap.planReasoningHint": "通过分数跟踪每个维度的清晰度，并一次减少一个问题的歧义。一旦达到阈值，就输出可操作的计划文档。",
   "be_agentModeMap.researchReasoningHint": "从可信的外部来源收集事实并引用每一个事实。根据至少两个来源交叉验证重要数据。",
   "be_agentSpawn.incompleteNotice": "此次运行尚未完成。子代理在任务中途达到了回合预算，因此上面的摘要是部分快照而非答案——不要将其作为结果报告给用户。请使用 resumeId=\"{resumeId}\" 和说明剩余工作的 instructions 再次调用 agent_spawn；子代理会保留其历史记录并从停止的位置继续。重复此操作直到它返回时不再带有此提示。如果你有意停止恢复，请明确说明并告知用户工作未完成。",
+  "be_agentSpawn.resumeRetryGuidance": "该子代理仍然可以恢复——此次失败没有消耗其历史记录。请使用相同的 resumeId 重试 agent_spawn（临时的提供方错误通常重试即可解决）。不要为此工作启动新代理：那会丢弃被中断子代理已经建立的一切。",
+  "be_agentSpawn.resumeExhaustedGuidance": "该子代理的累计回合上限已用尽，永远无法再恢复。不要重试此 resumeId。请阅读其最后的摘要，自己或用一个范围更窄的新子代理完成剩余步骤，并告知用户原代理已被中断。",
   "be_agentSpawn.propAgentNameDescription": "可选：在 ~/.lvis/agents/ 下定义的代理配置文件名称。指定后，使用该配置文件正文和默认的 sourceTools。",
   "be_agentSpawn.propInstructionsDescription": "子代理要执行的任务——系统+用户提示相结合。",
   "be_agentSpawn.propResumeIdDescription": "可选：通过其resumeId恢复先前生成的子代理（以不完整的结果返回）。设置后，子代理的历史记录会重新水合，并继续以指令作为后续提示；它的工具范围保持冻结到原始生成（不重新授予）。省略启动新的子代理。",

@@ -422,8 +422,26 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             ...promptPayload,
             childSessionId: result.childSessionId,
           });
+          // A failed RESUME must hand the parent its way back to the SAME
+          // child. Observed failure mode without this: a transient provider
+          // error surfaced as a bare string, the parent had nothing telling it
+          // the child was still resumable, and it respawned FRESH agents —
+          // silently discarding the suspended child's entire context.
+          const resumable = resumeId !== undefined && result.resumeExhausted !== true;
           return {
-            output: JSON.stringify({ error: message, taskState }),
+            output: JSON.stringify({
+              error: message,
+              taskState,
+              ...(resumable
+                ? {
+                    resumeId,
+                    resumeGuidance: t("be_agentSpawn.resumeRetryGuidance"),
+                  }
+                : {}),
+              ...(result.resumeExhausted === true
+                ? { resumeExhausted: true, resumeGuidance: t("be_agentSpawn.resumeExhaustedGuidance") }
+                : {}),
+            }),
             isError: true,
           };
         }
@@ -470,7 +488,15 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         const taskState = projectSubAgentRunState("error");
         deps.emit({ spawnId, type: "error", taskState, message, ...promptPayload, ...linkedPayload() });
         return {
-          output: JSON.stringify({ error: message, taskState }),
+          output: JSON.stringify({
+            error: message,
+            taskState,
+            // A throw never marks the resume chain exhausted, so a resume that
+            // died here (provider error, transport) is still continuable.
+            ...(resumeId
+              ? { resumeId, resumeGuidance: t("be_agentSpawn.resumeRetryGuidance") }
+              : {}),
+          }),
           isError: true,
         };
       }
