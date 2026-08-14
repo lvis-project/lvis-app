@@ -141,6 +141,68 @@ describe("SubAgentTranscriptAccumulator", () => {
     expect(joined).toContain("***@example.com");
   });
 
+  it("streams reasoning deltas as a live streaming entry", () => {
+    const acc = new SubAgentTranscriptAccumulator();
+    acc.onReasoningDelta("Let me ");
+    acc.onReasoningDelta("check the file");
+
+    const reasoning = acc.snapshot().find((e) => e.kind === "reasoning");
+    if (reasoning?.kind !== "reasoning") throw new Error("expected reasoning");
+    // Accumulated, not last-delta-only — and still marked live so the panel
+    // renders the "Thinking…" spinner while the child is actually thinking.
+    expect(reasoning.text).toBe("Let me check the file");
+    expect(reasoning.streaming).toBe(true);
+  });
+
+  it("DLP-masks the ACCUMULATION so a secret split across deltas cannot leak", () => {
+    const acc = new SubAgentTranscriptAccumulator();
+    // Split mid-address: neither half matches an email pattern on its own.
+    acc.onReasoningDelta("mail leak");
+    acc.onReasoningDelta("@example.com now");
+
+    const joined = JSON.stringify(acc.snapshot());
+    expect(joined).not.toContain("leak@example.com");
+    expect(joined).toContain("***@example.com");
+  });
+
+  it("leaves the settled round identical to the round-fold-only path", () => {
+    const streamed = new SubAgentTranscriptAccumulator();
+    streamed.onReasoningDelta("partial thou");
+    streamed.onReasoningDelta("ght");
+    streamed.onAssistantRound("thinking about it", "final answer");
+
+    const folded = new SubAgentTranscriptAccumulator();
+    folded.onAssistantRound("thinking about it", "final answer");
+
+    // Persistence is unchanged by this feature: once the round closes, the
+    // streamed transcript is byte-identical to the one deltas never touched.
+    expect(streamed.snapshot()).toEqual(folded.snapshot());
+  });
+
+  it("finalizes a streamed thought even when the round reports none", () => {
+    const acc = new SubAgentTranscriptAccumulator();
+    acc.onReasoningDelta("mid-stream reasoning");
+    // A provider that streams reasoning but reports an empty round `thought`
+    // must not leave the card spinning forever.
+    acc.onAssistantRound("", "answer");
+
+    const reasoning = acc.snapshot().find((e) => e.kind === "reasoning");
+    if (reasoning?.kind !== "reasoning") throw new Error("expected reasoning");
+    expect(reasoning.streaming).toBe(false);
+    expect(reasoning.text).toBe("mid-stream reasoning");
+  });
+
+  it("starts each round's reasoning fresh", () => {
+    const acc = new SubAgentTranscriptAccumulator();
+    acc.onReasoningDelta("first round thought");
+    acc.onAssistantRound("first round thought", "first answer");
+    acc.onReasoningDelta("second round thought");
+
+    const live = acc.snapshot().filter((e) => e.kind === "reasoning").at(-1);
+    if (live?.kind !== "reasoning") throw new Error("expected reasoning");
+    expect(live.text).toBe("second round thought");
+  });
+
   it("folds a completed assistant round into reasoning + assistant entries", () => {
     const acc = new SubAgentTranscriptAccumulator();
     acc.onAssistantRound("thinking about it", "final answer");
