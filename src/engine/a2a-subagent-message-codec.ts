@@ -11,6 +11,7 @@ import {
   GUIDE_MAX_CHARS,
   GUIDE_MAX_ENTRIES,
 } from "./turn/guidance-limits.js";
+import { t } from "../i18n/index.js";
 
 const MESSAGE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
 const MESSAGE_KEYS = new Set([
@@ -283,30 +284,80 @@ export interface AgentMessageAddress {
   childTitle: string;
 }
 
+/** Task states are host-projected A2A enum values; anything else is not one. */
+const TASK_STATE_PATTERN = /^[A-Za-z][A-Za-z0-9_-]{0,31}$/;
+
+function readTaskState(message: A2AMessage): string {
+  const raw = message.metadata?.taskState;
+  return typeof raw === "string" && TASK_STATE_PATTERN.test(raw) ? raw : "unknown";
+}
+
+/**
+ * Host-composed stand-in for a report whose parts render to nothing.
+ *
+ * A bare envelope (`[Sub-Agent: title] (task …, message …)`) is unactionable:
+ * the parent LLM receives an id and no instruction, so the turn ends without a
+ * response. The producer is expected to always carry content; this is the
+ * last-line defense so no delivery can reach the parent as an id-only line.
+ */
+function hostComposedEmptyBody(
+  address: AgentMessageAddress,
+  message: A2AMessage,
+): string {
+  return t("be_a2aSubAgentMessage.emptyBodyFallback", {
+    taskState: readTaskState(message),
+    resumeId: address.childSessionId,
+  });
+}
+
+/**
+ * Prefix a delivered child report with the host's judgment instruction.
+ *
+ * Applied at the two parent CONSUMPTION points (mid-turn guidance injection and
+ * the next-turn mailbox drain), never inside the canonical `formattedText` that
+ * the mailbox persists and revalidates — so a report can never be wrapped twice.
+ */
+export function wrapChildReportForParentJudgment(text: string): string {
+  return `${t("be_a2aSubAgentMessage.parentJudgmentInstruction")}\n\n${text}`;
+}
+
 function formatAgentMessageWithDetections(
   address: AgentMessageAddress,
   message: A2AMessage,
-): { text: string; approvalLabel: string; childTitle: string; detections: number } {
+): {
+  text: string;
+  approvalLabel: string;
+  childTitle: string;
+  detections: number;
+  emptyBody: boolean;
+} {
   const normalizedTitle = normalizeTitle(address.childTitle);
   const approvalLabel = `[Sub-Agent: ${normalizedTitle.title}]`;
-  const body = message.parts.map(renderPart).filter(Boolean).join("\n\n");
+  const rendered = message.parts
+    .map(renderPart)
+    .filter((part) => part.trim().length > 0)
+    .join("\n\n");
+  const emptyBody = rendered.length === 0;
+  const body = emptyBody ? hostComposedEmptyBody(address, message) : rendered;
   return {
     approvalLabel,
     childTitle: normalizedTitle.title,
     text: `${approvalLabel} (task ${address.childSessionId}, message ${message.messageId})\n${body}`,
     detections: normalizedTitle.detections,
+    emptyBody,
   };
 }
 
 export function formatAgentMessage(
   address: AgentMessageAddress,
   message: A2AMessage,
-): { text: string; approvalLabel: string; childTitle: string } {
+): { text: string; approvalLabel: string; childTitle: string; emptyBody: boolean } {
   const formatted = formatAgentMessageWithDetections(address, message);
   return {
     text: formatted.text,
     approvalLabel: formatted.approvalLabel,
     childTitle: formatted.childTitle,
+    emptyBody: formatted.emptyBody,
   };
 }
 
@@ -318,6 +369,9 @@ export type CanonicalAgentMessageResult =
       formattedText: string;
       approvalLabel: string;
       childTitle: string;
+      /** The producer sent no renderable content; `formattedText` carries the
+       *  host-composed stand-in instead. Callers audit this as a warning. */
+      emptyBody: boolean;
     }
   | { ok: false; reason: "invalid-message" | "unsupported-part" };
 
@@ -337,6 +391,7 @@ export function canonicalizeAgentMessage(
       formattedText: formatted.text,
       approvalLabel: formatted.approvalLabel,
       childTitle: formatted.childTitle,
+      emptyBody: formatted.emptyBody,
     };
   } catch {
     return { ok: false, reason: "invalid-message" };
