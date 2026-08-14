@@ -30,6 +30,8 @@ export const en = {
     "This resumeId can NEVER be resumed — the rejection is structural (wrong task state, ownership, or persisted metadata), so retrying the SAME resumeId will fail identically every time. Do NOT retry it. If the work is still needed, start a NEW sub-agent for it, and tell the user the original agent could not be continued.",
   "be_agentSpawn.emptySummaryFallback":
     "Task state: {taskState} — the sub-agent produced no summary. Resume it with agent_spawn(resumeId: \"{resumeId}\") to see the details.",
+  "be_agentSpawn.statusRestoredHint":
+    "No run is live in this process, but {count} sub-agent(s) from this conversation survived a restart. An empty run list does NOT mean their work finished — call agent_list to see them with their resumeId and state.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "be_agentSpawn.toolDescription":
@@ -61,4 +63,6 @@ export const ko: Record<keyof typeof en, string> = {
     "이 resumeId 는 다시는 재개할 수 없습니다 — 거부 사유가 구조적(task 상태/소유권/영속 메타데이터 불일치)이므로 같은 resumeId 재시도는 매번 동일하게 실패합니다. 재시도하지 마세요. 작업이 여전히 필요하면 새 sub-agent 로 시작하고, 원래 에이전트를 이어갈 수 없었음을 사용자에게 알리세요.",
   "be_agentSpawn.emptySummaryFallback":
     "작업 상태: {taskState} — 서브에이전트가 요약을 남기지 않았습니다. agent_spawn(resumeId: \"{resumeId}\") 로 재개해 상세를 확인하세요.",
+  "be_agentSpawn.statusRestoredHint":
+    "이 프로세스에는 살아 있는 run 이 없지만, 이 대화의 sub-agent {count} 개가 재시작 후에도 남아 있습니다. run 목록이 비었다고 해서 그 작업이 끝난 것이 아닙니다 — agent_list 를 호출하면 resumeId 와 상태까지 확인할 수 있습니다.",
 };

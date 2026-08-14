@@ -9,9 +9,11 @@
  *
  * These tests pin the invariants that make the record survive:
  *   1. the user message is durable before the first provider call,
- *   2. rounds completed before a mid-turn throw stay durable,
+ *   2. a tool that rejects its own input at the authorization boundary costs
+ *      that ONE call, not the turn — earlier rounds stay durable and the loop
+ *      keeps going,
  *   3. a provider stream failure keeps its partial round + error marker,
- *   4. the persisted partial turn replays through `historyToEntries`.
+ *   4. the persisted turn replays through `historyToEntries`.
  *
  * The loops built here carry no `postTurnHookChain`, which is also how
  * `SubAgentRunner` constructs a child loop — so these cases exercise the same
@@ -41,13 +43,16 @@ class ScriptedProvider implements LLMProvider {
   private index = 0;
 
   constructor(
-    private readonly turns: StreamEvent[][],
+    /** An `Error` entry makes that round's stream throw — a transport failure. */
+    private readonly turns: (StreamEvent[] | Error)[],
     private readonly onStreamStart?: () => void,
   ) {}
 
   async *streamTurn(_params: StreamTurnParams): AsyncIterable<StreamEvent> {
     this.onStreamStart?.();
-    yield* this.turns[this.index++] ?? [];
+    const turn = this.turns[this.index++];
+    if (turn instanceof Error) throw turn;
+    yield* turn ?? [];
   }
 }
 
@@ -76,13 +81,13 @@ function buildLoop(
  * A tool whose approval-cache key throws — the shape that lost the reported
  * turn. `approvalCacheKeyFor` runs the tool's own zod parse (BashTool's
  * `approvalCacheKey` does exactly this) at the invocation runner's authority
- * boundary, OUTSIDE the handler's error boundary, so an over-max
- * `timeoutSeconds` escapes the loop as a rejected `lvis:chat:send` instead of
- * becoming an error tool_result.
+ * boundary, which sits before the per-call execution boundary. The invocation
+ * runner now absorbs that rejection into an `is_error` tool_result, so these
+ * cases pin that ONE call fails rather than the whole `lvis:chat:send`.
  */
-function explodingTool(message: string) {
+function inputRejectingTool(message: string) {
   return createDynamicTool({
-    name: "exploding_tool",
+    name: "input_rejecting_tool",
     description: "rejects its own input at the approval boundary",
     source: "builtin",
     category: "read",
@@ -159,7 +164,7 @@ describe("transcript durability", () => {
     });
   });
 
-  it("keeps completed rounds durable when a tool throws mid-turn", async () => {
+  it("degrades a tool's own input rejection to an error tool_result, not a lost turn", async () => {
     await withTmpMemory(async (memoryManager) => {
       const toolRegistry = new ToolRegistry();
       toolRegistry.register(
@@ -172,7 +177,7 @@ describe("transcript durability", () => {
           execute: async () => ({ output: "tool round 1 output", isError: false }),
         }),
       );
-      toolRegistry.register(explodingTool("timeoutSeconds too_big"));
+      toolRegistry.register(inputRejectingTool("timeoutSeconds too_big"));
 
       const provider = new ScriptedProvider([
         [
@@ -182,38 +187,46 @@ describe("transcript durability", () => {
         ],
         [
           { type: "text_delta", text: "이제 두 번째 도구" },
-          { type: "tool_call", id: "call-2", name: "exploding_tool", input: {} },
+          { type: "tool_call", id: "call-2", name: "input_rejecting_tool", input: {} },
           { type: "message_complete", stopReason: "tool_use" },
+        ],
+        [
+          { type: "text_delta", text: "인자를 고쳐서 다시 시도하겠습니다" },
+          { type: "message_complete", stopReason: "end_turn" },
         ],
       ]);
 
-      await expect(
-        buildLoop(memoryManager, toolRegistry, provider).runTurn(
-          "두 라운드 작업",
-          undefined,
-          undefined,
-          { inputOrigin: "user-keyboard" },
-        ),
-      ).rejects.toThrow("timeoutSeconds too_big");
+      // The turn SETTLES. Before the absorption the same call rejected
+      // `lvis:chat:send`, so one malformed argument ended the user's turn and
+      // the earlier round survived only because the transcript was flushed.
+      const result = await buildLoop(memoryManager, toolRegistry, provider).runTurn(
+        "두 라운드 작업",
+        undefined,
+        undefined,
+        { inputOrigin: "user-keyboard" },
+      );
+      expect(result.stopReason).not.toBe("stream-error");
 
       const messages = persisted(memoryManager);
       expect(messages[0]).toMatchObject({ role: "user", content: "두 라운드 작업" });
-      expect(messages[1]).toMatchObject({
-        role: "assistant",
-        content: "먼저 도구를 실행합니다",
-      });
       expect(messages[2]).toMatchObject({
         role: "tool_result",
         toolUseId: "call-1",
         content: "tool round 1 output",
       });
-      expect(messages[3]).toMatchObject({
-        role: "assistant",
-        content: "이제 두 번째 도구",
-      });
-      // The failed round's own assistant message is the tail: its tool_use has
-      // no result, which `normalizeToolPairInvariant` repairs on load.
-      expect(messages).toHaveLength(4);
+
+      const rejected = messages.find(
+        (m) => m.role === "tool_result" && m.toolUseId === "call-2",
+      );
+      expect(rejected).toMatchObject({ isError: true });
+      // The model is told what it got wrong, so the next round can fix it.
+      expect(String(rejected?.content)).toContain("timeoutSeconds too_big");
+      // And the loop went on to produce a real reply.
+      expect(
+        messages.some(
+          (m) => m.role === "assistant" && m.content === "인자를 고쳐서 다시 시도하겠습니다",
+        ),
+      ).toBe(true);
     });
   });
 
@@ -245,19 +258,20 @@ describe("transcript durability", () => {
   it("replays a persisted mid-turn failure through historyToEntries", async () => {
     await withTmpMemory(async (memoryManager) => {
       const toolRegistry = new ToolRegistry();
-      toolRegistry.register(explodingTool("boom"));
+      toolRegistry.register(inputRejectingTool("boom"));
       const provider = new ScriptedProvider([
         [
           { type: "text_delta", text: "작업 시작" },
-          { type: "tool_call", id: "call-1", name: "exploding_tool", input: {} },
+          { type: "tool_call", id: "call-1", name: "input_rejecting_tool", input: {} },
           { type: "message_complete", stopReason: "tool_use" },
         ],
+        [{ type: "message_complete", stopReason: "end_turn" }],
       ]);
       const loop = buildLoop(memoryManager, toolRegistry, provider);
 
-      await expect(
-        loop.runTurn("리로드 확인", undefined, undefined, { inputOrigin: "user-keyboard" }),
-      ).rejects.toThrow("boom");
+      await loop.runTurn("리로드 확인", undefined, undefined, {
+        inputOrigin: "user-keyboard",
+      });
 
       // Reload the way the app does: engine load (which repairs the unpaired
       // tool_use tail) then the renderer's persisted-history projection.
