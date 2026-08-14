@@ -57,12 +57,17 @@ type PowerShellParser = (command: string) => Promise<PowerShellAstSummary>;
 export const PowerShellToolInputSchema = z.object({
   command: z.string().min(1).describe("PowerShell command to execute"),
   cwd: z.string().optional().describe("Working directory override"),
+  // Optional-but-defaulted and strictly positive — see BashToolInputSchema.
   timeoutSeconds: z
     .number()
     .int()
     .min(1)
-    .max(TOOL_TIMEOUT_POLICY.shellMaxMs / 1000)
-    .default(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000),
+    .default(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000)
+    .describe(
+      "Seconds to wait before the command is killed. Positive integer; defaults to " +
+        `${TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000}. Start with the default and only pass a ` +
+        "larger value when a previous call timed out.",
+    ),
 });
 
 const OUTPUT_CAP = 12_000;

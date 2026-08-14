@@ -172,9 +172,10 @@ export interface ChatSettings {
   systemPrompt: string;
   autoCompact: boolean;
   /**
-   * Tool rounds a sub-agent may run before `round-cap` suspends it.
-   * SubAgentRunner clamps this to its own hard ceiling, so a value larger than
-   * the loop limit is safely narrowed rather than honoured.
+   * Tool rounds a sub-agent may run before `round-cap` suspends it. Any
+   * positive integer — no ceiling sits above it. SubAgentRunner runs exactly
+   * this budget and the child ConversationLoop honours it, so the number in
+   * Settings is the number that runs.
    */
   subAgentMaxRounds: number;
 }

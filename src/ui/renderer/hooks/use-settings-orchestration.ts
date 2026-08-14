@@ -1,6 +1,5 @@
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
-  SUBAGENT_MAX_ROUNDS_MAX,
   SUBAGENT_MAX_ROUNDS_MIN,
 } from "../../../shared/subagent-rounds.js";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -518,13 +517,10 @@ export function useSettingsOrchestration(
 
   const setSubAgentMaxRoundsLive = useCallback((next: number) => {
     const previous = subAgentMaxRounds;
-    // Clamp in the UI as well as the engine: the engine clamp is the security
-    // boundary, this one keeps the persisted value from looking valid when it
-    // is not (a stored 9999 that silently runs as 60 is a lie in the file).
-    const clamped = Math.max(
-      SUBAGENT_MAX_ROUNDS_MIN,
-      Math.min(SUBAGENT_MAX_ROUNDS_MAX, Math.floor(next)),
-    );
+    // Floor only: below 1 an agent cannot finish a single tool round-trip.
+    // No upper clamp — the engine runs whatever is stored, so narrowing here
+    // would make the settings file disagree with what actually runs.
+    const clamped = Math.max(SUBAGENT_MAX_ROUNDS_MIN, Math.floor(next));
     setSubAgentMaxRounds(clamped);
     if (!settingsLoaded) return;
     void api

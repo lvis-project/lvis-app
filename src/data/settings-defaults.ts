@@ -30,11 +30,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
       "You are LVIS, a local knowledge assistant. You provide accurate, helpful answers grounded in the user's documents and context. Respond in the user's language.",
     autoCompact: true,
     // Tool rounds a sub-agent may run before it hits `round-cap` and suspends.
-    // Clamped to MAX_TURNS_CAP by SubAgentRunner, so a large value here cannot
-    // exceed the loop's hard ceiling. Exposed because the right budget depends
-    // on the work: a deep multi-repo review needs far more rounds than a
-    // single-file lookup, and guessing wrong shows up as an agent that stops
-    // mid-investigation with partial output.
+    // Run as configured — no ceiling narrows it. Exposed because the right
+    // budget depends on the work: a deep multi-repo review needs far more
+    // rounds than a single-file lookup, and guessing wrong shows up as an
+    // agent that stops mid-investigation with partial output.
     subAgentMaxRounds: SUBAGENT_MAX_ROUNDS_DEFAULT,
   },
   a2aRemote: {
