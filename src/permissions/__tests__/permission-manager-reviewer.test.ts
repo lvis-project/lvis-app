@@ -59,6 +59,17 @@ function makeManager(): {
   return { pm, cache, queue, classifier };
 }
 
+
+/**
+ * Tier-2 parent-adjudication policy is inert for these cases; every reviewer
+ * settings literal reuses the shipped default so the block stays one value.
+ */
+const PARENT_ADJUDICATION = {
+  maxVerdict: "medium",
+  timeoutMs: 30_000,
+  maxPerChildRun: 200,
+} as const;
+
 describe("PermissionManager.dispatchReviewer", () => {
   let pm: PermissionManager;
   let cache: VerdictCache;
@@ -760,6 +771,7 @@ describe("#664 flood guard — degraded rule reviewer does not over-defer headle
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
         interactive: { autoApprove: "low" },
+        parentAdjudication: PARENT_ADJUDICATION,
       }),
       // Factory present (boot contract honored) but the user has not
       // configured an API key → provider unconfigured → degrade to rule.

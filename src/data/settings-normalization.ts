@@ -1185,6 +1185,9 @@ export function normalizeFeatureFlags(input: unknown): FeatureFlags {
   if (typeof obj.subAgentAutonomousWake === "boolean") {
     result.subAgentAutonomousWake = obj.subAgentAutonomousWake;
   }
+  if (typeof obj.subAgentParentAdjudication === "boolean") {
+    result.subAgentParentAdjudication = obj.subAgentParentAdjudication;
+  }
   if (typeof obj.a2aLoopbackServer === "boolean") {
     result.a2aLoopbackServer = obj.a2aLoopbackServer;
   }
