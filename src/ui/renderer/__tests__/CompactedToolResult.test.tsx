@@ -34,7 +34,7 @@ describe("CompactedToolResult", () => {
         toolUseId={TOOL_USE_ID}
         toolName="Read"
         input={{ path: "/tmp/file.txt" }}
-        stubContent={STUB}
+        compactedResultText={STUB}
         sessionId={SESSION_ID}
       />,
     );
@@ -55,7 +55,7 @@ describe("CompactedToolResult", () => {
       <CompactedToolResult
         toolUseId={TOOL_USE_ID}
         toolName="Read"
-        stubContent={STUB}
+        compactedResultText={STUB}
         sessionId={SESSION_ID}
       />,
     );
@@ -92,7 +92,7 @@ describe("CompactedToolResult", () => {
       <CompactedToolResult
         toolUseId={TOOL_USE_ID}
         toolName="Read"
-        stubContent={STUB}
+        compactedResultText={STUB}
         sessionId={SESSION_ID}
       />,
     );
@@ -119,7 +119,7 @@ describe("CompactedToolResult", () => {
       <CompactedToolResult
         toolUseId={TOOL_USE_ID}
         toolName="Read"
-        stubContent={STUB}
+        compactedResultText={STUB}
         sessionId={SESSION_ID}
       />,
     );
@@ -142,7 +142,7 @@ describe("CompactedToolResult", () => {
       <CompactedToolResult
         toolUseId={TOOL_USE_ID}
         toolName="Read"
-        stubContent={STUB}
+        compactedResultText={STUB}
         sessionId={SESSION_ID}
       />,
     );
@@ -164,7 +164,7 @@ describe("CompactedToolResult", () => {
       <CompactedToolResult
         toolUseId={TOOL_USE_ID}
         toolName="Read"
-        stubContent={STUB}
+        compactedResultText={STUB}
         sessionId={SESSION_ID}
       />,
     );
@@ -188,7 +188,7 @@ describe("CompactedToolResult", () => {
       <CompactedToolResult
         toolUseId={TOOL_USE_ID}
         toolName="Read"
-        stubContent={STUB}
+        compactedResultText={STUB}
         sessionId={SESSION_ID}
       />,
     );
@@ -217,7 +217,7 @@ describe("CompactedToolResult", () => {
       <CompactedToolResult
         toolUseId={TOOL_USE_ID}
         toolName="Read"
-        stubContent={STUB}
+        compactedResultText={STUB}
         sessionId={SESSION_ID}
       />,
     );

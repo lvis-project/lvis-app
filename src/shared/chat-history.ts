@@ -32,7 +32,7 @@ export type SerializedToolDisplayMeta = {
   durationMs?: number;
 };
 /** Permission review verdict replayed onto the tool row on session reload. */
-export type SerializedPermissionReviewMeta = NonNullable<MessageMeta["permissionReview"]>;
+type SerializedPermissionReviewMeta = NonNullable<MessageMeta["permissionReview"]>;
 
 // Exact IPC payload emitted by serializeHistoryMessage() for renderer history
 // replay: multimodal content is flattened at the boundary, while persisted

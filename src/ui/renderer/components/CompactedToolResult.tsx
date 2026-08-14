@@ -38,8 +38,8 @@ function truncateInput(input: Record<string, unknown> | undefined): string {
 }
 
 /** Extract original char count from stub text for display fallback. */
-function parseStubChars(stubContent: string): number | null {
-  const m = stubContent.match(/(?:origLen|originalBytes)=(\d+)/);
+function parseStubChars(compactedResultText: string): number | null {
+  const m = compactedResultText.match(/(?:origLen|originalBytes)=(\d+)/);
   return m ? parseInt(m[1], 10) : null;
 }
 
@@ -56,7 +56,7 @@ export interface CompactedToolResultProps {
   /** Original tool input, for short display in header */
   input?: Record<string, unknown>;
   /** Stub content — `[tool_result stripped: ...]` */
-  stubContent: string;
+  compactedResultText: string;
   /** Active session id — passed to IPC for session guard */
   sessionId: string;
 }
@@ -65,7 +65,7 @@ export function CompactedToolResult({
   toolUseId,
   toolName,
   input,
-  stubContent,
+  compactedResultText,
   sessionId,
 }: CompactedToolResultProps) {
   const [state, setState] = useState<"collapsed" | "loading" | "expanded" | "missing">(
@@ -75,7 +75,7 @@ export function CompactedToolResult({
   const { t } = useTranslation();
 
   const inputStr = truncateInput(input);
-  const origChars = parseStubChars(stubContent);
+  const origChars = parseStubChars(compactedResultText);
 
   async function handleExpand() {
     // cache hit — verbatim already fetched, skip IPC
