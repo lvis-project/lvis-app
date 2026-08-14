@@ -216,8 +216,13 @@ export async function bootstrap(
     // failure of this lane — the ask escalates to the user.
     {
       adjudicator: () => ctx.parentAdjudicator,
-      // No feature block ⇒ off ⇒ the chain the app had before tier 2. OFF is
-      // the stricter state, so an absent or unreadable flag cannot widen it.
+      // The flag itself ships ON: `settings-defaults.ts` sets it, and the
+      // settings service merges stored flags over those defaults, so both an
+      // absent key and a non-boolean one resolve to the default rather than to
+      // this `?? false`. What `?? false` covers is the narrower case of a
+      // settings service with no feature block at all — an uninitialised read,
+      // where the host cannot establish the flag's state and therefore does
+      // not act on it.
       isEnabled: () =>
         settingsService.get("features")?.subAgentParentAdjudication ?? false,
       policy: () =>
