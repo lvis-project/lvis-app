@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { A2ASubAgentMessageBus } from "../a2a-subagent-message-bus.js";
 import type { ConversationLoop } from "../conversation-loop.js";
-import type { ResolvedSubAgentAddress } from "../subagent-message-mailbox.js";
+import type { ResolvedSubAgentAddress } from "../a2a-subagent-message-bus.js";
 import { A2A_ROLE_AGENT } from "../../shared/a2a.js";
 
 /**
