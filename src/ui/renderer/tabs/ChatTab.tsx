@@ -7,7 +7,6 @@ import { Label } from "../../../components/ui/label.js";
 import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.js";
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
-  SUBAGENT_MAX_ROUNDS_MAX,
   SUBAGENT_MAX_ROUNDS_MIN,
 } from "../../../shared/subagent-rounds.js";
 import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
@@ -238,7 +237,8 @@ export function ChatTab({
           <Input
             type="number"
             min={SUBAGENT_MAX_ROUNDS_MIN}
-            max={SUBAGENT_MAX_ROUNDS_MAX}
+            // No `max`: the engine runs the configured budget as-is, so the
+            // field must not refuse a value the engine would honour.
             // Commit on blur, not per keystroke: typing "12" passes through
             // "1", and a per-keystroke write would persist that and clamp it
             // back into the field mid-edit. `key` remounts the field when the
