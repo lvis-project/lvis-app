@@ -89,6 +89,60 @@ describe("host-determined risk bypass", () => {
     expect(trace.outcome).toBe("fresh");
   });
 
+  it("never calls the LLM for builtin agent_status and keeps the rule LOW", async () => {
+    const { provider, spy } = alwaysHighProvider();
+    const classifier = new LlmRiskClassifier(provider, "test-model");
+
+    const trace = await classifier.classifyWithTrace(
+      ctx({ toolName: "agent_status", source: "builtin", category: "meta", pathFields: [], finalInput: {} }),
+    );
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(trace.outcome).toBe("host-determined");
+    expect(trace.finalVerdict.level).toBe("low");
+    expect(trace.llmVerdict).toBeNull();
+  });
+
+  it("never calls the LLM for builtin agent_list under its declared read category", async () => {
+    const { provider, spy } = alwaysHighProvider();
+    const classifier = new LlmRiskClassifier(provider, "test-model");
+
+    // agent_list honestly declares `read`, not `meta`. The bypass tracks each
+    // tool's own declared category rather than a single hard-coded one.
+    const trace = await classifier.classifyWithTrace(
+      ctx({ toolName: "agent_list", source: "builtin", category: "read", pathFields: [], finalInput: {} }),
+    );
+
+    expect(spy).not.toHaveBeenCalled();
+    expect(trace.outcome).toBe("host-determined");
+    expect(trace.finalVerdict.level).toBe("low");
+  });
+
+  it("does NOT bypass agent_list under a category it does not declare", async () => {
+    const { provider, spy } = alwaysHighProvider();
+    const classifier = new LlmRiskClassifier(provider, "test-model");
+
+    const trace = await classifier.classifyWithTrace(
+      ctx({ toolName: "agent_list", source: "builtin", category: "meta", pathFields: [], finalInput: {} }),
+    );
+
+    expect(spy).toHaveBeenCalled();
+    expect(trace.outcome).toBe("fresh");
+  });
+
+  it("does NOT bypass agent_interrupt — a mutating meta tool keeps the LLM lane", async () => {
+    const { provider, spy } = alwaysHighProvider();
+    const classifier = new LlmRiskClassifier(provider, "test-model");
+
+    const trace = await classifier.classifyWithTrace(
+      ctx({ toolName: "agent_interrupt", source: "builtin", category: "meta", pathFields: [], finalInput: { id: "x" } }),
+    );
+
+    expect(spy).toHaveBeenCalled();
+    expect(trace.outcome).toBe("fresh");
+    expect(trace.finalVerdict.level).toBe("high");
+  });
+
   it("does NOT bypass other builtin tools — write still composes with the LLM", async () => {
     const { provider, spy } = alwaysHighProvider();
     const classifier = new LlmRiskClassifier(provider, "test-model");

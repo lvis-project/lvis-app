@@ -732,12 +732,62 @@ export async function runToolInvocation(
     // The cache key is an authority boundary too: derive it only after the
     // canonical host shell substrate is sealed, then reuse its exact public
     // projection through reviewer, modal, rationale, result, and audit paths.
-    const approvalCacheKey = approvalCacheKeyFor(
-      tool,
-      finalInput,
-      executionCwd,
-      hostShellExecutionPlanAudit,
-    );
+    //
+    // Absorption boundary. `approvalCacheKeyFor` runs the tool's OWN key
+    // derivation, and several tools parse their input schema to build it
+    // (BashTool hashes the zod-parsed `command`/`cwd`). That parse sits on the
+    // AUTHORIZATION path, before the per-call execution boundary that turns a
+    // tool's own throw into an `is_error` tool_result — so a single malformed
+    // tool call used to escape as an exception through `executeOne`, past the
+    // conversation loop, and reject the whole `lvis:chat:send`: one bad
+    // argument killed the user's turn. Degrading it here keeps the failure
+    // proportionate to its cause (this one call) and, because the model gets a
+    // normal error result naming the violation, self-correctable on the next
+    // round. Deliberately tool-agnostic: any tool whose key derivation rejects
+    // its input takes this path, not just bash.
+    let approvalCacheKey: string | undefined;
+    try {
+      approvalCacheKey = approvalCacheKeyFor(
+        tool,
+        finalInput,
+        executionCwd,
+        hostShellExecutionPlanAudit,
+      );
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : String(err);
+      const msg = t("be_executor.invalidToolInput", {
+        name: toolUse.name,
+        error: detail,
+      });
+      const durationMs = Date.now() - startTime;
+      emitToolStart(callbacks, toolUse.name, finalInput, meta);
+      callbacks?.onToolEnd?.(toolUse.name, msg, true, meta, undefined, durationMs);
+      await auditCurrentToolCall(
+        sessionId,
+        toolUse.name,
+        source,
+        trust,
+        finalInput,
+        msg,
+        true,
+        startTime,
+        {
+          decision: "deny",
+          reason: t("be_executor.invalidToolInputAudit"),
+          layer: 0,
+        },
+        Infinity,
+        permissionContext,
+        invocationCategory,
+        executionCwd,
+      );
+      return withHostShellExecutionPlan({
+        tool_use_id: toolUse.id,
+        content: msg,
+        is_error: true,
+        durationMs,
+      });
+    }
     // Exact Settings decisions are evaluated at the first point where every
     // identity component is host-finalized. This is deliberately before shell
     // and allowed-directory prompts: a persistent exact deny must block the

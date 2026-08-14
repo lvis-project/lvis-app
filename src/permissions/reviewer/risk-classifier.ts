@@ -651,9 +651,9 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     return { level: "low", reason: "write at allowed-dir leaf" };
   },
 
-  // ── meta rules (1) ──────────────────────────────────────
+  // ── meta rules (2) ──────────────────────────────────────
   //
-  // `agent_spawn` alone. Before this rule the `meta` category matched NOTHING
+  // `agent_spawn` first. Before this rule the `meta` category matched NOTHING
   // and fell through to the fail-safe MEDIUM at the bottom of `classify()` —
   // a rule GAP, not a judgement. `resolveReviewerDecision` asks on MEDIUM
   // unless the threshold is itself `medium`, so every spawn raised a modal,
@@ -672,6 +672,21 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     if (ctx.category !== "meta") return null;
     if (ctx.source !== "builtin" || ctx.toolName !== "agent_spawn") return null;
     return { level: "low", reason: "agent spawn (child tool effects gated separately)" };
+  },
+  // `agent_status` is a pure read of host-owned sub-agent bookkeeping. It has no
+  // path, network, or command argument: its single optional `id` is a lookup key,
+  // and the run set it may read is scoped by the HOST-supplied origin session id
+  // (`ctx.metadata.sessionId`), not by anything the model passes. It mutates
+  // nothing and confers no authority. Without this it fell to the fail-safe
+  // MEDIUM at the bottom of `classify()` — a rule GAP identical in shape to the
+  // pre-existing `agent_spawn` one — so every status poll raised a modal, which
+  // is why a restarted session's operator saw approvals for reading state.
+  // Name-scoped for the same reason as the rule above: a blanket `meta` LOW would
+  // cover mutating meta tools such as `agent_interrupt`.
+  (ctx) => {
+    if (ctx.category !== "meta") return null;
+    if (ctx.source !== "builtin" || ctx.toolName !== "agent_status") return null;
+    return { level: "low", reason: "agent status (host-scoped read of run state)" };
   },
 
   // ── read rules (2) — read shouldn't usually reach reviewer ──
@@ -888,26 +903,45 @@ function isTransientReviewerError(err: unknown): boolean {
 }
 
 /**
- * Tools whose risk verdict is fully determined by host structure.
+ * Builtin tools whose risk verdict is fully determined by host structure,
+ * each mapped to the category its own LOW rule is scoped to.
  *
  * Membership bar is high: a tool belongs here only when its safety argument
- * rests on an invariant the HOST enforces elsewhere (for `agent_spawn`, the
- * child's every effectful tool call re-enters PermissionManager), making the
- * LLM reviewer's opinion not merely redundant but unanswerable — the invariant
- * is not part of its prompt. Everything else keeps the max(rule, llm) path.
+ * rests on an invariant the HOST enforces elsewhere, making the LLM reviewer's
+ * opinion not merely redundant but unanswerable — the invariant is not part of
+ * its prompt. Everything else keeps the max(rule, llm) path.
+ *
+ *   - `agent_spawn` (meta) — the child's every effectful tool call re-enters
+ *     PermissionManager, so spawning confers no new authority.
+ *   - `agent_status` (meta) — reads host-owned run bookkeeping scoped by the
+ *     host-supplied origin session id; no argument reaches an effect.
+ *   - `agent_list` (read) — returns agent profile definitions plus this
+ *     conversation's own persisted sub-agent entries; it takes NO input at all
+ *     (`properties: {}`), so there is nothing for a model to weigh.
+ *
+ * Both readers kept being rated HIGH by the reviewer LLM on the same
+ * "sub-agents can do anything" reasoning it applied to `agent_spawn`, and
+ * `max(rule, llm)` let that guess override the host's LOW — turning a status
+ * poll after a restart into an approval modal.
+ *
+ * The value is the EXPECTED category rather than a single hard-coded one: these
+ * tools honestly declare different categories (`agent_list` is `read` because it
+ * reads, `agent_status` is `meta`), and pinning each tool to its own declared
+ * category preserves the co-scoping invariant below per-tool.
  */
-const HOST_DETERMINED_RISK_TOOLS: ReadonlySet<string> = new Set(["agent_spawn"]);
+const HOST_DETERMINED_RISK_TOOLS: ReadonlyMap<string, ToolCategory> = new Map([
+  ["agent_spawn", "meta"],
+  ["agent_status", "meta"],
+  ["agent_list", "read"],
+]);
 
 function isHostDeterminedRiskTool(input: ToolInvocationContext): boolean {
-  // Co-scoped with the meta rule that justifies the bypass (category included):
-  // the LOW rule below keys on (category, source, toolName), and keying the
-  // bypass on fewer axes would let a category drift hand the final verdict to
-  // a DIFFERENT rule with no LLM cross-check (architect review MINOR-1).
-  return (
-    input.category === "meta"
-    && input.source === "builtin"
-    && HOST_DETERMINED_RISK_TOOLS.has(input.toolName)
-  );
+  // Co-scoped with the rule that justifies each bypass (category included):
+  // those LOW rules key on (category, source, toolName), and keying the bypass
+  // on fewer axes would let a category drift hand the final verdict to a
+  // DIFFERENT rule with no LLM cross-check (architect review MINOR-1).
+  if (input.source !== "builtin") return false;
+  return HOST_DETERMINED_RISK_TOOLS.get(input.toolName) === input.category;
 }
 
 export class LlmRiskClassifier implements RiskClassifier {

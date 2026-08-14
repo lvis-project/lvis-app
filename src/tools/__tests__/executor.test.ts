@@ -416,6 +416,29 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     expect(results[0].content).toBe("dynamic read");
   });
 
+  it("absorbs a schema violation raised while deriving the approval cache key", async () => {
+    const registry = new ToolRegistry();
+    registry.register(new BashTool());
+    const executor = new ToolExecutor(registry);
+
+    // `timeoutSeconds: 0` violates `.min(1)`. BashTool's `approvalCacheKey`
+    // parses its input to hash it, and that parse runs on the AUTHORIZATION
+    // path — before the boundary that turns a tool's own throw into a result.
+    // The rejection used to escape as an exception and take the whole
+    // `lvis:chat:send` with it.
+    const results = await executor.executeAll(
+      [{ id: "tu-bad-schema", name: "bash", input: { command: "echo hi", timeoutSeconds: 0 } }],
+      { sessionId: "sess-bad-schema", permissionContext: userPermissionContext() },
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0].tool_use_id).toBe("tu-bad-schema");
+    expect(results[0].is_error).toBe(true);
+    // Names the tool and the violation so the model can correct the next call.
+    expect(results[0].content).toContain("bash");
+    expect(results[0].content).toContain("timeoutSeconds");
+  });
+
   it.skipIf(process.platform === "win32")("threads shell approvalCacheKey through permission rules so one command does not authorize another", async () => {
     const registry = new ToolRegistry();
     const bash = new BashTool();
