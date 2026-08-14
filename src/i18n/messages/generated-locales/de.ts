@@ -381,6 +381,7 @@ export const deMessages: Record<string, string> = {
   "be_errorClassifier.rateLimitExceeded": "Das Minutentariflimit wurde überschritten – bitte versuchen Sie es in Kürze noch einmal. Überprüfen Sie die Anbieterdiagnose auf bestimmte Grenzwerte und Wiederholungszeiten.",
   "be_errorClassifier.unknownError": "Es ist ein Fehler aufgetreten: {raw}",
   "be_executor.approvalDeniedByUser": "[Genehmigung verweigert] Tool „{name}“ – Benutzer hat die Ausführung verweigert.",
+  "be_executor.approvalDeniedByParent": "[Genehmigung verweigert] Tool „{name}“ – der übergeordnete Agent hat abgelehnt: {reason}",
   "be_executor.approvalGateError": "[Genehmigungsfehler] Tool „{name}“ – interner Fehler im Genehmigungsgate: {error}",
   "be_executor.approvalGateMissing": "[Genehmigungs-Gate nicht verbunden] Tool „{name}“ ({source}) – Entscheidung einholen, aber kein Genehmigungs-Gate verfügbar, blockiert. {reason}",
   "be_executor.approvalGateMissingLayer1": "[Genehmigungs-Gate nicht verbunden – Ebene 1] Tool „{name}“ ({source}) – Pfad liegt außerhalb der zulässigen Verzeichnisse, ist jedoch blockiert, da das Genehmigungs-Gate nicht verfügbar ist.",
