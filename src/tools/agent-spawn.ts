@@ -418,7 +418,14 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           // error surfaced as a bare string, the parent had nothing telling it
           // the child was still resumable, and it respawned FRESH agents —
           // silently discarding the suspended child's entire context.
-          const resumable = resumeId !== undefined && result.resumeExhausted !== true;
+          //
+          // Retry-same-id guidance is for TRANSIENT failures only. Structural
+          // policy rejections (`resumeInvalid` — wrong task state, origin
+          // mismatch, tampered metadata) fail identically forever; repeating
+          // the retry text there guides the model into an infinite loop.
+          const resumable = resumeId !== undefined
+            && result.resumeExhausted !== true
+            && result.resumeInvalid !== true;
           return {
             output: JSON.stringify({
               error: message,
@@ -431,6 +438,9 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
                 : {}),
               ...(result.resumeExhausted === true
                 ? { resumeExhausted: true, resumeGuidance: t("be_agentSpawn.resumeExhaustedGuidance") }
+                : {}),
+              ...(result.resumeInvalid === true
+                ? { resumeInvalid: true, resumeGuidance: t("be_agentSpawn.resumeInvalidGuidance") }
                 : {}),
             }),
             isError: true,

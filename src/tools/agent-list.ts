@@ -1,7 +1,7 @@
 import { createDynamicTool, type Tool } from "./base.js";
 import type { AgentProfileStore } from "../main/agent-profile-store.js";
 import type { SubAgentRunner } from "../engine/subagent-runner.js";
-import { A2ATaskState } from "../shared/a2a.js";
+import { isResumableSubAgentTaskState } from "../engine/subagent-runner.js";
 import { t } from "../i18n/index.js";
 
 export interface AgentListToolDeps {
@@ -9,13 +9,6 @@ export interface AgentListToolDeps {
   /** Same accessor agent_spawn uses; absent on surfaces without a runner. */
   getRunner?: () => SubAgentRunner | undefined;
 }
-
-/** Sub-agent states a parent can act on by resuming. */
-const RESUMABLE_TASK_STATES = new Set<string>([
-  A2ATaskState.INPUT_REQUIRED,
-  A2ATaskState.SUBMITTED,
-  A2ATaskState.WORKING,
-]);
 
 export function createAgentListTool(deps: AgentListToolDeps): Tool {
   return createDynamicTool({
@@ -52,10 +45,13 @@ export function createAgentListTool(deps: AgentListToolDeps): Tool {
         title: entry.title,
         resumeId: entry.childSessionId,
         taskState: entry.taskState ?? "unrecorded",
-        // Unrecorded means the child died before writing a projection — at
-        // least as unfinished as WORKING, so it stays resumable.
-        resumable: entry.taskState === undefined
-          || RESUMABLE_TASK_STATES.has(entry.taskState),
+        // Resumability comes from the runner's own resume-gate predicate:
+        // only INPUT_REQUIRED is accepted there, so only INPUT_REQUIRED may
+        // be advertised here. SUBMITTED/WORKING/unrecorded children were
+        // interrupted mid-run — the model still benefits from seeing they
+        // existed (start fresh if that work is needed again), but a resume
+        // attempt on them is a guaranteed permanent rejection.
+        resumable: isResumableSubAgentTaskState(entry.taskState),
       }));
 
       return {
