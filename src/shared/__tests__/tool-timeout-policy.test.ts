@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { TOOL_TIMEOUT_POLICY } from "../tool-timeout-policy.js";
+import { TOOL_TIMEOUT_POLICY, resolveSubAgentCeilingMs } from "../tool-timeout-policy.js";
+import {
+  SUBAGENT_MAX_ROUNDS_DEFAULT,
+  SUBAGENT_MAX_ROUNDS_MIN,
+} from "../subagent-rounds.js";
 
 describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
   it("no shell max exists — a timed-out call must be able to retry with a larger budget", () => {
@@ -29,7 +33,7 @@ describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
     expect(finitePositive(TOOL_TIMEOUT_POLICY.globalCeilingMs)).toBe(true);
     expect(finitePositive(TOOL_TIMEOUT_POLICY.pluginStartupDefaultMs)).toBe(true);
     expect(finitePositive(TOOL_TIMEOUT_POLICY.pluginStartupMaxMs)).toBe(true);
-    expect(finitePositive(TOOL_TIMEOUT_POLICY.subAgentCeilingMs)).toBe(true);
+    expect(finitePositive(TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs)).toBe(true);
     expect(finitePositive(TOOL_TIMEOUT_POLICY.mcpRequestDefaultMs)).toBe(true);
     expect(finitePositive(TOOL_TIMEOUT_POLICY.mcpRequestMaxMs)).toBe(true);
     expect(finitePositive(TOOL_TIMEOUT_POLICY.networkFetchDefaultMs)).toBe(true);
@@ -49,9 +53,43 @@ describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
   });
 
   it("sub-agent ceiling exceeds the per-tool ceiling — sub-agents legitimately need more headroom", () => {
-    expect(TOOL_TIMEOUT_POLICY.subAgentCeilingMs).toBeGreaterThan(
+    expect(TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs).toBeGreaterThan(
       TOOL_TIMEOUT_POLICY.globalCeilingMs,
     );
+  });
+
+  it("the scaled sub-agent ceiling reproduces the shipped constant at the default round budget", () => {
+    // The per-round allowance is DERIVED from the pair the policy already
+    // shipped, so scaling is a generalization of the old constant, not a
+    // retune of it. (The module also asserts this at load time.)
+    expect(resolveSubAgentCeilingMs(SUBAGENT_MAX_ROUNDS_DEFAULT)).toBe(
+      TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs,
+    );
+  });
+
+  it("a larger round budget buys proportionally more wall clock", () => {
+    // The failure this removes: rounds were made user-configurable with no
+    // maximum, so a 600-round agent under a fixed 600s clock died of the clock
+    // at round ~60 — the setting was silently inert past the default.
+    expect(resolveSubAgentCeilingMs(SUBAGENT_MAX_ROUNDS_DEFAULT * 10)).toBe(
+      TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs * 10,
+    );
+  });
+
+  it("a smaller round budget never drops below the shipped floor", () => {
+    for (const rounds of [SUBAGENT_MAX_ROUNDS_MIN, 5, 0, Number.NaN]) {
+      expect(resolveSubAgentCeilingMs(rounds)).toBe(
+        TOOL_TIMEOUT_POLICY.subAgentCeilingFloorMs,
+      );
+    }
+  });
+
+  it("the scaled ceiling is always finite — a deadline still always exists", () => {
+    for (const rounds of [SUBAGENT_MAX_ROUNDS_MIN, 60, 100_000]) {
+      const ceiling = resolveSubAgentCeilingMs(rounds);
+      expect(Number.isFinite(ceiling)).toBe(true);
+      expect(ceiling).toBeGreaterThan(0);
+    }
   });
 
   it("approval gate user-wait is independent of (and longer than) the tool execution cap — the user, not the runtime, is the slow party", () => {
