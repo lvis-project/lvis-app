@@ -250,6 +250,20 @@ export interface FeatureFlags {
    */
   subAgentAutonomousWake?: boolean;
   /**
+   * Tier 2 of the sub-agent approval chain — when true, a child tool call the
+   * automatic reviewer left at `ask` is first put to the child's own parent
+   * agent, and only reaches the user's approval dock when the parent cannot
+   * decide it (explicit hold, timeout, malformed answer) or policy reserves it
+   * for a human.
+   *
+   * Ships ON. It narrows nothing the host enforces: the verdict ceiling, the
+   * human-only request kinds, and every hard check inside the approval gate run
+   * before the parent is asked, and a parent answer can only allow ONCE — it
+   * never mints a durable approval record. With the flag off the gate takes the
+   * pre-existing path unchanged.
+   */
+  subAgentParentAdjudication?: boolean;
+  /**
    * Enables the A2A loopback route family on the shared 127.0.0.1 listener.
    * Default false. The boot lifecycle snapshots this value once; a settings
    * change takes effect only after restart.

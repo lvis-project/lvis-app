@@ -84,6 +84,53 @@ export interface ReviewerInteractiveBlock {
 }
 
 /**
+ * Highest reviewer verdict a parent agent is allowed to adjudicate for its own
+ * child (tier 2 of the sub-agent approval chain).
+ *
+ * `"high"` is deliberately absent from the type, not merely absent from the
+ * default: a HIGH verdict is the class of call the user asked to see, and a
+ * ceiling the settings file could raise to `"high"` would let a hand-edited
+ * file hand the whole class to an agent. The host checks this ceiling before
+ * the parent is asked at all, so no parent answer can exceed it.
+ */
+type ParentAdjudicationMaxVerdict = "low" | "medium";
+
+/** Bounds for {@link ReviewerParentAdjudicationBlock.timeoutMs}. */
+const PARENT_ADJUDICATION_TIMEOUT_MS_MIN = 1_000;
+const PARENT_ADJUDICATION_TIMEOUT_MS_MAX = 120_000;
+/** Bounds for {@link ReviewerParentAdjudicationBlock.maxPerChildRun}. */
+const PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MIN = 1;
+const PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MAX = 1_000;
+
+/**
+ * Tier-2 (parent-adjudication) policy for sub-agent tool approvals.
+ *
+ * Every field is a ceiling on what the lane may do, never a widening: the lane
+ * is skipped entirely unless the feature flag is on AND the request is
+ * eligible, and each of these only narrows it further.
+ *
+ * Reachable through {@link ReviewerSettingsBlock.parentAdjudication}; the name
+ * is exported once the adjudicator that consumes it exists.
+ */
+interface ReviewerParentAdjudicationBlock {
+  /** Verdict ceiling enforced by the host before the parent is asked. */
+  maxVerdict: ParentAdjudicationMaxVerdict;
+  /**
+   * How long one adjudication may take, measured from the moment it enters the
+   * queue rather than from the moment it starts, so a queue behind a slow
+   * adjudication cannot push a later request past this bound before it
+   * escalates to the user.
+   */
+  timeoutMs: number;
+  /**
+   * Adjudications a single child run may consume. Past it the lane escalates
+   * to the user, so a child cannot spend the parent's judgement as a resource
+   * to exhaust.
+   */
+  maxPerChildRun: number;
+}
+
+/**
  * Permission policy P3 — `permissions.reviewer` block. Provider/model remain
  * persisted for legacy command compatibility; runtime LLM reviewer wiring now
  * follows the active chat LLM provider/model when available.
@@ -96,6 +143,8 @@ export interface ReviewerSettingsBlock {
   model: string;
   fallbackOnError: ReviewerFallbackOnError;
   interactive: ReviewerInteractiveBlock;
+  /** Tier-2 policy for sub-agent asks a parent agent may decide. */
+  parentAdjudication: ReviewerParentAdjudicationBlock;
   /**
    * Issue #664 migration marker — ISO-8601 timestamp recorded the first
    * time a pre-#664 `mode:"disabled"` setting was rewritten to
@@ -158,10 +207,23 @@ const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
   model: "gpt-4o-mini",
   fallbackOnError: "deny",
   interactive: { autoApprove: "medium" },
+  // Tier 2 mirrors the interactive threshold: the parent may decide exactly
+  // the band the reviewer would have auto-approved one notch lower, and HIGH
+  // stays with the user under every setting. 30s is the wait a blocked child
+  // can absorb before the user is better served by the dock; 200 keeps a long
+  // multi-file child run from escalating on volume alone.
+  parentAdjudication: {
+    maxVerdict: "medium",
+    timeoutMs: 30_000,
+    maxPerChildRun: 200,
+  },
 };
 
 const REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<ReviewerInteractiveAutoApprove> =
   new Set(["off", "low", "medium"]);
+
+const PARENT_ADJUDICATION_MAX_VERDICTS: ReadonlySet<ParentAdjudicationMaxVerdict> =
+  new Set(["low", "medium"]);
 
 const DEFAULT_FILE: PermissionSettingsFile = {
   permissions: {
@@ -379,11 +441,64 @@ function normalizeReviewerBlock(parsed: unknown): ReviewerSettingsBlock {
       ? (obj.fallbackOnError as ReviewerFallbackOnError)
       : DEFAULT_REVIEWER.fallbackOnError;
   const interactive = normalizeInteractiveBlock(obj.interactive);
+  const parentAdjudication = normalizeParentAdjudicationBlock(obj.parentAdjudication);
   const disabledMigratedAt =
     typeof obj.disabledMigratedAt === "string" && obj.disabledMigratedAt.length > 0
       ? obj.disabledMigratedAt
       : undefined;
-  return { mode, provider, model, fallbackOnError, interactive, disabledMigratedAt };
+  return {
+    mode,
+    provider,
+    model,
+    fallbackOnError,
+    interactive,
+    parentAdjudication,
+    disabledMigratedAt,
+  };
+}
+
+/**
+ * Clamp rather than reject out-of-range numbers: the settings file is an
+ * external boundary a user may hand-edit, and both fields are ceilings whose
+ * clamped value is still a safe posture. A non-finite or non-numeric value has
+ * no clamped meaning at all, so it falls back to the default.
+ */
+function clampParentAdjudicationNumber(
+  value: unknown,
+  fallback: number,
+  min: number,
+  max: number,
+): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return fallback;
+  return Math.min(max, Math.max(min, Math.trunc(value)));
+}
+
+function normalizeParentAdjudicationBlock(
+  parsed: unknown,
+): ReviewerParentAdjudicationBlock {
+  const fallback = DEFAULT_REVIEWER.parentAdjudication;
+  if (!parsed || typeof parsed !== "object") return { ...fallback };
+  const obj = parsed as Record<string, unknown>;
+  const maxVerdict =
+    typeof obj.maxVerdict === "string" &&
+    PARENT_ADJUDICATION_MAX_VERDICTS.has(obj.maxVerdict as ParentAdjudicationMaxVerdict)
+      ? (obj.maxVerdict as ParentAdjudicationMaxVerdict)
+      : fallback.maxVerdict;
+  return {
+    maxVerdict,
+    timeoutMs: clampParentAdjudicationNumber(
+      obj.timeoutMs,
+      fallback.timeoutMs,
+      PARENT_ADJUDICATION_TIMEOUT_MS_MIN,
+      PARENT_ADJUDICATION_TIMEOUT_MS_MAX,
+    ),
+    maxPerChildRun: clampParentAdjudicationNumber(
+      obj.maxPerChildRun,
+      fallback.maxPerChildRun,
+      PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MIN,
+      PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MAX,
+    ),
+  };
 }
 
 function normalizeInteractiveBlock(parsed: unknown): ReviewerInteractiveBlock {
