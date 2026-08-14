@@ -60,7 +60,7 @@ import { finalizeAfterRoundCap, mergeFinalizeUsage, resolveRoundCapText } from "
 import { toolResultMeta } from "./tool-result-meta.js";
 
 const log = createLogger("lvis");
-const MAX_TOOL_ROUNDS = 60; // main chat + sub-agents; rationale at MAX_TURNS_DEFAULT
+const MAX_TOOL_ROUNDS = 60; // default when the caller assigns no `maxRounds`
 /**
  * Hard cap on finish_reason=length CONTINUATIONS per logical assistant answer.
  * Published provider guidance converges on 2–3. AND-ed with: (a) a
@@ -318,13 +318,13 @@ export async function queryLoop(
     let continuationCarryText = "";
     let continuationCarryThought = "";
     let continuationPrefillText: string | undefined = undefined;
-    // C3(a): effective round budget. Default = MAX_TOOL_ROUNDS (30); when a
-    // caller supplies maxRounds (sub-agent runner) clamp to it. Negative or
-    // zero falls back to default so callers keep working unchanged.
+    // C3(a): effective round budget. A host-assigned `maxRounds` (the sub-agent
+    // runner, carrying the user's configured budget) is HONOURED exactly, above
+    // the default too; narrowing it only shows up as an agent stopped mid-task.
     const requestedMaxRounds = bounds?.maxRounds;
     const effectiveMaxRounds =
       typeof requestedMaxRounds === "number" && Number.isFinite(requestedMaxRounds) && requestedMaxRounds > 0
-        ? Math.min(MAX_TOOL_ROUNDS, Math.floor(requestedMaxRounds))
+        ? Math.floor(requestedMaxRounds)
         : MAX_TOOL_ROUNDS;
 
     type PendingGuidanceDelivery = {
@@ -366,8 +366,11 @@ export async function queryLoop(
         len: delivery.joined.length,
       });
     };
+    // For-bound: structural backstop for iterations that spend no assistant
+    // round (meta-tool refunds). It must never sit BELOW the honoured budget.
+    const loopRoundBound = Math.max(MAX_TOOL_ROUNDS, effectiveMaxRounds);
     try {
-    for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    for (let round = 0; round < loopRoundBound; round++) {
       // C3(a): hard guard between rounds — if we have already executed
       // `effectiveMaxRounds` assistant turns, stop cleanly and return the
       // last text. This is the loop-boundary defense for agent_spawn
@@ -1584,7 +1587,7 @@ export async function queryLoop(
       }
     }
 
-    // Outer for-loop bound (MAX_TOOL_ROUNDS) exhausted — reachable when
+    // Outer for-loop bound (`loopRoundBound`) exhausted — reachable when
     // meta-tool refunds (`round--`) iterate the loop past 30 while
     // assistantRoundsRun stays under the cap. Same class as the assistantRounds
     // early-exit above: a budget-hit, not a natural end_turn — flag it so the

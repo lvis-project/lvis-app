@@ -79,6 +79,24 @@ describe("BashTool — timeout", () => {
       expect(result.isError).toBe(true);
       expect(result.metadata?.timedOut).toBe(true);
       expect(result.output).toMatch(/timed out/i);
+      // Expiry is a RETRYABLE tool error, not a thrown failure: the call
+      // returns a normal ToolResult and tells the caller how to escalate.
+      expect(result.output).toMatch(/retry with a larger `timeoutSeconds`/i);
+    },
+  );
+
+  it(
+    "a retry with a larger timeoutSeconds runs the same command to completion",
+    { timeout: 15000 },
+    async () => {
+      const tool = new BashTool();
+      const timedOut = await tool.execute({ command: "sleep 3", timeoutSeconds: 1 }, ctx());
+      expect(timedOut.metadata?.timedOut).toBe(true);
+      // Same command, larger budget — the escalation path the timeout message
+      // advertises must actually work.
+      const retried = await tool.execute({ command: "sleep 3", timeoutSeconds: 10 }, ctx());
+      expect(retried.isError).toBe(false);
+      expect(retried.metadata?.timedOut).toBeFalsy();
     },
   );
 });
@@ -281,23 +299,36 @@ describe("BashTool — schema default", () => {
   // Hardcoded numeric expectations pin the model-facing contract. If the
   // SOT changes (e.g. shellDefaultMs becomes 61_000), these tests break and
   // force an explicit decision instead of silently drifting the contract.
-  it("input schema defaults timeoutSeconds to 60 when omitted", () => {
+  it("input schema defaults timeoutSeconds to 120 when omitted — a deadline always exists", () => {
     const parsed = BashToolInputSchema.parse({ command: "echo hi" });
-    expect(parsed.timeoutSeconds).toBe(60);
-  });
-
-  it("input schema accepts timeoutSeconds at exactly the max (120, inclusive boundary)", () => {
-    const parsed = BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: 120 });
     expect(parsed.timeoutSeconds).toBe(120);
   });
 
-  it("input schema rejects timeoutSeconds above 120", () => {
-    expect(() => BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: 121 })).toThrow();
+  it("input schema accepts a timeoutSeconds well above the default (escalated retry)", () => {
+    expect(BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: 600 }).timeoutSeconds)
+      .toBe(600);
+    expect(BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: 86_400 }).timeoutSeconds)
+      .toBe(86_400);
+  });
+
+  it("input schema rejects every value that would mean 'wait forever' or is not a count of seconds", () => {
+    expect(() => BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: 0 })).toThrow();
+    expect(() => BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: -1 })).toThrow();
+    expect(() => BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: 1.5 })).toThrow();
+    expect(() =>
+      BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: Number.POSITIVE_INFINITY }),
+    ).toThrow();
+    expect(() =>
+      BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: Number.NaN }),
+    ).toThrow();
+    expect(() =>
+      BashToolInputSchema.parse({ command: "echo hi", timeoutSeconds: null }),
+    ).toThrow();
   });
 
   it("SOT stays in lockstep with the hardcoded contract (regression guard)", () => {
-    expect(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000).toBe(60);
-    expect(TOOL_TIMEOUT_POLICY.shellMaxMs / 1000).toBe(120);
+    expect(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000).toBe(120);
+    expect("shellMaxMs" in TOOL_TIMEOUT_POLICY).toBe(false);
   });
 });
 

@@ -44,23 +44,29 @@ describe("PowerShellTool — policy surface", () => {
     expect(found?.isReadOnly({ command: "Get-ChildItem" })).toBe(false);
   });
 
-  it("defaults timeoutSeconds to 60", () => {
+  it("defaults timeoutSeconds to 120 when omitted — a deadline always exists", () => {
     const parsed = PowerShellToolInputSchema.parse({ command: "Get-ChildItem" });
-    expect(parsed.timeoutSeconds).toBe(60);
-  });
-
-  it("accepts timeoutSeconds at exactly the max (120, inclusive boundary)", () => {
-    const parsed = PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: 120 });
     expect(parsed.timeoutSeconds).toBe(120);
   });
 
-  it("rejects timeoutSeconds above 120", () => {
-    expect(() => PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: 121 })).toThrow();
+  it("accepts a timeoutSeconds well above the default (escalated retry)", () => {
+    expect(
+      PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: 600 }).timeoutSeconds,
+    ).toBe(600);
+  });
+
+  it("rejects every value that would mean 'wait forever' or is not a count of seconds", () => {
+    expect(() => PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: 0 })).toThrow();
+    expect(() => PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: -1 })).toThrow();
+    expect(() => PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: 1.5 })).toThrow();
+    expect(() =>
+      PowerShellToolInputSchema.parse({ command: "Get-ChildItem", timeoutSeconds: Number.POSITIVE_INFINITY }),
+    ).toThrow();
   });
 
   it("SOT stays in lockstep with the hardcoded contract (regression guard)", () => {
-    expect(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000).toBe(60);
-    expect(TOOL_TIMEOUT_POLICY.shellMaxMs / 1000).toBe(120);
+    expect(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000).toBe(120);
+    expect("shellMaxMs" in TOOL_TIMEOUT_POLICY).toBe(false);
   });
 
   it("blocks expression execution and encoded command forms from the AST summary", () => {
