@@ -238,6 +238,29 @@ export interface SubAgentSpawnResult {
    * spawn results and on resumes that were allowed to run.
    */
   resumeExhausted?: boolean;
+  /**
+   * `true` when a `resume()` was REFUSED by a structural policy check that
+   * can never pass for this resumeId — wrong task state, origin mismatch,
+   * missing or tampered persisted metadata. Unlike a transient provider
+   * failure, retrying the same resumeId fails identically forever, so the
+   * caller must NOT emit retry-same-id guidance. Always paired with
+   * `ok === false`; never ran a turn.
+   */
+  resumeInvalid?: boolean;
+}
+
+/**
+ * SOT for "can this persisted child be resumed": the resume gate in
+ * `resumeWithPolicy` accepts only INPUT_REQUIRED, and it consumes this same
+ * predicate. `agent_list` advertises resumability through it too, so the two
+ * can never drift. (They did once: agent_list offered SUBMITTED/WORKING ids
+ * the gate then rejected, and the error path's retry guidance turned that
+ * into a guided infinite retry.)
+ */
+export function isResumableSubAgentTaskState(
+  taskState: string | undefined,
+): boolean {
+  return taskState === A2ATaskState.INPUT_REQUIRED;
 }
 
 export interface SubAgentSpawnCallbacks {
@@ -3032,6 +3055,7 @@ export class SubAgentRunner {
     if (!isValidSessionId(resumeId)) {
       return finishAttemptFailure(
         'sub-agent resume: invalid resumeId "' + resumeId + '"',
+        { resumeInvalid: true },
       );
     }
 
@@ -3044,6 +3068,7 @@ export class SubAgentRunner {
       if (idTag !== expectedTag) {
         return finishAttemptFailure(
           "sub-agent resume: resumeId does not belong to this session",
+          { resumeInvalid: true },
         );
       }
     }
@@ -3052,17 +3077,20 @@ export class SubAgentRunner {
     if (meta === null) {
       return finishAttemptFailure(
         'sub-agent resume: no session metadata for "' + resumeId + '"',
+        { resumeInvalid: true },
       );
     }
     if (meta.sessionKind !== "subagent") {
       return finishAttemptFailure(
         'sub-agent resume: session "' + resumeId
           + '" is not a sub-agent (kind=' + (meta.sessionKind ?? "unknown") + ")",
+        { resumeInvalid: true },
       );
     }
     if (meta.originSessionId !== originSessionId) {
       return finishAttemptFailure(
         "sub-agent resume: origin session metadata does not match caller",
+        { resumeInvalid: true },
       );
     }
     const hasWireBinding = meta.a2aWireHandlerId !== undefined
@@ -3077,24 +3105,28 @@ export class SubAgentRunner {
       ) {
         return finishAttemptFailure(
           "sub-agent resume: A2A wire binding metadata does not match caller",
+          { resumeInvalid: true },
         );
       }
     } else if (hasWireBinding) {
       return finishAttemptFailure(
         "sub-agent resume: wire-bound task requires the A2A wire entry point",
+        { resumeInvalid: true },
       );
     }
     if (
-      meta.subAgentTaskState !== A2ATaskState.INPUT_REQUIRED
+      !isResumableSubAgentTaskState(meta.subAgentTaskState)
       || !meta.subAgentSuspensionReason
     ) {
       return finishAttemptFailure(
         "sub-agent resume: task is not in INPUT_REQUIRED",
+        { resumeInvalid: true },
       );
     }
     if (!meta.subAgentTitle) {
       return finishAttemptFailure(
         "sub-agent resume: missing persisted sub-agent title",
+        { resumeInvalid: true },
       );
     }
     const persistedResumeReason = meta.subAgentSuspensionReason;

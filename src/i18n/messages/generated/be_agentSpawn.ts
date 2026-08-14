@@ -26,6 +26,8 @@ export const en = {
     "The sub-agent is STILL RESUMABLE — this failure did not consume its history. Retry agent_spawn with the SAME resumeId (transient provider errors usually clear on retry). Do NOT spawn a fresh agent for this work: that discards everything the suspended sub-agent already established.",
   "be_agentSpawn.resumeExhaustedGuidance":
     "This sub-agent's cumulative round ceiling is spent and it can NEVER be resumed again. Do not retry this resumeId. Read its last summary, finish the remaining steps yourself or in a NEW narrower sub-agent, and tell the user the original agent was cut short.",
+  "be_agentSpawn.resumeInvalidGuidance":
+    "This resumeId can NEVER be resumed — the rejection is structural (wrong task state, ownership, or persisted metadata), so retrying the SAME resumeId will fail identically every time. Do NOT retry it. If the work is still needed, start a NEW sub-agent for it, and tell the user the original agent could not be continued.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "be_agentSpawn.toolDescription":
@@ -53,4 +55,6 @@ export const ko: Record<keyof typeof en, string> = {
     "이 sub-agent 는 여전히 재개 가능합니다 — 이번 실패로 히스토리가 소실되지 않았습니다. 같은 resumeId 로 agent_spawn 을 재시도하세요 (일시적 provider 오류는 대개 재시도로 해소됩니다). 이 작업을 위해 새 에이전트를 띄우지 마세요: 중단된 sub-agent 가 이미 쌓은 것을 전부 버리게 됩니다.",
   "be_agentSpawn.resumeExhaustedGuidance":
     "이 sub-agent 는 누적 라운드 상한을 소진해 다시는 재개할 수 없습니다. 이 resumeId 를 재시도하지 마세요. 마지막 요약을 읽고 남은 단계를 직접 또는 더 좁은 새 sub-agent 로 마무리하고, 원래 에이전트가 중단됐음을 사용자에게 알리세요.",
+  "be_agentSpawn.resumeInvalidGuidance":
+    "이 resumeId 는 다시는 재개할 수 없습니다 — 거부 사유가 구조적(task 상태/소유권/영속 메타데이터 불일치)이므로 같은 resumeId 재시도는 매번 동일하게 실패합니다. 재시도하지 마세요. 작업이 여전히 필요하면 새 sub-agent 로 시작하고, 원래 에이전트를 이어갈 수 없었음을 사용자에게 알리세요.",
 };

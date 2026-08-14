@@ -2194,6 +2194,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       );
       expect(retry.ok).toBe(false);
       expect(retry.error).toMatch(/not in INPUT_REQUIRED|already terminal/i);
+      // Structural policy rejection: retrying the same id can never succeed,
+      // and the marker is what stops agent_spawn from emitting retry guidance.
+      expect(retry.resumeInvalid).toBe(true);
       expect(terminalGuard.turnsServed).toBe(0);
       expect(onLinked).not.toHaveBeenCalled();
       expect(subStore.loadSessionMetadata(resumeId)).toMatchObject({
