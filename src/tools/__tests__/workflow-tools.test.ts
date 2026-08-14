@@ -741,6 +741,11 @@ describe("agent_spawn tool", () => {
       error: "resume exhausted",
       taskState: "TASK_STATE_REJECTED",
     });
+    // An exhausted chain must say so and must NOT offer the dead resumeId back.
+    const exhaustedPayload = JSON.parse(result.output);
+    expect(exhaustedPayload.resumeExhausted).toBe(true);
+    expect(exhaustedPayload.resumeGuidance).toContain("재개할 수 없습니다");
+    expect(exhaustedPayload.resumeId).toBeUndefined();
     const terminalEvents = events.filter(
       (event) => event.type === "done" || event.type === "error",
     );
@@ -1189,6 +1194,32 @@ describe("agent_spawn tool", () => {
         metadata: expect.objectContaining({ taskState: "TASK_STATE_CANCELED" }),
       }),
     }));
+  });
+
+  it("a transient resume failure hands back the SAME resumeId with retry guidance", async () => {
+    const events: AgentSpawnEvent[] = [];
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        resume: async () => {
+          throw new Error("litellm.BadRequestError: Failed to initialize samplers");
+        },
+      }) as never,
+      emit: (e) => events.push(e),
+    });
+
+    const result = await tool.execute(
+      { title: "t", instructions: "continue", resumeId: "child-transient" },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse(result.output);
+    // The observed failure mode this pins: a bare error string gave the parent
+    // nothing pointing back at the suspended child, so it respawned FRESH
+    // agents and silently discarded the child's context.
+    expect(payload.resumeId).toBe("child-transient");
+    expect(payload.resumeGuidance).toContain("재개 가능");
+    expect(payload.resumeExhausted).toBeUndefined();
   });
 
   it("emits the child entries snapshot on done and activity events without embedding it in the tool result", async () => {
