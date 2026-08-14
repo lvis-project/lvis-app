@@ -112,7 +112,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         },
         background: {
           type: "boolean",
-          description: "When true, start the sub-agent and return a run handle immediately instead of blocking until it finishes. Use agent_status to inspect progress and agent_interrupt to stop it. Prefer true when spawning several agents that should run at the same time, or when the agent may need to reach you mid-run: a foreground spawn blocks you until the child is done, so you cannot answer its questions while it works. Prefer false for a single short lookup whose answer you need before doing anything else.",
+          description: "Deprecated and ignored: sub-agents always run in the background on surfaces that can deliver their results. You receive a run handle immediately; results arrive as parent messages, and agent_status inspects progress.",
         },
       },
     },
@@ -134,25 +134,16 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         };
       }
       const a = (rawInput ?? {}) as Record<string, unknown>;
-      // Posture is the CALLER's choice, not a default. Foreground blocks the
-      // parent on `await` for the child's whole run, so the A2A channel is inert
-      // for that spawn — a child can post to its parent, but the parent cannot
-      // read or answer until the child has already finished. Background keeps
-      // the parent on its own loop, which is what makes `waitForReply` and
-      // mid-run coordination reachable. Both are legitimate; which one fits
-      // depends on whether the parent has anything to do meanwhile, so the model
-      // picks per spawn (see the tool description).
-      const background = a.background === true;
-      if (background && ctx.metadata?.supportsA2AParentDelivery !== true) {
-        return {
-          output: JSON.stringify({
-            error: "background-parent-unsupported",
-            message: "Background sub-agent delivery is unavailable for this conversation surface.",
-            taskState: projectSubAgentRunState("rejected"),
-          }),
-          isError: true,
-        };
-      }
+      // Sub-agents ALWAYS run in the background on a surface that can deliver
+      // their results (user directive 2026-08-14, superseding the earlier
+      // model-picks design). Foreground blocked the parent on `await` for the
+      // child's whole run, making the A2A channel inert for that spawn — the
+      // parent could not read or answer anything until the child finished.
+      // With autonomous wake on by default, background results always reach
+      // the parent. The model's `background` flag is ignored; surfaces without
+      // parent delivery fall back to foreground, the only coherent posture
+      // there.
+      const background = ctx.metadata?.supportsA2AParentDelivery === true;
       const runner = deps.getRunner();
       if (!runner) {
         return {
