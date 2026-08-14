@@ -252,10 +252,6 @@ export interface SubAgentSpawnResult {
    * `ok === false`; absent on spawn results and on resumes allowed to run.
    */
   resumeRefusal?: "invalid" | "exhausted";
-  /** @deprecated superseded by `resumeRefusal: "exhausted"`; removed in this migration. */
-  resumeExhausted?: boolean;
-  /** @deprecated superseded by `resumeRefusal: "invalid"`; removed in this migration. */
-  resumeInvalid?: boolean;
 }
 
 /**
@@ -648,7 +644,7 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
  *     to be able to run.
  *
  * A resume that would breach either guard is refused BEFORE any turn runs
- * (`{ ok:false, resumeExhausted:true }`), so no LLM round is spent.
+ * (`{ ok:false, resumeRefusal:"exhausted" }`), so no LLM round is spent.
  */
 const MAX_RESUMES = 3;
 const CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER = 4;
@@ -2608,7 +2604,7 @@ export class SubAgentRunner {
    *     resumable by a no-origin caller, keeping the invariant consistent.
    *
    * ── Loop guards (Commit 2) ──
-   * Refused BEFORE any turn (`{ ok:false, resumeExhausted:true }`) when the
+   * Refused BEFORE any turn (`{ ok:false, resumeRefusal:"exhausted" }`) when the
    * session already hit `MAX_RESUMES` or the cumulative-rounds ceiling. A
    * per-`childSessionId` in-flight lock fail-closes a second concurrent resume
    * of the same id (the load→run→save transaction is not covered by the
@@ -3088,10 +3084,7 @@ export class SubAgentRunner {
     // length check below, which stays UNMARKED on purpose — fixing the answer
     // and retrying the same id is the correct move there.
     const refuseStructurally = (message: string) =>
-      finishAttemptFailure(message, {
-        resumeRefusal: "invalid",
-        resumeInvalid: true,
-      });
+      finishAttemptFailure(message, { resumeRefusal: "invalid" });
 
     if (!isValidSessionId(resumeId)) {
       return refuseStructurally(
@@ -3231,7 +3224,7 @@ export class SubAgentRunner {
       return await finishAuthorizedFailure(
         "sub-agent resume: exhausted (budgetResumeCount="
           + priorBudgetResumeCount + " >= " + MAX_RESUMES + ")",
-        { resumeRefusal: "exhausted", resumeExhausted: true },
+        { resumeRefusal: "exhausted" },
       );
     }
     const cumulativeRoundsCeiling = this.cumulativeRoundsCeiling();
@@ -3239,7 +3232,7 @@ export class SubAgentRunner {
       return await finishAuthorizedFailure(
         "sub-agent resume: cumulative-rounds ceiling reached ("
           + priorCumulativeRounds + " >= " + cumulativeRoundsCeiling + ")",
-        { resumeRefusal: "exhausted", resumeExhausted: true },
+        { resumeRefusal: "exhausted" },
       );
     }
 
