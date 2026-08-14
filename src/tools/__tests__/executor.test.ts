@@ -1687,6 +1687,64 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     );
   });
 
+  it("routes builtin reads in an A2A-prefixed turn through the reviewer lane, not the forced modal", async () => {
+    // User decision 2026-08-14: a parent turn merely PAGING its child's own
+    // report must not modal-storm. Builtin reads ride the same
+    // foreground-auto reviewer lane a child's own turn gets; write/shell/
+    // network/meta and remote one-shots stay force-modal (tests above).
+    const executeSpy = vi.fn(async () => "read ok");
+    const registry = new ToolRegistry();
+    registry.register(createDynamicTool({
+      name: "a2a_reviewer_lane_read_probe",
+      description: "A2A reviewer-lane read probe",
+      source: "builtin",
+      category: "read",
+      isReadOnly: () => true,
+      jsonSchema: { type: "object", properties: {} },
+      execute: async () => ({ output: await executeSpy(), isError: false }),
+    }));
+
+    const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
+    permMgr.setInteractiveAutoApprove("medium");
+    permMgr.checkDetailed = vi.fn(() => ({
+      decision: "allow",
+      reason: "auto mode (category: read, trust: high)",
+      layer: 6,
+    }));
+    permMgr.hasReviewer = vi.fn(() => true) as never;
+    permMgr.dispatchReviewer = vi.fn(async () => ({
+      verdict: { level: "low" as const, reason: "read-only paging of child output" },
+      outcome: "fresh" as const,
+    })) as never;
+    const approvalGate = {
+      requestAndWait: vi.fn(async (req: { id: string }) => ({
+        requestId: req.id,
+        choice: "allow-once" as const,
+      })),
+    };
+    const executor = new ToolExecutor(
+      registry,
+      undefined,
+      permMgr,
+      undefined,
+      approvalGate as never,
+    );
+
+    const results = await executor.executeAll(
+      [{ id: "tu-a2a-read-lane", name: "a2a_reviewer_lane_read_probe", input: {} }],
+      {
+        sessionId: "sess-a2a-read-lane",
+        approvalReasonPrefix: "[Sub-Agent: researcher]",
+        permissionContext: userPermissionContext({ trustOrigin: "llm-tool-arg" }),
+      },
+    );
+
+    expect(results[0].is_error).toBeUndefined();
+    expect(executeSpy).toHaveBeenCalledOnce();
+    expect(permMgr.dispatchReviewer).toHaveBeenCalledOnce();
+    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+  });
+
   it("re-elevates always-allow meta tools for sub-agent message provenance", async () => {
     const executeSpy = vi.fn(async () => "asked");
     const registry = new ToolRegistry();
