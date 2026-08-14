@@ -161,6 +161,76 @@ describe("TranscriptRenderer — minimal (required-only) contract", () => {
   });
 });
 
+describe("TranscriptRenderer — permission review attaches to its tool row", () => {
+  const review = (
+    toolUseId: string,
+    extra: Partial<Extract<ChatEntry, { kind: "permission_review" }>> = {},
+  ): ChatEntry => ({
+    kind: "permission_review",
+    status: "auto_approved",
+    toolName: "x",
+    groupId: "g",
+    toolUseId,
+    displayOrder: 0,
+    verdictLevel: "low",
+    ...extra,
+  });
+
+  it("renders the verdict inside the tool row when the tool call exists", () => {
+    const entries = [user("q"), review("t1"), toolGroup("t1"), assistant("done")];
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={entries}
+        streaming={false}
+        currentSessionId="s1"
+        workGroupsForceOpen
+      />,
+    );
+    const card = getByTestId("permission-review-status-card");
+    expect(card.getAttribute("data-variant")).toBe("attached");
+    // The chip lives inside the tool_group entry (index 2), not as its sibling.
+    expect(getByTestId("work-group").contains(card)).toBe(true);
+    expect(card.closest("[data-chat-entry-index]")?.getAttribute("data-chat-entry-index")).toBe("2");
+  });
+
+  it("keeps the standalone card while no tool row carries that tool call", () => {
+    const entries = [user("q"), review("pending", { status: "needs_approval" }), assistant("done")];
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={entries}
+        streaming={false}
+        currentSessionId="s1"
+        workGroupsForceOpen
+      />,
+    );
+    const card = getByTestId("permission-review-status-card");
+    expect(card.getAttribute("data-variant")).toBe("standalone");
+    expect(card.getAttribute("data-status")).toBe("needs_approval");
+  });
+
+  it("attaches only the verdict whose tool call is present", () => {
+    const entries = [
+      user("q"),
+      review("t1"),
+      review("orphan", { status: "failed" }),
+      toolGroup("t1"),
+      assistant("done"),
+    ];
+    const { getAllByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={entries}
+        streaming={false}
+        currentSessionId="s1"
+        workGroupsForceOpen
+      />,
+    );
+    const variants = getAllByTestId("permission-review-status-card").map((card) =>
+      card.getAttribute("data-variant"),
+    );
+    expect(variants.sort()).toEqual(["attached", "standalone"]);
+  });
+});
+
 describe("TranscriptRenderer — action suppression keys off callback presence", () => {
   it("renders the retry footer button once the actions cluster IS supplied", () => {
     const onRetryEffort = vi.fn();

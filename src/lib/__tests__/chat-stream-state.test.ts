@@ -6,7 +6,6 @@ import {
   applyToolEnd,
   applyToolStart,
   dropOptimisticUserEntry,
-  dropPermissionReviewEntries,
   finalizeStreamingReasoning,
   finalizeStreamingAssistant,
   setAssistantError,
@@ -73,7 +72,7 @@ describe("chat-stream-state", () => {
     });
   });
 
-  it("upserts permission review status and drops it when the matching tool starts", () => {
+  it("keeps the permission review verdict after the matching tool starts", () => {
     let entries: ChatEntry[] = appendUserEntry([], "규정 찾아줘");
     entries = upsertPermissionReview(entries, {
       status: "reviewing",
@@ -103,20 +102,32 @@ describe("chat-stream-state", () => {
       verdictLevel: "high",
     });
 
-    entries = applyToolStart(
-      dropPermissionReviewEntries(entries, { groupId: "round-review", toolUseId: "tool-review" }),
-      {
-        groupId: "round-review",
-        toolUseId: "tool-review",
-        name: "internal_kb_query",
-        displayOrder: 0,
-      },
-    );
+    entries = applyToolStart(entries, {
+      groupId: "round-review",
+      toolUseId: "tool-review",
+      name: "internal_kb_query",
+      displayOrder: 0,
+    });
+    entries = applyToolEnd(entries, {
+      groupId: "round-review",
+      toolUseId: "tool-review",
+      result: "ok",
+      isError: false,
+    });
 
-    expect(entries.map((entry) => entry.kind)).toEqual(["user", "tool_group"]);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "user",
+      "permission_review",
+      "tool_group",
+    ]);
+    expect(entries[1]).toMatchObject({
+      kind: "permission_review",
+      status: "needs_approval",
+      toolUseId: "tool-review",
+    });
   });
 
-  it("drops only the matching permission review when sibling tools share a group", () => {
+  it("keeps one verdict per tool call when sibling tools share a group", () => {
     let entries: ChatEntry[] = appendUserEntry([], "여러 도구");
     entries = upsertPermissionReview(entries, {
       status: "reviewing",
@@ -130,17 +141,27 @@ describe("chat-stream-state", () => {
       groupId: "shared-group",
       toolUseId: "tool-b",
     });
-
-    entries = dropPermissionReviewEntries(entries, {
+    entries = upsertPermissionReview(entries, {
+      status: "auto_approved",
+      toolName: "first_tool",
       groupId: "shared-group",
       toolUseId: "tool-a",
     });
 
-    expect(entries.map((entry) => entry.kind)).toEqual(["user", "permission_review"]);
+    expect(entries.map((entry) => entry.kind)).toEqual([
+      "user",
+      "permission_review",
+      "permission_review",
+    ]);
     expect(entries[1]).toMatchObject({
       kind: "permission_review",
+      toolUseId: "tool-a",
+      status: "auto_approved",
+    });
+    expect(entries[2]).toMatchObject({
+      kind: "permission_review",
       toolUseId: "tool-b",
-      toolName: "second_tool",
+      status: "reviewing",
     });
   });
 

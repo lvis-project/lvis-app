@@ -8,6 +8,7 @@ import type { LoopContext } from "./loop-context.js";
 import type { TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
 import type { GenericMessage, LLMVendor, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
+import type { PermissionReviewEvent } from "../../shared/permission-review-status.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
 import type { RequestAnchor } from "../../tools/pipeline/rationale-control.js";
 import {
@@ -56,6 +57,7 @@ import { gateCrossAgentInterceptedMetaTools } from "./intercepted-meta-gate.js";
 import { createSubscriptionUsageCollector, recordSubscriptionRoundTelemetry } from "./subscription-usage-telemetry.js";
 import { appendUsageForServingModel } from "./usage-by-model.js";
 import { finalizeAfterRoundCap, mergeFinalizeUsage, resolveRoundCapText } from "./round-cap-finalize.js";
+import { toolResultMeta } from "./tool-result-meta.js";
 
 const log = createLogger("lvis");
 const MAX_TOOL_ROUNDS = 60; // main chat + sub-agents; rationale at MAX_TURNS_DEFAULT
@@ -224,6 +226,9 @@ export async function queryLoop(
       : self.provider!;
     const allToolCalls: Array<{ name: string; input: Record<string, unknown>; result: string }> = [];
     const toolMetaByUseId = new Map<string, ToolCallMeta>();
+    // Last review event per tool call — the verdict the user saw live, stamped
+    // onto the tool_result so reload rebuilds the same row.
+    const permissionReviewByUseId = new Map<string, PermissionReviewEvent>();
     let turnUsage: TokenUsage | undefined;
     const recordProviderUsage = (
       usage: TokenUsage,
@@ -1184,7 +1189,10 @@ export async function queryLoop(
               toolMetaByUseId.set(meta.toolUseId, meta);
               callbacks?.onToolStart?.(name, input, meta);
             },
-            onPermissionReview: callbacks?.onPermissionReview,
+            onPermissionReview: (event) => {
+              permissionReviewByUseId.set(event.toolUseId, event);
+              callbacks?.onPermissionReview?.(event);
+            },
             onToolEnd: (name, result, isError, meta, uiPayload, durationMs) => {
               toolMetaByUseId.set(meta.toolUseId, meta);
               callbacks?.onToolEnd?.(name, result, isError, meta, uiPayload, durationMs);
@@ -1455,17 +1463,11 @@ export async function queryLoop(
       // tool_result 히스토리 append → loop back
       const allResults = [...toolResults, ...capResult.blocked];
       for (const tr of allResults) {
-        const meta = toolMetaByUseId.get(tr.tool_use_id);
-        const toolDisplay = "durationMs" in tr
-          ? {
-              durationMs: tr.durationMs,
-              ...(meta?.source ? { source: meta.source } : {}),
-              ...(meta?.category ? { category: meta.category } : {}),
-              ...(meta?.pluginId ? { pluginId: meta.pluginId } : {}),
-              ...(meta?.mcpServerId ? { mcpServerId: meta.mcpServerId } : {}),
-              ...("uiPayload" in tr && tr.uiPayload ? { uiPayload: tr.uiPayload } : {}),
-            }
-          : undefined;
+        const meta = toolResultMeta(
+          tr,
+          toolMetaByUseId.get(tr.tool_use_id),
+          permissionReviewByUseId.get(tr.tool_use_id),
+        );
         self.history.append({
           role: "tool_result",
           toolUseId: tr.tool_use_id,
@@ -1473,7 +1475,7 @@ export async function queryLoop(
           content: tr.content,
           ...(tr.is_error && { isError: true }),
           ...("image" in tr && tr.image ? { image: tr.image } : {}),
-          ...(toolDisplay ? { meta: { toolDisplay } } : {}),
+          ...(meta ? { meta } : {}),
         });
       }
       if (abortSignal?.aborted) {
