@@ -238,7 +238,7 @@ describe("sub-agent to A2A projection", () => {
     ["natural end", { ok: true, stopReason: "end_turn" }, A2ATaskState.COMPLETED],
     ["failed run", { ok: false }, A2ATaskState.FAILED],
     ["interrupt", { ok: true, stopReason: "interrupted" }, A2ATaskState.CANCELED],
-    ["resume guard", { ok: false, resumeExhausted: true }, A2ATaskState.REJECTED],
+    ["resume guard", { ok: false, resumeRefusal: "exhausted" as const }, A2ATaskState.REJECTED],
     ["prompt rejection", { ok: true, stopReason: "blocked" }, A2ATaskState.REJECTED],
     [
       "budget wait",

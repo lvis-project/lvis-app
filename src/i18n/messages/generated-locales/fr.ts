@@ -412,6 +412,7 @@ export const frMessages: Record<string, string> = {
   "be_executor.shellPathPolicyBlock": "[Politique de chemin du shell bloquée] Outil '{name}' — {reason}",
   "be_executor.toolExecutionCancelled": "L'exécution de l'outil a été annulée.",
   "be_executor.toolExecutionUnknownError": "Erreur d'exécution d'outil inconnue",
+  "be_executor.toolCeilingExceeded": "L'outil '{name}' a été arrêté par l'hôte LVIS au bout de {seconds}s — il s'agit du plafond d'exécution de l'hôte, pas du délai propre à l'outil. Le résultat est inconnu : l'appel a pu terminer son travail juste avant d'être coupé, vérifiez donc l'état actuel avant de supposer le contraire. Relancer l'appel à l'identique atteindra le même plafond. Si cet outil accepte son propre argument de délai, réessayez avec une valeur plus grande ; sinon, découpez le travail en étapes plus petites.",
   "be_executor.toolNotFound": "Outil introuvable: {name}",
   "be_executor.toolNotFoundAudit": "outil introuvable",
   "be_hookRunner.blockedByHook": "{name} a bloqué l'exécution de l'outil",

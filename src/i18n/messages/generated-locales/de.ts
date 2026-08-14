@@ -411,6 +411,7 @@ export const deMessages: Record<string, string> = {
   "be_executor.shellPathPolicyBlock": "[Shell-Pfadrichtlinie blockiert] Tool „{name}“ – {reason}",
   "be_executor.toolExecutionCancelled": "Die Werkzeugausführung wurde abgebrochen.",
   "be_executor.toolExecutionUnknownError": "Unbekannter Fehler bei der Ausführung des Tools",
+  "be_executor.toolCeilingExceeded": "Das Tool '{name}' wurde nach {seconds}s vom LVIS-Host gestoppt — das ist die Ausführungsobergrenze des Hosts, nicht das Timeout des Tools. Das Ergebnis ist unbekannt: Der Aufruf kann seine Arbeit kurz vor dem Abbruch beendet haben; prüfen Sie den aktuellen Zustand, bevor Sie vom Gegenteil ausgehen. Ein unveränderter Wiederholungsversuch läuft in dieselbe Grenze. Nimmt dieses Tool ein eigenes Timeout-Argument, versuchen Sie es mit einem größeren Wert; andernfalls teilen Sie die Arbeit in kleinere Schritte auf.",
   "be_executor.toolNotFound": "Werkzeug nicht gefunden: {name}",
   "be_executor.toolNotFoundAudit": "Werkzeug nicht gefunden",
   "be_hookRunner.blockedByHook": "{name} hat die Ausführung des Tools blockiert",

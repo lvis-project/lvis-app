@@ -29,7 +29,19 @@ import {
 } from "../shared/a2a.js";
 import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../shared/subagent-events.js";
 import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
+import { resolveSubAgentCeilingMs } from "../shared/tool-timeout-policy.js";
+import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-rounds.js";
 
+
+/**
+ * A terminal outcome as the emit/delivery path sees it. Identical to
+ * `SubAgentSpawnResult` except that `childSessionId` is optional: a run that
+ * rejected before the runner ever linked a child has no id to report, and the
+ * authorized id the delivery path actually addresses is passed separately.
+ */
+type SubAgentTerminalOutcome =
+  Omit<SubAgentSpawnResult, "childSessionId">
+  & { childSessionId?: string };
 
 /**
  * A terminal delivery must always carry something the parent can act on.
@@ -38,15 +50,20 @@ import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
  * ends without producing one (a resumed child that only ran tools, for example).
  * Delivering that verbatim produced an id-only envelope — header, no body — that
  * the parent LLM could not respond to, so name the final state and the way back
- * in instead.
+ * in instead. The way back in is the AUTHORIZED link the caller passes, not
+ * `result.childSessionId`: a refusal that never linked reports the unvalidated
+ * id it was handed, which is no route back to anything.
  */
-function backgroundResultText(result: SubAgentSpawnResult): string {
+function backgroundResultText(
+  result: SubAgentTerminalOutcome,
+  childSessionId: string,
+): string {
   const reported = result.error ?? result.summary;
   const summary = reported.trim().length > 0
     ? reported
     : t("be_agentSpawn.emptySummaryFallback", {
         taskState: projectSubAgentResultState(result),
-        resumeId: result.childSessionId,
+        resumeId: childSessionId,
       });
   if (!result.suspension) return summary;
   const requestedInput = result.suspension.reason === "question"
@@ -56,17 +73,19 @@ function backgroundResultText(result: SubAgentSpawnResult): string {
 }
 
 function createBackgroundResultMessage(
-  result: SubAgentSpawnResult,
+  result: SubAgentTerminalOutcome,
   parentSessionId: string,
   spawnId: string,
+  /** The AUTHORIZED child link — the same id the delivery addresses. */
+  childSessionId: string,
 ): A2AMessage {
   const suspension = result.suspension;
   return {
     messageId: createDlpSafeUuid(),
     role: A2A_ROLE_AGENT,
-    parts: [{ text: backgroundResultText(result) }],
+    parts: [{ text: backgroundResultText(result, childSessionId) }],
     contextId: parentSessionId,
-    taskId: result.childSessionId,
+    taskId: childSessionId,
     metadata: {
       taskState: projectSubAgentResultState(result),
       spawnId,
@@ -100,6 +119,16 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
     category: "meta",
     decisionOverride: "ask",
     parallelSafe: true,
+    // The executor's default wall clock bounds a single tool call; this one
+    // supervises a whole sub-agent loop whose length the user configures and
+    // which has no maximum. Sizing the deadline from that same budget is what
+    // keeps "unlimited rounds" from meaning "unlimited rounds until 600s".
+    // When no runner is wired the tool refuses at execute() anyway, so the
+    // shipped floor is the honest bound for that case.
+    resolveHostCeilingMs: () =>
+      resolveSubAgentCeilingMs(
+        deps.getRunner()?.roundBudget() ?? SUBAGENT_MAX_ROUNDS_DEFAULT,
+      ),
     jsonSchema: {
       type: "object",
       required: ["instructions"],
@@ -239,6 +268,51 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
       // calls onLinked only after exact origin + durable INPUT_REQUIRED checks.
       let linkedChildSessionId: string | undefined;
       const linkedPayload = () => linkedChildSessionId ? { childSessionId: linkedChildSessionId } : {};
+      /**
+       * The single place a TERMINAL renderer frame is emitted for this spawn.
+       *
+       * Three sites used to hand-roll this object — the background
+       * `terminalize`, the foreground success return, and the foreground error
+       * return — and they had drifted on the join key: the background frames
+       * carried `linkedChildSessionId` while the foreground ones carried
+       * `result.childSessionId`. Those are not the same id. `onLinked` fires
+       * only AFTER the runner's origin + durable-state checks pass, so a
+       * structurally refused resume has no link but still reports the
+       * caller-supplied `resumeId` as `result.childSessionId`. The foreground
+       * frames were therefore handing the viewer an unvalidated join key.
+       *
+       * The helper resolves it once, to the AUTHORIZED link only, and returns
+       * the projected state so callers do not re-derive it.
+       */
+      const emitTerminalFrame = (result: SubAgentTerminalOutcome) => {
+        const taskState = projectSubAgentResultState(result);
+        const status = subAgentRunStatusFromTaskState(taskState);
+        if (status === "error") {
+          deps.emit({
+            spawnId,
+            type: "error",
+            taskState,
+            status,
+            message: result.error ?? result.summary,
+            ...promptPayload,
+            ...linkedPayload(),
+          });
+        } else {
+          deps.emit({
+            spawnId,
+            type: "done",
+            taskState,
+            status,
+            ...(result.suspension ? { suspension: result.suspension } : {}),
+            summary: result.summary,
+            toolCallCount: result.toolCallCount,
+            entries: result.entries,
+            ...promptPayload,
+            ...linkedPayload(),
+          });
+        }
+        return { taskState, status };
+      };
       deps.emit({
         spawnId,
         type: "start",
@@ -313,37 +387,11 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             );
         if (background) {
           let terminalized = false;
-          const terminalize = async (result: SubAgentSpawnResult): Promise<void> => {
+          const terminalize = async (result: SubAgentTerminalOutcome): Promise<void> => {
             if (terminalized) return;
             terminalized = true;
             const authorizedChildSessionId = linkedChildSessionId;
-            const taskState = projectSubAgentResultState(result);
-            const status = subAgentRunStatusFromTaskState(taskState);
-            if (status === "error") {
-              const message = result.error ?? result.summary;
-              deps.emit({
-                spawnId,
-                type: "error",
-                taskState,
-                status,
-                message,
-                ...promptPayload,
-                ...linkedPayload(),
-              });
-            } else {
-              deps.emit({
-                spawnId,
-                type: "done",
-                taskState,
-                status,
-                ...(result.suspension ? { suspension: result.suspension } : {}),
-                summary: result.summary,
-                toolCallCount: result.toolCallCount,
-                entries: result.entries,
-                ...promptPayload,
-                ...linkedPayload(),
-              });
-            }
+            emitTerminalFrame(result);
 
             if (
               !authorizedChildSessionId
@@ -360,28 +408,18 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
                   result,
                   parentSessionId,
                   spawnId,
+                  authorizedChildSessionId,
                 ),
               });
             } catch {
               // Delivery owns its audit path. The renderer terminal state is final.
             }
           };
+          // A rejection is just a failure-shaped result: `terminalize` already
+          // owns the emit latch and skips parent delivery when there is no
+          // authorized link, so the unlinked case needs no separate frame.
           const terminalizeRejection = async (err: unknown): Promise<void> => {
             const message = (err as Error).message ?? "agent_spawn failed";
-            if (!linkedChildSessionId) {
-              if (terminalized) return;
-              terminalized = true;
-              const taskState = projectSubAgentRunState("error");
-              deps.emit({
-                spawnId,
-                type: "error",
-                taskState,
-                status: subAgentRunStatusFromTaskState(taskState),
-                message,
-                ...promptPayload,
-              });
-              return;
-            }
             await terminalize({
               summary: message,
               error: message,
@@ -413,67 +451,54 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
         }
 
         const result = await run();
-        const taskState = projectSubAgentResultState(result);
-        const status = subAgentRunStatusFromTaskState(taskState);
         // FAILED and REJECTED are errors even when runTurn returned a result,
         // for example a UserPromptSubmit stopReason of blocked.
+        const { taskState, status } = emitTerminalFrame(result);
         if (status === "error") {
-          const message = result.error ?? result.summary;
-          deps.emit({
-            spawnId,
-            type: "error",
-            taskState,
-            status,
-            message,
-            ...promptPayload,
-            childSessionId: result.childSessionId,
-          });
           // A failed RESUME must hand the parent its way back to the SAME
           // child. Observed failure mode without this: a transient provider
           // error surfaced as a bare string, the parent had nothing telling it
           // the child was still resumable, and it respawned FRESH agents —
           // silently discarding the suspended child's entire context.
           //
-          // Retry-same-id guidance is for TRANSIENT failures only. Structural
-          // policy rejections (`resumeInvalid` — wrong task state, origin
-          // mismatch, tampered metadata) fail identically forever; repeating
-          // the retry text there guides the model into an infinite loop.
-          const resumable = resumeId !== undefined
-            && result.resumeExhausted !== true
-            && result.resumeInvalid !== true;
+          // The refusal discriminant picks exactly one guidance text. Retry-
+          // same-id guidance is for TRANSIENT failures only (`resumeRefusal`
+          // absent); both refusal kinds are permanent for that id, so
+          // repeating the retry text for either guides the model into an
+          // infinite loop. As one switch on one field the three texts cannot
+          // collide — the previous shape spread two independent booleans into
+          // the same `resumeGuidance` key and relied on spread ORDER to pick a
+          // winner if both were ever set.
+          const resumeFields = ((): Record<string, unknown> => {
+            switch (result.resumeRefusal) {
+              case "exhausted":
+                return {
+                  resumeRefusal: "exhausted",
+                  resumeGuidance: t("be_agentSpawn.resumeExhaustedGuidance"),
+                };
+              case "invalid":
+                return {
+                  resumeRefusal: "invalid",
+                  resumeGuidance: t("be_agentSpawn.resumeInvalidGuidance"),
+                };
+              case undefined:
+                return resumeId === undefined
+                  ? {}
+                  : {
+                      resumeId,
+                      resumeGuidance: t("be_agentSpawn.resumeRetryGuidance"),
+                    };
+            }
+          })();
           return {
             output: JSON.stringify({
-              error: message,
+              error: result.error ?? result.summary,
               taskState,
-              ...(resumable
-                ? {
-                    resumeId,
-                    resumeGuidance: t("be_agentSpawn.resumeRetryGuidance"),
-                  }
-                : {}),
-              ...(result.resumeExhausted === true
-                ? { resumeExhausted: true, resumeGuidance: t("be_agentSpawn.resumeExhaustedGuidance") }
-                : {}),
-              ...(result.resumeInvalid === true
-                ? { resumeInvalid: true, resumeGuidance: t("be_agentSpawn.resumeInvalidGuidance") }
-                : {}),
+              ...resumeFields,
             }),
             isError: true,
           };
         }
-        // A terminal non-error event carries the addressable child join key.
-        deps.emit({
-          spawnId,
-          type: "done",
-          taskState,
-          status,
-          ...(result.suspension ? { suspension: result.suspension } : {}),
-          summary: result.summary,
-          toolCallCount: result.toolCallCount,
-          entries: result.entries,
-          ...promptPayload,
-          childSessionId: result.childSessionId,
-        });
         return {
           output: JSON.stringify({
             summary: result.summary,
