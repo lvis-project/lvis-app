@@ -308,6 +308,78 @@ All tool execution flows through the registry and executor:
 The source of a tool changes display and audit metadata; it does not create a
 separate policy bypass.
 
+### Sub-agent approval chain (three tiers)
+
+A tool call raised by a sub-agent's turn passes through up to three deciders.
+Each tier only ever narrows what the next one is asked:
+
+1. **Tier 1 — automatic review.** The permission manager and the reviewer
+   classifier decide as they do for any other call. A decision of allow ends
+   the chain here; the sub-agent's parent is not consulted and no dock appears.
+2. **Tier 2 — parent adjudication.** An `ask` that survives tier 1 and clears
+   every host-side precondition is put to a host-composed side turn with no
+   tools and one round, run on the *reviewer* model and prompted to stand in
+   for the parent (`src/permissions/parent-adjudicator.ts`). "The parent" is
+   therefore a role, not a session: the only parent-derived evidence is the
+   child's title and a truncated copy of the task the parent wrote when it
+   spawned the child — not the parent's model, system prompt, or history. That
+   is the ceiling's real basis, and the reason `maxVerdict` stays low. The
+   stage runs inside `ApprovalGate.requestAndWait`, after the away-authority
+   block and before the pending entry is created, so a parent-answered call
+   never reaches a dock.
+3. **Tier 3 — the user.** Anything the parent did not settle continues to the
+   approval dock as it would have without tier 2 — later than it would have,
+   and carrying an outbound `parentEscalation` notice so the dock can tell the
+   user that a stage they never saw has already run, and how it ended.
+
+The child blocks on the same `requestAndWait` call for all three tiers; no
+suspension or resume is involved, and the parent is never woken, so a busy
+parent cannot deadlock its own child.
+
+| Invariant | Where it is enforced | Why |
+| --------- | -------------------- | --- |
+| The ceiling is applied before the parent is asked | The gate derives every condition itself — request kind and category, mode, remote origin, forced-explicit and one-shot substrates, and the verdict ceiling — and never from the caller's eligibility flag | A parent may only narrow a decision the host was already willing to delegate; a caller that asserts eligibility wrongly widens nothing. |
+| A parent answer is allow-once or deny-once, never a rule | `askParent` returns decisions with no `rememberPattern` | A durable rule minted for a user who never saw the request would outlive the call the parent actually judged. |
+| No child-authored PROSE reaches the adjudication prompt | The only sentence in the evidence is the parent's spawn task. The child's tool arguments are the unavoidable exception — they are the call being judged — so they are masked and carried under the key `argumentsAuthoredBySubAgent`, beneath a system prompt that names the payload untrusted data rather than instructions | Evidence a child can narrate is evidence a child can use to argue for its own approval. What cannot be withheld is labelled as the requesting party's claim instead of presented as fact. |
+| Human-only classes stay human-only | Directory-scope grants, rationale cards and agent-action requests, `meta`-category tools, the `ask_all` and `plan` modes, remote-controller origins, forced-explicit and bound one-shot substrates, and any ask with no tier-1 verdict never enter tier 2 | These are the cases where the decision is the user's by construction, not a judgement about whether a call serves the child's task. |
+| Every failure that leaves a turn to answer ends at the user | Timeout, spent budget, unparseable answer, missing adjudicator, provider error and repeated denial all escalate to the dock; a turn stopped while the parent was thinking ends in a host `deny-once` with no dock at all | A stage that cannot answer must not be able to answer "allow" — and a turn the user stopped must not be readable as anyone's approval. |
+| Flag off means the chain is the two-tier one | The lane is a synchronous eligibility check; an ask that is not adjudicated is never awaited | The off path must be identical in behaviour and in timing. |
+
+Five deviations from the original design are deliberate and load-bearing:
+
+- **Host-only fields live on `ApprovalRequestInput`, not `ApprovalRequest`.**
+  `childProvenance` and `parentAdjudicationEligible` are inputs the host
+  supplies; the renderer neither receives nor echoes them, so there is no copy
+  for a compromised renderer to author or alter (same argument as
+  `remoteControllerOrigin`).
+- **Parent provenance travels in a WeakMap, not on the decision.**
+  `ApprovalDecision` is a renderer-supplied type, so an `answeredBy` field on it
+  would be a claim anyone could make. `parentAdjudicationOf(decision)` keyed on
+  the exact decision object the gate returned is a fact only the host can state.
+- **A parent deny sets no `rememberPattern`.** Stated separately from the
+  allow-once rule because it is the tempting one: a parent that could remember
+  a denial would be minting policy.
+- **Provenance requires a parent-authored task, and fails closed without one.**
+  `SubAgentSpawnInput.parentAuthoredTask` exists because the profile prompt a
+  child is spawned with is not the parent's instruction — it is a charter read
+  from a file on disk, which anything that can write that file could author.
+  Runs whose origin is not a conversation session (work-board items, host
+  labels) are excluded for the same reason.
+- **`approvalPurpose` is not part of the evidence.** For a sub-agent turn that
+  sentence can only have been lifted out of the child's own tool arguments, so
+  including it would have put the child's own prose into the prompt that
+  decides the child's request.
+
+Two known gaps, recorded so they are not mistaken for design: the adjudicator
+is handed the origin conversation's id but reads nothing from it, so the name
+promises a binding the module does not make; and a child run's budget counter is
+never released when the run ends.
+
+The chain end to end — tier-1 auto-approve, tier-2 allow, tier-2 deny, tier-3
+escalate — is regression-locked by
+`src/tools/__tests__/executor-parent-adjudication.test.ts`; the gate's own
+bounds live in `src/permissions/__tests__/parent-adjudication-gate.test.ts`.
+
 ### MCP↔plugin execution parity (invariant)
 
 External MCP-server tools (`source:"mcp"`, `mcp-tool-adapter.ts`) and in-process
