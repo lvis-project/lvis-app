@@ -230,22 +230,31 @@ export interface SubAgentSpawnResult {
    */
   incomplete?: boolean;
   /**
-   * `true` when a `resume()` was REFUSED before running any turn because the
-   * session hit a resume-axis loop guard (`resumeCount >= MAX_RESUMES` or
-   * `cumulativeRounds >= cumulativeRoundsCeiling()`). Distinct from `incomplete`
-   * (a run that started but hit its per-turn round budget): a resume-exhausted
-   * result never ran a turn at all. Always paired with `ok === false`. Absent on
-   * spawn results and on resumes that were allowed to run.
+   * Why a `resume()` was REFUSED before running any turn. ABSENT means the
+   * failure is transient (or the result is not a resume at all), so retrying
+   * the SAME resumeId is the correct move.
+   *
+   *  - `"exhausted"` — a resume-axis loop guard fired
+   *    (`budgetResumeCount >= MAX_RESUMES` or
+   *    `cumulativeRounds >= cumulativeRoundsCeiling()`). Distinct from
+   *    `incomplete` (a run that STARTED and hit its per-turn round budget):
+   *    an exhausted refusal never ran a turn at all.
+   *  - `"invalid"` — a structural policy check that can never pass for this
+   *    resumeId: wrong task state, origin mismatch, missing or tampered
+   *    persisted metadata.
+   *
+   * Both refusals are permanent for that id, so the caller must NOT emit
+   * retry-same-id guidance; they differ only in the recovery advice. A single
+   * discriminant instead of two optional booleans makes the impossible
+   * "both true" state unrepresentable — that combination used to be masked
+   * only by the object-spread ORDER in agent_spawn's error path, where the
+   * second guidance key silently overwrote the first. Always paired with
+   * `ok === false`; absent on spawn results and on resumes allowed to run.
    */
+  resumeRefusal?: "invalid" | "exhausted";
+  /** @deprecated superseded by `resumeRefusal: "exhausted"`; removed in this migration. */
   resumeExhausted?: boolean;
-  /**
-   * `true` when a `resume()` was REFUSED by a structural policy check that
-   * can never pass for this resumeId — wrong task state, origin mismatch,
-   * missing or tampered persisted metadata. Unlike a transient provider
-   * failure, retrying the same resumeId fails identically forever, so the
-   * caller must NOT emit retry-same-id guidance. Always paired with
-   * `ok === false`; never ran a turn.
-   */
+  /** @deprecated superseded by `resumeRefusal: "invalid"`; removed in this migration. */
   resumeInvalid?: boolean;
 }
 
@@ -3074,12 +3083,15 @@ export class SubAgentRunner {
     };
 
     // Structural policy refusals: retrying the SAME resumeId can never
-    // succeed, so each carries the resumeInvalid marker that suppresses
-    // agent_spawn's retry guidance. Contrast the question-answer length check
-    // below, which stays UNMARKED on purpose — fixing the answer and retrying
-    // the same id is the correct move there.
+    // succeed, so each carries the `resumeRefusal: "invalid"` marker that
+    // suppresses agent_spawn's retry guidance. Contrast the question-answer
+    // length check below, which stays UNMARKED on purpose — fixing the answer
+    // and retrying the same id is the correct move there.
     const refuseStructurally = (message: string) =>
-      finishAttemptFailure(message, { resumeInvalid: true });
+      finishAttemptFailure(message, {
+        resumeRefusal: "invalid",
+        resumeInvalid: true,
+      });
 
     if (!isValidSessionId(resumeId)) {
       return refuseStructurally(
@@ -3219,7 +3231,7 @@ export class SubAgentRunner {
       return await finishAuthorizedFailure(
         "sub-agent resume: exhausted (budgetResumeCount="
           + priorBudgetResumeCount + " >= " + MAX_RESUMES + ")",
-        { resumeExhausted: true },
+        { resumeRefusal: "exhausted", resumeExhausted: true },
       );
     }
     const cumulativeRoundsCeiling = this.cumulativeRoundsCeiling();
@@ -3227,7 +3239,7 @@ export class SubAgentRunner {
       return await finishAuthorizedFailure(
         "sub-agent resume: cumulative-rounds ceiling reached ("
           + priorCumulativeRounds + " >= " + cumulativeRoundsCeiling + ")",
-        { resumeExhausted: true },
+        { resumeRefusal: "exhausted", resumeExhausted: true },
       );
     }
 
