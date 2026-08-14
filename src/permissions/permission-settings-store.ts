@@ -109,10 +109,12 @@ const PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MAX = 1_000;
  * is skipped entirely unless the feature flag is on AND the request is
  * eligible, and each of these only narrows it further.
  *
- * Reachable through {@link ReviewerSettingsBlock.parentAdjudication}; the name
- * is exported once the adjudicator that consumes it exists.
+ * Reachable through {@link ReviewerSettingsBlock.parentAdjudication}, and read
+ * by the approval gate's tier-2 stage through the policy accessor it is wired
+ * with — the gate reads the live block per request rather than a value
+ * captured at boot, so a narrowed ceiling takes effect on the next ask.
  */
-interface ReviewerParentAdjudicationBlock {
+export interface ReviewerParentAdjudicationBlock {
   /** Verdict ceiling enforced by the host before the parent is asked. */
   maxVerdict: ParentAdjudicationMaxVerdict;
   /**

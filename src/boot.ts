@@ -74,6 +74,7 @@ import {
   createPermissionManager,
   createApprovalGate,
 } from "./boot/conversation.js";
+import { readPermissionSettings } from "./permissions/permission-settings-store.js";
 import { McpAppModelContextStore } from "./mcp/mcp-app-model-context.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
@@ -205,6 +206,23 @@ export async function bootstrap(
     mainWindow,
     ctx.bootAuditLogger,
     ctx.notificationService,
+    // Tier 2 of the sub-agent approval chain, supplied as accessors rather
+    // than values: the gate is built here, the reviewer that backs the
+    // adjudicator is wired much later in this same boot, and both the
+    // adjudicator and the policy are replaced whenever settings or login
+    // re-fire that wiring. Reading them per ask is what keeps the gate on the
+    // current one. In the window before the reviewer is wired the accessor has
+    // nothing to return, which the gate treats as it treats every other
+    // failure of this lane — the ask escalates to the user.
+    {
+      adjudicator: () => ctx.parentAdjudicator,
+      // No feature block ⇒ off ⇒ the chain the app had before tier 2. OFF is
+      // the stricter state, so an absent or unreadable flag cannot widen it.
+      isEnabled: () =>
+        settingsService.get("features")?.subAgentParentAdjudication ?? false,
+      policy: () =>
+        readPermissionSettings().permissions.reviewer.parentAdjudication,
+    },
   );
   ctx.approvalGate = approvalGate;
   const remoteA2AAgentActionApprover = buildSingleFlightAgentActionApprover(

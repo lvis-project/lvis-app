@@ -5,7 +5,14 @@ import type { PolicyFile } from "./policy-store.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { NotificationService } from "../main/notification-service.js";
 import type { ToolCategory } from "../tools/types.js";
-import type { RiskVerdict } from "./reviewer/risk-classifier.js";
+import type { RiskLevel, RiskVerdict } from "./reviewer/risk-classifier.js";
+import type {
+  ParentAdjudicationEscalationCause,
+  ParentAdjudicationEvidence,
+  ParentAdjudicationResult,
+  ParentAdjudicator,
+} from "./parent-adjudicator.js";
+import type { ReviewerParentAdjudicationBlock } from "./permission-settings-store.js";
 import {
   resolveReviewerSandboxCapability,
   type SandboxCapability,
@@ -76,6 +83,58 @@ function maskApprovalPurposeForDisplay(
   return { ...purpose, text: masked };
 }
 
+// ─── Tier-2 (parent adjudication) constants ──────────
+
+/** Verdict order, for the ceiling the host enforces before asking a parent. */
+const RISK_LEVEL_RANK: Record<RiskLevel, number> = {
+  low: 1,
+  medium: 2,
+  high: 3,
+};
+
+/**
+ * Consecutive parent denials of the same tool by the same child before the ask
+ * goes to the user instead.
+ *
+ * A child that keeps reaching for a tool its parent keeps refusing is in a loop
+ * neither of them can end: the parent has already given its answer, and the
+ * child is not persuaded by it. The user is the only party who can resolve
+ * that, so the third denial is escalated rather than answered again.
+ */
+const PARENT_DENIAL_ESCALATION_THRESHOLD = 3;
+
+/**
+ * Denial counters retained at once. Bounded for the reason the adjudicator's
+ * budget map is: child runs end without telling the gate. Eviction is
+ * least-recently-used, so it can only reset a streak for a child that has been
+ * idle behind this many others.
+ */
+const MAX_TRACKED_PARENT_DENIAL_KEYS = 1_000;
+
+/** Longest parent reason written to an audit row. */
+const MAX_AUDIT_REASON_CHARS = 160;
+
+/**
+ * Render model-authored text for an audit row.
+ *
+ * Rows are space-delimited `key=value` pairs, so a value containing a space and
+ * an `=` can forge the fields after it — a parent reason reading
+ * `... choice=allow-always` would otherwise write a lie into the record that
+ * exists to catch exactly that. Whitespace and `=` are the two characters that
+ * make the forgery, so both become `_`; the text stays readable and can no
+ * longer be parsed as more than one field.
+ *
+ * Applied to the host-owned child session id too, though nothing model-authored
+ * reaches it. The rule this file already follows for the answerer and origin
+ * tokens is that a value is made safe at the boundary where it enters a durable
+ * record, not at whichever earlier point someone argued it could not be hostile.
+ */
+function auditSafeText(value: string): string {
+  return value
+    .slice(0, MAX_AUDIT_REASON_CHARS)
+    .replace(/[\s=]+/g, "_");
+}
+
 /**
  * Permission mode hint passed alongside an ApprovalRequest. Drives the
  * §S4 isReadOnly short-circuit: in "ask_all" and "plan" modes even
@@ -114,6 +173,20 @@ export interface ApprovalRequest {
   evaluationContext?: PermissionEvaluationContext;
   /** Suggested natural-language purpose shown in the approval dock. */
   approvalPurpose?: ApprovalPurposeSuggestion;
+  /**
+   * Present iff tier 2 ran for this ask and handed the decision back to the
+   * user. It is the dock's only account of a stage the user never saw, and
+   * without it a parent-escalated ask is indistinguishable from one that was
+   * never eligible for a parent at all.
+   *
+   * Host-composed and outbound-only: the host writes it after the parent
+   * answers, the renderer displays it, and no decision field echoes it back.
+   * It is deliberately NOT part of the {@link signApprovalRequest} preimage —
+   * that signature authenticates the renderer round trip, and a field with no
+   * echoed copy has nothing to authenticate (see that function for the same
+   * argument applied to `remoteControllerOrigin`).
+   */
+  parentEscalation?: ParentEscalationNotice;
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";
@@ -439,6 +512,98 @@ interface ChildAgentProvenance {
   /** Host truncation of the parent-authored spawn task. */
   spawnTaskSummary: string;
 }
+
+/**
+ * Why the sub-agent approval chain reached the user after tier 2 ran.
+ *
+ * Every cause the adjudicator itself can answer with, plus one the gate owns:
+ * the module answers one call at a time and cannot see that it is answering the
+ * same call for the third time, so the repetition cause can only be raised
+ * here, where the counter lives.
+ */
+type ParentEscalationCause =
+  | ParentAdjudicationEscalationCause
+  /**
+   * The parent denied this child's use of this tool once too often. The chain
+   * escalates rather than denying again, because a child looping against a
+   * denial is exactly the state the parent cannot resolve on its own.
+   */
+  | "repeated-denial";
+
+/** The dock's account of a tier-2 stage that ended with the user. */
+interface ParentEscalationNotice {
+  cause: ParentEscalationCause;
+  /**
+   * One sentence, sanitized and DLP-masked where the parent's answer is parsed
+   * (`parent-adjudicator.ts`), which is the only place a result of that shape
+   * is minted. The parent is also shown host-masked evidence and nothing else,
+   * so its wording cannot carry material the dock was not going to show anyway.
+   */
+  reason: string;
+}
+
+/**
+ * Everything the gate needs to run tier 2, supplied by boot.
+ *
+ * All three are accessors rather than values, and for the same reason: the
+ * gate is constructed before the reviewer is wired and outlives every re-wire
+ * of it. A captured adjudicator would still be the boot-time stand-in after a
+ * login healed the reviewer, and a captured policy would still be the
+ * boot-time ceiling after the user narrowed it. Absent deps mean no tier 2 at
+ * all — the chain is then exactly the two-tier one that shipped before it.
+ */
+export interface ParentAdjudicationGateDeps {
+  /** The live adjudicator, re-read per ask. */
+  adjudicator: () => ParentAdjudicator;
+  /** The feature flag. False means the stage does not run at all. */
+  isEnabled: () => boolean;
+  /** The live tier-2 policy block. */
+  policy: () => ReviewerParentAdjudicationBlock;
+}
+
+/**
+ * Host-only provenance for a decision a parent agent made.
+ *
+ * A `WeakMap` for the reason the timeout and host-rejected markers above are
+ * `WeakSet`s: provenance is a fact about the exact object the host created,
+ * and a structural `{ choice: "allow-once" }` arriving from anywhere else can
+ * never be in it. The reason rides here rather than on
+ * {@link ApprovalDecision} because that type is renderer-supplied — a field on
+ * it would be a field a renderer could author.
+ */
+const parentAdjudicatedDecisions = new WeakMap<
+  ApprovalDecision,
+  ParentAdjudicationProvenance
+>();
+
+/** What the parent answered, for the consumers of the child's turn. */
+export interface ParentAdjudicationProvenance {
+  outcome: "allow-once" | "deny";
+  reason: string;
+}
+
+/** The parent's answer behind a decision, or undefined if no parent answered. */
+export function parentAdjudicationOf(
+  decision: ApprovalDecision | null | undefined,
+): ParentAdjudicationProvenance | undefined {
+  if (decision === null || decision === undefined) return undefined;
+  return parentAdjudicatedDecisions.get(decision);
+}
+
+function markParentAdjudicatedDecision(
+  decision: ApprovalDecision,
+  provenance: ParentAdjudicationProvenance,
+): ApprovalDecision {
+  parentAdjudicatedDecisions.set(decision, provenance);
+  return decision;
+}
+
+/** How the tier-2 stage ended, for the one caller that runs it. */
+type ParentAdjudicationStageOutcome =
+  /** The parent answered, and its answer is the decision. */
+  | { kind: "answered"; decision: ApprovalDecision }
+  /** The ask continues to the dock, carrying this notice. */
+  | { kind: "escalate"; notice: ParentEscalationNotice };
 
 export type ApprovalChoice =
   "allow-once" | "allow-session" | "allow-always" | "deny-once" | "deny-always";
@@ -959,17 +1124,30 @@ export class ApprovalGate {
    */
   private readonly awayAuthority = new AwayAuthority();
 
+  /**
+   * Tier 2 of the sub-agent approval chain, when boot wired one. Owned by the
+   * gate for the same reason the away answerer is: an answerer reachable
+   * beside the gate would be a second answer surface, and the argument for
+   * both is that there is exactly one and it sits below every hard check.
+   */
+  private readonly parentAdjudication?: ParentAdjudicationGateDeps;
+
+  /** Consecutive parent denials, keyed by child run and tool. */
+  private readonly parentDenialStreaks = new Map<string, number>();
+
   constructor(
     webContents: WebContents,
     initialPolicy?: PolicyFile,
     timeoutMs = TOOL_TIMEOUT_POLICY.approvalGateUserWaitMs,
     auditLogger?: AuditLogger,
     notificationService?: NotificationService,
+    parentAdjudication?: ParentAdjudicationGateDeps,
   ) {
     this.webContents = webContents;
     this.timeoutMs = timeoutMs;
     this.auditLogger = auditLogger;
     this.notificationService = notificationService;
+    this.parentAdjudication = parentAdjudication;
     this.currentPolicy = initialPolicy ?? {
       version: 1,
       requireExplicitApproval: true,
@@ -1038,6 +1216,282 @@ export class ApprovalGate {
   }
 
   /**
+   * Count one parent denial and report the streak length including it.
+   *
+   * The key pairs the child run with the tool: a parent refusing `fs_write`
+   * has said nothing about the same child's `web_fetch`, and a streak that
+   * mixed them would escalate an unrelated call.
+   */
+  private recordParentDenial(childSessionId: string, toolName: string): number {
+    const key = canonicalStringify([childSessionId, toolName]);
+    const streak = (this.parentDenialStreaks.get(key) ?? 0) + 1;
+    // Re-insert so map order stays least-recently-used for eviction.
+    this.parentDenialStreaks.delete(key);
+    this.parentDenialStreaks.set(key, streak);
+    if (this.parentDenialStreaks.size > MAX_TRACKED_PARENT_DENIAL_KEYS) {
+      const oldest = this.parentDenialStreaks.keys().next();
+      if (!oldest.done) this.parentDenialStreaks.delete(oldest.value);
+    }
+    return streak;
+  }
+
+  /** End a streak. Called by an allow, and by the escalation the streak causes. */
+  private clearParentDenialStreak(
+    childSessionId: string,
+    toolName: string,
+  ): void {
+    this.parentDenialStreaks.delete(
+      canonicalStringify([childSessionId, toolName]),
+    );
+  }
+
+  /**
+   * Decide whether tier 2 of the sub-agent approval chain may run for this ask,
+   * and return what running it would need. `null` means it may not.
+   *
+   * Synchronous, and deliberately so: it is the whole eligibility decision, so
+   * an ask that is not adjudicated never awaits anything and reaches the dock
+   * exactly as it did before this lane existed.
+   *
+   * It re-derives every precondition it can observe rather than trusting the
+   * caller's eligibility flag, which is therefore a necessary condition and
+   * never a sufficient one. It is also positioned rather than merely written:
+   * its one caller runs below every hard check in {@link requestAndWait}, so no
+   * answer this lane produces can re-open a sensitive-path block, a binding
+   * mismatch or a destroyed-window deny.
+   */
+  private parentAdjudicationLane(input: {
+    request: ApprovalRequest;
+    /** The caller's assertion about the facts only the caller can see. */
+    callerEligible: boolean;
+    forceExplicit: boolean;
+    oneShotPermitBound: boolean;
+    highRiskOneShot: boolean;
+    remoteControllerOrigin?: RemoteControllerOrigin;
+  }): {
+    deps: ParentAdjudicationGateDeps;
+    policy: ReviewerParentAdjudicationBlock;
+    verdict: RiskVerdict;
+  } | null {
+    const deps = this.parentAdjudication;
+    if (deps === undefined) return null;
+
+    const { request } = input;
+    const verdict = request.reviewerVerdict;
+    // The flag and the ceiling are read from disk-backed settings, so both are
+    // an external boundary that can fail. A failure here means the host cannot
+    // establish that this lane is permitted, and an unestablished permission is
+    // a denied one: the ask falls through to the user, which is the behaviour
+    // of the chain with the lane switched off.
+    let enabled: boolean;
+    let policy: ReviewerParentAdjudicationBlock;
+    try {
+      enabled = deps.isEnabled();
+      policy = deps.policy();
+    } catch {
+      return null;
+    }
+    if (!enabled) return null;
+    // Every condition the gate can see for itself, checked here regardless of
+    // what the caller asserted:
+    //   - kind: only an ordinary tool ask. A directory-scope grant, a plugin
+    //     agent-action and a rationale card are each a decision about the
+    //     user's own authority, not about whether a child's call serves its
+    //     task.
+    //   - mode: `ask_all` and `plan` are the user saying "show me every one of
+    //     these", which a lane that answers some of them would contradict.
+    //   - remote origin: a call a remote controller's turn raised is answered
+    //     at the desk or not at all.
+    //   - forceExplicit / a bound one-shot permit: substrates that require
+    //     per-invocation human consent.
+    //   - a HIGH verdict, or none at all: the ceiling, enforced before the
+    //     parent is asked rather than applied to its answer.
+    const withinCeiling =
+      verdict !== undefined &&
+      RISK_LEVEL_RANK[verdict.level] <= RISK_LEVEL_RANK[policy.maxVerdict];
+    const eligible =
+      input.callerEligible &&
+      (request.kind === undefined || request.kind === "tool") &&
+      request.category === "tool" &&
+      request.toolCategory !== "meta" &&
+      request.mode !== "ask_all" &&
+      request.mode !== "plan" &&
+      input.remoteControllerOrigin === undefined &&
+      !input.forceExplicit &&
+      !input.oneShotPermitBound &&
+      !input.highRiskOneShot &&
+      withinCeiling;
+    if (!eligible || verdict === undefined) return null;
+    return { deps, policy, verdict };
+  }
+
+  /**
+   * Ask the parent, and turn its answer into what happens to this ask. Reached
+   * only through {@link parentAdjudicationLane}, which is what decided that
+   * asking is permitted at all.
+   *
+   * Its only non-escalating answers are one allow-once and one deny-once,
+   * neither carrying a `rememberPattern`: a parent may decide one call and may
+   * not mint a rule that outlives it. Everything else — a timeout, a spent
+   * budget, an unparseable answer, a missing adjudicator, a thrown provider, an
+   * explicit "I cannot tell", or one denial too many — ends at the user's dock
+   * carrying a {@link ParentEscalationNotice}, so the user is told that a stage
+   * they never saw has already run.
+   */
+  private async askParent(
+    lane: {
+      deps: ParentAdjudicationGateDeps;
+      policy: ReviewerParentAdjudicationBlock;
+      verdict: RiskVerdict;
+    },
+    input: {
+      request: ApprovalRequest;
+      childProvenance: ChildAgentProvenance;
+      abortSignal?: AbortSignal;
+      /** Pre-rendered audit fields for this request. */
+      auditFields: string;
+    },
+  ): Promise<ParentAdjudicationStageOutcome> {
+    const { request, childProvenance } = input;
+    const { deps, policy, verdict } = lane;
+    const sessionId = request.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID;
+    const logRow = (row: string): void => {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId,
+        type: "approval",
+        output: row,
+      });
+    };
+
+    // Host-composed evidence only. The masking is the same display masking the
+    // dock gets, so the parent cannot be shown a secret the user would not
+    // have been shown, and the child cannot write into any of it.
+    const detections = new Set<string>();
+    const evidence: ParentAdjudicationEvidence = {
+      toolName: request.toolName,
+      ...(request.toolCategory === undefined
+        ? {}
+        : { toolCategory: request.toolCategory }),
+      ...(request.source === undefined ? {} : { source: request.source }),
+      maskedArgs: maskArgsForDisplay(request.args, detections),
+      verdict,
+      ...(request.approvalPurpose === undefined
+        ? {}
+        : {
+            approvalPurpose: maskApprovalPurposeForDisplay(
+              request.approvalPurpose,
+              detections,
+            ).text,
+          }),
+      ...(request.target?.filePath === undefined
+        ? {}
+        : {
+            targetFilePath: maskArgsForDisplay(
+              request.target.filePath,
+              detections,
+            ) as string,
+          }),
+      // The scope the permission decision actually used, when the pipeline
+      // captured one. An empty list is weaker evidence, never a wider one.
+      allowedDirectories: request.evaluationContext?.allowedDirectories ?? [],
+      child: {
+        childSessionId: childProvenance.childSessionId,
+        childTitle: childProvenance.childTitle,
+        spawnTaskSummary: childProvenance.spawnTaskSummary,
+      },
+    };
+
+    let result: ParentAdjudicationResult;
+    try {
+      result = await deps.adjudicator().adjudicate(evidence, {
+        parentSessionId: childProvenance.originSessionId,
+        timeoutMs: policy.timeoutMs,
+        maxPerChildRun: policy.maxPerChildRun,
+        ...(input.abortSignal === undefined
+          ? {}
+          : { abortSignal: input.abortSignal }),
+      });
+    } catch {
+      // A throwing adjudicator is a broken adjudicator, and this lane's whole
+      // contract is that nothing about it can produce an allow. Caught rather
+      // than propagated because an exception out of here would abandon the
+      // ask entirely — the user would never be offered the call at all.
+      result = {
+        outcome: "escalate",
+        cause: "llm-error",
+        reason: "the adjudication call failed",
+      };
+    }
+
+    if (result.outcome === "allow-once") {
+      this.clearParentDenialStreak(
+        childProvenance.childSessionId,
+        request.toolName,
+      );
+      logRow(
+        `[approval:parent-adjudicated] ${request.id} ${input.auditFields} answeredBy=${approvalAnswererAuditToken("parent-agent")} child=${auditSafeText(childProvenance.childSessionId)} reason=${auditSafeText(result.reason)} → allow-once`,
+      );
+      // No pending entry is ever created for this ask, so there is nothing for
+      // `resolve` to bind a later choice to and nothing for a user-approval
+      // record to be minted from. No `rememberPattern` either — the away
+      // answer sets none for the same reason, and its only consumers persist
+      // it as a durable rule.
+      return {
+        kind: "answered",
+        decision: markParentAdjudicatedDecision(
+          { requestId: request.id, choice: "allow-once" },
+          { outcome: "allow-once", reason: result.reason },
+        ),
+      };
+    }
+
+    if (result.outcome === "deny") {
+      const streak = this.recordParentDenial(
+        childProvenance.childSessionId,
+        request.toolName,
+      );
+      if (streak < PARENT_DENIAL_ESCALATION_THRESHOLD) {
+        logRow(
+          `[approval:parent-adjudicated] ${request.id} ${input.auditFields} answeredBy=${approvalAnswererAuditToken("parent-agent")} child=${auditSafeText(childProvenance.childSessionId)} streak=${streak} reason=${auditSafeText(result.reason)} → deny-once`,
+        );
+        // Deliberately no `rememberPattern`: a parent that could set one
+        // would be minting a durable deny rule for a user who never saw the
+        // request. Its reason travels on the host-only provenance map, which
+        // a renderer cannot read or write.
+        return {
+          kind: "answered",
+          decision: markParentAdjudicatedDecision(
+            { requestId: request.id, choice: "deny-once" },
+            { outcome: "deny", reason: result.reason },
+          ),
+        };
+      }
+      // The streak is cleared as it escalates, so the user is asked once per
+      // run of denials rather than for every ask from here on.
+      this.clearParentDenialStreak(
+        childProvenance.childSessionId,
+        request.toolName,
+      );
+      logRow(
+        `[approval:parent-escalated] ${request.id} ${input.auditFields} child=${auditSafeText(childProvenance.childSessionId)} cause=repeated-denial streak=${streak} reason=${auditSafeText(result.reason)}`,
+      );
+      return {
+        kind: "escalate",
+        notice: { cause: "repeated-denial", reason: result.reason },
+      };
+    }
+
+    logRow(
+      `[approval:parent-escalated] ${request.id} ${input.auditFields} child=${auditSafeText(childProvenance.childSessionId)} cause=${result.cause} reason=${auditSafeText(result.reason)}`,
+    );
+    return {
+      kind: "escalate",
+      notice: { cause: result.cause, reason: result.reason },
+    };
+  }
+
+  /**
    * Send an approval request to the renderer and wait for the response.
    * ConversationLoop.executeOne() awaits this and blocks the turn.
    * The requireExplicit field controls renderer dismiss behavior.
@@ -1076,9 +1530,8 @@ export class ApprovalGate {
     // here for the first reason, and the destructuring is the whole mechanism:
     // they are inputs to a host-internal decision, and a renderer that received
     // them could report which asks the host is about to route away from the
-    // dock. They have no reader yet — the parent-adjudication stage that
-    // consumes them lands separately — and removing them from the spread now is
-    // what makes that stage unable to introduce a leak when it arrives.
+    // dock. The tier-2 stage below reads both from these locals; neither is
+    // ever on `request`, so no later spread can put them back on the payload.
     const auditFieldsFor = (
       fields: ApprovalAuditFields,
       executionPlan?: HostShellExecutionPlanAuditProjection,
@@ -1460,6 +1913,46 @@ export class ApprovalGate {
       });
     }
 
+    // ─── Tier 2: parent adjudication ─────────────────
+    //
+    // Its position mirrors the away answerer's above it and is load-bearing
+    // for the same reason: every hard check has already run, so a parent
+    // answer cannot re-open one, and it sits above the OS notification and
+    // the renderer send so a call it answers never rings a phone or paints a
+    // dock. It runs only for asks that carry host-set child provenance, which
+    // is a fact no renderer and no child can author.
+    let parentEscalation: ParentEscalationNotice | undefined;
+    const parentLane =
+      childProvenance === undefined
+        ? null
+        : this.parentAdjudicationLane({
+            request: fullReq,
+            callerEligible: parentAdjudicationEligible === true,
+            forceExplicit,
+            oneShotPermitBound: oneShotPermitBinding !== undefined,
+            highRiskOneShot,
+            ...(remoteControllerOrigin === undefined
+              ? {}
+              : { remoteControllerOrigin }),
+          });
+    if (parentLane !== null && childProvenance !== undefined) {
+      const stage = await this.askParent(parentLane, {
+        request: fullReq,
+        childProvenance,
+        ...(abortSignal === undefined ? {} : { abortSignal }),
+        auditFields: auditFieldsFor(fullReq, executionPlanAudit),
+      });
+      // The stage awaits a model call, and the turn behind this ask can end
+      // during it. Checked before the outcome is honoured, and before the
+      // pending entry that the abort listener would otherwise cover exists:
+      // an abort that arrives in this window has no listener to fire, so
+      // without this check a stopped turn would sit on the dock until the
+      // five-minute timeout.
+      if (abortSignal?.aborted) return denyForAbortedTurn();
+      if (stage.kind === "answered") return stage.decision;
+      if (stage.kind === "escalate") parentEscalation = stage.notice;
+    }
+
     // Issue #260 — surface a system notification when an approval is about
     // to block the user. Approval is the most user-visible gate; default to
     // urgent so the OS toast plays sound even when window is backgrounded.
@@ -1486,6 +1979,10 @@ export class ApprovalGate {
     });
     const signedReq: ApprovalRequest = {
       ...fullReq,
+      // Added after the preimage above rather than before it, deliberately.
+      // The signature authenticates what the renderer echoes back, and this
+      // field is outbound-only — see its declaration.
+      ...(parentEscalation === undefined ? {} : { parentEscalation }),
       nonce,
       hmac: expectedHmac,
     };
