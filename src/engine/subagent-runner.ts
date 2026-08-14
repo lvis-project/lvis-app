@@ -148,8 +148,22 @@ export interface SubAgentSpawnInput {
    * LLM-tunable knob, so it is intentionally not surfaced in the tool schema.
    */
   maxRounds?: number;
-  /** Origin session id — propagated for audit attribution only. */
+  /**
+   * Origin session id — audit attribution, and the conversation a tier-2
+   * approval answer is attributed to when this run has one.
+   */
   originSessionId?: string;
+  /**
+   * The task the PARENT wrote, before any agent-profile body is rendered around
+   * it. Only a caller that can vouch for that sets it, and only a run that has
+   * it can have its child's approvals routed to its parent.
+   *
+   * Separate from `instructions` because `instructions` is what the CHILD is
+   * given, which for a profile spawn is the profile body followed by the task.
+   * A judgement made against the profile body is a judgement against a role
+   * description that justifies almost anything.
+   */
+  parentAuthoredTask?: string;
   /** Authorized project root inherited from the spawning conversation/work item. */
   projectRoot?: string;
   /** Human-readable project name paired with the project root. */
@@ -861,6 +875,9 @@ export function buildModePreamble(config: AgentModeConfig): string {
  * only makes the parent less certain, and an uncertain parent escalates.
  */
 const MAX_SPAWN_TASK_SUMMARY_CHARS = 600;
+/** Split of that budget when the task is longer — see {@link boundSpawnTaskSummary}. */
+const SPAWN_TASK_SUMMARY_HEAD_CHARS = 400;
+const SPAWN_TASK_SUMMARY_TAIL_CHARS = 200;
 
 /** What the gate needs to route a child's ask to the parent that spawned it. */
 interface SubAgentApprovalProvenance {
@@ -885,20 +902,44 @@ interface SubAgentApprovalProvenance {
 function buildSubAgentApprovalProvenance(input: {
   childSessionId: string;
   originSessionId: string | undefined;
-  task: string;
+  /** The parent's OWN words. Absent means no caller vouched for any. */
+  task: string | undefined;
   wireBound: boolean;
 }): SubAgentApprovalProvenance | null {
   if (input.wireBound) return null;
-  if (!input.originSessionId) return null;
-  const spawnTaskSummary = maskSubAgentText(input.task)
-    .slice(0, MAX_SPAWN_TASK_SUMMARY_CHARS)
-    .trim();
+  // A conversation id, not merely a truthy string. Host-orchestrated runs label
+  // their origin with things like `work-board:<item>`, which names a work item
+  // rather than a conversation: there is no parent turn behind it to answer for
+  // the call, and the work-board's own prompt promises the user that each tool
+  // call is theirs to approve. `isValidSessionId` is the existing definition of
+  // "an actual session", so this stays true as new host callers appear.
+  if (!input.originSessionId || !isValidSessionId(input.originSessionId)) {
+    return null;
+  }
+  if (!input.task) return null;
+  const spawnTaskSummary = boundSpawnTaskSummary(maskSubAgentText(input.task).trim());
   if (!spawnTaskSummary) return null;
   return {
     childSessionId: input.childSessionId,
     originSessionId: input.originSessionId,
     spawnTaskSummary,
   };
+}
+
+/**
+ * Bound a task summary without cutting its end off.
+ *
+ * A plain head slice is not a neutral shortening of an instruction: the
+ * constraints are usually at the END ("...and do not touch anything outside
+ * docs/"), so head-truncation reliably deletes the half that would make a call
+ * out of scope. Keeping both ends costs a few characters and preserves the part
+ * a judgement actually turns on.
+ */
+function boundSpawnTaskSummary(masked: string): string {
+  if (masked.length <= MAX_SPAWN_TASK_SUMMARY_CHARS) return masked;
+  const head = masked.slice(0, SPAWN_TASK_SUMMARY_HEAD_CHARS).trim();
+  const tail = masked.slice(-SPAWN_TASK_SUMMARY_TAIL_CHARS).trim();
+  return `${head}\n…\n${tail}`;
 }
 
 /**
@@ -941,11 +982,15 @@ export function makeSubAgentApprovalAdapter(
     req: ApprovalRequestInput,
   ): Promise<ApprovalDecision> {
     const labeledReason = `[Sub-Agent: ${title}] ${req.reason}`;
+    // Dropped before the spread, not overwritten after it. Overwriting only
+    // covers the runs that HAVE provenance; the runs that deliberately have
+    // none — a remote wire run, a host-orchestrated one — are exactly the ones
+    // a forged field would smuggle into tier 2, and the gate's only entry
+    // condition is that the field is present.
+    const { childProvenance: _callerSupplied, ...safeReq } = req;
     return base.requestAndWait({
-      ...req,
+      ...safeReq,
       reason: labeledReason,
-      // Spread first, then set: a caller-supplied `childProvenance` on the
-      // request would otherwise decide which run the host thinks is asking.
       ...(provenance === null
         ? {}
         : {
@@ -2219,9 +2264,11 @@ export class SubAgentRunner {
           approvalProvenance: buildSubAgentApprovalProvenance({
             childSessionId,
             originSessionId: input.originSessionId,
-            // The instructions the PARENT wrote, before the mode preamble the
-            // host prepends and before the child has said anything at all.
-            task: input.instructions,
+            // NOT `instructions`. By the time a profile-based spawn reaches
+            // here, `instructions` is the RENDERED prompt — profile body first,
+            // the parent's task last — so any bound on it keeps the role
+            // charter and drops the task. A charter argues for every call.
+            task: input.parentAuthoredTask,
             wireBound: executionPolicy !== undefined,
           }),
         });
