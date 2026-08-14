@@ -32,6 +32,7 @@ import {
 import {
   parseRationaleApprovalDisplay,
   type RationaleApprovalDisplay,
+  sealMaskedRationaleApprovalDisplay,
 } from "../shared/rationale-approval-display.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
@@ -822,7 +823,17 @@ function createRendererSafeRationaleApprovalRequest(
       level: display.effectiveVerdict.level,
       reason: maskedVerdict.masked,
     },
-    args: maskArgsForDisplay(display, detections),
+    // Emission integrity: the display was parse-guaranteed at construction and
+    // masking was the one mutation applied after that guarantee — a mask token
+    // pushing a near-cap field over its limit made the renderer's parse return
+    // null and the card lost its tool identity entirely. Seal per field with
+    // parser-identical validators so what ships ALWAYS parses; the renderer's
+    // null branch stays as defense-in-depth for forged payloads only.
+    args: sealMaskedRationaleApprovalDisplay(display, (value) => {
+      const { masked, detections: hits } = maskSensitiveData(value);
+      for (const hit of hits) detections.add(hit);
+      return masked;
+    }) as unknown as Record<string, unknown>,
     reason: RATIONALE_HOST_OWNED_REASON,
     createdAt: request.createdAt,
     requireExplicit: true,
@@ -1503,7 +1514,14 @@ export class ApprovalGate {
       // and are still used for tool execution.
       // Attach nonce+hmac to the masked payload for confused-deputy defense.
       const dlpHits = new Set<string>();
-      const maskedSignedReq: ApprovalRequest =
+      // Sealing is total by construction (the closing constructor throws rather
+      // than emitting an unparseable display), so this throw path should be
+      // unreachable — but an unreachable throw that would strand the pending
+      // entry until timeout is still a liveness hole. Mirror the send-failure
+      // branch below: clear pending, audit, deny once (review MINOR-2).
+      let maskedSignedReq: ApprovalRequest;
+      try {
+        maskedSignedReq =
         fullReq.kind === "rationale" && rationaleDisplay !== null
           ? createRendererSafeRationaleApprovalRequest(
               signedReq,
@@ -1522,6 +1540,23 @@ export class ApprovalGate {
                   }
                 : {}),
             };
+      } catch (sealErr) {
+        clearTimeout(timer);
+        this.pending.delete(fullReq.id);
+        this.auditLogger?.log({
+          timestamp: new Date().toISOString(),
+          sessionId: fullReq.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
+          type: "approval",
+          output: `[approval:seal-failed] ${fullReq.id} toolName=${fullReq.toolName} error=${sealErr instanceof Error ? sealErr.message : String(sealErr)} → deny-once`,
+        });
+        settle(
+          markHostApprovalRejectedDecision({
+            requestId: fullReq.id,
+            choice: "deny-once",
+          }),
+        );
+        return;
+      }
       if (dlpHits.size > 0) {
         this.auditLogger?.log({
           timestamp: new Date().toISOString(),
