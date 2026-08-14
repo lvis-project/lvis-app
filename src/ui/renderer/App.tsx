@@ -88,6 +88,7 @@ export function App() {
     loadedSkills,
     dismissAskQuestion,
     resetForNewSession,
+    restoreSubAgentSpawns,
   } = useWorkflowTools(api);
 
   // Chat state + stream lifecycle (useChatState is the sole owner of entries).
@@ -346,7 +347,7 @@ export function App() {
     currentSessionId, currentSessionKind, currentSessionTitle, sessions, refreshSessionId, refreshSessions,
     currentSessionProject,
     handleLoadSession: sessionLoad, handleFork: sessionFork,
-  } = useSessions(api, applyInitialSession, resetForNewSession);
+  } = useSessions(api, applyInitialSession, resetForNewSession, restoreSubAgentSpawns);
   const attachmentSessionScopeRef = useRef<{ initialized: boolean; sessionId?: string }>({
     initialized: false,
     sessionId: undefined,

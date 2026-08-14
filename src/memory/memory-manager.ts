@@ -265,6 +265,25 @@ export interface ToolResultArtifact {
 
 export type SessionKind = "main" | "routine" | "subagent";
 
+/**
+ * One sub-agent row rebuilt from persisted metadata after a restart.
+ *
+ * Carries only what a panel ROW needs. The transcript is fetched separately,
+ * on demand, by loading `childSessionId`.
+ */
+export interface RestoredSubAgentSession {
+  /** Panel row identity; same id the live event stream uses. */
+  spawnId: string;
+  /** The child's session id — also its `resumeId` for `agent_spawn`. */
+  childSessionId: string;
+  title: string;
+  modifiedAt: Date;
+  /** Last durable A2A projection, when the child recorded one. */
+  taskState?: A2AProjectedTaskState;
+  /** Parent `agent_spawn` tool_use id that created this child. */
+  toolUseId?: string;
+}
+
 export interface ListSessionsOptions {
   kind?: SessionKind | "all";
   routineId?: string;
@@ -2450,6 +2469,47 @@ export class MemoryManager {
           ...(metadata?.branchedAt ? { branchedAt: metadata.branchedAt } : {}),
         };
       });
+  }
+
+  /**
+   * Sub-agents spawned by one parent session, newest first.
+   *
+   * The renderer's sub-agent panel is fed entirely by the live `agent_spawn`
+   * event stream, so it is empty after an app restart: the main process that
+   * emitted those events is gone and nothing replays them. Every field the
+   * panel needs for a row is already on disk in the child's session metadata —
+   * this reads it back so a restored conversation still shows the agents it
+   * ran, and so each child's `resumeId` (its session id) stays reachable.
+   *
+   * Transcripts are deliberately NOT loaded here. One parent can spawn many
+   * children, and reading every child's `.jsonl` to render a list would make
+   * session load pay for transcripts the user may never open.
+   */
+  listSubAgentSessionsForOrigin(originSessionId: string): RestoredSubAgentSession[] {
+    if (!originSessionId) return [];
+    return readdirIfPresent(this.sessionsDir)
+      .filter((f) => f.endsWith(".jsonl"))
+      .flatMap((f): RestoredSubAgentSession[] => {
+        const id = f.replace(".jsonl", "");
+        const stat = statPathIfPresent(join(this.sessionsDir, f));
+        if (!stat) return [];
+        const metadata = this.loadSessionMetadata(id);
+        if (metadata?.sessionKind !== "subagent") return [];
+        if (metadata.originSessionId !== originSessionId) return [];
+        // `spawnId` is the panel's row identity. Metadata written before it was
+        // recorded cannot be joined to a row, so it is skipped rather than
+        // shown under a synthesized id that would split on the next live event.
+        if (!metadata.spawnId) return [];
+        return [{
+          spawnId: metadata.spawnId,
+          childSessionId: id,
+          title: metadata.subAgentTitle ?? metadata.title ?? "",
+          modifiedAt: stat.mtime,
+          ...(metadata.subAgentTaskState ? { taskState: metadata.subAgentTaskState } : {}),
+          ...(metadata.originToolUseId ? { toolUseId: metadata.originToolUseId } : {}),
+        }];
+      })
+      .sort((a, b) => b.modifiedAt.getTime() - a.modifiedAt.getTime());
   }
 
   listSessionsPage(options: ListSessionsOptions = {}): SessionListEntry[] {
