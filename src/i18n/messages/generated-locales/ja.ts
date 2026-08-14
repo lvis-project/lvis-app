@@ -152,6 +152,7 @@ export const jaMessages: Record<string, string> = {
   "assistantCard.systemNoticeContextError": "システム通知 - モデルの制限を超えました",
   "assistantCard.systemNoticeStreamError": "システム通知 - 応答ストリームエラー",
   "assistantCard.title": "LVIS の応答",
+  "assistantCard.interruptedBadge": "ユーザーが停止",
   "assistantCard.titleStreaming": "",
   "attachmentChip.chipAriaLabel": "添付ファイル {label} — 情報を表示するか、ファイルを開きます",
   "attachmentChip.chipTitle": "添付ファイル情報の表示 / ファイルを開く",

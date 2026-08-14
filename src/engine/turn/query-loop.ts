@@ -769,19 +769,13 @@ export async function queryLoop(
         // `<suggested_replies>` tags would land in ~/.lvis/sessions/*.jsonl
         // and be fed back to the LLM on every subsequent turn.
         //
-        // interrupted is *user-initiated* not a host error, so we do NOT
-        // attach systemNotice — the assistant content that was streamed
-        // before the abort is real model output and stays styled normally;
-        // only the "[중단됨]" suffix marks the boundary.
-        const interruptedSuffix = t("be_conversationLoop.interruptedSuffix");
-        // length-continuation: if the user aborts mid-chain, prepend the raw
-        // accumulated prefix so the persisted + returned text is the full
-        // partial answer, not just the last continuation round. Strip the
-        // suggested-replies block ONCE on the merged raw text (carry is "" on a
-        // non-continued turn ⇒ identical to the prior behavior).
-        const savedText = stripSuggestedReplies(continuationCarryText + (stream.text ?? "")) + interruptedSuffix;
-        self.history.append({ role: "assistant", content: savedText });
-        callbacks?.onTextDelta?.(interruptedSuffix);
+        // interrupted is user-initiated, not a host error, so no systemNotice:
+        // the streamed content is real model output. The boundary is
+        // `meta.interrupted` (renderer badge) — a "[중단됨]" text literal put UI
+        // state into the transcript the model replays. Continuation carry is
+        // prepended so an aborted chain persists the full partial answer.
+        const savedText = stripSuggestedReplies(continuationCarryText + (stream.text ?? ""));
+        self.history.append({ role: "assistant", content: savedText, meta: { interrupted: true } });
         return withServingIdentity({ text: savedText, toolCalls: allToolCalls, usage: turnUsage, stopReason: "interrupted" });
       }
 
@@ -1486,9 +1480,10 @@ export async function queryLoop(
         log.info(
           `queryLoop: EARLY-EXIT(tool-abort) — round=${roundIndex} toolResults=${allResults.length}`,
         );
-        const savedText = t("be_conversationLoop.interruptedText");
-        self.history.append({ role: "assistant", content: savedText });
-        callbacks?.onTextDelta?.(t("be_conversationLoop.interruptedSuffix"));
+        // No streamed text exists on the tool-abort path: empty prose plus the
+        // interrupted marker; the renderer badge carries the whole meaning.
+        const savedText = "";
+        self.history.append({ role: "assistant", content: savedText, meta: { interrupted: true } });
         return withServingIdentity({
           text: savedText,
           toolCalls: allToolCalls,

@@ -112,11 +112,14 @@ describe("ConversationLoop abort (B4)", () => {
     );
 
     expect(result.stopReason).toBe("interrupted");
-    expect(result.text).toContain("[중단됨]");
+    // The boundary is display state, never prose: the text stays exactly what
+    // the model streamed, and the marker rides on meta for the renderer badge.
+    expect(result.text).not.toContain("[중단됨]");
 
     const history = loop.getHistory().getMessages();
     const assistant = history.find((m) => m.role === "assistant");
-    expect(assistant?.content).toContain("[중단됨]");
+    expect(assistant?.content).not.toContain("[중단됨]");
+    expect(assistant?.meta?.interrupted).toBe(true);
   });
 
   it("abort before tool_use via abortCurrentTurn → no tool executed", async () => {
@@ -186,15 +189,19 @@ describe("ConversationLoop abort (B4)", () => {
     expect(toolEntered).toBe(true);
     expect(streamCalls).toBe(1);
     expect(result.stopReason).toBe("interrupted");
-    expect(result.text).toBe("[중단됨]");
-    expect(textDeltas.join("")).toContain("[중단됨]");
+    // A tool-phase abort has no streamed prose. The persisted assistant entry
+    // is empty text plus the interrupted marker — the badge carries the whole
+    // meaning, and nothing synthetic ever reaches the delta stream.
+    expect(result.text).toBe("");
+    expect(textDeltas.join("")).not.toContain("[중단됨]");
 
     const history = loop.getHistory().getMessages();
     const toolResult = history.find((message) => message.role === "tool_result",
     );
     expect(toolResult?.content).toContain("취소");
     const lastAssistant = history.filter((message) => message.role === "assistant").at(-1);
-    expect(lastAssistant?.content).toBe("[중단됨]");
+    expect(lastAssistant?.content).toBe("");
+    expect(lastAssistant?.meta?.interrupted).toBe(true);
   });
 
   it("abort after stream complete → no-op, normal result", async () => {
@@ -235,7 +242,7 @@ describe("ConversationLoop abort (B4)", () => {
     });
     // Should be treated as interrupt, not a hard error
     expect(result.stopReason).toBe("interrupted");
-    expect(result.text).toContain("[중단됨]");
+    expect(result.text).not.toContain("[중단됨]");
   });
 
   it("Issue 3: error with 'abort' substring but wrong name is NOT treated as abort", async () => {
