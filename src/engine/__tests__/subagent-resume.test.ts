@@ -1946,7 +1946,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
             text: "partial at cumulative ceiling",
             toolCalls: [],
             stopReason: "round-cap",
-          } as Awaited<ReturnType<typeof originalRunTurn>>;
+          } as unknown as Awaited<ReturnType<typeof originalRunTurn>>;
         },
       );
 
@@ -2029,7 +2029,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         text: "kept going past the old ceiling",
         toolCalls: [],
         stopReason: "round-cap",
-      } as Awaited<ReturnType<typeof originalRunTurn>>);
+      } as unknown as Awaited<ReturnType<typeof originalRunTurn>>);
 
     try {
       const resumed = await runner.resume(resumeId, "continue", "scaled-ceiling");
@@ -2436,7 +2436,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         status: "error",
       });
       expect(loserTerminal[0]).not.toHaveProperty("childSessionId");
-      expect(deliverToParent.mock.calls[0]?.[0]).toMatchObject({
+      expect((deliverToParent.mock.calls[0] as unknown[] | undefined)?.[0]).toMatchObject({
         parentSessionId: originSessionId,
         childSessionId: spawn.childSessionId,
       });
@@ -3118,7 +3118,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const originSessionId = "parent-question-order";
     const toolRegistry = new ToolRegistry();
     let runner!: SubAgentRunner;
-    toolRegistry.register(createAgentSendTool({ getRuntime: () => runner }));
+    toolRegistry.register(createAgentSendTool({ getRuntime: () => runner as unknown as import("../../tools/agent-send.js").AgentSendRuntime }));
     const subStore = makeSubStore();
     const namespace = openFeatureNamespace("subagent-messaging");
     const mailbox = new A2AAgentMessageMailbox(namespace);
@@ -3217,7 +3217,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const originSessionId = "parent-question-fallback";
     const toolRegistry = new ToolRegistry();
     let runner!: SubAgentRunner;
-    toolRegistry.register(createAgentSendTool({ getRuntime: () => runner }));
+    toolRegistry.register(createAgentSendTool({ getRuntime: () => runner as unknown as import("../../tools/agent-send.js").AgentSendRuntime }));
     const subStore = makeSubStore();
     const namespace = openFeatureNamespace("subagent-messaging");
     const mailbox = new A2AAgentMessageMailbox(namespace);
@@ -3392,10 +3392,10 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
     expect(r.isError).toBe(false);
     // resume() called with (resumeId, continuationInstructions, title, callbacks, originSessionId).
     expect(resumeSpy).toHaveBeenCalledTimes(1);
-    expect(resumeSpy.mock.calls[0][0]).toBe("sub-resume-me");
-    expect(resumeSpy.mock.calls[0][1]).toBe("keep going");
+    expect((resumeSpy.mock.calls[0] as unknown[])[0]).toBe("sub-resume-me");
+    expect((resumeSpy.mock.calls[0] as unknown[])[1]).toBe("keep going");
     // 5th arg is originSessionId (from ctx.metadata.sessionId = "parent").
-    expect(resumeSpy.mock.calls[0][4]).toBe("parent");
+    expect((resumeSpy.mock.calls[0] as unknown[])[4]).toBe("parent");
     // spawn() never called on the resume path.
     expect(spawnSpy).not.toHaveBeenCalled();
     const parsed = JSON.parse(r.output);
