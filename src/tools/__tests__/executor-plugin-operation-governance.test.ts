@@ -1102,7 +1102,11 @@ describe("ToolExecutor plugin operation governance", () => {
       await vi.advanceTimersByTimeAsync(TOOL_TIMEOUT_POLICY.globalCeilingMs + 1);
       const [timedOutResult] = await timedOutWrite;
       expect(timedOutResult.is_error).toBe(true);
-      expect(timedOutResult.content).toContain("exceeded global ceiling");
+      // A plugin tool has no timeout field of its own to escalate with, so the
+      // ceiling has to hand back a RETRYABLE result that names the host bound
+      // and says what to do instead — not an opaque abort and never a throw.
+      expect(timedOutResult.content).toContain("domain_write");
+      expect(timedOutResult.content).toContain("호스트");
 
       const readback = runWithInvocationOrigin("ui", undefined, () =>
         executor.executeAll(

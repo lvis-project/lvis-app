@@ -1826,13 +1826,23 @@ export class SubAgentRunner {
   }
 
   /**
+   * The normalized round budget one invocation may run — the same resolution
+   * `spawn()` and `resume()` use. The `agent_spawn` tool reads it to size its
+   * executor wall clock: the round setting has no maximum, so a FIXED ceiling
+   * silently reinstates the bound that setting exists to remove, killing a
+   * long agent by the clock instead of by its budget.
+   */
+  roundBudget(): number {
+    return normalizeRoundBudget(this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT);
+  }
+
+  /**
    * Resume-axis cumulative ceiling, scaled to the CONFIGURED budget so the
    * resume-loop protection stays proportional instead of becoming an absolute
    * ceiling that binds below what one spawn is allowed to run.
    */
   private cumulativeRoundsCeiling(): number {
-    const budget = normalizeRoundBudget(this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT);
-    return CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER * budget;
+    return CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER * this.roundBudget();
   }
 
   private buildChildDeps(args: {

@@ -398,6 +398,7 @@ export const jaMessages: Record<string, string> = {
   "be_executor.shellPathPolicyBlock": "[シェル パス ポリシーがブロックされました] ツール '{name}' — {reason}",
   "be_executor.toolExecutionCancelled": "ツールの実行がキャンセルされました。",
   "be_executor.toolExecutionUnknownError": "不明なツール実行エラー",
+  "be_executor.toolCeilingExceeded": "ツール '{name}' は {seconds} 秒後に LVIS ホストによって停止されました — これはツール自身のタイムアウトではなくホストの実行上限です。結果は不明です: 打ち切りの直前に処理が完了していた可能性があるため、失敗と決めつける前に現在の状態を確認してください。同じ呼び出しをそのまま繰り返しても同じ上限に達します。このツールが独自のタイムアウト引数を取るなら大きい値で再試行し、そうでなければ作業をより小さな手順に分けてください。",
   "be_executor.toolNotFound": "ツールが見つかりません: {name}",
   "be_executor.toolNotFoundAudit": "ツールが見つかりません",
   "be_hookRunner.blockedByHook": "{name} がツールの実行をブロックしました",

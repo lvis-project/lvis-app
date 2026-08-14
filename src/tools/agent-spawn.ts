@@ -29,6 +29,8 @@ import {
 } from "../shared/a2a.js";
 import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../shared/subagent-events.js";
 import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
+import { resolveSubAgentCeilingMs } from "../shared/tool-timeout-policy.js";
+import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-rounds.js";
 
 
 /**
@@ -117,6 +119,16 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
     category: "meta",
     decisionOverride: "ask",
     parallelSafe: true,
+    // The executor's default wall clock bounds a single tool call; this one
+    // supervises a whole sub-agent loop whose length the user configures and
+    // which has no maximum. Sizing the deadline from that same budget is what
+    // keeps "unlimited rounds" from meaning "unlimited rounds until 600s".
+    // When no runner is wired the tool refuses at execute() anyway, so the
+    // shipped floor is the honest bound for that case.
+    resolveHostCeilingMs: () =>
+      resolveSubAgentCeilingMs(
+        deps.getRunner()?.roundBudget() ?? SUBAGENT_MAX_ROUNDS_DEFAULT,
+      ),
     jsonSchema: {
       type: "object",
       required: ["instructions"],

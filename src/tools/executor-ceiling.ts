@@ -28,20 +28,32 @@ const SHELL_CEILING_GRACE_MS = 10_000;
 /**
  * Ceiling for one tool invocation.
  *
- * `agent_spawn` runs a whole sub-agent loop and gets `subAgentCeilingMs`.
- * Builtin shell tools carry their own `timeoutSeconds`, which is unbounded
- * above the default on purpose (see TOOL_TIMEOUT_POLICY): when the model
- * escalates past `globalCeilingMs` the ceiling follows, otherwise the retry
- * that names a larger budget would still be cut at the old ceiling. Every
- * other tool keeps `globalCeilingMs` — a plugin tool cannot raise its own
- * ceiling by declaring a `timeoutSeconds` field, because only builtin shell
- * tools are consulted here.
+ * Two host-owned escalation paths exist, and BOTH are gated on
+ * `source === "builtin"`:
+ *
+ *  - A builtin that runs a bounded loop of its own declares
+ *    `resolveHostCeilingMs` (today: `agent_spawn`, whose wall clock scales
+ *    with the configured sub-agent round budget). The value is host-derived,
+ *    never read from tool input.
+ *  - Builtin shell tools carry their own `timeoutSeconds`, which is unbounded
+ *    above the default on purpose (see TOOL_TIMEOUT_POLICY): when the model
+ *    escalates past `globalCeilingMs` the ceiling follows, otherwise the retry
+ *    that names a larger budget would still be cut at the old ceiling.
+ *
+ * Every other tool keeps `globalCeilingMs`. A plugin or MCP tool cannot raise
+ * its own ceiling — not by declaring a `timeoutSeconds` field (only builtin
+ * shell inputs are read) and not by declaring `resolveHostCeilingMs` (neither
+ * adapter can produce a builtin `Tool`). Its expiry is not a dead end either:
+ * the executor turns it into a retryable tool error naming the host bound, so
+ * the model can narrow the work and call again.
  */
 export function resolveEffectiveCeilingMs(
-  tool: Pick<Tool, "name" | "source" | "category">,
+  tool: Pick<Tool, "name" | "source" | "category" | "resolveHostCeilingMs">,
   input: Record<string, unknown>,
 ): number {
-  if (tool.name === "agent_spawn") return TOOL_TIMEOUT_POLICY.subAgentCeilingMs;
+  if (tool.source === "builtin" && tool.resolveHostCeilingMs) {
+    return tool.resolveHostCeilingMs();
+  }
   if (tool.source !== "builtin" || tool.category !== "shell") {
     return TOOL_TIMEOUT_POLICY.globalCeilingMs;
   }

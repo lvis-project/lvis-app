@@ -78,6 +78,21 @@ export interface Tool {
    * would route around that decision.
    */
   readonly requiresMcpScope?: boolean;
+  /**
+   * BUILTIN-only: this tool runs a bounded loop of its OWN whose length the
+   * user configures, so a fixed executor ceiling would silently re-impose the
+   * cap that setting exists to remove. Returns the wall-clock ceiling in ms
+   * for the next invocation; `resolveEffectiveCeilingMs` consults it in place
+   * of `globalCeilingMs`.
+   *
+   * `source: "builtin"` is checked at the read site, so a plugin or MCP tool
+   * cannot grant itself more wall clock — neither adapter copies anything
+   * from the wire into this field, and neither can produce a builtin `Tool`.
+   * Implementations must return a finite host-derived bound, never a value
+   * taken from tool input: model input choosing its own deadline is exactly
+   * what the ceiling exists to bound.
+   */
+  readonly resolveHostCeilingMs?: () => number;
   readonly pluginId?: string;
   /** Exact immutable plugin generation that produced this registry entry. */
   readonly pluginGeneration?: PluginToolGenerationOwner;
@@ -250,6 +265,8 @@ export interface DynamicToolSpec {
   appInvokable?: boolean;
   /** MCP-scoped builtin bit — see {@link Tool.requiresMcpScope}. */
   requiresMcpScope?: boolean;
+  /** Builtin self-declared wall clock — see {@link Tool.resolveHostCeilingMs}. */
+  resolveHostCeilingMs?: () => number;
   /** MCP Apps model-exposure bit — see {@link Tool.modelVisible}. */
   modelVisible?: boolean;
   pathFields?: readonly string[];
@@ -289,6 +306,9 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     operationPolicy: spec.operationPolicy,
     appInvokable: spec.appInvokable,
     ...(spec.requiresMcpScope ? { requiresMcpScope: true } : {}),
+    ...(spec.resolveHostCeilingMs
+      ? { resolveHostCeilingMs: spec.resolveHostCeilingMs }
+      : {}),
     modelVisible: spec.modelVisible,
     pathFields: spec.pathFields,
     version: spec.version ?? "1.0.0",
