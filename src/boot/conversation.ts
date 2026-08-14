@@ -20,7 +20,10 @@ import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { PluginRuntime } from "../plugins/runtime.js";
 import { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import { PermissionManager } from "../permissions/permission-manager.js";
-import { ApprovalGate } from "../permissions/approval-gate.js";
+import {
+  ApprovalGate,
+  type ParentAdjudicationGateDeps,
+} from "../permissions/approval-gate.js";
 import { loadPolicy } from "../permissions/policy-store.js";
 import { registerStandardCategories } from "../permissions/category-registry.js";
 import { ConversationLoop } from "../engine/conversation-loop.js";
@@ -149,6 +152,12 @@ export async function createApprovalGate(
   mainWindow: BrowserWindow,
   auditLogger: AuditLogger,
   notificationService?: NotificationService,
+  /**
+   * Tier 2 of the sub-agent approval chain. Omitted — in tests, and in any
+   * boot that has not wired a reviewer — the gate keeps the two-tier chain it
+   * had before: an eligible sub-agent ask goes straight to the user's dock.
+   */
+  parentAdjudication?: ParentAdjudicationGateDeps,
 ): Promise<ApprovalGate> {
 
 
@@ -159,6 +168,7 @@ export async function createApprovalGate(
     5 * 60 * 1000,
     auditLogger,
     notificationService,
+    parentAdjudication,
   );
 }
 

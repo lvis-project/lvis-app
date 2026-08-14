@@ -170,6 +170,12 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     });
     ctx.rationaleScopeReviewer = reviewerResult.rationaleScopeReviewer;
     ctx.approvalSentenceSelector = reviewerResult.approvalSentenceSelector;
+    // Replaced on every re-wire, which is why the approval gate reaches it
+    // through an accessor rather than holding the instance: a gate that
+    // captured this at boot would still be asking the stand-in after a login
+    // healed the reviewer, and every ask would escalate for a reason that had
+    // stopped being true.
+    ctx.parentAdjudicator = reviewerResult.parentAdjudicator;
     // A re-wire updates the runtime reviewer mode (notably the
     // llm-degraded-to-rule → llm heal driven by login or settings:update).
     // setReviewer itself does not broadcast, so an already-open PermissionsTab

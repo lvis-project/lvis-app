@@ -67,6 +67,11 @@ import {
   UnavailableRationaleScopeReviewer,
   type RationaleScopeReviewer,
 } from "../../permissions/reviewer/rationale-scope-reviewer.js";
+import {
+  LlmParentAdjudicator,
+  UnavailableParentAdjudicator,
+  type ParentAdjudicator,
+} from "../../permissions/parent-adjudicator.js";
 
 const log = createLogger("reviewer-wiring");
 
@@ -210,6 +215,14 @@ export interface WireReviewerResult {
    * mode leaves it as the stand-in that proposes nothing.
    */
   approvalSentenceSelector: ApprovalSentenceSelector;
+  /**
+   * Tier 2 of the sub-agent approval chain. It rides the same provider/model
+   * as the rest of the reviewer — the cheapest model already trusted with risk
+   * classification is the right one to ask a bounded judgement question — and
+   * every reviewer mode that has no provider leaves it as the stand-in whose
+   * only answer is "escalate to the user".
+   */
+  parentAdjudicator: ParentAdjudicator;
   cache: VerdictCache;
   deferredQueue: DeferredQueue;
   /** Persisted reviewer block actually loaded (post-normalisation). */
@@ -269,6 +282,7 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     new UnavailableRationaleScopeReviewer();
   let approvalSentenceSelector: ApprovalSentenceSelector =
     new UnavailableApprovalSentenceSelector();
+  let parentAdjudicator: ParentAdjudicator = new UnavailableParentAdjudicator();
   // Runtime classifier discriminant — diverges from persisted mode only on
   // the llm-degraded-to-rule path below.
   let runtimeMode: RuntimeReviewerMode = settings.mode;
@@ -335,6 +349,10 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
         effectiveSettings.model,
       );
       approvalSentenceSelector = new LlmApprovalSentenceSelector(
+        adapter,
+        effectiveSettings.model,
+      );
+      parentAdjudicator = new LlmParentAdjudicator(
         adapter,
         effectiveSettings.model,
       );
@@ -407,6 +425,7 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     classifier,
     rationaleScopeReviewer,
     approvalSentenceSelector,
+    parentAdjudicator,
     cache,
     deferredQueue,
     appliedSettings: settings,
