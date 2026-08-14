@@ -3052,10 +3052,17 @@ export class SubAgentRunner {
       return result;
     };
 
+    // Structural policy refusals: retrying the SAME resumeId can never
+    // succeed, so each carries the resumeInvalid marker that suppresses
+    // agent_spawn's retry guidance. Contrast the question-answer length check
+    // below, which stays UNMARKED on purpose — fixing the answer and retrying
+    // the same id is the correct move there.
+    const refuseStructurally = (message: string) =>
+      finishAttemptFailure(message, { resumeInvalid: true });
+
     if (!isValidSessionId(resumeId)) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         'sub-agent resume: invalid resumeId "' + resumeId + '"',
-        { resumeInvalid: true },
       );
     }
 
@@ -3066,31 +3073,27 @@ export class SubAgentRunner {
         ? createHash("sha256").update(originSessionId).digest("hex").slice(0, 8)
         : "";
       if (idTag !== expectedTag) {
-        return finishAttemptFailure(
+        return refuseStructurally(
           "sub-agent resume: resumeId does not belong to this session",
-          { resumeInvalid: true },
         );
       }
     }
 
     const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(resumeId);
     if (meta === null) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         'sub-agent resume: no session metadata for "' + resumeId + '"',
-        { resumeInvalid: true },
       );
     }
     if (meta.sessionKind !== "subagent") {
-      return finishAttemptFailure(
+      return refuseStructurally(
         'sub-agent resume: session "' + resumeId
           + '" is not a sub-agent (kind=' + (meta.sessionKind ?? "unknown") + ")",
-        { resumeInvalid: true },
       );
     }
     if (meta.originSessionId !== originSessionId) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         "sub-agent resume: origin session metadata does not match caller",
-        { resumeInvalid: true },
       );
     }
     const hasWireBinding = meta.a2aWireHandlerId !== undefined
@@ -3103,30 +3106,26 @@ export class SubAgentRunner {
         || !meta.projectRoot
         || meta.sourceTools === undefined
       ) {
-        return finishAttemptFailure(
+        return refuseStructurally(
           "sub-agent resume: A2A wire binding metadata does not match caller",
-          { resumeInvalid: true },
         );
       }
     } else if (hasWireBinding) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         "sub-agent resume: wire-bound task requires the A2A wire entry point",
-        { resumeInvalid: true },
       );
     }
     if (
       !isResumableSubAgentTaskState(meta.subAgentTaskState)
       || !meta.subAgentSuspensionReason
     ) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         "sub-agent resume: task is not in INPUT_REQUIRED",
-        { resumeInvalid: true },
       );
     }
     if (!meta.subAgentTitle) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         "sub-agent resume: missing persisted sub-agent title",
-        { resumeInvalid: true },
       );
     }
     const persistedResumeReason = meta.subAgentSuspensionReason;
@@ -3147,7 +3146,7 @@ export class SubAgentRunner {
 
     const priorTrackedRun = this.trackedRuns.get(resumeId);
     if (priorTrackedRun && isA2ATerminalTaskState(priorTrackedRun.taskState)) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         "sub-agent resume: in-memory task is already terminal",
       );
     }

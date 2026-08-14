@@ -2417,6 +2417,17 @@ describe("subAgentAutonomousWake un-fossilize migration", () => {
     expect(onDisk.appliedMigrations).toContain("subagent-autonomous-wake-default-flip");
   });
 
+  it("keeps a fresh install's first-session opt-out across the next boot", async () => {
+    // Fresh installs have no settings file; loadSettings seeds KNOWN_MIGRATIONS
+    // so a user opt-out saved in the very first session (before any migration
+    // marker could exist on disk) is not treated as a fossil on the next load.
+    const service = new SettingsService({ userDataPath });
+    await service.patch({ features: { subAgentAutonomousWake: false } } as never);
+
+    const rebooted = new SettingsService({ userDataPath });
+    expect(rebooted.get("features")?.subAgentAutonomousWake).toBe(false);
+  });
+
   it("respects an explicit opt-out written after the migration ran", () => {
     const path = join(userDataPath, "lvis-settings.json");
     writeFileSync(path, JSON.stringify({

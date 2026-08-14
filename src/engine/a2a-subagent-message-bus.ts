@@ -65,6 +65,14 @@ export type ParentWakeHandler = (parentSessionId: string) => Promise<void>;
  * round-boundary injection callback fires, so a late queue entry that is
  * dropped at turn end remains durable for the next turn.
  */
+/**
+ * Wake-refusal reasons that are legitimate holds rather than stalls: the
+ * mailbox entry's delivery is already owned by another mechanism (the active
+ * turn's guidance injection, or the in-flight wake's completion recheck).
+ * Everything else in wakeRefusalReasons is a HARD refusal.
+ */
+const SOFT_WAKE_REFUSALS = new Set(["turn-active", "wake-in-flight"]);
+
 export class A2ASubAgentMessageBus {
   private wakeHandler: ParentWakeHandler | null = null;
   private readonly wakeInFlight = new Set<string>();
@@ -394,12 +402,12 @@ export class A2ASubAgentMessageBus {
       this.requestWake(input.parentSessionId, deliveryInput);
       return { ok: true, disposition: "wake-requested", messageId: canonical.message.messageId };
     }
-    // turn-active and wake-in-flight are the two LEGITIMATE holds — the entry
-    // is durable and an existing mechanism (guidance injection above, or the
-    // in-flight wake's completion recheck) owns its delivery. Anything else
-    // means the message will sit until the user's next manual turn, which is
-    // exactly the silent-stall the field hit; log those loudly.
-    const benign = refusals.every((r) => r === "turn-active" || r === "wake-in-flight");
+    // SOFT holds are the two LEGITIMATE ones — the entry is durable and an
+    // existing mechanism (guidance injection above, or the in-flight wake's
+    // completion recheck) owns its delivery. A HARD refusal means the message
+    // will sit until the user's next manual turn, which is exactly the
+    // silent-stall the field hit; log those loudly.
+    const benign = refusals.every((r) => SOFT_WAKE_REFUSALS.has(r));
     this.audit(
       benign ? "info" : "warn",
       deliveryInput,
@@ -436,6 +444,13 @@ export class A2ASubAgentMessageBus {
     return this.wakeRefusalReasons(parentSessionId).length === 0;
   }
 
+  private wakeFlagEnabled(): boolean {
+    // `?? false` only guards the optional `features` type; loadSettings
+    // materializes the block on every path. Collapses once AppSettings makes
+    // `features` required (follow-up).
+    return this.deps.settingsService.get("features")?.subAgentAutonomousWake ?? false;
+  }
+
   /**
    * Every reason wake is currently refused for this parent; empty = wake.
    *
@@ -449,7 +464,7 @@ export class A2ASubAgentMessageBus {
    */
   private wakeRefusalReasons(parentSessionId: string): string[] {
     const reasons: string[] = [];
-    if (!(this.deps.settingsService.get("features")?.subAgentAutonomousWake ?? false)) {
+    if (!this.wakeFlagEnabled()) {
       reasons.push("flag-off");
     }
     if (this.deps.parentLoop.getSessionId() !== parentSessionId) {
@@ -461,10 +476,17 @@ export class A2ASubAgentMessageBus {
     return reasons;
   }
 
+  /**
+   * True when only SOFT holds (turn-active / wake-in-flight) stand between
+   * this parent and a wake — delivery ownership then already lies with the
+   * running turn's guidance injection or the in-flight wake's completion
+   * recheck. HARD refusals (flag-off / session-mismatch / handler-
+   * unregistered) mean nothing will deliver until the outside world changes.
+   * Derived from wakeRefusalReasons so the condition list has one home.
+   */
   private canRequestAutonomousWakeForCurrentParent(parentSessionId: string): boolean {
-    return (this.deps.settingsService.get("features")?.subAgentAutonomousWake ?? false)
-      && this.deps.parentLoop.getSessionId() === parentSessionId
-      && this.wakeHandler !== null;
+    return this.wakeRefusalReasons(parentSessionId)
+      .every((reason) => SOFT_WAKE_REFUSALS.has(reason));
   }
 
   private requestWake(parentSessionId: string, input: DeliverToParentInput): void {
