@@ -31,8 +31,23 @@ import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../shared/subagen
 import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 
 
+/**
+ * A terminal delivery must always carry something the parent can act on.
+ *
+ * `summary` is the child's last assistant text, which is empty whenever a run
+ * ends without producing one (a resumed child that only ran tools, for example).
+ * Delivering that verbatim produced an id-only envelope — header, no body — that
+ * the parent LLM could not respond to, so name the final state and the way back
+ * in instead.
+ */
 function backgroundResultText(result: SubAgentSpawnResult): string {
-  const summary = result.error ?? result.summary;
+  const reported = result.error ?? result.summary;
+  const summary = reported.trim().length > 0
+    ? reported
+    : t("be_agentSpawn.emptySummaryFallback", {
+        taskState: projectSubAgentResultState(result),
+        resumeId: result.childSessionId,
+      });
   if (!result.suspension) return summary;
   const requestedInput = result.suspension.reason === "question"
     ? result.suspension.prompt ?? "answer the sub-agent question"

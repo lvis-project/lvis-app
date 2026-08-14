@@ -13,6 +13,7 @@ import {
   canonicalizeAgentMessage,
   isSafeA2AMessageId,
   sanitizeA2ALabel,
+  wrapChildReportForParentJudgment,
 } from "./a2a-subagent-message-codec.js";
 
 export {
@@ -326,6 +327,12 @@ export class A2ASubAgentMessageBus {
       return this.drop(input, reason);
     }
     this.audit("info", deliveryInput, `stored:detections=${canonical.detectionCount}`);
+    if (canonical.emptyBody) {
+      // The producer sent a report with no renderable content and the codec
+      // substituted a host-composed body. Never silent: an empty terminal
+      // delivery is a producer defect, and this is where it becomes visible.
+      this.audit("warn", deliveryInput, "empty-body-fallback");
+    }
 
     if (address.ephemeralMessageId !== undefined) {
       this.ephemeralLeasesByEntryId.set(entry.id, {
@@ -348,9 +355,12 @@ export class A2ASubAgentMessageBus {
       && this.deps.parentLoop.hasActiveTurn()
     ) {
       const queued = this.deps.parentLoop.queueGuidanceWithDisposition(
-        entry.formattedText,
+        wrapChildReportForParentJudgment(entry.formattedText),
         {
           approvalReasonPrefix: entry.approvalLabel,
+          // Structured provenance for the renderer: a child report is not the
+          // generic "injected from the message queue" chip.
+          subAgentTitle: entry.childTitle,
           onInjected: () => this.acknowledgeParentMailbox(
             entry.parentSessionId,
             [entry.id],

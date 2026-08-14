@@ -133,7 +133,11 @@ function projectPlatformConversationEventToLegacyChatFrame(
     case "model.fallback":
       return streamFrame(fallbackChannel, { from: event.from, to: event.to });
     case "guidance.applied":
-      return streamFrame(streamChannel, withStreamId({ type: "guidance_injected", text: event.text }));
+      return streamFrame(streamChannel, withStreamId({
+        type: "guidance_injected",
+        text: event.text,
+        ...(event.subAgentReport ? { subAgentReport: event.subAgentReport } : {}),
+      }));
     case "guidance.dropped":
       return streamFrame(streamChannel, withStreamId({ type: "guidance_dropped", text: event.text }));
     case "suggestions.updated":

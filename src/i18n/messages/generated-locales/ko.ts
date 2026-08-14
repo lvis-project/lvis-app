@@ -10,6 +10,7 @@ import { ko as ko_attachmentChip } from "../generated/attachmentChip.js";
 import { ko as ko_auditPanel } from "../generated/auditPanel.js";
 import { ko as ko_auditTab } from "../generated/auditTab.js";
 import { ko as ko_awayAuthority } from "../generated/awayAuthority.js";
+import { ko as ko_be_a2aSubAgentMessage } from "../generated/be_a2aSubAgentMessage.js";
 import { ko as ko_be_agentList } from "../generated/be_agentList.js";
 import { ko as ko_be_agentModeMap } from "../generated/be_agentModeMap.js";
 import { ko as ko_be_agentSpawn } from "../generated/be_agentSpawn.js";
@@ -201,6 +202,7 @@ export const koMessages: Record<string, string> = {
   ...ko_auditPanel,
   ...ko_auditTab,
   ...ko_awayAuthority,
+  ...ko_be_a2aSubAgentMessage,
   ...ko_be_agentList,
   ...ko_be_agentModeMap,
   ...ko_be_agentSpawn,

@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import type React from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
-import { GitBranch, Pencil, Pin } from "lucide-react";
+import { Bot, GitBranch, Pencil, Pin } from "lucide-react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import { debugLog } from "../../../lib/debug-stream.js";
@@ -249,7 +249,40 @@ export function TranscriptRenderer({
       const prevAssistantComplete =
         prevEntry?.kind === "assistant" && prevEntry.streaming !== true;
       const userGapCls = prevAssistantComplete ? "!mt-4" : "";
-      if (editingEntryIdx === i && setEditingEntryIdx && onEditSave) {
+      // A sub-agent report enters the parent transcript as a user-role message
+      // because that is how the model receives it — but it is not the user's
+      // text and must not read as such. It gets its own left-aligned box with
+      // the reporting child named, and none of the edit/fork/pin affordances
+      // that only make sense on something the user wrote.
+      if (entry.injectHint === "sub-agent") {
+        rendered.push(
+          <div
+            key={idx}
+            data-chat-entry-index={idx}
+            data-testid="subagent-report-entry"
+            className={`mr-auto w-fit min-w-0 max-w-[85%] ${userGapCls}`}
+          >
+            <div
+              data-testid="subagent-report-bubble"
+              className={`min-w-0 overflow-hidden rounded-lg border border-primary/(--opacity-medium) bg-muted/(--opacity-subtle) px-3.5 py-2.5 text-body-sm text-foreground shadow-sm ${ringCls}`}
+            >
+              <div
+                data-testid="subagent-report-label"
+                className="mb-1 inline-flex items-center gap-1 rounded bg-muted/(--opacity-medium) px-1.5 py-0.5 text-micro text-muted-foreground"
+                title={t("chatView.subAgentReportTitle")}
+              >
+                <Bot className="h-3 w-3 text-primary" />
+                {entry.subAgentTitle
+                  ? t("chatView.subAgentReportLabelNamed", { title: entry.subAgentTitle })
+                  : t("chatView.subAgentReportLabel")}
+              </div>
+              <div className="cursor-text select-text whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
+                {searchHighlight ? highlightText(entry.text, searchHighlight) : entry.text}
+              </div>
+            </div>
+          </div>,
+        );
+      } else if (editingEntryIdx === i && setEditingEntryIdx && onEditSave) {
         rendered.push(
           <div key={idx} className={userGapCls}>
             <UserMessageEditor
