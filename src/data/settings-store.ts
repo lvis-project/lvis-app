@@ -83,6 +83,15 @@ const log = createLogger("settings");
  */
 const SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION = "subagent-autonomous-wake-default-flip";
 
+/**
+ * Every one-time migration this build knows. Fresh-install and
+ * corrupt-recovery settings start with ALL of them marked applied: a state
+ * built from current defaults is by definition post-migration, and seeding
+ * the markers closes the window where a user's first-session opt-out would
+ * be silently reverted by a migration re-run on the next boot.
+ */
+const KNOWN_MIGRATIONS: readonly string[] = [SUBAGENT_WAKE_DEFAULT_FLIP_MIGRATION];
+
 export type { LLMVendor, LLMVendorSettings };
 export { LLM_VENDORS };
 export type { ShortcutSettings, ShortcutSettingsPatch };
@@ -701,11 +710,10 @@ export class SettingsService {
       policy: options.secretPolicy ?? "packaged",
       encryption: safeStorage,
     });
-    const loaded = this.loadSettings() as AppSettings & { __needsV2WriteBack?: boolean };
-    const needsWriteBack = loaded.__needsV2WriteBack === true;
-    delete (loaded as { __needsV2WriteBack?: boolean }).__needsV2WriteBack;
+    const { settings: loaded, writeBack: needsWriteBack } = this.loadSettings();
     this.settings = loaded;
-    // v1 → v2 write-back: persist the migrated appearance so next load is clean.
+    // Migration write-back (appearance v2, one-time markers): persist so the
+    // next load is clean.
     if (needsWriteBack) {
       void this.saveSettings().catch(() => { /* best-effort — next load re-migrates */ });
     }
@@ -732,7 +740,7 @@ export class SettingsService {
   }
 
   async patch(
-    partial: Partial<Omit<AppSettings, "llm" | "marketplace" | "shortcuts">> & {
+    partial: Partial<Omit<AppSettings, "llm" | "marketplace" | "shortcuts" | "appliedMigrations">> & {
       marketplace?: Partial<MarketplaceSettings>;
       llm?: LLMSettingsPatch;
       shortcuts?: ShortcutSettingsPatch;
@@ -1256,13 +1264,14 @@ export class SettingsService {
 
   // --- private helpers ---
 
-  private loadSettings(): AppSettings {
+  private loadSettings(): { settings: AppSettings; writeBack: boolean } {
     if (!existsSync(this.settingsPath)) {
       const defaults = structuredClone(DEFAULT_SETTINGS);
       // Fresh installs stay English-first while non-English language packs move
       // toward marketplace delivery. Stored user choices are still preserved by
       // the migration/read path below.
-      return defaults;
+      defaults.appliedMigrations = [...KNOWN_MIGRATIONS];
+      return { settings: defaults, writeBack: false };
     }
     try {
       const raw = readFileSync(this.settingsPath, "utf-8");
@@ -1358,7 +1367,7 @@ export class SettingsService {
         migrationWriteBack = true;
       }
 
-      const result: AppSettings & { __needsV2WriteBack?: boolean } = {
+      const result: AppSettings = {
         llm,
         chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
         a2aRemote: normalizeA2ARemote(parsed.a2aRemote),
@@ -1379,10 +1388,11 @@ export class SettingsService {
         features: { ...DEFAULT_SETTINGS.features, ...normalizedFeatures },
         appliedMigrations,
       };
-      if (needsV2WriteBack || migrationWriteBack) result.__needsV2WriteBack = true;
-      return result;
+      return { settings: result, writeBack: needsV2WriteBack || migrationWriteBack };
     } catch {
-      return structuredClone(DEFAULT_SETTINGS);
+      const defaults = structuredClone(DEFAULT_SETTINGS);
+      defaults.appliedMigrations = [...KNOWN_MIGRATIONS];
+      return { settings: defaults, writeBack: false };
     }
   }
 
