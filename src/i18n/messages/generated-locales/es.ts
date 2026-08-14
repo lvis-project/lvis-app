@@ -2585,6 +2585,7 @@ export const esMessages: Record<string, string> = {
   "toolApprovalDialog.tilePermissionCategory": "Categoría de permiso",
   "toolApprovalDialog.tileToolSource": "Herramienta / Fuente",
   "toolApprovalDialog.toolApprovalTitle": "Aprobar la ejecución de la herramienta",
+  "toolApprovalDialog.identityUnverified": "sin verificar",
   "toolApprovalDialog.unknown": "Desconocido",
   "toolDisplay.agentSpawn": "Ejecutar subagente",
   "toolDisplay.applyPatch": "Archivo de parche",

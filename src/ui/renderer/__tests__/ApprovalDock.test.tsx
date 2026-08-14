@@ -497,14 +497,12 @@ describe("ApprovalDock", () => {
     );
 
     const deny = document.body.querySelector<HTMLButtonElement>('[data-testid="deny-button"]')!;
-    const always = document.body.querySelector<HTMLButtonElement>('[data-testid="allow-always-button"]')!;
-    const once = document.body.querySelector<HTMLButtonElement>('[data-testid="approve-button"]')!;
     await waitFor(() => expect(deny.tabIndex).toBe(0));
     expect(deny).toBeEnabled();
-    expect(always).toBeDisabled();
-    expect(always.tabIndex).toBe(-1);
-    expect(once).toBeDisabled();
-    expect(once.tabIndex).toBe(-1);
+    // Reject is the sole tab stop because it is the sole DECISION: the allow
+    // options are not rendered at all for an unverifiable seal.
+    expect(document.body.querySelector('[data-testid="allow-always-button"]')).toBeNull();
+    expect(document.body.querySelector('[data-testid="approve-button"]')).toBeNull();
     expect(document.activeElement).toBe(deny);
   });
 
