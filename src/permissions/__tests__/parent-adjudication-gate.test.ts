@@ -192,6 +192,10 @@ describe("parent adjudication — the answer", () => {
     expect(sent.parentEscalation).toEqual({
       cause: "parent-escalated",
       reason: "I cannot tell whether this path belongs to the task",
+      // Which child is asking, so the dock can name it. Carried by the host
+      // but written by the parent, hence masked and normalized on the way —
+      // see the title test below.
+      childTitle: "report writer",
     });
     // Host-only inputs never ride along with it.
     expect(sent).not.toHaveProperty("childProvenance");
@@ -199,6 +203,36 @@ describe("parent adjudication — the answer", () => {
     expect(
       rowStartingWith(auditLogger, "[approval:parent-escalated]"),
     ).toContain("cause=parent-escalated");
+  });
+
+  it("masks and normalizes the child title before the dock sees it", async () => {
+    // The title looks like host metadata and is not: `agent_spawn` reads it
+    // from the parent model's own tool arguments. Unmasked it can carry a
+    // secret past DLP, and un-normalized it can reorder or truncate the dock
+    // line it sits on.
+    const adjudicator = new ScriptedParentAdjudicator({
+      outcome: "escalate",
+      cause: "parent-escalated",
+      reason: "unclear",
+    });
+    const { gate, wc } = makeGate(adjudicator);
+
+    void gate.requestAndWait(
+      makeChildRequest({
+        childProvenance: {
+          childSessionId: CHILD_SESSION,
+          childTitle: "report writer jo.dreame@gmail.com \u202Ednammoc",
+          originSessionId: PARENT_SESSION,
+          spawnTaskSummary: "write the weekly report",
+        },
+      }),
+    );
+    await vi.waitFor(() => expect(wc.send).toHaveBeenCalled());
+
+    const title = sentRequest(wc).parentEscalation?.childTitle ?? "";
+    expect(title).toContain("report writer");
+    expect(title).not.toContain("jo.dreame@gmail.com");
+    expect(title).not.toContain("\u202E");
   });
 
   it("never shows the parent the dock's purpose sentence", async () => {
