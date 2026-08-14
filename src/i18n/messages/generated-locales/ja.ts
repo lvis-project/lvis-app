@@ -2603,6 +2603,7 @@ export const jaMessages: Record<string, string> = {
   "toolApprovalDialog.tilePermissionCategory": "許可カテゴリー",
   "toolApprovalDialog.tileToolSource": "ツール/ソース",
   "toolApprovalDialog.toolApprovalTitle": "ツールの実行を承認する",
+  "toolApprovalDialog.identityUnverified": "未検証",
   "toolApprovalDialog.unknown": "未知",
   "toolDisplay.agentSpawn": "サブエージェントを実行する",
   "toolDisplay.applyPatch": "パッチファイル",
