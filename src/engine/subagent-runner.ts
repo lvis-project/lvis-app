@@ -649,6 +649,58 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
 const MAX_RESUMES = 3;
 const CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER = 4;
 const MAX_TRACKED_RUNS = 100;
+/**
+ * Minimum spacing between activity emissions driven by reasoning deltas.
+ *
+ * Every emission serializes the WHOLE child transcript over IPC, and reasoning
+ * deltas arrive at token rate — forwarding one per delta would send the entire
+ * snapshot hundreds of times per round for text the user reads as a spinner.
+ * ~100ms is below the threshold at which streaming stops looking continuous
+ * while cutting the emission count by orders of magnitude.
+ */
+const REASONING_STREAM_EMIT_INTERVAL_MS = 100;
+
+/**
+ * Rate-limit `emit` to one call per `intervalMs`, leading and trailing.
+ *
+ * Leading, so the panel reacts to the first delta at once rather than after a
+ * blank interval. Trailing, so the last delta before a pause is never the one
+ * dropped — a coalescer without it leaves the visible thought truncated
+ * whenever the model stops mid-interval. `cancel()` drops a pending trailing
+ * call, which round boundaries use so their own unthrottled emission is the
+ * final word rather than racing a stale snapshot behind it.
+ */
+function createCoalescedEmitter(
+  emit: () => void,
+  intervalMs: number,
+): { schedule: () => void; cancel: () => void } {
+  let lastEmitMs = 0;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const fire = () => {
+    timer = undefined;
+    lastEmitMs = Date.now();
+    emit();
+  };
+  return {
+    schedule: () => {
+      if (timer !== undefined) return;
+      const waited = Date.now() - lastEmitMs;
+      if (waited >= intervalMs) {
+        fire();
+        return;
+      }
+      timer = setTimeout(fire, intervalMs - waited);
+      // The child loop keeps the process alive on its own; this timer must not
+      // be what holds it open if the run ends between deltas.
+      timer.unref?.();
+    },
+    cancel: () => {
+      if (timer === undefined) return;
+      clearTimeout(timer);
+      timer = undefined;
+    },
+  };
+}
 const QUESTION_SUSPENSION_PROMPT_FALLBACK =
   "Answer the sub-agent question to continue.";
 const BUDGET_SUSPENSION_PROMPT =
@@ -2442,6 +2494,10 @@ export class SubAgentRunner {
         toolCallCount: totalToolCalls,
       });
     };
+    const reasoningStreamEmitter = createCoalescedEmitter(
+      emitActivity,
+      REASONING_STREAM_EMIT_INTERVAL_MS,
+    );
     // Track whether the child loop completed cleanly. Starts false; flips true
     // only after `runTurn` returns without throwing. The catch leaves it false
     // so the error text surfaced as `summary` is reported as a FAILED spawn,
@@ -2483,6 +2539,10 @@ export class SubAgentRunner {
           // reasoning, and assistant rounds — into the shared ChatEntry model.
           // `toolCallCount:0` hardcode removed: real tool counts flow from the
           // accumulator's tool_start/tool_end rows.
+          onReasoningDelta: (text) => {
+            transcript.onReasoningDelta(text);
+            reasoningStreamEmitter.schedule();
+          },
           onToolStart: (name, input, meta) => {
             transcript.onToolStart(name, input, meta);
             emitActivity();
@@ -2500,6 +2560,11 @@ export class SubAgentRunner {
             assistantRounds += 1;
             turn = assistantRounds;
             lastText = round.text;
+            // Drop any queued delta emission first: the fold below is the
+            // authoritative state for this round, and a trailing snapshot
+            // landing after it would replace the finalized thought with the
+            // mid-stream one.
+            reasoningStreamEmitter.cancel();
             transcript.onAssistantRound(round.thought, round.text);
             emitActivity();
           },
@@ -2549,6 +2614,11 @@ export class SubAgentRunner {
         failureReason = message;
       }
     } finally {
+      // A run aborted mid-stream has deltas with no round boundary behind
+      // them, so a queued trailing emission could still land after this run
+      // has gone terminal. Drop it here rather than let an activity frame
+      // trail the terminal one.
+      reasoningStreamEmitter.cancel();
       unregisterSpawnChild();
       // SubagentStop — fires once whether the run completed, errored, or
       // aborted (the subagent has stopped either way). Observe-only/fail-soft.
@@ -3429,6 +3499,10 @@ export class SubAgentRunner {
         toolCallCount: totalToolCalls,
       });
     };
+    const reasoningStreamEmitter = createCoalescedEmitter(
+      emitActivity,
+      REASONING_STREAM_EMIT_INTERVAL_MS,
+    );
     let ok = false;
     let failureReason: string | undefined;
     let childInputRequired: TurnInputRequired | undefined;
@@ -3438,6 +3512,10 @@ export class SubAgentRunner {
       const turnResult = await child.runTurn(
         canonicalContinuationInstructions,
         {
+          onReasoningDelta: (text) => {
+            transcript.onReasoningDelta(text);
+            reasoningStreamEmitter.schedule();
+          },
           onToolStart: (name, input, cbMeta) => {
             transcript.onToolStart(name, input, cbMeta);
             emitActivity();
@@ -3455,6 +3533,11 @@ export class SubAgentRunner {
             assistantRounds += 1;
             turn = assistantRounds;
             lastText = round.text;
+            // Drop any queued delta emission first: the fold below is the
+            // authoritative state for this round, and a trailing snapshot
+            // landing after it would replace the finalized thought with the
+            // mid-stream one.
+            reasoningStreamEmitter.cancel();
             transcript.onAssistantRound(round.thought, round.text);
             emitActivity();
           },
@@ -3497,6 +3580,9 @@ export class SubAgentRunner {
       lastText = message;
       failureReason = message;
     } finally {
+      // Same reason as the spawn path: an abort mid-stream leaves deltas with
+      // no round boundary to cancel their queued emission.
+      reasoningStreamEmitter.cancel();
       unregisterResumeChild();
     }
     let result: SubAgentSpawnResult = {

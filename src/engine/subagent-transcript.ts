@@ -39,6 +39,17 @@ import type { McpUiPayload } from "../mcp/types.js";
 
 export class SubAgentTranscriptAccumulator {
   private entries: ChatEntry[] = [];
+  /**
+   * RAW reasoning text accumulated across this round's deltas.
+   *
+   * Kept raw because masking must run over the ACCUMULATION, never over a
+   * single delta: a secret split across two chunks matches no pattern in
+   * either half, so per-delta masking would leak exactly the values DLP
+   * exists to catch. `upsertStreamingReasoning` replaces the entry's text
+   * wholesale anyway, so whole-text masking is also the natural shape here.
+   * Reset at each round boundary.
+   */
+  private roundReasoning = "";
 
   /** Immutable snapshot of the child transcript so far. */
   snapshot(): ChatEntry[] {
@@ -119,17 +130,44 @@ export class SubAgentTranscriptAccumulator {
   }
 
   /**
+   * One reasoning delta from the child's stream — the live half of what
+   * {@link onAssistantRound} later folds.
+   *
+   * The child's thinking was only ever visible at the round boundary, so the
+   * sub-agent panel sat blank for the whole time the child was actually
+   * thinking and then showed a finished thought. Feeding the same streaming
+   * reasoning entry the parent chat uses makes "Thinking…" appear while it is
+   * true.
+   *
+   * Purely additive to what is kept: the round fold below still overwrites this
+   * entry with the round's own `thought`, so the settled transcript — the one
+   * that gets persisted and replayed — is byte-identical to before.
+   */
+  onReasoningDelta(delta: string): void {
+    if (!delta) return;
+    this.roundReasoning += delta;
+    const masked = maskSensitiveData(this.roundReasoning).masked;
+    if (!masked) return;
+    this.entries = upsertStreamingReasoning(this.entries, masked);
+  }
+
+  /**
    * Fold one completed assistant round into the transcript: the round's
    * reasoning (thought) becomes a finalized reasoning entry, and the round's
    * text becomes a finalized assistant entry. Both are DLP-masked. Called once
    * per round boundary from the child loop's `onAssistantRound`.
    */
   onAssistantRound(thought: string, text: string): void {
+    this.roundReasoning = "";
     const maskedThought = thought ? maskSensitiveData(thought).masked : "";
     if (maskedThought) {
       this.entries = upsertStreamingReasoning(this.entries, maskedThought);
-      this.entries = finalizeStreamingReasoning(this.entries, maskedThought);
     }
+    // Unconditional, unlike the upsert: a provider that streams reasoning
+    // deltas but reports an empty round `thought` would otherwise leave the
+    // streaming entry spinning "Thinking…" forever. With no streaming entry
+    // and no thought this is a no-op, so the no-delta path is unchanged.
+    this.entries = finalizeStreamingReasoning(this.entries, maskedThought);
     const maskedText = text ? maskSensitiveData(text).masked : "";
     if (maskedText) {
       this.entries = upsertStreamingAssistant(this.entries, maskedText);
