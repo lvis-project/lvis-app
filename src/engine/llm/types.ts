@@ -193,6 +193,15 @@ export interface MessageMeta {
     summary?: string;
     truncatedDir?: string;
   };
+  /**
+   * Sub-agent report provenance — present ONLY on the user message a child's
+   * A2A delivery injected. Lets historyToEntries rebuild the same distinct
+   * report box on reload that the live guidance frame drew.
+   */
+  subAgentReport?: {
+    /** Sanitized child title; absent when one batch mixed several children. */
+    title?: string;
+  };
 }
 
 /**

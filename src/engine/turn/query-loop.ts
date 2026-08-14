@@ -5,7 +5,8 @@
  * guidance queue) stays on the ConversationLoop instance, accessed via `self`.
  */
 import type { LoopContext } from "./loop-context.js";
-import type { TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
+import type { GuidanceInjectionSource, TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
+import { notifyGuidanceInjected, subAgentHistoryMeta, subAgentSourceForBatch, truncateGuidanceBatch } from "./guidance-batch.js";
 import type { GenericMessage, LLMVendor, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
 import type { ChatInputOrigin } from "../../shared/chat-origin.js";
 import type { PermissionReviewEvent } from "../../shared/permission-review-status.js";
@@ -41,7 +42,7 @@ import { nextToolTrustOrigin, rationaleProvenanceFor } from "./trust-origin.js";
 import { contextBudgetForCurrentRuntime } from "./compaction.js";
 import { markStaleToolResults, evictAgedToolResultImages, isContextLengthError } from "../auto-compact.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
-import { GUIDE_JOINED_MAX_CHARS, mergeGuidanceApprovalReasonPrefixes } from "./guidance-limits.js";
+import { mergeGuidanceApprovalReasonPrefixes } from "./guidance-limits.js";
 import { parseStagedEnvelope } from "../../shared/staged-origins.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
@@ -334,6 +335,7 @@ export async function queryLoop(
       joined: string;
       historyMessage: ReturnType<typeof self.history.append> | null;
       round: number;
+      subAgentSource: GuidanceInjectionSource | undefined;
     };
     let pendingGuidanceDelivery: PendingGuidanceDelivery | null = null;
 
@@ -359,7 +361,7 @@ export async function queryLoop(
           Promise.resolve().then(() => entry.onInjected?.())),
       );
       try {
-        callbacks?.onGuidanceInjected?.(delivery.joined);
+        notifyGuidanceInjected(callbacks?.onGuidanceInjected, delivery.joined, delivery.subAgentSource);
       } catch {
         // Renderer notification failure must not invalidate a committed round.
       }
@@ -447,25 +449,9 @@ export async function queryLoop(
           stagedOrigin = stagedGuidance.source;
           toolTrustOrigin = stagedGuidance.kind.inputOrigin;
         }
-        // Truncate from the head — preserve the user's MOST RECENT guides
-        // since older queued items may have been superseded. Worst case
-        // (16 × 8000 chars = 128KB joined) is capped at
-        // `GUIDE_JOINED_MAX_CHARS` and the truncation is surfaced via a
-        // leading marker so the LLM doesn't get confused by missing
-        // context.
-        let joined = self.guidanceQueue.map((entry) => entry.text).join("\n\n");
-        let truncatedCount = 0;
-        const kept = [...self.guidanceQueue];
-        const dropped = [];
-        while (joined.length > GUIDE_JOINED_MAX_CHARS && kept.length > 1) {
-          const removed = kept.shift();
-          if (removed) dropped.push(removed);
-          truncatedCount += 1;
-          joined = kept.map((entry) => entry.text).join("\n\n");
-        }
-        if (truncatedCount > 0) {
-          joined = t("be_conversationLoop.guidanceTruncationMarker", { count: truncatedCount, joined });
-        }
+        // Head-truncated to GUIDE_JOINED_MAX_CHARS with a marker — see
+        // `truncateGuidanceBatch`, which owns the bound and the marker.
+        const { kept, dropped, joined } = truncateGuidanceBatch(self.guidanceQueue);
         activeApprovalReasonPrefix = mergeGuidanceApprovalReasonPrefixes(
           activeApprovalReasonPrefix,
           kept.map((entry) => entry.approvalReasonPrefix),
@@ -495,11 +481,13 @@ export async function queryLoop(
           );
         }
         const injectedContent = t("be_conversationLoop.guidanceInjectionHeader", { joined });
+        const subAgentSource = subAgentSourceForBatch(kept);
         const delivery: PendingGuidanceDelivery = {
           entries: kept,
           joined,
           historyMessage: null,
           round,
+          subAgentSource,
         };
         pendingGuidanceDelivery = delivery;
         // Critic round 2 M1: run preflight BEFORE appending the guide so
@@ -541,6 +529,9 @@ export async function queryLoop(
         const historyMessage = self.history.append({
           role: "user",
           content: injectedContent,
+          // Persisted provenance so a reloaded transcript rebuilds the same
+          // sub-agent box the live `guidance.applied` frame drew.
+          ...subAgentHistoryMeta(subAgentSource),
         });
         delivery.historyMessage = historyMessage;
       }

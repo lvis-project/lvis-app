@@ -58,6 +58,8 @@ export async function runStreamedTurn(
     requestAnchorRawIntent?: string;
     rolePrompt?: ActiveRolePrompt;
     initialGuidance?: string;
+    /** Marks this turn's child messages as a sub-agent report for reload replay. */
+    subAgentReport?: { title?: string };
     approvalReasonPrefix?: string;
     /** Host-owned remote-controller authority, never parsed from chat input. */
     remoteControllerAuthority?: RemoteControllerAuthority;
@@ -252,7 +254,13 @@ export async function runStreamedTurn(
         }),
       onLlmStatus: (status) => send({ kind: "model.status", ownerDetail: { status } }),
       onFallback: (from, to) => send({ kind: "model.fallback", from, to }),
-      onGuidanceInjected: (text) => send({ kind: "guidance.applied", text }),
+      onGuidanceInjected: (text, source) => send({
+        kind: "guidance.applied",
+        text,
+        ...(source
+          ? { subAgentReport: source.title === undefined ? {} : { title: source.title } }
+          : {}),
+      }),
       onGuidanceDropped: (text) => send({ kind: "guidance.dropped", text }),
     },
     options.abortSignal,
@@ -267,6 +275,7 @@ export async function runStreamedTurn(
         : {}),
       ...(options.rolePrompt ? { rolePrompt: options.rolePrompt } : {}),
       ...(options.initialGuidance ? { initialGuidance: options.initialGuidance } : {}),
+      ...(options.subAgentReport ? { subAgentReport: options.subAgentReport } : {}),
       ...(options.approvalReasonPrefix
         ? { approvalReasonPrefix: options.approvalReasonPrefix }
         : {}),

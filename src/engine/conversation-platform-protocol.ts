@@ -143,7 +143,12 @@ export type PlatformConversationEvent =
   | { readonly kind: "usage.reported"; readonly ownerDetail: ConversationUsageReport }
   | { readonly kind: "model.status"; readonly ownerDetail: { readonly status: FallbackStatus } }
   | { readonly kind: "model.fallback"; readonly from: string; readonly to: string }
-  | { readonly kind: "guidance.applied"; readonly text: string }
+  | {
+    readonly kind: "guidance.applied";
+    readonly text: string;
+    /** Present when the whole injected batch was a sub-agent report. */
+    readonly subAgentReport?: { readonly title?: string };
+  }
   | { readonly kind: "guidance.dropped"; readonly text: string }
   | { readonly kind: "suggestions.updated"; readonly replies: readonly string[] }
   | { readonly kind: "turn.completed"; readonly route?: "command" }
