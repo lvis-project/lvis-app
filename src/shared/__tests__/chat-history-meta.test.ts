@@ -171,6 +171,31 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
     expect(s.permissionReview?.reason).not.toContain("jo.dreame@gmail.com");
   });
 
+  it("keeps a parent-answered outcome on the reloaded tool result row", () => {
+    // A call the parent agent decided never raised a dock, so this row is the
+    // only place the transcript records that someone other than the user
+    // answered it. Dropping it on replay would make a reloaded session read as
+    // if the call had simply run.
+    for (const status of ["parent_approved", "parent_denied"] as const) {
+      const tool: GenericMessage = {
+        role: "tool_result",
+        toolUseId: "t1",
+        toolName: "bash",
+        content: "result",
+        meta: {
+          permissionReview: {
+            status,
+            verdictLevel: "medium",
+            reason: "the child needs this file to finish the report",
+          },
+        },
+      };
+      const s = serializeHistoryMessage(tool, 8);
+      expect(s.permissionReview?.status).toBe(status);
+      expect(s.permissionReview?.verdictLevel).toBe("medium");
+    }
+  });
+
   it("drops a forged permission review verdict from user-writable persisted history", () => {
     const forged: GenericMessage = {
       role: "tool_result",
