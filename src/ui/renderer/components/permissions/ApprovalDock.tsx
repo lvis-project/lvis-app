@@ -5,7 +5,6 @@ import type { ApprovalDecisionExtras } from "../../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../../types.js";
 import type { UserApprovalVerdict } from "../../../../shared/permissions-events.js";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
-import { DockedApprovalCard } from "./DockedApprovalCard.js";
 
 export interface ApprovalDockProps {
   queue: ApprovalRequest[];
@@ -254,16 +253,11 @@ export function ApprovalDock({
         {t("toolApprovalDialog.dialogDescription")}
       </p>
 
-      {request.kind === "out-of-allowed-dir" ? (
-        <DockedApprovalCard
-          key={request.id}
-          request={request}
-          onDecide={decide}
-          onOpenPermanentDeny={onOpenPermanentDeny}
-          proposedChoice={proposedChoice}
-          interactionLocked={interactionLocked}
-        />
-      ) : (
+      {/* One frame for every kind. Path-grant (out-of-allowed-dir) requests
+          render their Evidence+Decision section INSIDE ToolApprovalContent —
+          the dock no longer forks to a second component with its own visual
+          language. */}
+      {(
         <ToolApprovalContent
           key={request.id}
           open
@@ -271,6 +265,7 @@ export function ApprovalDock({
           pendingCount={queue.length}
           onDecide={decide}
           onOpenPermanentDeny={onOpenPermanentDeny}
+          proposedChoice={proposedChoice}
           interactionLocked={interactionLocked}
         />
       )}
