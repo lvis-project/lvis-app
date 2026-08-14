@@ -70,6 +70,7 @@ import type { HookRunner } from "../hooks/hook-runner.js";
 import type { ScriptHookManager } from "../hooks/script-hook-manager.js";
 import type { RationaleScopeReviewer } from "../permissions/reviewer/rationale-scope-reviewer.js";
 import type { ApprovalSentenceSelector } from "../permissions/reviewer/approval-sentence-selector.js";
+import type { ParentAdjudicator } from "../permissions/parent-adjudicator.js";
 import type { RationaleHostService } from "../tools/pipeline/rationale-host-service.js";
 import type { A2ARemoteRuntime } from "../main/a2a-remote-runtime.js";
 import type { RemoteA2AActionController } from "../main/remote-a2a-action-controller.js";
@@ -173,6 +174,8 @@ export class BootContext {
   declare mcpAppModelContext: McpAppModelContextStore;
   declare rationaleScopeReviewer: RationaleScopeReviewer;
   declare approvalSentenceSelector: ApprovalSentenceSelector;
+  /** Tier 2 of the sub-agent approval chain; replaced on every reviewer re-wire. */
+  declare parentAdjudicator: ParentAdjudicator;
   declare rationaleHostService: RationaleHostService | undefined;
   declare rewireReviewerAgent: () => void;
 
@@ -299,6 +302,7 @@ const BOOT_CONTEXT_FIELDS = [
   "mcpAppModelContext",
   "rationaleScopeReviewer",
   "approvalSentenceSelector",
+  "parentAdjudicator",
   "rationaleHostService",
   "rewireReviewerAgent",
   "hookRunner",
