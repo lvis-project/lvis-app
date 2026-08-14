@@ -1707,7 +1707,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
     const permMgr = new PermissionManager("/tmp/nonexistent-permissions.json");
     permMgr.setInteractiveAutoApprove("medium");
     permMgr.checkDetailed = vi.fn(() => ({
-      decision: "allow",
+      decision: "allow" as const,
       reason: "auto mode (category: read, trust: high)",
       layer: 6,
     }));
