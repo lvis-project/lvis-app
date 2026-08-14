@@ -1174,7 +1174,7 @@ describe("A2ASubAgentMessageBus security boundary", () => {
     expect(entries).toHaveLength(1);
     expect(wake).not.toHaveBeenCalled();
   });
-  it("rechecks once when a second message arrives during an autonomous wake", async () => {
+  it("drains once when a second message arrives during an autonomous wake", async () => {
     const wakeResolvers: Array<() => void> = [];
     const wake = vi.fn(() => new Promise<void>((resolve) => {
       wakeResolvers.push(resolve);
@@ -1212,7 +1212,10 @@ describe("A2ASubAgentMessageBus security boundary", () => {
 
     wakeResolvers.shift()?.();
     await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(2));
-    expect(peek).toHaveBeenCalledWith("parent-session");
+    // The token the racing delivery left behind is what re-woke the parent —
+    // the drain never inspects the mailbox, so a re-wake cannot be triggered
+    // by an entry the previous wake failed to consume.
+    expect(peek).not.toHaveBeenCalled();
 
     wakeResolvers.shift()?.();
     await Promise.resolve();
@@ -1262,10 +1265,13 @@ describe("A2ASubAgentMessageBus security boundary", () => {
     })).resolves.toMatchObject({ ok: true, disposition: "queued" });
     expect(wake).not.toHaveBeenCalled();
 
+    // Exactly the order `runTurn`'s cleanup uses: drop unreachable guidance,
+    // then announce the settled turn.
     activeTurn = false;
     dispositionCallbacks?.onDropped?.("turn-ended");
+    localBus.notifyTurnSettled("parent-session");
     await vi.waitFor(() => expect(wake).toHaveBeenCalledTimes(1));
-    expect(peek).toHaveBeenCalledWith("parent-session");
+    expect(peek).not.toHaveBeenCalled();
     expect(entries).toHaveLength(1);
 
     await Promise.resolve();
