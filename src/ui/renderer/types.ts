@@ -15,6 +15,7 @@ import type { McpUiMessageOutcome } from "../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../mcp/mcp-app-download.js";
 import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.js";
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
+import type { ParentEscalationNotice } from "../../shared/parent-escalation-notice.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
 import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
@@ -1390,6 +1391,18 @@ export type ApprovalRequest = {
   evaluationContext?: PermissionEvaluationContextShape;
   /** Suggested natural-language purpose shown in the approval dock. */
   approvalPurpose?: ApprovalPurposeSuggestion;
+  /**
+   * Present iff the sub-agent chain's parent-adjudication stage ran for this
+   * ask and handed it back to the user. Display-only: the host writes it, the
+   * dock shows it, and no decision field echoes it — it is deliberately not in
+   * the request-signature preimage, which authenticates only the fields that
+   * make the renderer round trip.
+   *
+   * The canonical declaration is imported rather than re-declared: a mirror
+   * that drifted from the host's cause union would silently render an
+   * escalation the dock has no label for.
+   */
+  parentEscalation?: ParentEscalationNotice;
   args: unknown;
   reason: string;
   source?: "builtin" | "plugin" | "mcp";

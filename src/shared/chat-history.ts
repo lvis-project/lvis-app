@@ -198,12 +198,23 @@ function serializePermissionReview(
   permissionReview: MessageMeta["permissionReview"] | undefined,
 ): SerializedPermissionReviewMeta | undefined {
   if (!permissionReview) return undefined;
-  // Persisted JSONL is user-writable, so replay accepts only the verdict values
-  // the reviewer can actually produce.
+  // Persisted JSONL is user-writable, so replay accepts only the outcomes the
+  // permission chain can actually produce. The two parent-agent outcomes are
+  // among them: a call the parent decided is one the user never saw a dock for,
+  // so dropping it on reload would erase the only record that anyone other than
+  // the user answered it.
+  //
+  // Accepting them grants a label and nothing else — no consumer of this status
+  // branches on it outside rendering. The transcript is a record of what the
+  // user was shown, never the audit trail: who answered a call is settled by
+  // the `[approval:parent-adjudicated] answeredBy=…` rows in `~/.lvis/audit.log`,
+  // which this file cannot write.
   if (
     permissionReview.status !== "reviewing" &&
     permissionReview.status !== "needs_approval" &&
     permissionReview.status !== "auto_approved" &&
+    permissionReview.status !== "parent_approved" &&
+    permissionReview.status !== "parent_denied" &&
     permissionReview.status !== "failed"
   ) {
     return undefined;

@@ -7,7 +7,6 @@ import type { NotificationService } from "../main/notification-service.js";
 import type { ToolCategory } from "../tools/types.js";
 import type { RiskLevel, RiskVerdict } from "./reviewer/risk-classifier.js";
 import type {
-  ParentAdjudicationEscalationCause,
   ParentAdjudicationEvidence,
   ParentAdjudicationOptions,
   ParentAdjudicationResult,
@@ -24,6 +23,10 @@ import {
   canonicalizePathForMatch,
 } from "./sensitive-paths.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
+import { displaySafeLabel } from "../shared/display-safe-text.js";
+import type {
+  ParentEscalationNotice,
+} from "../shared/parent-escalation-notice.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
 import { resolveUserApprovalVerdict } from "../shared/permissions-events.js";
 import type {
@@ -562,25 +565,29 @@ interface ChildAgentProvenance {
  * same call for the third time, so the repetition cause can only be raised
  * here, where the counter lives.
  */
-type ParentEscalationCause =
-  | ParentAdjudicationEscalationCause
-  /**
-   * The parent denied this child's use of this tool once too often. The chain
-   * escalates rather than denying again, because a child looping against a
-   * denial is exactly the state the parent cannot resolve on its own.
-   */
-  | "repeated-denial";
+/**
+ * Display bound for {@link ParentEscalationNotice.childTitle}. The dock line is
+ * one row; a run titled with a whole paragraph would push the parent's reason
+ * and the buttons off the visible card.
+ */
+const PARENT_ESCALATION_CHILD_TITLE_MAX = 120;
 
-/** The dock's account of a tier-2 stage that ended with the user. */
-interface ParentEscalationNotice {
-  cause: ParentEscalationCause;
-  /**
-   * One sentence, sanitized and DLP-masked where the parent's answer is parsed
-   * (`parent-adjudicator.ts`), which is the only place a result of that shape
-   * is minted. The parent is also shown host-masked evidence and nothing else,
-   * so its wording cannot carry material the dock was not going to show anyway.
-   */
-  reason: string;
+/**
+ * Make a child run's title safe to put in front of the user.
+ *
+ * The title reads like host metadata and is not: `agent_spawn` takes it from
+ * the parent model's tool arguments, unbounded and unfiltered, and the run
+ * registry carries it verbatim. Every other place that shows a sub-agent title
+ * masks it (`maskSubAgentText` in the runner), and the sibling fields of this
+ * very notice are masked and sanitized too — so this one is masked for secrets
+ * and normalized for the invisible/bidi characters that let a label lie about
+ * what it says.
+ */
+function displaySafeChildTitle(title: string): string {
+  return displaySafeLabel(
+    maskSensitiveData(title).masked,
+    PARENT_ESCALATION_CHILD_TITLE_MAX,
+  );
 }
 
 /**
@@ -1576,7 +1583,11 @@ export class ApprovalGate {
       );
       return {
         kind: "escalate",
-        notice: { cause: "repeated-denial", reason: result.reason },
+        notice: {
+          cause: "repeated-denial",
+          reason: result.reason,
+          childTitle: displaySafeChildTitle(childProvenance.childTitle),
+        },
       };
     }
 
@@ -1585,7 +1596,11 @@ export class ApprovalGate {
     );
     return {
       kind: "escalate",
-      notice: { cause: result.cause, reason: result.reason },
+      notice: {
+        cause: result.cause,
+        reason: result.reason,
+        childTitle: displaySafeChildTitle(childProvenance.childTitle),
+      },
     };
   }
 
