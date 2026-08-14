@@ -30,7 +30,11 @@ import {
   resolveReviewerSandboxCapability,
   setActiveSandboxCapability,
 } from "../sandbox-capability.js";
-import { makePlatformBridgeAuthority, makeTestPolicy } from "./test-helpers.js";
+import {
+  auditRowTexts,
+  makePlatformBridgeAuthority,
+  makeTestPolicy,
+} from "./test-helpers.js";
 
 // ─── Mock WebContents ─────────────────────────────────
 
@@ -114,13 +118,6 @@ function lastSentNonceHmac(wc: ReturnType<typeof makeMockWebContents>): {
 }
 
 /** The text of every audit row a gate wrote, in order. */
-function auditRowTexts(auditLogger: { log: ReturnType<typeof vi.fn> }): string[] {
-  return auditLogger.log.mock.calls.map(([entry]) => {
-    const row = entry as { input?: string; output?: string };
-    return row.input ?? row.output ?? "";
-  });
-}
-
 function makeAuditingGate(): {
   wc: ReturnType<typeof makeMockWebContents>;
   auditLogger: { log: ReturnType<typeof vi.fn> };
