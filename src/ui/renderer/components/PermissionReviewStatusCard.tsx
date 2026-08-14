@@ -37,16 +37,44 @@ function StatusIcon({ entry }: { entry: PermissionReviewEntry }) {
   return <ShieldQuestion className="h-3.5 w-3.5 shrink-0" />;
 }
 
-export function PermissionReviewStatusCard({ entry }: { entry: PermissionReviewEntry }) {
+/**
+ * `attached` is the variant rendered inside the tool row that the verdict
+ * belongs to (ToolGroupCard). Tool name and source are already on that row, so
+ * the chip carries only the verdict — which is also the exact field set that
+ * survives persistence, keeping live and reloaded transcripts identical.
+ */
+export function PermissionReviewStatusCard({
+  entry,
+  variant = "standalone",
+}: {
+  entry: PermissionReviewEntry;
+  variant?: "standalone" | "attached";
+}) {
   const { t: tComp } = useTranslation();
   const source = entry.source === "plugin" ? tComp("permissionReviewStatusCard.sourcePlugin") :
     entry.source === "mcp" ? "MCP" :
     entry.source === "builtin" ? tComp("permissionReviewStatusCard.sourceBuiltin") :
     tComp("permissionReviewStatusCard.sourceUnknown");
+  if (variant === "attached") {
+    return (
+      <div
+        data-testid="permission-review-status-card"
+        data-status={entry.status}
+        data-variant="attached"
+        role="status"
+        aria-live="polite"
+        className={`inline-flex min-w-0 max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] [&_svg]:h-3 [&_svg]:w-3 ${toneClass(entry)}`}
+      >
+        <StatusIcon entry={entry} />
+        <span className="min-w-0 truncate font-medium">{statusLabel(entry)}</span>
+      </div>
+    );
+  }
   return (
     <div
       data-testid="permission-review-status-card"
       data-status={entry.status}
+      data-variant="standalone"
       role="status"
       aria-live="polite"
       className={`w-full max-w-full min-w-0 rounded-md border px-3 py-2 text-xs lvis-anim-message-in ${toneClass(entry)}`}

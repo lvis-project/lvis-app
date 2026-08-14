@@ -301,6 +301,44 @@ describe("historyToEntries", () => {
     expect(tool).not.toHaveProperty("uiPayload");
   });
 
+  it("replays the persisted permission review verdict onto its tool call", () => {
+    const entries = historyToEntries([
+      { index: 0, role: "user", content: "규정 찾아줘" },
+      {
+        index: 1,
+        role: "assistant",
+        content: "",
+        toolCalls: [{ id: "t1", name: "internal_kb_query", input: { q: "규정" } }],
+      },
+      {
+        index: 2,
+        role: "tool_result",
+        toolUseId: "t1",
+        toolName: "internal_kb_query",
+        content: "결과",
+        permissionReview: {
+          status: "auto_approved",
+          verdictLevel: "low",
+          reason: "read-only lookup",
+        },
+      },
+    ]);
+
+    const review = entries.find((entry) => entry.kind === "permission_review");
+    expect(review).toMatchObject({
+      kind: "permission_review",
+      status: "auto_approved",
+      verdictLevel: "low",
+      reason: "read-only lookup",
+      toolUseId: "t1",
+      toolName: "internal_kb_query",
+    });
+    const group = entries.find((entry) => entry.kind === "tool_group");
+    expect(review?.kind === "permission_review" ? review.groupId : null).toBe(
+      group?.kind === "tool_group" ? group.groupId : undefined,
+    );
+  });
+
   it("replays ask_user_question answers as a visible answer recap bubble", () => {
     const entries = historyToEntries([
       { index: 0, role: "user", content: "뉴스 정리해줘" },

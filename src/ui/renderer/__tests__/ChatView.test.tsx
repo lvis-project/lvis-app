@@ -365,7 +365,7 @@ describe("ChatView", () => {
     });
   });
 
-  it("shows permission reviewer progress and clears it when the tool starts", async () => {
+  it("shows permission reviewer progress and attaches the verdict to the tool row", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "규정 찾아줘");
     await act(async () => {
@@ -425,128 +425,59 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
+      const card = container.querySelector('[data-testid="permission-review-status-card"]');
+      expect(card).not.toBeNull();
+      expect(card?.getAttribute("data-variant")).toBe("attached");
+      expect(card?.getAttribute("data-status")).toBe("needs_approval");
     });
   });
 
-  it("keeps a fast auto-approved permission review card visible for a minimum dwell after tool start", async () => {
+  it("keeps the verdict on the tool row after the tool completes", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitChatMessage(container, "빠른 자동 승인 확인");
+    await submitChatMessage(container, "자동 승인 확인");
 
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
-    try {
-      await act(async () => {
-        emitChatStream({
-          type: "permission_review",
-          reviewStatus: "reviewing",
-          name: "safe_tool",
-          toolCategory: "read",
-          source: "plugin",
-          groupId: "g-dwell",
-          toolUseId: "t-dwell",
-          displayOrder: 0,
-          verdictLevel: "low",
-        });
+    await act(async () => {
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "auto_approved",
+        name: "safe_tool",
+        toolCategory: "read",
+        source: "plugin",
+        groupId: "g-attached",
+        toolUseId: "t-attached",
+        displayOrder: 0,
+        verdictLevel: "low",
       });
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')).not.toBeNull();
+    });
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="permission-review-status-card"]')?.getAttribute("data-variant")).toBe("standalone");
+    });
 
-      await act(async () => {
-        emitChatStream({
-          type: "permission_review",
-          reviewStatus: "auto_approved",
-          name: "safe_tool",
-          toolCategory: "read",
-          source: "plugin",
-          groupId: "g-dwell",
-          toolUseId: "t-dwell",
-          displayOrder: 0,
-          verdictLevel: "low",
-        });
+    await act(async () => {
+      emitChatStream({
+        type: "tool_start",
+        name: "safe_tool",
+        groupId: "g-attached",
+        toolUseId: "t-attached",
       });
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')?.getAttribute("data-status")).toBe("auto_approved");
-
-      await act(async () => {
-        emitChatStream({
-          type: "tool_start",
-          name: "safe_tool",
-          groupId: "g-dwell",
-          toolUseId: "t-dwell",
-        });
+      emitChatStream({
+        type: "tool_end",
+        name: "safe_tool",
+        groupId: "g-attached",
+        toolUseId: "t-attached",
+        result: "done",
       });
+    });
 
+    await waitFor(() => {
       const card = container.querySelector('[data-testid="permission-review-status-card"]');
       expect(card).not.toBeNull();
+      expect(card?.getAttribute("data-variant")).toBe("attached");
       expect(card?.getAttribute("data-status")).toBe("auto_approved");
-      expect(container.textContent).toContain("safe_tool");
-
-      await act(async () => {
-        vi.advanceTimersByTime(699);
-      });
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')).not.toBeNull();
-
-      await act(async () => {
-        vi.advanceTimersByTime(1);
-      });
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
+    });
   });
 
-  it("lets tool completion own the final state even when the permission review dwell is pending", async () => {
-    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
-    await submitChatMessage(container, "빠른 도구 완료 확인");
-
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
-    try {
-      await act(async () => {
-        emitChatStream({
-          type: "permission_review",
-          reviewStatus: "auto_approved",
-          name: "safe_tool",
-          toolCategory: "read",
-          source: "plugin",
-          groupId: "g-dwell-done",
-          toolUseId: "t-dwell-done",
-          displayOrder: 0,
-          verdictLevel: "low",
-        });
-      });
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')?.getAttribute("data-status")).toBe("auto_approved");
-
-      await act(async () => {
-        emitChatStream({
-          type: "tool_start",
-          name: "safe_tool",
-          groupId: "g-dwell-done",
-          toolUseId: "t-dwell-done",
-        });
-      });
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')).not.toBeNull();
-
-      await act(async () => {
-        emitChatStream({
-          type: "tool_end",
-          name: "safe_tool",
-          groupId: "g-dwell-done",
-          toolUseId: "t-dwell-done",
-          result: "done",
-        });
-      });
-
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
-      await act(async () => {
-        vi.advanceTimersByTime(700);
-      });
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it("clears permission reviewer status on stream done without a tool start", async () => {
+  it("keeps permission reviewer status on stream done without a tool start", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "상태 정리 확인");
     await act(async () => {
@@ -570,11 +501,13 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
+      const card = container.querySelector('[data-testid="permission-review-status-card"]');
+      expect(card).not.toBeNull();
+      expect(card?.getAttribute("data-status")).toBe("auto_approved");
     });
   });
 
-  it("clears permission reviewer status on stream error", async () => {
+  it("keeps permission reviewer status on stream error", async () => {
     const { container, emitChatStream } = await renderApp({ hasApiKey: true });
     await submitChatMessage(container, "오류 정리 확인");
     await act(async () => {
@@ -598,8 +531,19 @@ describe("ChatView", () => {
     });
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="permission-review-status-card"]')).toBeNull();
       expect(container.textContent).toContain("오류: reviewer failed");
+    });
+
+    // The completed turn collapses into a WorkGroup; the verdict is kept, not
+    // erased, so expanding the group shows it again.
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="work-group"] button')!);
+    });
+
+    await waitFor(() => {
+      const card = container.querySelector('[data-testid="permission-review-status-card"]');
+      expect(card).not.toBeNull();
+      expect(card?.getAttribute("data-status")).toBe("failed");
     });
   });
 

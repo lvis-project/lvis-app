@@ -7,6 +7,7 @@ import {
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
   normalizeSubscriptionUsageList,
+  upsertPermissionReview,
   type ChatEntry,
 } from "../../../lib/chat-stream-state.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
@@ -62,6 +63,18 @@ export function historyToEntries(
           ? { durationMs: m.toolDisplay.durationMs }
           : {}),
       });
+      if (m.permissionReview) {
+        out = upsertPermissionReview(out, {
+          status: m.permissionReview.status,
+          toolName: m.toolName ?? "tool",
+          groupId,
+          toolUseId,
+          ...(m.permissionReview.verdictLevel
+            ? { verdictLevel: m.permissionReview.verdictLevel }
+            : {}),
+          ...(m.permissionReview.reason ? { reason: m.permissionReview.reason } : {}),
+        });
+      }
       continue;
     }
     fallbackGroupId = null;

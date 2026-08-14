@@ -31,6 +31,8 @@ export type SerializedImportedTriggerMeta = NonNullable<MessageMeta["importedTri
 export type SerializedToolDisplayMeta = {
   durationMs?: number;
 };
+/** Permission review verdict replayed onto the tool row on session reload. */
+export type SerializedPermissionReviewMeta = NonNullable<MessageMeta["permissionReview"]>;
 
 // Exact IPC payload emitted by serializeHistoryMessage() for renderer history
 // replay: multimodal content is flattened at the boundary, while persisted
@@ -52,6 +54,8 @@ export type SerializedHistoryMessage = {
   importedTrigger?: SerializedImportedTriggerMeta;
   /** Tool result display metadata for live/reload parity. */
   toolDisplay?: SerializedToolDisplayMeta;
+  /** Permission review verdict for this tool call — tool_result rows only. */
+  permissionReview?: SerializedPermissionReviewMeta;
   /** Turn-aggregate stats — only on turn-final assistant messages. */
   turnSummary?: SerializedTurnSummary;
   /** Checkpoint metrics — only on compactBoundary user messages. */
@@ -120,6 +124,7 @@ export function serializeHistoryMessage(
   }
 
   if (m.role === "tool_result") {
+    const permissionReview = serializePermissionReview(meta?.permissionReview);
     return {
       ...base,
       toolUseId: m.toolUseId,
@@ -127,6 +132,7 @@ export function serializeHistoryMessage(
         ? { toolName: normalizeProviderToolAliasName(m.toolName) }
         : {}),
       ...(m.isError !== undefined ? { isError: m.isError } : {}),
+      ...(permissionReview !== undefined ? { permissionReview } : {}),
     };
   }
 
@@ -181,6 +187,37 @@ function serializeToolDisplay(
     return { durationMs };
   }
   return undefined;
+}
+
+function serializePermissionReview(
+  permissionReview: MessageMeta["permissionReview"] | undefined,
+): SerializedPermissionReviewMeta | undefined {
+  if (!permissionReview) return undefined;
+  // Persisted JSONL is user-writable, so replay accepts only the verdict values
+  // the reviewer can actually produce.
+  if (
+    permissionReview.status !== "reviewing" &&
+    permissionReview.status !== "needs_approval" &&
+    permissionReview.status !== "auto_approved" &&
+    permissionReview.status !== "failed"
+  ) {
+    return undefined;
+  }
+  const verdictLevel =
+    permissionReview.verdictLevel === "low" ||
+    permissionReview.verdictLevel === "medium" ||
+    permissionReview.verdictLevel === "high"
+      ? permissionReview.verdictLevel
+      : undefined;
+  const reason =
+    typeof permissionReview.reason === "string"
+      ? maskSensitiveData(permissionReview.reason).masked
+      : undefined;
+  return {
+    status: permissionReview.status,
+    ...(verdictLevel !== undefined ? { verdictLevel } : {}),
+    ...(reason !== undefined ? { reason } : {}),
+  };
 }
 
 function serializeSystemNotice(
