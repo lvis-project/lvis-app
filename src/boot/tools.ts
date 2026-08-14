@@ -247,7 +247,12 @@ export function registerBuiltinTools(
     );
   }
   if (workflowDeps?.agentProfileStore) {
-    builtins.push(createAgentListTool(workflowDeps.agentProfileStore));
+    builtins.push(createAgentListTool({
+      store: workflowDeps.agentProfileStore,
+      // Same runner accessor agent_spawn uses, so the list can name THIS
+      // conversation's resumable sub-agents next to the profile definitions.
+      getRunner: workflowDeps.getSubAgentRunner,
+    }));
   }
   if (workflowDeps?.getAgentSendRuntime) {
     builtins.push(createAgentSendTool({

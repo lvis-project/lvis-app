@@ -47,6 +47,21 @@ function ctx(sessionId = "session-x"): ToolExecutionContext {
   };
 }
 
+/**
+ * A surface WITHOUT parent delivery — the only place spawns still run in the
+ * foreground since the always-background directive. Blocking-result tests use
+ * this deliberately: they exercise the fallback path, which remains the only
+ * way to observe a spawn's terminal result synchronously.
+ */
+function foregroundCtx(sessionId = "session-x"): ToolExecutionContext {
+  const base = ctx(sessionId);
+  const { supportsA2AParentDelivery: _delivery, ...metadata } = base.metadata as {
+    sessionId: string;
+    supportsA2AParentDelivery: boolean;
+  };
+  return { ...base, metadata };
+}
+
 describe("ask_user_question tool", () => {
   it("rejects when gate is missing", async () => {
     const tool = createAskUserQuestionTool({ getGate: () => undefined });
@@ -492,31 +507,53 @@ describe("agent_spawn tool", () => {
     expect(r.isError).toBe(true);
   });
 
-  it.each([undefined, false])("fails closed before runner lookup when background parent delivery is %s", async (capability) => {
-    const getRunner = vi.fn();
+  it.each([undefined, false])("falls back to foreground when parent delivery is %s — the flag is ignored", async (capability) => {
+    // Always-background directive: the model's `background` flag no longer
+    // errors on an unsupported surface — it is simply ignored, and the spawn
+    // runs foreground, the only coherent posture where results cannot be
+    // delivered asynchronously.
+    const runner = {
+      spawn: vi.fn(async () => ({
+        ok: true,
+        summary: "done",
+        toolCallCount: 0,
+        turnCount: 1,
+        entries: [],
+        childSessionId: "sub-x",
+      })),
+    };
     const emit = vi.fn();
-    const tool = createAgentSpawnTool({ getRunner, emit });
+    const tool = createAgentSpawnTool({ getRunner: () => runner as never, emit });
     const metadata: Record<string, unknown> = { sessionId: "session-x" };
     if (capability !== undefined) metadata.supportsA2AParentDelivery = capability;
 
     const result = await tool.execute(
-      {
-        title: "background",
-        instructions: "work",
-        background: true,
-        supportsA2AParentDelivery: true,
-      },
+      { title: "background", instructions: "work", background: true },
       { cwd: process.cwd(), extraAllowedDirectories: [], metadata },
     );
 
-    expect(result.isError).toBe(true);
-    expect(JSON.parse(result.output)).toEqual({
-      error: "background-parent-unsupported",
-      message: "Background sub-agent delivery is unavailable for this conversation surface.",
-      taskState: "TASK_STATE_REJECTED",
-    });
-    expect(getRunner).not.toHaveBeenCalled();
-    expect(emit).not.toHaveBeenCalled();
+    expect(result.isError).toBe(false);
+    const payload = JSON.parse(result.output);
+    expect(payload.background).toBeUndefined();
+    expect(payload.summary).toBe("done");
+    expect(runner.spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ background: false }),
+      expect.anything(),
+    );
+  });
+
+  it("always spawns in the background on a delivery-capable surface, flag or no flag", async () => {
+    const runner = { spawn: vi.fn(async () => ({ ok: true })) };
+    const tool = createAgentSpawnTool({ getRunner: () => runner as never, emit: vi.fn() });
+
+    const result = await tool.execute(
+      { title: "t", instructions: "work" },
+      ctx(),
+    );
+
+    const payload = JSON.parse(result.output);
+    expect(payload.background).toBe(true);
+    expect(payload.spawnId).toBeDefined();
   });
 
   it("keeps the spawn-depth hard stop ahead of background capability checks", async () => {
@@ -567,7 +604,7 @@ describe("agent_spawn tool", () => {
     const executionCwd = resolvePath("test-fixtures", "agent-connector");
     const r = await tool.execute(
       { title: "search", instructions: "find X" },
-      { ...ctx(), cwd: executionCwd },
+      { ...foregroundCtx(), cwd: executionCwd },
     );
     expect(r.isError).toBe(false);
     const parsed = JSON.parse(r.output);
@@ -602,7 +639,7 @@ describe("agent_spawn tool", () => {
 
     const result = await tool.execute(
       { title: "blocked", instructions: "attempt work" },
-      ctx(),
+      foregroundCtx(),
     );
 
     expect(result.isError).toBe(true);
@@ -645,7 +682,7 @@ describe("agent_spawn tool", () => {
 
     const result = await tool.execute(
       { title: "budgeted", instructions: "work until the assigned budget" },
-      ctx(),
+      foregroundCtx(),
     );
 
     expect(result.isError).toBe(false);
@@ -689,7 +726,7 @@ describe("agent_spawn tool", () => {
 
     const result = await tool.execute(
       { title: "diagnostic-waiting", instructions: "work" },
-      ctx(),
+      foregroundCtx(),
     );
 
     expect(result.isError).toBe(false);
@@ -733,7 +770,7 @@ describe("agent_spawn tool", () => {
         instructions: "continue",
         resumeId: "child-resume-exhausted",
       },
-      ctx(),
+      foregroundCtx(),
     );
 
     expect(result.isError).toBe(true);
@@ -1209,7 +1246,7 @@ describe("agent_spawn tool", () => {
 
     const result = await tool.execute(
       { title: "t", instructions: "continue", resumeId: "child-transient" },
-      ctx(),
+      foregroundCtx(),
     );
 
     expect(result.isError).toBe(true);
@@ -1266,7 +1303,7 @@ describe("agent_spawn tool", () => {
         spawnEvents.push({ type: e.type, entries: e.entries as unknown[] | undefined });
       },
     });
-    const r = await tool.execute({ title: "t", instructions: "do" }, ctx());
+    const r = await tool.execute({ title: "t", instructions: "do" }, foregroundCtx());
     expect(r.isError).toBe(false);
     expect(JSON.parse(r.output).entries).toBeUndefined();
     const activity = spawnEvents.find((e) => e.type === "activity");
@@ -1465,7 +1502,7 @@ describe("skill_list and agent_list tools", () => {
         "---\nname: explorer\ndescription: Map repo\ntools: [agent_list]\n---\nsecret profile body",
         "utf-8",
       );
-      const tool = createAgentListTool(new AgentProfileStore({ userDir: agentDir }));
+      const tool = createAgentListTool({ store: new AgentProfileStore({ userDir: agentDir }) });
       const r = await tool.execute({}, ctx());
       const parsed = JSON.parse(r.output);
       expect(parsed.agents).toEqual(

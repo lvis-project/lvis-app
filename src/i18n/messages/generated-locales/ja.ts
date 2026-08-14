@@ -224,6 +224,7 @@ export const jaMessages: Record<string, string> = {
   "auditTab.statsTopTypes": "トップタイプ",
   "auditTab.statsTotalItems": "総項目数",
   "be_agentList.toolDescription": "現在利用可能な LVIS エージェント プロファイルのリストを返します。これは、agent_spawn のagentNameを選択する前に使用します。",
+  "be_agentList.existingGuidance": "これらのサブエージェントはこの会話に既に存在します。続行するには、その resumeId で agent_spawn を呼び出してください — 全履歴を保持したまま中断地点から継続します。再開可能な既存エージェントが既に担っている作業のために新しいエージェントを起動すると、そのエージェントのコンテキストを破棄することになります。",
   "be_agentModeMap.executeReasoningHint": "与えられた仕事を的確に遂行し、成果物を生み出す。範囲を拡大しないでください。 1 つの短い質問で曖昧さを明確にしてから、自分の仮定を述べます。",
   "be_agentModeMap.exploreReasoningHint": "ローカル マシンまたは内部文書で関連するアイテムを検索し、場所と重要なポイントのみを報告します。機密情報については、場所のみを報告し、内容を公開しないでください。",
   "be_agentModeMap.planReasoningHint": "スコアを使用して次元ごとの明確さを追跡し、一度に 1 つの質問ごとに曖昧さを減らします。しきい値に達したら、実行可能な計画文書を出力します。",
