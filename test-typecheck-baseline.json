@@ -45,7 +45,6 @@
     "src/engine/__tests__/conversation-loop-turn-summary.test.ts": 14,
     "src/engine/__tests__/request-plugin.test.ts": 4,
     "src/engine/__tests__/subagent-a2a-wire-runner.test.ts": 1,
-    "src/engine/__tests__/subagent-resume.test.ts": 7,
     "src/engine/__tests__/subagent-runner.test.ts": 17,
     "src/engine/llm/__tests__/model-list.test.ts": 8,
     "src/engine/llm/vercel/__tests__/snapshot-azure.test.ts": 4,
