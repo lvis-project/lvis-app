@@ -146,6 +146,7 @@ describe("ToolApprovalContent identity strip", () => {
           outOfAllowedDir: {
             candidatePath: "/workspace/out/report.md",
             suggestedParent: "/workspace/out",
+            currentAllowed: ["/workspace/project"],
             adjacencyWarnings: [],
           },
         }}
@@ -178,6 +179,7 @@ describe("ToolApprovalContent identity strip", () => {
           outOfAllowedDir: {
             candidatePath: "/workspace/out/report.md",
             suggestedParent: "/workspace/out",
+            currentAllowed: ["/workspace/project"],
             adjacencyWarnings: [],
           },
         }}
