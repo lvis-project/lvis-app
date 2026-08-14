@@ -111,6 +111,22 @@ function hasExactKeys(value: object, expected: readonly string[]): boolean {
   );
 }
 
+/**
+ * Field caps shared by the parser and the emission-side sealer. One definition:
+ * a cap the sealer trims to but the parser rejects at (or vice versa) would be
+ * exactly the silent divergence that produced unrenderable sealed displays.
+ */
+export const RATIONALE_DISPLAY_CAPS = Object.freeze({
+  toolName: 256,
+  targetItems: 32,
+  targetLength: 1_024,
+  listItems: 8,
+  listLength: 160,
+  authorityLength: 160,
+  reasonLength: 500,
+  suggestionLength: 500,
+});
+
 function isDisplayText(value: unknown, maxLength: number): value is string {
   return (
     typeof value === "string" &&
@@ -166,19 +182,19 @@ export function parseRationaleApprovalDisplay(
   if (
     value.contractVersion !== RATIONALE_APPROVAL_DISPLAY_VERSION ||
     value.display !== RATIONALE_APPROVAL_DISPLAY_KIND ||
-    !isDisplayText(value.toolName, 256) ||
-    !isDisplayList(value.canonicalTargets, 32, 1_024) ||
-    !isDisplayList(value.requestedEffects, 8, 160) ||
-    !isDisplayList(value.affectedResources, 8, 160) ||
-    !isDisplayText(value.requiredAuthority, 160) ||
+    !isDisplayText(value.toolName, RATIONALE_DISPLAY_CAPS.toolName) ||
+    !isDisplayList(value.canonicalTargets, RATIONALE_DISPLAY_CAPS.targetItems, RATIONALE_DISPLAY_CAPS.targetLength) ||
+    !isDisplayList(value.requestedEffects, RATIONALE_DISPLAY_CAPS.listItems, RATIONALE_DISPLAY_CAPS.listLength) ||
+    !isDisplayList(value.affectedResources, RATIONALE_DISPLAY_CAPS.listItems, RATIONALE_DISPLAY_CAPS.listLength) ||
+    !isDisplayText(value.requiredAuthority, RATIONALE_DISPLAY_CAPS.authorityLength) ||
     !isRecord(verdict) ||
     !hasExactKeys(verdict, ["level", "reason"]) ||
     !RISK_LEVELS.has(verdict.level as RationaleApprovalDisplayRiskLevel) ||
-    !isDisplayText(verdict.reason, 500) ||
+    !isDisplayText(verdict.reason, RATIONALE_DISPLAY_CAPS.reasonLength) ||
     !SCOPE_ALIGNMENTS.has(
       value.scopeAlignment as RationaleApprovalDisplayScopeAlignment,
     ) ||
-    !isDisplayList(value.scopeReasons, 8, 160) ||
+    !isDisplayList(value.scopeReasons, RATIONALE_DISPLAY_CAPS.listItems, RATIONALE_DISPLAY_CAPS.listLength) ||
     (value.rationaleStatus !== "ready" && value.rationaleStatus !== "failed") ||
     typeof value.modalFallbackRequired !== "boolean"
   ) {
@@ -189,7 +205,7 @@ export function parseRationaleApprovalDisplay(
     if (
       value.modalFallbackRequired !== false ||
       value.scopeAlignment === "unknown" ||
-      !isDisplayText(value.suggestion, 500)
+      !isDisplayText(value.suggestion, RATIONALE_DISPLAY_CAPS.suggestionLength)
     ) {
       return null;
     }
@@ -235,4 +251,109 @@ export function createRationaleApprovalDisplay(
     throw new TypeError("invalid rationale approval display");
   }
   return parsed;
+}
+
+/** Substitute for a field the DLP mask rendered invalid; always parses. */
+const REDACTED_DISPLAY_TEXT = "[redacted]";
+
+function sealText(
+  value: string,
+  maxLength: number,
+  maskText: (value: string) => string,
+): string {
+  // Normalize BEFORE masking so the DLP detectors see canonical text, then
+  // never re-normalize after — the mask token is plain ASCII and a second
+  // pass could only disturb what the detectors already approved.
+  const masked = maskText(normalizeRationaleApprovalDisplayText(value));
+  // Plain boolean, not the type-guard: `isDisplayText` narrows its argument to
+  // string, so on a value that is ALREADY a string the false branch narrows to
+  // `never` and the length check below stops compiling.
+  const fits = (candidate: string): boolean => isDisplayText(candidate, maxLength);
+  if (fits(masked)) return masked;
+  // Visible truncation repairs LENGTH violations only. Any other invalidity
+  // (emptied, unsafe characters) is total loss, and dressing total loss as a
+  // truncation — "…" — would claim a prefix survived when nothing did.
+  if (masked.length > maxLength) {
+    const truncated = truncateVisibly(masked, maxLength);
+    if (fits(truncated)) return truncated;
+  }
+  return REDACTED_DISPLAY_TEXT;
+}
+
+/**
+ * Cap an over-long masked string WITHOUT hiding that it was cut.
+ *
+ * A silent tail cut is a distortion, not a repair: a truncated path or URL
+ * reads as a COMPLETE, different value, and the user approves that other
+ * value (review MAJOR-1). The ellipsis makes every cut visible. The character
+ * before it is checked for a lone high surrogate so a code point is never
+ * split in half (review NIT-2) — a lone surrogate would render as U+FFFD and
+ * read as corruption rather than truncation.
+ */
+function truncateVisibly(value: string, maxLength: number): string {
+  let head = value.slice(0, Math.max(0, maxLength - 1));
+  const last = head.charCodeAt(head.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) head = head.slice(0, -1);
+  return head.trimEnd() + "…";
+}
+
+function sealList(
+  values: readonly string[],
+  maxItems: number,
+  maxLength: number,
+  maskText: (value: string) => string,
+): readonly string[] {
+  // Input lists are parse-guaranteed (constructor throws past the cap), so
+  // this slice drops nothing today. It exists for the day that guarantee
+  // weakens — and if that day comes, silent item-dropping is the same failure
+  // shape as silent truncation and must gain a visible marker too.
+  const sealed = values
+    .slice(0, maxItems)
+    .map((value) => sealText(value, maxLength, maskText));
+  return sealed.length >= 1 ? sealed : [REDACTED_DISPLAY_TEXT];
+}
+
+/**
+ * DLP-mask a display WITHOUT ever producing one the renderer cannot parse.
+ *
+ * The display entering emission is parse-guaranteed (built by
+ * `createRationaleApprovalDisplay`, which throws otherwise) — masking was the
+ * one mutation applied after that guarantee, and the mask token
+ * ("[REDACTED:TOKEN]", 16 chars) can push a near-cap field over its length
+ * limit, at which point the renderer's parse returned null and the approval
+ * card rendered with no tool identity at all.
+ *
+ * Masking is therefore applied per FIELD and re-validated with the same
+ * validators the parser uses; a field the mask rendered invalid degrades to
+ * `REDACTED_DISPLAY_TEXT` rather than degrading the whole card. Enum, boolean
+ * and status fields are never free text, never masked, and pass through
+ * verbatim — host-determined facts stay exactly as the host wrote them. The
+ * closing `createRationaleApprovalDisplay` makes totality a construction
+ * guarantee: if this function can return, its result parses.
+ */
+export function sealMaskedRationaleApprovalDisplay(
+  display: RationaleApprovalDisplay,
+  maskText: (value: string) => string,
+): RationaleApprovalDisplay {
+  const caps = RATIONALE_DISPLAY_CAPS;
+  return createRationaleApprovalDisplay({
+    toolName: sealText(display.toolName, caps.toolName, maskText),
+    canonicalTargets: sealList(display.canonicalTargets, caps.targetItems, caps.targetLength, maskText),
+    requestedEffects: sealList(display.requestedEffects, caps.listItems, caps.listLength, maskText),
+    affectedResources: sealList(display.affectedResources, caps.listItems, caps.listLength, maskText),
+    requiredAuthority: sealText(display.requiredAuthority, caps.authorityLength, maskText),
+    effectiveVerdict: {
+      level: display.effectiveVerdict.level,
+      reason: sealText(display.effectiveVerdict.reason, caps.reasonLength, maskText),
+    },
+    scopeAlignment: display.scopeAlignment,
+    scopeReasons: sealList(display.scopeReasons, caps.listItems, caps.listLength, maskText),
+    rationaleStatus: display.rationaleStatus,
+    // The ready/failed invariants (suggestion text XOR null) are preserved
+    // from the input display, which already satisfies them.
+    suggestion: display.rationaleStatus === "ready"
+      ? sealText(display.suggestion ?? "", caps.suggestionLength, maskText)
+      : null,
+    modalFallbackRequired: display.modalFallbackRequired,
+  });
 }
