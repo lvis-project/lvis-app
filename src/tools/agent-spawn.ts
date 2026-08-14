@@ -368,6 +368,11 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
                 instructions: profile
                   ? renderAgentProfilePrompt(profile, instructions)
                   : instructions,
+                // The same text, before the profile body is rendered around it.
+                // This is the half a parent adjudicating its own child's tool
+                // call needs; the rendered prompt above leads with a role
+                // charter that would stand in for the task.
+                parentAuthoredTask: instructions,
                 spawnId,
                 toolUseId,
                 sourceTools,
