@@ -384,6 +384,7 @@ export const esMessages: Record<string, string> = {
   "be_errorClassifier.rateLimitExceeded": "Se superó el límite de tarifa por minuto. Vuelva a intentarlo en breve. Verifique los diagnósticos del proveedor para conocer los límites específicos y el tiempo de reintento.",
   "be_errorClassifier.unknownError": "Se produjo un error: {raw}",
   "be_executor.approvalDeniedByUser": "[Aprobación denegada] Herramienta '{name}': ejecución denegada por el usuario.",
+  "be_executor.approvalDeniedByParent": "[Aprobación denegada] Herramienta '{name}': el agente principal la rechazó: {reason}",
   "be_executor.approvalGateError": "[Error de aprobación] Herramienta '{name}' — error interno de la puerta de aprobación: {error}",
   "be_executor.approvalGateMissing": "[Puerta de aprobación no conectada] Herramienta '{name}' ({source}): solicita decisión pero no hay puerta de aprobación disponible, bloqueada. {reason}",
   "be_executor.approvalGateMissingLayer1": "[Puerta de aprobación no conectada - Capa 1] Herramienta '{name}' ({source}): la ruta está fuera de los directorios permitidos pero está bloqueada porque la puerta de aprobación no está disponible.",

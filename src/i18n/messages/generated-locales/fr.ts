@@ -382,6 +382,7 @@ export const frMessages: Record<string, string> = {
   "be_errorClassifier.rateLimitExceeded": "Limite de débit par minute dépassée: veuillez réessayer sous peu. Vérifiez les diagnostics du fournisseur pour connaître les limites spécifiques et le calendrier des nouvelles tentatives.",
   "be_errorClassifier.unknownError": "Une erreur s'est produite: {raw}",
   "be_executor.approvalDeniedByUser": "[Approbation refusée] Outil '{name}' — l'utilisateur a refusé l'exécution.",
+  "be_executor.approvalDeniedByParent": "[Approbation refusée] Outil '{name}' — l'agent parent a refusé : {reason}",
   "be_executor.approvalGateError": "[Erreur d'approbation] Outil '{name}' — erreur interne de la porte d'approbation: {error}",
   "be_executor.approvalGateMissing": "[Porte d'approbation non connectée] Outil '{name}' ({source}) — demander une décision mais aucune porte d'approbation disponible, bloquée. {reason}",
   "be_executor.approvalGateMissingLayer1": "[Porte d'approbation non connectée — Couche 1] Outil '{name}' ({source}) — le chemin se trouve en dehors des répertoires autorisés mais est bloqué car la porte d'approbation n'est pas disponible.",

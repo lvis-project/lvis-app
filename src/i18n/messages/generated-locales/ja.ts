@@ -368,6 +368,7 @@ export const jaMessages: Record<string, string> = {
   "be_errorClassifier.rateLimitExceeded": "1 分あたりのレート制限を超えました - すぐに再試行してください。プロバイダーの診断で特定の制限と再試行のタイミングを確認してください。",
   "be_errorClassifier.unknownError": "エラーが発生しました: {raw}",
   "be_executor.approvalDeniedByUser": "[承認が拒否されました] ツール '{name}' — ユーザーが実行を拒否しました。",
+  "be_executor.approvalDeniedByParent": "[承認が拒否されました] ツール '{name}' — 親エージェントが拒否しました: {reason}",
   "be_executor.approvalGateError": "[承認エラー] ツール '{name}' — 承認ゲートの内部エラー: {error}",
   "be_executor.approvalGateMissing": "[承認ゲートが接続されていません] ツール '{name}' ({source}) — 決定を求めますが、利用可能な承認ゲートがなく、ブロックされています。 {reason}",
   "be_executor.approvalGateMissingLayer1": "[承認ゲートが接続されていません — レイヤ 1] ツール '{name}' ({source}) — パスは許可されたディレクトリの外にありますが、承認ゲートが使用できないためブロックされています。",

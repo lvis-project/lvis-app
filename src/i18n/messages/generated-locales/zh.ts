@@ -368,6 +368,7 @@ export const zhMessages: Record<string, string> = {
   "be_errorClassifier.rateLimitExceeded": "超出每分钟速率限制 - 请稍后重试。检查提供商诊断以了解特定限制和重试时间。",
   "be_errorClassifier.unknownError": "发生错误：{raw}",
   "be_executor.approvalDeniedByUser": "[批准被拒绝] 工具“{name}” - 用户拒绝执行。",
+  "be_executor.approvalDeniedByParent": "[批准被拒绝] 工具“{name}” - 上级代理拒绝：{reason}",
   "be_executor.approvalGateError": "[批准错误]工具“{name}”-批准门内部错误：{error}",
   "be_executor.approvalGateMissing": "[审批门未连接] 工具“{name}”({source}) — 请求决定，但没有可用的审批门，已被阻止。 {reason}",
   "be_executor.approvalGateMissingLayer1": "[批准门未连接 - 第 1 层] 工具“{name}”({source}) - 路径位于允许的目录之外，但由于批准门不可用而被阻止。",

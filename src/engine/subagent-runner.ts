@@ -47,7 +47,11 @@ import {
 import type { ToolRegistry } from "../tools/registry.js";
 import { isValidSessionId, type MemoryManager } from "../memory/memory-manager.js";
 import { projectRootEquals } from "../shared/project-identity.js";
-import type { ApprovalGate, ApprovalRequest, ApprovalDecision } from "../permissions/approval-gate.js";
+import type {
+  ApprovalGate,
+  ApprovalDecision,
+  ApprovalRequestInput,
+} from "../permissions/approval-gate.js";
 import {
   isModelComplexityLevel,
   resolveModelForComplexity,
@@ -850,15 +854,83 @@ export function buildModePreamble(config: AgentModeConfig): string {
 }
 
 /**
+ * Longest spawn-task summary attached to a child's approval asks.
+ *
+ * The parent's instructions can be pages long; the adjudicating side turn needs
+ * enough of them to recognise what it asked for, not all of them. Truncation
+ * only makes the parent less certain, and an uncertain parent escalates.
+ */
+const MAX_SPAWN_TASK_SUMMARY_CHARS = 600;
+
+/** What the gate needs to route a child's ask to the parent that spawned it. */
+interface SubAgentApprovalProvenance {
+  childSessionId: string;
+  originSessionId: string;
+  /** The parent-authored task, masked and truncated by the host. */
+  spawnTaskSummary: string;
+}
+
+/**
+ * Build the provenance an approval ask carries, when this run has a parent that
+ * could answer for it.
+ *
+ * `null` for the two cases where it could not. A run with no origin session has
+ * no parent conversation to attribute the answer to. And a run spawned or
+ * resumed over the A2A wire has a REMOTE agent behind it: its "task" is text a
+ * remote controller wrote, its origin is a synthetic host-minted id rather than
+ * a conversation, and asking a model to judge a call against remote-authored
+ * framing is the shape this feature exists to keep away from. Those asks stay
+ * with the user.
+ */
+function buildSubAgentApprovalProvenance(input: {
+  childSessionId: string;
+  originSessionId: string | undefined;
+  task: string;
+  wireBound: boolean;
+}): SubAgentApprovalProvenance | null {
+  if (input.wireBound) return null;
+  if (!input.originSessionId) return null;
+  const spawnTaskSummary = maskSubAgentText(input.task)
+    .slice(0, MAX_SPAWN_TASK_SUMMARY_CHARS)
+    .trim();
+  if (!spawnTaskSummary) return null;
+  return {
+    childSessionId: input.childSessionId,
+    originSessionId: input.originSessionId,
+    spawnTaskSummary,
+  };
+}
+
+/**
+ * Both halves of the provenance policy, exposed for the suite that pins it.
+ *
+ * The policy is a security boundary — who may state which run is asking, and
+ * which runs have no parent that may answer for them — and testing it through
+ * a full spawn would test the scaffolding instead of the rule.
+ */
+export const buildSubAgentApprovalProvenanceForTest =
+  buildSubAgentApprovalProvenance;
+
+/**
  * ApprovalGate wrapper that prepends `[Sub-Agent: <title>] ` to the
  * `reason` text shown in the user-facing approval dock so users can
  * distinguish parent-loop approvals from sub-agent approvals at a glance.
+ *
+ * It is also where an ask acquires the two host-only facts the gate's tier-2
+ * stage needs: which run raised it, and that the run's permission lane makes it
+ * a candidate at all. Both are attached here rather than upstream because this
+ * is the one place that holds the tracked run — a value the child, its tools
+ * and the renderer cannot reach, let alone author. `eligible` is the caller
+ * assertion the gate treats as necessary and never sufficient; the gate
+ * re-derives every condition it can observe for itself.
+ *
  * No other behavior changes — the underlying gate handles HMAC/nonce, S1
  * sensitive-path block, S4 read-only short-circuit, etc.
  */
-function makeSubAgentApprovalAdapter(
+export function makeSubAgentApprovalAdapter(
   base: ApprovalGate,
   title: string,
+  provenance: SubAgentApprovalProvenance | null,
 ): ApprovalGate {
   // We expose the same interface ConversationLoop / ToolExecutor uses via
   // duck-typing — only `requestAndWait` is actually called from the tool
@@ -866,10 +938,25 @@ function makeSubAgentApprovalAdapter(
   // forwards everything else to the original instance.
   const wrapper = Object.create(base) as ApprovalGate;
   wrapper.requestAndWait = function wrappedRequestAndWait(
-    req: Omit<ApprovalRequest, "requireExplicit">,
+    req: ApprovalRequestInput,
   ): Promise<ApprovalDecision> {
     const labeledReason = `[Sub-Agent: ${title}] ${req.reason}`;
-    return base.requestAndWait({ ...req, reason: labeledReason });
+    return base.requestAndWait({
+      ...req,
+      reason: labeledReason,
+      // Spread first, then set: a caller-supplied `childProvenance` on the
+      // request would otherwise decide which run the host thinks is asking.
+      ...(provenance === null
+        ? {}
+        : {
+            childProvenance: {
+              childSessionId: provenance.childSessionId,
+              childTitle: title,
+              originSessionId: provenance.originSessionId,
+              spawnTaskSummary: provenance.spawnTaskSummary,
+            },
+          }),
+    });
   };
   return wrapper;
 }
@@ -1856,6 +1943,12 @@ export class SubAgentRunner {
     includeAgentSend?: boolean;
     title: string;
     profileModel: string | undefined;
+    /**
+     * The parent behind this run, when it has one that could answer for it.
+     * `null` leaves the child's approvals on the path they took before tier 2
+     * existed: straight to the user.
+     */
+    approvalProvenance: SubAgentApprovalProvenance | null;
   }): {
     childDeps: ConversationLoopDeps;
     scopedTools: import("../tools/base.js").Tool[];
@@ -1900,7 +1993,11 @@ export class SubAgentRunner {
     // Wrap the parent ApprovalGate so approval requests from this sub-agent's
     // tool calls show "[Sub-Agent: <title>]" in their reason text.
     const wrappedApprovalGate = this.deps.parentDeps.approvalGate
-      ? makeSubAgentApprovalAdapter(this.deps.parentDeps.approvalGate, args.title)
+      ? makeSubAgentApprovalAdapter(
+          this.deps.parentDeps.approvalGate,
+          args.title,
+          args.approvalProvenance,
+        )
       : undefined;
 
     // Compose deps for the child loop. We share the parent's permissionManager,
@@ -2119,6 +2216,14 @@ export class SubAgentRunner {
           title: input.title,
           profileModel: input.profileModel,
           includeAgentSend: true,
+          approvalProvenance: buildSubAgentApprovalProvenance({
+            childSessionId,
+            originSessionId: input.originSessionId,
+            // The instructions the PARENT wrote, before the mode preamble the
+            // host prepends and before the child has said anything at all.
+            task: input.instructions,
+            wireBound: executionPolicy !== undefined,
+          }),
         });
 
         const child = new ConversationLoop(childDeps);
@@ -3268,6 +3373,16 @@ export class SubAgentRunner {
       frozenSourceTools,
       title: meta.subAgentTitle,
       profileModel: meta.profileModel,
+      // A resumed run's ORIGINAL instructions are not persisted, so the task
+      // here is the continuation the parent just wrote — which is the framing
+      // this segment of the run is actually working to, and the only
+      // parent-authored text that survives the suspension.
+      approvalProvenance: buildSubAgentApprovalProvenance({
+        childSessionId: resumeId,
+        originSessionId,
+        task: continuationInstructions,
+        wireBound: executionPolicy !== undefined,
+      }),
       // Spawn passes this; resume used to omit it, so a re-hydrated child came
       // back WITHOUT the ability to reach its parent unless `agent_send` happened
       // to survive in the persisted scope — and spawn deliberately filters it out
