@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { ToolApprovalContent } from "../ToolApprovalContent.js";
 import type { ApprovalRequest } from "../../types.js";
 import {
@@ -127,5 +127,68 @@ describe("ToolApprovalContent identity strip", () => {
     expect(screen.queryByTestId("approve-button")).toBeNull();
     expect(screen.queryByTestId("allow-always-button")).toBeNull();
     expect(screen.getByTestId("deny-button")).toBeInTheDocument();
+  });
+
+
+  it("renders a path-grant request inside the same frame, identity strip included", () => {
+    // US-004: the dock no longer forks to a second component. The path-grant
+    // Evidence+Decision section keeps its own semantics (allow-always grants a
+    // parent directory), but it lives under the same identity strip as every
+    // other kind — one frame, one visual language.
+    render(
+      <ToolApprovalContent
+        open
+        request={{
+          ...baseRequest(),
+          kind: "out-of-allowed-dir",
+          toolName: "write_file",
+          toolCategory: "write",
+          outOfAllowedDir: {
+            candidatePath: "/workspace/out/report.md",
+            suggestedParent: "/workspace/out",
+            adjacencyWarnings: [],
+          },
+        }}
+        onDecide={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("tool-approval-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("approval-tool-identity")).toHaveTextContent("write_file");
+    expect(screen.getByTestId("docked-approval-panel")).toBeInTheDocument();
+    // The generic decision row stays out — path grants decide in their own section.
+    expect(screen.queryByTestId("approve-button")).toBeNull();
+    expect(screen.getByTestId("docked-approval-choice-allow-once")).toBeInTheDocument();
+  });
+
+
+  it("panel A/D shortcuts are inert for a path-grant request", () => {
+    // The user may have navigated to the allow-always (parent grant) scope;
+    // the generic A shortcut would commit a plain allow-once and silently
+    // discard that selection. These shortcuts never existed for this kind
+    // before the frame unification and must stay absent (review MAJOR).
+    const onDecide = vi.fn();
+    render(
+      <ToolApprovalContent
+        open
+        request={{
+          ...baseRequest(),
+          kind: "out-of-allowed-dir",
+          toolName: "write_file",
+          toolCategory: "write",
+          outOfAllowedDir: {
+            candidatePath: "/workspace/out/report.md",
+            suggestedParent: "/workspace/out",
+            adjacencyWarnings: [],
+          },
+        }}
+        onDecide={onDecide}
+      />,
+    );
+    const panel = screen.getByTestId("tool-approval-panel");
+    // Focus the parent-grant scope, as a keyboard user would before committing.
+    screen.getByTestId("docked-approval-choice-allow-always").focus();
+    fireEvent.keyDown(panel, { key: "a" });
+    fireEvent.keyDown(panel, { key: "d" });
+    expect(onDecide).not.toHaveBeenCalled();
   });
 });
