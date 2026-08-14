@@ -634,6 +634,11 @@ export function registerChatHandlers(deps: IpcDeps): void {
             ...STREAM_TURN_OPTIONS,
             inputOrigin: "agent-message",
             approvalReasonPrefix: mailboxTurn.approvalReasonPrefix,
+            // The wake turn's INPUT is the child report, so the report box has
+            // to come off the turn-input row on reload.
+            subAgentReport: mailboxTurn.childTitle === undefined
+              ? {}
+              : { title: mailboxTurn.childTitle },
           },
         );
         if (conversationLoop.getSessionId() !== parentSessionId) return result;

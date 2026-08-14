@@ -862,6 +862,7 @@ describe("A2ASubAgentMessageBus security boundary", () => {
       onInjected?: () => void;
       onDropped?: (reason: "joined-limit" | "turn-ended") => void;
       approvalReasonPrefix?: string;
+      subAgentTitle?: string;
     } | undefined;
     const mailbox = {
       enqueue,
@@ -900,9 +901,45 @@ describe("A2ASubAgentMessageBus security boundary", () => {
     })).resolves.toMatchObject({ ok: true, disposition: "queued" });
     expect(entries).toHaveLength(1);
     expect(dispositionCallbacks?.approvalReasonPrefix).toBe("[Sub-Agent: worker]");
+    // Structured provenance so the renderer can draw the child-report box
+    // without sniffing the approval label string.
+    expect(dispositionCallbacks?.subAgentTitle).toBe("worker");
+    // The parent is told to judge the report; the durable entry stays canonical
+    // so the next-turn drain path cannot instruct a second time.
+    const injectedText = queueGuidanceWithDisposition.mock.calls[0]?.[0] as string;
+    expect(injectedText.endsWith(entries[0]?.formattedText ?? "")).toBe(true);
+    expect(injectedText).not.toBe(entries[0]?.formattedText);
     dispositionCallbacks?.onInjected?.();
     expect(entries).toHaveLength(0);
     expect(mailbox.acknowledge).toHaveBeenCalledOnce();
+  });
+
+  it("audits a warning when a body-less child report needs the host-composed body", async () => {
+    await expect(bus.deliverToParent({
+      parentSessionId: "parent-session",
+      childSessionId: "sub-child",
+      message: makeMessage({ parts: [{ text: "   " }] }),
+    })).resolves.toMatchObject({ ok: true });
+
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+      type: "warn",
+      input: expect.stringContaining("empty-body-fallback"),
+    }));
+    // The stored text is what the parent will read — never an id-only envelope.
+    const body = (entries[0]?.formattedText ?? "").split("\n").slice(1).join("\n");
+    expect(body.trim().length).toBeGreaterThan(0);
+  });
+
+  it("does not warn when the child sent real content", async () => {
+    await expect(bus.deliverToParent({
+      parentSessionId: "parent-session",
+      childSessionId: "sub-child",
+      message: makeMessage(),
+    })).resolves.toMatchObject({ ok: true });
+
+    expect(audit).not.toHaveBeenCalledWith(expect.objectContaining({
+      input: expect.stringContaining("empty-body-fallback"),
+    }));
   });
 
   it("keeps a running-parent message durable when the turn ends before injection", async () => {

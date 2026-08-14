@@ -1,13 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
 import type { TurnResult } from "../../../engine/conversation-loop.js";
 import type { IpcDeps } from "../../types.js";
+import { wrapChildReportForParentJudgment } from "../../../engine/a2a-subagent-message-codec.js";
 import {
   acknowledgeParentMailboxAfterTurn,
   prepareParentMailboxTurn,
 } from "../chat.js";
 
-function mailboxEntry(id: string, formattedText: string, approvalLabel: string) {
-  return { id, formattedText, approvalLabel };
+function mailboxEntry(
+  id: string,
+  formattedText: string,
+  approvalLabel: string,
+  childTitle?: string,
+) {
+  return { id, formattedText, approvalLabel, ...(childTitle ? { childTitle } : {}) };
 }
 
 function makeDeps(entries: Array<ReturnType<typeof mailboxEntry>>) {
@@ -44,10 +50,40 @@ describe("parent sub-agent mailbox turns", () => {
     await expect(prepareParentMailboxTurn(fixture.deps)).resolves.toEqual({
       parentSessionId: "parent-1",
       entryIds: ["message-1", "message-2"],
-      initialGuidance: "child one\n\nchild two",
+      initialGuidance: wrapChildReportForParentJudgment("child one\n\nchild two"),
       approvalReasonPrefix: "[Sub-Agent: multiple sources]",
     });
     expect(fixture.peekParentMailbox).toHaveBeenCalledWith("parent-1");
+  });
+
+  it("names the child on the snapshot when the whole mailbox came from one sub-agent", async () => {
+    const single = makeDeps([
+      mailboxEntry("message-1", "first", "[Sub-Agent: One]", "One"),
+      mailboxEntry("message-2", "second", "[Sub-Agent: One]", "One"),
+    ]);
+    await expect(prepareParentMailboxTurn(single.deps)).resolves.toMatchObject({
+      childTitle: "One",
+    });
+
+    const mixed = makeDeps([
+      mailboxEntry("message-1", "first", "[Sub-Agent: One]", "One"),
+      mailboxEntry("message-2", "second", "[Sub-Agent: Two]", "Two"),
+    ]);
+    const mixedTurn = await prepareParentMailboxTurn(mixed.deps);
+    // Still a sub-agent report, but no single child owns it — the box renders
+    // unnamed rather than crediting one child for another's work.
+    expect(mixedTurn?.childTitle).toBeUndefined();
+  });
+
+  it("instructs the parent to judge the drained reports exactly once", async () => {
+    const fixture = makeDeps([mailboxEntry("message-1", "child one", "[Sub-Agent: One]")]);
+
+    const mailboxTurn = await prepareParentMailboxTurn(fixture.deps);
+    const instruction = wrapChildReportForParentJudgment("");
+    expect(mailboxTurn?.initialGuidance.endsWith("child one")).toBe(true);
+    // Exactly one host instruction — the persisted entry text stays unwrapped so
+    // the mid-turn injection path cannot add a second copy.
+    expect(mailboxTurn?.initialGuidance.split(instruction.trim()).length).toBe(2);
   });
 
   it("keeps a single approval label when all queued messages share one child", async () => {

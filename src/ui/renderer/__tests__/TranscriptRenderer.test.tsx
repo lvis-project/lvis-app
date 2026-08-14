@@ -262,3 +262,58 @@ describe("TranscriptRenderer — action suppression keys off callback presence",
     expect(getByTestId("user-message-pin-indicator")).toBeTruthy();
   });
 });
+
+describe("TranscriptRenderer — sub-agent report box", () => {
+  const report = (extra: Partial<Extract<ChatEntry, { kind: "user" }>> = {}): ChatEntry => ({
+    kind: "user",
+    text: "[Sub-Agent: Contract audit] (task child-1, message m-1)\nfound 3 issues",
+    injectHint: "sub-agent",
+    ...extra,
+  });
+
+  it("renders a sub-agent report in its own box, not the queued-message chip", () => {
+    const { getByTestId, queryByTitle } = renderCore(
+      <TranscriptRenderer
+        entries={[report(), assistant("ok")]}
+        streaming={false}
+        currentSessionId="s1"
+      />,
+    );
+
+    expect(getByTestId("subagent-report-bubble")).toBeTruthy();
+    // chatView.queueInjectTitle — the generic chip must not appear for a child report.
+    expect(queryByTitle("메시지 큐에서 자동 인입")).toBeNull();
+    expect(getByTestId("subagent-report-label").textContent).toContain("서브에이전트 보고");
+  });
+
+  it("names the reporting child when the batch came from a single sub-agent", () => {
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[report({ subAgentTitle: "Contract audit" })]}
+        streaming={false}
+        currentSessionId="s1"
+      />,
+    );
+
+    expect(getByTestId("subagent-report-label").textContent).toContain("Contract audit");
+  });
+
+  it("offers no edit affordance on text the user never wrote", () => {
+    const { queryByTitle } = renderCore(
+      <TranscriptRenderer
+        entries={[report(), assistant("ok")]}
+        streaming={false}
+        currentSessionId="s1"
+        edit={{
+          editingEntryIdx: null,
+          editBusy: false,
+          setEditingEntryIdx: vi.fn(),
+          onEditSave: vi.fn(),
+        }}
+        actions={{ onFork: vi.fn(), onToggleStar: vi.fn() }}
+      />,
+    );
+
+    expect(queryByTitle(EDIT_TITLE)).toBeNull();
+  });
+});
