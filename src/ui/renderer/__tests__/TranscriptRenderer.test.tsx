@@ -229,6 +229,21 @@ describe("TranscriptRenderer — permission review attaches to its tool row", ()
     );
     expect(variants.sort()).toEqual(["attached", "standalone"]);
   });
+
+  it("opens the work group for a call the parent agent answered", () => {
+    // No dock ever showed these calls. A collapsed group would leave the only
+    // record of a decision made without the user folded away by default.
+    for (const status of ["parent_approved", "parent_denied"] as const) {
+      const entries = [user("q"), review("t1", { status }), toolGroup("t1"), assistant("done")];
+      const { getByTestId, unmount } = renderCore(
+        <TranscriptRenderer entries={entries} streaming={false} currentSessionId="s1" />,
+      );
+      const card = getByTestId("permission-review-status-card");
+      expect(card.getAttribute("data-variant")).toBe("attached");
+      expect(card.getAttribute("data-status")).toBe(status);
+      unmount();
+    }
+  });
 });
 
 describe("TranscriptRenderer — action suppression keys off callback presence", () => {
