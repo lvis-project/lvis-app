@@ -138,6 +138,7 @@ export function historyToEntries(
         ...(isReplayableSystemNotice(m.systemNotice)
           ? { systemNotice: m.systemNotice }
           : {}),
+        ...(m.interrupted === true ? { interrupted: true } : {}),
       });
 
       if (m.toolCalls?.length) {

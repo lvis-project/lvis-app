@@ -166,6 +166,7 @@ export const frMessages: Record<string, string> = {
   "assistantCard.systemNoticeContextError": "Avis système: limite de modèle dépassée",
   "assistantCard.systemNoticeStreamError": "Avis système – Erreur du flux de réponse",
   "assistantCard.title": "Réponse LVIS",
+  "assistantCard.interruptedBadge": "Arrêté par l'utilisateur",
   "assistantCard.titleStreaming": "",
   "attachmentChip.chipAriaLabel": "Pièce jointe {label} — afficher les informations ou ouvrir le fichier",
   "attachmentChip.chipTitle": "Afficher les informations sur la pièce jointe/ouvrir le fichier",
