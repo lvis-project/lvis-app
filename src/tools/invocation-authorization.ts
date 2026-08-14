@@ -5,6 +5,7 @@ import type { ToolCategory, ToolSource, TrustLevel } from "./types.js";
 import {
   isTailnetControllerP1BlockedTool, type PermissionCheckResult,
 } from "../permissions/permission-manager.js";
+import { parentAdjudicationOf } from "../permissions/approval-gate.js";
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
 import type { PermissionEvaluationContext } from "../permissions/evaluation-context.js";
 import type {
@@ -1289,6 +1290,24 @@ export async function authorizeToolInvocation(
                 scopeTargetFilePaths: targetFilePaths,
               }),
           reviewerVerdict: permissionResult.reviewer?.verdict,
+          // The facts about this ask that only this lane can see, for the
+          // gate's tier-2 stage. Everything the GATE can observe — request
+          // kind, permission mode, remote origin, forced-explicit substrates,
+          // the verdict ceiling — it re-derives for itself, so this is a
+          // necessary condition and never a sufficient one.
+          //
+          //   layer >= 3   the layer 1-2 gates (deny rules, MCP strict,
+          //                overlay-trigger, global strict mode) are decisions
+          //                about the user's own posture, not about whether one
+          //                call serves one task.
+          //   !forceModal  policy has already said this one goes to a human.
+          //   a verdict    tier 2 refines a tier-1 judgement; with nothing to
+          //                refine there is no ceiling to check an answer
+          //                against, and no basis for a model to decide.
+          parentAdjudicationEligible:
+            permissionResult.layer >= 3 &&
+            permissionResult.forceModal !== true &&
+            permissionResult.reviewer?.verdict !== undefined,
           ...(approvalPurpose ? { approvalPurpose } : {}),
           args: finalInput,
           reason: approvalReasonPrefix
@@ -1514,6 +1533,31 @@ export async function authorizeToolInvocation(
             durationMs,
           });
         }
+        // Tier 2 of the sub-agent chain answered this instead of the user.
+        // Host-derived from the exact decision object the gate returned — a
+        // structural lookalike arriving from anywhere else is not in that map,
+        // so nothing a renderer or a child can build reads as a parent answer.
+        const parentAnswer = parentAdjudicationOf(decision);
+        if (parentAnswer !== undefined) {
+          emitPermissionReview(callbacks, {
+            status:
+              parentAnswer.outcome === "allow-once"
+                ? "parent_approved"
+                : "parent_denied",
+            toolName: toolUse.name,
+            toolCategory: invocationCategory,
+            source: source as "builtin" | "plugin" | "mcp",
+            // The parent's own sentence. It is already sanitized and masked
+            // where the answer was parsed, and it is the only account the
+            // child's own panel will have of a decision no dock ever showed.
+            reason: parentAnswer.reason,
+            ...(permissionResult.reviewer?.verdict?.level === undefined
+              ? {}
+              : { verdictLevel: permissionResult.reviewer.verdict.level }),
+            ...meta,
+          });
+        }
+
         const remoteOneShotRejected =
           requiresRemoteLocalOneShot && decision.choice !== "allow-once";
         if (decision.choice.startsWith("deny") || remoteOneShotRejected) {
@@ -1527,9 +1571,18 @@ export async function authorizeToolInvocation(
               approvalCacheKey ?? decision.rememberPattern ?? toolUse.name;
             await services.permissionManager.addAlwaysDeniedPersist(pattern);
           }
-          const msg = t("be_executor.approvalDeniedByUser", {
-            name: toolUse.name,
-          });
+          // A child told "the user denied this" would be told something untrue,
+          // and would have no idea what to do differently. Its parent refused,
+          // and said why — so say that, and say whose refusal it was.
+          const msg =
+            parentAnswer?.outcome === "deny"
+              ? t("be_executor.approvalDeniedByParent", {
+                  name: toolUse.name,
+                  reason: parentAnswer.reason,
+                })
+              : t("be_executor.approvalDeniedByUser", {
+                  name: toolUse.name,
+                });
           const durationMs = Date.now() - startTime;
           // finalInput matches the args the user actually saw + denied via
           // approvalRequest — never log stale pre-hook input here.
@@ -1554,7 +1607,10 @@ export async function authorizeToolInvocation(
             {
               ...permissionResult,
               decision: "deny",
-              reason: "user denied approval request",
+              reason:
+                parentAnswer?.outcome === "deny"
+                  ? "parent agent denied approval request"
+                  : "user denied approval request",
             },
             Infinity,
             invocationPermissionContext,
@@ -1577,7 +1633,15 @@ export async function authorizeToolInvocation(
         // and retain their explicit reviewed-parent persistence contract.
         permissionResult = {
           decision: "allow",
-          reason: `user approved approval request (${decision.choice})`,
+          // Who actually answered. The deny branch above already says this;
+          // saying it only there would leave the per-tool-call audit asserting
+          // that a user approved a call no human was shown — wrong in the one
+          // direction that flatters the system, and on the surface a reviewer
+          // reads for the CALL rather than for the approval.
+          reason:
+            parentAnswer?.outcome === "allow-once"
+              ? `parent agent approved approval request (${decision.choice})`
+              : `user approved approval request (${decision.choice})`,
           layer: permissionResult.layer,
         };
         // allow-once / allow-always: 실행 계속

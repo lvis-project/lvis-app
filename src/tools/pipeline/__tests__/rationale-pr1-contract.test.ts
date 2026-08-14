@@ -744,7 +744,7 @@ describe("invocation audit and sealed resume", () => {
         phase: "approval-allow-once-cas-consume",
         beforePhase: "permission-ask-audit",
         afterPhase: "script-pre-tool-use",
-        lowerSourceMarker: "permissionResult = {\n          decision: \"allow\",\n          reason: `user approved approval request (${decision.choice})`,",
+        lowerSourceMarker: "? `parent agent approved approval request (${decision.choice})`",
         upperSourceMarker: "    : await runScriptHook(\n        services.scriptHookManager,\n        \"pre\",",
       },
       {

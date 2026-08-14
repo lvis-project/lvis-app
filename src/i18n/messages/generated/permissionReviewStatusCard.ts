@@ -2,6 +2,8 @@
 export const en = {
   "permissionReviewStatusCard.reviewing": "Reviewing permission...",
   "permissionReviewStatusCard.autoApproved": "Permission review complete · Low risk",
+  "permissionReviewStatusCard.parentApproved": "Approved by the parent agent",
+  "permissionReviewStatusCard.parentDenied": "Refused by the parent agent",
   "permissionReviewStatusCard.failed": "Permission review failed",
   "permissionReviewStatusCard.riskHigh": "High risk",
   "permissionReviewStatusCard.riskMedium": "Medium risk",
@@ -16,6 +18,8 @@ export const en = {
 export const ko: Record<keyof typeof en, string> = {
   "permissionReviewStatusCard.reviewing": "권한 검토중...",
   "permissionReviewStatusCard.autoApproved": "권한 검토 완료 · 낮은 위험",
+  "permissionReviewStatusCard.parentApproved": "상위 에이전트가 승인",
+  "permissionReviewStatusCard.parentDenied": "상위 에이전트가 거부",
   "permissionReviewStatusCard.failed": "권한 검토 실패",
   "permissionReviewStatusCard.riskHigh": "높은 위험",
   "permissionReviewStatusCard.riskMedium": "중간 위험",
