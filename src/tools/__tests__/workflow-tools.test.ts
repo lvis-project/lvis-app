@@ -54,11 +54,12 @@ function ctx(sessionId = "session-x"): ToolExecutionContext {
  * way to observe a spawn's terminal result synchronously.
  */
 function foregroundCtx(sessionId = "session-x"): ToolExecutionContext {
-  return {
-    cwd: process.cwd(),
-    extraAllowedDirectories: [],
-    metadata: { sessionId },
+  const base = ctx(sessionId);
+  const { supportsA2AParentDelivery: _delivery, ...metadata } = base.metadata as {
+    sessionId: string;
+    supportsA2AParentDelivery: boolean;
   };
+  return { ...base, metadata };
 }
 
 describe("ask_user_question tool", () => {
