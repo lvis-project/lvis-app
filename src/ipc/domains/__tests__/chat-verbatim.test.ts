@@ -147,6 +147,7 @@ function makeConversationLoop(
     newConversation: vi.fn(),
     listSessions: vi.fn(() => []),
     loadSession: vi.fn(),
+    listSubAgentSessionsForOrigin: vi.fn(() => []),
     refreshProvider: vi.fn(),
     abortCurrentTurn: vi.fn(),
     resetAndResume: vi.fn(),
@@ -175,6 +176,9 @@ function makeMinimalDeps(
       loadSession: vi.fn(),
       loadToolResultArtifact: vi.fn(() => null),
       loadSessionMetadata: vi.fn(() => null),
+      // Session loads now also rebuild the sub-agent panel rows from disk.
+      // No sub-agents in these fixtures, so an empty list is the honest stub.
+      listSubAgentSessionsForOrigin: vi.fn(() => []),
       saveSessionMetadata: vi.fn(),
       rehydrateToolResultArtifacts: vi.fn((_sessionId: string, messages: unknown[]) => messages),
       loadMainActiveSessionState: vi.fn(() => null),

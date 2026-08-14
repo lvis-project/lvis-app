@@ -9,6 +9,56 @@
  * simple list views; they live alongside this hook in the App.
  */
 import { useCallback, useEffect, useState } from "react";
+import { A2ATaskState } from "../../../shared/a2a.js";
+
+/** A sub-agent row rebuilt from disk, as sent by `chat:session-history`. */
+export interface RestoredSubAgentRow {
+  spawnId: string;
+  childSessionId: string;
+  title: string;
+  modifiedAt: string;
+  /** Last durable A2A projection the child recorded, when it recorded one. */
+  taskState?: string;
+  toolUseId?: string;
+}
+
+/**
+ * Status to show for a sub-agent row rebuilt from disk.
+ *
+ * Never returns `"running"`. The panel sorts running rows to the top, and a
+ * restored row cannot be running by construction: the process that ran it died
+ * with the app. Returning it would push a dead agent above a live one.
+ *
+ * `WORKING`/`SUBMITTED` are the interesting case. The last thing the child
+ * durably recorded was "in progress", and that record is accurate about the
+ * past and wrong about the present — the run cannot be reattached, only
+ * resumed. `"interrupted"` is the honest reading, and it is why that value
+ * exists in the union.
+ *
+ * An absent `taskState` resolves the same way, pessimistically: a child that
+ * never recorded a projection died before reaching one, so it is at least as
+ * unfinished as a WORKING row. Calling it `"done"` would be a claim the file
+ * does not support.
+ */
+function restoredSpawnStatus(row: RestoredSubAgentRow): SubAgentSpawn["status"] {
+  switch (row.taskState) {
+    case A2ATaskState.COMPLETED:
+      return "done";
+    case A2ATaskState.FAILED:
+    case A2ATaskState.REJECTED:
+      return "error";
+    case A2ATaskState.INPUT_REQUIRED:
+      // Stopped on a question it never got an answer to — still actionable.
+      return "waiting";
+    case A2ATaskState.CANCELED:
+      return "interrupted";
+    default:
+      return "interrupted";
+  }
+}
+
+/** Test seam for the mapping above; not used by the hook itself. */
+export const restoredSpawnStatusForTest = restoredSpawnStatus;
 import type { LvisApi } from "../types.js";
 import type { AskUserQuestionRequest } from "../components/AskUserQuestionCard.js";
 import type { SubAgentSpawn } from "../subagents/types.js";
@@ -165,6 +215,32 @@ export function useWorkflowTools(api: LvisApi) {
   }, []);
 
   /**
+   * Seed the panel from sub-agent rows rebuilt on disk after a restart.
+   *
+   * Merges rather than replaces: a live event may already have produced a row
+   * for the same `spawnId` (a restored session whose child is running again via
+   * resume), and a restored row must never clobber live state that is strictly
+   * fresher than the file it came from.
+   */
+  const restoreSubAgentSpawns = useCallback((restored: readonly RestoredSubAgentRow[]) => {
+    setSubAgentSpawns((prev) => {
+      const known = new Set(prev.map((spawn) => spawn.spawnId));
+      const rows = restored
+        .filter((row) => !known.has(row.spawnId))
+        .map((row): SubAgentSpawn => ({
+          spawnId: row.spawnId,
+          title: row.title || "(sub-agent)",
+          status: restoredSpawnStatus(row),
+          entries: [],
+          toolCallCount: 0,
+          childSessionId: row.childSessionId,
+          ...(row.toolUseId ? { toolUseId: row.toolUseId } : {}),
+        }));
+      return rows.length > 0 ? [...prev, ...rows] : prev;
+    });
+  }, []);
+
+  /**
    * M4: explicit reset hook callable from the App (e.g. when the user
    * clicks "new chat"). Clears the per-session skill badge list so a
    * brand-new conversation does not inherit prior session badges.
@@ -178,6 +254,7 @@ export function useWorkflowTools(api: LvisApi) {
   return {
     askQuestions,
     subAgentSpawns,
+    restoreSubAgentSpawns,
     loadedSkills,
     dismissAskQuestion,
     resetForNewSession,
