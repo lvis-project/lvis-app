@@ -9,6 +9,7 @@ import type { RiskLevel, RiskVerdict } from "./reviewer/risk-classifier.js";
 import type {
   ParentAdjudicationEscalationCause,
   ParentAdjudicationEvidence,
+  ParentAdjudicationOptions,
   ParentAdjudicationResult,
   ParentAdjudicator,
 } from "./parent-adjudicator.js";
@@ -113,6 +114,46 @@ const MAX_TRACKED_PARENT_DENIAL_KEYS = 1_000;
 
 /** Longest parent reason written to an audit row. */
 const MAX_AUDIT_REASON_CHARS = 160;
+
+/**
+ * Longest serialized argument payload shown to an adjudicating parent.
+ *
+ * The dock's copy of the arguments crosses local IPC, so its size was never
+ * anyone's problem. This copy crosses the network to a paid provider, once per
+ * ask, up to the per-run budget — and the adjudicator answers one ask at a
+ * time, so a child writing megabytes into a tool argument would bill the user
+ * for them and stall every other child's ask behind them.
+ */
+const MAX_EVIDENCE_ARGS_CHARS = 4_000;
+
+/**
+ * Bound the argument payload before it leaves the host.
+ *
+ * Truncation is safe in exactly one direction, and this is that direction:
+ * evidence a parent cannot see is evidence it cannot approve on, so a truncated
+ * payload can only move the answer toward escalate — which is the user.
+ *
+ * Bounding happens BEFORE masking, not after. DLP masking walks every string in
+ * the structure with a battery of patterns, and on a multi-megabyte tool
+ * argument that walk costs minutes on this process's only thread — so a bound
+ * applied to the masking OUTPUT would have prevented the network cost and kept
+ * the stall. The preview is masked like everything else: it is the input to the
+ * masking pass, never its output.
+ */
+function boundedEvidenceArgs(args: unknown): unknown {
+  let serialized: string;
+  try {
+    serialized = canonicalStringify(args);
+  } catch {
+    // Unserializable arguments are not evidence. Say so rather than guess.
+    return { omitted: "arguments could not be rendered" };
+  }
+  if (serialized.length <= MAX_EVIDENCE_ARGS_CHARS) return args;
+  return {
+    truncated: true,
+    preview: serialized.slice(0, MAX_EVIDENCE_ARGS_CHARS),
+  };
+}
 
 /**
  * Render model-authored text for an audit row.
@@ -1283,15 +1324,17 @@ export class ApprovalGate {
     // establish that this lane is permitted, and an unestablished permission is
     // a denied one: the ask falls through to the user, which is the behaviour
     // of the chain with the lane switched off.
-    let enabled: boolean;
     let policy: ReviewerParentAdjudicationBlock;
     try {
-      enabled = deps.isEnabled();
+      // The flag first, and the policy only after it: reading the policy opens
+      // the permission settings file, and a lane that is switched off must not
+      // put a synchronous file read on the approval path of every sub-agent
+      // ask it is not going to touch.
+      if (!deps.isEnabled()) return null;
       policy = deps.policy();
     } catch {
       return null;
     }
-    if (!enabled) return null;
     // Every condition the gate can see for itself, checked here regardless of
     // what the caller asserted:
     //   - kind: only an ordinary tool ask. A directory-scope grant, a plugin
@@ -1323,6 +1366,52 @@ export class ApprovalGate {
       withinCeiling;
     if (!eligible || verdict === undefined) return null;
     return { deps, policy, verdict };
+  }
+
+  /**
+   * Await the parent's answer, but no longer than the turn behind it lasts.
+   *
+   * The adjudicator is handed the abort signal and a well-behaved provider
+   * ends its call on it, but "well-behaved" is an assumption about code this
+   * gate does not own. Watching the signal here makes the bound structural:
+   * whatever the adapter does with it, a stopped turn stops waiting.
+   */
+  private async adjudicateWithin(
+    deps: ParentAdjudicationGateDeps,
+    evidence: ParentAdjudicationEvidence,
+    options: ParentAdjudicationOptions,
+  ): Promise<ParentAdjudicationResult> {
+    const answer = deps.adjudicator().adjudicate(evidence, options);
+    const signal = options.abortSignal;
+    if (signal === undefined) return answer;
+    if (signal.aborted) {
+      // Nothing will fire a listener for an abort that already happened.
+      void answer.catch(() => undefined);
+      return {
+        outcome: "escalate",
+        cause: "turn-aborted",
+        reason: "the turn was stopped",
+      };
+    }
+    let onAbort: (() => void) | undefined;
+    const stopped = new Promise<ParentAdjudicationResult>((resolve) => {
+      onAbort = (): void =>
+        resolve({
+          outcome: "escalate",
+          cause: "turn-aborted",
+          reason: "the turn was stopped",
+        });
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+    try {
+      return await Promise.race([answer, stopped]);
+    } finally {
+      if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
+      // The losing side of the race still settles. Without this, an
+      // adjudication that rejects after the abort won is an unhandled
+      // rejection, which this process treats as fatal.
+      void answer.catch(() => undefined);
+    }
   }
 
   /**
@@ -1364,47 +1453,56 @@ export class ApprovalGate {
       });
     };
 
-    // Host-composed evidence only. The masking is the same display masking the
-    // dock gets, so the parent cannot be shown a secret the user would not
-    // have been shown, and the child cannot write into any of it.
     const detections = new Set<string>();
-    const evidence: ParentAdjudicationEvidence = {
-      toolName: request.toolName,
-      ...(request.toolCategory === undefined
-        ? {}
-        : { toolCategory: request.toolCategory }),
-      ...(request.source === undefined ? {} : { source: request.source }),
-      maskedArgs: maskArgsForDisplay(request.args, detections),
-      verdict,
-      ...(request.approvalPurpose === undefined
-        ? {}
-        : {
-            approvalPurpose: maskApprovalPurposeForDisplay(
-              request.approvalPurpose,
-              detections,
-            ).text,
-          }),
-      ...(request.target?.filePath === undefined
-        ? {}
-        : {
-            targetFilePath: maskArgsForDisplay(
-              request.target.filePath,
-              detections,
-            ) as string,
-          }),
-      // The scope the permission decision actually used, when the pipeline
-      // captured one. An empty list is weaker evidence, never a wider one.
-      allowedDirectories: request.evaluationContext?.allowedDirectories ?? [],
-      child: {
-        childSessionId: childProvenance.childSessionId,
-        childTitle: childProvenance.childTitle,
-        spawnTaskSummary: childProvenance.spawnTaskSummary,
-      },
-    };
-
     let result: ParentAdjudicationResult;
     try {
-      result = await deps.adjudicator().adjudicate(evidence, {
+      // Host-composed evidence only. The masking is the same display masking
+      // the dock gets, so the parent cannot be shown a secret the user would
+      // not have been shown, and no prose a child wrote is in it.
+      //
+      // Composed INSIDE the try, not before it. Masking walks a structure the
+      // child chose the shape of, and a throw out of that walk would reject
+      // this method, reject `requestAndWait`, and surface as a tool error —
+      // the one failure of this lane that would never reach the dock.
+      const evidence: ParentAdjudicationEvidence = {
+        toolName: request.toolName,
+        ...(request.toolCategory === undefined
+          ? {}
+          : { toolCategory: request.toolCategory }),
+        ...(request.source === undefined ? {} : { source: request.source }),
+        maskedArgs: maskArgsForDisplay(
+          boundedEvidenceArgs(request.args),
+          detections,
+        ),
+        verdict,
+        ...(request.target?.filePath === undefined
+          ? {}
+          : {
+              targetFilePath: maskArgsForDisplay(
+                request.target.filePath,
+                detections,
+              ) as string,
+            }),
+        // The scope the permission decision actually used, when the pipeline
+        // captured one. An empty list is weaker evidence, never a wider one.
+        allowedDirectories: request.evaluationContext?.allowedDirectories ?? [],
+        child: {
+          childSessionId: childProvenance.childSessionId,
+          childTitle: childProvenance.childTitle,
+          spawnTaskSummary: childProvenance.spawnTaskSummary,
+        },
+      };
+      if (detections.size > 0) {
+        // The dock path writes this row when it masks a payload; a
+        // parent-answered ask never reaches that path, and an ask whose
+        // arguments held credentials must not be the one class of ask with no
+        // record that masking happened — especially since this payload leaves
+        // the machine.
+        logRow(
+          `[approval:args-dlp-masked] ${request.id} toolName=${request.toolName} lane=parent-adjudication detections=${[...detections].join(",")}`,
+        );
+      }
+      result = await this.adjudicateWithin(deps, evidence, {
         parentSessionId: childProvenance.originSessionId,
         timeoutMs: policy.timeoutMs,
         maxPerChildRun: policy.maxPerChildRun,
@@ -1430,7 +1528,7 @@ export class ApprovalGate {
         request.toolName,
       );
       logRow(
-        `[approval:parent-adjudicated] ${request.id} ${input.auditFields} answeredBy=${approvalAnswererAuditToken("parent-agent")} child=${auditSafeText(childProvenance.childSessionId)} reason=${auditSafeText(result.reason)} → allow-once`,
+        `[approval:parent-adjudicated] ${request.id} ${input.auditFields} answeredBy=${approvalAnswererAuditToken("parent-agent")} child=${auditSafeText(childProvenance.childSessionId)} parent=${auditSafeText(childProvenance.originSessionId)} reason=${auditSafeText(result.reason)} → allow-once`,
       );
       // No pending entry is ever created for this ask, so there is nothing for
       // `resolve` to bind a later choice to and nothing for a user-approval
@@ -1453,7 +1551,7 @@ export class ApprovalGate {
       );
       if (streak < PARENT_DENIAL_ESCALATION_THRESHOLD) {
         logRow(
-          `[approval:parent-adjudicated] ${request.id} ${input.auditFields} answeredBy=${approvalAnswererAuditToken("parent-agent")} child=${auditSafeText(childProvenance.childSessionId)} streak=${streak} reason=${auditSafeText(result.reason)} → deny-once`,
+          `[approval:parent-adjudicated] ${request.id} ${input.auditFields} answeredBy=${approvalAnswererAuditToken("parent-agent")} child=${auditSafeText(childProvenance.childSessionId)} parent=${auditSafeText(childProvenance.originSessionId)} streak=${streak} reason=${auditSafeText(result.reason)} → deny-once`,
         );
         // Deliberately no `rememberPattern`: a parent that could set one
         // would be minting a durable deny rule for a user who never saw the
@@ -1474,7 +1572,7 @@ export class ApprovalGate {
         request.toolName,
       );
       logRow(
-        `[approval:parent-escalated] ${request.id} ${input.auditFields} child=${auditSafeText(childProvenance.childSessionId)} cause=repeated-denial streak=${streak} reason=${auditSafeText(result.reason)}`,
+        `[approval:parent-escalated] ${request.id} ${input.auditFields} child=${auditSafeText(childProvenance.childSessionId)} parent=${auditSafeText(childProvenance.originSessionId)} cause=repeated-denial streak=${streak} reason=${auditSafeText(result.reason)}`,
       );
       return {
         kind: "escalate",
@@ -1483,7 +1581,7 @@ export class ApprovalGate {
     }
 
     logRow(
-      `[approval:parent-escalated] ${request.id} ${input.auditFields} child=${auditSafeText(childProvenance.childSessionId)} cause=${result.cause} reason=${auditSafeText(result.reason)}`,
+      `[approval:parent-escalated] ${request.id} ${input.auditFields} child=${auditSafeText(childProvenance.childSessionId)} parent=${auditSafeText(childProvenance.originSessionId)} cause=${result.cause} reason=${auditSafeText(result.reason)}`,
     );
     return {
       kind: "escalate",
