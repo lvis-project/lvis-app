@@ -2568,6 +2568,7 @@ export const frMessages: Record<string, string> = {
   "toolApprovalDialog.tilePermissionCategory": "Catégorie d'autorisation",
   "toolApprovalDialog.tileToolSource": "Outil/Source",
   "toolApprovalDialog.toolApprovalTitle": "Approuver l'exécution de l'outil",
+  "toolApprovalDialog.identityUnverified": "non vérifié",
   "toolApprovalDialog.unknown": "Inconnu",
   "toolDisplay.agentSpawn": "Exécuter le sous-agent",
   "toolDisplay.applyPatch": "Fichier de correctif",
