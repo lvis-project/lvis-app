@@ -398,6 +398,7 @@ export const zhMessages: Record<string, string> = {
   "be_executor.shellPathPolicyBlock": "[Shell 路径策略被阻止] 工具 '{name}' — {reason}",
   "be_executor.toolExecutionCancelled": "工具执行被取消。",
   "be_executor.toolExecutionUnknownError": "未知的工具执行错误",
+  "be_executor.toolCeilingExceeded": "工具 '{name}' 在 {seconds} 秒后被 LVIS 主机停止 —— 这是主机的执行上限，而不是工具自身的超时。结果未知：调用可能在被切断前刚好完成，因此在断定失败之前请先检查当前状态。原样重复该调用会再次触及同一上限。如果该工具接受自己的超时参数，请用更大的值重试；否则请把工作拆成更小的步骤。",
   "be_executor.toolNotFound": "未找到工具：{name}",
   "be_executor.toolNotFoundAudit": "找不到工具",
   "be_hookRunner.blockedByHook": "{name} 阻止工具执行",
