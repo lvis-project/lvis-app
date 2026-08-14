@@ -544,6 +544,19 @@ export function finalizeStreamingAssistant(
      * / "stream_error".
      */
     systemNotice?: "context-error" | "stream-error";
+    /**
+     * The turn this assistant message belongs to was aborted. Live streaming
+     * marks the entry through `markStreamingAssistantInterrupted`; the reload
+     * path has no such event and can only learn it from the persisted
+     * `SerializedHistoryMessage.interrupted`, so `historyToEntries` passes it
+     * here. Before it was consumed the flag was passed and silently dropped,
+     * and the "interrupted" badge a user saw live disappeared on reload —
+     * a finished-looking turn that had in fact been cut short.
+     *
+     * Sticky: once an entry carries the marker, a later re-finalize never
+     * clears it (an abort is a fact about the turn, not about the render).
+     */
+    interrupted?: boolean;
   },
 ): ChatEntry[] {
   const next = [...entries];
@@ -579,6 +592,9 @@ export function finalizeStreamingAssistant(
             : assistant.systemNotice !== undefined
               ? { systemNotice: assistant.systemNotice }
               : {}),
+          ...(opts?.interrupted === true || assistant.interrupted === true
+            ? { interrupted: true }
+            : {}),
         };
         return next;
       }
@@ -606,6 +622,9 @@ export function finalizeStreamingAssistant(
         : assistant.systemNotice !== undefined
           ? { systemNotice: assistant.systemNotice }
           : {}),
+      ...(opts?.interrupted === true || assistant.interrupted === true
+        ? { interrupted: true }
+        : {}),
     };
     return next;
   }
@@ -631,6 +650,7 @@ export function finalizeStreamingAssistant(
     phase: opts?.phase,
     ...(opts?.createdAt !== undefined ? { createdAt: opts.createdAt } : {}),
     ...(opts?.systemNotice !== undefined ? { systemNotice: opts.systemNotice } : {}),
+    ...(opts?.interrupted === true ? { interrupted: true } : {}),
   });
   return next;
 }
