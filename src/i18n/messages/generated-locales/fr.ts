@@ -238,6 +238,7 @@ export const frMessages: Record<string, string> = {
   "auditTab.statsTopTypes": "Principaux types",
   "auditTab.statsTotalItems": "Total des articles",
   "be_agentList.toolDescription": "Renvoie la liste des profils d'agent LVIS actuellement disponibles. Utilisez-le avant de sélectionner un nom d'agent pour agent_spawn.",
+  "be_agentList.existingGuidance": "Ces sous-agents existent déjà dans CETTE conversation. Pour en poursuivre un, appelez agent_spawn avec son resumeId — il conserve tout son historique et reprend là où il s'est arrêté. Lancer un nouvel agent pour un travail déjà porté par un agent reprenable existant jette le contexte de cet agent.",
   "be_agentModeMap.executeReasoningHint": "Exécuter la tâche assignée avec précision et produire le livrable. N'étendez pas la portée; Clarifiez les ambiguïtés avec une brève question, puis énoncez votre hypothèse.",
   "be_agentModeMap.exploreReasoningHint": "Recherchez les éléments pertinents sur la machine locale ou dans les documents internes et signalez uniquement l'emplacement et les points clés. Pour les informations sensibles, signalez uniquement l’emplacement – ​​n’exposez pas le contenu.",
   "be_agentModeMap.planReasoningHint": "Suivez la clarté par dimension avec un score et réduisez l’ambiguïté une question à la fois. Générez un document de plan exploitable une fois le seuil atteint.",
