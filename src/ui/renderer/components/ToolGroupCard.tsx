@@ -193,7 +193,7 @@ function SingleToolInline({
           toolUseId={tool.toolUseId}
           toolName={getToolDisplayName(tool.name)}
           input={tool.input}
-          stubContent={tool.result as string}
+          compactedResultText={tool.result as string}
           sessionId={sessionId}
         />
         <AttachedPermissionReview review={review} className="px-3 pb-1.5" />
@@ -457,7 +457,7 @@ export function ToolGroupCard({
                             toolUseId={tool.toolUseId}
                             toolName={getToolDisplayName(tool.name)}
                             input={tool.input}
-                            stubContent={tool.result}
+                            compactedResultText={tool.result}
                             sessionId={sessionId}
                           />
                         ) : /* Issue #749: write_file truncated+hasSidecar → WriteFileSidecarDiff */
