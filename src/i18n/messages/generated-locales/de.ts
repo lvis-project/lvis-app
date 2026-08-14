@@ -165,6 +165,7 @@ export const deMessages: Record<string, string> = {
   "assistantCard.systemNoticeContextError": "Systemhinweis – Modelllimit überschritten",
   "assistantCard.systemNoticeStreamError": "Systemhinweis – Antwort-Stream-Fehler",
   "assistantCard.title": "LVIS-Antwort",
+  "assistantCard.interruptedBadge": "Vom Benutzer gestoppt",
   "assistantCard.titleStreaming": "",
   "attachmentChip.chipAriaLabel": "Anhang {label} – Informationen anzeigen oder Datei öffnen",
   "attachmentChip.chipTitle": "Anhangsinformationen anzeigen / Datei öffnen",

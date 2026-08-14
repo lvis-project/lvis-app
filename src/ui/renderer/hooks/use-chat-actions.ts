@@ -13,6 +13,7 @@ export function useChatActions(opts: {
   streaming: boolean;
   currentSessionId: ReturnType<typeof useSessions>["currentSessionId"];
   entries: ReturnType<typeof useChatState>["entries"];
+  markLastAssistantInterrupted: ReturnType<typeof useChatState>["markLastAssistantInterrupted"];
   entryIndexToHistoryIndex: ReturnType<typeof useChatState>["entryIndexToHistoryIndex"];
   applyLoadedSession: ReturnType<typeof useChatState>["applyLoadedSession"];
   truncateToEntry: ReturnType<typeof useChatState>["truncateToEntry"];
@@ -22,7 +23,7 @@ export function useChatActions(opts: {
   starredToggle: ReturnType<typeof useStarred>["handleToggleStar"];
 }) {
   const {
-    api, streaming, currentSessionId, entries, entryIndexToHistoryIndex,
+    api, streaming, currentSessionId, entries, entryIndexToHistoryIndex, markLastAssistantInterrupted,
     applyLoadedSession, truncateToEntry, sessionLoad, sessionFork,
     starredIsEntry, starredToggle,
   } = opts;
@@ -49,8 +50,12 @@ export function useChatActions(opts: {
   );
 
   const handleAbort = useCallback(async () => {
+    // chatAbort resolves only after the turn settles as interrupted, so the
+    // badge lands exactly when the stream stops — the initiator marks it, not
+    // a "[중단됨]" literal pushed through the delta stream by the engine.
     try { await api.chatAbort(); } catch { /* no-op */ }
-  }, [api]);
+    markLastAssistantInterrupted();
+  }, [api, markLastAssistantInterrupted]);
 
 
 

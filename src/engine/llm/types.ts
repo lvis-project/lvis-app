@@ -34,6 +34,12 @@ export interface MessageMeta {
    * replayed as the user's own visible bubble.
    */
   displayText?: string;
+  /**
+   * The turn carrying this assistant message was aborted by the user before it
+   * finished. Display state, not prose: the renderer shows it as a badge, so
+   * the marker never contaminates the text that is replayed to the model.
+   */
+  interrupted?: boolean;
   /** Host-minted nonce for rollbackable injected rows across history cloning. */
   hostInjectionId?: string;
   /** Structured provenance for plugin/proactive imported trigger turns. */

@@ -11,6 +11,20 @@ import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
 import { replaceToolNamesInText } from "../utils/tool-display.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 
+/**
+ * Trailing "[중단됨]"-style markers that older engine versions appended to the
+ * assistant TEXT on abort. New turns carry `entry.interrupted` instead; these
+ * literals survive only in already-persisted sessions, so they are stripped at
+ * render and replaced by the same badge — one visual language for both eras.
+ * Tail-anchored on the exact known catalog values: prose that merely mentions
+ * the marker mid-sentence is left alone.
+ */
+const LEGACY_INTERRUPT_TAIL = /(?:\n*\s*)(?:\[Interrupted\]|\[중단됨\]|\[中断\]|\[Interrompu\]|\[Interrumpido\]|\[Unterbrochen\])\s*$/;
+function splitLegacyInterruptTail(text: string): { text: string; hadMarker: boolean } {
+  const stripped = text.replace(LEGACY_INTERRUPT_TAIL, "");
+  return { text: stripped, hadMarker: stripped !== text };
+}
+
 function AssistantCardImpl({
   entry,
   actions,
@@ -43,12 +57,14 @@ function AssistantCardImpl({
     : entry.streaming
       ? t("assistantCard.titleStreaming")
       : t("assistantCard.title");
-  const displayText = useMemo(() => detectFromStream(entry.text || "").cleanedText, [entry.text]);
+  const legacySplit = useMemo(() => splitLegacyInterruptTail(entry.text || ""), [entry.text]);
+  const wasInterrupted = entry.interrupted === true || legacySplit.hadMarker;
+  const displayText = useMemo(() => detectFromStream(legacySplit.text).cleanedText, [legacySplit.text]);
   const renderedText = useMemo(() => replaceToolNamesInText(displayText), [displayText]);
   const markdownText = entry.route === "command" ? preserveCommandLineBreaks(renderedText) : renderedText;
   const hasRenderableText = markdownText.trim().length > 0;
   const hasHeaderTitle = title.trim().length > 0;
-  const showHeader = actions !== undefined || isSystemNotice || (entry.streaming && hasHeaderTitle);
+  const showHeader = actions !== undefined || isSystemNotice || wasInterrupted || (entry.streaming && hasHeaderTitle);
 
 
   if (entry.streaming && !isSystemNotice && !hasRenderableText) {
@@ -73,6 +89,14 @@ function AssistantCardImpl({
         >
           {isSystemNotice ? <AlertTriangle className="h-3 w-3" /> : null}
           {title}
+          {wasInterrupted && !entry.streaming ? (
+            <span
+              data-testid="assistant-interrupted-badge"
+              className="rounded-full border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-1.5 py-px text-[10px] font-medium normal-case tracking-normal text-warning"
+            >
+              {t("assistantCard.interruptedBadge")}
+            </span>
+          ) : null}
           {entry.streaming ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
           {isStarred ? <Pin key="starred" className="h-3 w-3 fill-emphasis text-emphasis lvis-anim-star" /> : null}
           {actions && !entry.streaming ? (

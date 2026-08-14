@@ -152,6 +152,7 @@ export const zhMessages: Record<string, string> = {
   "assistantCard.systemNoticeContextError": "系统通知——超出型号限制",
   "assistantCard.systemNoticeStreamError": "系统通知-响应流错误",
   "assistantCard.title": "LVIS反应",
+  "assistantCard.interruptedBadge": "用户已停止",
   "assistantCard.titleStreaming": "",
   "attachmentChip.chipAriaLabel": "附件 {label} — 查看信息或打开文件",
   "attachmentChip.chipTitle": "查看附件信息/打开文件",
