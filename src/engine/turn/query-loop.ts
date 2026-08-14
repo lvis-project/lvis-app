@@ -60,12 +60,14 @@ import { finalizeAfterRoundCap, mergeFinalizeUsage, resolveRoundCapText } from "
 import { toolResultMeta } from "./tool-result-meta.js";
 
 const log = createLogger("lvis");
-const MAX_TOOL_ROUNDS = 60; // default when the caller assigns no `maxRounds`
+// No caller-assigned `maxRounds` = PARENT session: unbounded — a turn ends
+// at natural end_turn or user interrupt. Child loops always get a budget.
+const PARENT_UNLIMITED_ROUNDS = Number.MAX_SAFE_INTEGER;
 /**
  * Hard cap on finish_reason=length CONTINUATIONS per logical assistant answer.
  * Published provider guidance converges on 2–3. AND-ed with: (a) a
  * zero-progress break (a round adding no text AND no reasoning ends the chain),
- * (b) the global MAX_TOOL_ROUNDS budget, and (c) the per-iteration `round < 30`
+ * (b) the caller-assigned round budget, and (c) the per-iteration `round < 30`
  * for-bound. Any one tripping stops the chain — defense against a model that
  * always returns "max_tokens".
  */
@@ -325,7 +327,7 @@ export async function queryLoop(
     const effectiveMaxRounds =
       typeof requestedMaxRounds === "number" && Number.isFinite(requestedMaxRounds) && requestedMaxRounds > 0
         ? Math.floor(requestedMaxRounds)
-        : MAX_TOOL_ROUNDS;
+        : PARENT_UNLIMITED_ROUNDS;
 
     type PendingGuidanceDelivery = {
       entries: Array<(typeof self.guidanceQueue)[number]>;
@@ -366,9 +368,7 @@ export async function queryLoop(
         len: delivery.joined.length,
       });
     };
-    // For-bound: structural backstop for iterations that spend no assistant
-    // round (meta-tool refunds). It must never sit BELOW the honoured budget.
-    const loopRoundBound = Math.max(MAX_TOOL_ROUNDS, effectiveMaxRounds);
+    const loopRoundBound = effectiveMaxRounds;
     try {
     for (let round = 0; round < loopRoundBound; round++) {
       // C3(a): hard guard between rounds — if we have already executed
@@ -710,7 +710,7 @@ export async function queryLoop(
           });
           // Retry the round with the offending tool removed. Does NOT count as
           // an assistant round (assistantRoundsRun is unchanged); the for-loop
-          // `round` counter + MAX_TOOL_ROUNDS still bound total iterations.
+          // `round` counter + the round budget still bound total iterations.
           continue;
         }
 
