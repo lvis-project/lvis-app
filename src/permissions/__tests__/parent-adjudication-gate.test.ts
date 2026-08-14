@@ -23,6 +23,8 @@ import type {
   ParentAdjudicator,
 } from "../parent-adjudicator.js";
 import type { ReviewerParentAdjudicationBlock } from "../permission-settings-store.js";
+import { makeMockWebContents } from "../../__tests__/test-helpers.js";
+import { auditRowTexts } from "./test-helpers.js";
 
 const CHILD_SESSION = "child-session-1";
 const PARENT_SESSION = "parent-session-1";
@@ -56,13 +58,6 @@ class ScriptedParentAdjudicator implements ParentAdjudicator {
   forgetChildRun(childSessionId: string): void {
     this.forgotten.push(childSessionId);
   }
-}
-
-function makeMockWebContents() {
-  return {
-    send: vi.fn(),
-    isDestroyed: vi.fn(() => false),
-  };
 }
 
 const DEFAULT_POLICY: ReviewerParentAdjudicationBlock = {
@@ -126,18 +121,11 @@ function makeChildRequest(
   };
 }
 
-function auditRows(auditLogger: { log: ReturnType<typeof vi.fn> }): string[] {
-  return auditLogger.log.mock.calls.map(([entry]) => {
-    const row = entry as { input?: string; output?: string };
-    return row.input ?? row.output ?? "";
-  });
-}
-
 function rowStartingWith(
   auditLogger: { log: ReturnType<typeof vi.fn> },
   marker: string,
 ): string | undefined {
-  return auditRows(auditLogger).find((row) => row.startsWith(marker));
+  return auditRowTexts(auditLogger).find((row) => row.startsWith(marker));
 }
 
 function sentRequest(wc: ReturnType<typeof makeMockWebContents>): ApprovalRequest {
