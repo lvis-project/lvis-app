@@ -140,6 +140,8 @@ export type ReviewerDispatchOutcome =
   | "fresh"
   | "cache"
   | "approval-memory"
+  /** Rule verdict is final by construction; the LLM was never consulted. */
+  | "host-determined"
   | "unavailable"
   | "error"
   | "timeout"
@@ -148,7 +150,7 @@ export type ReviewerDispatchOutcome =
 
 export type ReviewerAutoDecisionOutcome = Extract<
   ReviewerDispatchOutcome,
-  "fresh" | "cache" | "approval-memory"
+  "fresh" | "cache" | "approval-memory" | "host-determined"
 >;
 
 /** Exhaustive fail-closed SOT for reviewer outcomes that may auto-decide. */
@@ -160,6 +162,10 @@ export function isReviewerAutoDecisionOutcome(
     case "fresh":
     case "cache":
     case "approval-memory":
+    // Host-determined is the STRONGEST auto-decision basis, not the weakest:
+    // the verdict came from a deterministic rule the host owns, so there is
+    // no model judgement to second-guess before acting on it.
+    case "host-determined":
       return true;
     case "unavailable":
     case "error":
@@ -1649,7 +1655,16 @@ export class PermissionManager {
         ruleVerdict: ruleVerdictForAudit ?? verdict.level,
         llmVerdict: llmVerdictForAudit,
         finalVerdict: verdict.level,
-        compositionRulesTriggered: [],
+        // A host-determined verdict deliberately skipped the LLM layer; record
+        // it here so an auditor can tell "review skipped by host policy" apart
+        // from "cache hit" and "non-LLM classifier", which also leave
+        // llmVerdict null (architect review MINOR-3).
+        compositionRulesTriggered: outcome === "host-determined"
+          ? [{
+              rule: "host-determined",
+              reason: "LLM review skipped by host policy — rule verdict is final by construction",
+            }]
+          : [],
         userApprovalUsed: userApprovalUsed
           ? {
               ...userApprovalUsed,

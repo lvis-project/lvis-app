@@ -64,7 +64,7 @@ export interface LlmRiskClassificationTrace {
   ruleVerdict: RiskVerdict;
   llmVerdict: RiskVerdict | null;
   finalVerdict: RiskVerdict;
-  outcome: "fresh" | "error" | "timeout" | "malformed";
+  outcome: "fresh" | "host-determined" | "error" | "timeout" | "malformed";
 }
 export type ReviewerDispatchErrorCode = "timeout" | "error";
 
@@ -887,6 +887,29 @@ function isTransientReviewerError(err: unknown): boolean {
   return true;
 }
 
+/**
+ * Tools whose risk verdict is fully determined by host structure.
+ *
+ * Membership bar is high: a tool belongs here only when its safety argument
+ * rests on an invariant the HOST enforces elsewhere (for `agent_spawn`, the
+ * child's every effectful tool call re-enters PermissionManager), making the
+ * LLM reviewer's opinion not merely redundant but unanswerable — the invariant
+ * is not part of its prompt. Everything else keeps the max(rule, llm) path.
+ */
+const HOST_DETERMINED_RISK_TOOLS: ReadonlySet<string> = new Set(["agent_spawn"]);
+
+function isHostDeterminedRiskTool(input: ToolInvocationContext): boolean {
+  // Co-scoped with the meta rule that justifies the bypass (category included):
+  // the LOW rule below keys on (category, source, toolName), and keying the
+  // bypass on fewer axes would let a category drift hand the final verdict to
+  // a DIFFERENT rule with no LLM cross-check (architect review MINOR-1).
+  return (
+    input.category === "meta"
+    && input.source === "builtin"
+    && HOST_DETERMINED_RISK_TOOLS.has(input.toolName)
+  );
+}
+
 export class LlmRiskClassifier implements RiskClassifier {
   private readonly rule = new RuleBasedRiskClassifier();
 
@@ -973,6 +996,19 @@ export class LlmRiskClassifier implements RiskClassifier {
   ): Promise<LlmRiskClassificationTrace> {
     // Composition baseline (security M1) — rule first, LLM cannot downgrade.
     const ruleVerdict = this.rule.classify(input);
+
+    // Host-determined tools never consult the LLM: their risk is settled by
+    // system structure, not by anything a model could weigh. For agent_spawn
+    // the structural fact is that every effectful call the child makes
+    // re-enters this same permission pipeline — a fact that is not in the
+    // reviewer prompt, so asking the LLM poses a question it cannot answer;
+    // it kept replying HIGH ("no sandbox isolation, file access") and the
+    // max(rule, llm) composition let that guess override the host's LOW.
+    // Name-scoped and builtin-only: a plugin/MCP tool that happens to share
+    // the name still takes the full composed path.
+    if (isHostDeterminedRiskTool(input)) {
+      return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict, outcome: "host-determined" };
+    }
 
     let llmVerdict: RiskVerdict;
     try {
