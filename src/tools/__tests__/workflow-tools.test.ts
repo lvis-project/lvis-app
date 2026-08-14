@@ -1546,6 +1546,43 @@ describe("agent_status and agent_interrupt tools", () => {
     expect(getSpy).toHaveBeenCalledWith("spawn-1", "session-b");
   });
 
+  it("agent_status points at agent_list when only restored sub-agents remain", async () => {
+    // Live runs are process-local; the children are not. After a restart the
+    // run list is legitimately empty while the conversation's sub-agents are
+    // still on disk — and an empty list was being read as "nothing running,
+    // so the work is done".
+    const tool = createAgentStatusTool({
+      getRunner: () => ({
+        listRunStatuses: () => [],
+        listPersistedSpawnsForOrigin: (originSessionId: string) =>
+          originSessionId === "session-x"
+            ? [
+                { childSessionId: "child-1", title: "Lookup", taskState: "INPUT_REQUIRED" },
+                { childSessionId: "child-2", title: "Draft", taskState: "WORKING" },
+              ]
+            : [],
+      }) as never,
+    });
+
+    const restored = JSON.parse((await tool.execute({}, ctx())).output);
+    expect(restored.runs).toEqual([]);
+    expect(restored.restoredSubAgentsHint).toContain("agent_list");
+    expect(restored.restoredSubAgentsHint).toContain("2");
+  });
+
+  it("agent_status stays silent when there is nothing restored to point at", async () => {
+    const tool = createAgentStatusTool({
+      getRunner: () => ({
+        listRunStatuses: () => [],
+        listPersistedSpawnsForOrigin: () => [],
+      }) as never,
+    });
+
+    const empty = JSON.parse((await tool.execute({}, ctx())).output);
+    expect(empty.runs).toEqual([]);
+    expect(empty.restoredSubAgentsHint).toBeUndefined();
+  });
+
   it("agent_interrupt delegates to the runner", async () => {
     const interruptSpy = vi.fn((id: string, originSessionId: string) => ({
       ok: true,
