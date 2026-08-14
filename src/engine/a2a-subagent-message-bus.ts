@@ -389,10 +389,22 @@ export class A2ASubAgentMessageBus {
       }
     }
 
-    if (this.shouldWake(input.parentSessionId)) {
+    const refusals = this.wakeRefusalReasons(input.parentSessionId);
+    if (refusals.length === 0) {
       this.requestWake(input.parentSessionId, deliveryInput);
       return { ok: true, disposition: "wake-requested", messageId: canonical.message.messageId };
     }
+    // turn-active and wake-in-flight are the two LEGITIMATE holds — the entry
+    // is durable and an existing mechanism (guidance injection above, or the
+    // in-flight wake's completion recheck) owns its delivery. Anything else
+    // means the message will sit until the user's next manual turn, which is
+    // exactly the silent-stall the field hit; log those loudly.
+    const benign = refusals.every((r) => r === "turn-active" || r === "wake-in-flight");
+    this.audit(
+      benign ? "info" : "warn",
+      deliveryInput,
+      `mailbox-no-wake:${refusals.join(",")}`,
+    );
     return { ok: true, disposition: "mailbox", messageId: canonical.message.messageId };
   }
 
@@ -421,13 +433,32 @@ export class A2ASubAgentMessageBus {
   }
 
   private shouldWake(parentSessionId: string): boolean {
-    return this.canWakeIdleParent(parentSessionId)
-      && !this.wakeInFlight.has(parentSessionId);
+    return this.wakeRefusalReasons(parentSessionId).length === 0;
   }
 
-  private canWakeIdleParent(parentSessionId: string): boolean {
-    return this.canRequestAutonomousWakeForCurrentParent(parentSessionId)
-      && !this.deps.parentLoop.hasActiveTurn();
+  /**
+   * Every reason wake is currently refused for this parent; empty = wake.
+   *
+   * Exists because the field failure mode of this gate is SILENCE: a child
+   * result reached the mailbox ("stored" audit) and nothing woke the parent,
+   * and the audit trail could not say which of the five conditions failed —
+   * the flag, a session mismatch, a missing handler, an active turn, or an
+   * in-flight wake. The refusal branch now names its reasons (see the
+   * mailbox-disposition audit below), turning the next occurrence from
+   * archaeology into a log line.
+   */
+  private wakeRefusalReasons(parentSessionId: string): string[] {
+    const reasons: string[] = [];
+    if (!(this.deps.settingsService.get("features")?.subAgentAutonomousWake ?? false)) {
+      reasons.push("flag-off");
+    }
+    if (this.deps.parentLoop.getSessionId() !== parentSessionId) {
+      reasons.push("session-mismatch");
+    }
+    if (this.wakeHandler === null) reasons.push("handler-unregistered");
+    if (this.deps.parentLoop.hasActiveTurn()) reasons.push("turn-active");
+    if (this.wakeInFlight.has(parentSessionId)) reasons.push("wake-in-flight");
+    return reasons;
   }
 
   private canRequestAutonomousWakeForCurrentParent(parentSessionId: string): boolean {
