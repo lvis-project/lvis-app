@@ -30,11 +30,13 @@ export function parseHostShellExecutionInput(
   if (cwd !== undefined && typeof cwd !== "string") return undefined;
   const timeoutSeconds = input.timeoutSeconds ??
     TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000;
+  // Type sanity only: a deadline must exist and be a positive integer, but it
+  // has no upper bound — a retry after a timeout escalates the budget, and the
+  // permit must not refuse the spawn that retry asks for.
   if (
     typeof timeoutSeconds !== "number" ||
     !Number.isInteger(timeoutSeconds) ||
-    timeoutSeconds < 1 ||
-    timeoutSeconds > TOOL_TIMEOUT_POLICY.shellMaxMs / 1000
+    timeoutSeconds < 1
   ) {
     return undefined;
   }

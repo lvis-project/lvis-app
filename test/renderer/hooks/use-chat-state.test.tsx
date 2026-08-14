@@ -46,210 +46,190 @@ describe("useChatState", () => {
     });
   });
 
-  it("keeps a fast auto-approved permission review visible briefly after tool_start", async () => {
+  it("keeps the permission review verdict once the matching tool runs", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
 
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
-    try {
-      act(() => {
-        result.current.appendUserEntry("빠른 자동 승인 확인");
-        result.current.setStreaming(true);
+    act(() => {
+      result.current.appendUserEntry("자동 승인 확인");
+      result.current.setStreaming(true);
+    });
+    act(() => {
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "auto_approved",
+        name: "safe_tool",
+        groupId: "g-verdict",
+        toolUseId: "t-verdict",
+        verdictLevel: "low",
       });
-      act(() => {
-        emitChatStream({
-          type: "permission_review",
-          reviewStatus: "auto_approved",
-          name: "safe_tool",
-          groupId: "g-dwell",
-          toolUseId: "t-dwell",
-          verdictLevel: "low",
-        });
+    });
+
+    expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
+
+    act(() => {
+      emitChatStream({
+        type: "tool_start",
+        name: "safe_tool",
+        groupId: "g-verdict",
+        toolUseId: "t-verdict",
       });
+    });
+    expect(result.current.entries.map((entry) => entry.kind)).toEqual([
+      "user",
+      "permission_review",
+      "tool_group",
+    ]);
 
-      expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
-
-      act(() => {
-        emitChatStream({
-          type: "tool_start",
-          name: "safe_tool",
-          groupId: "g-dwell",
-          toolUseId: "t-dwell",
-        });
+    act(() => {
+      emitChatStream({
+        type: "tool_end",
+        name: "safe_tool",
+        groupId: "g-verdict",
+        toolUseId: "t-verdict",
+        result: "ok",
       });
-
-      expect(result.current.entries.map((entry) => entry.kind)).toEqual([
-        "user",
-        "permission_review",
-        "tool_group",
-      ]);
-
-      act(() => {
-        vi.advanceTimersByTime(699);
-      });
-      expect(result.current.entries.map((entry) => entry.kind)).toEqual([
-        "user",
-        "permission_review",
-        "tool_group",
-      ]);
-
-      act(() => {
-        vi.advanceTimersByTime(1);
-      });
-      expect(result.current.entries.map((entry) => entry.kind)).toEqual(["user", "tool_group"]);
-    } finally {
-      vi.useRealTimers();
-    }
+    });
+    act(() => {
+      emitChatStream({ type: "done" });
+    });
+    expect(result.current.entries.map((entry) => entry.kind)).toEqual([
+      "user",
+      "permission_review",
+      "tool_group",
+    ]);
   });
 
-  it("clears pending permission review dwell when the chat is reset or locally errors", async () => {
+  it("keeps the verdict through a local error and drops it only with a new chat", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
 
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
-    try {
-      act(() => {
-        result.current.appendUserEntry("초기 요청");
-        emitChatStream({
-          type: "permission_review",
-          reviewStatus: "auto_approved",
-          name: "safe_tool",
-          groupId: "g-reset",
-          toolUseId: "t-reset",
-          verdictLevel: "low",
-        });
-        emitChatStream({
-          type: "tool_start",
-          name: "safe_tool",
-          groupId: "g-reset",
-          toolUseId: "t-reset",
-        });
+    act(() => {
+      result.current.appendUserEntry("초기 요청");
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "auto_approved",
+        name: "safe_tool",
+        groupId: "g-reset",
+        toolUseId: "t-reset",
+        verdictLevel: "low",
       });
-      expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
+      emitChatStream({
+        type: "tool_start",
+        name: "safe_tool",
+        groupId: "g-reset",
+        toolUseId: "t-reset",
+      });
+    });
+    expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
 
-      act(() => {
-        result.current.clearForNewChat();
-        vi.advanceTimersByTime(700);
-      });
-      expect(result.current.entries).toEqual([]);
+    act(() => {
+      result.current.clearForNewChat();
+    });
+    expect(result.current.entries).toEqual([]);
 
-      act(() => {
-        result.current.appendUserEntry("오류 요청");
-        emitChatStream({
-          type: "permission_review",
-          reviewStatus: "auto_approved",
-          name: "safe_tool",
-          groupId: "g-error",
-          toolUseId: "t-error",
-          verdictLevel: "low",
-        });
-        emitChatStream({
-          type: "tool_start",
-          name: "safe_tool",
-          groupId: "g-error",
-          toolUseId: "t-error",
-        });
+    act(() => {
+      result.current.appendUserEntry("오류 요청");
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "auto_approved",
+        name: "safe_tool",
+        groupId: "g-error",
+        toolUseId: "t-error",
+        verdictLevel: "low",
       });
-      expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
+      emitChatStream({
+        type: "tool_start",
+        name: "safe_tool",
+        groupId: "g-error",
+        toolUseId: "t-error",
+      });
+    });
 
-      act(() => {
-        result.current.setErrorWithThought("local send failed");
-        vi.advanceTimersByTime(700);
-      });
-      expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(false);
-      expect(result.current.entries.some((entry) => entry.kind === "assistant")).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    act(() => {
+      result.current.setErrorWithThought("local send failed");
+    });
+    expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
+    expect(result.current.entries.some((entry) => entry.kind === "assistant")).toBe(true);
   });
 
-  it("clears pending permission review dwell across session load and truncate paths", async () => {
+  it("keeps the verdict across an initial-session race and rewinds it with the transcript", async () => {
     const { api, emitChatStream } = makeMockLvisApi();
     const { result } = renderHook(() => useChatState(api as unknown as LvisApi));
 
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-07-01T00:00:00Z"));
-    try {
-      act(() => {
-        result.current.appendUserEntry("세션 교체 전 요청");
-        emitChatStream({
-          type: "permission_review",
-          reviewStatus: "auto_approved",
-          name: "safe_tool",
-          groupId: "g-load",
-          toolUseId: "t-load",
-          verdictLevel: "low",
-        });
-        emitChatStream({
-          type: "tool_start",
-          name: "safe_tool",
-          groupId: "g-load",
-          toolUseId: "t-load",
-        });
+    act(() => {
+      result.current.appendUserEntry("세션 교체 전 요청");
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "auto_approved",
+        name: "safe_tool",
+        groupId: "g-load",
+        toolUseId: "t-load",
+        verdictLevel: "low",
       });
-      expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
+      emitChatStream({
+        type: "tool_start",
+        name: "safe_tool",
+        groupId: "g-load",
+        toolUseId: "t-load",
+      });
+    });
+    expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
 
-      act(() => {
-        result.current.applyLoadedSession([{ kind: "user", text: "loaded session" }]);
-        vi.advanceTimersByTime(700);
-      });
-      expect(result.current.entries).toEqual([{ kind: "user", text: "loaded session" }]);
+    // An explicit session swap replaces the whole transcript.
+    act(() => {
+      result.current.applyLoadedSession([{ kind: "user", text: "loaded session" }]);
+    });
+    expect(result.current.entries).toEqual([{ kind: "user", text: "loaded session" }]);
 
-      act(() => {
-        result.current.appendUserEntry("초기 세션 경쟁 요청");
-        emitChatStream({
-          type: "permission_review",
-          reviewStatus: "auto_approved",
-          name: "safe_tool",
-          groupId: "g-initial",
-          toolUseId: "t-initial",
-          verdictLevel: "low",
-        });
-        emitChatStream({
-          type: "tool_start",
-          name: "safe_tool",
-          groupId: "g-initial",
-          toolUseId: "t-initial",
-        });
+    act(() => {
+      result.current.appendUserEntry("초기 세션 경쟁 요청");
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "auto_approved",
+        name: "safe_tool",
+        groupId: "g-initial",
+        toolUseId: "t-initial",
+        verdictLevel: "low",
       });
-      expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
+      emitChatStream({
+        type: "tool_start",
+        name: "safe_tool",
+        groupId: "g-initial",
+        toolUseId: "t-initial",
+      });
+    });
 
-      act(() => {
-        result.current.applyInitialSession([{ kind: "user", text: "ignored initial session" }]);
-        vi.advanceTimersByTime(700);
-      });
-      expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(false);
-      expect(result.current.entries.some((entry) => entry.kind === "user" && entry.text === "ignored initial session")).toBe(false);
+    // A late initial-session hydration loses to live entries — including the verdict.
+    act(() => {
+      result.current.applyInitialSession([{ kind: "user", text: "ignored initial session" }]);
+    });
+    expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
+    expect(result.current.entries.some((entry) => entry.kind === "user" && entry.text === "ignored initial session")).toBe(false);
 
-      act(() => {
-        result.current.appendUserEntry("truncate 전 요청");
-        emitChatStream({
-          type: "permission_review",
-          reviewStatus: "auto_approved",
-          name: "safe_tool",
-          groupId: "g-truncate",
-          toolUseId: "t-truncate",
-          verdictLevel: "low",
-        });
-        emitChatStream({
-          type: "tool_start",
-          name: "safe_tool",
-          groupId: "g-truncate",
-          toolUseId: "t-truncate",
-        });
+    act(() => {
+      result.current.appendUserEntry("truncate 전 요청");
+      emitChatStream({
+        type: "permission_review",
+        reviewStatus: "auto_approved",
+        name: "safe_tool",
+        groupId: "g-truncate",
+        toolUseId: "t-truncate",
+        verdictLevel: "low",
       });
-      expect(result.current.entries.some((entry) => entry.kind === "permission_review")).toBe(true);
+      emitChatStream({
+        type: "tool_start",
+        name: "safe_tool",
+        groupId: "g-truncate",
+        toolUseId: "t-truncate",
+      });
+    });
 
-      act(() => {
-        result.current.truncateToEntry(0);
-        vi.advanceTimersByTime(700);
-      });
-      expect(result.current.entries).toEqual([{ kind: "user", text: "loaded session" }]);
-    } finally {
-      vi.useRealTimers();
-    }
+    // Rewind keeps whatever survives the cut — nothing is erased out of band.
+    act(() => {
+      result.current.truncateToEntry(0);
+    });
+    expect(result.current.entries).toEqual([{ kind: "user", text: "loaded session" }]);
   });
 
   it("keeps overlay-import responses in the normal assistant stream", async () => {

@@ -29,7 +29,7 @@
 import type { RestoredSubAgentSession } from "../memory/memory-manager.js";
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
-  SUBAGENT_MAX_ROUNDS_MAX,
+  SUBAGENT_MAX_ROUNDS_MIN,
 } from "../shared/subagent-rounds.js";
 import { createHash } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
@@ -139,8 +139,8 @@ export interface SubAgentSpawnInput {
    * `maxTurns` schema field. It is set ONLY by host callers that run a
    * sub-agent for a FIXED-shape task (e.g. WorkBoardEngine's plan/execute
    * phases) and know the right budget for that phase. When absent, the
-   * budget is derived from the profile's `mode:` (`maxToolRoundsHint`) and
-   * finally `MAX_TURNS_DEFAULT` — see `spawn()`. This is host policy, not an
+   * budget is the user's configured `chat.subAgentMaxRounds` and finally
+   * `MAX_TURNS_DEFAULT` — see `spawn()`. This is host policy, not an
    * LLM-tunable knob, so it is intentionally not surfaced in the tool schema.
    */
   maxRounds?: number;
@@ -232,12 +232,35 @@ export interface SubAgentSpawnResult {
   /**
    * `true` when a `resume()` was REFUSED before running any turn because the
    * session hit a resume-axis loop guard (`resumeCount >= MAX_RESUMES` or
-   * `cumulativeRounds >= CUMULATIVE_ROUNDS_CEILING`). Distinct from `incomplete`
+   * `cumulativeRounds >= cumulativeRoundsCeiling()`). Distinct from `incomplete`
    * (a run that started but hit its per-turn round budget): a resume-exhausted
    * result never ran a turn at all. Always paired with `ok === false`. Absent on
    * spawn results and on resumes that were allowed to run.
    */
   resumeExhausted?: boolean;
+  /**
+   * `true` when a `resume()` was REFUSED by a structural policy check that
+   * can never pass for this resumeId — wrong task state, origin mismatch,
+   * missing or tampered persisted metadata. Unlike a transient provider
+   * failure, retrying the same resumeId fails identically forever, so the
+   * caller must NOT emit retry-same-id guidance. Always paired with
+   * `ok === false`; never ran a turn.
+   */
+  resumeInvalid?: boolean;
+}
+
+/**
+ * SOT for "can this persisted child be resumed": the resume gate in
+ * `resumeWithPolicy` accepts only INPUT_REQUIRED, and it consumes this same
+ * predicate. `agent_list` advertises resumability through it too, so the two
+ * can never drift. (They did once: agent_list offered SUBMITTED/WORKING ids
+ * the gate then rejected, and the error path's retry guidance turned that
+ * into a guided infinite retry.)
+ */
+export function isResumableSubAgentTaskState(
+  taskState: string | undefined,
+): boolean {
+  return taskState === A2ATaskState.INPUT_REQUIRED;
 }
 
 export interface SubAgentSpawnCallbacks {
@@ -562,8 +585,9 @@ export interface SubAgentRunnerDeps {
 }
 
 // Sub-agent round budget — ONE number, not a per-posture split. The child runs
-// on the same ConversationLoop whose per-run hard limit is MAX_TOOL_ROUNDS (60),
-// so the ceiling is pinned to that. The budget is HOST-ASSIGNED, not LLM-picked:
+// on the same ConversationLoop, which honours this host-assigned budget instead
+// of narrowing it to its own default bound, so what the user configures is what
+// runs. The budget is HOST-ASSIGNED, not LLM-picked:
 // `agent_spawn` exposes no `maxTurns` schema field. Resolution order (see
 // `spawn()`): explicit host `input.maxRounds` (fixed-shape host callers like
 // WorkBoardEngine) → the user's configured budget → MAX_TURNS_DEFAULT.
@@ -575,10 +599,18 @@ export interface SubAgentRunnerDeps {
 // read as a silent failure. A single budget is both more generous and easier to
 // reason about — and it is now user-configurable, which is the right lever.
 const MAX_TURNS_DEFAULT = SUBAGENT_MAX_ROUNDS_DEFAULT;
-// Internal ceiling only — the child ConversationLoop's own MAX_TOOL_ROUNDS (60)
-// is the real hard limit, so any resolved budget is clamped to this before
-// being passed as `maxRounds`.
-const MAX_TURNS_CAP = SUBAGENT_MAX_ROUNDS_MAX;
+
+/**
+ * Normalize a resolved round budget. Type sanity only — a non-finite or
+ * sub-minimum value cannot be run, but there is NO upper clamp: an absolute
+ * ceiling above the configured budget can only surface as an agent that stops
+ * mid-task with partial work.
+ */
+function normalizeRoundBudget(requested: number): number {
+  return Number.isFinite(requested)
+    ? Math.max(SUBAGENT_MAX_ROUNDS_MIN, Math.floor(requested))
+    : MAX_TURNS_DEFAULT;
+}
 /**
  * C3(b): tools that must NEVER appear in a sub-agent's registry, regardless
  * of `sourceTools`. Adding `agent_spawn` here is the primary fork-bomb
@@ -599,15 +631,18 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
  * global round budget the per-turn `maxRounds` cap enforces per turn.
  *
  *   - MAX_RESUMES: how many times a single sub-agent session may be resumed.
- *   - CUMULATIVE_ROUNDS_CEILING: total assistant rounds across the original
- *     spawn plus every resume segment. Pinned to 4× the per-turn hard cap so
- *     even a maximally-budgeted spawn + MAX_RESUMES resumes cannot exceed it.
+ *   - cumulative rounds ceiling: total assistant rounds across the original
+ *     spawn plus every resume segment. Pinned to
+ *     CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER × the CONFIGURED round budget, so the
+ *     protection stays proportional (a spawn + MAX_RESUMES resumes cannot
+ *     exceed it) while never binding below what the user asked a single agent
+ *     to be able to run.
  *
  * A resume that would breach either guard is refused BEFORE any turn runs
  * (`{ ok:false, resumeExhausted:true }`), so no LLM round is spent.
  */
 const MAX_RESUMES = 3;
-const CUMULATIVE_ROUNDS_CEILING = 4 * MAX_TURNS_CAP;
+const CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER = 4;
 const MAX_TRACKED_RUNS = 100;
 const QUESTION_SUSPENSION_PROMPT_FALLBACK =
   "Answer the sub-agent question to continue.";
@@ -1777,13 +1812,22 @@ export class SubAgentRunner {
    * not a usable number. Returning `null` rather than a substituted default
    * keeps the resolution order in `spawn()` readable as a single `??` chain and
    * leaves MAX_TURNS_DEFAULT as the one place the fallback value is written.
-   * The caller clamps to MAX_TURNS_CAP, so an out-of-range setting is narrowed
-   * rather than trusted.
+   * The caller normalizes it (minimum of 1); it is never narrowed downward.
    */
   private configuredRoundBudget(): number | null {
     const configured = this.deps.parentDeps.settingsService.get("chat")?.subAgentMaxRounds;
     if (typeof configured !== "number" || !Number.isFinite(configured)) return null;
     return Math.floor(configured);
+  }
+
+  /**
+   * Resume-axis cumulative ceiling, scaled to the CONFIGURED budget so the
+   * resume-loop protection stays proportional instead of becoming an absolute
+   * ceiling that binds below what one spawn is allowed to run.
+   */
+  private cumulativeRoundsCeiling(): number {
+    const budget = normalizeRoundBudget(this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT);
+    return CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER * budget;
   }
 
   private buildChildDeps(args: {
@@ -2046,7 +2090,7 @@ export class SubAgentRunner {
         // removed.
         const requestedRounds =
           input.maxRounds ?? this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT;
-        const cappedRounds = Math.max(1, Math.min(MAX_TURNS_CAP, requestedRounds));
+        const cappedRounds = normalizeRoundBudget(requestedRounds);
 
         // sourceTools empty/absent retains the historical full parent surface
         // minus the hard blocklist. Resume uses its frozen metadata instead.
@@ -2556,7 +2600,7 @@ export class SubAgentRunner {
    *
    * ── Loop guards (Commit 2) ──
    * Refused BEFORE any turn (`{ ok:false, resumeExhausted:true }`) when the
-   * session already hit `MAX_RESUMES` or `CUMULATIVE_ROUNDS_CEILING`. A
+   * session already hit `MAX_RESUMES` or the cumulative-rounds ceiling. A
    * per-`childSessionId` in-flight lock fail-closes a second concurrent resume
    * of the same id (the load→run→save transaction is not covered by the
    * file-level write lock).
@@ -3029,8 +3073,16 @@ export class SubAgentRunner {
       return result;
     };
 
+    // Structural policy refusals: retrying the SAME resumeId can never
+    // succeed, so each carries the resumeInvalid marker that suppresses
+    // agent_spawn's retry guidance. Contrast the question-answer length check
+    // below, which stays UNMARKED on purpose — fixing the answer and retrying
+    // the same id is the correct move there.
+    const refuseStructurally = (message: string) =>
+      finishAttemptFailure(message, { resumeInvalid: true });
+
     if (!isValidSessionId(resumeId)) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         'sub-agent resume: invalid resumeId "' + resumeId + '"',
       );
     }
@@ -3042,7 +3094,7 @@ export class SubAgentRunner {
         ? createHash("sha256").update(originSessionId).digest("hex").slice(0, 8)
         : "";
       if (idTag !== expectedTag) {
-        return finishAttemptFailure(
+        return refuseStructurally(
           "sub-agent resume: resumeId does not belong to this session",
         );
       }
@@ -3050,18 +3102,18 @@ export class SubAgentRunner {
 
     const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(resumeId);
     if (meta === null) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         'sub-agent resume: no session metadata for "' + resumeId + '"',
       );
     }
     if (meta.sessionKind !== "subagent") {
-      return finishAttemptFailure(
+      return refuseStructurally(
         'sub-agent resume: session "' + resumeId
           + '" is not a sub-agent (kind=' + (meta.sessionKind ?? "unknown") + ")",
       );
     }
     if (meta.originSessionId !== originSessionId) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         "sub-agent resume: origin session metadata does not match caller",
       );
     }
@@ -3075,25 +3127,25 @@ export class SubAgentRunner {
         || !meta.projectRoot
         || meta.sourceTools === undefined
       ) {
-        return finishAttemptFailure(
+        return refuseStructurally(
           "sub-agent resume: A2A wire binding metadata does not match caller",
         );
       }
     } else if (hasWireBinding) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         "sub-agent resume: wire-bound task requires the A2A wire entry point",
       );
     }
     if (
-      meta.subAgentTaskState !== A2ATaskState.INPUT_REQUIRED
+      !isResumableSubAgentTaskState(meta.subAgentTaskState)
       || !meta.subAgentSuspensionReason
     ) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         "sub-agent resume: task is not in INPUT_REQUIRED",
       );
     }
     if (!meta.subAgentTitle) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         "sub-agent resume: missing persisted sub-agent title",
       );
     }
@@ -3115,7 +3167,7 @@ export class SubAgentRunner {
 
     const priorTrackedRun = this.trackedRuns.get(resumeId);
     if (priorTrackedRun && isA2ATerminalTaskState(priorTrackedRun.taskState)) {
-      return finishAttemptFailure(
+      return refuseStructurally(
         "sub-agent resume: in-memory task is already terminal",
       );
     }
@@ -3170,20 +3222,24 @@ export class SubAgentRunner {
         { resumeExhausted: true },
       );
     }
-    if (priorCumulativeRounds >= CUMULATIVE_ROUNDS_CEILING) {
+    const cumulativeRoundsCeiling = this.cumulativeRoundsCeiling();
+    if (priorCumulativeRounds >= cumulativeRoundsCeiling) {
       return await finishAuthorizedFailure(
         "sub-agent resume: cumulative-rounds ceiling reached ("
-          + priorCumulativeRounds + " >= " + CUMULATIVE_ROUNDS_CEILING + ")",
+          + priorCumulativeRounds + " >= " + cumulativeRoundsCeiling + ")",
         { resumeExhausted: true },
       );
     }
 
-    const modeResult = resolveAgentMode(meta.profileMode);
-    const requestedRounds = modeResult.config.maxToolRoundsHint ?? MAX_TURNS_DEFAULT;
-    const remainingRounds = CUMULATIVE_ROUNDS_CEILING - priorCumulativeRounds;
+    // Same resolution as spawn: the user's configured budget, else the default.
+    // The per-mode `maxToolRoundsHint` is deliberately NOT consulted (see
+    // MAX_TURNS_DEFAULT) — a resumed agent given 15 rounds because its profile
+    // says "explore" dies mid-investigation exactly like the spawn path did.
+    const requestedRounds = this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT;
+    const remainingRounds = cumulativeRoundsCeiling - priorCumulativeRounds;
     const cappedRounds = Math.max(
-      1,
-      Math.min(MAX_TURNS_CAP, requestedRounds, remainingRounds),
+      SUBAGENT_MAX_ROUNDS_MIN,
+      Math.min(normalizeRoundBudget(requestedRounds), remainingRounds),
     );
 
     const frozenSourceTools = meta.sourceTools;

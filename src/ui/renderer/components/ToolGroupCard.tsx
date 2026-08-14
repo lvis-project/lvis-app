@@ -14,6 +14,31 @@ import { FileEditDiff, WriteFileSidecarDiff } from "./FileEditDiff.js";
 import { McpAppView } from "./McpAppView.js";
 import { CompactedToolResult } from "./CompactedToolResult.js";
 import { ToolPayloadBlock } from "./ToolPayloadBlock.js";
+import { PermissionReviewStatusCard } from "./PermissionReviewStatusCard.js";
+
+type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
+
+/** toolUseId → permission review verdict for that exact tool call. */
+export type PermissionReviewsByToolUseId = ReadonlyMap<string, PermissionReviewEntry>;
+
+/**
+ * The verdict belongs to the tool call, so it renders on the tool row instead
+ * of as a sibling card that could be read as unrelated to the call below it.
+ */
+function AttachedPermissionReview({
+  review,
+  className,
+}: {
+  review: PermissionReviewEntry | undefined;
+  className: string;
+}) {
+  if (!review) return null;
+  return (
+    <div className={className}>
+      <PermissionReviewStatusCard entry={review} variant="attached" />
+    </div>
+  );
+}
 
 /**
  * Per-tool execution duration badge — `⏱ 1.4s`. Rendered next to the
@@ -136,9 +161,11 @@ function isToolResultStub(value: unknown): value is string {
 function SingleToolInline({
   tool,
   sessionId,
+  review,
 }: {
   tool: Extract<ChatEntry, { kind: "tool_group" }>["tools"][number];
   sessionId?: string;
+  review?: PermissionReviewEntry;
 }) {
   const { t } = useTranslation();
   const isRunning = tool.status === "running";
@@ -161,13 +188,16 @@ function SingleToolInline({
 
   if (isStubResult && sessionId) {
     return (
-      <CompactedToolResult
-        toolUseId={tool.toolUseId}
-        toolName={getToolDisplayName(tool.name)}
-        input={tool.input}
-        stubContent={tool.result as string}
-        sessionId={sessionId}
-      />
+      <>
+        <CompactedToolResult
+          toolUseId={tool.toolUseId}
+          toolName={getToolDisplayName(tool.name)}
+          input={tool.input}
+          compactedResultText={tool.result as string}
+          sessionId={sessionId}
+        />
+        <AttachedPermissionReview review={review} className="px-3 pb-1.5" />
+      </>
     );
   }
 
@@ -189,12 +219,15 @@ function SingleToolInline({
 
   if (isWriteFileSidecar && sessionId) {
     return (
-      <WriteFileSidecarDiff
-        resultJson={tool.result as string}
-        sessionId={sessionId}
-        toolUseId={tool.toolUseId}
-        filePath={typeof tool.input?.path === "string" ? tool.input.path : undefined}
-      />
+      <>
+        <WriteFileSidecarDiff
+          resultJson={tool.result as string}
+          sessionId={sessionId}
+          toolUseId={tool.toolUseId}
+          filePath={typeof tool.input?.path === "string" ? tool.input.path : undefined}
+        />
+        <AttachedPermissionReview review={review} className="px-3 pb-1.5" />
+      </>
     );
   }
 
@@ -225,6 +258,7 @@ function SingleToolInline({
         )}
         {open ? <ChevronDown className="h-3 w-3 flex-shrink-0" /> : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
       </button>
+      <AttachedPermissionReview review={review} className="px-3 pb-1.5" />
       {open && (
         <div className="min-w-0 space-y-1 border-t px-3 py-1.5 font-mono text-[10px] lvis-anim-fade-in">
           {tool.input && (
@@ -266,10 +300,13 @@ function SingleToolInline({
 export function ToolGroupCard({
   group,
   sessionId,
+  permissionReviews,
 }: {
   group: Extract<ChatEntry, { kind: "tool_group" }>;
   /** Active session id for verbatim IPC fetch. When provided, stub results render as CompactedToolResult. */
   sessionId?: string;
+  /** Permission review verdicts to render on their own tool rows. */
+  permissionReviews?: PermissionReviewsByToolUseId;
 }) {
   // All hooks must be declared before any conditional return (Rules of Hooks)
   const { t } = useTranslation();
@@ -297,7 +334,13 @@ export function ToolGroupCard({
 
   // Single tool: render inline without group wrapper
   if (group.tools.length === 1 && group.tools[0]) {
-    return <SingleToolInline tool={group.tools[0]} sessionId={sessionId} />;
+    return (
+      <SingleToolInline
+        tool={group.tools[0]}
+        sessionId={sessionId}
+        review={permissionReviews?.get(group.tools[0].toolUseId)}
+      />
+    );
   }
   const doneCount = group.tools.filter((t) => t.status !== "running").length;
   const hasError = group.tools.some((t) => t.status === "error");
@@ -391,6 +434,10 @@ export function ToolGroupCard({
                     <ToolStatusBadge status={tool.status} />
                   )}
                 </button>
+                <AttachedPermissionReview
+                  review={permissionReviews?.get(tool.toolUseId)}
+                  className="px-2 pb-1"
+                />
                 {isExpanded && (
                   <div className="min-w-0 space-y-1 border-t px-2 py-1 font-mono text-[10px] lvis-anim-fade-in">
                     {tool.input && (
@@ -410,7 +457,7 @@ export function ToolGroupCard({
                             toolUseId={tool.toolUseId}
                             toolName={getToolDisplayName(tool.name)}
                             input={tool.input}
-                            stubContent={tool.result}
+                            compactedResultText={tool.result}
                             sessionId={sessionId}
                           />
                         ) : /* Issue #749: write_file truncated+hasSidecar → WriteFileSidecarDiff */

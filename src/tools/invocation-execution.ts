@@ -11,8 +11,7 @@ import { runWithEffectGateContext } from "../permissions/effect-enforcement.js";
 import { CHOKEPOINT_EFFECT } from "../permissions/effect-kind.js";
 import type { HostShellExecutionPermitBinding } from "../permissions/host-shell-execution-permit.js";
 import { mintHostShellExecutionPermit } from "../permissions/host-shell-execution-permit.js";
-import { runWithCeiling } from "./executor-ceiling.js";
-import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { resolveEffectiveCeilingMs, runWithCeiling } from "./executor-ceiling.js";
 import { isRemoteControllerAuthorityCurrent } from "../shared/chat-origin.js";
 import {
   A2A_CAUSAL_CONTEXT_METADATA_KEY,
@@ -647,11 +646,9 @@ export async function executeAuthorizedToolInvocation(
   // linked AbortController so the underlying tool work actually stops
   // (tools that participate in `executionContext.abortSignal` propagate
   // the cancellation). `agent_spawn` runs a full sub-agent loop and uses
-  // the larger `subAgentCeilingMs` instead of the per-tool cap.
-  const effectiveCeilingMs =
-    toolUse.name === "agent_spawn"
-      ? TOOL_TIMEOUT_POLICY.subAgentCeilingMs
-      : TOOL_TIMEOUT_POLICY.globalCeilingMs;
+  // the larger `subAgentCeilingMs`; a builtin shell invocation follows its own
+  // `timeoutSeconds` so an escalated retry is not cut short by the ceiling.
+  const effectiveCeilingMs = resolveEffectiveCeilingMs(tool, finalInput);
   const outcome = await runWithCeiling(
     async (signal) => {
       const ctx: ToolExecutionContext = { ...executionContext, abortSignal: signal };

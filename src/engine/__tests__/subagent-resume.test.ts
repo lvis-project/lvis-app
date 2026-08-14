@@ -1851,7 +1851,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     },
   );
   // ── 7) cumulative ceiling ───────────────────────────
-  it("refuses a resume when cumulativeRounds >= CUMULATIVE_ROUNDS_CEILING (no turn run)", async () => {
+  it("refuses a resume when cumulativeRounds >= the cumulative ceiling (no turn run)", async () => {
     const toolRegistry = new ToolRegistry();
     toolRegistry.register(noopTool("noop"));
     const subStore = makeSubStore();
@@ -1871,7 +1871,8 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     restore();
     const resumeId = spawn.childSessionId;
     const meta = subStore.loadSessionMetadata(resumeId)!;
-    // 4 * MAX_TURNS_CAP(60) = 240. Set exactly at the ceiling.
+    // 4 × the configured budget (unset here ⇒ default 60) = 240. Set exactly
+    // at the ceiling.
     await subStore.saveSessionMetadata(resumeId, {
       ...meta,
       cumulativeRounds: 240,
@@ -1945,7 +1946,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
             text: "partial at cumulative ceiling",
             toolCalls: [],
             stopReason: "round-cap",
-          } as Awaited<ReturnType<typeof originalRunTurn>>;
+          } as unknown as Awaited<ReturnType<typeof originalRunTurn>>;
         },
       );
 
@@ -1975,6 +1976,78 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       expect(subStore.loadSessionMetadata(resumeId)?.cumulativeRounds).toBe(
         240,
       );
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it("scales the cumulative ceiling to 4× the CONFIGURED budget, so it never binds below it", async () => {
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const parentDeps = {
+      ...buildLoopDeps(toolRegistry),
+      settingsService: {
+        get: (key: string) =>
+          key === "chat" ? { subAgentMaxRounds: 500 } : fakeLlmSettings(),
+        getSecret: () => "test-key",
+      },
+    } as unknown as ConstructorParameters<typeof SubAgentRunner>[0]["parentDeps"];
+    const runner = new SubAgentRunner({
+      parentDeps,
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "scaled-ceiling",
+      instructions: "do",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+    });
+    restore();
+
+    const resumeId = spawn.childSessionId;
+    const meta = subStore.loadSessionMetadata(resumeId)!;
+    // 240 was the old ABSOLUTE ceiling (4 × 60). With a configured budget of
+    // 500 the ceiling is 2000, so this resume must still run.
+    await subStore.saveSessionMetadata(resumeId, {
+      ...meta,
+      budgetResumeCount: 0,
+      questionAnswerCount: 0,
+      resumeCount: 0,
+      cumulativeRounds: 240,
+    });
+
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockResolvedValue({
+        text: "kept going past the old ceiling",
+        toolCalls: [],
+        stopReason: "round-cap",
+      } as unknown as Awaited<ReturnType<typeof originalRunTurn>>);
+
+    try {
+      const resumed = await runner.resume(resumeId, "continue", "scaled-ceiling");
+      expect(resumed.resumeExhausted).toBeFalsy();
+      expect(resumed.ok).toBe(true);
+      expect(runTurnSpy).toHaveBeenCalledTimes(1);
+
+      // At 4 × 500 the proportional guard still fires — resume-loop protection
+      // is scaled, not removed.
+      const afterRun = subStore.loadSessionMetadata(resumeId)!;
+      await subStore.saveSessionMetadata(resumeId, {
+        ...afterRun,
+        cumulativeRounds: 2000,
+      });
+      const refused = await runner.resume(resumeId, "continue", "scaled-ceiling");
+      expect(refused.ok).toBe(false);
+      expect(refused.resumeExhausted).toBe(true);
+      expect(runTurnSpy).toHaveBeenCalledTimes(1);
     } finally {
       runTurnSpy.mockRestore();
       restore();
@@ -2194,6 +2267,9 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
       );
       expect(retry.ok).toBe(false);
       expect(retry.error).toMatch(/not in INPUT_REQUIRED|already terminal/i);
+      // Structural policy rejection: retrying the same id can never succeed,
+      // and the marker is what stops agent_spawn from emitting retry guidance.
+      expect(retry.resumeInvalid).toBe(true);
       expect(terminalGuard.turnsServed).toBe(0);
       expect(onLinked).not.toHaveBeenCalled();
       expect(subStore.loadSessionMetadata(resumeId)).toMatchObject({
@@ -2360,7 +2436,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         status: "error",
       });
       expect(loserTerminal[0]).not.toHaveProperty("childSessionId");
-      expect(deliverToParent.mock.calls[0]?.[0]).toMatchObject({
+      expect((deliverToParent.mock.calls[0] as unknown[] | undefined)?.[0]).toMatchObject({
         parentSessionId: originSessionId,
         childSessionId: spawn.childSessionId,
       });
@@ -3042,7 +3118,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const originSessionId = "parent-question-order";
     const toolRegistry = new ToolRegistry();
     let runner!: SubAgentRunner;
-    toolRegistry.register(createAgentSendTool({ getRuntime: () => runner }));
+    toolRegistry.register(createAgentSendTool({ getRuntime: () => runner as unknown as import("../../tools/agent-send.js").AgentSendRuntime }));
     const subStore = makeSubStore();
     const namespace = openFeatureNamespace("subagent-messaging");
     const mailbox = new A2AAgentMessageMailbox(namespace);
@@ -3141,7 +3217,7 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
     const originSessionId = "parent-question-fallback";
     const toolRegistry = new ToolRegistry();
     let runner!: SubAgentRunner;
-    toolRegistry.register(createAgentSendTool({ getRuntime: () => runner }));
+    toolRegistry.register(createAgentSendTool({ getRuntime: () => runner as unknown as import("../../tools/agent-send.js").AgentSendRuntime }));
     const subStore = makeSubStore();
     const namespace = openFeatureNamespace("subagent-messaging");
     const mailbox = new A2AAgentMessageMailbox(namespace);
@@ -3316,10 +3392,10 @@ describe("agent_spawn tool — resume surface + routing (PR-C)", () => {
     expect(r.isError).toBe(false);
     // resume() called with (resumeId, continuationInstructions, title, callbacks, originSessionId).
     expect(resumeSpy).toHaveBeenCalledTimes(1);
-    expect(resumeSpy.mock.calls[0][0]).toBe("sub-resume-me");
-    expect(resumeSpy.mock.calls[0][1]).toBe("keep going");
+    expect((resumeSpy.mock.calls[0] as unknown[])[0]).toBe("sub-resume-me");
+    expect((resumeSpy.mock.calls[0] as unknown[])[1]).toBe("keep going");
     // 5th arg is originSessionId (from ctx.metadata.sessionId = "parent").
-    expect(resumeSpy.mock.calls[0][4]).toBe("parent");
+    expect((resumeSpy.mock.calls[0] as unknown[])[4]).toBe("parent");
     // spawn() never called on the resume path.
     expect(spawnSpy).not.toHaveBeenCalled();
     const parsed = JSON.parse(r.output);

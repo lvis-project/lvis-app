@@ -2,26 +2,34 @@
  * Tool execution timeout policy — single source of truth.
  *
  * All values are milliseconds for direct comparison without unit conversion.
- * Only `shellDefaultMs` / `shellMaxMs` are model-facing: the bash/powershell
- * Zod schema does `/ 1000` at the boundary to expose `timeoutSeconds` to
- * the model. Every other key is host-internal and consumed as ms directly —
- * no other surface should do the `/ 1000` conversion.
+ * Only `shellDefaultMs` is model-facing: the bash/powershell Zod schema does
+ * `/ 1000` at the boundary to expose `timeoutSeconds` to the model. Every
+ * other key is host-internal and consumed as ms directly — no other surface
+ * should do the `/ 1000` conversion.
  *
  * The module-level invariant block at the bottom of this file enforces
- * `shellDefaultMs % 1000 === 0` and `shellMaxMs % 1000 === 0` at load time
- * so a non-divisible value would crash the host at startup rather than
- * silently floor the model-facing cap (Zod `.int().max(120.5)` admits 120,
- * not 121 — the cap silently desyncs from the declared policy).
+ * `shellDefaultMs % 1000 === 0` at load time so a non-divisible value would
+ * crash the host at startup rather than yield a fractional model-facing
+ * default that the `.int()` schema then rejects.
+ *
+ * Shell timeout semantics: a timeout ALWAYS exists (the field is optional but
+ * defaulted, and non-positive / non-finite values are rejected), so no call
+ * can wait forever. There is deliberately NO upper bound: expiry is a clean,
+ * retryable tool error, and the retry's whole point is to name a LARGER
+ * budget. A cap would make that retry impossible and would fail input
+ * validation for the entire turn rather than for the one tool call.
  *
  * Surfaces:
- *  - Built-in shell tools (bash/powershell) — `shellDefaultMs` / `shellMaxMs`
- *    are exposed to the model (as `timeoutSeconds` after `/ 1000`) so it
- *    can pick a value within the cap. The host still enforces
- *    `globalCeilingMs` on top of whatever the model picks.
+ *  - Built-in shell tools (bash/powershell) — `shellDefaultMs` is exposed to
+ *    the model (as `timeoutSeconds` after `/ 1000`) as the value it gets when
+ *    it says nothing.
  *  - The executor caps every `tool.execute()` with an AbortController linked
  *    to a ceiling timer so the underlying work actually stops (tools that
  *    participate in `executionContext.abortSignal` propagate the
- *    cancellation), not just gets ignored.
+ *    cancellation), not just gets ignored. A builtin shell invocation whose
+ *    own `timeoutSeconds` exceeds that ceiling raises it for that invocation
+ *    (`resolveEffectiveCeilingMs`), so the tool's own retryable timeout — not
+ *    an opaque ceiling abort — is what the model sees.
  *  - Plugin-owned UI and MCP tool execution routes through the same executor
  *    and inherits `globalCeilingMs` — there is no separate plugin timeout
  *    key (single SoT).
@@ -45,14 +53,13 @@
  *    cap — they have their own `approvalGateUserWaitMs` because the user is
  *    actively present, not the runtime hanging.
  *
- * Values were derived from a survey of external OSS agent runtimes (≈60s
- * default median, 120s ceiling as the upper bound). The user-facing
- * principle: never let the user wait indefinitely; an LLM judging a task as
- * long-running can pick a value up to the cap.
+ * The user-facing principle: never let the user wait indefinitely, and never
+ * kill work the model explicitly budgeted for. An unspecified call gets
+ * `shellDefaultMs`; a model that times out escalates by retrying with a
+ * larger `timeoutSeconds`.
  */
 export const TOOL_TIMEOUT_POLICY = {
-  shellDefaultMs: 60_000,
-  shellMaxMs: 120_000,
+  shellDefaultMs: 120_000,
   globalCeilingMs: 120_000,
   pluginImportMs: 10_000,
   pluginFactoryMs: 10_000,
@@ -93,17 +100,17 @@ export const TOOL_TIMEOUT_POLICY = {
   processGroupDisposalMaxMs: 5 * 60 * 1000,
 } as const;
 
-// Load-time invariant — fail loudly if the shell keys drift to a non-divisible
-// value. The bash/powershell Zod schema does `.max(shellMaxMs / 1000)`; if
-// `shellMaxMs` is e.g. 120_500, the schema's `.int().max(120.5)` silently
-// floors the model-facing cap to 120, an 8% policy desync with no error.
-// Crashing at module load is the only way to make this drift visible.
-for (const key of ["shellDefaultMs", "shellMaxMs"] as const) {
+// Load-time invariant — fail loudly if the shell default drifts to a
+// non-divisible value. The bash/powershell Zod schema does
+// `.default(shellDefaultMs / 1000)`; if `shellDefaultMs` were e.g. 120_500,
+// that default is 120.5 and the `.int()` schema rejects its OWN default at
+// parse time. Crashing at module load makes the drift visible immediately.
+for (const key of ["shellDefaultMs"] as const) {
   if (TOOL_TIMEOUT_POLICY[key] % 1000 !== 0) {
     throw new Error(
       `TOOL_TIMEOUT_POLICY.${key} (${TOOL_TIMEOUT_POLICY[key]}) must be divisible by 1000 — ` +
         "the bash/powershell Zod schema does `/ 1000` to expose seconds to the model, " +
-        "and a non-divisible ms value silently floors the model-facing cap.",
+        "and a non-divisible ms value yields a fractional default the integer schema rejects.",
     );
   }
 }

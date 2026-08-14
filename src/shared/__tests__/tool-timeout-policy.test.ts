@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import { TOOL_TIMEOUT_POLICY } from "../tool-timeout-policy.js";
 
 describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
-  it("shell default never exceeds shell max", () => {
-    expect(TOOL_TIMEOUT_POLICY.shellDefaultMs).toBeLessThanOrEqual(
-      TOOL_TIMEOUT_POLICY.shellMaxMs,
-    );
+  it("no shell max exists — a timed-out call must be able to retry with a larger budget", () => {
+    expect("shellMaxMs" in TOOL_TIMEOUT_POLICY).toBe(false);
+  });
+
+  it("a shell default always exists, so an unspecified call still has a deadline", () => {
+    expect(Number.isFinite(TOOL_TIMEOUT_POLICY.shellDefaultMs)).toBe(true);
+    expect(TOOL_TIMEOUT_POLICY.shellDefaultMs).toBeGreaterThan(0);
   });
 
   it("MCP default never exceeds MCP max", () => {
@@ -23,7 +26,6 @@ describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
   it("every cap is finite and positive — no infinite-wait possible", () => {
     const finitePositive = (n: number) => Number.isFinite(n) && n > 0;
     expect(finitePositive(TOOL_TIMEOUT_POLICY.shellDefaultMs)).toBe(true);
-    expect(finitePositive(TOOL_TIMEOUT_POLICY.shellMaxMs)).toBe(true);
     expect(finitePositive(TOOL_TIMEOUT_POLICY.globalCeilingMs)).toBe(true);
     expect(finitePositive(TOOL_TIMEOUT_POLICY.pluginStartupDefaultMs)).toBe(true);
     expect(finitePositive(TOOL_TIMEOUT_POLICY.pluginStartupMaxMs)).toBe(true);
@@ -34,16 +36,13 @@ describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
     expect(finitePositive(TOOL_TIMEOUT_POLICY.approvalGateUserWaitMs)).toBe(true);
   });
 
-  it("user cap policy: 120_000ms across shell max / executor ceiling / MCP max", () => {
-    expect(TOOL_TIMEOUT_POLICY.shellMaxMs).toBe(120_000);
+  it("user wait policy: 120_000ms across shell default / executor ceiling / MCP max", () => {
+    expect(TOOL_TIMEOUT_POLICY.shellDefaultMs).toBe(120_000);
     expect(TOOL_TIMEOUT_POLICY.globalCeilingMs).toBe(120_000);
     expect(TOOL_TIMEOUT_POLICY.mcpRequestMaxMs).toBe(120_000);
   });
 
   it("executor global ceiling >= any per-surface max so the last-resort cap is never a regression", () => {
-    expect(TOOL_TIMEOUT_POLICY.globalCeilingMs).toBeGreaterThanOrEqual(
-      TOOL_TIMEOUT_POLICY.shellMaxMs,
-    );
     expect(TOOL_TIMEOUT_POLICY.globalCeilingMs).toBeGreaterThanOrEqual(
       TOOL_TIMEOUT_POLICY.mcpRequestMaxMs,
     );
@@ -61,8 +60,7 @@ describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
     );
   });
 
-  it("shell SOT is ms-aligned — shellMaxMs is divisible by 1000 so the Zod schema's `/ 1000` conversion yields an integer for model input", () => {
+  it("shell SOT is ms-aligned — shellDefaultMs is divisible by 1000 so the Zod schema's `/ 1000` conversion yields an integer default", () => {
     expect(TOOL_TIMEOUT_POLICY.shellDefaultMs % 1000).toBe(0);
-    expect(TOOL_TIMEOUT_POLICY.shellMaxMs % 1000).toBe(0);
   });
 });

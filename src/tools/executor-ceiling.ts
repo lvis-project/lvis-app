@@ -10,8 +10,50 @@
  * be unit-tested without instantiating the full 8-step pipeline.
  */
 
+import type { Tool } from "./base.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+
 /** Termination reason recorded for audit and error message branching. */
 export type ToolCeilingTerminationReason = "ceiling" | "user-abort" | "error";
+
+/**
+ * Head-room between a shell tool's own `timeoutSeconds` expiry and the
+ * executor ceiling. The tool kills the child itself and then formats a
+ * retryable "timed out after N seconds" result; without this margin the
+ * ceiling would race that formatting and replace a retryable tool error with
+ * an opaque ceiling abort.
+ */
+const SHELL_CEILING_GRACE_MS = 10_000;
+
+/**
+ * Ceiling for one tool invocation.
+ *
+ * `agent_spawn` runs a whole sub-agent loop and gets `subAgentCeilingMs`.
+ * Builtin shell tools carry their own `timeoutSeconds`, which is unbounded
+ * above the default on purpose (see TOOL_TIMEOUT_POLICY): when the model
+ * escalates past `globalCeilingMs` the ceiling follows, otherwise the retry
+ * that names a larger budget would still be cut at the old ceiling. Every
+ * other tool keeps `globalCeilingMs` — a plugin tool cannot raise its own
+ * ceiling by declaring a `timeoutSeconds` field, because only builtin shell
+ * tools are consulted here.
+ */
+export function resolveEffectiveCeilingMs(
+  tool: Pick<Tool, "name" | "source" | "category">,
+  input: Record<string, unknown>,
+): number {
+  if (tool.name === "agent_spawn") return TOOL_TIMEOUT_POLICY.subAgentCeilingMs;
+  if (tool.source !== "builtin" || tool.category !== "shell") {
+    return TOOL_TIMEOUT_POLICY.globalCeilingMs;
+  }
+  const requested = input.timeoutSeconds;
+  if (typeof requested !== "number" || !Number.isFinite(requested) || requested <= 0) {
+    return TOOL_TIMEOUT_POLICY.globalCeilingMs;
+  }
+  return Math.max(
+    TOOL_TIMEOUT_POLICY.globalCeilingMs + SHELL_CEILING_GRACE_MS,
+    Math.ceil(requested * 1000) + SHELL_CEILING_GRACE_MS,
+  );
+}
 
 /** Actual underlying task settlement. Discriminated by `ok`. */
 type ToolTaskOutcome<T> =

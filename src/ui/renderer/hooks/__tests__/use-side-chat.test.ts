@@ -195,6 +195,33 @@ describe("useSideChat unified-transcript rendering (tool / thinking / permission
     expect(review).toMatchObject({ kind: "permission_review", status: "reviewing", toolName: "bash" });
   });
 
+  it("keeps the permission_review verdict once its tool runs (parity with main)", async () => {
+    const { api, emit } = makeApi();
+    const { result } = renderHook(() => useSideChat(api));
+
+    await act(async () => {
+      await result.current.send("do something risky");
+    });
+    emit({
+      type: "permission_review",
+      streamId: 1,
+      reviewStatus: "auto_approved",
+      name: "bash",
+      groupId: "g1",
+      toolUseId: "t1",
+      displayOrder: 0,
+      verdictLevel: "low",
+    });
+    emit({ type: "tool_start", streamId: 1, name: "bash", groupId: "g1", toolUseId: "t1", displayOrder: 0 });
+    emit({ type: "tool_end", streamId: 1, name: "bash", groupId: "g1", toolUseId: "t1", result: "ok" });
+    emit({ type: "done", streamId: 1 });
+
+    expect(result.current.entries.find((e) => e.kind === "permission_review")).toMatchObject({
+      status: "auto_approved",
+      toolUseId: "t1",
+    });
+  });
+
   it("appends a turn_summary entry and derives turnSummaryByTurnStart", async () => {
     const { api, emit } = makeApi();
     const { result } = renderHook(() => useSideChat(api));

@@ -800,14 +800,14 @@ describe("lvis:chat:fork", () => {
   });
 
   it("rehydrates artifact-backed tool_result stubs before saving a forked session", async () => {
-    const stubContent = "[tool_result truncated by host (Issue #902): tool=long_output_query, toolUseId=\"tu-art\", originalBytes=12000]";
+    const compactedResultText = "[tool_result truncated by host (Issue #902): tool=long_output_query, toolUseId=\"tu-art\", originalBytes=12000]";
     const rawContent = "artifact-backed result\n".repeat(120);
     const loop = makeConversationLoop("session-fork-source", [
       { role: "assistant" as const, content: "", toolCalls: [{ id: "tu-art", name: "long_output_query", input: {} }] },
       makeToolResultMsg({
         toolUseId: "tu-art",
         toolName: "long_output_query",
-        content: stubContent,
+        content: compactedResultText,
       }),
     ]);
     loop.loadSession.mockReturnValue(true);
@@ -835,7 +835,7 @@ describe("lvis:chat:fork", () => {
     expect(result.ok).toBe(true);
     expect(deps.memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(
       "session-fork-source",
-      expect.arrayContaining([expect.objectContaining({ toolUseId: "tu-art", content: stubContent })]),
+      expect.arrayContaining([expect.objectContaining({ toolUseId: "tu-art", content: compactedResultText })]),
     );
     expect(deps.memoryManager.saveSession).toHaveBeenCalledWith(
       result.sessionId,

@@ -6,7 +6,6 @@ import {
   dropOptimisticUserEntry,
   applyToolEnd,
   applyToolStart,
-  dropPermissionReviewEntries,
   finalizeStreamingAssistant,
   finalizeStreamingReasoning,
   setAssistantError,
@@ -19,20 +18,9 @@ import {
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { debugLog, isDebugStreamEnabled } from "../../../lib/debug-stream.js";
 import { isLLMVendor } from "../../../shared/llm-vendor-defaults.js";
-import type { PermissionReviewStatus } from "../../../shared/permission-review-status.js";
 import { isMissingStagedEnvelopeErrorMessage } from "../../../shared/staged-origins.js";
 import type { LvisApi } from "../types.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
-
-const PERMISSION_REVIEW_MIN_DWELL_MS = 700;
-
-function permissionReviewKey(groupId: string, toolUseId: string): string {
-  return `${groupId}\u0000${toolUseId}`;
-}
-
-function shouldDwellPermissionReview(status: PermissionReviewStatus): boolean {
-  return status === "reviewing" || status === "auto_approved";
-}
 
 function isMissingStagedEnvelopeIpcError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -90,7 +78,6 @@ export function useChatState(api: LvisApi) {
   // Final assistant text is canonical at assistant_round(end_turn). Later
   // deltas in the same stream are protocol tail noise, not a new response.
   const finalAssistantRoundClosedRef = useRef(false);
-  const permissionReviewDropTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
 
   const [editingEntryIdx, setEditingEntryIdx] = useState<number | null>(null);
   const [editBusy, setEditBusy] = useState(false);
@@ -101,38 +88,7 @@ export function useChatState(api: LvisApi) {
     aliveRef.current = true;
     return () => {
       aliveRef.current = false;
-      for (const timeout of permissionReviewDropTimersRef.current.values()) {
-        clearTimeout(timeout);
-      }
-      permissionReviewDropTimersRef.current.clear();
     };
-  }, []);
-
-  const clearPermissionReviewDwell = useCallback((key: string) => {
-    const timeout = permissionReviewDropTimersRef.current.get(key);
-    if (timeout) {
-      clearTimeout(timeout);
-      permissionReviewDropTimersRef.current.delete(key);
-    }
-  }, []);
-
-  const clearAllPermissionReviewDwell = useCallback(() => {
-    for (const timeout of permissionReviewDropTimersRef.current.values()) {
-      clearTimeout(timeout);
-    }
-    permissionReviewDropTimersRef.current.clear();
-  }, []);
-
-  const schedulePermissionReviewDrop = useCallback((groupId: string, toolUseId: string, delayMs: number) => {
-    const key = permissionReviewKey(groupId, toolUseId);
-    const existing = permissionReviewDropTimersRef.current.get(key);
-    if (existing) clearTimeout(existing);
-    const timeout = setTimeout(() => {
-      permissionReviewDropTimersRef.current.delete(key);
-      if (!aliveRef.current) return;
-      setEntries((p) => dropPermissionReviewEntries(p, { groupId, toolUseId }));
-    }, delayMs);
-    permissionReviewDropTimersRef.current.set(key, timeout);
   }, []);
 
   // Map renderer `entries` (which include reasoning/tool_group/system) to
@@ -270,12 +226,6 @@ export function useChatState(api: LvisApi) {
           reason,
           approvalPurpose,
         } = ev;
-        const reviewKey = permissionReviewKey(groupId, toolUseId);
-        const pendingDrop = permissionReviewDropTimersRef.current.get(reviewKey);
-        if (pendingDrop) {
-          clearTimeout(pendingDrop);
-          permissionReviewDropTimersRef.current.delete(reviewKey);
-        }
         setEntries((p) =>
           upsertPermissionReview(dropPendingLlmStatusAssistant(p), {
             status: reviewStatus,
@@ -348,32 +298,10 @@ export function useChatState(api: LvisApi) {
         thoughtRef.current = "";
       } else if (ev.type === "tool_start" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
         const { groupId, toolUseId, displayOrder = 0, name, input, source, toolCategory, pluginId, mcpServerId } = ev;
-        const reviewKey = permissionReviewKey(groupId, toolUseId);
         setEntries((p) => {
           const base = dropPendingLlmStatusAssistant(p);
-          const reviewEntry = base.find(
-            (entry): entry is Extract<ChatEntry, { kind: "permission_review" }> =>
-              entry.kind === "permission_review" &&
-              entry.groupId === groupId &&
-              entry.toolUseId === toolUseId,
-          );
-          const elapsedMs = reviewEntry?.createdAt
-            ? Date.now() - reviewEntry.createdAt
-            : PERMISSION_REVIEW_MIN_DWELL_MS;
-          const shouldKeepReviewCard =
-            reviewEntry != null &&
-            shouldDwellPermissionReview(reviewEntry.status) &&
-            elapsedMs < PERMISSION_REVIEW_MIN_DWELL_MS;
-          if (shouldKeepReviewCard) {
-            schedulePermissionReviewDrop(groupId, toolUseId, PERMISSION_REVIEW_MIN_DWELL_MS - elapsedMs);
-          } else {
-            clearPermissionReviewDwell(reviewKey);
-          }
-          const reviewBase = shouldKeepReviewCard
-            ? base
-            : dropPermissionReviewEntries(base, { groupId, toolUseId });
           return applyToolStart(
-            reviewBase,
+            base,
             {
               groupId,
               toolUseId,
@@ -389,9 +317,8 @@ export function useChatState(api: LvisApi) {
         });
       } else if (ev.type === "tool_end" && ev.name && ev.groupId && ev.toolUseId !== undefined) {
         const { groupId, toolUseId, result, isError, uiPayload, durationMs, source, toolCategory, pluginId, mcpServerId, executionPlan } = ev;
-        clearPermissionReviewDwell(permissionReviewKey(groupId, toolUseId));
         setEntries((p) => applyToolEnd(
-          dropPermissionReviewEntries(p, { groupId, toolUseId }),
+          p,
           {
             groupId,
             toolUseId,
@@ -413,13 +340,12 @@ export function useChatState(api: LvisApi) {
         setCompactTriggerSource(null);
         setEntries((p) =>
           setAssistantError(
-            dropPermissionReviewEntries(p),
+            p,
             t("useChatState.errorPrefix", { error: ev.error || t("useChatState.unknownError") }),
             thoughtRef.current,
             ev.systemNotice,
           ),
         );
-        clearAllPermissionReviewDwell();
         streamRef.current = "";
         thoughtRef.current = "";
         activeStreamIdRef.current = null;
@@ -520,8 +446,7 @@ export function useChatState(api: LvisApi) {
           });
         }
         if (finalAssistantRoundClosedRef.current) {
-          setEntries((p) => dropPermissionReviewEntries(dropPendingLlmStatusAssistant(p)));
-          clearAllPermissionReviewDwell();
+          setEntries((p) => dropPendingLlmStatusAssistant(p));
           if (debugStreamEnabled) {
             debugLog("stream", "done:skip-finalize", {
               reason: "final assistant_round already closed",
@@ -545,8 +470,7 @@ export function useChatState(api: LvisApi) {
             });
           }
           setEntries((p) => {
-            const base = dropPermissionReviewEntries(p);
-            let next = finalizeStreamingReasoning(base, thoughtRef.current);
+            let next = finalizeStreamingReasoning(p, thoughtRef.current);
             next = finalizeStreamingAssistant(
               next,
               finalText,
@@ -560,12 +484,10 @@ export function useChatState(api: LvisApi) {
             }
             return next;
           });
-          clearAllPermissionReviewDwell();
           streamRef.current = "";
           thoughtRef.current = "";
         } else {
-          setEntries((p) => dropPermissionReviewEntries(dropPendingLlmStatusAssistant(p)));
-          clearAllPermissionReviewDwell();
+          setEntries((p) => dropPendingLlmStatusAssistant(p));
           if (debugStreamEnabled) {
             debugLog("stream", "done:skip-finalize", {
               reason: "streamRef and thoughtRef both empty",
@@ -818,32 +740,28 @@ export function useChatState(api: LvisApi) {
 
   // Used by handleAsk in App.tsx to reset stream accumulators before chatSend.
   const resetStreamAccumulators = useCallback(() => {
-    clearAllPermissionReviewDwell();
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
     finalAssistantRoundClosedRef.current = false;
-  }, [clearAllPermissionReviewDwell]);
+  }, []);
 
   // Used by handleAsk error path to show an error bubble with the current thought.
   const setErrorWithThought = useCallback((message: string) => {
-    clearAllPermissionReviewDwell();
-    setEntries((p) => setAssistantError(dropPermissionReviewEntries(p), message, thoughtRef.current));
+    setEntries((p) => setAssistantError(p, message, thoughtRef.current));
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
     finalAssistantRoundClosedRef.current = false;
-  }, [clearAllPermissionReviewDwell]);
+  }, []);
 
   // ── Intent methods (replace raw setEntries) ──
   const seedRoutineEntries = useCallback((seeded: ChatEntry[]) => {
-    clearAllPermissionReviewDwell();
     finalAssistantRoundClosedRef.current = false;
     setEntries(seeded);
-  }, [clearAllPermissionReviewDwell]);
+  }, []);
 
   const clearForNewChat = useCallback(() => {
-    clearAllPermissionReviewDwell();
     setEntries([]);
     streamRef.current = "";
     thoughtRef.current = "";
@@ -853,7 +771,7 @@ export function useChatState(api: LvisApi) {
     setIsCompacting(false);
     setCompactTriggerSource(null);
     setIsRecoveryExhausted(false);
-  }, [clearAllPermissionReviewDwell]);
+  }, []);
 
   const appendUserMessage = useCallback((content: string, injectHint?: "queue" | "interrupt"): void => {
     setEntries((p) => appendUserEntry(p, content, injectHint));
@@ -895,34 +813,31 @@ export function useChatState(api: LvisApi) {
     // Session switch: clear any in-flight compact indicator. If a compact
     // was running in the previous session, its compact_notice may never
     // arrive for this hook instance — the StatusBar hint would stick.
-    clearAllPermissionReviewDwell();
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
     finalAssistantRoundClosedRef.current = false;
     setIsCompacting(false);
     setEntries(loaded);
-  }, [clearAllPermissionReviewDwell]);
+  }, []);
 
   const applyInitialSession = useCallback((loaded: ChatEntry[]) => {
-    clearAllPermissionReviewDwell();
     finalAssistantRoundClosedRef.current = false;
-    setEntries((current) => (current.length === 0 ? loaded : dropPermissionReviewEntries(current)));
-  }, [clearAllPermissionReviewDwell]);
+    setEntries((current) => (current.length === 0 ? loaded : current));
+  }, []);
 
   const truncateToEntry = useCallback((entryIndex: number) => {
     // Edit/retry rewind drops history forward of `entryIndex`. If a pre-turn
     // compact was mid-flight, its `compact_notice` will land in a different
     // streaming context (or never arrive for this hook instance), so clear
     // the indicator here too — same class as applyLoadedSession / clearForNewChat.
-    clearAllPermissionReviewDwell();
     streamRef.current = "";
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
     finalAssistantRoundClosedRef.current = false;
     setIsCompacting(false);
-    setEntries((p) => dropPermissionReviewEntries(p.slice(0, entryIndex + 1)));
-  }, [clearAllPermissionReviewDwell]);
+    setEntries((p) => p.slice(0, entryIndex + 1));
+  }, []);
 
   /**
    * B1 — /compact manual command handler.
