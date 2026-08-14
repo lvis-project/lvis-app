@@ -229,6 +229,18 @@ export class ConversationLoop {
    */
   guidanceQueue: GuidanceQueueEntry[] = [];
 
+  /**
+   * Observers of "this turn is over and the loop is idle again".
+   *
+   * The A2A parent bus is the first subscriber: a child message that reached
+   * the durable mailbox while a turn held the loop has no other moment at
+   * which the host learns the loop became eligible for an autonomous wake.
+   * Before this seam the bus polled that transition with its own recheck state
+   * machine; now the loop announces it once, from the same cleanup that drops
+   * unreachable guidance.
+   */
+  private readonly turnSettledListeners = new Set<(sessionId: string) => void>();
+
   constructor(deps: ConversationLoopDeps) {
     this.deps = deps;
     this.history = new ConversationHistory();
@@ -361,6 +373,32 @@ export class ConversationLoop {
   /** True when a turn is currently in flight. Renderer-facing visibility. */
   hasActiveTurn(): boolean {
     return this.currentAbortController !== null;
+  }
+
+  /** Subscribe to turn-settled notifications. Returns the unsubscribe. */
+  onTurnSettled(listener: (sessionId: string) => void): () => void {
+    this.turnSettledListeners.add(listener);
+    return () => {
+      this.turnSettledListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Announce that the turn for `sessionId` has released the loop.
+   *
+   * Called from the last statement of `runTurn`'s `finally`, so a listener
+   * observes `hasActiveTurn() === false` and sees every guidance drop
+   * disposition that this turn produced. Listener isolation is deliberate: an
+   * observer's throw must never mask the turn's real result.
+   */
+  emitTurnSettled(sessionId: string): void {
+    for (const listener of this.turnSettledListeners) {
+      try {
+        listener(sessionId);
+      } catch {
+        // Observer failure is never the turn's problem.
+      }
+    }
   }
 
 

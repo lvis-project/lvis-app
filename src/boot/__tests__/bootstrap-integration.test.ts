@@ -140,6 +140,8 @@ vi.mock("../conversation.js", () => ({
     return {
       getSessionId: vi.fn(() => undefined),
       getTurnAdditionalDirectories: vi.fn(() => []),
+      // Wiring subscribes the A2A bus to turn-settled notifications.
+      onTurnSettled: vi.fn(() => () => {}),
     };
   }),
   createRoutineConversationLoop: vi.fn((deps) => {
