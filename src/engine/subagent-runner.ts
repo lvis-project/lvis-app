@@ -26,6 +26,7 @@
  * shared state (`sessionId`, `history`, `cumulativeUsage`), and lets each
  * spawn audit-log under a child sessionId tagged with the origin session id.
  */
+import type { RestoredSubAgentSession } from "../memory/memory-manager.js";
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_MAX,
@@ -1523,6 +1524,37 @@ export class SubAgentRunner {
     const run = this.trackedRuns.get(id);
     if (run && !this.isRunVisibleToOrigin(run, originSessionId)) return null;
     return run ? this.snapshotRun(run) : null;
+  }
+
+  /**
+   * Sub-agent rows persisted under one parent session, newest first.
+   *
+   * Must go through the runner rather than the main MemoryManager: children
+   * live in their OWN namespace (`~/.lvis/subagent/`, wired in
+   * `createIsolatedConversationMemoryManagers`), so the main manager's sessions
+   * directory contains none of them. `getPersistedTranscript` below reaches the
+   * same store the same way.
+   *
+   * Rows only — a child's transcript is fetched separately, on demand.
+   */
+  listPersistedSpawnsForOrigin(originSessionId: string): RestoredSubAgentSession[] {
+    if (!isValidSessionId(originSessionId)) return [];
+    return this.deps.subAgentMemoryManager.listSubAgentSessionsForOrigin(originSessionId);
+  }
+
+  /**
+   * Whether `childSessionId` is a sub-agent this exact parent spawned.
+   *
+   * Answers ownership from the record the HOST wrote at spawn time rather than
+   * from the parent's transcript, which compaction may have stripped the linking
+   * tool_result out of. Both ids must be well-formed and the child must actually
+   * be a sub-agent session: a main session id must never satisfy this, or it
+   * would become a way to read another conversation.
+   */
+  isPersistedSpawnOfOrigin(originSessionId: string, childSessionId: string): boolean {
+    if (!isValidSessionId(originSessionId) || !isValidSessionId(childSessionId)) return false;
+    const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(childSessionId);
+    return meta?.sessionKind === "subagent" && meta.originSessionId === originSessionId;
   }
 
   getPersistedTranscript(
