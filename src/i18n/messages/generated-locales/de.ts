@@ -2564,6 +2564,7 @@ export const deMessages: Record<string, string> = {
   "toolApprovalDialog.tilePermissionCategory": "Berechtigungskategorie",
   "toolApprovalDialog.tileToolSource": "Werkzeug / Quelle",
   "toolApprovalDialog.toolApprovalTitle": "Werkzeugausführung genehmigen",
+  "toolApprovalDialog.identityUnverified": "ungeprüft",
   "toolApprovalDialog.unknown": "Unbekannt",
   "toolDisplay.agentSpawn": "Subagent ausführen",
   "toolDisplay.applyPatch": "Patch-Datei",

@@ -737,8 +737,12 @@ export function ToolApprovalContent({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-testid="tool-approval-card">
         <section className="min-h-0 min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-contain px-3 py-2 sm:px-4 sm:py-3">
           <div className="space-y-2">
-            {!isRationaleApproval && (
-              <>
+            {/* Identity strip — host-owned facts (toolName, source, category,
+                origin, risk chip), rendered for EVERY kind including a
+                rationale whose sealed display failed to parse. The sealed
+                table is EVIDENCE; identity must never depend on it — the
+                degenerate card that showed no tool name at all is the bug
+                this unconditional render removes. */}
                 <div className="min-w-0 space-y-1">
                   <div className="flex min-w-0 items-center gap-2">
                     <Badge variant="outline" className={`${badgeClassName} shrink-0`}>
@@ -748,8 +752,24 @@ export function ToolApprovalContent({
                       className="min-w-0 flex-1 break-all font-mono text-xs font-semibold"
                       data-testid="approval-tool-identity"
                     >
-                      {sourceToolToken(request)}
+                      {/* For a sealed card only the HMAC-sealed display.toolName
+                          is display-trusted; the generic request fields are
+                          deliberately not attested for this kind. When the seal
+                          is invalid the request name is the only identity left —
+                          strictly better than the identity-less card this
+                          replaces, but it must say it is unverified. */}
+                      {isRationaleApproval
+                        ? rationaleDisplay?.toolName ?? request.toolName
+                        : sourceToolToken(request)}
                     </code>
+                    {rationaleDisplayInvalid ? (
+                      <span
+                        className="shrink-0 rounded-full border border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) px-1.5 py-px text-[10px] text-destructive"
+                        data-testid="approval-identity-unverified"
+                      >
+                        {tHook("toolApprovalDialog.identityUnverified")}
+                      </span>
+                    ) : null}
                     {(pendingCount ?? 0) > 1 ? (
                       <span
                         className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground"
@@ -759,6 +779,7 @@ export function ToolApprovalContent({
                       </span>
                     ) : null}
                   </div>
+                  {!isRationaleApproval && (
                   <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
                     <span>{request.sourcePluginId ?? sourceBadge}</span>
                     <span aria-hidden="true">·</span>
@@ -770,6 +791,7 @@ export function ToolApprovalContent({
                       {request.sessionId ?? tHook("approvalAttribution.unattributed")}
                     </code>
                   </div>
+                  )}
                   {request.kind === "agent-action" && request.approvalScope ? (
                     <p className="break-words text-[10px] text-muted-foreground">
                       {tHook("toolApprovalDialog.approvalScopePrefix")}: {request.approvalScope}
@@ -777,6 +799,8 @@ export function ToolApprovalContent({
                   ) : null}
                 </div>
 
+            {!isRationaleApproval && (
+              <>
                 <div
                   className={`min-w-0 rounded-md border-l-2 px-3 py-2 ${
                     showsHighRiskReason
@@ -1046,6 +1070,13 @@ export function ToolApprovalContent({
               >
                 {tHook("toolApprovalDialog.denyOnce")}
               </Button>
+{/* Fail-closed: a sealed display that cannot be parsed strips the
+                  allow options entirely — a button that can never be legitimately
+                  pressed teaches users to distrust the panel, and offering approval
+                  for an action whose identity evidence is broken is not an option
+                  this card may present. Deny remains: it unblocks the turn and
+                  lets the model regenerate the rationale. */}
+              {!rationaleDisplayInvalid && (
               <Button
                 ref={(element) => {
                   decisionButtonRefs.current[1] = element;
@@ -1076,6 +1107,8 @@ export function ToolApprovalContent({
               >
                 {tHook("toolApprovalDialog.allowAlways")}
               </Button>
+              )}
+{!rationaleDisplayInvalid && (
               <Button
                 ref={(element) => {
                   decisionButtonRefs.current[2] = element;
@@ -1098,6 +1131,7 @@ export function ToolApprovalContent({
               >
                 {tHook("toolApprovalDialog.allowOnce")}
               </Button>
+              )}
             </div>
             {persistentUnavailableReason ? (
               <p
