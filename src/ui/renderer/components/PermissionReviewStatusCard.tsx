@@ -9,6 +9,15 @@ function statusLabel(entry: PermissionReviewEntry): string {
   if (entry.status === "reviewing") return t("permissionReviewStatusCard.reviewing");
   if (entry.status === "auto_approved") return t("permissionReviewStatusCard.autoApproved");
   if (entry.status === "failed") return t("permissionReviewStatusCard.failed");
+  // A parent agent answered this one. Without these two the fall-through below
+  // would label a decided call "approval required", which is the opposite of
+  // what happened.
+  if (entry.status === "parent_approved") {
+    return t("permissionReviewStatusCard.parentApproved");
+  }
+  if (entry.status === "parent_denied") {
+    return t("permissionReviewStatusCard.parentDenied");
+  }
   const level =
     entry.verdictLevel === "high" ? t("permissionReviewStatusCard.riskHigh") :
     entry.verdictLevel === "medium" ? t("permissionReviewStatusCard.riskMedium") :
@@ -21,10 +30,14 @@ function toneClass(entry: PermissionReviewEntry): string {
   if (entry.status === "reviewing") {
     return "border-info/(--opacity-medium) bg-info/(--opacity-faint) text-info";
   }
-  if (entry.status === "auto_approved") {
+  if (entry.status === "auto_approved" || entry.status === "parent_approved") {
     return "border-success/(--opacity-medium) bg-success/(--opacity-faint) text-success";
   }
-  if (entry.status === "failed" || entry.verdictLevel === "high") {
+  if (
+    entry.status === "failed" ||
+    entry.status === "parent_denied" ||
+    entry.verdictLevel === "high"
+  ) {
     return "border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) text-destructive";
   }
   return "border-warning/(--opacity-medium) bg-warning/(--opacity-subtle) text-warning";
@@ -32,8 +45,16 @@ function toneClass(entry: PermissionReviewEntry): string {
 
 function StatusIcon({ entry }: { entry: PermissionReviewEntry }) {
   if (entry.status === "reviewing") return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" />;
-  if (entry.status === "auto_approved") return <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />;
-  if (entry.status === "failed" || entry.verdictLevel === "high") return <AlertTriangle className="h-3.5 w-3.5 shrink-0" />;
+  if (entry.status === "auto_approved" || entry.status === "parent_approved") {
+    return <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />;
+  }
+  if (
+    entry.status === "failed" ||
+    entry.status === "parent_denied" ||
+    entry.verdictLevel === "high"
+  ) {
+    return <AlertTriangle className="h-3.5 w-3.5 shrink-0" />;
+  }
   return <ShieldQuestion className="h-3.5 w-3.5 shrink-0" />;
 }
 
