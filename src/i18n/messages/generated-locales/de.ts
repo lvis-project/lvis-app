@@ -237,6 +237,7 @@ export const deMessages: Record<string, string> = {
   "auditTab.statsTopTypes": "Top-Typen",
   "auditTab.statsTotalItems": "Gesamtzahl der Artikel",
   "be_agentList.toolDescription": "Gibt die Liste der derzeit verfügbaren LVIS-Agentenprofile zurück. Verwenden Sie dies, bevor Sie einen agentNamen für agent_spawn auswählen.",
+  "be_agentList.existingGuidance": "Diese Subagenten existieren bereits in DIESER Konversation. Um einen fortzusetzen, rufen Sie agent_spawn mit seiner resumeId auf — er behält seinen vollständigen Verlauf und macht dort weiter, wo er aufgehört hat. Einen neuen Agenten für Arbeit zu starten, die ein bestehender fortsetzbarer Agent bereits trägt, verwirft dessen Kontext.",
   "be_agentModeMap.executeReasoningHint": "Führen Sie die zugewiesene Aufgabe präzise aus und liefern Sie die Ergebnisse. Erweitern Sie den Umfang nicht; Klären Sie Unklarheiten mit einer kurzen Frage und geben Sie dann Ihre Vermutung an.",
   "be_agentModeMap.exploreReasoningHint": "Finden Sie relevante Elemente auf dem lokalen Computer oder in internen Dokumenten und melden Sie nur Standort und Schlüsselpunkte. Melden Sie bei vertraulichen Informationen nur den Standort – geben Sie den Inhalt nicht preis.",
   "be_agentModeMap.planReasoningHint": "Verfolgen Sie die Klarheit pro Dimension mit einer Punktzahl und reduzieren Sie die Mehrdeutigkeit bei einer Frage nach der anderen. Geben Sie ein umsetzbares Plandokument aus, sobald der Schwellenwert erreicht ist.",
