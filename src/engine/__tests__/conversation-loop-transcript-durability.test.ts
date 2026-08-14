@@ -90,7 +90,7 @@ function explodingTool(message: string) {
     approvalCacheKey: () => {
       throw new Error(message);
     },
-    execute: async () => ({ output: "never reached" }),
+    execute: async () => ({ output: "never reached", isError: false }),
   });
 }
 
@@ -169,7 +169,7 @@ describe("transcript durability", () => {
           source: "builtin",
           category: "read",
           jsonSchema: { type: "object", properties: {} },
-          execute: async () => ({ output: "tool round 1 output" }),
+          execute: async () => ({ output: "tool round 1 output", isError: false }),
         }),
       );
       toolRegistry.register(explodingTool("timeoutSeconds too_big"));
