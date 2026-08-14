@@ -6,6 +6,7 @@ import {
   createRationaleApprovalDisplay,
   normalizeRationaleApprovalDisplayText,
   type RationaleApprovalDisplay,
+  RATIONALE_DISPLAY_CAPS,
 } from "../../shared/rationale-approval-display.js";
 import {
   RATIONALE_CONTROL_CONTRACT_VERSION,
@@ -207,11 +208,11 @@ export function validateRationaleUiAuditProjection(
       !/^[0-9a-f]{64}$/u.test(value.actionDigest) ||
       value.round !== 1 ||
       value.reasonCode !== "foreground-reviewer-threshold" ||
-      !isSanitizedProjectionText(value.toolName, 256) ||
-      !isBoundedProjectionList(value.canonicalTargets, 32, 1_024) ||
-      !isBoundedProjectionList(value.requestedEffects, 8, 160) ||
-      !isBoundedProjectionList(value.affectedResources, 8, 160) ||
-      !isSanitizedProjectionText(value.requiredAuthority, 160) ||
+      !isSanitizedProjectionText(value.toolName, RATIONALE_DISPLAY_CAPS.toolName) ||
+      !isBoundedProjectionList(value.canonicalTargets, RATIONALE_DISPLAY_CAPS.targetItems, RATIONALE_DISPLAY_CAPS.targetLength) ||
+      !isBoundedProjectionList(value.requestedEffects, RATIONALE_DISPLAY_CAPS.listItems, RATIONALE_DISPLAY_CAPS.listLength) ||
+      !isBoundedProjectionList(value.affectedResources, RATIONALE_DISPLAY_CAPS.listItems, RATIONALE_DISPLAY_CAPS.listLength) ||
+      !isSanitizedProjectionText(value.requiredAuthority, RATIONALE_DISPLAY_CAPS.authorityLength) ||
       (value.reviewerOutcome !== "fresh" && value.reviewerOutcome !== "cache") ||
       !PROJECTION_GENERATION_OUTCOMES.includes(
         value.generationOutcome as RationaleGenerationOutcome,
@@ -223,7 +224,7 @@ export function validateRationaleUiAuditProjection(
       !PROJECTION_SCOPE_ALIGNMENTS.includes(
         value.scopeAlignment as ReviewerScopeAlignment,
       ) ||
-      !isBoundedProjectionList(value.scopeReasons, 8, 160) ||
+      !isBoundedProjectionList(value.scopeReasons, RATIONALE_DISPLAY_CAPS.listItems, RATIONALE_DISPLAY_CAPS.listLength) ||
       (value.rationaleStatus !== "ready" && value.rationaleStatus !== "failed") ||
       (value.terminalReason !== null &&
         !PROJECTION_TERMINAL_REASONS.includes(
@@ -245,9 +246,9 @@ export function validateRationaleUiAuditProjection(
       "effectiveVerdict",
     );
     if (
-      !isSanitizedProjectionText(initial.reason, 500) ||
-      !isSanitizedProjectionText(reevaluated.reason, 500) ||
-      !isSanitizedProjectionText(effective.reason, 500)
+      !isSanitizedProjectionText(initial.reason, RATIONALE_DISPLAY_CAPS.reasonLength) ||
+      !isSanitizedProjectionText(reevaluated.reason, RATIONALE_DISPLAY_CAPS.reasonLength) ||
+      !isSanitizedProjectionText(effective.reason, RATIONALE_DISPLAY_CAPS.reasonLength)
     ) {
       return false;
     }
@@ -258,7 +259,7 @@ export function validateRationaleUiAuditProjection(
         value.reevaluationOutcome === "fresh" &&
         value.scopeAlignment !== "unknown" &&
         value.modalFallbackRequired === false &&
-        isSanitizedProjectionText(value.suggestion, 500);
+        isSanitizedProjectionText(value.suggestion, RATIONALE_DISPLAY_CAPS.suggestionLength);
       if (!readyOk) return false;
       // autoApproved=true is a POSITIVE terminal: it requires the reviewer to
       // have judged the sealed action in-scope (aligned) and not intrinsically
