@@ -224,6 +224,7 @@ export const zhMessages: Record<string, string> = {
   "auditTab.statsTopTypes": "顶级类型",
   "auditTab.statsTotalItems": "总项目",
   "be_agentList.toolDescription": "返回当前可用的 LVIS 代理配置文件的列表。在为agent_spawn 选择agentName 之前使用此选项。",
+  "be_agentList.existingGuidance": "这些子代理已存在于当前会话中。要继续某个子代理，请使用其 resumeId 调用 agent_spawn——它会保留完整历史并从停止处继续。为可恢复的现有代理已承担的工作启动新代理，会丢弃该代理的上下文。",
   "be_agentModeMap.executeReasoningHint": "准确执行分配的任务并产生可交付成果。不扩大范围；用一个简短的问题澄清歧义，然后陈述你的假设。",
   "be_agentModeMap.exploreReasoningHint": "在本地计算机或内部文档中查找相关项目，并仅报告位置和关键点。对于敏感信息，仅报告位置 - 不要暴露内容。",
   "be_agentModeMap.planReasoningHint": "通过分数跟踪每个维度的清晰度，并一次减少一个问题的歧义。一旦达到阈值，就输出可操作的计划文档。",
