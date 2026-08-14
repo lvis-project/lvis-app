@@ -41,6 +41,33 @@ function commitsHostInjectedMessages(stopReason: TurnStopReason | undefined,
   return stopReason === "end_turn" || stopReason === "input-required";
 }
 
+/**
+ * Durability flush for the in-flight turn's transcript.
+ *
+ * The turn's normal persistence points (the post-turn hook chain, the
+ * no-hook-chain fallback, and the turn_summary save) all sit AFTER `queryLoop`
+ * returns, so any throw between the user append and those points used to leave
+ * the whole turn — the user's own message included — in memory only. This flush
+ * is what makes the record survive that path.
+ *
+ * `MemoryManager.saveSession` rewrites the session JSONL from the in-memory
+ * history rather than appending, so calling it repeatedly within one turn is
+ * idempotent: the last write wins and no retry path can duplicate a message.
+ * Failures are logged, never rethrown — a durability flush must not replace the
+ * error the turn is already reporting.
+ */
+async function flushTranscript(self: LoopContext, reason: string): Promise<void> {
+  if (self.deps.disableSessionPersistence) return;
+  try {
+    await self.deps.memoryManager.saveSession(
+      self.sessionId,
+      self.history.getMessages(),
+    );
+  } catch (err) {
+    log.warn(`transcript flush failed (${reason}): %s`, err);
+  }
+}
+
 
 export async function runTurn(
   self: LoopContext,
@@ -171,6 +198,10 @@ export async function runTurn(
     let agentMessageInputId: string | null = null;
     let retainHostInjectedMessages = false;
     let turnStateFinalized = false;
+    /** True once the user's message is in history — i.e. the turn was accepted. */
+    let userTurnAppended = false;
+    /** True once the post-turn persistence path ran (hook chain or fallback). */
+    let transcriptPersistedAfterLoop = false;
 
     // Cleanup covers every path after the controller becomes observable:
     // lifecycle hooks, prompt refusal, preflight, queryLoop, and post-turn
@@ -401,11 +432,18 @@ export async function runTurn(
         meta: { hostInjectionId: initialGuidanceId },
       });
     }
+    userTurnAppended = true;
     // §4.5.2 step 5 — HISTORY_APPEND
     self.tracer.step("HISTORY_APPEND", {
       role: "user",
       historySize: self.history.length,
     });
+    // The turn is accepted: make the user's message durable BEFORE the token
+    // preflight, prompt assembly, or the first provider call can throw. Without
+    // this the record of what the user asked exists only in renderer state until
+    // the turn reaches its post-turn persistence, so a crash or a mid-turn
+    // failure erases the question along with the answer.
+    await flushTranscript(self, "turn-accepted");
 
     // Lazy Tool Scoping — 이 턴에서 노출할 plugin 집합 결정.
     // SystemPromptBuilder Tool Schemas 섹션도 동일 scope로 필터링되도록
@@ -665,6 +703,9 @@ export async function runTurn(
       });
       self.deps.idleScheduler?.signalConversation();
     }
+    // Both branches above own the turn's durable projection, so the finally's
+    // safety-net flush is only needed for turns that never reached this point.
+    transcriptPersistedAfterLoop = true;
 
     // Same-session compact checkpoints run inside `runPreflightGuard`.
     // No post-turn hook is needed; the next user turn re-evaluates token usage.
@@ -876,15 +917,23 @@ export async function runTurn(
       removedHostInjectionRows +=
         self.history.removeByHostInjectionId(agentMessageInputId);
     }
-    if (removedHostInjectionRows > 0 && !self.deps.disableSessionPersistence) {
-      try {
-        await self.deps.memoryManager.saveSession(
-          self.sessionId,
-          self.history.getMessages(),
-        );
-      } catch (err) {
-        log.warn("host-injection rollback save failed: %s", err);
-      }
+    // A turn that escaped by throwing never reached the post-turn persistence
+    // path, so every round it completed lives only in memory. Flush the whole
+    // accumulated transcript — the user's message, each assistant round, and
+    // each tool_result — so the failure costs the answer, not the record.
+    //
+    // No synthetic end-of-turn marker is written: `historyToEntries` drops an
+    // empty assistant message on the replay path, so the row would be invisible
+    // on reload while still riding the wire on the next turn. An unpaired
+    // tool_use tail is repaired by `normalizeToolPairInvariant` at load.
+    if (
+      userTurnAppended
+      && (!transcriptPersistedAfterLoop || removedHostInjectionRows > 0)
+    ) {
+      await flushTranscript(
+        self,
+        transcriptPersistedAfterLoop ? "host-injection-rollback" : "mid-turn-failure",
+      );
     }
     await finalizeTurnState();
   }
