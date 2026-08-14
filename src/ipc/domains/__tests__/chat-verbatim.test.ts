@@ -1666,8 +1666,11 @@ describe("sub-agent parent mailbox on manual turns", () => {
       undefined,
       expect.objectContaining({
         inputOrigin: "user-keyboard",
-        initialGuidance: "[Sub-Agent: Researcher]\nfinished",
+        // The drained report is prefixed with the host's judgment instruction
+        // and still ends with the entry's canonical, unwrapped text.
+        initialGuidance: expect.stringMatching(/\[Sub-Agent: Researcher\]\nfinished$/),
         approvalReasonPrefix: "[Sub-Agent: Researcher]",
+        subAgentReport: {},
       }),
     );
     expect(acknowledgeParentMailbox).toHaveBeenCalledWith("parent-session", ["message-1"]);
@@ -1815,12 +1818,15 @@ describe("sub-agent autonomous parent wake", () => {
     await wakeHandler!("parent-session");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
-      "[Sub-Agent: Researcher]\nfinished",
+      // The wake turn's input IS the report, prefixed once with the host's
+      // judgment instruction so the parent cannot end the turn ignoring it.
+      expect.stringMatching(/\[Sub-Agent: Researcher\]\nfinished$/),
       expect.any(Object),
       undefined,
       expect.objectContaining({
         inputOrigin: "agent-message",
         approvalReasonPrefix: "[Sub-Agent: Researcher]",
+        subAgentReport: {},
       }),
     );
     expect(loop.runTurn.mock.calls[0]?.[3]).not.toHaveProperty("initialGuidance");

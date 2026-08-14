@@ -109,6 +109,13 @@ export async function runTurn(
       remoteControllerAuthority?: RemoteControllerAuthority;
       /** DLP-masked durable child messages joined to this turn after the prompt gate. */
       initialGuidance?: string;
+      /**
+       * Marks the child messages this turn carries as a sub-agent report. Stamped
+       * onto whichever message holds them — the `agent-message` turn input on a
+       * wake turn, the guidance message when they ride a user turn — so a reload
+       * replays the report box instead of a bubble attributed to the user.
+       */
+      subAgentReport?: { title?: string };
       /** Host-owned causal hop inherited from durable A2A guidance. */
       a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
@@ -417,6 +424,12 @@ export async function runTurn(
         : {}),
     };
 
+    // A wake turn's INPUT is the child report itself; when the report instead
+    // rides a user turn, the guidance message below carries it. Stamp whichever
+    // one actually holds it so exactly one row replays as the report box.
+    if (options?.subAgentReport && !options.initialGuidance && inputOrigin === "agent-message") {
+      userMeta.subAgentReport = options.subAgentReport;
+    }
     self.history.append({
       role: "user",
       content: userContent,
@@ -429,7 +442,10 @@ export async function runTurn(
         content: t("be_conversationLoop.guidanceInjectionHeader", {
           joined: options.initialGuidance,
         }),
-        meta: { hostInjectionId: initialGuidanceId },
+        meta: {
+          hostInjectionId: initialGuidanceId,
+          ...(options.subAgentReport ? { subAgentReport: options.subAgentReport } : {}),
+        },
       });
     }
     userTurnAppended = true;

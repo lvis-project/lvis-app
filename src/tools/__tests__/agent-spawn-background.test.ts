@@ -118,6 +118,46 @@ describe("agent_spawn background routing", () => {
     }));
     expect(deliverToParent).not.toHaveBeenCalled();
   });
+  it("delivers actionable text when the child run produced no summary", async () => {
+    const deliverToParent = vi.fn(async (
+      _delivery: { message: { parts: Array<{ text?: string }> } },
+    ) => ({ ok: true as const, disposition: "queued" }));
+    const emit = vi.fn();
+    const spawn = vi.fn(async (
+      _input: unknown,
+      callbacks: { onLinked?: (input: { childSessionId: string }) => void },
+    ) => {
+      callbacks.onLinked?.({ childSessionId: "sub-silent" });
+      // A resumed child that ended a run without a final assistant message.
+      return {
+        summary: "",
+        toolCallCount: 2,
+        turnCount: 1,
+        childSessionId: "sub-silent",
+        entries: [],
+        ok: true,
+      };
+    });
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({ spawn, deliverToParent }) as never,
+      emit,
+    });
+
+    await expect(tool.execute({
+      title: "silent child",
+      instructions: "work",
+      background: true,
+    }, parentContext())).resolves.toMatchObject({ isError: false });
+    for (let attempt = 0; attempt < 20 && deliverToParent.mock.calls.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+
+    expect(deliverToParent).toHaveBeenCalledTimes(1);
+    const text = deliverToParent.mock.calls[0]?.[0].message.parts[0]?.text ?? "";
+    expect(text.trim().length).toBeGreaterThan(0);
+    expect(text).toContain("sub-silent");
+    expect(text).toContain(A2ATaskState.COMPLETED);
+  });
   it("keeps background delivery ids DLP-clean and correlated with renderer events", async () => {
     const deliverToParent = vi.fn(async (input: {
       message: { messageId: string; metadata?: unknown };

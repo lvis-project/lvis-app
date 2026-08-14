@@ -26,6 +26,7 @@ import type { GenericMessage, UserContentPart } from "../../engine/llm/types.js"
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import type { TurnResult } from "../../engine/conversation-loop.js";
 import type { ParentMailboxEntry } from "../../engine/subagent-message-mailbox.js";
+import { wrapChildReportForParentJudgment } from "../../engine/a2a-subagent-message-codec.js";
 import { parseStagedEnvelope, stagedOriginForInput } from "../../shared/staged-origins.js";
 import { SESSION_LIST_MAX_LIMIT } from "../../shared/session-lookup.js";
 import type { IpcDeps } from "../types.js";
@@ -53,6 +54,8 @@ export interface ParentMailboxTurn {
   entryIds: string[];
   initialGuidance: string;
   approvalReasonPrefix: string;
+  /** Sanitized sub-agent title when the whole snapshot came from one child. */
+  childTitle?: string;
 }
 
 interface ParentMailboxRunner {
@@ -105,11 +108,23 @@ export async function prepareParentMailboxTurn(deps: IpcDeps): Promise<ParentMai
     return null;
   }
 
+  const childTitles = [...new Set(entries.map((entry) => entry.childTitle))];
+  const singleChildTitle = childTitles.length === 1
+    && typeof childTitles[0] === "string"
+    && childTitles[0].length > 0
+    ? childTitles[0]
+    : undefined;
   return {
     parentSessionId,
     entryIds: entries.map((entry) => entry.id),
-    initialGuidance: entries.map((entry) => entry.formattedText).join("\n\n"),
+    // Wrapped HERE, at the drain, and not inside the persisted `formattedText`
+    // — the mid-turn injection path wraps at its own consumption point, so a
+    // given entry is instructed exactly once.
+    initialGuidance: wrapChildReportForParentJudgment(
+      entries.map((entry) => entry.formattedText).join("\n\n"),
+    ),
     approvalReasonPrefix: mailboxApprovalPrefix(entries),
+    ...(singleChildTitle !== undefined ? { childTitle: singleChildTitle } : {}),
   };
 }
 
@@ -551,6 +566,9 @@ export async function handleChatSend(
           ? {
               initialGuidance: mailboxTurn.initialGuidance,
               approvalReasonPrefix: mailboxTurn.approvalReasonPrefix,
+              subAgentReport: mailboxTurn.childTitle === undefined
+                ? {}
+                : { title: mailboxTurn.childTitle },
             }
           : {}),
         ...(ctx.remoteControllerAuthority

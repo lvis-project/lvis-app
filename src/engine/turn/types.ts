@@ -51,6 +51,13 @@ export interface WorkspaceRootRevocationOptions {
   preserveRoots?: readonly string[];
 }
 
+/** Non-user origin of an injected guidance batch, for renderer attribution. */
+export interface GuidanceInjectionSource {
+  kind: "sub-agent";
+  /** Sanitized child title; absent when one batch mixed several children. */
+  title?: string;
+}
+
 export interface TurnCallbacks {
   onReasoningDelta?: (text: string) => void;
   onTextDelta?: (text: string) => void;
@@ -127,7 +134,12 @@ export interface TurnCallbacks {
 
 
 
-  onGuidanceInjected?: (text: string) => void;
+  /**
+   * `source` is present only when EVERY delivered guide in this batch was a
+   * sub-agent report, so the renderer can draw the child-report box without
+   * mislabelling a batch that also carried the user's own guide text.
+   */
+  onGuidanceInjected?: (text: string, source?: GuidanceInjectionSource) => void;
   /**
    * Fired once at turn end if any queued guide utterances never reached a
    * round boundary (single-round turn — typical of short text-only

@@ -87,6 +87,12 @@ export type StreamEvent = {
   compactStatus?: "summarized" | "content_truncated" | "noop" | "reduced_insufficient_forced";
   /** Truncation archive directory for original messages (CONTENT_TRUNCATED path). */
   truncatedDir?: string;
+  /**
+   * `guidance_injected` provenance — present when the whole injected batch was
+   * a sub-agent report, so the transcript renders the child-report box rather
+   * than the generic queued-message chip.
+   */
+  subAgentReport?: { title?: string };
   /** Set to "command" on `done` events when the turn was a slash command. */
   route?: "command";
   /** Permission mode changed by slash command; renderer fans this into the badge event bus. */
@@ -175,7 +181,15 @@ export type ToolEntryItem = {
 };
 
 export type ChatEntry =
-  | { kind: "user"; text: string; injectHint?: "queue" | "interrupt"; createdAt?: number }
+  | {
+      kind: "user";
+      text: string;
+      /** `sub-agent` is a child's A2A report, not anything the user typed. */
+      injectHint?: "queue" | "interrupt" | "sub-agent";
+      /** Sanitized child title shown on the sub-agent report box. */
+      subAgentTitle?: string;
+      createdAt?: number;
+    }
   | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
   | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number; systemNotice?: "context-error" | "stream-error"; interrupted?: boolean }
   // Permission review verdict for one tool call. The entry is never removed

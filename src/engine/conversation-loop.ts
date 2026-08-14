@@ -86,10 +86,18 @@ export interface GuidanceQueueEntry {
   approvalReasonPrefix?: string;
   /** Host-owned hop context for a message-triggered receiver turn. */
   a2aCausalContext?: A2AAgentCausalContext;
+  /**
+   * Sanitized child title when this guidance is a sub-agent report.
+   *
+   * Structured provenance rather than sniffing `approvalReasonPrefix` for an
+   * `[Sub-Agent: …]` envelope: the renderer draws a distinct box off this field,
+   * and a string test would also match a user guide that merely quoted one.
+   */
+  subAgentTitle?: string;
 }
 type GuidanceDisposition = Pick<
   GuidanceQueueEntry,
-  "onInjected" | "onDropped" | "approvalReasonPrefix" | "a2aCausalContext"
+  "onInjected" | "onDropped" | "approvalReasonPrefix" | "a2aCausalContext" | "subAgentTitle"
 >;
 
 
@@ -835,6 +843,12 @@ export class ConversationLoop {
       remoteControllerAuthority?: RemoteControllerAuthority;
       /** DLP-masked durable child messages joined to this turn after the prompt gate. */
       initialGuidance?: string;
+      /**
+       * Marks the durable child messages this turn carries as a sub-agent
+       * report, so the persisted transcript replays them as the report box and
+       * not as text the user appears to have written.
+       */
+      subAgentReport?: { title?: string };
       /** Host-owned causal hop inherited from durable A2A guidance. */
       a2aCausalContext?: A2AAgentCausalContext;
       inputOrigin: ChatInputOrigin;
