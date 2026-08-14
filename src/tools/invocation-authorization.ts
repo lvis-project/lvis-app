@@ -1633,7 +1633,15 @@ export async function authorizeToolInvocation(
         // and retain their explicit reviewed-parent persistence contract.
         permissionResult = {
           decision: "allow",
-          reason: `user approved approval request (${decision.choice})`,
+          // Who actually answered. The deny branch above already says this;
+          // saying it only there would leave the per-tool-call audit asserting
+          // that a user approved a call no human was shown — wrong in the one
+          // direction that flatters the system, and on the surface a reviewer
+          // reads for the CALL rather than for the approval.
+          reason:
+            parentAnswer?.outcome === "allow-once"
+              ? `parent agent approved approval request (${decision.choice})`
+              : `user approved approval request (${decision.choice})`,
           layer: permissionResult.layer,
         };
         // allow-once / allow-always: 실행 계속
