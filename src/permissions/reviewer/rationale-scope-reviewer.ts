@@ -56,7 +56,21 @@ const UNTRUSTED_TEXT_CONTROL_RE =
   /[\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]/g;
 const HTML_TAG_RE = /<[^>]*>/g;
 
-function sanitizeUntrustedReviewerText(
+/**
+ * Reduce a model-authored string to inert plain text.
+ *
+ * Everything a reviewer LLM returns is untrusted: the prompt it answered
+ * carried data the calling agent could influence, so its free-text fields are
+ * downstream of that influence. The order matters — markup and control
+ * characters come out first, so markdown stripping cannot be evaded by an
+ * embedded tag, a backtick, or a bidi override, and DLP masking runs last so
+ * it sees the final text rather than a form that hid a secret behind markup.
+ *
+ * Exported because the parent adjudicator consumes model prose on the same
+ * terms. A second copy of this that drifted would be a hole in whichever
+ * reviewer fell behind.
+ */
+export function sanitizeUntrustedReviewerText(
   value: string,
   maxLength: number,
 ): string {
