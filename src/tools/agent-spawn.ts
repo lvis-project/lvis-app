@@ -588,8 +588,27 @@ export function createAgentStatusTool(deps: Pick<AgentSpawnToolDeps, "getRunner"
           isError: !run,
         };
       }
+      const runs = runner.listRunStatuses(originSessionId);
+      // Live runs are process-local; persisted spawns are not. After an app
+      // restart this list is empty while the conversation's sub-agents are
+      // still sitting on disk, and the observed reading of that empty list was
+      // "no active sub-agents, so the work is done" — a wrong conclusion drawn
+      // from a true fact. Name the other list rather than restate this one:
+      // `agent_list` is where the restored children appear, with resumeId.
+      const restoredCount = runs.length === 0
+        ? runner.listPersistedSpawnsForOrigin(originSessionId).length
+        : 0;
       return {
-        output: JSON.stringify({ runs: runner.listRunStatuses(originSessionId) }),
+        output: JSON.stringify({
+          runs,
+          ...(restoredCount > 0
+            ? {
+                restoredSubAgentsHint: t("be_agentSpawn.statusRestoredHint", {
+                  count: String(restoredCount),
+                }),
+              }
+            : {}),
+        }),
         isError: false,
       };
     },
