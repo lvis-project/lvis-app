@@ -257,18 +257,16 @@ export function ApprovalDock({
           render their Evidence+Decision section INSIDE ToolApprovalContent —
           the dock no longer forks to a second component with its own visual
           language. */}
-      {(
-        <ToolApprovalContent
-          key={request.id}
-          open
-          request={request}
-          pendingCount={queue.length}
-          onDecide={decide}
-          onOpenPermanentDeny={onOpenPermanentDeny}
-          proposedChoice={proposedChoice}
-          interactionLocked={interactionLocked}
-        />
-      )}
+      <ToolApprovalContent
+        key={request.id}
+        open
+        request={request}
+        pendingCount={queue.length}
+        onDecide={decide}
+        onOpenPermanentDeny={onOpenPermanentDeny}
+        proposedChoice={proposedChoice}
+        interactionLocked={interactionLocked}
+      />
 
       <p className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         <span key={request.id}>

@@ -712,10 +712,13 @@ export function ToolApprovalContent({
   const isOutOfDir = request.kind === "out-of-allowed-dir";
   // finalVerdict already computed above (before the null-check guard) — use it here.
   const badgeClassName = levelBadgeClass(finalVerdict as RiskLevel);
-  const rows = isRationaleApproval
+  // Rationale cards render the sealed table instead, and out-of-dir cards
+  // render the path-grant section — neither consumes the generic review rows,
+  // so skip computing them.
+  const rows = isRationaleApproval || isOutOfDir
     ? []
     : approvalReviewRows(request, category, argsStr, originLabel, source, sourceBadge);
-  const sandboxSummary = isRationaleApproval ? null : approvalSandboxSummary(request);
+  const sandboxSummary = isRationaleApproval || isOutOfDir ? null : approvalSandboxSummary(request);
   const categoryImpact = category === "read"
     ? tHook("toolApprovalDialog.impactRead")
     : category === "write"
