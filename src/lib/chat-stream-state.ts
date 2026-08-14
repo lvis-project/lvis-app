@@ -178,6 +178,10 @@ export type ChatEntry =
   | { kind: "user"; text: string; injectHint?: "queue" | "interrupt"; createdAt?: number }
   | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
   | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number; systemNotice?: "context-error" | "stream-error"; interrupted?: boolean }
+  // Permission review verdict for one tool call. The entry is never removed
+  // once created — it is the audit trail of what the reviewer decided, and the
+  // renderer attaches it to the matching tool row (standalone only while no
+  // tool row exists for its toolUseId).
   | {
       kind: "permission_review";
       status: PermissionReviewStatus;
@@ -695,21 +699,6 @@ export function upsertPermissionReview(
   }
   next.push(entry);
   return next;
-}
-
-export function dropPermissionReviewEntries(
-  entries: ChatEntry[],
-  payload?: { groupId?: string; toolUseId?: string },
-): ChatEntry[] {
-  if (!payload?.groupId && !payload?.toolUseId) {
-    return entries.filter((entry) => entry.kind !== "permission_review");
-  }
-  return entries.filter((entry) => {
-    if (entry.kind !== "permission_review") return true;
-    if (payload.toolUseId) return entry.toolUseId !== payload.toolUseId;
-    if (payload.groupId && entry.groupId === payload.groupId) return false;
-    return true;
-  });
 }
 
 export function applyToolStart(

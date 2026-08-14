@@ -1,5 +1,40 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { runWithCeiling } from "../executor-ceiling.js";
+import { resolveEffectiveCeilingMs, runWithCeiling } from "../executor-ceiling.js";
+import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
+
+describe("resolveEffectiveCeilingMs — per-invocation ceiling", () => {
+  const bash = { name: "bash", source: "builtin", category: "shell" } as const;
+
+  it("follows a builtin shell tool's own timeoutSeconds when it exceeds the global ceiling", () => {
+    // An escalated retry (600s) must not be cut at the 120s ceiling — the
+    // tool's own retryable timeout has to be what fires.
+    const ceiling = resolveEffectiveCeilingMs(bash, { command: "bun run build", timeoutSeconds: 600 });
+    expect(ceiling).toBeGreaterThan(600_000);
+  });
+
+  it("leaves head-room above a default-budget shell call so its own timeout fires first", () => {
+    const ceiling = resolveEffectiveCeilingMs(bash, {
+      command: "echo hi",
+      timeoutSeconds: TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000,
+    });
+    expect(ceiling).toBeGreaterThan(TOOL_TIMEOUT_POLICY.shellDefaultMs);
+  });
+
+  it("agent_spawn keeps the sub-agent ceiling", () => {
+    expect(
+      resolveEffectiveCeilingMs({ name: "agent_spawn", source: "builtin", category: "meta" }, {}),
+    ).toBe(TOOL_TIMEOUT_POLICY.subAgentCeilingMs);
+  });
+
+  it("a non-builtin tool cannot raise its own ceiling by declaring timeoutSeconds", () => {
+    expect(
+      resolveEffectiveCeilingMs(
+        { name: "plugin_thing", source: "plugin", category: "shell" },
+        { timeoutSeconds: 100_000 },
+      ),
+    ).toBe(TOOL_TIMEOUT_POLICY.globalCeilingMs);
+  });
+});
 
 describe("runWithCeiling — executor global ceiling helper", () => {
   beforeEach(() => {

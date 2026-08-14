@@ -4626,7 +4626,7 @@ LVIS 는 **모든** skill 을 body-hash 승인 게이트(§9 skill-load + skill-
 
 **행동 knob 최소주의**: LVIS 는 vendor 별 temperature/sampling 파라미터를 제거(modern frontier 모델이 무시 — `llm-vendor-defaults.ts` CHANGELOG)했으므로 mode 는 temperature 를 갖지 않는다. `reasoningHint`(자세 텍스트) + `maxToolRoundsHint`(turn seed) 만 기존 surface 에 매핑된다.
 
-**maxTurns ceiling 정합**: mode 의 `maxToolRoundsHint`(execute 20 / plan 30 / research 25 / explore 15)는 spawn 호출이 `maxTurns` 를 생략했을 때만 seed 하며, 명시적 `input.maxTurns` 가 항상 우선한다. 모든 경로의 상한은 child loop 의 실제 per-run hard bound 인 `MAX_TOOL_ROUNDS`(30)에 정렬된 `MAX_TURNS_CAP = 30`(SOT, `subagent-runner.ts` export)이다. `agent_spawn` 의 schema `maximum` + clamp 도 이 SOT 를 import 하여 LLM 에게 loop 가 조용히 버리는 라운드(31-60)를 광고하지 않는다.
+**round budget 정합 (상한 없음)**: sub-agent 의 라운드 예산은 host-assigned 이며 해석 순서는 `input.maxRounds` → 사용자 설정 `chat.subAgentMaxRounds` → `SUBAGENT_MAX_ROUNDS_DEFAULT`(60). **절대 상한(`MAX_TURNS_CAP`)은 제거**되었다: 설정값 위에 놓인 ceiling 은 "작업 도중 멈춘 에이전트" 로만 표현되기 때문이다. 검증은 type sanity 뿐 (finite + integer, 최소 1). child `ConversationLoop` 은 host-assigned `maxRounds` 를 그대로 존중하며 (`MAX_TOOL_ROUNDS`(60)는 이제 *caller 가 예산을 주지 않았을 때의 default*), Settings UI 도 `max` 없이 `min=1` 만 강제한다. resume 축의 루프 보호는 유지되되 비례한다: cumulative ceiling = `4 × 설정 예산` (`MAX_RESUMES = 3` 은 불변).
 
 #### §5.X File-based State 동시성·보존 (신규 v5)
 
@@ -4661,9 +4661,8 @@ interface ToolMeta {
 
 | Surface | 상수 | 값 | 의미 |
 |--------------------------------- |------------------------ |--------- |----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Built-in shell Zod schema default | `shellDefaultMs` | `60_000` | model 이 `timeoutSeconds` 미명시 시 기본 (Zod schema 가 `/ 1000` 변환해 seconds 노출) |
-| Built-in shell Zod schema max | `shellMaxMs` | `120_000` | model 이 input 으로 줄 수 있는 상한 (Zod schema 가 `/ 1000` 변환) |
-| Executor 글로벌 ceiling | `globalCeilingMs` | `120_000` | `runWithCeiling` AbortController-linked last-resort cap. 플러그인 자신의 UI/MCP tool invocation도 executor를 거치므로 같은 ceiling으로 cover (별도 키 없음) |
+| Built-in shell Zod schema default | `shellDefaultMs` | `120_000` | model 이 `timeoutSeconds` 미명시 시 기본 (Zod schema 가 `/ 1000` 변환해 seconds 노출). **상한 없음** — deadline 은 항상 존재하지만 (positive integer 강제) 만료가 retryable error 이므로 재시도는 *더 큰* 값을 지정할 수 있어야 한다 |
+| Executor 글로벌 ceiling | `globalCeilingMs` | `120_000` | `runWithCeiling` AbortController-linked last-resort cap. 플러그인 자신의 UI/MCP tool invocation도 executor를 거치므로 같은 ceiling으로 cover (별도 키 없음). built-in shell 호출은 자신의 `timeoutSeconds` 가 더 크면 `resolveEffectiveCeilingMs` 가 그 invocation 한정으로 ceiling 을 올린다 |
 | Sub-agent ceiling | `subAgentCeilingMs` | `600_000` | `agent_spawn` 처럼 자체 sub-agent loop 를 가진 tool 의 ceiling. globalCeiling 보다 길어야 inner round chain 이 살아남는다 |
 | MCP request default | `mcpRequestDefaultMs` | `60_000` | per-server `connectionTimeoutMs` 미선언 시 |
 | MCP request max ceiling | `mcpRequestMaxMs` | `120_000` | server 선언 timeout 은 dispatch+ingestion 두 단 모두 이 값으로 clamp/reject. SSE streaming activity reset 도 _absolute wall-clock deadline_ 으로 clamp 되어 server 가 chunk 흘리며 영원히 잡고 있을 수 없다 |
@@ -4672,15 +4671,14 @@ interface ToolMeta {
 | Network fetch default | `networkFetchDefaultMs` | `15_000` | `core/network-guard.ts` `fetchPublicHttpResponse` 의 per-hop timeout |
 | Approval gate user wait | `approvalGateUserWaitMs` | `300_000` | 사용자 입력 대기. _runtime hang 이 아니라 사용자가 느린_ 케이스 — globalCeiling 의 cap 대상 아님 |
 
-**LLM judging — 연장은 model 자율, 단 cap 안에서**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` 인자에 최대 `shellMaxMs / 1000 = 120` 까지 명시 가능 (SOT 는 ms, Zod schema 가 `/ 1000` 변환해 model 에 노출). cap 위는 어떤 경로로도 허용되지 않으며, 글로벌 ceiling 이 fail-safe 로 동시에 동작한다.
-
-**외부 평균 근거**: 외부 OSS agent runtime 의 산술 평균이 ≈60s, 사용자-facing 최대 cap 으로 120s 합의. LVIS 이전 default 600s(10분) 는 model 이 task 완료 후에도 timeout 인자를 줄이지 않으면 사용자가 10분까지 무한 대기하던 회귀의 원천.
+**LLM judging — escalation on retry**: model 이 long-running (bun install, large build 등) 으로 판단하면 shell tool 의 `timeoutSeconds` 인자를 명시한다. *기본값으로 시작하고, 타임아웃되면 더 큰 값으로 재시도* 하는 것이 model-facing 계약 (schema description 에 그대로 기술). 상한이 없는 이유: 상한이 있으면 (a) 정당한 재시도가 불가능하고 (b) 초과 값이 tool call 하나가 아니라 **turn 전체를 input-validation 실패로 죽인다**. 무한 대기는 상한이 아니라 *deadline 이 항상 존재한다*는 것 (optional-but-defaulted + positive integer) 으로 막는다.
 
 **Invariants** (`src/shared/__tests__/tool-timeout-policy.test.ts` 가 지키는 룰):
-- `shellDefaultMs <= shellMaxMs` / `mcpRequestDefaultMs <= mcpRequestMaxMs` / `pluginStartupDefaultMs <= pluginStartupMaxMs`
+- `shellMaxMs` 는 존재하지 않는다 (shell timeout 상한 없음)
+- `mcpRequestDefaultMs <= mcpRequestMaxMs` / `pluginStartupDefaultMs <= pluginStartupMaxMs`
 - 모든 값 finite + positive (Infinity 또는 0 금지)
-- `globalCeilingMs >= shellMaxMs` / `>= mcpRequestMaxMs` (last-resort cap 이 per-surface max 보다 작으면 회귀)
-- `shellDefaultMs % 1000 === 0` / `shellMaxMs % 1000 === 0` (Zod schema `/ 1000` 변환 후 정수 보장)
+- `globalCeilingMs >= mcpRequestMaxMs` (last-resort cap 이 per-surface max 보다 작으면 회귀)
+- `shellDefaultMs % 1000 === 0` (Zod schema `/ 1000` 변환 후 정수 보장)
 - `subAgentCeilingMs > globalCeilingMs` (sub-agent 가 inner 도구들의 ceiling 보다 길어야 함)
 - `approvalGateUserWaitMs > globalCeilingMs` (사용자 입력 대기는 tool 실행 cap 과 독립)
 

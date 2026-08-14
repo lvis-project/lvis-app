@@ -60,11 +60,12 @@ describe("agent_send host boundary", () => {
     const tool = createAgentSendTool({ getRuntime: () => runtime });
     const mainRegistry = new ToolRegistry();
     mainRegistry.register(tool);
-    // `agent_send` is model-visible on BOTH sides. It used to be hidden from the
-    // parent, which made the A2A channel one-way: a child could reach its parent,
-    // but the parent had no tool to answer with, so `waitForReply` below could
-    // never actually be satisfied.
-    expect(mainRegistry.getToolSchemas().map((schema) => schema.name)).toContain("agent_send");
+    // `agent_send` is hidden at the root scope: execute() rejects every
+    // non-child caller (spawnDepth !== 1), so a root-visible schema would
+    // advertise a tool the parent can never successfully call. The sub-agent
+    // runner re-registers it visible for children (`buildChildDeps`); a parent
+    // replies to a suspended child via agent_spawn(resumeId=...) instead.
+    expect(mainRegistry.getToolSchemas().map((schema) => schema.name)).not.toContain("agent_send");
 
     const result = await tool.execute({
       to: "parent",
@@ -88,7 +89,7 @@ describe("agent_send host boundary", () => {
     expect(generatedMessageId)
       .toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
     expect(maskSensitiveData(generatedMessageId).detections).toEqual([]);
-    expect(tool.modelVisible).toBe(true);
+    expect(tool.modelVisible).toBe(false);
     expect(runtime.cancelQuestionWait).not.toHaveBeenCalled();
     expect(tool.parallelSafe).toBeUndefined();
   });

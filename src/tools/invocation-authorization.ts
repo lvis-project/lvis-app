@@ -1088,8 +1088,52 @@ export async function authorizeToolInvocation(
     // A cross-agent Message is untrusted input. Preserve any prior deny,
     // but force every otherwise-allowed tool through the receiver's own
     // ApprovalGate with the DLP-masked Sub-Agent provenance label.
+    //
+    // Exception — builtin READ tools in a LOCAL mailbox turn ride the same
+    // foreground-auto reviewer lane a child's own turn gets (auto-approve
+    // with audit up to the configured threshold, ask above it, Store B
+    // honored) instead of the unconditional modal. Without this, autonomous
+    // wake turns modal-storm on the parent merely PAGING its child's own
+    // report (read_tool_result_chunk), and forceModal even voids
+    // "allow always". Reads mutate nothing; every write/shell/network/meta
+    // call and every remote one-shot stays force-modal, and
+    // deriveApprovalIsReadOnly stays pinned false so an ask from this lane
+    // still cannot take the §S4 read shortcut.
     if ((approvalReasonPrefix || requiresRemoteLocalOneShot) && permissionResult.decision !== "deny") {
-      permissionResult = {
+      const reviewerLaneEligible =
+        !requiresRemoteLocalOneShot &&
+        source === "builtin" &&
+        invocationCategory === "read" &&
+        invocationPermissionContext.headless !== true &&
+        services.permissionManager?.getInteractiveAutoApprove() !== "off";
+      let reviewerLaneResult: PermissionCheckResult | null = null;
+      if (reviewerLaneEligible) {
+        reviewerLaneResult = await dispatchReviewerForInteractiveAutoImpl(
+          services.permissionManager,
+          toolUse.name,
+          source,
+          invocationCategory,
+          tool.pathFields ?? [],
+          finalInput,
+          invocationAllowedScope.directories,
+          sensitivePathPattern ? [sensitivePathPattern] : [],
+          invocationPermissionContext,
+          evaluationContext,
+          sandboxAttestation,
+          callbacks,
+          meta,
+          approvalPurpose,
+          hostShellExecutionPlan,
+          abortSignal,
+          auditInput,
+        );
+        if (abortSignal?.aborted) {
+          return withHostShellExecutionPlan(
+            await returnUserAbort(abortDeps(finalInput)),
+          );
+        }
+      }
+      permissionResult = reviewerLaneResult ?? {
         ...permissionResult,
         decision: "ask",
         forceModal: true,

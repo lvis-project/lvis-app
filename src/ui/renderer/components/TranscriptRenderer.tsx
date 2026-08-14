@@ -29,6 +29,8 @@ import {
   type NativeContextMenuHandlers,
 } from "../hooks/use-native-context-menu.js";
 
+type PermissionReviewEntry = Extract<ChatEntry, { kind: "permission_review" }>;
+
 /**
  * Per-turn provider-reported usage summary, keyed by turn-start entry index.
  * Built by the caller (from `turn_summary` entries) and consumed here to feed
@@ -197,6 +199,23 @@ export function TranscriptRenderer({
 
   // Use entries (sliced in view-mode, full list otherwise for the main source).
   const activeEntries = entries;
+
+  // A permission review belongs to one tool call, so it renders ON that tool's
+  // row (ToolGroupCard) whenever the row exists — main chat and the sub-agent
+  // panel both come through here, so both surfaces show the same thing. A
+  // standalone card is left only for verdicts with no row: a review still in
+  // flight before tool_start, a pending approval, or a tool that never ran.
+  const permissionReviewsByToolUseId = new Map<string, PermissionReviewEntry>();
+  const toolUseIdsWithRow = new Set<string>();
+  for (const candidate of activeEntries) {
+    if (candidate.kind === "permission_review") {
+      permissionReviewsByToolUseId.set(candidate.toolUseId, candidate);
+    } else if (candidate.kind === "tool_group") {
+      for (const tool of candidate.tools) toolUseIdsWithRow.add(tool.toolUseId);
+    }
+  }
+  const rendersOnToolRow = (candidate: PermissionReviewEntry): boolean =>
+    toolUseIdsWithRow.has(candidate.toolUseId);
 
   const { lastTurnStartIdx, entryClassMap, finalTurnStartMap, entryTurnStartMap } =
     classifyTurnEntries(activeEntries, streaming);
@@ -461,10 +480,12 @@ export function TranscriptRenderer({
               groupHasPermissionReview = true;
             }
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
-            groupEntries.push({
-              idx: i,
-              node: <PermissionReviewStatusCard key={`permission-review-${e.toolUseId}`} entry={e} />,
-            });
+            if (!rendersOnToolRow(e)) {
+              groupEntries.push({
+                idx: i,
+                node: <PermissionReviewStatusCard key={`permission-review-${e.toolUseId}`} entry={e} />,
+              });
+            }
           } else {
             break;
           }
@@ -473,7 +494,14 @@ export function TranscriptRenderer({
             groupRevisions.push(entryRenderRevision({ entry: e, idx: i, searchHighlight, starred: false }));
             groupEntries.push({
               idx: i,
-              node: <ToolGroupCard key={e.groupId} group={e} sessionId={currentSessionId} />,
+              node: (
+                <ToolGroupCard
+                  key={e.groupId}
+                  group={e}
+                  sessionId={currentSessionId}
+                  permissionReviews={permissionReviewsByToolUseId}
+                />
+              ),
             });
           } else {
             break;
@@ -555,9 +583,18 @@ export function TranscriptRenderer({
       if (entry.kind === "reasoning") {
         rendered.push(<ReasoningCard key={idx} entry={entry} />);
       } else if (entry.kind === "permission_review") {
-        rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
+        if (!rendersOnToolRow(entry)) {
+          rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
+        }
       } else if (entry.kind === "tool_group") {
-        rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
+        rendered.push(
+          <ToolGroupCard
+            key={entry.groupId}
+            group={entry}
+            sessionId={currentSessionId}
+            permissionReviews={permissionReviewsByToolUseId}
+          />,
+        );
       } else if (entry.kind === "assistant") {
         rendered.push(
           <div key={idx} data-chat-entry-index={idx} className={`min-w-0 w-full max-w-full overflow-x-hidden rounded-lg${ringCls ? ` ${ringCls}` : ""}`}>
@@ -623,9 +660,18 @@ export function TranscriptRenderer({
     if (entry.kind === "reasoning") {
       rendered.push(<ReasoningCard key={idx} entry={entry} />);
     } else if (entry.kind === "permission_review") {
-      rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
+      if (!rendersOnToolRow(entry)) {
+        rendered.push(<PermissionReviewStatusCard key={`permission-review-${entry.toolUseId}`} entry={entry} />);
+      }
     } else if (entry.kind === "tool_group") {
-      rendered.push(<ToolGroupCard key={entry.groupId} group={entry} sessionId={currentSessionId} />);
+      rendered.push(
+        <ToolGroupCard
+          key={entry.groupId}
+          group={entry}
+          sessionId={currentSessionId}
+          permissionReviews={permissionReviewsByToolUseId}
+        />,
+      );
     }
     i++;
   }

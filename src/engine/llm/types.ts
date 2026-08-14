@@ -60,6 +60,16 @@ export interface MessageMeta {
     mcpServerId?: string;
     uiPayload?: import("../../mcp/types.js").McpUiPayload;
   };
+  /**
+   * Final permission review verdict for the tool call this result answers.
+   * Carried on the tool_result message so a reloaded transcript shows the same
+   * verdict on the same tool row that the live stream showed.
+   */
+  permissionReview?: {
+    status: import("../../shared/permission-review-status.js").PermissionReviewStatus;
+    verdictLevel?: import("../../shared/permission-review-status.js").PermissionReviewRiskLevel;
+    reason?: string;
+  };
 
 
 

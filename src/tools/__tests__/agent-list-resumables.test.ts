@@ -62,13 +62,19 @@ describe("agent_list existing sub-agents", () => {
     expect(payload.existingSubAgentsGuidance).toContain("resumeId");
   });
 
-  it("treats an unrecorded taskState as resumable — died before writing one", async () => {
+  it("advertises only what the runner's resume gate accepts — INPUT_REQUIRED", async () => {
+    // The runner's resumeWithPolicy rejects everything but INPUT_REQUIRED, so
+    // advertising SUBMITTED/WORKING/unrecorded as resumable sends the model
+    // into a guided retry loop against a permanent rejection. They stay
+    // listed (the model benefits from knowing they existed) but non-resumable.
     const tool = makeTool([
       { spawnId: "s3", childSessionId: "sub-aaaa-3333", title: "t", modifiedAt: new Date() },
+      { spawnId: "s4", childSessionId: "sub-aaaa-4444", title: "t", modifiedAt: new Date(), taskState: A2ATaskState.WORKING },
+      { spawnId: "s5", childSessionId: "sub-aaaa-5555", title: "t", modifiedAt: new Date(), taskState: A2ATaskState.SUBMITTED },
     ]);
     const payload = JSON.parse((await tool.execute({}, ctx)).output);
-    expect(payload.existingSubAgents[0].resumable).toBe(true);
-    expect(payload.existingSubAgents[0].taskState).toBe("unrecorded");
+    expect(payload.existingSubAgents.map((e: { taskState: string; resumable: boolean }) => [e.taskState, e.resumable]))
+      .toEqual([["unrecorded", false], [A2ATaskState.WORKING, false], [A2ATaskState.SUBMITTED, false]]);
   });
 
   it("omits the section entirely when the conversation has no sub-agents", async () => {

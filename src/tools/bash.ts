@@ -65,12 +65,19 @@ import { backgroundShellManager } from "./background-shell-manager.js";
 export const BashToolInputSchema = z.object({
   command: z.string().min(1).describe("Shell command to execute"),
   cwd: z.string().optional().describe("Working directory override"),
+  // Optional-but-defaulted and strictly positive: a command always has a
+  // deadline, so nothing waits forever. No upper bound — a timeout is a clean,
+  // retryable error whose retry exists precisely to name a LARGER budget.
   timeoutSeconds: z
     .number()
     .int()
     .min(1)
-    .max(TOOL_TIMEOUT_POLICY.shellMaxMs / 1000)
-    .default(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000),
+    .default(TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000)
+    .describe(
+      "Seconds to wait before the command is killed. Positive integer; defaults to " +
+        `${TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000}. Start with the default and only pass a ` +
+        "larger value when a previous call timed out.",
+    ),
   run_in_background: z
     .boolean()
     .optional()
@@ -625,7 +632,13 @@ function formatTimeoutOutput(
   command: string,
   timeoutSeconds: number,
 ): string {
-  const parts = [`Command timed out after ${timeoutSeconds} seconds.`];
+  // Expiry is retryable, and saying so is what makes the unbounded
+  // `timeoutSeconds` usable: the caller escalates the budget instead of
+  // treating the timeout as a dead end.
+  const parts = [
+    `Command timed out after ${timeoutSeconds} seconds. Retry with a larger ` +
+      "`timeoutSeconds` if the command legitimately needs longer.",
+  ];
   if (partial !== "(no output)") {
     parts.push("", "Partial output:", partial);
   }
