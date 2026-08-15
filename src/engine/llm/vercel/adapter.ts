@@ -34,6 +34,7 @@ import { TOOL_SEARCH_TOOL_NAME } from "../../../tools/registry.js";
 import type { MarketplaceInstalledProviderPreset } from "../../../shared/marketplace-package-assets.js";
 import { isGuardedInsecureCredentialedModelProviderFetch } from "../marketplace-provider-fetch.js";
 import { normalizeOutputTokenLimit } from "../output-token-limit.js";
+import { toGrammarSafeToolSchemas } from "../grammar-safe-tool-schema.js";
 
 /** Vendor slot recognised by VercelUnifiedProvider. */
 export type VercelVendor = LLMVendor;
@@ -752,8 +753,15 @@ function restoreNonTextStreamEventFromOpenAIResponses(event: StreamEvent): Strea
 }
 
 function buildTools(
-  schemas: ToolSchema[] | undefined,
+  rawSchemas: ToolSchema[] | undefined,
 ): Record<string, ReturnType<typeof tool>> | undefined {
+  // Grammar-compiling backends reject the WHOLE request when any one tool
+  // carries a `pattern` shorthand they cannot translate, so the expansion runs
+  // here — the single place every vendor's tool payload is assembled — rather
+  // than behind a vendor branch that could drift. It is an identity on the
+  // regex language and returns the same reference when nothing needed
+  // rewriting, so unaffected vendors keep byte-identical payloads.
+  const schemas = toGrammarSafeToolSchemas(rawSchemas);
   if (!schemas || schemas.length === 0) return undefined;
   const out: Record<string, ReturnType<typeof tool>> = {};
   for (const s of schemas) {
