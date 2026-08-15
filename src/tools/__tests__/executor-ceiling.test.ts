@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveEffectiveCeilingMs, runWithCeiling } from "../executor-ceiling.js";
-import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
+import {
+  MAX_TIMER_DELAY_MS,
+  TOOL_TIMEOUT_POLICY,
+  resolveSubAgentCeilingMs,
+} from "../../shared/tool-timeout-policy.js";
 
 describe("resolveEffectiveCeilingMs — per-invocation ceiling", () => {
   const bash = { name: "bash", source: "builtin", category: "shell" } as const;
@@ -32,6 +36,51 @@ describe("resolveEffectiveCeilingMs — per-invocation ceiling", () => {
         {},
       ),
     ).toBe(1_800_000);
+  });
+
+  it("clamps a scaled sub-agent ceiling to the largest delay setTimeout can hold", () => {
+    // A `subAgentMaxRounds` of 300_000 scales to ~3.0e9ms. That is past the
+    // signed-32-bit delay `setTimeout` stores, where Node substitutes 1ms —
+    // so WITHOUT the clamp this ceiling fires ~immediately and every spawn
+    // aborts on arrival. The round budget has no maximum by design, so the
+    // clamp is what keeps an oversized budget a long deadline rather than none.
+    const hugeBudget = {
+      name: "agent_spawn",
+      source: "builtin",
+      category: "meta",
+      resolveHostCeilingMs: () => resolveSubAgentCeilingMs(300_000),
+    } as const;
+    expect(resolveSubAgentCeilingMs(300_000)).toBeGreaterThan(MAX_TIMER_DELAY_MS);
+    expect(resolveEffectiveCeilingMs(hugeBudget, {})).toBe(MAX_TIMER_DELAY_MS);
+  });
+
+  it("clamps an oversized shell timeoutSeconds to the same bound", () => {
+    // Same overflow on the other escalation path: `timeoutSeconds` is
+    // deliberately uncapped so a retry can name a larger budget, and above
+    // ~2_147_474s the derived ceiling crosses the 32-bit delay.
+    expect(
+      resolveEffectiveCeilingMs(bash, { command: "sleep 1", timeoutSeconds: 3_000_000 }),
+    ).toBe(MAX_TIMER_DELAY_MS);
+  });
+
+  it("arms a real timer at the clamped ceiling instead of firing after 1ms", async () => {
+    // The behavioural half: an unclamped 3.0e9 delay would resolve this race
+    // via the ceiling almost immediately. The clamped ceiling lets the task win.
+    vi.useRealTimers();
+    const ceiling = resolveEffectiveCeilingMs(bash, {
+      command: "sleep 1",
+      timeoutSeconds: 3_000_000,
+    });
+    const outcome = await runWithCeiling(
+      async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return "finished";
+      },
+      ceiling,
+      undefined,
+      "long-budget-tool",
+    );
+    expect(outcome).toEqual({ ok: true, value: "finished" });
   });
 
   it("a non-builtin tool cannot raise its own ceiling by declaring timeoutSeconds", () => {

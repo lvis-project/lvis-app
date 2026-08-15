@@ -347,6 +347,40 @@ describe("parent adjudication — the answer", () => {
     expect(adjudicator.options[0]?.timeoutMs).toBe(30_000);
     expect(adjudicator.options[0]?.maxPerChildRun).toBe(200);
   });
+
+  it("tells the parent when a sibling's message is what prompted the call", async () => {
+    // The A2A lane force-asks precisely because a sibling's text is not
+    // something the receiver agreed to act on. Reaching the parent without
+    // that fact makes the force-ask indistinguishable from an ordinary one,
+    // and the parent judges "does this serve the task I gave it?" blind to
+    // the third agent that caused it.
+    const adjudicator = new ScriptedParentAdjudicator({
+      outcome: "allow-once",
+      reason: "in task",
+    });
+    const { gate } = makeGate(adjudicator);
+
+    await gate.requestAndWait(
+      makeChildRequest({ approvalReasonPrefix: "[Sub-Agent: researcher]" }),
+    );
+
+    const evidence = adjudicator.seen[0] as ParentAdjudicationEvidence;
+    expect(evidence.a2aInfluenceLabel).toBe("[Sub-Agent: researcher]");
+  });
+
+  it("omits the influence label when no cross-agent message was in play", async () => {
+    const adjudicator = new ScriptedParentAdjudicator({
+      outcome: "allow-once",
+      reason: "in task",
+    });
+    const { gate } = makeGate(adjudicator);
+
+    await gate.requestAndWait(makeChildRequest());
+
+    const evidence = adjudicator.seen[0] as ParentAdjudicationEvidence;
+    expect(evidence.a2aInfluenceLabel).toBeUndefined();
+    expect(Object.keys(evidence)).not.toContain("a2aInfluenceLabel");
+  });
 });
 
 describe("parent adjudication — what stays with the user", () => {

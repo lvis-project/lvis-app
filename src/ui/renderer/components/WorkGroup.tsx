@@ -22,7 +22,14 @@ interface WorkGroupProps {
    * not rerender just because the active group changed.
    */
   revision: string;
-  /** Keep transient status surfaces visible while the owning event is still within its dwell window. */
+  /**
+   * Hold the group open regardless of its own collapse state. Two callers set
+   * it: a read-only companion surface that wants historical content visible on
+   * selection (the sub-agent side panel), and a group containing a permission
+   * review — where a collapsed group would be the user's only view of a
+   * decision made without them. Internal `open` state still tracks streaming
+   * underneath, so the group collapses normally once this is withdrawn.
+   */
   forceOpen?: boolean;
 }
 

@@ -17,6 +17,7 @@ vi.mock("electron", () => ({
 }));
 
 import { SettingsService, type SystemSettings } from "../settings-store.js";
+import { DEFAULT_SETTINGS } from "../settings-defaults.js";
 import {
   LOG_RETENTION_DAYS,
   LOG_RETENTION_MIN_DAYS,
@@ -2315,6 +2316,70 @@ describe("SettingsService diagnostics (#1499 E2)", () => {
       includeCrashDumps: false,
       logRetentionDays: LOG_RETENTION_DAYS,
     });
+  });
+});
+
+describe("SettingsService chat normalization", () => {
+  let userDataPath: string;
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-chat-"));
+  });
+  afterEach(async () => {
+    await cleanupTmpDir(userDataPath);
+  });
+
+  it("floors a fractional sub-agent round budget and drops mistyped fields", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({
+      chat: {
+        ...s.get("chat"),
+        subAgentMaxRounds: 12.7,
+        autoCompact: "yes" as never,
+        systemPrompt: 42 as never,
+      },
+    });
+    const chat = s.get("chat");
+    expect(chat.subAgentMaxRounds).toBe(12);
+    // Mistyped values are dropped, so the prior (default) value stands.
+    expect(chat.autoCompact).toBe(DEFAULT_SETTINGS.chat.autoCompact);
+    expect(chat.systemPrompt).toBe(DEFAULT_SETTINGS.chat.systemPrompt);
+  });
+
+  it("raises a non-positive round budget to the runnable minimum", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ chat: { ...s.get("chat"), subAgentMaxRounds: 0 } });
+    expect(s.get("chat").subAgentMaxRounds).toBe(1);
+    await s.patch({ chat: { ...s.get("chat"), subAgentMaxRounds: -5 } });
+    expect(s.get("chat").subAgentMaxRounds).toBe(1);
+  });
+
+  it("keeps a very large round budget — the budget has no upper clamp", async () => {
+    // Deliberate: an absolute ceiling above the configured budget can only
+    // surface as an agent that stops mid-task. The 32-bit timer bound this
+    // could once overflow is enforced where the timer is armed instead.
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ chat: { ...s.get("chat"), subAgentMaxRounds: 300_000 } });
+    expect(s.get("chat").subAgentMaxRounds).toBe(300_000);
+  });
+
+  it("corrupt on-disk chat falls back to defaults", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        chat: { subAgentMaxRounds: "many", autoCompact: 1, systemPrompt: [] },
+      }),
+      "utf-8",
+    );
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("chat")).toEqual(DEFAULT_SETTINGS.chat);
+  });
+
+  it("rejects a non-finite round budget rather than persisting NaN", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ chat: { ...s.get("chat"), subAgentMaxRounds: Number.NaN } });
+    expect(s.get("chat").subAgentMaxRounds).toBe(
+      DEFAULT_SETTINGS.chat.subAgentMaxRounds,
+    );
   });
 });
 
