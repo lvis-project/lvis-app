@@ -31,6 +31,36 @@ import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../shared/subagen
 import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { resolveSubAgentCeilingMs } from "../shared/tool-timeout-policy.js";
 import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-rounds.js";
+import { isDeterministicProviderRequestRejection } from "../engine/llm/error-classifier.js";
+
+/**
+ * Guidance for a resume that WAS authorized and did run, then failed.
+ *
+ * This population used to get one text: "retry the SAME resumeId, transient
+ * provider errors clear on retry". That is true only for failures whose cause
+ * can change between attempts. When the provider REFUSED the request — a tool
+ * schema its grammar compiler cannot translate, a strict-mode schema rejection
+ * — the next attempt sends the same frozen tool scope and gets the same
+ * refusal, so the retry text drives the parent around a loop that can never
+ * exit.
+ *
+ * It is deliberately NOT modelled as a `resumeRefusal` value. That field means
+ * "the runner refused before spending a turn", and it carries the promise that
+ * the host made the decision. Here the host authorized the resume, the turn
+ * ran, and a REMOTE system rejected the payload — a different fact that must
+ * not be laundered through a host-refusal discriminant. So the caller still
+ * gets `resumeId` (the child is intact and becomes resumable again once the
+ * model, provider, or tool scope changes) plus an explicit marker that the
+ * cause is deterministic.
+ */
+function resumeRanGuidance(error: string): Record<string, unknown> {
+  return isDeterministicProviderRequestRejection(error)
+    ? {
+        resumeDeterministicFailure: true,
+        resumeGuidance: t("be_agentSpawn.resumeProviderRejectedGuidance"),
+      }
+    : { resumeGuidance: t("be_agentSpawn.resumeRetryGuidance") };
+}
 
 
 /**
@@ -474,6 +504,11 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
           // collide — the previous shape spread two independent booleans into
           // the same `resumeGuidance` key and relied on spread ORDER to pick a
           // winner if both were ever set.
+          //
+          // `resumeRefusal` absent does NOT by itself mean transient: it means
+          // the resume was authorized and actually ran, and the turn then died.
+          // `resumeRanGuidance` splits that population on the only property
+          // that decides whether retrying helps — see its doc comment.
           const resumeFields = ((): Record<string, unknown> => {
             switch (result.resumeRefusal) {
               case "exhausted":
@@ -489,10 +524,7 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
               case undefined:
                 return resumeId === undefined
                   ? {}
-                  : {
-                      resumeId,
-                      resumeGuidance: t("be_agentSpawn.resumeRetryGuidance"),
-                    };
+                  : { resumeId, ...resumeRanGuidance(result.error ?? result.summary) };
             }
           })();
           return {
@@ -538,10 +570,10 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
             error: message,
             taskState,
             // A throw never marks the resume chain exhausted, so a resume that
-            // died here (provider error, transport) is still continuable.
-            ...(resumeId
-              ? { resumeId, resumeGuidance: t("be_agentSpawn.resumeRetryGuidance") }
-              : {}),
+            // died here (provider error, transport) is still continuable — but
+            // only retryable when the provider did not refuse the request
+            // itself, which is what `resumeRanGuidance` decides.
+            ...(resumeId ? { resumeId, ...resumeRanGuidance(message) } : {}),
           }),
           isError: true,
         };

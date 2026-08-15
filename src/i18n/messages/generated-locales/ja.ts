@@ -233,6 +233,8 @@ export const jaMessages: Record<string, string> = {
   "be_agentSpawn.resumeRetryGuidance": "このサブエージェントはまだ再開可能です — 今回の失敗で履歴は失われていません。同じ resumeId で agent_spawn を再試行してください（一時的なプロバイダーエラーは再試行で解消することがほとんどです）。この作業のために新しいエージェントを起動しないでください: 中断されたサブエージェントが積み上げたものをすべて破棄することになります。",
   "be_agentSpawn.resumeExhaustedGuidance": "このサブエージェントは累積ラウンド上限を使い切っており、二度と再開できません。この resumeId を再試行しないでください。最後の要約を読み、残りの手順を自分で、またはより範囲を絞った新しいサブエージェントで仕上げ、元のエージェントが中断されたことをユーザーに伝えてください。",
   "be_agentSpawn.resumeInvalidGuidance": "この resumeId は二度と再開できません — 拒否理由が構造的（タスク状態・所有権・永続メタデータの不一致）であるため、同じ resumeId の再試行は毎回同一の失敗になります。再試行しないでください。作業がまだ必要なら新しい sub-agent を起動し、元のエージェントを継続できなかったことをユーザーに伝えてください。",
+  "be_agentSpawn.resumeProviderRejectedGuidance":
+    "プロバイダーがこのリクエスト自体を拒否しました — 一時的な障害ではありません。プロバイダーは生成前にリクエストを検証するため、同一のリクエストは毎回同じように拒否されます。同じ resumeId での再試行は抜け出せないループになります。サブエージェントの履歴は保持されており再開も可能ですが、リクエストが変わってからです: モデルやプロバイダーを切り替えるか、ツール範囲をより狭めた新しいサブエージェントで作業を続けてください。黙って再試行せず、プロバイダーのエラー本文をユーザーに報告してください。",
   "be_agentSpawn.statusRestoredHint": "このプロセスに実行中の run はありませんが、この会話の sub-agent が {count} 件、再起動後も残っています。run 一覧が空でも作業が終わったわけではありません — agent_list を呼ぶと resumeId と状態まで確認できます。",
   "be_agentSpawn.propAgentNameDescription": "オプション: ~/.lvis/agents/ で定義されたエージェント プロファイル名。指定すると、そのプロファイル本体とデフォルトのsourceToolsが使用されます。",
   "be_agentSpawn.propInstructionsDescription": "サブエージェントが実行するタスク - システムとユーザーのプロンプトを組み合わせたもの。",
