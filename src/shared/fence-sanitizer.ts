@@ -9,6 +9,8 @@
  *     attached to their own turn (the turn stays theirs; only the body is untrusted)
  *   · `<lvis-preference-source>` — a memory/profile source used to refresh preferences
  *   · `<lvis-memory-consolidation-source>` / `<lvis-long-term-memory-overview>` — derived-memory inputs and prompt context
+ *   · `<lvis-parent-directive>` — a parent agent's mid-run directive to its own sub-agent
+ *     (the host label naming the parent sits OUTSIDE; the parent's words are the body)
  *
  * The fence IS the labelling mechanism, so a body that can emit its own closing tag
  * defeats it: everything the author writes after that tag appears, to the model, to sit
@@ -33,6 +35,7 @@ export type FenceTag =
   | "lvis-preference-source"
   | "lvis-memory-consolidation-source"
   | "lvis-long-term-memory-overview"
+  | "lvis-parent-directive"
   | "mcp-resource";
 
 /**
