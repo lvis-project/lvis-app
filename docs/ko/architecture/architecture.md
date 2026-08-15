@@ -1944,7 +1944,7 @@ Layer 0–8 의 permission policy 는 _어떤 도구 호출을 허용/거부_ �
   의존하므로, 해당 `Tool.workerId` 가 host-owned `spawnWorker` 경로로
   ASRT-wrapped 상태일 때만 허용된다. macOS/Linux plugin workers 는
   ASRT-wrapped UDS path 를 쓰고, Windows plugin workers 는 UDS 대신 TCP
-  control channel 을 유지하되 ASRT 0.0.66 의 공개
+  control channel 을 유지하되 ASRT 0.0.73 의 공개
   `grantWindowsAcl`/`revokeWindowsAcl` primitive 를 worker 별 holder PID 로
   적용한 뒤 srt-win wrapped command 로 실행한다. ordinary plugin
   tools/degraded/off/egress-only synthetic substrate 에서는 known-safe
@@ -1960,7 +1960,7 @@ Layer 0–8 의 permission policy 는 _어떤 도구 호출을 허용/거부_ �
   activation 성공/degrade 율 모니터링용. **Rollback**: Settings → 권한 'OS 도구
   샌드박스' 토글(per-host opt-out) + `hostClassifiesRisk` 토글(relaxation off).
 - **Windows (srt-win)**: 동일 gate 에 합류한다 (`LVIS_SANDBOX_WINDOWS` 별도
-  opt-in 제거). ASRT 0.0.66 srt-win 은 dedicated `srt-sandbox` user ACL backend
+  opt-in 제거). ASRT 0.0.73 srt-win 은 dedicated `srt-sandbox` user ACL backend
   로 filesystem rules 를 적용하고 WFP + loopback proxy 로 egress 를 제한하는
   **filesystem+network partial** 샌드박스다. process 격리는 제공하지 않는다.
   srt-win.exe 는 **번들** (asarUnpack vendor/**) 이라 **다운로드가 없다** —

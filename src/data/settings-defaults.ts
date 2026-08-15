@@ -178,10 +178,17 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // opt-in work out of the box, BUT default-on win32 is DEFERRED: Windows
     // srt-win is only PARTIALLY confined (filesystem + network, no PROCESS
     // isolation), and the shell-containment gate (`isActiveSandboxShellContained`,
-    // used by bash.ts / powershell.ts) requires full fs+process confinement — so
-    // with the sandbox ACTIVE, bash/powershell refuse to run. Flip win32 to `true`
-    // only after the shell tools handle the Windows partial case (run unsandboxed
-    // + pre-exec ask, not error). `linux` stays OFF until C/D-series QA is green.
+    // used by bash.ts / powershell.ts) requires full fs+process confinement.
+    //
+    // The shell tools DO handle that partial case now: `buildHostShellExecutionPlan`
+    // routes win32+ASRT to an honest plain host child (`fallbackReason:
+    // "windows-partial-shell-acl-unsafe"`) authorized per invocation by a one-shot
+    // host permit, rather than erroring. So default-on would run; it is withheld
+    // for what it would COST, not what it would break — every bash/powershell call
+    // would take an allow-once approval while gaining no shell isolation, and the
+    // win32 substrate has no live QA evidence (the Windows CI job exercises the
+    // logic, not a provisioned srt-win machine). Flip win32 to `true` after live
+    // Windows QA. `linux` stays OFF until C/D-series QA is green.
     //
     // Computed from `process.platform` at default-construction; stable per-process.
     //

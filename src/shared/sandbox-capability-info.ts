@@ -133,6 +133,13 @@ export function sandboxConfinementForPlatform(
     // `srt-sandbox` user ACL backend and confines egress with WFP + loopback
     // proxy routing. Process isolation is still unavailable on Windows, so the
     // substrate remains partial.
+    //
+    // ASRT 0.0.73 hardened the filesystem half: `srt-win install` now also
+    // deny-stamps the stock world-writable system directories (ProgramData,
+    // PUBLIC, %SystemRoot%\Temp/Tasks, System32\spool\PRINTERS, the FxsTmp /
+    // com\dmp pairs, …) for the sandbox user. Those were ambient write targets
+    // no per-exec `--deny-write` ever covered, so `filesystem: true` here is a
+    // stronger claim than it was — while `process: false` is unchanged.
     return { filesystem: true, process: false, network: true };
   }
   // Generic partial profile for any future non-Windows partial backend:
