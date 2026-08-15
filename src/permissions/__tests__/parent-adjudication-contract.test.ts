@@ -54,7 +54,14 @@ describe("reviewer.parentAdjudication settings block", () => {
     const p = writeSettings(dir, BASE_REVIEWER);
 
     expect(readPermissionSettings(p).permissions.reviewer.parentAdjudication)
-      .toEqual({ maxVerdict: "medium", timeoutMs: 30_000, maxPerChildRun: 200 });
+      .toEqual({
+        maxVerdict: "medium",
+        timeoutMs: 30_000,
+        maxPerChildRun: 200,
+        includeParentContextTurns: 0,
+        backgroundEscalation: "deferred",
+        model: "reviewer",
+      });
   });
 
   it("reads a well-formed block verbatim", () => {
@@ -69,7 +76,14 @@ describe("reviewer.parentAdjudication settings block", () => {
     });
 
     expect(readPermissionSettings(p).permissions.reviewer.parentAdjudication)
-      .toEqual({ maxVerdict: "low", timeoutMs: 5_000, maxPerChildRun: 12 });
+      .toEqual({
+        maxVerdict: "low",
+        timeoutMs: 5_000,
+        maxPerChildRun: 12,
+        includeParentContextTurns: 0,
+        backgroundEscalation: "deferred",
+        model: "reviewer",
+      });
   });
 
   it("refuses to raise the ceiling to high, however the file spells it", () => {

@@ -75,6 +75,7 @@ import {
   createApprovalGate,
 } from "./boot/conversation.js";
 import { readPermissionSettings } from "./permissions/permission-settings-store.js";
+import { summarizeParentContextTurns } from "./permissions/parent-context-evidence.js";
 import { McpAppModelContextStore } from "./mcp/mcp-app-model-context.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
@@ -215,7 +216,13 @@ export async function bootstrap(
     // nothing to return, which the gate treats as it treats every other
     // failure of this lane — the ask escalates to the user.
     {
-      adjudicator: () => ctx.parentAdjudicator,
+      // Both adjudicators are replaced on every reviewer re-wire, so the
+      // policy's model source is resolved per ask here rather than captured —
+      // the reason this whole block is accessors.
+      adjudicator: (source) =>
+        source === "parent-session"
+          ? ctx.parentSessionAdjudicator
+          : ctx.parentAdjudicator,
       // The flag itself ships ON: `settings-defaults.ts` sets it, and the
       // settings service merges stored flags over those defaults, so both an
       // absent key and a non-boolean one resolve to the default rather than to
@@ -227,6 +234,19 @@ export async function bootstrap(
         settingsService.get("features")?.subAgentParentAdjudication ?? false,
       policy: () =>
         readPermissionSettings().permissions.reviewer.parentAdjudication,
+      // The parent conversation's recent turns, when the operator opted in.
+      // Read from the main session store the parent's own loop writes, and
+      // composed by the summariser — which is where the exclusion of
+      // child-authored entries, the bounds and the masking all live.
+      parentContext: (parentSessionId, maxTurns) =>
+        summarizeParentContextTurns(
+          memoryManager.loadSession(parentSessionId) ?? [],
+          maxTurns,
+        ),
+      // The queue a tier-3 escalation lands in when nobody is watching the
+      // run. Reached through the permission manager rather than captured: the
+      // queue instance is replaced on every reviewer re-wire.
+      deferredQueue: () => ctx.permissionManager?.getDeferredQueue() ?? null,
     },
   );
   ctx.approvalGate = approvalGate;

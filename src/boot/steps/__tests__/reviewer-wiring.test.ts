@@ -62,6 +62,9 @@ const PARENT_ADJUDICATION = {
   maxVerdict: "medium",
   timeoutMs: 30_000,
   maxPerChildRun: 200,
+  includeParentContextTurns: 0,
+  backgroundEscalation: "deferred",
+  model: "reviewer",
 } as const;
 
 describe("Permission policy P4 reviewer-wiring", () => {

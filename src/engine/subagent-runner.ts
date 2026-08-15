@@ -937,6 +937,12 @@ interface SubAgentApprovalProvenance {
   originSessionId: string;
   /** The parent-authored task, masked and truncated by the host. */
   spawnTaskSummary: string;
+  /**
+   * Whether the host started this run in the background — nobody is watching
+   * its turn, so an approval it raises would paint a dock for no one. The
+   * host's own execution posture, never anything the child model says.
+   */
+  background: boolean;
 }
 
 /**
@@ -957,6 +963,8 @@ function buildSubAgentApprovalProvenance(input: {
   /** The parent's OWN words. Absent means no caller vouched for any. */
   task: string | undefined;
   wireBound: boolean;
+  /** Host execution posture of the run; decides where a tier-3 ask goes. */
+  background: boolean;
 }): SubAgentApprovalProvenance | null {
   if (input.wireBound) return null;
   // A conversation id, not merely a truthy string. Host-orchestrated runs label
@@ -975,6 +983,7 @@ function buildSubAgentApprovalProvenance(input: {
     childSessionId: input.childSessionId,
     originSessionId: input.originSessionId,
     spawnTaskSummary,
+    background: input.background,
   };
 }
 
@@ -1051,6 +1060,7 @@ export function makeSubAgentApprovalAdapter(
               childTitle: title,
               originSessionId: provenance.originSessionId,
               spawnTaskSummary: provenance.spawnTaskSummary,
+              background: provenance.background,
             },
           }),
     });
@@ -2322,6 +2332,7 @@ export class SubAgentRunner {
             // charter and drops the task. A charter argues for every call.
             task: input.parentAuthoredTask,
             wireBound: executionPolicy !== undefined,
+            background: input.background === true,
           }),
         });
 
@@ -3506,6 +3517,7 @@ export class SubAgentRunner {
         // "which door" is an inference and `hasWireBinding` is the fact, and
         // the fact is what decides whether a remote peer wrote this framing.
         wireBound: executionPolicy !== undefined || hasWireBinding,
+        background,
       }),
       // Spawn passes this; resume used to omit it, so a re-hydrated child came
       // back WITHOUT the ability to reach its parent unless `agent_send` happened
