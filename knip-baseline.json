@@ -1635,11 +1635,6 @@
     {
       "type": "types",
       "file": "src/data/settings-store.ts",
-      "name": "ChatSettings"
-    },
-    {
-      "type": "types",
-      "file": "src/data/settings-store.ts",
       "name": "FontSizeScale"
     },
     {

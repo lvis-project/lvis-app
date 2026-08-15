@@ -46,7 +46,7 @@ const ENTRY_KEYS = new Set([
   "text",
 ]);
 
-export type ParentDirectiveAppendResult =
+type ParentDirectiveAppendResult =
   | { ok: true; entry: ParentDirectiveEntry }
   | { ok: false; reason: "pending-cap" };
 

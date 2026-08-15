@@ -62,6 +62,7 @@ import {
   normalizeA2ARemote,
   normalizeActiveChatRuntime,
   normalizeAppearance,
+  normalizeChat,
   normalizeDiagnostics,
   normalizeFeatureFlags,
   normalizeMarketplace,
@@ -788,7 +789,7 @@ export class SettingsService {
         nextMarketplace.installedProviderPresets,
       );
     }
-    if (partial.chat) this.settings.chat = { ...this.settings.chat, ...partial.chat };
+    if (partial.chat) this.settings.chat = normalizeChat({ ...this.settings.chat, ...partial.chat });
     if (partial.a2aRemote) this.settings.a2aRemote = normalizeA2ARemote({ ...this.settings.a2aRemote, ...partial.a2aRemote });
     if (partial.webSearch) this.settings.webSearch = { ...this.settings.webSearch, ...partial.webSearch };
     if (partial.marketplace) {
@@ -1384,7 +1385,7 @@ export class SettingsService {
 
       const result: AppSettings = {
         llm,
-        chat: { ...DEFAULT_SETTINGS.chat, ...parsed.chat },
+        chat: normalizeChat(parsed.chat),
         a2aRemote: normalizeA2ARemote(parsed.a2aRemote),
         webSearch: { ...DEFAULT_SETTINGS.webSearch, ...parsed.webSearch },
         marketplace,
