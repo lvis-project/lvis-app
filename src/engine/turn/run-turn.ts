@@ -952,5 +952,10 @@ export async function runTurn(
       );
     }
     await finalizeTurnState();
+    // Last statement of the turn, after `dropPendingGuidance` has settled every
+    // guidance disposition and after post-turn persistence. An observer that
+    // starts work here — the A2A bus drains pending child deliveries — must not
+    // interleave with this turn's own tail.
+    self.emitTurnSettled(effectiveSessionId);
   }
 }

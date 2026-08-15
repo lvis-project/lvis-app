@@ -435,6 +435,12 @@ export async function wireConversation(
         messageId,
       ),
   });
+  // The bus cannot observe "the parent turn just released the loop" from the
+  // inside. Without this subscription, a message stored mid-turn that never
+  // reached a round boundary waits for the user's next manual turn.
+  conversationLoop.onTurnSettled((sessionId) => {
+    subAgentMessageBus.notifyTurnSettled(sessionId);
+  });
   const agentMessageMailbox = new A2AAgentMessageMailbox(
     subAgentMessagingNamespace,
   );
