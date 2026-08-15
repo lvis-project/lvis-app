@@ -12,7 +12,12 @@ import type {
   ParentAdjudicationResult,
   ParentAdjudicator,
 } from "./parent-adjudicator.js";
-import type { ReviewerParentAdjudicationBlock } from "./permission-settings-store.js";
+import type { ParentContextTurn } from "./parent-context-evidence.js";
+import type {
+  ParentAdjudicationModelSource,
+  ReviewerParentAdjudicationBlock,
+} from "./permission-settings-store.js";
+import type { DeferredQueue } from "./reviewer/deferred-queue.js";
 import {
   resolveReviewerSandboxCapability,
   type SandboxCapability,
@@ -555,6 +560,15 @@ interface ChildAgentProvenance {
   originSessionId: string;
   /** Host truncation of the parent-authored spawn task. */
   spawnTaskSummary: string;
+  /**
+   * Whether the run executes in the background — the host's own fact about
+   * how it was started, never the child model's.
+   *
+   * Absent means foreground, which is the answer that keeps the pre-existing
+   * modal route: a run whose posture the host cannot establish is treated as
+   * one somebody is watching.
+   */
+  background?: boolean;
 }
 
 /**
@@ -590,6 +604,34 @@ function displaySafeChildTitle(title: string): string {
   );
 }
 
+/** Bound for the deferred queue's one-line description of a queued ask. */
+const DEFERRED_ESCALATION_SUMMARY_MAX = 1_000;
+
+/**
+ * The line the deferred-queue panel shows for a queued sub-agent escalation.
+ *
+ * Every part is host-owned: the cause is one of a closed set the gate itself
+ * assigns, the child title is masked and display-normalised, and the arguments
+ * go through the same bound-then-mask pass the evidence uses. The
+ * adjudicator's sentence is not here — see the caller.
+ */
+function deferredEscalationSummary(
+  request: ApprovalRequest,
+  notice: ParentEscalationNotice,
+  childProvenance: ChildAgentProvenance,
+): string {
+  let masked: string;
+  try {
+    masked = canonicalStringify(
+      maskArgsForDisplay(boundedEvidenceArgs(request.args), new Set<string>()),
+    );
+  } catch {
+    masked = "[unserializable input]";
+  }
+  const head = `[sub-agent escalation cause=${notice.cause} child=${displaySafeChildTitle(childProvenance.childTitle)}] `;
+  return `${head}${masked}`.slice(0, DEFERRED_ESCALATION_SUMMARY_MAX);
+}
+
 /**
  * Everything the gate needs to run tier 2, supplied by boot.
  *
@@ -601,12 +643,32 @@ function displaySafeChildTitle(title: string): string {
  * all — the chain is then exactly the two-tier one that shipped before it.
  */
 export interface ParentAdjudicationGateDeps {
-  /** The live adjudicator, re-read per ask. */
-  adjudicator: () => ParentAdjudicator;
+  /**
+   * The live adjudicator for the model source the policy names, re-read per
+   * ask. The source is passed rather than resolved here so one setting change
+   * moves the next ask onto the other model with nothing to re-wire.
+   */
+  adjudicator: (source: ParentAdjudicationModelSource) => ParentAdjudicator;
   /** The feature flag. False means the stage does not run at all. */
   isEnabled: () => boolean;
   /** The live tier-2 policy block. */
   policy: () => ReviewerParentAdjudicationBlock;
+  /**
+   * Recent parent-conversation turns for the evidence, when the policy asks
+   * for any. Absent — or throwing, or returning nothing — simply means the
+   * evidence carries no conversation block: this is context that can improve
+   * an answer, never a precondition for producing one.
+   */
+  parentContext?: (
+    parentSessionId: string,
+    maxTurns: number,
+  ) => readonly ParentContextTurn[];
+  /**
+   * The deferred-approval queue, for escalations raised by a run nobody is
+   * watching. Absent means every escalation paints a dock, which is the
+   * behaviour of the chain before this route existed.
+   */
+  deferredQueue?: () => DeferredQueue | null;
 }
 
 /**
@@ -644,6 +706,32 @@ function markParentAdjudicatedDecision(
 ): ApprovalDecision {
   parentAdjudicatedDecisions.set(decision, provenance);
   return decision;
+}
+
+/**
+ * Host-only provenance for an escalation that went to the deferred queue
+ * instead of to a dock. A `WeakMap` for the reason the one above it is: this
+ * is a fact about the exact object the gate created.
+ */
+const deferredEscalatedDecisions = new WeakMap<
+  ApprovalDecision,
+  DeferredEscalationProvenance
+>();
+
+/** What the child's turn is told about an ask that was queued, not shown. */
+export interface DeferredEscalationProvenance {
+  /** Why tier 2 gave up on answering it. */
+  cause: ParentEscalationNotice["cause"];
+  /** Queue entry the user will review. */
+  deferredId: string;
+}
+
+/** The queue entry behind a decision, or undefined if none was created. */
+export function deferredParentEscalationOf(
+  decision: ApprovalDecision | null | undefined,
+): DeferredEscalationProvenance | undefined {
+  if (decision === null || decision === undefined) return undefined;
+  return deferredEscalatedDecisions.get(decision);
 }
 
 /** How the tier-2 stage ended, for the one caller that runs it. */
@@ -1376,6 +1464,128 @@ export class ApprovalGate {
   }
 
   /**
+   * The evidence's optional parent-conversation block, or nothing.
+   *
+   * Nothing is the default and nothing is also every failure: the reader opens
+   * a transcript file, which is an external boundary, and a lane that could not
+   * read it still has a task summary and a verdict to judge with. The turns
+   * themselves are composed by the reader the host wired — bounding, masking
+   * and the exclusion of child-authored entries all live there, in one place,
+   * rather than at each of this method's would-be call sites.
+   */
+  private parentContextBlock(
+    policy: ReviewerParentAdjudicationBlock,
+    parentSessionId: string,
+  ): { parentContext?: readonly ParentContextTurn[] } {
+    const read = this.parentAdjudication?.parentContext;
+    if (read === undefined || policy.includeParentContextTurns <= 0) return {};
+    let turns: readonly ParentContextTurn[];
+    try {
+      turns = read(parentSessionId, policy.includeParentContextTurns);
+    } catch {
+      return {};
+    }
+    return turns.length === 0 ? {} : { parentContext: turns };
+  }
+
+  /**
+   * Route a tier-3 escalation raised by a run nobody is watching into the
+   * deferred queue, and answer the ask fail-closed.
+   *
+   * `null` means this ask is not one of those, and the caller paints the dock
+   * exactly as it did before — which is also what every failure of this route
+   * returns, because a queue that could not record the ask must not be the
+   * reason the user never sees it.
+   *
+   * What the queue entry can and cannot do afterwards is the point of routing
+   * here rather than waiting out a modal nobody will answer. The decision
+   * returned is a host denial: one-shot, no `rememberPattern`, no pending entry
+   * for a later answer to bind to. The entry itself is appended WITHOUT a
+   * `grant`, so the resolve path refuses `"approved"` for it — reviewing it
+   * later can record what the user thinks, and can never turn into permission
+   * for a call whose turn is over. A timeout on the queue is therefore not a
+   * thing that can happen: the denial has already happened.
+   */
+  private async deferParentEscalation(input: {
+    request: ApprovalRequest;
+    childProvenance: ChildAgentProvenance;
+    policy: ReviewerParentAdjudicationBlock;
+    notice: ParentEscalationNotice;
+    verdict: RiskVerdict;
+    auditFields: string;
+  }): Promise<ApprovalDecision | null> {
+    const { request, childProvenance, policy, notice } = input;
+    if (policy.backgroundEscalation !== "deferred") return null;
+    // Two host facts, either of which means the dock would be painted for
+    // nobody: the run itself is a background one, or the user armed the away
+    // answerer before leaving the desk. Neither is anything a child asserts.
+    const unattended =
+      childProvenance.background === true ||
+      this.awayAuthority.snapshot() !== null;
+    if (!unattended) return null;
+    const queue = this.parentAdjudication?.deferredQueue?.();
+    if (!queue) return null;
+    // A queue row states what the call was. Neither field is defaulted here —
+    // an entry that called an unknown source "builtin" or an unknown category
+    // "read" would be a record of a call that did not happen, and the honest
+    // answer for an ask the host cannot describe is the dock it would have
+    // painted anyway.
+    const { source, toolCategory } = request;
+    if (source === undefined || toolCategory === undefined) return null;
+
+    const sessionId = request.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID;
+    let deferredId: string;
+    try {
+      deferredId = await queue.append({
+        toolName: request.toolName,
+        source,
+        category: toolCategory,
+        // Host-composed and host-owned: the cause, the child's masked title and
+        // the masked arguments. The adjudicator's own sentence is deliberately
+        // absent — the queue panel has no way to attribute a model's words to
+        // the model, and this field is read as a description of the call. It is
+        // in the audit row below instead.
+        inputSummary: deferredEscalationSummary(request, notice, childProvenance),
+        ...(request.evaluationContext === undefined
+          ? {}
+          : { evaluationContext: request.evaluationContext }),
+        verdict: input.verdict,
+      });
+    } catch {
+      return null;
+    }
+
+    this.auditLogger?.log({
+      timestamp: new Date().toISOString(),
+      sessionId,
+      type: "approval",
+      output: `[approval:parent-escalation-deferred] ${request.id} ${input.auditFields} deferredId=${auditSafeText(deferredId)} child=${auditSafeText(childProvenance.childSessionId)} parent=${auditSafeText(childProvenance.originSessionId)} cause=${notice.cause} reason=${auditSafeText(notice.reason)} → deny-once`,
+    });
+    try {
+      this.notificationService?.fire({
+        kind: "approval",
+        title: t("be_approvalGate.notificationTitle"),
+        body: t("be_approvalGate.deferredEscalationBody", {
+          name: request.toolName,
+        }),
+        contextRef: { approvalId: request.id },
+        urgent: true,
+      });
+    } catch {
+      // A notification that failed must not un-record the queue entry.
+    }
+    const decision = markHostApprovalRejectedDecision({
+      requestId: request.id,
+      choice: "deny-once",
+    });
+    deferredEscalatedDecisions.set(decision, {
+      cause: notice.cause,
+      deferredId,
+    });
+    return decision;
+  }
+
+  /**
    * Await the parent's answer, but no longer than the turn behind it lasts.
    *
    * The adjudicator is handed the abort signal and a well-behaved provider
@@ -1385,10 +1595,11 @@ export class ApprovalGate {
    */
   private async adjudicateWithin(
     deps: ParentAdjudicationGateDeps,
+    modelSource: ParentAdjudicationModelSource,
     evidence: ParentAdjudicationEvidence,
     options: ParentAdjudicationOptions,
   ): Promise<ParentAdjudicationResult> {
-    const answer = deps.adjudicator().adjudicate(evidence, options);
+    const answer = deps.adjudicator(modelSource).adjudicate(evidence, options);
     const signal = options.abortSignal;
     if (signal === undefined) return answer;
     if (signal.aborted) {
@@ -1498,6 +1709,7 @@ export class ApprovalGate {
           childTitle: childProvenance.childTitle,
           spawnTaskSummary: childProvenance.spawnTaskSummary,
         },
+        ...this.parentContextBlock(policy, childProvenance.originSessionId),
       };
       if (detections.size > 0) {
         // The dock path writes this row when it masks a payload; a
@@ -1509,7 +1721,7 @@ export class ApprovalGate {
           `[approval:args-dlp-masked] ${request.id} toolName=${request.toolName} lane=parent-adjudication detections=${[...detections].join(",")}`,
         );
       }
-      result = await this.adjudicateWithin(deps, evidence, {
+      result = await this.adjudicateWithin(deps, policy.model, evidence, {
         parentSessionId: childProvenance.originSessionId,
         timeoutMs: policy.timeoutMs,
         maxPerChildRun: policy.maxPerChildRun,
@@ -2063,7 +2275,21 @@ export class ApprovalGate {
       // five-minute timeout.
       if (abortSignal?.aborted) return denyForAbortedTurn();
       if (stage.kind === "answered") return stage.decision;
-      if (stage.kind === "escalate") parentEscalation = stage.notice;
+      if (stage.kind === "escalate") {
+        // Tier 3, for a run nobody is watching. Returns null — and falls
+        // through to the dock below — whenever the route does not apply or
+        // could not record the ask.
+        const deferred = await this.deferParentEscalation({
+          request: fullReq,
+          childProvenance,
+          policy: parentLane.policy,
+          notice: stage.notice,
+          verdict: parentLane.verdict,
+          auditFields: auditFieldsFor(fullReq, executionPlanAudit),
+        });
+        if (deferred !== null) return deferred;
+        parentEscalation = stage.notice;
+      }
     }
 
     // Issue #260 — surface a system notification when an approval is about

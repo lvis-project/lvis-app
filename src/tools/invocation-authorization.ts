@@ -5,7 +5,10 @@ import type { ToolCategory, ToolSource, TrustLevel } from "./types.js";
 import {
   isTailnetControllerP1BlockedTool, type PermissionCheckResult,
 } from "../permissions/permission-manager.js";
-import { parentAdjudicationOf } from "../permissions/approval-gate.js";
+import {
+  deferredParentEscalationOf,
+  parentAdjudicationOf,
+} from "../permissions/approval-gate.js";
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
 import type { PermissionEvaluationContext } from "../permissions/evaluation-context.js";
 import type {
@@ -1574,15 +1577,24 @@ export async function authorizeToolInvocation(
           // A child told "the user denied this" would be told something untrue,
           // and would have no idea what to do differently. Its parent refused,
           // and said why — so say that, and say whose refusal it was.
+          //
+          // The third case is the one nobody refused: tier 3 reached a desk
+          // with nobody at it, so the host denied the call and queued it for
+          // review. A child that read that as a refusal would retry against a
+          // dock that is not going to appear.
           const msg =
             parentAnswer?.outcome === "deny"
               ? t("be_executor.approvalDeniedByParent", {
                   name: toolUse.name,
                   reason: parentAnswer.reason,
                 })
-              : t("be_executor.approvalDeniedByUser", {
-                  name: toolUse.name,
-                });
+              : deferredParentEscalationOf(decision) !== undefined
+                ? t("be_executor.approvalDeferredForReview", {
+                    name: toolUse.name,
+                  })
+                : t("be_executor.approvalDeniedByUser", {
+                    name: toolUse.name,
+                  });
           const durationMs = Date.now() - startTime;
           // finalInput matches the args the user actually saw + denied via
           // approvalRequest — never log stale pre-hook input here.

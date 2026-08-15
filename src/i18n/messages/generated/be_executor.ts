@@ -34,6 +34,8 @@ export const en = {
   "be_executor.approvalGateError": "[Approval error] Tool '{name}' — approval gate internal error: {error}",
   "be_executor.approvalDeniedByUser": "[Approval denied] Tool '{name}' — user denied execution.",
   "be_executor.approvalDeniedByParent": "[Approval denied] Tool '{name}' — the parent agent refused: {reason}",
+  "be_executor.approvalDeferredForReview":
+    "[Approval deferred] Tool '{name}' — nobody was at the desk, so this call was denied and queued for the user to review later. Do not retry it; report what you needed and why.",
   "be_executor.approvalGateMissing": "[Approval gate not connected] Tool '{name}' ({source}) — ask decision but no approval gate available, blocked. {reason}",
   "be_executor.hookBlockScript": "[Hook blocked] {reason}",
   "be_executor.rateLimitExceeded": "[Rate limit] Tool '{name}' (trust:{trust}) call frequency exceeded. Please try again in a moment.",
@@ -74,6 +76,8 @@ export const ko: Record<keyof typeof en, string> = {
   "be_executor.approvalGateError": "[승인 오류] 도구 '{name}' — 승인 게이트 내부 오류: {error}",
   "be_executor.approvalDeniedByUser": "[승인 거부] 도구 '{name}' — 사용자가 실행을 거부했습니다.",
   "be_executor.approvalDeniedByParent": "[승인 거부] 도구 '{name}' — 상위 에이전트가 거부했습니다: {reason}",
+  "be_executor.approvalDeferredForReview":
+    "[승인 보류] 도구 '{name}' — 자리에 아무도 없어 이 호출을 거부하고 사용자가 나중에 검토하도록 대기열에 넣었습니다. 재시도하지 말고, 무엇이 왜 필요했는지 보고하세요.",
   "be_executor.approvalGateMissing": "[승인 게이트 미연결] 도구 '{name}' ({source}) — ask 결정이지만 승인 게이트가 없어 차단. {reason}",
   "be_executor.hookBlockScript": "[Hook 차단] {reason}",
   "be_executor.rateLimitExceeded": "[속도 제한] 도구 '{name}' (trust:{trust}) 호출 빈도 초과. 잠시 후 다시 시도해주세요.",

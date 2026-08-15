@@ -22,7 +22,8 @@ import {
   canUseLlmVendorWithoutApiKey,
 } from "../../shared/llm-vendor-defaults.js";
 import { marketplaceProviderPresetSecretKey } from "../../shared/marketplace-package-assets.js";
-import { wireReviewerAgent } from "./reviewer-wiring.js";
+import { LlmReviewerProviderAdapter, wireReviewerAgent } from "./reviewer-wiring.js";
+import type { ParentAdjudicationTarget } from "../../permissions/parent-adjudicator.js";
 import {
   bindManifestIntegrityAudit,
   manifestIntegrityState,
@@ -148,11 +149,38 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
       ...(block.vertexLocation ? { vertexLocation: block.vertexLocation } : {}),
     };
   };
+  /**
+   * The provider/model a parent session's own chat loop runs on, for tier 2's
+   * `model: "parent-session"` option.
+   *
+   * Built from the same settings the loop's own provider construction reads —
+   * the active chat runtime, or the configured vendor block — rather than from
+   * a live loop object, so it answers for a parent session whether or not that
+   * loop is the one currently running in this process. Resolved per ask, and
+   * `null` whenever the chat provider is unconfigured, which escalates that ask
+   * to the user rather than quietly answering it on another model.
+   *
+   * The session id is accepted and not yet consulted: no session carries its
+   * own provider/model today, and this is the seam a per-session identity would
+   * arrive on rather than at the gate's call site.
+   */
+  const resolveParentSessionAdjudicationTarget = (
+    _parentSessionId: string,
+  ): ParentAdjudicationTarget | null => {
+    const identity = readActiveReviewerLlm();
+    const upstream = reviewerStreamProviderFor(identity.provider);
+    if (!upstream) return null;
+    return {
+      provider: new LlmReviewerProviderAdapter(upstream),
+      model: identity.model,
+    };
+  };
   const rewireReviewerAgent = (): void => {
     const reviewerResult = wireReviewerAgent({
       permissionManager,
       readActiveLlm: readActiveReviewerLlm,
       streamProviderFor: reviewerStreamProviderFor,
+      resolveParentSessionAdjudicationTarget,
       // Key inheritance — Foundry reads llm.apiKey.azure-foundry,
       // GCP playground reads llm.apiKey.gemini. Both use the same secret
       // store as the chat LLM providers so no new UI is required.
@@ -176,6 +204,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     // healed the reviewer, and every ask would escalate for a reason that had
     // stopped being true.
     ctx.parentAdjudicator = reviewerResult.parentAdjudicator;
+    ctx.parentSessionAdjudicator = reviewerResult.parentSessionAdjudicator;
     // A re-wire updates the runtime reviewer mode (notably the
     // llm-degraded-to-rule → llm heal driven by login or settings:update).
     // setReviewer itself does not broadcast, so an already-open PermissionsTab
