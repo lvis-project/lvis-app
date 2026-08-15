@@ -21,11 +21,23 @@ import {
   removeAllowedDirectoryPersist,
   readPermissionSettings,
   setReviewerSettingsPersist,
+  type ParentAdjudicationBackgroundEscalation,
+  type ParentAdjudicationMaxVerdict,
+  type ParentAdjudicationModelSource,
   type ReviewerFallbackOnError,
   type ReviewerInteractiveAutoApprove,
   type ReviewerMode,
+  type ReviewerParentAdjudicationBlock,
   type ReviewerSettingsBlock,
 } from "./permission-settings-store.js";
+import {
+  PARENT_ADJUDICATION_CONTEXT_TURNS_MAX,
+  PARENT_ADJUDICATION_CONTEXT_TURNS_MIN,
+  PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MAX,
+  PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MIN,
+  PARENT_ADJUDICATION_TIMEOUT_MS_MAX,
+  PARENT_ADJUDICATION_TIMEOUT_MS_MIN,
+} from "../shared/parent-adjudication-bounds.js";
 import {
   acceptHookTrust,
   disableHookTrust,
@@ -255,12 +267,19 @@ export type PermissionReviewerVerb =
   | "mode"
   | "fallback"
   | "interactive"
+  | "adjudication"
   | "show";
 
 export interface PermissionReviewerCommand {
   verb: PermissionReviewerVerb;
-  /** For mode/fallback/interactive: the new value. Empty string for `show`. */
+  /** For mode/fallback/interactive/adjudication: the new value. Empty string for `show`. */
   value: string;
+  /**
+   * For `adjudication` only — which field of the parent-adjudication block the
+   * value belongs to. The block is a set of independent ceilings, so the verb
+   * carries a field rather than splitting into six verbs.
+   */
+  field?: ParentAdjudicationField;
 }
 
 export type PermissionReviewerResult =
@@ -268,7 +287,106 @@ export type PermissionReviewerResult =
   | { ok: true; verb: "mode"; settings: ReviewerSettingsBlock }
   | { ok: true; verb: "fallback"; settings: ReviewerSettingsBlock }
   | { ok: true; verb: "interactive"; settings: ReviewerSettingsBlock }
+  | { ok: true; verb: "adjudication"; settings: ReviewerSettingsBlock }
   | { ok: false; error: string };
+
+/** Writable fields of the parent-adjudication block. */
+type ParentAdjudicationField =
+  | "maxVerdict"
+  | "timeoutMs"
+  | "maxPerChildRun"
+  | "includeParentContextTurns"
+  | "backgroundEscalation"
+  | "model";
+
+const PARENT_ADJUDICATION_FIELDS: ReadonlySet<ParentAdjudicationField> = new Set([
+  "maxVerdict",
+  "timeoutMs",
+  "maxPerChildRun",
+  "includeParentContextTurns",
+  "backgroundEscalation",
+  "model",
+]);
+
+const VALID_PARENT_ADJUDICATION_MAX_VERDICTS: ReadonlySet<ParentAdjudicationMaxVerdict> =
+  new Set(["low", "medium"]);
+const VALID_PARENT_ADJUDICATION_BACKGROUND_ESCALATIONS:
+  ReadonlySet<ParentAdjudicationBackgroundEscalation> = new Set(["deferred", "modal"]);
+const VALID_PARENT_ADJUDICATION_MODEL_SOURCES: ReadonlySet<ParentAdjudicationModelSource> =
+  new Set(["reviewer", "parent-session"]);
+
+const PARENT_ADJUDICATION_NUMERIC_BOUNDS: Readonly<
+  Record<"timeoutMs" | "maxPerChildRun" | "includeParentContextTurns", { min: number; max: number }>
+> = {
+  timeoutMs: {
+    min: PARENT_ADJUDICATION_TIMEOUT_MS_MIN,
+    max: PARENT_ADJUDICATION_TIMEOUT_MS_MAX,
+  },
+  maxPerChildRun: {
+    min: PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MIN,
+    max: PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MAX,
+  },
+  includeParentContextTurns: {
+    min: PARENT_ADJUDICATION_CONTEXT_TURNS_MIN,
+    max: PARENT_ADJUDICATION_CONTEXT_TURNS_MAX,
+  },
+};
+
+/**
+ * Resolve one `adjudication <field> <value>` pair into the block patch it
+ * writes. Rejects rather than clamps: the read path clamps a hand-edited file
+ * because a file is an external boundary, but a write arrives from a caller
+ * that can be told it was wrong, and silently storing a different number than
+ * the one asked for is the worse answer.
+ */
+function parentAdjudicationFieldPatch(
+  field: ParentAdjudicationField,
+  value: string,
+): Partial<ReviewerParentAdjudicationBlock> | { ok: false; error: string } {
+  if (field === "maxVerdict") {
+    if (!VALID_PARENT_ADJUDICATION_MAX_VERDICTS.has(value as ParentAdjudicationMaxVerdict)) {
+      return {
+        ok: false,
+        error: `invalid maxVerdict '${value}' — expected ${[...VALID_PARENT_ADJUDICATION_MAX_VERDICTS].join("|")}`,
+      };
+    }
+    return { maxVerdict: value as ParentAdjudicationMaxVerdict };
+  }
+  if (field === "backgroundEscalation") {
+    if (
+      !VALID_PARENT_ADJUDICATION_BACKGROUND_ESCALATIONS.has(
+        value as ParentAdjudicationBackgroundEscalation,
+      )
+    ) {
+      return {
+        ok: false,
+        error: `invalid backgroundEscalation '${value}' — expected ${[...VALID_PARENT_ADJUDICATION_BACKGROUND_ESCALATIONS].join("|")}`,
+      };
+    }
+    return { backgroundEscalation: value as ParentAdjudicationBackgroundEscalation };
+  }
+  if (field === "model") {
+    if (!VALID_PARENT_ADJUDICATION_MODEL_SOURCES.has(value as ParentAdjudicationModelSource)) {
+      return {
+        ok: false,
+        error: `invalid model '${value}' — expected ${[...VALID_PARENT_ADJUDICATION_MODEL_SOURCES].join("|")}`,
+      };
+    }
+    return { model: value as ParentAdjudicationModelSource };
+  }
+  const bounds = PARENT_ADJUDICATION_NUMERIC_BOUNDS[field];
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) {
+    return { ok: false, error: `invalid ${field} '${value}' — expected an integer` };
+  }
+  if (parsed < bounds.min || parsed > bounds.max) {
+    return {
+      ok: false,
+      error: `invalid ${field} '${value}' — expected ${bounds.min}..${bounds.max}`,
+    };
+  }
+  return { [field]: parsed };
+}
 
 const VALID_REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set([
   "disabled",
@@ -295,6 +413,7 @@ const VALID_REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<ReviewerInteractiveA
  *   "mode rule"
  *   "mode llm"
  *   "fallback deny"
+ *   "adjudication maxVerdict low"
  */
 export function parsePermissionReviewerCommand(
   rawArgs: string,
@@ -304,7 +423,7 @@ export function parsePermissionReviewerCommand(
     return {
       ok: false,
       error:
-        "missing subcommand — usage: /permission reviewer <show|mode|fallback|interactive> [value]",
+        "missing subcommand — usage: /permission reviewer <show|mode|fallback|interactive|adjudication> [value]",
     };
   }
   const rawVerb = args[0];
@@ -319,16 +438,36 @@ export function parsePermissionReviewerCommand(
     verb !== "mode" &&
     verb !== "fallback" &&
     verb !== "interactive" &&
+    verb !== "adjudication" &&
     verb !== "show"
   ) {
     return {
       ok: false,
-      error: `unknown subcommand '${verb}' — expected show|mode|fallback|interactive`,
+      error: `unknown subcommand '${verb}' — expected show|mode|fallback|interactive|adjudication`,
     };
   }
   if (verb === "show") {
     if (args.length > 1) return { ok: false, error: "show takes no extra arguments" };
     return { verb, value: "" };
+  }
+  if (verb === "adjudication") {
+    if (args.length < 3) {
+      return {
+        ok: false,
+        error: `adjudication requires a field and a value — expected ${[...PARENT_ADJUDICATION_FIELDS].join("|")}`,
+      };
+    }
+    if (args.length > 3) {
+      return { ok: false, error: `adjudication takes a single value (got ${args.length - 2})` };
+    }
+    const field = args[1] as ParentAdjudicationField;
+    if (!PARENT_ADJUDICATION_FIELDS.has(field)) {
+      return {
+        ok: false,
+        error: `unknown adjudication field '${args[1]}' — expected ${[...PARENT_ADJUDICATION_FIELDS].join("|")}`,
+      };
+    }
+    return { verb, value: args[2], field };
   }
   if (args.length < 2) {
     return { ok: false, error: `${verb} requires a value argument` };
@@ -407,6 +546,26 @@ export async function dispatchPermissionReviewerCommand(
         pathOverride,
       );
       return { ok: true, verb: "interactive", settings };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  }
+  if (cmd.verb === "adjudication") {
+    if (!cmd.field) {
+      return { ok: false, error: "adjudication requires a field" };
+    }
+    const patch = parentAdjudicationFieldPatch(cmd.field, cmd.value);
+    if ("ok" in patch) return patch;
+    try {
+      // The reviewer patch merges shallowly, so the whole block is rewritten
+      // from the persisted one with a single field replaced — a bare
+      // `{ [field]: value }` would drop the five ceilings it did not name.
+      const current = readPermissionSettings(pathOverride).permissions.reviewer;
+      const settings = await setReviewerSettingsPersist(
+        { parentAdjudication: { ...current.parentAdjudication, ...patch } },
+        pathOverride,
+      );
+      return { ok: true, verb: "adjudication", settings };
     } catch (err) {
       return { ok: false, error: (err as Error).message };
     }

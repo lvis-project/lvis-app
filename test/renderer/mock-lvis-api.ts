@@ -13,6 +13,20 @@ import type { SubscriptionRuntimeStatusUpdatedEvent } from "../../src/shared/sub
 
 export type MockLvisApi = Record<string, Mock>;
 
+/**
+ * Persisted default of `permissions.reviewer.parentAdjudication`. The
+ * Permissions tab renders the block unconditionally, so every mock of
+ * `reviewerDispatch("show")` has to carry it — main always does.
+ */
+export const MOCK_REVIEWER_PARENT_ADJUDICATION = {
+  maxVerdict: "medium",
+  timeoutMs: 30_000,
+  maxPerChildRun: 200,
+  includeParentContextTurns: 0,
+  backgroundEscalation: "deferred",
+  model: "reviewer",
+} as const;
+
 type HistoryMock = {
   sessionId?: string;
   sessionTitle?: string;
@@ -298,6 +312,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
           provider: "openai",
           model: "gpt-4o-mini",
           fallbackOnError: "deny",
+          parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
         },
       })),
       auditShow: vi.fn(async () => ({ ok: true, entries: [], total: 0, summary: { files: 0, bytes: 0 } })),
