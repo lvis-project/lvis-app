@@ -607,6 +607,9 @@ function displaySafeChildTitle(title: string): string {
 /** Bound for the deferred queue's one-line description of a queued ask. */
 const DEFERRED_ESCALATION_SUMMARY_MAX = 1_000;
 
+/** (child run, tool) pairs whose queue entry is remembered for coalescing. */
+const MAX_TRACKED_DEFERRED_PAIRS = 500;
+
 /**
  * The line the deferred-queue panel shows for a queued sub-agent escalation.
  *
@@ -1294,6 +1297,10 @@ export class ApprovalGate {
    * toasts — burying the entries a user might actually act on. The first ask
    * of a pair is recorded and announced; the rest are still denied, and are
    * told they belong to the entry already waiting.
+   *
+   * Bounded and evicted oldest-first, because a run ends without telling this
+   * map. Eviction only costs a second queue row for a pair that has been idle
+   * behind this many others, which no live run reaches.
    */
   private readonly deferredEscalationEntries = new Map<string, string>();
 
@@ -1624,6 +1631,10 @@ export class ApprovalGate {
     }
 
     this.deferredEscalationEntries.set(pairKey, deferredId);
+    if (this.deferredEscalationEntries.size > MAX_TRACKED_DEFERRED_PAIRS) {
+      const oldest = this.deferredEscalationEntries.keys().next();
+      if (!oldest.done) this.deferredEscalationEntries.delete(oldest.value);
+    }
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
       sessionId,
