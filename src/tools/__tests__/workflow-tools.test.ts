@@ -1252,7 +1252,7 @@ describe("agent_spawn tool", () => {
     const tool = createAgentSpawnTool({
       getRunner: () => ({
         resume: async () => {
-          throw new Error("litellm.BadRequestError: Failed to initialize samplers");
+          throw new Error("litellm.APIConnectionError: fetch failed (ECONNRESET)");
         },
       }) as never,
       emit: (e) => events.push(e),
@@ -1271,6 +1271,68 @@ describe("agent_spawn tool", () => {
     expect(payload.resumeId).toBe("child-transient");
     expect(payload.resumeGuidance).toContain("재개 가능");
     expect(payload.resumeRefusal).toBeUndefined();
+    expect(payload.resumeDeterministicFailure).toBeUndefined();
+  });
+
+  it("a provider request rejection on resume drops the retry-same-id guidance", async () => {
+    // The self-hosted grammar compiler validates the request and refuses it
+    // BEFORE generating, so an identical resume (same frozen tool scope) is
+    // refused identically forever — retry guidance there is an exit-less loop.
+    // It is not a `resumeRefusal` either: the host authorized this resume and
+    // the turn ran; a REMOTE system rejected the payload.
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        resume: async () => ({
+          summary: "provider error",
+          error: "litellm.BadRequestError: OpenAIException - Failed to initialize samplers: "
+            + "failed to parse grammar. Received Model Group=muse-glimmer-30b",
+          toolCallCount: 0,
+          turnCount: 0,
+          childSessionId: "child-grammar",
+          entries: [],
+          ok: false,
+        }),
+      }) as never,
+      emit: () => {},
+    });
+
+    const result = await tool.execute(
+      { title: "t", instructions: "continue", resumeId: "child-grammar" },
+      foregroundCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse(result.output);
+    expect(payload.resumeRefusal).toBeUndefined();
+    expect(payload.resumeDeterministicFailure).toBe(true);
+    // The child stays addressable — it becomes resumable again once the model,
+    // provider, or tool scope changes — but the text must not tell the model
+    // that a bare retry clears it.
+    expect(payload.resumeId).toBe("child-grammar");
+    expect(payload.resumeGuidance).not.toContain("재개 가능합니다");
+    expect(payload.resumeGuidance).toContain("provider 가 거부");
+  });
+
+  it("a THROWN provider request rejection is classified like a returned one", async () => {
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        resume: async () => {
+          throw new Error(
+            "litellm.BadRequestError: Failed to initialize samplers: failed to parse grammar",
+          );
+        },
+      }) as never,
+      emit: () => {},
+    });
+
+    const result = await tool.execute(
+      { title: "t", instructions: "continue", resumeId: "child-grammar-throw" },
+      foregroundCtx(),
+    );
+
+    const payload = JSON.parse(result.output);
+    expect(payload.resumeDeterministicFailure).toBe(true);
+    expect(payload.resumeGuidance).toContain("provider 가 거부");
   });
 
   it("a structural resume rejection never offers the resumeId back for retry", async () => {
