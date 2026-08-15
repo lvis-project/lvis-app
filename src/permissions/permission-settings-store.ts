@@ -104,8 +104,12 @@ type ParentAdjudicationMaxVerdict = "low" | "medium";
  *   - `"modal"` — the pre-existing behaviour: the dock is painted immediately
  *     whatever the run is.
  *
- * Foreground children take the modal under both values: someone is watching
- * that turn, and the queue's approval cannot re-drive a call that is over.
+ * `"deferred"` only diverts an ask the host can establish nobody would see: a
+ * background run while the app window is hidden or minimised, or any run while
+ * the away answerer is armed. With the window in front of the user, every
+ * escalation still paints the dock under both values — the queue cannot
+ * re-drive a call whose turn is over, so it is the weaker answer whenever a
+ * human is actually there to give the stronger one.
  */
 type ParentAdjudicationBackgroundEscalation = "deferred" | "modal";
 
@@ -169,7 +173,10 @@ export interface ReviewerParentAdjudicationBlock {
    *
    * Opt-in rather than on, because it is the one field of this block that
    * widens what leaves the machine: the turns are the user's own words, and
-   * they travel to whichever provider answers the side turn. What the host
+   * they travel to whichever provider answers the side turn — which under the
+   * default `model: "reviewer"` is the REVIEWER's configured vendor and
+   * endpoint (a marketplace preset's `baseUrl`, if one is selected), not
+   * necessarily the chat provider the conversation itself runs on. What the host
    * composes from them is bounded, DLP-masked and quoted as data, and no
    * sub-agent report is ever among them (a child could otherwise argue for its
    * own approval through its parent's transcript).
