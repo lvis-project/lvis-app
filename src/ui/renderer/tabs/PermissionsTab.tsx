@@ -1170,6 +1170,7 @@ export function PermissionsTab({
               >
                 <SelectTrigger
                   className="h-8 w-full text-[11px]"
+                  aria-label={t("permissionsTab.adjudicationMaxVerdictLabel")}
                   data-testid="parent-adjudication-max-verdict-select"
                 >
                   <SelectValue />
@@ -1199,6 +1200,7 @@ export function PermissionsTab({
               >
                 <SelectTrigger
                   className="h-8 w-full text-[11px]"
+                  aria-label={t("permissionsTab.adjudicationModelLabel")}
                   data-testid="parent-adjudication-model-select"
                 >
                   <SelectValue />
@@ -1233,6 +1235,7 @@ export function PermissionsTab({
               >
                 <SelectTrigger
                   className="h-8 w-full text-[11px]"
+                  aria-label={t("permissionsTab.adjudicationBackgroundEscalationLabel")}
                   data-testid="parent-adjudication-background-escalation-select"
                 >
                   <SelectValue />
@@ -1269,6 +1272,7 @@ export function PermissionsTab({
                 key={`${adjudicationRevision}-${reviewer.parentAdjudication.timeoutMs}`}
                 defaultValue={reviewer.parentAdjudication.timeoutMs / MS_PER_SECOND}
                 disabled={adjudicationBusy || !adjudicationEnabled}
+                aria-label={t("permissionsTab.adjudicationTimeoutLabel")}
                 data-testid="parent-adjudication-timeout-input"
                 className="h-8 w-24 text-[11px]"
                 onBlur={(e) => {
@@ -1298,6 +1302,7 @@ export function PermissionsTab({
                 key={`${adjudicationRevision}-${reviewer.parentAdjudication.maxPerChildRun}`}
                 defaultValue={reviewer.parentAdjudication.maxPerChildRun}
                 disabled={adjudicationBusy || !adjudicationEnabled}
+                aria-label={t("permissionsTab.adjudicationMaxPerChildRunLabel")}
                 data-testid="parent-adjudication-max-per-child-run-input"
                 className="h-8 w-24 text-[11px]"
                 onBlur={(e) => {
@@ -1326,6 +1331,7 @@ export function PermissionsTab({
                 key={`${adjudicationRevision}-${reviewer.parentAdjudication.includeParentContextTurns}`}
                 defaultValue={reviewer.parentAdjudication.includeParentContextTurns}
                 disabled={adjudicationBusy || !adjudicationEnabled}
+                aria-label={t("permissionsTab.adjudicationContextTurnsLabel")}
                 data-testid="parent-adjudication-context-turns-input"
                 className="h-8 w-24 text-[11px]"
                 onBlur={(e) => {
