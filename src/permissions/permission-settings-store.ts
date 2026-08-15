@@ -95,12 +95,45 @@ export interface ReviewerInteractiveBlock {
  */
 type ParentAdjudicationMaxVerdict = "low" | "medium";
 
+/**
+ * Where a tier-3 escalation goes when nobody is watching the child run.
+ *
+ *   - `"deferred"` — the ask is denied fail-closed and recorded in the deferred
+ *     queue with an OS notification, so a background child neither blocks on a
+ *     dock nobody is looking at nor waits out the five-minute approval timeout.
+ *   - `"modal"` — the pre-existing behaviour: the dock is painted immediately
+ *     whatever the run is.
+ *
+ * Foreground children take the modal under both values: someone is watching
+ * that turn, and the queue's approval cannot re-drive a call that is over.
+ */
+type ParentAdjudicationBackgroundEscalation = "deferred" | "modal";
+
+/**
+ * Which model answers the tier-2 side turn.
+ *
+ *   - `"reviewer"` — the permission reviewer's own adapter. It is already
+ *     wired, already trusted with risk classification, and costs nothing extra
+ *     to reach.
+ *   - `"parent-session"` — the chat provider/model the parent's own loop runs
+ *     on. It reasons about the parent's task with the parent's own model, and
+ *     it is available even in reviewer modes that wire no LLM at all.
+ *
+ * COST: `"parent-session"` bills one extra call on the (usually larger) chat
+ * model for every adjudicated sub-agent tool call, bounded by `maxPerChildRun`
+ * per child run. `"reviewer"` is the cheaper default for that reason.
+ */
+export type ParentAdjudicationModelSource = "reviewer" | "parent-session";
+
 /** Bounds for {@link ReviewerParentAdjudicationBlock.timeoutMs}. */
 const PARENT_ADJUDICATION_TIMEOUT_MS_MIN = 1_000;
 const PARENT_ADJUDICATION_TIMEOUT_MS_MAX = 120_000;
 /** Bounds for {@link ReviewerParentAdjudicationBlock.maxPerChildRun}. */
 const PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MIN = 1;
 const PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MAX = 1_000;
+/** Bounds for {@link ReviewerParentAdjudicationBlock.includeParentContextTurns}. */
+const PARENT_ADJUDICATION_CONTEXT_TURNS_MIN = 0;
+const PARENT_ADJUDICATION_CONTEXT_TURNS_MAX = 5;
 
 /**
  * Tier-2 (parent-adjudication) policy for sub-agent tool approvals.
@@ -130,6 +163,22 @@ export interface ReviewerParentAdjudicationBlock {
    * to exhaust.
    */
   maxPerChildRun: number;
+  /**
+   * How many of the parent conversation's most recent turns are quoted into
+   * the adjudication evidence. `0` — the default — includes none.
+   *
+   * Opt-in rather than on, because it is the one field of this block that
+   * widens what leaves the machine: the turns are the user's own words, and
+   * they travel to whichever provider answers the side turn. What the host
+   * composes from them is bounded, DLP-masked and quoted as data, and no
+   * sub-agent report is ever among them (a child could otherwise argue for its
+   * own approval through its parent's transcript).
+   */
+  includeParentContextTurns: number;
+  /** Where a tier-3 escalation goes for a background child run. */
+  backgroundEscalation: ParentAdjudicationBackgroundEscalation;
+  /** Which model answers the side turn. See the type for the cost note. */
+  model: ParentAdjudicationModelSource;
 }
 
 /**
@@ -214,10 +263,21 @@ const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
   // stays with the user under every setting. 30s is the wait a blocked child
   // can absorb before the user is better served by the dock; 200 keeps a long
   // multi-file child run from escalating on volume alone.
+  // Parent context is off: the lane works without it, and the version of it
+  // that ships on by default would be the one that starts sending the user's
+  // conversation to a provider nobody asked to send it to.
+  //
+  // A background child escalates into the deferred queue rather than onto a
+  // dock: its turn is not one anybody is watching, and a modal it raises is a
+  // modal that waits out the approval timeout into the same denial the queue
+  // records immediately — with none of the queue's later review.
   parentAdjudication: {
     maxVerdict: "medium",
     timeoutMs: 30_000,
     maxPerChildRun: 200,
+    includeParentContextTurns: 0,
+    backgroundEscalation: "deferred",
+    model: "reviewer",
   },
 };
 
@@ -226,6 +286,12 @@ const REVIEWER_INTERACTIVE_AUTO_APPROVES: ReadonlySet<ReviewerInteractiveAutoApp
 
 const PARENT_ADJUDICATION_MAX_VERDICTS: ReadonlySet<ParentAdjudicationMaxVerdict> =
   new Set(["low", "medium"]);
+
+const PARENT_ADJUDICATION_BACKGROUND_ESCALATIONS: ReadonlySet<ParentAdjudicationBackgroundEscalation> =
+  new Set(["deferred", "modal"]);
+
+const PARENT_ADJUDICATION_MODEL_SOURCES: ReadonlySet<ParentAdjudicationModelSource> =
+  new Set(["reviewer", "parent-session"]);
 
 const DEFAULT_FILE: PermissionSettingsFile = {
   permissions: {
@@ -486,6 +552,18 @@ function normalizeParentAdjudicationBlock(
     PARENT_ADJUDICATION_MAX_VERDICTS.has(obj.maxVerdict as ParentAdjudicationMaxVerdict)
       ? (obj.maxVerdict as ParentAdjudicationMaxVerdict)
       : fallback.maxVerdict;
+  const backgroundEscalation =
+    typeof obj.backgroundEscalation === "string" &&
+    PARENT_ADJUDICATION_BACKGROUND_ESCALATIONS.has(
+      obj.backgroundEscalation as ParentAdjudicationBackgroundEscalation,
+    )
+      ? (obj.backgroundEscalation as ParentAdjudicationBackgroundEscalation)
+      : fallback.backgroundEscalation;
+  const model =
+    typeof obj.model === "string" &&
+    PARENT_ADJUDICATION_MODEL_SOURCES.has(obj.model as ParentAdjudicationModelSource)
+      ? (obj.model as ParentAdjudicationModelSource)
+      : fallback.model;
   return {
     maxVerdict,
     timeoutMs: clampParentAdjudicationNumber(
@@ -500,6 +578,17 @@ function normalizeParentAdjudicationBlock(
       PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MIN,
       PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MAX,
     ),
+    // Clamped like the other numbers, and to a deliberately short range: each
+    // turn is a chunk of the user's conversation leaving the machine, so the
+    // upper bound is a property of the feature rather than a matter of taste.
+    includeParentContextTurns: clampParentAdjudicationNumber(
+      obj.includeParentContextTurns,
+      fallback.includeParentContextTurns,
+      PARENT_ADJUDICATION_CONTEXT_TURNS_MIN,
+      PARENT_ADJUDICATION_CONTEXT_TURNS_MAX,
+    ),
+    backgroundEscalation,
+    model,
   };
 }
 

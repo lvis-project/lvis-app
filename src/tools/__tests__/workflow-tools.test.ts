@@ -37,6 +37,8 @@ import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../../shared/subagent-rounds.js";
 import { createSkillLoadTool } from "../skill-load.js";
 import { createSkillListTool } from "../skill-list.js";
 import { createAgentListTool } from "../agent-list.js";
+import { en as agentListEn } from "../../i18n/messages/generated/be_agentList.js";
+import { en as agentSpawnEn } from "../../i18n/messages/generated/be_agentSpawn.js";
 import { RoutinesStore } from "../../main/routines-store.js";
 import { SessionTodoStore } from "../../main/session-todo-store.js";
 import { SkillStore } from "../../main/skill-store.js";
@@ -1581,6 +1583,24 @@ describe("agent_status and agent_interrupt tools", () => {
     const empty = JSON.parse((await tool.execute({}, ctx())).output);
     expect(empty.runs).toEqual([]);
     expect(empty.restoredSubAgentsHint).toBeUndefined();
+  });
+
+  it("says in both descriptions where restored sub-agents are listed", () => {
+    // The hint only fires after a call that already returned an empty list.
+    // A model that reads "active or recent runs" and stops there never makes
+    // that call — so the same fact has to be in what it reads beforehand.
+    // Tool names survive translation; the sentence around them does not, so
+    // the wording is asserted on the English catalog and the pointing on the
+    // rendered description.
+    const status = createAgentStatusTool({ getRunner: () => undefined });
+    expect(status.description).toContain("agent_list");
+    expect(agentSpawnEn["be_agentSpawn.statusToolDescription"]).toContain(
+      "restart",
+    );
+
+    const list = createAgentListTool({ store: { list: async () => [] } as never });
+    expect(list.description).toContain("agent_status");
+    expect(agentListEn["be_agentList.toolDescription"]).toContain("restart");
   });
 
   it("agent_interrupt delegates to the runner", async () => {

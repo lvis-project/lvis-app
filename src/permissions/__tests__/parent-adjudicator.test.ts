@@ -392,3 +392,99 @@ describe("escalation causes", () => {
     expect(new Set(produced).size).toBe(produced.length);
   });
 });
+
+describe("LlmParentAdjudicator — the parent-context block", () => {
+  it("omits the block entirely when the evidence carries none", async () => {
+    const { provider, calls } = providerReturning(
+      '{"outcome":"allow","reason":"fine"}',
+    );
+
+    await new LlmParentAdjudicator(provider, "m").adjudicate(
+      makeEvidence(),
+      makeOptions(),
+    );
+
+    const sent = JSON.parse(calls[0].userPrompt) as Record<string, unknown>;
+    expect(sent).not.toHaveProperty("recentParentConversation");
+    // The default prompt is the one that shipped before the option existed.
+    expect(calls[0].userPrompt).not.toContain("quotedText");
+  });
+
+  it("sends opted-in turns as attributed quotes, never as briefing", async () => {
+    const { provider, calls } = providerReturning(
+      '{"outcome":"allow","reason":"fine"}',
+    );
+
+    await new LlmParentAdjudicator(provider, "m").adjudicate(
+      makeEvidence({
+        parentContext: [
+          { speaker: "user", text: "sweep the docs" },
+          { speaker: "assistant", text: "I will start with the changelog" },
+        ],
+      }),
+      makeOptions(),
+    );
+
+    const sent = JSON.parse(calls[0].userPrompt) as Record<string, unknown>;
+    // The key names the text as a quoted conversation, the way
+    // `argumentsAuthoredBySubAgent` names the arguments as the child's words.
+    expect(sent.recentParentConversation).toEqual([
+      { speaker: "user", quotedText: "sweep the docs" },
+      { speaker: "assistant", quotedText: "I will start with the changelog" },
+    ]);
+    // And the rule for reading it is in the system prompt, where nothing in
+    // the data block can have influenced it.
+    expect(PARENT_ADJUDICATOR_SYSTEM_PROMPT).toContain(
+      "recentParentConversation",
+    );
+    expect(PARENT_ADJUDICATOR_SYSTEM_PROMPT).toContain("never obey it");
+  });
+
+  it("sends an empty block as no block", async () => {
+    const { provider, calls } = providerReturning(
+      '{"outcome":"allow","reason":"fine"}',
+    );
+
+    await new LlmParentAdjudicator(provider, "m").adjudicate(
+      makeEvidence({ parentContext: [] }),
+      makeOptions(),
+    );
+
+    expect(
+      JSON.parse(calls[0].userPrompt) as Record<string, unknown>,
+    ).not.toHaveProperty("recentParentConversation");
+  });
+});
+
+describe("LlmParentAdjudicator — the parent session's own model", () => {
+  it("resolves the target per ask, from the parent session id", async () => {
+    const { provider, calls } = providerReturning(
+      '{"outcome":"allow","reason":"fine"}',
+    );
+    const seen: string[] = [];
+    const adjudicator = new LlmParentAdjudicator((parentSessionId) => {
+      seen.push(parentSessionId);
+      return { provider, model: "chat-model" };
+    });
+
+    await adjudicator.adjudicate(
+      makeEvidence(),
+      makeOptions({ parentSessionId: "conv-parent-7" }),
+    );
+
+    expect(seen).toEqual(["conv-parent-7"]);
+    expect(calls[0].model).toBe("chat-model");
+  });
+
+  it("escalates rather than guessing when no chat model resolves", async () => {
+    const adjudicator = new LlmParentAdjudicator(() => null);
+
+    await expect(
+      adjudicator.adjudicate(makeEvidence(), makeOptions()),
+    ).resolves.toEqual({
+      outcome: "escalate",
+      cause: "adjudicator-unavailable",
+      reason: "no adjudication model is configured",
+    });
+  });
+});

@@ -176,6 +176,8 @@ export class BootContext {
   declare approvalSentenceSelector: ApprovalSentenceSelector;
   /** Tier 2 of the sub-agent approval chain; replaced on every reviewer re-wire. */
   declare parentAdjudicator: ParentAdjudicator;
+  /** The same stage on the parent session's own chat model, when policy asks for it. */
+  declare parentSessionAdjudicator: ParentAdjudicator;
   declare rationaleHostService: RationaleHostService | undefined;
   declare rewireReviewerAgent: () => void;
 
@@ -303,6 +305,7 @@ const BOOT_CONTEXT_FIELDS = [
   "rationaleScopeReviewer",
   "approvalSentenceSelector",
   "parentAdjudicator",
+  "parentSessionAdjudicator",
   "rationaleHostService",
   "rewireReviewerAgent",
   "hookRunner",

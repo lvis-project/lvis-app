@@ -291,6 +291,9 @@ describe("normalizePermissionSettings — reviewer block", () => {
         maxVerdict: "medium",
         timeoutMs: 30_000,
         maxPerChildRun: 200,
+        includeParentContextTurns: 0,
+        backgroundEscalation: "deferred",
+        model: "reviewer",
       },
     });
   });
@@ -336,6 +339,9 @@ describe("normalizePermissionSettings — reviewer block", () => {
         maxVerdict: "medium",
         timeoutMs: 30_000,
         maxPerChildRun: 200,
+        includeParentContextTurns: 0,
+        backgroundEscalation: "deferred",
+        model: "reviewer",
       },
     });
   });
