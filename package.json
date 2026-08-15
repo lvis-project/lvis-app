@@ -107,7 +107,7 @@
     "@anthropic-ai/sandbox-runtime": "0.0.67",
     "@modelcontextprotocol/ext-apps": "1.7.5",
     "@modelcontextprotocol/sdk": "1.30.0",
-    "@openai/codex": "0.146.0",
+    "@openai/codex": "0.147.0",
     "adm-zip": "^0.6.0",
     "ai": "~7.0.2",
     "ajv": "^8.18.0",
