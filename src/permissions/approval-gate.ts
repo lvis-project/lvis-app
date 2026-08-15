@@ -669,6 +669,20 @@ export interface ParentAdjudicationGateDeps {
    * behaviour of the chain before this route existed.
    */
   deferredQueue?: () => DeferredQueue | null;
+  /**
+   * Whether somebody could see a dock right now — the app window existing,
+   * visible, and not minimised.
+   *
+   * The load-bearing half of "unattended". A child run's own `background` flag
+   * is not that fact by itself: this desktop host starts every locally spawned
+   * child in the background, so a route keyed on it alone would divert EVERY
+   * tier-3 escalation away from a user sitting in front of the app — taking
+   * away the one tier the chain exists to preserve.
+   *
+   * Absent, or throwing, means the host cannot establish that nobody is there,
+   * and an unestablished absence is treated as presence: the dock is painted.
+   */
+  isDeskAttended?: () => boolean;
 }
 
 /**
@@ -1271,6 +1285,18 @@ export class ApprovalGate {
   /** Consecutive parent denials, keyed by child run and tool. */
   private readonly parentDenialStreaks = new Map<string, number>();
 
+  /**
+   * Queue entries already raised for a (child run, tool) pair.
+   *
+   * A child that has spent its adjudication budget escalates on EVERY
+   * subsequent call, and a route that appended a row and rang the OS for each
+   * of them would turn one runaway loop into hundreds of identical rows and
+   * toasts — burying the entries a user might actually act on. The first ask
+   * of a pair is recorded and announced; the rest are still denied, and are
+   * told they belong to the entry already waiting.
+   */
+  private readonly deferredEscalationEntries = new Map<string, string>();
+
   constructor(
     webContents: WebContents,
     initialPolicy?: PolicyFile,
@@ -1489,6 +1515,24 @@ export class ApprovalGate {
   }
 
   /**
+   * Whether anyone could see a dock right now. Unknown counts as yes.
+   *
+   * A throwing accessor is a destroyed or half-torn-down window, and the answer
+   * that keeps the user's tier is "assume they are there": the cost of being
+   * wrong that way is a dock nobody reads, and the cost of being wrong the
+   * other way is an approval the user never got the chance to give.
+   */
+  private deskAttended(): boolean {
+    const read = this.parentAdjudication?.isDeskAttended;
+    if (read === undefined) return true;
+    try {
+      return read();
+    } catch {
+      return true;
+    }
+  }
+
+  /**
    * Route a tier-3 escalation raised by a run nobody is watching into the
    * deferred queue, and answer the ask fail-closed.
    *
@@ -1516,12 +1560,14 @@ export class ApprovalGate {
   }): Promise<ApprovalDecision | null> {
     const { request, childProvenance, policy, notice } = input;
     if (policy.backgroundEscalation !== "deferred") return null;
-    // Two host facts, either of which means the dock would be painted for
-    // nobody: the run itself is a background one, or the user armed the away
-    // answerer before leaving the desk. Neither is anything a child asserts.
+    // Host facts only, and deliberately narrow. A background run whose window
+    // nobody can see is one case; a desk the user armed the away answerer
+    // before leaving is the other. The background flag ALONE is not enough —
+    // every locally spawned child is a background run on this host, so keying
+    // on it would take the dock away from a user who is sitting right there.
     const unattended =
-      childProvenance.background === true ||
-      this.awayAuthority.snapshot() !== null;
+      this.awayAuthority.snapshot() !== null ||
+      (childProvenance.background === true && !this.deskAttended());
     if (!unattended) return null;
     const queue = this.parentAdjudication?.deferredQueue?.();
     if (!queue) return null;
@@ -1534,6 +1580,28 @@ export class ApprovalGate {
     if (source === undefined || toolCategory === undefined) return null;
 
     const sessionId = request.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID;
+    const pairKey = canonicalStringify([
+      childProvenance.childSessionId,
+      request.toolName,
+    ]);
+    const alreadyQueued = this.deferredEscalationEntries.get(pairKey);
+    if (alreadyQueued !== undefined) {
+      this.auditLogger?.log({
+        timestamp: new Date().toISOString(),
+        sessionId,
+        type: "approval",
+        output: `[approval:parent-escalation-deferred] ${request.id} ${input.auditFields} deferredId=${auditSafeText(alreadyQueued)} child=${auditSafeText(childProvenance.childSessionId)} parent=${auditSafeText(childProvenance.originSessionId)} cause=${notice.cause} coalesced=true → deny-once`,
+      });
+      const repeat = markHostApprovalRejectedDecision({
+        requestId: request.id,
+        choice: "deny-once",
+      });
+      deferredEscalatedDecisions.set(repeat, {
+        cause: notice.cause,
+        deferredId: alreadyQueued,
+      });
+      return repeat;
+    }
     let deferredId: string;
     try {
       deferredId = await queue.append({
@@ -1555,6 +1623,7 @@ export class ApprovalGate {
       return null;
     }
 
+    this.deferredEscalationEntries.set(pairKey, deferredId);
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
       sessionId,

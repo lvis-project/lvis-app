@@ -75,6 +75,8 @@ function makeGate(options: {
   ) => readonly ParentContextTurn[];
   deferredQueue?: DeferredQueue | null;
   bySource?: Partial<Record<ParentAdjudicationModelSource, ParentAdjudicator>>;
+  /** Whether a dock would be seen. Default: nobody is at the desk. */
+  deskAttended?: boolean | (() => boolean);
 } = {}) {
   const wc = makeMockWebContents();
   const auditLogger = { log: vi.fn() };
@@ -96,6 +98,10 @@ function makeGate(options: {
     ...(options.deferredQueue === undefined
       ? {}
       : { deferredQueue: () => options.deferredQueue ?? null }),
+    isDeskAttended: (): boolean =>
+      typeof options.deskAttended === "function"
+        ? options.deskAttended()
+        : (options.deskAttended ?? false),
   };
   const gate = new ApprovalGate(
     wc as never,
@@ -329,6 +335,53 @@ describe("tier 3 — where a background escalation goes", () => {
     expect(append).not.toHaveBeenCalled();
     const sent = wc.send.mock.calls[0]?.[1] as ApprovalRequest;
     expect(sent.parentEscalation?.cause).toBe("parent-escalated");
+  });
+
+  it("keeps the dock for a background run while the window is in front", async () => {
+    // Every locally spawned child is a background run on this host, so the
+    // flag alone must not divert an ask away from a user who is right there.
+    const { queue, append } = fakeQueue();
+    const { gate, wc } = makeGate({ deferredQueue: queue, deskAttended: true });
+
+    void gate.requestAndWait(makeChildRequest());
+    await vi.waitFor(() => expect(wc.send).toHaveBeenCalled());
+
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("keeps the dock when attendance cannot be established", async () => {
+    const { queue, append } = fakeQueue();
+    const { gate, wc } = makeGate({
+      deferredQueue: queue,
+      deskAttended: () => {
+        throw new Error("window torn down mid-read");
+      },
+    });
+
+    void gate.requestAndWait(makeChildRequest());
+    await vi.waitFor(() => expect(wc.send).toHaveBeenCalled());
+
+    expect(append).not.toHaveBeenCalled();
+  });
+
+  it("queues one entry per child and tool, and denies the repeats all the same", async () => {
+    // A child past its adjudication budget escalates on every call. One row
+    // and one toast per (run, tool) keeps that from burying the queue.
+    let next = 0;
+    const { queue, append } = fakeQueue(async () => `deferred-${++next}`);
+    const { gate, notificationService } = makeGate({ deferredQueue: queue });
+
+    const first = await gate.requestAndWait(makeChildRequest());
+    const second = await gate.requestAndWait(
+      makeChildRequest({ id: "child-req-2" }),
+    );
+
+    expect(append).toHaveBeenCalledTimes(1);
+    expect(notificationService.fire).toHaveBeenCalledTimes(1);
+    expect(second.choice).toBe("deny-once");
+    expect(deferredParentEscalationOf(second)?.deferredId).toBe(
+      deferredParentEscalationOf(first)?.deferredId,
+    );
   });
 
   it("keeps the immediate dock when the operator chose modal", async () => {

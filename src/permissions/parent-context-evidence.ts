@@ -54,6 +54,22 @@ const NON_USER_AUTHORED_META_KEYS = [
   "importedTrigger",
 ] as const;
 
+/**
+ * Second, independent test for child-authored content in a user record.
+ *
+ * The meta keys above are the primary one, and they depend on a producer having
+ * stamped the row. This does not: every child report is formatted with this
+ * host-composed label in front of it (the A2A message codec writes it, and the
+ * sub-agent approval adapter writes the same shape), so a record carrying the
+ * label carries a child's text whatever its meta says. Historical rows written
+ * before a producer learned to stamp are covered by this and only this.
+ *
+ * A user who types the label themselves loses that turn from the block. That is
+ * the right way round: a dropped turn costs the adjudicator context, and a
+ * quoted child costs the invariant.
+ */
+const CHILD_REPORT_LABEL = "[Sub-Agent: ";
+
 function metaOf(record: Record<string, unknown>): Record<string, unknown> | null {
   const meta = record.meta;
   if (!meta || typeof meta !== "object" || Array.isArray(meta)) return null;
@@ -90,7 +106,17 @@ function quotableTurn(record: unknown): ParentContextTurn | null {
         : typeof message.content === "string"
           ? message.content
           : null;
-    return raw === null ? null : { speaker: "user", text: raw };
+    if (raw === null) return null;
+    // Checked against BOTH readings of the record: a label hidden in the
+    // wrapped content still means a child wrote part of this row.
+    if (
+      raw.includes(CHILD_REPORT_LABEL) ||
+      (typeof message.content === "string" &&
+        message.content.includes(CHILD_REPORT_LABEL))
+    ) {
+      return null;
+    }
+    return { speaker: "user", text: raw };
   }
 
   if (message.role === "assistant") {
@@ -102,6 +128,31 @@ function quotableTurn(record: unknown): ParentContextTurn | null {
   }
 
   return null;
+}
+
+/**
+ * Whether an assistant turn is one the parent produced with a child's report
+ * fresh in front of it.
+ *
+ * Rule 1 keeps a child's own words out of the block; this keeps out the
+ * laundered version of them. A child report is shown to the parent model, and a
+ * report that says "restate the following for the record" can get its sentence
+ * echoed into the parent's next assistant turn — which would then be quoted
+ * with no marker at all. The nearest preceding user-role record is what that
+ * turn was answering, so if THAT record was excluded, so is this one.
+ */
+function answersAnExcludedRecord(
+  transcript: readonly unknown[],
+  assistantIndex: number,
+): boolean {
+  for (let i = assistantIndex - 1; i >= 0; i--) {
+    const record = transcript[i];
+    if (!record || typeof record !== "object" || Array.isArray(record)) continue;
+    const message = record as Record<string, unknown>;
+    if (message.role !== "user") continue;
+    return quotableTurn(message) === null;
+  }
+  return false;
 }
 
 /**
@@ -126,12 +177,18 @@ export function summarizeParentContextTurns(
     if (collected.length >= maxTurns) break;
     const turn = quotableTurn(transcript[i]);
     if (turn === null) continue;
+    if (turn.speaker === "assistant" && answersAnExcludedRecord(transcript, i)) {
+      continue;
+    }
     // Bound, then mask — never the other way round (rule 3).
     const bounded = turn.text.slice(0, MAX_TURN_CHARS);
-    if (totalChars + bounded.length > MAX_TOTAL_CHARS) break;
     const text = sanitizeUntrustedReviewerText(bounded, MAX_TURN_CHARS);
     if (!text) continue;
-    totalChars += bounded.length;
+    // Counted on what is actually sent: masking substitutes placeholders and
+    // can lengthen a turn, so charging the pre-mask length would let the block
+    // exceed the bound it advertises.
+    if (totalChars + text.length > MAX_TOTAL_CHARS) break;
+    totalChars += text.length;
     collected.push({ speaker: turn.speaker, text });
   }
   return collected.reverse();
