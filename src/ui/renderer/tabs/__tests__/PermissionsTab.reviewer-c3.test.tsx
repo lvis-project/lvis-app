@@ -5,6 +5,7 @@
  * exposes the read-only prompt panel only; reviewer config stays slash/internal.
  */
 import "../../../../../test/renderer/setup.js";
+import { MOCK_REVIEWER_PARENT_ADJUDICATION } from "../../../../../test/renderer/mock-lvis-api.js";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -74,6 +75,7 @@ function installApi(providerKeys: Partial<Record<string, boolean>> = {}) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
+              parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
               interactive: { autoApprove: "off" as const },
             },
           };
@@ -87,6 +89,7 @@ function installApi(providerKeys: Partial<Record<string, boolean>> = {}) {
             provider: "openai" as const,
             model: "gpt-4o-mini",
             fallbackOnError: "deny" as const,
+            parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
             interactive: { autoApprove: "off" as const },
           },
         };
@@ -221,6 +224,7 @@ describe("PermissionsTab C3 — active LLM following", () => {
             provider: "openai" as const,
             model: "gpt-4o-mini",
             fallbackOnError: "deny" as const,
+            parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
             interactive: { autoApprove: "off" as const },
           },
         };

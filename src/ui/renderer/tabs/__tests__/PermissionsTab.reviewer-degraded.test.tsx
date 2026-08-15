@@ -4,6 +4,7 @@
  * controls or degraded banners. Auto mode keeps only the read-only prompt view.
  */
 import "../../../../../test/renderer/setup.js";
+import { MOCK_REVIEWER_PARENT_ADJUDICATION } from "../../../../../test/renderer/mock-lvis-api.js";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -53,6 +54,7 @@ function installApi(opts: { mode: "llm" | "rule"; degraded: boolean }) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
+              parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
               interactive: { autoApprove: "low" as const },
             },
             reviewerDegradedToRule: opts.degraded,

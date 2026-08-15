@@ -380,6 +380,13 @@ export type AppSettings = {
      * runner is available.
      */
     osToolSandbox?: boolean;
+    /**
+     * Sub-agent parent-adjudication lane (tier 2 of the approval chain).
+     * Mirrors the main-process SOT in `src/data/settings-store.ts`
+     * `FeatureFlags.subAgentParentAdjudication`. Default true — with the flag
+     * off the approval gate takes the pre-existing path unchanged.
+     */
+    subAgentParentAdjudication?: boolean;
   };
 };
 
@@ -1628,18 +1635,39 @@ export type PermissionReviewerFallbackOnError = "deny" | "rule";
 /** Issue #690 — interactive reviewer auto-approve scope. */
 export type PermissionReviewerInteractiveAutoApprove = "off" | "low" | "medium";
 
+/**
+ * Tier-2 parent-adjudication ceilings. Mirrors
+ * `ReviewerParentAdjudicationBlock` in the main-process settings store; the
+ * numeric bounds the form types against come from
+ * `shared/parent-adjudication-bounds.ts` so both layers agree.
+ */
+export type ParentAdjudicationMaxVerdict = "low" | "medium";
+export type ParentAdjudicationBackgroundEscalation = "deferred" | "modal";
+export type ParentAdjudicationModelSource = "reviewer" | "parent-session";
+
+interface PermissionReviewerParentAdjudication {
+  maxVerdict: ParentAdjudicationMaxVerdict;
+  timeoutMs: number;
+  maxPerChildRun: number;
+  /** Parent conversation turns quoted into the evidence. `0` sends none. */
+  includeParentContextTurns: number;
+  backgroundEscalation: ParentAdjudicationBackgroundEscalation;
+  model: ParentAdjudicationModelSource;
+}
+
 export interface PermissionReviewerSettings {
   mode: PermissionReviewerMode;
   provider: PermissionReviewerProvider;
   model: string;
   fallbackOnError: PermissionReviewerFallbackOnError;
   interactive: { autoApprove: PermissionReviewerInteractiveAutoApprove };
+  parentAdjudication: PermissionReviewerParentAdjudication;
 }
 
 export type PermissionReviewerDispatchResult =
   | {
       ok: true;
-      verb: "show" | "mode" | "provider" | "model" | "fallback" | "interactive";
+      verb: "show" | "mode" | "provider" | "model" | "fallback" | "interactive" | "adjudication";
       settings: PermissionReviewerSettings;
       /**
        * Runtime degrade flag — true when the persisted reviewer mode is "llm"
