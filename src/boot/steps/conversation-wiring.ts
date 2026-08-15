@@ -37,6 +37,7 @@ import { SubAgentRunner } from "../../engine/subagent-runner.js";
 import { A2ASubAgentMessageBus } from "../../engine/a2a-subagent-message-bus.js";
 import { A2AAgentMessageBus } from "../../engine/a2a-agent-message-bus.js";
 import { A2AAgentMessageMailbox } from "../../engine/a2a-agent-message-mailbox.js";
+import { ParentDirectiveMailbox } from "../../engine/parent-directive-mailbox.js";
 import { SubAgentMessageMailbox } from "../../engine/subagent-message-mailbox.js";
 import { createWorkBoardEngine, type WorkBoardEngine,
 } from "../../core/work-board-engine.js";
@@ -444,6 +445,11 @@ export async function wireConversation(
   const agentMessageMailbox = new A2AAgentMessageMailbox(
     subAgentMessagingNamespace,
   );
+  // Parent → child directives share the messaging namespace with the two child
+  // mailboxes and keep their own file: one domain directory, one store per edge.
+  const parentDirectiveMailbox = new ParentDirectiveMailbox(
+    subAgentMessagingNamespace,
+  );
   const agentMessageBus = new A2AAgentMessageBus({
     parentBus: subAgentMessageBus,
     mailbox: agentMessageMailbox,
@@ -505,6 +511,7 @@ export async function wireConversation(
     subAgentMemoryManager,
     messageBus: subAgentMessageBus,
     agentMessageBus,
+    parentDirectiveMailbox,
   });
   // skill_load no longer mutates conversation history. The body is registered
   // into SkillOverlay for the current user-turn window and read by
