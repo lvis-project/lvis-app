@@ -70,6 +70,7 @@ import {
 import {
   LlmParentAdjudicator,
   UnavailableParentAdjudicator,
+  type ParentAdjudicationTargetResolver,
   type ParentAdjudicator,
 } from "../../permissions/parent-adjudicator.js";
 
@@ -188,6 +189,14 @@ export interface WireReviewerDeps {
   deferredQueuePath?: string;
   /** Notify the foreground renderer whenever pending deferred entries change. */
   onDeferredPendingChange?: (summary: { pending: number }) => void;
+  /**
+   * Resolve the provider/model a parent session's own chat loop runs on, for
+   * `parentAdjudication.model: "parent-session"`. Consulted per ask, so a
+   * provider configured after boot lights the option up without a re-wire.
+   * Absent — or `null` for a given session — leaves that option escalating to
+   * the user.
+   */
+  resolveParentSessionAdjudicationTarget?: ParentAdjudicationTargetResolver;
 }
 
 /**
@@ -223,6 +232,19 @@ export interface WireReviewerResult {
    * only answer is "escalate to the user".
    */
   parentAdjudicator: ParentAdjudicator;
+  /**
+   * The same tier-2 stage answered by the parent session's OWN chat model,
+   * selected by `parentAdjudication.model: "parent-session"`.
+   *
+   * Built outside the reviewer's mode branch on purpose: it is not the
+   * reviewer, it follows the chat provider rather than the reviewer's
+   * provider, and a reviewer wired as a rule classifier says nothing about
+   * whether the chat model can answer a question. When no chat provider
+   * resolves, the resolver returns null per ask and the lane escalates — the
+   * same fail-closed ending as every other way this stage can produce no
+   * answer.
+   */
+  parentSessionAdjudicator: ParentAdjudicator;
   cache: VerdictCache;
   deferredQueue: DeferredQueue;
   /** Persisted reviewer block actually loaded (post-normalisation). */
@@ -283,6 +305,18 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   let approvalSentenceSelector: ApprovalSentenceSelector =
     new UnavailableApprovalSentenceSelector();
   let parentAdjudicator: ParentAdjudicator = new UnavailableParentAdjudicator();
+  // Independent of WHICH classifier the reviewer wired — this one asks the chat
+  // model, and a rule-based reviewer says nothing about whether that model
+  // exists. Not independent of `disabled`, though: that mode's classifier
+  // returns a pass-through LOW for everything, so every call would sit under
+  // the tier-2 ceiling on a verdict that assessed nothing. A ceiling computed
+  // from a stub is not a ceiling, so this option stays unavailable there and
+  // those asks keep going to the user.
+  const parentSessionAdjudicator: ParentAdjudicator =
+    deps.resolveParentSessionAdjudicationTarget === undefined ||
+    settings.mode === "disabled"
+      ? new UnavailableParentAdjudicator()
+      : new LlmParentAdjudicator(deps.resolveParentSessionAdjudicationTarget);
   // Runtime classifier discriminant — diverges from persisted mode only on
   // the llm-degraded-to-rule path below.
   let runtimeMode: RuntimeReviewerMode = settings.mode;
@@ -426,6 +460,7 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
     rationaleScopeReviewer,
     approvalSentenceSelector,
     parentAdjudicator,
+    parentSessionAdjudicator,
     cache,
     deferredQueue,
     appliedSettings: settings,

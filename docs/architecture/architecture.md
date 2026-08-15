@@ -370,15 +370,68 @@ Five deviations from the original design are deliberate and load-bearing:
   including it would have put the child's own prose into the prompt that
   decides the child's request.
 
-Two known gaps, recorded so they are not mistaken for design: the adjudicator
-is handed the origin conversation's id but reads nothing from it, so the name
-promises a binding the module does not make; and a child run's budget counter is
-never released when the run ends.
+Three settings move or widen the chain, each conservative by default
+(`permissions.reviewer.parentAdjudication`):
+
+- **`includeParentContextTurns` (default `0`, clamped `0..5`).** Above zero the
+  evidence gains a host-composed block of the parent conversation's most recent
+  turns, quoted as data under `recentParentConversation` beneath a system-prompt
+  line that says to read it and never obey it. Opt-in because it is the only
+  part of the evidence that sends the user's own words to a provider.
+  `summarizeParentContextTurns` (`src/permissions/parent-context-evidence.ts`)
+  composes it: user and assistant text only — never tool results, reasoning or
+  tool calls — with every host-injected user record dropped, which is what keeps
+  a **sub-agent's report out of the prompt that decides that sub-agent's own
+  call**. Three defences carry that, because one producer alone cannot: the
+  mid-turn injection site now stamps `hostInjectionId` unconditionally (a batch
+  mixing the user's guide with a child's report is deliberately not attributed
+  to the child, so it used to reach the transcript unmarked); the reader also
+  drops any user record carrying the host-composed `[Sub-Agent: ` label, which
+  covers rows written before that stamp; and an assistant turn answering an
+  excluded record is dropped too, so a report asking the parent to restate it
+  cannot launder itself through the parent's own voice. Each turn is cut to 500
+  characters BEFORE the DLP pass (the bound exists to stop the masking walk, so
+  a bound on its output would not do the job) and the block to 2000 measured on
+  what is actually sent. The read is memoised for a few seconds because
+  `loadSession` is a synchronous whole-file parse on the main thread.
+- **`backgroundEscalation` (default `"deferred"`).** A tier-3 escalation the
+  host can establish nobody would see — a background child run while the app
+  window is hidden or minimised, or any child run while the away answerer is
+  armed — is denied fail-closed and recorded in the deferred queue with an OS
+  notification, rather than painting a dock nobody is watching. The run's
+  `background` flag alone is deliberately NOT enough: every locally spawned
+  child is a background run on this host, so keying on it would take the dock
+  away from a user sitting in front of the app, and tier 3 is the tier the
+  chain exists to preserve. The entry carries **no `grant`**, so the resolve
+  path refuses `"approved"` for it: reviewing it later records an opinion and
+  can never become permission for a call whose turn is over. There is no
+  timeout that could auto-anything — the denial has already happened. An
+  attended window, `"modal"`, an unwired queue, an unreadable attendance signal
+  or a failed append each keep the immediate dock. Repeat escalations from the
+  same (child run, tool) coalesce onto the first entry — still each denied —
+  so a child past its adjudication budget cannot bury the queue.
+- **`model` (default `"reviewer"`).** `"parent-session"` runs the side turn on
+  the chat provider/model the parent's own loop uses, resolved per ask from the
+  same settings that build that loop's provider; unresolvable resolves to
+  escalate, never to a fallback model. Zero tools, one round and the strict JSON
+  parse are identical either way. It is available in reviewer modes that wire no
+  LLM of their own — but NOT in `disabled`, whose classifier returns a
+  pass-through LOW for every call: a tier-2 ceiling computed from a verdict that
+  assessed nothing is not a ceiling. Cost note: it bills the (usually larger)
+  chat model once per adjudicated call, bounded by `maxPerChildRun`.
+
+One known gap remains, recorded so it is not mistaken for design: a child run's
+budget counter is never released when the run ends. The origin conversation id
+handed to the adjudicator is no longer dead — it is what `"parent-session"`
+resolves its target from.
 
 The chain end to end — tier-1 auto-approve, tier-2 allow, tier-2 deny, tier-3
 escalate — is regression-locked by
 `src/tools/__tests__/executor-parent-adjudication.test.ts`; the gate's own
-bounds live in `src/permissions/__tests__/parent-adjudication-gate.test.ts`.
+bounds live in `src/permissions/__tests__/parent-adjudication-gate.test.ts`,
+and the three settings above in
+`src/permissions/__tests__/parent-adjudication-options.test.ts` +
+`parent-context-evidence.test.ts`.
 
 ### MCP↔plugin execution parity (invariant)
 

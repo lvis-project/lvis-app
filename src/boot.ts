@@ -75,6 +75,8 @@ import {
   createApprovalGate,
 } from "./boot/conversation.js";
 import { readPermissionSettings } from "./permissions/permission-settings-store.js";
+import { summarizeParentContextTurns } from "./permissions/parent-context-evidence.js";
+import type { ParentContextTurn } from "./permissions/parent-context-evidence.js";
 import { McpAppModelContextStore } from "./mcp/mcp-app-model-context.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
@@ -115,6 +117,47 @@ import { createRemoteA2AActionController } from "./main/remote-a2a-action-contro
 import { buildSingleFlightAgentActionApprover } from "./permissions/agent-action-approver.js";
 import { PluginBundleLifecycle } from "./plugins/plugin-bundle-lifecycle.js";
 const log = createLogger("lvis");
+
+/**
+ * How long one parent transcript read is reused for tier-2 evidence.
+ *
+ * `loadSession` reads and parses the whole session file synchronously on this
+ * process's only thread. One adjudicated tool call is worth that; a burst of
+ * them from one child run is not, and the approval path is the worst place to
+ * spend it. A few seconds of staleness costs at most one very recent turn out
+ * of the quoted block.
+ */
+const PARENT_CONTEXT_CACHE_MS = 5_000;
+
+const parentContextCache = new Map<
+  string,
+  { readAt: number; turns: readonly ParentContextTurn[] }
+>();
+
+/**
+ * Compose the parent-context block, reusing a recent read of the same session.
+ *
+ * Keyed by session AND turn count because the count bounds what the summariser
+ * returns. The map is bounded by clearing it whenever it outgrows a handful of
+ * sessions — this is a burst cache, not a store.
+ */
+function readParentContextTurns(
+  memoryManager: { loadSession: (sessionId: string) => unknown[] | null },
+  parentSessionId: string,
+  maxTurns: number,
+): readonly ParentContextTurn[] {
+  const key = `${parentSessionId}\u0000${maxTurns}`;
+  const now = Date.now();
+  const cached = parentContextCache.get(key);
+  if (cached && now - cached.readAt < PARENT_CONTEXT_CACHE_MS) return cached.turns;
+  const turns = summarizeParentContextTurns(
+    memoryManager.loadSession(parentSessionId) ?? [],
+    maxTurns,
+  );
+  if (parentContextCache.size > 16) parentContextCache.clear();
+  parentContextCache.set(key, { readAt: now, turns });
+  return turns;
+}
 
 export type { AppServices } from "./boot/types.js";
 
@@ -215,7 +258,13 @@ export async function bootstrap(
     // nothing to return, which the gate treats as it treats every other
     // failure of this lane — the ask escalates to the user.
     {
-      adjudicator: () => ctx.parentAdjudicator,
+      // Both adjudicators are replaced on every reviewer re-wire, so the
+      // policy's model source is resolved per ask here rather than captured —
+      // the reason this whole block is accessors.
+      adjudicator: (source) =>
+        source === "parent-session"
+          ? ctx.parentSessionAdjudicator
+          : ctx.parentAdjudicator,
       // The flag itself ships ON: `settings-defaults.ts` sets it, and the
       // settings service merges stored flags over those defaults, so both an
       // absent key and a non-boolean one resolve to the default rather than to
@@ -227,6 +276,30 @@ export async function bootstrap(
         settingsService.get("features")?.subAgentParentAdjudication ?? false,
       policy: () =>
         readPermissionSettings().permissions.reviewer.parentAdjudication,
+      // The parent conversation's recent turns, when the operator opted in.
+      // Read from the main session store the parent's own loop writes, and
+      // composed by the summariser — which is where the exclusion of
+      // child-authored entries, the bounds and the masking all live.
+      //
+      // Memoised for a few seconds because `loadSession` is a synchronous
+      // whole-file read and parse on this process's only thread, and a busy
+      // child can raise adjudications in a tight burst (up to `maxPerChildRun`
+      // of them). Once per burst is the cost this feature is worth; once per
+      // ask is a main-process stall on the approval path. Staleness is bounded
+      // by the same few seconds and costs at most one missing recent turn.
+      parentContext: (parentSessionId, maxTurns) =>
+        readParentContextTurns(memoryManager, parentSessionId, maxTurns),
+      // Whether a dock would be seen by anyone. Visible and not minimised, not
+      // focused: a user reading the window beside another app is still there.
+      isDeskAttended: () => {
+        const win = getMainWindow();
+        if (!win || win.isDestroyed()) return false;
+        return win.isVisible() && !win.isMinimized();
+      },
+      // The queue a tier-3 escalation lands in when nobody is watching the
+      // run. Reached through the permission manager rather than captured: the
+      // queue instance is replaced on every reviewer re-wire.
+      deferredQueue: () => ctx.permissionManager?.getDeferredQueue() ?? null,
     },
   );
   ctx.approvalGate = approvalGate;

@@ -68,6 +68,9 @@ const PARENT_ADJUDICATION = {
   maxVerdict: "medium",
   timeoutMs: 30_000,
   maxPerChildRun: 200,
+  includeParentContextTurns: 0,
+  backgroundEscalation: "deferred",
+  model: "reviewer",
 } as const;
 
 describe("PermissionManager.dispatchReviewer", () => {
