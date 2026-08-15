@@ -91,6 +91,18 @@ import type {
   A2AStagedQuestionDelivery,
 } from "./a2a-agent-message-bus.js";
 import type { A2AAgentMailboxEntry } from "./a2a-agent-message-mailbox.js";
+import { sanitizeA2ALabel } from "./a2a-subagent-message-codec.js";
+import {
+  formatParentDirective,
+  hasUnsafeDirectiveControlChars,
+  PARENT_DIRECTIVE_MAX_CHARS,
+  type ParentDirectiveDeliveryResult,
+  type ParentDirectiveDropReason,
+} from "./parent-directive.js";
+import type {
+  ParentDirectiveEntry,
+  ParentDirectiveMailbox,
+} from "./parent-directive-mailbox.js";
 import {
   causalContextForEnvelopes,
   isSafeA2AStructuralId,
@@ -605,6 +617,14 @@ export interface SubAgentRunnerDeps {
   messageBus?: A2ASubAgentMessageBus;
   /** Child-to-parent and sibling A2A message bus. */
   agentMessageBus?: A2AAgentMessageBus;
+  /**
+   * Durable parent-to-child directive queue.
+   *
+   * Optional for the same reason `agentMessageBus` is — boot wires it, and every
+   * caller without it fails closed (`mailbox-unavailable`) instead of delivering
+   * a directive nothing could make durable.
+   */
+  parentDirectiveMailbox?: ParentDirectiveMailbox;
 }
 
 // Sub-agent round budget — ONE number, not a per-posture split. The child runs
@@ -644,6 +664,11 @@ const SUB_AGENT_TOOL_BLOCKLIST = new Set<string>([
   "agent_spawn",
   "agent_status",
   "agent_interrupt",
+  // Parent-only: `agent_guide` addresses the caller's OWN children, and a
+  // sub-agent has none. Its execute() already refuses a non-root caller; the
+  // blocklist keeps it out of the child's registry so the refusal is never a
+  // tool the child can see and try.
+  "agent_guide",
   "memory_write",
 ]);
 
@@ -1586,6 +1611,179 @@ export class SubAgentRunner {
     };
   }
 
+  /**
+   * A parent's mid-run directive to one of ITS OWN sub-agents.
+   *
+   * The other three A2A edges already existed — parent starts a child, child
+   * reports to its parent, child messages a sibling — and the parent could
+   * reach a SUSPENDED child by resuming it. What it could not do was tell a
+   * child that is still running to change direction or stop; the only lever was
+   * `agent_interrupt`, which throws the run away. This is that edge.
+   *
+   * AUTHORIZATION is the host-written spawn record (`isPersistedSpawnOfOrigin`),
+   * never the parent's transcript: compaction can strip the linking tool_result,
+   * and a claim in the model's context is not evidence of ownership. ONE HOP,
+   * downward only — a sub-agent cannot direct anything (it is not a root
+   * session, so `nested-parent` refuses it before ownership is even consulted),
+   * and there is no `to: "parent"` here because that direction is `agent_send`.
+   *
+   * DELIVERY is durable-first, exactly as sibling A2A delivery is: the directive
+   * is stored before the running child's guidance queue is touched, and the
+   * store is acknowledged only from `onInjected`. A turn that ends before the
+   * guidance reaches a round boundary therefore keeps the directive for the
+   * child's next resume instead of dropping it with the queue.
+   *
+   * A child that is neither live nor resumable is REFUSED rather than queued.
+   * `isResumableSubAgentTaskState` is the SOT the resume gate itself consumes:
+   * queuing for a WORKING-but-not-live (interrupted, or restored across a
+   * restart) child would store a message no code path can ever deliver, and a
+   * TTL would only decide how long that lie stays on disk. The parent is told
+   * the child is not resumable, which is actionable and true.
+   */
+  async queueParentMessageToChild(
+    originSessionId: string,
+    childSessionId: string,
+    text: string,
+  ): Promise<ParentDirectiveDeliveryResult> {
+    const messageId = createDlpSafeUuid();
+    const audit = (type: "info" | "warn", outcome: string): void =>
+      this.auditParentDirective(type, { originSessionId, childSessionId, messageId }, outcome);
+    const refuse = (
+      reason: ParentDirectiveDropReason,
+    ): Extract<ParentDirectiveDeliveryResult, { ok: false }> => {
+      audit("warn", "dropped:" + reason);
+      return { ok: false, reason };
+    };
+
+    if (!isValidSessionId(originSessionId) || !isValidSessionId(childSessionId)) {
+      return refuse("unknown-recipient");
+    }
+    if (originSessionId === childSessionId) return refuse("self-send");
+    // Hop guard, checked BEFORE ownership: a sub-agent session directing anything
+    // would be a second hop on the parent axis, whatever it happens to own.
+    if (
+      this.deps.subAgentMemoryManager.loadSessionMetadata(originSessionId)?.sessionKind
+        === "subagent"
+    ) {
+      return refuse("nested-parent");
+    }
+    const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(childSessionId);
+    if (!this.isPersistedSpawnOfOrigin(originSessionId, childSessionId)) {
+      // One verdict, two reasons — the same split sibling A2A already reports:
+      // "no such child" and "someone else's child" are different facts to an
+      // operator, and telling the parent which one it hit is what keeps it from
+      // retrying an address that will never become its own. No disclosure here
+      // that `agent_list` does not already make: every session is this user's.
+      return refuse(meta?.sessionKind === "subagent" ? "cross-origin" : "unknown-recipient");
+    }
+    if (typeof text !== "string" || text.length > PARENT_DIRECTIVE_MAX_CHARS) {
+      return refuse("message-too-long");
+    }
+    const masked = maskSubAgentText(text).trim();
+    if (masked.length === 0 || hasUnsafeDirectiveControlChars(masked)) {
+      return refuse("invalid-message");
+    }
+    const envelope = formatParentDirective(masked);
+    if (envelope.length > GUIDE_MAX_CHARS) return refuse("message-too-long");
+
+    const mailbox = this.deps.parentDirectiveMailbox;
+    if (!mailbox) return refuse("mailbox-unavailable");
+
+    const active = this.activeChildren.get(childSessionId);
+    const live = active?.originSessionId === originSessionId
+      && active.loop.hasActiveTurn() === true;
+    const taskState = meta?.subAgentTaskState ?? A2ATaskState.SUBMITTED;
+    if (!live) {
+      if (isA2ATerminalTaskState(taskState)) return refuse("terminal-recipient");
+      // Registered but not yet holding a turn: the run exists and will accept a
+      // directive shortly, so this is a RETRY, not the "start it again" advice
+      // `child-not-resumable` carries. The two look identical in persisted
+      // metadata (both WORKING), which is why the live registry decides here.
+      if (active?.originSessionId === originSessionId) {
+        return refuse("recipient-unavailable");
+      }
+      // Both halves of the resume gate: the state SOT, and the suspension reason
+      // `resumeWithPolicy` also requires. Accepting one without the other would
+      // store a directive whose only delivery path refuses structurally.
+      if (!isResumableSubAgentTaskState(taskState) || !meta?.subAgentSuspensionReason) {
+        return refuse("child-not-resumable");
+      }
+    }
+
+    let stored: Awaited<ReturnType<ParentDirectiveMailbox["append"]>>;
+    try {
+      stored = await mailbox.append({ originSessionId, childSessionId, text: envelope });
+    } catch {
+      return refuse("storage-failed");
+    }
+    if (!stored.ok) return refuse(stored.reason);
+    const entryId = stored.entry.id;
+
+    if (!live) {
+      audit("info", "mailbox");
+      return { ok: true, disposition: "mailbox", childSessionId, messageId };
+    }
+
+    // No `approvalReasonPrefix`, deliberately. That field is the sibling path's
+    // force-ask trigger, and it belongs there: a sibling is a peer whose text
+    // the receiver never agreed to act on. The parent is this child's PRINCIPAL
+    // — it authored the task the child is already running, and a spawn's
+    // instructions raise no force-ask. Making a mid-run amendment stricter than
+    // the instructions it amends would put a modal in front of every directive,
+    // which is how a real gate gets clicked through. The child's own tool calls
+    // remain gated exactly as they were.
+    const queued = active!.loop.queueGuidanceWithDisposition(envelope, {
+      onInjected: () => mailbox
+        .acknowledge(childSessionId, [entryId])
+        .then((removed) => audit(
+          removed === 1 ? "info" : "warn",
+          removed === 1 ? "injected" : "ack-failed",
+        ))
+        .catch(() => audit("warn", "ack-failed")),
+      onDropped: (reason) => audit("warn", "deferred:" + reason),
+    });
+    if (queued === "queued") {
+      audit("info", "queued");
+      return { ok: true, disposition: "queued", childSessionId, messageId };
+    }
+
+    // The child stopped accepting guidance between the liveness check and the
+    // enqueue. The stored directive is only kept when the child landed somewhere
+    // a resume can still deliver it from; otherwise it is removed, because an
+    // entry no path will read is worse than an error the parent can act on.
+    const settledState = this.deps.subAgentMemoryManager
+      .loadSessionMetadata(childSessionId)?.subAgentTaskState ?? A2ATaskState.SUBMITTED;
+    if (queued !== "queue-full" && isResumableSubAgentTaskState(settledState)) {
+      audit("info", "mailbox:" + queued);
+      return { ok: true, disposition: "mailbox", childSessionId, messageId };
+    }
+    try {
+      const removed = await mailbox.acknowledge(childSessionId, [entryId]);
+      if (removed !== 1) return refuse("storage-failed");
+    } catch {
+      return refuse("storage-failed");
+    }
+    return refuse(queued === "queue-full" ? "pending-cap" : "recipient-unavailable");
+  }
+
+  private auditParentDirective(
+    type: "info" | "warn",
+    input: { originSessionId: string; childSessionId: string; messageId: string },
+    outcome: string,
+  ): void {
+    this.deps.parentDeps?.auditLogger?.log({
+      timestamp: new Date().toISOString(),
+      sessionId: isValidSessionId(input.originSessionId) ? input.originSessionId : "unknown",
+      type,
+      input: [
+        "a2a:parent-directive:", outcome,
+        ":origin=", sanitizeA2ALabel(input.originSessionId),
+        ":child=", sanitizeA2ALabel(input.childSessionId),
+        ":message=", input.messageId,
+      ].join(""),
+    });
+  }
+
   reserveQuestionWait(
     senderChildSessionId: string,
     prompt: string,
@@ -1701,6 +1899,17 @@ export class SubAgentRunner {
     taskState: A2AProjectedTaskState,
   ): Promise<void> {
     if (!isA2ATerminalTaskState(taskState)) return;
+    // A finished child reads nothing more, so an undelivered parent directive
+    // addressed to it is now garbage that would otherwise hold a slot against
+    // the per-child cap forever.
+    try {
+      await this.deps.parentDirectiveMailbox?.discardForChild(childSessionId);
+    } catch {
+      log.warn(
+        "sub-agent terminal parent directive cleanup failed for %s",
+        childSessionId,
+      );
+    }
     try {
       const cleaned = await this.deps.agentMessageBus
         ?.cleanupTerminalRecipientMailbox?.(childSessionId);
@@ -3619,6 +3828,39 @@ export class SubAgentRunner {
         agentMailboxCausalContext = causalContext;
       }
     }
+    // Parent directives queued while this child was suspended. They ride the
+    // SAME initial-guidance channel as sibling mail — one injection path, one
+    // joined bound — and carry no A2A causal context: the parent is this run's
+    // own principal, not a peer whose hop has to be accounted for.
+    let parentDirectiveEntries: ParentDirectiveEntry[] = [];
+    const parentDirectiveMailbox = this.deps.parentDirectiveMailbox;
+    // A resume with no origin (host-internal callers) addresses no parent, so
+    // there is no authority under which a stored directive could be delivered.
+    if (parentDirectiveMailbox && originSessionId) {
+      try {
+        // The caller's origin, which the gate above already proved equal to the
+        // persisted `meta.originSessionId`: a directive is delivered on the
+        // authority of the parent asking for this resume, not on its own claim.
+        parentDirectiveEntries = await parentDirectiveMailbox.peek(
+          resumeId,
+          originSessionId,
+        );
+      } catch {
+        return await finishAuthorizedFailure(
+          "sub-agent resume: parent directive read failed",
+        );
+      }
+    }
+    const initialGuidance = [
+      agentMailboxGuidance,
+      ...parentDirectiveEntries.map((entry) => entry.text),
+    ].filter((part): part is string => part !== undefined && part.length > 0)
+      .join("\n\n");
+    if (initialGuidance.length > GUIDE_JOINED_MAX_CHARS) {
+      return await finishAuthorizedFailure(
+        "sub-agent resume: injected guidance exceeds host limit",
+      );
+    }
     if (cancellation.signal.aborted) {
       return await finishAuthorizedFailure("sub-agent run interrupted");
     }
@@ -3731,11 +3973,9 @@ export class SubAgentRunner {
           maxRounds: cappedRounds,
           sessionIdOverride: resumeId,
           spawnDepth: 1,
-          ...(agentMailboxEntries.length > 0
-            ? {
-                initialGuidance: agentMailboxGuidance!,
-                a2aCausalContext: agentMailboxCausalContext!,
-              }
+          ...(initialGuidance.length > 0 ? { initialGuidance } : {}),
+          ...(agentMailboxCausalContext
+            ? { a2aCausalContext: agentMailboxCausalContext }
             : {}),
           ...(executionPolicy
             ? { approvalReasonPrefix: executionPolicy.approvalReasonPrefix }
@@ -3903,6 +4143,33 @@ export class SubAgentRunner {
         }
       } catch {
         log.warn("sub-agent resume: agent mailbox acknowledgement failed for %s", resumeId);
+      }
+    }
+    // Same rule as the sibling mailbox above: a directive is consumed only when
+    // the turn that carried it actually reached a conclusion. A run that failed
+    // or was interrupted leaves it pending for the next resume.
+    if (
+      parentDirectiveMailbox
+      && parentDirectiveEntries.length > 0
+      && result.ok
+      && (result.stopReason === "end_turn" || result.stopReason === "input-required")
+    ) {
+      try {
+        const removed = await parentDirectiveMailbox.acknowledge(
+          resumeId,
+          parentDirectiveEntries.map((entry) => entry.id),
+        );
+        if (removed !== parentDirectiveEntries.length) {
+          log.warn(
+            "sub-agent resume: parent directive acknowledgement mismatch for %s",
+            resumeId,
+          );
+        }
+      } catch {
+        log.warn(
+          "sub-agent resume: parent directive acknowledgement failed for %s",
+          resumeId,
+        );
       }
     }
     if (durableTaskState) {
