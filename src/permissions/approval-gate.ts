@@ -238,6 +238,18 @@ export interface ApprovalRequest {
   parentEscalation?: ParentEscalationNotice;
   args: unknown;
   reason: string;
+  /**
+   * Host-composed label naming the cross-agent message that was influencing
+   * the caller when this ask was raised (`[Sub-Agent: <title>]`), when one
+   * was. The same string is already the leading segment of {@link reason},
+   * so carrying it structurally discloses nothing new — it just stops the
+   * consumers that need the FACT from having to parse it back out of prose.
+   *
+   * Host-composed and outbound-only, for the reason {@link parentEscalation}
+   * is: the host writes it, no decision field echoes it back, and it is not
+   * part of the {@link signApprovalRequest} preimage.
+   */
+  approvalReasonPrefix?: string;
   source?: "builtin" | "plugin" | "mcp";
   /** Plugin id that issued this approval request, when source === "plugin". */
   sourcePluginId?: string;
@@ -704,7 +716,7 @@ const parentAdjudicatedDecisions = new WeakMap<
 >();
 
 /** What the parent answered, for the consumers of the child's turn. */
-export interface ParentAdjudicationProvenance {
+interface ParentAdjudicationProvenance {
   outcome: "allow-once" | "deny";
   reason: string;
 }
@@ -736,7 +748,7 @@ const deferredEscalatedDecisions = new WeakMap<
 >();
 
 /** What the child's turn is told about an ask that was queued, not shown. */
-export interface DeferredEscalationProvenance {
+interface DeferredEscalationProvenance {
   /** Why tier 2 gave up on answering it. */
   cause: ParentEscalationNotice["cause"];
   /** Queue entry the user will review. */
@@ -1789,6 +1801,14 @@ export class ApprovalGate {
           childTitle: childProvenance.childTitle,
           spawnTaskSummary: childProvenance.spawnTaskSummary,
         },
+        // Host-composed, and the one fact about this ask the parent cannot
+        // otherwise see: a sibling's message is what prompted the call. It is
+        // already the leading segment of the `reason` the dock would have
+        // shown, so a parent-answered ask is the ONLY lane where omitting it
+        // hides something the human path displays.
+        ...(request.approvalReasonPrefix === undefined
+          ? {}
+          : { a2aInfluenceLabel: request.approvalReasonPrefix }),
         ...this.parentContextBlock(policy, childProvenance.originSessionId),
       };
       if (detections.size > 0) {

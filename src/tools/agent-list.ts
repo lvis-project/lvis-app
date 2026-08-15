@@ -45,13 +45,19 @@ export function createAgentListTool(deps: AgentListToolDeps): Tool {
         title: entry.title,
         resumeId: entry.childSessionId,
         taskState: entry.taskState ?? "unrecorded",
-        // Resumability comes from the runner's own resume-gate predicate:
+        // Resumability comes from the runner's own resume-gate predicates:
         // only INPUT_REQUIRED is accepted there, so only INPUT_REQUIRED may
         // be advertised here. SUBMITTED/WORKING/unrecorded children were
         // interrupted mid-run — the model still benefits from seeing they
         // existed (start fresh if that work is needed again), but a resume
         // attempt on them is a guaranteed permanent rejection.
-        resumable: isResumableSubAgentTaskState(entry.taskState),
+        //
+        // The resume-axis counters are the second half of that same gate: a
+        // child that spent its resume budget stays INPUT_REQUIRED forever, so
+        // reading the state alone would advertise a resume that is likewise a
+        // guaranteed permanent rejection — one wasted parent round each time.
+        resumable: isResumableSubAgentTaskState(entry.taskState)
+          && !runner?.isResumeExhausted(entry.childSessionId),
       }));
 
       return {

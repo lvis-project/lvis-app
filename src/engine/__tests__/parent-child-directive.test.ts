@@ -80,6 +80,9 @@ function stubbedRunner(metadataById: MetadataById) {
       auditLogger: {
         log: (entry: { input: string }) => audited.push(entry.input),
       },
+      // The acceptance predicate consults the resume-axis counters, and the
+      // cumulative ceiling is scaled to this budget (4 × 60 = 240 rounds).
+      settingsService: { get: () => ({ subAgentMaxRounds: 60 }) },
     },
   } as never);
   return { runner, mailbox, audited };
@@ -204,6 +207,54 @@ describe("SubAgentRunner.queueParentMessageToChild — routing and bounds", () =
     });
     expect(await runner.queueParentMessageToChild(ROOT_SESSION, OWNED_CHILD, "stop"))
       .toEqual({ ok: false, reason: "child-not-resumable" });
+  });
+
+  it("refuses a child whose resume count is spent, storing nothing", async () => {
+    // The resume-axis guards are the rest of the same gate. This child is
+    // INPUT_REQUIRED with a suspension reason — it passes the state halves —
+    // but `resume()` refuses it before running a turn, so accepting the
+    // directive would durably store a message with no delivery path left.
+    const { runner, mailbox } = stubbedRunner({
+      [OWNED_CHILD]: {
+        sessionKind: "subagent",
+        originSessionId: ROOT_SESSION,
+        subAgentTitle: "worker",
+        subAgentTaskState: "TASK_STATE_INPUT_REQUIRED",
+        subAgentSuspensionReason: "budget",
+        budgetResumeCount: 3,
+      },
+    });
+    expect(await runner.queueParentMessageToChild(ROOT_SESSION, OWNED_CHILD, "stop"))
+      .toEqual({ ok: false, reason: "child-not-resumable" });
+    expect(await mailbox.peek(OWNED_CHILD, ROOT_SESSION)).toHaveLength(0);
+  });
+
+  it("refuses a child that reached the cumulative-rounds ceiling", async () => {
+    // The other resume axis, on a child suspended for a question rather than
+    // for budget — the ceiling applies regardless of why it stopped.
+    const { runner, mailbox } = stubbedRunner({
+      [OWNED_CHILD]: {
+        ...suspendedChild(),
+        cumulativeRounds: 240,
+      },
+    });
+    expect(await runner.queueParentMessageToChild(ROOT_SESSION, OWNED_CHILD, "stop"))
+      .toEqual({ ok: false, reason: "child-not-resumable" });
+    expect(await mailbox.peek(OWNED_CHILD, ROOT_SESSION)).toHaveLength(0);
+  });
+
+  it("still accepts a suspended child with resume budget left", async () => {
+    // The guard must narrow to EXHAUSTED, not to "has ever been resumed".
+    const { runner, mailbox } = stubbedRunner({
+      [OWNED_CHILD]: {
+        ...suspendedChild(),
+        budgetResumeCount: 2,
+        cumulativeRounds: 239,
+      },
+    });
+    expect(await runner.queueParentMessageToChild(ROOT_SESSION, OWNED_CHILD, "stop"))
+      .toMatchObject({ ok: true, disposition: "mailbox" });
+    expect(await mailbox.peek(OWNED_CHILD, ROOT_SESSION)).toHaveLength(1);
   });
 
   it("refuses a finished child", async () => {

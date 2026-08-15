@@ -11,7 +11,10 @@ import { A2ATaskState } from "../../shared/a2a.js";
  */
 const PARENT = "9ebd3fcc-3317-4e83-9914-f6b32d3672ac";
 
-function makeTool(persisted: Array<Record<string, unknown>>) {
+function makeTool(
+  persisted: Array<Record<string, unknown>>,
+  exhausted: readonly string[] = [],
+) {
   return createAgentListTool({
     store: { list: vi.fn(async () => [
       { name: "researcher", description: "d", sourceTools: [], triggers: [], model: "mid", mode: "research" },
@@ -19,6 +22,7 @@ function makeTool(persisted: Array<Record<string, unknown>>) {
     getRunner: () => ({
       listPersistedSpawnsForOrigin: vi.fn((origin: string) =>
         origin === PARENT ? persisted : []),
+      isResumeExhausted: vi.fn((id: string) => exhausted.includes(id)),
     }) as never,
   });
 }
@@ -75,6 +79,23 @@ describe("agent_list existing sub-agents", () => {
     const payload = JSON.parse((await tool.execute({}, ctx)).output);
     expect(payload.existingSubAgents.map((e: { taskState: string; resumable: boolean }) => [e.taskState, e.resumable]))
       .toEqual([["unrecorded", false], [A2ATaskState.WORKING, false], [A2ATaskState.SUBMITTED, false]]);
+  });
+
+  it("does not advertise an INPUT_REQUIRED child whose resume budget is spent", async () => {
+    // The state SOT is only half the resume gate. A child that spent its
+    // resume-axis budget stays INPUT_REQUIRED forever, so reading the state
+    // alone advertises a resume that the runner refuses without running a
+    // turn — the same wasted round the WORKING case above exists to prevent.
+    const tool = makeTool(
+      [
+        { spawnId: "s6", childSessionId: "sub-aaaa-6666", title: "live", modifiedAt: new Date(), taskState: A2ATaskState.INPUT_REQUIRED },
+        { spawnId: "s7", childSessionId: "sub-aaaa-7777", title: "spent", modifiedAt: new Date(), taskState: A2ATaskState.INPUT_REQUIRED },
+      ],
+      ["sub-aaaa-7777"],
+    );
+    const payload = JSON.parse((await tool.execute({}, ctx)).output);
+    expect(payload.existingSubAgents.map((e: { resumeId: string; resumable: boolean }) => [e.resumeId, e.resumable]))
+      .toEqual([["sub-aaaa-6666", true], ["sub-aaaa-7777", false]]);
   });
 
   it("omits the section entirely when the conversation has no sub-agents", async () => {

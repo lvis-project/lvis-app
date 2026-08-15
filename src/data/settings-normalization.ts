@@ -72,6 +72,7 @@ import type {
   A2ARemoteSettings,
   AppearanceSettings,
   AppearanceSettingsV1,
+  ChatSettings,
   ChatThemePreference,
   CodeThemePreference,
   DiagnosticsSettings,
@@ -1093,6 +1094,29 @@ export function normalizeDiagnostics(input: unknown): DiagnosticsSettings {
   }
   if (typeof obj.logRetentionDays === "number" && Number.isInteger(obj.logRetentionDays)) {
     result.logRetentionDays = clampLogRetentionDays(obj.logRetentionDays);
+  }
+  return result;
+}
+
+/**
+ * Chat block, normalized at both store boundaries (disk load and patch).
+ *
+ * `subAgentMaxRounds` reaches `SubAgentRunner` as a live round budget and a
+ * scaled executor wall clock, so a `NaN`, a fraction, or a `0` from a
+ * hand-edited settings.json is not an inert bad value — it is a sub-agent that
+ * cannot run. There is deliberately NO upper clamp: the budget is uncapped by
+ * design (a ceiling above it only shows up as an agent stopped mid-task), and
+ * the timer-delay bound that used to be implicit is enforced where the timer
+ * is armed instead (`resolveEffectiveCeilingMs`).
+ */
+export function normalizeChat(input: unknown): ChatSettings {
+  const result: ChatSettings = { ...DEFAULT_SETTINGS.chat };
+  if (!input || typeof input !== "object" || Array.isArray(input)) return result;
+  const value = input as Record<string, unknown>;
+  if (typeof value.systemPrompt === "string") result.systemPrompt = value.systemPrompt;
+  if (typeof value.autoCompact === "boolean") result.autoCompact = value.autoCompact;
+  if (typeof value.subAgentMaxRounds === "number" && Number.isFinite(value.subAgentMaxRounds)) {
+    result.subAgentMaxRounds = Math.max(1, Math.floor(value.subAgentMaxRounds));
   }
   return result;
 }
