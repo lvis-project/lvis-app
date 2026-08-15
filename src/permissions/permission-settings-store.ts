@@ -28,6 +28,14 @@ import { withFileLock } from "../lib/with-file-lock.js";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
+import {
+  PARENT_ADJUDICATION_CONTEXT_TURNS_MAX,
+  PARENT_ADJUDICATION_CONTEXT_TURNS_MIN,
+  PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MAX,
+  PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MIN,
+  PARENT_ADJUDICATION_TIMEOUT_MS_MAX,
+  PARENT_ADJUDICATION_TIMEOUT_MS_MIN,
+} from "../shared/parent-adjudication-bounds.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
 
 const log = createLogger("permission-settings");
@@ -93,7 +101,7 @@ export interface ReviewerInteractiveBlock {
  * file hand the whole class to an agent. The host checks this ceiling before
  * the parent is asked at all, so no parent answer can exceed it.
  */
-type ParentAdjudicationMaxVerdict = "low" | "medium";
+export type ParentAdjudicationMaxVerdict = "low" | "medium";
 
 /**
  * Where a tier-3 escalation goes when nobody is watching the child run.
@@ -111,7 +119,7 @@ type ParentAdjudicationMaxVerdict = "low" | "medium";
  * re-drive a call whose turn is over, so it is the weaker answer whenever a
  * human is actually there to give the stronger one.
  */
-type ParentAdjudicationBackgroundEscalation = "deferred" | "modal";
+export type ParentAdjudicationBackgroundEscalation = "deferred" | "modal";
 
 /**
  * Which model answers the tier-2 side turn.
@@ -129,15 +137,9 @@ type ParentAdjudicationBackgroundEscalation = "deferred" | "modal";
  */
 export type ParentAdjudicationModelSource = "reviewer" | "parent-session";
 
-/** Bounds for {@link ReviewerParentAdjudicationBlock.timeoutMs}. */
-const PARENT_ADJUDICATION_TIMEOUT_MS_MIN = 1_000;
-const PARENT_ADJUDICATION_TIMEOUT_MS_MAX = 120_000;
-/** Bounds for {@link ReviewerParentAdjudicationBlock.maxPerChildRun}. */
-const PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MIN = 1;
-const PARENT_ADJUDICATION_MAX_PER_CHILD_RUN_MAX = 1_000;
-/** Bounds for {@link ReviewerParentAdjudicationBlock.includeParentContextTurns}. */
-const PARENT_ADJUDICATION_CONTEXT_TURNS_MIN = 0;
-const PARENT_ADJUDICATION_CONTEXT_TURNS_MAX = 5;
+// Bounds for the numeric fields of ReviewerParentAdjudicationBlock live in
+// shared/parent-adjudication-bounds.ts — the settings form mirrors the same
+// ceilings it types values against, so they cannot be declared per layer.
 
 /**
  * Tier-2 (parent-adjudication) policy for sub-agent tool approvals.
