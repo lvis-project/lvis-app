@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.ts";
+import { MOCK_REVIEWER_PARENT_ADJUDICATION } from "../../../../../test/renderer/mock-lvis-api.js";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import { PermissionsTab } from "../PermissionsTab.js";
@@ -45,6 +46,7 @@ function installLvisApi() {
         provider: "openai",
         model: "gpt-4o-mini",
         fallbackOnError: "deny",
+        parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
         interactive: { autoApprove: "off" },
       },
     })),

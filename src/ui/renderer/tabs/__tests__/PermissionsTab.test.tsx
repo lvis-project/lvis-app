@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
+import { MOCK_REVIEWER_PARENT_ADJUDICATION } from "../../../../../test/renderer/mock-lvis-api.js";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -66,6 +67,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
+              parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
               interactive: { autoApprove: "off" as const },
             },
           };
@@ -79,6 +81,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
+              parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
               interactive: { autoApprove: "off" as const },
             },
           };
@@ -92,6 +95,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
+              parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
               interactive: { autoApprove: "off" as const },
             },
           };
@@ -105,6 +109,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "rule" as const,
+              parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
               interactive: { autoApprove: "off" as const },
             },
           };
@@ -118,6 +123,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
+              parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
               interactive: { autoApprove: rawArgs === "interactive medium" ? "medium" as const : "low" as const },
             },
           };
@@ -131,6 +137,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-4o-mini",
               fallbackOnError: "deny" as const,
+              parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
               interactive: { autoApprove: "off" as const },
             },
           };
@@ -144,6 +151,7 @@ function installApi(disabledBatches: HookTrustRow[][]) {
               provider: "openai" as const,
               model: "gpt-5.5-mini",
               fallbackOnError: "deny" as const,
+              parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
               interactive: { autoApprove: "off" as const },
             },
           };
@@ -410,6 +418,7 @@ describe("PermissionsTab hook quarantine notice", () => {
             provider: "openai" as const,
             model: "gpt-4o-mini",
             fallbackOnError: "deny" as const,
+            parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
             interactive: { autoApprove: "off" as const },
           },
         };
@@ -423,6 +432,7 @@ describe("PermissionsTab hook quarantine notice", () => {
             provider: "openai" as const,
             model: "gpt-4o-mini",
             fallbackOnError: "deny" as const,
+            parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
             interactive: { autoApprove: "off" as const },
           },
         };
@@ -613,6 +623,7 @@ describe("PermissionsTab hook quarantine notice", () => {
             provider: "openai" as const,
             model: "gpt-4o-mini",
             fallbackOnError: "deny" as const,
+            parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
             interactive: { autoApprove: "off" as const },
           },
         };
@@ -641,6 +652,7 @@ describe("PermissionsTab hook quarantine notice", () => {
             provider: "openai" as const,
             model: "gpt-4o-mini",
             fallbackOnError: "deny" as const,
+            parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
             interactive: { autoApprove: "off" as const },
           },
         };
@@ -1065,6 +1077,7 @@ describe("PermissionsTab — handleWindowsInstall error-shape robustness", () =>
             provider: "openai" as const,
             model: "gpt-4o-mini",
             fallbackOnError: "deny" as const,
+            parentAdjudication: MOCK_REVIEWER_PARENT_ADJUDICATION,
             interactive: { autoApprove: "off" as const },
           },
         })),

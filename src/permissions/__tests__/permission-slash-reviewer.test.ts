@@ -115,6 +115,110 @@ describe("parsePermissionReviewerCommand", () => {
     const r = parsePermissionReviewerCommand("mode rule extra");
     expect(r).toEqual({ ok: false, error: expect.stringMatching(/single value/) });
   });
+
+  it("parses 'adjudication <field> <value>'", () => {
+    expect(parsePermissionReviewerCommand("adjudication maxVerdict low")).toEqual({
+      verb: "adjudication",
+      value: "low",
+      field: "maxVerdict",
+    });
+  });
+
+  it("rejects 'adjudication' with no field", () => {
+    const r = parsePermissionReviewerCommand("adjudication");
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/requires a field and a value/) });
+  });
+
+  it("rejects an unknown adjudication field", () => {
+    const r = parsePermissionReviewerCommand("adjudication bogus 1");
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/unknown adjudication field/) });
+  });
+
+  it("rejects 'adjudication' with too many args", () => {
+    const r = parsePermissionReviewerCommand("adjudication timeoutMs 1000 extra");
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/single value/) });
+  });
+});
+
+describe("dispatchPermissionReviewerCommand — parent adjudication", () => {
+  it("persists one ceiling without disturbing the other five", async () => {
+    const path = tmpSettingsPath();
+    const r = await dispatchPermissionReviewerCommand(
+      { verb: "adjudication", value: "low", field: "maxVerdict" },
+      path,
+    );
+    expect(r.ok).toBe(true);
+    const block = readPermissionSettings(path).permissions.reviewer.parentAdjudication;
+    expect(block.maxVerdict).toBe("low");
+    expect(block.timeoutMs).toBe(30_000);
+    expect(block.maxPerChildRun).toBe(200);
+    expect(block.includeParentContextTurns).toBe(0);
+    expect(block.backgroundEscalation).toBe("deferred");
+    expect(block.model).toBe("reviewer");
+  });
+
+  it("persists every writable field", async () => {
+    const path = tmpSettingsPath();
+    for (const [field, value] of [
+      ["timeoutMs", "45000"],
+      ["maxPerChildRun", "50"],
+      ["includeParentContextTurns", "2"],
+      ["backgroundEscalation", "modal"],
+      ["model", "parent-session"],
+    ] as const) {
+      const r = await dispatchPermissionReviewerCommand(
+        { verb: "adjudication", value, field },
+        path,
+      );
+      expect(r.ok, `${field}=${value}`).toBe(true);
+    }
+    const block = readPermissionSettings(path).permissions.reviewer.parentAdjudication;
+    expect(block.timeoutMs).toBe(45_000);
+    expect(block.maxPerChildRun).toBe(50);
+    expect(block.includeParentContextTurns).toBe(2);
+    expect(block.backgroundEscalation).toBe("modal");
+    expect(block.model).toBe("parent-session");
+  });
+
+  it("rejects an out-of-range number rather than clamping it", async () => {
+    const path = tmpSettingsPath();
+    const r = await dispatchPermissionReviewerCommand(
+      { verb: "adjudication", value: "900000", field: "timeoutMs" },
+      path,
+    );
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/expected 1000\.\.120000/) });
+    expect(readPermissionSettings(path).permissions.reviewer.parentAdjudication.timeoutMs)
+      .toBe(30_000);
+  });
+
+  it("rejects a non-integer number", async () => {
+    const path = tmpSettingsPath();
+    const r = await dispatchPermissionReviewerCommand(
+      { verb: "adjudication", value: "2.5", field: "includeParentContextTurns" },
+      path,
+    );
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/expected an integer/) });
+  });
+
+  it("rejects a verdict ceiling the type does not allow", async () => {
+    const path = tmpSettingsPath();
+    const r = await dispatchPermissionReviewerCommand(
+      { verb: "adjudication", value: "high", field: "maxVerdict" },
+      path,
+    );
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/invalid maxVerdict/) });
+    expect(readPermissionSettings(path).permissions.reviewer.parentAdjudication.maxVerdict)
+      .toBe("medium");
+  });
+
+  it("rejects an unknown adjudicating model source", async () => {
+    const path = tmpSettingsPath();
+    const r = await dispatchPermissionReviewerCommand(
+      { verb: "adjudication", value: "gpt-4o", field: "model" },
+      path,
+    );
+    expect(r).toEqual({ ok: false, error: expect.stringMatching(/invalid model/) });
+  });
 });
 
 describe("dispatchPermissionReviewerCommand — persistence", () => {
