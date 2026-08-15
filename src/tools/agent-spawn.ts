@@ -585,7 +585,12 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
 export function createAgentStatusTool(deps: Pick<AgentSpawnToolDeps, "getRunner">): Tool {
   return createDynamicTool({
     name: "agent_status",
-    description: "Inspect active or recent sub-agent runs. Pass spawnId or childSessionId as id; omit id to list all tracked runs.",
+    // Says what this list is NOT, because the empty version of it is the one
+    // that gets misread: a restart leaves the live runs behind while the
+    // conversation's children stay on disk, and "no live runs" has been read
+    // as "the work finished". The same fact the restored-runs hint states
+    // after the call, stated where the model reads before making it.
+    description: t("be_agentSpawn.statusToolDescription"),
     source: "builtin",
     category: "meta",
     decisionOverride: "always-allow-with-audit",

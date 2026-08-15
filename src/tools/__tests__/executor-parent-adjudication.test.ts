@@ -157,6 +157,11 @@ async function runChildToolCall(options: {
           maxVerdict: "medium",
           timeoutMs: 5_000,
           maxPerChildRun: 200,
+          includeParentContextTurns: 0,
+          // The dock, not the queue: this chain test is about the four legs
+          // the user can see, and the deferred route removes the last one.
+          backgroundEscalation: "modal",
+          model: "reviewer",
         }),
       },
     );

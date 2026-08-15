@@ -32,6 +32,8 @@ export const en = {
     "The provider REFUSED this request itself — not a transient outage. It validates the request before generating, and it will refuse an identical request identically every time, so retrying the SAME resumeId is a loop with no exit. The sub-agent's history is intact and it stays resumable, but only after something about the request changes: switch the model or provider, or continue the work in a NEW sub-agent with a narrower tool scope. Report the provider error text to the user rather than retrying silently.",
   "be_agentSpawn.emptySummaryFallback":
     "Task state: {taskState} — the sub-agent produced no summary. Resume it with agent_spawn(resumeId: \"{resumeId}\") to see the details.",
+  "be_agentSpawn.statusToolDescription":
+    "Inspect active or recent sub-agent runs. Pass spawnId or childSessionId as id; omit id to list all tracked runs. Live runs only: after an app restart, sub-agents persisted from this conversation are listed by agent_list, not here.",
   "be_agentSpawn.statusRestoredHint":
     "No run is live in this process, but {count} sub-agent(s) from this conversation survived a restart. An empty run list does NOT mean their work finished — call agent_list to see them with their resumeId and state.",
 } as const;
@@ -67,6 +69,8 @@ export const ko: Record<keyof typeof en, string> = {
     "이 요청 자체를 provider 가 거부했습니다 — 일시적 장애가 아닙니다. provider 는 생성 전에 요청을 검증하며 동일한 요청은 매번 동일하게 거부하므로, 같은 resumeId 재시도는 빠져나올 수 없는 루프입니다. sub-agent 히스토리는 온전하고 여전히 재개 가능하지만, 요청이 달라진 뒤에만 가능합니다: 모델이나 provider 를 바꾸거나, 더 좁은 tool 범위의 새 sub-agent 로 작업을 이어가세요. 조용히 재시도하지 말고 provider 오류 원문을 사용자에게 보고하세요.",
   "be_agentSpawn.emptySummaryFallback":
     "작업 상태: {taskState} — 서브에이전트가 요약을 남기지 않았습니다. agent_spawn(resumeId: \"{resumeId}\") 로 재개해 상세를 확인하세요.",
+  "be_agentSpawn.statusToolDescription":
+    "활성 또는 최근 sub-agent 실행을 조회합니다. id 로 spawnId 또는 childSessionId 를 넘기고, 생략하면 추적 중인 실행을 모두 나열합니다. 여기에는 살아 있는 실행만 나옵니다 — 앱 재시작 후 이 대화에 남아 있는 sub-agent 는 agent_list 가 보여줍니다.",
   "be_agentSpawn.statusRestoredHint":
     "이 프로세스에는 살아 있는 run 이 없지만, 이 대화의 sub-agent {count} 개가 재시작 후에도 남아 있습니다. run 목록이 비었다고 해서 그 작업이 끝난 것이 아닙니다 — agent_list 를 호출하면 resumeId 와 상태까지 확인할 수 있습니다.",
 };
