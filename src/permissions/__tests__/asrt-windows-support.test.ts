@@ -13,7 +13,7 @@ import {
   resolveAsrtWindowsReady,
 } from "../asrt-windows-support.js";
 
-// ASRT 0.0.67: readAsrtWindowsStatus reads BOTH the sandbox-user and WFP state
+// ASRT 0.0.73: readAsrtWindowsStatus reads BOTH the sandbox-user and WFP state
 // from a SINGLE `srt-win status` spawn (checkWindowsSandboxStatusAsync). Override
 // only that one export; everything else (resolveSrtWin, WindowsSandboxError, …)
 // stays real so the DI-based install tests are unaffected.
@@ -77,6 +77,15 @@ function readAsrtSandboxManagerSource(): string {
   const require = createRequire(import.meta.url);
   const indexPath = require.resolve("@anthropic-ai/sandbox-runtime");
   return readFileSync(join(dirname(indexPath), "sandbox", "sandbox-manager.js"), "utf-8");
+}
+
+function readAsrtWindowsUtilsSource(): string {
+  const require = createRequire(import.meta.url);
+  const indexPath = require.resolve("@anthropic-ai/sandbox-runtime");
+  return readFileSync(
+    join(dirname(indexPath), "sandbox", "windows-sandbox-utils.js"),
+    "utf-8",
+  );
 }
 
 describe("asrt-windows-support adapter", () => {
@@ -381,7 +390,7 @@ describe("asrt-windows-support adapter", () => {
   });
 
   it("surfaces an install_timeout WindowsSandboxError distinctly (UAC left open)", async () => {
-    // ASRT 0.0.67 installWindowsSandboxAsync throws WindowsSandboxError with code
+    // ASRT 0.0.73 installWindowsSandboxAsync throws WindowsSandboxError with code
     // 'install_timeout' when the self-elevating subprocess is killed by the 120s
     // spawn timeout with the UAC consent dialog still open. The adapter must
     // surface that distinctly (not as a generic failure), and must NOT run the
@@ -410,7 +419,65 @@ describe("asrt-windows-support adapter", () => {
     expect(verifyWindowsWfpEgress).not.toHaveBeenCalled();
   });
 
-  it("reads user + WFP from the single checkWindowsSandboxStatusAsync spawn (ASRT 0.0.67)", async () => {
+  it("refuses an install whose ambient write-deny stamping failed", async () => {
+    // ASRT 0.0.73 added an install step that deny-stamps the stock
+    // world-writable system dirs for the sandbox user, with its own exit code
+    // (17 → 'install_ambient_failed'). The WFP filters and the sandbox user can
+    // both be in place when it fails, so the tempting reading is "mostly
+    // installed". It is not: the win32 capability LVIS publishes claims
+    // `filesystem: true`, and that claim assumes those stamps landed. The
+    // adapter must reject the install rather than let a half-stamped machine
+    // publish filesystem confinement.
+    const { WindowsSandboxError } = await import("@anthropic-ai/sandbox-runtime");
+    const grantBackendAcl = vi.fn(async () => undefined);
+    const verifyWindowsWfpEgress = vi.fn(async () => undefined);
+
+    await expect(
+      installAsrtWindowsSandbox({
+        loadRuntime: async () => ({
+          installWindowsSandboxAsync: async () => {
+            throw new WindowsSandboxError(
+              "install_ambient_failed",
+              "srt-win install: ambient write-deny stamping failed",
+              "install",
+            );
+          },
+          verifyWindowsWfpEgress,
+        }),
+        grantBackendAcl,
+      }),
+    ).rejects.toThrow(/deny-stamp the stock world-writable system directories/i);
+
+    // Fail-closed: neither the backend ACL grant nor the readiness verification
+    // may run for an install that was not accepted.
+    expect(grantBackendAcl).not.toHaveBeenCalled();
+    expect(verifyWindowsWfpEgress).not.toHaveBeenCalled();
+  });
+
+  it("pins the ambient write-deny exit code the adapter maps", () => {
+    // The mapping above is only meaningful while ASRT still emits this code.
+    // If upstream renumbers or drops the ambient stamping step, this fails and
+    // sends us back to the adapter instead of leaving a mapping for a code that
+    // no longer occurs.
+    const source = readAsrtWindowsUtilsSource();
+    expect(source).toMatch(/case 17:/);
+    expect(source).toContain("install_ambient_failed");
+  });
+
+  it("pins Windows per-exec filesystem to deny-only", () => {
+    // `assertPerExecFilesystemSupported` (asrt-sandbox.ts), the powershell win32
+    // refusal, and the MCP-stdio win32 refusal all rest on ONE upstream fact:
+    // `srt-win exec` takes --deny-read/--deny-write but no allow grants. Pin it
+    // against the installed bundle so a version bump that ADDS allow grants
+    // surfaces here — those refusals would then be over-strict, not honest.
+    const source = readAsrtWindowsUtilsSource();
+    expect(source).toContain("'--deny-read'");
+    expect(source).toContain("'--deny-write'");
+    expect(source).not.toContain("'--allow-read'");
+    expect(source).not.toContain("'--allow-write'");
+  });
+
+  it("reads user + WFP from the single checkWindowsSandboxStatusAsync spawn (ASRT 0.0.73)", async () => {
     const ORIGINAL_PLATFORM = process.platform;
     Object.defineProperty(process, "platform", { value: "win32", configurable: true });
     checkWindowsSandboxStatusAsyncMock.mockResolvedValue({
@@ -431,7 +498,7 @@ describe("asrt-windows-support adapter", () => {
 
       // ONE status spawn — not the old two-spawn (user + wfp) path.
       expect(checkWindowsSandboxStatusAsyncMock).toHaveBeenCalledTimes(1);
-      // Threaded the EXPLICIT srt-win descriptor (0.0.67 has no implicit fallback).
+      // Threaded the EXPLICIT srt-win descriptor (no implicit fallback since 0.0.67).
       expect(checkWindowsSandboxStatusAsyncMock.mock.calls[0]?.[0]).toMatchObject({
         srtWin: expect.objectContaining({ exe: expect.stringContaining("srt-win") }),
       });
@@ -450,7 +517,7 @@ describe("asrt-windows-support adapter", () => {
     }
   });
 
-  it("normalizes the ASRT 0.0.67 ready sandbox-user shape", () => {
+  it("normalizes the ASRT 0.0.73 ready sandbox-user shape", () => {
     expect(
       normalizeAsrtWindowsUserState({
         provisioned: true,
