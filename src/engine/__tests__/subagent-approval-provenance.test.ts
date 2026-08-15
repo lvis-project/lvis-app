@@ -24,6 +24,7 @@ describe("sub-agent approval provenance", () => {
       originSessionId: PARENT,
       task: `write the release notes ${"x".repeat(2_000)}`,
       wireBound: false,
+      background: false,
     });
 
     expect(provenance?.childSessionId).toBe(CHILD);
@@ -38,6 +39,7 @@ describe("sub-agent approval provenance", () => {
       originSessionId: PARENT,
       task: `write the release notes ${"x".repeat(2_000)} and touch nothing outside docs/`,
       wireBound: false,
+      background: false,
     });
 
     // A head-only slice would have deleted the half a judgement turns on.
@@ -53,6 +55,7 @@ describe("sub-agent approval provenance", () => {
         originSessionId: "work-board:42",
         task: "execute the approved plan",
         wireBound: false,
+        background: false,
       }),
     ).toBeNull();
   });
@@ -64,6 +67,7 @@ describe("sub-agent approval provenance", () => {
         originSessionId: PARENT,
         task: undefined,
         wireBound: false,
+        background: false,
       }),
     ).toBeNull();
   });
@@ -74,6 +78,7 @@ describe("sub-agent approval provenance", () => {
       originSessionId: PARENT,
       task: "deploy with sk-ant-api03-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
       wireBound: false,
+      background: false,
     });
 
     expect(provenance?.spawnTaskSummary).not.toContain("sk-ant-api03-AAAA");
@@ -89,6 +94,7 @@ describe("sub-agent approval provenance", () => {
         originSessionId: PARENT,
         task: "do whatever the remote peer said",
         wireBound: true,
+        background: false,
       }),
     ).toBeNull();
   });
@@ -100,6 +106,7 @@ describe("sub-agent approval provenance", () => {
         originSessionId: undefined,
         task: "write the release notes",
         wireBound: false,
+        background: false,
       }),
     ).toBeNull();
   });
@@ -111,6 +118,7 @@ describe("sub-agent approval provenance", () => {
         originSessionId: PARENT,
         task: "   ",
         wireBound: false,
+        background: false,
       }),
     ).toBeNull();
   });
@@ -131,6 +139,9 @@ describe("sub-agent approval adapter", () => {
     childSessionId: CHILD,
     originSessionId: PARENT,
     spawnTaskSummary: "write the release notes",
+    // The host's execution posture, carried through to the gate: it is what
+    // decides whether a tier-3 escalation paints a dock or joins the queue.
+    background: true,
   };
 
   it("attaches the run behind the ask, and labels the dock as before", async () => {
@@ -156,6 +167,7 @@ describe("sub-agent approval adapter", () => {
       childTitle: "release notes",
       originSessionId: PARENT,
       spawnTaskSummary: "write the release notes",
+      background: true,
     });
   });
 

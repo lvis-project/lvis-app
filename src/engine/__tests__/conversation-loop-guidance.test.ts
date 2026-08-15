@@ -180,6 +180,40 @@ describe("ConversationLoop guidance queue + boundary inject", () => {
     ).toBe(true);
   });
 
+  it("marks the injected row as host-minted, whoever the batch came from", async () => {
+    // The row is a host injection whether it carried the user's guide, a
+    // child's report, or both. Anything that later decides what the USER said
+    // reads this marker — the tier-2 parent-context evidence is the first such
+    // reader, and a mixed batch is deliberately not attributed to the child,
+    // so without the stamp a child's prose would pass as its parent's words.
+    const provider = new FakeProvider([
+      [
+        { type: "tool_call", id: "t1", name: "noop_tool", input: {} } as StreamEvent,
+        { type: "message_complete", stopReason: "tool_use" } as StreamEvent,
+      ],
+      [
+        { type: "text_delta", text: "done" } as StreamEvent,
+        { type: "message_complete", stopReason: "end_turn" } as StreamEvent,
+      ],
+    ]);
+    const loop = makeLoop(provider);
+
+    const turnPromise = loop.runTurn("start", undefined, undefined, {
+      inputOrigin: "user-keyboard",
+    });
+    await Promise.resolve();
+    loop.queueGuidance("mid-turn guide");
+    await turnPromise;
+
+    const injectedRow = getHistory(loop).find(
+      (m) =>
+        m.role === "user" &&
+        typeof m.content === "string" &&
+        m.content.includes("mid-turn guide"),
+    ) as { meta?: { hostInjectionId?: string } } | undefined;
+    expect(injectedRow?.meta?.hostInjectionId).toBeTruthy();
+  });
+
   it("joins multiple queued utterances at the same boundary with blank-line separators", async () => {
     const provider = new FakeProvider([
       [
