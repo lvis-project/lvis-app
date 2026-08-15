@@ -31,6 +31,7 @@ import {
   type McpResourceAccessResolver,
 } from "../tools/mcp-resource-tools.js";
 import { createAgentListTool } from "../tools/agent-list.js";
+import { createAgentGuideTool } from "../tools/agent-guide.js";
 import { createAgentSendTool, type AgentSendRuntime } from "../tools/agent-send.js";
 import type { AskUserQuestionGate } from "../main/ask-user-question-gate.js";
 import type { RoutinesStore } from "../main/routines-store.js";
@@ -242,6 +243,11 @@ export function registerBuiltinTools(
         getRunner: workflowDeps.getSubAgentRunner,
       }),
       createAgentInterruptTool({
+        getRunner: workflowDeps.getSubAgentRunner,
+      }),
+      // The other half of the same relationship: `agent_interrupt` ends a run,
+      // `agent_guide` redirects one that should keep going.
+      createAgentGuideTool({
         getRunner: workflowDeps.getSubAgentRunner,
       }),
     );

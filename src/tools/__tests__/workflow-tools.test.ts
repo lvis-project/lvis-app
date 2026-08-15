@@ -37,6 +37,7 @@ import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../../shared/subagent-rounds.js";
 import { createSkillLoadTool } from "../skill-load.js";
 import { createSkillListTool } from "../skill-list.js";
 import { createAgentListTool } from "../agent-list.js";
+import { createAgentGuideTool } from "../agent-guide.js";
 import { RoutinesStore } from "../../main/routines-store.js";
 import { SessionTodoStore } from "../../main/session-todo-store.js";
 import { SkillStore } from "../../main/skill-store.js";
@@ -1777,5 +1778,110 @@ describe("skill_load tool", () => {
     expect(result.isError).toBe(true);
     expect(JSON.parse(result.output).error).toContain("generation access unavailable");
     expect(load).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent_guide tool", () => {
+  it("delegates a directive to the runner under the caller's own session id", async () => {
+    const queueSpy = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "queued" as const,
+      childSessionId: "child-1",
+      messageId: "message-1",
+    }));
+    const tool = createAgentGuideTool({
+      getRunner: () => ({ queueParentMessageToChild: queueSpy }) as never,
+    });
+
+    const result = await tool.execute(
+      { childSessionId: "child-1", message: "change direction" },
+      ctx(),
+    );
+    expect(result.isError).toBe(false);
+    // The origin is the HOST-supplied session id, never anything the model wrote.
+    expect(queueSpy).toHaveBeenCalledWith("session-x", "child-1", "change direction");
+    expect(JSON.parse(result.output)).toMatchObject({
+      childSessionId: "child-1",
+      disposition: "queued",
+    });
+  });
+
+  it("tells the parent how a stored directive will be delivered", async () => {
+    const tool = createAgentGuideTool({
+      getRunner: () => ({
+        queueParentMessageToChild: async () => ({
+          ok: true as const,
+          disposition: "mailbox" as const,
+          childSessionId: "child-1",
+          messageId: "message-1",
+        }),
+      }) as never,
+    });
+
+    const parsed = JSON.parse(
+      (await tool.execute({ childSessionId: "child-1", message: "stop" }, ctx())).output,
+    );
+    expect(parsed.disposition).toBe("mailbox");
+    expect(parsed.guidance).toContain("agent_spawn(resumeId)");
+  });
+
+  it("refuses a sub-agent caller — a child has no children to direct", async () => {
+    const queueSpy = vi.fn();
+    const tool = createAgentGuideTool({
+      getRunner: () => ({ queueParentMessageToChild: queueSpy }) as never,
+    });
+
+    const refused = await tool.execute(
+      { childSessionId: "child-1", message: "change direction" },
+      {
+        cwd: process.cwd(),
+        extraAllowedDirectories: [],
+        metadata: { sessionId: "sub-1", spawnDepth: 1 },
+      },
+    );
+    expect(refused.isError).toBe(true);
+    expect(JSON.parse(refused.output).error).toContain("cannot be invoked from a sub-agent");
+    expect(queueSpy).not.toHaveBeenCalled();
+  });
+
+  it("requires a session id, a recipient, and a non-empty message", async () => {
+    const queueSpy = vi.fn();
+    const tool = createAgentGuideTool({
+      getRunner: () => ({ queueParentMessageToChild: queueSpy }) as never,
+    });
+
+    const noSession = await tool.execute(
+      { childSessionId: "child-1", message: "hi" },
+      { cwd: process.cwd(), extraAllowedDirectories: [], metadata: {} },
+    );
+    expect(noSession.isError).toBe(true);
+    expect(JSON.parse(noSession.output).error).toContain("session id");
+
+    const noRecipient = await tool.execute({ childSessionId: "  ", message: "hi" }, ctx());
+    expect(JSON.parse(noRecipient.output).error).toBe("unknown-recipient");
+
+    const noMessage = await tool.execute({ childSessionId: "child-1", message: " " }, ctx());
+    expect(JSON.parse(noMessage.output).error).toBe("invalid-message");
+    expect(queueSpy).not.toHaveBeenCalled();
+  });
+
+  it("names non-resumability instead of leaving the parent to retry", async () => {
+    const tool = createAgentGuideTool({
+      getRunner: () => ({
+        queueParentMessageToChild: async () => ({
+          ok: false as const,
+          reason: "child-not-resumable" as const,
+        }),
+      }) as never,
+    });
+
+    const refused = await tool.execute(
+      { childSessionId: "child-1", message: "stop" },
+      ctx(),
+    );
+    expect(refused.isError).toBe(true);
+    const parsed = JSON.parse(refused.output);
+    expect(parsed.error).toBe("child-not-resumable");
+    expect(parsed.guidance).toContain("agent_list");
   });
 });
