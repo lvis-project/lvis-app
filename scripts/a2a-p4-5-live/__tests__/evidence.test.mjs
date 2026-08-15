@@ -792,7 +792,7 @@ test("evidence workflow separates secret-free unsigned candidate execution from 
     // did not in 0b328df6 (a batch Dependabot merge), and this test sat
     // red for twelve days because it runs under `node --test` rather than
     // the vitest gate.
-    "actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d # v4",
+    "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4",
     "gh attestation verify",
     "node scripts/write-installer-provenance.mjs",
     "--source-digest \"$REQUESTED_HEAD\"",
@@ -814,7 +814,7 @@ test("evidence workflow separates secret-free unsigned candidate execution from 
   for (const ref of attestRefs) {
     assert.equal(
       ref,
-      "actions/attest@508db95dd578ae2727ebd6217d5ba78e4fbda05d",
+      "actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6",
       `unreviewed attest pin: ${ref}`,
     );
   }
