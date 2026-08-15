@@ -1,3 +1,5 @@
+<!-- 역사적 미러: 이 문서는 동결된 스냅샷이며 코드와 함께 갱신되지 않습니다. 현재 계약은 ../../architecture/architecture.md 입니다. -->
+
 # LVIS Architecture Document v0.4.1 (Historical Snapshot)
 
 > **Version**: 0.4.1 (base) · v5 덧붙이기 (2026-04-19) — Appendix D-v5 참조

@@ -41,19 +41,15 @@ describe("agent-mode-map", () => {
       expect(AGENT_MODE_MAP.default.autoSkills).toEqual([]);
     });
 
-    it("default mode carries a concrete round budget for anonymous spawns", () => {
-      // Since agent_spawn no longer lets the LLM pick maxTurns, an anonymous
-      // spawn (no agentName → default mode) must get a real host budget, not
-      // silently fall through to the 30 ceiling. 20 = standard multi-step work.
-      expect(AGENT_MODE_MAP.default.maxToolRoundsHint).toBe(20);
-    });
-
-    it("every mode declares a round budget below the 30 loop ceiling", () => {
+    it("no mode declares a round budget", () => {
+      // The per-mode budget hint was retired: a single user-configured budget
+      // replaced it, and the runner resolves it without consulting the mode.
+      // A mode that reintroduced one would be inert config that reads as live.
       for (const mode of AGENT_MODES) {
-        const hint = AGENT_MODE_MAP[mode].maxToolRoundsHint;
-        expect(hint, `mode "${mode}" must declare a maxToolRoundsHint`).toBeDefined();
-        expect(hint!).toBeGreaterThan(0);
-        expect(hint!).toBeLessThanOrEqual(30);
+        expect(
+          Object.keys(AGENT_MODE_MAP[mode]),
+          `mode "${mode}" must not carry a round budget`,
+        ).toEqual(["reasoningHint", "autoSkills"]);
       }
     });
 

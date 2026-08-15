@@ -19,7 +19,7 @@ import type { SubAgentRunner } from "../engine/subagent-runner.js";
 import { PARENT_DIRECTIVE_MAX_CHARS } from "../engine/parent-directive.js";
 import { t } from "../i18n/index.js";
 
-export interface AgentGuideToolDeps {
+interface AgentGuideToolDeps {
   getRunner: () => SubAgentRunner | undefined;
 }
 

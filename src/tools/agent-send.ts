@@ -119,9 +119,11 @@ export function createAgentSendTool(deps: AgentSendToolDeps): Tool {
     // tool the parent can never successfully call — the model would try
     // `agent_send(to: <child>)` and get a bare "unknown-sender". The sub-agent
     // runner re-registers this tool `modelVisible: true` for children only
-    // (`buildChildDeps`), which is the one scope where it works. A parent
-    // "replies" to a suspended child through `agent_spawn(resumeId=...)`, a
-    // different mechanism entirely; there is no parent→running-child send path.
+    // (`buildChildDeps`), which is the one scope where it works. The parent's
+    // own outbound paths are separate tools: `agent_guide` addresses a child
+    // (delivered live to a running one, or queued in the durable parent
+    // directive mailbox for a suspended one), and `agent_spawn(resumeId=...)`
+    // continues a suspended child with new instructions.
     //
     // This grants no new authority. `agent_send` moves a message; it mutates no
     // file and touches no network. Whatever the recipient does with the message

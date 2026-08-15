@@ -1316,6 +1316,11 @@ export async function authorizeToolInvocation(
           reason: approvalReasonPrefix
             ? `${approvalReasonPrefix} ${permissionResult.reason}`
             : permissionResult.reason,
+          // Also carried structurally: the tier-2 adjudication evidence needs
+          // "this call was raised under another agent's influence" as a FACT,
+          // and recovering it by splitting the prefixed `reason` above would
+          // be parsing prose the host just finished composing.
+          ...(approvalReasonPrefix ? { approvalReasonPrefix } : {}),
           source: source as "builtin" | "plugin" | "mcp",
           createdAt: Date.now(),
           ...(targetFilePath ? { target: { filePath: targetFilePath } } : {}),
