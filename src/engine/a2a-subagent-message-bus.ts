@@ -69,16 +69,25 @@ export type ParentWakeHandler = (parentSessionId: string) => Promise<void>;
 /**
  * Wake-refusal reasons that are legitimate holds rather than stalls: the
  * mailbox entry's delivery is already owned by another mechanism (the active
- * turn's guidance injection, or the in-flight wake's completion recheck).
- * Everything else in wakeRefusalReasons is a HARD refusal.
+ * turn's guidance injection and its turn-settled drain, or the in-flight
+ * wake's completion drain). Everything else in wakeRefusalReasons is a HARD
+ * refusal — nothing delivers until the outside world changes.
  */
 const SOFT_WAKE_REFUSALS = new Set(["turn-active", "wake-in-flight"]);
 
 export class A2ASubAgentMessageBus {
   private wakeHandler: ParentWakeHandler | null = null;
   private readonly wakeInFlight = new Set<string>();
-  private readonly wakeRecheckPending = new Map<string, DeliverToParentInput>();
-  private readonly wakeRecheckInFlight = new Set<string>();
+  /**
+   * Per-parent progress token — "a stored delivery for this parent has not yet
+   * been reported as consumed". `drain` consumes it before dispatching a wake,
+   * which is the ONLY thing that bounds the loop: a wake that consumes nothing
+   * (a mailbox entry the receiving turn refused, an acknowledge that failed,
+   * a `prepareParentMailboxTurn` that fails closed) finds no token when it
+   * completes and therefore does not wake itself again. Peeking the mailbox
+   * instead would re-wake such a poisoned entry forever.
+   */
+  private readonly wakeDirty = new Map<string, DeliverToParentInput>();
   private readonly ephemeralLeasesByEntryId = new Map<string, {
     parentSessionId: string;
     childSessionId: string;
@@ -342,13 +351,11 @@ export class A2ASubAgentMessageBus {
       });
     }
 
-    // A wake handler snapshots the durable mailbox before it starts the turn.
-    // Remember deliveries that race that snapshot so completion rechecks the
-    // mailbox once. The recheck is mailbox-backed and bounded: a wake that
-    // consumes nothing does not schedule itself again.
-    if (this.wakeInFlight.has(input.parentSessionId)) {
-      this.scheduleWakeRecheck(input.parentSessionId, deliveryInput);
-    }
+    // The entry is durable from here on, so every path below owes it exactly
+    // one delivery attempt. Marking the parent dirty first means no branch can
+    // forget: a wake racing this store, a turn that ends before injection, and
+    // an outright refusal all converge on the same token for `drain` to spend.
+    this.wakeDirty.set(input.parentSessionId, deliveryInput);
 
     if (
       this.deps.parentLoop.getSessionId() === input.parentSessionId
@@ -365,24 +372,35 @@ export class A2ASubAgentMessageBus {
             entry.parentSessionId,
             [entry.id],
           )
-            .then((removed) => this.audit(
-              removed === 1 ? "info" : "warn",
-              deliveryInput,
-              removed === 1 ? "injected" : "ack-failed",
-            ))
+            .then((removed) => {
+              if (removed === 1) {
+                // The running turn consumed this delivery, so the token it
+                // minted is spent. Identity-matched on purpose: a later
+                // delivery may already own the slot, and its claim outranks
+                // this acknowledgement. Without this, every injected message
+                // would leave a token behind for the turn-settled drain to
+                // spend on a wake with nothing left to deliver.
+                if (this.wakeDirty.get(entry.parentSessionId) === deliveryInput) {
+                  this.wakeDirty.delete(entry.parentSessionId);
+                }
+              }
+              this.audit(
+                removed === 1 ? "info" : "warn",
+                deliveryInput,
+                removed === 1 ? "injected" : "ack-failed",
+              );
+            })
             .catch(() => this.audit("warn", deliveryInput, "ack-failed")),
           onDropped: (reason) => {
             this.audit("warn", deliveryInput, `deferred:${reason}`);
-            if (reason === "turn-ended") {
-              this.scheduleWakeRecheck(entry.parentSessionId, deliveryInput);
-            } else if (
-              reason === "joined-limit"
-              && this.canRequestAutonomousWakeForCurrentParent(entry.parentSessionId)
-            ) {
+            // `turn-ended` needs nothing here: this callback runs inside the
+            // turn's own cleanup, whose turn-settled notification drains the
+            // very same token moments later.
+            if (reason === "joined-limit") {
               // The guidance was accepted into the active queue but could not
-              // join the next model call. The lease-aware handler waits for
-              // that turn to release, then revalidates the durable mailbox.
-              this.requestWake(entry.parentSessionId, deliveryInput);
+              // join the next model call. Nothing else will carry it, so spend
+              // the token now; the lease-aware handler waits out the turn.
+              this.drain(entry.parentSessionId);
             }
           },
         },
@@ -391,39 +409,93 @@ export class A2ASubAgentMessageBus {
         return { ok: true, disposition: "queued", messageId: canonical.message.messageId };
       }
       this.audit("warn", deliveryInput, `deferred:${queued}`);
-      if (
-        queued === "queue-full"
-        && this.canRequestAutonomousWakeForCurrentParent(input.parentSessionId)
-      ) {
-        // The host wake handler snapshots and awaits the current turn/session
-        // lease before revalidating idle state. Request it now so an active
-        // queue overflow cannot silently degrade opt-in wake to manual-only.
-        this.requestWake(input.parentSessionId, deliveryInput);
-        return {
-          ok: true,
-          disposition: "wake-requested",
-          messageId: canonical.message.messageId,
-        };
-      }
     }
 
-    const refusals = this.wakeRefusalReasons(input.parentSessionId);
-    if (refusals.length === 0) {
-      this.requestWake(input.parentSessionId, deliveryInput);
-      return { ok: true, disposition: "wake-requested", messageId: canonical.message.messageId };
+    return this.drain(input.parentSessionId)
+      ? { ok: true, disposition: "wake-requested", messageId: canonical.message.messageId }
+      : { ok: true, disposition: "mailbox", messageId: canonical.message.messageId };
+  }
+
+  /**
+   * The parent's turn released the loop — retry whatever is still owed.
+   *
+   * This replaces the bus's old habit of inferring that transition from its
+   * own state. A message stored mid-turn but never injected (queue drop, ack
+   * failure, a turn that ended first) keeps its token, and this is the moment
+   * it becomes deliverable.
+   */
+  notifyTurnSettled(parentSessionId: string): void {
+    this.drain(parentSessionId);
+  }
+
+  /**
+   * The one wake trigger. Idle delivery, turn end, and wake completion all
+   * funnel here; none of them decides for itself whether to wake.
+   *
+   * Deliberately does NOT peek the mailbox: a non-empty mailbox cannot tell
+   * "work nobody has tried to deliver" apart from "work the last wake already
+   * tried and could not consume". Only the token carries that distinction, and
+   * spending it before dispatch is what bounds the wake. The cost of that
+   * choice is stated plainly: a wake whose turn refuses the entry (a
+   * fail-closed mailbox turn, a stop reason that withholds the
+   * acknowledgement) does not retry, and the entry waits for the next real
+   * trigger — a later delivery, or the mailbox fold on the user's next turn.
+   * Re-arming on non-consumption instead is precisely the infinite wake loop
+   * this design exists to prevent.
+   *
+   * @returns true when this call dispatched a wake.
+   */
+  private drain(parentSessionId: string): boolean {
+    const input = this.wakeDirty.get(parentSessionId);
+    if (input === undefined) return false;
+
+    const refusals = this.wakeRefusalReasons(parentSessionId);
+    // `turn-active` alone never blocks: the host handler's first action is to
+    // await the live turn/session lease, so dispatching now is how an overflow
+    // during a running turn avoids degrading to manual-only. Every other
+    // refusal — including `wake-in-flight`, whose completion re-drains — means
+    // this call must not dispatch.
+    const blocking = refusals.filter((reason) => reason !== "turn-active");
+    if (blocking.length > 0) {
+      // HARD refusals (flag-off / session-mismatch / handler-unregistered)
+      // leave the message sitting until the user's next manual turn — the
+      // silent stall the field hit — so they are logged loudly. A held token
+      // is not lost: the next drain trigger re-evaluates it.
+      this.audit(
+        blocking.every((reason) => SOFT_WAKE_REFUSALS.has(reason)) ? "info" : "warn",
+        input,
+        `mailbox-no-wake:${refusals.join(",")}`,
+      );
+      return false;
     }
-    // SOFT holds are the two LEGITIMATE ones — the entry is durable and an
-    // existing mechanism (guidance injection above, or the in-flight wake's
-    // completion recheck) owns its delivery. A HARD refusal means the message
-    // will sit until the user's next manual turn, which is exactly the
-    // silent-stall the field hit; log those loudly.
-    const benign = refusals.every((r) => SOFT_WAKE_REFUSALS.has(r));
-    this.audit(
-      benign ? "info" : "warn",
-      deliveryInput,
-      `mailbox-no-wake:${refusals.join(",")}`,
-    );
-    return { ok: true, disposition: "mailbox", messageId: canonical.message.messageId };
+    const handler = this.wakeHandler;
+    // Unreachable in practice — `wakeRefusalReasons` already reported a null
+    // handler above — but the narrowing is what lets the call below be typed.
+    if (handler === null) return false;
+
+    // Spend the token BEFORE dispatch. Deliveries that arrive while the wake
+    // runs set a fresh one and are picked up by the completion drain below;
+    // a wake that consumed nothing leaves the map empty and stops.
+    this.wakeDirty.delete(parentSessionId);
+    this.wakeInFlight.add(parentSessionId);
+    try {
+      void handler(parentSessionId)
+        .then(() => this.audit("info", input, "wake-finished"))
+        .catch(() => this.audit("warn", input, "wake-failed"))
+        .finally(() => {
+          this.wakeInFlight.delete(parentSessionId);
+          this.drain(parentSessionId);
+        });
+    } catch {
+      // A handler that throws before returning its promise never attached the
+      // cleanup above. Leaving the in-flight mark would refuse every future
+      // drain for this parent — now the only delivery path there is.
+      this.wakeInFlight.delete(parentSessionId);
+      this.wakeDirty.set(parentSessionId, input);
+      this.audit("warn", input, "wake-failed");
+      return false;
+    }
+    return true;
   }
 
   private releaseEphemeralAddress(
@@ -448,10 +520,6 @@ export class A2ASubAgentMessageBus {
         this.ephemeralLeasesByEntryId.delete(entryId);
       }
     }
-  }
-
-  private shouldWake(parentSessionId: string): boolean {
-    return this.wakeRefusalReasons(parentSessionId).length === 0;
   }
 
   private wakeFlagEnabled(): boolean {
@@ -484,69 +552,6 @@ export class A2ASubAgentMessageBus {
     if (this.deps.parentLoop.hasActiveTurn()) reasons.push("turn-active");
     if (this.wakeInFlight.has(parentSessionId)) reasons.push("wake-in-flight");
     return reasons;
-  }
-
-  /**
-   * True when only SOFT holds (turn-active / wake-in-flight) stand between
-   * this parent and a wake — delivery ownership then already lies with the
-   * running turn's guidance injection or the in-flight wake's completion
-   * recheck. HARD refusals (flag-off / session-mismatch / handler-
-   * unregistered) mean nothing will deliver until the outside world changes.
-   * Derived from wakeRefusalReasons so the condition list has one home.
-   */
-  private canRequestAutonomousWakeForCurrentParent(parentSessionId: string): boolean {
-    return this.wakeRefusalReasons(parentSessionId)
-      .every((reason) => SOFT_WAKE_REFUSALS.has(reason));
-  }
-
-  private requestWake(parentSessionId: string, input: DeliverToParentInput): void {
-    const handler = this.wakeHandler;
-    if (!handler || this.wakeInFlight.has(parentSessionId)) return;
-    this.wakeInFlight.add(parentSessionId);
-    void handler(parentSessionId)
-      .then(() => this.audit("info", input, "wake-finished"))
-      .catch(() => this.audit("warn", input, "wake-failed"))
-      .finally(() => {
-        this.wakeInFlight.delete(parentSessionId);
-        this.runWakeRecheck(parentSessionId);
-      });
-  }
-
-  private scheduleWakeRecheck(parentSessionId: string, input: DeliverToParentInput): void {
-    this.wakeRecheckPending.set(parentSessionId, input);
-    if (!this.wakeInFlight.has(parentSessionId)) {
-      this.runWakeRecheck(parentSessionId);
-    }
-  }
-
-  private runWakeRecheck(parentSessionId: string): void {
-    if (
-      this.wakeInFlight.has(parentSessionId)
-      || this.wakeRecheckInFlight.has(parentSessionId)
-    ) {
-      return;
-    }
-    const input = this.wakeRecheckPending.get(parentSessionId);
-    if (!input) return;
-    this.wakeRecheckPending.delete(parentSessionId);
-    this.wakeRecheckInFlight.add(parentSessionId);
-
-    void this.peekParentMailbox(parentSessionId)
-      .then((entries) => {
-        if (entries.length > 0 && this.shouldWake(parentSessionId)) {
-          this.requestWake(parentSessionId, input);
-        }
-      })
-      .catch(() => this.audit("warn", input, "wake-recheck-failed"))
-      .finally(() => {
-        this.wakeRecheckInFlight.delete(parentSessionId);
-        if (
-          this.wakeRecheckPending.has(parentSessionId)
-          && !this.wakeInFlight.has(parentSessionId)
-        ) {
-          this.runWakeRecheck(parentSessionId);
-        }
-      });
   }
 
   private drop(
