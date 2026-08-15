@@ -1650,8 +1650,17 @@ describe("Windows NSIS installer smoke contracts", () => {
       dependencies?: Record<string, string>;
       build?: { nsis?: { deleteAppDataOnUninstall?: boolean } };
     };
+    // Deliberate drift guard: installer.nsh drives srt-win.exe directly
+    // (`acl recover --force`, then `uninstall`), a CLI contract no type checker
+    // covers. An ASRT bump must re-verify against the newly vendored binary that
+    // both subcommands still exist, that `uninstall` still reports user
+    // cancellation as exit 10, and that the teardown still clears everything the
+    // install stamped — 0.0.73 added ambient write-deny stamps on the stock
+    // world-writable system dirs, which `uninstall` removes (and `--keep-user`
+    // deliberately keeps, a flag this installer does not pass). Verified for
+    // 0.0.73; bump this only together with that check.
     expect(packageJson.dependencies?.["@anthropic-ai/sandbox-runtime"]).toBe(
-      "0.0.67",
+      "0.0.73",
     );
     expect(packageJson.build?.nsis?.deleteAppDataOnUninstall).toBe(false);
   });
