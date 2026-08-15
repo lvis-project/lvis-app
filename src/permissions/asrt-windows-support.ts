@@ -5,11 +5,25 @@
  * calls in this file so future package updates usually touch one adapter plus
  * its drift tests, not every IPC/UI caller.
  *
- * Current target: @anthropic-ai/sandbox-runtime 0.0.67
+ * Current target: @anthropic-ai/sandbox-runtime 0.0.73
  * - dedicated `srt-sandbox` user provisioning
  * - WFP keyed to the sandbox user SID
  * - filesystem rules applied by ASRT's Windows ACL backend
  * - no Windows sign-out requirement for activation
+ * - AMBIENT WRITE-DENY (new in 0.0.73): `srt-win install` additionally
+ *   deny-stamps the stock world-writable system directories for the sandbox
+ *   user, closing the ambient write holes that the per-exec `--deny-write`
+ *   stamps never covered. It is an install-time step with its own failure exit
+ *   (17 → `install_ambient_failed`), mapped in {@link installAsrtWindowsSandbox}.
+ * - MACHINE-STORE / REGISTRY MOVE (new in 0.0.73): the sandbox credential, the
+ *   setup marker, and the CA record moved out of the per-user
+ *   `%LOCALAPPDATA%\sandbox-runtime\state.db` into
+ *   `HKLM\SOFTWARE\sandbox-runtime` + `%ProgramData%\sandbox-runtime`. A
+ *   sandbox provisioned by an earlier ASRT therefore reads back with
+ *   `credPresent: false`, which {@link normalizeAsrtWindowsUserState} maps to
+ *   `"incomplete"` → not ready → the sandbox stays inactive (fail-closed) and
+ *   Settings surfaces the install action again. `srt-win install` is idempotent,
+ *   so re-running it is the whole migration.
  * - NO IMPLICIT VENDORED RESOLUTION: every srt-win-backed helper takes an
  *   EXPLICIT spawn descriptor (`resolveSrtWin({ path })`) — the argless form
  *   THROWS. The srt-win path SoT lives in asrt-sandbox.ts
@@ -57,7 +71,7 @@ type VerifyWindowsWfpEgressFn = (opts?: {
   readonly srtWin?: SrtWinSpawn;
 }) => Promise<unknown>;
 
-// ASRT 0.0.67: the install is ASYNC (installWindowsSandboxAsync) and takes an
+// ASRT 0.0.73: the install is ASYNC (installWindowsSandboxAsync) and takes an
 // explicit srt-win spawn descriptor. Keeping it async is what unfreezes the main
 // process during the modal UAC wait (issue #1608 class).
 type InstallWindowsSandboxAsyncFn = (opts: {
@@ -111,9 +125,10 @@ function resolveAsrtPackageRoot(): string {
 
 /**
  * Resolve the ASRT module namespace + the EXPLICIT srt-win spawn descriptor in
- * one spot. ASRT 0.0.67 removed implicit vendored resolution, so every
- * srt-win-backed helper (status/install/verify) needs this descriptor built from
- * the srt-win path SoT ({@link getVendoredSrtWinExePath} in asrt-sandbox.ts).
+ * one spot. ASRT 0.0.67 removed implicit vendored resolution and 0.0.73 still
+ * has none, so every srt-win-backed helper (status/install/verify) needs this
+ * descriptor built from the srt-win path SoT
+ * ({@link getVendoredSrtWinExePath} in asrt-sandbox.ts).
  */
 async function loadSrtWin(): Promise<{
   mod: typeof import("@anthropic-ai/sandbox-runtime");
@@ -323,7 +338,7 @@ export async function resolveAsrtWindowsReady(
   if (isAsrtWindowsReady(userState, wfpState)) return true;
   if (userState !== "ready" || wfpState !== "cannot-read") return false;
 
-  // ASRT 0.0.67 reports `cannot-read` when BFE enumeration is admin-gated.
+  // ASRT 0.0.73 reports `cannot-read` when BFE enumeration is admin-gated.
   // The non-elevated readiness proof is behavioral WFP egress verification.
   try {
     await verifyWindowsWfpEgress({
@@ -361,7 +376,7 @@ export async function readAsrtWindowsStatus(): Promise<SandboxWindowsStatusInfo>
   }
 
   const { mod, srtWin } = await loadSrtWin();
-  // ASRT 0.0.67: ONE `srt-win status` spawn returns BOTH the sandbox-user and
+  // ASRT 0.0.73: ONE `srt-win status` spawn returns BOTH the sandbox-user and
   // WFP state (checkWindowsSandboxStatusAsync), non-blocking — replaces the two
   // separate synchronous user + wfp probes.
   const { user, wfp } = await mod.checkWindowsSandboxStatusAsync({ srtWin });
@@ -393,10 +408,10 @@ export async function installAsrtWindowsSandbox(
   const { installWindowsSandboxAsync, verifyWindowsWfpEgress } =
     dependencies.loadRuntime ? await dependencies.loadRuntime() : mod;
 
-  // ASRT 0.0.67: the install is ASYNC — the modal UAC prompt is still shown, but
+  // ASRT 0.0.73: the install is ASYNC — the modal UAC prompt is still shown, but
   // the main-process event loop stays live (spinners/timers keep running) rather
   // than freezing for the full consent wait (issue #1608 class). The srt-win
-  // descriptor is explicit (no implicit vendored fallback in 0.0.67).
+  // descriptor is explicit (no implicit vendored fallback since 0.0.67).
   let result: AsrtWindowsInstallCancelledLike | AsrtWindowsInstallSuccessLike;
   try {
     result = await installWindowsSandboxAsync({
@@ -404,18 +419,35 @@ export async function installAsrtWindowsSandbox(
       srtWin,
     });
   } catch (error) {
-    if (
-      error instanceof mod.WindowsSandboxError &&
-      error.code === "install_timeout"
-    ) {
-      // The self-elevating install subprocess was killed by the 120s spawn
-      // timeout with the UAC consent dialog still open. Surface it distinctly so
-      // the caller can prompt the user to re-run and approve elevation promptly
-      // (a late approval after the timeout would half-complete).
-      throw new Error(
-        "ASRT Windows sandbox install timed out after 120s with the UAC consent " +
-          "prompt still open. Re-run the install and approve the elevation prompt.",
-      );
+    if (error instanceof mod.WindowsSandboxError) {
+      if (error.code === "install_timeout") {
+        // The self-elevating install subprocess was killed by the 120s spawn
+        // timeout with the UAC consent dialog still open. Surface it distinctly so
+        // the caller can prompt the user to re-run and approve elevation promptly
+        // (a late approval after the timeout would half-complete).
+        throw new Error(
+          "ASRT Windows sandbox install timed out after 120s with the UAC consent " +
+            "prompt still open. Re-run the install and approve the elevation prompt.",
+        );
+      }
+      if (error.code === "install_ambient_failed") {
+        // ASRT 0.0.73 exit 17: the WFP filters and the sandbox user may both be
+        // in place, but the ambient write-deny stamps on the stock
+        // world-writable system directories did not land. Treating that as a
+        // generic failure would be dishonest in the dangerous direction — the
+        // filesystem confinement LVIS publishes for win32
+        // (`sandboxConfinementForPlatform` → `filesystem: true`) assumes those
+        // stamps exist. Fail the install loudly so the capability is never
+        // published on a half-stamped machine.
+        throw new Error(
+          "ASRT Windows sandbox install could not deny-stamp the stock " +
+            "world-writable system directories for the sandbox user, so the " +
+            "filesystem confinement this sandbox reports would be incomplete. " +
+            "The install was NOT accepted. Re-run it from an account that can " +
+            "elevate, and check that no policy or security agent is reverting " +
+            `ACL changes on the Windows system directories. (${error.message})`,
+        );
+      }
     }
     throw error;
   }
