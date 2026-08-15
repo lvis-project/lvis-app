@@ -11,7 +11,7 @@
  */
 
 import type { Tool } from "./base.js";
-import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import { MAX_TIMER_DELAY_MS, TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
 /** Termination reason recorded for audit and error message branching. */
 export type ToolCeilingTerminationReason = "ceiling" | "user-abort" | "error";
@@ -46,8 +46,22 @@ const SHELL_CEILING_GRACE_MS = 10_000;
  * adapter can produce a builtin `Tool`). Its expiry is not a dead end either:
  * the executor turns it into a retryable tool error naming the host bound, so
  * the model can narrow the work and call again.
+ *
+ * Both escalation paths scale without an upper bound of their own, so the
+ * resolved value is clamped HERE — the one place every executor timer arm is
+ * computed — to {@link MAX_TIMER_DELAY_MS}. Above that bound `setTimeout`
+ * overflows its 32-bit delay and fires after 1ms, which would turn the largest
+ * configured budgets into instant aborts; see the constant for the full note.
  */
 export function resolveEffectiveCeilingMs(
+  tool: Pick<Tool, "name" | "source" | "category" | "resolveHostCeilingMs">,
+  input: Record<string, unknown>,
+): number {
+  return Math.min(MAX_TIMER_DELAY_MS, resolveRequestedCeilingMs(tool, input));
+}
+
+/** The unclamped policy result. Only `resolveEffectiveCeilingMs` may call it. */
+function resolveRequestedCeilingMs(
   tool: Pick<Tool, "name" | "source" | "category" | "resolveHostCeilingMs">,
   input: Record<string, unknown>,
 ): number {

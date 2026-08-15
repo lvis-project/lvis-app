@@ -52,9 +52,12 @@ import { t } from "../i18n/index.js";
  * llm-vendor-defaults.ts CHANGELOG — modern frontier models ignore them),
  * so a mode does NOT carry a temperature. `reasoningHint` is injected into
  * the sub-agent's instructions so the LLM knows the working posture
- * expected of this mode; `maxToolRoundsHint` is a soft suggestion the
- * spawn caller may use to seed the host round budget when no explicit
- * `maxRounds` override is provided.
+ * expected of this mode.
+ *
+ * A mode does not carry a round budget either. The per-mode hint this file
+ * once declared was retired when the budget became a single user-configurable
+ * setting — see the note at `MAX_TURNS_DEFAULT` in subagent-runner.ts for why
+ * the per-posture split was the wrong lever.
  */
 export interface AgentModeConfig {
   /** One-line working-posture hint injected into the sub-agent prompt. */
@@ -66,12 +69,6 @@ export interface AgentModeConfig {
    * runs the normal body-hash approval dock. See the SECURITY MODEL note.
    */
   autoSkills: readonly string[];
-  /**
-   * Soft default for the host round budget when no explicit maxRounds is
-   * provided by the caller. undefined → fall back to SubAgentRunner's own
-   * MAX_TURNS_DEFAULT.
-   */
-  maxToolRoundsHint?: number;
 }
 
 export const AGENT_MODES = [
@@ -97,43 +94,31 @@ export const AGENT_MODE_MAP: Readonly<Record<AgentMode, AgentModeConfig>> =
       reasoningHint:
         t("be_agentModeMap.executeReasoningHint"),
       autoSkills: ["email-polish", "meeting-minutes"],
-      maxToolRoundsHint: 20,
     },
     plan: {
       reasoningHint:
         t("be_agentModeMap.planReasoningHint"),
       autoSkills: ["decision-record", "report-writing"],
-      maxToolRoundsHint: 30,
     },
     research: {
       reasoningHint:
         t("be_agentModeMap.researchReasoningHint"),
       autoSkills: ["data-summary", "report-writing"],
-      maxToolRoundsHint: 25,
     },
     explore: {
       reasoningHint:
         t("be_agentModeMap.exploreReasoningHint"),
       autoSkills: [],
-      maxToolRoundsHint: 15,
     },
     default: {
       // Design-intent fallback: unknown / absent mode lands here (including an
       // anonymous `agent_spawn` with no `agentName`). No auto skills, no posture
       // injection — the profile body alone drives the sub-agent, exactly as it
-      // did before mode support existed.
-      //
-      // Round budget: since `agent_spawn` no longer lets the LLM pick a
-      // `maxTurns`, this hint is the host's budget for EVERY anonymous spawn.
-      // 20 assistant rounds — standard multi-step work — sits between the
-      // read-only explore posture (15) and the full 30 ceiling: high enough
-      // that a normal multi-step sub-task finishes without a premature
-      // round-cap, low enough that a runaway loop is still bounded. A caller
-      // that knows it needs the full 30 uses a `plan`-mode profile (or passes
-      // an explicit host `maxRounds`).
+      // did before mode support existed. The round budget an anonymous spawn
+      // runs is the user's configured one, resolved entirely in the runner —
+      // no mode, including this one, has a say in it.
       reasoningHint: "",
       autoSkills: [],
-      maxToolRoundsHint: 20,
     },
   });
 
