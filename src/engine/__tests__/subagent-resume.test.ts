@@ -36,6 +36,7 @@ import { createDynamicTool } from "../../tools/base.js";
 import { InputClassifier } from "../../core/input-classifier.js";
 import { RouteEngine } from "../../core/route-engine.js";
 import { SubAgentRunner } from "../subagent-runner.js";
+import { ParentDirectiveMailbox } from "../parent-directive-mailbox.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams,
 } from "../llm/types.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
@@ -1981,6 +1982,160 @@ describe("SubAgentRunner.resume — re-hydration (PR-C)", () => {
         240,
       );
     } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it("treats a round-cap segment as having consumed its parent directive", async () => {
+    // A directive is acknowledged when the turn that carried it reached a
+    // conclusion. Round-cap IS a conclusion: the segment ran, the child saw
+    // the directive in its initial guidance, and it produced partial work.
+    // Withholding the ack because the TASK did not finish re-injects the same
+    // text at the top of every following segment — a parent that guided a
+    // long-running child would have its one message replayed for the rest of
+    // the resume chain.
+    const originSessionId = "parent-directive-round-cap";
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const mailbox = new ParentDirectiveMailbox(
+      openFeatureNamespace("parent-directive-round-cap"),
+    );
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+      parentDirectiveMailbox: mailbox,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "guided",
+      instructions: "do",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+      originSessionId,
+    });
+    restore();
+    const resumeId = spawn.childSessionId;
+
+    const stored = await mailbox.append({
+      originSessionId,
+      childSessionId: resumeId,
+      text: "[Host] the parent asks you to narrow the scope",
+    });
+    expect(stored.ok).toBe(true);
+
+    const guidancePerResume: Array<string | undefined> = [];
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockImplementation(
+        async (...args: Parameters<typeof originalRunTurn>) => {
+          guidancePerResume.push(
+            (args[3] as { initialGuidance?: string } | undefined)?.initialGuidance,
+          );
+          return {
+            text: "partial work",
+            toolCalls: [],
+            stopReason: "round-cap",
+          } as unknown as Awaited<ReturnType<typeof originalRunTurn>>;
+        },
+      );
+
+    try {
+      const first = await runner.resume(
+        resumeId,
+        "continue",
+        "guided",
+        undefined,
+        originSessionId,
+      );
+      expect(first).toMatchObject({
+        ok: true,
+        stopReason: "round-cap",
+        suspension: { reason: "budget" },
+      });
+      expect(guidancePerResume[0]).toContain("narrow the scope");
+      // Acknowledged by the segment that ran it, so nothing is left to replay.
+      expect(await mailbox.peek(resumeId, originSessionId)).toHaveLength(0);
+
+      const second = await runner.resume(
+        resumeId,
+        "continue again",
+        "guided",
+        undefined,
+        originSessionId,
+      );
+      expect(second.ok).toBe(true);
+      expect(runTurnSpy).toHaveBeenCalledTimes(2);
+      expect(guidancePerResume[1] ?? "").not.toContain("narrow the scope");
+    } finally {
+      runTurnSpy.mockRestore();
+      restore();
+    }
+  });
+
+  it("does not acknowledge a parent directive when the segment never concluded", async () => {
+    // The boundary of the round-cap widening: an interrupted segment did NOT
+    // conclude, so it must not report the directive as consumed. (What the
+    // mailbox then holds is a separate decision — the child's terminal
+    // projection discards it, since a finished child can never read it.)
+    const originSessionId = "parent-directive-failed";
+    const toolRegistry = new ToolRegistry();
+    toolRegistry.register(noopTool("noop"));
+    const subStore = makeSubStore();
+    const mailbox = new ParentDirectiveMailbox(
+      openFeatureNamespace("parent-directive-failed"),
+    );
+    const runner = new SubAgentRunner({
+      parentDeps: buildLoopDeps(toolRegistry),
+      toolRegistry,
+      subAgentMemoryManager: subStore,
+      parentDirectiveMailbox: mailbox,
+    });
+
+    let restore = patchProvider(waitingSpawnProvider());
+    const spawn = await runner.spawn({
+      title: "guided-failure",
+      instructions: "do",
+      sourceTools: ["noop"],
+      maxRounds: 2,
+      originSessionId,
+    });
+    restore();
+    const resumeId = spawn.childSessionId;
+    await mailbox.append({
+      originSessionId,
+      childSessionId: resumeId,
+      text: "[Host] the parent asks you to narrow the scope",
+    });
+    const acknowledge = vi.spyOn(mailbox, "acknowledge");
+
+    const originalRunTurn = ConversationLoop.prototype.runTurn;
+    restore = patchProvider(cleanSpawnProvider());
+    const runTurnSpy = vi
+      .spyOn(ConversationLoop.prototype, "runTurn")
+      .mockResolvedValue({
+        text: "stopped mid-flight",
+        toolCalls: [],
+        stopReason: "interrupted",
+      } as unknown as Awaited<ReturnType<typeof originalRunTurn>>);
+
+    try {
+      const failed = await runner.resume(
+        resumeId,
+        "continue",
+        "guided-failure",
+        undefined,
+        originSessionId,
+      );
+      expect(failed.ok).toBe(false);
+      expect(acknowledge).not.toHaveBeenCalled();
+    } finally {
+      acknowledge.mockRestore();
       runTurnSpy.mockRestore();
       restore();
     }

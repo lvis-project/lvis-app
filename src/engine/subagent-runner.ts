@@ -635,11 +635,11 @@ export interface SubAgentRunnerDeps {
 // `spawn()`): explicit host `input.maxRounds` (fixed-shape host callers like
 // WorkBoardEngine) → the user's configured budget → MAX_TURNS_DEFAULT.
 //
-// The old `mode.maxToolRoundsHint` split (explore=15, execute=20, research=25)
-// is deliberately NOT consulted any more. Those per-mode numbers were the direct
-// cause of agents dying mid-investigation: an "explore" agent got 15 rounds for
-// work that needed far more, hit `round-cap`, and returned partial output that
-// read as a silent failure. A single budget is both more generous and easier to
+// A per-mode split (explore=15, execute=20, research=25) used to seed this and
+// was REMOVED, field and all. Those per-mode numbers were the direct cause of
+// agents dying mid-investigation: an "explore" agent got 15 rounds for work
+// that needed far more, hit `round-cap`, and returned partial output that read
+// as a silent failure. A single budget is both more generous and easier to
 // reason about — and it is now user-configurable, which is the right lever.
 const MAX_TURNS_DEFAULT = SUBAGENT_MAX_ROUNDS_DEFAULT;
 
@@ -797,6 +797,35 @@ function isSuccessfulSubAgentStopReason(
   return stopReason === "end_turn"
     || stopReason === "round-cap"
     || (stopReason === "input-required" && inputRequired?.reason === "question");
+}
+
+/**
+ * Whether a finished resume segment CONSUMED the parent directive injected
+ * into it.
+ *
+ * The rule is "the turn that carried it reached a conclusion", and a round-cap
+ * conclusion counts: the segment ran, the child saw the directive in its
+ * initial guidance, and it produced real partial work. What it did NOT do is
+ * finish the task — which is a reason to resume again, not a reason to treat
+ * the directive as undelivered. Leaving it pending re-injects the SAME text at
+ * the top of the next segment, so a parent that guided a long-running child
+ * would have its one message replayed once per round-cap for the rest of the
+ * resume chain.
+ *
+ * A failed or interrupted segment does NOT report it consumed: there the turn
+ * may never have reached the LLM at all. That is only an acknowledgement
+ * decision — what the mailbox then holds is decided separately by
+ * `cleanupTerminalRecipientMailbox`, which discards every pending directive
+ * once the child's projection is terminal.
+ */
+function resumeSegmentConsumedGuidance(result: SubAgentSpawnResult): boolean {
+  if (!result.ok) return false;
+  return result.stopReason === "end_turn"
+    || result.stopReason === "input-required"
+    // ok + round-cap always carries the budget suspension built above; the
+    // suspension is asserted rather than assumed so a future stop reason
+    // cannot quietly inherit this branch.
+    || (result.stopReason === "round-cap" && result.suspension?.reason === "budget");
 }
 
 function subAgentStopFailureReason(
@@ -1702,10 +1731,17 @@ export class SubAgentRunner {
       if (active?.originSessionId === originSessionId) {
         return refuse("recipient-unavailable");
       }
-      // Both halves of the resume gate: the state SOT, and the suspension reason
-      // `resumeWithPolicy` also requires. Accepting one without the other would
-      // store a directive whose only delivery path refuses structurally.
-      if (!isResumableSubAgentTaskState(taskState) || !meta?.subAgentSuspensionReason) {
+      // Every half of the resume gate: the state SOT, the suspension reason
+      // `resumeWithPolicy` also requires, and the two resume-axis counters it
+      // checks before running a turn. Accepting on any subset would store a
+      // directive whose only delivery path refuses structurally — and an
+      // exhausted child's refusal is permanent, so the directive would sit in
+      // the mailbox until the child's terminal cleanup discarded it unread.
+      if (
+        !isResumableSubAgentTaskState(taskState)
+        || !meta?.subAgentSuspensionReason
+        || this.spentResumeAxis(meta) !== null
+      ) {
         return refuse("child-not-resumable");
       }
     }
@@ -2248,6 +2284,51 @@ export class SubAgentRunner {
     return CUMULATIVE_ROUNDS_BUDGET_MULTIPLIER * this.roundBudget();
   }
 
+  /**
+   * Which resume-axis guard this suspended child has already spent, if any.
+   *
+   * ONE predicate for the two guards `resume()` enforces before it runs a
+   * turn, so the ACCEPTANCE side (`queueParentMessageToChild`, `agent_list`'s
+   * `resumable` flag) and the DELIVERY side cannot drift. Both axes are
+   * deterministic — nothing a later resume does can lower a spent counter —
+   * which is what makes "already exhausted" a fact the acceptance side may
+   * act on rather than a race it would be guessing at.
+   */
+  private spentResumeAxis(meta: {
+    subAgentSuspensionReason?: string;
+    budgetResumeCount?: number;
+    resumeCount?: number;
+    cumulativeRounds?: number;
+  }): "budget-resumes" | "cumulative-rounds" | null {
+    const priorBudgetResumeCount = Math.max(
+      meta.budgetResumeCount ?? 0,
+      meta.resumeCount ?? 0,
+    );
+    if (
+      meta.subAgentSuspensionReason === "budget"
+      && priorBudgetResumeCount >= MAX_RESUMES
+    ) {
+      return "budget-resumes";
+    }
+    if ((meta.cumulativeRounds ?? 0) >= this.cumulativeRoundsCeiling()) {
+      return "cumulative-rounds";
+    }
+    return null;
+  }
+
+  /**
+   * Whether a resume of this child would be refused before running a turn.
+   *
+   * Read by `agent_list` so the `resumable` flag it advertises means what it
+   * says: a child whose resume budget is spent is INPUT_REQUIRED forever, and
+   * offering it as resumable spends a parent round on a guaranteed refusal.
+   */
+  isResumeExhausted(childSessionId: string): boolean {
+    const meta = this.deps.subAgentMemoryManager.loadSessionMetadata(childSessionId);
+    if (!meta) return false;
+    return this.spentResumeAxis(meta) !== null;
+  }
+
   private buildChildDeps(args: {
     /**
      * The frozen source-tool allowlist. `null` ⇒ full parent surface minus the
@@ -2513,9 +2594,8 @@ export class SubAgentRunner {
         // Host-assigned round budget. Resolution: an explicit host `maxRounds`
         // wins; otherwise the user's configured budget; otherwise the default.
         // The LLM cannot change this policy because agent_spawn exposes no raw
-        // maxTurns field. The profile's `mode.maxToolRoundsHint` is intentionally
-        // NOT consulted — see MAX_TURNS_DEFAULT for why the per-mode split was
-        // removed.
+        // maxTurns field, and the profile's mode carries no budget of its own —
+        // see MAX_TURNS_DEFAULT for why the per-mode split was removed.
         const requestedRounds =
           input.maxRounds ?? this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT;
         const cappedRounds = normalizeRoundBudget(requestedRounds);
@@ -3672,15 +3752,18 @@ export class SubAgentRunner {
     const priorQuestionAnswerCount = meta.questionAnswerCount ?? 0;
     const priorCumulativeRounds = meta.cumulativeRounds ?? 0;
 
-    if (persistedResumeReason === "budget" && priorBudgetResumeCount >= MAX_RESUMES) {
+    const cumulativeRoundsCeiling = this.cumulativeRoundsCeiling();
+    // Same predicate `queueParentMessageToChild` and `agent_list` consult, so
+    // what they call "resumable" is exactly what this path will accept.
+    const spentAxis = this.spentResumeAxis(meta);
+    if (spentAxis === "budget-resumes") {
       return await finishAuthorizedFailure(
         "sub-agent resume: exhausted (budgetResumeCount="
           + priorBudgetResumeCount + " >= " + MAX_RESUMES + ")",
         { resumeRefusal: "exhausted" },
       );
     }
-    const cumulativeRoundsCeiling = this.cumulativeRoundsCeiling();
-    if (priorCumulativeRounds >= cumulativeRoundsCeiling) {
+    if (spentAxis === "cumulative-rounds") {
       return await finishAuthorizedFailure(
         "sub-agent resume: cumulative-rounds ceiling reached ("
           + priorCumulativeRounds + " >= " + cumulativeRoundsCeiling + ")",
@@ -3689,9 +3772,9 @@ export class SubAgentRunner {
     }
 
     // Same resolution as spawn: the user's configured budget, else the default.
-    // The per-mode `maxToolRoundsHint` is deliberately NOT consulted (see
-    // MAX_TURNS_DEFAULT) — a resumed agent given 15 rounds because its profile
-    // says "explore" dies mid-investigation exactly like the spawn path did.
+    // No per-mode budget exists to consult (see MAX_TURNS_DEFAULT) — a resumed
+    // agent given 15 rounds because its profile says "explore" would die
+    // mid-investigation exactly like the spawn path did.
     const requestedRounds = this.configuredRoundBudget() ?? MAX_TURNS_DEFAULT;
     const remainingRounds = cumulativeRoundsCeiling - priorCumulativeRounds;
     const cappedRounds = Math.max(
@@ -4124,6 +4207,11 @@ export class SubAgentRunner {
       }
     }
 
+    // The SIBLING mailbox deliberately keeps the narrower rule: a peer's
+    // message rides an at-least-once lane whose entry also carries the causal
+    // context and force-ask label governing the segment, and retaining it on a
+    // round-cap is what carries that governance into the continuation. See the
+    // "retains idle sibling mailbox delivery" case in subagent-resume.test.ts.
     if (
       agentMessageBus
       && agentMailboxEntries.length > 0
@@ -4145,14 +4233,17 @@ export class SubAgentRunner {
         log.warn("sub-agent resume: agent mailbox acknowledgement failed for %s", resumeId);
       }
     }
-    // Same rule as the sibling mailbox above: a directive is consumed only when
-    // the turn that carried it actually reached a conclusion. A run that failed
-    // or was interrupted leaves it pending for the next resume.
+    // A parent directive is consumed when the turn that carried it reached a
+    // conclusion — INCLUDING a round-cap (see `resumeSegmentConsumedGuidance`).
+    // It carries no causal context and no force-ask label, so unlike the
+    // sibling entry above there is nothing in it that a continuation still
+    // needs; re-injecting it would only replay the parent's one message at the
+    // top of every remaining segment. A run that failed or was interrupted
+    // acknowledges nothing.
     if (
       parentDirectiveMailbox
       && parentDirectiveEntries.length > 0
-      && result.ok
-      && (result.stopReason === "end_turn" || result.stopReason === "input-required")
+      && resumeSegmentConsumedGuidance(result)
     ) {
       try {
         const removed = await parentDirectiveMailbox.acknowledge(

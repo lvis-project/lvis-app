@@ -65,6 +65,26 @@
  */
 import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "./subagent-rounds.js";
 
+/**
+ * Largest delay a Node `setTimeout` can actually hold.
+ *
+ * Node stores the delay as a SIGNED 32-BIT integer. A delay above this
+ * overflows, and Node's documented response is to warn and substitute `1` —
+ * so a ceiling of 2_147_483_648ms does not mean "a very long deadline", it
+ * means the timer fires ~immediately and aborts the call it was armed to
+ * protect. Both scaled ceilings can cross the bound from ordinary settings:
+ * `resolveSubAgentCeilingMs` at a `subAgentMaxRounds` of 214_749, and a shell
+ * `timeoutSeconds` of 2_147_474 — neither of which the round budget nor the
+ * shell timeout caps, both deliberately (see the notes above).
+ *
+ * The resolution is therefore a CLAMP, not a rejection: every resolved ceiling
+ * passes through `Math.min` against this bound in `resolveEffectiveCeilingMs`
+ * (the one place all executor timer arms are computed), so an oversized budget
+ * degrades to "the longest deadline Node can arm" — ~24.9 days — instead of to
+ * no deadline at all.
+ */
+export const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 export const TOOL_TIMEOUT_POLICY = {
   shellDefaultMs: 120_000,
   globalCeilingMs: 120_000,

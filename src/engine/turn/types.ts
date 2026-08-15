@@ -217,16 +217,17 @@ export type TurnStopReason =
   | "interrupted"
   | "context-error"
   | "stream-error"
-  // The turn used up its round budget (queryLoop `effectiveMaxRounds`, set by
-  // a sub-agent's host-assigned `maxRounds` or the global MAX_TOOL_ROUNDS)
-  // before the LLM produced a natural end_turn. The returned text is the
-  // PARTIAL work so far — the task did not finish. Distinct from `interrupted`
-  // (user-initiated) and `max_tokens` (single-answer output cap): this is a
-  // host-imposed round budget. Sub-agents surface it to the parent as an
-  // `incomplete` result (see SubAgentSpawnResult); the main chat surfaces it
-  // as a "send a new message to continue" affordance (the persistent loop
-  // resumes on the next user message). turn_summary / notification gates treat
-  // it like a completed turn (real partial output + usage), NOT like an error.
+  // The turn used up its round budget (queryLoop `effectiveMaxRounds`) before
+  // the LLM produced a natural end_turn. Only a SUB-AGENT turn can reach this:
+  // the budget comes from the host-assigned `maxRounds` the runner passes, and
+  // a parent turn with no `maxRounds` runs `PARENT_UNLIMITED_ROUNDS` — there is
+  // no global round constant. The returned text is the PARTIAL work so far —
+  // the task did not finish. Distinct from `interrupted` (user-initiated) and
+  // `max_tokens` (single-answer output cap): this is a host-imposed round
+  // budget. Sub-agents surface it to the parent as a budget SUSPENSION with a
+  // `resumeId` (see SubAgentSpawnResult), so the parent continues the same
+  // child rather than starting over. turn_summary / notification gates treat it
+  // like a completed turn (real partial output + usage), NOT like an error.
   | "round-cap"
   // A sub-agent deliberately ended the current round to wait for an answer.
   // The loop is fully terminated; continuation re-hydrates the persisted

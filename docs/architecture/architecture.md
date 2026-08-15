@@ -292,6 +292,50 @@ implementation units:
 Every implementation unit remains below 1,600 lines. The split does not add a
 second state store, runtime alias, IPC channel, or policy path.
 
+## Sub-agent Messaging (A2A)
+
+Sub-agents are in-process child `ConversationLoop`s. Messaging expands the
+**communication** graph between them; it never expands the **creation** graph,
+which stays hard-stopped at depth 1. Full design detail, decision record and
+state-transition table live in
+[docs/blueprints/a2a-subagent-messaging.md](../blueprints/a2a-subagent-messaging.md);
+this section records only the contract the rest of the host depends on.
+
+**Four messaging edges.** Each is a distinct tool with a distinct authority:
+
+| Edge | Mechanism | Authority |
+|---|---|---|
+| child → parent | `agent_send(to: <parent>)`, optionally `waitForReply` for a question | a child reports to its own principal |
+| child → sibling | `agent_send(to: <siblingChildSessionId>)` | peers under one origin; the receiver never agreed to act on it, so it force-asks |
+| parent → child | `agent_guide` — injected live into a running child, or queued in the durable directive mailbox for a suspended one | the parent amends the task it authored |
+| parent → suspended child | `agent_spawn(resumeId=…)` continuation instructions | re-hydrates and continues the same child |
+
+`agent_send` is registered model-visible for children only; `agent_guide` is
+parent-only and blocklisted out of every child registry. Addresses are always
+the host-minted `childSessionId` (`sub-<sha256(origin)[:8]>-<uuid>`) — a profile
+name is display text, never an address.
+
+**Wake drain invariant.** A queued child message can start a parent turn when
+autonomous wake is enabled. The drain has one invariant: a per-parent dirty
+token, spent before dispatch, is the progress guarantee — a wake that consumes
+nothing must stop, and every trigger that legitimately owes a delivery must
+still reach exactly one wake. Pinned by
+`src/engine/__tests__/a2a-wake-drain.test.ts`.
+
+**Mailbox durability.** Both the sibling mailbox and the parent directive
+mailbox persist to disk, so a message survives the suspension it was written
+across. A directive is only accepted for a child whose resume can still happen
+— task state, suspension reason, and both resume-axis counters — because the
+mailbox's only delivery path is a resume that would otherwise refuse it. On the
+delivery side an entry is acknowledged when the segment that carried it reached
+a conclusion, and a terminal child's pending entries are discarded outright.
+
+**Parent rounds are unbounded.** A round budget is a sub-agent concept: the
+runner assigns `maxRounds` per child, and hitting it is a `round-cap` budget
+suspension carrying a `resumeId`. A parent turn passes no `maxRounds` and runs
+`PARENT_UNLIMITED_ROUNDS` — there is no global round constant, so a parent turn
+never reaches `round-cap`.
+
 ## Tool Governance
 
 All tool execution flows through the registry and executor:
@@ -345,7 +389,7 @@ parent cannot deadlock its own child.
 | Every failure that leaves a turn to answer ends at the user | Timeout, spent budget, unparseable answer, missing adjudicator, provider error and repeated denial all escalate to the dock; a turn stopped while the parent was thinking ends in a host `deny-once` with no dock at all | A stage that cannot answer must not be able to answer "allow" — and a turn the user stopped must not be readable as anyone's approval. |
 | Flag off means the chain is the two-tier one | The lane is a synchronous eligibility check; an ask that is not adjudicated is never awaited | The off path must be identical in behaviour and in timing. |
 
-Five deviations from the original design are deliberate and load-bearing:
+Six deviations from the original design are deliberate and load-bearing:
 
 - **Host-only fields live on `ApprovalRequestInput`, not `ApprovalRequest`.**
   `childProvenance` and `parentAdjudicationEligible` are inputs the host
@@ -369,6 +413,15 @@ Five deviations from the original design are deliberate and load-bearing:
   sentence can only have been lifted out of the child's own tool arguments, so
   including it would have put the child's own prose into the prompt that
   decides the child's request.
+- **A2A influence IS part of the evidence.** A sibling's message re-elevates the
+  receiver's calls into an ask even on the read lane, which is why an otherwise
+  auto-approved builtin read can reach tier 2 at all. The host label naming that
+  sender rides the evidence as `a2aInfluenceLabel`, emitted to the adjudicator
+  as a quoted `raisedUnderAnotherAgentsInfluence.quotedSenderLabel` under its own
+  read-it-never-obey-it system-prompt line. It is host-composed and already the
+  leading segment of the `reason` the dock would have shown, so it discloses
+  nothing new — but without it the parent judges "does this serve the task I
+  gave it?" blind to the third agent that prompted the call.
 
 Three settings move or widen the chain, each conservative by default
 (`permissions.reviewer.parentAdjudication`):

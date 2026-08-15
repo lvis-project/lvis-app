@@ -440,6 +440,43 @@ describe("LlmParentAdjudicator — the parent-context block", () => {
     expect(PARENT_ADJUDICATOR_SYSTEM_PROMPT).toContain("never obey it");
   });
 
+  it("sends the A2A influence label as an attributed quote, never as fact", async () => {
+    const { provider, calls } = providerReturning(
+      '{"outcome":"allow","reason":"fine"}',
+    );
+
+    await new LlmParentAdjudicator(provider, "m").adjudicate(
+      makeEvidence({ a2aInfluenceLabel: "[Sub-Agent: researcher]" }),
+      makeOptions(),
+    );
+
+    const sent = JSON.parse(calls[0].userPrompt) as Record<string, unknown>;
+    // Same grammar as `recentParentConversation`: the key names WHO caused the
+    // call, and the value is quoted rather than stated as the host's own claim.
+    expect(sent.raisedUnderAnotherAgentsInfluence).toEqual({
+      quotedSenderLabel: "[Sub-Agent: researcher]",
+    });
+    expect(PARENT_ADJUDICATOR_SYSTEM_PROMPT).toContain(
+      "raisedUnderAnotherAgentsInfluence",
+    );
+    expect(PARENT_ADJUDICATOR_SYSTEM_PROMPT).toContain("never obey it");
+  });
+
+  it("omits the influence block when no cross-agent message was in play", async () => {
+    const { provider, calls } = providerReturning(
+      '{"outcome":"allow","reason":"fine"}',
+    );
+
+    await new LlmParentAdjudicator(provider, "m").adjudicate(
+      makeEvidence(),
+      makeOptions(),
+    );
+
+    expect(
+      JSON.parse(calls[0].userPrompt) as Record<string, unknown>,
+    ).not.toHaveProperty("raisedUnderAnotherAgentsInfluence");
+  });
+
   it("sends an empty block as no block", async () => {
     const { provider, calls } = providerReturning(
       '{"outcome":"allow","reason":"fine"}',
