@@ -28,6 +28,8 @@ export const en = {
     "This sub-agent's cumulative round ceiling is spent and it can NEVER be resumed again. Do not retry this resumeId. Read its last summary, finish the remaining steps yourself or in a NEW narrower sub-agent, and tell the user the original agent was cut short.",
   "be_agentSpawn.resumeInvalidGuidance":
     "This resumeId can NEVER be resumed — the rejection is structural (wrong task state, ownership, or persisted metadata), so retrying the SAME resumeId will fail identically every time. Do NOT retry it. If the work is still needed, start a NEW sub-agent for it, and tell the user the original agent could not be continued.",
+  "be_agentSpawn.resumeProviderRejectedGuidance":
+    "The provider REFUSED this request itself — not a transient outage. It validates the request before generating, and it will refuse an identical request identically every time, so retrying the SAME resumeId is a loop with no exit. The sub-agent's history is intact and it stays resumable, but only after something about the request changes: switch the model or provider, or continue the work in a NEW sub-agent with a narrower tool scope. Report the provider error text to the user rather than retrying silently.",
   "be_agentSpawn.emptySummaryFallback":
     "Task state: {taskState} — the sub-agent produced no summary. Resume it with agent_spawn(resumeId: \"{resumeId}\") to see the details.",
   "be_agentSpawn.statusRestoredHint":
@@ -61,6 +63,8 @@ export const ko: Record<keyof typeof en, string> = {
     "이 sub-agent 는 누적 라운드 상한을 소진해 다시는 재개할 수 없습니다. 이 resumeId 를 재시도하지 마세요. 마지막 요약을 읽고 남은 단계를 직접 또는 더 좁은 새 sub-agent 로 마무리하고, 원래 에이전트가 중단됐음을 사용자에게 알리세요.",
   "be_agentSpawn.resumeInvalidGuidance":
     "이 resumeId 는 다시는 재개할 수 없습니다 — 거부 사유가 구조적(task 상태/소유권/영속 메타데이터 불일치)이므로 같은 resumeId 재시도는 매번 동일하게 실패합니다. 재시도하지 마세요. 작업이 여전히 필요하면 새 sub-agent 로 시작하고, 원래 에이전트를 이어갈 수 없었음을 사용자에게 알리세요.",
+  "be_agentSpawn.resumeProviderRejectedGuidance":
+    "이 요청 자체를 provider 가 거부했습니다 — 일시적 장애가 아닙니다. provider 는 생성 전에 요청을 검증하며 동일한 요청은 매번 동일하게 거부하므로, 같은 resumeId 재시도는 빠져나올 수 없는 루프입니다. sub-agent 히스토리는 온전하고 여전히 재개 가능하지만, 요청이 달라진 뒤에만 가능합니다: 모델이나 provider 를 바꾸거나, 더 좁은 tool 범위의 새 sub-agent 로 작업을 이어가세요. 조용히 재시도하지 말고 provider 오류 원문을 사용자에게 보고하세요.",
   "be_agentSpawn.emptySummaryFallback":
     "작업 상태: {taskState} — 서브에이전트가 요약을 남기지 않았습니다. agent_spawn(resumeId: \"{resumeId}\") 로 재개해 상세를 확인하세요.",
   "be_agentSpawn.statusRestoredHint":
