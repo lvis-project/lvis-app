@@ -4,6 +4,7 @@
  * turn state (history, provider, usage, lastRound/lastContext token fields,
  * guidance queue) stays on the ConversationLoop instance, accessed via `self`.
  */
+import { randomUUID } from "node:crypto";
 import type { LoopContext } from "./loop-context.js";
 import type { GuidanceInjectionSource, TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
 import { notifyGuidanceInjected, subAgentHistoryMeta, subAgentSourceForBatch, truncateGuidanceBatch } from "./guidance-batch.js";
@@ -529,9 +530,22 @@ export async function queryLoop(
         const historyMessage = self.history.append({
           role: "user",
           content: injectedContent,
-          // Persisted provenance so a reloaded transcript rebuilds the same
-          // sub-agent box the live `guidance.applied` frame drew.
-          ...subAgentHistoryMeta(subAgentSource),
+          meta: {
+            // Marked as a host-minted row, always — the same stamp the
+            // start-of-turn guidance injection already carries.
+            //
+            // Not decoration. A batch that mixed the user's own mid-turn guide
+            // with a child's report is deliberately NOT attributed to the child
+            // (the user wrote part of it), so without this marker the row is
+            // indistinguishable from a message the user typed. Anything that
+            // decides what the USER said — the tier-2 parent-context evidence
+            // is the first such reader — would otherwise quote a child's prose
+            // back as its parent's own words.
+            hostInjectionId: randomUUID(),
+            // Persisted provenance so a reloaded transcript rebuilds the same
+            // sub-agent box the live `guidance.applied` frame drew.
+            ...(subAgentHistoryMeta(subAgentSource).meta ?? {}),
+          },
         });
         delivery.historyMessage = historyMessage;
       }

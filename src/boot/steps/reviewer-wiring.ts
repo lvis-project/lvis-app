@@ -305,10 +305,16 @@ export function wireReviewerAgent(deps: WireReviewerDeps): WireReviewerResult {
   let approvalSentenceSelector: ApprovalSentenceSelector =
     new UnavailableApprovalSentenceSelector();
   let parentAdjudicator: ParentAdjudicator = new UnavailableParentAdjudicator();
-  // Independent of the reviewer's mode: this one asks the chat model, and the
-  // reviewer's classifier is not what decides whether the chat model exists.
+  // Independent of WHICH classifier the reviewer wired — this one asks the chat
+  // model, and a rule-based reviewer says nothing about whether that model
+  // exists. Not independent of `disabled`, though: that mode's classifier
+  // returns a pass-through LOW for everything, so every call would sit under
+  // the tier-2 ceiling on a verdict that assessed nothing. A ceiling computed
+  // from a stub is not a ceiling, so this option stays unavailable there and
+  // those asks keep going to the user.
   const parentSessionAdjudicator: ParentAdjudicator =
-    deps.resolveParentSessionAdjudicationTarget === undefined
+    deps.resolveParentSessionAdjudicationTarget === undefined ||
+    settings.mode === "disabled"
       ? new UnavailableParentAdjudicator()
       : new LlmParentAdjudicator(deps.resolveParentSessionAdjudicationTarget);
   // Runtime classifier discriminant — diverges from persisted mode only on

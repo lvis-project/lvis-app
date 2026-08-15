@@ -31,6 +31,10 @@ import {
 } from "../../../permissions/reviewer/verdict-cache.js";
 import type { LLMProvider, StreamEvent } from "../../../engine/llm/types.js";
 import { marketplaceProviderPresetSecretKey } from "../../../shared/marketplace-package-assets.js";
+import {
+  LlmParentAdjudicator,
+  UnavailableParentAdjudicator,
+} from "../../../permissions/parent-adjudicator.js";
 
 let tmpDir: string;
 
@@ -88,6 +92,48 @@ describe("Permission policy P4 reviewer-wiring", () => {
     expect(result.rationaleScopeReviewer).toBeInstanceOf(UnavailableRationaleScopeReviewer);
     expect(setReviewerSpy).toHaveBeenCalledOnce();
     expect(pm.hasReviewer()).toBe(true);
+  });
+
+  it("the parent-session adjudicator follows the chat model, but not into mode=disabled", () => {
+    // A rule reviewer still assesses a call, so the tier-2 ceiling means
+    // something and the chat model may answer under it. `disabled` returns a
+    // pass-through LOW for everything: a ceiling computed from that assessed
+    // nothing, so the option stays unavailable and those asks reach the user.
+    const target = {
+      provider: { complete: async () => ({ text: "", tokensIn: 0, tokensOut: 0, costUsd: 0 }) },
+      model: "chat-model",
+    };
+    const settingsFor = (mode: "rule" | "disabled") => () => ({
+      mode,
+      provider: "openai" as const,
+      model: "gpt-4o-mini",
+      fallbackOnError: "deny" as const,
+      interactive: { autoApprove: "off" as const },
+      parentAdjudication: PARENT_ADJUDICATION,
+    });
+
+    const ruled = wireReviewerAgent({
+      permissionManager: new PermissionManager(join(tmpDir, "permissions-rule.json")),
+      readSettings: settingsFor("rule"),
+      resolveParentSessionAdjudicationTarget: () => target,
+      verdictCachePath: join(tmpDir, "cache-parent-session.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-parent-session.jsonl"),
+    });
+    expect(ruled.parentSessionAdjudicator).toBeInstanceOf(LlmParentAdjudicator);
+    // The reviewer's own adjudicator is unavailable in rule mode — the two are
+    // separate answers to separate questions.
+    expect(ruled.parentAdjudicator).toBeInstanceOf(UnavailableParentAdjudicator);
+
+    const disabled = wireReviewerAgent({
+      permissionManager: new PermissionManager(join(tmpDir, "permissions-disabled.json")),
+      readSettings: settingsFor("disabled"),
+      resolveParentSessionAdjudicationTarget: () => target,
+      verdictCachePath: join(tmpDir, "cache-parent-session-off.jsonl"),
+      deferredQueuePath: join(tmpDir, "queue-parent-session-off.jsonl"),
+    });
+    expect(disabled.parentSessionAdjudicator).toBeInstanceOf(
+      UnavailableParentAdjudicator,
+    );
   });
 
   it("settings mode=disabled wires DisabledRiskClassifier", () => {
