@@ -37,6 +37,7 @@ import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../../shared/subagent-rounds.js";
 import { createSkillLoadTool } from "../skill-load.js";
 import { createSkillListTool } from "../skill-list.js";
 import { createAgentListTool } from "../agent-list.js";
+import { createAgentGuideTool } from "../agent-guide.js";
 import { en as agentListEn } from "../../i18n/messages/generated/be_agentList.js";
 import { en as agentSpawnEn } from "../../i18n/messages/generated/be_agentSpawn.js";
 import { RoutinesStore } from "../../main/routines-store.js";
@@ -1253,7 +1254,7 @@ describe("agent_spawn tool", () => {
     const tool = createAgentSpawnTool({
       getRunner: () => ({
         resume: async () => {
-          throw new Error("litellm.BadRequestError: Failed to initialize samplers");
+          throw new Error("litellm.APIConnectionError: fetch failed (ECONNRESET)");
         },
       }) as never,
       emit: (e) => events.push(e),
@@ -1272,6 +1273,68 @@ describe("agent_spawn tool", () => {
     expect(payload.resumeId).toBe("child-transient");
     expect(payload.resumeGuidance).toContain("재개 가능");
     expect(payload.resumeRefusal).toBeUndefined();
+    expect(payload.resumeDeterministicFailure).toBeUndefined();
+  });
+
+  it("a provider request rejection on resume drops the retry-same-id guidance", async () => {
+    // The self-hosted grammar compiler validates the request and refuses it
+    // BEFORE generating, so an identical resume (same frozen tool scope) is
+    // refused identically forever — retry guidance there is an exit-less loop.
+    // It is not a `resumeRefusal` either: the host authorized this resume and
+    // the turn ran; a REMOTE system rejected the payload.
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        resume: async () => ({
+          summary: "provider error",
+          error: "litellm.BadRequestError: OpenAIException - Failed to initialize samplers: "
+            + "failed to parse grammar. Received Model Group=muse-glimmer-30b",
+          toolCallCount: 0,
+          turnCount: 0,
+          childSessionId: "child-grammar",
+          entries: [],
+          ok: false,
+        }),
+      }) as never,
+      emit: () => {},
+    });
+
+    const result = await tool.execute(
+      { title: "t", instructions: "continue", resumeId: "child-grammar" },
+      foregroundCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    const payload = JSON.parse(result.output);
+    expect(payload.resumeRefusal).toBeUndefined();
+    expect(payload.resumeDeterministicFailure).toBe(true);
+    // The child stays addressable — it becomes resumable again once the model,
+    // provider, or tool scope changes — but the text must not tell the model
+    // that a bare retry clears it.
+    expect(payload.resumeId).toBe("child-grammar");
+    expect(payload.resumeGuidance).not.toContain("재개 가능합니다");
+    expect(payload.resumeGuidance).toContain("provider 가 거부");
+  });
+
+  it("a THROWN provider request rejection is classified like a returned one", async () => {
+    const tool = createAgentSpawnTool({
+      getRunner: () => ({
+        resume: async () => {
+          throw new Error(
+            "litellm.BadRequestError: Failed to initialize samplers: failed to parse grammar",
+          );
+        },
+      }) as never,
+      emit: () => {},
+    });
+
+    const result = await tool.execute(
+      { title: "t", instructions: "continue", resumeId: "child-grammar-throw" },
+      foregroundCtx(),
+    );
+
+    const payload = JSON.parse(result.output);
+    expect(payload.resumeDeterministicFailure).toBe(true);
+    expect(payload.resumeGuidance).toContain("provider 가 거부");
   });
 
   it("a structural resume rejection never offers the resumeId back for retry", async () => {
@@ -1797,5 +1860,110 @@ describe("skill_load tool", () => {
     expect(result.isError).toBe(true);
     expect(JSON.parse(result.output).error).toContain("generation access unavailable");
     expect(load).not.toHaveBeenCalled();
+  });
+});
+
+describe("agent_guide tool", () => {
+  it("delegates a directive to the runner under the caller's own session id", async () => {
+    const queueSpy = vi.fn(async () => ({
+      ok: true as const,
+      disposition: "queued" as const,
+      childSessionId: "child-1",
+      messageId: "message-1",
+    }));
+    const tool = createAgentGuideTool({
+      getRunner: () => ({ queueParentMessageToChild: queueSpy }) as never,
+    });
+
+    const result = await tool.execute(
+      { childSessionId: "child-1", message: "change direction" },
+      ctx(),
+    );
+    expect(result.isError).toBe(false);
+    // The origin is the HOST-supplied session id, never anything the model wrote.
+    expect(queueSpy).toHaveBeenCalledWith("session-x", "child-1", "change direction");
+    expect(JSON.parse(result.output)).toMatchObject({
+      childSessionId: "child-1",
+      disposition: "queued",
+    });
+  });
+
+  it("tells the parent how a stored directive will be delivered", async () => {
+    const tool = createAgentGuideTool({
+      getRunner: () => ({
+        queueParentMessageToChild: async () => ({
+          ok: true as const,
+          disposition: "mailbox" as const,
+          childSessionId: "child-1",
+          messageId: "message-1",
+        }),
+      }) as never,
+    });
+
+    const parsed = JSON.parse(
+      (await tool.execute({ childSessionId: "child-1", message: "stop" }, ctx())).output,
+    );
+    expect(parsed.disposition).toBe("mailbox");
+    expect(parsed.guidance).toContain("agent_spawn(resumeId)");
+  });
+
+  it("refuses a sub-agent caller — a child has no children to direct", async () => {
+    const queueSpy = vi.fn();
+    const tool = createAgentGuideTool({
+      getRunner: () => ({ queueParentMessageToChild: queueSpy }) as never,
+    });
+
+    const refused = await tool.execute(
+      { childSessionId: "child-1", message: "change direction" },
+      {
+        cwd: process.cwd(),
+        extraAllowedDirectories: [],
+        metadata: { sessionId: "sub-1", spawnDepth: 1 },
+      },
+    );
+    expect(refused.isError).toBe(true);
+    expect(JSON.parse(refused.output).error).toContain("cannot be invoked from a sub-agent");
+    expect(queueSpy).not.toHaveBeenCalled();
+  });
+
+  it("requires a session id, a recipient, and a non-empty message", async () => {
+    const queueSpy = vi.fn();
+    const tool = createAgentGuideTool({
+      getRunner: () => ({ queueParentMessageToChild: queueSpy }) as never,
+    });
+
+    const noSession = await tool.execute(
+      { childSessionId: "child-1", message: "hi" },
+      { cwd: process.cwd(), extraAllowedDirectories: [], metadata: {} },
+    );
+    expect(noSession.isError).toBe(true);
+    expect(JSON.parse(noSession.output).error).toContain("session id");
+
+    const noRecipient = await tool.execute({ childSessionId: "  ", message: "hi" }, ctx());
+    expect(JSON.parse(noRecipient.output).error).toBe("unknown-recipient");
+
+    const noMessage = await tool.execute({ childSessionId: "child-1", message: " " }, ctx());
+    expect(JSON.parse(noMessage.output).error).toBe("invalid-message");
+    expect(queueSpy).not.toHaveBeenCalled();
+  });
+
+  it("names non-resumability instead of leaving the parent to retry", async () => {
+    const tool = createAgentGuideTool({
+      getRunner: () => ({
+        queueParentMessageToChild: async () => ({
+          ok: false as const,
+          reason: "child-not-resumable" as const,
+        }),
+      }) as never,
+    });
+
+    const refused = await tool.execute(
+      { childSessionId: "child-1", message: "stop" },
+      ctx(),
+    );
+    expect(refused.isError).toBe(true);
+    const parsed = JSON.parse(refused.output);
+    expect(parsed.error).toBe("child-not-resumable");
+    expect(parsed.guidance).toContain("agent_list");
   });
 });

@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { classifyProviderError } from "../error-classifier.js";
+import {
+  classifyProviderError,
+  isDeterministicProviderRequestRejection,
+} from "../error-classifier.js";
 
 describe("classifyProviderError", () => {
   it("classifies api_key error", () => {
@@ -70,5 +73,44 @@ describe("classifyProviderError", () => {
       expect(result.category).toBe("context-length");
       expect(result.userMessage).toContain("자동 압축 또는 새 대화");
     });
+  });
+});
+
+describe("isDeterministicProviderRequestRejection", () => {
+  it("recognizes the self-hosted grammar-compile refusals", () => {
+    // The exact llama.cpp text observed on a sub-agent resume, as LiteLLM
+    // wraps it.
+    expect(isDeterministicProviderRequestRejection(
+      "litellm.BadRequestError: OpenAIException - Failed to initialize samplers: "
+      + "failed to parse grammar. Received Model Group=muse-glimmer-30b",
+    )).toBe(true);
+    // The vLLM/xgrammar sibling.
+    expect(isDeterministicProviderRequestRejection(
+      "Grammar error: regex parse error: look-around is not supported",
+    )).toBe(true);
+    expect(isDeterministicProviderRequestRejection(
+      "JSON schema conversion failed: Pattern must start with '^' and end with '$'",
+    )).toBe(true);
+  });
+
+  it("recognizes hosted-vendor strict-mode schema rejections", () => {
+    expect(isDeterministicProviderRequestRejection(
+      "400 invalid_function_parameters",
+    )).toBe(true);
+    expect(isDeterministicProviderRequestRejection(
+      "Invalid schema for function 'ep_parking_read': array missing items",
+    )).toBe(true);
+  });
+
+  it("leaves genuinely transient failures retryable", () => {
+    for (const raw of [
+      "429 Too Many Requests: rate_limit exceeded",
+      "fetch failed: ECONNREFUSED",
+      "provider stream idle ceiling exceeded",
+      "500 internal server error",
+      "context_length exceeded",
+    ]) {
+      expect(isDeterministicProviderRequestRejection(raw)).toBe(false);
+    }
   });
 });
