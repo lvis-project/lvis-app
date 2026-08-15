@@ -6,7 +6,7 @@
  * objects) and merges the English default catalog here. Non-English generated
  * catalogs are language-pack chunks under `../generated-locales/`.
  *
- * Fragments: 190
+ * Fragments: 191
  */
 import { en as en_actionPanel } from "./actionPanel.js";
 import { en as en_app } from "./app.js";
@@ -46,6 +46,7 @@ import { en as en_be_mcpManager } from "./be_mcpManager.js";
 import { en as en_be_mcpResourceAttachment } from "./be_mcpResourceAttachment.js";
 import { en as en_be_mcpResourceTools } from "./be_mcpResourceTools.js";
 import { en as en_be_memoryManager } from "./be_memoryManager.js";
+import { en as en_be_parentDirective } from "./be_parentDirective.js";
 import { en as en_be_permissionManager } from "./be_permissionManager.js";
 import { en as en_be_permissionModeApply } from "./be_permissionModeApply.js";
 import { en as en_be_pluginExpansion } from "./be_pluginExpansion.js";
@@ -238,6 +239,7 @@ export const generatedEn: Record<string, string> = {
   ...en_be_mcpResourceAttachment,
   ...en_be_mcpResourceTools,
   ...en_be_memoryManager,
+  ...en_be_parentDirective,
   ...en_be_permissionManager,
   ...en_be_permissionModeApply,
   ...en_be_pluginExpansion,
