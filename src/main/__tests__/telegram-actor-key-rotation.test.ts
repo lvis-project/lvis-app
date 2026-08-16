@@ -172,7 +172,6 @@ function connectionService(store: TelegramConnectionStore, secretStore: SecretSt
     conversationDigestFor: (conversationId: string) =>
       telegramConversationDigest(BOT_FINGERPRINT, conversationId),
     conversationExists: () => true,
-    envManaged: false,
   });
 }
 

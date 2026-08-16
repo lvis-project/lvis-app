@@ -116,7 +116,9 @@ function connectionFixture(overrides: {
   // The command port's submit contract is SYNCHRONOUS: it returns the
   // submission object (whose `completion` promise settles the receipt), or
   // null while streaming.
-  const submit = vi.fn(overrides.submit ?? (() => ({ completion: Promise.resolve() })));
+  const submit = vi.fn<(actor: unknown, command: unknown) => unknown>(
+    overrides.submit ?? (() => ({ completion: Promise.resolve() })),
+  );
   const onFatal = vi.fn();
   // A recorded offset marks every queued update as LIVE traffic; a null one
   // would make the ingress treat the first batch as pre-pairing backlog and
