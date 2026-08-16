@@ -4,7 +4,7 @@
  * hybrid topology).
  *
  * Why this is NOT `McpClient`: design §0 decision (3) confines `mcp-client.ts`
- * to EXTERNAL/untrusted servers and the documented dual-era (`2024-11-05`)
+ * to EXTERNAL/untrusted servers and the documented dual-era (pre-final)
  * fallback exception. A first-party plugin is RC-only — it never speaks the
  * legacy protocol — and registers with PLUGIN authority (its declared category,
  * natural tool name, `source:"plugin"`), not the external `category:"network"` +
