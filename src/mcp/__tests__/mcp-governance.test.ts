@@ -552,7 +552,9 @@ describe("McpGovernance — per-request capability gate (governance-per-request)
     const gov = governanceWithPolicy(basePolicy({ allowedCapabilities: [] }));
     expect(gov.validateRequestCapability("browser-use", "server/discover").valid).toBe(true);
     expect(gov.validateRequestCapability("browser-use", "initialize").valid).toBe(true);
-    expect(gov.validateRequestCapability("browser-use", "notifications/initialized").valid).toBe(true);
+    // Notifications never pass through this gate (sendNotification does not
+    // consult it), so they are declassified — fail-closed like any unknown verb.
+    expect(gov.validateRequestCapability("browser-use", "notifications/initialized").valid).toBe(false);
   });
 
   it("fail-closed: denies an unclassified (non-control, uncapability) method", () => {
