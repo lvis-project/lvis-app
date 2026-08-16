@@ -324,6 +324,12 @@ import {
   RPC_MISSING_REQUIRED_CLIENT_CAPABILITY,
   RPC_UNSUPPORTED_PROTOCOL_VERSION,
 } from "./protocol-constants.js";
+import {
+  collectParamHeaderAnnotations,
+  deriveStandardHeaders,
+  extractParamHeaders,
+  type McpParamHeaderAnnotation,
+} from "./http-request-headers.js";
 
 const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
 
@@ -359,10 +365,20 @@ const MAX_TASK_POLLS = 600;
  * - `close` must resolve all pending requests as rejected.
  * - `isAlive` lets the health check poll without caring about the transport.
  */
+/** Per-send transport options. Only the HTTP transport consumes them. */
+export interface McpSendOptions {
+  /**
+   * Extra HTTP headers for THIS request — the `Mcp-Param-{Name}` mirrors the
+   * final spec's `x-mcp-header` extension requires of Streamable-HTTP clients.
+   * Names/values are pre-validated+encoded by `http-request-headers.ts`.
+   */
+  extraHeaders?: Readonly<Record<string, string>>;
+}
+
 export interface McpTransport {
   readonly kind: "stdio" | "http" | "loopback";
   open(): Promise<void>;
-  send(message: JsonRpcMessage): Promise<void>;
+  send(message: JsonRpcMessage, opts?: McpSendOptions): Promise<void>;
   close(): Promise<void>;
   isAlive(): boolean;
   onMessage(handler: (msg: JsonRpcResponse) => void): void;
@@ -395,6 +411,12 @@ interface PendingRequest {
 export class McpClient {
   private nextRequestId = 1;
   private readonly pendingRequests = new Map<number, PendingRequest>();
+  /**
+   * Per-tool validated `x-mcp-header` annotations (HTTP transport only),
+   * captured at discovery so each `tools/call` can mirror the designated
+   * argument values into `Mcp-Param-{Name}` headers.
+   */
+  private readonly paramHeaderAnnotations = new Map<string, McpParamHeaderAnnotation[]>();
 
   private readonly bufferedResponses = new Map<number, JsonRpcResponse>();
   private healthTimer: NodeJS.Timeout | null = null;
@@ -556,7 +578,7 @@ export class McpClient {
 
       // 도구 목록 요청 (mode-aware `_meta` via sendRequest)
       const toolsResult = await this.sendRequest<McpToolsListResult>("tools/list", {}, HANDSHAKE_TIMEOUT_MS);
-      const tools = toolsResult.tools ?? [];
+      const tools = this.applyParamHeaderConformance(toolsResult.tools ?? []);
 
       // Layer 3: 도구 등록 검증
       const existingToolNames = new Set(this.toolRegistry.listAll().map((t) => t.name));
@@ -1062,9 +1084,17 @@ export class McpClient {
       // (opaque) `requestState`, bounded by MAX_MRTR_ROUNDS.
       let params: Record<string, unknown> = { name, arguments: args };
       let rounds = 0;
+      // `x-mcp-header` mirroring (final spec, HTTP only): the server designated
+      // these argument values for HTTP-header duty at discovery; the transport
+      // MUST carry them on the POST or a conformant server rejects with -32020.
+      const annotations = this.paramHeaderAnnotations.get(name);
+      const sendOpts: McpSendOptions | undefined =
+        annotations !== undefined
+          ? { extraHeaders: extractParamHeaders(annotations, args) }
+          : undefined;
       // eslint-disable-next-line no-constant-condition
       while (true) {
-        const result = await this.sendRequest<McpToolCallResult>("tools/call", params, timeoutMs);
+        const result = await this.sendRequest<McpToolCallResult>("tools/call", params, timeoutMs, sendOpts);
 
         if (result.resultType === "input_required") {
           rounds += 1;
@@ -1301,6 +1331,34 @@ export class McpClient {
   // ─── JSON-RPC Transport ─────────────────────────────
 
   /**
+   * `x-mcp-header` conformance (final spec, Streamable HTTP only): validate
+   * each discovered tool's annotations, keep the valid annotation sets for
+   * per-call header mirroring, and EXCLUDE a tool whose annotations violate
+   * any constraint — the spec's required failure isolation (one malformed tool
+   * must not block the rest). Non-HTTP transports MAY ignore the extension;
+   * we do, and legacy-era servers predate it entirely.
+   */
+  private applyParamHeaderConformance(tools: McpToolSchema[]): McpToolSchema[] {
+    this.paramHeaderAnnotations.clear();
+    if (this.transport?.kind !== "http" || this.mode !== "rc") return tools;
+    const kept: McpToolSchema[] = [];
+    for (const tool of tools) {
+      const outcome = collectParamHeaderAnnotations(tool.inputSchema);
+      if (outcome.reason !== undefined) {
+        log.warn(
+          `${this.config.id} tool '${tool.name}' rejected (x-mcp-header): ${outcome.reason}`,
+        );
+        continue;
+      }
+      if (outcome.annotations.length > 0) {
+        this.paramHeaderAnnotations.set(tool.name, outcome.annotations);
+      }
+      kept.push(tool);
+    }
+    return kept;
+  }
+
+  /**
    * The host's per-request client capabilities (RC `_meta`). This slice
    * advertises a fixed sound default; the `mrtr-input-loop`/`governance-per-request`
    * milestones derive it from the active turn's consent state + #811 policy
@@ -1335,7 +1393,12 @@ export class McpClient {
     };
   }
 
-  private sendRequest<T>(method: string, params: Record<string, unknown>, timeoutMs?: number): Promise<T> {
+  private sendRequest<T>(
+    method: string,
+    params: Record<string, unknown>,
+    timeoutMs?: number,
+    sendOpts?: McpSendOptions,
+  ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const transport = this.transport;
       if (!transport || !transport.isAlive()) {
@@ -1393,7 +1456,7 @@ export class McpClient {
       }
 
       const request: JsonRpcRequest = { jsonrpc: "2.0", id, method, params: this.withRequestMeta(params) };
-      transport.send(request).catch((err: Error) => {
+      transport.send(request, sendOpts).catch((err: Error) => {
         // send 실패 → pending 정리 후 reject
         const pending = this.pendingRequests.get(id);
         if (!pending) return;
@@ -2085,7 +2148,7 @@ class HttpTransport implements McpTransport {
     this.alive = true;
   }
 
-  async send(message: JsonRpcMessage): Promise<void> {
+  async send(message: JsonRpcMessage, opts?: McpSendOptions): Promise<void> {
     if (!this.alive) {
       throw new Error(`[mcp-client] http transport closed`);
     }
@@ -2126,6 +2189,18 @@ class HttpTransport implements McpTransport {
       } else if (!hasAuthorization(headers)) {
         headers.authorization = `Bearer ${this.config.apiKey}`;
       }
+    }
+
+    // Request-metadata headers (final `2026-07-28` Streamable HTTP): the
+    // standard trio is derived FROM the message body so header and body can
+    // never disagree (a mismatch is a server-side -32020 rejection), and the
+    // caller's `Mcp-Param-{Name}` mirrors ride the same request. Stamped LAST
+    // so an admin-supplied header can never desynchronize them from the body.
+    for (const [k, v] of Object.entries(deriveStandardHeaders(message))) {
+      headers[k] = v;
+    }
+    for (const [k, v] of Object.entries(opts?.extraHeaders ?? {})) {
+      headers[k] = v;
     }
 
     const body = JSON.stringify(message);
