@@ -35,13 +35,10 @@ const log = createLogger("mcp-governance");
  */
 const CAPABILITY_METHODS = {
   tools: ["tools/list", "tools/call", "tasks/get", "tasks/update", "tasks/cancel"],
-  resources: [
-    "resources/list",
-    "resources/read",
-    "resources/templates/list",
-    "resources/subscribe",
-    "resources/unsubscribe",
-  ],
+  // `resources/subscribe`/`unsubscribe` were removed by the final `2026-07-28`
+  // revision (superseded by `subscriptions/listen`) and had no sender here —
+  // dropped, so the fail-closed default denies them like any unclassified verb.
+  resources: ["resources/list", "resources/read", "resources/templates/list"],
   prompts: ["prompts/list", "prompts/get"],
 } satisfies Record<McpCapability, string[]>;
 
@@ -62,7 +59,6 @@ const REQUEST_METHOD_CAPABILITY: Record<string, McpCapability> = Object.fromEntr
 const CONTROL_METHODS: ReadonlySet<string> = new Set([
   "server/discover",
   "initialize",
-  "ping",
   "notifications/initialized",
   "notifications/cancelled",
   "notifications/progress",
@@ -316,7 +312,7 @@ export class McpGovernance {
    * deny-by-default + approved-server invariants: an unapproved server is denied,
    * and a request exercising a capability the server was not approved for is
    * denied — even if a prior registration slipped through. Protocol/control
-   * methods that exercise NO gated capability (`server/discover`, `ping`,
+   * methods that exercise NO gated capability (`server/discover`,
    * notifications) pass.
    */
   validateRequestCapability(

@@ -1739,16 +1739,17 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await client.disconnect();
   });
 
-  it("maps a -32003 missing-required-client-capability error on a tool call", async () => {
+  it("maps a -32021 missing-required-client-capability error on a tool call", async () => {
+    // Final `2026-07-28` numbering (the draft's -32003 moved to -32021).
     const { client } = rcHttpClient("mc", (method, id) => {
       if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
       if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
-      if (method === "tools/call") return jsonRpcErrorResponse(id, -32003, "missing capability");
+      if (method === "tools/call") return jsonRpcErrorResponse(id, -32021, "missing capability");
       return new Response("unexpected", { status: 500 });
     });
 
     await client.connect();
-    await expect(client.callTool("q", {})).rejects.toThrow(/-32003/);
+    await expect(client.callTool("q", {})).rejects.toThrow(/-32021/);
     await client.disconnect();
   });
 });
