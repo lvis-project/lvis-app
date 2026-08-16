@@ -1363,6 +1363,121 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await client.disconnect();
   });
 
+  it("re-discovers on snapshot expiry and honors the server's CURRENT advertisement", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let discoverCalls = 0;
+      const { client } = rcHttpClient("snap", (method, id) => {
+        if (method === "server/discover") {
+          discoverCalls += 1;
+          return jsonRpcResponse(id, {
+            ...RC_DISCOVER_RESULT,
+            ttlMs: 1, // clamped to the 30s floor
+            // Apps advertised only from the SECOND discover on.
+            capabilities:
+              discoverCalls === 1
+                ? { tools: {} }
+                : { tools: {}, extensions: { "io.modelcontextprotocol/ui": {} } },
+          });
+        }
+        if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+        if (method === "tools/call")
+          return jsonRpcResponse(id, {
+            resultType: "complete",
+            content: [{ type: "text", text: "ok" }],
+            _meta: { ui: { resourceUri: "ui://snap/card.html" } },
+          });
+        return new Response("unexpected", { status: 500 });
+      });
+
+      await client.connect();
+      // Fresh snapshot, no Apps advertised → the ui payload is dropped.
+      expect((await client.callTool("t", {})).uiPayload).toBeUndefined();
+      expect(discoverCalls).toBe(1);
+
+      vi.setSystemTime(Date.now() + 31_000);
+      // Expired → single-flight re-discover; the NEW advertisement wins.
+      const result = await client.callTool("t", {});
+      expect(discoverCalls).toBe(2);
+      expect(result.uiPayload?.resourceUri).toBe("ui://snap/card.html");
+      await client.disconnect();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails the Apps gate closed when the snapshot is expired and refresh fails", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let discoverCalls = 0;
+      const { client } = rcHttpClient("snapfail", (method, id) => {
+        if (method === "server/discover") {
+          discoverCalls += 1;
+          if (discoverCalls > 1) return new Response("boom", { status: 500 });
+          return jsonRpcResponse(id, {
+            ...RC_DISCOVER_RESULT,
+            capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/ui": {} } },
+          });
+        }
+        if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+        if (method === "tools/call")
+          return jsonRpcResponse(id, {
+            resultType: "complete",
+            content: [{ type: "text", text: "ok" }],
+            _meta: { ui: { resourceUri: "ui://snapfail/card.html" } },
+          });
+        return new Response("unexpected", { status: 500 });
+      });
+
+      await client.connect();
+      expect((await client.callTool("t", {})).uiPayload?.resourceUri).toBe(
+        "ui://snapfail/card.html",
+      );
+
+      vi.setSystemTime(Date.now() + 31_000);
+      // Security gate: a stale-and-unrefreshable advertisement is NOT honored —
+      // the card is dropped, but the text result still flows.
+      const result = await client.callTool("t", {});
+      expect(result.text).toBe("ok");
+      expect(result.uiPayload).toBeUndefined();
+      await client.disconnect();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shares one in-flight refresh across concurrent expired reads (single-flight)", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    try {
+      let discoverCalls = 0;
+      const { client } = rcHttpClient("snapsf", (method, id) => {
+        if (method === "server/discover") {
+          discoverCalls += 1;
+          return jsonRpcResponse(id, {
+            ...RC_DISCOVER_RESULT,
+            capabilities: { tools: {}, extensions: { "io.modelcontextprotocol/ui": {} } },
+          });
+        }
+        if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+        if (method === "tools/call")
+          return jsonRpcResponse(id, {
+            resultType: "complete",
+            content: [{ type: "text", text: "ok" }],
+          });
+        return new Response("unexpected", { status: 500 });
+      });
+
+      await client.connect();
+      vi.setSystemTime(Date.now() + 31_000);
+      await Promise.all([client.callTool("t", {}), client.callTool("t", {})]);
+      // Initial discover + exactly ONE shared refresh, not one per read.
+      expect(discoverCalls).toBe(2);
+      await client.disconnect();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("stamps the Streamable HTTP request-metadata headers on every POST (final spec)", async () => {
     const TOOL = {
       name: "get_weather",
