@@ -649,8 +649,8 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
    *    hook, unlike a file read, can hang; the user is waiting on a card;
    *  - a hard HTML size cap, so a runaway hook cannot balloon the render path.
    *
-   * Every failure throws — the loopback server maps it to `-32002` and no body is
-   * ever served.
+   * Every failure throws — the loopback server maps it to `-32602`
+   * (resource-not-found under the final revision) and no body is ever served.
    *
    * `ceilingMs` defaults to the SOT and is a parameter solely so tests can exercise
    * the ceiling with a small value without weakening it (same seam as
