@@ -119,6 +119,58 @@ class McpRpcError extends Error {
   }
 }
 
+/**
+ * A non-2xx Streamable HTTP status whose body did NOT carry a routable JSON-RPC
+ * error. `modernErrorBody` records whether the body was a recognized (but
+ * id-less) modern JSON-RPC error — the final spec's legacy-detection rule turns
+ * on exactly this distinction: 400/404/405 with a NON-modern body means "legacy
+ * server, fall back to initialize"; a modern body means "modern server, do not".
+ */
+class McpHttpStatusError extends Error {
+  constructor(
+    readonly status: number,
+    body: string,
+    readonly modernErrorBody: boolean,
+  ) {
+    super(`http transport HTTP ${status}: ${body}`);
+    this.name = "McpHttpStatusError";
+  }
+}
+
+/**
+ * The final spec's era-detection rule for the `server/discover` probe: fall
+ * back to `initialize` on stdio `-32601`, or on an HTTP 400/404/405 whose body
+ * is not a recognized modern JSON-RPC error. A modern body (whatever the code)
+ * proves a modern server — the probe error then propagates instead.
+ */
+function isLegacyFallbackSignal(err: unknown): boolean {
+  if (err instanceof McpRpcError) return err.code === RPC_METHOD_NOT_FOUND;
+  if (err instanceof McpHttpStatusError) {
+    return !err.modernErrorBody && (err.status === 400 || err.status === 404 || err.status === 405);
+  }
+  return false;
+}
+
+/** Parse an HTTP error body as a JSON-RPC error response, or null. */
+function parseJsonRpcErrorBody(body: string): JsonRpcResponse | null {
+  if (!body) return null;
+  try {
+    const parsed = JSON.parse(body) as JsonRpcResponse;
+    if (
+      parsed !== null &&
+      typeof parsed === "object" &&
+      parsed.jsonrpc === "2.0" &&
+      parsed.error !== undefined &&
+      typeof parsed.error.code === "number"
+    ) {
+      return parsed;
+    }
+  } catch {
+    /* not JSON — legacy/proxy body */
+  }
+  return null;
+}
+
 /** Legacy `initialize` result — used ONLY on the dual-era external fallback. */
 interface McpInitializeResult {
   protocolVersion: string;
@@ -317,6 +369,7 @@ import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import {
   MCP_PROTOCOL_VERSION,
   MCP_LEGACY_PROTOCOL_VERSION,
+  MCP_SUPPORTED_LEGACY_VERSIONS,
   META_PROTOCOL_VERSION,
   META_CLIENT_INFO,
   META_CLIENT_CAPABILITIES,
@@ -547,12 +600,15 @@ export class McpClient {
       `${this.config.id} RC discovery completed`,
         );
       } catch (err) {
-        // Documented dual-era exception (design §0): an EXTERNAL pre-RC server
-        // does not implement `server/discover` and answers `-32601`. Fall back
-        // to the legacy `initialize` handshake. ANY other error is a real
-        // failure and propagates. LVIS's own plugins are always RC, so this
-        // never runs for first-party plugins.
-        if (!(err instanceof McpRpcError) || err.code !== RPC_METHOD_NOT_FOUND) {
+        // Documented dual-era exception (design §0): an EXTERNAL pre-final
+        // server does not implement `server/discover`. On stdio that surfaces
+        // as `-32601`; on Streamable HTTP the final spec's detection rule
+        // applies — 400/404/405 with a body that is NOT a recognized modern
+        // JSON-RPC error means "legacy server" (a session-enforcing pre-final
+        // server answers the probe with a bare 400, never -32601). ANY other
+        // error is a real failure and propagates. LVIS's own plugins always
+        // speak the final revision, so this never runs for first-party plugins.
+        if (!isLegacyFallbackSignal(err)) {
           throw err;
         }
         this.mode = "legacy";
@@ -565,6 +621,16 @@ export class McpClient {
           },
           HANDSHAKE_TIMEOUT_MS,
         );
+        // Legacy negotiation: the server may counter with its own revision. We
+        // continue only on a revision whose transport behavior this client
+        // actually implements — anything else is a mutual-incompatibility error,
+        // not something to limp through.
+        if (!MCP_SUPPORTED_LEGACY_VERSIONS.includes(initResult.protocolVersion)) {
+          throw new Error(
+            `[mcp-client] '${this.config.id}' countered initialize with unsupported protocol ` +
+              `'${initResult.protocolVersion}' (supported legacy: ${MCP_SUPPORTED_LEGACY_VERSIONS.join(", ")})`,
+          );
+        }
         await this.sendNotification("notifications/initialized", {});
         log.info(
           {
@@ -2107,6 +2173,8 @@ class StdioTransport implements McpTransport {
  */
 class HttpTransport implements McpTransport {
   readonly kind = "http" as const;
+  /** Server-minted legacy session id (`Mcp-Session-Id`); null outside the dual-era lane. */
+  private sessionId: string | null = null;
   private alive = false;
   private messageHandler: ((msg: JsonRpcResponse) => void) | null = null;
   private closeHandler: ((reason: string) => void) | null = null;
@@ -2202,6 +2270,13 @@ class HttpTransport implements McpTransport {
     for (const [k, v] of Object.entries(opts?.extraHeaders ?? {})) {
       headers[k] = v;
     }
+    // Dual-era session echo: a pre-final (2025-03-26..2025-11-25) server may
+    // mint a session on initialize and require it on every later request. Echo
+    // whatever the server minted; a final-spec server never mints one (and per
+    // spec ignores a stray echo), so this stays inert outside the legacy lane.
+    if (this.sessionId !== null) {
+      headers["mcp-session-id"] = this.sessionId;
+    }
 
     const body = JSON.stringify(message);
     const init: RequestInit = {
@@ -2251,6 +2326,13 @@ class HttpTransport implements McpTransport {
     // Response headers received — cancel the initial-response timeout.
     clearTimeout(timeoutId);
 
+    // Capture a legacy server's minted session for the echo above. Only ever
+    // set by pre-final servers; the final revision removed sessions entirely.
+    const mintedSession = response.headers.get("mcp-session-id");
+    if (mintedSession !== null && mintedSession.length > 0) {
+      this.sessionId = mintedSession;
+    }
+
     // Notifications (no id) expect no body — release and return.
     if (!("id" in message)) {
       this.inflight.delete(controller);
@@ -2269,8 +2351,22 @@ class HttpTransport implements McpTransport {
     if (!response.ok) {
       this.inflight.delete(controller);
       const body = await response.text().catch(() => "");
+      // Final-spec backward compat: a MODERN server also answers with 4xx for
+      // UnsupportedProtocolVersion / HeaderMismatch / unknown method — carrying
+      // a JSON-RPC error body. Route a parseable, id-bearing error through the
+      // normal response path so the pending request rejects with its REAL code
+      // (and the connect probe can tell "modern error" from "legacy server").
+      const rpcError = parseJsonRpcErrorBody(body);
+      if (rpcError !== null && rpcError.id !== undefined && rpcError.id !== null) {
+        this.messageHandler?.(rpcError);
+        return;
+      }
       // Scrub obvious secret material before surfacing server error bodies.
-      throw new Error(`http transport HTTP ${response.status}: ${scrubSecrets(body)}`);
+      throw new McpHttpStatusError(
+        response.status,
+        scrubSecrets(body),
+        rpcError !== null,
+      );
     }
 
     const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
