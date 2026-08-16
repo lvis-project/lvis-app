@@ -29,6 +29,7 @@ import type { McpUiResourceMeta } from "./types.js";
 import {
   MCP_PROTOCOL_VERSION,
   META_PROTOCOL_VERSION,
+  META_SERVER_INFO,
   RPC_METHOD_NOT_FOUND,
   RPC_RESOURCE_NOT_FOUND,
   RPC_INVALID_PARAMS,
@@ -88,9 +89,30 @@ export class PluginMcpServer {
    * Handle one JSON-RPC request and return its response. Tool-execution
    * failures surface as `isError: true` in a `complete` result (NOT a JSON-RPC
    * error) — matching the RC `CallToolResult` model; only protocol/dispatch
-   * problems use JSON-RPC error codes.
+   * problems use JSON-RPC error codes. Every RESULT is stamped with the
+   * reserved `serverInfo` `_meta` identity (spec SHOULD) — errors are not.
    */
   async handle(request: JsonRpcRequestLike): Promise<JsonRpcResponseLike> {
+    const response = await this.dispatch(request);
+    if (
+      response.result !== undefined &&
+      response.result !== null &&
+      typeof response.result === "object" &&
+      !Array.isArray(response.result)
+    ) {
+      const result = response.result as { _meta?: Record<string, unknown> };
+      result._meta = {
+        ...result._meta,
+        [META_SERVER_INFO]: {
+          name: this.manifest.name ?? this.manifest.id,
+          version: this.manifest.version,
+        },
+      };
+    }
+    return response;
+  }
+
+  private async dispatch(request: JsonRpcRequestLike): Promise<JsonRpcResponseLike> {
     const id = request.id;
 
     const versionError = this.checkProtocolVersion(request.params);
