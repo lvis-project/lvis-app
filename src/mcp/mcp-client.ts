@@ -486,12 +486,13 @@ export class McpClient {
   private healthTimer: NodeJS.Timeout | null = null;
   private transport: McpTransport | null = null;
   /**
-   * Protocol era resolved at connect: "rc" (2026-07-28 stateless, per-request
-   * `_meta`) or "legacy" (the documented dual-era exception for an EXTERNAL
-   * pre-RC server). Defaults to "rc" so the initial `server/discover` probe
-   * carries the RC `_meta`; flips to "legacy" only when that probe 404s.
+   * Protocol era resolved at connect: "final" (the current 2026-07-28
+   * stateless revision, per-request `_meta`) or "legacy" (the documented
+   * dual-era exception for an EXTERNAL pre-final server). Defaults to "final"
+   * so the initial `server/discover` probe carries the stateless `_meta`;
+   * flips to "legacy" only when the probe signals a pre-final server.
    */
-  private mode: "rc" | "legacy" = "rc";
+  private mode: "final" | "legacy" = "final";
   /**
    * Whether the server ADVERTISED the MCP Apps extension (`io.modelcontextprotocol/ui`)
    * in `server/discover`. The host honors a tool result's `_meta.ui` only when
@@ -578,7 +579,7 @@ export class McpClient {
 
       // RC handshake (#1230, design §3.6): stateless — no `initialize`. Probe
       // `server/discover` (which carries the per-request RC `_meta`) to read the
-      // server's capabilities. The probe runs in the default "rc" mode so the
+      // server's capabilities. The probe runs in the default "final" mode so the
       // `_meta` is stamped.
       try {
         const discover = await this.sendRequest<McpDiscoverResult>(
@@ -586,7 +587,7 @@ export class McpClient {
           {},
           HANDSHAKE_TIMEOUT_MS,
         );
-        this.mode = "rc";
+        this.mode = "final";
         // §3.7 MCP Apps permission gate — only honor `_meta.ui` from a server
         // that DECLARED the ui extension at discovery.
         this.appsUiAdvertised =
@@ -1417,7 +1418,7 @@ export class McpClient {
    */
   private applyParamHeaderConformance(tools: McpToolSchema[]): McpToolSchema[] {
     this.paramHeaderAnnotations.clear();
-    if (this.transport?.kind !== "http" || this.mode !== "rc") return tools;
+    if (this.transport?.kind !== "http" || this.mode !== "final") return tools;
     const kept: McpToolSchema[] = [];
     for (const tool of tools) {
       const outcome = collectParamHeaderAnnotations(tool.inputSchema);
@@ -2266,7 +2267,8 @@ class StdioTransport implements McpTransport {
 // ─── Streamable HTTP Transport ───────────────────────
 
 /**
- * Implements the MCP Streamable HTTP transport (spec 2025-03-26).
+ * Implements the MCP Streamable HTTP transport (final `2026-07-28` revision —
+ * stateless, per-request metadata headers; introduced in `2025-03-26`).
  *
  * Wire protocol:
  *   - POST `url` with JSON-RPC body.

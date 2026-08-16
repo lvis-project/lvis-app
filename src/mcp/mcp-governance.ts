@@ -34,7 +34,9 @@ const log = createLogger("mcp-governance");
  * ride `tools` (they manage long-running `tools/call` work).
  */
 const CAPABILITY_METHODS = {
-  tools: ["tools/list", "tools/call", "tasks/get", "tasks/update", "tasks/cancel"],
+  // `tasks/update` (client→server task input) has no sender yet — it joins
+  // this list alongside its implementation, like every other verb here.
+  tools: ["tools/list", "tools/call", "tasks/get", "tasks/cancel"],
   // `resources/subscribe`/`unsubscribe` were removed by the final `2026-07-28`
   // revision (superseded by `subscriptions/listen`) and had no sender here —
   // dropped, so the fail-closed default denies them like any unclassified verb.
@@ -56,13 +58,11 @@ const REQUEST_METHOD_CAPABILITY: Record<string, McpCapability> = Object.fromEntr
  * (fail-closed), so a new capability verb a server invokes is denied until it is
  * explicitly classified — rather than sailing through ungated.
  */
-const CONTROL_METHODS: ReadonlySet<string> = new Set([
-  "server/discover",
-  "initialize",
-  "notifications/initialized",
-  "notifications/cancelled",
-  "notifications/progress",
-]);
+// Notifications are absent on purpose: this gate sits on `sendRequest` (and
+// the explicit pre-checks), while `sendNotification` never consults it — a
+// notification entry here is unreachable, the same dead-entry class the
+// removed `ping`/`resources/subscribe` verbs were.
+const CONTROL_METHODS: ReadonlySet<string> = new Set(["server/discover", "initialize"]);
 
 const DEFAULT_POLICY: McpGovernancePolicy = {
   version: "1.0",
