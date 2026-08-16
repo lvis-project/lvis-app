@@ -18,10 +18,24 @@
 export const MCP_PROTOCOL_VERSION = "2026-07-28";
 
 /**
- * Dual-era exception only (design §0): proposed to an EXTERNAL server that does
- * not implement `server/discover`. First-party plugins never negotiate this.
+ * Dual-era exception only (design §0): the revision PROPOSED to an EXTERNAL
+ * server that does not implement `server/discover`. `2025-03-26` is the newest
+ * pre-final revision whose transport behavior this client implements
+ * (single-endpoint Streamable HTTP + server-minted session echo; no
+ * per-request version header, which arrived in `2025-06-18`). First-party
+ * plugins never negotiate this.
  */
-export const MCP_LEGACY_PROTOCOL_VERSION = "2024-11-05";
+export const MCP_LEGACY_PROTOCOL_VERSION = "2025-03-26";
+
+/**
+ * Legacy revisions the dual-era lane can actually speak. A legacy server may
+ * counter `initialize` with its own revision; anything outside this list is a
+ * mutual incompatibility, not something to limp through.
+ */
+export const MCP_SUPPORTED_LEGACY_VERSIONS: readonly string[] = [
+  "2025-03-26",
+  "2024-11-05",
+];
 
 // ─── Reserved per-request `_meta` keys (`RequestMetaObject`) ───
 // (`io.modelcontextprotocol/serverInfo` — the result-`_meta` identity a server

@@ -1455,6 +1455,86 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await client.disconnect();
   });
 
+  it("falls back to initialize when a session-enforcing legacy server answers the probe with a bare 400", async () => {
+    // Pre-final Streamable HTTP servers reject ANY request before initialize
+    // with a non-JSON-RPC 400 ("Bad Request: no session") — never -32601. The
+    // final spec's detection rule: 4xx + non-modern body ⇒ legacy server.
+    const SESSION = "sess-legacy-1";
+    const { client, fetchMock } = rcHttpClient("sess", (method, id) => {
+      if (method === "server/discover")
+        return new Response("Bad Request: Server not initialized", { status: 400 });
+      if (method === "initialize")
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            result: {
+              protocolVersion: "2025-03-26",
+              capabilities: { tools: {} },
+              serverInfo: { name: "legacy-sess", version: "1.2" },
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json", "mcp-session-id": SESSION } },
+        );
+      if (method === "notifications/initialized") return new Response(null, { status: 202 });
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    expect(client.getState().status).toBe("connected");
+
+    // The initialize request proposes the newest legacy revision we implement,
+    // and every request AFTER the server minted the session echoes it.
+    const initInit = fetchMock.mock.calls.find(
+      ([, i]) => readRpcMethod(i as RequestInit) === "initialize",
+    )?.[1];
+    expect(readRpcParams(initInit as RequestInit)?.protocolVersion).toBe("2025-03-26");
+    const listInit = fetchMock.mock.calls.find(
+      ([, i]) => readRpcMethod(i as RequestInit) === "tools/list",
+    )?.[1];
+    expect(
+      ((listInit as RequestInit | undefined)?.headers as Record<string, string> | undefined)?.[
+        "mcp-session-id"
+      ],
+    ).toBe(SESSION);
+    await client.disconnect();
+  });
+
+  it("does NOT fall back when the 400 body is a recognized modern JSON-RPC error", async () => {
+    const { client } = rcHttpClient("modern400", (method, id) => {
+      if (method === "server/discover")
+        return new Response(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            id,
+            error: { code: -32022, message: "unsupported", data: { supported: ["2026-01-01"] } },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } },
+        );
+      return new Response("unexpected", { status: 500 });
+    });
+
+    // A modern server rejecting the probe is a REAL failure — no initialize.
+    await expect(client.connect()).rejects.toThrow(/unsupported/);
+  });
+
+  it("refuses a legacy counter-version outside the supported set", async () => {
+    const { client } = rcHttpClient("oldold", (method, id) => {
+      if (method === "server/discover")
+        return new Response("Not Found", { status: 404 });
+      if (method === "initialize")
+        return jsonRpcResponse(id, {
+          protocolVersion: "2019-01-01",
+          capabilities: {},
+          serverInfo: { name: "ancient", version: "0.1" },
+        });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await expect(client.connect()).rejects.toThrow(/unsupported protocol '2019-01-01'/);
+  });
+
   it("fails closed on input_required when no MRTR resolver is wired (No-Fallback)", async () => {
     const { client } = rcHttpClient("ir", (method, id) => {
       if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
