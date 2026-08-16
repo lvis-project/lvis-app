@@ -416,6 +416,13 @@ const MIN_TASK_POLL_INTERVAL_MS = 50;
 const MAX_TASK_POLLS = 600;
 /** Absorbs `notifications/tools/list_changed` bursts into one re-fetch. */
 const TOOLS_REFRESH_DEBOUNCE_MS = 500;
+/**
+ * Capability-snapshot TTL clamp (§6a.2): the server's own `DiscoverResult.ttlMs`
+ * drives expiry, bounded so a hostile 1ms cannot thrash re-discovery and a
+ * hostile `Infinity` cannot pin the snapshot forever.
+ */
+const SNAPSHOT_TTL_MIN_MS = 30_000;
+const SNAPSHOT_TTL_MAX_MS = 86_400_000;
 
 // ─── Transport Strategy ──────────────────────────────
 
@@ -494,17 +501,16 @@ export class McpClient {
    */
   private mode: "final" | "legacy" = "final";
   /**
-   * Whether the server ADVERTISED the MCP Apps extension (`io.modelcontextprotocol/ui`)
-   * in `server/discover`. The host honors a tool result's `_meta.ui` only when
-   * this is true — a server that did not declare Apps cannot smuggle a UI surface
-   * (the §3.7 "permission enforcement per `_meta.ui`" gate; the renderer CSP is
-   * the second layer). Legacy (dual-era) servers never advertise Apps.
+   * TTL-aware capability snapshot (§6a.2) — the ONE authority for every "did
+   * the server advertise X" question, replacing the connect-time latched
+   * booleans. Expiry comes from the server's own `DiscoverResult.ttlMs`
+   * (clamped); reads go through {@link capabilityAdvertised}, which refreshes
+   * single-flight on expiry. Null until the final-mode discover lands and in
+   * legacy mode (pre-final servers never advertise these surfaces).
    */
-  private appsUiAdvertised = false;
-  /** The server DECLARED the `prompts` capability at discovery (gate for prompts/list). */
-  private promptsAdvertised = false;
-  /** The server DECLARED the core `resources` capability (gate for resources/list). */
-  private resourcesAdvertised = false;
+  private capabilitySnapshot: { discover: McpDiscoverResult; fetchedAt: number } | null = null;
+  /** In-flight snapshot refresh (single-flight; concurrent reads await it). */
+  private snapshotRefresh: Promise<void> | null = null;
 
   readonly state: McpServerState;
 
@@ -588,14 +594,10 @@ export class McpClient {
           HANDSHAKE_TIMEOUT_MS,
         );
         this.mode = "final";
-        // §3.7 MCP Apps permission gate — only honor `_meta.ui` from a server
-        // that DECLARED the ui extension at discovery.
-        this.appsUiAdvertised =
-          discover.capabilities?.extensions?.[MCP_APPS_UI_EXTENSION] !== undefined;
-        this.promptsAdvertised = discover.capabilities?.prompts !== undefined;
-        // The CORE `resources` capability, not the MCP-Apps `ui://` extension —
-        // those are different surfaces with different containment rules.
-        this.resourcesAdvertised = discover.capabilities?.resources !== undefined;
+        // The snapshot (§6a.2) is the one authority every later "did the
+        // server advertise X" read consults — including the §3.7 Apps
+        // `_meta.ui` honor gate. It expires per the server's own ttlMs.
+        this.capabilitySnapshot = { discover, fetchedAt: Date.now() };
         // Server-level usage guidance (read-only surface; never auto-injected here).
         // `discover` is untrusted wire data cast without runtime validation, so
         // coerce a non-string `instructions` to undefined here at the boundary —
@@ -607,7 +609,7 @@ export class McpClient {
             protocol: MCP_PROTOCOL_VERSION,
             supportedVersions: discover.supportedVersions,
             server: `${discover.serverInfo.name}@${discover.serverInfo.version}`,
-            apps: this.appsUiAdvertised,
+            apps: discover.capabilities?.extensions?.[MCP_APPS_UI_EXTENSION] !== undefined,
           },
       `${this.config.id} RC discovery completed`,
         );
@@ -708,7 +710,7 @@ export class McpClient {
    * hang the handshake.
    */
   private async discoverPrompts(): Promise<void> {
-    if (!this.promptsAdvertised) return;
+    if (!(await this.capabilityAdvertised("prompts"))) return;
     if (!this.governance.validateRequestCapability(this.config.id, "prompts/list", {}).valid) {
       return;
     }
@@ -768,7 +770,7 @@ export class McpClient {
    * host chrome and the audit log. One shape leaves this boundary.
    */
   private async discoverResources(): Promise<void> {
-    if (!this.resourcesAdvertised) return;
+    if (!(await this.capabilityAdvertised("resources"))) return;
     if (!this.governance.validateRequestCapability(this.config.id, "resources/list", {}).valid) {
       return;
     }
@@ -861,7 +863,7 @@ export class McpClient {
    * what the user types into it.
    */
   private async discoverResourceTemplates(): Promise<void> {
-    if (!this.resourcesAdvertised) return;
+    if (!(await this.capabilityAdvertised("resources"))) return;
     if (
       !this.governance.validateRequestCapability(
         this.config.id,
@@ -971,7 +973,7 @@ export class McpClient {
     /** The URI the host produced, for the audit row and the attachment header. */
     uri: string;
   }> {
-    if (!this.resourcesAdvertised) {
+    if (!(await this.capabilityAdvertised("resources"))) {
       throw new Error("[mcp-client] server did not advertise resources");
     }
     const declared = this.state.resourceTemplates?.find(
@@ -1015,7 +1017,7 @@ export class McpClient {
     /** True when the block cap or the character budget clipped the read. */
     truncated: boolean;
   }> {
-    if (!this.resourcesAdvertised) {
+    if (!(await this.capabilityAdvertised("resources"))) {
       throw new Error("[mcp-client] server did not advertise resources");
     }
     const declared = this.state.resources?.find((resource) => resource.uri === uri);
@@ -1092,7 +1094,7 @@ export class McpClient {
     /** Message blocks the host refused to carry past its cap. */
     droppedBlocks: number;
   }> {
-    if (!this.promptsAdvertised) {
+    if (!(await this.capabilityAdvertised("prompts"))) {
       throw new Error(`[mcp-client] server '${this.config.id}' did not advertise prompts`);
     }
     const declared = this.state.prompts?.some((prompt) => prompt.name === name);
@@ -1237,15 +1239,20 @@ export class McpClient {
   }
 
   /** Render a `complete` CallToolResult to text (+ MCP Apps UI). Throws on isError. */
-  private renderToolResult(result: McpToolCallResult): { text: string; uiPayload?: McpUiPayload } {
+  private async renderToolResult(
+    result: McpToolCallResult,
+  ): Promise<{ text: string; uiPayload?: McpUiPayload }> {
     const content = result.content ?? [];
     if (result.isError) {
       throw new Error(content.map((c) => c.text ?? JSON.stringify(c)).join("\n"));
     }
     const text = content.map((c) => c.text ?? JSON.stringify(c)).join("\n");
-    // MCP Apps permission gate (§3.7): ignore `_meta.ui` unless the server
-    // advertised the ui extension at discovery.
-    const uiMeta = this.appsUiAdvertised ? result._meta?.ui : undefined;
+    // MCP Apps permission gate (§3.7): ignore `_meta.ui` unless the server's
+    // CURRENT advertisement includes the ui extension. Security gate — fails
+    // closed on a stale-and-unrefreshable snapshot (§6a.2).
+    const uiMeta = (await this.capabilityAdvertised("appsUi", { securityGate: true }))
+      ? result._meta?.ui
+      : undefined;
     let uiPayload: McpUiPayload | undefined;
     // Fail-closed at EXTRACTION, mirroring the plugin arm (`plugin-runtime-delegate`),
     // which drops a malformed `_meta.ui` here rather than carrying it forward.
@@ -1398,15 +1405,95 @@ export class McpClient {
       throw new Error(`[mcp-client] ${t("be_mcpClient.resourceReadNoText", { uri })}`);
     }
 
-    // §3.7 permission gate — same rule as tool `_meta.ui`: ignore the ui extension
-    // unless the server advertised it at discovery. Fail-closed, so an un-advertised
-    // server cannot open its own CSP.
-    const meta = this.appsUiAdvertised ? textPart._meta?.ui : undefined;
+    // §3.7 permission gate — same rule as tool `_meta.ui`: ignore the ui
+    // extension unless the server's CURRENT advertisement includes it.
+    // Security gate — fails closed on a stale-and-unrefreshable snapshot,
+    // so an un-advertised server cannot open its own CSP (§6a.2).
+    const meta = (await this.capabilityAdvertised("appsUi", { securityGate: true }))
+      ? textPart._meta?.ui
+      : undefined;
 
     return { html: textPart.text, csp: meta?.csp, permissions: meta?.permissions };
   }
 
   // ─── JSON-RPC Transport ─────────────────────────────
+
+  // ─── Capability Snapshot (§6a.2) ─────────────────────
+
+  /** The snapshot's effective TTL: the server's own `ttlMs`, clamped. */
+  private snapshotTtlMs(): number {
+    const raw = this.capabilitySnapshot?.discover.ttlMs;
+    // Absent/malformed ttlMs (non-conformant server) → max clamp: no thrash,
+    // and the snapshot still refreshes daily rather than living forever.
+    const ttl = typeof raw === "number" && Number.isFinite(raw) ? raw : SNAPSHOT_TTL_MAX_MS;
+    return Math.min(Math.max(ttl, SNAPSHOT_TTL_MIN_MS), SNAPSHOT_TTL_MAX_MS);
+  }
+
+  private snapshotExpired(): boolean {
+    if (!this.capabilitySnapshot) return true;
+    return Date.now() - this.capabilitySnapshot.fetchedAt > this.snapshotTtlMs();
+  }
+
+  /** Single-flight `server/discover` re-issue; concurrent reads share one. */
+  private refreshCapabilitySnapshot(): Promise<void> {
+    if (this.snapshotRefresh) return this.snapshotRefresh;
+    const refresh = (async () => {
+      const discover = await this.sendRequest<McpDiscoverResult>(
+        "server/discover",
+        {},
+        HANDSHAKE_TIMEOUT_MS,
+      );
+      this.capabilitySnapshot = { discover, fetchedAt: Date.now() };
+      this.state.instructions =
+        typeof discover.instructions === "string" ? discover.instructions : undefined;
+    })();
+    this.snapshotRefresh = refresh.finally(() => {
+      this.snapshotRefresh = null;
+    });
+    return this.snapshotRefresh;
+  }
+
+  /**
+   * Whether the server currently advertises `kind` (§6a.2). On an expired
+   * snapshot this refreshes single-flight first. Refresh FAILURE splits by
+   * consumer: an availability read keeps serving the stale snapshot (a fetch
+   * hiccup must not disable working surfaces); the Apps `_meta.ui` honor gate
+   * passes `securityGate` and fails CLOSED instead — it decides whether
+   * server-authored UI is honored, so a stale-and-unrefreshable claim is not
+   * good enough. Legacy servers never advertise these surfaces.
+   */
+  private async capabilityAdvertised(
+    kind: "appsUi" | "prompts" | "resources",
+    opts?: { securityGate?: boolean },
+  ): Promise<boolean> {
+    if (this.mode === "legacy") return false;
+    if (this.snapshotExpired()) {
+      try {
+        await this.refreshCapabilitySnapshot();
+      } catch (err) {
+        if (opts?.securityGate) {
+          log.warn(
+            `${this.config.id} capability snapshot refresh failed — failing the Apps gate closed: %s`,
+            err,
+          );
+          return false;
+        }
+        log.warn(`${this.config.id} capability snapshot refresh failed — serving stale: %s`, err);
+      }
+    }
+    const capabilities = this.capabilitySnapshot?.discover.capabilities;
+    if (!capabilities) return false;
+    switch (kind) {
+      case "appsUi":
+        return capabilities.extensions?.[MCP_APPS_UI_EXTENSION] !== undefined;
+      case "prompts":
+        return capabilities.prompts !== undefined;
+      case "resources":
+        // The CORE `resources` capability, not the MCP-Apps `ui://` extension —
+        // different surfaces with different containment rules.
+        return capabilities.resources !== undefined;
+    }
+  }
 
   /**
    * `x-mcp-header` conformance (final spec, Streamable HTTP only): validate
@@ -1704,6 +1791,9 @@ export class McpClient {
       clearTimeout(this.toolsRefreshTimer);
       this.toolsRefreshTimer = null;
     }
+    // The capability snapshot describes THIS connection's server; a torn-down
+    // connection has no advertisement (reconnect re-discovers).
+    this.capabilitySnapshot = null;
     this.toolRegistry.unregisterByMcp(this.config.id);
     this.state.registeredTools = [];
     this.state.prompts = undefined;
