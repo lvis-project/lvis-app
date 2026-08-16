@@ -4,21 +4,15 @@ The Telegram bridge lets one Telegram private DM reach one active LVIS
 conversation. It is off until an owner turns it on, and it is intentionally
 separate from the loopback `/v1` API, A2A, and Tailnet services.
 
-There are two ways to run it, and they are mutually exclusive. When the launch
-environment configures the bridge, that configuration wins and the desktop
-screen is read-only.
-
-| | Desktop connection | Environment deployment |
-|---|---|---|
-| Configured in | `Settings → Connections → Remote surfaces` | Launch environment variables |
-| Receives via | Outbound long polling (`getUpdates`) | Inbound webhook on a loopback listener |
-| Public endpoint | None | Owner-operated HTTPS terminator |
-| Pairing | One-time code sent to the bot | Fixed numeric allow-list |
-| Intended for | A personal desktop | An always-on server |
+It is configured in `Settings → Connections → Remote surfaces`, receives
+updates over an outbound long poll (`getUpdates`), opens no port and no public
+endpoint, and pairs through a one-time code sent to the bot. (An earlier
+environment-configured webhook deployment mode was removed; the desktop
+connection is the only lane.)
 
 ## Desktop connection
 
-The desktop path exists because the webhook deployment's own safety
+The desktop path exists because a webhook deployment's own safety
 requirement — that a proxy's forwarding lifecycle be coupled to the bridge
 lifecycle — cannot be enforced by an app with a Disconnect button. Polling
 opens no listener, so there is no fixed port whose forwarding can outlive the
@@ -156,105 +150,7 @@ response.
 Disconnecting deletes the stored token, revokes the pairing and any share,
 stops receiving, and leaves your bot exactly as it was on Telegram's side.
 
-## Environment deployment
-
-This path is unchanged. Supply these through the app's launch environment or a
-service-manager secret facility; never commit them to a repository, shell
-profile, Marketplace Compose file, or a `.env` tracked by Git.
-
-```text
-LVIS_TELEGRAM_BRIDGE=1
-LVIS_TELEGRAM_BOT_TOKEN=<BotFather token>
-LVIS_TELEGRAM_WEBHOOK_SECRET=<32-256 ASCII chars matching [A-Za-z0-9_-]>
-LVIS_TELEGRAM_ALLOWED_USER_IDS=<your numeric Telegram user id[,another-id], no spaces>
-LVIS_TELEGRAM_PORT=46175                         # optional fixed loopback port
-LVIS_TELEGRAM_WEBHOOK_PATH=/telegram/webhook      # optional exact path
-LVIS_TELEGRAM_ROUTE_EPOCH=1                       # bump to fence prior route bindings
-```
-
-In this path the bot token and webhook secret are process environment values
-and are never written to LVIS settings. The listener is off unless
-`LVIS_TELEGRAM_BRIDGE=1`, and an enabled-but-unused bridge makes no network
-contact with Telegram at all. It always binds literal `127.0.0.1`. A malformed
-enabled configuration fails closed and leaves this auxiliary adapter
-unavailable while the desktop app continues booting.
-
-`LVIS_TELEGRAM_ALLOWED_USER_IDS` is this path's pairing source of truth. It
-accepts only canonical positive Telegram numeric IDs, not usernames, and the
-allowed owner must send the first message before LVIS attaches that DM to the
-safe projection. When more than one owner is configured, they share the one
-active conversation's projection; they are not independent sessions. In this
-path the route binds the conversation captured at app start — change the
-configuration and restart to bind a different one.
-
-Inbound requests must carry Telegram's configured `secret_token` header before
-their JSON is parsed. Only private, text-only messages from an exact allowed
-Telegram user ID reach the common `platform-bridge` command path, and the host
-assigns that provenance itself: the request cannot claim local keyboard trust,
-a Tailnet role, a session, an attachment, an approval, or a cancellation.
-
-Raw Telegram IDs, message text, the bot token, the webhook secret, and the
-conversation ID are not written to the bridge receipt file. The runtime uses an
-OS-encrypted HMAC secret to derive opaque actor and route bindings.
-
-### Public HTTPS termination and webhook registration
-
-Operate a dedicated public HTTPS hostname/path that forwards only to the
-loopback listener. Do not expose the app's `/v1`, `/a2a`, Tailnet, or
-Marketplace routes through that proxy. The proxy must preserve the raw body and
-`X-Telegram-Bot-Api-Secret-Token` header, disable request-body logging and
-caching, and enforce the same 64 KiB request cap.
-
-**Fixed-port safety requirement:** do not leave a persistent proxy or tunnel
-forwarding to the configured `LVIS_TELEGRAM_PORT` loopback target (default
-`127.0.0.1:46175`) unless its forwarding lifecycle is coupled to the bridge
-lifecycle. If LVIS stops and the proxy keeps forwarding, another local process
-could bind that configured port and receive webhook bodies and the Telegram
-secret header. Stop forwarding before or with the bridge, or use a dedicated OS
-account/socket ACL that prevents another local process from receiving the
-traffic, or an authenticated local relay whose backend binding is itself tied
-to the bridge. Without one of these controls, do not operate this fixed-port
-deployment.
-
-Telegram's cloud Bot API requires a public HTTPS webhook endpoint on its
-supported ports. Configure the endpoint only after the tunnel/proxy works:
-
-```bash
-curl --fail-with-body --request POST \
-  "https://api.telegram.org/bot${LVIS_TELEGRAM_BOT_TOKEN}/setWebhook" \
-  --header 'content-type: application/json' \
-  --data @- <<JSON
-{
-  "url": "https://telegram-bridge.example.com/telegram/webhook",
-  "secret_token": "${LVIS_TELEGRAM_WEBHOOK_SECRET}",
-  "allowed_updates": ["message"],
-  "max_connections": 1
-}
-JSON
-```
-
-On Windows PowerShell, build the same JSON through `ConvertTo-Json` and call
-`Invoke-RestMethod`; keep the bot token and secret in process environment
-variables rather than embedding either value in a script file.
-
-This command is deliberately not built into LVIS: it mutates a third-party
-production bot and makes a public endpoint authoritative. Use `getWebhookInfo`
-to verify the URL and inspect delivery errors. Do not add `drop_pending_updates`
-unless discarding pending messages is an explicit owner decision.
-
-If Cloudflare fronts the hostname, give the webhook a dedicated route and
-disable browser-oriented JavaScript, Turnstile, and bot challenges on that
-route—Telegram cannot solve them. Retain tunnel/origin reachability controls
-and the Telegram secret-header check; a challenge bypass must not become a
-broad proxy bypass.
-
-The Marketplace Oracle Compose deployment is not the Telegram bridge host and
-must not receive the bot token or a generic `/telegram` proxy route. A separate
-relay design would be required to bridge that deployment to a desktop app.
-
 ## Operational limits
-
-These apply to both paths.
 
 - Inbound deliveries use durable, plaintext-free receipts for seven days. The
   outbound projection is live, bounded, and at-most-once: after a process
@@ -262,8 +158,7 @@ These apply to both paths.
   blindly.
 - Accepted and permanently rejected deliveries are confirmed so that a stale
   command is not retried later. Only unavailable/capacity conditions are left
-  for retry — under webhook by Telegram, and under polling by not confirming
-  the update.
+  for retry — by not confirming the update, so the next poll re-fetches it.
 - Telegram output is plain `sendMessage` text only. LVIS does not set Markdown
   or HTML parsing, entities, keyboards, callbacks, paid broadcast, threads, or
   link previews.
