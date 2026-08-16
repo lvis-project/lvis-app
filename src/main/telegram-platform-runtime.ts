@@ -28,7 +28,6 @@ const ACTOR_SECRET_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const BOT_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/;
 const TELEGRAM_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
 
-const MAX_ALLOWED_ROUTES = 128;
 const MAX_DELIVERY_ID_CHARS = 256;
 const MAX_TEXT_CHARS = 24_000;
 const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
@@ -66,30 +65,6 @@ export interface TelegramPlatformRuntime {
   isRouteCurrent(route: TelegramPlatformRoute): boolean;
   /** Revoke every route and every already-admitted bridge guard. */
   dispose(): void;
-}
-
-export interface CreateTelegramPlatformRuntimeOptions {
-  /** Explicit owner Telegram user ids. Each authorizes only its private DM. */
-  readonly allowedUserIds: readonly string[];
-  /** SHA-256 fingerprint supplied by lifecycle code; never the bot token. */
-  readonly botFingerprint: string;
-  /** Host reader for the currently selected private conversation. */
-  readonly getCurrentConversationId: () => string;
-  /** Host-owned monotonically increasing active-conversation generation. */
-  readonly getCurrentConversationEpoch: () => number;
-  /** Test-only injection; production uses Electron OS-encrypted safeStorage. */
-  readonly secretStore?: SecretStore;
-  /** Test-only Electron safeStorage injection. */
-  readonly encryption?: SafeStorageLike;
-  /** Owner-configured route generation; changing it fences prior deliveries. */
-  readonly routeEpoch?: number;
-  /**
-   * Host-minted generation for this activation of the bridge. It exists so a
-   * disconnect/reconnect with unchanged owner configuration cannot reproduce a
-   * byte-identical binding, which would let a binding captured before the
-   * disconnect satisfy the guard afterwards.
-   */
-  readonly activationEpoch: number;
 }
 
 /**
@@ -130,122 +105,6 @@ export function ensureTelegramPlatformActorSecret(secretStore: SecretStore): str
   }
   secretStore.write(TELEGRAM_PLATFORM_ACTOR_SECRET_NAME, generated);
   return generated;
-}
-
-/**
- * Build fixed personal-DM routes for one bot identity and one currently active
- * host conversation. There is no persisted pairing registry: owner allowlist
- * changes take effect on restart, and dispose() revokes all in-flight routes.
- */
-export function createTelegramPlatformRuntime(
-  options: CreateTelegramPlatformRuntimeOptions,
-): TelegramPlatformRuntime {
-  const validated = validateOptions(options);
-  const currentConversationId = captureConversationId(validated.getCurrentConversationId);
-  const currentConversationEpoch = captureConversationEpoch(validated.getCurrentConversationEpoch);
-  const secretStore = validated.secretStore
-    ?? new SafeStorageSecretStore(validated.encryption ?? safeStorage);
-  const actorSecret = ensureTelegramPlatformActorSecret(secretStore);
-  const conversationDigest = hashConversation(validated.botFingerprint, currentConversationId);
-
-  const bridgeId = deterministicUuid(actorSecret, "bridge", [validated.botFingerprint]);
-  const routesByChatId = new Map<string, TelegramPlatformRoute>();
-  const routeSet = new Set<TelegramPlatformRoute>();
-  const guardsByRoute = new Map<TelegramPlatformRoute, PlatformBridgeGuard>();
-  let disposed = false;
-
-  const routes = validated.allowedUserIds.map((chatId) => {
-    const bridgeBinding = Object.freeze({
-      bridgeId,
-      bridgeEpoch: validated.activationEpoch,
-      // routeId deliberately excludes the activation epoch: it names *which*
-      // owner route this is, and the delivery layer keys open channels on it.
-      // sameBinding() compares bridgeEpoch, so a binding minted by an earlier
-      // activation already fails the guard without destabilizing that key.
-      routeId: deterministicUuid(actorSecret, "route", [
-        validated.botFingerprint,
-        chatId,
-        String(validated.routeEpoch),
-      ]),
-      routeEpoch: validated.routeEpoch,
-      scope: deterministicUuid(actorSecret, "scope", [
-        validated.botFingerprint,
-        chatId,
-        conversationDigest,
-        String(validated.routeEpoch),
-        String(validated.activationEpoch),
-      ]),
-    } satisfies PlatformBridgeBinding);
-    const route = Object.freeze({
-      chatId,
-      conversationId: currentConversationId,
-      actorDigest: actorDigestFor(actorSecret, validated.botFingerprint, chatId),
-      binding: bridgeBinding,
-      bridgeBinding,
-    } satisfies TelegramPlatformRoute);
-    routesByChatId.set(chatId, route);
-    routeSet.add(route);
-    return route;
-  });
-  const frozenRoutes = Object.freeze([...routes]) as readonly TelegramPlatformRoute[];
-
-  const isRouteCurrent = (route: TelegramPlatformRoute): boolean => {
-    if (disposed || !routeSet.has(route)) return false;
-    return currentConversationEpochMatches(
-      validated.getCurrentConversationEpoch,
-      currentConversationEpoch,
-    ) && currentConversationMatches(validated.getCurrentConversationId, currentConversationId);
-  };
-
-  for (const route of frozenRoutes) {
-    const guard: PlatformBridgeGuard = Object.freeze({
-      isCurrent(candidate: PlatformBridgeBinding): boolean {
-        try {
-          return isRouteCurrent(route)
-            && sameBinding(candidate, route.binding)
-            && routesByChatId.get(route.chatId) === route;
-        } catch {
-          return false;
-        }
-      },
-    });
-    guardsByRoute.set(route, guard);
-  }
-
-  const routeForEnvelope = (
-    envelope: Readonly<PlatformBridgeVerifiedEnvelope>,
-  ): TelegramPlatformRoute | null => {
-    const verified = normalizeTelegramEnvelope(envelope);
-    if (verified === null || disposed) return null;
-    if (verified.channelId !== verified.senderId) return null;
-    const route = routesByChatId.get(verified.channelId);
-    return route !== undefined && isRouteCurrent(route) ? route : null;
-  };
-
-  const authorize: PlatformBridgeInboundAuthorizer = (envelope) => {
-    const route = routeForEnvelope(envelope);
-    if (route === null) return null;
-    const bridgeGuard = guardsByRoute.get(route);
-    if (bridgeGuard === undefined) return null;
-    const authorization: PlatformBridgeInboundAuthorization = Object.freeze({
-      actorDigest: route.actorDigest,
-      conversationDigest,
-      bridgeBinding: route.binding,
-      bridgeGuard,
-    });
-    return authorization;
-  };
-
-  return Object.freeze({
-    authorize,
-    conversationId: currentConversationId,
-    routes: frozenRoutes,
-    routeForEnvelope,
-    isRouteCurrent,
-    dispose: () => {
-      disposed = true;
-    },
-  });
 }
 
 /**
@@ -568,111 +427,10 @@ function isRouteAuthority(value: unknown): value is TelegramPairedRouteAuthority
     && typeof (value as TelegramPairedRouteAuthority).resolveBoundConversation === "function";
 }
 
-function validateOptions(
-  value: CreateTelegramPlatformRuntimeOptions,
-): Readonly<{
-  allowedUserIds: readonly string[];
-  botFingerprint: string;
-  getCurrentConversationId: () => string;
-  getCurrentConversationEpoch: () => number;
-  secretStore: SecretStore | undefined;
-  encryption: SafeStorageLike | undefined;
-  routeEpoch: number;
-  activationEpoch: number;
-}> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("telegram-platform-runtime-invalid");
-  }
-  try {
-    if (!Array.isArray(value.allowedUserIds)
-      || value.allowedUserIds.length === 0
-      || value.allowedUserIds.length > MAX_ALLOWED_ROUTES
-      || !BOT_FINGERPRINT_PATTERN.test(value.botFingerprint)
-      || typeof value.getCurrentConversationId !== "function"
-      || typeof value.getCurrentConversationEpoch !== "function"
-      || (value.secretStore !== undefined && !isSecretStore(value.secretStore))
-      || (value.encryption !== undefined && !isSafeStorageLike(value.encryption))) {
-      throw new Error("telegram-platform-runtime-invalid");
-    }
-    const seen = new Set<string>();
-    const allowedUserIds: string[] = [];
-    for (const userId of value.allowedUserIds) {
-      if (!isCanonicalTelegramId(userId) || seen.has(userId)) {
-        throw new Error("telegram-platform-runtime-invalid");
-      }
-      seen.add(userId);
-      allowedUserIds.push(userId);
-    }
-    const routeEpoch = value.routeEpoch ?? 1;
-    if (!positiveInteger(routeEpoch) || !positiveInteger(value.activationEpoch)) {
-      throw new Error("telegram-platform-runtime-invalid");
-    }
-    return Object.freeze({
-      allowedUserIds: Object.freeze(allowedUserIds),
-      botFingerprint: value.botFingerprint,
-      getCurrentConversationId: value.getCurrentConversationId,
-      getCurrentConversationEpoch: value.getCurrentConversationEpoch,
-      secretStore: value.secretStore,
-      encryption: value.encryption,
-      routeEpoch,
-      activationEpoch: value.activationEpoch,
-    });
-  } catch (error) {
-    if (error instanceof Error && error.message === "telegram-platform-runtime-invalid") {
-      throw error;
-    }
-    throw new Error("telegram-platform-runtime-invalid");
-  }
-}
 
-function captureConversationId(reader: () => string): string {
-  try {
-    const current = reader();
-    if (!isTelegramConversationId(current)) {
-      throw new Error("telegram-platform-runtime-current-conversation-unavailable");
-    }
-    return current;
-  } catch (error) {
-    if (error instanceof Error && error.message === "telegram-platform-runtime-current-conversation-unavailable") {
-      throw error;
-    }
-    throw new Error("telegram-platform-runtime-current-conversation-unavailable");
-  }
-}
 
-function captureConversationEpoch(reader: () => number): number {
-  try {
-    const current = reader();
-    if (!isConversationEpoch(current)) {
-      throw new Error("telegram-platform-runtime-current-conversation-epoch-unavailable");
-    }
-    return current;
-  } catch (error) {
-    if (error instanceof Error && error.message === "telegram-platform-runtime-current-conversation-epoch-unavailable") {
-      throw error;
-    }
-    throw new Error("telegram-platform-runtime-current-conversation-epoch-unavailable");
-  }
-}
 
-function currentConversationEpochMatches(reader: () => number, captured: number): boolean {
-  try {
-    return reader() === captured;
-  } catch {
-    return false;
-  }
-}
 
-function isConversationEpoch(value: unknown): value is number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
-}
-function currentConversationMatches(reader: () => string, captured: string): boolean {
-  try {
-    return reader() === captured;
-  } catch {
-    return false;
-  }
-}
 
 function normalizeTelegramEnvelope(value: unknown): PlatformBridgeVerifiedEnvelope | null {
   const record = exactDataRecord(value, ["provider", "deliveryId", "channelId", "senderId", "text"]);
@@ -817,12 +575,4 @@ function isSecretStore(value: unknown): value is SecretStore {
     && value !== null
     && typeof (value as { read?: unknown }).read === "function"
     && typeof (value as { write?: unknown }).write === "function";
-}
-
-function isSafeStorageLike(value: unknown): value is SafeStorageLike {
-  return typeof value === "object"
-    && value !== null
-    && typeof (value as { isEncryptionAvailable?: unknown }).isEncryptionAvailable === "function"
-    && typeof (value as { encryptString?: unknown }).encryptString === "function"
-    && typeof (value as { decryptString?: unknown }).decryptString === "function";
 }
