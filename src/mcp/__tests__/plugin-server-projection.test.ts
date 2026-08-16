@@ -166,16 +166,21 @@ describe("plugin-server-projection — normalized Tool[] → MCP tools/list (#88
 });
 
 describe("plugin-server-projection — manifest → server/discover (#1230 §3.2)", () => {
-  it("projects serverInfo + RC supportedVersions + tools capability", () => {
+  it("projects serverInfo + supportedVersions + tools capability + cache fields", () => {
     const discover = manifestToDiscoverResult(BASE_MANIFEST);
     expect(discover.resultType).toBe("complete");
     expect(discover.supportedVersions).toEqual(["2026-07-28"]);
+    // Required `CacheableResult` fields (final `2026-07-28` schema).
+    expect(discover.ttlMs).toBe(3_600_000);
+    expect(discover.cacheScope).toBe("private");
     expect(discover.serverInfo).toEqual({
       name: "Meeting",
       version: "2.1.0",
       description: "Records and summarizes meetings",
     });
-    expect(discover.capabilities.tools).toEqual({ listChanged: true });
+    // `false` until a notification emitter exists — advertising `true` promised
+    // a `notifications/tools/list_changed` no plugin server can send.
+    expect(discover.capabilities.tools).toEqual({ listChanged: false });
   });
 
   it("declares the MCP Apps extension only when the manifest ships UI", () => {

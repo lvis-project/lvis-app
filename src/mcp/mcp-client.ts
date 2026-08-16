@@ -105,7 +105,7 @@ export type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcRespo
 /**
  * A JSON-RPC error returned by the server, carrying the numeric `code` so the
  * connect path can detect `-32601` (method-not-found → dual-era fallback) and
- * `callTool` can map `-32003`/`-32004` (design §8). The base runner previously
+ * `callTool` can map `-32021`/`-32022` (design §8). The base runner previously
  * collapsed these to a plain `Error`, losing the code.
  */
 class McpRpcError extends Error {
@@ -171,7 +171,7 @@ export interface McpClientCapabilities {
  * (milestone `governance-per-request`, design §3.6). Per-request — not connect-
  * time — because what the host can offer varies with the active turn: an
  * interactive turn can elicit (advertise `elicitation`); a headless/routine turn
- * cannot (advertise none, so a server requiring it gets a clean `-32003` instead
+ * cannot (advertise none, so a server requiring it gets a clean `-32021` instead
  * of a hung approval). The exact deriving signals (turn consent state,
  * headless/routine mode, #811 policy) are wired by the host; omitted ⇒ a fixed
  * sound default. This is the client-side half of per-request governance; the
@@ -306,26 +306,24 @@ interface McpTaskState {
 
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 
-// #1230 — pre-adopt the MCP 2026-07-28 stateless Release Candidate
-// (docs/architecture/mcp-alignment-design.md §8). LVIS speaks RC by default:
+// #1230 — the MCP 2026-07-28 stateless protocol, adopted at RC and now FINAL
+// (docs/architecture/mcp-alignment-design.md §8). LVIS speaks it by default:
 // no initialize handshake, per-request `_meta` capability negotiation,
 // `server/discover` for capabilities. MCP_LEGACY_PROTOCOL_VERSION is used ONLY
 // by the documented dual-era exception (design §0) when an EXTERNAL server does
-// not implement `server/discover` (a pre-RC server). LVIS's own plugins are
-// always RC, so that fallback never runs for first-party plugins.
-const MCP_PROTOCOL_VERSION = "2026-07-28";
-const MCP_LEGACY_PROTOCOL_VERSION = "2024-11-05";
-
-// Reserved per-request `_meta` keys (verified verbatim vs the upstream MCP
-// schema/draft/schema.ts — design §8).
-const META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
-const META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo";
-const META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
-
-// JSON-RPC / MCP error codes (verified §8).
-const RPC_METHOD_NOT_FOUND = -32601;
-const RPC_MISSING_REQUIRED_CLIENT_CAPABILITY = -32003;
-const RPC_UNSUPPORTED_PROTOCOL_VERSION = -32004;
+// not implement `server/discover` (a pre-final server). LVIS's own plugins
+// always speak the final revision, so that fallback never runs for first-party
+// plugins. Wire constants live in the shared authority module.
+import {
+  MCP_PROTOCOL_VERSION,
+  MCP_LEGACY_PROTOCOL_VERSION,
+  META_PROTOCOL_VERSION,
+  META_CLIENT_INFO,
+  META_CLIENT_CAPABILITIES,
+  RPC_METHOD_NOT_FOUND,
+  RPC_MISSING_REQUIRED_CLIENT_CAPABILITY,
+  RPC_UNSUPPORTED_PROTOCOL_VERSION,
+} from "./protocol-constants.js";
 
 const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
 
@@ -1090,12 +1088,12 @@ export class McpClient {
       // Map the RC capability/version errors (§8) to clearer host messages.
       if (err instanceof McpRpcError && err.code === RPC_MISSING_REQUIRED_CLIENT_CAPABILITY) {
         throw new Error(
-          `[mcp-client] '${this.config.id}' requires a client capability the host did not advertise for tool '${name}' (-32003): ${err.message}`,
+          `[mcp-client] '${this.config.id}' requires a client capability the host did not advertise for tool '${name}' (-32021): ${err.message}`,
         );
       }
       if (err instanceof McpRpcError && err.code === RPC_UNSUPPORTED_PROTOCOL_VERSION) {
         throw new Error(
-          `[mcp-client] '${this.config.id}' does not support protocol ${MCP_PROTOCOL_VERSION} for tool '${name}' (-32004): ${err.message}`,
+          `[mcp-client] '${this.config.id}' does not support protocol ${MCP_PROTOCOL_VERSION} for tool '${name}' (-32022): ${err.message}`,
         );
       }
       const message = err instanceof Error ? err.message : String(err);
@@ -1605,19 +1603,10 @@ export class McpClient {
       return;
     }
 
-    // stdio transport: exit 이벤트로 프로세스 사망을 감지하므로 active probe 불필요.
-    // http transport: 매 30초 POST 요청은 트래픽/비용/로그 노이즈를 유발하고,
-    //   서버가 `ping`을 구현하지 않으면 계속 오류가 쌓인다. 연결 상태는
-    //   `send()` 실패 시 SSE stream 종료/네트워크 오류 경로로 감지되므로
-    //   http 쪽에서도 능동 probe 를 생략한다. 필요하면 향후 서버가 선언한
-    //   capability (`capabilities.ping`) 기반으로 enable 한다.
-    if (transport.kind !== "stdio") return;
-
-    // ping 요청 (응답 없어도 transport 생존 확인이 목적)
-    this.sendRequest("ping", {}, 5000).catch(() => {
-      // ping 미지원 서버도 있으므로 무시 (stdio는 exit 이벤트로 감지,
-      // http는 send 단계에서 오류 발생 시 transport.close 경로로 처리)
-    });
+    // No active probe on ANY transport. `ping` was removed from the protocol in
+    // the final `2026-07-28` revision, and it was already redundant here: stdio
+    // detects death via the child `exit` event, http via `send()` failure /
+    // SSE-stream termination. The `isAlive()` check above is the whole check.
   }
 }
 

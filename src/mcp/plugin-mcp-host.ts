@@ -39,10 +39,12 @@ import { canonicalStringify } from "../shared/canonical-json.js";
 
 const log = createLogger("plugin-mcp-host");
 
-const MCP_PROTOCOL_VERSION = "2026-07-28";
-const META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
-const META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo";
-const META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
+import {
+  MCP_PROTOCOL_VERSION,
+  META_PROTOCOL_VERSION,
+  META_CLIENT_INFO,
+  META_CLIENT_CAPABILITIES,
+} from "./protocol-constants.js";
 
 const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
 /** First-party host advertises elicitation; sampling/roots are deprecated (§8 SEP-2577). */

@@ -43,11 +43,24 @@ import type {
 } from "../plugins/types.js";
 import { toolVisibility } from "../plugins/runtime/tool-visibility.js";
 
-/** The RC protocol revision LVIS plugin-servers speak. */
-const MCP_PROTOCOL_VERSION = "2026-07-28";
+import { MCP_PROTOCOL_VERSION } from "./protocol-constants.js";
 
-/** JSON Schema 2020-12 dialect URI (the RC default for tool inputSchema). */
+/** JSON Schema 2020-12 dialect URI (the default dialect for tool inputSchema). */
 const JSON_SCHEMA_2020_12 = "https://json-schema.org/draft/2020-12/schema";
+
+/**
+ * `CacheableResult` fields (`ttlMs` + `cacheScope`, both REQUIRED since the
+ * final `2026-07-28` schema) every plugin-server list/read/discover result
+ * carries. A plugin's manifest — and therefore its discover/tools/resources
+ * surfaces — is static for the server generation's lifetime, and a reload tears
+ * the transport down with it, so a client honoring this TTL can never observe a
+ * stale list across generations. `private`: plugin content is per-user; no
+ * shared intermediary may cache it.
+ */
+export const PLUGIN_RESULT_CACHE = {
+  ttlMs: 3_600_000,
+  cacheScope: "private",
+} as const satisfies { ttlMs: number; cacheScope: "public" | "private" };
 
 /**
  * An MCP `Tool` projected from one normalized `Tool`. #885 v6 — `annotations` is
@@ -78,6 +91,8 @@ export interface McpToolProjection {
 /** A `server/discover` `DiscoverResult` projected from a plugin manifest. */
 export interface McpDiscoverProjection {
   resultType: "complete";
+  ttlMs: number;
+  cacheScope: "public" | "private";
   supportedVersions: string[];
   serverInfo: { name: string; version: string; description: string };
   capabilities: {
@@ -140,14 +155,18 @@ export function manifestToolsToMcpTools(manifest: PluginManifest): McpToolProjec
 /**
  * Project a plugin manifest to a `server/discover` `DiscoverResult`. Capability
  * flags are derived from what the plugin actually contributes (tools present →
- * `tools.listChanged`; UI extension → the MCP Apps extension). `manifest.capabilities[]`
+ * `tools`; UI extension → the MCP Apps extension). `manifest.capabilities[]`
  * is NOT projected — it is LVIS-internal dependency metadata, not MCP
  * `ServerCapabilities` (§3.2).
  */
 export function manifestToDiscoverResult(manifest: PluginManifest): McpDiscoverProjection {
   const capabilities: McpDiscoverProjection["capabilities"] = {};
   if ((manifest.tools?.length ?? 0) > 0) {
-    capabilities.tools = { listChanged: true };
+    // `listChanged: false` is the honest value: `PluginMcpServer` has no
+    // notification emitter and the loopback transport is request/response-only,
+    // so a `true` here advertised a notification that could never arrive. The
+    // list is static per server generation anyway (reload replaces the server).
+    capabilities.tools = { listChanged: false };
   }
   const extensions: Record<string, unknown> = {};
   // Advertise the MCP Apps extension when the plugin ships EITHER a host-mounted
@@ -161,6 +180,7 @@ export function manifestToDiscoverResult(manifest: PluginManifest): McpDiscoverP
   }
   return {
     resultType: "complete",
+    ...PLUGIN_RESULT_CACHE,
     supportedVersions: [MCP_PROTOCOL_VERSION],
     serverInfo: {
       name: manifest.name ?? manifest.id,
