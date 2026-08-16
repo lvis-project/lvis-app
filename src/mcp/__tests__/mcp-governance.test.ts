@@ -552,6 +552,9 @@ describe("McpGovernance — per-request capability gate (governance-per-request)
     const gov = governanceWithPolicy(basePolicy({ allowedCapabilities: [] }));
     expect(gov.validateRequestCapability("browser-use", "server/discover").valid).toBe(true);
     expect(gov.validateRequestCapability("browser-use", "initialize").valid).toBe(true);
+    // §6a.3 — opening the notification channel exercises no gated capability;
+    // every notification-driven refresh re-enters the gated */list paths.
+    expect(gov.validateRequestCapability("browser-use", "subscriptions/listen").valid).toBe(true);
     // Notifications never pass through this gate (sendNotification does not
     // consult it), so they are declassified — fail-closed like any unknown verb.
     expect(gov.validateRequestCapability("browser-use", "notifications/initialized").valid).toBe(false);

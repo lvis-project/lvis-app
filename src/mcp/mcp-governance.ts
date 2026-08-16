@@ -62,7 +62,14 @@ const REQUEST_METHOD_CAPABILITY: Record<string, McpCapability> = Object.fromEntr
 // the explicit pre-checks), while `sendNotification` never consults it — a
 // notification entry here is unreachable, the same dead-entry class the
 // removed `ping`/`resources/subscribe` verbs were.
-const CONTROL_METHODS: ReadonlySet<string> = new Set(["server/discover", "initialize"]);
+// `subscriptions/listen` exercises no gated capability itself (§6a.3): it only
+// opens the notification channel, and every notification-driven refresh
+// re-enters the gated `*/list` paths — the chokepoints don't move.
+const CONTROL_METHODS: ReadonlySet<string> = new Set([
+  "server/discover",
+  "initialize",
+  "subscriptions/listen",
+]);
 
 const DEFAULT_POLICY: McpGovernancePolicy = {
   version: "1.0",
