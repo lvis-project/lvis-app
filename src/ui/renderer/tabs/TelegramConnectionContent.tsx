@@ -52,7 +52,6 @@ function stateLabel(
 ): string {
   switch (snapshot.state) {
     case "unsupported": return t("telegramConnection.stateUnsupported");
-    case "env-managed": return t("telegramConnection.stateEnvManaged");
     case "disconnected": return t("telegramConnection.stateDisconnected");
     case "connected-unpaired": return t("telegramConnection.stateConnectedUnpaired");
     case "pairing-unrecognized": return t("telegramConnection.statePairingUnrecognized");
@@ -180,7 +179,7 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
   }, [issuedCode]);
 
   const state = snapshot?.state ?? null;
-  const readOnly = state === "unsupported" || state === "env-managed";
+  const readOnly = state === "unsupported";
   // A pairing this machine can no longer recognise is repaired the same way a
   // missing one is: mint a code and send it. Same affordance, different reason,
   // which the body text below supplies.
@@ -254,10 +253,6 @@ export function TelegramConnectionContent({ api }: TelegramConnectionContentProp
 
             {snapshot.state === "unsupported" ? (
               <p className="text-xs text-muted-foreground">{t("telegramConnection.unsupportedBody")}</p>
-            ) : null}
-
-            {snapshot.state === "env-managed" ? (
-              <p className="text-xs text-muted-foreground">{t("telegramConnection.envManagedBody")}</p>
             ) : null}
 
             {snapshot.state === "pairing-unrecognized" ? (

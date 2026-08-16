@@ -94,16 +94,6 @@ describe("TelegramConnectionContent", () => {
     expect(connect).not.toHaveBeenCalled();
   });
 
-  it("is read-only when the launch environment owns the bridge", async () => {
-    const { api } = makeApi(snapshotOf({ state: "env-managed", botUsername: "my_assistant_bot" }));
-    render(<TelegramConnectionContent api={api} />);
-
-    await screen.findByTestId("telegram-connection-state");
-    expect(screen.queryByTestId("telegram-connection-connect")).toBeNull();
-    expect(screen.queryByTestId("telegram-connection-create-pairing-code")).toBeNull();
-    expect(screen.queryByTestId("telegram-connection-approve")).toBeNull();
-  });
-
   it("discloses the continuous connection before the token is submitted", async () => {
     const { api, connect } = makeApi(snapshotOf());
     render(<TelegramConnectionContent api={api} />);

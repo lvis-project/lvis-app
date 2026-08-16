@@ -1,19 +1,18 @@
 /**
  * Main-process lifecycle for the default-OFF Telegram platform bridge.
  *
- * Telegram is deliberately a separate external-platform listener. It never
- * shares the Local API, A2A, or Tailnet HTTP route family, never configures a
- * public endpoint, and never auto-registers a Telegram webhook. A deployment
- * owner connects this loopback listener to a dedicated trusted HTTPS
- * terminator after explicitly configuring the bot webhook secret.
+ * Telegram is deliberately a separate external-platform adapter. It never
+ * shares the Local API, A2A, or Tailnet HTTP route family, opens no listener,
+ * and never registers a Telegram webhook: updates arrive over an outbound
+ * long poll owned by the desktop, activated only by the owner's stored
+ * connection (`telegram-connection-service`).
  */
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import {
   createTailnetControllerReceiptStore,
   type TailnetControllerReceiptStore,
 } from "../api/tailnet-controller-receipt-store.js";
-import { startTelegramWebhookServer } from "../api/telegram-webhook-server.js";
 import type { SecretStore } from "../audit/hmac-chain.js";
 import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-runtime.js";
 import {
@@ -32,12 +31,10 @@ import {
   coalesceTelegramDeliveryQueue,
   createTelegramOutboundTransport,
   createTelegramPollingVerifier,
-  createTelegramWebhookVerifier,
   type TelegramDeliveryChannel,
 } from "./telegram-platform-adapter.js";
 import {
   createTelegramPairedPlatformRuntime,
-  createTelegramPlatformRuntime,
   type TelegramPairedRouteAuthority,
   type TelegramPlatformRoute,
   type TelegramPlatformRuntime,
@@ -54,8 +51,6 @@ import {
 import type { ConversationCommandPort } from "./conversation-command-port.js";
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
 
-export const DEFAULT_TELEGRAM_BRIDGE_PORT = 46_175;
-export const DEFAULT_TELEGRAM_WEBHOOK_PATH = "/telegram/webhook";
 const TELEGRAM_BRIDGE_FEATURE = "telegram-bridge";
 const TELEGRAM_RECEIPT_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 const TELEGRAM_MAX_RAW_BODY_BYTES = 64 * 1024;
@@ -69,18 +64,6 @@ const TELEGRAM_MAX_TEXT_UTF16_UNITS = 4_096;
 /** Upper bound on how long a stop waits for already-queued safe deliveries. */
 const TELEGRAM_DELIVERY_DRAIN_TIMEOUT_MS = 2_000;
 
-export interface TelegramBridgeConfig {
-  readonly port: number;
-  readonly webhookPath: string;
-  /** Process-only credential; callers must never log or persist it. */
-  readonly botToken: string;
-  /** Process-only webhook verifier secret; callers must never log or persist it. */
-  readonly webhookSecret: string;
-  /** Canonical, explicit owner-configured personal Telegram account IDs. */
-  readonly allowedUserIds: readonly string[];
-  readonly routeEpoch: number;
-}
-
 export interface TelegramBridgeServer {
   /** Loopback port for the webhook path; null when updates are polled. */
   readonly port: number | null;
@@ -93,11 +76,11 @@ interface TelegramIngressHandle {
 }
 
 /**
- * The three things that differ between the environment-configured webhook
- * deployment and the owner-driven polling connection. Everything else — the
- * receipt store, the delivery adapter, the safe-projection attach, and the
- * shared inbound core — is identical, which is what keeps the two paths from
- * drifting into two security models.
+ * What one activation supplies to the shared core: its runtime, its inbound
+ * verifier, and how updates are received. The receipt store, the delivery
+ * adapter, the safe-projection attach, and the inbound gateway are identical
+ * for every activation, which is what keeps a future second ingress from
+ * drifting into a second security model.
  */
 interface TelegramActivationPlan {
   readonly botToken: string;
@@ -107,24 +90,12 @@ interface TelegramActivationPlan {
   startIngress(gateway: PlatformBridgeInboundGateway): Promise<TelegramIngressHandle>;
 }
 
-export interface StartTelegramBridgeServerOptions {
+interface StartTelegramBridgeServerOptions {
   readonly conversationSurfaceRuntime: ConversationSurfaceRuntime;
   readonly conversationCommandPort: ConversationCommandPort;
   readonly getCurrentConversationId: () => string;
-  /** Monotonic host epoch, incremented for every active-session replacement. */
-  readonly getCurrentConversationEpoch: () => number;
-  readonly env?: NodeJS.ProcessEnv;
-  /** Injectable only for lifecycle tests. Production uses a Telegram-only file. */
   readonly receiptStore?: PlatformBridgeReceiptStore;
   readonly log?: (message: string) => void;
-  /** @internal deterministic lifecycle injection for unit tests. */
-  readonly dependencies?: Partial<TelegramBridgeServerDependencies>;
-}
-
-interface TelegramBridgeServerDependencies {
-  readonly createRuntime: typeof createTelegramPlatformRuntime;
-  readonly createReceiptStore: () => TailnetControllerReceiptStore;
-  readonly startServer: typeof startTelegramWebhookServer;
 }
 
 interface ActiveTelegramDeliveryDestination {
@@ -164,96 +135,6 @@ let activationSequence = 0;
  * are never TTL-pruned, so they would accumulate against the receipt cap.
  */
 const installationReceiptOwnerId = randomUUID();
-
-/**
- * Resolve the immutable launch configuration. Disabled is a zero-side-effect
- * result; all sensitive values remain process-only and are intentionally not
- * written to settings, logs, feature namespaces, or delivery records.
- */
-export function resolveTelegramBridgeConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): TelegramBridgeConfig | null {
-  const enabled = env.LVIS_TELEGRAM_BRIDGE;
-  if (enabled === undefined || enabled === "0") return null;
-  if (enabled !== "1") throw new Error("telegram-bridge-enable-invalid");
-
-  const botToken = env.LVIS_TELEGRAM_BOT_TOKEN;
-  if (!isBotToken(botToken)) throw new Error("telegram-bridge-bot-token-missing-or-invalid");
-
-  const webhookSecret = env.LVIS_TELEGRAM_WEBHOOK_SECRET;
-  if (!isWebhookSecret(webhookSecret)) {
-    throw new Error("telegram-bridge-webhook-secret-missing-or-invalid");
-  }
-
-  const allowedUserIds = parseAllowedUserIds(env.LVIS_TELEGRAM_ALLOWED_USER_IDS);
-  const port = env.LVIS_TELEGRAM_PORT === undefined
-    ? DEFAULT_TELEGRAM_BRIDGE_PORT
-    : parseFixedPort(env.LVIS_TELEGRAM_PORT);
-  const webhookPath = env.LVIS_TELEGRAM_WEBHOOK_PATH === undefined
-    ? DEFAULT_TELEGRAM_WEBHOOK_PATH
-    : parseWebhookPath(env.LVIS_TELEGRAM_WEBHOOK_PATH);
-  const routeEpoch = env.LVIS_TELEGRAM_ROUTE_EPOCH === undefined
-    ? 1
-    : parsePositiveInteger(env.LVIS_TELEGRAM_ROUTE_EPOCH, "telegram-bridge-route-epoch-invalid");
-
-  return Object.freeze({
-    port,
-    webhookPath,
-    botToken,
-    webhookSecret,
-    allowedUserIds: Object.freeze(allowedUserIds),
-    routeEpoch,
-  });
-}
-
-function dependencies(
-  overrides: Partial<TelegramBridgeServerDependencies> | undefined,
-): TelegramBridgeServerDependencies {
-  return {
-    createRuntime: createTelegramPlatformRuntime,
-    createReceiptStore: createTelegramBridgeReceiptStore,
-    startServer: startTelegramWebhookServer,
-    ...overrides,
-  };
-}
-
-async function startForBoot(
-  options: StartTelegramBridgeServerOptions,
-  generation: number,
-): Promise<TelegramBridgeServer | null> {
-  // This must precede secret-store access, runtime creation, receipt setup,
-  // provider transport construction, and listener construction. OFF means no
-  // Telegram side effect at all.
-  const config = resolveTelegramBridgeConfig(options.env);
-  if (config === null) return null;
-
-  const deps = dependencies(options.dependencies);
-  const plan: TelegramActivationPlan = {
-    botToken: config.botToken,
-    botFingerprint: botFingerprint(config.botToken),
-    createRuntime: async (activationEpoch) => await deps.createRuntime({
-      allowedUserIds: config.allowedUserIds,
-      botFingerprint: botFingerprint(config.botToken),
-      getCurrentConversationId: options.getCurrentConversationId,
-      getCurrentConversationEpoch: options.getCurrentConversationEpoch,
-      routeEpoch: config.routeEpoch,
-      activationEpoch,
-    }),
-    verifier: createTelegramWebhookVerifier({ secretToken: config.webhookSecret }),
-    startIngress: async (gateway) => {
-      const server = await deps.startServer({
-        host: "127.0.0.1",
-        port: config.port,
-        path: config.webhookPath,
-        gateway,
-        maxBodyBytes: TELEGRAM_MAX_RAW_BODY_BYTES,
-        log: (message) => options.log?.("[telegram-bridge] " + message),
-      });
-      return { port: server.port, close: () => server.close() };
-    },
-  };
-  return await startActivation(plan, options, generation);
-}
 
 export interface StartTelegramConnectionBridgeOptions {
   readonly conversationSurfaceRuntime: ConversationSurfaceRuntime;
@@ -345,7 +226,6 @@ export async function maybeStartTelegramConnectionBridge(
     conversationSurfaceRuntime: options.conversationSurfaceRuntime,
     conversationCommandPort: options.conversationCommandPort,
     getCurrentConversationId: options.getCurrentConversationId,
-    getCurrentConversationEpoch: () => 0,
     ...(options.receiptStore ? { receiptStore: options.receiptStore } : {}),
     ...(options.log ? { log: options.log } : {}),
   }, lifecycleGeneration);
@@ -369,9 +249,8 @@ async function startActivation(
   options: StartTelegramBridgeServerOptions,
   generation: number,
 ): Promise<TelegramBridgeServer | null> {
-  const deps = dependencies(options.dependencies);
-  // Consumed only past the disabled check, so a boot with the bridge off leaves
-  // the first real activation at epoch 1.
+  // Consumed only past the start checks, so a boot without a stored
+  // connection leaves the first real activation at epoch 1.
   const activationEpoch = ++activationSequence;
   const runtime = await plan.createRuntime(activationEpoch);
   if (generation !== lifecycleGeneration) {
@@ -379,7 +258,7 @@ async function startActivation(
     return null;
   }
 
-  const receiptStore = options.receiptStore ?? deps.createReceiptStore();
+  const receiptStore = options.receiptStore ?? createTelegramBridgeReceiptStore();
   const deliveryDestinations = new Map<string, ActiveTelegramDeliveryDestination>();
   const releaseDeliveryDestination = (channel: TelegramDeliveryChannel): void => {
     const lease = channel.deliveryLease;
@@ -476,43 +355,8 @@ async function startActivation(
   }
 
   activeBridge = { ingress, runtime, delivery, deliveryDestinations, channels };
-  options.log?.(
-    ingress.port === null
-      ? "[telegram-bridge] receiving updates over an outbound connection"
-      : "[telegram-bridge] loopback listener ready on 127.0.0.1:"
-        + ingress.port
-        + "; configure the HTTPS webhook externally",
-  );
+  options.log?.("[telegram-bridge] receiving updates over an outbound connection");
   return Object.freeze({ port: ingress.port });
-}
-
-/** Idempotently start the explicitly configured Telegram bridge activation. */
-export async function maybeStartTelegramBridgeServer(
-  options: StartTelegramBridgeServerOptions,
-): Promise<TelegramBridgeServer | null> {
-  if (shutdownRequested) return null;
-  if (stopPromise) {
-    // Wait for the owner's disconnect to finish, then start a real reconnect.
-    // Returning null here would silently swallow a connect issued in the same
-    // tick as the preceding disconnect.
-    await stopPromise;
-    if (shutdownRequested) return null;
-  }
-  if (activeBridge) return Object.freeze({ port: activeBridge.ingress.port });
-  if (startPromise) return await startPromise;
-
-  const attempt = ++startAttemptSequence;
-  activeStartAttempt = attempt;
-  const pending = startForBoot(options, lifecycleGeneration);
-  startPromise = pending;
-  try {
-    return await pending;
-  } finally {
-    if (activeStartAttempt === attempt) {
-      startPromise = null;
-      activeStartAttempt = null;
-    }
-  }
 }
 
 async function stopActivation(): Promise<void> {
@@ -603,60 +447,4 @@ function createTelegramBridgeReceiptStore(): TailnetControllerReceiptStore {
     filePath: join(namespace.dir, "command-receipts.json"),
     ttlMs: TELEGRAM_RECEIPT_TTL_MS,
   });
-}
-
-function botFingerprint(token: string): string {
-  return createHash("sha256")
-    .update("lvis/telegram-bridge/bot-fingerprint/v1\0", "utf8")
-    .update(token, "utf8")
-    .digest("hex");
-}
-
-function isBotToken(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9:_-]{16,256}$/.test(value);
-}
-
-function isWebhookSecret(value: unknown): value is string {
-  return typeof value === "string" && /^[A-Za-z0-9_-]{32,256}$/.test(value);
-}
-
-function parseAllowedUserIds(value: unknown): string[] {
-  if (typeof value !== "string" || value.length === 0 || value.length > 8_192) {
-    throw new Error("telegram-bridge-allowed-users-missing-or-invalid");
-  }
-  const ids = value.split(",");
-  if (ids.length > 128 || ids.some((id) => !isCanonicalTelegramUserId(id))) {
-    throw new Error("telegram-bridge-allowed-users-missing-or-invalid");
-  }
-  if (new Set(ids).size !== ids.length) {
-    throw new Error("telegram-bridge-allowed-users-missing-or-invalid");
-  }
-  return ids;
-}
-
-function parseFixedPort(value: string): number {
-  return parsePositiveInteger(value, "telegram-bridge-port-invalid", 65_535);
-}
-
-function parseWebhookPath(value: string): string {
-  if (
-    value.length > 128
-    || !/^\/(?:[A-Za-z0-9][A-Za-z0-9_-]*)(?:\/[A-Za-z0-9][A-Za-z0-9_-]*)*$/.test(value)
-  ) {
-    throw new Error("telegram-bridge-webhook-path-invalid");
-  }
-  return value;
-}
-
-function parsePositiveInteger(value: string, error: string, max = Number.MAX_SAFE_INTEGER): number {
-  if (!/^[1-9]\d*$/.test(value)) throw new Error(error);
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed > max) throw new Error(error);
-  return parsed;
-}
-
-function isCanonicalTelegramUserId(value: string): boolean {
-  if (!/^[1-9]\d*$/.test(value)) return false;
-  const numeric = Number(value);
-  return Number.isSafeInteger(numeric) && String(numeric) === value;
 }

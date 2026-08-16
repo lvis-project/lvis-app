@@ -467,8 +467,14 @@ function isTailnetPairingShareBinding(
 }
 
 function isTailnetOpaqueId(value: unknown): value is string {
+  // Versions 1-8: Tailnet bindings are random v4, but the Telegram paired
+  // runtime deliberately mints DETERMINISTIC v8 bindings
+  // (`deterministicUuid`, telegram-platform-runtime.ts). A `[1-5]` nibble here
+  // rejected every real paired-lane inbound as `platform-bridge-pairing-invalid`
+  // — a gap no unit suite saw because each side was tested against a mock of
+  // the other.
   return typeof value === "string"
-    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+    && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 function isPositiveEpoch(value: unknown): value is number {

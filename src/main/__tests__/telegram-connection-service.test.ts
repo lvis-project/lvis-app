@@ -153,7 +153,6 @@ interface Harness {
 
 async function harness(
   options: {
-    readonly envManaged?: boolean;
     readonly encrypted?: boolean;
     readonly existingConversations?: readonly string[];
   } = {},
@@ -197,7 +196,6 @@ async function harness(
     getCurrentConversationId: () => conversation.id,
     conversationDigestFor: digestOf,
     conversationExists: (conversationId: string) => existingConversations.has(conversationId),
-    envManaged: options.envManaged ?? false,
     createBotApiClient: bot.factory,
   });
   return {
@@ -230,39 +228,6 @@ async function pairedHarness(): Promise<Harness & { readonly code: string }> {
 }
 
 describe("createTelegramConnectionService", () => {
-  it("locks every mutation to the environment without reading the store", async () => {
-    const h = await harness({ envManaged: true });
-    const managed = { ok: false, error: "telegram-managed-by-environment" };
-
-    expect(snapshotOf(h.service)).toEqual({
-      state: "env-managed",
-      botUsername: null,
-      pairing: null,
-      approval: null,
-      pendingCode: null,
-      lastErrorCode: null,
-    });
-    expect(await h.service.connect(BOT_TOKEN)).toEqual(managed);
-    expect(await h.service.disconnect()).toEqual(managed);
-    expect(await h.service.pause()).toEqual(managed);
-    expect(await h.service.resume()).toEqual(managed);
-    expect(await h.service.createPairingCode()).toEqual(managed);
-    expect(await h.service.revokePairing("11111111-1111-4111-8111-111111111111")).toEqual(managed);
-    expect(await h.service.approveCurrentConversation()).toEqual(managed);
-    expect(await h.service.revokeApproval("11111111-1111-4111-8111-111111111111")).toEqual(managed);
-
-    expect(h.calls).toEqual([]);
-    expect(h.secrets.service.setSecret).not.toHaveBeenCalled();
-    expect(h.secrets.service.isSecretStorageEncrypted).not.toHaveBeenCalled();
-    expect(h.bridge.start).not.toHaveBeenCalled();
-    expect(h.bot.created).toEqual([]);
-
-    // Positive control: the same wiring without the env var does connect.
-    const open = await harness({ envManaged: false });
-    expect(await open.service.connect(BOT_TOKEN)).toEqual({ ok: true });
-    expect(open.calls).toContain("setConnected");
-  });
-
   it("reports unsupported and writes no secret when storage is not encrypted", async () => {
     const h = await harness({ encrypted: false });
 

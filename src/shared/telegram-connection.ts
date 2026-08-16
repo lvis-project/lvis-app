@@ -26,7 +26,6 @@ const TELEGRAM_CONNECTION_STATES = [
   /** This machine has no usable encrypted store, so no token may be saved. */
   "unsupported",
   /** Boot environment owns the bridge; the desktop surface is read-only. */
-  "env-managed",
   "disconnected",
   "connected-unpaired",
   /**
@@ -69,7 +68,6 @@ const TELEGRAM_CONNECTION_ERROR_CODES = [
   "telegram-connection-input-invalid",
   "telegram-connection-operation-rejected",
   "user-keyboard-required",
-  "telegram-managed-by-environment",
   "telegram-encryption-unavailable",
   "telegram-bot-token-rejected",
   /**

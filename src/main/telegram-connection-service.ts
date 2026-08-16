@@ -107,8 +107,6 @@ export interface CreateTelegramConnectionServiceOptions {
    * is the exact failure this dependency exists to end.
    */
   readonly conversationExists: (conversationId: string) => boolean;
-  /** True when `LVIS_TELEGRAM_BRIDGE` owns the bridge. Wins over stored state. */
-  readonly envManaged: boolean;
   /** Test-only injection; production builds a real Bot API client. */
   readonly createBotApiClient?: (botToken: string) => TelegramBotApiClient;
 }
@@ -144,7 +142,6 @@ function failure(error: TelegramConnectionErrorCode): TelegramConnectionFailure 
   return Object.freeze({ ok: false as const, error });
 }
 
-const MANAGED = failure("telegram-managed-by-environment");
 const UNAVAILABLE = failure("telegram-connection-unavailable");
 const ENCRYPTION_UNAVAILABLE = failure("telegram-encryption-unavailable");
 const INPUT_INVALID = failure("telegram-connection-input-invalid");
@@ -317,11 +314,10 @@ export function createTelegramConnectionService(
     || typeof options.reconcileActorKey !== "function"
     || typeof options.getCurrentConversationId !== "function"
     || typeof options.conversationDigestFor !== "function"
-    || typeof options.envManaged !== "boolean"
   ) {
     throw new Error("telegram-connection-service-invalid");
   }
-  const { store, settingsService, bridgeControl, envManaged } = options;
+  const { store, settingsService, bridgeControl } = options;
   const makeClient = options.createBotApiClient
     ?? ((botToken: string) => createTelegramBotApiClient({ botToken }));
   const listeners = new Set<() => void>();
@@ -339,7 +335,7 @@ export function createTelegramConnectionService(
     }
   };
 
-  if (!envManaged) store.subscribe(emitChange);
+  store.subscribe(emitChange);
 
   /**
    * The conversation on screen, named both ways. The store persists the id so
@@ -574,7 +570,6 @@ export function createTelegramConnectionService(
 
   const snapshot = (): TelegramConnectionSnapshotResult => {
     try {
-      if (envManaged) return inertSnapshot("env-managed");
       if (!settingsService.isSecretStorageEncrypted()) return inertSnapshot("unsupported");
       const owner = store.ownerSnapshot();
       const approval = projectApproval(owner.approval, currentConversation()?.digest ?? null);
@@ -601,7 +596,6 @@ export function createTelegramConnectionService(
   };
 
   const connect = async (botToken: string): Promise<TelegramConnectionMutationResult> => {
-    if (envManaged) return MANAGED;
     if (!isTelegramBotToken(botToken)) return INPUT_INVALID;
     return await runExclusive(async () => {
       // Probed before any write: an unencryptable host must not receive the
@@ -644,7 +638,6 @@ export function createTelegramConnectionService(
   };
 
   const disconnect = async (): Promise<TelegramConnectionMutationResult> => {
-    if (envManaged) return MANAGED;
     return await runExclusive(async () => {
       let secretFailure: TelegramConnectionMutationResult | null = null;
       try {
@@ -673,7 +666,6 @@ export function createTelegramConnectionService(
   };
 
   const pause = async (): Promise<TelegramConnectionMutationResult> => {
-    if (envManaged) return MANAGED;
     return await runExclusive(async () => {
       let paused: boolean;
       try {
@@ -693,7 +685,6 @@ export function createTelegramConnectionService(
   };
 
   const resume = async (): Promise<TelegramConnectionMutationResult> => {
-    if (envManaged) return MANAGED;
     return await runExclusive(async () => {
       let encrypted: boolean;
       try {
@@ -742,7 +733,6 @@ export function createTelegramConnectionService(
    * connection's last error rather than surfaced: nobody is at the keyboard.
    */
   const resumeStoredConnection = async (): Promise<void> => {
-    if (envManaged) return;
     let desired: TelegramDesiredState;
     try {
       desired = store.desiredState();
@@ -754,7 +744,6 @@ export function createTelegramConnectionService(
   };
 
   const createPairingCode = async (): Promise<TelegramCreatePairingCodeResult> => {
-    if (envManaged) return MANAGED;
     return await runExclusive(async () => {
       // The bot handle is in-memory only, so a code cannot be minted before
       // this activation verified the bot it would point the owner at.
@@ -803,7 +792,6 @@ export function createTelegramConnectionService(
   };
 
   const revokePairing = async (id: string): Promise<TelegramConnectionMutationResult> => {
-    if (envManaged) return MANAGED;
     if (!isTelegramConnectionId(id)) return INPUT_INVALID;
     return await runExclusive(async () => {
       try {
@@ -817,7 +805,6 @@ export function createTelegramConnectionService(
   const approveCurrentConversation = async (
     duration?: TelegramApprovalDurationPreset,
   ): Promise<TelegramConnectionMutationResult> => {
-    if (envManaged) return MANAGED;
     if (duration !== undefined && !isTelegramApprovalDurationPreset(duration)) return INPUT_INVALID;
     return await runExclusive(async () => {
       // Resolved here, never received: the renderer cannot name a conversation.
@@ -837,7 +824,6 @@ export function createTelegramConnectionService(
   };
 
   const revokeApproval = async (id: string): Promise<TelegramConnectionMutationResult> => {
-    if (envManaged) return MANAGED;
     if (!isTelegramConnectionId(id)) return INPUT_INVALID;
     return await runExclusive(async () => {
       try {
