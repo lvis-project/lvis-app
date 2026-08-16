@@ -2230,7 +2230,12 @@ describe("ToolExecutor — D4 ordered approval/execution (§4.5.3)", () => {
     while (started.length < 2 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    expect(started).toEqual(["parallel_a", "parallel_b"]);
+    // ORDER-agnostic on purpose: both executes run concurrently, and each
+    // passes through async permission/risk stages before its `started.push`,
+    // so which one ticks first is scheduler noise (observed inverted under
+    // full-suite load). The invariant this test pins is "both started BEFORE
+    // either resolved" here, and strict RESULT order below.
+    expect([...started].sort()).toEqual(["parallel_a", "parallel_b"]);
     resolvers.get("parallel_b")?.({ output: "B", isError: false });
     resolvers.get("parallel_a")?.({ output: "A", isError: false });
 
