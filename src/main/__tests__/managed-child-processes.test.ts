@@ -1,6 +1,29 @@
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
+
+// These unit tests hand FAKE children with real-looking pids (4321, 5432) to a
+// module whose tree-kill path shells out to the REAL taskkill/pgrep against
+// those pids. When such a pid happens to exist on the loaded host, `taskkill
+// /T /F` kills an innocent live process tree AND returns 0 — skipping the
+// `child.kill("SIGKILL")` fallback these assertions pin (the observed
+// full-suite-only failure). Neutralize the shell-out: a "failed" taskkill and
+// a "no children" pgrep force the deterministic in-process fallback on every
+// platform, and no real process is ever signalled.
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    spawnSync: vi.fn(() => ({
+      status: 1,
+      signal: null,
+      stdout: "",
+      stderr: "",
+      pid: 0,
+      output: [],
+    })),
+  };
+});
 import {
   __resetManagedChildProcessesForTest,
   assertManagedChildProcessAdmissionOpen,

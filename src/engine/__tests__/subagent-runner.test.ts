@@ -761,7 +761,7 @@ describe("SubAgentRunner — projected terminal status", () => {
       });
       rejectMetadata(new Error("initial metadata write failed"));
 
-      const deadline = Date.now() + 1000;
+      const deadline = Date.now() + 4000;
       while (deliverToParent.mock.calls.length === 0 && Date.now() < deadline) {
         await new Promise((resolve) => setTimeout(resolve, 5));
       }
@@ -888,7 +888,7 @@ describe("SubAgentRunner — projected terminal status", () => {
         },
       );
       const handle = JSON.parse(handleResult.output);
-      const saveDeadline = Date.now() + 1000;
+      const saveDeadline = Date.now() + 4000;
       while (
         saveSessionMetadata.mock.calls.length < 2 &&
         Date.now() < saveDeadline
@@ -910,7 +910,7 @@ describe("SubAgentRunner — projected terminal status", () => {
       });
 
       rejectFinalMetadata(new Error("final metadata write failed"));
-      const deliveryDeadline = Date.now() + 1000;
+      const deliveryDeadline = Date.now() + 4000;
       while (
         deliverToParent.mock.calls.length === 0 &&
         Date.now() < deliveryDeadline

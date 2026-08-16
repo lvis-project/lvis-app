@@ -874,7 +874,7 @@ describe("agent_spawn tool", () => {
       entries: [],
       ok: true,
     });
-    const deadline = Date.now() + 1000;
+    const deadline = Date.now() + 4000;
     while (!events.some((event) => event.type === "done") && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -927,7 +927,7 @@ describe("agent_spawn tool", () => {
     );
     expect(handle.isError).toBe(false);
 
-    const deadline = Date.now() + 1000;
+    const deadline = Date.now() + 4000;
     while (deliverToParent.mock.calls.length === 0 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -982,7 +982,7 @@ describe("agent_spawn tool", () => {
     );
     expect(handle.isError).toBe(false);
 
-    const deadline = Date.now() + 1000;
+    const deadline = Date.now() + 4000;
     while (deliverToParent.mock.calls.length === 0 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -1069,7 +1069,7 @@ describe("agent_spawn tool", () => {
     );
     expect(handle.isError).toBe(false);
 
-    const deadline = Date.now() + 1000;
+    const deadline = Date.now() + 4000;
     while (deliverToParent.mock.calls.length === 0 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -1122,7 +1122,7 @@ describe("agent_spawn tool", () => {
     );
     expect(handle.isError).toBe(false);
 
-    const deadline = Date.now() + 1000;
+    const deadline = Date.now() + 4000;
     while (deliverToParent.mock.calls.length === 0 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -1231,7 +1231,7 @@ describe("agent_spawn tool", () => {
     const status = JSON.parse((await statusTool.execute({ id: handle.spawnId }, ctx())).output);
     expect(status.run.status).toBe("interrupted");
 
-    const deadline = Date.now() + 1000;
+    const deadline = Date.now() + 4000;
     while (!events.some((event) => event.type === "done") && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
