@@ -107,7 +107,7 @@ export interface McpGlobalRules {
  * MCP transport types.
  *
  * - `stdio`    : local subprocess with Content-Length framed JSON-RPC on stdin/stdout.
- * - `http`     : MCP Streamable HTTP transport (spec revision 2025-03-26+).
+ * - `http`     : MCP Streamable HTTP transport (final `2026-07-28` revision).
  *                Single POST endpoint that returns either `application/json`
  *                for single responses or `text/event-stream` for streaming.
  * - `sse`      : legacy HTTP+SSE dual-endpoint transport. Governance layer only
