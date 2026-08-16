@@ -424,6 +424,15 @@ const TOOLS_REFRESH_DEBOUNCE_MS = 500;
  */
 const SNAPSHOT_TTL_MIN_MS = 30_000;
 const SNAPSHOT_TTL_MAX_MS = 86_400_000;
+/**
+ * Synthetic, implementation-defined code (-32000..-32019 range) the HTTP
+ * transport uses to settle the unbounded `subscriptions/listen` request when
+ * its stream ends — never sent on the wire, only delivered client-internally.
+ */
+const RPC_LISTEN_STREAM_ENDED = -32010;
+/** Listen re-open backoff (§6a.3): capped exponential, reset on acknowledge. */
+const LISTEN_BACKOFF_START_MS = 1_000;
+const LISTEN_BACKOFF_MAX_MS = 60_000;
 
 // ─── Transport Strategy ──────────────────────────────
 
@@ -442,6 +451,13 @@ export interface McpSendOptions {
    * Names/values are pre-validated+encoded by `http-request-headers.ts`.
    */
   extraHeaders?: Readonly<Record<string, string>>;
+  /**
+   * This request's SSE response stream is LONG-LIVED (`subscriptions/listen`):
+   * a dropped/ended stream is reported back as this request's error response
+   * instead of killing the whole transport — losing the stream only degrades
+   * freshness (§6a.3), never the connection.
+   */
+  nonFatalStream?: boolean;
 }
 
 export interface McpTransport {
@@ -464,7 +480,8 @@ export interface McpTransport {
 interface PendingRequest {
   resolve: (value: unknown) => void;
   reject: (reason: Error) => void;
-  timer: NodeJS.Timeout;
+  /** Null for the one deliberately-unbounded request (`subscriptions/listen`). */
+  timer: NodeJS.Timeout | null;
   /** Per-chunk activity window — gets reset by `resetPendingTimers` when SSE
    *  data flows so a long-running streaming response isn't killed mid-flight. */
   timeoutMs: number;
@@ -489,6 +506,10 @@ export class McpClient {
   /** Debounce/refresh state for `notifications/tools/list_changed`. */
   private toolsRefreshTimer: NodeJS.Timeout | null = null;
   private toolsRefreshRunning = false;
+  /** `subscriptions/listen` re-open state (§6a.3). */
+  private listenBackoffMs = LISTEN_BACKOFF_START_MS;
+  private listenReopenTimer: NodeJS.Timeout | null = null;
+  private listenUnsupported = false;
 
   private readonly bufferedResponses = new Map<number, JsonRpcResponse>();
   private healthTimer: NodeJS.Timeout | null = null;
@@ -689,6 +710,10 @@ export class McpClient {
 
       // Health check 시작
       this.startHealthCheck();
+
+      // §6a.3 — one long-lived notification stream when the server advertises
+      // any listChanged kind (no-op otherwise, and for legacy servers).
+      this.openListenStream();
 
       log.info(
       `${this.config.id} connected: ${this.state.registeredTools.length} tools registered`,
@@ -1444,6 +1469,60 @@ export class McpClient {
 
   // ─── JSON-RPC Transport ─────────────────────────────
 
+  // ─── subscriptions/listen (§6a.3) ────────────────────
+
+  /** The `listChanged` kinds the CURRENT snapshot advertises. */
+  private advertisedListChangedFilter(): Record<string, boolean> {
+    const capabilities = this.capabilitySnapshot?.discover.capabilities;
+    const filter: Record<string, boolean> = {};
+    if (capabilities?.tools?.listChanged) filter.toolsListChanged = true;
+    if (capabilities?.prompts?.listChanged) filter.promptsListChanged = true;
+    if (capabilities?.resources?.listChanged) filter.resourcesListChanged = true;
+    return filter;
+  }
+
+  /**
+   * Open the ONE long-lived notification stream (§6a.3), opting into exactly
+   * the kinds the server advertises. The request is unbounded (no timers); its
+   * settle means the stream ended — re-open with capped backoff while still
+   * connected. A `-32601` marks the server as not implementing listen (an
+   * advertisement without a channel): stop trying, snapshot-expiry refreshes
+   * still bound staleness.
+   */
+  private openListenStream(): void {
+    if (this.mode !== "final" || this.listenUnsupported) return;
+    const filter = this.advertisedListChangedFilter();
+    if (Object.keys(filter).length === 0) return;
+    void this.sendRequest("subscriptions/listen", { notifications: filter })
+      .then(() => this.scheduleListenReopen())
+      .catch((err: unknown) => {
+        if (err instanceof McpRpcError && err.code === RPC_METHOD_NOT_FOUND) {
+          this.listenUnsupported = true;
+          log.warn(
+            `${this.config.id} advertises listChanged but does not implement subscriptions/listen`,
+          );
+          return;
+        }
+        this.scheduleListenReopen();
+      });
+  }
+
+  private scheduleListenReopen(): void {
+    // Also bail when the transport is gone: teardown rejections settle the
+    // listen promise DURING disconnect (at its close await), and a timer armed
+    // there would outlive the clear in clearDiscoveredSurfaces.
+    if (this.state.status !== "connected" || !this.transport?.isAlive() || this.listenReopenTimer) {
+      return;
+    }
+    const delay = this.listenBackoffMs;
+    this.listenBackoffMs = Math.min(this.listenBackoffMs * 2, LISTEN_BACKOFF_MAX_MS);
+    this.listenReopenTimer = setTimeout(() => {
+      this.listenReopenTimer = null;
+      if (this.state.status === "connected") this.openListenStream();
+    }, delay);
+    this.listenReopenTimer.unref?.();
+  }
+
   // ─── Capability Snapshot (§6a.2) ─────────────────────
 
   /** The snapshot's effective TTL: the server's own `ttlMs`, clamped. */
@@ -1624,10 +1703,20 @@ export class McpClient {
       const id = this.nextRequestId++;
       const timeout = Math.min(timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS, MAX_REQUEST_TIMEOUT_MS);
 
-      const timer = setTimeout(() => {
-        this.pendingRequests.delete(id);
-        reject(new Error(`[mcp-client] ${t("be_mcpClient.requestTimeout", { timeout: String(timeout), method })}`));
-      }, timeout);
+      // `subscriptions/listen` is the one deliberately-UNBOUNDED request
+      // (§6a.3): its "response" only arrives when the notification stream ends,
+      // so it carries no timers and its transport stream is non-fatal on drop.
+      const unbounded = method === "subscriptions/listen";
+      const timer = unbounded
+        ? null
+        : setTimeout(() => {
+            this.pendingRequests.delete(id);
+            reject(
+              new Error(
+                `[mcp-client] ${t("be_mcpClient.requestTimeout", { timeout: String(timeout), method })}`,
+              ),
+            );
+          }, timeout);
 
       this.pendingRequests.set(id, {
         resolve: resolve as (value: unknown) => void,
@@ -1647,12 +1736,15 @@ export class McpClient {
       }
 
       const request: JsonRpcRequest = { jsonrpc: "2.0", id, method, params: this.withRequestMeta(params) };
-      transport.send(request, sendOpts).catch((err: Error) => {
+      const effectiveSendOpts: McpSendOptions | undefined = unbounded
+        ? { ...sendOpts, nonFatalStream: true }
+        : sendOpts;
+      transport.send(request, effectiveSendOpts).catch((err: Error) => {
         // send 실패 → pending 정리 후 reject
         const pending = this.pendingRequests.get(id);
         if (!pending) return;
         this.pendingRequests.delete(id);
-        clearTimeout(pending.timer);
+        if (pending.timer) clearTimeout(pending.timer);
         pending.reject(err);
       });
     });
@@ -1692,7 +1784,7 @@ export class McpClient {
     }
 
     this.pendingRequests.delete(response.id);
-    clearTimeout(pending.timer);
+    if (pending.timer) clearTimeout(pending.timer);
 
     if (response.error) {
       pending.reject(
@@ -1722,6 +1814,11 @@ export class McpClient {
         return;
       case "notifications/tools/list_changed":
         this.scheduleToolsRefresh();
+        return;
+      case "notifications/subscriptions/acknowledged":
+        // The server accepted the listen filter — the stream is live; reset
+        // the re-open backoff so a later drop recovers quickly.
+        this.listenBackoffMs = LISTEN_BACKOFF_START_MS;
         return;
       case "notifications/prompts/list_changed":
         void this.discoverPrompts().catch((err) => {
@@ -1820,6 +1917,12 @@ export class McpClient {
     // The capability snapshot describes THIS connection's server; a torn-down
     // connection has no advertisement (reconnect re-discovers).
     this.capabilitySnapshot = null;
+    if (this.listenReopenTimer) {
+      clearTimeout(this.listenReopenTimer);
+      this.listenReopenTimer = null;
+    }
+    this.listenBackoffMs = LISTEN_BACKOFF_START_MS;
+    this.listenUnsupported = false;
     this.toolRegistry.unregisterByMcp(this.config.id);
     this.state.registeredTools = [];
     this.state.prompts = undefined;
@@ -1852,7 +1955,7 @@ export class McpClient {
 
   private rejectAllPending(reason: string): void {
     for (const [, pending] of this.pendingRequests) {
-      clearTimeout(pending.timer);
+      if (pending.timer) clearTimeout(pending.timer);
       pending.reject(new Error(`[mcp-client] ${reason}`));
     }
     this.pendingRequests.clear();
@@ -1886,6 +1989,9 @@ export class McpClient {
   private resetPendingTimers(): void {
     const now = Date.now();
     for (const [id, pending] of this.pendingRequests) {
+      // The unbounded listen request has no timers to reset — by design it
+      // outlives every window.
+      if (pending.timer === null) continue;
       clearTimeout(pending.timer);
       const method = pending.method;
       const timeoutMs = pending.timeoutMs;
@@ -2609,6 +2715,25 @@ class HttpTransport implements McpTransport {
 
     const contentType = (response.headers.get("content-type") ?? "").toLowerCase();
     if (contentType.includes("text/event-stream")) {
+      if (opts?.nonFatalStream && "id" in message) {
+        // Long-lived listen stream (§6a.3): drop/end is EXPECTED (proxies,
+        // idle timeouts) and must not kill the transport. Whatever ends the
+        // stream, settle THIS request with a synthetic error so the client's
+        // re-open logic runs; every notification the stream carried has
+        // already flowed through `onMessage`.
+        void this.consumeSse(response, controller)
+          .catch((err) => {
+            log.info(`${this.config.id} listen stream error (non-fatal): %s`, err);
+          })
+          .finally(() => {
+            this.messageHandler?.({
+              jsonrpc: "2.0",
+              id: message.id,
+              error: { code: RPC_LISTEN_STREAM_ENDED, message: "listen stream ended" },
+            });
+          });
+        return;
+      }
       // Fire-and-forget stream reader — messages arrive asynchronously
       // through the normal `onMessage` path, matching stdio semantics.
       void this.consumeSse(response, controller).catch((err) => {
