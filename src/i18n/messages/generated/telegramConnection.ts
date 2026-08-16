@@ -22,8 +22,6 @@ export const en = {
 
   "telegramConnection.stateUnsupported": "Not available on this machine",
   "telegramConnection.unsupportedBody": "A bot token can only be stored in this machine's encrypted credential store, and it is not available here. Connecting is disabled rather than falling back to plain text.",
-  "telegramConnection.stateEnvManaged": "Managed by the launch environment",
-  "telegramConnection.envManagedBody": "This desktop was started with Telegram bridge environment variables, so those settings win and this screen is read-only. Remove them and restart to manage the connection here.",
 
   "telegramConnection.stateDisconnected": "Not connected",
   "telegramConnection.connect": "Connect bot",
@@ -103,8 +101,6 @@ export const ko = {
 
   "telegramConnection.stateUnsupported": "이 기기에서는 사용할 수 없음",
   "telegramConnection.unsupportedBody": "봇 토큰은 이 기기의 암호화 자격증명 저장소에만 보관할 수 있는데, 여기서는 사용할 수 없습니다. 평문으로 대체하지 않고 연결을 막습니다.",
-  "telegramConnection.stateEnvManaged": "실행 환경이 관리 중",
-  "telegramConnection.envManagedBody": "이 데스크톱이 Telegram 브리지 환경변수와 함께 실행되어 그 설정이 우선하며, 이 화면은 읽기 전용입니다. 여기서 관리하려면 환경변수를 제거하고 다시 실행하세요.",
 
   "telegramConnection.stateDisconnected": "연결 안 됨",
   "telegramConnection.connect": "봇 연결",

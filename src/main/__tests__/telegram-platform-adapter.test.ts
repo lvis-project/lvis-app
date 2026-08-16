@@ -6,14 +6,12 @@ import type {
 import {
   coalesceTelegramDeliveryQueue,
   createTelegramOutboundTransport,
-  createTelegramWebhookVerifier,
+  createTelegramPollingVerifier,
   type TelegramDeliveryChannel,
   type TelegramDeliveryQueueEntry,
 } from "../telegram-platform-adapter.js";
 
-const SECRET = "telegram_webhook-secret_123";
 const BOT_TOKEN = "123456:BOT_TOKEN-safe_123";
-const SECRET_HEADER = "x-telegram-bot-api-secret-token";
 
 function update(): Record<string, unknown> {
   return {
@@ -28,11 +26,10 @@ function update(): Record<string, unknown> {
   };
 }
 
-function signedRequest(body: unknown, headers: Record<string, unknown> = { [SECRET_HEADER]: SECRET }) {
+function polledUpdate(body: unknown) {
   return {
     rawBody: Buffer.from(JSON.stringify(body), "utf8"),
-    headers,
-  } as unknown as Parameters<ReturnType<typeof createTelegramWebhookVerifier>["verify"]>[0];
+  } as unknown as Parameters<ReturnType<typeof createTelegramPollingVerifier>["verify"]>[0];
 }
 
 function sendOptions(): PlatformBridgeDeliveryTransportSendOptions {
@@ -56,13 +53,10 @@ function coalesceQueue(
 }
 
 describe("Telegram platform adapter", () => {
-  it("authenticates the one case-insensitive secret header before parsing and maps only a simple private text update", () => {
-    const verifier = createTelegramWebhookVerifier({ secretToken: SECRET });
+  it("maps only a simple private text update and ignores an unparseable body", () => {
+    const verifier = createTelegramPollingVerifier();
 
-    expect(verifier.verify(signedRequest(update(), {
-      "X-Telegram-Bot-Api-Secret-Token": SECRET,
-      "content-type": "application/json",
-    }))).toEqual({
+    expect(verifier.verify(polledUpdate(update()))).toEqual({
       provider: "telegram",
       deliveryId: "123",
       channelId: "42",
@@ -70,36 +64,11 @@ describe("Telegram platform adapter", () => {
       text: "safe telegram text",
     });
 
-    const unauthenticated = Object.create(null) as Record<string, unknown>;
-    Object.defineProperties(unauthenticated, {
-      headers: { enumerable: true, value: { [SECRET_HEADER]: "wrong" } },
-      rawBody: {
-        enumerable: true,
-        get: () => {
-          throw new Error("raw body must not be read before authentication");
-        },
-      },
-    });
-    expect(() => verifier.verify(unauthenticated as unknown as Parameters<ReturnType<typeof createTelegramWebhookVerifier>["verify"]>[0])).toThrow("telegram-webhook-verification-failed");
-    expect(verifier.verify(signedRequest("not-json", { [SECRET_HEADER]: SECRET }))).toBeUndefined();
-  });
-
-  it("rejects missing, malformed, and duplicate Telegram secret headers", () => {
-    const verifier = createTelegramWebhookVerifier({ secretToken: SECRET });
-    const body = update();
-
-    expect(() => verifier.verify(signedRequest(body, {}))).toThrow("telegram-webhook-verification-failed");
-    expect(() => verifier.verify(signedRequest(body, { [SECRET_HEADER]: [SECRET] }))).toThrow("telegram-webhook-verification-failed");
-    expect(() => verifier.verify(signedRequest(body, {
-      [SECRET_HEADER]: SECRET,
-      "X-Telegram-Bot-Api-Secret-Token": SECRET,
-    }))).toThrow("telegram-webhook-verification-failed");
-    expect(() => verifier.verify(signedRequest(body, { [SECRET_HEADER]: `${SECRET},${SECRET}` }))).toThrow("telegram-webhook-verification-failed");
-    expect(() => verifier.verify(signedRequest(body, { [SECRET_HEADER]: "wrong" }))).toThrow("telegram-webhook-verification-failed");
+    expect(verifier.verify(polledUpdate("not-json"))).toBeUndefined();
   });
 
   it("ignores reply decoration instead of killing the message that carries it", () => {
-    const verifier = createTelegramWebhookVerifier({ secretToken: SECRET });
+    const verifier = createTelegramPollingVerifier();
     // Swipe-to-reply is Telegram's default gesture in a DM. The parser never
     // reads these fields, so rejecting them discarded a perfectly ordinary
     // message for HOW it was composed, with no containment gain.
@@ -109,7 +78,7 @@ describe("Telegram platform adapter", () => {
     ]) {
       const candidate = structuredClone(update()) as Record<string, any>;
       decorate(candidate);
-      const envelope = verifier.verify(signedRequest(candidate));
+      const envelope = verifier.verify(polledUpdate(candidate));
       expect(envelope).toBeDefined();
       // The decoration is metadata only: nothing from it enters the envelope.
       expect(JSON.stringify(envelope)).not.toContain("earlier");
@@ -117,7 +86,7 @@ describe("Telegram platform adapter", () => {
   });
 
   it("fails closed for every non-text or non-private message form", () => {
-    const verifier = createTelegramWebhookVerifier({ secretToken: SECRET });
+    const verifier = createTelegramPollingVerifier();
     const rejected: readonly [string, (candidate: Record<string, any>) => void][] = [
       ["another Update form", (candidate) => { candidate.edited_message = candidate.message; }],
       ["group chat", (candidate) => { candidate.message.chat.type = "group"; }],
@@ -133,12 +102,12 @@ describe("Telegram platform adapter", () => {
     for (const [_name, mutate] of rejected) {
       const candidate = structuredClone(update()) as Record<string, any>;
       mutate(candidate);
-      expect(verifier.verify(signedRequest(candidate))).toBeUndefined();
+      expect(verifier.verify(polledUpdate(candidate))).toBeUndefined();
     }
   });
 
   it("enforces safe positive direct-message identifiers and text UTF-16 unit bounds", () => {
-    const verifier = createTelegramWebhookVerifier({ secretToken: SECRET });
+    const verifier = createTelegramPollingVerifier();
     const rejected: readonly [string, (candidate: Record<string, any>) => void][] = [
       ["zero update id", (candidate) => { candidate.update_id = 0; }],
       ["unsafe update id", (candidate) => { candidate.update_id = Number.MAX_SAFE_INTEGER + 1; }],
@@ -156,23 +125,20 @@ describe("Telegram platform adapter", () => {
     for (const [_name, mutate] of rejected) {
       const candidate = structuredClone(update()) as Record<string, any>;
       mutate(candidate);
-      expect(verifier.verify(signedRequest(candidate))).toBeUndefined();
+      expect(verifier.verify(polledUpdate(candidate))).toBeUndefined();
     }
 
     const boundary = structuredClone(update()) as Record<string, any>;
     boundary.message.text = "😀".repeat(2_048);
     expect(boundary.message.text).toHaveLength(4_096);
-    expect(verifier.verify(signedRequest(boundary))).toMatchObject({ text: boundary.message.text });
+    expect(verifier.verify(polledUpdate(boundary))).toMatchObject({ text: boundary.message.text });
 
     const whitespace = structuredClone(update()) as Record<string, any>;
     whitespace.message.text = "safe\ntext\tstill allowed";
-    expect(verifier.verify(signedRequest(whitespace))).toMatchObject({ text: whitespace.message.text });
+    expect(verifier.verify(polledUpdate(whitespace))).toMatchObject({ text: whitespace.message.text });
   });
 
-  it("validates secret and bot-token configuration without accepting URL-changing token material", () => {
-    for (const secretToken of ["", "bad secret", "bad/secret", "x".repeat(257)]) {
-      expect(() => createTelegramWebhookVerifier({ secretToken })).toThrow("telegram-webhook-secret-token-invalid");
-    }
+  it("validates bot-token configuration without accepting URL-changing token material", () => {
     for (const botToken of ["", "bad token", "bad/path", "x".repeat(257)]) {
       expect(() => createTelegramOutboundTransport({ botToken })).toThrow("telegram-outbound-bot-token-invalid");
     }
