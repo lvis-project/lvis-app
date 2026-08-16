@@ -1363,6 +1363,77 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await client.disconnect();
   });
 
+  it("stamps the Streamable HTTP request-metadata headers on every POST (final spec)", async () => {
+    const TOOL = {
+      name: "get_weather",
+      description: "weather",
+      inputSchema: {
+        type: "object",
+        properties: {
+          region: { type: "string", "x-mcp-header": "Region" },
+          query: { type: "string" },
+        },
+      },
+    };
+    const { client, fetchMock } = rcHttpClient("hdr", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [TOOL] });
+      if (method === "tools/call")
+        return jsonRpcResponse(id, { resultType: "complete", content: [{ type: "text", text: "ok" }] });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    // `callTool` takes the WIRE tool name (the adapter's execute callback passes
+    // `schema.name`, not the namespaced registry name).
+    await client.callTool("get_weather", { region: "us-west1", query: "rain" });
+
+    const headerOf = (init: unknown, name: string) =>
+      ((init as RequestInit | undefined)?.headers as Record<string, string> | undefined)?.[name];
+    for (const [, init] of fetchMock.mock.calls) {
+      const method = readRpcMethod(init as RequestInit);
+      if (!method) continue;
+      // Mcp-Method mirrors the body's method; the version header mirrors _meta.
+      expect(headerOf(init, "mcp-method")).toBe(method);
+      expect(headerOf(init, "mcp-protocol-version")).toBe("2026-07-28");
+    }
+    const callInit = fetchMock.mock.calls.find(
+      ([, i]) => readRpcMethod(i as RequestInit) === "tools/call",
+    )?.[1];
+    // Mcp-Name mirrors params.name; the x-mcp-header-designated argument rides
+    // as an Mcp-Param-* header.
+    expect(headerOf(callInit, "mcp-name")).toBe("get_weather");
+    expect(headerOf(callInit, "mcp-param-region")).toBe("us-west1");
+    expect(headerOf(callInit, "mcp-param-query")).toBeUndefined();
+    await client.disconnect();
+  });
+
+  it("excludes a tool whose x-mcp-header annotations are invalid, keeping the rest", async () => {
+    const BAD = {
+      name: "bad_tool",
+      description: "malformed annotation",
+      inputSchema: {
+        type: "object",
+        properties: { n: { type: "number", "x-mcp-header": "N" } },
+      },
+    };
+    const GOOD = {
+      name: "good_tool",
+      description: "fine",
+      inputSchema: { type: "object", properties: { q: { type: "string" } } },
+    };
+    const { client } = rcHttpClient("xh", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [BAD, GOOD] });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    // Failure isolation (spec MUST): only the malformed tool is rejected.
+    expect(client.getState().registeredTools).toEqual(["mcp_xh_good_tool"]);
+    await client.disconnect();
+  });
+
   it("falls back to the legacy initialize handshake when server/discover answers -32601 (dual-era exception)", async () => {
     const { client, fetchMock } = rcHttpClient("legacy", (method, id) => {
       if (method === "server/discover") return jsonRpcErrorResponse(id, -32601, "Method not found");
