@@ -26,13 +26,15 @@ import {
 } from "./plugin-ui-resource-provider.js";
 import type { McpUiResourceMeta } from "./types.js";
 
-const MCP_PROTOCOL_VERSION = "2026-07-28";
-const META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
-
-const RPC_METHOD_NOT_FOUND = -32601;
-const RPC_RESOURCE_NOT_FOUND = -32002;
-const RPC_INVALID_PARAMS = -32602;
-const RPC_UNSUPPORTED_PROTOCOL_VERSION = -32004;
+import {
+  MCP_PROTOCOL_VERSION,
+  META_PROTOCOL_VERSION,
+  RPC_METHOD_NOT_FOUND,
+  RPC_RESOURCE_NOT_FOUND,
+  RPC_INVALID_PARAMS,
+  RPC_UNSUPPORTED_PROTOCOL_VERSION,
+} from "./protocol-constants.js";
+import { PLUGIN_RESULT_CACHE } from "./plugin-server-projection.js";
 
 /** One content block of a tool result (a 2026-07-28 `CallToolResult` content). */
 export interface PluginToolContent {
@@ -76,7 +78,8 @@ export class PluginMcpServer {
     /**
      * Serves this plugin's declared `ui://` resources (MCP App cards). Absent
      * when the plugin ships no `uiResources[]`; a `resources/read` then always
-     * fails-closed with `-32002`, and `resources/list` returns an empty set.
+     * fails-closed with resource-not-found, and `resources/list` returns an
+     * empty set.
      */
     private readonly uiResources?: PluginUiResourceProvider,
   ) {}
@@ -103,14 +106,22 @@ export class PluginMcpServer {
         return {
           jsonrpc: "2.0",
           id,
-          result: { resultType: "complete", tools: manifestToolsToMcpTools(this.manifest) },
+          result: {
+            resultType: "complete",
+            ...PLUGIN_RESULT_CACHE,
+            tools: manifestToolsToMcpTools(this.manifest),
+          },
         };
 
       case "resources/list":
         return {
           jsonrpc: "2.0",
           id,
-          result: { resultType: "complete", resources: this.uiResources?.list() ?? [] },
+          result: {
+            resultType: "complete",
+            ...PLUGIN_RESULT_CACHE,
+            resources: this.uiResources?.list() ?? [],
+          },
         };
 
       case "resources/read": {
@@ -126,7 +137,7 @@ export class PluginMcpServer {
         // Fail-closed: no provider ⇒ this plugin serves no ui:// resource. The
         // provider itself enforces own-namespace-only + declared-only + path
         // containment (the single chokepoint), so a denied/undeclared/escaping
-        // uri surfaces here as `-32002` — never a served body.
+        // uri surfaces here as resource-not-found — never a served body.
         if (!this.uiResources) {
           return {
             jsonrpc: "2.0",
@@ -148,7 +159,7 @@ export class PluginMcpServer {
           return {
             jsonrpc: "2.0",
             id,
-            result: { resultType: "complete", contents: [content] },
+            result: { resultType: "complete", ...PLUGIN_RESULT_CACHE, contents: [content] },
           };
         } catch (err) {
           return {
@@ -210,9 +221,9 @@ export class PluginMcpServer {
   }
 
   /**
-   * Validate the client's advertised protocol version (RC `_meta`). A request
+   * Validate the client's advertised protocol version (`_meta`). A request
    * with no `_meta` protocol version is tolerated (e.g. an internal caller);
-   * an explicit mismatch is rejected with `-32004` per §8.
+   * an explicit mismatch is rejected with `-32022` per §8.
    */
   private checkProtocolVersion(
     params: Record<string, unknown> | undefined,
