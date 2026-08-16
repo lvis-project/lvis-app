@@ -382,7 +382,91 @@ or breaking live plugins — all No-Fallback violations.
 - **Signed-zip artifact format** — out-of-process stdio + new manifest/`_meta` fields version the artifact + SDK schema; define the re-sign + installed-plugin migration (`plugin-install-receipt.ts` SHA-256 pins). Decide at `untrusted-stdio-isolation`.
 - **Tasks extension draft pinning** — `experimental-ext-tasks` versions independently of the core RC; pin its draft schema (and re-check `DetailedTask`/`notifications/tasks`) at `tasks-extension`.
 - **Apps/Skills version pinning** — pin to the `2026-01-26`/Draft snapshots now (accept churn) or defer until they ride a dated RC. Decide at `apps-and-skills-extensions`.
-- **Per-request capability source** — the exact signals (turn consent state, headless/routine mode, #811 policy) that derive the host's per-request `clientCapabilities`. Decide at `mrtr-input-loop`/`governance-per-request`.
+- ~~**Per-request capability source**~~ — DECIDED (owner directive 2026-08-16, design in §6a): the provider derives from the active turn's interactivity plus hook policy, and the server-side capability snapshot becomes TTL-aware instead of connect-latched.
+
+---
+
+## 6a. `governance-per-request` server half + final-revision gap closure (owner-approved wave, 2026-08-16)
+
+Owner decision: implement the four deliberately-deferred final-revision gaps TOGETHER
+with the `governance-per-request` server half, design review first (this section is
+that review's artifact). Everything below preserves the §0 invariants: deny-by-default,
+single-chokepoint gating, No-Fallback.
+
+### 6a.1 Per-request `clientCapabilities` source (closes the §6 decision)
+
+`McpClientCapabilityProvider` (already injected, client half DONE §5a) is the ONLY
+authority. It derives, per outbound request:
+
+- **Interactive turn** → `{ elicitation: { form: {}, url: {} }, extensions: {} }` —
+  the host can gather approvals/input.
+- **Headless surface** (routine, scheduled run, no attached user surface) → `{ extensions: {} }` —
+  a server requiring elicitation gets a clean `-32021` instead of a hung approval.
+- **Hook veto**: when the #811 policy layer denies interactive gathering for the
+  invocation, the provider degrades to the headless shape for that request. The hook
+  remains a HOST layer — it shapes what we advertise; it never rewrites wire messages.
+
+Governance does not re-derive any of this: the provider decides, `_meta` carries it,
+and the server's `-32021` is the enforcement echo.
+
+### 6a.2 Capability snapshot with TTL (removes the connect-time latch)
+
+Replace the three latched booleans (`appsUiAdvertised` / `promptsAdvertised` /
+`resourcesAdvertised`, `mcp-client.ts`) with ONE `CapabilitySnapshot` authority:
+`{ discover: McpDiscoverResult, fetchedAt }`. Accessors answer every "did the server
+advertise X" question — including the §3.7 Apps `_meta.ui` honor gate — from the
+snapshot, and the snapshot refreshes itself:
+
+- **Expiry** = the server's own `DiscoverResult.ttlMs` (REQUIRED in the final schema;
+  this is what the field is FOR — we currently declare and never read it). Clamp to
+  `[30s, 24h]` so a hostile 1ms/`Infinity` TTL cannot thrash or pin the snapshot.
+- **Refresh** = single-flight `server/discover` re-issue on first expired read;
+  concurrent reads await the same refresh. Refresh FAILURE keeps serving the stale
+  snapshot for plain capability reads (availability) but the Apps `_meta.ui` honor
+  gate fails CLOSED on a stale-and-unrefreshable snapshot (it is a security gate,
+  not a convenience read — one chokepoint, two documented consumers).
+- The static `approval.allowedCapabilities` whitelist stays the ADMIN-policy SoT and
+  is already evaluated per-request (`validateRequestCapability`); the snapshot is the
+  SERVER-advertisement half of the same question. A request passes only when both say yes
+  — unchanged principle, now both halves are per-request.
+
+### 6a.3 `subscriptions/listen`
+
+After a final-mode discover that advertises any `listChanged`, the client opens ONE
+listen request per connection, opting into exactly the kinds advertised
+(`toolsListChanged`/`promptsListChanged`/`resourcesListChanged`; no
+`resourceSubscriptions` — no consumer). Mechanics:
+
+- The listen request bypasses the pending-request timeout map (it never completes by
+  design); its notifications flow through the existing `handleNotification` dispatch,
+  which already debounces/refreshes per kind. `io.modelcontextprotocol/subscriptionId`
+  is accepted and ignored (no multiplexing need at one stream per connection).
+- HTTP: the response SSE stream IS the channel; on stream drop, re-open with capped
+  backoff — losing the stream only degrades freshness (lists refresh on the next
+  snapshot expiry), never correctness.
+- stdio: same request; the pipe is the stream.
+- Governance: `subscriptions/listen` joins `CONTROL_METHODS` — it exercises no gated
+  capability itself (each notification-driven refresh re-enters the gated
+  `tools/list`/`prompts/list`/`resources/list` paths, which stay the chokepoints).
+
+### 6a.4 Small conformance closures riding the same wave
+
+- **`serverInfo` result-`_meta`**: `PluginMcpServer` stamps
+  `io.modelcontextprotocol/serverInfo` (name/version from the manifest) on every
+  result (`META_SERVER_INFO` returns to `protocol-constants.ts` with this consumer).
+- **HeaderMismatch retry**: on a `-32020` rejection of a `tools/call` that carried
+  `Mcp-Param-*` mirrors, refresh `tools/list` (annotations re-validated) and retry
+  ONCE; a second `-32020` propagates. (`RPC_HEADER_MISMATCH` returns with this consumer.)
+
+### 6a.5 Review + gate notes
+
+Permissions-sensitive surface: `mcp-governance.ts` classification change
+(`subscriptions/listen` as control) and the Apps honor-gate consumer moving onto the
+snapshot accessor. Implementation follows only after this section merges through
+review. Conformance fixtures: snapshot expiry/refresh (fake timers), listen-stream
+notification round-trip, fail-closed Apps gate on unrefreshable snapshot, `-32020`
+single-retry. `src/mcp` stays non-cluster-sensitive; the governance file edit rides
+the normal review.
 
 ---
 
