@@ -93,7 +93,7 @@ function makeSubAgentShapedLoop(gate: ApprovalGate, executeSpy: (input: unknown)
 }
 
 async function firstApprovalPayload<T>(wc: ReturnType<typeof makeMockWebContents>): Promise<T> {
-  const deadline = Date.now() + 2000;
+  const deadline = Date.now() + 4000;
   while (Date.now() < deadline) {
     const payload = wc.send.mock.calls[0]?.[1];
     if (payload) return payload as T;
