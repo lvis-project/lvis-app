@@ -2222,7 +2222,11 @@ describe("ToolExecutor — D4 ordered approval/execution (§4.5.3)", () => {
       { sessionId: "sess-parallel-safe", permissionContext: userPermissionContext() },
     );
 
-    const deadline = Date.now() + 1000;
+    // Generous start deadline: this poll exits within milliseconds once both
+    // executes are scheduled — the slack only matters under full-suite CPU
+    // saturation, where the previous 1s deadline expired before the second
+    // tool got a tick and failed the gate on unrelated pushes.
+    const deadline = Date.now() + 8000;
     while (started.length < 2 && Date.now() < deadline) {
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
@@ -2233,7 +2237,7 @@ describe("ToolExecutor — D4 ordered approval/execution (§4.5.3)", () => {
     const results = await execPromise;
     expect(results.map((result) => result.tool_use_id)).toEqual(["pa", "pb"]);
     expect(results.map((result) => result.content)).toEqual(["A", "B"]);
-  });
+  }, 15000);
 
   it("hands the turn's abort signal to the approval gate and reports a stop as a stop", async () => {
     const executeSpy = vi.fn(async () => "should-not-run");
