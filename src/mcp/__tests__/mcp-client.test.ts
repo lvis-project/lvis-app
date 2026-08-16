@@ -1363,6 +1363,106 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await client.disconnect();
   });
 
+  it("opens subscriptions/listen with exactly the advertised listChanged kinds", async () => {
+    const listenParams: unknown[] = [];
+    const { client, fetchMock } = rcHttpClient("lsn", (method, id) => {
+      if (method === "server/discover")
+        return jsonRpcResponse(id, {
+          ...RC_DISCOVER_RESULT,
+          capabilities: { tools: { listChanged: true }, prompts: { listChanged: true } },
+        });
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "subscriptions/listen") return jsonRpcResponse(id, { resultType: "complete" });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    // The listen request is fired-and-forgotten at connect; give its async
+    // send chain a beat to reach the fetch stub before scanning calls.
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    for (const [, init] of fetchMock.mock.calls) {
+      if (readRpcMethod(init as RequestInit) === "subscriptions/listen") {
+        listenParams.push(readRpcParams(init as RequestInit)?.notifications);
+      }
+    }
+    expect(listenParams).toEqual([{ toolsListChanged: true, promptsListChanged: true }]);
+    await client.disconnect();
+  });
+
+  it("does NOT open a listen stream when the server advertises no listChanged", async () => {
+    const { client, fetchMock } = rcHttpClient("nolsn", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    const methods = fetchMock.mock.calls.map(([, i]) => readRpcMethod(i as RequestInit));
+    expect(methods).not.toContain("subscriptions/listen");
+    await client.disconnect();
+  });
+
+  it("drives refreshes from notifications on the listen stream; a stream end is non-fatal", async () => {
+    let listCalls = 0;
+    const TOOL_V1 = { name: "a", description: "v1", inputSchema: { type: "object", properties: {} } };
+    const TOOL_V2 = { name: "b", description: "v2", inputSchema: { type: "object", properties: {} } };
+    const { client } = rcHttpClient("lsn2", (method, id) => {
+      if (method === "server/discover")
+        return jsonRpcResponse(id, {
+          ...RC_DISCOVER_RESULT,
+          capabilities: { tools: { listChanged: true } },
+        });
+      if (method === "tools/list") {
+        listCalls += 1;
+        return jsonRpcResponse(id, { tools: listCalls === 1 ? [TOOL_V1] : [TOOL_V2] });
+      }
+      if (method === "subscriptions/listen")
+        // Ack + one change notification, then the stream ENDS (no final
+        // response) — expected for proxies/idle timeouts; must not kill the
+        // transport, only settle the listen request for re-open.
+        return sseResponse([
+          `data: {"jsonrpc":"2.0","method":"notifications/subscriptions/acknowledged"}\n\n`,
+          `data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\n\n`,
+        ]);
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    expect(client.getState().registeredTools).toEqual(["mcp_lsn2_a"]);
+    await new Promise((resolve) => setTimeout(resolve, 900));
+    // The notification refreshed tools, and the ended stream left the
+    // connection alive.
+    expect(listCalls).toBe(2);
+    expect(client.getState().registeredTools).toEqual(["mcp_lsn2_b"]);
+    expect(client.getState().status).toBe("connected");
+    await client.disconnect();
+  }, 10000);
+
+  it("marks listen unsupported on -32601 and stops re-opening", async () => {
+    let listenCalls = 0;
+    const { client } = rcHttpClient("lsn3", (method, id) => {
+      if (method === "server/discover")
+        return jsonRpcResponse(id, {
+          ...RC_DISCOVER_RESULT,
+          capabilities: { tools: { listChanged: true } },
+        });
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [] });
+      if (method === "subscriptions/listen") {
+        listenCalls += 1;
+        return jsonRpcErrorResponse(id, -32601, "Method not found");
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    // Past the first re-open backoff window (1s): an advertisement without an
+    // implementation is remembered, not retried.
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    expect(listenCalls).toBe(1);
+    expect(client.getState().status).toBe("connected");
+    await client.disconnect();
+  }, 10000);
+
   it("retries ONCE after HeaderMismatch by refreshing tools/list and rebuilding the mirrors", async () => {
     // The server rotates its x-mcp-header name between discovery and the call.
     const toolWithHeader = (headerName: string) => ({
