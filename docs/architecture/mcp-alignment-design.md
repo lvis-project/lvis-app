@@ -61,7 +61,7 @@ The **LVIS host becomes an MCP _host_** that runs **one MCP client per loaded pl
 | Plugin UI (`PluginUiExtension[]`, embedded host viewport) (`src/plugins/public-contract.ts`) | **MCP Apps** `io.modelcontextprotocol/ui` (`_meta.ui`→`ui://` resource, `text/html;profile=mcp-app`) | Electron host uses isolated embedded webviews plus renderer-native fullscreen/PiP surfaces under a host-built CSP. **Apps version axis is SEPARATE** (SEP-1865 / snapshot `2026-01-26`, postMessage `2025-06-18`) — do not couple to the core-RC milestone. |
 | Skills (`SkillOverlay`, `SKILL.md`+`references/`) (`src/main/skill-overlay.ts`) | **Skills over MCP** `io.modelcontextprotocol/skills` (skills as `skill://` Resources) | Maps cleanly (no new RPC); **SEP-2640 is Draft** — pin schema before building; never auto-execute skill-declared code without per-skill opt-in. |
 
-**GAPS now resolved (see §8 for the verified shapes):** Tasks lives in a **separate** extension repo (`experimental-ext-tasks`) with methods `tasks/get`/`tasks/update`/`tasks/cancel`; `DiscoverResult.ttlMs`/`cacheScope` are **real required** fields (`CacheableResult`); `resultType` core enum is `"complete" | "input_required"` (`"task"` is extension-only); MRTR retries the **same** request with `inputResponses`+echoed `requestState` (no new id); errors are `-32003` (missing client capability) / `-32004` (unsupported version) — **no "input-required error"**; there is **no `subscriptionId` `_meta` key**; `sampling`/`roots`/`logging` are **deprecated** (SEP-2577). Still genuinely open: **MCP Apps** is not a `2026-07-28` artifact (SEP-1865, snapshot `2026-01-26`) and **Skills** SEP-2640 is Draft — both pinned at their own milestone.
+**GAPS now resolved (see §8 for the verified shapes):** Tasks lives in a **separate** extension repo (`experimental-ext-tasks`) with methods `tasks/get`/`tasks/update`/`tasks/cancel`; `DiscoverResult.ttlMs`/`cacheScope` are **real required** fields (`CacheableResult`); `resultType` core enum is `"complete" | "input_required"` (`"task"` is extension-only); MRTR retries the **same** request with `inputResponses`+echoed `requestState` (no new id); errors are `-32021` (missing client capability) / `-32022` (unsupported version) after final renumbering — **no "input-required error"**; `sampling`/`roots`/`logging` are **deprecated** (SEP-2577). Still genuinely open: **MCP Apps** is not a `2026-07-28` artifact (SEP-1865, snapshot `2026-01-26`) and **Skills** SEP-2640 is Draft — both pinned at their own milestone.
 
 ---
 
@@ -183,7 +183,7 @@ Built + tested (one module each, all green under `bun run test:vitest -- run src
 - `plugin-server-projection.ts` — manifest/`toolSchemas` → `server/discover` +
   `tools/list` (dialect → 2020-12; authority under `lvisai/*` `_meta`).
 - `plugin-mcp-server.ts` — the RC server methods (`server/discover`/`tools/list`/
-  `tools/call`); thrown delegate → `isError` CallToolResult; `-32004` on bad version.
+  `tools/call`); thrown delegate → `isError` CallToolResult; `-32022` on bad version.
 - `loopback-transport.ts` — in-process `McpTransport` (client ↔ server, no socket).
 - `plugin-tool-from-mcp.ts` — **reverse** projection: discovered MCP tool →
   canonical `Tool`, authority read back from `_meta` (the "category SOT from
@@ -398,10 +398,14 @@ or breaking live plugins — all No-Fallback violations.
 
 ---
 
-## 8. Verified RC wire shapes (pinned to upstream `schema/draft/schema.ts`)
+## 8. Verified RC wire shapes (re-pinned to the FINAL `schema/2026-07-28/schema.ts`)
 
-Quoted/condensed from `modelcontextprotocol/modelcontextprotocol@main schema/draft/schema.ts`
-(`LATEST_PROTOCOL_VERSION = "2026-07-28"`) and `modelcontextprotocol/experimental-ext-tasks` (Tasks).
+Quoted/condensed from `modelcontextprotocol/modelcontextprotocol@main schema/2026-07-28/schema.ts`
+(the revision is now **Final/current**) and `modelcontextprotocol/experimental-ext-tasks` (Tasks).
+Finalization changed two things vs the draft this section was first pinned to: the
+spec-reserved error codes moved into the `-32020..-32099` partition, and the
+`io.modelcontextprotocol/subscriptionId` notification-`_meta` key was added. Both are
+reflected below; the shared wire constants live in `src/mcp/protocol-constants.ts`.
 
 **Per-request `_meta` (REQUIRED on every request — `RequestParams._meta` is required):**
 ```ts
@@ -422,11 +426,11 @@ RequestMetaObject {
 
 **Elicitation** `elicitation/create`: form `{mode?:"form", message, requestedSchema}` or url `{mode:"url", message, elicitationId, url}` → `ElicitResult { action: "accept"|"decline"|"cancel"; content? }`.
 
-**Errors:** `-32003` `MISSING_REQUIRED_CLIENT_CAPABILITY` (`data.requiredCapabilities`; HTTP 400); `-32004` `UNSUPPORTED_PROTOCOL_VERSION` (`data.{supported,requested}`). **No "input-required" error code** — input-required is a success `resultType`. Method gated behind an unadvertised *server* capability ⇒ `-32601`.
+**Errors (final numbering):** `-32021` `MISSING_REQUIRED_CLIENT_CAPABILITY` (`data.requiredCapabilities`; HTTP 400); `-32022` `UNSUPPORTED_PROTOCOL_VERSION` (`data.{supported,requested}`); `-32020` `HEADER_MISMATCH` (Streamable HTTP header/body mismatch, HTTP 400). Resource-not-found rides `-32602` (Invalid Params); the pre-final `-32002` is burned and MUST NOT be reused. **No "input-required" error code** — input-required is a success `resultType`. Method gated behind an unadvertised *server* capability ⇒ `-32601`.
 
 **Capabilities:** `ClientCapabilities { experimental?; roots?(dep); sampling?(dep); elicitation?{form?,url?}; extensions? }`; `ServerCapabilities { experimental?; logging?(dep); completions?; prompts?{listChanged?}; resources?{subscribe?,listChanged?}; tools?{listChanged?}; extensions? }`. `extensions` keys MUST be prefixed (e.g. `"io.modelcontextprotocol/tasks"`).
 
-**`subscriptions/listen`** params `{ notifications: SubscriptionFilter{ toolsListChanged?, promptsListChanged?, resourcesListChanged?, resourceSubscriptions?: string[] } }`; server first sends `notifications/subscriptions/acknowledged`. Updates: `notifications/resources/updated {uri}`, `notifications/{tools,prompts,resources}/list_changed`. **No `subscriptionId` `_meta` key exists.**
+**`subscriptions/listen`** params `{ notifications: SubscriptionFilter{ toolsListChanged?, promptsListChanged?, resourcesListChanged?, resourceSubscriptions?: string[] } }`; server first sends `notifications/subscriptions/acknowledged`. Updates: `notifications/resources/updated {uri}`, `notifications/{tools,prompts,resources}/list_changed`. The server tags each delivered notification's `_meta` with `io.modelcontextprotocol/subscriptionId` (added at finalization — the draft had no such key).
 
 **Tool:** `{ name, title?, icons?, description?, inputSchema:{type:"object", $schema?}, outputSchema?, annotations?:ToolAnnotations, _meta? }`. **JSON Schema dialect = 2020-12** (default when no `$schema`). `ToolAnnotations { title?; readOnlyHint?=false; destructiveHint?=true; idempotentHint?=false; openWorldHint?=true }`.
 
@@ -434,7 +438,7 @@ RequestMetaObject {
 
 **Tasks (`experimental-ext-tasks`):** methods `tasks/get` / `tasks/update {taskId, inputResponses}` / `tasks/cancel {taskId}`; `CreateTaskResult = Result & Task` with `resultType:"task"`; `Task {taskId, status: "working"|"input_required"|"completed"|"failed"|"cancelled", createdAt, lastUpdatedAt, ttlMs|null, pollIntervalMs?}`; `notifications/tasks` carries the full `DetailedTask`; subscribe via `subscriptions/listen` + `{taskIds}`.
 
-**Corrections vs the earlier prose research:** `-32003`/`-32004` meanings (were swapped); no input-required error path; no `subscriptionId` key; Tasks methods are `get/update/cancel` (not `tasks/result`) and live in a separate repo; `"task"` resultType is extension-only; `ttlMs`/`cacheScope` are required; `sampling`/`roots`/`logging` deprecated (SEP-2577).
+**Corrections vs the earlier prose research:** the missing-capability/unsupported-version error meanings (were swapped; now `-32021`/`-32022` after final renumbering); no input-required error path; Tasks methods are `get/update/cancel` (not `tasks/result`) and live in a separate repo; `"task"` resultType is extension-only; `ttlMs`/`cacheScope` are required (on `DiscoverResult` AND every `List*`/`ReadResource` result); `sampling`/`roots`/`logging` deprecated (SEP-2577).
 
 ---
 

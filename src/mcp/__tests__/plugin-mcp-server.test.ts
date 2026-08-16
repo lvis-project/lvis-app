@@ -38,18 +38,27 @@ describe("PluginMcpServer — RC server methods (#1230 §3.1)", () => {
     expect(res.error).toBeUndefined();
     expect(res.result).toMatchObject({
       resultType: "complete",
+      ttlMs: 3_600_000,
+      cacheScope: "private",
       supportedVersions: ["2026-07-28"],
       serverInfo: { name: "FS", version: "1.0.0" },
-      capabilities: { tools: { listChanged: true } },
+      // `false` until a real notification emitter exists — the loopback
+      // transport is request/response-only, so `true` was unfulfillable.
+      capabilities: { tools: { listChanged: false } },
     });
   });
 
   it("answers tools/list with projected tools (explicit _meta.ui.visibility, no wire category)", async () => {
     const res = (await server.handle(req("tools/list", { ...RC_META }))).result as {
       resultType: string;
+      ttlMs: number;
+      cacheScope: string;
       tools: Array<{ name: string; _meta: Record<string, unknown> }>;
     };
     expect(res.resultType).toBe("complete");
+    // `CacheableResult` fields are REQUIRED on list results (final schema).
+    expect(res.ttlMs).toBe(3_600_000);
+    expect(res.cacheScope).toBe("private");
     expect(res.tools.map((t) => t.name)).toEqual(["fs_read"]);
     // #885 v6 — visibility is emitted explicitly; category is REMOVED from the wire.
     expect((res.tools[0]._meta as { ui: { visibility: string[] } }).ui.visibility).toEqual(["model"]);
@@ -93,11 +102,11 @@ describe("PluginMcpServer — RC server methods (#1230 §3.1)", () => {
     expect(res.error?.code).toBe(-32601);
   });
 
-  it("rejects an unsupported protocol version in _meta (-32004)", async () => {
+  it("rejects an unsupported protocol version in _meta (-32022)", async () => {
     const res = await server.handle(
       req("tools/list", { _meta: { "io.modelcontextprotocol/protocolVersion": "2024-11-05" } }),
     );
-    expect(res.error?.code).toBe(-32004);
+    expect(res.error?.code).toBe(-32022);
     expect(res.error?.data).toMatchObject({ supported: ["2026-07-28"], requested: "2024-11-05" });
   });
 
@@ -124,6 +133,8 @@ describe("PluginMcpServer — resources/read + resources/list (ui:// serving sea
     expect(res.error).toBeUndefined();
     expect(res.result).toEqual({
       resultType: "complete",
+      ttlMs: 3_600_000,
+      cacheScope: "private",
       contents: [
         {
           uri: CARD_URI,
@@ -135,13 +146,14 @@ describe("PluginMcpServer — resources/read + resources/list (ui:// serving sea
     });
   });
 
-  it("rejects a cross-plugin uri authority with -32002 (own-namespace-only, fail-closed)", async () => {
+  it("rejects a cross-plugin uri authority with -32602 (own-namespace-only, fail-closed)", async () => {
     const server = new PluginMcpServer(MANIFEST, delegate, provider);
     const res = await server.handle(
       req("resources/read", { uri: "ui://other-plugin/card.html", ...RC_META }),
     );
     expect(res.result).toBeUndefined();
-    expect(res.error?.code).toBe(-32002);
+    // Resource-not-found rides -32602 since the final revision (-32002 is burned).
+    expect(res.error?.code).toBe(-32602);
   });
 
   it("rejects resources/read without a string uri (-32602)", async () => {
@@ -150,10 +162,10 @@ describe("PluginMcpServer — resources/read + resources/list (ui:// serving sea
     expect(res.error?.code).toBe(-32602);
   });
 
-  it("fails-closed with -32002 when the plugin serves NO ui:// resources (no provider)", async () => {
+  it("fails-closed with -32602 when the plugin serves NO ui:// resources (no provider)", async () => {
     const server = new PluginMcpServer(MANIFEST, delegate);
     const res = await server.handle(req("resources/read", { uri: CARD_URI, ...RC_META }));
-    expect(res.error?.code).toBe(-32002);
+    expect(res.error?.code).toBe(-32602);
   });
 
   it("lists declared resources; empty when no provider", async () => {

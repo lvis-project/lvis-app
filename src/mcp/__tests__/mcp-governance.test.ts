@@ -552,14 +552,15 @@ describe("McpGovernance — per-request capability gate (governance-per-request)
     const gov = governanceWithPolicy(basePolicy({ allowedCapabilities: [] }));
     expect(gov.validateRequestCapability("browser-use", "server/discover").valid).toBe(true);
     expect(gov.validateRequestCapability("browser-use", "initialize").valid).toBe(true);
-    expect(gov.validateRequestCapability("browser-use", "ping").valid).toBe(true);
     expect(gov.validateRequestCapability("browser-use", "notifications/initialized").valid).toBe(true);
   });
 
   it("fail-closed: denies an unclassified (non-control, uncapability) method", () => {
     // CRITIC finding — unknown capability verbs must NOT sail through ungated.
     const gov = governanceWithPolicy(basePolicy({ allowedCapabilities: ["tools"] }));
-    for (const method of ["completion/complete", "logging/setLevel", "resources/unsubscribe", "wat/evil"]) {
+    // `ping` and `resources/subscribe`/`unsubscribe` were removed by the final
+    // `2026-07-28` revision — declassified here, so they fail closed too.
+    for (const method of ["completion/complete", "logging/setLevel", "resources/subscribe", "resources/unsubscribe", "ping", "wat/evil"]) {
       expect(gov.validateRequestCapability("browser-use", method).valid, method).toBe(false);
     }
   });
