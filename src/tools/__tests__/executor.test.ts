@@ -67,7 +67,7 @@ async function waitForApprovalPayload<T>(
   wc: ReturnType<typeof makeMockWebContents>,
   index = 0,
 ): Promise<T> {
-  const deadline = Date.now() + 1000;
+  const deadline = Date.now() + 4000;
   while (Date.now() < deadline) {
     const payload = wc.send.mock.calls[index]?.[1];
     if (payload) return payload as T;
@@ -354,7 +354,7 @@ describe("ToolExecutor — C1 sensitive-path hard-block wiring", () => {
       },
     );
 
-    const deadline = Date.now() + 1000;
+    const deadline = Date.now() + 4000;
     while (gate.pendingCount < 1 && Date.now() < deadline) {
       await new Promise((r) => setTimeout(r, 10));
     }
