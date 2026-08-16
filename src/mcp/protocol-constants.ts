@@ -38,11 +38,11 @@ export const MCP_SUPPORTED_LEGACY_VERSIONS: readonly string[] = [
 ];
 
 // ─── Reserved per-request `_meta` keys (`RequestMetaObject`) ───
-// (`io.modelcontextprotocol/serverInfo` — the result-`_meta` identity a server
-// SHOULD stamp — joins this list when the stamping lands.)
 export const META_PROTOCOL_VERSION = "io.modelcontextprotocol/protocolVersion";
 export const META_CLIENT_INFO = "io.modelcontextprotocol/clientInfo";
 export const META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilities";
+/** Reserved result-`_meta` key a server SHOULD stamp with its identity. */
+export const META_SERVER_INFO = "io.modelcontextprotocol/serverInfo";
 
 // ─── JSON-RPC 2.0 codes ───
 export const RPC_INVALID_PARAMS = -32602;
@@ -56,7 +56,6 @@ export const RPC_METHOD_NOT_FOUND = -32601;
 export const RPC_RESOURCE_NOT_FOUND = -32602;
 
 // ─── MCP-reserved partition (`-32020..-32099`), final numbering ───
-// (`-32020` HeaderMismatch joins when the client grows a consumer for it —
-// the header-mismatch retry lands with the dual-era fallback rework.)
+export const RPC_HEADER_MISMATCH = -32020;
 export const RPC_MISSING_REQUIRED_CLIENT_CAPABILITY = -32021;
 export const RPC_UNSUPPORTED_PROTOCOL_VERSION = -32022;

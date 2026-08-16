@@ -73,7 +73,28 @@ describe("PluginMcpServer — RC server methods (#1230 §3.1)", () => {
     expect(res.result).toEqual({
       resultType: "complete",
       content: [{ type: "text", text: "file-body" }],
+      // Every result carries the reserved serverInfo identity (spec SHOULD).
+      _meta: { "io.modelcontextprotocol/serverInfo": { name: "FS", version: "1.0.0" } },
     });
+  });
+
+  it("merges the serverInfo stamp with a tool result's own _meta (ui preserved)", async () => {
+    const withUi: PluginToolDelegate = async () => ({
+      content: [{ type: "text", text: "card" }],
+      _meta: { ui: { resourceUri: "ui://com.example.fs/card.html" } },
+    });
+    const res = await new PluginMcpServer(MANIFEST, withUi).handle(
+      req("tools/call", { name: "fs_read", arguments: {}, ...RC_META }),
+    );
+    const meta = (res.result as { _meta: Record<string, unknown> })._meta;
+    expect(meta.ui).toEqual({ resourceUri: "ui://com.example.fs/card.html" });
+    expect(meta["io.modelcontextprotocol/serverInfo"]).toEqual({ name: "FS", version: "1.0.0" });
+  });
+
+  it("does NOT stamp serverInfo onto JSON-RPC errors", async () => {
+    const res = await server.handle(req("frobnicate", { ...RC_META }));
+    expect(res.result).toBeUndefined();
+    expect(res.error?.code).toBe(-32601);
   });
 
   it("surfaces a thrown delegate as isError content (not a JSON-RPC error)", async () => {
@@ -135,6 +156,7 @@ describe("PluginMcpServer — resources/read + resources/list (ui:// serving sea
       resultType: "complete",
       ttlMs: 3_600_000,
       cacheScope: "private",
+      _meta: { "io.modelcontextprotocol/serverInfo": { name: "FS", version: "1.0.0" } },
       contents: [
         {
           uri: CARD_URI,
