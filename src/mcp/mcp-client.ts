@@ -379,6 +379,7 @@ import {
   META_PROTOCOL_VERSION,
   META_CLIENT_INFO,
   META_CLIENT_CAPABILITIES,
+  RPC_HEADER_MISMATCH,
   RPC_METHOD_NOT_FOUND,
   RPC_MISSING_REQUIRED_CLIENT_CAPABILITY,
   RPC_UNSUPPORTED_PROTOCOL_VERSION,
@@ -1168,13 +1169,38 @@ export class McpClient {
       // these argument values for HTTP-header duty at discovery; the transport
       // MUST carry them on the POST or a conformant server rejects with -32020.
       const annotations = this.paramHeaderAnnotations.get(name);
-      const sendOpts: McpSendOptions | undefined =
+      let sendOpts: McpSendOptions | undefined =
         annotations !== undefined
           ? { extraHeaders: extractParamHeaders(annotations, args) }
           : undefined;
+      let headerRetryDone = false;
       // eslint-disable-next-line no-constant-condition
       while (true) {
-        const result = await this.sendRequest<McpToolCallResult>("tools/call", params, timeoutMs, sendOpts);
+        let result: McpToolCallResult;
+        try {
+          result = await this.sendRequest<McpToolCallResult>("tools/call", params, timeoutMs, sendOpts);
+        } catch (err) {
+          // Spec client behavior on HeaderMismatch when we mirrored
+          // `Mcp-Param-*` headers: the tool's inputSchema may have changed —
+          // refresh `tools/list` (annotations re-validated), rebuild the
+          // mirrors, and retry ONCE. A second -32020 propagates.
+          if (
+            !headerRetryDone &&
+            err instanceof McpRpcError &&
+            err.code === RPC_HEADER_MISMATCH &&
+            sendOpts?.extraHeaders !== undefined
+          ) {
+            headerRetryDone = true;
+            await this.refreshTools();
+            const refreshed = this.paramHeaderAnnotations.get(name);
+            sendOpts =
+              refreshed !== undefined
+                ? { extraHeaders: extractParamHeaders(refreshed, args) }
+                : undefined;
+            continue;
+          }
+          throw err;
+        }
 
         if (result.resultType === "input_required") {
           rounds += 1;
