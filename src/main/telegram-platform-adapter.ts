@@ -6,7 +6,6 @@
  * decides which Telegram account is paired to a conversation; those remain
  * host-owned lifecycle and authorization concerns.
  */
-import { timingSafeEqual } from "node:crypto";
 import { performance } from "node:perf_hooks";
 import type {
   PlatformBridgeVerifiedEnvelope,
@@ -20,8 +19,6 @@ import type {
 } from "./platform-bridge-delivery.js";
 import { safeTrailingText } from "./platform-bridge-delivery.js";
 
-const TELEGRAM_SECRET_HEADER = "x-telegram-bot-api-secret-token";
-const MAX_TELEGRAM_SECRET_TOKEN_CHARS = 256;
 const MAX_TELEGRAM_BOT_TOKEN_CHARS = 256;
 /**
  * Telegram measures `sendMessage` text in UTF-16 code units, the same unit its
@@ -37,7 +34,6 @@ const DEFAULT_MIN_TELEGRAM_GLOBAL_INTERVAL_MS = Math.ceil(
   1_000 / FREE_TELEGRAM_GLOBAL_MESSAGES_PER_SECOND,
 );
 const DEFAULT_TELEGRAM_REQUEST_TIMEOUT_MS = 15_000;
-const TELEGRAM_SECRET_TOKEN = /^[A-Za-z0-9_-]{1,256}$/;
 // Telegram bot tokens are path material in the Bot API URL. Keep the grammar
 // deliberately narrow so configuration can never change the HTTPS endpoint.
 const TELEGRAM_BOT_TOKEN = /^[A-Za-z0-9:_-]{1,256}$/;
@@ -96,46 +92,6 @@ const TRANSIENT_STATUSES = new Set<TelegramStatusMessage["status"]>([
   "compaction-completed",
 ]);
 
-/** Configuration for Telegram's signed webhook verifier. */
-export interface CreateTelegramWebhookVerifierOptions {
-  /** Telegram's configured webhook `secret_token`; never logged or persisted here. */
-  readonly secretToken: string;
-}
-
-/**
- * Verify one Telegram webhook before decoding its body.
- *
- * The fixed secret header is Telegram's webhook authenticity mechanism. Header
- * authentication intentionally happens before even UTF-8/JSON decoding, so an
- * unauthenticated request cannot exercise the parser.
- */
-export function createTelegramWebhookVerifier(
-  options: CreateTelegramWebhookVerifierOptions,
-): PlatformBridgeWebhookVerifier {
-  const secretToken = readConfiguredSecretToken(options);
-  const expectedSecret = Buffer.from(secretToken, "utf8");
-
-  return Object.freeze({
-    verify(request: Readonly<unknown>): PlatformBridgeVerifiedEnvelope | undefined {
-      let authenticated = false;
-      try {
-        const presentedHeader = readSingleTelegramSecretHeader(request);
-        authenticated = presentedHeader !== undefined && constantTimeEquals(presentedHeader, expectedSecret);
-      } catch {
-        authenticated = false;
-      }
-      // The generic throw is intentional: the core distinguishes an
-      // unauthenticated webhook (`verification-failed`) from a correctly
-      // authenticated but unsupported Telegram Update (`invalid-envelope`).
-      if (!authenticated) throw telegramWebhookVerificationFailure();
-
-      // Do not touch rawBody until the signed header has been authenticated.
-      const rawBody = readRawBody(request);
-      if (rawBody === undefined) return undefined;
-      return parseTelegramTextUpdate(rawBody);
-    },
-  });
-}
 
 /**
  * Verify one Telegram Update that THIS host already fetched over its own
@@ -143,11 +99,9 @@ export function createTelegramWebhookVerifier(
  *
  * Authenticity here comes from TLS to api.telegram.org plus the bot token on
  * that outbound request — not from a signature over these bytes, because the
- * bytes are host-produced rather than attacker-presented. This is a separate
- * factory on purpose: adding a "skip the header when none is present" branch
- * to `createTelegramWebhookVerifier` would make the loopback webhook listener
- * forgeable by any local process. The shape allow-list is still applied, so a
- * compromised or unexpected Bot API response cannot widen the envelope.
+ * bytes are host-produced rather than attacker-presented. The shape allow-list
+ * is still applied, so a compromised or unexpected Bot API response cannot
+ * widen the envelope.
  */
 export function createTelegramPollingVerifier(): PlatformBridgeWebhookVerifier {
   return Object.freeze({
@@ -419,13 +373,6 @@ export function createTelegramOutboundTransport(
     },
   });
 }
-function readConfiguredSecretToken(options: unknown): string {
-  const secretToken = readOptionString(options, "secretToken");
-  if (!isValidTelegramSecretToken(secretToken)) {
-    throw new TypeError("telegram-webhook-secret-token-invalid");
-  }
-  return secretToken;
-}
 
 function readConfiguredBotToken(options: unknown): string {
   const botToken = readOptionString(options, "botToken");
@@ -441,11 +388,6 @@ function readOptionString(options: unknown, key: string): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-function isValidTelegramSecretToken(value: string | undefined): value is string {
-  return value !== undefined
-    && value.length <= MAX_TELEGRAM_SECRET_TOKEN_CHARS
-    && TELEGRAM_SECRET_TOKEN.test(value);
-}
 
 function isValidTelegramBotToken(value: string | undefined): value is string {
   return value !== undefined
@@ -453,34 +395,7 @@ function isValidTelegramBotToken(value: string | undefined): value is string {
     && TELEGRAM_BOT_TOKEN.test(value);
 }
 
-function readSingleTelegramSecretHeader(request: unknown): string | undefined {
-  if (!isDataRecord(request)) return undefined;
-  const headers = readOwnDataValue(request, "headers");
-  if (!isDataRecord(headers)) return undefined;
 
-  let value: string | undefined;
-  let count = 0;
-  for (const key of Reflect.ownKeys(headers)) {
-    if (typeof key !== "string") return undefined;
-    const descriptor = Object.getOwnPropertyDescriptor(headers, key);
-    if (descriptor === undefined || !("value" in descriptor)) return undefined;
-    if (key.toLowerCase() !== TELEGRAM_SECRET_HEADER) continue;
-    count += 1;
-    // Arrays represent duplicate header lines. A non-string is malformed.
-    if (count > 1 || typeof descriptor.value !== "string") return undefined;
-    value = descriptor.value;
-  }
-  return count === 1 ? value : undefined;
-}
-
-function constantTimeEquals(presented: string, expected: Buffer): boolean {
-  const candidate = Buffer.from(presented, "utf8");
-  try {
-    return candidate.length === expected.length && timingSafeEqual(candidate, expected);
-  } finally {
-    candidate.fill(0);
-  }
-}
 
 function readRawBody(request: unknown): Uint8Array | undefined {
   if (!isDataRecord(request)) return undefined;
@@ -856,8 +771,4 @@ async function isSuccessfulTelegramResponse(response: unknown): Promise<boolean>
 
 function telegramDeliveryFailure(): Error {
   return new Error("telegram-delivery-failed");
-}
-
-function telegramWebhookVerificationFailure(): Error {
-  return new Error("telegram-webhook-verification-failed");
 }

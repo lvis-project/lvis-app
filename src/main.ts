@@ -48,11 +48,7 @@ import {
   resolveTailnetObserverConfig,
 } from "./main/tailnet-surface-server.js";
 import { createTailnetPairedSharingRuntime } from "./main/tailnet-paired-sharing-runtime.js";
-import {
-  maybeStartTelegramBridgeServer,
-  resolveTelegramBridgeConfig,
-  stopTelegramBridgeServer,
-} from "./main/telegram-bridge-server.js";
+import { stopTelegramBridgeServer } from "./main/telegram-bridge-server.js";
 import { createTelegramConnectionStore } from "./main/telegram-connection-store.js";
 import { createTelegramConnectionService } from "./main/telegram-connection-service.js";
 import { createTelegramShareChangeWatcher } from "./main/telegram-share-identity.js";
@@ -215,18 +211,6 @@ async function main() {
 
 
 
-  // Telegram is a separately configured external-platform adapter with two
-  // mutually exclusive paths. When the launch environment configures it, that
-  // configuration wins and the owner surface is read-only; a leftover env var
-  // must never be silently overridden by stored state.
-  const telegramEnvManaged = (() => {
-    try {
-      return resolveTelegramBridgeConfig(process.env) !== null;
-    } catch {
-      // A malformed enabled configuration still means the environment owns it.
-      return true;
-    }
-  })();
   let telegramConnectionService:
     | ReturnType<typeof createTelegramConnectionService>
     | undefined;
@@ -268,7 +252,6 @@ async function main() {
       // never told a share points at something they cannot see.
       conversationExists: (conversationId: string) =>
         services.memoryManager.hasSessionTranscript(conversationId),
-      envManaged: telegramEnvManaged,
     });
     // Any change to the paired share retires an armed Away Authority grant.
     //
@@ -358,22 +341,10 @@ async function main() {
   }
 
   // Telegram is a separately configured external-platform adapter. It remains
-  // OFF unless the owner provides the explicit boot-only route and credential
-  // configuration; it neither changes Telegram's webhook configuration nor
-  // shares Tailnet, Local API, or A2A authority.
+  // OFF until the owner connects a bot from the desktop; it never registers a
+  // webhook and never shares Tailnet, Local API, or A2A authority.
   try {
-    if (telegramEnvManaged) {
-      const telegram = await maybeStartTelegramBridgeServer({
-        conversationSurfaceRuntime,
-        conversationCommandPort,
-        getCurrentConversationId,
-        getCurrentConversationEpoch: () => services.conversationLoop.getSessionEpoch(),
-        log: (message) => log.info(message),
-      });
-      if (telegram) {
-        log.info("telegram bridge listening on 127.0.0.1:" + telegram.port);
-      }
-    } else if (telegramConnectionService) {
+    if (telegramConnectionService) {
       // Resume whatever the owner left connected. A paused or disconnected
       // store is a no-op, so nothing reaches Telegram until they ask for it.
       await telegramConnectionService.resumeStoredConnection();
