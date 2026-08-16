@@ -1363,6 +1363,82 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await client.disconnect();
   });
 
+  it("retries ONCE after HeaderMismatch by refreshing tools/list and rebuilding the mirrors", async () => {
+    // The server rotates its x-mcp-header name between discovery and the call.
+    const toolWithHeader = (headerName: string) => ({
+      name: "q",
+      description: "q",
+      inputSchema: {
+        type: "object",
+        properties: { region: { type: "string", "x-mcp-header": headerName } },
+      },
+    });
+    let listCalls = 0;
+    let callCalls = 0;
+    const { client, fetchMock } = rcHttpClient("hm", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") {
+        listCalls += 1;
+        return jsonRpcResponse(id, {
+          tools: [toolWithHeader(listCalls === 1 ? "Region" : "Zone")],
+        });
+      }
+      if (method === "tools/call") {
+        callCalls += 1;
+        if (callCalls === 1) return jsonRpcErrorResponse(id, -32020, "Header mismatch");
+        return jsonRpcResponse(id, {
+          resultType: "complete",
+          content: [{ type: "text", text: "ok" }],
+        });
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    const result = await client.callTool("q", { region: "us-west1" });
+    expect(result.text).toBe("ok");
+    // One refresh between the two calls, and the SECOND call mirrors the
+    // renamed header from the refreshed schema.
+    expect(listCalls).toBe(2);
+    expect(callCalls).toBe(2);
+    const toolCallInits = fetchMock.mock.calls.filter(
+      ([, i]) => readRpcMethod(i as RequestInit) === "tools/call",
+    );
+    const secondCall = toolCallInits[toolCallInits.length - 1]?.[1];
+    const headers = (secondCall as RequestInit | undefined)?.headers as
+      | Record<string, string>
+      | undefined;
+    expect(headers?.["mcp-param-zone"]).toBe("us-west1");
+    expect(headers?.["mcp-param-region"]).toBeUndefined();
+    await client.disconnect();
+  });
+
+  it("propagates a second HeaderMismatch instead of retrying again", async () => {
+    const TOOL = {
+      name: "q",
+      description: "q",
+      inputSchema: {
+        type: "object",
+        properties: { region: { type: "string", "x-mcp-header": "Region" } },
+      },
+    };
+    let callCalls = 0;
+    const { client } = rcHttpClient("hm2", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") return jsonRpcResponse(id, { tools: [TOOL] });
+      if (method === "tools/call") {
+        callCalls += 1;
+        return jsonRpcErrorResponse(id, -32020, "Header mismatch");
+      }
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    await expect(client.callTool("q", { region: "x" })).rejects.toThrow(/-32020|Header mismatch/);
+    expect(callCalls).toBe(2);
+    await client.disconnect();
+  });
+
   it("re-discovers on snapshot expiry and honors the server's CURRENT advertisement", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
