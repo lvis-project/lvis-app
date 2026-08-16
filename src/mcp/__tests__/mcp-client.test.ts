@@ -1535,6 +1535,83 @@ describe("McpClient — 2026-07-28 RC stateless handshake (#1230)", () => {
     await expect(client.connect()).rejects.toThrow(/unsupported protocol '2019-01-01'/);
   });
 
+  it("routes an SSE-delivered tools/list_changed notification into a debounced tools refresh", async () => {
+    const TOOL_V1 = {
+      name: "alpha",
+      description: "v1",
+      inputSchema: { type: "object", properties: {} },
+    };
+    const TOOL_V2 = {
+      name: "beta",
+      description: "v2",
+      inputSchema: { type: "object", properties: {} },
+    };
+    let listCalls = 0;
+    const { client } = rcHttpClient("lc", (method, id) => {
+      if (method === "server/discover")
+        return jsonRpcResponse(id, {
+          ...RC_DISCOVER_RESULT,
+          capabilities: { tools: { listChanged: true } },
+        });
+      if (method === "tools/list") {
+        listCalls += 1;
+        return jsonRpcResponse(id, { tools: listCalls === 1 ? [TOOL_V1] : [TOOL_V2] });
+      }
+      if (method === "tools/call")
+        // Request-scoped SSE stream: a list_changed notification precedes the
+        // final response — previously both were silently dropped.
+        return sseResponse([
+          `data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\n\n`,
+          `data: {"jsonrpc":"2.0","id":${id},"result":{"resultType":"complete","content":[{"type":"text","text":"ok"}]}}\n\n`,
+        ]);
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    expect(client.getState().registeredTools).toEqual(["mcp_lc_alpha"]);
+
+    await client.callTool("alpha", {});
+    // Debounce (500ms) + refresh round-trip.
+    await new Promise((resolve) => setTimeout(resolve, 900));
+
+    expect(listCalls).toBe(2);
+    expect(client.getState().registeredTools).toEqual(["mcp_lc_beta"]);
+    await client.disconnect();
+  }, 10000);
+
+  it("keeps the previous registration when a list_changed-driven refresh fails", async () => {
+    const TOOL_V1 = {
+      name: "alpha",
+      description: "v1",
+      inputSchema: { type: "object", properties: {} },
+    };
+    let listCalls = 0;
+    const { client } = rcHttpClient("lcf", (method, id) => {
+      if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);
+      if (method === "tools/list") {
+        listCalls += 1;
+        if (listCalls === 1) return jsonRpcResponse(id, { tools: [TOOL_V1] });
+        return new Response("boom", { status: 500 });
+      }
+      if (method === "tools/call")
+        return sseResponse([
+          `data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\n\n`,
+          `data: {"jsonrpc":"2.0","id":${id},"result":{"resultType":"complete","content":[{"type":"text","text":"ok"}]}}\n\n`,
+        ]);
+      return new Response("unexpected", { status: 500 });
+    });
+
+    await client.connect();
+    await client.callTool("alpha", {});
+    await new Promise((resolve) => setTimeout(resolve, 900));
+
+    // The notification is advisory: a failed re-fetch must not tear down
+    // working tools.
+    expect(listCalls).toBe(2);
+    expect(client.getState().registeredTools).toEqual(["mcp_lcf_alpha"]);
+    await client.disconnect();
+  }, 10000);
+
   it("fails closed on input_required when no MRTR resolver is wired (No-Fallback)", async () => {
     const { client } = rcHttpClient("ir", (method, id) => {
       if (method === "server/discover") return jsonRpcResponse(id, RC_DISCOVER_RESULT);

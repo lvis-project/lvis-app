@@ -96,6 +96,12 @@ export interface JsonRpcResponse {
   id: number;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
+  /**
+   * Present on an id-less SERVER notification delivered on the same inbound
+   * channel (stdio pipe / SSE response stream). A response never carries it.
+   */
+  method?: string;
+  params?: Record<string, unknown>;
 }
 
 export type JsonRpcMessage = JsonRpcRequest | JsonRpcNotification | JsonRpcResponse;
@@ -408,6 +414,8 @@ const MAX_MRTR_ROUNDS = 8;
 const DEFAULT_TASK_POLL_INTERVAL_MS = 1_000;
 const MIN_TASK_POLL_INTERVAL_MS = 50;
 const MAX_TASK_POLLS = 600;
+/** Absorbs `notifications/tools/list_changed` bursts into one re-fetch. */
+const TOOLS_REFRESH_DEBOUNCE_MS = 500;
 
 // ─── Transport Strategy ──────────────────────────────
 
@@ -470,6 +478,9 @@ export class McpClient {
    * argument values into `Mcp-Param-{Name}` headers.
    */
   private readonly paramHeaderAnnotations = new Map<string, McpParamHeaderAnnotation[]>();
+  /** Debounce/refresh state for `notifications/tools/list_changed`. */
+  private toolsRefreshTimer: NodeJS.Timeout | null = null;
+  private toolsRefreshRunning = false;
 
   private readonly bufferedResponses = new Map<number, JsonRpcResponse>();
   private healthTimer: NodeJS.Timeout | null = null;
@@ -1548,6 +1559,13 @@ export class McpClient {
 
   private handleResponse(response: JsonRpcResponse): void {
     if (response.id === undefined || response.id === null) {
+      // Id-less inbound = a server NOTIFICATION (stdio push / SSE
+      // request-scoped event). These were previously dropped wholesale, which
+      // made every advertised `listChanged` capability and every
+      // `notifications/progress` unobservable.
+      if (typeof response.method === "string") {
+        this.handleNotification(response.method, response.params);
+      }
       return;
     }
 
@@ -1576,6 +1594,104 @@ export class McpClient {
   }
 
   /**
+   * Server-notification dispatch. Only notifications with a live meaning here
+   * are acted on; the rest are logged at debug so a dropped kind is diagnosable
+   * (the previous behavior was a silent wholesale drop).
+   */
+  private handleNotification(method: string, _params?: Record<string, unknown>): void {
+    switch (method) {
+      case "notifications/progress":
+        // A progress tick is proof of life for whatever is pending. The SSE
+        // chunk path already resets per-request activity timers for HTTP;
+        // this covers stdio, where nothing else does.
+        this.resetPendingTimers();
+        return;
+      case "notifications/tools/list_changed":
+        this.scheduleToolsRefresh();
+        return;
+      case "notifications/prompts/list_changed":
+        void this.discoverPrompts().catch((err) => {
+          log.warn(`${this.config.id} prompts refresh after list_changed failed: %s`, err);
+        });
+        return;
+      case "notifications/resources/list_changed":
+        void this.discoverResources()
+          .then(() => this.discoverResourceTemplates())
+          .catch((err) => {
+            log.warn(`${this.config.id} resources refresh after list_changed failed: %s`, err);
+          });
+        return;
+      default:
+        log.debug(`${this.config.id} unhandled server notification '${method}'`);
+    }
+  }
+
+  /**
+   * Debounced `tools/list` re-fetch after `notifications/tools/list_changed`.
+   * Debounce absorbs notification bursts; the guard keeps one refresh in
+   * flight. A refresh failure keeps the PREVIOUS registration (the notification
+   * is advisory — a fetch hiccup must not tear down working tools).
+   */
+  private scheduleToolsRefresh(): void {
+    if (this.toolsRefreshTimer) return;
+    this.toolsRefreshTimer = setTimeout(() => {
+      this.toolsRefreshTimer = null;
+      if (this.toolsRefreshRunning) {
+        // A burst landed during a running refresh — go again after it.
+        this.scheduleToolsRefresh();
+        return;
+      }
+      this.toolsRefreshRunning = true;
+      void this.refreshTools()
+        .catch((err) => {
+          log.warn(`${this.config.id} tools refresh after list_changed failed: %s`, err);
+        })
+        .finally(() => {
+          this.toolsRefreshRunning = false;
+        });
+    }, TOOLS_REFRESH_DEBOUNCE_MS);
+    this.toolsRefreshTimer.unref?.();
+  }
+
+  private async refreshTools(): Promise<void> {
+    if (this.state.status !== "connected") return;
+    const toolsResult = await this.sendRequest<McpToolsListResult>(
+      "tools/list",
+      {},
+      HANDSHAKE_TIMEOUT_MS,
+    );
+    const tools = this.applyParamHeaderConformance(toolsResult.tools ?? []);
+
+    // Validate against the registry MINUS this server's own registrations —
+    // otherwise the refresh would collide with itself on every unchanged name.
+    const ownNames = new Set(this.state.registeredTools);
+    const existingToolNames = new Set(
+      this.toolRegistry
+        .listAll()
+        .map((tool) => tool.name)
+        .filter((name) => !ownNames.has(name)),
+    );
+    const validation = this.governance.validateToolRegistration(
+      this.config.id,
+      tools,
+      existingToolNames,
+    );
+    if (!validation.valid) {
+      throw new Error(
+        `[mcp-client] ${t("be_mcpClient.toolRegistrationValidationFailed", { layer: String(validation.layer), reason: validation.reason })}`,
+      );
+    }
+
+    // Swap: registerTools rolls its own batch back on a partial failure, so the
+    // worst post-validation outcome is an empty (never half-updated) set.
+    this.clearRegisteredToolOverrides();
+    this.toolRegistry.unregisterByMcp(this.config.id);
+    this.state.registeredTools = [];
+    this.registerTools(tools);
+    log.info(`${this.config.id} tools refreshed: ${this.state.registeredTools.length} registered`);
+  }
+
+  /**
    * Drop everything discovery produced. Called by BOTH teardown paths, because a
    * catalogue that outlives its connection is worse than an empty one: every
    * consumer keeps offering names and URIs whose call can only fail, and the
@@ -1583,6 +1699,10 @@ export class McpClient {
    * tools and leave prompts and resources behind.
    */
   private clearDiscoveredSurfaces(): void {
+    if (this.toolsRefreshTimer) {
+      clearTimeout(this.toolsRefreshTimer);
+      this.toolsRefreshTimer = null;
+    }
     this.toolRegistry.unregisterByMcp(this.config.id);
     this.state.registeredTools = [];
     this.state.prompts = undefined;

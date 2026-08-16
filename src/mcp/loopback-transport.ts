@@ -38,13 +38,15 @@ export class LoopbackTransport implements McpTransport {
     }
     // Only requests (have both `method` and `id`) get a reply; notifications
     // (method, no id) are fire-and-forget; responses never travel client→server.
-    if (!("method" in message) || !("id" in message)) {
+    // (`method` is optional on every union arm now, so narrow by value.)
+    const method = "method" in message ? message.method : undefined;
+    if (typeof method !== "string" || !("id" in message)) {
       return;
     }
     const response = await this.server.handle({
       jsonrpc: "2.0",
       id: message.id,
-      method: message.method,
+      method,
       params: message.params,
     });
     queueMicrotask(() => {
