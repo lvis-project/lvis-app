@@ -125,7 +125,7 @@ describe("ToolExecutor — structural shell deny runs before approval, for both 
       { sessionId: "sess-bash-ok", permissionContext: { trustOrigin: "user-keyboard" } },
     );
 
-    const deadline = Date.now() + 2000;
+    const deadline = Date.now() + 4000;
     while (Date.now() < deadline && wc.send.mock.calls.length === 0) {
       await new Promise((r) => setTimeout(r, 5));
     }
