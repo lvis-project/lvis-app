@@ -232,6 +232,10 @@ async function main() {
           // A fatal poll outcome tears the activation down through the same
           // owner-initiated path a manual disconnect uses.
           stopBridge: () => stopTelegramBridgeServer("user"),
+          // Read at activation time, not boot order: the gate is created with
+          // the main window, after this service but before any owner-driven
+          // activation can run. Absent keeps approvals desk-only.
+          ...(services.approvalGate ? { approvalGate: services.approvalGate } : {}),
           log: (message: string) => log.info(message),
         }),
         stop: (reason: "shutdown" | "user") => stopTelegramBridgeServer(reason),

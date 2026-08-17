@@ -7,6 +7,7 @@ import {
   type TelegramPollingIngress,
   type TelegramPollingIngressOptions,
 } from "../telegram-polling-ingress.js";
+import { callbackUpdate } from "./telegram-bridge-fixtures.js";
 
 const OWNER_ID = 123456789;
 
@@ -189,6 +190,51 @@ describe("startTelegramPollingIngress", () => {
     // Not advancing would wedge the loop on this update forever.
     await vi.waitFor(() => expect(h.currentOffset()).toBe(301));
     expect(h.handleWebhook).not.toHaveBeenCalled();
+  });
+
+  it("hands a decision press to the callback handler, never to the conversation", async () => {
+    const onCallbackQuery = vi.fn(async () => {});
+    const h = harness({ onCallbackQuery });
+    h.queue({ ok: true, value: [callbackUpdate(310, "opaque-token-abc")] });
+    start(h.options);
+
+    await vi.waitFor(() => expect(onCallbackQuery).toHaveBeenCalledWith({
+      provider: "telegram",
+      callbackQueryId: "press-310",
+      senderId: String(OWNER_ID),
+      data: "opaque-token-abc",
+    }));
+    // A press is a decision signal, not conversation input.
+    expect(h.handleWebhook).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(h.currentOffset()).toBe(311));
+  });
+
+  it("consumes a press when no callback handler is wired, without wedging", async () => {
+    const lines: string[] = [];
+    const h = harness({ log: (message: string) => { lines.push(message); } });
+    h.queue({ ok: true, value: [callbackUpdate(320, "opaque-token-abc")] });
+    start(h.options);
+
+    // Re-polling an unhandled press could never help; it is consumed on
+    // purpose, so it must not be tallied as data loss either.
+    await vi.waitFor(() => expect(h.currentOffset()).toBe(321));
+    expect(h.handleWebhook).not.toHaveBeenCalled();
+    expect(lines.filter((line) => line.includes("pre-envelope drop"))).toEqual([]);
+  });
+
+  it("keeps polling when the callback handler itself throws", async () => {
+    const h = harness({
+      onCallbackQuery: vi.fn(async () => { throw new Error("handler down"); }),
+    });
+    h.queue({
+      ok: true,
+      value: [callbackUpdate(330, "opaque-token-abc"), textUpdate(331, "hello")],
+    });
+    start(h.options);
+
+    // The press is consumed and the following message still reaches the core.
+    await vi.waitFor(() => expect(h.currentOffset()).toBe(332));
+    expect(h.handleWebhook).toHaveBeenCalledTimes(1);
   });
 
   it("dispatches strictly one update at a time, in order", async () => {
