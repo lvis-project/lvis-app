@@ -158,6 +158,7 @@ export const esMessages: Record<string, string> = {
   "assistantCard.feedbackUp": "Esto fue útil",
   "assistantCard.forkButton": "Tenedor",
   "assistantCard.reasonPlaceholder": "Razón (opcional)",
+  "assistantCard.restoredNoticeBadge": "Error de una sesión anterior",
   "assistantCard.retryButton": "Reintentar (profundidad: alta)",
   "assistantCard.sendButton": "Enviar",
   "assistantCard.starButton": "Fijar",
