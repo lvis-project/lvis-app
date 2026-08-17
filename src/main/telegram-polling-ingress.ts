@@ -23,7 +23,11 @@ import {
   looksLikeTelegramPairingCode,
   telegramPairingCodeDigest,
 } from "./telegram-pairing-code.js";
-import { parseTelegramTextUpdate } from "./telegram-platform-adapter.js";
+import {
+  parseTelegramCallbackQueryUpdate,
+  parseTelegramTextUpdate,
+  type TelegramCallbackQueryEnvelope,
+} from "./telegram-platform-adapter.js";
 import type {
   PlatformBridgeInboundGateway,
   PlatformBridgeInboundResult,
@@ -133,6 +137,14 @@ export interface TelegramPollingIngressOptions {
   readonly notifyUnroutable?: (
     chatId: string,
     notice: TelegramControlNotice,
+  ) => void | Promise<void>;
+  /**
+   * Handler for a verified inline-keyboard press. Absent means every
+   * callback update is consumed and dropped — the loop must still advance
+   * past it, so a bridge without remote approval wired cannot wedge on one.
+   */
+  readonly onCallbackQuery?: (
+    callback: TelegramCallbackQueryEnvelope,
   ) => void | Promise<void>;
   readonly log?: (message: string) => void;
   /** Test seam; production sleeps on a timer that the abort signal cancels. */
@@ -386,6 +398,23 @@ async function handleUpdate(
   // trickle. The count is what separates those two, since the reason itself
   // cannot — telling them apart would mean reading the payload.
   if (envelope === undefined) {
+    // A button press is the one non-message update this loop acts on. It is
+    // parsed HERE, at the same parse point as messages, by the same
+    // fail-closed adapter posture — never routed through the conversation
+    // gateway, because a decision signal is not conversation input. Consumed
+    // whether or not a handler is wired: an unhandled press can never
+    // resolve anything, so re-polling it could never help.
+    const callback = parseTelegramCallbackQueryUpdate(update.rawBody);
+    if (callback !== undefined) {
+      if (options.onCallbackQuery !== undefined) {
+        try {
+          await options.onCallbackQuery(callback);
+        } catch {
+          options.log?.("[telegram-poll] callback handling failed");
+        }
+      }
+      return "advance";
+    }
     drops.record("unparsable-update");
     return "advance";
   }

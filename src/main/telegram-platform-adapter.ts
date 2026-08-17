@@ -55,6 +55,24 @@ const SAFE_NETWORK_ERROR_CODE = /^[A-Z][A-Z0-9_]{1,31}$/;
 const TELEGRAM_BOT_TOKEN = /^[A-Za-z0-9:_-]{1,256}$/;
 
 const ALLOWED_UPDATE_KEYS = new Set(["update_id", "message"]);
+const ALLOWED_CALLBACK_UPDATE_KEYS = new Set(["update_id", "callback_query"]);
+// The exact fields a private-chat button press carries. `message` and
+// `chat_instance` are admitted for PRESENCE only — a press on a real card
+// always echoes the card message — and are never read: the host keeps its own
+// nonce→card record, so nothing routing-relevant is taken from the wire.
+const ALLOWED_CALLBACK_QUERY_KEYS = new Set([
+  "id",
+  "from",
+  "message",
+  "chat_instance",
+  "data",
+]);
+/**
+ * The host mints callback tokens from this grammar and the parser re-applies
+ * it on the way back in, so a forged update carrying structured data — JSON,
+ * tool names, separators — dies here rather than reaching a handler.
+ */
+const OPAQUE_CALLBACK_TOKEN = /^[A-Za-z0-9_-]{1,64}$/;
 // Metadata the parser never reads, admitted so an ordinary DM is not rejected
 // for HOW it was composed:
 //
@@ -646,6 +664,70 @@ export function parseTelegramTextUpdate(
   });
 }
 
+/**
+ * One verified inline-keyboard press, reduced to the three facts the host
+ * needs: which query to acknowledge, who pressed, and the opaque token the
+ * host minted. Deliberately NOT a `PlatformBridgeVerifiedEnvelope`: a press is
+ * a decision signal, never conversation input, so it must not be submittable
+ * through the shared ingress gateway.
+ */
+export interface TelegramCallbackQueryEnvelope {
+  readonly provider: "telegram";
+  /** Provider-issued id, echoed back verbatim to `answerCallbackQuery`. */
+  readonly callbackQueryId: string;
+  readonly senderId: string;
+  /** Opaque host-minted token; the grammar admits nothing structured. */
+  readonly data: string;
+}
+
+/**
+ * Decode one Telegram `callback_query` update, or `undefined` for anything
+ * else. Same posture as {@link parseTelegramTextUpdate} and applied at the
+ * same ingress parse point: a strict key allow-list, fail-closed on every
+ * unknown shape, and nothing free-form admitted — the callback data must match
+ * the host's own opaque token grammar.
+ */
+export function parseTelegramCallbackQueryUpdate(
+  rawBody: Uint8Array,
+): TelegramCallbackQueryEnvelope | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(rawBody).toString("utf8"));
+  } catch {
+    return undefined;
+  }
+  if (!isDataRecord(parsed) || !hasOnlyOwnDataKeys(parsed, ALLOWED_CALLBACK_UPDATE_KEYS)) {
+    return undefined;
+  }
+  const updateId = readOwnDataValue(parsed, "update_id");
+  const callbackQuery = readOwnDataValue(parsed, "callback_query");
+  if (!isPositiveSafeInteger(updateId) || !isDataRecord(callbackQuery)) return undefined;
+  if (!hasOnlyOwnDataKeys(callbackQuery, ALLOWED_CALLBACK_QUERY_KEYS)) return undefined;
+
+  const callbackQueryId = readOwnDataValue(callbackQuery, "id");
+  const from = readOwnDataValue(callbackQuery, "from");
+  const data = readOwnDataValue(callbackQuery, "data");
+  if (
+    typeof callbackQueryId !== "string"
+    || !OPAQUE_CALLBACK_TOKEN.test(callbackQueryId)
+    || typeof data !== "string"
+    || !OPAQUE_CALLBACK_TOKEN.test(data)
+    || !isDataRecord(from)
+  ) {
+    return undefined;
+  }
+  const senderId = readOwnDataValue(from, "id");
+  const senderIsBot = readOwnDataValue(from, "is_bot");
+  if (senderIsBot !== false || !isPositiveSafeInteger(senderId)) return undefined;
+
+  return Object.freeze({
+    provider: "telegram",
+    callbackQueryId,
+    senderId: String(senderId),
+    data,
+  });
+}
+
 function isSafeTelegramText(value: unknown): value is string {
   if (typeof value !== "string" || value.length === 0) return false;
   // `String.length` already is the UTF-16 unit count Telegram itself bounds.
@@ -969,17 +1051,18 @@ function telegramFailureText(value: unknown): string | undefined {
 }
 
 /**
- * Render `tool <identifier> (approve on the desktop app)` for the approval
- * wait, or `undefined` (fail closed to the bare status text) for anything
- * else. The shared grammar predicate is the one validation authority; this
- * function only adds the display template. Approval stays local-only, so the
- * text points the reader at the desktop card.
+ * Render `tool <identifier> (waiting for approval)` for the approval wait, or
+ * `undefined` (fail closed to the bare status text) for anything else. The
+ * shared grammar predicate is the one validation authority; this function
+ * only adds the display template. It deliberately does not say WHERE to
+ * approve: the desk card is always live, and when the remote-approval
+ * coordinator holds a current route it follows up with its own button card.
  */
 function telegramApprovalToolText(status: unknown, tool: unknown): string | undefined {
   if (status !== "awaiting-local-approval" || !isSharedApprovalToolIdentifier(tool)) {
     return undefined;
   }
-  return `tool ${tool} (approve on the desktop app)`;
+  return `tool ${tool} (waiting for approval)`;
 }
 
 /** Last bound before the wire: Telegram rejects the whole send past this. */

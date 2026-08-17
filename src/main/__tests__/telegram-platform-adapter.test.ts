@@ -8,6 +8,7 @@ import {
   coalesceTelegramDeliveryQueue,
   createTelegramOutboundTransport,
   createTelegramPollingVerifier,
+  parseTelegramCallbackQueryUpdate,
   type TelegramDeliveryChannel,
   type TelegramDeliveryQueueEntry,
 } from "../telegram-platform-adapter.js";
@@ -137,6 +138,57 @@ describe("Telegram platform adapter", () => {
     const whitespace = structuredClone(update()) as Record<string, any>;
     whitespace.message.text = "safe\ntext\tstill allowed";
     expect(verifier.verify(polledUpdate(whitespace))).toMatchObject({ text: whitespace.message.text });
+  });
+
+  it("decodes only a plain private button press into a callback envelope", () => {
+    const pressed = {
+      update_id: 123,
+      callback_query: {
+        id: "press-1",
+        from: { id: 42, is_bot: false },
+        // Presence-only fields a real press always echoes; never read.
+        message: { message_id: 456, date: 1_700_000_000, chat: { id: 42, type: "private" } },
+        chat_instance: "-3538274119585",
+        data: "opaque-token_ABC",
+      },
+    };
+    const envelope = parseTelegramCallbackQueryUpdate(
+      Buffer.from(JSON.stringify(pressed), "utf8"),
+    );
+    expect(envelope).toEqual({
+      provider: "telegram",
+      callbackQueryId: "press-1",
+      senderId: "42",
+      data: "opaque-token_ABC",
+    });
+    // Nothing routing-relevant is taken from the echoed card message.
+    expect(JSON.stringify(envelope)).not.toContain("456");
+
+    const rejected: readonly [string, (candidate: Record<string, any>) => void][] = [
+      ["a text update instead", (candidate) => {
+        delete candidate.callback_query;
+        candidate.message = (update() as Record<string, any>).message;
+      }],
+      ["extra update key", (candidate) => { candidate.edited_message = {}; }],
+      ["extra callback key", (candidate) => { candidate.callback_query.game_short_name = "g"; }],
+      ["bot sender", (candidate) => { candidate.callback_query.from.is_bot = true; }],
+      ["unsafe sender id", (candidate) => { candidate.callback_query.from.id = 0; }],
+      ["missing data", (candidate) => { delete candidate.callback_query.data; }],
+      ["structured data", (candidate) => { candidate.callback_query.data = '{"choice":"allow"}'; }],
+      ["overlong data", (candidate) => { candidate.callback_query.data = "a".repeat(65); }],
+      ["empty data", (candidate) => { candidate.callback_query.data = ""; }],
+      ["non-token query id", (candidate) => { candidate.callback_query.id = "has space"; }],
+      ["zero update id", (candidate) => { candidate.update_id = 0; }],
+    ];
+    for (const [name, mutate] of rejected) {
+      const candidate = structuredClone(pressed) as Record<string, any>;
+      mutate(candidate);
+      expect(
+        parseTelegramCallbackQueryUpdate(Buffer.from(JSON.stringify(candidate), "utf8")),
+        name,
+      ).toBeUndefined();
+    }
+    expect(parseTelegramCallbackQueryUpdate(Buffer.from("not-json", "utf8"))).toBeUndefined();
   });
 
   it("validates bot-token configuration without accepting URL-changing token material", () => {
@@ -312,7 +364,7 @@ describe("Telegram platform adapter", () => {
       JSON.parse(String(init?.body)).text,
     );
     expect(sentTexts).toEqual([
-      "LVIS: waiting for local approval — tool builtin:list_files (approve on the desktop app)",
+      "LVIS: waiting for local approval — tool builtin:list_files (waiting for approval)",
       "LVIS: working",
     ]);
   });
