@@ -14,6 +14,13 @@ import {
   type SharedConversationProjectionEvent,
 } from "./conversation-platform-protocol.js";
 
+/**
+ * Re-exported so downstream safe surfaces (bridge delivery, providers) can
+ * validate a turn-failure summary without importing the owner event module.
+ */
+export { toSafeTurnFailureSummary } from "./turn-failure-summary.js";
+export type { TurnFailureCategory, TurnFailureSummary } from "./turn-failure-summary.js";
+
 /** Version of the safe remote observer wire shape. */
 export const SHARED_CONVERSATION_PROTOCOL_VERSION = 1 as const;
 

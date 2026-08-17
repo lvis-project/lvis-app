@@ -23,6 +23,10 @@ import {
   readPlatformBridgeDeliverySendFailure,
   safeTrailingText,
 } from "./platform-bridge-delivery.js";
+import {
+  toSafeTurnFailureSummary,
+  type TurnFailureCategory,
+} from "../engine/shared-conversation-projection.js";
 
 const MAX_TELEGRAM_BOT_TOKEN_CHARS = 256;
 /**
@@ -85,6 +89,22 @@ const OUTBOUND_STATUS_TEXT: Readonly<Record<string, string>> = Object.freeze({
   "compaction-completed": "LVIS: context organized",
   "turn-failed": "LVIS: turn failed",
   "turn-completed": "LVIS: completed",
+});
+
+/**
+ * Display labels for the closed share-safe failure categories carried on a
+ * `turn-failed` status. Same pattern as `OUTBOUND_STATUS_TEXT`: a fixed table
+ * keyed by an already-classified value, never a match over raw error text.
+ * Typed over the closed union so a new category cannot ship without a label.
+ */
+const FAILURE_CATEGORY_TEXT: Readonly<Record<TurnFailureCategory, string>> = Object.freeze({
+  provider: "provider error",
+  auth: "auth error",
+  "rate-limit": "rate limit",
+  context: "context limit",
+  network: "network error",
+  model: "model error",
+  internal: "internal error",
 });
 
 const FALLBACK_TEXT = "LVIS: message unavailable";
@@ -689,7 +709,15 @@ function normalizeTelegramQueueEntry(value: unknown): TelegramDeliveryQueueEntry
   if (kind === "status") {
     const status = readOwnDataValue(message, "status");
     if (!isTelegramStatus(status)) throw new TypeError("telegram-delivery-queue-entry-invalid");
-    return freezeQueueEntry(cursor, { kind, cursor, status });
+    // A failure summary that fails re-validation is dropped, not fatal: the
+    // bare status still reaches the reader.
+    const failure = toSafeTurnFailureSummary(readOwnDataValue(message, "failure"));
+    return freezeQueueEntry(cursor, {
+      kind,
+      cursor,
+      status,
+      ...(failure === undefined ? {} : { failure: Object.freeze(failure) }),
+    });
   }
   throw new TypeError("telegram-delivery-queue-entry-invalid");
 }
@@ -896,9 +924,25 @@ function telegramOutboundText(message: unknown): string | undefined {
   }
   if (kind === "status") {
     const status = readOwnDataValue(message, "status");
-    return typeof status === "string" ? OUTBOUND_STATUS_TEXT[status] : undefined;
+    const statusText = typeof status === "string" ? OUTBOUND_STATUS_TEXT[status] : undefined;
+    if (statusText === undefined) return undefined;
+    const failureText = telegramFailureText(readOwnDataValue(message, "failure"));
+    if (failureText === undefined) return statusText;
+    return boundedOutboundText(`${statusText} — ${failureText}`) || statusText;
   }
   return undefined;
+}
+
+/**
+ * Render `<category>: <short summary>` from an already-safe failure summary,
+ * or `undefined` (fail closed to the bare status text) for anything else. The
+ * shared fail-closed sanitizer is the one validation authority; this function
+ * only adds the display label lookup.
+ */
+function telegramFailureText(value: unknown): string | undefined {
+  const failure = toSafeTurnFailureSummary(value);
+  if (failure === undefined) return undefined;
+  return `${FAILURE_CATEGORY_TEXT[failure.category]}: ${failure.summary}`;
 }
 
 /** Last bound before the wire: Telegram rejects the whole send past this. */
