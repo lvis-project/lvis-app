@@ -197,6 +197,34 @@ describe("PlatformBridgeDeliveryAdapter", () => {
     expect(channel.state()).toEqual({ lastAcceptedCursor: 2, pendingMessages: 0, closed: false });
   });
 
+  it("forwards the coarse approval tool identifier and resumes with plain tool status after the decision", async () => {
+    const sent: PlatformBridgeOutboundMessage[] = [];
+    const adapter = createPlatformBridgeDeliveryAdapter({
+      transport: { send: async (_channel: string, message) => void sent.push(message) },
+    });
+    const channel = adapter.openChannel("telegram:approval-wait", CONVERSATION_ID);
+
+    expect(channel.enqueueSnapshot(snapshot())).toBe("accepted");
+    expect(channel.enqueueEvent(
+      event(1, { kind: "approval.waiting-local", tool: "builtin:list_files" }),
+    )).toBe("accepted");
+    // A malformed identifier is dropped at this boundary, never forwarded.
+    expect(channel.enqueueEvent(
+      event(2, { kind: "approval.waiting-local", tool: "unsafe tool C:\\private\\path" }),
+    )).toBe("accepted");
+    // The local decision resumes the turn through the ordinary tool status.
+    expect(channel.enqueueEvent(event(3, { kind: "tool.state", state: "running" }))).toBe("accepted");
+    await channel.waitForIdle();
+
+    expect(sent).toEqual([
+      { kind: "snapshot", cursor: 0, status: "idle", text: "" },
+      { kind: "status", cursor: 1, status: "awaiting-local-approval", tool: "builtin:list_files" },
+      { kind: "status", cursor: 2, status: "awaiting-local-approval" },
+      { kind: "status", cursor: 3, status: "tool-running" },
+    ]);
+    expect(JSON.stringify(sent)).not.toContain("private");
+  });
+
   it("lets a provider compact only queued safe messages and retain split current-cursor chunks", async () => {
     const firstSend = deferred();
     const sent: PlatformBridgeOutboundMessage[] = [];
