@@ -13,11 +13,16 @@ import type {
 } from "./platform-bridge-inbound.js";
 import type {
   PlatformBridgeDeliveryQueuedMessage,
+  PlatformBridgeDeliverySendFailure,
   PlatformBridgeDeliveryTransport,
   PlatformBridgeDeliveryTransportSendOptions,
   PlatformBridgeOutboundMessage,
 } from "./platform-bridge-delivery.js";
-import { safeTrailingText } from "./platform-bridge-delivery.js";
+import {
+  platformBridgeDeliverySendFailureError,
+  readPlatformBridgeDeliverySendFailure,
+  safeTrailingText,
+} from "./platform-bridge-delivery.js";
 
 const MAX_TELEGRAM_BOT_TOKEN_CHARS = 256;
 /**
@@ -34,6 +39,12 @@ const DEFAULT_MIN_TELEGRAM_GLOBAL_INTERVAL_MS = Math.ceil(
   1_000 / FREE_TELEGRAM_GLOBAL_MESSAGES_PER_SECOND,
 );
 const DEFAULT_TELEGRAM_REQUEST_TIMEOUT_MS = 15_000;
+/** Bound on an honored Bot API `retry_after` hint; anything longer is capped. */
+const MAX_TELEGRAM_RETRY_AFTER_MS = 30_000;
+/** Provider-supplied error descriptions are truncated before they may be logged. */
+const MAX_LOGGED_DESCRIPTION_CHARS = 120;
+/** Network errno-style codes are the only free-form error detail admitted to a log. */
+const SAFE_NETWORK_ERROR_CODE = /^[A-Z][A-Z0-9_]{1,31}$/;
 // Telegram bot tokens are path material in the Bot API URL. Keep the grammar
 // deliberately narrow so configuration can never change the HTTPS endpoint.
 const TELEGRAM_BOT_TOKEN = /^[A-Za-z0-9:_-]{1,256}$/;
@@ -237,6 +248,124 @@ export interface CreateTelegramOutboundTransportOptions {
   readonly now?: () => number;
   /** Injectable delay seam for deterministic lifecycle tests. */
   readonly wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
+  /**
+   * Host log sink for SAFE egress failure classification lines. It receives
+   * only coarse failure detail (network code, HTTP status, Bot API error_code,
+   * a truncated description) — never the bot token, the request URL, the chat
+   * id, or any message text.
+   */
+  readonly log?: (message: string) => void;
+}
+
+/**
+ * The single classification of every way one Telegram send can fail.
+ *
+ * `terminal` covers host-side lifecycle and precondition failures that carry
+ * no wire detail; the wire kinds carry only the coarse, share-safe fields the
+ * policy and log line below are allowed to see. All failure construction goes
+ * through `telegramDeliveryFailure`, so retry semantics and log content cannot
+ * drift between call sites.
+ */
+type TelegramSendFailureClass =
+  | { readonly kind: "terminal"; readonly code: TelegramTerminalSendFailureCode }
+  | { readonly kind: "network"; readonly networkCode?: string }
+  | { readonly kind: "timeout" }
+  | {
+    readonly kind: "response";
+    readonly httpStatus?: number;
+    readonly apiErrorCode?: number;
+    readonly description?: string;
+    readonly retryAfterMs?: number;
+  };
+
+type TelegramTerminalSendFailureCode =
+  | "invalid-destination"
+  | "stale-channel"
+  | "aborted"
+  | "clock-invalid"
+  | "unrenderable-message"
+  | "internal-error";
+
+/**
+ * The one failure chokepoint: map a classification to the generic delivery
+ * failure contract (transient or not, bounded retry-after), emit at most one
+ * safe log line, and mint the single generic error the projection fan-out may
+ * observe. The error message is always `telegram-delivery-failed`.
+ */
+function telegramDeliveryFailure(
+  classification: TelegramSendFailureClass,
+  log?: (message: string) => void,
+): Error {
+  const line = formatTelegramSendFailureLog(classification);
+  if (line !== undefined) {
+    try {
+      log?.(line);
+    } catch {
+      // A log sink failure must not change delivery behavior.
+    }
+  }
+  return platformBridgeDeliverySendFailureError(
+    "telegram-delivery-failed",
+    telegramSendFailurePolicy(classification),
+  );
+}
+
+/** One policy table: which failures are transient, and their kebab-case reason. */
+function telegramSendFailurePolicy(
+  classification: TelegramSendFailureClass,
+): PlatformBridgeDeliverySendFailure {
+  switch (classification.kind) {
+    case "terminal":
+      return { transient: false, reason: classification.code };
+    case "network":
+      return { transient: true, reason: "network" };
+    case "timeout":
+      return { transient: true, reason: "timeout" };
+    case "response": {
+      const code = classification.apiErrorCode ?? classification.httpStatus;
+      const transient = code === 429 || (code !== undefined && code >= 500 && code <= 599);
+      const reason = classification.apiErrorCode !== undefined
+        ? `api-${classification.apiErrorCode}`
+        : classification.httpStatus !== undefined
+          ? `http-${classification.httpStatus}`
+          : "invalid-response";
+      return {
+        transient,
+        reason,
+        ...(transient && classification.retryAfterMs !== undefined
+          ? { retryAfterMs: classification.retryAfterMs }
+          : {}),
+      };
+    }
+  }
+}
+
+/**
+ * One log formatter for wire failures. Terminal classifications return
+ * `undefined`: they carry no wire detail, and their reason code still reaches
+ * the bridge log through the delivery adapter's close-reason callback.
+ */
+function formatTelegramSendFailureLog(
+  classification: TelegramSendFailureClass,
+): string | undefined {
+  switch (classification.kind) {
+    case "terminal":
+      return undefined;
+    case "network":
+      return `[telegram-egress] sendMessage failed: network error${
+        classification.networkCode !== undefined ? ` (${classification.networkCode})` : ""
+      }`;
+    case "timeout":
+      return "[telegram-egress] sendMessage failed: request timeout";
+    case "response":
+      return `[telegram-egress] sendMessage rejected: http_status=${classification.httpStatus ?? "unknown"}${
+        classification.apiErrorCode !== undefined ? ` error_code=${classification.apiErrorCode}` : ""
+      }${
+        classification.description !== undefined ? ` description="${classification.description}"` : ""
+      }${
+        classification.retryAfterMs !== undefined ? ` retry_after_ms=${classification.retryAfterMs}` : ""
+      }`;
+  }
 }
 
 /**
@@ -263,6 +392,9 @@ export function createTelegramOutboundTransport(
   if (options?.wait !== undefined && typeof options.wait !== "function") {
     throw new TypeError("telegram-outbound-wait-invalid");
   }
+  if (options?.log !== undefined && typeof options.log !== "function") {
+    throw new TypeError("telegram-outbound-log-invalid");
+  }
   const minIntervalMs = positiveSafeInteger(
     options?.minIntervalMs ?? DEFAULT_MIN_TELEGRAM_DELIVERY_INTERVAL_MS,
     "telegram-outbound-min-interval-invalid",
@@ -275,6 +407,7 @@ export function createTelegramOutboundTransport(
   const isChannelCurrent = options.isChannelCurrent;
   const now = options.now ?? monotonicNow;
   const wait = options.wait ?? defaultTelegramWait;
+  const log = options.log;
   const lastDeliveryAttemptAt = new Map<string, number>();
   let lastGlobalDeliveryAttemptAt: number | undefined;
   const chatTails = new Map<string, Promise<void>>();
@@ -291,10 +424,13 @@ export function createTelegramOutboundTransport(
       let requestAbort: TelegramRequestAbort | undefined;
       try {
         const chatId = readTelegramChatId(channel);
-        if (!isCanonicalTelegramChatId(chatId)) throw telegramDeliveryFailure();
-        if (!isAbortSignal(sendOptions?.signal)) throw telegramDeliveryFailure();
-        if (!Number.isSafeInteger(sendOptions.generation) || sendOptions.generation < 1) {
-          throw telegramDeliveryFailure();
+        if (
+          !isCanonicalTelegramChatId(chatId)
+          || !isAbortSignal(sendOptions?.signal)
+          || !Number.isSafeInteger(sendOptions.generation)
+          || sendOptions.generation < 1
+        ) {
+          throw telegramDeliveryFailure({ kind: "terminal", code: "invalid-destination" });
         }
 
         const chatGate = acquireTelegramChatGate(chatTails, chatId);
@@ -332,7 +468,9 @@ export function createTelegramOutboundTransport(
         assertTelegramDeliveryCurrent(channel, sendOptions, isChannelCurrent);
 
         const text = telegramOutboundText(message);
-        if (text === undefined) throw telegramDeliveryFailure();
+        if (text === undefined) {
+          throw telegramDeliveryFailure({ kind: "terminal", code: "unrenderable-message" });
+        }
         // Mark launch rather than success: a failing Bot API cannot be hammered
         // by a retry loop, and both free-rate budgets use one monotonic sample.
         const launchedAt = readTelegramNow(now);
@@ -356,15 +494,35 @@ export function createTelegramOutboundTransport(
           releaseGlobalGate?.();
           releaseGlobalGate = undefined;
         }
-        const response = await responsePromise;
+        let response: Response;
+        try {
+          response = await responsePromise;
+        } catch (error) {
+          // A channel-driven abort is host lifecycle; only a timer expiry on
+          // this request's own controller is a wire timeout worth reporting.
+          if (sendOptions.signal.aborted) {
+            throw telegramDeliveryFailure({ kind: "terminal", code: "aborted" });
+          }
+          if (requestAbort?.signal.aborted === true) {
+            throw telegramDeliveryFailure({ kind: "timeout" }, log);
+          }
+          const networkCode = readSafeNetworkErrorCode(error);
+          throw telegramDeliveryFailure(
+            { kind: "network", ...(networkCode !== undefined ? { networkCode } : {}) },
+            log,
+          );
+        }
         requestAbort.dispose();
         requestAbort = undefined;
-        if (!(await isSuccessfulTelegramResponse(response))) throw telegramDeliveryFailure();
+        const responseFailure = await classifyTelegramSendResponse(response);
+        if (responseFailure !== undefined) throw telegramDeliveryFailure(responseFailure, log);
         assertTelegramDeliveryCurrent(channel, sendOptions, isChannelCurrent);
-      } catch {
-        // Do not reveal bot token, endpoint, response body, or provider detail
-        // through a projection fan-out failure.
-        throw telegramDeliveryFailure();
+      } catch (error) {
+        // Every classified failure re-throws unchanged; anything else stays
+        // one generic error so a projection fan-out failure can never reveal
+        // the bot token, the endpoint, a response body, or provider detail.
+        if (readPlatformBridgeDeliverySendFailure(error) !== undefined) throw error;
+        throw telegramDeliveryFailure({ kind: "terminal", code: "internal-error" });
       } finally {
         requestAbort?.dispose();
         releaseGlobalGate?.();
@@ -651,16 +809,18 @@ function assertTelegramDeliveryCurrent(
   isChannelCurrent: CreateTelegramOutboundTransportOptions["isChannelCurrent"],
 ): void {
   if (!isAbortSignal(sendOptions.signal) || sendOptions.signal.aborted) {
-    throw telegramDeliveryFailure();
+    throw telegramDeliveryFailure({ kind: "terminal", code: "aborted" });
   }
   if (isChannelCurrent !== undefined && !isChannelCurrent(channel, sendOptions.generation)) {
-    throw telegramDeliveryFailure();
+    throw telegramDeliveryFailure({ kind: "terminal", code: "stale-channel" });
   }
 }
 
 function readTelegramNow(now: () => number): number {
   const value = now();
-  if (!Number.isSafeInteger(value) || value < 0) throw telegramDeliveryFailure();
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw telegramDeliveryFailure({ kind: "terminal", code: "clock-invalid" });
+  }
   return value;
 }
 
@@ -681,7 +841,9 @@ function waitForTelegramDelay(
   milliseconds: number,
   signal: AbortSignal,
 ): Promise<void> {
-  if (signal.aborted) return Promise.reject(telegramDeliveryFailure());
+  if (signal.aborted) {
+    return Promise.reject(telegramDeliveryFailure({ kind: "terminal", code: "aborted" }));
+  }
   return new Promise((resolve, reject) => {
     let settled = false;
     const finish = (error: Error | undefined): void => {
@@ -691,13 +853,13 @@ function waitForTelegramDelay(
       if (error === undefined) resolve();
       else reject(error);
     };
-    const onAbort = (): void => finish(telegramDeliveryFailure());
+    const onAbort = (): void => finish(telegramDeliveryFailure({ kind: "terminal", code: "aborted" }));
     signal.addEventListener("abort", onAbort, { once: true });
     Promise.resolve()
       .then(() => wait(milliseconds, signal))
       .then(
         () => finish(undefined),
-        () => finish(telegramDeliveryFailure()),
+        () => finish(telegramDeliveryFailure({ kind: "terminal", code: "aborted" })),
       );
   });
 }
@@ -757,18 +919,92 @@ function boundedOutboundText(value: string): string {
   return output;
 }
 
-async function isSuccessfulTelegramResponse(response: unknown): Promise<boolean> {
-  if (!response || typeof response !== "object") return false;
-  const candidate = response as { ok?: unknown; json?: unknown };
-  if (candidate.ok !== true || typeof candidate.json !== "function") return false;
-  try {
-    const body = await candidate.json();
-    return isDataRecord(body) && readOwnDataValue(body, "ok") === true;
-  } catch {
-    return false;
+/**
+ * Turn one Bot API response into the response classification, or `undefined`
+ * on success. It reads only coarse, share-safe fields: the HTTP status, the
+ * Bot API `error_code`, a defensively truncated `description`, and a bounded
+ * `retry_after` hint. The response body is never propagated whole.
+ */
+async function classifyTelegramSendResponse(
+  response: unknown,
+): Promise<Extract<TelegramSendFailureClass, { kind: "response" }> | undefined> {
+  const candidate = response && typeof response === "object"
+    ? response as { ok?: unknown; status?: unknown; json?: unknown }
+    : undefined;
+  let body: unknown;
+  if (candidate !== undefined && typeof candidate.json === "function") {
+    try {
+      body = await (candidate.json as () => Promise<unknown>).call(response);
+    } catch {
+      body = undefined;
+    }
   }
+  const bodyRecord = isDataRecord(body) ? body : undefined;
+  if (candidate?.ok === true && bodyRecord !== undefined && readOwnDataValue(bodyRecord, "ok") === true) {
+    return undefined;
+  }
+  const httpStatus = readHttpLikeCode(candidate?.status);
+  const apiErrorCode = bodyRecord !== undefined
+    ? readHttpLikeCode(readOwnDataValue(bodyRecord, "error_code"))
+    : undefined;
+  const description = bodyRecord !== undefined
+    ? safeLoggedDescription(readOwnDataValue(bodyRecord, "description"))
+    : undefined;
+  const parameters = bodyRecord !== undefined ? readOwnDataValue(bodyRecord, "parameters") : undefined;
+  const retryAfter = isDataRecord(parameters) ? readOwnDataValue(parameters, "retry_after") : undefined;
+  const retryAfterMs = typeof retryAfter === "number" && Number.isSafeInteger(retryAfter) && retryAfter >= 0
+    ? Math.min(retryAfter * 1_000, MAX_TELEGRAM_RETRY_AFTER_MS)
+    : undefined;
+  return {
+    kind: "response",
+    ...(httpStatus !== undefined ? { httpStatus } : {}),
+    ...(apiErrorCode !== undefined ? { apiErrorCode } : {}),
+    ...(description !== undefined ? { description } : {}),
+    ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+  };
 }
 
-function telegramDeliveryFailure(): Error {
-  return new Error("telegram-delivery-failed");
+/** Bot API `error_code` mirrors HTTP status grammar; anything else is dropped. */
+function readHttpLikeCode(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 100 && value <= 599
+    ? value
+    : undefined;
+}
+
+/**
+ * Reduce a provider-supplied description to one short printable line: control
+ * characters and quotes are dropped, and the length is hard-capped so a
+ * hostile description cannot flood or restructure the log.
+ */
+function safeLoggedDescription(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  let output = "";
+  for (const character of value) {
+    const codePoint = character.codePointAt(0);
+    if (codePoint === undefined) break;
+    if (isUnsafeTelegramCodePoint(codePoint) || codePoint === 0x09 || codePoint === 0x0a
+      || codePoint === 0x0d || codePoint === 0x22) {
+      continue;
+    }
+    output += character;
+    if (output.length >= MAX_LOGGED_DESCRIPTION_CHARS) break;
+  }
+  return output.length === 0 ? undefined : output;
+}
+
+/**
+ * Extract only an errno-style code (for example a refused or reset connection
+ * constant) from a network failure. Error messages are never read: a runtime
+ * network error message can embed the request URL, which embeds the token.
+ */
+function readSafeNetworkErrorCode(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 4 && current !== null && typeof current === "object"; depth += 1) {
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (typeof candidate.code === "string" && SAFE_NETWORK_ERROR_CODE.test(candidate.code)) {
+      return candidate.code;
+    }
+    current = candidate.cause;
+  }
+  return undefined;
 }
