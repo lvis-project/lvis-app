@@ -25,6 +25,20 @@ export type ApprovalPurposeSuggestion = {
   confidence: "sufficient" | "insufficient";
 };
 
+/**
+ * The one grammar for a share-safe coarse tool identifier derived from a
+ * permission review ("builtin:list_files"). Every boundary that forwards the
+ * identifier toward a remote surface validates against this single predicate
+ * so the producer and the egress checks cannot drift. Identifier characters
+ * only — no whitespace, no control characters, nothing that could smuggle
+ * tool arguments or path material.
+ */
+const SHARED_APPROVAL_TOOL_IDENTIFIER = /^[A-Za-z0-9_.:/-]{1,128}$/;
+
+export function isSharedApprovalToolIdentifier(value: unknown): value is string {
+  return typeof value === "string" && SHARED_APPROVAL_TOOL_IDENTIFIER.test(value);
+}
+
 export type PermissionReviewEvent = {
   status: PermissionReviewStatus;
   toolName: string;

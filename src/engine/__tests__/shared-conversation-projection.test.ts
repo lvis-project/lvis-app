@@ -62,7 +62,7 @@ describe("SharedConversationProjectionStore", () => {
       { kind: "tool.state", state: "running" },
       { kind: "assistant.text.delta", text: "Visible reply" },
       { kind: "tool.state", state: "completed" },
-      { kind: "approval.waiting-local" },
+      { kind: "approval.waiting-local", tool: "shell" },
     ]);
     expect(snapshot).toMatchObject({
       cursor: 5,
@@ -74,6 +74,40 @@ describe("SharedConversationProjectionStore", () => {
     expect(serialized).not.toContain("private-result");
     expect(serialized).not.toContain("private approval rationale");
     expect(serialized).not.toContain("owner-private-turn");
+  });
+
+  it("carries only a coarse grammar-checked tool identifier into the approval wait event", () => {
+    const timeline = createPlatformConversationTimeline();
+    const store = createSharedConversationProjectionStore(timeline);
+    store.start();
+
+    const publishReview = (tool: { name: string; source?: "builtin" | "plugin" | "mcp" }) =>
+      timeline.publish({
+        conversationId: CONVERSATION_ID,
+        event: {
+          kind: "permission.reviewed",
+          review: {
+            status: "needs_approval",
+            tool: { groupId: "g", toolUseId: "t", displayOrder: 1, ...tool },
+            ownerDetail: { reason: "private approval rationale" },
+          },
+        },
+      });
+
+    publishReview({ name: "list_files", source: "builtin" });
+    // A name outside the identifier grammar is dropped, never forwarded.
+    publishReview({ name: "evil tool C:\\private\\path", source: "mcp" });
+    publishReview({ name: "x".repeat(129), source: "plugin" });
+
+    const replay = store.read(CONVERSATION_ID);
+    expect(replay.events.map((event) => event.event)).toEqual([
+      { kind: "approval.waiting-local", tool: "builtin:list_files" },
+      { kind: "approval.waiting-local" },
+      { kind: "approval.waiting-local" },
+    ]);
+    const serialized = JSON.stringify(replay);
+    expect(serialized).not.toContain("private approval rationale");
+    expect(serialized).not.toContain("private\\\\path");
   });
 
   it("uses dense public cursors so private timeline events leave no observable gaps", () => {
