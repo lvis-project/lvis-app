@@ -828,3 +828,142 @@ describe("NotificationService — bypassFocusGate × cooldown intersection (#843
     expect(factoryStub.calls[0].urgency).toBe("critical");
   });
 });
+
+// #2103 — fire() is structurally never-throwing. The old invariant was
+// enforced per call site ("notification failure must never block X" wrappers)
+// and several call sites (boot steps, plugin event handlers, IPC handlers,
+// global-shortcut callbacks) had no wrapper at all. The service is now the
+// single enforcement point: no injected dependency failure, window-handle
+// race, or delivery error may escape fire() into the calling lifecycle flow.
+describe("NotificationService — never-throw contract (#2103)", () => {
+  it("fire() does not throw when getMainWindow throws", () => {
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => {
+        throw new Error("window registry torn down");
+      },
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => false,
+    });
+    expect(() => svc.fire({ kind: "system", title: "x", body: "y" })).not.toThrow();
+  });
+
+  it("fire() does not throw when isAnyWindowFocused throws", () => {
+    const win = makeMockWindow({ focused: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => {
+        throw new Error("focus probe failed");
+      },
+    });
+    expect(() => svc.fire({ kind: "turn-end", title: "x", body: "y" })).not.toThrow();
+  });
+
+  it("fire() does not throw when the window handle races destruction (isMinimized throws)", () => {
+    // Electron throws "Object has been destroyed" when a method runs on a
+    // window destroyed between the isDestroyed() check and the next call.
+    const win = makeMockWindow({ focused: true });
+    (win.isMinimized as ReturnType<typeof vi.fn>).mockImplementation(() => {
+      throw new Error("Object has been destroyed");
+    });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    expect(() => svc.fire({ kind: "system", title: "x", body: "y" })).not.toThrow();
+  });
+
+  it("fire() does not throw when the OS notification factory throws", () => {
+    const win = makeMockWindow({ focused: false, minimized: true });
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: () => {
+        throw new Error("no notification backend");
+      },
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => false,
+    });
+    expect(() => svc.fire({ kind: "approval", title: "x", body: "y" })).not.toThrow();
+  });
+
+  it("fire() falls back to the OS path when the toast send throws, and stays silent if that fails too", () => {
+    const win = makeMockWindow({ focused: true, minimized: false });
+    win.webContents.send.mockImplementation(() => {
+      throw new Error("webContents destroyed mid-fire");
+    });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    // Toast path fails → OS fallback fires.
+    expect(() => svc.fire({ kind: "system", title: "x", body: "y" })).not.toThrow();
+    expect(factoryStub.calls.length).toBe(1);
+
+    // Same scenario with the fallback factory ALSO failing — still no throw.
+    const svc2 = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      notificationFactory: () => {
+        throw new Error("no notification backend");
+      },
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => true,
+    });
+    expect(() => svc2.fire({ kind: "system", title: "x", body: "y" })).not.toThrow();
+  });
+
+  it("fire() does not throw when the audit logger throws", () => {
+    const win = makeMockWindow({ focused: false });
+    const factoryStub = makeNotificationFactoryStub();
+    const auditLogger = {
+      log: vi.fn(() => {
+        throw new Error("audit disk full");
+      }),
+    } as unknown as AuditLogger;
+    const svc = new NotificationService({
+      getMainWindow: () => win as unknown as Electron.BrowserWindow,
+      auditLogger,
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => false,
+    });
+    expect(() => svc.fire({ kind: "routine", title: "x", body: "y" })).not.toThrow();
+    expect(factoryStub.calls.length).toBe(1);
+  });
+
+  it("OS notification click handler does not throw when getMainWindow throws", () => {
+    let windowGone = false;
+    const win = makeMockWindow({ focused: false, minimized: true });
+    const factoryStub = makeNotificationFactoryStub();
+    const svc = new NotificationService({
+      getMainWindow: () => {
+        if (windowGone) throw new Error("window registry torn down");
+        return win as unknown as Electron.BrowserWindow;
+      },
+      notificationFactory: factoryStub.factory,
+      isReady: () => true,
+      isTestEnv: () => false,
+      isAnyWindowFocused: () => false,
+    });
+    svc.fire({ kind: "ask-user", title: "q", body: "b", contextRef: { questionId: "q-1" } });
+    expect(factoryStub.calls[0].clickHandler).toBeDefined();
+    windowGone = true;
+    expect(() => factoryStub.calls[0].clickHandler!()).not.toThrow();
+  });
+});
