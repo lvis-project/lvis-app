@@ -4,7 +4,8 @@
  * These drive the actual composer of the actual App: the text goes through
  * `useMessageQueue`'s submit path, `useApprovalSentence`'s interceptor, the
  * `window.lvis.approval.selectSentence` bridge, and lands (or fails to land)
- * on the real `DockedApprovalCard`. Nothing here unit-tests the parser.
+ * on the real approval card (`ToolApprovalContent`). Nothing here unit-tests
+ * the parser.
  *
  * The property under test is the one the whole design rests on: **the sentence
  * fills the form and the button grants.** A `/allow` that reached `respond`
@@ -52,8 +53,14 @@ async function appWithPendingApproval() {
   return app;
 }
 
+const CHOICE_TESTID: Record<string, string> = {
+  "deny-once": "deny-button",
+  "allow-always": "allow-always-button",
+  "allow-once": "approve-button",
+};
+
 const choice = (container: HTMLElement, name: string) =>
-  container.querySelector(`[data-testid="docked-approval-choice-${name}"]`) as HTMLButtonElement | null;
+  container.querySelector(`[data-testid="${CHOICE_TESTID[name]}"]`) as HTMLButtonElement | null;
 
 const systemText = (container: HTMLElement) => container.textContent ?? "";
 
@@ -89,7 +96,7 @@ describe("/allow — the sentence fills the form", () => {
       expect(document.activeElement).toBe(choice(app.container, "allow-always")),
     );
     expect(
-      app.container.querySelector('[data-testid="docked-approval-target"]')?.textContent,
+      app.container.querySelector('[data-testid="approval-decision-target"]')?.textContent,
     ).toContain(PARENT);
 
     // THE point: nothing has been decided. The card is still up.
@@ -305,7 +312,7 @@ describe("/allow — every failure is plain, and none of it is a grant", () => {
     expect(document.activeElement).toBe(choice(app.container, "deny-once"));
     expect(choice(app.container, "allow-always")?.tabIndex).toBe(-1);
     expect(
-      app.container.querySelector('[data-testid="docked-review-details"]')?.textContent,
+      app.container.querySelector('[data-testid="approval-review-details"]')?.textContent,
     ).toContain("/home/ken/reports/q4.md");
     expect(ns.approval.respond).toHaveBeenCalledTimes(1);
   });
