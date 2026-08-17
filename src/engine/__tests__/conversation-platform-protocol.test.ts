@@ -108,4 +108,15 @@ describe("platform conversation protocol", () => {
       ownerDetail: { message: "raw" },
     })).toEqual({ kind: "turn.failed" });
   });
+
+  it("never projects a turn's user input to shared surfaces", () => {
+    // The submitting chat platform already shows the sender their own message;
+    // sharing it back would duplicate every remote turn and hand other
+    // surfaces' input text to safe-projection observers.
+    expect(projectSharedConversationEvent({
+      kind: "user.message",
+      origin: "platform-bridge",
+      ownerDetail: { text: "the user's own words" },
+    })).toBeUndefined();
+  });
 });

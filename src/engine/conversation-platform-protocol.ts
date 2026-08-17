@@ -21,6 +21,7 @@ import {
   type PermissionReviewRiskLevel,
   type PermissionReviewStatus,
 } from "../shared/permission-review-status.js";
+import type { ChatInputOrigin } from "../shared/chat-origin.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { FallbackStatus } from "./llm/vercel/fallback-chain.js";
 import type { TurnCallbacks } from "./turn/types.js";
@@ -103,6 +104,23 @@ export type ConversationUsageReport = Parameters<
  */
 export type PlatformConversationEvent =
   | { readonly kind: "turn.started" }
+  /**
+   * The user input that started this turn, published once per turn for EVERY
+   * origin — keyboard, staged, queue, loopback, Tailnet, chat-platform bridge.
+   * One stream, two origins: a surface that did not submit the turn learns the
+   * turn's input from this event instead of a side channel, and each surface
+   * adapter decides at its own single normalization point whether it already
+   * rendered this input (the desktop renderer echoes its own submissions
+   * optimistically and therefore only materializes external-surface origins).
+   * The text is user content, so it is owner detail and never crosses the
+   * shared projection.
+   */
+  | {
+    readonly kind: "user.message";
+    /** Host-resolved input provenance; a surface payload cannot supply it. */
+    readonly origin: ChatInputOrigin;
+    readonly ownerDetail: { readonly text: string };
+  }
   | { readonly kind: "assistant.reasoning.delta"; readonly ownerDetail: { readonly text: string } }
   | { readonly kind: "assistant.text.delta"; readonly text: string }
   | { readonly kind: "assistant.round.completed"; readonly round: ConversationAssistantRound }
@@ -364,6 +382,14 @@ export function projectSharedConversationEvent(
   switch (event.kind) {
     case "turn.started":
       return { kind: "turn.started" };
+    case "user.message":
+      // Deliberately NOT shared: a remote chat surface already shows the
+      // sender their own message in its native conversation, so projecting the
+      // turn input back out would duplicate every remote turn (and leak other
+      // surfaces' input text to observers that only hold the safe projection).
+      // Owner surfaces receive it through the owner-detail compatibility
+      // adapter instead.
+      return undefined;
     case "assistant.text.delta":
       return { kind: "assistant.text.delta", text: event.text };
     case "tool.started":
