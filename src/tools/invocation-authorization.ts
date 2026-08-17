@@ -1413,9 +1413,10 @@ export async function authorizeToolInvocation(
         // surface sees `working` and then, minutes later, a failure — silence
         // that reads as a dead bridge rather than as waiting for the desk.
         //
-        // The platform projector maps `needs_approval` to a bare
-        // `approval.waiting-local` and discards every other field, so this adds
-        // no egress beyond that one status.
+        // The platform projector maps `needs_approval` to
+        // `approval.waiting-local` carrying only a coarse grammar-checked tool
+        // identifier and discards every other field, so this adds no egress
+        // beyond that one status plus the tool name.
         if (requiresRemoteLocalOneShot) {
           emitPermissionReview(callbacks, {
             status: "needs_approval",
