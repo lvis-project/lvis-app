@@ -63,17 +63,12 @@ export function ApprovalDock({
   const focusPreferredDecision = useCallback(() => {
     const root = rootRef.current;
     if (!root) return;
-    const selectors = request?.kind === "out-of-allowed-dir"
-      ? [
-          '[data-testid="docked-approval-choice-deny-once"]:not(:disabled)',
-          '[data-testid="docked-approval-choice-allow-once"]:not(:disabled)',
-          '[data-testid="docked-approval-choice-allow-always"]:not(:disabled)',
-        ]
-      : [
-          '[data-testid="deny-button"]:not(:disabled)',
-          '[data-testid="approve-button"]:not(:disabled)',
-          '[data-testid="allow-always-button"]:not(:disabled)',
-        ];
+    // One decision row for every request kind — fail-closed Reject first.
+    const selectors = [
+      '[data-testid="deny-button"]:not(:disabled)',
+      '[data-testid="approve-button"]:not(:disabled)',
+      '[data-testid="allow-always-button"]:not(:disabled)',
+    ];
     for (const selector of selectors) {
       const target = root.querySelector<HTMLElement>(selector);
       if (target) {
@@ -81,7 +76,7 @@ export function ApprovalDock({
         return;
       }
     }
-  }, [request?.kind]);
+  }, []);
 
   useEffect(() => () => {
     if (returnFocusFrameRef.current !== null) {
@@ -228,34 +223,29 @@ export function ApprovalDock({
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
     >
-      {request.kind === "out-of-allowed-dir" || request.kind === "rationale" ? (
-        <header className="flex min-w-0 shrink-0 items-center gap-2 border-b px-3 py-2">
-          <h2 id={titleId} className="min-w-0 flex-1 truncate text-sm font-semibold">
-            {title}
-          </h2>
-          {remaining > 0 ? (
-            <span
-              className="shrink-0 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
-              data-testid="approval-queue-depth"
-              aria-label={t("toolApprovalDialog.pendingCount", { count: remaining })}
-            >
-              1 / {queue.length}
-            </span>
-          ) : null}
-        </header>
-      ) : (
-        <header className="sr-only">
-          <h2 id={titleId}>{title}. {request.toolName}</h2>
-          {remaining > 0 ? t("toolApprovalDialog.pendingCount", { count: remaining }) : null}
-        </header>
-      )}
+      {/* One visible header for every kind — same title placement, same
+          queue-depth chip, regardless of what raised the request. */}
+      <header className="flex min-w-0 shrink-0 items-center gap-2 border-b px-3 py-2">
+        <h2 id={titleId} className="min-w-0 flex-1 truncate text-sm font-semibold">
+          {title}
+        </h2>
+        {remaining > 0 ? (
+          <span
+            className="shrink-0 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground"
+            data-testid="approval-queue-depth"
+            aria-label={t("toolApprovalDialog.pendingCount", { count: remaining })}
+          >
+            1 / {queue.length}
+          </span>
+        ) : null}
+      </header>
       <p id={descriptionId} className="sr-only">
         {t("toolApprovalDialog.dialogDescription")}
       </p>
 
       {/* One frame for every kind. Path-grant (out-of-allowed-dir) requests
-          render their Evidence+Decision section INSIDE ToolApprovalContent —
-          the dock no longer forks to a second component with its own visual
+          render their evidence and decisions INSIDE ToolApprovalContent —
+          the dock never forks to a second component with its own visual
           language. */}
       <ToolApprovalContent
         key={request.id}
