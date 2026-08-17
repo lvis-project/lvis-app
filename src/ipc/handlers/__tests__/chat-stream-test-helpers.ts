@@ -7,7 +7,7 @@
 import { vi } from "vitest";
 import type { ConversationLoop } from "../../../engine/conversation-loop.js";
 
-export const completedTurn = {
+const completedTurn = {
   text: "done",
   toolCalls: [],
   route: "default",
