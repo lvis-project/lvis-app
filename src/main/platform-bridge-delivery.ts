@@ -16,6 +16,20 @@ import type {
 const DEFAULT_MAX_CHANNELS = 128;
 const DEFAULT_MAX_PENDING_MESSAGES_PER_CHANNEL = 64;
 /**
+ * Retry policy defaults for one transiently failing provider send. Two
+ * in-place retries with doubling backoff absorb a network blip or a single
+ * rate-limit window without turning the bounded queue into a hammer, and the
+ * per-delay cap keeps a hostile provider `retry-after` hint from parking a
+ * drain loop for minutes.
+ */
+const DEFAULT_MAX_TRANSIENT_SEND_RETRIES = 2;
+const DEFAULT_RETRY_BACKOFF_BASE_MS = 500;
+const DEFAULT_MAX_RETRY_DELAY_MS = 30_000;
+const SEND_FAILURE_PROPERTY = "platformBridgeDeliverySendFailure";
+/** Reason codes are short kebab-case tokens; anything else fails closed. */
+const SEND_FAILURE_REASON = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const MAX_SEND_FAILURE_RETRY_AFTER_MS = 3_600_000;
+/**
  * UTF-16 code units, not Unicode code points: every provider length limit this
  * module has to respect is expressed in the same unit as `String.length`, and
  * counting scalar values instead silently doubles an emoji-heavy payload.
@@ -81,6 +95,75 @@ export interface PlatformBridgeDeliveryTransportSendOptions {
   readonly signal: AbortSignal;
   /** New on every openChannel, including a re-pair of the same destination. */
   readonly generation: number;
+}
+
+/**
+ * Structured, share-safe classification a provider transport attaches to one
+ * send failure so this adapter can choose retry-in-place versus close without
+ * reading any provider detail. It deliberately fits only retry semantics and a
+ * short kebab-case reason code; credentials, endpoints, payload text, and
+ * destination identifiers cannot pass through this shape. An unmarked throw
+ * stays fail-closed: it is treated as permanent and closes the channel.
+ */
+export interface PlatformBridgeDeliverySendFailure {
+  /** True only for failures worth retrying in place (network blip, 5xx, 429). */
+  readonly transient: boolean;
+  /** Provider-requested minimum wait before the next attempt, in milliseconds. */
+  readonly retryAfterMs?: number;
+  /** Short kebab-case classification code, e.g. "network" or "http-502". */
+  readonly reason?: string;
+}
+
+/**
+ * Mint the one error shape the drain loop's retry/close policy understands.
+ * Transports throw this instead of implementing their own retry loops, so
+ * delivery semantics (ordering, backoff, close) stay owned by this module.
+ */
+export function platformBridgeDeliverySendFailureError(
+  message: string,
+  failure: PlatformBridgeDeliverySendFailure,
+): Error {
+  const error = new Error(message);
+  Object.defineProperty(error, SEND_FAILURE_PROPERTY, {
+    value: Object.freeze({
+      transient: failure.transient === true,
+      ...(failure.retryAfterMs !== undefined ? { retryAfterMs: failure.retryAfterMs } : {}),
+      ...(failure.reason !== undefined ? { reason: failure.reason } : {}),
+    }),
+    enumerable: false,
+  });
+  return error;
+}
+
+/**
+ * Read a transport-attached send-failure classification, or `undefined` for
+ * anything unmarked or malformed. Validation fails closed to `undefined`
+ * (permanent, no retry) so a forged or corrupted marker cannot buy retries or
+ * smuggle unbounded strings into a close-reason log line.
+ */
+export function readPlatformBridgeDeliverySendFailure(
+  error: unknown,
+): PlatformBridgeDeliverySendFailure | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const marker = (error as Record<string, unknown>)[SEND_FAILURE_PROPERTY];
+  if (!marker || typeof marker !== "object") return undefined;
+  const candidate = marker as { transient?: unknown; retryAfterMs?: unknown; reason?: unknown };
+  if (typeof candidate.transient !== "boolean") return undefined;
+  if (candidate.retryAfterMs !== undefined
+    && (!Number.isSafeInteger(candidate.retryAfterMs)
+      || (candidate.retryAfterMs as number) < 0
+      || (candidate.retryAfterMs as number) > MAX_SEND_FAILURE_RETRY_AFTER_MS)) {
+    return undefined;
+  }
+  if (candidate.reason !== undefined
+    && (typeof candidate.reason !== "string" || !SEND_FAILURE_REASON.test(candidate.reason))) {
+    return undefined;
+  }
+  return {
+    transient: candidate.transient,
+    ...(candidate.retryAfterMs !== undefined ? { retryAfterMs: candidate.retryAfterMs as number } : {}),
+    ...(candidate.reason !== undefined ? { reason: candidate.reason as string } : {}),
+  };
 }
 
 export type PlatformBridgeDeliveryEnqueueResult =
@@ -171,8 +254,20 @@ export interface CreatePlatformBridgeDeliveryAdapterOptions<TChannel> {
   readonly coalesceQueuedMessages?: PlatformBridgeDeliveryQueueCoalescer;
   /** A slow channel is closed rather than silently dropping a partial transcript. */
   readonly onBackpressure?: (channel: TChannel) => void;
-  /** A provider failure closes only its channel and never throws into the projection producer. */
-  readonly onDeliveryFailure?: (channel: TChannel) => void;
+  /**
+   * A provider failure closes only its channel and never throws into the
+   * projection producer. `reason` is the transport's validated kebab-case
+   * classification code (or a policy-derived one) so a close is never silent.
+   */
+  readonly onDeliveryFailure?: (channel: TChannel, reason?: string) => void;
+  /** Bound in-place retries of one transiently failing send; defaults to 2. */
+  readonly maxTransientSendRetries?: number;
+  /** First transient retry delay; doubles per attempt. Defaults to 500 ms. */
+  readonly retryBackoffBaseMs?: number;
+  /** Cap on one retry delay, including provider retry-after hints; defaults to 30,000 ms. */
+  readonly maxRetryDelayMs?: number;
+  /** Injectable delay seam for deterministic retry tests. */
+  readonly wait?: (milliseconds: number, signal: AbortSignal) => Promise<void>;
 }
 
 type PendingMessage = PlatformBridgeDeliveryQueuedMessage;
@@ -207,6 +302,22 @@ export function createPlatformBridgeDeliveryAdapter<TChannel>(
     "maxPendingMessagesPerChannel",
   );
   const maxTextChars = positiveInteger(options.maxTextChars ?? DEFAULT_MAX_TEXT_CHARS, "maxTextChars");
+  const maxTransientSendRetries = nonNegativeInteger(
+    options.maxTransientSendRetries ?? DEFAULT_MAX_TRANSIENT_SEND_RETRIES,
+    "maxTransientSendRetries",
+  );
+  const retryBackoffBaseMs = positiveInteger(
+    options.retryBackoffBaseMs ?? DEFAULT_RETRY_BACKOFF_BASE_MS,
+    "retryBackoffBaseMs",
+  );
+  const maxRetryDelayMs = positiveInteger(
+    options.maxRetryDelayMs ?? DEFAULT_MAX_RETRY_DELAY_MS,
+    "maxRetryDelayMs",
+  );
+  if (options.wait !== undefined && typeof options.wait !== "function") {
+    throw new TypeError("platform-bridge-delivery-wait-invalid");
+  }
+  const wait = options.wait ?? abortableDelay;
   const channels = new Map<TChannel, ChannelRecord<TChannel>>();
   let nextGeneration = 0;
 
@@ -221,12 +332,35 @@ export function createPlatformBridgeDeliveryAdapter<TChannel>(
     }
   };
 
-  const reportDeliveryFailure = (channel: TChannel): void => {
+  const reportDeliveryFailure = (channel: TChannel, reason: string): void => {
     try {
-      options.onDeliveryFailure?.(channel);
+      options.onDeliveryFailure?.(channel, reason);
     } catch {
       // A callback failure cannot affect the canonical conversation producer.
     }
+  };
+
+  /**
+   * The one retry/close decision for a failed provider send. Transports only
+   * classify (via `platformBridgeDeliverySendFailureError`); whether to retry
+   * in place, how long to wait, and when to close is decided here so a second
+   * transport inherits identical delivery semantics.
+   */
+  const sendFailurePolicy = (
+    error: unknown,
+    attemptsSoFar: number,
+  ): { readonly action: "retry"; readonly delayMs: number } | { readonly action: "close"; readonly reason: string } => {
+    const failure = readPlatformBridgeDeliverySendFailure(error);
+    if (failure === undefined) return { action: "close", reason: "unclassified" };
+    if (!failure.transient) return { action: "close", reason: failure.reason ?? "permanent" };
+    if (attemptsSoFar >= maxTransientSendRetries) {
+      return { action: "close", reason: `${failure.reason ?? "transient"}-retries-exhausted` };
+    }
+    const backoff = retryBackoffBaseMs * 2 ** attemptsSoFar;
+    return {
+      action: "retry",
+      delayMs: Math.min(Math.max(backoff, failure.retryAfterMs ?? 0), maxRetryDelayMs),
+    };
   };
 
   const closeRecord = (record: ChannelRecord<TChannel>): void => {
@@ -243,6 +377,9 @@ export function createPlatformBridgeDeliveryAdapter<TChannel>(
     if (!isCurrent(record) || record.sending || record.queue.length === 0) return;
     record.sending = true;
     const drain = (async () => {
+      // In-place retries of the queue head preserve per-conversation ordering:
+      // nothing behind the head is handed to the transport until it settles.
+      let attempts = 0;
       while (isCurrent(record) && record.queue.length > 0) {
         // Keep the in-flight message in the queue until it settles.  Queue
         // length therefore bounds both buffered and actively delivered data.
@@ -253,14 +390,26 @@ export function createPlatformBridgeDeliveryAdapter<TChannel>(
             signal: record.abortController.signal,
             generation: record.generation,
           });
-        } catch {
+        } catch (error) {
           // A rejected old/aborted send is not a failure of a newer pairing
           // that reused the same provider destination key.
           if (!isCurrent(record)) return;
-          reportDeliveryFailure(record.channel);
+          const decision = sendFailurePolicy(error, attempts);
+          if (decision.action === "retry") {
+            attempts += 1;
+            try {
+              await wait(decision.delayMs, record.abortController.signal);
+            } catch {
+              // An aborted or failed delay falls through to the loop's
+              // isCurrent check rather than counting as a provider failure.
+            }
+            continue;
+          }
+          reportDeliveryFailure(record.channel, decision.reason);
           closeRecord(record);
           return;
         }
+        attempts = 0;
         if (!isCurrent(record)) return;
         if (record.queue[0] === next) record.queue.shift();
       }
@@ -300,7 +449,7 @@ export function createPlatformBridgeDeliveryAdapter<TChannel>(
         normalized = compacted.map((candidate) => normalizeQueuedMessage(candidate, maxTextChars));
       } catch {
         closeRecord(record);
-        reportDeliveryFailure(record.channel);
+        reportDeliveryFailure(record.channel, "coalescer-error");
         return "closed";
       }
       record.queue = inFlight === undefined ? normalized : [inFlight, ...normalized];
@@ -696,4 +845,26 @@ function positiveInteger(value: number, name: string): number {
     throw new RangeError(`platform-bridge-delivery-${name}-invalid`);
   }
   return value;
+}
+
+function nonNegativeInteger(value: number, name: string): number {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new RangeError(`platform-bridge-delivery-${name}-invalid`);
+  }
+  return value;
+}
+
+/** Resolve (never reject) after the delay or as soon as the channel aborts. */
+function abortableDelay(milliseconds: number, signal: AbortSignal): Promise<void> {
+  if (milliseconds <= 0 || signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const finish = (): void => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, milliseconds);
+    timer.unref?.();
+    signal.addEventListener("abort", finish, { once: true });
+  });
 }

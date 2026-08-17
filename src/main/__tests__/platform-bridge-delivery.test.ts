@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   createPlatformBridgeDeliveryAdapter,
+  platformBridgeDeliverySendFailureError,
   type PlatformBridgeOutboundMessage,
 } from "../platform-bridge-delivery.js";
 import {
@@ -321,6 +322,137 @@ describe("PlatformBridgeDeliveryAdapter", () => {
     expect(generations).toEqual([1, 2]);
     expect(onDeliveryFailure).not.toHaveBeenCalled();
     expect(replacement.state().closed).toBe(false);
+  });
+
+  it("retries a transiently failing send in place and preserves per-channel ordering", async () => {
+    const sent: string[] = [];
+    const delays: number[] = [];
+    const onDeliveryFailure = vi.fn();
+    let failuresRemaining = 1;
+    const adapter = createPlatformBridgeDeliveryAdapter({
+      transport: {
+        send: async (_channel: string, message) => {
+          if (failuresRemaining > 0) {
+            failuresRemaining -= 1;
+            throw platformBridgeDeliverySendFailureError("telegram-delivery-failed", {
+              transient: true,
+              reason: "network",
+            });
+          }
+          sent.push(message.kind === "text" ? message.text : message.kind);
+        },
+      },
+      maxTransientSendRetries: 2,
+      retryBackoffBaseMs: 7,
+      wait: async (milliseconds) => void delays.push(milliseconds),
+      onDeliveryFailure,
+    });
+    const channel = adapter.openChannel("paired-chat", CONVERSATION_ID);
+
+    expect(channel.enqueueEvent(event(1, { kind: "assistant.text.delta", text: "first" }))).toBe("accepted");
+    expect(channel.enqueueEvent(event(2, { kind: "assistant.text.delta", text: "second" }))).toBe("accepted");
+    await channel.waitForIdle();
+
+    // The blip cost one backoff wait, not the channel or the turn's ordering.
+    expect(sent).toEqual(["first", "second"]);
+    expect(delays).toEqual([7]);
+    expect(onDeliveryFailure).not.toHaveBeenCalled();
+    expect(channel.state().closed).toBe(false);
+  });
+
+  it("closes with an exhaustion reason after bounded transient retries with doubling backoff", async () => {
+    const delays: number[] = [];
+    const failures: Array<string | undefined> = [];
+    let attempts = 0;
+    const adapter = createPlatformBridgeDeliveryAdapter({
+      transport: {
+        send: async () => {
+          attempts += 1;
+          throw platformBridgeDeliverySendFailureError("telegram-delivery-failed", {
+            transient: true,
+            reason: "http-502",
+          });
+        },
+      },
+      maxTransientSendRetries: 2,
+      retryBackoffBaseMs: 3,
+      wait: async (milliseconds) => void delays.push(milliseconds),
+      onDeliveryFailure: (_channel, reason) => void failures.push(reason),
+    });
+    const channel = adapter.openChannel("paired-chat", CONVERSATION_ID);
+
+    expect(channel.enqueueEvent(event(1, { kind: "assistant.text.delta", text: "reply" }))).toBe("accepted");
+    await channel.waitForIdle();
+
+    expect(attempts).toBe(3);
+    expect(delays).toEqual([3, 6]);
+    expect(failures).toEqual(["http-502-retries-exhausted"]);
+    expect(channel.state().closed).toBe(true);
+  });
+
+  it("closes immediately with the classified reason on a permanent failure and treats unmarked throws as permanent", async () => {
+    const runCase = async (error: Error): Promise<{ attempts: number; reason: string | undefined }> => {
+      const failures: Array<string | undefined> = [];
+      let attempts = 0;
+      const adapter = createPlatformBridgeDeliveryAdapter({
+        transport: {
+          send: async () => {
+            attempts += 1;
+            throw error;
+          },
+        },
+        wait: async () => undefined,
+        onDeliveryFailure: (_channel, reason) => void failures.push(reason),
+      });
+      const channel = adapter.openChannel("paired-chat", CONVERSATION_ID);
+      channel.enqueueEvent(event(1, { kind: "assistant.text.delta", text: "reply" }));
+      await channel.waitForIdle();
+      expect(channel.state().closed).toBe(true);
+      return { attempts, reason: failures[0] };
+    };
+
+    expect(await runCase(
+      platformBridgeDeliverySendFailureError("telegram-delivery-failed", {
+        transient: false,
+        reason: "api-403",
+      }),
+    )).toEqual({ attempts: 1, reason: "api-403" });
+    // Fail closed: a transport that throws without classifying gets no retries.
+    expect(await runCase(new Error("unmarked provider throw"))).toEqual({
+      attempts: 1,
+      reason: "unclassified",
+    });
+  });
+
+  it("honors a provider retry-after hint but caps every retry delay", async () => {
+    const delays: number[] = [];
+    let failuresRemaining = 2;
+    const adapter = createPlatformBridgeDeliveryAdapter({
+      transport: {
+        send: async () => {
+          if (failuresRemaining > 0) {
+            failuresRemaining -= 1;
+            throw platformBridgeDeliverySendFailureError("telegram-delivery-failed", {
+              transient: true,
+              reason: "api-429",
+              retryAfterMs: failuresRemaining === 1 ? 5_000 : 100,
+            });
+          }
+        },
+      },
+      maxTransientSendRetries: 2,
+      retryBackoffBaseMs: 1,
+      maxRetryDelayMs: 2_000,
+      wait: async (milliseconds) => void delays.push(milliseconds),
+    });
+    const channel = adapter.openChannel("paired-chat", CONVERSATION_ID);
+
+    channel.enqueueEvent(event(1, { kind: "assistant.text.delta", text: "reply" }));
+    await channel.waitForIdle();
+
+    // First hint (5s) is capped to 2s; second hint (100ms) beats the backoff.
+    expect(delays).toEqual([2_000, 100]);
+    expect(channel.state().closed).toBe(false);
   });
 
   it("subscribes through SharedConversationProjectionStore and maps only safe projected output", async () => {
