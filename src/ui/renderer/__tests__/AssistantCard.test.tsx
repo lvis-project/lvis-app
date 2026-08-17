@@ -128,6 +128,57 @@ describe("AssistantCard — slash command newline fix", () => {
   });
 });
 
+describe("AssistantCard — live vs restored systemNotice (Issue #2113)", () => {
+  function cardRoot(container: HTMLElement): HTMLElement {
+    const root = container.querySelector<HTMLElement>("div.group");
+    expect(root).not.toBeNull();
+    return root!;
+  }
+
+  it("renders a live stream-error banner with destructive styling and no restored badge", () => {
+    const { container } = renderCard(
+      makeEntry({ text: "응답 스트림이 끊겼습니다.", systemNotice: "stream-error" }),
+    );
+    const card = cardRoot(container);
+    expect(card.className).toContain("border-destructive");
+    expect(card.className).toContain("bg-destructive");
+    expect(
+      container.querySelector("[data-testid='assistant-restored-notice-badge']"),
+    ).toBeNull();
+  });
+
+  it("softens a restored stream-error banner and shows the previous-session badge", () => {
+    const { container } = renderCard(
+      makeEntry({
+        text: "응답 스트림이 끊겼습니다.",
+        systemNotice: "stream-error",
+        restored: true,
+      }),
+    );
+    const card = cardRoot(container);
+    // Restored banner must NOT reuse the live destructive treatment — that is
+    // exactly what made an old error read as a fresh one on session reload.
+    expect(card.className).not.toContain("destructive");
+    expect(card.className).toContain("border-border");
+    expect(card.className).toContain("bg-muted");
+    const badge = container.querySelector(
+      "[data-testid='assistant-restored-notice-badge']",
+    );
+    expect(badge).not.toBeNull();
+    expect(badge!.textContent?.trim()).not.toBe("");
+  });
+
+  it("restored without a systemNotice renders as a plain assistant card", () => {
+    const { container } = renderCard(makeEntry({ restored: true }));
+    const card = cardRoot(container);
+    expect(card.className).not.toContain("destructive");
+    expect(card.className).not.toContain("bg-muted");
+    expect(
+      container.querySelector("[data-testid='assistant-restored-notice-badge']"),
+    ).toBeNull();
+  });
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });

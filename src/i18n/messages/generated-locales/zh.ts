@@ -144,6 +144,7 @@ export const zhMessages: Record<string, string> = {
   "assistantCard.feedbackUp": "这很有帮助",
   "assistantCard.forkButton": "叉",
   "assistantCard.reasonPlaceholder": "原因（可选）",
+  "assistantCard.restoredNoticeBadge": "上次会话的错误",
   "assistantCard.retryButton": "重试（深度：高）",
   "assistantCard.sendButton": "发送",
   "assistantCard.starButton": "别针",

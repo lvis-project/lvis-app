@@ -158,6 +158,7 @@ export const frMessages: Record<string, string> = {
   "assistantCard.feedbackUp": "Cela a été utile",
   "assistantCard.forkButton": "Fourchette",
   "assistantCard.reasonPlaceholder": "Raison (facultatif)",
+  "assistantCard.restoredNoticeBadge": "Erreur d'une session précédente",
   "assistantCard.retryButton": "Réessayer (profondeur: élevée)",
   "assistantCard.sendButton": "Envoyer",
   "assistantCard.starButton": "Épingler",
