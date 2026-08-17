@@ -978,6 +978,56 @@ interface PendingEntry {
 }
 
 /**
+ * Host-internal view of one parked approval, handed to a registered
+ * {@link PendingApprovalObserver}.
+ *
+ * It exists so a second host-owned answer surface (the paired chat-platform
+ * bridge card) can offer a decision for a request WITHOUT growing a second
+ * resolution path: the observer holds exactly the echo material the renderer
+ * holds — the request id, nonce, and HMAC — and answers through the same
+ * {@link ApprovalGate.resolve} chokepoint, subject to the same integrity and
+ * allowed-choice checks. It deliberately carries no arguments, no paths, no
+ * reason text, and no verdict: an observer that renders a remote card gets the
+ * coarse identity fields only, mirroring the shared projection's approval
+ * event.
+ *
+ * Main-process only. Nothing here may cross IPC or a provider wire; the nonce
+ * and HMAC in particular are resolution capability, which is why this view is
+ * only reachable through {@link ApprovalGate.observePendingApprovals} — a
+ * registration surface no renderer or provider payload can call.
+ */
+export interface PendingApprovalView {
+  readonly requestId: string;
+  readonly toolName: string;
+  readonly source?: "builtin" | "plugin" | "mcp";
+  readonly category: "tool" | "agent-action";
+  readonly kind?: ApprovalKind;
+  readonly allowedChoices?: readonly ApprovalChoice[];
+  /** Conversation attribution, as on the request; never renderer-supplied. */
+  readonly sessionId?: string;
+  /** Echo material {@link ApprovalGate.resolve} verifies; host-internal only. */
+  readonly nonce: string;
+  readonly hmac: string;
+}
+
+/**
+ * Host-internal observer of the gate's pending set.
+ *
+ * `onPending` fires when a request is parked for an interactive answer — after
+ * every host-only short circuit (sensitive-path block, read-only
+ * auto-approve, away answer, parent answer), so an observer can never offer a
+ * decision the desk was never offered. `onSettled` fires exactly when the
+ * parked request stops being answerable, whatever settled it: a desk answer, a
+ * remote answer, the timeout, a turn abort, a cancel, or shutdown. Observers
+ * must tolerate `onSettled` for ids they never saw and must never throw;
+ * a throwing observer is swallowed so it cannot alter approval flow.
+ */
+export interface PendingApprovalObserver {
+  onPending(view: PendingApprovalView): void;
+  onSettled(requestId: string, decision: ApprovalDecision): void;
+}
+
+/**
  * Audit vocabulary for who answered an approval, and the closed set of
  * answerers itself: {@link ApprovalAnswerer} is `keyof` this table, so the type
  * cannot gain a member without that member also declaring the token it writes
@@ -1009,6 +1059,16 @@ const APPROVAL_ANSWERER_AUDIT_TOKENS = {
    * be the origin of a durable approval record.
    */
   "parent-agent": "parent-agent",
+  /**
+   * The paired chat-platform surface: the owner pressed a decision button on a
+   * bridge card. Distinct from `desk` for the reason the dimension exists — a
+   * reviewer partitioning rows by where the owner was must not have to infer
+   * "away from the desk" from surrounding rows — and distinct from
+   * `away-authority` because a human answered THIS call rather than
+   * pre-authorizing a class of calls. Only host code relaying a verified paired
+   * owner's button press may pass it; the renderer's IPC route cannot.
+   */
+  "platform-bridge": "platform-bridge",
 } as const;
 
 /**
@@ -1281,6 +1341,9 @@ export class ApprovalGate {
    */
   private readonly sessionKey: Buffer = randomBytes(32);
 
+  /** Host-internal observers of the pending set; see {@link observePendingApprovals}. */
+  private readonly pendingObservers = new Set<PendingApprovalObserver>();
+
   /**
    * The desk-armed second answerer. Owned by the gate rather than reachable
    * beside it: an answerer that could be consulted anywhere else would be a
@@ -1394,6 +1457,43 @@ export class ApprovalGate {
   /** Current grant state for the desk surface that displays it. */
   awayAuthoritySnapshot(): AwayAuthoritySnapshot | null {
     return this.awayAuthority.snapshot();
+  }
+
+  /**
+   * Register a host-internal observer of parked approvals. Returns the
+   * unsubscribe. See {@link PendingApprovalView} for what an observer receives
+   * and why registration is the only way to receive it.
+   */
+  observePendingApprovals(observer: PendingApprovalObserver): () => void {
+    this.pendingObservers.add(observer);
+    return () => {
+      this.pendingObservers.delete(observer);
+    };
+  }
+
+  /** Fan one parked request out to observers; a throwing observer is inert. */
+  private notifyPendingParked(view: PendingApprovalView): void {
+    for (const observer of [...this.pendingObservers]) {
+      try {
+        observer.onPending(view);
+      } catch {
+        // An observer failure must never alter approval flow.
+      }
+    }
+  }
+
+  /** Fan one settlement out to observers; a throwing observer is inert. */
+  private notifyPendingSettled(
+    requestId: string,
+    decision: ApprovalDecision,
+  ): void {
+    for (const observer of [...this.pendingObservers]) {
+      try {
+        observer.onSettled(requestId, decision);
+      } catch {
+        // An observer failure must never alter approval flow.
+      }
+    }
   }
 
   /**
@@ -2438,6 +2538,11 @@ export class ApprovalGate {
       const settle = (decision: ApprovalDecision): void => {
         detachAbortListener?.();
         detachAbortListener = undefined;
+        // Every way a PARKED request ends passes through here — desk answer,
+        // remote answer, timeout, turn abort, cancel, shutdown sweep — so this
+        // is the one place an observer's card can be told the request is no
+        // longer answerable.
+        this.notifyPendingSettled(fullReq.id, decision);
         resolve(decision);
       };
       const timer = setTimeout(() => {
@@ -2510,6 +2615,26 @@ export class ApprovalGate {
           : {}),
         nonce,
         expectedHmac,
+      });
+
+      // Announce the parked request to host-internal observers. Positioned
+      // after `pending.set` so an observer's answer through `resolve()` finds
+      // the entry, and below every host-only short circuit above (which all
+      // returned before a pending entry existed).
+      this.notifyPendingParked({
+        requestId: fullReq.id,
+        toolName: fullReq.toolName,
+        ...(fullReq.source === undefined ? {} : { source: fullReq.source }),
+        category: fullReq.category,
+        ...(fullReq.kind === undefined ? {} : { kind: fullReq.kind }),
+        ...(fullReq.allowedChoices === undefined
+          ? {}
+          : { allowedChoices: fullReq.allowedChoices }),
+        ...(fullReq.sessionId === undefined
+          ? {}
+          : { sessionId: fullReq.sessionId }),
+        nonce,
+        hmac: expectedHmac,
       });
 
       // Send the request to the renderer (main→renderer one-way).
@@ -2594,10 +2719,18 @@ export class ApprovalGate {
   /**
    * Called by the IPC handler when the renderer responds.
    * Ignores unknown pending entries, making duplicate responses safe.
+   *
+   * `answeredBy` is host-derived AT THE CALL SITE, never read from the
+   * decision payload: the renderer's IPC route and the plugin host-API route
+   * omit it and stay `desk`; the paired chat-platform card handler is the one
+   * caller that passes `"platform-bridge"`. Every answerer passes the same
+   * integrity and allowed-choice checks below — there is deliberately no
+   * second resolution path.
    */
   resolve(
     requestId: string,
     decision: ApprovalDecision,
+    answeredBy: ApprovalAnswerer = "desk",
   ): ApprovalDecision | null {
     const entry = this.pending.get(requestId);
     if (!entry) return null;
@@ -2671,21 +2804,17 @@ export class ApprovalGate {
     }
     // §S8 phase: decided
     //
-    // `answeredBy` is host-derived: it is fixed here and never read from
-    // `decision`, so a renderer that adds an `answeredBy` field to its response
-    // payload cannot reach this row. Two host call sites reach this method —
-    // the `lvis:approval:respond` IPC handler in `src/ipc/domains/permissions.ts`
-    // and `hostApi.agentApproval.respond` in the plugin runtime — and both
-    // answer from a surface inside the app window, so `desk` describes them
-    // both today. When a second answerer exists, the plugin host-API route is
-    // the one to look at first: it is host code relaying a plugin's response
-    // rather than a user clicking the dock, so it is the site most likely to
-    // need its own answerer rather than this default.
+    // `answeredBy` is host-derived: it is the parameter this method's caller
+    // fixed and never read from `decision`, so a renderer that adds an
+    // `answeredBy` field to its response payload cannot reach this row. The
+    // `lvis:approval:respond` IPC handler and `hostApi.agentApproval.respond`
+    // in the plugin runtime omit it and record `desk`; the paired
+    // chat-platform card handler passes `"platform-bridge"`.
     this.auditLogger?.log({
       timestamp: new Date().toISOString(),
       sessionId: entry.sessionId ?? UNATTRIBUTED_APPROVAL_SESSION_ID,
       type: "approval",
-      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields({ ...entry, answeredBy: "desk" }, entry.executionPlan)} choice=${resolvedDecision.choice} rememberPattern=${resolvedDecision.rememberPattern ?? "none"}`,
+      output: `[approval:decided] ${requestId} ${formatApprovalAuditFields({ ...entry, answeredBy }, entry.executionPlan)} choice=${resolvedDecision.choice} rememberPattern=${resolvedDecision.rememberPattern ?? "none"}`,
     });
     entry.resolve(resolvedDecision);
     return resolvedDecision;

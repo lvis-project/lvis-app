@@ -21,6 +21,10 @@ function requestBody(call: unknown[]): Record<string, unknown> {
   return JSON.parse(String(init.body)) as Record<string, unknown>;
 }
 
+function requestTarget(call: unknown[]): string {
+  return String(call[0]);
+}
+
 function message(updateId: number, text: string) {
   return {
     update_id: updateId,
@@ -54,14 +58,14 @@ describe("TelegramBotApiClient", () => {
     await expect(api.getWebhookInfo()).resolves.toEqual({ ok: true, value: { hasWebhook: false } });
   });
 
-  it("always asks for a bounded batch of message updates only", async () => {
+  it("always asks for a bounded batch of message and button-press updates only", async () => {
     const fetchStub = vi.fn(async () => json({ ok: true, result: [] }));
     const api = client(fetchStub as unknown as typeof fetch);
 
     await api.getUpdates({ offset: 42 });
 
     const body = requestBody(fetchStub.mock.calls[0] as unknown as unknown[]);
-    expect(body).toMatchObject({ offset: 42, allowed_updates: ["message"] });
+    expect(body).toMatchObject({ offset: 42, allowed_updates: ["message", "callback_query"] });
     // An omitted limit would inherit Telegram's default of 100, and an omitted
     // allowed_updates would inherit whatever a prior setWebhook configured.
     expect(body.limit).toBe(25);
@@ -169,6 +173,89 @@ describe("TelegramBotApiClient", () => {
     const result = await api.getMe();
     expect(result).toEqual({ ok: false, reason: "unreachable" });
     expect(JSON.stringify(result)).not.toContain(BOT_TOKEN);
+  });
+
+  it("sends a decision card as protected text with opaque inline buttons", async () => {
+    const fetchStub = vi.fn(async () => json({ ok: true, result: { message_id: 77 } }));
+    const api = client(fetchStub as unknown as typeof fetch);
+
+    const sent = await api.sendDecisionCard("123456789", "LVIS: waiting for approval", [
+      { label: "Approve once", callbackData: "token-approve" },
+      { label: "Deny", callbackData: "token-deny" },
+    ]);
+    expect(sent).toEqual({ ok: true, value: { messageId: 77 } });
+
+    const body = requestBody(fetchStub.mock.calls[0] as unknown as unknown[]);
+    expect(requestTarget(fetchStub.mock.calls[0] as unknown as unknown[])).toContain("/sendMessage");
+    expect(body).toMatchObject({
+      chat_id: "123456789",
+      protect_content: true,
+      reply_markup: {
+        inline_keyboard: [[
+          { text: "Approve once", callback_data: "token-approve" },
+          { text: "Deny", callback_data: "token-deny" },
+        ]],
+      },
+    });
+  });
+
+  it("refuses decision-card inputs that could smuggle structure into a button", async () => {
+    const fetchStub = vi.fn(async () => json({ ok: true, result: { message_id: 1 } }));
+    const api = client(fetchStub as unknown as typeof fetch);
+
+    for (const buttons of [
+      [],
+      [{ label: "Approve", callbackData: '{"choice":"allow"}' }],
+      [{ label: "Approve", callbackData: "a".repeat(65) }],
+      [{ label: "", callbackData: "token" }],
+      [{ label: "x".repeat(33), callbackData: "token" }],
+    ]) {
+      await expect(api.sendDecisionCard("123456789", "text", buttons))
+        .rejects.toThrow("telegram-bot-api-client-buttons-invalid");
+    }
+    expect(fetchStub).not.toHaveBeenCalled();
+
+    // A provider answer with no message id is unusable for a later edit.
+    const noMessageId = client(vi.fn(async () => json({ ok: true, result: {} })) as unknown as typeof fetch);
+    await expect(noMessageId.sendDecisionCard("123456789", "text", [
+      { label: "Approve once", callbackData: "token" },
+    ])).resolves.toEqual({ ok: false, reason: "invalid-response" });
+  });
+
+  it("edits a card's text without a reply markup, which retires its buttons", async () => {
+    const fetchStub = vi.fn(async () => json({ ok: true, result: { message_id: 77 } }));
+    const api = client(fetchStub as unknown as typeof fetch);
+
+    await expect(api.editMessageText("123456789", 77, "LVIS: approved"))
+      .resolves.toEqual({ ok: true, value: true });
+
+    const body = requestBody(fetchStub.mock.calls[0] as unknown as unknown[]);
+    expect(requestTarget(fetchStub.mock.calls[0] as unknown as unknown[])).toContain("/editMessageText");
+    expect(body).toMatchObject({ chat_id: "123456789", message_id: 77, text: "LVIS: approved" });
+    expect("reply_markup" in body).toBe(false);
+
+    await expect(api.editMessageText("123456789", 0, "text"))
+      .rejects.toThrow("telegram-bot-api-client-message-id-invalid");
+  });
+
+  it("acknowledges a callback query, with and without a toast", async () => {
+    const fetchStub = vi.fn(async () => json({ ok: true, result: true }));
+    const api = client(fetchStub as unknown as typeof fetch);
+
+    await expect(api.answerCallbackQuery("press-1")).resolves.toEqual({ ok: true, value: true });
+    await expect(api.answerCallbackQuery("press-2", "Approved for this run"))
+      .resolves.toEqual({ ok: true, value: true });
+
+    const silent = requestBody(fetchStub.mock.calls[0] as unknown as unknown[]);
+    expect(requestTarget(fetchStub.mock.calls[0] as unknown as unknown[])).toContain("/answerCallbackQuery");
+    expect(silent).toEqual({ callback_query_id: "press-1" });
+    expect(requestBody(fetchStub.mock.calls[1] as unknown as unknown[])).toEqual({
+      callback_query_id: "press-2",
+      text: "Approved for this run",
+    });
+
+    await expect(api.answerCallbackQuery("has space"))
+      .rejects.toThrow("telegram-bot-api-client-callback-query-id-invalid");
   });
 
   it("rejects an unusable configuration instead of calling Telegram", async () => {
