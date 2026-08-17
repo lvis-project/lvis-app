@@ -30,6 +30,10 @@ import {
   type ConversationEventReplay,
   type ConversationEventSubscriptionOptions,
 } from "./conversation-event-hub.js";
+import {
+  toSafeTurnFailureSummary,
+  type TurnFailureSummary,
+} from "./turn-failure-summary.js";
 
 /** Version of the semantic platform event contract. */
 export const PLATFORM_CONVERSATION_PROTOCOL_VERSION = 1 as const;
@@ -116,6 +120,12 @@ export type PlatformConversationEvent =
   | { readonly kind: "permission.reviewed"; readonly review: ConversationPermissionReview }
   | {
     readonly kind: "turn.error";
+    /**
+     * Share-safe failure summary derived by the producer through
+     * `deriveTurnFailureSummary()`. Portable by design: closed category union
+     * plus a fixed table sentence, never the raw error message.
+     */
+    readonly failure?: TurnFailureSummary;
     readonly ownerDetail: {
       readonly message: string;
       readonly systemNotice?: "context-error" | "stream-error";
@@ -336,7 +346,7 @@ export type SharedConversationProjectionEvent =
   | { readonly kind: "approval.waiting-local" }
   | { readonly kind: "compaction.started" }
   | { readonly kind: "compaction.completed" }
-  | { readonly kind: "turn.failed" }
+  | { readonly kind: "turn.failed"; readonly failure?: TurnFailureSummary }
   | { readonly kind: "turn.completed" };
 
 export function projectSharedConversationEvent(
@@ -359,8 +369,15 @@ export function projectSharedConversationEvent(
       return { kind: "compaction.started" };
     case "compaction.completed":
       return { kind: "compaction.completed" };
-    case "turn.error":
-      return { kind: "turn.failed" };
+    case "turn.error": {
+      // Re-validate even our own producer's summary: only the whitelisted
+      // fields flow, with the category checked against the closed union and
+      // the sentence defensively truncated.
+      const failure = toSafeTurnFailureSummary(event.failure);
+      return failure === undefined
+        ? { kind: "turn.failed" }
+        : { kind: "turn.failed", failure };
+    }
     case "turn.completed":
       return { kind: "turn.completed" };
     default:

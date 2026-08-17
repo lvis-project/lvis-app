@@ -6,11 +6,13 @@
  * event type, so a provider adapter cannot accidentally serialize reasoning,
  * tool arguments/results, attachment bytes, paths, or private session detail.
  */
-import type {
-  SharedConversationEventEnvelope,
-  SharedConversationProjectionStore,
-  SharedConversationProjectionSubscription,
-  SharedConversationSnapshot,
+import {
+  toSafeTurnFailureSummary,
+  type SharedConversationEventEnvelope,
+  type SharedConversationProjectionStore,
+  type SharedConversationProjectionSubscription,
+  type SharedConversationSnapshot,
+  type TurnFailureSummary,
 } from "../engine/shared-conversation-projection.js";
 
 const DEFAULT_MAX_CHANNELS = 128;
@@ -71,6 +73,11 @@ export type PlatformBridgeOutboundMessage =
     readonly kind: "status";
     readonly cursor: number;
     readonly status: Exclude<PlatformBridgeOutboundStatus, "idle" | "running">;
+    /**
+     * Present only for `turn-failed`: the closed, share-safe failure summary
+     * (fixed category union plus a fixed table sentence, never raw error text).
+     */
+    readonly failure?: TurnFailureSummary;
   };
 
 /**
@@ -629,7 +636,14 @@ function copyOutboundMessage(message: PlatformBridgeOutboundMessage): PlatformBr
     case "text":
       return { kind: "text", cursor: message.cursor, text: message.text };
     case "status":
-      return { kind: "status", cursor: message.cursor, status: message.status };
+      return {
+        kind: "status",
+        cursor: message.cursor,
+        status: message.status,
+        ...(message.failure === undefined
+          ? {}
+          : { failure: { category: message.failure.category, summary: message.failure.summary } }),
+      };
   }
 }
 
@@ -648,7 +662,7 @@ function normalizeOutboundMessage(
     case "text":
       return { kind: "text", cursor: message.cursor, text: safeText(message.text, maxTextChars) };
     case "status":
-      return { kind: "status", cursor: message.cursor, status: message.status };
+      return statusMessage(message.cursor, message.status, message.failure);
   }
 }
 
@@ -696,10 +710,20 @@ function isValidOutboundMessage(
     case "text":
       return isSafeOutboundText(message.text, maxTextChars);
     case "status":
-      return isEventStatus(message.status);
+      return isEventStatus(message.status)
+        && isSafeOutboundFailure((message as { failure?: unknown }).failure);
     default:
       return false;
   }
+}
+
+/** Undefined, or a summary that already survives fail-closed re-validation unchanged. */
+function isSafeOutboundFailure(value: unknown): value is TurnFailureSummary | undefined {
+  if (value === undefined) return true;
+  const safe = toSafeTurnFailureSummary(value);
+  return safe !== undefined
+    && safe.category === (value as { category?: unknown }).category
+    && safe.summary === (value as { summary?: unknown }).summary;
 }
 
 function isSafeOutboundText(value: unknown, maxTextChars: number): value is string {
@@ -767,7 +791,7 @@ function toEventMessage(
     case "compaction.completed":
       return statusMessage(event.cursor, "compaction-completed");
     case "turn.failed":
-      return statusMessage(event.cursor, "turn-failed");
+      return statusMessage(event.cursor, "turn-failed", event.event.failure);
     case "turn.completed":
       return statusMessage(event.cursor, "turn-completed");
   }
@@ -776,8 +800,17 @@ function toEventMessage(
 function statusMessage(
   cursor: number,
   status: Exclude<PlatformBridgeOutboundStatus, "idle" | "running">,
+  failure?: TurnFailureSummary,
 ): PlatformBridgeOutboundMessage {
-  return { kind: "status", cursor, status };
+  // Fail closed: a summary that does not survive re-validation is dropped and
+  // the bare status still flows.
+  const safeFailure = toSafeTurnFailureSummary(failure);
+  return {
+    kind: "status",
+    cursor,
+    status,
+    ...(safeFailure === undefined ? {} : { failure: safeFailure }),
+  };
 }
 
 function discardQueuedAtOrBefore<TChannel>(record: ChannelRecord<TChannel>, cursor: number): void {

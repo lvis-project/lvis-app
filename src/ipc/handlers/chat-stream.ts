@@ -14,6 +14,7 @@ import type {
   PlatformConversationEvent,
   PlatformConversationEventSink,
 } from "../../engine/conversation-platform-protocol.js";
+import { deriveTurnFailureSummary } from "../../engine/turn-failure-summary.js";
 import type { ChatInputOrigin, RemoteControllerAuthority } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
 import type { ConversationLoop, TurnResult } from "../../engine/conversation-loop.js";
@@ -201,9 +202,15 @@ export async function runStreamedTurn(
             ...(uiPayload === undefined ? {} : { uiPayload }),
           },
         }),
-      onError: (error, systemNotice) =>
+      onError: (error, systemNotice, classifierCategory) =>
         send({
           kind: "turn.error",
+          // The one derivation point for the share-safe failure summary: a
+          // closed-table lookup that never copies the raw error message.
+          failure: deriveTurnFailureSummary({
+            ...(systemNotice === undefined ? {} : { systemNotice }),
+            ...(classifierCategory === undefined ? {} : { classifierCategory }),
+          }),
           ownerDetail: {
             message: error,
             ...(systemNotice === undefined ? {} : { systemNotice }),
