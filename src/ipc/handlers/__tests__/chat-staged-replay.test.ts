@@ -13,26 +13,9 @@
  * envelope did not survive, e.g. DLP rewriting the fence header).
  */
 import { describe, expect, it, vi } from "vitest";
-import type { ConversationLoop } from "../../../engine/conversation-loop.js";
 import { runStreamedTurn, STREAM_TURN_OPTIONS } from "../chat-stream.js";
 import { formatStagedEnvelope, STAGED_ORIGIN_KINDS } from "../../../shared/staged-origins.js";
-
-const completedTurn = {
-  text: "done",
-  toolCalls: [],
-  route: "default",
-  stopReason: "end_turn",
-} as const;
-
-function makeLoop() {
-  const runTurn = vi.fn(async (..._args: unknown[]) => completedTurn);
-  const loop = { runTurn } as unknown as ConversationLoop;
-  return { loop, runTurn };
-}
-
-function turnOptions(runTurn: ReturnType<typeof makeLoop>["runTurn"]): Record<string, unknown> {
-  return (runTurn.mock.calls[0] as unknown[])[3] as Record<string, unknown>;
-}
+import { makeLoop, turnOptions } from "./chat-stream-test-helpers.js";
 
 const sampleSource: Record<string, string> = {
   "plugin-emitted": "overlay:meeting-detection",
