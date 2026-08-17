@@ -1328,6 +1328,10 @@ B${i}
     expect(sent).toEqual([
       {
         channel: "lvis:chat:stream",
+        payload: expect.objectContaining({ type: "user_message", text: "hello", origin: "user-keyboard", streamId: 1 }),
+      },
+      {
+        channel: "lvis:chat:stream",
         payload: expect.objectContaining({ type: "text_delta", text: "before", streamId: 1 }),
       },
       {

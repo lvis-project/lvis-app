@@ -50,6 +50,12 @@ function projectPlatformConversationEventToLegacyChatFrame(
   switch (event.kind) {
     case "turn.started":
       return undefined;
+    case "user.message":
+      return streamFrame(streamChannel, withStreamId({
+        type: "user_message",
+        text: event.ownerDetail.text,
+        origin: event.origin,
+      }));
     case "assistant.reasoning.delta":
       return streamFrame(streamChannel, withStreamId({
         type: "reasoning_delta",
