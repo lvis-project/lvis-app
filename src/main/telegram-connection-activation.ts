@@ -22,6 +22,7 @@ import {
   createTelegramActorDigester,
   telegramConversationDigest,
 } from "./telegram-platform-runtime.js";
+import type { TelegramRemoteApprovalGatePort } from "./telegram-remote-approval.js";
 
 export interface StartTelegramConnectionActivationOptions {
   readonly store: TelegramConnectionStore;
@@ -35,6 +36,12 @@ export interface StartTelegramConnectionActivationOptions {
    * converge on one path.
    */
   readonly stopBridge: () => Promise<void>;
+  /**
+   * The host approval gate behind the remote-approval card feature. Read at
+   * activation time by the composition owner (`main.ts`); absent — in tests
+   * and in any boot without a gate — keeps approvals desk-only.
+   */
+  readonly approvalGate?: TelegramRemoteApprovalGatePort;
   /** Test-only injection; production reads Electron's OS-encrypted store. */
   readonly secretStore?: SecretStore;
   readonly log?: (message: string) => void;
@@ -151,6 +158,7 @@ export async function startTelegramConnectionActivation(
       return actorDigest !== null && store.activePairingActorDigest() === actorDigest;
     },
     notifyUnroutable: createUnroutableNotifier(controlReplies),
+    ...(options.approvalGate ? { approvalGate: options.approvalGate } : {}),
     onFatal: async (code) => {
       // Best-effort, and deliberately not allowed to skip the teardown below.
       // One fatal code says the store itself cannot be written, so the call
