@@ -106,6 +106,42 @@ describe("PlatformBridgeDeliveryAdapter", () => {
     expect(wire).not.toContain("never-forward");
   });
 
+  it("carries the share-safe failure summary on a failed turn and drops a forged one", async () => {
+    const sent: PlatformBridgeOutboundMessage[] = [];
+    const adapter = createPlatformBridgeDeliveryAdapter({
+      transport: { send: async (_channel: string, message) => void sent.push(message) },
+    });
+    const channel = adapter.openChannel("telegram:failed-chat", CONVERSATION_ID);
+
+    channel.enqueueEvent(event(1, {
+      kind: "turn.failed",
+      failure: { category: "rate-limit", summary: "The model rate limit was hit. Retry shortly." },
+    }));
+    channel.enqueueEvent(event(2, {
+      kind: "turn.failed",
+      failure: {
+        category: "stack-trace",
+        summary: "at C:\\private\\secret.ts:1 token sk-FAKE-TOKEN-123",
+      } as unknown as { category: "provider"; summary: string },
+    }));
+    channel.enqueueEvent(event(3, { kind: "turn.failed" }));
+    await channel.waitForIdle();
+
+    expect(sent).toEqual([
+      {
+        kind: "status",
+        cursor: 1,
+        status: "turn-failed",
+        failure: { category: "rate-limit", summary: "The model rate limit was hit. Retry shortly." },
+      },
+      { kind: "status", cursor: 2, status: "turn-failed" },
+      { kind: "status", cursor: 3, status: "turn-failed" },
+    ]);
+    const wire = JSON.stringify(sent);
+    expect(wire).not.toContain("secret.ts");
+    expect(wire).not.toContain("sk-FAKE-TOKEN-123");
+  });
+
   it("bounds text by UTF-16 unit and keeps the newest end of a snapshot", async () => {
     const sent: PlatformBridgeOutboundMessage[] = [];
     const adapter = createPlatformBridgeDeliveryAdapter({

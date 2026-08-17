@@ -83,6 +83,12 @@ export interface TurnCallbacks {
   onPermissionModeChanged?: (mode: "default" | "strict" | "auto" | "allow",
   ) => void;
   onError?: (error: string, systemNotice?: "context-error" | "stream-error",
+    /**
+     * Provider error classification computed where the raw error exists
+     * (`classifyProviderError`); consumed by `deriveTurnFailureSummary` to
+     * build the share-safe failure summary. Never raw error text.
+     */
+    classifierCategory?: string,
   ) => void;
   onCompactOccurred?: (result: {
     removedMessages: number;
