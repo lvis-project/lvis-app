@@ -347,7 +347,32 @@ export class NotificationService {
     }
   }
 
+  /**
+   * Fire a notification cue. NEVER throws (#2103).
+   *
+   * Notifications are passive lifecycle cues; the flows that emit them
+   * (turn completion, approval entry, plugin events, boot steps, shortcut
+   * registration, IPC handlers) must never fail because a cue could not be
+   * delivered. That invariant used to be enforced per call site with a
+   * try/catch around every `fire(...)` — a pattern that was applied at some
+   * sites and missed at others. It is now structural: `fire()` catches
+   * everything (including injected `getMainWindow` / `isAnyWindowFocused`
+   * probes and window-handle races) and degrades to a warn log, so a new
+   * call site cannot reintroduce the failure class by forgetting a wrapper.
+   */
   fire(opts: FireOptions): void {
+    try {
+      this.fireUnguarded(opts);
+    } catch (err) {
+      // Delivery failure must never propagate into the calling flow. The
+      // inner OS/toast paths already degrade individually; this catch is the
+      // structural backstop for everything else (probe callbacks, window
+      // races, sanitizer edge cases).
+      log.warn("notification fire failed: %s", (err as Error)?.message ?? String(err));
+    }
+  }
+
+  private fireUnguarded(opts: FireOptions): void {
     // Test-mode + pre-ready hard guard — never pop a notification before the
     // app is ready or inside a vitest run.
     if (this.isTestEnv() || !this.isReady()) return;
@@ -494,9 +519,13 @@ export class NotificationService {
     kind: NotificationKind;
     contextRef?: NotificationContextRef;
   }): void {
-    const win = this.getMainWindow();
-    if (!win || win.isDestroyed()) return;
+    // Entirely inside the try — this runs from OS notification click /
+    // Action Center activation callbacks, where a throw would surface as an
+    // unhandled exception in the main process. `getMainWindow()` is an
+    // injected getter and shares fire()'s never-throw contract (#2103).
     try {
+      const win = this.getMainWindow();
+      if (!win || win.isDestroyed()) return;
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
