@@ -3,6 +3,7 @@ import type {
   PlatformBridgeDeliveryTransportSendOptions,
   PlatformBridgeOutboundMessage,
 } from "../platform-bridge-delivery.js";
+import { readPlatformBridgeDeliverySendFailure } from "../platform-bridge-delivery.js";
 import {
   coalesceTelegramDeliveryQueue,
   createTelegramOutboundTransport,
@@ -490,5 +491,163 @@ describe("Telegram platform adapter", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("classifies a network failure as transient and logs only a safe errno-style code", async () => {
+    const logs: string[] = [];
+    const networkError = new Error(
+      `fetch failed for https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`,
+    );
+    (networkError as { cause?: unknown }).cause = Object.assign(
+      new Error("connect ECONNREFUSED 127.0.0.1:443"),
+      { code: "ECONNREFUSED" },
+    );
+    const transport = createTelegramOutboundTransport({
+      botToken: BOT_TOKEN,
+      fetch: vi.fn(async () => { throw networkError; }) as unknown as typeof globalThis.fetch,
+      log: (message) => void logs.push(message),
+    });
+
+    const error: unknown = await transport.send(
+      { chatId: "42" },
+      { kind: "text", cursor: 1, text: "private reply text" },
+      sendOptions(),
+    ).then(() => undefined, (thrown: unknown) => thrown);
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("telegram-delivery-failed");
+    expect(readPlatformBridgeDeliverySendFailure(error)).toEqual({
+      transient: true,
+      reason: "network",
+    });
+    expect(logs).toEqual(["[telegram-egress] sendMessage failed: network error (ECONNREFUSED)"]);
+    const logged = logs.join("\n");
+    expect(logged).not.toContain(BOT_TOKEN);
+    expect(logged).not.toContain("42");
+    expect(logged).not.toContain("private reply text");
+    expect(logged).not.toContain("https://");
+  });
+
+  it("classifies a request timeout as transient without leaking wire detail", async () => {
+    vi.useFakeTimers();
+    try {
+      const logs: string[] = [];
+      const hangingFetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () => reject(new Error("request-aborted")), { once: true });
+        }));
+      const transport = createTelegramOutboundTransport({
+        botToken: BOT_TOKEN,
+        fetch: hangingFetch as unknown as typeof globalThis.fetch,
+        requestTimeoutMs: 25,
+        log: (message) => void logs.push(message),
+      });
+
+      const delivery = transport.send(
+        { chatId: "42" },
+        { kind: "text", cursor: 1, text: "will time out" },
+        sendOptions(),
+      ).then(() => undefined, (thrown: unknown) => thrown);
+      await vi.advanceTimersByTimeAsync(25);
+      const error = await delivery;
+
+      expect(readPlatformBridgeDeliverySendFailure(error)).toEqual({
+        transient: true,
+        reason: "timeout",
+      });
+      expect(logs).toEqual(["[telegram-egress] sendMessage failed: request timeout"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("classifies Bot API rejections by status: 5xx transient, 429 with capped retry-after, 403 permanent", async () => {
+    const classify = async (status: number, body: Record<string, unknown>) => {
+      const logs: string[] = [];
+      const transport = createTelegramOutboundTransport({
+        botToken: BOT_TOKEN,
+        fetch: vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof globalThis.fetch,
+        log: (message) => void logs.push(message),
+      });
+      const error: unknown = await transport.send(
+        { chatId: "42" },
+        { kind: "text", cursor: 1, text: "private reply text" },
+        sendOptions(),
+      ).then(() => undefined, (thrown: unknown) => thrown);
+      expect((error as Error).message).toBe("telegram-delivery-failed");
+      const logged = logs.join("\n");
+      expect(logged).not.toContain(BOT_TOKEN);
+      expect(logged).not.toContain("private reply text");
+      return { failure: readPlatformBridgeDeliverySendFailure(error), logged };
+    };
+
+    const serverError = await classify(502, { ok: false, error_code: 502, description: "Bad Gateway" });
+    expect(serverError.failure).toEqual({ transient: true, reason: "api-502" });
+    expect(serverError.logged).toContain("http_status=502");
+    expect(serverError.logged).toContain("error_code=502");
+
+    const rateLimited = await classify(429, {
+      ok: false,
+      error_code: 429,
+      description: "Too Many Requests: retry after 99",
+      parameters: { retry_after: 99 },
+    });
+    // A 99-second provider hint is honored only up to the 30-second cap.
+    expect(rateLimited.failure).toEqual({ transient: true, reason: "api-429", retryAfterMs: 30_000 });
+    expect(rateLimited.logged).toContain("retry_after_ms=30000");
+
+    const shortRateLimit = await classify(429, {
+      ok: false,
+      error_code: 429,
+      description: "Too Many Requests: retry after 2",
+      parameters: { retry_after: 2 },
+    });
+    expect(shortRateLimit.failure).toEqual({ transient: true, reason: "api-429", retryAfterMs: 2_000 });
+
+    const forbidden = await classify(403, {
+      ok: false,
+      error_code: 403,
+      description: "Forbidden: bot was blocked by the user",
+    });
+    expect(forbidden.failure).toEqual({ transient: false, reason: "api-403" });
+    expect(forbidden.logged).toContain('description="Forbidden: bot was blocked by the user"');
+
+    // A success status carrying a failure body is still a permanent rejection.
+    const failedBody = await classify(200, { ok: false });
+    expect(failedBody.failure).toEqual({ transient: false, reason: "http-200" });
+  });
+
+  it("truncates and sanitizes a hostile provider description before logging it", async () => {
+    const logs: string[] = [];
+    const hostileDescription = `${"A\"\u0000\u0007\n<x>".repeat(40)}${"B".repeat(5_000)}`;
+    const transport = createTelegramOutboundTransport({
+      botToken: BOT_TOKEN,
+      fetch: vi.fn(async () => new Response(
+        JSON.stringify({ ok: false, error_code: 400, description: hostileDescription }),
+        { status: 400 },
+      )) as unknown as typeof globalThis.fetch,
+      log: (message) => void logs.push(message),
+    });
+
+    await expect(transport.send(
+      { chatId: "42" },
+      { kind: "text", cursor: 1, text: "safe" },
+      sendOptions(),
+    )).rejects.toThrow("telegram-delivery-failed");
+
+    expect(logs).toHaveLength(1);
+    const line = logs[0]!;
+    // Prefix + status fields + a description hard-capped at 120 characters.
+    expect(line.length).toBeLessThan(220);
+    expect(line).toContain('description="A<x>');
+    // Embedded quotes and control characters are stripped, so a hostile
+    // description can neither restructure the line nor flood the log.
+    const delimiter = 'description="';
+    const loggedDescription = line.slice(line.indexOf(delimiter) + delimiter.length, -1);
+    expect(loggedDescription.length).toBeLessThanOrEqual(120);
+    expect(loggedDescription).not.toContain('"');
+    expect(line).not.toContain("\u0000");
+    expect(line).not.toContain("\u0007");
+    expect(line).not.toContain("\n");
   });
 });
