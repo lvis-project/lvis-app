@@ -4,11 +4,12 @@ import {
   MAX_TURN_FAILURE_SUMMARY_CHARS,
   toSafeTurnFailureSummary,
   TURN_FAILURE_CATEGORIES,
+  type TurnFailureCategory,
 } from "../turn-failure-summary.js";
 
 describe("turn failure summary", () => {
   it("maps the provider error classification onto the closed category union", () => {
-    const cases: readonly [string, string][] = [
+    const cases: readonly [string, TurnFailureCategory][] = [
       ["api-key", "auth"],
       ["rate-limit", "rate-limit"],
       ["context-length", "context"],
