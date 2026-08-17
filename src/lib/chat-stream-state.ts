@@ -10,6 +10,7 @@ import {
   normalizeSubscriptionUsageTelemetry,
   type SubscriptionUsageTelemetry,
 } from "../shared/subscription-runtime.js";
+import { isExternalSurfaceInputOrigin } from "../shared/chat-origin.js";
 import { t } from "../i18n/index.js";
 
 export type TokenUsageSegment = {
@@ -34,6 +35,8 @@ export type StreamEvent = {
   type: string;
   streamId?: number;
   text?: string;
+  /** Host-resolved input provenance carried by `user_message` frames. */
+  origin?: string;
   thought?: string;
   name?: string;
   error?: string;
@@ -184,6 +187,14 @@ export type ChatEntry =
   | {
       kind: "user";
       text: string;
+      /**
+       * External-surface provenance for a turn the desktop did not submit
+       * (loopback API, Tailnet controller, chat-platform bridge). Set only by
+       * `applyExternalUserMessage` from the live stream; the bubble itself
+       * persists through normal history, the badge is live-stream display
+       * state.
+       */
+      origin?: string;
       /** `sub-agent` is a child's A2A report, not anything the user typed. */
       injectHint?: "queue" | "interrupt" | "sub-agent";
       /** Sanitized child title shown on the sub-agent report box. */
@@ -365,6 +376,28 @@ export function appendUserEntry(
   return [
     ...entries,
     { kind: "user", text, createdAt: Date.now(), ...(injectHint ? { injectHint } : {}) },
+  ];
+}
+
+/**
+ * Apply a `user_message` stream frame — the timeline's record of the input
+ * text that started a turn. Every turn emits one regardless of origin ("one
+ * stream, two origins"); this is the desktop transcript's single normalization
+ * point for it. Turns this surface submitted itself (keyboard, staged, queue,
+ * replay, agent wake) are already echoed optimistically at send time, so only
+ * turns submitted by an external surface append a row here — with their origin
+ * kept for the provenance badge.
+ */
+export function applyExternalUserMessage(
+  entries: ChatEntry[],
+  frame: { text?: string; origin?: string },
+): ChatEntry[] {
+  if (!isExternalSurfaceInputOrigin(frame.origin)) return entries;
+  const text = typeof frame.text === "string" ? frame.text : "";
+  if (text.length === 0) return entries;
+  return [
+    ...entries,
+    { kind: "user", text, origin: frame.origin, createdAt: Date.now() },
   ];
 }
 
