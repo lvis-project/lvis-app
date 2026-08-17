@@ -46,6 +46,30 @@ describe("platform conversation legacy adapter", () => {
     expect(sseSink).toHaveBeenCalledWith(CHANNELS.chat.stream, expected);
   });
 
+  it("projects the turn-input event as an owner user_message frame with its origin", () => {
+    const timeline = createPlatformConversationTimeline();
+    const adapter = createPlatformConversationLegacyStreamAdapter(timeline);
+    const sink = vi.fn();
+    adapter.subscribe(sink);
+
+    timeline.publish({
+      conversationId: "main-session",
+      turnId: createPlatformTurnId(7),
+      event: {
+        kind: "user.message",
+        origin: "platform-bridge",
+        ownerDetail: { text: "bridge-submitted input" },
+      },
+    });
+
+    expect(sink).toHaveBeenCalledWith(CHANNELS.chat.stream, {
+      streamId: 7,
+      type: "user_message",
+      text: "bridge-submitted input",
+      origin: "platform-bridge",
+    });
+  });
+
   it("keeps a pre-turn redaction notice compatible without inventing a stream id", () => {
     const timeline = createPlatformConversationTimeline();
     const adapter = createPlatformConversationLegacyStreamAdapter(timeline);

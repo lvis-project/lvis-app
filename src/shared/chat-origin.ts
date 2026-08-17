@@ -243,6 +243,21 @@ export function isUserKeyboardOrigin(origin: ChatInputOrigin): boolean {
   return origin === "user-keyboard";
 }
 
+/**
+ * Origins whose turns are submitted by a surface OTHER than the desktop
+ * renderer (loopback/local API, Tailnet controller, paired chat-platform
+ * bridge). The desktop transcript echoes its own submissions optimistically at
+ * send time, so this is the single predicate deciding that a turn's
+ * `user.message` timeline event still needs a visible user row there.
+ */
+export function isExternalSurfaceInputOrigin(
+  origin: string | undefined,
+): origin is Extract<ChatInputOrigin, "surface-user" | "tailnet-surface" | "platform-bridge"> {
+  return origin === "surface-user"
+    || origin === "tailnet-surface"
+    || origin === "platform-bridge";
+}
+
 export function isChatSendInputOrigin(value: unknown): value is ChatSendInputOrigin {
   // The staged half is DERIVED from the staged-origin registry. Listing those
   // literals here by hand is how a registered origin gets silently rejected at
