@@ -19,41 +19,22 @@ import { MemorySecretStore } from "../../audit/hmac-chain.js";
 import { createConversationSurfaceRuntime } from "../../engine/conversation-surface-runtime.js";
 import { createPlatformConversationEventSink } from "../../engine/conversation-platform-protocol.js";
 import type { ConversationCommandPort } from "../conversation-command-port.js";
-import type { TelegramBotApiResult, TelegramPolledUpdate } from "../telegram-bot-api-client.js";
-import {
-  createTelegramActorDigester,
-  telegramConversationDigest,
-  type TelegramPairedRouteAuthority,
-} from "../telegram-platform-runtime.js";
 import {
   maybeStartTelegramConnectionBridge,
   resetTelegramBridgeServerForTests,
   stopTelegramBridgeServer,
 } from "../telegram-bridge-server.js";
+import {
+  BOT_FINGERPRINT,
+  BOT_TOKEN,
+  BOUND_CONVERSATION,
+  OWNER_CHAT_ID,
+  ownerPairedAuthority,
+  textUpdate,
+  type Batch,
+} from "./telegram-bridge-fixtures.js";
 
-const BOT_TOKEN = "123456789:abcdefghijklmnopqrstuvwxyz_ABCDEF";
-const BOT_FINGERPRINT = "a".repeat(64);
-const OWNER_CHAT_ID = "123456789";
-const BOUND_CONVERSATION = "active-conversation";
 const ASSISTANT_TEXT = "응답 텍스트입니다.";
-
-type Batch = TelegramBotApiResult<readonly TelegramPolledUpdate[]>;
-
-function textUpdate(updateId: number, text: string): TelegramPolledUpdate {
-  return {
-    updateId,
-    rawBody: Buffer.from(JSON.stringify({
-      update_id: updateId,
-      message: {
-        message_id: updateId + 1,
-        date: 1_700_000_000,
-        from: { id: Number(OWNER_CHAT_ID), is_bot: false },
-        chat: { id: Number(OWNER_CHAT_ID), type: "private" },
-        text,
-      },
-    }), "utf8"),
-  };
-}
 
 afterEach(async () => {
   await stopTelegramBridgeServer();
@@ -66,19 +47,7 @@ describe("telegram egress integration (real projection, real delivery)", () => {
     const surface = createConversationSurfaceRuntime();
 
     const secretStore = new MemorySecretStore();
-    const digester = createTelegramActorDigester({ botFingerprint: BOT_FINGERPRINT, secretStore });
-    const ownerDigest = digester.digestFor(OWNER_CHAT_ID);
-    if (ownerDigest === null) throw new Error("fixture-owner-digest");
-    const conversationDigest = telegramConversationDigest(BOT_FINGERPRINT, BOUND_CONVERSATION);
-    const authority: TelegramPairedRouteAuthority = {
-      activePairingActorDigest: () => ownerDigest,
-      resolveActiveApproval: (actorDigest, digest) =>
-        actorDigest === ownerDigest && digest === conversationDigest
-          ? { scope: "1e7d0f3a-0000-4000-8000-00000000a003" }
-          : null,
-      resolveBoundConversation: (actorDigest) =>
-        actorDigest === ownerDigest ? BOUND_CONVERSATION : null,
-    };
+    const { authority } = ownerPairedAuthority(secretStore);
 
     const batches: Batch[] = [];
     const client = {
