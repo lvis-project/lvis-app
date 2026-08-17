@@ -108,6 +108,9 @@ function botApiFixture() {
     getUpdates: vi.fn(async () => ({ ok: true as const, value: [] })),
     // The owner service never sends; a call here would be a regression.
     sendMessage: vi.fn(async () => ({ ok: true as const, value: true as const })),
+    sendDecisionCard: vi.fn(async () => ({ ok: true as const, value: { messageId: 1 } })),
+    editMessageText: vi.fn(async () => ({ ok: true as const, value: true as const })),
+    answerCallbackQuery: vi.fn(async () => ({ ok: true as const, value: true as const })),
   };
   const created: string[] = [];
   return {
@@ -289,11 +292,17 @@ describe("createTelegramConnectionService", () => {
     // Locked inventory: the client exposes no webhook mutator at all, so none
     // can be called. `sendMessage` is a host-authored control notice, not a
     // bot-configuration call; adding anything here must be deliberate.
+    // The three decision-card methods are the remote-approval surface: fixed
+    // host text and opaque tokens outbound, one acknowledgement inbound —
+    // still nothing that can reconfigure the owner's bot.
     expect(Object.keys(h.bot.client)).toEqual([
       "getMe",
       "getWebhookInfo",
       "getUpdates",
       "sendMessage",
+      "sendDecisionCard",
+      "editMessageText",
+      "answerCallbackQuery",
     ]);
     // The owner service itself never sends — only the ingress does.
     expect(h.bot.client.sendMessage).not.toHaveBeenCalled();

@@ -38,6 +38,17 @@ const MAX_RETRY_AFTER_SECONDS = 3_600;
 const CANONICAL_CHAT_ID = /^[1-9][0-9]{0,15}$/;
 /** A control notice is a sentence, not a transcript. */
 const MAX_CONTROL_TEXT_CHARS = 512;
+/**
+ * Opaque host-minted callback token grammar. The Bot API bounds
+ * `callback_data` at 64 bytes; restricting it to URL-safe identifier
+ * characters keeps every byte one character and keeps structured payloads —
+ * tool names, ids, JSON — unrepresentable by construction.
+ */
+const OPAQUE_CALLBACK_DATA = /^[A-Za-z0-9_-]{1,64}$/;
+/** A decision button carries one short verb, never content. */
+const MAX_BUTTON_LABEL_CHARS = 32;
+/** Provider-issued callback query id; treated as an opaque bounded token. */
+const CALLBACK_QUERY_ID = /^[A-Za-z0-9_-]{1,64}$/;
 
 export type TelegramBotApiFailureReason =
   /** 401: the token is wrong or was revoked. */
@@ -90,6 +101,13 @@ interface TelegramGetUpdatesInput {
   readonly signal?: AbortSignal;
 }
 
+/** One host-minted decision button: a fixed verb plus an opaque token. */
+export interface TelegramDecisionButton {
+  readonly label: string;
+  /** Opaque host token only; the grammar rejects structured payloads. */
+  readonly callbackData: string;
+}
+
 export interface TelegramBotApiClient {
   getMe(signal?: AbortSignal): Promise<TelegramBotApiResult<TelegramBotIdentity>>;
   getWebhookInfo(signal?: AbortSignal): Promise<TelegramBotApiResult<TelegramWebhookStatus>>;
@@ -100,6 +118,35 @@ export interface TelegramBotApiClient {
    * own cooldown — this client does no pacing.
    */
   sendMessage(chatId: string, text: string): Promise<TelegramBotApiResult<true>>;
+  /**
+   * Send one host-authored decision card with an inline keyboard of exactly
+   * the given buttons. Same contract as `sendMessage` — fixed host text, no
+   * conversation content, caller-owned pacing — plus opaque callback tokens.
+   * Returns the provider message id so the caller can later edit the card.
+   */
+  sendDecisionCard(
+    chatId: string,
+    text: string,
+    buttons: readonly TelegramDecisionButton[],
+  ): Promise<TelegramBotApiResult<{ readonly messageId: number }>>;
+  /**
+   * Replace one previously sent host-authored message's text. The reply
+   * markup is deliberately omitted from the request, which removes the inline
+   * keyboard — editing a decided card is what retires its buttons.
+   */
+  editMessageText(
+    chatId: string,
+    messageId: number,
+    text: string,
+  ): Promise<TelegramBotApiResult<true>>;
+  /**
+   * Acknowledge one callback query so the pressing client stops its spinner.
+   * `text` is an optional fixed host toast; omitted means a silent dismiss.
+   */
+  answerCallbackQuery(
+    callbackQueryId: string,
+    text?: string,
+  ): Promise<TelegramBotApiResult<true>>;
 }
 
 export interface CreateTelegramBotApiClientOptions {
@@ -200,8 +247,9 @@ export function createTelegramBotApiClient(
           limit,
           timeout: timeoutSeconds,
           // Always explicit: omitting it inherits whatever a prior setWebhook
-          // left configured on the bot.
-          allowed_updates: ["message"],
+          // left configured on the bot. `callback_query` is the decision-card
+          // button press; the ingress parser fail-closes on everything else.
+          allowed_updates: ["message", "callback_query"],
         },
         timeoutSeconds * 1_000 + pollRequestTimeoutMs,
         input.signal,
@@ -248,7 +296,110 @@ export function createTelegramBotApiClient(
       );
       return result.ok ? { ok: true, value: true } : result;
     },
+
+    async sendDecisionCard(
+      chatId: string,
+      text: string,
+      buttons: readonly TelegramDecisionButton[],
+    ): Promise<TelegramBotApiResult<{ readonly messageId: number }>> {
+      if (!CANONICAL_CHAT_ID.test(chatId)) {
+        throw new TypeError("telegram-bot-api-client-chat-id-invalid");
+      }
+      if (typeof text !== "string" || text.length === 0 || text.length > MAX_CONTROL_TEXT_CHARS) {
+        throw new TypeError("telegram-bot-api-client-text-invalid");
+      }
+      if (!Array.isArray(buttons) || buttons.length === 0 || buttons.length > 4
+        || !buttons.every(isValidDecisionButton)) {
+        throw new TypeError("telegram-bot-api-client-buttons-invalid");
+      }
+      const result = await call(
+        "sendMessage",
+        {
+          chat_id: chatId,
+          text,
+          link_preview_options: { is_disabled: true },
+          protect_content: true,
+          reply_markup: {
+            inline_keyboard: [
+              buttons.map((button) => ({
+                text: button.label,
+                callback_data: button.callbackData,
+              })),
+            ],
+          },
+        },
+        requestTimeoutMs,
+        undefined,
+      );
+      if (!result.ok) return result;
+      const value = result.value;
+      if (!isRecord(value) || !isPositiveSafeInteger(value.message_id)) {
+        return failure("invalid-response");
+      }
+      return { ok: true, value: Object.freeze({ messageId: value.message_id }) };
+    },
+
+    async editMessageText(
+      chatId: string,
+      messageId: number,
+      text: string,
+    ): Promise<TelegramBotApiResult<true>> {
+      if (!CANONICAL_CHAT_ID.test(chatId)) {
+        throw new TypeError("telegram-bot-api-client-chat-id-invalid");
+      }
+      if (!isPositiveSafeInteger(messageId)) {
+        throw new TypeError("telegram-bot-api-client-message-id-invalid");
+      }
+      if (typeof text !== "string" || text.length === 0 || text.length > MAX_CONTROL_TEXT_CHARS) {
+        throw new TypeError("telegram-bot-api-client-text-invalid");
+      }
+      const result = await call(
+        "editMessageText",
+        {
+          chat_id: chatId,
+          message_id: messageId,
+          text,
+          // No reply_markup: the edit is what removes the inline keyboard.
+          link_preview_options: { is_disabled: true },
+        },
+        requestTimeoutMs,
+        undefined,
+      );
+      return result.ok ? { ok: true, value: true } : result;
+    },
+
+    async answerCallbackQuery(
+      callbackQueryId: string,
+      text?: string,
+    ): Promise<TelegramBotApiResult<true>> {
+      if (typeof callbackQueryId !== "string" || !CALLBACK_QUERY_ID.test(callbackQueryId)) {
+        throw new TypeError("telegram-bot-api-client-callback-query-id-invalid");
+      }
+      if (text !== undefined
+        && (typeof text !== "string" || text.length === 0 || text.length > MAX_CONTROL_TEXT_CHARS)) {
+        throw new TypeError("telegram-bot-api-client-text-invalid");
+      }
+      const result = await call(
+        "answerCallbackQuery",
+        {
+          callback_query_id: callbackQueryId,
+          ...(text === undefined ? {} : { text }),
+        },
+        requestTimeoutMs,
+        undefined,
+      );
+      return result.ok ? { ok: true, value: true } : result;
+    },
   });
+}
+
+function isValidDecisionButton(value: unknown): value is TelegramDecisionButton {
+  return isRecord(value)
+    && typeof value.label === "string"
+    && value.label.length > 0
+    && value.label.length <= MAX_BUTTON_LABEL_CHARS
+    && typeof value.callbackData === "string"
+    && OPAQUE_CALLBACK_DATA.test(value.callbackData);
 }
 
 /**

@@ -31,6 +31,7 @@ import {
   coalesceTelegramDeliveryQueue,
   createTelegramOutboundTransport,
   createTelegramPollingVerifier,
+  type TelegramCallbackQueryEnvelope,
   type TelegramDeliveryChannel,
 } from "./telegram-platform-adapter.js";
 import {
@@ -39,6 +40,11 @@ import {
   type TelegramPlatformRoute,
   type TelegramPlatformRuntime,
 } from "./telegram-platform-runtime.js";
+import {
+  createTelegramRemoteApprovalCoordinator,
+  type TelegramRemoteApprovalCoordinator,
+  type TelegramRemoteApprovalGatePort,
+} from "./telegram-remote-approval.js";
 import {
   createTelegramBotApiClient,
   type TelegramBotApiClient,
@@ -87,7 +93,17 @@ interface TelegramActivationPlan {
   readonly botFingerprint: string;
   createRuntime(activationEpoch: number): Promise<TelegramPlatformRuntime>;
   readonly verifier: PlatformBridgeWebhookVerifier;
-  startIngress(gateway: PlatformBridgeInboundGateway): Promise<TelegramIngressHandle>;
+  startIngress(
+    gateway: PlatformBridgeInboundGateway,
+    onCallbackQuery?: (callback: TelegramCallbackQueryEnvelope) => Promise<void>,
+  ): Promise<TelegramIngressHandle>;
+  /**
+   * Optional remote-approval attachment for this activation. It takes the
+   * activation's own runtime so the coordinator's egress fence is the same
+   * route-currency check the delivery path uses; absent means approvals stay
+   * desk-only, which is every activation without a wired approval gate.
+   */
+  createRemoteApproval?(runtime: TelegramPlatformRuntime): TelegramRemoteApprovalCoordinator;
 }
 
 interface StartTelegramBridgeServerOptions {
@@ -111,6 +127,7 @@ interface ActiveTelegramBridge {
   readonly deliveryDestinations: Map<string, ActiveTelegramDeliveryDestination>;
   /** Retained so a stop can drain open sends before the adapter is closed. */
   readonly channels: Map<string, PlatformBridgeDeliveryChannel>;
+  readonly remoteApproval: TelegramRemoteApprovalCoordinator | undefined;
 }
 
 let activeBridge: ActiveTelegramBridge | null = null;
@@ -158,6 +175,12 @@ export interface StartTelegramConnectionBridgeOptions {
   ) => void | Promise<void>;
   readonly receiptStore?: PlatformBridgeReceiptStore;
   readonly log?: (message: string) => void;
+  /**
+   * The host approval gate, exposed only through the narrow remote-approval
+   * port. Present means the paired owner may decide parked tool approvals
+   * from a button card; absent keeps approvals desk-only.
+   */
+  readonly approvalGate?: TelegramRemoteApprovalGatePort;
   /** Test-only injection; production builds a real Bot API client. */
   readonly createBotApiClient?: (botToken: string) => TelegramBotApiClient;
   /**
@@ -196,7 +219,7 @@ export async function maybeStartTelegramConnectionBridge(
       ...(options.secretStore ? { secretStore: options.secretStore } : {}),
     })),
     verifier: createTelegramPollingVerifier(),
-    startIngress: (gateway) => {
+    startIngress: (gateway, onCallbackQuery) => {
       const poll = startTelegramPollingIngress({
         client,
         gateway,
@@ -208,6 +231,7 @@ export async function maybeStartTelegramConnectionBridge(
         ...(options.onPaired ? { onPaired: options.onPaired } : {}),
         ...(options.isPairedOwner ? { isPairedOwner: options.isPairedOwner } : {}),
         ...(options.notifyUnroutable ? { notifyUnroutable: options.notifyUnroutable } : {}),
+        ...(onCallbackQuery ? { onCallbackQuery } : {}),
         ...(options.log ? { log: options.log } : {}),
       });
       return Promise.resolve({
@@ -218,6 +242,31 @@ export async function maybeStartTelegramConnectionBridge(
         },
       });
     },
+    // Remote approval exists only when BOTH the gate seam and the paired-owner
+    // predicate are wired: without the predicate no press could ever be
+    // attributed, so offering cards would mint tokens nothing may consume.
+    ...(options.approvalGate === undefined || options.isPairedOwner === undefined
+      ? {}
+      : {
+        createRemoteApproval: (runtime: TelegramPlatformRuntime) =>
+          createTelegramRemoteApprovalCoordinator({
+            client,
+            gate: options.approvalGate!,
+            // The same currency the delivery fence enforces: the approval's
+            // conversation must be the route's bound conversation AND that
+            // route must still be current (paired, shared, on screen).
+            routeChatIdForConversation: (conversationId) => {
+              for (const route of runtime.routes) {
+                if (route.conversationId === conversationId && runtime.isRouteCurrent(route)) {
+                  return route.chatId;
+                }
+              }
+              return null;
+            },
+            isPairedOwner: options.isPairedOwner!,
+            ...(options.log ? { log: options.log } : {}),
+          }),
+      }),
   };
 
   const attempt = ++startAttemptSequence;
@@ -347,22 +396,33 @@ async function startActivation(
     ...(options.log ? { log: options.log } : {}),
   });
 
+  // Created before ingress so the first polled press already has a handler,
+  // and disposed on every teardown path below so no card can outlive the
+  // activation that minted its tokens.
+  const remoteApproval = plan.createRemoteApproval?.(runtime);
   let ingress: TelegramIngressHandle;
   try {
-    ingress = await plan.startIngress(gateway);
+    ingress = await plan.startIngress(
+      gateway,
+      remoteApproval === undefined
+        ? undefined
+        : (callback) => remoteApproval.handleCallbackQuery(callback),
+    );
   } catch (error) {
+    remoteApproval?.dispose();
     delivery.close();
     runtime.dispose();
     throw error;
   }
   if (generation !== lifecycleGeneration) {
+    remoteApproval?.dispose();
     runtime.dispose();
     delivery.close();
     await ingress.close();
     return null;
   }
 
-  activeBridge = { ingress, runtime, delivery, deliveryDestinations, channels };
+  activeBridge = { ingress, runtime, delivery, deliveryDestinations, channels, remoteApproval };
   options.log?.("[telegram-bridge] receiving updates over an outbound connection");
   return Object.freeze({ port: ingress.port });
 }
@@ -386,6 +446,9 @@ function takeActiveBridge(): ActiveTelegramBridge | null {
 async function closeBridge(bridge: ActiveTelegramBridge): Promise<void> {
   // Invalidate first: an in-flight webhook that already passed header parsing
   // cannot reserve a new command or publish a queued provider send afterwards.
+  // The remote-approval detach is part of the same invalidation — a press
+  // arriving mid-teardown must find no live token.
+  bridge.remoteApproval?.dispose();
   bridge.deliveryDestinations.clear();
   bridge.runtime.dispose();
   // Drain before closing, not after: waitForIdle resolves immediately once a
