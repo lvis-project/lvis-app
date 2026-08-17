@@ -269,6 +269,10 @@ async function startActivation(
   const delivery = createPlatformBridgeDeliveryAdapter<TelegramDeliveryChannel>({
     transport: createTelegramOutboundTransport({
       botToken: plan.botToken,
+      // Egress failures classify themselves into this sink (network / HTTP
+      // status / Bot API error code only); without it a failed send is
+      // indistinguishable from a delivered one.
+      ...(options.log ? { log: options.log } : {}),
       isChannelCurrent: (channel, generation) => {
         const lease = channel.deliveryLease;
         if (lease === undefined) return false;
@@ -284,9 +288,13 @@ async function startActivation(
       releaseDeliveryDestination(channel);
       options.log?.("[telegram-bridge] safe delivery closed after backpressure");
     },
-    onDeliveryFailure: (channel) => {
+    onDeliveryFailure: (channel, reason) => {
       releaseDeliveryDestination(channel);
-      options.log?.("[telegram-bridge] safe delivery closed after provider failure");
+      options.log?.(
+        `[telegram-bridge] safe delivery closed after provider failure${
+          reason !== undefined ? ` (${reason})` : ""
+        }`,
+      );
     },
   });
   const channels = new Map<string, PlatformBridgeDeliveryChannel>();
