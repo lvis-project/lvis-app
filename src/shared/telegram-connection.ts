@@ -201,8 +201,15 @@ const ACCOUNT_FINGERPRINT = /^[a-f0-9]{12}$/;
  * without branching that gate.
  */
 export const TELEGRAM_PAIRING_CODE = /^lvis-tg-v1\.[A-Za-z0-9_-]{43}$/;
-/** BotFather handles are 5-32 chars and must end in "bot" (case-insensitive). */
-const BOT_USERNAME = /^[A-Za-z][A-Za-z0-9_]{3,30}[Bb][Oo][Tt]$/;
+/**
+ * BotFather handles are 5-32 chars TOTAL and must end in "bot"
+ * (case-insensitive). The middle quantifier is total-length arithmetic:
+ * 1 leading letter + {1,28} middle + 3-char suffix = 5..32. A wider middle
+ * bound would silently raise the minimum above BotFather's own floor and
+ * reject real 5-6 char handles (e.g. `aebot`) after a successful identity
+ * call — which the connect flow then misreports as provider-unreachable.
+ */
+const BOT_USERNAME = /^[A-Za-z][A-Za-z0-9_]{1,28}[Bb][Oo][Tt]$/;
 /** The bot token is bounded here only to reject obvious paste errors early. */
 const BOT_TOKEN = /^[0-9]{5,20}:[A-Za-z0-9_-]{20,220}$/;
 const MAX_CONVERSATION_CHARS = 4_096;
