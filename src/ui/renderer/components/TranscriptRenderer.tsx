@@ -9,6 +9,7 @@ import { debugLog } from "../../../lib/debug-stream.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 import { lookupBillablePricingOptional } from "../../../shared/pricing-data.js";
 import { highlightText } from "../utils/html-preview.js";
+import { trustOriginLabel } from "../utils/trust-origin-label.js";
 import { classifyTurnEntries, isTurnStartEntry } from "../utils/classify-turn-entries.js";
 import { entryRenderRevision } from "../utils/chat-entry-revision.js";
 import { AssistantCard } from "./AssistantCard.js";
@@ -329,6 +330,15 @@ export function TranscriptRenderer({
               className={`min-w-0 overflow-hidden rounded-lg border border-message-user-border bg-message-user px-3.5 py-2.5 text-body-sm text-message-user-foreground shadow-sm ${ringCls}`}
             >
               {/* Sender is implicit. Metadata stays above the selectable body. */}
+              {entry.origin ? (
+                <div
+                  data-testid="user-message-origin-badge"
+                  className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-muted/(--opacity-subtle) px-1.5 py-0.5 text-micro text-message-user-muted"
+                  title={trustOriginLabel(entry.origin)}
+                >
+                  {trustOriginLabel(entry.origin)}
+                </div>
+              ) : null}
               {entry.injectHint === "queue" ? (
                 <div className="mb-1 inline-flex items-center gap-1 rounded bg-message-user-muted/(--opacity-subtle) px-1.5 py-0.5 text-micro text-message-user-muted" title={t("chatView.queueInjectTitle")}>
                   {t("chatView.queueInjectLabel")}
