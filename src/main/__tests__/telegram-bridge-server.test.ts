@@ -9,10 +9,16 @@ import {
   resetTelegramBridgeServerForTests,
   stopTelegramBridgeServer,
 } from "../telegram-bridge-server.js";
+import type {
+  PendingApprovalObserver,
+  PendingApprovalView,
+} from "../../permissions/approval-gate.js";
+import type { TelegramRemoteApprovalGatePort } from "../telegram-remote-approval.js";
 import {
   BOT_FINGERPRINT,
   BOT_TOKEN,
   BOUND_CONVERSATION,
+  callbackUpdate,
   OWNER_CHAT_ID,
   ownerPairedAuthority,
   textUpdate,
@@ -79,6 +85,11 @@ function connectionFixture(overrides: {
     getMe: vi.fn(async () => ({ ok: true as const, value: { username: "a_bot" } })),
     getWebhookInfo: vi.fn(async () => ({ ok: true as const, value: { hasWebhook: false } })),
     sendMessage,
+    // Remote-approval card surface; exercised only when an approvalGate is
+    // handed to the bridge.
+    sendDecisionCard: vi.fn(async () => ({ ok: true as const, value: { messageId: 900 } })),
+    editMessageText: vi.fn(async () => ({ ok: true as const, value: true as const })),
+    answerCallbackQuery: vi.fn(async () => ({ ok: true as const, value: true as const })),
   };
   const createBotApiClient = vi.fn(() => client as never);
 
@@ -120,7 +131,12 @@ function connectionFixture(overrides: {
   };
 
   return { input, client, createBotApiClient, submit, onFatal, sendMessage,
-    queue(...next: Batch[]) { batches.push(...next); },
+    queue(...next: Batch[]) {
+      batches.push(...next);
+      // Wake a poll parked on an empty queue so a batch queued after start —
+      // a button press for a card whose token did not exist yet — is fetched.
+      while (parked.length > 0) parked.shift()?.();
+    },
   };
 }
 
@@ -247,5 +263,66 @@ describe("Telegram bridge lifecycle (owner-driven connection)", () => {
     releaseCompletion?.();
     await settled();
     expect(settle).toHaveBeenCalledOnce();
+  });
+
+  it("wires the approval gate to a card fenced by the live route and relays the press back", async () => {
+    const observers: PendingApprovalObserver[] = [];
+    const gate: TelegramRemoteApprovalGatePort = {
+      observePendingApprovals: (observer) => {
+        observers.push(observer);
+        return () => {};
+      },
+      resolve: vi.fn((_requestId, decision) => decision),
+    };
+    const f = connectionFixture({
+      receiptStore: {
+        reserve: vi.fn(() => ({ kind: "reserved" })),
+        releaseReserved: vi.fn(),
+        settle: vi.fn(),
+      },
+    });
+    // The owner's message is what mints the live route the card is fenced by.
+    f.queue({ ok: true, value: [textUpdate(101, "hello")] });
+    await maybeStartTelegramConnectionBridge({ ...f.input, approvalGate: gate });
+    await settled();
+    expect(f.submit).toHaveBeenCalledOnce();
+
+    const parkedView = (overrides: Partial<PendingApprovalView> = {}): PendingApprovalView => ({
+      requestId: "req-9",
+      toolName: "list_files",
+      source: "builtin",
+      category: "tool",
+      sessionId: BOUND_CONVERSATION,
+      nonce: "nonce-9",
+      hmac: "hmac-9",
+      ...overrides,
+    });
+
+    // A parked approval for a conversation with no current route sends nothing.
+    observers[0]?.onPending(parkedView({ sessionId: "an-unshared-conversation" }));
+    await settled();
+    expect(f.client.sendDecisionCard).not.toHaveBeenCalled();
+
+    // The bound, on-screen conversation gets the card at the owner's chat.
+    observers[0]?.onPending(parkedView());
+    await vi.waitFor(() => expect(f.client.sendDecisionCard).toHaveBeenCalledOnce());
+    const cardCall = f.client.sendDecisionCard.mock.calls[0] as unknown as [
+      string,
+      string,
+      readonly { callbackData: string }[],
+    ];
+    expect(cardCall[0]).toBe(OWNER_CHAT_ID);
+    const approveToken = cardCall[2][0]!.callbackData;
+
+    // The owner presses approve; the poller relays it into the SAME gate
+    // resolve chokepoint with the gate's own echo material, as the bridge.
+    f.queue({ ok: true, value: [callbackUpdate(102, approveToken)] });
+    await vi.waitFor(() => expect(gate.resolve).toHaveBeenCalledWith(
+      "req-9",
+      { requestId: "req-9", choice: "allow-once", nonce: "nonce-9", hmac: "hmac-9" },
+      "platform-bridge",
+    ));
+    await vi.waitFor(() => expect(f.client.answerCallbackQuery)
+      .toHaveBeenCalledWith("press-102", "Approved for this run"));
   });
 });

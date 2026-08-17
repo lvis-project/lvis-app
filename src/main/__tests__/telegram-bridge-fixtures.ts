@@ -38,6 +38,25 @@ export function textUpdate(updateId: number, text: string): TelegramPolledUpdate
   };
 }
 
+/** One polled inline-keyboard press carrying an opaque token, as raw wire bytes. */
+export function callbackUpdate(
+  updateId: number,
+  data: string,
+  senderId: number = Number(OWNER_CHAT_ID),
+): TelegramPolledUpdate {
+  return {
+    updateId,
+    rawBody: Buffer.from(JSON.stringify({
+      update_id: updateId,
+      callback_query: {
+        id: `press-${updateId}`,
+        from: { id: senderId, is_bot: false },
+        data,
+      },
+    }), "utf8"),
+  };
+}
+
 /**
  * Build the authority a completed owner pairing leaves behind: the digester
  * and runtime must read the SAME secret store so the actor digest agrees, and
