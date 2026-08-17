@@ -120,6 +120,18 @@ export async function runStreamedTurn(
   // `docs/architecture/proposals/suggested-replies-ghost-text.md`.
   const suggestedRepliesFilter = createStreamingFilter();
   send({ kind: "turn.started" });
+  // Uniform turn-input announcement: EVERY streamed turn publishes its input
+  // once, right after `turn.started`, with the host-resolved origin. This is
+  // the one emission point (rather than a per-transport special case in the
+  // bridge/Tailnet ingress) so a surface that did not submit the turn — e.g.
+  // the desktop renderer during a chat-platform-bridge turn — can render the
+  // user row from the same timeline it already streams from. `displayText`
+  // wins when a replay/folded turn carries the row the user originally saw.
+  send({
+    kind: "user.message",
+    origin: inputOrigin,
+    ownerDetail: { text: options.displayText ?? input },
+  });
   const result = await conversationLoop.runTurn(
     input,
     {
