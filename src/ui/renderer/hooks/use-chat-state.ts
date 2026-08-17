@@ -3,6 +3,7 @@ import { t } from "../../../i18n/runtime.js";
 import {
   appendImportedTriggerEntry,
   appendUserEntry,
+  applyExternalUserMessage,
   dropOptimisticUserEntry,
   applyToolEnd,
   applyToolStart,
@@ -188,7 +189,13 @@ export function useChatState(api: LvisApi) {
           return;
         }
       }
-      if (ev.type === "llm_status") {
+      if (ev.type === "user_message") {
+        // Turn-input row from the shared timeline. applyExternalUserMessage is
+        // the single normalization point: it appends only for turns an
+        // external surface submitted (bridge/Tailnet/loopback) and ignores the
+        // origins this renderer already echoed optimistically.
+        setEntries((p) => applyExternalUserMessage(p, ev));
+      } else if (ev.type === "llm_status") {
         const message = formatLlmStatusMessage(ev);
         if (!message) return;
         setEntries((p) => {

@@ -332,3 +332,31 @@ describe("TranscriptRenderer — sub-agent report box", () => {
     expect(queryByTitle(EDIT_TITLE)).toBeNull();
   });
 });
+
+describe("TranscriptRenderer — external-surface origin badge", () => {
+  it("labels a remote-origin user bubble with its provenance", () => {
+    const { getByTestId } = renderCore(
+      <TranscriptRenderer
+        entries={[
+          { kind: "user", text: "원격에서 온 메시지", origin: "platform-bridge" },
+          assistant("답변"),
+        ]}
+        streaming={false}
+        currentSessionId="s1"
+      />,
+    );
+
+    // trustOriginLabel.platformBridge — ko locale pinned by the jsdom project.
+    expect(getByTestId("user-message-origin-badge").textContent).toContain(
+      "외부 채팅 플랫폼 입력",
+    );
+    expect(getByTestId("user-message-bubble").textContent).toContain("원격에서 온 메시지");
+  });
+
+  it("shows no origin badge on an ordinary local user bubble", () => {
+    const { queryByTestId } = renderCore(
+      <TranscriptRenderer entries={[user("로컬 질문")]} streaming={false} currentSessionId="s1" />,
+    );
+    expect(queryByTestId("user-message-origin-badge")).toBeNull();
+  });
+});
