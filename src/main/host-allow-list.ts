@@ -28,6 +28,18 @@
  */
 
 const MAX_HOSTS = 16;
+
+/**
+ * Loopback literals `allowLoopback` admits verbatim. Cookies on these hosts
+ * terminate on the user's own machine, so admitting them does not open the
+ * cross-site blanket-match the single-label rule exists to prevent. The only
+ * legitimate caller today is `openAuthWindow.cookieHosts` for OAuth loopback
+ * redirects (`http://localhost:<port>` / `http://127.0.0.1:<port>`), where the
+ * IdP's own SDK runs the local listener. Exact literals only — `foo.localhost`
+ * carries a dot and goes through the normal rules.
+ */
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
 /** Block bare registry suffixes — see PSL note in the file header. */
 const FORBIDDEN_TOP_LEVELS = new Set([
   "com",
@@ -53,13 +65,29 @@ export function normalizeHost(raw: string): string {
  * Normalize + validate a manifest-supplied allow-list. Throws on a list that
  * would be too broad to enforce meaningfully. The error is the audit-friendly
  * surface that surfaces in load-time logs for a malformed plugin manifest.
+ *
+ * `allowLoopback` is a per-surface opt-in: it admits the {@link LOOPBACK_HOSTS}
+ * literals (which the single-label rule would otherwise reject) and relaxes
+ * nothing else. Surfaces whose flows legitimately end on a local listener
+ * (OAuth loopback redirects) declare it; every other consumer keeps the strict
+ * default.
  */
-export function normalizeAllowedHosts(raw: readonly string[]): string[] {
+export function normalizeAllowedHosts(
+  raw: readonly string[],
+  options: { readonly allowLoopback?: boolean } = {},
+): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const entry of raw) {
     const host = normalizeHost(entry);
     if (host.length === 0) continue;
+    if (options.allowLoopback === true && LOOPBACK_HOSTS.has(host)) {
+      if (!seen.has(host)) {
+        seen.add(host);
+        out.push(host);
+      }
+      continue;
+    }
     if (host === "*" || host.includes("*")) {
       throw new Error(`host-allow-list: wildcard host '${entry}' is not allowed`);
     }
