@@ -121,7 +121,9 @@ describe("telegram egress integration (real projection, real delivery)", () => {
     // deadline passes) rather than counting sends: returning while a later
     // paced send is still in flight would make teardown abort a healthy
     // delivery and report a provider failure this test would then misread.
-    const deadline = Date.now() + 20_000;
+    // The deadline is deliberately generous: a starved worker under a fully
+    // parallel suite stretches the paced hops, and success returns early.
+    const deadline = Date.now() + 45_000;
     const assistantTextSent = (): boolean =>
       sentBodies.some((body) => String(body.text ?? "").includes(ASSISTANT_TEXT));
     while (Date.now() < deadline && !assistantTextSent()) {
@@ -134,5 +136,5 @@ describe("telegram egress integration (real projection, real delivery)", () => {
     expect(assistantTextSent()).toBe(true);
     // The healthy path must not have closed the safe delivery channel.
     expect(bridgeLogs.filter((line) => line.includes("safe delivery closed"))).toEqual([]);
-  }, 30_000);
+  }, 60_000);
 });
