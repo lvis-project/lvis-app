@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   appendImportedTriggerEntry,
   appendUserEntry,
+  applyExternalUserMessage,
   applyToolEnd,
   applyToolStart,
   dropOptimisticUserEntry,
@@ -604,5 +605,55 @@ describe("dropOptimisticUserEntry", () => {
     expect(dropOptimisticUserEntry(otherUser, "refused turn")).toEqual(otherUser);
 
     expect(dropOptimisticUserEntry([], "refused turn")).toEqual([]);
+  });
+});
+
+/**
+ * `user_message` normalization — every turn announces its input on the one
+ * stream; this single chokepoint decides whether the desktop transcript still
+ * needs a row for it. External-surface turns (bridge/Tailnet/loopback) do;
+ * origins this surface echoed optimistically at send time must not duplicate.
+ */
+describe("applyExternalUserMessage", () => {
+  it("appends a user row carrying its external origin for a bridge turn", () => {
+    const entries: ChatEntry[] = [{ kind: "assistant", text: "earlier reply" }];
+    const next = applyExternalUserMessage(entries, {
+      text: "텔레그램에서 보낸 메시지",
+      origin: "platform-bridge",
+    });
+    expect(next).toHaveLength(2);
+    expect(next[1]).toMatchObject({
+      kind: "user",
+      text: "텔레그램에서 보낸 메시지",
+      origin: "platform-bridge",
+    });
+  });
+
+  it("appends for every external surface origin", () => {
+    for (const origin of ["surface-user", "tailnet-surface", "platform-bridge"]) {
+      const next = applyExternalUserMessage([], { text: "remote input", origin });
+      expect(next).toHaveLength(1);
+    }
+  });
+
+  it("ignores origins the desktop already echoed optimistically", () => {
+    for (const origin of [
+      "user-keyboard",
+      "queue-auto",
+      "plugin-emitted",
+      "app-emitted",
+      "mcp-prompt-emitted",
+      "agent-message",
+      undefined,
+    ]) {
+      const entries: ChatEntry[] = [{ kind: "user", text: "already echoed" }];
+      expect(applyExternalUserMessage(entries, { text: "already echoed", origin })).toBe(entries);
+    }
+  });
+
+  it("ignores an empty or missing text payload", () => {
+    const entries: ChatEntry[] = [];
+    expect(applyExternalUserMessage(entries, { origin: "platform-bridge" })).toBe(entries);
+    expect(applyExternalUserMessage(entries, { text: "", origin: "platform-bridge" })).toBe(entries);
   });
 });
