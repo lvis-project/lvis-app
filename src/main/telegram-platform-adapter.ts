@@ -27,6 +27,7 @@ import {
   toSafeTurnFailureSummary,
   type TurnFailureCategory,
 } from "../engine/shared-conversation-projection.js";
+import { isSharedApprovalToolIdentifier } from "../shared/permission-review-status.js";
 
 const MAX_TELEGRAM_BOT_TOKEN_CHARS = 256;
 /**
@@ -229,7 +230,21 @@ export function coalesceTelegramDeliveryQueue(
           pendingStatus = normalized;
         } else {
           flushStatus();
-          output.push(normalized);
+          const previous = output[output.length - 1];
+          if (
+            normalized.message.status === "awaiting-local-approval"
+            && previous !== undefined
+            && previous.message.kind === "status"
+            && previous.message.status === "awaiting-local-approval"
+            && previous.message.tool === normalized.message.tool
+          ) {
+            // One approval card is one notice. A repeated identical wait for
+            // the same tool keeps the newest cursor instead of sending the
+            // same rate-limited message again.
+            output[output.length - 1] = normalized;
+          } else {
+            output.push(normalized);
+          }
         }
         break;
       case "snapshot":
@@ -712,11 +727,18 @@ function normalizeTelegramQueueEntry(value: unknown): TelegramDeliveryQueueEntry
     // A failure summary that fails re-validation is dropped, not fatal: the
     // bare status still reaches the reader.
     const failure = toSafeTurnFailureSummary(readOwnDataValue(message, "failure"));
+    // Same drop-not-fatal rule for the approval tool identifier: it is only
+    // admitted on the approval wait status and against the one shared grammar.
+    const tool = readOwnDataValue(message, "tool");
+    const safeTool = status === "awaiting-local-approval" && isSharedApprovalToolIdentifier(tool)
+      ? tool
+      : undefined;
     return freezeQueueEntry(cursor, {
       kind,
       cursor,
       status,
       ...(failure === undefined ? {} : { failure: Object.freeze(failure) }),
+      ...(safeTool === undefined ? {} : { tool: safeTool }),
     });
   }
   throw new TypeError("telegram-delivery-queue-entry-invalid");
@@ -926,9 +948,10 @@ function telegramOutboundText(message: unknown): string | undefined {
     const status = readOwnDataValue(message, "status");
     const statusText = typeof status === "string" ? OUTBOUND_STATUS_TEXT[status] : undefined;
     if (statusText === undefined) return undefined;
-    const failureText = telegramFailureText(readOwnDataValue(message, "failure"));
-    if (failureText === undefined) return statusText;
-    return boundedOutboundText(`${statusText} — ${failureText}`) || statusText;
+    const detail = telegramFailureText(readOwnDataValue(message, "failure"))
+      ?? telegramApprovalToolText(status, readOwnDataValue(message, "tool"));
+    if (detail === undefined) return statusText;
+    return boundedOutboundText(`${statusText} — ${detail}`) || statusText;
   }
   return undefined;
 }
@@ -943,6 +966,20 @@ function telegramFailureText(value: unknown): string | undefined {
   const failure = toSafeTurnFailureSummary(value);
   if (failure === undefined) return undefined;
   return `${FAILURE_CATEGORY_TEXT[failure.category]}: ${failure.summary}`;
+}
+
+/**
+ * Render `tool <identifier> (approve on the desktop app)` for the approval
+ * wait, or `undefined` (fail closed to the bare status text) for anything
+ * else. The shared grammar predicate is the one validation authority; this
+ * function only adds the display template. Approval stays local-only, so the
+ * text points the reader at the desktop card.
+ */
+function telegramApprovalToolText(status: unknown, tool: unknown): string | undefined {
+  if (status !== "awaiting-local-approval" || !isSharedApprovalToolIdentifier(tool)) {
+    return undefined;
+  }
+  return `tool ${tool} (approve on the desktop app)`;
 }
 
 /** Last bound before the wire: Telegram rejects the whole send past this. */

@@ -289,6 +289,65 @@ describe("Telegram platform adapter", () => {
     ]);
   });
 
+  it("names the waiting tool in the approval notice and resumes with the plain working status", async () => {
+    const fetchSpy = successfulFetch();
+    const transport = createTelegramOutboundTransport({
+      botToken: BOT_TOKEN,
+      fetch: fetchSpy as unknown as typeof globalThis.fetch,
+      minIntervalMs: 1,
+      wait: async () => undefined,
+    });
+    const messages: readonly PlatformBridgeOutboundMessage[] = [
+      { kind: "status", cursor: 1, status: "awaiting-local-approval", tool: "builtin:list_files" },
+      // The approval decision itself never crosses the bridge; the turn simply
+      // resumes through the ordinary tool status once it is approved locally.
+      { kind: "status", cursor: 2, status: "tool-running" },
+    ];
+
+    for (const message of messages) {
+      await transport.send({ chatId: "42" }, message, sendOptions());
+    }
+
+    const sentTexts = fetchSpy.mock.calls.map(([, init]) =>
+      JSON.parse(String(init?.body)).text,
+    );
+    expect(sentTexts).toEqual([
+      "LVIS: waiting for local approval — tool builtin:list_files (approve on the desktop app)",
+      "LVIS: working",
+    ]);
+  });
+
+  it("keeps the fixed approval text when the tool identifier is missing or unsafe", async () => {
+    const fetchSpy = successfulFetch();
+    const transport = createTelegramOutboundTransport({
+      botToken: BOT_TOKEN,
+      fetch: fetchSpy as unknown as typeof globalThis.fetch,
+      minIntervalMs: 1,
+      wait: async () => undefined,
+    });
+
+    for (const tool of [undefined, "unsafe tool C:\\private\\path"]) {
+      await transport.send(
+        { chatId: "42" },
+        {
+          kind: "status",
+          cursor: 1,
+          status: "awaiting-local-approval",
+          ...(tool === undefined ? {} : { tool }),
+        },
+        sendOptions(),
+      );
+    }
+
+    const sentTexts = fetchSpy.mock.calls.map(([, init]) =>
+      JSON.parse(String(init?.body)).text,
+    );
+    expect(sentTexts).toEqual([
+      "LVIS: waiting for local approval",
+      "LVIS: waiting for local approval",
+    ]);
+  });
+
   it("fails with one generic error for invalid destinations, stale routes, fetch failures, and invalid Bot API responses", async () => {
     const tokenBearingFetch = successfulFetch();
     const staleTransport = createTelegramOutboundTransport({
@@ -369,6 +428,45 @@ describe("Telegram platform adapter", () => {
     expect(() => coalesceQueue([
       { cursor: 11, message: { kind: "text", cursor: 12, text: "mismatched cursor" } },
     ])).toThrow("telegram-delivery-queue-entry-invalid");
+  });
+
+  it("collapses a repeated identical approval wait into one queued notice and keeps distinct ones", () => {
+    const repeated = coalesceQueue([
+      { cursor: 1, message: { kind: "status", cursor: 1, status: "awaiting-local-approval", tool: "builtin:list_files" } },
+      { cursor: 2, message: { kind: "status", cursor: 2, status: "awaiting-local-approval", tool: "builtin:list_files" } },
+      { cursor: 3, message: { kind: "status", cursor: 3, status: "awaiting-local-approval", tool: "builtin:list_files" } },
+    ]);
+    expect(repeated).toEqual([
+      { cursor: 3, message: { kind: "status", cursor: 3, status: "awaiting-local-approval", tool: "builtin:list_files" } },
+    ]);
+
+    // A wait for a DIFFERENT tool is new information, not spam.
+    const distinct = coalesceQueue([
+      { cursor: 1, message: { kind: "status", cursor: 1, status: "awaiting-local-approval", tool: "builtin:list_files" } },
+      { cursor: 2, message: { kind: "status", cursor: 2, status: "awaiting-local-approval", tool: "builtin:run_shell" } },
+    ]);
+    expect(distinct).toHaveLength(2);
+
+    // Intervening text keeps both notices: the reader saw progress between them.
+    const separated = coalesceQueue([
+      { cursor: 1, message: { kind: "status", cursor: 1, status: "awaiting-local-approval", tool: "builtin:list_files" } },
+      { cursor: 2, message: { kind: "text", cursor: 2, text: "partial reply" } },
+      { cursor: 3, message: { kind: "status", cursor: 3, status: "awaiting-local-approval", tool: "builtin:list_files" } },
+    ]);
+    expect(separated).toHaveLength(3);
+
+    // Re-admission drops a non-conforming or misplaced identifier rather than
+    // killing the channel: the bare status still reaches the reader.
+    expect(coalesceQueue([
+      { cursor: 4, message: { kind: "status", cursor: 4, status: "awaiting-local-approval", tool: "unsafe tool name" } },
+    ])).toEqual([
+      { cursor: 4, message: { kind: "status", cursor: 4, status: "awaiting-local-approval" } },
+    ]);
+    expect(coalesceQueue([
+      { cursor: 5, message: { kind: "status", cursor: 5, status: "turn-completed", tool: "builtin:list_files" } },
+    ])).toEqual([
+      { cursor: 5, message: { kind: "status", cursor: 5, status: "turn-completed" } },
+    ]);
   });
 
   it("keeps an over-long snapshot as one message holding its newest window", () => {
