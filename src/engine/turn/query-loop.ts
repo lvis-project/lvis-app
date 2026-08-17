@@ -749,7 +749,7 @@ export async function queryLoop(
             });
           }
         }
-        callbacks?.onError?.(stream.userMessage, "stream-error");
+        callbacks?.onError?.(stream.userMessage, "stream-error", stream.classification);
         self.history.append({
           role: "assistant",
           content: stream.userMessage,

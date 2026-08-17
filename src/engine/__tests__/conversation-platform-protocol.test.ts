@@ -73,4 +73,39 @@ describe("platform conversation protocol", () => {
       ownerDetail: { text: "private chain of thought" },
     })).toBeUndefined();
   });
+
+  it("projects a failed turn with only the closed share-safe failure summary", () => {
+    const projected = projectSharedConversationEvent({
+      kind: "turn.error",
+      failure: { category: "provider", summary: "The model provider returned an error." },
+      ownerDetail: {
+        message: "Failed after 3 attempts. Last error: token sk-FAKE-TOKEN-123",
+        systemNotice: "stream-error",
+      },
+    });
+
+    expect(projected).toEqual({
+      kind: "turn.failed",
+      failure: { category: "provider", summary: "The model provider returned an error." },
+    });
+    // The raw owner message never crosses the projection.
+    expect(JSON.stringify(projected)).not.toContain("sk-FAKE-TOKEN-123");
+
+    // A summary that fails closed re-validation is dropped, not forwarded.
+    const forged = projectSharedConversationEvent({
+      kind: "turn.error",
+      failure: {
+        category: "stack-trace",
+        summary: "at C:\\private\\secret.ts:1",
+      } as unknown as { category: "provider"; summary: string },
+      ownerDetail: { message: "raw" },
+    });
+    expect(forged).toEqual({ kind: "turn.failed" });
+
+    // A legacy event without a summary still projects the bare failure.
+    expect(projectSharedConversationEvent({
+      kind: "turn.error",
+      ownerDetail: { message: "raw" },
+    })).toEqual({ kind: "turn.failed" });
+  });
 });
