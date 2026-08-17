@@ -215,6 +215,80 @@ describe("Telegram platform adapter", () => {
     ]);
   });
 
+  it("renders a failed turn with its category and safe summary, failing closed otherwise", async () => {
+    const fetchSpy = successfulFetch();
+    const transport = createTelegramOutboundTransport({
+      botToken: BOT_TOKEN,
+      fetch: fetchSpy as unknown as typeof globalThis.fetch,
+      minIntervalMs: 1,
+      wait: async () => undefined,
+    });
+    const messages: readonly PlatformBridgeOutboundMessage[] = [
+      {
+        kind: "status",
+        cursor: 1,
+        status: "turn-failed",
+        failure: { category: "provider", summary: "The model provider returned an error." },
+      },
+      {
+        kind: "status",
+        cursor: 2,
+        status: "turn-failed",
+        failure: {
+          category: "stack-trace",
+          summary: "at C:\\private\\secret.ts:1 token sk-FAKE-TOKEN-123",
+        } as unknown as { category: "provider"; summary: string },
+      },
+      { kind: "status", cursor: 3, status: "turn-failed" },
+    ];
+
+    for (const message of messages) {
+      await transport.send({ chatId: "42" }, message, sendOptions());
+    }
+
+    const sentTexts = fetchSpy.mock.calls.map(([, init]) =>
+      JSON.parse(String(init?.body)).text,
+    );
+    expect(sentTexts).toEqual([
+      "LVIS: turn failed — provider error: The model provider returned an error.",
+      "LVIS: turn failed",
+      "LVIS: turn failed",
+    ]);
+    const bodies = JSON.stringify(fetchSpy.mock.calls.map(([, init]) => String(init?.body)));
+    expect(bodies).not.toContain("secret.ts");
+    expect(bodies).not.toContain("sk-FAKE-TOKEN-123");
+  });
+
+  it("keeps the failure summary on a coalesced turn-failed status and drops a forged one", () => {
+    const failure = { category: "network", summary: "The model request failed over the network." } as const;
+    const combined = coalesceQueue([
+      { cursor: 1, message: { kind: "status", cursor: 1, status: "tool-running" } },
+      { cursor: 2, message: { kind: "status", cursor: 2, status: "turn-failed", failure } },
+    ]);
+    expect(combined).toEqual([
+      { cursor: 1, message: { kind: "status", cursor: 1, status: "tool-running" } },
+      { cursor: 2, message: { kind: "status", cursor: 2, status: "turn-failed", failure } },
+    ]);
+
+    const forged = coalesceQueue([
+      {
+        cursor: 3,
+        message: {
+          kind: "status",
+          cursor: 3,
+          status: "turn-failed",
+          failure: {
+            category: "stack-trace",
+            summary: "sk-FAKE-TOKEN-123",
+          } as unknown as { category: "provider"; summary: string },
+        },
+      },
+    ]);
+    expect(forged).toEqual([
+      { cursor: 3, message: { kind: "status", cursor: 3, status: "turn-failed" } },
+    ]);
+  });
+
   it("fails with one generic error for invalid destinations, stale routes, fetch failures, and invalid Bot API responses", async () => {
     const tokenBearingFetch = successfulFetch();
     const staleTransport = createTelegramOutboundTransport({
