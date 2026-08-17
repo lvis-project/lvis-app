@@ -131,8 +131,18 @@ describe("openAuthWindow — cookieHosts is validated by the host-allow-list SoT
     await expect(call(["com"])).rejects.toThrow(/public-suffix/);
   });
 
-  it("rejects a single-label host", async () => {
-    await expect(call(["localhost"])).rejects.toThrow(/at least one dot/);
+  it("rejects a non-loopback single-label host", async () => {
+    await expect(call(["intranet"])).rejects.toThrow(/at least one dot/);
+  });
+
+  it("admits loopback literals — the OAuth loopback-redirect flow declares them", async () => {
+    // Regression lock for the ms-graph login outage: `cookieHosts:
+    // ["localhost"]` must get PAST intake validation (same positive-assertion
+    // shape as the well-formed-list case below — the stubbed BrowserWindow
+    // makes anything that passes validation fail later with a non-cookieHosts
+    // error).
+    await expect(call(["localhost"])).rejects.not.toThrow(/cookieHosts/);
+    await expect(call(["127.0.0.1"])).rejects.not.toThrow(/cookieHosts/);
   });
 
   it("rejects a wildcard", async () => {
