@@ -157,6 +157,7 @@ export const deMessages: Record<string, string> = {
   "assistantCard.feedbackUp": "Das war hilfreich",
   "assistantCard.forkButton": "Gabel",
   "assistantCard.reasonPlaceholder": "Grund (optional)",
+  "assistantCard.restoredNoticeBadge": "Fehler aus einer früheren Sitzung",
   "assistantCard.retryButton": "Wiederholen (Tiefe: hoch)",
   "assistantCard.sendButton": "Schicken",
   "assistantCard.starButton": "Anheften",
