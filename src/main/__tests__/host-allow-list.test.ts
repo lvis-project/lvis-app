@@ -45,6 +45,38 @@ describe("normalizeAllowedHosts", () => {
     expect(() => normalizeAllowedHosts(["localhost"])).toThrow(/at least one dot/);
   });
 
+  // OAuth loopback redirects (`http://localhost:<port>`) are the one flow
+  // that legitimately names a single-label host. The opt-in admits exactly
+  // the loopback literals and must relax nothing else — a non-loopback
+  // single label under the flag is the regression this block guards.
+  describe("allowLoopback opt-in", () => {
+    it("admits the loopback literals verbatim", () => {
+      expect(
+        normalizeAllowedHosts(["localhost", "127.0.0.1", "::1"], { allowLoopback: true }),
+      ).toEqual(["localhost", "127.0.0.1", "::1"]);
+    });
+
+    it("still refuses non-loopback single-label hosts", () => {
+      expect(() =>
+        normalizeAllowedHosts(["intranet"], { allowLoopback: true }),
+      ).toThrow(/at least one dot/);
+    });
+
+    it("still refuses bare public suffixes and wildcards", () => {
+      expect(() => normalizeAllowedHosts(["com"], { allowLoopback: true })).toThrow(
+        /public-suffix/,
+      );
+      expect(() => normalizeAllowedHosts(["*"], { allowLoopback: true })).toThrow(
+        /wildcard/,
+      );
+    });
+
+    it("stays off by default — the flag is per-surface, not ambient", () => {
+      expect(() => normalizeAllowedHosts(["localhost"], {})).toThrow(/at least one dot/);
+      expect(() => normalizeAllowedHosts(["127.0.0.1"])).not.toThrow();
+    });
+  });
+
   // The list mirrored by the SDK's plugin-manifest.schema.json `not.enum`
   // gate. Drift would mean a manifest passes AJV at publish but throws at
   // plugin load. If you change this list, also update the SDK schema in

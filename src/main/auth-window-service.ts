@@ -508,10 +508,15 @@ export async function openAuthWindow(
   // happens before any BrowserWindow / partition is created.
   let normalizedCookieHosts: string[];
   try {
+    // `allowLoopback` — OAuth loopback redirects (RFC 8252 §7.3) legitimately
+    // declare `localhost`/`127.0.0.1` here, and loopback cookies cannot leave
+    // the machine, so admitting the literals does not widen the exfiltration
+    // surface the strict single-label rule guards.
     normalizedCookieHosts = normalizeAllowedHosts(
       (Array.isArray(cookieHosts) ? cookieHosts : []).filter(
         (h): h is string => typeof h === "string",
       ),
+      { allowLoopback: true },
     );
   } catch (err) {
     throw new Error(
