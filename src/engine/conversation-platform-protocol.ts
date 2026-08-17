@@ -15,10 +15,11 @@
  */
 import type { McpUiPayload } from "../mcp/types.js";
 import type { HostShellExecutionPlanAuditProjection } from "../permissions/host-shell-execution-plan.js";
-import type {
-  ApprovalPurposeSuggestion,
-  PermissionReviewRiskLevel,
-  PermissionReviewStatus,
+import {
+  isSharedApprovalToolIdentifier,
+  type ApprovalPurposeSuggestion,
+  type PermissionReviewRiskLevel,
+  type PermissionReviewStatus,
 } from "../shared/permission-review-status.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
 import type { FallbackStatus } from "./llm/vercel/fallback-chain.js";
@@ -343,7 +344,15 @@ export type SharedConversationProjectionEvent =
   | { readonly kind: "turn.started" }
   | { readonly kind: "assistant.text.delta"; readonly text: string }
   | { readonly kind: "tool.state"; readonly state: "running" | "completed" | "failed" }
-  | { readonly kind: "approval.waiting-local" }
+  | {
+    readonly kind: "approval.waiting-local";
+    /**
+     * Coarse safe tool identifier ("builtin:list_files"). Never tool
+     * arguments, paths, request payloads, or review reasons; a name outside
+     * the conservative identifier grammar is dropped rather than forwarded.
+     */
+    readonly tool?: string;
+  }
   | { readonly kind: "compaction.started" }
   | { readonly kind: "compaction.completed" }
   | { readonly kind: "turn.failed"; readonly failure?: TurnFailureSummary }
@@ -361,10 +370,13 @@ export function projectSharedConversationEvent(
       return { kind: "tool.state", state: "running" };
     case "tool.completed":
       return { kind: "tool.state", state: event.isError ? "failed" : "completed" };
-    case "permission.reviewed":
-      return event.review.status === "needs_approval"
+    case "permission.reviewed": {
+      if (event.review.status !== "needs_approval") return undefined;
+      const tool = sharedApprovalToolIdentifier(event.review.tool);
+      return tool === undefined
         ? { kind: "approval.waiting-local" }
-        : undefined;
+        : { kind: "approval.waiting-local", tool };
+    }
     case "compaction.started":
       return { kind: "compaction.started" };
     case "compaction.completed":
@@ -383,6 +395,20 @@ export function projectSharedConversationEvent(
     default:
       return undefined;
   }
+}
+
+/**
+ * Registered tool names are host-controlled identifiers, but this projection
+ * feeds remote surfaces, so it validates against the one shared grammar
+ * instead of trusting the producer, and drops a non-conforming name rather
+ * than forwarding it.
+ */
+function sharedApprovalToolIdentifier(
+  tool: ConversationToolReference,
+): string | undefined {
+  if (typeof tool.name !== "string") return undefined;
+  const identifier = tool.source === undefined ? tool.name : `${tool.source}:${tool.name}`;
+  return isSharedApprovalToolIdentifier(identifier) ? identifier : undefined;
 }
 
 function toHubSubscriptionOptions(

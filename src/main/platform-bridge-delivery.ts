@@ -14,6 +14,7 @@ import {
   type SharedConversationSnapshot,
   type TurnFailureSummary,
 } from "../engine/shared-conversation-projection.js";
+import { isSharedApprovalToolIdentifier } from "../shared/permission-review-status.js";
 
 const DEFAULT_MAX_CHANNELS = 128;
 const DEFAULT_MAX_PENDING_MESSAGES_PER_CHANNEL = 64;
@@ -78,6 +79,12 @@ export type PlatformBridgeOutboundMessage =
      * (fixed category union plus a fixed table sentence, never raw error text).
      */
     readonly failure?: TurnFailureSummary;
+    /**
+     * Coarse safe tool identifier, present only for "awaiting-local-approval".
+     * It names WHAT is waiting for the desktop approval card; it never carries
+     * tool arguments, paths, or payloads.
+     */
+    readonly tool?: string;
   };
 
 /**
@@ -643,6 +650,7 @@ function copyOutboundMessage(message: PlatformBridgeOutboundMessage): PlatformBr
         ...(message.failure === undefined
           ? {}
           : { failure: { category: message.failure.category, summary: message.failure.summary } }),
+        ...(message.tool === undefined ? {} : { tool: message.tool }),
       };
   }
 }
@@ -662,7 +670,7 @@ function normalizeOutboundMessage(
     case "text":
       return { kind: "text", cursor: message.cursor, text: safeText(message.text, maxTextChars) };
     case "status":
-      return statusMessage(message.cursor, message.status, message.failure);
+      return statusMessage(message.cursor, message.status, message.failure, message.tool);
   }
 }
 
@@ -702,7 +710,13 @@ function isValidOutboundMessage(
   maxTextChars: number,
 ): value is PlatformBridgeOutboundMessage {
   if (!value || typeof value !== "object") return false;
-  const message = value as { kind?: unknown; cursor?: unknown; status?: unknown; text?: unknown };
+  const message = value as {
+    kind?: unknown;
+    cursor?: unknown;
+    status?: unknown;
+    text?: unknown;
+    tool?: unknown;
+  };
   if (message.cursor !== cursor) return false;
   switch (message.kind) {
     case "snapshot":
@@ -711,7 +725,10 @@ function isValidOutboundMessage(
       return isSafeOutboundText(message.text, maxTextChars);
     case "status":
       return isEventStatus(message.status)
-        && isSafeOutboundFailure((message as { failure?: unknown }).failure);
+        && isSafeOutboundFailure((message as { failure?: unknown }).failure)
+        && (message.tool === undefined
+          || (message.status === "awaiting-local-approval"
+            && isSharedApprovalToolIdentifier(message.tool)));
     default:
       return false;
   }
@@ -785,7 +802,7 @@ function toEventMessage(
             : "tool-failed",
       );
     case "approval.waiting-local":
-      return statusMessage(event.cursor, "awaiting-local-approval");
+      return statusMessage(event.cursor, "awaiting-local-approval", undefined, event.event.tool);
     case "compaction.started":
       return statusMessage(event.cursor, "compaction-started");
     case "compaction.completed":
@@ -801,15 +818,21 @@ function statusMessage(
   cursor: number,
   status: Exclude<PlatformBridgeOutboundStatus, "idle" | "running">,
   failure?: TurnFailureSummary,
+  tool?: unknown,
 ): PlatformBridgeOutboundMessage {
   // Fail closed: a summary that does not survive re-validation is dropped and
-  // the bare status still flows.
+  // the bare status still flows. The approval tool identifier follows the
+  // same rule against the one shared grammar — this module is the last
+  // owner-side boundary before a provider transport.
   const safeFailure = toSafeTurnFailureSummary(failure);
   return {
     kind: "status",
     cursor,
     status,
     ...(safeFailure === undefined ? {} : { failure: safeFailure }),
+    ...(status === "awaiting-local-approval" && isSharedApprovalToolIdentifier(tool)
+      ? { tool }
+      : {}),
   };
 }
 
