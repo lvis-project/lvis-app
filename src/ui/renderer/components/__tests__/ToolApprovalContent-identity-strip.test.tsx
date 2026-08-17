@@ -131,10 +131,10 @@ describe("ToolApprovalContent identity strip", () => {
 
 
   it("renders a path-grant request inside the same frame, identity strip included", () => {
-    // US-004: the dock no longer forks to a second component. The path-grant
-    // Evidence+Decision section keeps its own semantics (allow-always grants a
-    // parent directory), but it lives under the same identity strip as every
-    // other kind — one frame, one visual language.
+    // Issue #2104: one approval format. The path-grant kind keeps its own
+    // decision semantics (allow-always grants a parent directory), but it uses
+    // the same identity strip, review expander, and decision row as every
+    // other kind — one frame, one visual language, no second layout.
     render(
       <ToolApprovalContent
         open
@@ -155,10 +155,12 @@ describe("ToolApprovalContent identity strip", () => {
     );
     expect(screen.getByTestId("tool-approval-panel")).toBeInTheDocument();
     expect(screen.getByTestId("approval-tool-identity")).toHaveTextContent("write_file");
-    expect(screen.getByTestId("docked-approval-panel")).toBeInTheDocument();
-    // The generic decision row stays out — path grants decide in their own section.
-    expect(screen.queryByTestId("approve-button")).toBeNull();
-    expect(screen.getByTestId("docked-approval-choice-allow-once")).toBeInTheDocument();
+    // The one generic decision row serves path grants too.
+    expect(screen.getByTestId("approve-button")).toBeInTheDocument();
+    expect(screen.getByTestId("deny-button")).toBeInTheDocument();
+    expect(screen.getByTestId("approval-review-details")).toBeInTheDocument();
+    expect(screen.getByTestId("approval-path-grant-evidence")).toBeInTheDocument();
+    expect(screen.queryByTestId("docked-approval-panel")).toBeNull();
   });
 
 
@@ -168,11 +170,12 @@ describe("ToolApprovalContent identity strip", () => {
     // discard that selection. These shortcuts never existed for this kind
     // before the frame unification and must stay absent (review MAJOR).
     const onDecide = vi.fn();
+    const { allowedChoices: _unconstrained, ...openChoices } = baseRequest();
     render(
       <ToolApprovalContent
         open
         request={{
-          ...baseRequest(),
+          ...openChoices,
           kind: "out-of-allowed-dir",
           toolName: "write_file",
           toolCategory: "write",
@@ -187,8 +190,8 @@ describe("ToolApprovalContent identity strip", () => {
       />,
     );
     const panel = screen.getByTestId("tool-approval-panel");
-    // Focus the parent-grant scope, as a keyboard user would before committing.
-    screen.getByTestId("docked-approval-choice-allow-always").focus();
+    // Focus the parent-grant decision, as a keyboard user would before committing.
+    screen.getByTestId("allow-always-button").focus();
     fireEvent.keyDown(panel, { key: "a" });
     fireEvent.keyDown(panel, { key: "d" });
     expect(onDecide).not.toHaveBeenCalled();

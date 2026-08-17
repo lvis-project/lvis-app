@@ -16,7 +16,7 @@ import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { ChevronDown } from "lucide-react";
-import { DockedApprovalCard } from "./permissions/DockedApprovalCard.js";
+import { buildApprovalScopeOptions } from "../../../permissions/approval-scope-options.js";
 import { SOURCE_BADGE } from "../constants.js";
 import type { ApprovalDecisionExtras } from "../hooks/use-approval.js";
 import type { ApprovalChoice, ApprovalRequest } from "../types.js";
@@ -479,7 +479,7 @@ export function ToolApprovalContent({
   onOpenPermanentDeny?: (request: ApprovalRequest, verdict: UserApprovalVerdict) => void;
   /** Settings owns the current exact-deny decision until it is saved or cancelled. */
   interactionLocked?: boolean;
-  /** Approval-sentence preselection, consumed only by the out-of-dir section. */
+  /** Approval-sentence preselection: focuses the named decision button. */
   proposedChoice?: ApprovalChoice | null;
 }) {
   const { t: tHook } = useTranslation();
@@ -508,6 +508,32 @@ export function ToolApprovalContent({
     [isRationaleApproval, request?.args],
   );
   const rationaleDisplayInvalid = isRationaleApproval && rationaleDisplay === null;
+  // Path-grant (out-of-allowed-dir) view-model — the ONE place the shared
+  // scope authority is projected for rendering. The card below stays a single
+  // layout for every kind; only this data (labels, availability, the pattern
+  // the allow-always button must carry) is kind-specific.
+  const isOutOfDir = request?.kind === "out-of-allowed-dir";
+  const outOfDir = isOutOfDir ? request?.outOfAllowedDir : undefined;
+  const outOfDirCandidatePath = outOfDir?.candidatePath ?? "";
+  const outOfDirSuggestedParent = outOfDir?.suggestedParent ?? null;
+  const outOfDirScopes = useMemo(() => {
+    if (!isOutOfDir) return null;
+    const options = buildApprovalScopeOptions({
+      candidatePath: outOfDirCandidatePath,
+      suggestedParent: outOfDirSuggestedParent,
+      ...(request?.allowedChoices ? { allowedChoices: request.allowedChoices } : {}),
+    });
+    return {
+      deny: options.find((scope) => scope.choice === "deny-once") ?? null,
+      always: options.find((scope) => scope.choice === "allow-always") ?? null,
+      once: options.find((scope) => scope.choice === "allow-once") ?? null,
+    };
+  }, [
+    isOutOfDir,
+    outOfDirCandidatePath,
+    outOfDirSuggestedParent,
+    request?.allowedChoices,
+  ]);
   const elicitationFields = elicitationParse.fields;
   const isMcpElicitation = isMcpElicitationRequest(request);
   const hasElicitationSchema = isMcpElicitation && hasRequestedElicitationSchema(request);
@@ -571,17 +597,28 @@ export function ToolApprovalContent({
     isMcpElicitation ||
     isAgentAction ||
     isHostConstrainedToOneShot;
-  const alwaysAllowUnavailable = approvalIsOneShot || finalVerdict === "high";
+  // For a path grant, availability comes from the shared scope authority
+  // (buildApprovalScopeOptions): allow-always exists only when the host
+  // resolved a safe parent AND the host did not narrow the choices.
+  const alwaysAllowUnavailable = outOfDirScopes
+    ? outOfDirScopes.always === null
+    : approvalIsOneShot || finalVerdict === "high";
   const persistentUnavailableReason = alwaysAllowUnavailable
-    ? finalVerdict === "high"
-      ? tHook("toolApprovalDialog.persistentUnavailableHighRisk")
-      : tHook("toolApprovalDialog.persistentUnavailableOneShot")
+    ? outOfDirScopes
+      ? outOfDirSuggestedParent
+        ? tHook("toolApprovalDialog.persistentUnavailableOneShot")
+        : tHook("toolApprovalDialog.persistentUnavailableNoParent")
+      : finalVerdict === "high"
+        ? tHook("toolApprovalDialog.persistentUnavailableHighRisk")
+        : tHook("toolApprovalDialog.persistentUnavailableOneShot")
     : null;
-  const denyDecisionDisabled = recordingDecision || interactionLocked;
+  const denyDecisionDisabled = recordingDecision || interactionLocked ||
+    (outOfDirScopes !== null && outOfDirScopes.deny === null);
   const alwaysAllowDecisionDisabled =
     approveDisabled || alwaysAllowUnavailable || recordingDecision || interactionLocked;
   const allowOnceDecisionDisabled =
-    approveDisabled || recordingDecision || interactionLocked;
+    approveDisabled || recordingDecision || interactionLocked ||
+    (outOfDirScopes !== null && outOfDirScopes.once === null);
 
   // Exactly one enabled decision must remain in the tab order. Default to the
   // fail-closed Reject action so a pending Enter/Space from the covered
@@ -599,6 +636,37 @@ export function ToolApprovalContent({
     alwaysAllowDecisionDisabled,
     denyDecisionDisabled,
     request?.id,
+  ]);
+
+  // A `/allow` sentence FILLS THE FORM: it moves focus onto the decision it
+  // named — the target line above rewrites with it — and nothing is decided
+  // until that button is pressed. A proposal naming a decision this request
+  // does not offer is ignored rather than approximated.
+  const proposedDecisionIndex = proposedChoice === "deny-once"
+    ? 0
+    : proposedChoice === "allow-always"
+      ? 1
+      : proposedChoice === "allow-once"
+        ? 2
+        : null;
+  useEffect(() => {
+    if (proposedDecisionIndex === null) return;
+    const disabled = [
+      denyDecisionDisabled,
+      alwaysAllowDecisionDisabled,
+      allowOnceDecisionDisabled,
+    ];
+    if (disabled[proposedDecisionIndex]) return;
+    setDecisionIndex(proposedDecisionIndex);
+    const frame = requestAnimationFrame(() => {
+      decisionButtonRefs.current[proposedDecisionIndex]?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [
+    proposedDecisionIndex,
+    denyDecisionDisabled,
+    alwaysAllowDecisionDisabled,
+    allowOnceDecisionDisabled,
   ]);
 
   const moveDecisionFocus = useCallback((direction: 1 | -1) => {
@@ -644,7 +712,10 @@ export function ToolApprovalContent({
     if (interactionLocked || recordingRequestIdRef.current !== null) return;
     const requestIdAtStart = request?.id ?? null;
     setRecordError(null);
-    if (request && choice === "allow-always" && !alwaysAllowUnavailable) {
+    // A path-grant allow-always persists through the host's directory grant
+    // (the rememberPattern argument) — never as an exact-args tuple, so the
+    // user-approval record path is skipped for out-of-allowed-dir requests.
+    if (request && choice === "allow-always" && !alwaysAllowUnavailable && !isOutOfDir) {
       // canonicalStringify: sort object keys so {a,b} and {b,a} produce the
       // same string — matching how dispatchReviewer builds the lookup key.
       const canonicalArgs = canonicalStringifyForRenderer(request.args ?? {});
@@ -697,6 +768,7 @@ export function ToolApprovalContent({
     finalVerdict,
     onDecide,
     alwaysAllowUnavailable,
+    isOutOfDir,
     interactionLocked,
     tHook,
   ]);
@@ -712,11 +784,16 @@ export function ToolApprovalContent({
     : (isUnsupportedElicitationForm || elicitationInvalid
         ? "mcp-elicitation-input-unavailable"
         : undefined);
+  // Path grants keep the A/D shortcuts inert (see handlePanelKeyDown), so
+  // their buttons must not advertise them.
+  const decisionShortcutsActive = !isOutOfDir;
   const approveButtonTitle = rationaleDisplayInvalid
     ? RATIONALE_INVALID_APPROVAL_MESSAGE
     : (approveDisabled
         ? tHook("toolApprovalDialog.completeRequiredChoices")
-        : tHook("toolApprovalDialog.shortcutA"));
+        : decisionShortcutsActive
+          ? tHook("toolApprovalDialog.shortcutA")
+          : undefined);
 
 
   const handlePanelKeyDown = useCallback((e: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -750,7 +827,7 @@ export function ToolApprovalContent({
       if (!request?.requireExplicit) onDecide("deny-once");
       return;
     }
-    // Path-grant requests own their decision semantics in DockedApprovalCard:
+    // Path-grant requests keep their decision semantics on the buttons only:
     // the user may have navigated to the allow-always (parent grant) scope,
     // and the generic A shortcut would silently commit a plain allow-once,
     // discarding that selection. Before the frame unification these shortcuts
@@ -793,21 +870,15 @@ export function ToolApprovalContent({
   const sourceBadge = request.source ? SOURCE_BADGE[request.source] ?? request.source : tHook("toolApprovalDialog.unknown");
   const originLabel = trustOriginLabel(request.trustOrigin);
   const category = request.toolCategory ?? "meta";
-  // Path-grant approvals keep their own Evidence+Decision section: the
-  // allow-always choice there GRANTS A PARENT DIRECTORY and must carry the
-  // pattern argument — forcing it through the generic three-button row would
-  // change what the button means, not just where it sits. One frame, one
-  // identity strip; the decision layer is polymorphic by kind.
-  const isOutOfDir = request.kind === "out-of-allowed-dir";
   // finalVerdict already computed above (before the null-check guard) — use it here.
   const badgeClassName = levelBadgeClass(finalVerdict as RiskLevel);
-  // Rationale cards render the sealed table instead, and out-of-dir cards
-  // render the path-grant section — neither consumes the generic review rows,
-  // so skip computing them.
+  // Rationale cards render the sealed table and out-of-dir cards render the
+  // path-grant evidence rows — neither consumes the generic review rows, so
+  // skip computing them. The frame around that evidence is shared.
   const rows = isRationaleApproval || isOutOfDir
     ? []
     : approvalReviewRows(request, category, argsStr, originLabel, source, sourceBadge);
-  const sandboxSummary = isRationaleApproval || isOutOfDir ? null : approvalSandboxSummary(request);
+  const sandboxSummary = isRationaleApproval ? null : approvalSandboxSummary(request);
   const categoryImpact = category === "read"
     ? tHook("toolApprovalDialog.impactRead")
     : category === "write"
@@ -819,11 +890,15 @@ export function ToolApprovalContent({
           : tHook("toolApprovalDialog.impactMeta");
   const specificReviewerReason = request.reviewerVerdict?.reason.trim() ?? "";
   const specificHostReason = request.reason.trim();
-  const reviewedImpact = !isBoilerplateApprovalReason(specificReviewerReason)
-    ? specificReviewerReason
-    : !isBoilerplateApprovalReason(specificHostReason)
-      ? specificHostReason
-      : categoryImpact;
+  // The path-grant reason is host-derived and localized here; the raw
+  // request.reason for this kind is an internal English marker.
+  const reviewedImpact = isOutOfDir
+    ? tHook("dockedApprovalCard.headline", { toolName: request.toolName })
+    : !isBoilerplateApprovalReason(specificReviewerReason)
+      ? specificReviewerReason
+      : !isBoilerplateApprovalReason(specificHostReason)
+        ? specificHostReason
+        : categoryImpact;
   const highRiskReason = (userProvidedPurpose || reviewedImpact || categoryImpact).slice(0, 220);
   const impactSummary = isRationaleApproval
     ? ""
@@ -881,14 +956,6 @@ export function ToolApprovalContent({
                         {tHook("toolApprovalDialog.identityUnverified")}
                       </span>
                     ) : null}
-                    {(pendingCount ?? 0) > 1 ? (
-                      <span
-                        className="shrink-0 rounded-full border px-2 py-0.5 text-[10px] text-muted-foreground"
-                        data-testid="approval-inline-queue-depth"
-                      >
-                        1 / {pendingCount}
-                      </span>
-                    ) : null}
                   </div>
                   {!isRationaleApproval && (
                   <div className="flex min-w-0 flex-wrap items-baseline gap-x-1.5 gap-y-0.5 text-[10px] text-muted-foreground">
@@ -918,7 +985,7 @@ export function ToolApprovalContent({
               <ParentEscalationBand notice={request.parentEscalation} />
             ) : null}
 
-            {!isRationaleApproval && !isOutOfDir && (
+            {!isRationaleApproval && (
               <>
                 <div
                   className={`min-w-0 rounded-md border-l-2 px-3 py-2 ${
@@ -939,6 +1006,23 @@ export function ToolApprovalContent({
                   >
                     {impactSummary}
                   </p>
+                  {/* Path grants keep what will be granted on screen: the
+                      line tracks the selected decision, so moving to
+                      allow-always shows the parent folder before the press. */}
+                  {isOutOfDir ? (
+                    <p
+                      className="mt-0.5 break-all font-mono text-[11px]"
+                      data-testid="approval-decision-target"
+                    >
+                      {decisionIndex === 0
+                        ? tHook("dockedApprovalCard.denySummary")
+                        : decisionIndex === 1 && outOfDirScopes?.always
+                          ? tHook("dockedApprovalCard.targetParent", {
+                              path: outOfDirScopes.always.path ?? "",
+                            })
+                          : outOfDirCandidatePath}
+                    </p>
+                  ) : null}
                   {sandboxSummary ? (
                     <p
                       className="mt-0.5 break-words text-[10px] text-muted-foreground"
@@ -956,15 +1040,6 @@ export function ToolApprovalContent({
               </>
             )}
 
-            {isOutOfDir ? (
-              <DockedApprovalCard
-                request={request}
-                onDecide={(choice, rememberPattern) => onDecide(choice, rememberPattern)}
-                onOpenPermanentDeny={onOpenPermanentDeny}
-                proposedChoice={proposedChoice}
-                interactionLocked={interactionLocked}
-              />
-            ) : (
             <details
               className="group min-w-0 overflow-hidden rounded-lg border border-border-strong bg-muted/(--opacity-light)"
               data-testid="approval-review-details"
@@ -986,6 +1061,31 @@ export function ToolApprovalContent({
               <div className="space-y-3 border-t p-3">
                 {isRationaleApproval ? (
                   <RationaleApprovalCard display={rationaleDisplay} />
+                ) : isOutOfDir ? (
+                  <div
+                    className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(finalVerdict as RiskLevel)}`}
+                    data-testid="approval-path-grant-evidence"
+                  >
+                    <h4 className="border-b px-3 py-2 text-xs font-semibold">
+                      {reviewTitleForCategory(category)}
+                    </h4>
+                    <ReviewRow label={tHook("toolApprovalDialog.allowOnce")}>
+                      <code className="break-all font-mono">{outOfDirCandidatePath}</code>
+                    </ReviewRow>
+                    {outOfDirSuggestedParent ? (
+                      <ReviewRow label={tHook("toolApprovalDialog.allowAlways")}>
+                        <code className="break-all font-mono">{outOfDirSuggestedParent}</code>
+                      </ReviewRow>
+                    ) : null}
+                    {decisionIndex === 1 && (outOfDir?.adjacencyWarnings.length ?? 0) > 0 ? (
+                      <p
+                        className="border-t px-3 py-2 text-[11px] text-warning"
+                        data-testid="approval-adjacency-warning"
+                      >
+                        {`⚠ ${outOfDir?.adjacencyWarnings.join(" · ")}`}
+                      </p>
+                    ) : null}
+                  </div>
                 ) : (
                   <div className={`min-w-0 overflow-hidden rounded-md border ${reviewBoxClass(finalVerdict as RiskLevel)}`}>
                     <h4 className="border-b px-3 py-2 text-xs font-semibold">
@@ -1037,7 +1137,6 @@ export function ToolApprovalContent({
                 )}
               </div>
             </details>
-            )}
 
             {!isRationaleApproval && isElicitationForm && (
               <div
@@ -1156,7 +1255,6 @@ export function ToolApprovalContent({
           </div>
 
         </section>
-          {!isOutOfDir && (
           <footer className="min-w-0 shrink-0 space-y-1.5 border-t bg-card px-3 py-2 sm:px-4">
             <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
               <span>{tHook("toolApprovalDialog.permanentDenyInSettings")}</span>
@@ -1191,11 +1289,12 @@ export function ToolApprovalContent({
                 onClick={() => {
                   if (recordingRequestIdRef.current === null) onDecide("deny-once");
                 }}
-                title={tHook("toolApprovalDialog.shortcutD")}
+                title={decisionShortcutsActive ? tHook("toolApprovalDialog.shortcutD") : undefined}
                 disabled={denyDecisionDisabled}
                 tabIndex={decisionIndex === 0 && !denyDecisionDisabled ? 0 : -1}
                 onFocus={() => setDecisionIndex(0)}
                 aria-describedby={interactionLocked ? "approval-decision-locked" : undefined}
+                data-proposed={proposedDecisionIndex === 0 && !denyDecisionDisabled ? "true" : undefined}
                 data-testid="deny-button"
               >
                 {tHook("toolApprovalDialog.denyOnce")}
@@ -1213,17 +1312,16 @@ export function ToolApprovalContent({
                 }}
                 size="sm"
                 variant="outline"
-                onClick={() => void handleApprove("allow-always")}
+                onClick={() => void handleApprove("allow-always", outOfDirScopes?.always?.path)}
                 disabled={alwaysAllowDecisionDisabled}
                 tabIndex={decisionIndex === 1 && !alwaysAllowDecisionDisabled ? 0 : -1}
                 onFocus={() => setDecisionIndex(1)}
                 title={
                   alwaysAllowUnavailable
-                    ? (finalVerdict === "high"
-                        ? tHook("toolApprovalDialog.persistentUnavailableHighRisk")
-                        : tHook("toolApprovalDialog.persistentUnavailableOneShot"))
+                    ? persistentUnavailableReason ?? undefined
                     : approveDisabled ? tHook("toolApprovalDialog.completeRequiredChoices") : undefined
                 }
+                data-proposed={proposedDecisionIndex === 1 && !alwaysAllowDecisionDisabled ? "true" : undefined}
                 aria-describedby={
                   interactionLocked
                     ? "approval-decision-locked"
@@ -1250,6 +1348,7 @@ export function ToolApprovalContent({
                 tabIndex={decisionIndex === 2 && !allowOnceDecisionDisabled ? 0 : -1}
                 onFocus={() => setDecisionIndex(2)}
                 title={approveButtonTitle}
+                data-proposed={proposedDecisionIndex === 2 && !allowOnceDecisionDisabled ? "true" : undefined}
                 aria-describedby={
                   interactionLocked
                     ? "approval-decision-locked"
@@ -1287,7 +1386,6 @@ export function ToolApprovalContent({
               </p>
             ) : null}
           </footer>
-          )}
       </div>
     </div>
   );

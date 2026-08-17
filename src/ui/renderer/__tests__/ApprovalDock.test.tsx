@@ -524,7 +524,7 @@ describe("ApprovalDock", () => {
     await waitFor(() => {
       expect(document.body.textContent).toContain("read_file");
     });
-    expect(document.body.querySelector('[data-testid="approval-inline-queue-depth"]')?.textContent)
+    expect(document.body.querySelector('[data-testid="approval-queue-depth"]')?.textContent)
       .toContain("1 / 2");
     expect(document.body.textContent).toContain("대기 중 1개");
     expect(document.body.textContent).not.toContain("모두 허용");
@@ -673,10 +673,10 @@ describe("ApprovalDock", () => {
     });
   });
 
-  it("renders no modal for out-of-allowed-dir — the docked card serves it", async () => {
-    // The modal OutOfAllowedDirCard was replaced by DockedApprovalCard, which
-    // lives in the chat region. Rendering a modal here as well would put two
-    // surfaces on one decision.
+  it("renders out-of-allowed-dir in the same non-modal frame as every other kind", async () => {
+    // One approval frame: a path grant shares the identity strip, review
+    // expander, and decision row of every other request. Rendering a second
+    // surface here would put two formats on one decision.
     const onDecide = vi.fn();
     const onOpenPermanentDeny = vi.fn();
     const { container } = render(
@@ -701,7 +701,11 @@ describe("ApprovalDock", () => {
     );
 
     expect(container.querySelector('[data-testid="approval-dock"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="docked-approval-panel"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="tool-approval-panel"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="deny-button"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="allow-always-button"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="approve-button"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="approval-review-details"]')).toBeTruthy();
     expect(container.querySelector('[role="dialog"]')).toBeNull();
     expect(document.body.textContent).toContain("/Users/ken/Documents/project/notes.md");
     fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')!);

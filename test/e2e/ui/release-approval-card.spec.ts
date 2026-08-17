@@ -1,5 +1,6 @@
 /**
- * Pre-release verification for the docked approval card (#1973).
+ * Pre-release verification for the docked approval card (#1973, unified
+ * frame #2104).
  *
  * It landed with unit coverage only. The failure mode unit tests cannot see is
  * a wiring one: the dock is mounted once by App beside the routed content, and
@@ -145,26 +146,28 @@ test.describe("release check — docked approval card", () => {
 
     await expect(overlay).toBeVisible({ timeout: 10_000 });
 
-    const target = page.getByTestId("docked-approval-target");
+    const target = page.getByTestId("approval-decision-target");
     await expect(target).toBeVisible();
     const firstTarget = ((await target.textContent()) ?? "").trim();
     expect(firstTarget.length).toBeGreaterThan(0);
 
-    // Every scope must be rendered as its own button.
-    for (const choice of ["deny-once", "allow-always", "allow-once"]) {
-      await expect(page.getByTestId(`docked-approval-choice-${choice}`)).toBeVisible();
+    // Every decision must be rendered as its own button — the same three
+    // buttons every other approval kind renders (one frame, issue #2104).
+    for (const testId of ["deny-button", "allow-always-button", "approve-button"]) {
+      await expect(page.getByTestId(testId)).toBeVisible();
     }
 
-    // A non-modal surface must not steal focus from the routed page on mount.
-    // Keyboard users enter it deliberately, then the roving option group
-    // exposes every scope without requiring a mouse.
-    const focusedInCard = await page.evaluate(() => {
-      const el = document.activeElement;
-      return !!el?.closest('[data-testid="approval-dock"]');
-    });
-    expect(focusedInCard, "non-modal card stole route focus on mount").toBe(false);
+    // The dock hands keyboard focus to the fail-closed Reject decision on
+    // arrival, so a pending Enter/Space from the covered composer can never
+    // become an accidental approval.
+    await expect
+      .poll(async () => page.evaluate(() => {
+        const el = document.activeElement;
+        return !!el?.closest('[data-testid="approval-dock"]');
+      }), { timeout: 5_000 })
+      .toBe(true);
 
-    await page.getByTestId("docked-approval-choice-allow-once").focus();
+    await page.getByTestId("approve-button").focus();
 
     // Arrowing must move focus AND rewrite the target line. This is the
     // property the design rests on: what will be granted is always on screen.
