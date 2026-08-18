@@ -86,19 +86,15 @@ vi.mock("../../plugins/registry.js", () => ({
   readPluginRegistry: harness.readPluginRegistry,
 }));
 
-import { initPluginRuntime } from "../../boot/steps/plugin-runtime.js";
-import { KNOWN_CAPABILITIES } from "../../plugins/capabilities.js";
 import { HOSTAPI_EFFECT_BY_PATH } from "../effect-kind.js";
-import {
-  instrumentEffectsByPath,
-  isPlainNamespace,
-} from "../hostapi-effect-recorder.js";
+import { instrumentEffectsByPath } from "../hostapi-effect-recorder.js";
 import {
   createEffectLedger,
   runWithEffectLedger,
   type EffectLedger,
 } from "../effect-ledger.js";
 import type { PluginHostApi } from "../../plugins/types.js";
+import { buildRealHostApi, collectFunctionPaths } from "./real-host-api.js";
 import { PermissionTestResources } from "./test-resources.js";
 
 const resources = new PermissionTestResources();
@@ -107,124 +103,6 @@ afterEach(async () => {
   await resources.cleanup();
 });
 
-type CreateHostApi = (
-  pluginId: string,
-  manifest: {
-    id: string;
-    config?: Record<string, unknown>;
-    capabilities?: string[];
-  },
-  pluginDataDir: string,
-  incarnation: {
-    registerDisposer: (dispose: () => void) => void;
-    trackOperation: <T>(operation: Promise<T>) => Promise<T>;
-    isActive: () => boolean;
-    isLifecycleHookActive: () => boolean;
-  },
-  installPluginId: string | null,
-) => PluginHostApi;
-
-/** Build a REAL hostApi object via the production createHostApi factory. */
-async function buildRealHostApi(): Promise<PluginHostApi> {
-  harness.capturedRuntimeOptions = null;
-  const bootAuditLogger = { log: vi.fn() };
-  await initPluginRuntime({
-    projectRoot: "/tmp/lvis-test/project",
-    settingsService: {
-      get: vi.fn((key: string) => {
-        if (key === "llm") return { provider: "openai" };
-        if (key === "pluginConfigs") return {};
-        return undefined;
-      }),
-      getSecret: vi.fn(() => undefined),
-      getPluginConfig: vi.fn(() => ({})),
-      setPluginConfig: vi.fn(),
-    } as never,
-    memoryManager: {} as never,
-    toolRegistry: {
-      unregisterByPlugin: vi.fn(),
-      register: vi.fn(),
-      listAll: vi.fn(() => []),
-      listPluginIds: vi.fn(() => []),
-      replacePluginTools: vi.fn(),
-    } as never,
-    pythonPath: undefined,
-    bootAuditLogger: bootAuditLogger as never,
-    mainWindow: {} as never,
-    networkFetch: vi.fn(async () => new Response("")) as never,
-    openAuthWindowService: vi.fn(),
-    openLinkWindowService: vi.fn(),
-    openAuthPartitionViewerService: vi.fn(),
-    clearAuthPartitionService: vi.fn(),
-    shellOpenExternal: vi.fn(),
-    approvalGate: { requestAndWait: vi.fn(), resolve: vi.fn() } as never,
-    routinesStore: { list: () => [] } as never,
-  });
-
-  const createHostApi = harness.capturedRuntimeOptions?.createHostApi as
-    | CreateHostApi
-    | undefined;
-  expect(
-    createHostApi,
-    "initPluginRuntime must register a createHostApi factory",
-  ).toBeDefined();
-  const pluginDataDir = resources.makeTmpDir("lvis-hostapi-completeness-");
-  // Build with the FULL capability vocabulary, not a sampled subset. A
-  // namespace/method wired ONLY under a capability ABSENT from the fixture would
-  // escape BOTH the non-plain-namespace assertion AND the SOT-coverage assertion
-  // below (it would never be enumerated), so completeness coverage must enumerate
-  // every conditionally-wired method — declare the maximal capability set.
-  return createHostApi!(
-    "completeness-plugin",
-    {
-      id: "completeness-plugin",
-      config: {},
-      capabilities: [...KNOWN_CAPABILITIES],
-    },
-    pluginDataDir,
-    {
-      registerDisposer: vi.fn(),
-      trackOperation: <T>(operation: Promise<T>) => operation,
-      isActive: () => true,
-      isLifecycleHookActive: () => false,
-    },
-    null,
-  );
-}
-
-/**
- * Recursively collect every function-valued leaf method PATH (dotted) into
- * `out`, AND every non-plain namespace path into `nonPlainNamespaces`. The
- * recording wrapper only INSTRUMENTS plain namespaces (the shared
- * {@link isPlainNamespace} predicate); a non-plain namespace (class instance /
- * custom prototype) would pass the path-completeness check yet be copied
- * verbatim and left UNINSTRUMENTED by the wrapper — a silent fail-open one level
- * up. Flagging it here keeps the test and the wrapper on the SAME traversal
- * surface so such a namespace fails CI and must be handled.
- */
-function collectFunctionPaths(
-  obj: unknown,
-  prefix: string,
-  out: string[],
-  nonPlainNamespaces: string[],
-): void {
-  if (obj === null || typeof obj !== "object") return;
-  for (const key of Object.keys(obj as Record<string, unknown>)) {
-    const value = (obj as Record<string, unknown>)[key];
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (typeof value === "function") {
-      out.push(path);
-    } else if (
-      value !== null &&
-      typeof value === "object" &&
-      !Array.isArray(value)
-    ) {
-      if (!isPlainNamespace(value)) nonPlainNamespaces.push(path);
-      collectFunctionPaths(value, path, out, nonPlainNamespaces);
-    }
-  }
-}
-
 describe("hostApi effect classification — STRUCTURAL completeness", () => {
   beforeEach(() => {
     harness.readPluginRegistry.mockReset();
@@ -232,7 +110,10 @@ describe("hostApi effect classification — STRUCTURAL completeness", () => {
   });
 
   it("every function-valued method of the REAL hostApi is classified in the SOT", async () => {
-    const hostApi = await buildRealHostApi();
+    const hostApi = await buildRealHostApi(
+      harness,
+      resources.makeTmpDir("lvis-hostapi-completeness-"),
+    );
     const paths: string[] = [];
     const nonPlainNamespaces: string[] = [];
     collectFunctionPaths(hostApi, "", paths, nonPlainNamespaces);
@@ -285,7 +166,10 @@ describe("hostApi effect classification — STRUCTURAL completeness", () => {
   });
 
   it("records a fail-closed WRITE + the SOT entry's effect is honored for a known method", async () => {
-    const hostApi = await buildRealHostApi();
+    const hostApi = await buildRealHostApi(
+      harness,
+      resources.makeTmpDir("lvis-hostapi-completeness-"),
+    );
     const ledger: EffectLedger = createEffectLedger("cid-known");
     await runWithEffectLedger(ledger, async () => {
       // A pure read method records read; a write method records write — both via

@@ -98,7 +98,6 @@
     "src/permissions/__tests__/approval-gate.test.ts": 30,
     "src/permissions/__tests__/effect-enforcement.test.ts": 1,
     "src/permissions/__tests__/host-fetch-verb-snapshot.test.ts": 1,
-    "src/permissions/__tests__/hostapi-effect-completeness.test.ts": 1,
     "src/permissions/__tests__/hostapi-effect-recorder.test.ts": 1,
     "src/permissions/__tests__/permission-manager-legacy-null-verdict.test.ts": 5,
     "src/permissions/__tests__/permission-manager-reviewer.test.ts": 4,
