@@ -19,7 +19,7 @@ import {
   type Server,
   type ServerResponse,
 } from "node:http";
-import type { AddressInfo } from "node:net";
+import type { AddressInfo, Socket } from "node:net";
 import {
   SHARED_CONVERSATION_PROTOCOL_VERSION,
   type SharedConversationEventEnvelope,
@@ -210,7 +210,15 @@ interface TailnetControllerBroker {
 }
 
 interface TailnetRequestLimiter {
-  accept(login: string): boolean;
+  /**
+   * `login` is a client-supplied identity claim (see the header-trust note
+   * at the top of this file); `socket` is the raw connection it arrived on,
+   * which a caller cannot swap out mid-request. The limiter pins its bucket
+   * key to whichever login a socket first authorized with, so rotating the
+   * header on later requests over the same connection cannot mint new
+   * tracked identities.
+   */
+  accept(login: string, socket: Socket): boolean;
 }
 interface TailnetWebRuntime {
   readonly origin: string;
@@ -595,7 +603,7 @@ async function route(
     sendJson(res, 401, { ok: false, error: "unauthorized" });
     return;
   }
-  if (!requestLimiter.accept(login)) {
+  if (!requestLimiter.accept(login, req.socket)) {
     sendJson(res, 429, { ok: false, error: "tailnet-rate-limited" });
     return;
   }
@@ -778,7 +786,7 @@ function routeTailnetWebDocument(
     sendTailnetWebJson(res, web, 401, { ok: false, error: "unauthorized" });
     return;
   }
-  if (!requestLimiter.accept(login)) {
+  if (!requestLimiter.accept(login, req.socket)) {
     sendTailnetWebJson(res, web, 429, { ok: false, error: "tailnet-rate-limited" });
     return;
   }
@@ -1150,7 +1158,7 @@ function authorizeTailnetWebRequest(
     sendTailnetWebJson(res, web, 403, { ok: false, error: "tailnet-role-required" });
     return null;
   }
-  if (consumeRateLimit && !requestLimiter.accept(login)) {
+  if (consumeRateLimit && !requestLimiter.accept(login, req.socket)) {
     req.resume();
     sendTailnetWebJson(res, web, 429, { ok: false, error: "tailnet-rate-limited" });
     return null;
@@ -1614,7 +1622,7 @@ async function routeControllerCommand(
     sendJson(res, 401, { ok: false, error: "unauthorized" });
     return;
   }
-  if (!requestLimiter.accept(login)) {
+  if (!requestLimiter.accept(login, req.socket)) {
     req.resume();
     sendJson(res, 429, { ok: false, error: "tailnet-rate-limited" });
     return;
@@ -1717,7 +1725,7 @@ async function routeTailnetAttachmentUpload(
     sendJson(res, 401, { ok: false, error: "unauthorized" });
     return;
   }
-  if (!requestLimiter.accept(login)) {
+  if (!requestLimiter.accept(login, req.socket)) {
     req.resume();
     sendJson(res, 429, { ok: false, error: "tailnet-rate-limited" });
     return;
@@ -1965,7 +1973,7 @@ async function routePairingClaim(
     sendJson(res, 401, { ok: false, error: "unauthorized" });
     return;
   }
-  if (!requestLimiter.accept(login)) {
+  if (!requestLimiter.accept(login, req.socket)) {
     req.resume();
     sendJson(res, 429, { ok: false, error: "tailnet-rate-limited" });
     return;
@@ -2431,18 +2439,42 @@ function createTailnetRequestLimiter(
   windowMs: number,
 ): TailnetRequestLimiter {
   const buckets = new Map<string, { startedAt: number; count: number }>();
+  // A raw TCP connection is not something a caller can forge or swap out
+  // mid-request, unlike the Tailscale-User-Login header. Pinning the bucket
+  // key to whichever login a socket first authorized with means later
+  // requests on that same connection cannot mint additional tracked
+  // identities by sending a different header value -- the number of
+  // distinct identities one caller can register is bounded by how many
+  // sockets it holds open, which the listener already caps separately via
+  // maxConnections. The map holds only digests, never raw logins.
+  const pinnedIdentity = new WeakMap<Socket, string>();
   return {
-    accept(login): boolean {
+    accept(login, socket): boolean {
       const now = Date.now();
       // The map never retains a login, and stale buckets are evicted before a
       // new identity can consume one of the fixed slots.
       for (const [key, bucket] of buckets) {
         if (now - bucket.startedAt >= windowMs) buckets.delete(key);
       }
-      const key = identityDigest(login);
+      let key = pinnedIdentity.get(socket);
+      if (key === undefined) {
+        key = identityDigest(login);
+        pinnedIdentity.set(socket, key);
+      }
       const current = buckets.get(key);
       if (current === undefined) {
-        if (buckets.size >= MAX_TRACKED_RATE_IDENTITIES) return false;
+        if (buckets.size >= MAX_TRACKED_RATE_IDENTITIES) {
+          // Refusing every caller here would itself be a self-inflicted
+          // outage: capacity is now bounded by real distinct connections,
+          // not by how many header values a caller can send, so a flood of
+          // genuinely new identities still deserves service. Evict the
+          // longest-tracked bucket (Map iteration order is insertion order)
+          // to make room -- the accepted cost is that identity's window
+          // resets a little early, never that a caller earning a fresh
+          // bucket is turned away outright.
+          const oldestKey = buckets.keys().next().value;
+          if (oldestKey !== undefined) buckets.delete(oldestKey);
+        }
         buckets.set(key, { startedAt: now, count: 1 });
         return true;
       }
