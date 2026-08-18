@@ -50,6 +50,14 @@ describe("isReinstallFixableFailureKind", () => {
     expect(isReinstallFixableFailureKind("incompatible-app-version")).toBe(false);
   });
 
+  it("classifies a marketplace revocation block as NOT reinstall-fixable", () => {
+    // A reinstall either re-fetches the same blocked version (the install
+    // path enforces the same revocation registry) or is a genuine upgrade,
+    // not a "repair" — the Doctor must show the block reason instead of
+    // looping a reinstall.
+    expect(isReinstallFixableFailureKind("plugin-revoked")).toBe(false);
+  });
+
   it("partitions the full taxonomy without leaving a kind unclassified", () => {
     const fixable = PLUGIN_INSTALL_FAILURE_KINDS.filter((kind) =>
       isReinstallFixableFailureKind(kind),
@@ -58,6 +66,10 @@ describe("isReinstallFixableFailureKind", () => {
       (kind) => !isReinstallFixableFailureKind(kind),
     );
     expect(fixable).toEqual(["manifest-validation-error"]);
-    expect(notFixable).toEqual(["catalog-grant-mismatch", "incompatible-app-version"]);
+    expect(notFixable).toEqual([
+      "catalog-grant-mismatch",
+      "incompatible-app-version",
+      "plugin-revoked",
+    ]);
   });
 });
