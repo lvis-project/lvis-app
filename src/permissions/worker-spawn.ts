@@ -61,6 +61,7 @@ import { unlinkSync, rmdirSync, chmodSync, lstatSync } from "node:fs";
 import { join, resolve as pathResolve } from "node:path";
 
 import { lvisHome } from "../shared/lvis-home.js";
+import { PLUGIN_WORKER_RUN_DIR_NAME } from "../plugins/plugin-storage-layout.js";
 import { shellQuote } from "../lib/shell-resolver.js";
 import { buildSafeChildEnv, buildSandboxedChildEnv } from "../tools/safe-env.js";
 import { terminateChildProcess } from "../tools/terminate-child-process.js";
@@ -490,7 +491,7 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     lvisHome(),
     "plugins",
     safePlugin,
-    "run",
+    PLUGIN_WORKER_RUN_DIR_NAME,
     safeWorker,
   );
   const socketPath = join(socketDir, "control.sock");
