@@ -1822,7 +1822,7 @@ describe("ASRT provisioning precondition", () => {
       group_sid: "S-1-5-21-1-2-3-1002",
     },
     cred_present: true,
-    marker_version: 1,
+    marker_version: 2,
     marker_user_sid: "S-1-5-21-1-2-3-1001",
   };
 
@@ -1835,9 +1835,9 @@ describe("ASRT provisioning precondition", () => {
     // legitimately changed — a vendor bump moving the marker schema, say — then
     // looks identical to a genuine provisioning failure, and the run happens on
     // a Windows CI machine that is gone by the time anyone reads the log.
-    const raw = { ...structuredClone(READY), marker_version: 2 };
+    const raw = { ...structuredClone(READY), marker_version: 99 };
     expect(() => assertAsrtUserReady(raw)).toThrow(/marker_version/);
-    expect(() => assertAsrtUserReady(raw)).toThrow(/"marker_version":2/);
+    expect(() => assertAsrtUserReady(raw)).toThrow(/"marker_version":99/);
   });
 
   it.each([
