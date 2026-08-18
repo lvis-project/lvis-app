@@ -88,6 +88,13 @@ export function resolveTailnetObserverConfig(
   if (rawPairedSharing !== undefined && rawPairedSharing !== "1") {
     throw new Error("tailnet-paired-sharing-enable-invalid");
   }
+  // The controller accepts remote commands that reach the user's agent, so it
+  // needs the pairing boundary for the same reason the web adapter does. Without
+  // this, enabling the controller alone leaves the share authorizer undefined —
+  // i.e. no pairing gate at all on the native routes.
+  if (rawController === "1" && rawPairedSharing !== "1") {
+    throw new Error("tailnet-controller-requires-paired-sharing");
+  }
   const rawWeb = env.LVIS_TAILNET_WEB;
   if (rawWeb !== undefined && rawWeb !== "1") {
     throw new Error("tailnet-web-enable-invalid");
