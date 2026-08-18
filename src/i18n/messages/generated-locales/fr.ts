@@ -2613,7 +2613,7 @@ export const frMessages: Record<string, string> = {
   "toolApprovalDialog.impactWrite": "Crée ou modifie les données de la cible examinée.",
   "toolApprovalDialog.impactNetwork": "Envoie ou reçoit des données via le réseau.",
   "toolApprovalDialog.impactShell": "Exécute une commande système sur cet appareil.",
-  "toolApprovalDialog.impactMeta": "Modifie l’état de l’application ou de l’agent.",
+  "toolApprovalDialog.impactMeta": "Modifie l’état de l’application ou de l’agent. Choisir « toujours autoriser » fait que cet outil ne redemandera plus. Pour un outil capable de lancer des agents ou de modifier les permissions, c’est une autorisation permanente, pas un confort.",
   "toolApprovalDialog.completeRequiredChoices": "Effectuez les choix obligatoires avant d’approuver",
   "toolApprovalDialog.noTypedValueProvided": "Aucune valeur fournie",
   "toolApprovalDialog.typedInputOutsideApproval": "Les cartes d’approbation ne recueillent aucune saisie de texte. Ajoutez le texte facultatif à la demande d’origine puis réessayez.",
