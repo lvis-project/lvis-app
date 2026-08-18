@@ -62,8 +62,8 @@ import { join, resolve as pathResolve } from "node:path";
 
 import { lvisHome } from "../shared/lvis-home.js";
 import { PLUGIN_WORKER_RUN_DIR_NAME } from "../plugins/plugin-storage-layout.js";
-import { shellQuote } from "../lib/shell-resolver.js";
-import { buildSafeChildEnv, buildSandboxedChildEnv } from "../tools/safe-env.js";
+import { buildSafeChildEnv } from "../tools/safe-env.js";
+import { spawnConfinedChild } from "./confined-child.js";
 import { terminateChildProcess } from "../tools/terminate-child-process.js";
 import {
   assertManagedChildProcessAdmissionOpen,
@@ -72,13 +72,10 @@ import {
 import { createSandboxProcessHome } from "./sandbox-process-home.js";
 import {
   isAsrtSandboxActive,
-  wrapWorkerCommand,
   cleanupAsrtSandboxAfterCommand,
   registerWorkerUnixSocketDir,
   unregisterWorkerUnixSocketDir,
   grantWindowsWorkerFilesystemAccess,
-  getDefaultSensitiveReadDenyPaths,
-  getDefaultSensitiveWriteDenyPaths,
   type WindowsWorkerFilesystemGrant,
 } from "./asrt-sandbox.js";
 import {
@@ -215,25 +212,6 @@ function removeSocketArtifacts(socketPath: string, socketDir: string): void {
   }
 }
 
-function buildWorkerCommand(command: string, args: readonly string[]): {
-  readonly cmdline: string;
-  readonly binShell?: string;
-} {
-  if (process.platform === "win32") {
-    return {
-      cmdline: ["&", powershellQuote(command), ...args.map((part) => powershellQuote(part))].join(" "),
-      binShell: "powershell",
-    };
-  }
-  return {
-    cmdline: [command, ...args].map((part) => shellQuote(part)).join(" "),
-  };
-}
-
-function powershellQuote(value: string): string {
-  return `'${value.replace(/'/g, "''")}'`;
-}
-
 function windowsSystemRoot(): string {
   const root = process.env.SystemRoot ?? process.env.WINDIR;
   if (root === undefined || root.trim().length === 0) {
@@ -348,8 +326,6 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
   const releaseWorkerReservation = reserveWrappedWorker(safePlugin, safeWorker);
 
   if (process.platform === "win32") {
-    const denyRead = getDefaultSensitiveReadDenyPaths();
-    const denyWrite = getDefaultSensitiveWriteDenyPaths();
     let holder: ChildProcess;
     try {
       holder = startWindowsAclGrantHolder(
@@ -439,30 +415,22 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
       });
       assertHolderAlive();
 
-      const { cmdline, binShell } = buildWorkerCommand(spec.command, args);
-      const { argv, env } = await wrapWorkerCommand(cmdline, {
-        filesystem: { denyRead, denyWrite },
-        ...(binShell !== undefined ? { binShell } : {}),
+      // Windows grants reachability through ACLs against the holder process,
+      // so the wrap carries the deny floor only.
+      child = await spawnConfinedChild({
+        command: spec.command,
+        args,
+        label: `worker:${safePlugin}:${safeWorker}:asrt-win`,
+        grantMode: "deny-only",
+        baseEnv,
+        extraEnv: { ...sandboxHome.env },
+        assertStillValid: assertHolderAlive,
+        onWrapped: () => {
+          wrapped = true;
+          markPluginWorkerWrapped(safePlugin, safeWorker);
+          marked = true;
+        },
       });
-      wrapped = true;
-      assertHolderAlive();
-
-      const [cmd, ...wrappedArgs] = argv;
-      if (cmd === undefined) {
-        throw new Error("[worker-spawn] ASRT returned an empty argv for the Windows worker wrap");
-      }
-
-      markPluginWorkerWrapped(safePlugin, safeWorker);
-      marked = true;
-
-      assertManagedChildProcessAdmissionOpen(`worker:${safePlugin}:${safeWorker}:asrt-win`);
-      child = spawn(cmd, wrappedArgs, {
-        stdio: ["ignore", "pipe", "pipe"],
-        shell: false,
-        windowsHide: true,
-        env: buildWrappedWorkerEnv(baseEnv, env, { ...sandboxHome.env }),
-      });
-      trackManagedChildProcess(child, { label: `worker:${safePlugin}:${safeWorker}:asrt-win` });
       child.once("exit", finalizeResources);
       child.once("error", () => {
         // `error` can mean signal/message delivery failed while the child is
@@ -543,17 +511,6 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     ...(tmpDir ? [tmpDir] : []),
   ];
 
-  // FAIL-CLOSED read jail: a per-command `denyRead` REPLACES the shared boot
-  // floor in ASRT (`customConfig?.filesystem?.denyRead ?? config.filesystem
-  // .denyRead` — an empty-but-present array is NOT nullish), so it must be
-  // restated here or the worker regains read of `~/.lvis/secrets`, `~/.ssh`,
-  // `~/.aws`, … — the SAME SOT bash/MCP wraps restate (the #1365 floor).
-  const denyRead = getDefaultSensitiveReadDenyPaths();
-  // FAIL-CLOSED write floor: per-command `denyWrite` also replaces the shared
-  // boot array, so restate the centralized persistence-vector SOT here.
-  // This keeps long-lived plugin workers symmetric with terminal/MCP wraps.
-  const denyWrite = getDefaultSensitiveWriteDenyPaths();
-
   // UDS allow — SHARED config, NOT per-command (the per-command channel is INERT
   // for the seatbelt/seccomp UDS rules in current ASRT; see asrt-sandbox.ts's
   // WORKER UDS header). Register the socketDir so the live shared config grants
@@ -570,33 +527,26 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     // path with spaces/metacharacters cannot mis-split. ASRT runs this branch
     // under a POSIX shell (mac/linux). The per-command wrap carries ONLY the
     // filesystem jail (the `--bind`).
-    const { cmdline, binShell } = buildWorkerCommand(spec.command, args);
-    const { argv, env } = await wrapWorkerCommand(cmdline, {
-      filesystem: { allowWrite, allowRead, denyRead, denyWrite },
-      ...(binShell !== undefined ? { binShell } : {}),
-    });
-    // The wrap incremented ASRT's per-command state (Linux activeSandboxCount,
-    // proxy ref); from here a failure MUST decrement it (see the catch).
-    wrapped = true;
-
-    const [cmd, ...wrappedArgs] = argv;
-    if (cmd === undefined) {
-      throw new Error("[worker-spawn] ASRT returned an empty argv for the worker wrap");
-    }
-
-    // Mark the reviewer wrapped-registry: this worker genuinely runs under ASRT.
-    // Keyed plugin-scoped (NOT workerId alone) so two plugins sharing a workerId
-    // (e.g. "main") cannot collide into a false `asrt` no-leak signal.
-    markPluginWorkerWrapped(safePlugin, safeWorker);
-
-    assertManagedChildProcessAdmissionOpen(`worker:${safePlugin}:${safeWorker}:asrt`);
-    const child = spawn(cmd, wrappedArgs, {
-      stdio: ["ignore", "pipe", "pipe"],
-      shell: false,
-      windowsHide: true,
-      // Overlay the ASRT proxy env (none on mac/linux — proxy is baked into the
-      // command string) onto the secret-stripped base env.
-      env: buildWrappedWorkerEnv(baseEnv, env, { ...sandboxHome.env }),
+    const child = await spawnConfinedChild({
+      command: spec.command,
+      args,
+      label: `worker:${safePlugin}:${safeWorker}:asrt`,
+      grantMode: "allow-list",
+      allowRead,
+      allowWrite,
+      baseEnv,
+      extraEnv: { ...sandboxHome.env },
+      onWrapped: () => {
+        // The wrap incremented ASRT's per-command state (Linux
+        // activeSandboxCount, proxy ref); from here a failure MUST decrement
+        // it (see the catch).
+        wrapped = true;
+        // Mark the reviewer wrapped-registry: this worker genuinely runs under
+        // ASRT. Keyed plugin-scoped (NOT workerId alone) so two plugins sharing
+        // a workerId (e.g. "main") cannot collide into a false `asrt`
+        // no-leak signal.
+        markPluginWorkerWrapped(safePlugin, safeWorker);
+      },
     });
     trackManagedChildProcess(child, { label: `worker:${safePlugin}:${safeWorker}:asrt` });
 
@@ -651,22 +601,6 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
  * `process.env` (none on mac/linux — proxy baked into the command string).
  * Mirrors mcp-client's buildWrappedStdioEnv.
  */
-function buildWrappedWorkerEnv(
-  baseEnv: NodeJS.ProcessEnv,
-  wrappedEnv: NodeJS.ProcessEnv,
-  sandboxHomeEnv: Record<string, string>,
-): NodeJS.ProcessEnv {
-  const asrtComposed = buildSandboxedChildEnv(wrappedEnv);
-  const safeBaseline = buildSandboxedChildEnv(process.env);
-  const proxyOverlay: Record<string, string> = {};
-  for (const [key, value] of Object.entries(asrtComposed)) {
-    if (value === undefined) continue;
-    if (safeBaseline[key] === value) continue;
-    proxyOverlay[key] = value;
-  }
-  return { ...baseEnv, ...proxyOverlay, ...sandboxHomeEnv };
-}
-
 /** Build the {@link SpawnedWorker} handle around a spawned child. */
 function makeHandle(
   child: ChildProcess,
