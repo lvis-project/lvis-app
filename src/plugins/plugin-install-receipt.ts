@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
+import { PLUGIN_DATA_DIR_NAME, PLUGIN_WORKER_RUN_DIR_NAME } from "./plugin-storage-layout.js";
 import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("plugin-install-receipt");
@@ -259,9 +260,10 @@ export async function verifyInstallReceiptRaw(
     // (`<pluginRoot>/data`, created by ensurePluginDataDir — under the LVIS
     // home, the sole writable area the sandbox grants the plugin inside its
     // root) holds runtime state the plugin legitimately creates/mutates at
-    // runtime (index DBs, migration markers, workspace). That is NOT part of
-    // the signed install artifact, so scanning it makes the receipt fail the
-    // moment the plugin runs. Skip it at the TOP level only — a nested
+    // runtime (index DBs, migration markers, workspace), and `<pluginRoot>/run`
+    // holds host-allocated worker control sockets. Neither is part of the
+    // signed install artifact, so scanning them makes the receipt fail the
+    // moment the plugin runs. Skip them at the TOP level only — a nested
     // `dist/data/` would be shipped payload and stays validated.
     actualPaths = await listFilesRecursive(pluginRoot, PLUGIN_RUNTIME_DIR_NAMES);
   } catch (err) {
@@ -279,11 +281,20 @@ export async function verifyInstallReceiptRaw(
 
 /**
  * Top-level directory names under a plugin root that hold runtime state, not
- * installed payload, and are therefore excluded from receipt validation. Kept
- * in sync with `ensurePluginDataDir` (runtime/sandbox.ts), which creates the
- * plugin's writable data dir as `<pluginRoot>/data`.
+ * installed payload, and are therefore excluded from receipt validation:
+ *
+ *  - `data/` — the plugin's writable state, created by `ensurePluginDataDir`
+ *    (runtime/sandbox.ts) and the sole region the OS write-jail grants it.
+ *  - `run/` — HOST-allocated worker control sockets
+ *    (`run/<workerId>/control.sock`, permissions/worker-spawn.ts). A worker
+ *    that dies without cleanup leaves the socket behind; without this
+ *    exclusion the next boot's payload scan hits a non-regular file and
+ *    refuses to load an otherwise-intact plugin.
  */
-const PLUGIN_RUNTIME_DIR_NAMES: ReadonlySet<string> = new Set(["data"]);
+const PLUGIN_RUNTIME_DIR_NAMES: ReadonlySet<string> = new Set([
+  PLUGIN_DATA_DIR_NAME,
+  PLUGIN_WORKER_RUN_DIR_NAME,
+]);
 
 export async function listFilesRecursive(
   root: string,
