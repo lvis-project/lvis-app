@@ -34,6 +34,7 @@ import type { ToolCategory, ToolSource, ToolTrustOrigin } from "../../tools/type
 import { maskSensitiveData } from "../../audit/dlp-filter.js";
 import { PERMISSION_REVIEWER_SYSTEM_PROMPT } from "../../shared/permission-reviewer-framework.js";
 import { getDottedFieldValue } from "../../shared/dotted-field-value.js";
+import { extractShellCommands } from "../../shared/shell-command-fields.js";
 import {
   formatSandboxCapabilityForPrompt,
   sandboxRelaxesCategory,
@@ -359,16 +360,6 @@ const LOCALHOST_HOSTS: ReadonlySet<string> = new Set([
   "0.0.0.0",
 ]);
 
-function extractShellCommand(input: Record<string, unknown>): string | null {
-  // Bash tool family — common field names.
-  const candidates = ["command", "cmd", "script", "shellCommand"];
-  for (const k of candidates) {
-    const v = input[k];
-    if (typeof v === "string" && v.length > 0) return v;
-  }
-  return null;
-}
-
 function extractNetworkHost(input: Record<string, unknown>): string | null {
   return extractNetworkTarget(input)?.host ?? null;
 }
@@ -526,16 +517,18 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   // ── shell rules (3) ─────────────────────────────────────
   (ctx) => {
     if (ctx.category !== "shell") return null;
-    const cmd = extractShellCommand(ctx.finalInput);
-    if (cmd && DESTRUCTIVE_SHELL_RE.test(cmd)) {
+    // Every command-bearing field, not just the first populated one — a
+    // destructive `script` next to a benign `command` must still read high.
+    const cmds = extractShellCommands(ctx.finalInput);
+    if (cmds.some((cmd) => DESTRUCTIVE_SHELL_RE.test(cmd))) {
       return { level: "high", reason: "shell destructive verb" };
     }
     return null;
   },
   (ctx) => {
     if (ctx.category !== "shell") return null;
-    const cmd = extractShellCommand(ctx.finalInput);
-    if (cmd && REVERSIBLE_SHELL_RE.test(cmd)) {
+    const cmds = extractShellCommands(ctx.finalInput);
+    if (cmds.length > 0 && cmds.every((cmd) => REVERSIBLE_SHELL_RE.test(cmd))) {
       return { level: "low", reason: "shell reversible verb" };
     }
     return null;
