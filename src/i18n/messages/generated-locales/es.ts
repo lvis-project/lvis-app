@@ -612,6 +612,8 @@ export const esMessages: Record<string, string> = {
   "be_permissionModeApply.auditChainNotReady": "La cadena de auditoría de permisos no se ha inicializado.",
   "be_permissionModeApply.auditWriteFailed": "No se pudo escribir la entrada de auditoría de permisos: {message}",
   "be_permissionModeApply.durableModeDenied": "Se canceló el cambio de modo de permiso permanente.",
+  "be_permissionModeApply.externalDurableForbidden": "Un cambio de modo de permiso solicitado desde fuera de la aplicación se aplica solo a la sesión actual y no se puede guardar de forma permanente.",
+  "be_permissionModeApply.externalModeForbidden": "El modo de permiso '{mode}' no se puede establecer desde fuera de la aplicación. Cámbielo en la configuración de permisos de la aplicación.",
   "be_pluginExpansion.activated": "Complemento '{pluginId}' activado.",
   "be_pluginExpansion.missingPluginId": "Error de request_plugin: se requiere pluginId (cadena). Disponible: {available}",
   "be_pluginExpansion.noneAvailable": "(ninguno)",

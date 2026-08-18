@@ -167,4 +167,78 @@ describe("handleSetPermissionMode — rejected bypass does not short-circuit app
     expect(permissionManager.setModePersist).not.toHaveBeenCalled();
     expect(result).toMatchObject({ ok: false, error: "durable-mode-denied" });
   });
+
+  // ── Durability follows the CHANNEL ──
+  it("the in-app settings surface still gets a DURABLE change (unchanged local-UI trust context)", async () => {
+    const { deps, permissionManager, approvalGate } = makeDeps();
+
+    const result = await handleSetPermissionMode(deps, "auto", {
+      source: "settings-ui",
+      trustOrigin: "user-keyboard",
+      explicitUserAction: true,
+    });
+
+    expect(result).toEqual({ ok: true, mode: "auto" });
+    expect(permissionManager.setModePersist).toHaveBeenCalledWith("auto");
+    expect(permissionManager.setMode).not.toHaveBeenCalled();
+    // The built-in confirmation still stands in for the prompt.
+    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+  });
+
+  it("the in-app settings surface may still select `allow`", async () => {
+    const { deps, permissionManager } = makeDeps();
+
+    const result = await handleSetPermissionMode(deps, "allow", {
+      source: "settings-ui",
+      trustOrigin: "user-keyboard",
+      explicitUserAction: true,
+    });
+
+    expect(result).toEqual({ ok: true, mode: "allow" });
+    expect(permissionManager.setModePersist).toHaveBeenCalledWith("allow");
+  });
+
+  it("the external channel gets a SESSION-scoped change — nothing is persisted", async () => {
+    const { deps, permissionManager, approvalGate } = makeDeps();
+
+    const result = await handleSetPermissionMode(deps, "auto", {
+      source: "local-api-approval",
+      trustOrigin: "local-api",
+      explicitUserAction: true,
+    });
+
+    expect(result).toEqual({ ok: true, mode: "auto" });
+    expect(permissionManager.setMode).toHaveBeenCalledWith("auto");
+    expect(permissionManager.setModePersist).not.toHaveBeenCalled();
+    // Still no second prompt: the ApprovalGate dock already asked.
+    expect(approvalGate.requestAndWait).not.toHaveBeenCalled();
+  });
+
+  it("the external channel cannot select `allow`", async () => {
+    const { deps, permissionManager } = makeDeps();
+
+    const result = await handleSetPermissionMode(deps, "allow", {
+      source: "local-api-approval",
+      trustOrigin: "cli",
+      explicitUserAction: true,
+    });
+
+    expect(result).toMatchObject({ ok: false, error: "external-mode-forbidden" });
+    expect(permissionManager.setMode).not.toHaveBeenCalled();
+    expect(permissionManager.setModePersist).not.toHaveBeenCalled();
+  });
+
+  // A shape that fails narrowing is NOT "external" — downgrading it to a
+  // session change would drop the ApprovalGate ask that currently guards it.
+  it("a bypass that fails narrowing still takes the durable path (and its prompt)", async () => {
+    const { deps, approvalGate } = makeDeps();
+
+    await handleSetPermissionMode(deps, "auto", {
+      source: "unknown-source",
+      trustOrigin: "local-api",
+      explicitUserAction: true,
+    });
+
+    expect(approvalGate.requestAndWait).toHaveBeenCalledTimes(1);
+  });
 });

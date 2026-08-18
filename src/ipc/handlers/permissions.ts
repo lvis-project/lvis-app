@@ -67,11 +67,21 @@ function broadcastPermissionModeChanged(deps: IpcDeps, mode: string): void {
 /**
  * CORE of `lvis:permission:set-mode`, transport-agnostic. Everything AFTER the
  * transport-level sender-frame + user-keyboard-intent checks: mode validation →
- * durable slash parse → parse-error / durable-confirm checks → permission
- * manager presence → {@link applyPermissionModeCommand} with the supplied
- * approval bypass → broadcast + return. Error codes / messages are unchanged
- * from the previous inline implementation ("invalid-mode",
- * "missing-durable-confirm", "no-permission-manager").
+ * slash parse → parse-error / durable-confirm checks → permission manager
+ * presence → {@link applyPermissionModeCommand} with the supplied approval
+ * bypass → broadcast + return. Error codes / messages are unchanged
+ * ("invalid-mode", "missing-durable-confirm", "no-permission-manager").
+ *
+ * DURABILITY IS PER CHANNEL, not fixed. The renderer surfaces
+ * (`settings-ui` / `builtin-slash`) still request `--durable`: the user is in
+ * the app, looking at the setting they are changing, and expects it to stick.
+ * The EXTERNAL channel (`local-api-approval`) does not — its whole consent is
+ * one ApprovalGate click on one request, so the change is session-scoped and
+ * expires with the session the human was looking at. `isExternalApprovalBypass`
+ * over the ALREADY-narrowed bypass is what decides; a bypass shape that fails
+ * narrowing is not treated as external, so it keeps falling through to the
+ * ApprovalGate ask instead of being quietly downgraded into a promptless
+ * session change.
  */
 export async function handleSetPermissionMode(
   deps: IpcDeps,
@@ -81,19 +91,23 @@ export async function handleSetPermissionMode(
   if (typeof mode !== "string") {
     return { ok: false, error: "invalid-mode", message: "mode must be a string" };
   }
+  const { applyPermissionModeCommand, resolvePermissionModeApprovalBypass, isExternalApprovalBypass } =
+    await import("../../permissions/permission-mode-apply.js");
+  const approvalBypass = resolvePermissionModeApprovalBypass(bypass);
+  const external = isExternalApprovalBypass(approvalBypass);
   const { parsePermissionModeCommand } = await import("../../permissions/permission-slash.js");
-  const parsed = parsePermissionModeCommand(`${mode} --durable`);
+  const parsed = parsePermissionModeCommand(external ? mode : `${mode} --durable`);
   if (isParseError<PermissionModeCommand>(parsed)) {
     return { ok: false, error: "invalid-mode", message: parsed.error };
   }
-  if (parsed.durable !== true) {
+  // Only the in-app channel asserts durability here. On the external channel a
+  // `--durable` smuggled inside the mode string is NOT stripped — it is left in
+  // place so `applyPermissionModeCommand`'s ceiling refuses it loudly.
+  if (!external && parsed.durable !== true) {
     return { ok: false, error: "missing-durable-confirm", message: "durable mode command must require modal confirmation" };
   }
   const pm = deps.conversationLoop.permissionManager;
   if (!pm) return { ok: false, error: "no-permission-manager", message: "permission manager not initialized" };
-  const { applyPermissionModeCommand, resolvePermissionModeApprovalBypass } =
-    await import("../../permissions/permission-mode-apply.js");
-  const approvalBypass = resolvePermissionModeApprovalBypass(bypass);
   const result = await applyPermissionModeCommand(parsed, {
     permissionManager: pm,
     approvalGate: deps.approvalGate,

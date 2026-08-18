@@ -596,6 +596,8 @@ export const jaMessages: Record<string, string> = {
   "be_permissionModeApply.auditChainNotReady": "権限監査チェーンが初期化されていません。",
   "be_permissionModeApply.auditWriteFailed": "権限監査エントリの書き込みに失敗しました: {message}",
   "be_permissionModeApply.durableModeDenied": "永続的な許可モードの変更がキャンセルされました。",
+  "be_permissionModeApply.externalDurableForbidden": "アプリ外部から要求された権限モードの変更は現在のセッションにのみ適用され、永続的に保存することはできません。",
+  "be_permissionModeApply.externalModeForbidden": "権限モード「{mode}」はアプリ外部から設定できません。アプリの権限設定で変更してください。",
   "be_pluginExpansion.activated": "プラグイン「{pluginId}」が有効になりました。",
   "be_pluginExpansion.missingPluginId": "request_plugin エラー: pluginId (文字列) が必要です。利用可能: {available}",
   "be_pluginExpansion.noneAvailable": "（なし）",

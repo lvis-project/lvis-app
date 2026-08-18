@@ -309,6 +309,114 @@ describe("local-api dispatch — external mutation with approver wired", () => {
   });
 });
 
+/**
+ * The external channel's ONE approval click buys ONE session, not a
+ * standing grant.
+ *
+ * `makeMutationDeps` above models the permission manager as a single in-memory
+ * `mode`, which cannot tell a session change from a persisted one. These deps
+ * split the two the way `PermissionManager` really does: `setModePersist`
+ * writes `permissionsFile.mode` (what a restart reads back) AND the runtime
+ * mode, `setMode` touches only the runtime. `reload()` is the restart.
+ */
+function makeDurabilityDeps(fakeWin: ReturnType<typeof makeFakeWindow>) {
+  // What permissions.json holds — the ONLY thing that survives a restart.
+  let persistedMode = "default";
+  let runtimeMode = "default";
+  const setMode = vi.fn((next: string) => {
+    runtimeMode = next;
+  });
+  const setModePersist = vi.fn(async (next: string) => {
+    persistedMode = next;
+    runtimeMode = next;
+  });
+  const ipc = {
+    conversationLoop: {
+      getSessionId: () => "s",
+      permissionManager: { getMode: () => runtimeMode, setMode, setModePersist },
+    },
+    approvalGate: {
+      requestAndWait: vi.fn(async () => ({ requestId: "x", choice: "allow-once" as const })),
+    },
+    auditLogger: {
+      isPermissionAuditChainReady: () => true,
+      appendPermissionAuditEntry: vi.fn(async () => undefined),
+    },
+    getMainWindow: () => fakeWin.win,
+  } as unknown as IpcDeps;
+  return {
+    deps: { ipc, conversationCommandPort, externalMutationApprover: async () => true } as LocalApiDeps,
+    setMode,
+    setModePersist,
+    /** Restart / settings reload: the runtime mode comes back from the file. */
+    reload: () => {
+      runtimeMode = persistedMode;
+      return runtimeMode;
+    },
+  };
+}
+
+describe("local-api dispatch — external set-mode is session-scoped", () => {
+  it("an approved external mode change applies now but does NOT survive a restart", async () => {
+    const fakeWin = makeFakeWindow();
+    const { deps, setMode, setModePersist, reload } = makeDurabilityDeps(fakeWin);
+    const api = createLocalApi(deps);
+
+    const result = await api.dispatch({
+      channel: PERMISSIONS.setMode,
+      args: { mode: "auto" },
+      origin: "local-api",
+    });
+
+    expect(result).toEqual({ ok: true, data: { ok: true, mode: "auto" } });
+    // Applied to the live session...
+    expect(setMode).toHaveBeenCalledWith("auto");
+    expect(fakeWin.send).toHaveBeenCalledWith(PERMISSIONS.modeChanged, { mode: "auto" });
+    // ...but never written to permissions.json, so a restart is back to default.
+    expect(setModePersist).not.toHaveBeenCalled();
+    expect(reload()).toBe("default");
+  });
+
+  it("refuses the `allow` mode outright — the one mode that would end prompting for good", async () => {
+    const fakeWin = makeFakeWindow();
+    const { deps, setMode, setModePersist } = makeDurabilityDeps(fakeWin);
+    const api = createLocalApi(deps);
+
+    const result = await api.dispatch({
+      channel: PERMISSIONS.setMode,
+      args: { mode: "allow" },
+      origin: "local-api",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: { ok: false, error: "external-mode-forbidden" },
+    });
+    expect(setMode).not.toHaveBeenCalled();
+    expect(setModePersist).not.toHaveBeenCalled();
+    expect(fakeWin.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a `--durable` smuggled into the mode string rather than silently honouring it", async () => {
+    const fakeWin = makeFakeWindow();
+    const { deps, setMode, setModePersist } = makeDurabilityDeps(fakeWin);
+    const api = createLocalApi(deps);
+
+    const result = await api.dispatch({
+      channel: PERMISSIONS.setMode,
+      args: { mode: "auto --durable" },
+      origin: "local-api",
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      data: { ok: false, error: "external-durable-forbidden" },
+    });
+    expect(setMode).not.toHaveBeenCalled();
+    expect(setModePersist).not.toHaveBeenCalled();
+  });
+});
+
 describe("local-api dispatch — shared conversation lease", () => {
   it("returns the normal chat busy result instead of rejecting the transport", async () => {
     const execute = vi.fn(async () => {

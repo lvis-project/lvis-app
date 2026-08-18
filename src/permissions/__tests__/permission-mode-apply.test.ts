@@ -31,7 +31,20 @@ const durableAuto: PermissionModeCommand = {
   kind: "mode",
   mode: "auto",
   durable: true,
-};
+} as never;
+
+/** What the EXTERNAL channel is now allowed to send: session-scoped, non-`allow`. */
+const sessionAuto: PermissionModeCommand = {
+  kind: "mode",
+  mode: "auto",
+  durable: false,
+} as never;
+
+const EXTERNAL_BYPASS = {
+  source: "local-api-approval",
+  trustOrigin: "local-api",
+  explicitUserAction: true,
+} as const;
 
 describe("applyPermissionModeCommand", () => {
   it("uses the approval gate for durable mode changes without a trusted built-in confirmation", async () => {
@@ -77,19 +90,15 @@ describe("applyPermissionModeCommand", () => {
   });
 
   // ── 3-agent cluster review of PR #1441 — critic minor 1 + audit forensics ──
-  it("does not request approval for durable mode changes backed by a local-api-approval bypass, and pins the confirmationSource forensic marker", async () => {
+  it("does not request approval for a SESSION-scoped mode change backed by a local-api-approval bypass, and pins the confirmationSource forensic marker", async () => {
     const deps = makeDeps();
 
-    const result = await applyPermissionModeCommand(durableAuto, {
+    const result = await applyPermissionModeCommand(sessionAuto, {
       ...deps,
-      approvalBypass: {
-        source: "local-api-approval",
-        trustOrigin: "local-api",
-        explicitUserAction: true,
-      },
+      approvalBypass: EXTERNAL_BYPASS,
     } as never);
 
-    expect(result).toMatchObject({ ok: true, mode: "auto", durable: true });
+    expect(result).toMatchObject({ ok: true, mode: "auto", durable: false });
     expect(deps.approvalGate.requestAndWait).not.toHaveBeenCalled();
     expect(deps.auditLogger.appendPermissionAuditEntry).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -97,11 +106,61 @@ describe("applyPermissionModeCommand", () => {
         trustOrigin: "user-keyboard",
         fromMode: "default",
         toMode: "auto",
-        durable: true,
+        durable: false,
         confirmationSource: "local-api-approval",
       }),
     );
-    expect(deps.permissionManager.setModePersist).toHaveBeenCalledWith("auto");
+    // Session-scoped: in-memory only, never written to permissions.json.
+    expect(deps.permissionManager.setMode).toHaveBeenCalledWith("auto");
+    expect(deps.permissionManager.setModePersist).not.toHaveBeenCalled();
+  });
+
+  // ── External-channel ceiling ──
+  // One ApprovalGate click is consent to ONE change, not to a standing grant.
+  it("refuses a DURABLE mode change on the external channel — nothing is persisted and nothing is audited as applied", async () => {
+    const deps = makeDeps();
+
+    const result = await applyPermissionModeCommand(durableAuto, {
+      ...deps,
+      approvalBypass: EXTERNAL_BYPASS,
+    } as never);
+
+    expect(result).toMatchObject({ ok: false, error: "external-durable-forbidden" });
+    expect(deps.permissionManager.setModePersist).not.toHaveBeenCalled();
+    expect(deps.permissionManager.setMode).not.toHaveBeenCalled();
+    expect(deps.auditLogger.appendPermissionAuditEntry).not.toHaveBeenCalled();
+  });
+
+  it("refuses the `allow` mode on the external channel even session-scoped", async () => {
+    const deps = makeDeps();
+
+    const result = await applyPermissionModeCommand(
+      { kind: "mode", mode: "allow", durable: false } as never,
+      { ...deps, approvalBypass: EXTERNAL_BYPASS } as never,
+    );
+
+    expect(result).toMatchObject({ ok: false, error: "external-mode-forbidden" });
+    expect(deps.permissionManager.setMode).not.toHaveBeenCalled();
+    expect(deps.permissionManager.setModePersist).not.toHaveBeenCalled();
+  });
+
+  it("keeps `allow` reachable for the in-app settings surface (local UI is a different trust context)", async () => {
+    const deps = makeDeps();
+
+    const result = await applyPermissionModeCommand(
+      { kind: "mode", mode: "allow", durable: true } as never,
+      {
+        ...deps,
+        approvalBypass: {
+          source: "settings-ui",
+          trustOrigin: "user-keyboard",
+          explicitUserAction: true,
+        },
+      } as never,
+    );
+
+    expect(result).toMatchObject({ ok: true, mode: "allow", durable: true });
+    expect(deps.permissionManager.setModePersist).toHaveBeenCalledWith("allow");
   });
 
   // The bypass union pins trustOrigin: ExternalOrigin for the local-api-approval
