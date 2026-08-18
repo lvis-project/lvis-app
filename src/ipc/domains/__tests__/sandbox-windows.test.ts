@@ -12,6 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
 import { UNAUTHORIZED_FRAME } from "../../gated.js";
 import { setProcessPlatform } from "../../../testing/process-platform.js";
+import { foreignFrameEvent, hostFrameEvent } from "../../../__tests__/test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
@@ -111,17 +112,6 @@ vi.mock("../../../permissions/asrt-windows-support.js", async (importOriginal) =
   };
 });
 
-// validateSender: the test seam — null event (trusted) returns true; a foreign
-// frame object returns false so the UNAUTHORIZED_FRAME path is exercisable.
-vi.mock("../../gated.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../gated.js")>();
-  return {
-    ...actual,
-    validateSender: vi.fn((e: unknown) => e === null),
-    auditUnauthorized: vi.fn(),
-  };
-});
-
 function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
   const fn = handlers.get(channel);
   if (!fn) throw new Error(`No handler registered for: ${channel}`);
@@ -177,7 +167,7 @@ describe("sandboxWindowsStatus", () => {
   it("returns a not-applicable shape off win32 (no ASRT call)", async () => {
     setProcessPlatform("darwin");
     await setup();
-    const result = await invoke(PERMISSIONS.sandboxWindowsStatus, null);
+    const result = await invoke(PERMISSIONS.sandboxWindowsStatus, hostFrameEvent());
     expect(result).toEqual({
       applicable: false,
       userState: null,
@@ -192,7 +182,7 @@ describe("sandboxWindowsStatus", () => {
     asrtState.userStatus = { provisioned: true, sid: "S-1-5-21-1" };
     asrtState.wfpState = "absent";
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, null)) as Record<string, unknown>;
+    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, hostFrameEvent())) as Record<string, unknown>;
     expect(result.applicable).toBe(true);
     expect(result.userState).toBe("incomplete");
     expect(result.wfpState).toBe("absent");
@@ -205,7 +195,7 @@ describe("sandboxWindowsStatus", () => {
     asrtState.userStatus = readyUserStatus();
     asrtState.wfpState = "installed";
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, null)) as Record<string, unknown>;
+    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, hostFrameEvent())) as Record<string, unknown>;
     expect(result.ready).toBe(true);
     expect(result.userState).toBe("ready");
     expect(result.wfpState).toBe("installed");
@@ -216,7 +206,7 @@ describe("sandboxWindowsStatus", () => {
     asrtState.userStatus = readyUserStatus();
     asrtState.wfpState = "absent";
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, null)) as Record<string, unknown>;
+    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, hostFrameEvent())) as Record<string, unknown>;
     expect(result.ready).toBe(false);
   });
 
@@ -225,7 +215,7 @@ describe("sandboxWindowsStatus", () => {
     asrtState.userStatus = readyUserStatus();
     asrtState.wfpState = "cannot-read";
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, null)) as Record<string, unknown>;
+    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, hostFrameEvent())) as Record<string, unknown>;
     expect(result.wfpState).toBe("cannot-read");
     expect(result.ready).toBe(true);
     expect(asrtState.verifyCalls).toHaveLength(1);
@@ -238,7 +228,7 @@ describe("sandboxWindowsStatus", () => {
     asrtState.wfpState = "cannot-read";
     asrtState.verifyRejects = true;
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, null)) as Record<string, unknown>;
+    const result = (await invoke(PERMISSIONS.sandboxWindowsStatus, hostFrameEvent())) as Record<string, unknown>;
     expect(result.wfpState).toBe("cannot-read");
     expect(result.ready).toBe(false);
     expect(asrtState.verifyCalls).toHaveLength(1);
@@ -249,7 +239,7 @@ describe("sandboxWindowsInstall", () => {
   it("rejects a foreign frame with UNAUTHORIZED_FRAME (sender guard)", async () => {
     setProcessPlatform("win32");
     await setup();
-    const foreignEvent = { senderFrame: { url: "https://evil.example" } };
+    const foreignEvent = foreignFrameEvent("https://evil.example");
     const result = await invoke(PERMISSIONS.sandboxWindowsInstall, foreignEvent, { intent: USER_INTENT });
     expect(result).toEqual(UNAUTHORIZED_FRAME);
   });
@@ -257,7 +247,7 @@ describe("sandboxWindowsInstall", () => {
   it("rejects a submission without user-keyboard intent", async () => {
     setProcessPlatform("win32");
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, null, {})) as Record<string, unknown>;
+    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, hostFrameEvent(), {})) as Record<string, unknown>;
     expect(result.ok).toBe(false);
     expect(result.error).toBe("user-keyboard-required");
   });
@@ -266,7 +256,7 @@ describe("sandboxWindowsInstall", () => {
     setProcessPlatform("win32");
     asrtState.installResult = { cancelled: true };
     await setup();
-    const result = await invoke(PERMISSIONS.sandboxWindowsInstall, null, { intent: USER_INTENT });
+    const result = await invoke(PERMISSIONS.sandboxWindowsInstall, hostFrameEvent(), { intent: USER_INTENT });
     expect(result).toEqual({ cancelled: true });
     // The single UAC was attempted with the canonical proxy port range.
     expect(asrtState.installCalls).toHaveLength(1);
@@ -280,7 +270,7 @@ describe("sandboxWindowsInstall", () => {
       wfp: { state: "installed" },
     };
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, null, { intent: USER_INTENT })) as Record<string, unknown>;
+    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, hostFrameEvent(), { intent: USER_INTENT })) as Record<string, unknown>;
     expect(result.userState).toBe("incomplete");
     expect(result.wfpState).toBe("installed");
     expect(result.ready).toBe(false);
@@ -293,7 +283,7 @@ describe("sandboxWindowsInstall", () => {
       wfp: { state: "installed" },
     };
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, null, { intent: USER_INTENT })) as Record<string, unknown>;
+    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, hostFrameEvent(), { intent: USER_INTENT })) as Record<string, unknown>;
     expect(result.ready).toBe(true);
   });
 
@@ -304,7 +294,7 @@ describe("sandboxWindowsInstall", () => {
       wfp: { state: "cannot-read" },
     };
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, null, { intent: USER_INTENT })) as Record<string, unknown>;
+    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, hostFrameEvent(), { intent: USER_INTENT })) as Record<string, unknown>;
     expect(result.wfpState).toBe("cannot-read");
     expect(result.ready).toBe(true);
     expect(asrtState.verifyCalls).toHaveLength(1);
@@ -314,7 +304,7 @@ describe("sandboxWindowsInstall", () => {
   it("refuses off win32 (not-applicable)", async () => {
     setProcessPlatform("linux");
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, null, { intent: USER_INTENT })) as Record<string, unknown>;
+    const result = (await invoke(PERMISSIONS.sandboxWindowsInstall, hostFrameEvent(), { intent: USER_INTENT })) as Record<string, unknown>;
     expect(result.ok).toBe(false);
     expect(result.error).toBe("not-applicable");
   });
@@ -324,7 +314,7 @@ describe("sandboxCapability win32 reconcile", () => {
   it("reports win32 as available with fs+network partial confines (matches boot SOT)", async () => {
     setProcessPlatform("win32");
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxCapability, null)) as {
+    const result = (await invoke(PERMISSIONS.sandboxCapability, hostFrameEvent())) as {
       platform: string;
       available: boolean;
       kind: string;
@@ -346,7 +336,7 @@ describe("sandboxCapability win32 reconcile", () => {
   it("still reports darwin as full-confine available", async () => {
     setProcessPlatform("darwin");
     await setup();
-    const result = (await invoke(PERMISSIONS.sandboxCapability, null)) as {
+    const result = (await invoke(PERMISSIONS.sandboxCapability, hostFrameEvent())) as {
       available: boolean;
       kind: string;
       potentialReason: string;
@@ -371,7 +361,7 @@ describe("sandboxCapability win32 reconcile", () => {
     });
     try {
       await setup();
-      const result = (await invoke(PERMISSIONS.sandboxCapability, null)) as {
+      const result = (await invoke(PERMISSIONS.sandboxCapability, hostFrameEvent())) as {
         available: boolean;
         kind: string;
         runtime: { available: boolean; kind: string; reason: string };

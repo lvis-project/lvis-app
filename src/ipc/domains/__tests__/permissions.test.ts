@@ -6,6 +6,12 @@ import { PERMISSIONS } from "../../../shared/ipc-channels.js";
 import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 import { UNAUTHORIZED_FRAME } from "../../gated.js";
 import { setWorkspaceRootLifecycle } from "../../../permissions/workspace-root-lifecycle.js";
+import {
+  foreignFrameEvent,
+  framelessEvent,
+  hostFrameEvent,
+  pluginShellFrameEvent,
+} from "../../../__tests__/test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const USER_INTENT = { inputOrigin: "user-keyboard", userActivation: true };
@@ -41,9 +47,8 @@ function invoke(channel: string, ...args: unknown[]): unknown {
   const fn = handlers.get(channel);
   if (!fn) throw new Error(`No handler registered for: ${channel}`);
   // Issue #798: mutating user-approval handlers gate on user-keyboard intent.
-  // Tests already invoke through the unauthenticated test seam (null event +
-  // validateSender mock); auto-inject the intent marker on the relevant
-  // channels so existing test fixtures don't need a payload rewrite.
+  // Auto-inject the intent marker on the relevant channels so existing test
+  // fixtures don't need a payload rewrite.
   const intentRequired =
     channel === PERMISSIONS.userApprovalRecord ||
     channel === PERMISSIONS.userApprovalRevoke;
@@ -53,7 +58,7 @@ function invoke(channel: string, ...args: unknown[]): unknown {
       args = [{ ...payload, intent: { inputOrigin: "user-keyboard", userActivation: true } }, ...args.slice(1)];
     }
   }
-  return fn(null, ...args);
+  return fn(hostFrameEvent(), ...args);
 }
 
 function makeDeferredEntry(overrides: Record<string, unknown> = {}) {
@@ -1024,11 +1029,11 @@ describe("permissions IPC handlers", () => {
 });
 
 // ─── Helper: create an IPC event with a foreign sender frame ─────────────────
-// validateSender(null) returns true (trusted); we need a foreign URL to test
-// the UNAUTHORIZED_FRAME path in reviewerProviderHasKey.
+// `invoke` sends the trusted host-renderer frame; these send a frame the guards
+// must refuse, exercising the UNAUTHORIZED_FRAME path.
 
 function makeForeignEvent(url = "https://attacker.example.com/pwn") {
-  return { senderFrame: { url } };
+  return foreignFrameEvent(url);
 }
 
 function invokeWithEvent(channel: string, event: unknown, ...args: unknown[]): unknown {
@@ -1316,5 +1321,73 @@ describe("Minor-2 R2: vendors?.['azure-foundry']?.baseUrl — no TypeError when 
     // Since endpoint is null, reviewerProviderKeyPresent returns false.
     const result = await invoke(PERMISSIONS.reviewerProviderHasKey, "foundry");
     expect(result).toBe(false); // no throw, no TypeError
+  });
+});
+
+// ─── Sender-frame guard on the state-mutating permission channels ────────────
+// These channels changed the host's permission state, so they must refuse
+// anything that is not the host renderer. A plugin UI shell is also a `file://`
+// frame — the base `validateSender` accepts it — so the stronger
+// `validateHostRendererSender` is what actually turns it away. A frameless
+// event (Electron nulls `senderFrame` once the sending frame is destroyed or
+// navigated away between `invoke` and handler execution) is refused too: an
+// unprovable sender is not a trusted one.
+
+describe("state-mutating permission channels refuse non-host frames", () => {
+  const MUTATING: ReadonlyArray<readonly [string, Record<string, unknown>]> = [
+    [PERMISSIONS.setMode, { mode: "auto", intent: USER_INTENT }],
+    [PERMISSIONS.addRule, { pattern: "write_file:path:/tmp/a.md", action: "allow", intent: USER_INTENT }],
+    [PERMISSIONS.removeRule, { pattern: "write_file:path:/tmp/a.md", action: "allow", intent: USER_INTENT }],
+    [PERMISSIONS.approvalRespond, { requestId: "approval-1", choice: "allow-once" }],
+    [PERMISSIONS.policySet, { patch: { requireExplicitApproval: false }, intent: USER_INTENT }],
+    [
+      PERMISSIONS.userApprovalRecord,
+      {
+        requestId: "req-frame-guard",
+        toolName: "bash_run",
+        args: '{"command":"echo hi"}',
+        source: "user-keyboard",
+        scope: "session",
+        verdictAtApproval: "low",
+        intent: USER_INTENT,
+      },
+    ],
+  ];
+
+  it.each(MUTATING)("%s refuses a plugin-ui-shell frame", async (channel, payload) => {
+    const { deps, permissionManager } = await setup();
+
+    const result = await invokeWithEvent(channel, pluginShellFrameEvent(), payload);
+
+    expect(result).toEqual(UNAUTHORIZED_FRAME);
+    expect(permissionManager.setModePersist).not.toHaveBeenCalled();
+    expect(permissionManager.addAlwaysAllowedPersist).not.toHaveBeenCalled();
+    expect(permissionManager.removeRule).not.toHaveBeenCalled();
+    expect(recordApprovalMock).not.toHaveBeenCalled();
+    expect(deps.approvalGate.resolve).not.toHaveBeenCalled();
+  });
+
+  it.each(MUTATING)("%s refuses an event whose sender frame is gone", async (channel, payload) => {
+    const { permissionManager } = await setup();
+
+    const result = await invokeWithEvent(channel, framelessEvent(), payload);
+
+    expect(result).toEqual(UNAUTHORIZED_FRAME);
+    expect(permissionManager.setModePersist).not.toHaveBeenCalled();
+    expect(permissionManager.addAlwaysAllowedPersist).not.toHaveBeenCalled();
+    expect(recordApprovalMock).not.toHaveBeenCalled();
+  });
+
+  it("still accepts the host renderer frame on the same channels", async () => {
+    const { permissionManager } = await setup();
+
+    const result = await invokeWithEvent(
+      PERMISSIONS.setMode,
+      hostFrameEvent(),
+      { mode: "auto", intent: USER_INTENT },
+    );
+
+    expect(result).toEqual({ ok: true, mode: "auto" });
+    expect(permissionManager.setModePersist).toHaveBeenCalledWith("auto");
   });
 });

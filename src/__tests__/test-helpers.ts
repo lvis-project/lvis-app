@@ -10,14 +10,24 @@ export function makeMockWebContents() {
   };
 }
 
+/** The document the host renderer loads — `main-window.ts` loadFile(index.html). */
+export const HOST_FRAME_URL = "file:///Applications/Lvis.app/dist/index.html";
+
+/** The one document a plugin UI shell frame loads. */
+export const PLUGIN_SHELL_FRAME_URL =
+  "file:///Applications/Lvis.app/dist/plugin-ui-shell.html";
+
 /**
  * A synthetic `IpcMainInvokeEvent` from the TRUSTED host renderer frame — the one
- * `validateHostRendererSender` accepts. Shared so the gated-IPC suites don't each
- * re-declare an identical trusted-frame builder.
+ * `validateHostRendererSender` accepts. THE shared builder: `validateSender` fails
+ * closed on a missing frame, so a handler test can no longer hand its handler a
+ * frameless `null`/`{}` and be treated as trusted. Every gated-IPC suite builds its
+ * event here, so a newly written handler test gets a valid frame by default rather
+ * than by remembering.
  */
 export function hostFrameEvent(): IpcMainInvokeEvent {
   return {
-    senderFrame: { url: "file:///Applications/Lvis.app/dist/index.html" },
+    senderFrame: { url: HOST_FRAME_URL },
     sender: {},
   } as unknown as IpcMainInvokeEvent;
 }
@@ -25,6 +35,20 @@ export function hostFrameEvent(): IpcMainInvokeEvent {
 /** A synthetic event from ANY OTHER frame — a plugin shell, a remote page, an empty URL. */
 export function foreignFrameEvent(url: string): IpcMainInvokeEvent {
   return { senderFrame: { url }, sender: {} } as unknown as IpcMainInvokeEvent;
+}
+
+/** A plugin-UI-shell frame — a `file:` frame that sensitive host channels must refuse. */
+export function pluginShellFrameEvent(): IpcMainInvokeEvent {
+  return foreignFrameEvent(PLUGIN_SHELL_FRAME_URL);
+}
+
+/**
+ * An event whose sender frame is gone — what Electron delivers once the sending
+ * frame is destroyed or navigated away between `invoke` and handler execution.
+ * Every guard must refuse it.
+ */
+export function framelessEvent(): IpcMainInvokeEvent {
+  return { senderFrame: null, sender: {} } as unknown as IpcMainInvokeEvent;
 }
 
 type RegisteredHandler = (...args: unknown[]) => unknown;
@@ -36,7 +60,7 @@ export function invokeRegisteredHandler<T = unknown>(
 ): T {
   const fn = handlers.get(channel);
   if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return fn(null, ...args) as T;
+  return fn(hostFrameEvent(), ...args) as T;
 }
 
 export function invokeRegisteredHandlerWithEvent<T = unknown>(

@@ -145,10 +145,10 @@ describe("validateSender", () => {
     expect(validateSender(makeEvent(""))).toBe(false);
   });
 
-  it("returns true when event has no senderFrame (test synthetic events)", () => {
-    expect(validateSender(null)).toBe(true);
-    expect(validateSender(undefined)).toBe(true);
-    expect(validateSender({} as IpcMainInvokeEvent)).toBe(true);
+  it("returns false when the event has no senderFrame", () => {
+    expect(validateSender(null)).toBe(false);
+    expect(validateSender(undefined)).toBe(false);
+    expect(validateSender({} as IpcMainInvokeEvent)).toBe(false);
   });
 });
 
