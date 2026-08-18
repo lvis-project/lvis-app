@@ -8,6 +8,41 @@ import {
 export const MARKETPLACE_DISABLED_CODE = "marketplace-disabled";
 
 /**
+ * Stable English IPC code for {@link PluginRevokedError}. Not exported —
+ * unlike {@link MARKETPLACE_DISABLED_CODE}, no caller throws/checks this
+ * error type directly today; `buildInstallFailureResult` below is the only
+ * consumer. The renderer's `formatIpcError` map (`ui/renderer/format-ipc-error.ts`)
+ * matches the literal `"plugin-revoked"` string rather than importing this
+ * constant, matching how it already treats every other code in that map.
+ */
+const PLUGIN_REVOKED_CODE = "plugin-revoked";
+
+/**
+ * Install refused because the marketplace revocation registry blocks
+ * this exact `slug@version` (explicit blocklist) or the version is below
+ * the plugin's pinned minimum. Thrown by `assertMarketplaceNotRevoked`
+ * (`plugins/plugin-artifact-store.ts`), the install-time twin of the
+ * `markRevoked` LOAD-boundary gate in `plugins/runtime/runtime-state.ts`.
+ *
+ * A class (not an inline `new Error(...)`) for the same reason
+ * {@link MarketplaceBackendDisabledError} is one: `buildInstallFailureResult`
+ * needs to recognise it by type to emit the stable `plugin-revoked` code
+ * instead of leaking the raw English sentence into a localized toast.
+ */
+export class PluginRevokedError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly pluginVersion: string,
+    public readonly reasonDetail: string,
+  ) {
+    super(
+      `plugin '${pluginId}@${pluginVersion}' is blocked by the marketplace revocation registry: ${reasonDetail}`,
+    );
+    this.name = "PluginRevokedError";
+  }
+}
+
+/**
  * Uninstall refused because the package is not installed (plugin, agent, skill).
  *
  * Deliberately NOT the existing `not-found` code. This condition is reached from
@@ -84,7 +119,9 @@ export function buildInstallFailureResult(
     ? INCOMPATIBLE_APP_VERSION_CODE
     : error instanceof MarketplaceBackendDisabledError
       ? MARKETPLACE_DISABLED_CODE
-      : undefined;
+      : error instanceof PluginRevokedError
+        ? PLUGIN_REVOKED_CODE
+        : undefined;
   return {
     slug,
     success: false,

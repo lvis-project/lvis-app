@@ -80,6 +80,7 @@ import type { ParentContextTurn } from "./permissions/parent-context-evidence.js
 import { McpAppModelContextStore } from "./mcp/mcp-app-model-context.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
+import { wireRevocationRegistry } from "./boot/steps/revocation-bootstrap.js";
 import { wireAnnouncementCheck, wireReleasePrep, wireUpdateCheck,
 } from "./boot/steps/post-boot.js";
 import { migrateCanonicalization } from "./permissions/user-approval-store.js";
@@ -486,6 +487,14 @@ export async function bootstrap(
   // tier-3 check fails closed with `whitelist-unreachable`. Resolves on every
   // path (fresh, offline, cached) so a network blip never blocks boot.
   await wireWhitelistRegistry({ bootAuditLogger: ctx.bootAuditLogger });
+
+  // Load the plugin revocation registry BEFORE initPluginRuntime, same
+  // ordering requirement as the whitelist above: the LOAD-boundary gate
+  // (`markRevoked`) runs inside `pluginRuntime.startAll()`, which fires later
+  // (deferStart:true — see `startPlugins()` below) but must see a populated
+  // registry the first time it runs. Resolves on every path (fresh, offline,
+  // cached) — fail-open on a fetch failure, never blocks boot.
+  await wireRevocationRegistry({ bootAuditLogger: ctx.bootAuditLogger });
 
   // Cluster review M1 — PermissionManager is built BEFORE initPluginRuntime
   // so its per-plugin revoke signal can be wired into the resolveApiKey host

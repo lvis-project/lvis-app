@@ -29,6 +29,7 @@ import {
 import { appVersionSatisfiesMin } from "../../shared/semver-compare.js";
 import { getLvisAppVersion } from "../../shared/app-version.js";
 import type { PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
+import { revocationRegistry } from "../revocation/revocation-registry.js";
 import type { PluginIntegrityCheckResult } from "./runtime-preflight.js";
 import { reportPluginIntegrity, verifyPluginIntegrity } from "./runtime-integrity.js";
 import { isPluginRuntimeDetachedOperationError } from "./detached-operation.js";
@@ -1300,6 +1301,46 @@ export abstract class PluginRuntimeState {
       // diagnosis directing the user to update the app.
       installFailureKind: "incompatible-app-version",
       installFailureMessage: `plugin requires LVIS >= ${minAppVersion}, current ${currentAppVersion}`,
+    });
+    return true;
+  }
+
+  /**
+   * Plugin revocation gate (LOAD boundary). A plugin already on disk
+   * (installed before it was revoked, or sideloaded) must not silently keep
+   * running once the marketplace revocation registry blocks its exact
+   * version or drops it below the pinned minimum — mirrors
+   * `markIncompatibleAppVersion` immediately above, including the
+   * "isolation" property: this plugin is skipped, every other plugin still
+   * loads normally.
+   *
+   * Fail-open by construction: `revocationRegistry.evaluate()` returns
+   * `allow` whenever no valid signed document has ever been obtained (see
+   * `revocation-registry.ts` for the fail-open/fail-closed rationale), so
+   * this method only ever blocks when a signed document actually says to.
+   */
+  protected markRevoked(manifest: PluginManifest): boolean {
+    const decision = revocationRegistry.evaluate(manifest.id, manifest.version);
+    if (decision.kind === "allow") return false;
+
+    const reason = `plugin revoked — ${decision.reason}`;
+    log.error(`${manifest.id} rejected — ${reason}`);
+    this.auditLog?.("error", "plugin_revoked", {
+      pluginId: manifest.id,
+      version: manifest.version,
+      ruleKind: decision.ruleKind,
+      reason: decision.reason,
+    });
+    this.markFailed(manifest.id, {
+      name: manifest.name ?? manifest.id,
+      description: decision.reason,
+    }, {
+      // NOT locally reinstall-fixable — a reinstall from the marketplace
+      // either re-fetches the same blocked version (the install path
+      // enforces the same registry) or is a genuine version upgrade, not a
+      // "repair". The Doctor must show the block reason and offer Remove.
+      installFailureKind: "plugin-revoked",
+      installFailureMessage: decision.reason,
     });
     return true;
   }

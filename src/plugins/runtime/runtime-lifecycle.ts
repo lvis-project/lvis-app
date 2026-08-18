@@ -215,6 +215,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       if (this.markIncompatibleAppVersion(manifest)) {
         continue;
       }
+      // Plugin revocation gate. Same LOAD-boundary shape as the
+      // version gate immediately above: skip this plugin, keep loading
+      // everything else (isolation).
+      if (this.markRevoked(manifest)) {
+        continue;
+      }
       const requiredCapabilities = manifest.requires?.capabilities ?? [];
       if (requiredCapabilities.length > 0) {
         const availableManifests = [...enabledManifestSnapshots.values()]

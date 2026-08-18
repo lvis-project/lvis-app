@@ -420,6 +420,12 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
       return "failed";
     }
 
+    // Plugin revocation gate — HARD BLOCK at LOAD (see boot path).
+    if (!canCommit()) return "cancelled";
+    if (this.markRevoked(manifest)) {
+      return "failed";
+    }
+
     const missingCapabilities = this.capabilityDependencies().missing(manifest);
     if (missingCapabilities.length > 0) {
       if (!canCommit()) return "cancelled";

@@ -27,6 +27,7 @@ import { getBundledPublicKeys } from "./publisher-keys.js";
 import {
   ArtifactRollbackError,
   assertMarketplaceAppUpgradeNotRequired,
+  assertMarketplaceNotRevoked,
   PluginArtifactStore,
   retryOnTransientFsLock,
 } from "./plugin-artifact-store.js";
@@ -960,6 +961,9 @@ export class PluginMarketplaceService {
       throw new Error(`Plugin not found in marketplace: ${pluginId}`);
     }
     assertMarketplaceAppUpgradeNotRequired(plugin);
+    // refuse to install a blocked/below-minVersion `slug@version`
+    // before any network download or deployment-guard check runs.
+    assertMarketplaceNotRevoked(plugin);
     const canonicalPluginId = plugin.id;
     if (seen.has(canonicalPluginId)) {
       return { pluginId: canonicalPluginId, installed: true };
@@ -1610,6 +1614,12 @@ export class PluginMarketplaceService {
         );
       }
       assertMarketplaceAppUpgradeNotRequired(plugin);
+      // refuse a blocked/below-minVersion `slug@version` here too
+      // (versioned/rollback install path — see `installWithDependencies`
+      // for the primary catalog-driven install path). Checked against the
+      // REQUESTED `version` param, not `plugin.version` (the catalog's
+      // latest) — this call installs whatever version the caller asked for.
+      assertMarketplaceNotRevoked({ id: plugin.id, version });
       assertNetworkAccessAcknowledgement({
         plugin,
         acknowledgement: options?.networkAccessAcknowledgement,
@@ -1710,6 +1720,12 @@ export class PluginMarketplaceService {
             `Delisted plugins are unsupported for rollback (yanked artifacts are not retained locally).`,
         );
       }
+      // rollback is exactly the vector a confused user (or a script
+      // trying to work around a block) would reach for to "downgrade
+      // around" a revocation: it re-installs a version that was already
+      // superseded, and that version is a prime revocation candidate. Gate
+      // it the same as every other install path.
+      assertMarketplaceNotRevoked({ id: pluginId, version: priorVersion });
       const registrySnapshot = await this.artifactStore.readCachedRegistryEntrySnapshot(pluginId, priorVersion);
       const existingEntry = await this.getRawRegistryEntry(pluginId);
       let pendingEntry: PluginRegistryEntry | null = null;

@@ -63,3 +63,25 @@ export const WHITELIST_PUBLIC_KEYS: Readonly<Record<string, PublicKeyInput>> = O
 });
 
 export const WHITELIST_PRIMARY_KEY_ID = "whitelist-v1" as const;
+
+// Trust root for the plugin revocation registry (min-version pins +
+// an explicit `slug@version` blocklist, see `plugins/revocation/`).
+//
+// Deliberately REUSES the whitelist trust domain above (`WHITELIST_PUBLIC_KEYS`
+// / `WHITELIST_PRIMARY_KEY_ID`, imported directly by `revocation-registry.ts`
+// under a `REVOCATION_*` alias) rather than minting a third one: like the
+// whitelist, this is a small, host-consumed SECURITY POLICY document (not a
+// plugin tarball) issued by the same `lvis-project/marketplace-whitelist`
+// operator and hosted alongside `whitelist.json`. Reusing the key means one
+// rotation event covers both documents, and — the property that actually
+// matters here — the revocation trust anchor stays SEPARATE from
+// `MARKETPLACE_PUBLIC_KEYS` (the tarball-signing key) for the same reason the
+// whitelist does: if the key that signs plugin artifacts is ever
+// compromised, that compromise must NOT also let the attacker rewrite which
+// versions are revoked. A revocation document is the thing a defender
+// reaches for precisely when the artifact-signing key's integrity is in
+// question, so it cannot share that key's trust domain.
+//
+// No separate `REVOCATION_PUBLIC_KEYS` constant is declared here — re-exporting
+// the exact same object under a second name is a duplicate-export smell (and
+// `check:knip` catches it); the alias is applied at the one import site instead.
