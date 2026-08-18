@@ -9,7 +9,7 @@ const plugins = [
   { slug: "local-indexer", title: "Local Indexer", id: "local-indexer", ver: "0.4.11", scope: "Local · RAG", desc: "kiwipiepy 한국어 형태소 + pymupdf4llm + FTS5 + LanceDB. chokidar 폴더 감시.", color: "from-teal/10 to-transparent" },
   { slug: "ms-graph", title: "Microsoft 365 (Outlook)", id: "ms-graph", ver: "0.3.28", scope: "Mail · Calendar", desc: "MSAL OAuth + Electron safeStorage 토큰. mail + calendar 31개 도구.", color: "from-accent/60 to-transparent" },
   { slug: "meeting", title: "Meeting", id: "meeting", ver: "0.4.18", scope: "Audio · STT", desc: "OpenAI Whisper API (gpt-4o-transcribe) + PCM16LE 16kHz/3sec 청크.", color: "from-coral/10 to-transparent" },
-  { slug: "work-assistant", title: "Work Assistant (업무도우미)", id: "work-assistant", ver: "0.7.0", scope: "Proactive", desc: "10+ detector → triggerConversation + showOverlay. mail/calendar/meeting 신호 통합.", color: "from-citron/30 to-transparent" },
+  { slug: "work-assistant", title: "Work Assistant (업무도우미)", id: "work-assistant", ver: "0.7.0", scope: "Proactive", desc: "10+ detector → triggerConversation. mail/calendar/meeting 신호 통합.", color: "from-citron/30 to-transparent" },
   { slug: "agent-hub", title: "Agent Hub Sidebar", id: "agent-hub", ver: "0.8.1", scope: "Host UI Plugin", desc: "‘업무 보드’ 사이드바 + 43개 도구 + 5분 polling. agent-hub.lvisai.xyz 와 통신.", color: "from-ink/[0.06] to-transparent" },
   { slug: "lge-api", title: "LGE EP (이피)", id: "lge-api", ver: "0.12.9", scope: "사내 포털", desc: "EP/Space/NHRS/LGenie/주차 — 24개 도구. openAuthWindow 세션 + 사내망 DNS 게이트.", color: "from-coral/10 to-transparent" },
 ];
