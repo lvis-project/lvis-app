@@ -78,6 +78,7 @@ function buildWithScope(builder: ReturnType<typeof createSystemPromptBuilder>): 
     activePluginIds: new Set<string>(),
     includeBuiltins: true,
     includeMcp: true,
+    includeEgress: true,
   });
   return builder.build();
 }

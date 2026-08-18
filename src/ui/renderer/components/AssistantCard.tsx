@@ -8,6 +8,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import { clampDanglingMarkdownLink } from "../utils/streaming-markdown.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
+import { MARKDOWN_SAFE_COMPONENTS, markdownUrlTransform } from "../utils/markdown-safe.js";
 import { replaceToolNamesInText } from "../utils/tool-display.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
 
@@ -170,7 +171,11 @@ function AssistantCardImpl({
         className={`prose prose-sm lvis-prose max-h-none max-w-none overflow-y-visible break-words [overflow-wrap:anywhere] ${entry.route === "command" ? "whitespace-pre-wrap" : ""}`}
         data-testid="assistant-message-body"
       >
-        <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+        <ReactMarkdown
+          remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+          urlTransform={markdownUrlTransform}
+          components={MARKDOWN_SAFE_COMPONENTS}
+        >
           {entry.streaming ? clampDanglingMarkdownLink(markdownText) : markdownText}
         </ReactMarkdown>
       </div>

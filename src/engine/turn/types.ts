@@ -455,6 +455,11 @@ export interface ToolScope {
   /** Tools kept visible by an explicit fixed-surface allowlist. */
   forcedToolNames: Set<string>;
   includeBuiltins: boolean;
+  /**
+   * Expose builtins that can reach a model-chosen external URL. Off in
+   * unattended (headless/routine) lanes — see {@link Tool.arbitraryEgress}.
+   */
+  includeEgress: boolean;
   includeMcp: boolean;
   /**
    * #1176 deferral gate. `false` → eager full-schema exposure of every

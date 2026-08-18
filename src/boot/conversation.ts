@@ -106,11 +106,17 @@ export async function createPermissionManager(): Promise<PermissionManager> {
   // §6.3: PermissionManager (Layer 2-3)
   const permissionManager = new PermissionManager();
 
+  // Layer 3 standing allows. Only tools that neither reach private data nor
+  // leave the machine belong here — `skill_list` and `agent_list` enumerate
+  // host-owned registries and nothing else.
+  //
+  // `web_fetch` and `web_search` were removed: both send a model-chosen string
+  // to a model-chosen destination, so a standing allow makes them an
+  // approval-free exfiltration channel for anything already in the turn's
+  // context. They now run under the `network` category like any other egress.
   permissionManager.setRules([
     { pattern: "skill_list", action: "allow" },
     { pattern: "agent_list", action: "allow" },
-    { pattern: "web_search", action: "allow" },
-    { pattern: "web_fetch", action: "allow" },
   ]);
 
   await permissionManager.loadRulesFromFile();
