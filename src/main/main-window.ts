@@ -19,6 +19,7 @@ import {
   isSideBrowserContents,
   takePendingSideBrowserSrc,
 } from "./side-browser-webview.js";
+import { configurePluginWebviewAttach } from "./plugin-webview-attach.js";
 import { getCommonChromeOptions } from "./window-chrome.js";
 import { getLastThemePayload } from "../shared/plugin-theme-cache.js";
 import { registerWindowEventListeners } from "./window-event-listeners.js";
@@ -267,6 +268,16 @@ export function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
 
   const pendingSideBrowserWebviews: string[] = [];
   win.webContents.on("will-attach-webview", (event, webPreferences, params) => {
+    // Plugin frames first. Both guards key on the partition and each ignores
+    // the other's, so order is not load-bearing — but a plugin frame reaching
+    // attach with its preferences untouched is the case that matters, and
+    // running it first keeps that obvious.
+    const pluginResult = configurePluginWebviewAttach({
+      webPreferences: webPreferences as Record<string, unknown>,
+      params: params as unknown as Record<string, string>,
+    });
+    if (pluginResult === "enforced") return;
+
     const result = configureSideBrowserWebviewAttach({
       event,
       webPreferences: webPreferences as Record<string, unknown>,
