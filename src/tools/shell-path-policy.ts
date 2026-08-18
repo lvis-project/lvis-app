@@ -385,7 +385,19 @@ function tokenizeCommand(command: string): string[] {
 }
 
 function splitCandidateParts(token: string): string[] {
-  const parts = [token];
+  const parts: string[] = [];
+  // Glued short-flag value: `-o/Users/x/.ssh/authorized_keys`, `-I/etc`.
+  // Without this the whole token is the only candidate, and because it starts
+  // with `-` it resolves RELATIVE to the sandbox cwd (`<cwd>/-o/Users/…`) — a
+  // path that is inside the sandbox, so the real target was never checked.
+  // Splitting off the value after the leading letter-cluster gives the policy
+  // the path the command will actually open. It goes FIRST so the violation the
+  // caller reports names the real target rather than the pseudo-relative one.
+  const glued = /^-[A-Za-z]+([/~.].*)$/.exec(token);
+  if (glued && !token.startsWith("--")) {
+    parts.push(glued[1]!);
+  }
+  parts.push(token);
   const eq = token.indexOf("=");
   if (eq > 0 && eq < token.length - 1) {
     parts.push(token.slice(eq + 1));
