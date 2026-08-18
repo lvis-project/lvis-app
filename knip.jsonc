@@ -22,9 +22,16 @@
       // Electron-hosted entry points. `smoke:llm` / `smoke:app` launch these
       // with the electron binary rather than importing them, so Knip cannot
       // infer the reference and reports both as unused files.
+      //
+      // The git hook chain is an entry point for the same reason:
+      // `.git/hooks/pre-commit` and `pre-push` EXECUTE run-local-checks.mjs,
+      // nothing imports it. Without this, every export reachable only from
+      // there is invisible to Knip — so a dead export under scripts/hooks/
+      // could never be reported, and seven of them had accumulated.
       "entry": [
         "scripts/smoke-live-model.mjs",
-        "scripts/smoke-live-app.mjs"
+        "scripts/smoke-live-app.mjs",
+        "scripts/hooks/run-local-checks.mjs"
       ]
     },
     "web": {
