@@ -6,6 +6,7 @@ import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor } from "../tools/executor.js";
 import { backgroundShellManager } from "../tools/background-shell-manager.js";
 import { isActiveSandboxFilesystemContainedForPluginEffects } from "../permissions/sandbox-capability.js";
+import { baseAllowedDirectories } from "../permissions/base-allowed-directories.js";
 import { getWorkspaceRootLifecycle } from "../permissions/workspace-root-lifecycle.js";
 import { HookRunner } from "../hooks/hook-runner.js";
 import type { LifecycleHookEvent } from "../hooks/script-hook-types.js";
@@ -561,6 +562,11 @@ export class ConversationLoop {
 
   getTurnAdditionalDirectories(): readonly string[] {
     return [
+      // Always-on first. `sessionAdditionalDirectories` is reassigned by
+      // `applyProjectContext` on every `newConversation()`, so anything that
+      // must survive a new chat cannot live there — it has to be part of the
+      // base set assembled here. See `baseAllowedDirectories`.
+      ...baseAllowedDirectories(),
       ...(this.deps.getAdditionalDirectories?.() ?? this.deps.additionalDirectories ?? []),
       ...this.sessionAdditionalDirectories,
       ...this.turnAdditionalDirectories,
