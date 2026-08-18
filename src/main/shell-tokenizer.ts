@@ -64,6 +64,17 @@ export interface ShellLeaf {
    * wrapper (`env` alone → prints the environment) when `argv` is empty.
    */
   strippedWrappers: string[];
+  /**
+   * The leading `NAME=value` assignments stripped from the front of the leaf,
+   * in source order, INCLUDING the ones consumed as `env`/`command` operands.
+   *
+   * Stripping them is what exposes the effective verb, but an assignment is not
+   * inert: `LESSOPEN='|/bin/sh %s' less f` and `GIT_EXTERNAL_DIFF=/bin/sh git
+   * diff` both run a shell that the verb scan never sees. A classifier that
+   * discards the assignments cannot notice. They are reported here so the
+   * caller decides, rather than being silently dropped.
+   */
+  assignments: string[];
   /** The raw text of the leaf, trimmed, before any stripping. */
   raw: string;
 }
@@ -482,7 +493,7 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
     argvWords.push(w.value);
   }
 
-  const { argv, strippedWrappers } = stripAssignmentsAndWrappers(argvWords);
+  const { argv, strippedWrappers, assignments } = stripAssignmentsAndWrappers(argvWords);
   return {
     argv,
     redirectTargets,
@@ -491,6 +502,7 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
     hasCommandSubstitution,
     hasProcessSubstitution,
     strippedWrappers,
+    assignments,
     raw: raw.raw,
   };
 }
@@ -504,16 +516,22 @@ const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
  * option flag (`nice -n 5`) is safe, but over-skipping could hide the real
  * verb, so only leading `-flag` tokens and a single numeric/duration operand
  * are consumed. `env`/`command` additionally accept `VAR=value` operands
- * before the verb (`env X=1 ls`). Returns the residual argv plus the basenames
- * of any wrappers stripped, so callers can recover a bare wrapper's verb. */
+ * before the verb (`env X=1 ls`). Returns the residual argv, the basenames of
+ * any wrappers stripped (so callers can recover a bare wrapper's verb), and the
+ * assignments themselves — stripped from argv but REPORTED, because an
+ * assignment can select the interpreter the verb then runs. */
 function stripAssignmentsAndWrappers(
   words: string[],
-): { argv: string[]; strippedWrappers: string[] } {
+): { argv: string[]; strippedWrappers: string[]; assignments: string[] } {
   let i = 0;
   const strippedWrappers: string[] = [];
+  const assignments: string[] = [];
   // Leading VAR=value assignments (value may have been a quoted string with
   // spaces — already collapsed into a single word by the scanner).
-  while (i < words.length && ASSIGNMENT_RE.test(words[i]!)) i += 1;
+  while (i < words.length && ASSIGNMENT_RE.test(words[i]!)) {
+    assignments.push(words[i]!);
+    i += 1;
+  }
   // Wrapper commands and their option/duration/assignment operands.
   while (i < words.length) {
     const head = stripPath(words[i]!);
@@ -525,7 +543,10 @@ function stripAssignmentsAndWrappers(
     // Skip a single numeric/duration operand (e.g. `timeout 5s ls`).
     if (i < words.length && /^[0-9]+[smhd]?$/.test(words[i]!)) i += 1;
     // `env`/`command` accept VAR=value operands before the verb (`env X=1 ls`).
-    while (i < words.length && ASSIGNMENT_RE.test(words[i]!)) i += 1;
+    while (i < words.length && ASSIGNMENT_RE.test(words[i]!)) {
+      assignments.push(words[i]!);
+      i += 1;
+    }
   }
-  return { argv: words.slice(i), strippedWrappers };
+  return { argv: words.slice(i), strippedWrappers, assignments };
 }

