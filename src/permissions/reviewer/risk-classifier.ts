@@ -167,12 +167,15 @@ export interface ToolInvocationContext {
    *
    * `ownerPluginSandboxRoot` is the absolute directory path the owning plugin
    * tool is permitted to write inside without triggering reviewer escalation:
-   * `~/.lvis/plugins/<ownerPluginId>/`, computed HOST-side by the executor at
-   * tool-invocation time (`pathResolve(lvisHome(), "plugins", pluginId)`) —
-   * never a manifest value. For builtin tools, or where the contract declares no
-   * sandbox, leave undefined and the normal write rules apply. The path
-   * participates in the verdict-cache identity so a plugin rename/reinstall that
-   * changes the sandbox root invalidates a cached LOW.
+   * `~/.lvis/plugins/<ownerPluginId>/data`, computed HOST-side by the executor
+   * at tool-invocation time (`resolvePluginWritableRoot(pluginId)`) — never a
+   * manifest value. It is the plugin's DATA directory, not its root: the root
+   * holds the installed bundle, and an auto-LOW there would rubber-stamp a
+   * plugin rewriting the module the next load imports. For builtin tools, or
+   * where the contract declares no sandbox, leave undefined and the normal
+   * write rules apply. The path participates in the verdict-cache identity so
+   * a plugin rename/reinstall that changes the sandbox root invalidates a
+   * cached LOW.
    *
    * #885 v6 (Q4): the old manifest-declared `writesToOwnSandbox` self-attestation
    * is REMOVED — it was an untrusted self-claim (MCP "annotations untrusted"); a
@@ -579,7 +582,7 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   // safe: a path escaping the root falls through to the existing HIGH rules.
   //
   // Without this rule a plugin like ms-graph that writes its MSAL token cache
-  // to `~/.lvis/plugins/lvis-plugin-ms-graph/...` gets caught by the "write
+  // to `~/.lvis/plugins/lvis-plugin-ms-graph/data/...` gets caught by the "write
   // path not declared" or "write outside allowed dirs" HIGH rules — the host's
   // `allowedDirectories` does not include plugin sandboxes by design (plugin
   // data isolation, §5 file-based memory). The auto-LOW rule lets plugins

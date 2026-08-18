@@ -9,6 +9,7 @@ import type { PluginHostApi, PluginManifest } from "../types.js";
 import { createPluginStorage } from "../storage.js";
 import { applyConfigDefaults } from "../config-schema.js";
 import { createLogger } from "../../lib/logger.js";
+import { PLUGIN_DATA_DIR_NAME } from "../plugin-storage-layout.js";
 const log = createLogger("sandbox");
 
 /**
@@ -98,7 +99,7 @@ export function ensurePluginDataDir(
   pluginsRoot: string | undefined,
 ): string {
   const baseRoot = pluginsRoot ?? dirname(pluginRoot);
-  const dataDir = resolve(baseRoot, pluginId, "data");
+  const dataDir = resolve(baseRoot, pluginId, PLUGIN_DATA_DIR_NAME);
   mkdirSync(dataDir, { recursive: true });
   return dataDir;
 }

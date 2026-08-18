@@ -9,9 +9,16 @@
  *
  * The earlier derivation hard-coded the jail to the resolved cwd. That is
  * wrong for two reasons:
- *   - a plugin-owned tool's writable region is its sandbox root
- *     (`~/.lvis/plugins/<pluginId>/`), not the chat session cwd; and
+ *   - a plugin-owned tool's writable region is its own storage namespace
+ *     (`~/.lvis/plugins/<pluginId>/data`), not the chat session cwd; and
  *   - a user who authorized extra directories expects writes there to work.
+ *
+ * The plugin-owned region is the plugin's DATA directory, not its root. The
+ * root also holds `plugin.json` and `dist/` — the module the next load imports
+ * into the Electron main process. Load-time install-receipt verification
+ * detects a rewritten bundle, but a jail that excludes the bundle removes the
+ * self-rewrite primitive rather than merely detecting its use. See
+ * `plugins/plugin-storage-layout.ts resolvePluginWritableRoot`.
  *
  * The write set is therefore the canonicalized union of:
  *   - `ownerPluginSandboxRoot` when the invoking tool is plugin-owned
@@ -26,9 +33,11 @@ import { canonicalizePathForMatch } from "./sensitive-paths.js";
 /** Inputs for {@link deriveSandboxWritePaths}. Pure data — no I/O of its own. */
 export interface SandboxWriteJailInput {
   /**
-   * Owner plugin sandbox root (`~/.lvis/plugins/<pluginId>/`) when the
+   * Owner plugin writable root (`~/.lvis/plugins/<pluginId>/data`) when the
    * invoking tool is plugin-owned, else undefined. Builtins (bash/powershell
-   * invoked directly) have no owner plugin and pass undefined.
+   * invoked directly) have no owner plugin and pass undefined. Producers MUST
+   * derive it via `resolvePluginWritableRoot` so the installed bundle stays
+   * outside the jail.
    */
   ownerPluginSandboxRoot?: string;
   /**
@@ -51,7 +60,7 @@ export interface SandboxWriteJailInput {
  *
  * Builtins / no-plugin shell: `ownerPluginSandboxRoot` is undefined, so the
  * jail is exactly the allowed directories. A plugin-owned tool additionally
- * gains its own sandbox root.
+ * gains its own writable data root.
  */
 export function deriveSandboxWritePaths(input: SandboxWriteJailInput): string[] {
   const raw: string[] = [];

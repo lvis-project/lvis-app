@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { resolve as pathResolve } from "node:path";
 import type { Tool } from "./base.js";
 import type { ToolCategory, ToolSource, TrustLevel } from "./types.js";
 import {
@@ -17,7 +16,7 @@ import type {
 } from "../permissions/host-shell-execution-plan.js";
 import type { HostShellExecutionPermitBinding } from "../permissions/host-shell-execution-permit.js";
 import { resolveReviewerSandboxCapability } from "../permissions/sandbox-capability.js";
-import { lvisHome } from "../shared/lvis-home.js";
+import { resolvePluginWritableRoot } from "../plugins/plugin-storage-layout.js";
 import {
   isRemoteControllerAuthorityCurrent,
   remoteControllerOriginOf,
@@ -698,13 +697,7 @@ export async function authorizeToolInvocation(
     // HOST-computed `ownerPluginSandboxRoot` + host-verified path containment.
     const sandboxAttestation = {
       ...(tool.pluginId
-        ? {
-            ownerPluginSandboxRoot: pathResolve(
-              lvisHome(),
-              "plugins",
-              tool.pluginId,
-            ),
-          }
+        ? { ownerPluginSandboxRoot: resolvePluginWritableRoot(tool.pluginId) }
         : {}),
     };
     let foregroundMemorySkipChecked = false;
