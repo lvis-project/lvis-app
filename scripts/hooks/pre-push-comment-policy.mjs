@@ -2,15 +2,15 @@ import * as nodeModule from "node:module";
 
 import { isCanonicalGitPath } from "./pre-push-markdown-policy.mjs";
 
-export const MAX_COMMENT_ONLY_FILES = 64;
-export const MAX_COMMENT_ONLY_BYTES = 4 * 1024 * 1024;
+const MAX_COMMENT_ONLY_FILES = 64;
+const MAX_COMMENT_ONLY_BYTES = 4 * 1024 * 1024;
 
 const safeSourcePath = /^src\/(?:[^/]+\/)*[^/]+\.(?:ts|js|mjs|cjs)$/;
 const generatedPathSegment = /(?:^|\/)(?:__generated__|generated)(?:\/|$)/i;
 const generatedBasename = /\.generated\.(?:ts|js|mjs|cjs)$/i;
 const controlledComment = /^\/\/(?:[\/!#@]|\s*(?:@|#|eslint|prettier|biome|oxlint|tslint|deno|bun|node|vite|webpack|rollup|esbuild|istanbul|c8|v8|nyc|coverage|sourceurl|sourcemappingurl|spdx|copyright|license|codeql|lgtm|nosemgrep|nosonar|nolint|noinspection|snyk|sonar|fallthrough|falls-through|region|endregion|cspell|spellcheck|language)\b)/i;
 
-export function isCommentOnlyLvisAppSourcePath(relativePath) {
+function isCommentOnlyLvisAppSourcePath(relativePath) {
   if (!isCanonicalGitPath(relativePath) || !safeSourcePath.test(relativePath)) return false;
   return !generatedPathSegment.test(relativePath) && !generatedBasename.test(relativePath);
 }
@@ -38,7 +38,7 @@ function parsedOutput(parser, source) {
   }
 }
 
-export function isStandaloneCommentOnlyJavaScriptChange(
+function isStandaloneCommentOnlyJavaScriptChange(
   before,
   after,
   parser = nodeModule.stripTypeScriptTypes

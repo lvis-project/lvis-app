@@ -1,7 +1,7 @@
 import { isCanonicalGitPath } from "./pre-push-markdown-policy.mjs";
 
-export const MAX_TARGETED_VITEST_FILES = 64;
-export const MAX_TARGETED_VITEST_ARGUMENT_CHARS = 16_384;
+const MAX_TARGETED_VITEST_FILES = 64;
+const MAX_TARGETED_VITEST_ARGUMENT_CHARS = 16_384;
 
 const deniedPathSegments = new Set([
   "__fixtures__",
@@ -70,7 +70,7 @@ function isSafeTestTreePath(relativePath) {
   return !segments.some((segment) => deniedPathSegments.has(segment));
 }
 
-export function isTargetableLvisAppVitestPath(relativePath) {
+function isTargetableLvisAppVitestPath(relativePath) {
   if (!isSafeTestTreePath(relativePath)) return false;
   if (!collectedVitestPath.test(relativePath)) return false;
 
@@ -78,7 +78,7 @@ export function isTargetableLvisAppVitestPath(relativePath) {
   return !generatedAssetTestBasenames.has(segments.at(-1));
 }
 
-export function isTargetableLvisAppVitestSupportPath(relativePath) {
+function isTargetableLvisAppVitestSupportPath(relativePath) {
   return (
     isSafeTestTreePath(relativePath) &&
     targetedVitestSupportConsumers.has(relativePath)

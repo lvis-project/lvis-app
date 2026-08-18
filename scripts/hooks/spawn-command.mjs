@@ -7,7 +7,7 @@ function isTrustedWindowsBatchCommand(command) {
   return TRUSTED_WINDOWS_BATCH_COMMANDS.has(command.toLowerCase());
 }
 
-export function normalizeSpawnInvocation(
+function normalizeSpawnInvocation(
   command,
   args,
   { platform = process.platform, comSpec = process.env.ComSpec } = {}
