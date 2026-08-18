@@ -202,7 +202,25 @@ export type ChatEntry =
       createdAt?: number;
     }
   | { kind: "reasoning"; text: string; streaming?: boolean; createdAt?: number }
-  | { kind: "assistant"; text: string; streaming?: boolean; route?: "command"; phase?: "work" | "final"; createdAt?: number; systemNotice?: "context-error" | "stream-error"; interrupted?: boolean }
+  | {
+      kind: "assistant";
+      text: string;
+      streaming?: boolean;
+      route?: "command";
+      phase?: "work" | "final";
+      createdAt?: number;
+      systemNotice?: "context-error" | "stream-error";
+      interrupted?: boolean;
+      /**
+       * Entry was rebuilt from persisted history rather than produced by the
+       * live stream. Stamped ONLY by the disk-replay path (historyToEntries);
+       * live streaming callers never set it. The renderer uses it at the
+       * single banner render point (AssistantCard) to soften a replayed
+       * systemNotice so an old error does not re-present as a fresh one
+       * (Issue #2113). Display state only — never persisted.
+       */
+      restored?: boolean;
+    }
   // Permission review verdict for one tool call. The entry is never removed
   // once created — it is the audit trail of what the reviewer decided, and the
   // renderer attaches it to the matching tool row (standalone only while no
@@ -590,6 +608,13 @@ export function finalizeStreamingAssistant(
      * clears it (an abort is a fact about the turn, not about the render).
      */
     interrupted?: boolean;
+    /**
+     * Issue #2113 — the entry is being rebuilt from persisted history.
+     * Passed ONLY by the disk-replay caller (historyToEntries); live
+     * streaming callers never set it, so a live systemNotice banner and a
+     * replayed one stay distinguishable at the render point.
+     */
+    restored?: boolean;
   },
 ): ChatEntry[] {
   const next = [...entries];
@@ -628,6 +653,9 @@ export function finalizeStreamingAssistant(
           ...(opts?.interrupted === true || assistant.interrupted === true
             ? { interrupted: true }
             : {}),
+          ...(opts?.restored === true || assistant.restored === true
+            ? { restored: true }
+            : {}),
         };
         return next;
       }
@@ -658,6 +686,9 @@ export function finalizeStreamingAssistant(
       ...(opts?.interrupted === true || assistant.interrupted === true
         ? { interrupted: true }
         : {}),
+      ...(opts?.restored === true || assistant.restored === true
+        ? { restored: true }
+        : {}),
     };
     return next;
   }
@@ -684,6 +715,7 @@ export function finalizeStreamingAssistant(
     ...(opts?.createdAt !== undefined ? { createdAt: opts.createdAt } : {}),
     ...(opts?.systemNotice !== undefined ? { systemNotice: opts.systemNotice } : {}),
     ...(opts?.interrupted === true ? { interrupted: true } : {}),
+    ...(opts?.restored === true ? { restored: true } : {}),
   });
   return next;
 }

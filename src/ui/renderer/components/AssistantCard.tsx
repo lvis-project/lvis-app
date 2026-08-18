@@ -1,4 +1,4 @@
-import { Loader2, Pin, RefreshCw, GitBranch, ThumbsUp, ThumbsDown, AlertTriangle } from "lucide-react";
+import { Loader2, Pin, RefreshCw, GitBranch, ThumbsUp, ThumbsDown, AlertTriangle, History } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { memo, useMemo, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
@@ -46,6 +46,12 @@ function AssistantCardImpl({
 
   // distinguish a real LLM reply from an error banner masquerading as one.
   const isSystemNotice = entry.systemNotice !== undefined;
+  // Issue #2113 — a systemNotice replayed from persisted history is an old
+  // error, not a fresh one. Softened styling + a "previous session" badge
+  // keep it recognizable without re-alarming the user after a session
+  // reload (e.g. OS-notification click). Live notices keep the destructive
+  // treatment unchanged. This is the single live/restored distinction point.
+  const isRestoredNotice = isSystemNotice && entry.restored === true;
   const systemNoticeLabel =
     entry.systemNotice === "context-error"
       ? t("assistantCard.systemNoticeContextError")
@@ -73,22 +79,38 @@ function AssistantCardImpl({
   return (
     <div
       className={
-        isSystemNotice
-          ? "group relative min-w-0 w-full max-w-full overflow-visible rounded-lg border border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) p-3 text-sm shadow-sm lvis-anim-message-in"
-          : "group relative min-w-0 w-full max-w-full overflow-visible py-1 text-sm lvis-anim-message-in"
+        isRestoredNotice
+          ? "group relative min-w-0 w-full max-w-full overflow-visible rounded-lg border border-border/(--opacity-medium) bg-muted/(--opacity-subtle) p-3 text-sm lvis-anim-message-in"
+          : isSystemNotice
+            ? "group relative min-w-0 w-full max-w-full overflow-visible rounded-lg border border-destructive/(--opacity-medium) bg-destructive/(--opacity-faint) p-3 text-sm shadow-sm lvis-anim-message-in"
+            : "group relative min-w-0 w-full max-w-full overflow-visible py-1 text-sm lvis-anim-message-in"
       }
     >
       {/* Header bar — mirrors WorkBoardPanel's SectionShell header pattern */}
       {showHeader && (
         <div
           className={
-            isSystemNotice
-              ? "mb-2 flex items-center gap-1.5 rounded border-b border-destructive/(--opacity-light) pb-2 text-[11px] font-semibold uppercase tracking-wider text-destructive"
-              : "mb-2 flex items-center gap-1.5 rounded pb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+            isRestoredNotice
+              ? "mb-2 flex items-center gap-1.5 rounded border-b border-border/(--opacity-light) pb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
+              : isSystemNotice
+                ? "mb-2 flex items-center gap-1.5 rounded border-b border-destructive/(--opacity-light) pb-2 text-[11px] font-semibold uppercase tracking-wider text-destructive"
+                : "mb-2 flex items-center gap-1.5 rounded pb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"
           }
         >
-          {isSystemNotice ? <AlertTriangle className="h-3 w-3" /> : null}
+          {isRestoredNotice ? (
+            <History className="h-3 w-3" />
+          ) : isSystemNotice ? (
+            <AlertTriangle className="h-3 w-3" />
+          ) : null}
           {title}
+          {isRestoredNotice ? (
+            <span
+              data-testid="assistant-restored-notice-badge"
+              className="rounded-full border border-border/(--opacity-medium) bg-muted/(--opacity-half) px-1.5 py-px text-[10px] font-medium normal-case tracking-normal text-muted-foreground"
+            >
+              {t("assistantCard.restoredNoticeBadge")}
+            </span>
+          ) : null}
           {wasInterrupted && !entry.streaming ? (
             <span
               data-testid="assistant-interrupted-badge"
