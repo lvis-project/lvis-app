@@ -56,6 +56,15 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   // environment, not by the argv the classifier can see, so there is no argv
   // shape that proves a paging call is side-effect-free. Paging a file is
   // `cat`'s job as far as this classifier is concerned.
+  // `cd` changes the working directory of a shell that exits when the call
+  // does — it mutates nothing on disk and does not persist to the next call
+  // (each one spawns from the session cwd, and `input.cwd` is the supported way
+  // to start elsewhere). What it DOES change is the meaning of every relative
+  // operand after it, so it is only safe here because the shell path policy now
+  // walks leaves in order and resolves each one against the directory actually
+  // in effect. Without that walk, `cd /tmp && cat ../../etc/passwd` classified
+  // read and resolved against the session cwd, which is inside the boundary.
+  "cd",
   "ls", "cat", "head", "tail", "pwd", "echo", "printf",
   "grep", "egrep", "fgrep", "rg", "ag", "find", "fd", "wc", "stat", "file",
   "du", "df", "tree", "which", "type", "whoami", "id", "hostname", "uname",
@@ -70,7 +79,12 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   // as `shell` (extra approval prompt — the safe, stated discipline of this module).
   "sed", "diff", "cmp", "basename", "dirname", "realpath", "readlink",
   "true", "false", "test", "sleep", "seq", "yes", "tr", "nl", "tac", "rev",
-  "column", "comm", "join", "paste", "expand", "unexpand", "fold", "split",
+  // `split` is deliberately absent: with no flag at all it writes `xaa`, `xab`,
+  // … into the working directory. It was in this set, and only stayed harmless
+  // because its `null` entry in MUTATING_FLAGS escalated every call back to
+  // shell. Listing a writing verb as read-only and relying on a second table to
+  // undo it invites someone to prune the "redundant" entry.
+  "column", "comm", "join", "paste", "expand", "unexpand", "fold",
 ]);
 
 /**
@@ -85,6 +99,10 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
  * {@link READ_ONLY_COMMANDS} and already fail closed as unknown verbs. Their
  * `null` entries here are retained so the MUTATING_FLAGS table stays accurate
  * if those verbs are ever added to READ_ONLY_COMMANDS in the future.
+ *
+ * That claim was false for `split` until now — it WAS in READ_ONLY_COMMANDS,
+ * and this table was the only thing keeping `split hugefile` from classifying
+ * read. The two tables now agree with this note.
  *
  * Flag matching — three modes, all applied:
  *  1. Long flags: exact-token (`--in-place`) or `--flag=value` prefix
