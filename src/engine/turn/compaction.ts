@@ -15,7 +15,13 @@ import type {
 } from "./types.js";
 import { compactWithBoundary, DEFAULT_PRESERVE_RECENT_TURNS, renderBoundaryAsPreamble } from "../structured-compact.js";
 import { CompressionStatus } from "../../shared/compact-status.js";
-import { estimateMessagesTokens, getModelPreflightThreshold, getModelUsableContext } from "../auto-compact.js";
+import {
+  estimateMessagesTokens,
+  getModelPreflightThreshold,
+  getModelPreflightThresholdSource,
+  getModelUsableContext,
+  type PreflightThresholdSource,
+} from "../auto-compact.js";
 import { compactedHistoryWithContextCarrier, contentTruncatedHistoryWithContextCarrier } from "./context-carrier.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
@@ -41,6 +47,8 @@ interface RuntimeContextBudget {
   readonly preflight: number;
   readonly usableContext: number;
   readonly identity: string;
+  /** Observability only — which input the preflight threshold came from. */
+  readonly thresholdSource: PreflightThresholdSource | "subscription-fallback" | "reported-context-window";
 }
 
 function safeReportedContextBudget(
@@ -83,6 +91,7 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
           preflight: SUBSCRIPTION_FALLBACK_PREFLIGHT,
           usableContext: SUBSCRIPTION_FALLBACK_USABLE_CONTEXT,
           identity: `subscription:codex/${model}`,
+          thresholdSource: "subscription-fallback",
         };
       }
       // Codex catalog model IDs are OpenAI model IDs, but remain isolated from
@@ -98,6 +107,7 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
       // A matching terminal Codex report may make the catalog budget more
       // conservative, never larger. Invalid/tiny reports retain the catalog
       // threshold so a malformed external value cannot disable preflight.
+      const reportedIsTighter = reportedBudget !== undefined && reportedBudget.preflight < catalogPreflight;
       return {
         model,
         preflight: reportedBudget
@@ -107,6 +117,9 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
           ? Math.min(catalogUsableContext, reportedBudget.usableContext)
           : catalogUsableContext,
         identity: `subscription:codex/${model}`,
+        thresholdSource: reportedIsTighter
+          ? "reported-context-window"
+          : getModelPreflightThresholdSource("openai", model),
       };
     }
     return {
@@ -114,6 +127,7 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
       preflight: SUBSCRIPTION_FALLBACK_PREFLIGHT,
       usableContext: SUBSCRIPTION_FALLBACK_USABLE_CONTEXT,
       identity: `subscription:${subscriptionRuntime.provider}/${model}`,
+      thresholdSource: "subscription-fallback",
     };
   }
 
@@ -125,6 +139,7 @@ export function contextBudgetForCurrentRuntime(self: ConversationLoop): RuntimeC
     preflight: getModelPreflightThreshold(provider, model),
     usableContext: getModelUsableContext(provider, model),
     identity: `${provider}/${model}`,
+    thresholdSource: getModelPreflightThresholdSource(provider, model),
   };
 }
 
@@ -417,6 +432,21 @@ export async function applyBoundaryToSession(
     });
   }
 
+/**
+ * Emits the `PREFLIGHT_GUARD` trace step — the single legibility point for
+ * "is compaction running?" (O-1). No prompt/message content, only counts and
+ * the decision. `self.tracer` is a NullTracer outside dev/`LVIS_TRACE=1`, so
+ * this is a no-op appendFileSync skip in production hot paths.
+ */
+function tracePreflightGuard(
+  self: ConversationLoop,
+  outcome: "skipped" | "not-reached" | "fired",
+  reason: string,
+  extra?: Record<string, unknown>,
+): void {
+  self.tracer.step("PREFLIGHT_GUARD", { outcome, reason, ...extra });
+}
+
 export async function runPreflightGuard(
   self: ConversationLoop,
     projectionContext: RequestProjectionContext,
@@ -452,31 +482,46 @@ export async function runPreflightGuard(
       self.contextErrorPending = false;
       self.recoveryExhausted = true;
       callbacks?.onRecoveryExhausted?.();
+      tracePreflightGuard(self, "skipped", "recovery-budget-exhausted", {
+        contextErrorRecoveryCount: self.contextErrorRecoveryCount,
+      });
       return false;
     }
     // Budget 소진 상태면 compact 완전 차단 (re-arm 은 정상 turn 완료 후 reset).
     if (self.recoveryExhausted) {
       log.warn("preflight: recoveryExhausted — all compact API calls blocked until normal turn completes");
+      tracePreflightGuard(self, "skipped", "recovery-exhausted");
       return false;
     }
     if (!forceRecover && !forceRateLimit && !self.isAutoCompactEnabled()) {
     log.debug("runPreflightGuard: skipped (autoCompact setting OFF)");
+      tracePreflightGuard(self, "skipped", "auto-compact-disabled");
       return false;
     }
     if (self.isCompacting) {
       log.info("preflight: SKIPPED — isCompacting lock held (concurrent turn race avoided)");
+      tracePreflightGuard(self, "skipped", "concurrent-compaction-lock");
       return false;
     }
-    if (!self.provider) return false;
+    if (!self.provider) {
+      tracePreflightGuard(self, "skipped", "no-provider");
+      return false;
+    }
 
     const memoryReviewer = self.deps.memoryReviewer;
     if (!memoryReviewer) {
       log.warn("preflight: compact skipped because common Memory Reviewer is unavailable");
+      tracePreflightGuard(self, "skipped", "memory-reviewer-unavailable");
       return false;
     }
 
-    const { preflight, identity } = contextBudgetForCurrentRuntime(self);
-    if (!forceRecover && !forceRateLimit && preflight <= 0) return false;
+    const { preflight, identity, thresholdSource } = contextBudgetForCurrentRuntime(self);
+    if (!forceRecover && !forceRateLimit && preflight <= 0) {
+      tracePreflightGuard(self, "skipped", "invalid-preflight-threshold", {
+        threshold: preflight, thresholdSource, model: identity,
+      });
+      return false;
+    }
 
     const messagesBefore = self.history.getMessages();
     const requestProjection = projectionContext.estimateCurrent();
@@ -491,7 +536,12 @@ export async function runPreflightGuard(
     const contextTokensIn = self.lastContextInputTokens > 0
       ? self.lastContextInputTokens + pendingInputDelta
       : estimated;
-    if (!forceRecover && !forceRateLimit && estimated < preflight && contextTokensIn < preflight) return false;
+    if (!forceRecover && !forceRateLimit && estimated < preflight && contextTokensIn < preflight) {
+      tracePreflightGuard(self, "not-reached", "below-threshold", {
+        threshold: preflight, thresholdSource, model: identity, estimated, contextTokensIn,
+      });
+      return false;
+    }
     const triggerSource: Exclude<CompactTriggerSource, "manual"> = forceRecover
       ? "force-recover"
       : forceRateLimit
@@ -499,6 +549,9 @@ export async function runPreflightGuard(
         : estimated >= preflight
           ? "estimate"
           : "context-tokens";
+    tracePreflightGuard(self, "fired", triggerSource, {
+      threshold: preflight, thresholdSource, model: identity, estimated, contextTokensIn,
+    });
 
     self.isCompacting = true;
     // Notify renderer immediately so it can show a "자동 압축 중..." indicator
@@ -562,6 +615,7 @@ export async function runPreflightGuard(
         log.info("preflight: LLM compact returned NOOP (history within preserveRecentTokens) — no mutation");
         self.lastContextInputTokens = contextTokensIn;
         self.lastContextInputProjectionTokens = estimated;
+        self.tracer.step("COMPACTION_RESULT", { status: "noop", triggerSource });
         // NOOP ⇒ no compaction applied ⇒ no PostCompact (mirrors onCompactOccurred,
         // which only emits when applyBoundaryToSession runs).
         return false;
@@ -583,6 +637,13 @@ export async function runPreflightGuard(
       log.info(
         `preflight: APPLIED — removed=${compactResult.removedCount} estimatedAfter=${compactResult.estimatedAfter} compactNum=${self.compactNum}`,
       );
+      self.tracer.step("COMPACTION_RESULT", {
+        status: "applied",
+        triggerSource,
+        removedCount: compactResult.removedCount,
+        estimatedAfter: compactResult.estimatedAfter,
+        compactNum: self.compactNum,
+      });
       // ── #811 m2: PostCompact (NON-BLOCKING) ──
       // Fired AFTER auto-compact applied. OBSERVE-ONLY. Payload: before/after
       // message + token counts. After-counts are read post-mutation.
@@ -597,6 +658,7 @@ export async function runPreflightGuard(
       // LLM compact 실패 시 turn 자체는 계속 진행 — compact 미적용 history 로 stream attempt.
       // context_error 도달 시 stream-collector 의 safety net 이 사용자 안내 처리.
       log.warn(`preflight: LLM compact failed — ${(err as Error).message}. Delegating to context_error safety net.`);
+      self.tracer.step("COMPACTION_RESULT", { status: "error", triggerSource, message: (err as Error).message });
       return false;
     } finally {
       self.isCompacting = false;
