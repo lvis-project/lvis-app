@@ -15,6 +15,34 @@ function sha(character: string): string {
   return character.repeat(40);
 }
 
+/**
+ * Serve the rolling-window endpoints from fixed page and file maps.
+ *
+ * Shared because three cases need the same shape and a copy per case is how
+ * they drift: a fixture that answers `/pulls` one way and `/pulls/N/files`
+ * another stops testing the thing it was written for.
+ *
+ * `onPullsPage` observes which page numbers were requested, which is how the
+ * stop-condition cases tell "the scan ended here" from "the scan ran again" —
+ * the evaluation deliberately re-scans to detect a window that moved.
+ */
+function rollingWindowRequestPage(
+  pulls: Record<number, unknown[]>,
+  files: Record<number, unknown[]>,
+  onPullsPage?: (page: number) => void,
+) {
+  return (endpoint: string, parameters: { page?: number }) => {
+    if (endpoint === "repos/owner/repo/pulls") {
+      onPullsPage?.(parameters.page as number);
+      return pulls[parameters.page as number] ?? [];
+    }
+    const match = endpoint.match(/^repos\/owner\/repo\/pulls\/(\d+)(\/files)?$/);
+    if (!match) throw new Error("unexpected-endpoint");
+    const number = Number(match[1]);
+    return match[2] ? files[number]! : { changed_files: files[number]!.length };
+  };
+}
+
 describe("cluster scope API evaluation", () => {
   it("includes previous filenames so sensitive renames remain fail-closed", () => {
     expect(
@@ -128,15 +156,7 @@ describe("cluster scope API evaluation", () => {
       4: [{ status: "modified", filename: "src/boot/start.ts" }],
     };
 
-    const requestPage = (endpoint: string, parameters: { page?: number }) => {
-      if (endpoint === "repos/owner/repo/pulls") {
-        return pulls[parameters.page as keyof typeof pulls] ?? [];
-      }
-      const match = endpoint.match(/^repos\/owner\/repo\/pulls\/(\d+)(\/files)?$/);
-      if (!match) throw new Error("unexpected-endpoint");
-      const number = Number(match[1]) as keyof typeof files;
-      return match[2] ? files[number] : { changed_files: files[number].length };
-    };
+    const requestPage = rollingWindowRequestPage(pulls, files);
 
     expect(
       evaluateSensitiveRollingWindow({
@@ -262,6 +282,13 @@ describe("cluster scope API evaluation", () => {
       }),
     ).toThrow("pull-request-pages-saturated");
 
+    // A page whose entries are NOT descending is accepted. `updated_at` is a
+    // mutable sort key, so a pull touched while the scan paginates moves and
+    // an item can arrive out of sequence. Refusing that made an ordinary merge
+    // landing mid-scan fail CI, and it protected nothing: `updated_at >=
+    // merged_at` always, so reading until the window is exhausted cannot skip
+    // a pull whose `merged_at` is inside it, whatever order the pages arrive
+    // in. This case used to expect `pull-request-order-invalid`.
     expect(() =>
       evaluateSensitiveRollingWindow({
         repo: REPO,
@@ -273,7 +300,7 @@ describe("cluster scope API evaluation", () => {
           pull(2, "2026-07-12T04:00:00Z"),
         ],
       }),
-    ).toThrow("pull-request-order-invalid");
+    ).not.toThrow("pull-request-order-invalid");
 
     let listCalls = 0;
     expect(() =>
@@ -468,5 +495,79 @@ describe("comment-only exclusion from sensitive-cluster detection", () => {
         requestPage,
       }),
     ).toBe(true);
+  });
+
+  it("still finds every in-window pull when a page arrives out of order", () => {
+    // The shape observed on the real repository: one break, exactly at a page
+    // boundary, zero duplicates — a pull touched while the scan paginated, so
+    // page 2 opens with a NEWER timestamp than page 1 closed with.
+    //
+    // Refusing that is what used to fail. Accepting it only helps if the scan
+    // is still complete, which is the property this pins: the sensitive pull
+    // sitting AFTER the out-of-order entry must still be counted.
+    const pulls = {
+      1: [
+        { number: 1, merged_at: "2026-07-12T09:00:00Z", updated_at: "2026-07-12T10:00:00Z" },
+        { number: 2, merged_at: "2026-07-12T05:00:00Z", updated_at: "2026-07-12T06:00:00Z" },
+      ],
+      2: [
+        // Out of order: newer than page 1's tail, because it was just updated.
+        { number: 3, merged_at: "2026-07-12T07:00:00Z", updated_at: "2026-07-12T11:00:00Z" },
+        { number: 4, merged_at: "2026-07-12T04:00:00Z", updated_at: "2026-07-12T05:00:00Z" },
+      ],
+    };
+    const sensitive = [{ status: "modified", filename: "src/boot/start.ts" }];
+    const files = { 1: sensitive, 2: sensitive, 3: sensitive, 4: sensitive };
+
+    const requestPage = rollingWindowRequestPage(pulls, files);
+
+    expect(
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: "2026-07-01T00:00:00Z",
+        threshold: 4,
+        requestPage,
+        pageSize: 2,
+      }),
+    ).toEqual({ count: 4, hit: true });
+  });
+
+  it("stops on the page's OLDEST entry, not on its last one", () => {
+    // Those differ exactly when the order broke. Keying the stop on the last
+    // entry would end the scan while an in-window pull was still unread on the
+    // next page — the completeness bug that swapping the assertion for a
+    // minimum is there to avoid.
+    const pulls = {
+      1: [
+        { number: 1, merged_at: "2026-07-12T09:00:00Z", updated_at: "2026-07-12T10:00:00Z" },
+        // Older than the window: the page has reached past it.
+        { number: 2, merged_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T01:00:00Z" },
+        // …but the LAST entry is inside it, so a last-entry stop would page on.
+        { number: 3, merged_at: "2026-07-12T08:00:00Z", updated_at: "2026-07-12T09:00:00Z" },
+      ],
+      2: [{ number: 4, merged_at: "2026-07-12T07:00:00Z", updated_at: "2026-07-12T08:00:00Z" }],
+    };
+    const sensitive = [{ status: "modified", filename: "src/boot/start.ts" }];
+    const files = { 1: sensitive, 2: sensitive, 3: sensitive, 4: sensitive };
+    // Page NUMBERS, not request count: the evaluation runs the scan twice — the
+    // second pass re-derives the candidates and fails the run if the window
+    // moved underneath it — so counting requests would count that revalidation.
+    const requestedPages = new Set<number>();
+
+    const requestPage = rollingWindowRequestPage(pulls, files, (page) =>
+      requestedPages.add(page),
+    );
+
+    evaluateSensitiveRollingWindow({
+      repo: REPO,
+      since: "2026-07-01T00:00:00Z",
+      threshold: 99,
+      requestPage,
+      pageSize: 3,
+    });
+
+    // Only page 1: its oldest entry is outside the window, so there is nothing
+    // left to find however the entries were ordered within it.
+    expect([...requestedPages]).toEqual([1]);
   });
 });
