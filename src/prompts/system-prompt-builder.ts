@@ -163,6 +163,7 @@ export class SystemPromptBuilder {
     activeToolNames?: Set<string>;
     includeBuiltins: boolean;
     includeMcp: boolean;
+    includeEgress: boolean;
     /** Tool-Level Deferral — retained for persisted/test scope compatibility. */
     deferral?: boolean;
   } | null = null;
@@ -297,6 +298,7 @@ export class SystemPromptBuilder {
     activeToolNames?: Set<string>;
     includeBuiltins: boolean;
     includeMcp: boolean;
+    includeEgress: boolean;
     deferral?: boolean;
   } | null): {
     sources: Array<{ id: number; label: string; chars: number; estTokens: number }>;
@@ -360,6 +362,7 @@ export class SystemPromptBuilder {
     activeToolNames?: Set<string>;
     includeBuiltins: boolean;
     includeMcp: boolean;
+    includeEgress: boolean;
     deferral?: boolean;
   } | null): void {
     this.toolScope = scope;

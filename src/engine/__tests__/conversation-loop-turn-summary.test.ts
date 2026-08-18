@@ -102,6 +102,7 @@ function visibleToolSchemas(toolRegistry: ToolRegistry): ToolSchema[] {
     activePluginIds: new Set<string>(),
     includeBuiltins: true,
     includeMcp: false,
+    includeEgress: true,
   }).map((schema) => ({
     name: schema.name,
     description: schema.description,
