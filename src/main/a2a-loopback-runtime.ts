@@ -8,7 +8,7 @@ import {
 } from "../api/a2a-router.js";
 import {
   A2ASubAgentHandler,
-  type A2AMutationAuthorizer,
+  type A2AWireAuthorizer,
   type A2ATaskLifecycleAuditEvent,
 } from "../api/a2a-subagent-handler.js";
 import {
@@ -246,12 +246,12 @@ export async function createA2ALoopbackRuntime(
     },
   });
 
-  const authorizeMutation: A2AMutationAuthorizer = async (descriptor) => {
+  const authorizeOperation: A2AWireAuthorizer = async (descriptor) => {
     if (!options.approveAgentAction) return false;
     return Boolean(await options.approveAgentAction({
       toolName: `a2a-${descriptor.operation}`,
       args: { operation: descriptor.operation, handlerId: descriptor.handlerId },
-      reason: options.approvalReason ?? "An external A2A client requested a sub-agent mutation. Do you want to allow it?",
+      reason: options.approvalReason ?? "An external A2A client requested a sub-agent operation. Do you want to allow it?",
       trustOrigin: options.wireTrustOrigin ?? "a2a-loopback",
     }));
   };
@@ -270,7 +270,7 @@ export async function createA2ALoopbackRuntime(
       binding: buildBinding(handlerId, profile, options.project),
       runner,
       store,
-      authorizeMutation,
+      authorizeOperation,
       audit,
     });
   });

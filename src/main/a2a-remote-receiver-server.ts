@@ -119,7 +119,7 @@ async function startForBoot(
     transformHandler: (handler) => remote.wrapReceiver(handler),
     advertisedOrigin: receiverPublicOrigin,
     wireTrustOrigin: "a2a-remote-wire",
-    approvalReason: "[A2A Wire: Remote] A trusted remote caller requested a sub-agent mutation. Do you want to allow it?",
+    approvalReason: "[A2A Wire: Remote] A trusted remote caller requested a sub-agent operation. Do you want to allow it?",
     auditSessionId: "a2a-remote-wire",
     auditScope: "a2a-remote-wire",
   });
