@@ -498,7 +498,7 @@ describe("hostApi marshalling — the surface a process boundary must carry", ()
       ["storage.readJson", await hostApi.storage.readJson("surface-probe.json")],
       ["storage.readText", await hostApi.storage.readText("surface-probe.json")],
       ["getInstalledPluginIds", hostApi.getInstalledPluginIds()],
-      ["getSecret", hostApi.getSecret("surface-probe-secret")],
+      ["getSecret", await hostApi.getSecret("surface-probe-secret")],
       ["config.get", hostApi.config.get("surface-probe-key")],
       ["hasRoutineBySource", await hostApi.hasRoutineBySource("surface-probe")],
     ];
@@ -510,5 +510,24 @@ describe("hostApi marshalling — the surface a process boundary must carry", ()
       ).toBe(true);
       expect(describeNonJson(value, `${path}()`)).toBeNull();
     }
+  });
+
+  it("getSecret answers asynchronously, because a synchronous answer cannot cross a process", async () => {
+    // Not a style preference. `SharedArrayBuffer` + `Atomics.wait` shares
+    // memory between THREADS, not processes, so there is no mechanism that
+    // makes a synchronous cross-process call work — and pushing a snapshot of
+    // the secrets into the child up front is the opposite of what the gate is
+    // for. The signature is the part that has to survive the boundary; the
+    // host implementation is still synchronous inside.
+    //
+    // Reverting it would compile everywhere `await` is already written, since
+    // `await` on a plain value yields that value. This is what notices.
+    const hostApi = await buildRealHostApi(
+      harness,
+      resources.makeTmpDir("lvis-hostapi-getsecret-"),
+    );
+    const returned = hostApi.getSecret("surface-probe-secret");
+    expect(returned).toBeInstanceOf(Promise);
+    await expect(returned).resolves.toBeNull();
   });
 });
