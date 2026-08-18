@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { deriveSandboxWritePaths } from "../sandbox-write-jail.js";
 import { canonicalizePathForMatch } from "../sensitive-paths.js";
 import { PermissionTestResources } from "./test-resources.js";
+import { resolvePluginWritableRoot } from "../../plugins/plugin-storage-layout.js";
 
 const resources = new PermissionTestResources();
 
@@ -89,5 +90,20 @@ describe("deriveSandboxWritePaths", () => {
     const result = deriveSandboxWritePaths({ allowedDirectories: [dotted] });
     expect(result).toEqual([canonicalizePathForMatch(dotted)]);
     expect(result[0]).toBe(canonicalizePathForMatch(base));
+  });
+
+  it("does not admit the owner plugin's installed bundle into the write jail", () => {
+    // Producers derive the owner root via resolvePluginWritableRoot, so the
+    // jail covers `<pluginRoot>/data` only. `dist/` — the module the next load
+    // imports into the Electron main process — stays outside it.
+    const cwd = resources.makeTmpDir("lvis-jail-bundle-cwd-");
+    const writableRoot = resolvePluginWritableRoot("lvis-plugin-jail-fixture");
+    const result = deriveSandboxWritePaths({
+      ownerPluginSandboxRoot: writableRoot,
+      allowedDirectories: [cwd],
+    });
+    const pluginRoot = join(writableRoot, "..");
+    expect(result).not.toContain(canonicalizePathForMatch(pluginRoot));
+    expect(result).not.toContain(canonicalizePathForMatch(join(pluginRoot, "dist")));
   });
 });

@@ -1,6 +1,5 @@
 import type { ApprovalDecision } from "../permissions/approval-gate.js";
 import { randomUUID } from "node:crypto";
-import { resolve as pathResolve } from "node:path";
 import type { PermissionCheckResult } from "../permissions/permission-manager.js";
 import type { ToolExecutionAuditMetadata } from "../audit/audit-schema.js";
 import { maskSensitiveData } from "../audit/dlp-filter.js";
@@ -22,7 +21,7 @@ import {
 import { TOOL_RESULT_CHUNK_READER_METADATA_KEY } from "./tool-result-chunk.js";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
-import { lvisHome } from "../shared/lvis-home.js";
+import { resolvePluginWritableRoot } from "../plugins/plugin-storage-layout.js";
 import type { Tool } from "./base.js";
 import type { HookRunner } from "../hooks/hook-runner.js";
 import type { HostShellExecutionPlan } from "../permissions/host-shell-execution-plan.js";
@@ -612,9 +611,11 @@ export async function executeAuthorizedToolInvocation(
     extraAllowedDirectories: [...new Set(invocationRuntimeAllowedDirectories)],
     // Owner plugin sandbox root — same derivation the reviewer uses
     // (executor permission path). Plugin-owned tools confine their OS
-    // write-jail to `~/.lvis/plugins/<pluginId>/`; builtins pass undefined.
+    // write-jail to `~/.lvis/plugins/<pluginId>/data`, the plugin's own
+    // writable state, NOT the plugin root: the root holds the bundle the next
+    // load imports into the main process. Builtins pass undefined.
     ...(tool.pluginId
-      ? { ownerPluginSandboxRoot: pathResolve(lvisHome(), "plugins", tool.pluginId) }
+      ? { ownerPluginSandboxRoot: resolvePluginWritableRoot(tool.pluginId) }
       : {}),
     ...(hostShellExecutionPlan ? { hostShellExecutionPlan } : {}),
     ...(hostShellExecutionPermit ? { hostShellExecutionPermit } : {}),
