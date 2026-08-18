@@ -48,6 +48,11 @@ import {
 const TEXT_MODE = "text/plain";
 const CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
 const CHILD_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]{1,256}$/;
+/**
+ * Upper bound on remembered disclosure grants. The receiver is long-lived, so
+ * the ledger evicts oldest-first rather than growing with the task store.
+ */
+const DISCLOSURE_CONSENT_CAPACITY = 256;
 const SEND_KEYS = new Set(["tenant", "message", "configuration", "metadata"]);
 const SEND_CONFIGURATION_KEYS = new Set([
   "acceptedOutputModes",
@@ -375,21 +380,32 @@ export interface A2ATaskLifecycleAuditEvent {
   taskId?: string;
   messageId?: string;
   detectionCount?: number;
-  operation?: A2AMutationOperation;
+  operation?: A2AWireOperation;
 }
 
-export type A2AMutationOperation = "send-message" | "cancel-task";
+type A2AMutationOperation = "send-message" | "cancel-task";
 
-/** Host-owned, redacted description of a requested wire mutation. */
-export interface A2AMutationAuthorizationDescriptor {
-  operation: A2AMutationOperation;
+/**
+ * Wire operations that disclose stored task content — full message history and
+ * sub-agent artifacts — without changing anything. The payload is exactly what
+ * a user would refuse to hand to an untrusted peer, so disclosure carries the
+ * same consent obligation as a mutation.
+ */
+type A2AReadOperation = "get-task" | "list-tasks";
+
+/** Every wire operation that needs explicit user authority before it runs. */
+export type A2AWireOperation = A2AMutationOperation | A2AReadOperation;
+
+/** Host-owned, redacted description of a requested wire operation. */
+export interface A2AWireAuthorizationDescriptor {
+  operation: A2AWireOperation;
   handlerId: string;
   taskId?: string;
   messageId?: string;
 }
 
-export type A2AMutationAuthorizer = (
-  descriptor: Readonly<A2AMutationAuthorizationDescriptor>,
+export type A2AWireAuthorizer = (
+  descriptor: Readonly<A2AWireAuthorizationDescriptor>,
 ) => boolean | Promise<boolean>;
 
 export interface CreateA2ASubAgentHandlerOptions {
@@ -398,7 +414,7 @@ export interface CreateA2ASubAgentHandlerOptions {
   binding: A2AWireHostBinding;
   runner: A2ASubAgentLifecycleRunner;
   store: A2ATaskStore;
-  authorizeMutation: A2AMutationAuthorizer;
+  authorizeOperation: A2AWireAuthorizer;
   makeId?: () => string;
   audit?: (event: A2ATaskLifecycleAuditEvent) => void;
 }
@@ -445,6 +461,14 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
   private readonly pendingTaskMutations = new Map<string, PendingTaskMutation>();
   private readonly taskQueues = new Map<string, Promise<void>>();
   private readonly expiryRetries = new Map<string, ExpiryRetryState>();
+  /**
+   * Task ids the user has already consented to disclose on this wire, newest
+   * last. Consent is established by approving a mutation on the task or by
+   * approving an explicit `tasks/get`; it lets the caller poll the task it was
+   * granted without re-prompting on every poll. Deliberately process-local:
+   * a restart drops every grant and the next read prompts again.
+   */
+  private readonly disclosureConsent = new Set<string>();
   private expiryTimer: ReturnType<typeof setTimeout> | undefined;
   private expiryQueue: Promise<void> = Promise.resolve();
   private expirySweepQueued = false;
@@ -708,7 +732,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
   private reserveTaskMutation<T>(
     taskId: string,
     fingerprint: PendingTaskMutation["fingerprint"],
-    descriptor: Omit<A2AMutationAuthorizationDescriptor, "handlerId">,
+    descriptor: Omit<A2AWireAuthorizationDescriptor, "handlerId">,
     operation: () => Promise<T>,
   ): Promise<T> {
     const existing = this.pendingTaskMutations.get(taskId);
@@ -740,7 +764,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
       taskId?: string;
       messageId?: string;
       detectionCount?: number;
-      operation?: A2AMutationOperation;
+      operation?: A2AWireOperation;
     } = {},
   ): void {
     try {
@@ -757,7 +781,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
   }
 
   private rejectConcurrentMutation(
-    descriptor: Omit<A2AMutationAuthorizationDescriptor, "handlerId">,
+    descriptor: Omit<A2AWireAuthorizationDescriptor, "handlerId">,
   ): never {
     this.audit("consent-denied", "dropped", {
       operation: descriptor.operation,
@@ -767,8 +791,8 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     throw new A2AHandlerError(A2AHostJsonRpcErrorDefinition.OPERATION_REJECTED);
   }
 
-  private async authorizeMutation(
-    descriptor: Omit<A2AMutationAuthorizationDescriptor, "handlerId">,
+  private async authorizeOperation(
+    descriptor: Omit<A2AWireAuthorizationDescriptor, "handlerId">,
   ): Promise<void> {
     const request = Object.freeze({
       operation: descriptor.operation,
@@ -776,7 +800,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
       ...(descriptor.taskId ? { taskId: descriptor.taskId } : {}),
       ...(descriptor.messageId ? { messageId: descriptor.messageId } : {}),
     });
-    const authorize = this.options.authorizeMutation as A2AMutationAuthorizer | undefined;
+    const authorize = this.options.authorizeOperation as A2AWireAuthorizer | undefined;
     let allowed = false;
     try {
       allowed = typeof authorize === "function" && (await authorize(request)) === true;
@@ -790,6 +814,32 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
       ...(request.messageId ? { messageId: request.messageId } : {}),
     });
     throw new A2AHandlerError(A2AHostJsonRpcErrorDefinition.OPERATION_REJECTED);
+  }
+
+  /**
+   * Record that the user has consented to disclose one task to this wire.
+   * Called only where an approval actually happened (or where the caller's own
+   * `message/send` produced the task), never as a side effect of a read.
+   */
+  private grantDisclosure(taskId: string): void {
+    this.disclosureConsent.delete(taskId);
+    this.disclosureConsent.add(taskId);
+    while (this.disclosureConsent.size > DISCLOSURE_CONSENT_CAPACITY) {
+      const oldest = this.disclosureConsent.values().next();
+      if (oldest.done) break;
+      this.disclosureConsent.delete(oldest.value);
+    }
+  }
+
+  /**
+   * Gate one task's content behind consent already granted for that exact task,
+   * or behind a fresh prompt. Callers must resolve task availability first so a
+   * caller guessing ids cannot turn unknown ids into user-visible prompts.
+   */
+  private async authorizeDisclosure(taskId: string): Promise<void> {
+    if (this.disclosureConsent.has(taskId)) return;
+    await this.authorizeOperation({ operation: "get-task", taskId });
+    this.grantDisclosure(taskId);
   }
 
   private auditUnavailableTask(
@@ -1201,7 +1251,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
           return { duplicate: true as const, record: admission.record };
         }
         try {
-          await this.authorizeMutation(descriptor);
+          await this.authorizeOperation(descriptor);
           return {
             duplicate: false as const,
             started: this.startInitialTask(parsed, admission.admissionId),
@@ -1259,7 +1309,7 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
           parsed.message.messageId,
         );
         if (preflight.duplicate) return { duplicate: true, record: preflight.record };
-        await this.authorizeMutation(descriptor);
+        await this.authorizeOperation(descriptor);
         const revalidated = await this.options.store.lookupTask(this.id, taskId);
         if (revalidated.ok) await this.reconcile(revalidated.record);
         const committed = await this.options.store.beginContinuation(input);
@@ -1314,11 +1364,16 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
       this.auditUnavailableTask(lookup.reason, parsed.id);
       throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_FOUND);
     }
+    await this.authorizeDisclosure(parsed.id);
     return projectTask((await this.reconcile(lookup.record)).task, parsed.historyLength);
   }
 
   private async listTasks(params: A2AJsonObject): Promise<A2ADirectJsonRpcResult> {
     const parsed = parseList(params);
+    // Enumeration is never covered by a per-task grant: it is the primitive
+    // that turns "holds the bearer" into "reads every stored transcript", so
+    // every call is authorized on its own.
+    await this.authorizeOperation({ operation: "list-tasks" });
     const records = await this.options.store.list(this.id, {
       ...(parsed.contextId ? { contextId: parsed.contextId } : {}),
       ...(parsed.statusTimestampAfter
@@ -1364,12 +1419,18 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     }
     let record = await this.reconcile(lookup.record);
     let state = record.task.status.state;
-    if (state === A2ATaskState.CANCELED) return record.task;
+    if (state === A2ATaskState.CANCELED) {
+      // Idempotent re-cancel returns the stored task, so it is a disclosure
+      // and must not be a way around the read gate.
+      await this.authorizeDisclosure(taskId);
+      return record.task;
+    }
     if (isA2ATerminalTaskState(state)) {
       this.audit("task-not-cancelable", "dropped", { taskId });
       throw new A2AHandlerError(A2AJsonRpcErrorDefinition.TASK_NOT_CANCELABLE);
     }
-    await this.authorizeMutation({ operation: "cancel-task", taskId });
+    await this.authorizeOperation({ operation: "cancel-task", taskId });
+    this.grantDisclosure(taskId);
 
     const revalidated = await this.options.store.lookupTask(this.id, taskId);
     if (!revalidated.ok) {
@@ -1419,8 +1480,13 @@ export class A2ASubAgentHandler implements A2ARequestHandler {
     params: A2AJsonObject,
   ): Promise<A2ADirectJsonRpcResult> {
     switch (method) {
-      case A2AJsonRpcMethod.SEND_MESSAGE:
-        return { task: await this.sendMessage(params) };
+      case A2AJsonRpcMethod.SEND_MESSAGE: {
+        const task = await this.sendMessage(params);
+        // The caller's own send produced this task and the user approved it;
+        // polling that one task for its result needs no further prompt.
+        this.grantDisclosure(task.id);
+        return { task };
+      }
       case A2AJsonRpcMethod.GET_TASK:
         return await this.getTask(params);
       case A2AJsonRpcMethod.LIST_TASKS:
