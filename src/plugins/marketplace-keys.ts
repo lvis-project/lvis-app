@@ -7,19 +7,25 @@
  */
 import type { PublicKeyInput } from "./envelope-verifier.js";
 
-// Key rotation in progress: the marketplace server is migrating its plugin
-// signing key from `poc-v1` (proof-of-concept) to `prod-v1` (production).
-// Both are active trust anchors during the transition — most catalog plugins
-// are still signed with `poc-v1`, while newer re-publishes (e.g. `meeting`)
-// carry `prod-v1`. `verifyEnvelope` accepts any key in this map, so keeping
-// both lets either generation install. Values are the base64 of the raw
-// 32-byte ed25519 public keys. Retire `poc-v1` only after every catalog
-// artifact has been re-signed with `prod-v1` (and any offline-cache TTL
-// referencing it has expired). NOTE: commit `prod-v1.pub` to
-// lvis-marketplace/schemas/keys/ so this anchor has an out-of-band source
-// (the repo currently ships only poc-v1.pub).
+// `prod-v1` is the sole trust anchor. Values are base64 of the raw 32-byte
+// ed25519 public key.
+//
+// `poc-v1` was removed here. Its PRIVATE half is public — it shipped in the
+// marketplace repo's test fixtures and was exposed again in a merged public PR
+// — so while it stayed in this map anyone able to serve an artifact could sign
+// one that every LVIS build accepted. `verifyEnvelope` accepts ANY key in this
+// map, which is what made a single burned anchor sufficient.
+//
+// It could only be dropped once nothing installable still needed it. The
+// catalog was re-signed to `prod-v1` (804 of 860 version rows); the 56 that
+// remain on `poc-v1` have no artifact file on disk at all — archived plugins
+// (`email`, `calendar`) and pre-rename versions (`pageindex`,
+// `work-proactive`) — so their download 404s before any signature check runs.
+// Verified against the production database and storage before this change.
+//
+// Adding a second anchor again is a rotation, not a convenience: ship both for
+// an overlap window, re-sign the catalog head, then remove the old one.
 export const MARKETPLACE_PUBLIC_KEYS: Readonly<Record<string, string>> = Object.freeze({
-  "poc-v1": "Qm3FUAMek2r5OkXCurgX6dNYSqiT1GRnjb5fWfuOoao=",
   "prod-v1": "JnmneLJZ3G9TiC+JU0naTDlOdIHC07PB+BToCIarL8E=",
 });
 
