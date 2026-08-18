@@ -22,7 +22,9 @@ export type TraceStepName =
   | "ROUND_COMMIT"          // 10. Commit assistant_round
   | "POST_TURN"             // 11. PostTurnHookChain.run
   | "GUIDANCE_INJECTED"     // out-of-band — mid-stream "guide" utterance consumed at round boundary
-  | "LENGTH_CONTINUATION";  // out-of-band — finish_reason=length truncation -> continue partial answer verbatim (vLLM continue_final_message)
+  | "LENGTH_CONTINUATION"   // out-of-band — finish_reason=length truncation -> continue partial answer verbatim (vLLM continue_final_message)
+  | "PREFLIGHT_GUARD"       // out-of-band — runPreflightGuard decision: fired / skipped / not-reached, and why
+  | "COMPACTION_RESULT";    // out-of-band — outcome of an LLM compaction triggered by PREFLIGHT_GUARD: applied / noop / error
 
 export interface TraceEntry {
   ts: string;
