@@ -573,6 +573,17 @@ describe("setAssistantError — Issue #911 systemNotice option", () => {
     const last = out[out.length - 1] as Extract<ChatEntry, { kind: "assistant" }>;
     expect(last.systemNotice).toBeUndefined();
   });
+
+  it("live error path never stamps restored — the marker is replay-only (Issue #2113)", () => {
+    const out = setAssistantError(
+      [{ kind: "user", text: "hi" }],
+      "응답 스트림이 끊겼습니다.",
+      "",
+      "stream-error",
+    );
+    const last = out[out.length - 1] as Extract<ChatEntry, { kind: "assistant" }>;
+    expect(last.restored).toBeUndefined();
+  });
 });
 
 /**

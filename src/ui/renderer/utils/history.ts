@@ -158,6 +158,11 @@ export function historyToEntries(
       // back to Date.now() — UI then renders the load time, but that's
       // acceptable for legacy data since the timestamp wasn't recorded.
       out = finalizeStreamingAssistant(out, visibleText, {
+        // Issue #2113 — every assistant entry rebuilt here is a restored
+        // one. This is the single stamping point: AssistantCard reads the
+        // flag to soften a replayed systemNotice banner so an old error
+        // does not re-present as a fresh one on session reload.
+        restored: true,
         ...(m.createdAt !== undefined ? { createdAt: m.createdAt } : {}),
         ...(isReplayableSystemNotice(m.systemNotice)
           ? { systemNotice: m.systemNotice }
