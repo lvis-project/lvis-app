@@ -297,7 +297,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // (addRule/removeRule/setMode): foreign frames are rejected + audited, and a
   // synthetic submission without an active user gesture is refused.
   ipcMain.handle(PERMISSIONS.sandboxWindowsInstall, async (e, payload: unknown): Promise<SandboxWindowsInstallResult | typeof UNAUTHORIZED_FRAME | { ok: false; error: string; message: string }> => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.sandboxWindowsInstall, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.sandboxWindowsInstall, e); return UNAUTHORIZED_FRAME; }
     const body = payloadRecord(payload);
     const intent = requireUserKeyboardIntent(body.intent);
     if (!intent.ok) return intent;
@@ -308,7 +308,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(PERMISSIONS.setMode, async (e, payload: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.setMode, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.setMode, e); return UNAUTHORIZED_FRAME; }
     const body = payloadRecord(payload);
     const intent = requireUserKeyboardIntent(body.intent);
     if (!intent.ok) return intent;
@@ -327,7 +327,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(PERMISSIONS.addRule, async (e, payload: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.addRule, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.addRule, e); return UNAUTHORIZED_FRAME; }
     const body = payloadRecord(payload);
     const intent = requireUserKeyboardIntent(body.intent);
     if (!intent.ok) return intent;
@@ -359,7 +359,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(PERMISSIONS.removeRule, async (e, payload: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.removeRule, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.removeRule, e); return UNAUTHORIZED_FRAME; }
     const body = payloadRecord(payload);
     const intent = requireUserKeyboardIntent(body.intent);
     if (!intent.ok) return intent;
@@ -388,7 +388,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
 
   // lvis:approval:request direction is main→renderer (webContents.send) — no ipcMain.handle needed
   ipcMain.handle(PERMISSIONS.approvalRespond, (e, decision: ApprovalDecision) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.approvalRespond, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.approvalRespond, e); return UNAUTHORIZED_FRAME; }
     const snapshot = approvalGate?.getRequestSnapshot?.(decision.requestId);
     let honoredDecision: ApprovalDecision | null = null;
     if (approvalGate) {
@@ -522,7 +522,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     PERMISSIONS.dirDispatch,
     async (e, args: { rawArgs: string }) => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, PERMISSIONS.dirDispatch, e);
         return UNAUTHORIZED_FRAME;
       }
@@ -561,7 +561,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     PERMISSIONS.reviewerDispatch,
     async (e, args: { rawArgs: string }) => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, PERMISSIONS.reviewerDispatch, e);
         return UNAUTHORIZED_FRAME;
       }
@@ -694,7 +694,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
         acknowledgeWarnings?: boolean;
       },
     ) => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, PERMISSIONS.deferredResolve, e);
         return UNAUTHORIZED_FRAME;
       }
@@ -892,7 +892,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(PERMISSIONS.policySet, async (e, payload: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.policySet, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.policySet, e); return UNAUTHORIZED_FRAME; }
     const body = payloadRecord(payload);
     const intent = requireUserKeyboardIntent(body.intent);
     if (!intent.ok) return intent;
@@ -917,7 +917,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // ── User-Approval Store handlers ──────────────────────────
 
   ipcMain.handle(PERMISSIONS.userApprovalRecord, async (e, payload: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRecord, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRecord, e); return UNAUTHORIZED_FRAME; }
     const body = payloadRecord(payload);
     // Issue #798: parity with peer mutating handlers (addRule, removeRule,
     // setMode, dirDispatch, reviewerDispatch, deferredResolve, policySet).
@@ -1017,7 +1017,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(PERMISSIONS.userApprovalRevoke, async (e, payload: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRevoke, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalRevoke, e); return UNAUTHORIZED_FRAME; }
     // Issue #798: revoke is destructive (forces re-approval). Gate on
     // user-keyboard intent for parity with peer mutating handlers.
     //

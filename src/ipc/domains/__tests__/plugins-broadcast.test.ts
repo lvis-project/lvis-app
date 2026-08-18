@@ -10,6 +10,7 @@ import {
   it,
   vi,
 } from "vitest";
+import { hostFrameEvent } from "../../../__tests__/test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const cleanupRoots: string[] = [];
@@ -47,7 +48,7 @@ vi.mock("electron", () => ({
 function invoke(channel: string, ...args: unknown[]): Promise<unknown> {
   const fn = handlers.get(channel);
   if (!fn) throw new Error(`No handler registered for: ${channel}`);
-  return Promise.resolve(fn(null, ...args));
+  return Promise.resolve(fn(hostFrameEvent(), ...args));
 }
 
 function makeWindow(options: { destroyed?: boolean } = {}) {

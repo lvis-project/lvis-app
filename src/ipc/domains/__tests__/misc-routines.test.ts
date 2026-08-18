@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ROUTINES_V2 } from "../../../shared/ipc-channels.js";
+import { hostFrameEvent } from "../../../__tests__/test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
@@ -64,7 +65,7 @@ async function setup(
 async function invoke(channel: string, ...args: unknown[]) {
   const fn = handlers.get(channel);
   if (!fn) throw new Error(`No handler registered for ${channel}`);
-  return await fn(null, ...args);
+  return await fn(hostFrameEvent(), ...args);
 }
 
 describe("routine pending results", () => {

@@ -102,7 +102,6 @@
     "src/permissions/__tests__/hostapi-effect-recorder.test.ts": 1,
     "src/permissions/__tests__/permission-manager-legacy-null-verdict.test.ts": 5,
     "src/permissions/__tests__/permission-manager-reviewer.test.ts": 4,
-    "src/permissions/__tests__/permission-mode-apply.test.ts": 1,
     "src/permissions/__tests__/permission-slash.test.ts": 1,
     "src/permissions/__tests__/permissions-store.test.ts": 1,
     "src/permissions/__tests__/plugin-operation-grant.test.ts": 4,
