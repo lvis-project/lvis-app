@@ -6,7 +6,51 @@
 export const SUGGESTED_REPLIES_OPEN = "<suggested_replies>";
 export const SUGGESTED_REPLIES_CLOSE = "</suggested_replies>";
 
-const BLOCK_REGEX = /<suggested_replies>([\s\S]*?)<\/suggested_replies>/;
+/**
+ * Tag matching is whitespace-tolerant on purpose.
+ *
+ * Models drift on the exact spelling — `< suggested_replies>` with a space
+ * after the bracket is the observed one. Matching the literal only meant the
+ * open tag was never found, so the filter passed the whole block through and
+ * the user saw the raw markup, closing tag and all, instead of reply chips.
+ * A one-character deviation should degrade the suggestions, not the transcript.
+ *
+ * The three consumers (parse, strip, stream) share these definitions so a
+ * spelling one accepts can never be a spelling another leaks.
+ */
+const OPEN_TAG = String.raw`<\s*suggested_replies\s*>`;
+const CLOSE_TAG = String.raw`<\s*\/\s*suggested_replies\s*>`;
+
+const BLOCK_REGEX = new RegExp(`${OPEN_TAG}([\\s\\S]*?)${CLOSE_TAG}`);
+const CLOSED_BLOCK_GLOBAL = new RegExp(`\\n*${OPEN_TAG}[\\s\\S]*?${CLOSE_TAG}\\s*`, "g");
+const TRAILING_ORPHAN = new RegExp(`\\n*${OPEN_TAG}[\\s\\S]*$`);
+const OPEN_TAG_ANYWHERE = new RegExp(OPEN_TAG);
+
+/**
+ * Longest tail of `text` that could still turn into an opening tag.
+ *
+ * The literal version asked "how much of this suffix is a prefix of the exact
+ * tag". With a tolerant tag there is no single string to prefix-match, so the
+ * question becomes whether the suffix could still *grow into* one: it must
+ * start with `<`, and its non-whitespace characters must so far spell the tag.
+ * Bounded so a stray `<` followed by a wall of whitespace cannot make the
+ * filter buffer without limit.
+ */
+const MAX_PARTIAL_OPEN_TAG = 64;
+
+function couldGrowIntoOpenTag(candidate: string): boolean {
+  if (!candidate.startsWith("<")) return false;
+  const compact = candidate.replace(/\s+/g, "");
+  return SUGGESTED_REPLIES_OPEN.startsWith(compact);
+}
+
+function partialOpenTagLength(text: string): number {
+  const max = Math.min(text.length, MAX_PARTIAL_OPEN_TAG);
+  for (let i = max; i > 0; i--) {
+    if (couldGrowIntoOpenTag(text.slice(text.length - i))) return i;
+  }
+  return 0;
+}
 
 /** Extract suggested replies from a complete assistant message. */
 export function parseSuggestedReplies(raw: string): string[] {
@@ -31,8 +75,8 @@ export function parseSuggestedReplies(raw: string): string[] {
  * this completes the same guarantee at the persistence layer.
  */
 export function stripSuggestedReplies(raw: string): string {
-  const closed = raw.replace(/\n*<suggested_replies>[\s\S]*?<\/suggested_replies>\s*/g, "");
-  const noTrailingOrphan = closed.replace(/\n*<suggested_replies>[\s\S]*$/, "");
+  const closed = raw.replace(CLOSED_BLOCK_GLOBAL, "");
+  const noTrailingOrphan = closed.replace(TRAILING_ORPHAN, "");
   return noTrailingOrphan.trimEnd();
 }
 
@@ -68,7 +112,8 @@ export function createStreamingFilter(): StreamingFilter {
         return "";
       }
       pending += chunk;
-      const openIdx = pending.indexOf(SUGGESTED_REPLIES_OPEN);
+      const openMatch = OPEN_TAG_ANYWHERE.exec(pending);
+      const openIdx = openMatch ? openMatch.index : -1;
       if (openIdx >= 0) {
         const visible = pending.slice(0, openIdx).replace(/\n*$/, "");
         blockBuffer = pending.slice(openIdx);
@@ -76,7 +121,7 @@ export function createStreamingFilter(): StreamingFilter {
         inBlock = true;
         return visible;
       }
-      const heldBack = longestSuffixPrefix(pending, SUGGESTED_REPLIES_OPEN);
+      const heldBack = partialOpenTagLength(pending);
       if (heldBack > 0) {
         const visible = pending.slice(0, pending.length - heldBack);
         pending = pending.slice(pending.length - heldBack);
@@ -93,12 +138,4 @@ export function createStreamingFilter(): StreamingFilter {
       return { trailing: pending, suggestedReplies: [] };
     },
   };
-}
-
-function longestSuffixPrefix(text: string, pattern: string): number {
-  const max = Math.min(text.length, pattern.length - 1);
-  for (let i = max; i > 0; i--) {
-    if (pattern.startsWith(text.slice(text.length - i))) return i;
-  }
-  return 0;
 }
