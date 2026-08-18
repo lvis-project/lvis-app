@@ -611,6 +611,8 @@ export const frMessages: Record<string, string> = {
   "be_permissionModeApply.auditChainNotReady": "La chaîne d’audit des autorisations n’a pas été initialisée.",
   "be_permissionModeApply.auditWriteFailed": "Échec de l'écriture de l'entrée d'audit des autorisations: {message}",
   "be_permissionModeApply.durableModeDenied": "Le changement de mode d'autorisation permanent a été annulé.",
+  "be_permissionModeApply.externalDurableForbidden": "Un changement de mode d'autorisation demandé depuis l'extérieur de l'application s'applique uniquement à la session en cours et ne peut pas être enregistré de façon permanente.",
+  "be_permissionModeApply.externalModeForbidden": "Le mode d'autorisation « {mode} » ne peut pas être défini depuis l'extérieur de l'application. Modifiez-le dans les paramètres d'autorisation de l'application.",
   "be_pluginExpansion.activated": "Plugin '{pluginId}' activé.",
   "be_pluginExpansion.missingPluginId": "Erreur request_plugin: pluginId (chaîne) requis. Disponible: {available}",
   "be_pluginExpansion.noneAvailable": "(aucun)",

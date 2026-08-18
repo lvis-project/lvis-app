@@ -609,6 +609,8 @@ export const deMessages: Record<string, string> = {
   "be_permissionModeApply.auditChainNotReady": "Die Berechtigungsprüfungskette wurde nicht initialisiert.",
   "be_permissionModeApply.auditWriteFailed": "Berechtigungsprüfungseintrag konnte nicht geschrieben werden: {message}",
   "be_permissionModeApply.durableModeDenied": "Die dauerhafte Änderung des Berechtigungsmodus wurde abgebrochen.",
+  "be_permissionModeApply.externalDurableForbidden": "Eine von außerhalb der App angeforderte Änderung des Berechtigungsmodus gilt nur für die aktuelle Sitzung und kann nicht dauerhaft gespeichert werden.",
+  "be_permissionModeApply.externalModeForbidden": "Der Berechtigungsmodus „{mode}“ kann nicht von außerhalb der App gesetzt werden. Ändern Sie ihn in den Berechtigungseinstellungen der App.",
   "be_pluginExpansion.activated": "Plugin '{pluginId}' aktiviert.",
   "be_pluginExpansion.missingPluginId": "request_plugin-Fehler: PluginId (Zeichenfolge) erforderlich. Verfügbar: {available}",
   "be_pluginExpansion.noneAvailable": "(keiner)",

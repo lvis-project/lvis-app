@@ -596,6 +596,8 @@ export const zhMessages: Record<string, string> = {
   "be_permissionModeApply.auditChainNotReady": "权限审核链尚未初始化。",
   "be_permissionModeApply.auditWriteFailed": "写入权限审核条目失败：{message}",
   "be_permissionModeApply.durableModeDenied": "永久权限模式更改已取消。",
+  "be_permissionModeApply.externalDurableForbidden": "从应用外部请求的权限模式更改仅适用于当前会话，无法永久保存。",
+  "be_permissionModeApply.externalModeForbidden": "无法从应用外部设置权限模式“{mode}”。请在应用的权限设置中更改。",
   "be_pluginExpansion.activated": "插件“{pluginId}”已激活。",
   "be_pluginExpansion.missingPluginId": "request_plugin 错误：需要pluginId（字符串）。可用：{available}",
   "be_pluginExpansion.noneAvailable": "（没有任何）",
