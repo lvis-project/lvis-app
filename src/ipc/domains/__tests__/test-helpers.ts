@@ -1,3 +1,5 @@
+import { HOST_FRAME_URL, hostFrameEvent } from "../../../__tests__/test-helpers.js";
+
 export function invokeAppIpcHandler(
   handlers: Map<string, (...args: unknown[]) => unknown>,
   channel: string,
@@ -7,12 +9,7 @@ export function invokeAppIpcHandler(
   if (!fn) throw new Error(`No handler registered for: ${channel}`);
   return Promise.resolve(
     fn(
-      {
-        frameId: 0,
-        processId: 0,
-        frame: { url: "file:///app/index.html" },
-        senderFrame: { url: "file:///app/index.html" },
-      } as never,
+      { ...hostFrameEvent(), frameId: 0, processId: 0, frame: { url: HOST_FRAME_URL } } as never,
       ...args,
     ),
   );
@@ -33,13 +30,6 @@ export function invokeFileIpcHandler(
   const fn = handlers.get(channel);
   if (!fn) throw new Error(`No handler registered for: ${channel}`);
   return Promise.resolve(
-    fn(
-      {
-        frameId: 0,
-        processId: 0,
-        senderFrame: { url: "file:///app/index.html" },
-      } as never,
-      ...args,
-    ),
+    fn({ ...hostFrameEvent(), frameId: 0, processId: 0 } as never, ...args),
   );
 }

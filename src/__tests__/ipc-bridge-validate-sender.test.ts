@@ -50,9 +50,9 @@ describe("validateSender", () => {
     expect(validateSender(ev("not-a-url"))).toBe(false);
   });
 
-  it("treats missing senderFrame as trusted (unit-test ergonomics)", () => {
-    expect(validateSender(null)).toBe(true);
-    expect(validateSender(undefined)).toBe(true);
-    expect(validateSender({} as IpcMainInvokeEvent)).toBe(true);
+  it("refuses a missing senderFrame", () => {
+    expect(validateSender(null)).toBe(false);
+    expect(validateSender(undefined)).toBe(false);
+    expect(validateSender({} as IpcMainInvokeEvent)).toBe(false);
   });
 });
