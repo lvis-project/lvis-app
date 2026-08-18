@@ -2630,7 +2630,7 @@ export const esMessages: Record<string, string> = {
   "toolApprovalDialog.impactWrite": "Crea o modifica datos en el destino revisado.",
   "toolApprovalDialog.impactNetwork": "Envía o recibe datos a través de la red.",
   "toolApprovalDialog.impactShell": "Ejecuta un comando del sistema en este dispositivo.",
-  "toolApprovalDialog.impactMeta": "Cambia el estado de la aplicación o del agente.",
+  "toolApprovalDialog.impactMeta": "Cambia el estado de la aplicación o del agente. Elegir «permitir siempre» hace que esta herramienta deje de preguntar. Para una herramienta que puede iniciar agentes o alterar permisos, eso es una concesión permanente, no una comodidad.",
   "toolApprovalDialog.completeRequiredChoices": "Completa las opciones obligatorias antes de aprobar",
   "toolApprovalDialog.noTypedValueProvided": "No se proporcionó ningún valor",
   "toolApprovalDialog.typedInputOutsideApproval": "Las tarjetas de aprobación no recopilan texto escrito. Incluye el texto opcional en la solicitud original y vuelve a intentarlo.",

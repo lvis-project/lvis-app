@@ -2473,7 +2473,7 @@ describe("ToolExecutor — agent_spawn (meta + decisionOverride:'ask') permissio
   // layer 5 BEFORE categoryBasedDecision runs. The PM post-guard (layer-agnostic)
   // must still re-elevate to ask+forceModal to honour the per-invocation contract.
 
-  it("default mode: modal fires even after addAlwaysAllowedPersist('agent_spawn')", async () => {
+  it("default mode: modal does NOT fire after addAlwaysAllowedPersist('agent_spawn')", async () => {
     const innerExecuteSpy = vi.fn(async () => ({
       output: JSON.stringify({ ok: true }),
       isError: false,
@@ -2502,11 +2502,17 @@ describe("ToolExecutor — agent_spawn (meta + decisionOverride:'ask') permissio
       { sessionId: "sess-spawn-persist", permissionContext: userPermissionContext() },
     );
 
-    // The per-invocation decisionOverride:"ask" gate must STILL fire even though
-    // alwaysAllowed hit at layer 5 (which would otherwise skip the modal).
-    expect(requestSpy).toHaveBeenCalledTimes(1);
-    // Tool must NOT have executed (modal was denied).
-    expect(innerExecuteSpy).not.toHaveBeenCalled();
+    // End-to-end evidence that the grant is honoured, not just that a decision
+    // object says so: no modal is requested at all, and the tool actually runs.
+    //
+    // This inverts the previous contract. The per-invocation
+    // decisionOverride:"ask" used to re-elevate over a layer-5 grant, which
+    // meant the "always allow" the user had already ticked for this exact tool
+    // could never take effect — a control that wrote to the store and changed
+    // nothing. The cost of honouring it is disclosed in the approval dialog's
+    // meta impact line before the user ticks it.
+    expect(requestSpy).not.toHaveBeenCalled();
+    expect(innerExecuteSpy).toHaveBeenCalledTimes(1);
   });
 
   it("allow mode: persisted grant + allow mode → modal does NOT fire (allow-all wins)", async () => {
