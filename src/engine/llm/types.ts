@@ -59,6 +59,8 @@ export interface MessageMeta {
     pluginId?: string;
     mcpServerId?: string;
     uiPayload?: import("../../mcp/types.js").McpUiPayload;
+    /** Stopped by the user mid-flight — a deliberate halt, not a failure. */
+    cancelled?: boolean;
   };
   /**
    * Final permission review verdict for the tool call this result answers.
