@@ -24,7 +24,7 @@ export interface ActionPanelActivityItem {
   label: string;
   detail?: string;
   target?: string;
-  status?: "running" | "done" | "error";
+  status?: "running" | "done" | "error" | "cancelled";
 }
 
 export interface ActionPanelActivityState {

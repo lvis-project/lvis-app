@@ -2,6 +2,7 @@
 export const en = {
   "toolGroupCard.running": "running",
   "toolGroupCard.failed": "Failed",
+  "toolGroupCard.cancelled": "Stopped",
   "toolGroupCard.done": "Done",
   "toolGroupCard.input": "Input",
   "toolGroupCard.error": "Error",
@@ -16,6 +17,7 @@ export const en = {
 export const ko: Record<keyof typeof en, string> = {
   "toolGroupCard.running": "실행 중",
   "toolGroupCard.failed": "실패",
+  "toolGroupCard.cancelled": "중단됨",
   "toolGroupCard.done": "완료",
   "toolGroupCard.input": "입력",
   "toolGroupCard.error": "오류",
