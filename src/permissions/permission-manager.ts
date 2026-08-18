@@ -1308,12 +1308,19 @@ export class PermissionManager {
     }
 
     // 5. Always-allowed (previous user approval)
+    let storedDockGrant = false;
     if (result === undefined) {
       const grantTier = this.alwaysAllowed.get(allowTarget);
       // P2 tier gate — see the layer-3 mirror above. A read-tier grant covers
       // only read invocations; write-tier covers everything.
       if (grantTier !== undefined && grantCovers(grantTier, resolvedCategory)) {
         result = { decision: "allow", reason: t("be_permissionManager.userPermanentApproval"), layer: 5 };
+        // Recorded for the meta-override guard below. A layer-5 grant is the
+        // user having ticked "always allow" on the dock for THIS tool while
+        // looking at it — a different fact from a broad allow-rule in settings
+        // (layer 3) or a category default (layer 6), and the only one of the
+        // three that is per-tool informed consent.
+        storedDockGrant = true;
       }
     }
 
@@ -1342,7 +1349,18 @@ export class PermissionManager {
     if (
       result.decision === "allow" &&
       context.decisionOverride === "ask" &&
-      this.mode !== "allow"
+      this.mode !== "allow" &&
+      // A stored dock grant is honoured. Previously the override re-asked even
+      // here, so the checkbox was written correctly but could never be reached
+      // for this tool class — the user saw a control that did nothing, which
+      // reads as a defect rather than as a policy.
+      //
+      // Scoped to layer 5 on purpose. Layers 3 and 6 still re-ask: a broad
+      // allow-rule in settings, or a category default, is not someone looking
+      // at THIS tool and deciding. The remote-turn exposure the override was
+      // built for arrives through those, not through a dock click the user
+      // made in the foreground.
+      !storedDockGrant
     ) {
       const foregroundReviewer = this.shouldRouteForegroundReviewer(
         resolvedCategory,
