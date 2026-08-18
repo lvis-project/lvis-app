@@ -2695,6 +2695,7 @@ export const zhMessages: Record<string, string> = {
   "toolGroupCard.done": "完毕",
   "toolGroupCard.error": "错误",
   "toolGroupCard.failed": "失败的",
+  "toolGroupCard.cancelled": "已停止",
   "toolGroupCard.hasErrors": "有错误",
   "toolGroupCard.input": "输入",
   "toolGroupCard.result": "结果",

@@ -2677,6 +2677,7 @@ export const esMessages: Record<string, string> = {
   "toolGroupCard.done": "Hecho",
   "toolGroupCard.error": "Error",
   "toolGroupCard.failed": "Fallido",
+  "toolGroupCard.cancelled": "Detenido",
   "toolGroupCard.hasErrors": "Tiene errores",
   "toolGroupCard.input": "Aporte",
   "toolGroupCard.result": "Resultado",
