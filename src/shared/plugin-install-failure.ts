@@ -2,6 +2,7 @@ export const PLUGIN_INSTALL_FAILURE_KINDS = [
   "catalog-grant-mismatch",
   "manifest-validation-error",
   "incompatible-app-version",
+  "plugin-revoked",
 ] as const;
 
 export type PluginInstallFailureKind = (typeof PLUGIN_INSTALL_FAILURE_KINDS)[number];
@@ -18,10 +19,19 @@ export function isPluginInstallFailureKind(value: unknown): value is PluginInsta
  *   - `incompatible-app-version` — the plugin requires a newer LVIS build; a
  *     reinstall re-fetches the same too-new package and re-throws, so the user
  *     must update the app instead.
+ *   - `plugin-revoked` — the marketplace revocation registry blocks this
+ *     exact `slug@version` (explicit blocklist) or the version is below the
+ *     plugin's pinned minimum. A reinstall from the marketplace either
+ *     re-fetches the same blocked version (the install path enforces the same
+ *     registry) or, if the catalog has since published a newer version, is a
+ *     genuine upgrade rather than a "repair" — either way looping a reinstall
+ *     here is not the right remedy; the Doctor must show the block reason and
+ *     point at Remove instead.
  */
 const REINSTALL_NOT_FIXABLE_KINDS: ReadonlySet<PluginInstallFailureKind> = new Set([
   "catalog-grant-mismatch",
   "incompatible-app-version",
+  "plugin-revoked",
 ]);
 
 /**

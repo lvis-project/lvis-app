@@ -2339,11 +2339,6 @@
     },
     {
       "type": "types",
-      "file": "src/permissions/permission-slash.ts",
-      "name": "SlashPermissionMode"
-    },
-    {
-      "type": "types",
       "file": "src/permissions/reviewer/deferred-queue.ts",
       "name": "DeferredEntryStatus"
     },
@@ -2416,6 +2411,31 @@
       "type": "types",
       "file": "src/plugins/plugin-removal-transaction.ts",
       "name": "RemovalTransactionPhase"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/revocation/revocation-registry.ts",
+      "name": "RevocationDecision"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/revocation/revocation-registry.ts",
+      "name": "RevocationInitOptions"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/revocation/revocation-registry.ts",
+      "name": "RevocationSource"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/revocation/revocation-registry.ts",
+      "name": "RevocationStatus"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/revocation/revocation-schema.ts",
+      "name": "RevocationBlockedEntry"
     },
     {
       "type": "types",
