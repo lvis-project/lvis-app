@@ -60,6 +60,22 @@ function escapeHtmlText(value: string): string {
     .replace(/>/g, "&gt;");
 }
 
+/**
+ * JSON for embedding inside a `<script>` block.
+ *
+ * `JSON.stringify` escapes for the JSON grammar, not for HTML parsing: it
+ * leaves `<` alone, so a value containing `</script>` closes the block and
+ * everything after it is parsed as markup. Escaping `<` (and `>` for symmetry)
+ * as `\u003c` / `\u003e` keeps the value a single JS string literal no matter
+ * what it contains, which makes the sink safe on its own rather than relying on
+ * every caller to canonicalize first.
+ */
+// Exported for direct testing — the HTML-safety of this escaping is the
+// security property that keeps the shell document injection-proof.
+export function jsonForScriptBlock(value: string): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c").replace(/>/g, "\\u003e");
+}
+
 function buildLinkWindowShellHtml(opts: {
   url: string;
   title: string;
@@ -67,8 +83,8 @@ function buildLinkWindowShellHtml(opts: {
   platform: NodeJS.Platform;
 }): string {
   const platform = opts.platform;
-  const url = JSON.stringify(opts.url);
-  const partition = JSON.stringify(opts.partition ?? "");
+  const url = jsonForScriptBlock(opts.url);
+  const partition = jsonForScriptBlock(opts.partition ?? "");
   const titleAttr = escapeHtmlAttr(opts.title);
   const titleText = escapeHtmlText(opts.title);
   const titleBarHtml = buildTitlebarHtml({ platform, title: opts.title });

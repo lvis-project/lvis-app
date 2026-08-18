@@ -51,3 +51,24 @@ describe("attachLinkNavigationGuards", () => {
     expect(redirectEvent.preventDefault).toHaveBeenCalledOnce();
   });
 });
+
+describe("jsonForScriptBlock — script-block injection safety", () => {
+  it("neutralizes a </script> sequence so the value cannot break out", async () => {
+    const { jsonForScriptBlock } = await import("../link-window-service.js");
+    const malicious = "https://ok.example/</script><script>alert(1)</script>";
+    const out = jsonForScriptBlock(malicious);
+    // No raw angle bracket survives — a parser can never see a closing tag.
+    expect(out).not.toContain("<");
+    expect(out).not.toContain(">");
+    expect(out).toContain("\\u003c");
+    // Still a valid JS string literal that round-trips to the original.
+    // eslint-disable-next-line no-eval
+    expect(JSON.parse(out.replace(/\\u003c/g, "<").replace(/\\u003e/g, ">"))).toBe(malicious);
+  });
+
+  it("leaves an ordinary URL intact as a parseable literal", async () => {
+    const { jsonForScriptBlock } = await import("../link-window-service.js");
+    const url = "https://example.com/path?a=1&b=2";
+    expect(JSON.parse(jsonForScriptBlock(url))).toBe(url);
+  });
+});
