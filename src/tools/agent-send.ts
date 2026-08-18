@@ -100,9 +100,60 @@ function validatePart(value: unknown): { ok: true; part: A2APart } | {
   return { ok: true, part: structuredClone(value) as unknown as A2APart };
 }
 
+/**
+ * Every way a send can be refused.
+ *
+ * Declared as a union rather than plain strings so {@link SEND_FAILURE_GUIDANCE}
+ * has to cover all of them: adding a refusal without saying what to do about it
+ * then fails to compile, instead of silently shipping a bare error token.
+ */
+export type AgentSendFailureReason =
+  | "recipient-unavailable"
+  | "terminal-recipient"
+  | "cross-origin"
+  | "unknown-sender"
+  | "unknown-recipient"
+  | "message-bus-unavailable"
+  | "invalid-message"
+  | "storage-failed"
+  | "aborted";
+
+/**
+ * What the caller should DO about a refusal.
+ *
+ * A bare `{"error":"recipient-unavailable"}` tells the model that something
+ * failed but not what to try instead, which is how a refused send turns into a
+ * guess — re-sending in a loop, or asking for a replacement sub-agent to be
+ * spawned when the existing one is merely idle. `agent_guide` and `agent_spawn`
+ * both attach guidance to their failures; this is the same treatment for the
+ * one A2A tool that lacked it.
+ */
+export const SEND_FAILURE_GUIDANCE: Readonly<Record<AgentSendFailureReason, string>> =
+  Object.freeze({
+    "recipient-unavailable":
+      "The recipient is not accepting messages right now — it is neither running nor waiting for input. This is a timing miss, not a permanent failure: do NOT re-send in a loop, and do NOT ask for a replacement agent to be spawned. Carry on with what you can do and report what you still needed from it.",
+    "terminal-recipient":
+      "The recipient has finished and can never receive another message. Use whatever it already returned; if the work is still open, say so rather than waiting.",
+    "cross-origin":
+      "That childSessionId belongs to another conversation's agent, so it is not addressable from here. Only your parent and your sibling sub-agents are.",
+    "unknown-sender":
+      "agent_send is callable only from INSIDE a sub-agent. From a parent conversation, steer a RUNNING sub-agent with agent_guide, or continue a SUSPENDED one with agent_spawn using its resumeId.",
+    "unknown-recipient":
+      "No sub-agent has that childSessionId. Agent names are not addresses — take the exact childSessionId from agent_list or agent_status.",
+    "message-bus-unavailable":
+      "A2A messaging is not wired up in this run, so no send can succeed. Do not retry; finish what you can alone and report the gap.",
+    "invalid-message":
+      "The message payload was rejected before delivery. Re-send with plain text content rather than retrying the same payload unchanged.",
+    "storage-failed":
+      "The message could not be durably recorded, so it was not delivered. One retry is reasonable; if it fails again, treat the channel as unavailable and continue without it.",
+    aborted:
+      "The turn was stopped while this send was in flight. Do not re-send automatically — the stop was deliberate.",
+  });
+
 function resultError(reason: string): ToolResult {
+  const guidance = (SEND_FAILURE_GUIDANCE as Record<string, string | undefined>)[reason];
   return {
-    output: JSON.stringify({ error: reason }),
+    output: JSON.stringify({ error: reason, ...(guidance ? { guidance } : {}) }),
     isError: true,
   };
 }
