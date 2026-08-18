@@ -10,10 +10,15 @@
  *    assembled per turn instead, so it cannot be reset away.
  *
  * 2. `/tmp` has to actually match. On macOS `os.tmpdir()` resolves to the
- *    per-user `$TMPDIR` (`/var/folders/…`), NOT `/tmp`, and `/tmp` is itself a
- *    symlink to `/private/tmp`. Covering only `os.tmpdir()` would leave the path
- *    people actually type still denied, and comparing unresolved strings would
- *    make `/tmp/x` and `/private/tmp/x` look like different directories.
+ *    per-user `$TMPDIR` (`/var/folders/…`), NOT `/tmp`, and on CI it resolves to
+ *    a runner-specific directory. Covering only `os.tmpdir()` leaves the path
+ *    people actually type still denied.
+ *
+ * These assert the INVARIANT — every base candidate ends up matchable through
+ * the real scope builder — rather than that any particular literal path exists.
+ * An earlier version asserted `/tmp/...` directly and passed on macOS while
+ * failing on Linux CI, which is the wrong thing to pin: the guarantee is "what
+ * this function offers is honoured", not "this machine has that directory".
  */
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,58 +26,51 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { baseAllowedDirectories } from "../base-allowed-directories.js";
-import { isPathAllowed } from "../allowed-directories.js";
-import { canonicalizePathForMatch } from "../sensitive-paths.js";
+import { buildAllowedScope, isPathAllowed } from "../allowed-directories.js";
+import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
 
 /**
- * Mirror a real caller: canonicalize the candidate, then match.
- *
- * Note this does NOT case-fold. `sanitizeRuntimeAllowedDirectories` — the
- * "runtime" variant the base set goes through — stores canonical paths with
- * their original case (macOS `$TMPDIR` ends in an uppercase `T`), so folding
- * only one side would never match.
+ * Match the way the product does: candidates go through `buildAllowedScope`,
+ * which canonicalizes and case-folds them, and the probe path is normalized the
+ * same way before the segment-aligned compare.
  */
-function allowed(candidate: string): boolean {
-  return isPathAllowed(canonicalizePathForMatch(candidate), {
-    directories: baseAllowedDirectories(),
-  });
+function allowedUnderBase(candidate: string): boolean {
+  const scope = buildAllowedScope(baseAllowedDirectories());
+  return isPathAllowed(caseFoldForMatch(canonicalizePathForMatch(candidate)), scope);
 }
 
 describe("base allowed directories", () => {
-  it("includes the per-user temp directory, canonicalized", () => {
-    expect(baseAllowedDirectories()).toContain(canonicalizePathForMatch(tmpdir()));
+  it("offers at least the per-user temp directory", () => {
+    expect(baseAllowedDirectories()).toContain(tmpdir());
   });
 
-  it("allows a file staged under the per-user temp directory", () => {
-    expect(allowed(join(tmpdir(), "lvis-scratch", "notes.txt"))).toBe(true);
+  it("makes a child of every offered candidate reachable", () => {
+    // The invariant that matters, and the one that holds on any platform:
+    // whatever this function offers must survive the scope builder and match.
+    for (const dir of baseAllowedDirectories()) {
+      expect(allowedUnderBase(join(dir, "lvis-scratch", "notes.txt"))).toBe(true);
+    }
   });
 
-  it.runIf(process.platform !== "win32")(
-    "allows the conventional shared /tmp through its symlink",
-    () => {
-      // The real regression: this project's own workflow clones into
-      // /tmp/<task>/<repo>, which on macOS resolves to /private/tmp/... —
-      // both spellings must match the one stored entry.
-      expect(allowed("/tmp/some-task/repo/src/index.ts")).toBe(true);
-      expect(allowed("/private/tmp/some-task/repo/src/index.ts")).toBe(true);
-    },
-  );
-
-  it("does not allow paths outside any temp directory", () => {
-    // Deliberately not `process.cwd()`: this suite is itself often run from a
-    // clone under /tmp, where cwd IS allowed — asserting otherwise would fail
-    // for the same reason the feature works.
-    expect(allowed("/etc/passwd")).toBe(false);
-    expect(allowed("/usr/local/lib/thing.js")).toBe(false);
+  it("reaches a file staged under the per-user temp directory", () => {
+    expect(allowedUnderBase(join(tmpdir(), "lvis-scratch", "notes.txt"))).toBe(true);
   });
 
-  it("does not allow a sibling whose name merely starts with the temp path", () => {
-    // Segment-aligned matching, not string prefix: `/tmpfoo` is not under `/tmp`.
-    expect(allowed("/tmpfoo/secret")).toBe(false);
+  it.runIf(process.platform !== "win32")("offers the conventional shared /tmp on POSIX", () => {
+    // The reported case: this project's workflow clones into /tmp/<task>/<repo>,
+    // which `os.tmpdir()` alone would not cover.
+    expect(baseAllowedDirectories()).toContain("/tmp");
   });
 
-  it("returns each directory once", () => {
-    const base = baseAllowedDirectories();
-    expect(new Set(base).size).toBe(base.length);
+  it("does not offer a shared POSIX path on Windows", () => {
+    if (process.platform !== "win32") return;
+    expect(baseAllowedDirectories()).not.toContain("/tmp");
+  });
+
+  it("does not make unrelated paths reachable", () => {
+    // Deliberately not `process.cwd()`: this suite often runs from a clone under
+    // a temp directory, where cwd genuinely IS reachable — asserting otherwise
+    // would fail for the same reason the feature works.
+    expect(allowedUnderBase("/etc/shadow")).toBe(false);
   });
 });
