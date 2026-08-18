@@ -169,15 +169,37 @@ describe("PermissionManager — meta decisionOverride re-elevation (V1 SOT)", ()
 
   // ── MAJOR-2 — layer-5 alwaysAllowed must not defeat the per-invocation gate
 
-  it("layer-5 alwaysAllowed + default mode + decisionOverride='ask' → forceModal ask", async () => {
-    // Regression: the OLD executor block was layer-agnostic. A user clicking
-    // "Allow always" on agent_spawn's modal calls addAlwaysAllowedPersist and
-    // subsequent invocations hit layer-5 (alwaysAllowed.get()), returning allow
-    // BEFORE categoryBasedDecision. The post-guard (layer-agnostic) must still
-    // re-elevate to ask+forceModal to honour the tool author's per-invocation
-    // contract, even against a persisted grant.
+  it("layer-5 alwaysAllowed + default mode + decisionOverride='ask' → allow (dock grant is honoured)", async () => {
+    // The priority here was deliberately inverted. It used to be "the tool
+    // author's per-invocation contract outranks a persisted grant", so the
+    // post-guard re-elevated to ask+forceModal even after the user had ticked
+    // "always allow" on this exact tool's modal.
+    //
+    // The observable result was a control that did nothing: the checkbox wrote
+    // to the grant store correctly, but `forceModal` meant the stored-grant
+    // lookup was never consulted on the next call, so the prompt returned every
+    // time. Users reasonably read that as broken rather than as policy.
+    //
+    // Now an explicit dock grant wins, and the cost is disclosed where the
+    // decision is made — the meta impact line in the approval dialog states
+    // that "always allow" is a standing grant for a tool that can start agents
+    // or change permissions.
     pm.setMode("default");
     await pm.addAlwaysAllowedPersist("agent_spawn");
+    const result = pm.checkDetailed("agent_spawn", "builtin", "meta", null, {
+      decisionOverride: "ask",
+    });
+    expect(result.decision).toBe("allow");
+    expect(result.layer).toBe(5);
+  });
+
+  it("does NOT extend the exemption to a layer-3 allow rule", async () => {
+    // The scoping that keeps this safe. A broad allow-rule in settings, or a
+    // category default, is not someone looking at THIS tool and deciding — and
+    // it is the path a remote or sub-agent turn arrives through. Only the
+    // foreground dock click is treated as informed consent.
+    pm.setMode("default");
+    pm.setRules([{ pattern: "agent_spawn", action: "allow" }]);
     const result = pm.checkDetailed("agent_spawn", "builtin", "meta", null, {
       decisionOverride: "ask",
     });

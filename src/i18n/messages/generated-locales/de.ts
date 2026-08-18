@@ -2609,7 +2609,7 @@ export const deMessages: Record<string, string> = {
   "toolApprovalDialog.impactWrite": "Erstellt oder ändert Daten im geprüften Ziel.",
   "toolApprovalDialog.impactNetwork": "Sendet oder empfängt Daten über das Netzwerk.",
   "toolApprovalDialog.impactShell": "Führt einen Systembefehl auf diesem Gerät aus.",
-  "toolApprovalDialog.impactMeta": "Ändert den Zustand der Anwendung oder des Agenten.",
+  "toolApprovalDialog.impactMeta": "Ändert den Zustand der Anwendung oder des Agenten. Mit \"immer erlauben\" fragt dieses Werkzeug nicht mehr nach. Bei einem Werkzeug, das Agenten starten oder Berechtigungen ändern kann, ist das eine dauerhafte Freigabe, keine Bequemlichkeit.",
   "toolApprovalDialog.completeRequiredChoices": "Treffen Sie vor der Genehmigung alle erforderlichen Auswahlen",
   "toolApprovalDialog.noTypedValueProvided": "Kein vorgegebener Wert",
   "toolApprovalDialog.typedInputOutsideApproval": "Genehmigungskarten erfassen keine Texteingaben. Geben Sie optionalen Text in der ursprünglichen Anfrage an und versuchen Sie es erneut.",

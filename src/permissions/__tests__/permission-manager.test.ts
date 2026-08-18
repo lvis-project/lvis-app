@@ -918,11 +918,23 @@ describe("PermissionManager — P2 graduated grant tiers", () => {
 
   // ── P1 post-guard composition (meta + write grant + override:ask) ─────────
 
-  it("post-guard composes with tier gate: meta write-grant → allow then ask+forceModal", async () => {
+  it("post-guard composes with tier gate: meta write-grant → allow (dock grant honoured)", async () => {
     // A write-tier grant covers meta (write ≥ requiredTier(meta)=write), so the
-    // layer produces allow — then the P1 per-invocation post-guard re-elevates
-    // an author's decisionOverride:'ask' to ask+forceModal.
+    // layer produces allow. The post-guard used to re-elevate that to
+    // ask+forceModal even though the user had granted it on this exact tool;
+    // the grant is now honoured, so the tier gate is what decides here.
     await pm.addAlwaysAllowedPersist("agent_spawn", "write");
+    const r = pm.checkDetailed("agent_spawn", "builtin", "meta", null, {
+      decisionOverride: "ask",
+    });
+    expect(r.decision).toBe("allow");
+    expect(r.layer).toBe(5);
+  });
+
+  it("a read-tier grant still does NOT cover a meta invocation", async () => {
+    // The tier gate is unchanged and still binding: honouring dock grants did
+    // not widen which grants cover which categories.
+    await pm.addAlwaysAllowedPersist("agent_spawn", "read");
     const r = pm.checkDetailed("agent_spawn", "builtin", "meta", null, {
       decisionOverride: "ask",
     });
