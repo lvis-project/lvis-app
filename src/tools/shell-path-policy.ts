@@ -2,6 +2,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve as pathResolve } from "node:path";
 
 import { t } from "../i18n/index.js";
+import { tokenizeShell } from "../main/shell-tokenizer.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
   canonicalizePathForMatch,
@@ -113,6 +114,28 @@ export function findShellPathPolicyViolation(
   if (dynamicPathComposition) {
     return { kind: "dynamic-path", reason: dynamicPathComposition };
   }
+  // Operands are checked twice, against two different base directories.
+  //
+  // The scan below resolves every candidate against the SESSION cwd. That is
+  // the historical check and it stays exactly as it was, so nothing that used
+  // to be caught stops being caught.
+  //
+  // What it cannot see is `cd`. A relative operand means nothing without the
+  // directory it resolves against, and `cd` changes that directory mid-command.
+  // Resolving everything against the session cwd let
+  // `cd /tmp && cat ../../etc/passwd` through: statically that reads
+  // `<session cwd>/../../etc/passwd`, comfortably inside the boundary, while
+  // the shell reads `/etc/passwd`. The per-leaf walk below resolves each
+  // operand against the cwd actually in effect when that leaf runs.
+  //
+  // Two checks rather than one replacing the other: the per-leaf walk reads
+  // operands out of the shared tokenizer's argv, which is a different extractor
+  // from the flat scan. Any candidate one of them does not see, the other
+  // still does. For a containment check, missing an operand is the failure that
+  // matters, so both run.
+  const leafViolation = findCwdAwareLeafViolation(command, cwd, sandboxRoot, extraAllowedDirectories);
+  if (leafViolation) return leafViolation;
+
   const candidates = extractPathCandidates(command);
   for (const candidate of candidates) {
     if (isIgnoredShellDeviceCandidate(candidate)) {
@@ -151,6 +174,177 @@ export function findShellPathPolicyViolation(
     }
   }
   return null;
+}
+
+/**
+ * Walk the command's leaves in order, tracking the working directory each one
+ * actually runs in, and check that leaf's operands against THAT directory.
+ *
+ * Leaf boundaries come from the shared {@link tokenizeShell} SOT — the same one
+ * the risk classifier splits on — so the two agree on what a command is. This
+ * module's own flat tokenizer has no notion of a leaf and therefore no notion
+ * of order, which is why it cannot do this.
+ *
+ * Every reference agent host that gates shell commands evaluates a compound
+ * command per segment rather than as one string, because an allowed segment
+ * otherwise becomes a prefix that carries an arbitrary one after it. This is
+ * that same rule applied to path containment: `cd` is the segment whose effect
+ * is to redefine what the following segments' relative operands mean.
+ *
+ * Conservative where it cannot be precise:
+ *  - a `cd` whose destination is not decidable from argv alone stops the walk
+ *    with a violation rather than being skipped. Skipping re-opens the escape
+ *    for exactly the inputs an attacker controls.
+ *  - a `cd` is treated as affecting every later leaf even where the shell would
+ *    scope it (a subshell, or a pipeline stage). Over-applying it can only
+ *    reject a command that would have stayed inside the boundary; under-
+ *    applying it is what produced the escape.
+ */
+function findCwdAwareLeafViolation(
+  command: string,
+  cwd: string,
+  sandboxRoot: string,
+  extraAllowedDirectories: readonly string[],
+): ShellPathPolicyViolation | null {
+  const { leaves, parseError } = tokenizeShell(command);
+  // A command the SOT tokenizer cannot parse has no trustworthy leaf order, so
+  // this walk claims nothing about it. The flat scan below still runs, as do
+  // the recursive-traversal and dynamic-composition guards above, and the risk
+  // classifier independently fails a parse error closed.
+  if (parseError) return null;
+
+  let current = cwd;
+  for (const leaf of leaves) {
+    const operands = [...leaf.argv, ...leaf.redirectTargets];
+    const isCd = leaf.argv.length > 0 && stripLeafVerbPath(leaf.argv[0]!) === "cd";
+
+    // `cd`'s own destination is checked as an operand like any other, so a
+    // `cd` that leaves the boundary is caught here and not merely tracked.
+    for (const operand of isCd ? operands.slice(1) : operands) {
+      const violation = checkOperandAgainstBase(operand, current, sandboxRoot, extraAllowedDirectories);
+      if (violation) return violation;
+    }
+
+    if (!isCd) continue;
+
+    const destination = resolveCdDestination(leaf.argv.slice(1), current);
+    if (destination === null) {
+      return {
+        kind: "dynamic-path",
+        reason:
+          `Dynamic path: cd destination in \`${leaf.argv.join(" ")}\` cannot be resolved before running, ` +
+          "so the paths used after it cannot be checked. Use an absolute path, or set the working directory on the call instead.",
+      };
+    }
+
+    // Check the RESOLVED destination, not just the operand text that produced
+    // it. A bare `cd` carries no operand at all and goes home, so an
+    // operand-only check waved it through — and since a bare filename is not a
+    // path candidate, every `cat foo` after it went unchecked too.
+    //
+    // Confining the destination is what makes those bare operands safe to keep
+    // ignoring: if every directory the command can stand in is inside the
+    // boundary, a name resolved against one of them is inside it as well.
+    const destinationViolation = checkResolvedPath(destination, leaf.argv.join(" "), sandboxRoot, extraAllowedDirectories);
+    if (destinationViolation) return destinationViolation;
+
+    current = destination;
+  }
+  return null;
+}
+
+/**
+ * Run one operand through the same sensitive-path and sandbox checks the flat
+ * scan applies, but against a caller-chosen base directory.
+ */
+function checkOperandAgainstBase(
+  operand: string,
+  base: string,
+  sandboxRoot: string,
+  extraAllowedDirectories: readonly string[],
+): ShellPathPolicyViolation | null {
+  for (const part of splitCandidateParts(operand)) {
+    const candidate = normalizeCandidate(part);
+    if (!candidate || !looksLikePath(candidate)) continue;
+    if (isIgnoredShellDeviceCandidate(candidate)) continue;
+
+    let absolute: string;
+    try {
+      absolute = resolveCandidatePath(candidate, base);
+    } catch (err) {
+      return {
+        kind: "invalid-path",
+        reason: err instanceof Error ? err.message : String(err),
+        candidate,
+      };
+    }
+    if (isIgnoredShellDevicePath(absolute)) continue;
+
+    const violation = checkResolvedPath(absolute, candidate, sandboxRoot, extraAllowedDirectories);
+    if (violation) return violation;
+  }
+  return null;
+}
+
+/**
+ * Apply the sensitive-path and sandbox-boundary rules to an already-resolved
+ * absolute path. `label` is what the violation reports as the operand, so the
+ * message names something the user can find in the command they wrote.
+ */
+function checkResolvedPath(
+  absolute: string,
+  label: string,
+  sandboxRoot: string,
+  extraAllowedDirectories: readonly string[],
+): ShellPathPolicyViolation | null {
+  const sensitive = isSensitivePath(caseFoldForMatch(canonicalizePathForMatch(absolute)));
+  if (sensitive) {
+    return {
+      kind: "sensitive-path",
+      reason: `Sensitive path: command operand ${label} matches ${sensitive}`,
+      candidate: label,
+      path: absolute,
+    };
+  }
+  const check = validateSandboxPath(absolute, sandboxRoot, [...extraAllowedDirectories]);
+  if (!check.allowed) {
+    return {
+      kind: "sandbox-boundary",
+      reason: `Sandbox: ${check.reason}`,
+      candidate: label,
+      path: absolute,
+    };
+  }
+  return null;
+}
+
+/**
+ * Where a `cd` leaf lands, or `null` when argv alone does not decide it.
+ *
+ * `null` is returned for `cd -` (OLDPWD) and for an operand still carrying an
+ * unexpanded `$…` — both name a value the command text does not contain.
+ * A bare `cd` IS decidable: it goes to the home directory, which is then
+ * checked against the boundary like any other destination.
+ *
+ * `-L`/`-P` select how symlinks are resolved, not where to go, so they are
+ * skipped rather than mistaken for the destination.
+ */
+function resolveCdDestination(args: readonly string[], from: string): string | null {
+  const operands = args.filter((arg) => arg !== "-L" && arg !== "-P" && arg !== "--");
+  if (operands.length === 0) return homedir();
+  const operand = operands[0]!;
+  if (operand === "-") return null;
+  try {
+    const resolved = resolveCandidatePath(operand, from);
+    return resolved.includes("$") ? null : resolved;
+  } catch {
+    return null;
+  }
+}
+
+function stripLeafVerbPath(verb: string): string {
+  const slash = Math.max(verb.lastIndexOf("/"), verb.lastIndexOf("\\"));
+  return slash >= 0 ? verb.slice(slash + 1) : verb;
 }
 
 function isIgnoredShellDevicePath(canonicalPath: string): boolean {
