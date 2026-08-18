@@ -4,7 +4,7 @@ import { t } from "../i18n/index.js";
 import { isExternalOrigin, type ExternalOrigin, type TrustOrigin } from "../contract/trust-origin.js";
 import type { ApprovalGate } from "./approval-gate.js";
 import type { PermissionManager } from "./permission-manager.js";
-import type { PermissionModeCommand } from "./permission-slash.js";
+import type { PermissionModeCommand, SlashPermissionMode } from "./permission-slash.js";
 
 export type PermissionModeApplyResult =
   | {
@@ -34,7 +34,10 @@ export type PermissionModeApplyResult =
  *     `src/main/local-api-server.ts`) BEFORE the handler ran. The ApprovalGate
  *     "Allow" click IS the explicit user action; the {@link ExternalOrigin}
  *     records WHO initiated it. Widening the guard for this variant is what
- *     prevents a DOUBLE prompt — the consent already happened.
+ *     prevents a DOUBLE prompt — the consent already happened. It is ALSO the
+ *     channel discriminant: see {@link isExternalApprovalBypass} and the
+ *     external-channel ceiling in {@link applyPermissionModeCommand}, which
+ *     hold that one click to one session and keep `allow` out of reach.
  *
  * Fail-closed: any other source/trustOrigin combination does NOT satisfy the
  * built-in-confirmation guard and falls through to the normal ApprovalGate ask.
@@ -97,6 +100,36 @@ export function resolvePermissionModeApprovalBypass(
   return undefined;
 }
 
+/**
+ * Is this resolved confirmation the EXTERNAL channel (local API / CLI / SDK)
+ * rather than a first-party renderer surface?
+ *
+ * The `source` discriminant on {@link PermissionModeApprovalBypass} is ALREADY
+ * the channel axis — `settings-ui` / `builtin-slash` are in-app surfaces the
+ * user drove directly, `local-api-approval` is an out-of-process caller whose
+ * change a human merely consented to once through the ApprovalGate dock. This
+ * predicate names that split so the ceiling below reads as policy rather than
+ * as a string comparison, and so no second "isExternal" flag has to be threaded
+ * through the transports.
+ */
+export function isExternalApprovalBypass(
+  bypass: PermissionModeApprovalBypass | undefined,
+): bypass is Extract<PermissionModeApprovalBypass, { source: "local-api-approval" }> {
+  return bypass?.source === "local-api-approval";
+}
+
+/**
+ * Modes the EXTERNAL channel may never select.
+ *
+ * `allow` is the mode that removes tool prompting entirely, so setting it
+ * converts a single ApprovalGate click into blanket, open-ended authority over
+ * every later tool call. That is not what the human answered: the dock asks
+ * "change the permission mode", not "stop asking me about anything, forever".
+ * The in-app surfaces keep `allow` — a user standing in the permission settings
+ * choosing it IS the consent — but an out-of-process caller cannot reach it.
+ */
+const EXTERNAL_CHANNEL_FORBIDDEN_MODES: readonly SlashPermissionMode[] = ["allow"];
+
 export async function applyPermissionModeCommand(
   cmd: PermissionModeCommand,
   deps: {
@@ -120,6 +153,37 @@ export async function applyPermissionModeCommand(
   //     silent bypass: no "local-api-approval" bypass is ever constructed unless
   //     `local-api-server.ts` observed a real ApprovalGate "allow" decision.
   const trustedConfirmation = resolvePermissionModeApprovalBypass(deps.approvalBypass);
+
+  // EXTERNAL-CHANNEL CEILING. The ApprovalGate consent an out-of-process caller
+  // obtained is ONE click on ONE request; it is not a mandate to hand that
+  // caller powers the click did not describe. Two limits, enforced here (the
+  // authority) rather than only at the transport that happens to call in today:
+  //
+  //   - not durable — the effect lasts the session the human was looking at,
+  //     not every session from now on;
+  //   - not `allow` — see EXTERNAL_CHANNEL_FORBIDDEN_MODES.
+  //
+  // Both are unreachable from the renderer surfaces (`settings-ui` /
+  // `builtin-slash`), which are a different trust context and keep what they
+  // had. The durable refusal is defence in depth: `handleSetPermissionMode`
+  // already declines to mark an external command durable, so reaching it means
+  // a caller hand-built a durable command for the external channel.
+  if (isExternalApprovalBypass(trustedConfirmation)) {
+    if (EXTERNAL_CHANNEL_FORBIDDEN_MODES.includes(cmd.mode)) {
+      return {
+        ok: false,
+        error: "external-mode-forbidden",
+        message: t("be_permissionModeApply.externalModeForbidden", { mode: cmd.mode }),
+      };
+    }
+    if (cmd.durable) {
+      return {
+        ok: false,
+        error: "external-durable-forbidden",
+        message: t("be_permissionModeApply.externalDurableForbidden"),
+      };
+    }
+  }
 
   if (cmd.durable && !trustedConfirmation) {
     if (!deps.approvalGate) {
