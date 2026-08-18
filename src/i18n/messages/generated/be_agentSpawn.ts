@@ -22,6 +22,10 @@ export const en = {
     "Optional: continue an EXISTING sub-agent instead of starting a new one — this is the normal way to hand a suspended sub-agent more work, not only an error-recovery path. Takes a resumeId from agent_list or from an incomplete result. The sub-agent's history is re-hydrated and `instructions` becomes its follow-up prompt; its tool scope stays frozen to the original spawn (not re-granted). To steer a sub-agent that is still RUNNING, use agent_guide instead — that delivers a directive without starting a run. Omit to start a fresh sub-agent.",
   "be_agentSpawn.incompleteNotice":
     "This run is NOT finished. The sub-agent hit its round budget mid-task, so the summary above is a partial snapshot, not an answer — do not report it to the user as a result. Call agent_spawn again with resumeId=\"{resumeId}\" and instructions naming what still needs doing; the sub-agent keeps its history and continues from exactly where it stopped. Repeat until it returns without this notice. If you deliberately stop resuming, say so explicitly and tell the user the work was left incomplete.",
+  "be_agentSpawn.freshSpawnFailedGuidance":
+    "This sub-agent died before finishing and CANNOT be resumed — it never suspended, so there is no point to continue from. Do not immediately spawn the same task again: an identical retry that hits the same condition just burns another agent. Read the error first. If the cause looks transient (provider hiccup, timeout), one retry is reasonable. If it does not, change something — narrow the task, adjust sourceTools, or do the work yourself — and tell the user this agent was lost.",
+  "be_agentSpawn.freshSpawnRejectedGuidance":
+    "This sub-agent was REJECTED by the provider, not interrupted — the same request will be refused the same way every time. It cannot be resumed and retrying it unchanged cannot succeed. Change the request before trying again: narrow sourceTools (a tool schema the provider cannot compile is the usual cause), simplify the instructions, or do the work without a sub-agent. Tell the user why this agent could not run.",
   "be_agentSpawn.resumeRetryGuidance":
     "The sub-agent is STILL RESUMABLE — this failure did not consume its history. Retry agent_spawn with the SAME resumeId (transient provider errors usually clear on retry). Do NOT spawn a fresh agent for this work: that discards everything the suspended sub-agent already established.",
   "be_agentSpawn.resumeExhaustedGuidance":
@@ -59,6 +63,10 @@ export const ko: Record<keyof typeof en, string> = {
     "선택: 새로 띄우는 대신 기존 sub-agent 를 이어서 실행합니다 — 중단된 sub-agent 에게 추가 작업을 주는 정상 경로이며 오류 복구 전용이 아닙니다. resumeId 는 agent_list 또는 미완료 결과에서 얻습니다. 지정 시 sub-agent 히스토리를 재수화하고 instructions 를 후속 프롬프트로 이어갑니다. tool 범위는 최초 spawn 시점으로 고정되어 재부여되지 않습니다. 아직 실행 중(running)인 sub-agent 의 방향을 바꾸려면 대신 agent_guide 를 쓰세요 — 새 실행을 시작하지 않고 지시만 전달합니다. 생략하면 새 sub-agent 를 시작합니다.",
   "be_agentSpawn.incompleteNotice":
     "이 실행은 끝나지 않았습니다. sub-agent 가 작업 도중 라운드 예산에 도달했으므로 위 요약은 답이 아니라 중간 스냅샷입니다 — 사용자에게 결과로 보고하지 마세요. agent_spawn 을 resumeId=\"{resumeId}\" 와 남은 작업을 명시한 instructions 로 다시 호출하세요. sub-agent 는 히스토리를 유지한 채 중단된 지점부터 정확히 이어갑니다. 이 안내가 사라질 때까지 반복하세요. 의도적으로 재개를 중단한다면 그 사실을 명시하고 작업이 미완료로 남았음을 사용자에게 알리세요.",
+  "be_agentSpawn.freshSpawnFailedGuidance":
+    "이 sub-agent 는 완료 전에 죽었고 **재개할 수 없습니다** — 중단(suspend) 한 적이 없어 이어갈 지점 자체가 없습니다. 같은 작업을 곧바로 다시 띄우지 마세요: 동일 조건에 걸리는 재시도는 에이전트만 하나 더 소모합니다. 먼저 오류를 읽으세요. 원인이 일시적(프로바이더 오류, 타임아웃)으로 보이면 한 번 재시도는 합리적입니다. 그렇지 않다면 무언가를 바꾸세요 — 작업 범위를 좁히거나, sourceTools 를 조정하거나, 직접 수행하고 — 이 에이전트가 유실됐음을 사용자에게 알리세요.",
+  "be_agentSpawn.freshSpawnRejectedGuidance":
+    "이 sub-agent 는 중단된 게 아니라 프로바이더가 **거부**했습니다 — 같은 요청은 매번 같은 방식으로 거부됩니다. 재개할 수 없고, 바꾸지 않은 재시도는 성공할 수 없습니다. 다시 시도하기 전에 요청을 바꾸세요: sourceTools 를 좁히거나(프로바이더가 컴파일하지 못하는 tool 스키마가 흔한 원인), instructions 를 단순화하거나, sub-agent 없이 처리하세요. 이 에이전트가 왜 실행되지 못했는지 사용자에게 알리세요.",
   "be_agentSpawn.resumeRetryGuidance":
     "이 sub-agent 는 여전히 재개 가능합니다 — 이번 실패로 히스토리가 소실되지 않았습니다. 같은 resumeId 로 agent_spawn 을 재시도하세요 (일시적 provider 오류는 대개 재시도로 해소됩니다). 이 작업을 위해 새 에이전트를 띄우지 마세요: 중단된 sub-agent 가 이미 쌓은 것을 전부 버리게 됩니다.",
   "be_agentSpawn.resumeExhaustedGuidance":
