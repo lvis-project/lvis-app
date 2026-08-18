@@ -675,7 +675,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
       installAlias,
     );
 
-    expect(api.getSecret(secretKey)).toBe("host-secret-value");
+    expect(await api.getSecret(secretKey)).toBe("host-secret-value");
     expect(runtimeTestState.runtime.resolvePluginInstallId)
       .not.toHaveBeenCalled();
   });
@@ -705,7 +705,7 @@ describe("HostApi emitEvent/onEvent round-trip", () => {
       { installSource: "admin", manifestSha256 },
     );
 
-    expect(api.getSecret(secretKey)).toBe("fresh-admin-secret");
+    expect(await api.getSecret(secretKey)).toBe("fresh-admin-secret");
     expect(runtimeTestState.readPluginRegistry).toHaveBeenCalledOnce();
   });
 
