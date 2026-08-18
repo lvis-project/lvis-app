@@ -36,6 +36,19 @@ function makeMcpScopedBuiltin(name: string) {
   });
 }
 
+/** A BUILTIN that can reach a model-chosen external URL. */
+function makeEgressBuiltin(name: string) {
+  return createDynamicTool({
+    name,
+    description: `egress builtin ${name}`,
+    source: "builtin",
+    category: "network",
+    arbitraryEgress: true,
+    jsonSchema: { type: "object", properties: {} },
+    execute: async () => ({ output: "", isError: false }),
+  });
+}
+
 function makePluginTool(name: string, pluginId: string) {
   return createDynamicTool({
     name,
@@ -78,6 +91,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activePluginIds: new Set<string>(),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
     });
     const names = schemas.map((s) => s.name).sort();
     expect(names).toEqual(["bash", "web_search"]);
@@ -89,6 +103,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activePluginIds: new Set(["com.example.meeting"]),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
     });
     const names = schemas.map((s) => s.name).sort();
     expect(names).toEqual(["bash", "web_search"]);
@@ -106,6 +121,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activePluginIds: new Set<string>(),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
     }).map((s) => s.name);
     expect(withoutMcp).not.toContain("mcp_resource_list");
     expect(withoutMcp).toContain("bash");
@@ -114,8 +130,49 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activePluginIds: new Set<string>(),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
     }).map((s) => s.name);
     expect(withMcp).toContain("mcp_resource_list");
+  });
+
+  it("withholds an arbitrary-egress builtin when egress is out of scope", () => {
+    // Unattended (headless/routine) lanes set `includeEgress: false`. Dropping
+    // the tool at the REGISTRY — not at the approval gate — is what makes this
+    // hold against prompt injection: the schema is never shown, so injected
+    // text in a mail body or indexed document cannot ask for the tool by name.
+    const r = seed();
+    r.register(makeEgressBuiltin("web_fetch"));
+
+    const unattended = r.getToolSchemasForScope({
+      activePluginIds: new Set<string>(),
+      includeBuiltins: true,
+      includeMcp: false,
+      includeEgress: false,
+    }).map((s) => s.name);
+    expect(unattended).not.toContain("web_fetch");
+    // Withholding egress must not disturb the rest of the builtin surface.
+    expect(unattended).toContain("bash");
+
+    const attended = r.getToolSchemasForScope({
+      activePluginIds: new Set<string>(),
+      includeBuiltins: true,
+      includeMcp: false,
+      includeEgress: true,
+    }).map((s) => s.name);
+    expect(attended).toContain("web_fetch");
+  });
+
+  it("fails closed when the egress switch is omitted", () => {
+    // A security switch must withhold when a caller forgets it, not expose.
+    const r = seed();
+    r.register(makeEgressBuiltin("web_fetch"));
+    const names = r.getToolSchemasForScope({
+      activePluginIds: new Set<string>(),
+      includeBuiltins: true,
+      includeMcp: false,
+      // includeEgress deliberately omitted — that is the case under test.
+    } as never).map((s) => s.name);
+    expect(names).not.toContain("web_fetch");
   });
 
   it("plugin schemas load individually by activeToolNames", () => {
@@ -125,6 +182,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activeToolNames: new Set(["meeting_stop", "email_list"]),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
     });
     const names = schemas.map((s) => s.name).sort();
     expect(names).toEqual([
@@ -142,6 +200,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activeToolNames: new Set(["meeting_stop", "mcp_fetch"]),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
     });
 
     expect(schemas.find((s) => s.name === "bash")).toMatchObject({
@@ -167,6 +226,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activeToolNames: new Set(["mcp_fetch"]),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
     });
     expect(withMcp.map((s) => s.name)).toContain("mcp_fetch");
 
@@ -174,6 +234,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activePluginIds: new Set<string>(),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
     });
     expect(withoutMcp.map((s) => s.name)).not.toContain("mcp_fetch");
   });
@@ -185,6 +246,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activeToolNames: new Set(["meeting_start"]),
       includeBuiltins: false,
       includeMcp: false,
+      includeEgress: true,
     });
     const names = schemas.map((s) => s.name).sort();
     expect(names).toEqual(["meeting_start"]);
@@ -197,6 +259,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activeToolNames: ["email_list"],
       includeBuiltins: false,
       includeMcp: false,
+      includeEgress: true,
     });
     expect(schemas.map((s) => s.name)).toEqual(["email_list"]);
   });
@@ -208,6 +271,7 @@ describe("ToolRegistry.getToolSchemasForScope — Phase 1 Lazy Tool Scoping", ()
       activePluginIds: new Set<string>(),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
     });
     expect(schemas.map((s) => s.name)).not.toContain("bash");
   });
@@ -226,6 +290,7 @@ describe("ToolRegistry — Tool-Level Deferral", () => {
       activePluginIds: new Set<string>(),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
       deferral: false,
     });
     expect(schemas.map((s) => s.name)).toContain("tool_search");
@@ -238,6 +303,7 @@ describe("ToolRegistry — Tool-Level Deferral", () => {
       activeToolNames: new Set(["meeting_start"]),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
       deferral: true,
     });
     const names = schemas.map((s) => s.name).sort();
@@ -253,6 +319,7 @@ describe("ToolRegistry — Tool-Level Deferral", () => {
       activeToolNames: new Set<string>(),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
       deferral: true,
     });
     expect(schemas.map((s) => s.name)).not.toContain("meeting_start");
@@ -266,6 +333,7 @@ describe("ToolRegistry — Tool-Level Deferral", () => {
       activeToolNames: new Set(["meeting_start"]),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
       deferral: true,
     });
     expect(schemas.map((s) => s.name)).not.toContain("meeting_start");
@@ -349,6 +417,7 @@ describe("ToolRegistry — eager exposure (deferral=false, #1176)", () => {
       // No activeToolNames at all — eager mode must still load every meeting tool.
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
       deferral: false,
     });
     const names = schemas.map((s) => s.name).sort();
@@ -361,6 +430,7 @@ describe("ToolRegistry — eager exposure (deferral=false, #1176)", () => {
       activePluginIds: new Set<string>(),
       includeBuiltins: false,
       includeMcp: true,
+      includeEgress: true,
       deferral: false,
     });
     expect(schemas.map((s) => s.name)).toContain("mcp_fetch");
@@ -372,6 +442,7 @@ describe("ToolRegistry — eager exposure (deferral=false, #1176)", () => {
       activePluginIds: new Set(["com.example.meeting"]),
       includeBuiltins: false,
       includeMcp: false,
+      includeEgress: true,
       deferral: false,
     });
     const names = schemas.map((s) => s.name).sort();
@@ -396,6 +467,7 @@ describe("ToolRegistry — eager exposure (deferral=false, #1176)", () => {
       activePluginIds: new Set(["com.example.meeting"]),
       includeBuiltins: false,
       includeMcp: false,
+      includeEgress: true,
       deferral: false,
     });
     expect(schemas.map((s) => s.name)).not.toContain("meeting_stop");

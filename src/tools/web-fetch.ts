@@ -42,8 +42,13 @@ function webFetchPrivateNetworkApprovalCacheKey(input: unknown): string | undefi
   }
 }
 
-function webFetchCategoryForInput(input: unknown): "read" | "network" {
-  return webFetchRequiresPrivateNetwork(input) ? "network" : "read";
+function webFetchCategoryForInput(input: unknown): "network" {
+  // Always `network`, whether or not the URL is private. The destination is
+  // model-chosen, so a public URL is an exfiltration channel just as much as a
+  // private one — classifying the public case as `read` made every public
+  // fetch auto-allow under the builtin read policy.
+  void webFetchRequiresPrivateNetwork(input);
+  return "network";
 }
 
 function htmlToPlainTextForWebFetch(html: string): string {
@@ -108,9 +113,10 @@ export function createWebFetchTool(networkFetch: typeof fetch): Tool {
     name: "web_fetch",
     description: t("be_tools.webFetchDescription"),
     source: "builtin",
-    category: "read",
+    category: "network",
     categoryForInput: (input) => webFetchCategoryForInput(input),
     isReadOnly: () => true,
+    arbitraryEgress: true,
     approvalCacheKey: (input) => webFetchPrivateNetworkApprovalCacheKey(input),
     jsonSchema: {
       type: "object",
