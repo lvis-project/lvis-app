@@ -324,12 +324,17 @@ export async function installFromMarketplace(
   }
 
   // 5. Verify signature.
-  // Detect the empty trusted-key configuration up front. When the bundled
-  // SDK key set is filtered to empty (e.g. `bun run start` keeps the
-  // production SDK keys but `LVIS_DEV=1` is unset, dropping the dev/poc
-  // test keys) every envelope hits a generic "no signature matched" error.
-  // Surfacing the misconfiguration explicitly avoids the user chasing
-  // signature corruption that isn't there.
+  // Detect an empty trusted-key configuration up front, so a launcher that
+  // supplied no anchors fails with that fact rather than with a generic "no
+  // signature matched" — which sends people hunting for signature corruption
+  // that isn't there.
+  //
+  // This comment previously described an `LVIS_DEV=1` filter that dropped
+  // dev/poc keys from a production build. No such filter existed:
+  // `getBundledPublicKeys()` returned every entry unconditionally. Describing
+  // a control that was never implemented is worse than describing none — it
+  // reassures a reviewer into skipping the check. Anchors now come from
+  // `MARKETPLACE_PUBLIC_KEYS`, which holds `prod-v1` alone.
   // Distinct code (KEYS_NOT_CONFIGURED, not SIGNATURE_INVALID) so ops
   // dashboards / SOC alerts that page on signature failures don't get false
   // positives from a launcher misconfig — the two have very different
@@ -337,7 +342,7 @@ export async function installFromMarketplace(
   if (Object.keys(opts.publicKeys).length === 0) {
     throw new MarketplaceInstallerError(
       "KEYS_NOT_CONFIGURED",
-      "no trusted marketplace public keys are configured for this build — set LVIS_DEV=1 to enable the bundled dev/poc keys, or ship a packaged build with production keys",
+      "no trusted marketplace public keys are configured for this build — the launcher supplied an empty anchor set",
     );
   }
   const result: VerifyResult = verifyEnvelope(body, envelope, opts.publicKeys);
