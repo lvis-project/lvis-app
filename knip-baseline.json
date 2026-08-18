@@ -139,11 +139,6 @@
     },
     {
       "type": "exports",
-      "file": "scripts/lib/electron-native-modules.mjs",
-      "name": "withElectronNativeRebuildLock"
-    },
-    {
-      "type": "exports",
       "file": "scripts/lib/main-bundle-budget.mjs",
       "name": "isMainBundleRootScriptPath"
     },
@@ -1296,36 +1291,6 @@
       "type": "files",
       "file": "scripts/electron-after-pack.cjs",
       "name": "scripts/electron-after-pack.cjs"
-    },
-    {
-      "type": "files",
-      "file": "scripts/hooks/node-native-abi.mjs",
-      "name": "scripts/hooks/node-native-abi.mjs"
-    },
-    {
-      "type": "files",
-      "file": "scripts/hooks/pre-push-comment-policy.mjs",
-      "name": "scripts/hooks/pre-push-comment-policy.mjs"
-    },
-    {
-      "type": "files",
-      "file": "scripts/hooks/pre-push-markdown-policy.mjs",
-      "name": "scripts/hooks/pre-push-markdown-policy.mjs"
-    },
-    {
-      "type": "files",
-      "file": "scripts/hooks/pre-push-test-policy.mjs",
-      "name": "scripts/hooks/pre-push-test-policy.mjs"
-    },
-    {
-      "type": "files",
-      "file": "scripts/hooks/run-local-checks.mjs",
-      "name": "scripts/hooks/run-local-checks.mjs"
-    },
-    {
-      "type": "files",
-      "file": "scripts/hooks/spawn-command.mjs",
-      "name": "scripts/hooks/spawn-command.mjs"
     },
     {
       "type": "files",
