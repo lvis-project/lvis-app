@@ -43,6 +43,30 @@ describe("historyToEntries — systemNotice marker (Issue #911)", () => {
     expect(assistant.systemNotice).toBe("stream-error");
   });
 
+  it("stamps restored on every replayed assistant entry (Issue #2113)", () => {
+    const messages: PersistedHistoryMessage[] = [
+      { index: 0, role: "user", content: "go" },
+      { index: 1, role: "assistant", content: "ordinary reply" },
+      { index: 2, role: "user", content: "again" },
+      {
+        index: 3,
+        role: "assistant",
+        content: "응답 스트림이 끊겼습니다.",
+        systemNotice: "stream-error",
+      },
+    ];
+    const entries = historyToEntries(messages);
+    const assistants = entries.filter((e) => e.kind === "assistant") as Array<
+      Extract<ReturnType<typeof historyToEntries>[number], { kind: "assistant" }>
+    >;
+    expect(assistants).toHaveLength(2);
+    // historyToEntries is the single stamping point — replayed entries carry
+    // restored so AssistantCard can soften an old systemNotice banner
+    // instead of re-presenting it as a fresh error on session reload.
+    expect(assistants.every((a) => a.restored === true)).toBe(true);
+    expect(assistants[1]!.systemNotice).toBe("stream-error");
+  });
+
   it("omits systemNotice when the persisted assistant message has no marker", () => {
     const messages: PersistedHistoryMessage[] = [
       { index: 0, role: "user", content: "hi" },

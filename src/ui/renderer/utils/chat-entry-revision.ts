@@ -67,7 +67,7 @@ export function entryRenderRevision(params: {
     case "reasoning":
       return `${idx}:reasoning:${textRevision(entry.text)}:${entry.streaming ? "1" : "0"}`;
     case "assistant":
-      return `${idx}:assistant:${textRevision(entry.text)}:${entry.streaming ? "1" : "0"}:${entry.phase ?? ""}:${entry.systemNotice ?? ""}:${textRevision(searchHighlight)}:${starred ? "1" : "0"}`;
+      return `${idx}:assistant:${textRevision(entry.text)}:${entry.streaming ? "1" : "0"}:${entry.phase ?? ""}:${entry.systemNotice ?? ""}:${entry.restored ? "1" : "0"}:${textRevision(searchHighlight)}:${starred ? "1" : "0"}`;
     case "permission_review":
       return [
         idx,

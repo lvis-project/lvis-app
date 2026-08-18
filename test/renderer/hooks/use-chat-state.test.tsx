@@ -689,10 +689,10 @@ describe("useSessions (streaming guard)", () => {
       { kind: "user", text: "작업 순서 확인" },
       { kind: "reasoning", text: "검색 계획", streaming: false },
       expect.objectContaining({ kind: "tool_group", status: "done" }),
-      { kind: "assistant", text: "중간 답변", streaming: false, route: undefined },
+      { kind: "assistant", text: "중간 답변", streaming: false, route: undefined, restored: true },
       { kind: "reasoning", text: "검증 계획", streaming: false },
       expect.objectContaining({ kind: "tool_group", status: "done" }),
-      { kind: "assistant", text: "최종 답변", streaming: false, route: undefined },
+      { kind: "assistant", text: "최종 답변", streaming: false, route: undefined, restored: true },
     ]);
     expect(result.current.currentSessionId).toBe("other-sess");
   });
@@ -716,7 +716,7 @@ describe("useSessions (streaming guard)", () => {
 
     expect(setEntries).toHaveBeenCalledWith([
       { kind: "user", text: "이전 질문" },
-      { kind: "assistant", text: "이전 답변", streaming: false, route: undefined },
+      { kind: "assistant", text: "이전 답변", streaming: false, route: undefined, restored: true },
     ]);
   });
 
@@ -817,7 +817,7 @@ describe("useSessions (streaming guard)", () => {
     await waitFor(() => {
       expect(applyInitial).toHaveBeenCalledWith([
         { kind: "user", text: "이전 질문" },
-        { kind: "assistant", text: "이전 답변", streaming: false, route: undefined },
+        { kind: "assistant", text: "이전 답변", streaming: false, route: undefined, restored: true },
       ]);
     });
     expect(result.current.currentSessionId).toBe("persisted-sess");
@@ -846,7 +846,7 @@ describe("useSessions (streaming guard)", () => {
     await waitFor(() => {
       expect(applyInitial).toHaveBeenCalledWith([
         { kind: "user", text: "진행 중 질문" },
-        { kind: "assistant", text: "진행 중 답변", streaming: false, route: undefined },
+        { kind: "assistant", text: "진행 중 답변", streaming: false, route: undefined, restored: true },
       ]);
     });
   });
@@ -889,7 +889,7 @@ describe("useSessions (streaming guard)", () => {
     await waitFor(() => expect(api.chatSessionResume).toHaveBeenCalledWith("main-sess"));
     expect(applyInitial).toHaveBeenCalledWith([
       { kind: "user", text: "메인 질문" },
-      { kind: "assistant", text: "메인 답변", streaming: false, route: undefined },
+      { kind: "assistant", text: "메인 답변", streaming: false, route: undefined, restored: true },
     ]);
     expect(result.current.currentSessionId).toBe("main-sess");
     expect(result.current.currentSessionKind).toBe("main");

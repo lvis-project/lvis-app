@@ -144,6 +144,7 @@ export const jaMessages: Record<string, string> = {
   "assistantCard.feedbackUp": "これは役に立ちました",
   "assistantCard.forkButton": "フォーク",
   "assistantCard.reasonPlaceholder": "理由（任意）",
+  "assistantCard.restoredNoticeBadge": "前回のセッションのエラー",
   "assistantCard.retryButton": "リトライ（深さ：高）",
   "assistantCard.sendButton": "送信",
   "assistantCard.starButton": "ピン",
