@@ -125,6 +125,11 @@ export function resolveToolScope(
       forcedToolNames,
       includeBuiltins: true,
       includeMcp: deps.headless !== true,
+      // Unattended lanes get no arbitrary-egress builtin. A routine turn has no
+      // human watching the destination, and its input (mail bodies, indexed
+      // documents, transcripts) is exactly the untrusted material an injected
+      // instruction rides in on.
+      includeEgress: deps.headless !== true,
       deferral,
     };
   }
