@@ -9,6 +9,7 @@
  * prompt/message content.
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { makeHistoryExceedingEstimateThreshold } from "../../__tests__/conversation-loop-test-helpers.js";
 import { ConversationLoop } from "../../conversation-loop.js";
 import type { GenericMessage } from "../../llm/types.js";
 import { getModelPreflightThreshold, estimateMessagesTokens } from "../../auto-compact.js";
@@ -76,15 +77,6 @@ function makeSyntheticCompactResult(originalMessages: GenericMessage[]): import(
     estimatedAfter: 100,
     truncatedCount: 0,
   };
-}
-
-/** Plain-ASCII history whose estimateMessagesTokens result exceeds the given threshold. */
-function makeHistoryExceedingEstimateThreshold(threshold: number): GenericMessage[] {
-  const charsPerMsg = (threshold / 2 + 500) * 4;
-  return [
-    { role: "user", content: "a".repeat(Math.ceil(charsPerMsg)) },
-    { role: "assistant", content: "b".repeat(Math.ceil(charsPerMsg)) },
-  ];
 }
 
 describe("PREFLIGHT_GUARD trace step — fired path", () => {
