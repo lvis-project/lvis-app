@@ -1240,10 +1240,10 @@ describe("initPluginRuntime HostApi factory", () => {
     );
 
     // Active vendor (openai) — allowed
-    expect(api.getSecret("llm.apiKey.openai")).toBe("sk-openai");
+    expect(await api.getSecret("llm.apiKey.openai")).toBe("sk-openai");
 
     // Non-active vendor (claude) — denied even though allowlisted
-    expect(api.getSecret("llm.apiKey.claude")).toBeNull();
+    expect(await api.getSecret("llm.apiKey.claude")).toBeNull();
 
     // Audit captured the Tier-4 deny. `vendor-mismatch` is the ONE token both
     // host APIs now emit for this tier; `getSecret` used to rename it to
@@ -1363,8 +1363,8 @@ describe("initPluginRuntime HostApi factory", () => {
       trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-")),
     );
 
-    expect(api.getSecret(activeKey)).toBe("fr-secret");
-    expect(api.getSecret(idleKey)).toBeNull();
+    expect(await api.getSecret(activeKey)).toBe("fr-secret");
+    expect(await api.getSecret(idleKey)).toBeNull();
     expect(getSecretMock).not.toHaveBeenCalledWith(idleKey);
     expect(bootAuditLogger.log).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1473,7 +1473,7 @@ describe("initPluginRuntime HostApi factory", () => {
       trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-")),
     );
 
-    expect(api.getSecret(genericKey)).toBeNull();
+    expect(await api.getSecret(genericKey)).toBeNull();
     expect(getSecretMock).not.toHaveBeenCalledWith(genericKey);
     expect(bootAuditLogger.log).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1549,9 +1549,9 @@ describe("initPluginRuntime HostApi factory", () => {
     );
 
     // Attacker-controlled prefix gets folded into `other`
-    expect(api.getSecret("attacker.x")).toBeNull();
-    expect(api.getSecret("garbage.y")).toBeNull();
-    expect(api.getSecret("evilprefix.z")).toBeNull();
+    expect(await api.getSecret("attacker.x")).toBeNull();
+    expect(await api.getSecret("garbage.y")).toBeNull();
+    expect(await api.getSecret("evilprefix.z")).toBeNull();
 
     expect(
       getHostSecretCounter("hostSecret_denied", "plugin-b7", "other"),
@@ -1629,11 +1629,11 @@ describe("initPluginRuntime HostApi factory", () => {
       pluginDataDir,
     );
 
-    expect(api.getSecret("plugin.plugin-q.sttApiKey")).toBeNull();
-    expect(api.getSecret("plugin.plugin-q.webhookUrl")).toBe(
+    expect(await api.getSecret("plugin.plugin-q.sttApiKey")).toBeNull();
+    expect(await api.getSecret("plugin.plugin-q.webhookUrl")).toBe(
       "https://example.com/hook",
     );
-    expect(api.getSecret("plugin.plugin-q.apiKey")).toBe("sk-valid");
+    expect(await api.getSecret("plugin.plugin-q.apiKey")).toBe("sk-valid");
     expect(bootAuditLogger.log).toHaveBeenCalledWith(
       expect.objectContaining({
         type: "warn",
@@ -1740,7 +1740,7 @@ describe("initPluginRuntime HostApi factory", () => {
       manifest,
       trackTmpDir(mkdtempSync("/tmp/lvis-hostapi-data-")),
     );
-    expect(api.getSecret("llm.apiKey.openai")).toBe("sk-openai");
+    expect(await api.getSecret("llm.apiKey.openai")).toBe("sk-openai");
 
     runtimeTestState.readPluginRegistry.mockRejectedValue(
       new Error("registry unavailable"),
@@ -1748,7 +1748,7 @@ describe("initPluginRuntime HostApi factory", () => {
     emitEvent("plugin.installed", { pluginId: "plugin-cache-fail" });
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(api.getSecret("llm.apiKey.openai")).toBeNull();
+    expect(await api.getSecret("llm.apiKey.openai")).toBeNull();
   });
 });
 
