@@ -634,7 +634,7 @@ export function createHostApiFactory(
         }
         return bindApiKeyResult(result);
       },
-      getSecret: (key) => {
+      getSecret: async (key) => {
         // #893 Stage 2 — the four-tier secret access gate. The DECISION lives
         // in `runSecretGate` (src/plugins/whitelist/secret-gate.ts), the one
         // authority `resolveApiKey` above also calls; everything below is this
