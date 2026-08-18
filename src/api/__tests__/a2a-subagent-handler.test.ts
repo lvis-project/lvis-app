@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   A2ARole,
   A2ATaskState,
+  type A2AJsonObject,
   type A2AMessage,
   type A2ATask,
 } from "../../shared/a2a.js";
@@ -22,8 +23,9 @@ import {
   A2A_INPUT_REQUIRED_TTL_MS,
   A2ASubAgentHandler,
   createA2AContextId,
-  type A2AMutationAuthorizer,
   type A2ASubAgentLifecycleRunner,
+  type A2AWireAuthorizationDescriptor,
+  type A2AWireAuthorizer,
 } from "../a2a-subagent-handler.js";
 import { A2ATaskStore } from "../a2a-task-store.js";
 
@@ -106,6 +108,11 @@ function card(): A2AAgentCardTemplate {
   };
 }
 
+/** `A2AMessage` is an interface, so widening is needed to satisfy `A2AJsonObject`. */
+function sendParams(message: A2AMessage): A2AJsonObject {
+  return { message } as unknown as A2AJsonObject;
+}
+
 function userMessage(
   messageId: string,
   overrides: Partial<A2AMessage> = {},
@@ -121,8 +128,8 @@ function userMessage(
 function makeHarness(
   handlerId = HANDLER_ID,
   options: {
-    authorizeMutation?: A2AMutationAuthorizer;
-    omitAuthorizeMutation?: boolean;
+    authorizeOperation?: A2AWireAuthorizer;
+    omitAuthorizeOperation?: boolean;
     maxTasks?: number;
     maxHistoryMessages?: number;
     now?: () => string;
@@ -151,7 +158,9 @@ function makeHarness(
       },
     })),
   };
-  const authorizeMutation = options.authorizeMutation ?? vi.fn(async () => true);
+  const authorizeOperation = vi.fn<A2AWireAuthorizer>(
+    options.authorizeOperation ?? (async () => true),
+  );
   let id = 0;
   const handlerOptions = {
     id: handlerId,
@@ -159,15 +168,15 @@ function makeHarness(
     binding: binding(handlerId),
     runner: runner as unknown as A2ASubAgentLifecycleRunner,
     store,
-    authorizeMutation,
+    authorizeOperation,
     makeId: () => "server-id-" + String(++id),
     audit,
   };
-  if (options.omitAuthorizeMutation) {
-    delete (handlerOptions as { authorizeMutation?: A2AMutationAuthorizer }).authorizeMutation;
+  if (options.omitAuthorizeOperation) {
+    delete (handlerOptions as { authorizeOperation?: A2AWireAuthorizer }).authorizeOperation;
   }
   const handler = new A2ASubAgentHandler(handlerOptions);
-  return { store, runner, audit, authorizeMutation, handler };
+  return { store, runner, audit, authorizeOperation, handler };
 }
 
 afterEach(() => {
@@ -241,14 +250,14 @@ describe("A2ASubAgentHandler", () => {
       expect(maskSensitiveData(id).detections).toEqual([]);
     }
 
-    const { store, runner, audit, authorizeMutation } = makeHarness();
+    const { store, runner, audit, authorizeOperation } = makeHarness();
     const handler = new A2ASubAgentHandler({
       id: HANDLER_ID,
       card: card(),
       binding: binding(HANDLER_ID),
       runner: runner as unknown as A2ASubAgentLifecycleRunner,
       store,
-      authorizeMutation,
+      authorizeOperation,
       audit,
     });
     const task = taskFrom(await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
@@ -259,9 +268,9 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("fails closed before the initial runner/store mutation when consent is denied", async () => {
-    const authorizeMutation = vi.fn(async () => false);
+    const authorizeOperation = vi.fn(async () => false);
     const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
-      authorizeMutation,
+      authorizeOperation,
     });
 
     await expect(handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
@@ -275,7 +284,7 @@ describe("A2ASubAgentHandler", () => {
       },
     });
 
-    expect(authorizeMutation).toHaveBeenCalledWith({
+    expect(authorizeOperation).toHaveBeenCalledWith({
       operation: "send-message",
       handlerId: HANDLER_ID,
       messageId: "wire-consent-denied",
@@ -289,19 +298,19 @@ describe("A2ASubAgentHandler", () => {
       operation: "send-message",
       messageId: "wire-consent-denied",
     }));
-    expect(JSON.stringify(authorizeMutation.mock.calls)).not.toContain("sk-abcdefgh12345678");
+    expect(JSON.stringify(authorizeOperation.mock.calls)).not.toContain("sk-abcdefgh12345678");
     expect(JSON.stringify(audit.mock.calls)).not.toContain("sk-abcdefgh12345678");
   });
 
   it.each(["missing", "throw"] as const)(
     "fails closed with OPERATION_REJECTED when the authorizer is %s",
     async (mode) => {
-      const authorizeMutation = vi.fn(async () => {
+      const authorizeOperation = vi.fn(async () => {
         throw new Error("private approval detail");
       });
       const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
-        ...(mode === "throw" ? { authorizeMutation } : {}),
-        omitAuthorizeMutation: mode === "missing",
+        ...(mode === "throw" ? { authorizeOperation } : {}),
+        omitAuthorizeOperation: mode === "missing",
       });
 
       await expect(handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
@@ -317,10 +326,10 @@ describe("A2ASubAgentHandler", () => {
   );
 
   it("releases an initial admission after denial so later work can be approved", async () => {
-    const authorizeMutation = vi.fn()
+    const authorizeOperation = vi.fn()
       .mockResolvedValueOnce(false)
       .mockResolvedValueOnce(true);
-    const { handler, runner } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const { handler, runner } = makeHarness(HANDLER_ID, { authorizeOperation });
 
     await expect(handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
       message: userMessage("wire-admission-denied"),
@@ -330,14 +339,14 @@ describe("A2ASubAgentHandler", () => {
     }));
 
     expect(approved.id).toBe(TASK_ID);
-    expect(authorizeMutation).toHaveBeenCalledTimes(2);
+    expect(authorizeOperation).toHaveBeenCalledTimes(2);
     expect(runner.spawnFromA2AWire).toHaveBeenCalledOnce();
   });
 
   it("keeps the fixed rejection when the audit sink throws", async () => {
-    const authorizeMutation = vi.fn(async () => false);
+    const authorizeOperation = vi.fn(async () => false);
     const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
-      authorizeMutation,
+      authorizeOperation,
     });
     audit.mockImplementation(() => {
       throw new Error("audit sink failed");
@@ -347,13 +356,13 @@ describe("A2ASubAgentHandler", () => {
       message: userMessage("wire-consent-audit-failure"),
     })).rejects.toMatchObject({ definition: { code: -32010 } });
 
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation).toHaveBeenCalledOnce();
     expect(runner.spawnFromA2AWire).not.toHaveBeenCalled();
     await expect(store.list(HANDLER_ID)).resolves.toEqual([]);
   });
 
   it("rejects invalid send input before requesting consent", async () => {
-    const { handler, runner, store, authorizeMutation } = makeHarness();
+    const { handler, runner, store, authorizeOperation } = makeHarness();
 
     await expect(handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
       message: userMessage("wire-invalid-raw", {
@@ -361,7 +370,7 @@ describe("A2ASubAgentHandler", () => {
       }),
     })).rejects.toMatchObject({ definition: { code: -32005 } });
 
-    expect(authorizeMutation).not.toHaveBeenCalled();
+    expect(authorizeOperation).not.toHaveBeenCalled();
     expect(runner.spawnFromA2AWire).not.toHaveBeenCalled();
     await expect(store.list(HANDLER_ID)).resolves.toEqual([]);
   });
@@ -480,7 +489,7 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("reconciles detached cancellation before accepting a continuation", async () => {
-    const { handler, runner, store, audit, authorizeMutation } = makeHarness();
+    const { handler, runner, store, audit, authorizeOperation } = makeHarness();
     await seedInputRequiredTask(
       store,
       TASK_ID,
@@ -501,7 +510,7 @@ describe("A2ASubAgentHandler", () => {
       }),
     })).rejects.toMatchObject({ definition: { code: -32602 } });
 
-    expect(authorizeMutation).not.toHaveBeenCalled();
+    expect(authorizeOperation).not.toHaveBeenCalled();
     expect(runner.resumeFromA2AWire).not.toHaveBeenCalled();
     await expect(store.get(HANDLER_ID, TASK_ID)).resolves.toMatchObject({
       task: {
@@ -519,8 +528,8 @@ describe("A2ASubAgentHandler", () => {
 
   it("reconciles detached cancellation while continuation consent is pending", async () => {
     const approval = deferred<boolean>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const authorizeOperation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
     await seedInputRequiredTask(
       store,
       TASK_ID,
@@ -538,7 +547,7 @@ describe("A2ASubAgentHandler", () => {
     const rejection = expect(pending).rejects.toMatchObject({
       definition: { code: -32602 },
     });
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
     runner.getA2AWireRunSnapshot.mockReturnValue({
       childSessionId: TASK_ID,
       title: "wire profile",
@@ -554,9 +563,9 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("preflights a continuation before consent and leaves it waiting when denied", async () => {
-    const authorizeMutation = vi.fn(async () => false);
+    const authorizeOperation = vi.fn(async () => false);
     const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
-      authorizeMutation,
+      authorizeOperation,
     });
     await seedWorkingTask(
       store,
@@ -583,7 +592,7 @@ describe("A2ASubAgentHandler", () => {
       }),
     })).rejects.toMatchObject({ definition: { code: -32010 } });
 
-    expect(authorizeMutation).toHaveBeenCalledWith({
+    expect(authorizeOperation).toHaveBeenCalledWith({
       operation: "send-message",
       handlerId: HANDLER_ID,
       taskId: TASK_ID,
@@ -607,8 +616,8 @@ describe("A2ASubAgentHandler", () => {
 
   it("coalesces identical concurrent continuation denial without another prompt", async () => {
     const approval = deferred<boolean>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const authorizeOperation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -631,7 +640,7 @@ describe("A2ASubAgentHandler", () => {
 
     const first = handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, request);
     const second = handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, request);
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
     approval.resolve(false);
 
     await Promise.all([
@@ -652,8 +661,8 @@ describe("A2ASubAgentHandler", () => {
   it("starts one resume for identical concurrent approved continuations", async () => {
     const approval = deferred<boolean>();
     const resume = deferred<SubAgentSpawnResult>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const authorizeOperation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
     runner.resumeFromA2AWire.mockImplementation(async () => await resume.promise);
     await seedWorkingTask(
       store,
@@ -678,7 +687,7 @@ describe("A2ASubAgentHandler", () => {
 
     const first = handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, request);
     const second = handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, request);
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
     approval.resolve(true);
     const tasks = (await Promise.all([first, second])).map(taskFrom);
 
@@ -696,8 +705,11 @@ describe("A2ASubAgentHandler", () => {
 
   it("rejects a distinct concurrent continuation before the task FIFO or authorizer", async () => {
     const approval = deferred<boolean>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    // Reads carry their own consent step; only the mutation is held pending so
+    // the assertion still isolates the task FIFO from the read path.
+    const authorizeOperation = vi.fn(async (descriptor: A2AWireAuthorizationDescriptor) =>
+      descriptor.operation === "send-message" ? await approval.promise : true);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -720,7 +732,7 @@ describe("A2ASubAgentHandler", () => {
     const firstRejection = expect(first).rejects.toMatchObject({
       definition: { code: -32010 },
     });
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
 
     await expect(handler.handle(A2AJsonRpcMethod.GET_TASK, { id: TASK_ID }))
       .resolves.toMatchObject({ status: { state: A2ATaskState.INPUT_REQUIRED } });
@@ -733,7 +745,8 @@ describe("A2ASubAgentHandler", () => {
         contextId: "context-distinct",
       }),
     })).rejects.toMatchObject({ definition: { code: -32010 } });
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation.mock.calls
+      .filter(([descriptor]) => descriptor.operation === "send-message")).toHaveLength(1);
 
     approval.resolve(false);
     await firstRejection;
@@ -742,8 +755,8 @@ describe("A2ASubAgentHandler", () => {
 
   it("revalidates a continuation after approval before history or runner mutation", async () => {
     const approval = deferred<boolean>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const authorizeOperation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -765,7 +778,7 @@ describe("A2ASubAgentHandler", () => {
     const rejection = expect(pending).rejects.toMatchObject({
       definition: { code: -32602 },
     });
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
     await store.transition({
       handlerId: HANDLER_ID,
       taskId: TASK_ID,
@@ -786,7 +799,7 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("rejects invalid continuation context before requesting consent", async () => {
-    const { handler, runner, store, authorizeMutation } = makeHarness();
+    const { handler, runner, store, authorizeOperation } = makeHarness();
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -810,7 +823,7 @@ describe("A2ASubAgentHandler", () => {
         contextId: "context-wrong",
       }),
     })).rejects.toMatchObject({ definition: { code: -32602 } });
-    expect(authorizeMutation).not.toHaveBeenCalled();
+    expect(authorizeOperation).not.toHaveBeenCalled();
     expect(runner.resumeFromA2AWire).not.toHaveBeenCalled();
   });
 
@@ -825,7 +838,7 @@ describe("A2ASubAgentHandler", () => {
     await expect(unknown.handler.handle(A2AJsonRpcMethod.CANCEL_TASK, {
       id: "sub-unknown-preflight",
     })).rejects.toMatchObject({ definition: { code: -32001 } });
-    expect(unknown.authorizeMutation).not.toHaveBeenCalled();
+    expect(unknown.authorizeOperation).not.toHaveBeenCalled();
 
     const terminal = makeHarness();
     await seedWorkingTask(
@@ -849,7 +862,7 @@ describe("A2ASubAgentHandler", () => {
     await expect(terminal.handler.handle(A2AJsonRpcMethod.CANCEL_TASK, {
       id: TASK_ID,
     })).rejects.toMatchObject({ definition: { code: -32002 } });
-    expect(terminal.authorizeMutation).not.toHaveBeenCalled();
+    expect(terminal.authorizeOperation).not.toHaveBeenCalled();
 
     const historyFull = makeHarness(HANDLER_ID, { maxHistoryMessages: 1 });
     await seedWorkingTask(
@@ -870,7 +883,7 @@ describe("A2ASubAgentHandler", () => {
         contextId: "context-history-full",
       }),
     })).rejects.toMatchObject({ definition: { code: -32602 } });
-    expect(historyFull.authorizeMutation).not.toHaveBeenCalled();
+    expect(historyFull.authorizeOperation).not.toHaveBeenCalled();
     expect(historyFull.runner.resumeFromA2AWire).not.toHaveBeenCalled();
   });
 
@@ -899,7 +912,7 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("coalesces a semantic initial retry but projects each caller configuration", async () => {
-    const { handler, runner, authorizeMutation } = makeHarness();
+    const { handler, runner, authorizeOperation } = makeHarness();
     let releaseLink!: () => void;
     const linkGate = new Promise<void>((resolve) => {
       releaseLink = resolve;
@@ -932,7 +945,7 @@ describe("A2ASubAgentHandler", () => {
     expect(firstTask.status.state).toBe(A2ATaskState.WORKING);
     expect(firstTask.history).toEqual([]);
     expect(runner.spawnFromA2AWire).toHaveBeenCalledOnce();
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation).toHaveBeenCalledOnce();
 
     let secondSettled = false;
     void second.then(() => {
@@ -948,7 +961,7 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("rejects a distinct initial mutation while the admission is linking", async () => {
-    const { handler, runner, authorizeMutation } = makeHarness();
+    const { handler, runner, authorizeOperation } = makeHarness();
     const linkGate = deferred<void>();
     const resultGate = deferred<SubAgentSpawnResult>();
     runner.spawnFromA2AWire.mockImplementation(async (_request, _binding, callbacks) => {
@@ -966,7 +979,7 @@ describe("A2ASubAgentHandler", () => {
     await expect(handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
       message: userMessage("wire-admission-distinct"),
     })).rejects.toMatchObject({ definition: { code: -32010 } });
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation).toHaveBeenCalledOnce();
     expect(runner.spawnFromA2AWire).toHaveBeenCalledOnce();
 
     linkGate.resolve();
@@ -976,7 +989,7 @@ describe("A2ASubAgentHandler", () => {
 
   it("blocks a continuation from committing an initial admission message id", async () => {
     const initialTaskId = "sub-initial-admission-race";
-    const { handler, runner, store, authorizeMutation } = makeHarness();
+    const { handler, runner, store, authorizeOperation } = makeHarness();
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -1010,7 +1023,7 @@ describe("A2ASubAgentHandler", () => {
         parts: [{ text: "continuation collision" }],
       }),
     })).rejects.toMatchObject({ definition: { code: -32602 } });
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation).toHaveBeenCalledOnce();
     expect(runner.resumeFromA2AWire).not.toHaveBeenCalled();
 
     linkGate.resolve();
@@ -1020,8 +1033,8 @@ describe("A2ASubAgentHandler", () => {
 
   it("rejects conflicting concurrent initial bodies with the same message id", async () => {
     const approval = deferred<boolean>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const authorizeOperation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
 
     const first = handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
       message: userMessage("wire-conflicting-initial", {
@@ -1031,14 +1044,14 @@ describe("A2ASubAgentHandler", () => {
     const firstRejection = expect(first).rejects.toMatchObject({
       definition: { code: -32010 },
     });
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
 
     await expect(handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
       message: userMessage("wire-conflicting-initial", {
         parts: [{ text: "different body" }],
       }),
     })).rejects.toMatchObject({ definition: { code: -32010 } });
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation).toHaveBeenCalledOnce();
     expect(runner.spawnFromA2AWire).not.toHaveBeenCalled();
 
     approval.resolve(false);
@@ -1047,19 +1060,19 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("replays an already durable duplicate without requesting consent again", async () => {
-    const { handler, runner, authorizeMutation } = makeHarness();
+    const { handler, runner, authorizeOperation } = makeHarness();
     const request = { message: userMessage("wire-durable-replay") };
 
     const first = taskFrom(await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, request));
     const replay = taskFrom(await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, request));
 
     expect(replay.id).toBe(first.id);
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation).toHaveBeenCalledOnce();
     expect(runner.spawnFromA2AWire).toHaveBeenCalledOnce();
   });
 
   it("rejects a conflicting body for an already durable initial message id", async () => {
-    const { handler, runner, authorizeMutation } = makeHarness();
+    const { handler, runner, authorizeOperation } = makeHarness();
     await handler.handle(A2AJsonRpcMethod.SEND_MESSAGE, {
       message: userMessage("wire-durable-initial-conflict", {
         parts: [{ text: "first body" }],
@@ -1072,12 +1085,12 @@ describe("A2ASubAgentHandler", () => {
       }),
     })).rejects.toMatchObject({ definition: { code: -32602 } });
 
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation).toHaveBeenCalledOnce();
     expect(runner.spawnFromA2AWire).toHaveBeenCalledOnce();
   });
 
   it("rejects a conflicting body for an already durable continuation message id", async () => {
-    const { handler, runner, store, authorizeMutation } = makeHarness();
+    const { handler, runner, store, authorizeOperation } = makeHarness();
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -1111,12 +1124,12 @@ describe("A2ASubAgentHandler", () => {
       }),
     })).rejects.toMatchObject({ definition: { code: -32602 } });
 
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation).toHaveBeenCalledOnce();
     expect(runner.resumeFromA2AWire).toHaveBeenCalledOnce();
   });
 
-  it("does not request mutation consent for task reads", async () => {
-    const { handler, store, authorizeMutation } = makeHarness();
+  it("requires consent before disclosing a task the caller was never granted", async () => {
+    const { handler, store, authorizeOperation } = makeHarness();
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -1127,11 +1140,134 @@ describe("A2ASubAgentHandler", () => {
 
     await handler.handle(A2AJsonRpcMethod.GET_TASK, { id: TASK_ID });
     await handler.handle(A2AJsonRpcMethod.LIST_TASKS, {});
-    expect(authorizeMutation).not.toHaveBeenCalled();
+    expect(authorizeOperation.mock.calls.map(([descriptor]) => descriptor)).toEqual([
+      { operation: "get-task", handlerId: HANDLER_ID, taskId: TASK_ID },
+      { operation: "list-tasks", handlerId: HANDLER_ID },
+    ]);
+  });
+
+  it("denies refused task reads and discloses nothing", async () => {
+    const authorizeOperation = vi.fn(async () => false);
+    const { handler, store, audit } = makeHarness(HANDLER_ID, { authorizeOperation });
+    await seedWorkingTask(
+      store,
+      HANDLER_ID,
+      TASK_ID,
+      "context-read-denied",
+      "message-read-denied",
+    );
+
+    await expect(handler.handle(A2AJsonRpcMethod.GET_TASK, { id: TASK_ID }))
+      .rejects.toMatchObject({ definition: { code: -32010 } });
+    await expect(handler.handle(A2AJsonRpcMethod.LIST_TASKS, {}))
+      .rejects.toMatchObject({ definition: { code: -32010 } });
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "dropped",
+      reason: "consent-denied",
+      operation: "get-task",
+      taskId: TASK_ID,
+    }));
+    expect(audit).toHaveBeenCalledWith(expect.objectContaining({
+      outcome: "dropped",
+      reason: "consent-denied",
+      operation: "list-tasks",
+    }));
+  });
+
+  it("fails task reads closed when no authorizer is wired", async () => {
+    const { handler, store } = makeHarness(HANDLER_ID, { omitAuthorizeOperation: true });
+    await seedWorkingTask(
+      store,
+      HANDLER_ID,
+      TASK_ID,
+      "context-read-unwired",
+      "message-read-unwired",
+    );
+
+    await expect(handler.handle(A2AJsonRpcMethod.GET_TASK, { id: TASK_ID }))
+      .rejects.toMatchObject({ definition: { code: -32010 } });
+    await expect(handler.handle(A2AJsonRpcMethod.LIST_TASKS, {}))
+      .rejects.toMatchObject({ definition: { code: -32010 } });
+  });
+
+  it("lets a caller poll the task its own send created without re-prompting", async () => {
+    const { handler, authorizeOperation } = makeHarness();
+
+    const sent = taskFrom(await handler.handle(
+      A2AJsonRpcMethod.SEND_MESSAGE,
+      sendParams(userMessage("message-poll-own")),
+    ));
+    authorizeOperation.mockClear();
+
+    await expect(handler.handle(A2AJsonRpcMethod.GET_TASK, { id: sent.id }))
+      .resolves.toMatchObject({ id: sent.id });
+    await expect(handler.handle(A2AJsonRpcMethod.GET_TASK, { id: sent.id }))
+      .resolves.toMatchObject({ id: sent.id });
+    expect(authorizeOperation).not.toHaveBeenCalled();
+
+    // Enumeration is never covered by a per-task grant.
+    await handler.handle(A2AJsonRpcMethod.LIST_TASKS, {});
+    expect(authorizeOperation.mock.calls.map(([descriptor]) => descriptor.operation))
+      .toEqual(["list-tasks"]);
+  });
+
+  it("keeps disclosure grants scoped to the handler that earned them", async () => {
+    const owner = makeHarness(HANDLER_ID);
+    const other = makeHarness("profile-b");
+    const sent = taskFrom(await owner.handler.handle(
+      A2AJsonRpcMethod.SEND_MESSAGE,
+      sendParams(userMessage("message-cross-origin-grant")),
+    ));
+    await seedWorkingTask(
+      other.store,
+      "profile-b",
+      sent.id,
+      "context-other-origin",
+      "message-other-origin",
+    );
+    other.authorizeOperation.mockClear();
+
+    await expect(other.handler.handle(A2AJsonRpcMethod.GET_TASK, { id: sent.id }))
+      .resolves.toMatchObject({ id: sent.id });
+    expect(other.authorizeOperation).toHaveBeenCalledWith({
+      operation: "get-task",
+      handlerId: "profile-b",
+      taskId: sent.id,
+    });
+  });
+
+  it("does not prompt for tasks owned by another origin or absent entirely", async () => {
+    const owner = makeHarness(HANDLER_ID);
+    const foreign = new A2ASubAgentHandler({
+      id: "profile-b",
+      card: card(),
+      binding: binding("profile-b"),
+      runner: owner.runner as unknown as A2ASubAgentLifecycleRunner,
+      store: owner.store,
+      authorizeOperation: owner.authorizeOperation,
+      audit: owner.audit,
+    });
+    await seedWorkingTask(
+      owner.store,
+      HANDLER_ID,
+      TASK_ID,
+      "context-foreign",
+      "message-foreign",
+    );
+
+    await expect(foreign.handle(A2AJsonRpcMethod.GET_TASK, { id: TASK_ID }))
+      .rejects.toMatchObject({ definition: { code: -32001 } });
+    await expect(foreign.handle(A2AJsonRpcMethod.GET_TASK, { id: "absent-task" }))
+      .rejects.toMatchObject({ definition: { code: -32001 } });
+    expect(owner.authorizeOperation).not.toHaveBeenCalled();
+    expect(owner.audit).toHaveBeenCalledWith(expect.objectContaining({
+      reason: "cross-origin",
+      taskId: TASK_ID,
+    }));
   });
 
   it("rejects a full active task store before consent or runner start", async () => {
-    const { handler, runner, store, authorizeMutation, audit } = makeHarness(
+    const { handler, runner, store, authorizeOperation, audit } = makeHarness(
       HANDLER_ID,
       { maxTasks: 1 },
     );
@@ -1147,7 +1283,7 @@ describe("A2ASubAgentHandler", () => {
       message: userMessage("message-capacity-rejected"),
     })).rejects.toMatchObject({ definition: { code: -32010 } });
 
-    expect(authorizeMutation).not.toHaveBeenCalled();
+    expect(authorizeOperation).not.toHaveBeenCalled();
     expect(runner.spawnFromA2AWire).not.toHaveBeenCalled();
     await expect(store.list(HANDLER_ID)).resolves.toHaveLength(1);
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({
@@ -1158,7 +1294,7 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("cancels a live task idempotently through the handler-bound runner seam", async () => {
-    const { handler, runner, store, authorizeMutation } = makeHarness();
+    const { handler, runner, store, authorizeOperation } = makeHarness();
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -1173,13 +1309,13 @@ describe("A2ASubAgentHandler", () => {
     expect((first as A2ATask).status.state).toBe(A2ATaskState.CANCELED);
     expect((second as A2ATask).status.state).toBe(A2ATaskState.CANCELED);
     expect(runner.cancelA2AWireRun).toHaveBeenCalledOnce();
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation).toHaveBeenCalledOnce();
   });
 
   it("preflights cancel before consent and preserves a live task when denied", async () => {
-    const authorizeMutation = vi.fn(async () => false);
+    const authorizeOperation = vi.fn(async () => false);
     const { handler, runner, store, audit } = makeHarness(HANDLER_ID, {
-      authorizeMutation,
+      authorizeOperation,
     });
     await seedWorkingTask(
       store,
@@ -1192,7 +1328,7 @@ describe("A2ASubAgentHandler", () => {
     await expect(handler.handle(A2AJsonRpcMethod.CANCEL_TASK, { id: TASK_ID }))
       .rejects.toMatchObject({ definition: { code: -32010 } });
 
-    expect(authorizeMutation).toHaveBeenCalledWith({
+    expect(authorizeOperation).toHaveBeenCalledWith({
       operation: "cancel-task",
       handlerId: HANDLER_ID,
       taskId: TASK_ID,
@@ -1210,8 +1346,8 @@ describe("A2ASubAgentHandler", () => {
 
   it("coalesces identical concurrent cancel denial", async () => {
     const approval = deferred<boolean>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const authorizeOperation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -1222,7 +1358,7 @@ describe("A2ASubAgentHandler", () => {
 
     const first = handler.handle(A2AJsonRpcMethod.CANCEL_TASK, { id: TASK_ID });
     const second = handler.handle(A2AJsonRpcMethod.CANCEL_TASK, { id: TASK_ID });
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
     approval.resolve(false);
 
     await Promise.all([
@@ -1237,8 +1373,8 @@ describe("A2ASubAgentHandler", () => {
 
   it("runs one cancel mutation for identical concurrent approval", async () => {
     const approval = deferred<boolean>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const authorizeOperation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -1249,7 +1385,7 @@ describe("A2ASubAgentHandler", () => {
 
     const first = handler.handle(A2AJsonRpcMethod.CANCEL_TASK, { id: TASK_ID });
     const second = handler.handle(A2AJsonRpcMethod.CANCEL_TASK, { id: TASK_ID });
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
     approval.resolve(true);
     const tasks = await Promise.all([first, second]) as A2ATask[];
 
@@ -1282,8 +1418,8 @@ describe("A2ASubAgentHandler", () => {
 
   it("revalidates cancel after approval before the runner mutation", async () => {
     const approval = deferred<boolean>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const authorizeOperation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -1296,7 +1432,7 @@ describe("A2ASubAgentHandler", () => {
     const rejection = expect(pending).rejects.toMatchObject({
       definition: { code: -32002 },
     });
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
     await store.transition({
       handlerId: HANDLER_ID,
       taskId: TASK_ID,
@@ -1313,8 +1449,8 @@ describe("A2ASubAgentHandler", () => {
 
   it("rejects cancel immediately while a distinct continuation consent is pending", async () => {
     const approval = deferred<boolean>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const authorizeOperation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
     await seedWorkingTask(
       store,
       HANDLER_ID,
@@ -1336,11 +1472,11 @@ describe("A2ASubAgentHandler", () => {
     const continuationRejection = expect(continuation).rejects.toMatchObject({
       definition: { code: -32010 },
     });
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
 
     await expect(handler.handle(A2AJsonRpcMethod.CANCEL_TASK, { id: TASK_ID }))
       .rejects.toMatchObject({ definition: { code: -32010 } });
-    expect(authorizeMutation).toHaveBeenCalledOnce();
+    expect(authorizeOperation).toHaveBeenCalledOnce();
     expect(runner.cancelA2AWireRun).not.toHaveBeenCalled();
 
     approval.resolve(false);
@@ -1349,7 +1485,7 @@ describe("A2ASubAgentHandler", () => {
   });
 
   it("returns authoritative detached cancellation without canceling the runner again", async () => {
-    const { handler, runner, store, authorizeMutation } = makeHarness();
+    const { handler, runner, store, authorizeOperation } = makeHarness();
     await seedInputRequiredTask(
       store,
       TASK_ID,
@@ -1368,7 +1504,10 @@ describe("A2ASubAgentHandler", () => {
     ) as A2ATask;
 
     expect(canceled.status.state).toBe(A2ATaskState.CANCELED);
-    expect(authorizeMutation).not.toHaveBeenCalled();
+    // No cancel consent: the runner already stopped. The task body still leaves
+    // the host, so the idempotent return costs a disclosure approval instead.
+    expect(authorizeOperation.mock.calls.map(([descriptor]) => descriptor.operation))
+      .toEqual(["get-task"]);
     expect(runner.cancelA2AWireRun).not.toHaveBeenCalled();
     await expect(store.get(HANDLER_ID, TASK_ID)).resolves.toMatchObject({
       task: { status: { state: A2ATaskState.CANCELED } },
@@ -1377,8 +1516,8 @@ describe("A2ASubAgentHandler", () => {
 
   it("reconciles detached cancellation while cancel consent is pending", async () => {
     const approval = deferred<boolean>();
-    const authorizeMutation = vi.fn(async () => await approval.promise);
-    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeMutation });
+    const authorizeOperation = vi.fn(async () => await approval.promise);
+    const { handler, runner, store } = makeHarness(HANDLER_ID, { authorizeOperation });
     await seedInputRequiredTask(
       store,
       TASK_ID,
@@ -1387,7 +1526,7 @@ describe("A2ASubAgentHandler", () => {
     );
 
     const pending = handler.handle(A2AJsonRpcMethod.CANCEL_TASK, { id: TASK_ID });
-    await vi.waitFor(() => expect(authorizeMutation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(authorizeOperation).toHaveBeenCalledOnce());
     runner.getA2AWireRunSnapshot.mockReturnValue({
       childSessionId: TASK_ID,
       title: "wire profile",
@@ -1521,14 +1660,14 @@ describe("A2ASubAgentHandler", () => {
       getA2AWireRunSnapshot: vi.fn(),
       cancelA2AWireRun: vi.fn(),
     };
-    const authorizeMutation = vi.fn(async () => true);
+    const authorizeOperation = vi.fn(async () => true);
     const other = new A2ASubAgentHandler({
       id: "profile-b",
       card: card(),
       binding: binding("profile-b"),
       runner: runner as unknown as A2ASubAgentLifecycleRunner,
       store: first.store,
-      authorizeMutation,
+      authorizeOperation,
       audit,
     });
 
@@ -1545,7 +1684,7 @@ describe("A2ASubAgentHandler", () => {
     expect(runner.getA2AWireRunSnapshot).not.toHaveBeenCalled();
     expect(runner.resumeFromA2AWire).not.toHaveBeenCalled();
     expect(runner.cancelA2AWireRun).not.toHaveBeenCalled();
-    expect(authorizeMutation).not.toHaveBeenCalled();
+    expect(authorizeOperation).not.toHaveBeenCalled();
     expect(audit).toHaveBeenCalledTimes(3);
     expect(audit).toHaveBeenCalledWith(expect.objectContaining({
       reason: "cross-origin",
@@ -1582,7 +1721,7 @@ describe("A2ASubAgentHandler", () => {
         binding: binding("profile-b"),
         runner: runner as unknown as A2ASubAgentLifecycleRunner,
         store: first.store,
-        authorizeMutation: vi.fn(async () => true),
+        authorizeOperation: vi.fn(async () => true),
         audit,
       });
 
