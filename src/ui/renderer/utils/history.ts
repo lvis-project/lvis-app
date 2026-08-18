@@ -59,6 +59,7 @@ export function historyToEntries(
         toolUseId,
         result: textContent(m.content),
         isError: m.isError,
+        ...(m.toolDisplay?.cancelled ? { cancelled: true } : {}),
         ...(m.toolDisplay?.durationMs !== undefined
           ? { durationMs: m.toolDisplay.durationMs }
           : {}),

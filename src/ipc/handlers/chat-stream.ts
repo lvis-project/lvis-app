@@ -194,6 +194,7 @@ export async function runStreamedTurn(
       onToolEnd: (name, toolResult, isError, meta, uiPayload, durationMs) =>
         send({
           kind: "tool.completed",
+          ...(meta.cancelled ? { cancelled: true } : {}),
           tool: {
             name,
             groupId: meta.groupId,

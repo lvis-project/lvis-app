@@ -138,13 +138,21 @@ function ToolStatusBadge({
 }) {
   const { t } = useTranslation();
   const isError = status === "error";
+  // A user stop is neither a failure nor a completion. `status` carries it as
+  // its own value, so every `=== "error"` check elsewhere already excludes it;
+  // only the label has to say which of the three happened.
+  const isCancelled = status === "cancelled";
 
   return (
     <Badge
       variant={isError ? "secondary" : "default"}
-      className={`shrink-0 px-1 py-0 text-[10px] ${isError ? "text-destructive" : ""}`}
+      className={`shrink-0 px-1 py-0 text-[10px] ${isError ? "text-destructive" : ""} ${isCancelled ? "text-muted-foreground" : ""}`}
     >
-      {isError ? t("toolGroupCard.failed") : t("toolGroupCard.done")}
+      {isError
+        ? t("toolGroupCard.failed")
+        : isCancelled
+          ? t("toolGroupCard.cancelled")
+          : t("toolGroupCard.done")}
     </Badge>
   );
 }
