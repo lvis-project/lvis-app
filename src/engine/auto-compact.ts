@@ -75,6 +75,28 @@ export function getModelPreflightThreshold(vendor: LLMVendor, model: string): nu
   return windowThreshold;
 }
 
+/** Which input {@link getModelPreflightThreshold} actually used — observability only. */
+export type PreflightThresholdSource =
+  | "runtime-override" | "dev-env-override" | "tpm-capped" | "context-window";
+
+/**
+ * Mirrors {@link getModelPreflightThreshold}'s own priority order so trace
+ * consumers can tell whether a preflight decision was made against the
+ * model's context window, a TPM cap, or a UI/env override — without
+ * duplicating the threshold math itself.
+ */
+export function getModelPreflightThresholdSource(vendor: LLMVendor, model: string): PreflightThresholdSource {
+  if (_runtimePreflightOverride !== null) return "runtime-override";
+  if (readDevPreflightOverride() !== null) return "dev-env-override";
+  const windowThreshold = getPreflightThreshold(getModelContextWindow(vendor, model));
+  const pricing = lookupPricing(vendor, model);
+  if (typeof pricing.tpmDefault === "number" && pricing.tpmDefault > 0) {
+    const tpmThreshold = Math.floor(pricing.tpmDefault * 0.8);
+    if (tpmThreshold < windowThreshold) return "tpm-capped";
+  }
+  return "context-window";
+}
+
 let _devOverrideWarnedValue: number | null | undefined = undefined;
 let _runtimePreflightOverride: number | null = null;
 
