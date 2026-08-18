@@ -2660,6 +2660,7 @@ export const frMessages: Record<string, string> = {
   "toolGroupCard.done": "Fait",
   "toolGroupCard.error": "Erreur",
   "toolGroupCard.failed": "Échoué",
+  "toolGroupCard.cancelled": "Arrêté",
   "toolGroupCard.hasErrors": "A des erreurs",
   "toolGroupCard.input": "Saisir",
   "toolGroupCard.result": "Résultat",

@@ -2656,6 +2656,7 @@ export const deMessages: Record<string, string> = {
   "toolGroupCard.done": "Erledigt",
   "toolGroupCard.error": "Fehler",
   "toolGroupCard.failed": "Fehlgeschlagen",
+  "toolGroupCard.cancelled": "Gestoppt",
   "toolGroupCard.hasErrors": "Hat Fehler",
   "toolGroupCard.input": "Eingang",
   "toolGroupCard.result": "Ergebnis",
