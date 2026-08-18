@@ -39,7 +39,7 @@ export default function Page() {
       <ol>
         <li>플러그인 (예: ms-graph) 이 <code>hostApi.emitEvent('email.new', payload)</code> 호출.</li>
         <li>구독 중인 work-assistant 가 <code>onEvent('email.new', …)</code> 에서 detector 평가.</li>
-        <li>detector 가 surface 결정 시 <code>hostApi.triggerConversation({"{ …spec }"})</code> 또는 <code>showOverlay({"{ …input }"})</code> 호출.</li>
+        <li>detector 가 surface 결정 시 <code>hostApi.triggerConversation({"{ …spec }"})</code> 호출.</li>
         <li>host UI가 MessageQueuePanel 또는 카드로 노출.</li>
         <li>모든 흐름 → <code>{"~/.lvis/audit/<YYYY-MM-DD>.jsonl"}</code> 한 줄 JSONL append.</li>
       </ol>
@@ -47,7 +47,7 @@ export default function Page() {
       <Callout tone="info" title="enqueueMessage 같은 API는 없다">
         SDK 표면에 <code>hostApi.enqueueMessage</code> 가 존재하지 않습니다.
         패널에 항목을 넣는 표준 경로는 <strong>이벤트 emit → host UI 가 감지 → 렌더</strong> 또는
-        <strong> triggerConversation / showOverlay</strong> 입니다.
+        <strong> triggerConversation</strong> 입니다.
       </Callout>
 
       <PageNav />

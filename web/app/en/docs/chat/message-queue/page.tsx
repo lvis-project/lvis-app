@@ -39,7 +39,7 @@ export default function Page() {
       <ol>
         <li>A plugin (e.g. ms-graph) calls <code>hostApi.emitEvent('email.new', payload)</code>.</li>
         <li>The subscribed work-assistant evaluates it via a detector in <code>onEvent('email.new', …)</code>.</li>
-        <li>When the detector decides on a surface, it calls <code>hostApi.triggerConversation({"{ …spec }"})</code> or <code>showOverlay({"{ …input }"})</code>.</li>
+        <li>When the detector decides on a surface, it calls <code>hostApi.triggerConversation({"{ …spec }"})</code>.</li>
         <li>The host UI exposes it via the MessageQueuePanel or a card.</li>
         <li>Every flow appends one line to <code>{"~/.lvis/audit/<YYYY-MM-DD>.jsonl"}</code>.</li>
       </ol>
@@ -47,7 +47,7 @@ export default function Page() {
       <Callout tone="info" title="There's no API like enqueueMessage">
         There is no <code>hostApi.enqueueMessage</code> on the SDK surface.
         The standard path for putting an item on the panel is <strong>emit an event → host UI detects it → render</strong>, or
-        <strong> triggerConversation / showOverlay</strong>.
+        <strong> triggerConversation</strong>.
       </Callout>
 
       <PageNav />
