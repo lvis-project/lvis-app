@@ -463,7 +463,7 @@ function isReadOnlyLeaf(leaf: ShellLeaf): boolean {
   if (!READ_ONLY_COMMANDS.has(verb)) return false;
   // A read-only verb still MUTATES when carrying a mutating flag (`sed -i`,
   // `find … -delete`, …). Escalate to non-read-only.
-  if (hasMutatingFlag(verb, argv.slice(1))) return false;
+  if (hasMutatingFlag(verb, argv.slice(1), leaf.argvHasExpandableDollar.slice(1))) return false;
   return true;
 }
 
@@ -539,9 +539,21 @@ function isReadOnlyGitInspectionToken(token: string): boolean {
   }
   // `git log -5` — a bare count shortcut, no letters to check.
   if (/^-[0-9]+$/.test(token)) return true;
+
+  // A flag that takes a glued value: the letter is the flag and everything
+  // after it is its argument, so the cluster scan stops there.
+  //
+  // Only stopping at the first NON-letter is not enough. That works for `-U5`
+  // and `-M50%`, where a digit ends the run, and fails for an alphabetic value:
+  // `-Sneedle` scanned as the cluster `Sneedle`, and `d` is not an allow-listed
+  // letter, so searching a diff for a string prompted while `-S needle` — the
+  // same search, spelled with a space — did not.
+  const valueTaking = /^-([A-Za-z])(.+)$/.exec(token);
+  if (valueTaking && GIT_VALUE_TAKING_SHORT_FLAGS.has(valueTaking[1]!)) {
+    return GIT_INSPECTION_READ_ONLY_SHORT_LETTERS.has(valueTaking[1]!);
+  }
+
   // Short flags: every letter in the leading cluster must be allow-listed.
-  // A glued value (`-U5`, `-M50%`, `-Sneedle`) stops the cluster at the first
-  // non-letter, which is exactly the flag letters that were actually passed.
   const cluster = /^-([A-Za-z]+)/.exec(token);
   if (cluster === null) return false;
   for (const letter of cluster[1]!) {
@@ -549,6 +561,27 @@ function isReadOnlyGitInspectionToken(token: string): boolean {
   }
   return true;
 }
+
+/**
+ * Git short flags whose value may be gluéd directly onto the letter, so the
+ * characters after it are an operand rather than more flags.
+ *
+ * Being in this set does NOT make a flag read-only — the letter is still
+ * checked against {@link GIT_INSPECTION_READ_ONLY_SHORT_LETTERS}. It only
+ * decides where the flag ends, which is what stops an alphabetic value from
+ * being misread as a cluster of unknown flag letters.
+ */
+const GIT_VALUE_TAKING_SHORT_FLAGS: ReadonlySet<string> = new Set([
+  "S", // -S<string>  pickaxe search
+  "G", // -G<regex>   diff-content search
+  "L", // -L<range>   line-range log / blame
+  "U", // -U<n>       context lines
+  "M", // -M<n>       rename detection threshold
+  "C", // -C<n>       copy detection threshold
+  "B", // -B<n>       break-rewrite threshold
+  "I", // -I<regex>   ignore matching changes
+  "n", // -n<n>       max count
+]);
 
 /**
  * True when `verb`'s argument tokens carry a flag that turns a read-only verb
@@ -565,7 +598,11 @@ function isReadOnlyGitInspectionToken(token: string): boolean {
  *     token contains an unexpanded `$`, the runtime shell may expand it into a
  *     mutating flag (e.g. `sed $IFS-i f`). Fail closed → shell.
  */
-function hasMutatingFlag(verb: string, args: readonly string[]): boolean {
+function hasMutatingFlag(
+  verb: string,
+  args: readonly string[],
+  argsHaveExpandableDollar: readonly boolean[],
+): boolean {
   if (!MUTATING_FLAGS.has(verb)) return false;
   // `.get()` is always defined here because `.has()` just returned true;
   // TypeScript cannot narrow Map.get() through .has() so we assert non-null.
@@ -574,9 +611,15 @@ function hasMutatingFlag(verb: string, args: readonly string[]): boolean {
 
   const shortLetters = MUTATING_SHORT_LETTERS.get(verb);
 
-  for (const arg of args) {
+  for (const [index, arg] of args.entries()) {
     // Mode 4: dollar-expansion in any arg for this mutating-capable verb.
-    if (arg.includes("$")) return true;
+    // Keyed on whether the shell will actually EXPAND that `$`, not on the
+    // character being present. A `$` inside `'...'` is literal, so it cannot
+    // split into a flag this scan never saw — which is the entire reason this
+    // mode exists. Without the distinction `rg 'foo$'` classified shell while
+    // `grep 'foo$' f` classified read, purely because rg has an entry in
+    // MUTATING_FLAGS and grep does not.
+    if (arg.includes("$") && argsHaveExpandableDollar[index] === true) return true;
 
     // Mode 1: exact token.
     if (flagSet.has(arg)) return true;
