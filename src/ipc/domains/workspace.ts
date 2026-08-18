@@ -25,7 +25,7 @@ import { t } from "../../i18n/index.js";
 import { promises as fs } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { randomBytes } from "node:crypto";
-import { validateSender, auditUnauthorized } from "../gated.js";
+import { validateSender, validateHostRendererSender, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { assertReadableFilePath } from "../../tools/file-read-core.js";
@@ -760,7 +760,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.workspace.pickRoot,
     async (e, opts?: { ackToken?: string }): Promise<WorkspacePickRootResult> => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.workspace.pickRoot, e);
         return { ok: false, error: "unauthorized" };
       }
@@ -898,7 +898,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.workspace.removeRoot,
     async (e, rawPath: string): Promise<WorkspaceRemoveRootResult> => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.workspace.removeRoot, e);
         return { ok: false, error: "unauthorized", message: "sender frame not authorized" };
       }
@@ -982,7 +982,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.workspace.reveal,
     async (e, rawPath: string): Promise<WorkspaceRevealResult> => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.workspace.reveal, e);
         return { ok: false, error: "unauthorized", message: "sender frame not authorized" };
       }
@@ -1012,7 +1012,9 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
    * which carries no capability on its own. This handler is the trust gate that
    * gives the drop the SAME defense as the #1448 native warned-pick:
    *
-   *   1. `validateSender` — a plugin-ui-shell / external frame is refused.
+   *   1. `validateHostRendererSender` — a plugin-ui-shell / external frame is
+   *      refused (the base `validateSender` accepts any `file:` frame, so it
+   *      never delivered the plugin-shell rejection this step describes).
    *   2. `validateDirectoryAddition` — Layer-0 HARD-DENY (filesystem root /
    *      sensitive dir). An ack can NEVER clear a hard deny, so a dropped
    *      `~/.lvis/secrets` is rejected here and never reaches persistence.
@@ -1038,7 +1040,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.workspace.dropPrepare,
     async (e, rawPath: string): Promise<WorkspaceDropPrepareResult> => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.workspace.dropPrepare, e);
         return { ok: false, error: "unauthorized" };
       }

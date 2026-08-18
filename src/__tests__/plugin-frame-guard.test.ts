@@ -42,10 +42,10 @@ describe("validatePluginFrame", () => {
     expect(validatePluginFrame(ev("https://evil.example.com/"))).toBe(false);
   });
 
-  it("treats null event as trusted (unit-test ergonomics)", () => {
-    expect(validatePluginFrame(null)).toBe(true);
-    expect(validatePluginFrame(undefined)).toBe(true);
-    expect(validatePluginFrame({} as IpcMainInvokeEvent)).toBe(true);
+  it("refuses a missing sender frame", () => {
+    expect(validatePluginFrame(null)).toBe(false);
+    expect(validatePluginFrame(undefined)).toBe(false);
+    expect(validatePluginFrame({} as IpcMainInvokeEvent)).toBe(false);
   });
 
   it("rejects malformed URL", () => {

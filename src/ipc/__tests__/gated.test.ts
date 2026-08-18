@@ -45,10 +45,18 @@ describe("validateSender", () => {
     expect(validateSender(ev("not-a-url"))).toBe(false);
   });
 
-  it("treats missing senderFrame as trusted (unit-test ergonomics)", () => {
-    expect(validateSender(null)).toBe(true);
-    expect(validateSender(undefined)).toBe(true);
-    expect(validateSender({} as IpcMainInvokeEvent)).toBe(true);
+  // Electron nulls `senderFrame` once the sending frame is destroyed or
+  // navigated away between `invoke` and handler execution, so an absent frame
+  // is an unprovable sender — not a trusted one.
+  it("refuses a missing senderFrame", () => {
+    expect(validateSender(null)).toBe(false);
+    expect(validateSender(undefined)).toBe(false);
+    expect(validateSender({} as IpcMainInvokeEvent)).toBe(false);
+    expect(validateSender({ senderFrame: null } as unknown as IpcMainInvokeEvent)).toBe(false);
+  });
+
+  it("refuses a present frame with an empty url", () => {
+    expect(validateSender(ev(""))).toBe(false);
   });
 });
 
@@ -158,9 +166,9 @@ describe("validatePluginFrame", () => {
     expect(validatePluginFrame(ev("http://localhost:5173/"))).toBe(false);
   });
 
-  it("treats missing frame as trusted (unit-test ergonomics)", () => {
-    expect(validatePluginFrame(null)).toBe(true);
-    expect(validatePluginFrame(undefined)).toBe(true);
+  it("refuses a missing frame", () => {
+    expect(validatePluginFrame(null)).toBe(false);
+    expect(validatePluginFrame(undefined)).toBe(false);
   });
 });
 

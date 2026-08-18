@@ -16,16 +16,19 @@ import { isPluginShellFrameUrl } from "../shared/plugin-shell-frame.js";
 /**
  * IPC sender validation. Accepts file:// (packaged renderer) and
  * http://localhost / http://127.0.0.1 (dev server). Anything else is rejected.
- * Tests may pass null/undefined events — those are treated as trusted.
+ *
+ * Fails CLOSED on a missing frame. Electron nulls `senderFrame` once the
+ * sending frame is destroyed or navigated away between `invoke` and handler
+ * execution, so an absent frame is an unprovable sender, not a trusted one.
  *
  * Read-only channels may use this. State-mutating / sensitive host channels
- * must use {@link validateHostRendererSender} instead — it additionally fails
- * closed on a null/empty frame URL and rejects plugin-ui-shell frames, neither
- * of which this base validator does.
+ * must use {@link validateHostRendererSender} instead — it additionally
+ * rejects an empty frame URL and plugin-ui-shell frames, neither of which
+ * this base validator does.
  */
 export function validateSender(event: IpcMainInvokeEvent | null | undefined): boolean {
   const frame = event?.senderFrame;
-  if (!frame) return true;
+  if (!frame) return false;
   const rawUrl = frame.url ?? "";
   try {
     const url = new URL(rawUrl);
@@ -44,10 +47,10 @@ export function validateSender(event: IpcMainInvokeEvent | null | undefined): bo
  * host-wide `window.lvisApi`; reject them explicitly at sensitive channels.
  */
 export function validateHostRendererSender(event: IpcMainInvokeEvent | null | undefined): boolean {
-  // `validateSender` already applied the accepted-protocol allow-list (and
-  // already rejected an unparseable URL on a present frame). The only two
-  // things this adds are the fail-closed empty-URL rule and the plugin-shell
-  // rejection, so those are all it spells out.
+  // `validateSender` already applied the accepted-protocol allow-list, already
+  // rejected a missing frame, and already rejected an unparseable URL. The one
+  // thing this adds is the plugin-shell rejection; the empty-URL guard below is
+  // kept as a belt-and-braces restatement of the same fail-closed rule.
   if (!validateSender(event)) return false;
   const rawUrl = event?.senderFrame?.url ?? "";
   if (!rawUrl) return false;
@@ -85,9 +88,12 @@ export function auditUnauthorized(
 /**
  * #237 Option B — Plugin webview sender validation.
  * Plugin frames are file:// and must have loaded plugin-ui-shell.html.
+ *
+ * Fails CLOSED on a missing frame for the same reason `validateSender` does:
+ * a destroyed or navigated-away frame cannot prove it was the plugin shell.
  */
 export function validatePluginFrame(event: IpcMainInvokeEvent | null | undefined): boolean {
   const frame = event?.senderFrame;
-  if (!frame) return true;
+  if (!frame) return false;
   return isPluginShellFrameUrl(frame.url ?? "");
 }
