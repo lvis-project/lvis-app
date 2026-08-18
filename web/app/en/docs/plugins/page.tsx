@@ -9,7 +9,7 @@ const plugins = [
   { slug: "local-indexer", title: "Local Indexer", id: "local-indexer", ver: "0.4.11", scope: "Local · RAG", desc: "kiwipiepy Korean morphological analysis + pymupdf4llm + FTS5 + LanceDB. Folder watching via chokidar.", color: "from-teal/10 to-transparent" },
   { slug: "ms-graph", title: "Microsoft 365 (Outlook)", id: "ms-graph", ver: "0.3.28", scope: "Mail · Calendar", desc: "MSAL OAuth + Electron safeStorage tokens. 31 mail + calendar tools.", color: "from-accent/60 to-transparent" },
   { slug: "meeting", title: "Meeting", id: "meeting", ver: "0.4.18", scope: "Audio · STT", desc: "OpenAI Whisper API (gpt-4o-transcribe) + PCM16LE 16kHz/3sec chunks.", color: "from-coral/10 to-transparent" },
-  { slug: "work-assistant", title: "Work Assistant", id: "work-assistant", ver: "0.7.0", scope: "Proactive", desc: "10+ detectors → triggerConversation + showOverlay. Unifies mail/calendar/meeting signals.", color: "from-citron/30 to-transparent" },
+  { slug: "work-assistant", title: "Work Assistant", id: "work-assistant", ver: "0.7.0", scope: "Proactive", desc: "10+ detectors → triggerConversation. Unifies mail/calendar/meeting signals.", color: "from-citron/30 to-transparent" },
   { slug: "agent-hub", title: "Agent Hub Sidebar", id: "agent-hub", ver: "0.8.1", scope: "Host UI Plugin", desc: "Work board sidebar + 43 tools + 5-minute polling. Talks to agent-hub.lvisai.xyz.", color: "from-ink/[0.06] to-transparent" },
   { slug: "ep-api", title: "the internal portal", id: "ep-api", ver: "0.12.9", scope: "Corporate portal", desc: "EP/Space/the HR system/internal search/parking — 24 tools. openAuthWindow session + intranet DNS gate.", color: "from-coral/10 to-transparent" },
 ];
