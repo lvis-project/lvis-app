@@ -174,8 +174,14 @@ export function createLocalApi(deps: LocalApiDeps): LocalApi {
    * BYPASS: `explicitUserAction` is `true` BECAUSE the user just clicked Allow in
    * the app — the ApprovalGate consent IS the explicit user action. `source:
    * "local-api-approval"` + `trustOrigin: origin` let `handleSetPermissionMode`
-   * complete the durable mode change WITHOUT a second in-app prompt (the strict
-   * bypass guard is widened for exactly this externally-approved shape).
+   * complete the mode change WITHOUT a second in-app prompt (the strict bypass
+   * guard is widened for exactly this externally-approved shape).
+   *
+   * SCOPE: that same `source` is also what marks this as the EXTERNAL channel,
+   * so the change is SESSION-SCOPED (never written to permissions.json) and
+   * cannot select the `allow` mode at all — one click buys one session, not
+   * permanent removal of every future prompt. See
+   * `EXTERNAL_CHANNEL_FORBIDDEN_MODES` in `permissions/permission-mode-apply.ts`.
    */
   async function routeExternalMutation(
     channel: ExternalMutationChannel,
