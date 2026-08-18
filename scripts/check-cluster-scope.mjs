@@ -247,9 +247,12 @@ function collectRollingWindowCandidates({
 }) {
   const candidates = [];
   const seen = new Set();
-  let previousUpdated = Number.POSITIVE_INFINITY;
 
   for (let page = 1; page <= maxPullPages; page += 1) {
+    // Recomputed per page: the stop condition is "this page reached past the
+    // window", which is a property of the page's OLDEST entry — not of its
+    // last entry, which is only the oldest when the ordering held.
+    let oldestUpdatedInPage = Number.POSITIVE_INFINITY;
     const pulls = arrayPage(
       requestPage("repos/" + repo + "/pulls", {
         direction: "desc",
@@ -271,8 +274,20 @@ function collectRollingWindowCandidates({
       seen.add(number);
 
       const updatedAt = timestamp(pull.updated_at, "pull-request-updated-at-invalid");
-      if (updatedAt > previousUpdated) fail("pull-request-order-invalid");
-      previousUpdated = updatedAt;
+      // Deliberately NOT asserted to be descending. `updated_at` is a MUTABLE
+      // sort key: a pull touched while this scan is paginating moves, and an
+      // item can then appear on a later page carrying a newer timestamp than
+      // the previous page's tail. Observed on a real repository — one break,
+      // exactly at a page boundary, with zero duplicates, so the `seen` set
+      // above does not notice it either.
+      //
+      // The scan does not need the order to hold. `updated_at >= merged_at`
+      // always, so reading until the window is exhausted cannot skip a pull
+      // whose `merged_at` is inside it, whatever sequence the pages arrive in.
+      // Asserting an order the API does not guarantee under concurrent
+      // mutation added no safety and turned an ordinary merge landing
+      // mid-scan into a hard CI failure.
+      if (updatedAt < oldestUpdatedInPage) oldestUpdatedInPage = updatedAt;
 
       if (pull.merged_at === null) continue;
       const mergedAt = timestamp(pull.merged_at, "pull-request-merged-at-invalid");
@@ -285,11 +300,7 @@ function collectRollingWindowCandidates({
       }
     }
 
-    const lastUpdated = timestamp(
-      pulls.at(-1).updated_at,
-      "pull-request-updated-at-invalid",
-    );
-    if (pulls.length < pageSize || lastUpdated < sinceTime) return candidates;
+    if (pulls.length < pageSize || oldestUpdatedInPage < sinceTime) return candidates;
   }
 
   fail("pull-request-pages-saturated");
