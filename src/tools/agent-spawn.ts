@@ -522,9 +522,39 @@ export function createAgentSpawnTool(deps: AgentSpawnToolDeps): Tool {
                   resumeGuidance: t("be_agentSpawn.resumeInvalidGuidance"),
                 };
               case undefined:
-                return resumeId === undefined
-                  ? {}
-                  : { resumeId, ...resumeRanGuidance(result.error ?? result.summary) };
+                if (resumeId !== undefined) {
+                  return { resumeId, ...resumeRanGuidance(result.error ?? result.summary) };
+                }
+                // A failed FRESH spawn used to return nothing but the error
+                // string. The parent then had no fact to act on and did the
+                // only thing left: spawn the same work again — the very
+                // respawn-loses-context failure the resume branch above exists
+                // to prevent, arriving through the other door.
+                //
+                // It deliberately does NOT hand back a resumeId. Resume is
+                // built on SUSPENSION — `resumeWithPolicy` wants the parked
+                // state, the suspension reason, and the resume counters — and a
+                // run that died never parked, so there is no point to resume
+                // from. Advertising one would recreate the documented failure
+                // where an id was offered that the gate then refused and the
+                // retry guidance turned into a guided infinite loop (see
+                // `isResumableSubAgentTaskState`).
+                //
+                // What it gives instead is the truth: which child died, and
+                // whether the cause can change on another attempt.
+                //
+                // A run the host REFUSED (stopReason "blocked") is excluded: it
+                // never started, so it is not a lost child, and telling the
+                // parent to narrow sourceTools would send it tuning a request
+                // that policy — not the provider — turned away.
+                if (result.stopReason === "blocked") return {};
+                return {
+                  ...(linkedChildSessionId ? { childSessionId: linkedChildSessionId } : {}),
+                  freshSpawnFailed: true,
+                  ...(isDeterministicProviderRequestRejection(result.error ?? result.summary)
+                    ? { spawnDeterministicFailure: true, spawnGuidance: t("be_agentSpawn.freshSpawnRejectedGuidance") }
+                    : { spawnGuidance: t("be_agentSpawn.freshSpawnFailedGuidance") }),
+                };
             }
           })();
           return {
