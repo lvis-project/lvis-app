@@ -12,6 +12,7 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createLogger } from "../lib/logger.js";
 import { mainDir } from "./main-paths.js";
+import { validateExternalUrl } from "../shared/external-url.js";
 import {
   attachSideBrowserWebview,
   configureSideBrowserWebviewAttach,
@@ -311,10 +312,27 @@ export function createWindow(options: { showBootstrapSplash?: boolean } = {}) {
   // the canonical event payload only.
   win.webContents.on("will-navigate", (details) => {
     const url = details.url;
-    if (!url.startsWith("file://") && !url.startsWith("data:")) {
-      details.preventDefault();
-      void shell.openExternal(url);
+    // Pin to the app's OWN document rather than allowing the file: scheme.
+    // This window carries the full host preload, so any other file: document
+    // — a dropped HTML file, an attacker-written one — would inherit the whole
+    // `lvisApi` bridge, and its `senderFrame.url` is a file: URL that passes
+    // both `validateSender` and `validateHostRendererSender`. Nothing in the
+    // renderer navigates itself; the splash and index are loaded from main via
+    // loadURL/loadFile, which do not raise `will-navigate`.
+    if (url === rendererIndexUrl()) return;
+    details.preventDefault();
+    // The fallback used to hand the raw URL to `shell.openExternal`, which
+    // launches any registered handler — `ms-msdt:`, `smb://` (NTLM leak),
+    // `search-ms:`. The sibling `setWindowOpenHandler` above already enforces
+    // http/https; route through the shared validator so both agree.
+    const validated = validateExternalUrl(url);
+    if (!validated.ok) {
+      log.warn({ url, error: validated.error }, "blocked navigation to disallowed URL");
+      return;
     }
+    void shell.openExternal(validated.url).catch((err) => {
+      log.error({ url: validated.url, err }, "failed to open external URL");
+    });
   });
 
   if (showBootstrapSplash) {
