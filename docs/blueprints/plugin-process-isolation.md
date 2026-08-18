@@ -41,7 +41,7 @@ Consequences, stated plainly:
   (`instrumentEffectsByPath`), the effect gate (`enforceMutatingEffects`), the
   permission manager, and the audit logger. It can monkey-patch any of them.
 
-The entire capability model — 37 classified hostApi paths, the effect ledger, the
+The entire capability model — 36 classified hostApi paths, the effect ledger, the
 egress guard, the approval gate — is a set of in-heap JavaScript closures sitting
 next to code that can rewrite them. That is the finding. Everything below is about
 turning that into a wire.
@@ -65,7 +65,7 @@ behind a protocol boundary, and it is live on `main`:
 So the work is **not** "invent an RPC for plugins". It is:
 
 1. swap the transport under an existing, tested projection, and
-2. build the reverse channel — the 37 hostApi paths — which MCP does not cover and
+2. build the reverse channel — the 36 hostApi paths — which MCP does not cover and
    which today is a plain object handed to the factory.
 
 Point 2 is the whole job.
@@ -94,7 +94,7 @@ The `PluginRuntimeContext` handed to (1) carries: `pluginId`, `pluginRoot`,
 `hostRoot`, `pluginDataDir` (all strings), `config` (resolved plain object from
 `applyConfigDefaults`), `log` (a **function**), and `hostApi` (the object below).
 
-### 2.2 Plugin → host: the 37 hostApi paths
+### 2.2 Plugin → host: the 36 hostApi paths
 
 The authoritative list is `HOSTAPI_EFFECT_BY_PATH` in
 `src/permissions/effect-kind.ts`. It is not hand-maintained prose: the completeness
@@ -112,14 +112,14 @@ IPC contract afterwards.
 
 **agentApproval (2)** — `agentApproval.request`, `agentApproval.respond`
 
-**top level (20)** — `getSecret`, `getInstalledPluginIds`, `hasRoutineBySource`,
-`getAppPreference`, `probePrivateHost`, `resolveApiKey`, `callTool`, `emitEvent`,
+**top level (19)** — `getSecret`, `getInstalledPluginIds`, `hasRoutineBySource`,
+`getAppPreference`, `probePrivateHost`, `resolveApiKey`, `emitEvent`,
 `onEvent`, `onPluginsChanged`, `onShutdown`, `logEvent`, `callLlm`, `hostFetch`,
 `spawnWorker`, `openExternalUrl`, `openAuthWindow`, `openAuthPartitionViewer`,
 `clearAuthPartition`, `triggerConversation`
 
-Total: **37 paths + 6 host→instance entry points = 43 members** the boundary must
-carry.
+Total: **36 paths + 6 host→instance entry points = 42 members** the boundary must
+carry. (36, not 37, once the `callTool` drift in §2.3 is closed.)
 
 ### 2.3 Two drifts that must be closed before the contract is frozen
 
@@ -247,7 +247,11 @@ onStdout(), onStderr(), onExit() }` — live process control.
 **`storage.read → Uint8Array` and `storage.write(data: string | Uint8Array)`.**
 Base64 on the wire with an explicit encoding tag, reconstructed as `Uint8Array` in
 the child. Base64 inflates payloads by 4/3; an explicit maximum applies and
-exceeding it throws.
+exceeding it throws. Note what the conformance test measured: `storage.read`
+declares `Uint8Array` but actually delivers a Node `Buffer`, and `Buffer` carries a
+`toJSON()`. A naive round-trip therefore does **not** throw — it succeeds into
+`{ type: "Buffer", data: number[] }`, a different type that reads as success. The
+encoding has to be explicit precisely because JSON will not object.
 
 **Everything else is plain data** and crosses unchanged: `openAuthWindow` →
 `AuthWindowCookie[]` or `{ finalUrl }`; `agentApproval.request` → an `ApprovalChoice`
@@ -537,13 +541,30 @@ underestimated.
 `HOSTAPI_EFFECT_BY_PATH`, delete the unimplemented `showOverlay?` declaration from
 `PluginHostApi` and its SDK mirror. Add a serialization-conformance test that walks
 the real hostApi and asserts, per path, whether its arguments and return values are
-JSON-representable — with the eight non-representable members
-(`hostFetch`, `resolveApiKey`, `spawnWorker`, `storage.read`, `storage.write`, plus
-the three disposer-returning subscriptions) named explicitly as requiring a decided
-representation rather than being silently allowed.
+JSON-representable — with the non-representable members named explicitly as
+requiring a decided representation rather than being silently allowed.
+
+*Correction from doing it.* That set is **ten**, not eight. Alongside `hostFetch`,
+`resolveApiKey`, `spawnWorker`, `storage.read`, `storage.write` and the three
+disposer-returning subscriptions (`onEvent`, `onPluginsChanged`,
+`config.onChange`), the criterion "arguments **and** return values" also catches:
+
+- `onShutdown`, whose argument is a handler function. It differs from the three
+  subscriptions only in returning `void` instead of a disposer, which is not a
+  difference the wire cares about. §3.1 already decided it.
+- `callLlm`, whose `options.signal` is an `AbortSignal`. Its return (`string`) is
+  fine, which is why counting by return value alone missed it. §3.2 already decided
+  it.
+
+Neither is a new design question — both already have a decided representation
+above; the Stage 1 enumeration simply undercounted. The conformance test pins all
+ten.
 
 *What proves it.* The existing completeness test stays green; the new conformance
-test fails if a member is added without a marshalling decision.
+test fails if a member is added without a marshalling decision. It also asserts the
+direction the completeness test never did — that every `HOSTAPI_EFFECT_BY_PATH` key
+exists on the real hostApi — which is the check whose absence let `callTool` sit in
+the effect SOT unimplemented.
 
 *Risk: low.* No behaviour change. This is the artifact every later stage is checked
 against.
@@ -598,19 +619,19 @@ kind that slips.
 
 *Scope.* Ship the child-side entrypoint that builds the hostApi stub, imports the
 plugin factory, and serves `PluginMcpServer` over `StdioServerLoop`; plus the
-host-side dispatcher that services all 37 paths. Behind a host-owned routing SOT
+host-side dispatcher that services all 36 paths. Behind a host-owned routing SOT
 that **ships empty**. Nothing routes to it; the app is unchanged.
 
 *What proves it.* The child runtime driven over in-memory paired streams, following
 the pattern `stdio-server-loop`'s own tests already use. A contract test that every
-one of the 37 paths dispatches, marshals per §3, and reconstructs the right error
+one of the 36 paths dispatches, marshals per §3, and reconstructs the right error
 class per §3.3. A leak test for each of the four subscription members
 (`onEvent`, `config.onChange`, `onPluginsChanged`, `onShutdown`): subscribe,
 dispose, assert both sides released.
 
 *Risk: this is where the real difficulty concentrates, and it is not close.* No
-single method is hard. The difficulty is 37 methods × (argument marshalling ×
-return marshalling × disposer lifetime × error identity), which is 37 independent
+single method is hard. The difficulty is 36 methods × (argument marshalling ×
+return marshalling × disposer lifetime × error identity), which is 36 independent
 opportunities to change behaviour in a way no existing test notices — because today
 every one of them is a direct function call that no test was written to pin. The
 four subscription members are the worst of it: each needs a two-sided lifetime that
