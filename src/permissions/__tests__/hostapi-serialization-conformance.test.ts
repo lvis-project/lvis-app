@@ -92,6 +92,7 @@ vi.mock("../../plugins/registry.js", () => ({
   readPluginRegistry: harness.readPluginRegistry,
 }));
 
+import { describeNonJson } from "../../shared/json-representable.js";
 import { HOSTAPI_EFFECT_BY_PATH } from "../effect-kind.js";
 import { buildRealHostApi, collectFunctionPaths } from "./real-host-api.js";
 import { PermissionTestResources } from "./test-resources.js";
@@ -346,57 +347,6 @@ const REQUIRES_DECIDED_REPRESENTATION: readonly string[] = [
   "storage.read",
   "storage.write",
 ];
-
-/**
- * Report the first reason `value` would not survive a JSON round-trip, or
- * `null` when it would.
- *
- * `undefined` is accepted: it is how the declared `T | undefined` contracts say
- * "absent", and absent maps onto an omitted field on the wire. Everything else
- * that JSON cannot carry — functions, symbols, bigints, cycles — and everything
- * whose prototype is not `Object.prototype`/`Array.prototype`/`null` is
- * rejected. The prototype check is the load-bearing one: `Date`, `Map`, `Set`,
- * `URL`, `Uint8Array`, `Response`, and any class instance all either vanish or
- * come back as a different type, and several of them (`Date`, `URL`) stringify
- * without complaint, so `JSON.stringify` alone would not catch them.
- */
-function describeNonJson(
-  value: unknown,
-  path: string,
-  seen: WeakSet<object> = new WeakSet(),
-): string | null {
-  if (value === null || value === undefined) return null;
-  const type = typeof value;
-  if (type === "string" || type === "boolean") return null;
-  if (type === "number") {
-    return Number.isFinite(value as number)
-      ? null
-      : `${path}: non-finite number (JSON.stringify emits null)`;
-  }
-  if (type !== "object") return `${path}: ${type}`;
-
-  const object = value as object;
-  if (seen.has(object)) return `${path}: cycle`;
-  seen.add(object);
-
-  const proto = Object.getPrototypeOf(object) as object | null;
-  if (Array.isArray(object)) {
-    for (const [index, item] of (object as unknown[]).entries()) {
-      const reason = describeNonJson(item, `${path}[${index}]`, seen);
-      if (reason) return reason;
-    }
-    return null;
-  }
-  if (proto !== Object.prototype && proto !== null) {
-    const name = (object.constructor as { name?: string } | undefined)?.name;
-    return `${path}: ${name ?? "non-plain object"}`;
-  }
-  for (const [key, item] of Object.entries(object)) {
-    const reason = describeNonJson(item, `${path}.${key}`, seen);
-    if (reason) return reason;
-  }
-  return null;
-}
 
 describe("hostApi marshalling — the surface a process boundary must carry", () => {
   beforeEach(() => {
