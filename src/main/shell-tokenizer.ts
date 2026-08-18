@@ -476,7 +476,20 @@ function matchParen(command: string, openParen: number): number {
 }
 
 /** Reduce `/usr/bin/ls` → `ls`; leave bare verbs unchanged. */
-function stripPath(token: string): string {
+/**
+ * Reduce a command token to its basename, so `/usr/bin/cat` and `cat` are the
+ * same verb to every caller.
+ *
+ * Shared because there were three copies and they had begun to differ: one
+ * also split on `\\`, which meant two classifiers looking at the same Windows
+ * path could disagree about what verb was being run. Verb extraction is part
+ * of reading a shell command, so it belongs with the tokenizer that does that.
+ *
+ * Deliberately `/`-only. A Windows-style separator is a real gap — see the
+ * note in shell-path-policy — but widening it here would silently reclassify
+ * commands, which is a behaviour change and not this function's job.
+ */
+export function stripCommandPath(token: string): string {
   const slash = token.lastIndexOf("/");
   return slash >= 0 ? token.slice(slash + 1) : token;
 }
@@ -571,7 +584,7 @@ function stripAssignmentsAndWrappers(
   }
   // Wrapper commands and their option/duration/assignment operands.
   while (i < words.length) {
-    const head = stripPath(words[i]!);
+    const head = stripCommandPath(words[i]!);
     if (!WRAPPER_COMMANDS.has(head)) break;
     strippedWrappers.push(head);
     i += 1;
