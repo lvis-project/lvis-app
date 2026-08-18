@@ -64,6 +64,7 @@ import { t } from "../i18n/index.js";
 // LOW/MEDIUM-risk helpers. Authorization and execution/finalization are
 // delegated to their named stages below.
 import { extractTargetFilePaths, shellPathPolicyViolation } from "./pipeline/path-extraction.js";
+import { hasShellCommandArgument } from "../shared/shell-command-fields.js";
 import { buildApprovalPurposeSuggestion } from "./pipeline/approval-purpose.js";
 import { pluginTurnScopeTarget } from "./pipeline/plugin-turn-scope.js";
 import {
@@ -1258,7 +1259,15 @@ export async function runToolInvocation(
       emitGrantAudit("always");
     };
 
-    if (invocationCategory === "shell") {
+    // Path containment runs on the SHAPE of the call — "this invocation carries
+    // a command string" — not on the risk verdict derived from it. Gating on
+    // `invocationCategory === "shell"` made the sensitive-path hard block and
+    // the allowed-directory check reachable only for commands the classifier
+    // had already decided were dangerous, so every way to get a mutating
+    // command classified `read` was also a way to erase containment. A low-risk
+    // judgement is never a reason to skip a control documented as
+    // unoverridable.
+    if (invocationCategory === "shell" || hasShellCommandArgument(finalInput)) {
       while (true) {
         const shellPathViolation = shellPathPolicyViolation(
           finalInput,

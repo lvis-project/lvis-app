@@ -9,6 +9,7 @@ import { resolve as pathResolve } from "node:path";
 import { resolveToolPathForPermission } from "../../shared/tool-path-resolution.js";
 import type { Tool } from "../base.js";
 import { getDottedFieldValue } from "../../shared/dotted-field-value.js";
+import { extractShellCommands } from "../../shared/shell-command-fields.js";
 import {
   findShellPathPolicyViolation,
   type ShellPathPolicyViolation,
@@ -46,13 +47,21 @@ export function extractTargetFilePaths(
   return [...new Set(paths)];
 }
 
+/**
+ * Run the shell path policy over EVERY command-bearing argument of the call.
+ *
+ * Scanning only `finalInput.command` left the other command fields
+ * (`cmd`/`script`/`shellCommand`) unexamined — the same asymmetry that let a
+ * second field carry the real payload past classification. The policy is a
+ * containment control, so it has to see every string that will be executed.
+ */
 export function shellPathPolicyViolation(
   finalInput: Record<string, unknown>,
   sandboxRoot: string,
   allowedDirectories: readonly string[],
 ): ShellPathPolicyViolation | null {
-  const command = finalInput.command;
-  if (typeof command !== "string" || command.length === 0) {
+  const commands = extractShellCommands(finalInput);
+  if (commands.length === 0) {
     return { kind: "invalid-path", reason: "Shell path policy: missing command string" };
   }
   const cwdValue = finalInput.cwd;
@@ -62,10 +71,14 @@ export function shellPathPolicyViolation(
   const resolvedCwd = cwdValue
     ? pathResolve(sandboxRoot, cwdValue)
     : sandboxRoot;
-  return findShellPathPolicyViolation(
-    command,
-    resolvedCwd,
-    sandboxRoot,
-    allowedDirectories,
-  );
+  for (const command of commands) {
+    const violation = findShellPathPolicyViolation(
+      command,
+      resolvedCwd,
+      sandboxRoot,
+      allowedDirectories,
+    );
+    if (violation) return violation;
+  }
+  return null;
 }
