@@ -84,6 +84,7 @@ function projectPlatformConversationEventToLegacyChatFrame(
         ...legacyToolReference(event.tool),
         result: event.ownerDetail.result,
         isError: event.isError,
+        ...(event.cancelled ? { cancelled: true } : {}),
         ...(event.ownerDetail.executionPlan === undefined
           ? {}
           : { executionPlan: event.ownerDetail.executionPlan }),

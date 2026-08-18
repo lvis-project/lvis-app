@@ -28,6 +28,16 @@ export interface ToolCallMeta {
   mcpServerId?: string;
   /** Renderer-safe shell projection; never the raw capability or permit. */
   executionPlan?: HostShellExecutionPlanAuditProjection;
+  /**
+   * The user stopped the turn while this call was in flight.
+   *
+   * The LLM-facing `is_error` stays true — a tool-result has no third state in
+   * the provider schemas and the model must know no usable result came back.
+   * This is the RENDERER's separate signal, so a deliberate stop is not drawn
+   * as a failure. The assistant-text path already draws this distinction
+   * (`entry.interrupted` vs `systemNotice`); tool rows had no carrier for it.
+   */
+  cancelled?: boolean;
 }
 
 export interface ToolUseBlock {

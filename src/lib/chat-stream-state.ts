@@ -43,6 +43,8 @@ export type StreamEvent = {
   systemNotice?: "context-error" | "stream-error";
   result?: string;
   isError?: boolean;
+  /** Tool call halted by a user stop rather than failing. */
+  cancelled?: boolean;
   input?: Record<string, unknown>;
   groupId?: string;
   toolUseId?: string;
@@ -155,7 +157,13 @@ export type ToolEntryItem = {
   toolUseId: string;
   name: string;
   displayOrder: number;
-  status: "running" | "done" | "error";
+  /**
+   * `cancelled` is its own state rather than a flag beside `error` on purpose:
+   * every existing `status === "error"` check (badge, row styling, the group's
+   * hasError roll-up) then stops matching a user stop for free, instead of each
+   * one needing to remember to exclude it.
+   */
+  status: "running" | "done" | "error" | "cancelled";
   input?: Record<string, unknown>;
   result?: string;
   source?: "builtin" | "plugin" | "mcp";
@@ -880,6 +888,8 @@ export function applyToolEnd(
     toolUseId: string;
     result?: string;
     isError?: boolean;
+    /** User stopped the turn mid-call — rendered as halted, not failed. */
+    cancelled?: boolean;
     uiPayload?: ToolEntryItem["uiPayload"];
     durationMs?: number;
     source?: "builtin" | "plugin" | "mcp";
@@ -905,7 +915,11 @@ export function applyToolEnd(
     const { startedAt: _startedAt, ...rest } = tool;
     return {
       ...rest,
-      status: (payload.isError ? "error" : "done") as "done" | "error",
+      status: (payload.cancelled
+        ? "cancelled"
+        : payload.isError
+          ? "error"
+          : "done") as "done" | "error" | "cancelled",
       result: payload.result,
       ...(payload.source ? { source: payload.source } : {}),
       ...(payload.category ? { category: payload.category } : {}),
