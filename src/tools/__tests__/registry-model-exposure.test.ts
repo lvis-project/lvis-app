@@ -107,6 +107,7 @@ const FULL_SCOPE = {
   activePluginIds: [PLUGIN_ID],
   includeBuiltins: true,
   includeMcp: true,
+  includeEgress: true,
   deferral: false, // eager: every in-scope tool's full schema loads
 };
 

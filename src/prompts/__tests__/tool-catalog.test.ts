@@ -62,6 +62,7 @@ describe("SystemPromptBuilder — tool catalog (Tool-Level Deferral)", () => {
       activeToolNames: new Set(["meeting_start"]),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
       deferral: true,
     });
     const prompt = builder.build();
@@ -82,6 +83,7 @@ describe("SystemPromptBuilder — tool catalog (Tool-Level Deferral)", () => {
       activePluginIds: new Set(["com.example.meeting"]),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
       deferral: false,
     });
     const prompt = builder.build();
@@ -102,6 +104,7 @@ describe("SystemPromptBuilder — tool catalog (Tool-Level Deferral)", () => {
       activeToolNames: new Set(["meeting_start", "meeting_stop"]),
       includeBuiltins: true,
       includeMcp: false,
+      includeEgress: true,
       deferral: true,
     });
     const prompt = builder.build();

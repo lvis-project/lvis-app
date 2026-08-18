@@ -7,6 +7,7 @@ import { AlertTriangle, CheckCircle2, Loader2, Play, XCircle } from "lucide-reac
 import ReactMarkdown from "react-markdown";
 import { t } from "../../../i18n/runtime.js";
 import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
+import { MARKDOWN_SAFE_COMPONENTS, markdownUrlTransform } from "../utils/markdown-safe.js";
 import { Badge } from "../../../components/ui/badge.js";
 import { Button } from "../../../components/ui/button.js";
 import { Checkbox } from "../../../components/ui/checkbox.js";
@@ -723,7 +724,11 @@ function RunOutputPanel({
           <div className="text-[11px] font-medium text-muted-foreground">{t("workBoard.runLiveHeading")}</div>
           <div className="mt-1 max-h-32 overflow-auto rounded bg-background/(--opacity-strong) p-3">
             <div className="prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
-              <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>{liveText}</ReactMarkdown>
+              <ReactMarkdown
+                remarkPlugins={MARKDOWN_REMARK_PLUGINS}
+                urlTransform={markdownUrlTransform}
+                components={MARKDOWN_SAFE_COMPONENTS}
+              >{liveText}</ReactMarkdown>
             </div>
           </div>
         </div>

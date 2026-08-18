@@ -60,7 +60,14 @@ describe("web_fetch SSRF guard", () => {
   it("scopes private network access behind a separate approval key", () => {
     const tool = makeWebFetchTool();
 
-    expect(tool.category).toBe("read");
+    // `network` for BOTH public and private destinations: the URL is
+    // model-chosen, so a public fetch is an exfiltration channel just as much
+    // as a private one. The private-network distinction survives in the
+    // approval CACHE KEY below, not in the category.
+    expect(tool.category).toBe("network");
+    expect(tool.categoryForInput?.({
+      url: "https://example.com/page",
+    })).toBe("network");
     expect(tool.categoryForInput?.({
       url: "http://10.185.177.209:8080/status",
       allowPrivateNetwork: true,
