@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve as pathResolve } from "node:path";
 
 import { t } from "../i18n/index.js";
-import { tokenizeShell } from "../main/shell-tokenizer.js";
+import { stripCommandPath, tokenizeShell } from "../main/shell-tokenizer.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
   canonicalizePathForMatch,
@@ -216,7 +216,12 @@ function findCwdAwareLeafViolation(
   let current = cwd;
   for (const leaf of leaves) {
     const operands = [...leaf.argv, ...leaf.redirectTargets];
-    const isCd = leaf.argv.length > 0 && stripLeafVerbPath(leaf.argv[0]!) === "cd";
+    // `/`-only basename reduction, matching the risk classifier — the two must
+    // agree on what verb a leaf runs. A Windows-style `C:\\tools\\cd` is not
+    // reduced by either, so both see the full token and neither treats it as
+    // `cd`; that is a shared gap, not a disagreement, and closing it belongs
+    // with the shared helper rather than here.
+    const isCd = leaf.argv.length > 0 && stripCommandPath(leaf.argv[0]!) === "cd";
 
     // `cd`'s own destination is checked as an operand like any other, so a
     // `cd` that leaves the boundary is caught here and not merely tracked.
@@ -340,11 +345,6 @@ function resolveCdDestination(args: readonly string[], from: string): string | n
   } catch {
     return null;
   }
-}
-
-function stripLeafVerbPath(verb: string): string {
-  const slash = Math.max(verb.lastIndexOf("/"), verb.lastIndexOf("\\"));
-  return slash >= 0 ? verb.slice(slash + 1) : verb;
 }
 
 function isIgnoredShellDevicePath(canonicalPath: string): boolean {
