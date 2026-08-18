@@ -70,6 +70,18 @@ describe("Tailnet observer lifecycle", () => {
     })).toMatchObject({
       pairedSharingEnabled: true,
     });
+
+    // The controller needs the pairing boundary, so it is only valid WITH
+    // paired sharing — the same coupling the web adapter already requires.
+    expect(resolveTailnetObserverConfig({
+      LVIS_TAILNET_OBSERVER: "1",
+      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_CONTROLLER: "1",
+      LVIS_TAILNET_PAIRED_SHARING: "1",
+    })).toMatchObject({
+      controllerEnabled: true,
+      pairedSharingEnabled: true,
+    });
     expect(resolveTailnetObserverConfig({
       LVIS_TAILNET_OBSERVER: "1",
       LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
@@ -100,6 +112,13 @@ describe("Tailnet observer lifecycle", () => {
         LVIS_TAILNET_OBSERVER: "1",
         LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
         LVIS_TAILNET_CONTROLLER: "true",
+      },
+      // Controller enabled (valid "1") but WITHOUT paired sharing — the new
+      // coupling gate rejects it rather than leaving the native routes ungated.
+      {
+        LVIS_TAILNET_OBSERVER: "1",
+        LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+        LVIS_TAILNET_CONTROLLER: "1",
       },
       {
         LVIS_TAILNET_OBSERVER: "1",

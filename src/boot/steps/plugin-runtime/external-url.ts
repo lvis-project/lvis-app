@@ -85,9 +85,13 @@ export async function routeExternalUrl(input: {
     });
   } catch { /* audit must not break host */ }
 
+  // Hand the sinks the CANONICALIZED url, not the caller's raw string. Only
+  // `validated.url` has been through `new URL(...).toString()`, which is what
+  // percent-encodes `<` and `>`; passing the raw string let a plugin smuggle
+  // markup into the link-window shell document.
   if (flow === "system-browser") {
-    await shellOpenExternal(url);
+    await shellOpenExternal(validated.url);
     return;
   }
-  await openLinkWindowService({ url, persistPartition: EXTERNAL_LINK_PARTITION });
+  await openLinkWindowService({ url: validated.url, persistPartition: EXTERNAL_LINK_PARTITION });
 }
