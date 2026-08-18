@@ -260,3 +260,43 @@ describe("PluginUiHostView — webview attach flow", () => {
     expect(container.textContent ?? "").toMatch(/lvisApi/);
   });
 });
+
+describe("PluginUiHostView — webview security attributes", () => {
+  /**
+   * These are the RENDERER's request. Main enforces the same three values at
+   * `will-attach-webview` (`src/main/plugin-webview-attach.ts`), which is what
+   * actually holds — a `webpreferences` string is ignored key-by-key when
+   * mistyped, and it is a DOM attribute in a renderer that may itself be the
+   * thing compromised.
+   *
+   * Pinned anyway so the two sides cannot silently disagree. A request that
+   * drifts from what main enforces is how a future reader concludes the wrong
+   * one is authoritative.
+   */
+  it("requests the isolated, unprivileged configuration", () => {
+    vi.stubGlobal("lvisApi", {
+      pluginShellUrl: SHELL_URL,
+      pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    const prefs = mountHost(VIEW).querySelector("webview")?.getAttribute("webpreferences") ?? "";
+
+    expect(prefs).toContain("contextIsolation=yes");
+    expect(prefs).toContain("nodeIntegration=no");
+    expect(prefs).toContain("sandbox=yes");
+  });
+
+  it("runs the plugin in its own session partition", () => {
+    // Storage siloing, and the key main's attach guard matches on to decide
+    // that this frame is a plugin frame at all.
+    vi.stubGlobal("lvisApi", {
+      pluginShellUrl: SHELL_URL,
+      pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    const partition = mountHost(VIEW).querySelector("webview")?.getAttribute("partition") ?? "";
+    expect(partition).toMatch(/^persist:plugin:[0-9a-f]{8}$/);
+  });
+});
