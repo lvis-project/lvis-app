@@ -133,6 +133,8 @@ export type PlatformConversationEvent =
     readonly kind: "tool.completed";
     readonly tool: ConversationToolReference;
     readonly isError: boolean;
+    /** User stopped the turn while this call was running. */
+    readonly cancelled?: boolean;
     readonly durationMs: number;
     readonly ownerDetail: ConversationToolEndOwnerDetail;
   }
@@ -361,7 +363,7 @@ export function createPlatformConversationEventSink(
 export type SharedConversationProjectionEvent =
   | { readonly kind: "turn.started" }
   | { readonly kind: "assistant.text.delta"; readonly text: string }
-  | { readonly kind: "tool.state"; readonly state: "running" | "completed" | "failed" }
+  | { readonly kind: "tool.state"; readonly state: "running" | "completed" | "failed" | "cancelled" }
   | {
     readonly kind: "approval.waiting-local";
     /**
@@ -395,7 +397,12 @@ export function projectSharedConversationEvent(
     case "tool.started":
       return { kind: "tool.state", state: "running" };
     case "tool.completed":
-      return { kind: "tool.state", state: event.isError ? "failed" : "completed" };
+      // A user stop is reported as its own state; remote surfaces should not
+      // show "failed" for something the user deliberately halted.
+      return {
+        kind: "tool.state",
+        state: event.cancelled ? "cancelled" : event.isError ? "failed" : "completed",
+      };
     case "permission.reviewed": {
       if (event.review.status !== "needs_approval") return undefined;
       const tool = sharedApprovalToolIdentifier(event.review.tool);

@@ -32,6 +32,12 @@ type SerializedSubAgentReportMeta = NonNullable<MessageMeta["subAgentReport"]>;
 export type SerializedImportedTriggerMeta = NonNullable<MessageMeta["importedTrigger"]>;
 export type SerializedToolDisplayMeta = {
   durationMs?: number;
+  /**
+   * The user stopped the turn while this call was running. Replayed so a
+   * reloaded transcript draws the halt the same way the live one did, instead
+   * of degrading it back to a failure.
+   */
+  cancelled?: boolean;
 };
 /** Permission review verdict replayed onto the tool row on session reload. */
 type SerializedPermissionReviewMeta = NonNullable<MessageMeta["permissionReview"]>;
@@ -188,8 +194,16 @@ function serializeToolDisplay(
     toolDisplay.durationMs >= 0
       ? toolDisplay.durationMs
       : undefined;
-  if (durationMs !== undefined) {
-    return { durationMs };
+  // `cancelled` is inert in the same sense `durationMs` is — it selects a badge
+  // and nothing else, mounts nothing, and crosses back into no IPC — so it is
+  // safe to replay from a user-writable transcript. Without it a reload turns
+  // every stopped call back into a failure.
+  const cancelled = toolDisplay.cancelled === true ? true : undefined;
+  if (durationMs !== undefined || cancelled !== undefined) {
+    return {
+      ...(durationMs !== undefined ? { durationMs } : {}),
+      ...(cancelled !== undefined ? { cancelled } : {}),
+    };
   }
   return undefined;
 }

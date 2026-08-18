@@ -983,6 +983,10 @@ export async function executeAuthorizedToolInvocation(
 
   if (interruptionReason === "user-abort") {
     const durationMs = Date.now() - startTime;
+    // Mark BEFORE any onToolEnd/meta consumer reads it: the same `meta` object
+    // reaches the live renderer event and the persisted tool_result meta, so
+    // setting it here is what makes both paths agree.
+    meta.cancelled = true;
     try {
       if (!rationaleResumeContext?.started) {
         callbacks?.onToolEnd?.(toolUse.name, content, true, meta, undefined, durationMs);

@@ -22,6 +22,7 @@ export function toolResultMeta(
         ...(callMeta?.category ? { category: callMeta.category } : {}),
         ...(callMeta?.pluginId ? { pluginId: callMeta.pluginId } : {}),
         ...(callMeta?.mcpServerId ? { mcpServerId: callMeta.mcpServerId } : {}),
+        ...(callMeta?.cancelled ? { cancelled: true } : {}),
         ...("uiPayload" in result && result.uiPayload ? { uiPayload: result.uiPayload } : {}),
       }
     : undefined;
