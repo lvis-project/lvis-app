@@ -15,6 +15,7 @@
 // Stages: pre-commit | pre-push | manual. Bypass once with LVIS_HOOKS_SKIP=1.
 
 import { existsSync, readFileSync } from "node:fs";
+import { parsePrePushUpdates, readPrePushInput } from "./pre-push-ref-updates.mjs";
 import { basename, join, resolve } from "node:path";
 import { TextDecoder } from "node:util";
 
@@ -269,45 +270,6 @@ function getProtectedBranchNames(repoRoot) {
   }
 
   return names;
-}
-
-function parsePrePushUpdates(input) {
-  const lines = input
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const updates = [];
-  let complete = lines.length > 0;
-
-  for (const line of lines) {
-    const fields = line.split(/\s+/);
-    if (fields.length !== 4) {
-      complete = false;
-      continue;
-    }
-    const [localRef, localSha, remoteRef, remoteSha] = fields;
-    const validObjectIds = [localSha, remoteSha].every((sha) =>
-      /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/i.test(sha)
-    );
-    if (!localRef || !remoteRef || !validObjectIds) {
-      complete = false;
-      continue;
-    }
-    updates.push({ localRef, localSha, remoteRef, remoteSha });
-  }
-
-  return { updates, complete: complete && updates.length === lines.length };
-}
-
-function readPrePushInput() {
-  if (process.stdin.isTTY) {
-    return "";
-  }
-  try {
-    return readFileSync(0, "utf-8");
-  } catch {
-    return "";
-  }
 }
 
 function runPushPolicyChecks(repoRoot, parsedUpdates) {
