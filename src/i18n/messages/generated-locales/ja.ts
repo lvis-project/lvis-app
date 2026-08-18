@@ -2695,6 +2695,7 @@ export const jaMessages: Record<string, string> = {
   "toolGroupCard.done": "終わり",
   "toolGroupCard.error": "エラー",
   "toolGroupCard.failed": "失敗した",
+  "toolGroupCard.cancelled": "中断",
   "toolGroupCard.hasErrors": "エラーあり",
   "toolGroupCard.input": "入力",
   "toolGroupCard.result": "結果",
