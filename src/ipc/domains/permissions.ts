@@ -14,7 +14,6 @@ import type {
 } from "../../shared/permissions-events.js";
 import { hasUserKeyboardIntent } from "../../shared/chat-origin.js";
 import {
-  validateSender,
   validateHostRendererSender,
   UNAUTHORIZED_FRAME,
   auditUnauthorized,
@@ -605,7 +604,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // are accepted; anything else short-circuits before touching the secret store.
   // Minor: REVIEWER_PROVIDERS_SET imported from permission-settings-store (single SOT).
   ipcMain.handle(PERMISSIONS.reviewerProviderHasKey, async (e, provider: unknown) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, PERMISSIONS.reviewerProviderHasKey, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -629,10 +628,20 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   // ── Permission policy — deferred queue surface ────────────────────────────
-  // Returns DLP-redacted tool inputs + verdicts; gated to prevent a
-  // compromised foreign frame from harvesting them.
+  // Returns DLP-redacted tool inputs + verdicts.
+  //
+  // Host-renderer only. This and the five channels around it are READ-ONLY but
+  // not low-risk, and read-only is what previously earned them the base
+  // validator — which admits plugin UI shells by design. Reading the approval
+  // queue tells a plugin what the user is about to be asked to approve, which
+  // is reconnaissance for timing a request against it, not a read. Same for
+  // the audit log, the hook trust state, and which providers hold a key.
+  //
+  // This comment used to say the channel was "gated to prevent a compromised
+  // foreign frame from harvesting them" while using the validator that does
+  // not reject those frames.
   ipcMain.handle(PERMISSIONS.deferredList, async (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, PERMISSIONS.deferredList, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -643,7 +652,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(PERMISSIONS.hookTrustList, async (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, PERMISSIONS.hookTrustList, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -841,7 +850,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     PERMISSIONS.auditShow,
     async (e, args: { last?: number }) => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, PERMISSIONS.auditShow, e);
         return UNAUTHORIZED_FRAME;
       }
@@ -857,7 +866,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(PERMISSIONS.auditVerify, async (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, PERMISSIONS.auditVerify, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -1043,7 +1052,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(PERMISSIONS.userApprovalList, async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalList, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, PERMISSIONS.userApprovalList, e); return UNAUTHORIZED_FRAME; }
     try {
       return await listApprovals();
     } catch {
