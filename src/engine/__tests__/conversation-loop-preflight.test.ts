@@ -11,6 +11,7 @@
  * - threshold values: 80% of usable model context
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { makeHistoryExceedingEstimateThreshold } from "./conversation-loop-test-helpers.js";
 import { ConversationLoop } from "../conversation-loop.js";
 import type { GenericMessage, LLMProvider, StreamEvent } from "../llm/types.js";
 import { getModelPreflightThreshold, estimateMessagesTokens } from "../auto-compact.js";
@@ -113,18 +114,6 @@ class ScriptedProvider implements LLMProvider {
   async *streamTurn(): AsyncIterable<StreamEvent> {
     yield* this.turns[this.index++] ?? [];
   }
-}
-
-/**
- * Build a message array whose `estimateMessagesTokens` result EXCEEDS the
- * preflight threshold. Uses plain ASCII (no Korean weighting).
- */
-function makeHistoryExceedingEstimateThreshold(threshold: number): GenericMessage[] {
-  const charsPerMsg = (threshold / 2 + 500) * 4;
-  return [
-    { role: "user", content: "a".repeat(Math.ceil(charsPerMsg)) },
-    { role: "assistant", content: "b".repeat(Math.ceil(charsPerMsg)) },
-  ];
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
