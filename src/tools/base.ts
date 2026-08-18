@@ -79,6 +79,17 @@ export interface Tool {
    */
   readonly requiresMcpScope?: boolean;
   /**
+   * BUILTIN-only: this tool can reach an arbitrary, model-chosen external URL.
+   *
+   * Such a tool is an EGRESS primitive, not a read: paired with any tool that
+   * can reach private data it completes the exfiltration path, and the model
+   * picks the destination. Unattended lanes (routines) have no human to notice
+   * an unexpected destination, so they withhold it the same way they withhold
+   * MCP — at the registry, before the schema is ever shown, so an injected
+   * instruction cannot even name the tool.
+   */
+  readonly arbitraryEgress?: boolean;
+  /**
    * BUILTIN-only: this tool runs a bounded loop of its OWN whose length the
    * user configures, so a fixed executor ceiling would silently re-impose the
    * cap that setting exists to remove. Returns the wall-clock ceiling in ms
@@ -265,6 +276,8 @@ export interface DynamicToolSpec {
   appInvokable?: boolean;
   /** MCP-scoped builtin bit — see {@link Tool.requiresMcpScope}. */
   requiresMcpScope?: boolean;
+  /** Arbitrary-egress builtin bit — see {@link Tool.arbitraryEgress}. */
+  arbitraryEgress?: boolean;
   /** Builtin self-declared wall clock — see {@link Tool.resolveHostCeilingMs}. */
   resolveHostCeilingMs?: () => number;
   /** MCP Apps model-exposure bit — see {@link Tool.modelVisible}. */
@@ -306,6 +319,7 @@ export function createDynamicTool(spec: DynamicToolSpec): Tool {
     operationPolicy: spec.operationPolicy,
     appInvokable: spec.appInvokable,
     ...(spec.requiresMcpScope ? { requiresMcpScope: true } : {}),
+    ...(spec.arbitraryEgress ? { arbitraryEgress: true } : {}),
     ...(spec.resolveHostCeilingMs
       ? { resolveHostCeilingMs: spec.resolveHostCeilingMs }
       : {}),

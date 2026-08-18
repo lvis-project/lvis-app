@@ -539,6 +539,7 @@ export class ToolRegistry {
     activeToolNames?: Set<string> | string[];
     includeBuiltins: boolean;
     includeMcp: boolean;
+    includeEgress: boolean;
     deferral?: boolean;
   }): ToolSchemaEntry[] {
     const active = scope.activePluginIds instanceof Set
@@ -566,6 +567,11 @@ export class ToolRegistry {
           // loops run with MCP withheld on purpose, and a builtin badge must not
           // be a way around that decision.
           if (tool.requiresMcpScope && !scope.includeMcp) return false;
+          // …and the same reasoning for arbitrary egress. Withholding at the
+          // registry (rather than at the approval gate) is what makes it hold
+          // against prompt injection: the tool never appears in the schema, so
+          // injected text cannot ask for it by name.
+          if (tool.arbitraryEgress && !scope.includeEgress) return false;
           return true;
         }
         if (tool.source === "mcp") {

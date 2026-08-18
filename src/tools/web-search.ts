@@ -108,6 +108,7 @@ export function createWebSearchTool(
     source: "builtin",
     category: "read",
     isReadOnly: () => true,
+    arbitraryEgress: true,
     jsonSchema: {
       type: "object",
       properties: {

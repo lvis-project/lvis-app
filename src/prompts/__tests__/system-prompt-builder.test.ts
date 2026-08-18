@@ -255,7 +255,7 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
 
     // Only the active plugin's skill is catalogued.
     const builder = make();
-    builder.setToolScope({ activePluginIds: new Set(["in-scope"]), includeBuiltins: true, includeMcp: true });
+    builder.setToolScope({ activePluginIds: new Set(["in-scope"]), includeBuiltins: true, includeMcp: true, includeEgress: true });
     const prompt = builder.build();
     expect(prompt).toContain("alpha-skill");
     expect(prompt).not.toContain("beta-skill");
@@ -266,6 +266,7 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
       activePluginIds: new Set(["in-scope", "out-scope"]),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
     });
     expect(builder2.build()).toContain("beta-skill");
   });
@@ -282,7 +283,7 @@ describe("SystemPromptBuilder — Conversation Continuity Guard", () => {
       getAvailableSkills: () => [{ name: "user-note", description: "a user-owned skill" }],
     });
     // Empty plugin scope: a user skill (no plugin owner) is still catalogued.
-    builder.setToolScope({ activePluginIds: new Set(), includeBuiltins: true, includeMcp: true });
+    builder.setToolScope({ activePluginIds: new Set(), includeBuiltins: true, includeMcp: true, includeEgress: true });
     expect(builder.build()).toContain("user-note");
   });
 

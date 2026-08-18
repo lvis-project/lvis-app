@@ -53,6 +53,7 @@ describe("SystemPromptBuilder — inactive plugin catalog", () => {
       activePluginIds: new Set<string>(),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
     });
     const prompt = builder.build();
     expect(prompt).toContain("## 사용 가능한 플러그인 (현재 턴 미선택 — request_plugin 으로 선택)");
@@ -80,6 +81,7 @@ describe("SystemPromptBuilder — inactive plugin catalog", () => {
       activePluginIds: new Set(["example-meeting"]),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
     });
     const prompt = builder.build();
     expect(prompt).not.toContain("**example-meeting**");
@@ -92,6 +94,7 @@ describe("SystemPromptBuilder — inactive plugin catalog", () => {
       activePluginIds: new Set<string>(),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
     });
     const prompt = builder.build();
     expect(prompt).not.toContain("사용 가능한 플러그인");
@@ -110,6 +113,7 @@ describe("SystemPromptBuilder — inactive plugin catalog", () => {
       activePluginIds: new Set(["example-meeting"]),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
     });
     const prompt = builder.build();
     expect(prompt).not.toContain("사용 가능한 플러그인");
@@ -140,6 +144,7 @@ describe("SystemPromptBuilder — inactive plugin catalog", () => {
       activePluginIds: new Set<string>(),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
     });
     const prompt = builder.build();
     expect(prompt).not.toContain("**example-disabled**");
@@ -172,6 +177,7 @@ describe("SystemPromptBuilder — inactive plugin catalog", () => {
       activePluginIds: new Set<string>(),
       includeBuiltins: true,
       includeMcp: true,
+      includeEgress: true,
     });
     const prompt = builder.build();
     expect(prompt).not.toContain("**example-denied**");
