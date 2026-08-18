@@ -10,12 +10,12 @@ import { describe, it, expect, beforeEach, afterAll } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHash, generateKeyPairSync, sign } from "node:crypto";
+import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { whitelistRegistry } from "../whitelist-registry.js";
 import { WhitelistCache } from "../whitelist-cache.js";
-import type { SignatureEnvelope } from "../../types.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
 import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { signEnvelopeFixture } from "../../../testing/sign-envelope-fixture.js";
 
 // ---------------------------------------------------------------------
 // Helpers
@@ -51,21 +51,13 @@ function buildWhitelist(opts: {
   };
 }
 
-let testPrivateKey: ReturnType<typeof generateKeyPairSync>["privateKey"];
+// `KeyObject`, not `ReturnType<typeof generateKeyPairSync>["privateKey"]` —
+// that `ReturnType` resolves the union of every overload's return shape
+// (including string/JsonWebKey/Buffer variants from unrelated key types),
+// not the `KeyObject` the "ed25519", no-options overload actually returns,
+// which broke `crypto.sign()`'s parameter typing below.
+let testPrivateKey: KeyObject;
 let testKeyId: string;
-
-function signDoc(body: string): string {
-  const sigBytes = sign(null, Buffer.from(body, "utf-8"), testPrivateKey);
-  const envelope: SignatureEnvelope = {
-    version: 1,
-    iat: Math.floor(Date.now() / 1000),
-    artifact_sha256: createHash("sha256").update(Buffer.from(body, "utf-8")).digest("hex"),
-    signatures: [
-      { key_id: testKeyId, alg: "ed25519", sig: sigBytes.toString("base64") },
-    ],
-  };
-  return JSON.stringify(envelope);
-}
 
 function makeSigned(opts: {
   issuedAt: string;
@@ -74,7 +66,7 @@ function makeSigned(opts: {
 }): SignedDoc {
   const doc = buildWhitelist(opts);
   const body = JSON.stringify(doc);
-  return { body, signature: signDoc(body), doc };
+  return { body, signature: signEnvelopeFixture(body, testPrivateKey, testKeyId), doc };
 }
 
 const tempRoots: string[] = [];
