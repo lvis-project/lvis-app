@@ -15,6 +15,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   ACL_QUERY_SCRIPT,
+  assertAsrtUserReady,
   assertRuntimeNotificationArtifactsRemoved,
   FOREIGN_PROTOCOL_FIXTURE_SCRIPT,
   buildPowerShellScript,
@@ -1806,5 +1807,52 @@ describe("Windows NSIS installer smoke contracts", () => {
     const smoke = readRepoFile("scripts/smoke-windows-nsis-installer.mjs");
     expect(smoke).toContain('"LVIS_ALLOW_DISPOSABLE_WINDOWS_INSTALLER_SMOKE"');
     expect(smoke).toContain("assertDisposableSmokeGate()");
+  });
+});
+
+describe("ASRT provisioning precondition", () => {
+  const READY = {
+    user: {
+      exists: true,
+      group_exists: true,
+      in_builtin_users: true,
+      in_sandbox_group: true,
+      hidden_from_logon: true,
+      sid: "S-1-5-21-1-2-3-1001",
+      group_sid: "S-1-5-21-1-2-3-1002",
+    },
+    cred_present: true,
+    marker_version: 1,
+    marker_user_sid: "S-1-5-21-1-2-3-1001",
+  };
+
+  it("accepts a fully provisioned sandbox", () => {
+    expect(() => assertAsrtUserReady(structuredClone(READY))).not.toThrow();
+  });
+
+  it("reports the payload, not just the field name", () => {
+    // A field name says WHICH check failed and not what was seen. A value that
+    // legitimately changed — a vendor bump moving the marker schema, say — then
+    // looks identical to a genuine provisioning failure, and the run happens on
+    // a Windows CI machine that is gone by the time anyone reads the log.
+    const raw = { ...structuredClone(READY), marker_version: 2 };
+    expect(() => assertAsrtUserReady(raw)).toThrow(/marker_version/);
+    expect(() => assertAsrtUserReady(raw)).toThrow(/"marker_version":2/);
+  });
+
+  it.each([
+    ["cred_present", { cred_present: false }],
+    ["marker_user_sid", { marker_user_sid: "S-1-5-21-9-9-9-9999" }],
+  ])("still refuses a genuinely unprovisioned sandbox: %s", (field, patch) => {
+    // Widening the message must not widen what passes.
+    expect(() => assertAsrtUserReady({ ...structuredClone(READY), ...patch })).toThrow(
+      new RegExp(field),
+    );
+  });
+
+  it("refuses a missing sandbox user sid", () => {
+    const raw = structuredClone(READY);
+    delete (raw.user as { sid?: string }).sid;
+    expect(() => assertAsrtUserReady(raw)).toThrow(/user\.sid/);
   });
 });

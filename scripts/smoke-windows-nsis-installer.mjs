@@ -1693,7 +1693,7 @@ async function assertAclSidAbsent(target, sid, label) {
   }
 }
 
-function assertAsrtUserReady(raw) {
+export function assertAsrtUserReady(raw) {
   const user = raw.user ?? {};
   const missing = [
     ["user.exists", user.exists],
@@ -1716,8 +1716,13 @@ function assertAsrtUserReady(raw) {
     missing.push("user.group_sid");
   }
   if (missing.length > 0) {
+    // The raw payload goes in the message, as the WFP and absent-state
+    // assertions below already do. Field names alone say WHICH check failed
+    // and not what was seen, so a value that legitimately changed — a vendor
+    // bump moving the marker schema, say — is indistinguishable from a genuine
+    // provisioning failure without a Windows machine to reproduce on.
     throw new Error(
-      `ASRT provisioning precondition failed: ${missing.join(", ")}`,
+      `ASRT provisioning precondition failed: ${missing.join(", ")}: ${JSON.stringify(raw)}`,
     );
   }
 }
