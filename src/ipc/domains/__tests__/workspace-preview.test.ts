@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir, homedir } from "node:os";
 import { join } from "node:path";
 import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { PLUGIN_SHELL_FRAME_URL } from "../../../__tests__/test-helpers.js";
 
 const {
   handlers,
@@ -93,6 +94,7 @@ function invoke(channel: string, url: string, ...args: unknown[]): Promise<unkno
 
 const OK_FRAME = "file:///app/index.html";
 const EVIL_FRAME = "https://evil.example.com/x";
+const PLUGIN_SHELL_FRAME = PLUGIN_SHELL_FRAME_URL;
 const dirLinkType = process.platform === "win32" ? "junction" : "dir";
 
 let root: string;
@@ -1585,5 +1587,60 @@ describe("workspace:drop-prepare handler (#1458 drag-drop add-root)", () => {
     };
     expect(done).toMatchObject({ ok: false, error: "not-found" });
     expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+});
+
+// A plugin UI shell is also a `file://` frame, so the base `validateSender`
+// accepts it — only `validateHostRendererSender` turns it away. These rows pin
+// that the root-mutating and shell-invoking workspace channels use the stronger
+// validator, so a plugin shell cannot widen the workspace scope or drive the
+// OS file manager through a host channel.
+describe("workspace channels refuse a plugin-ui-shell frame", () => {
+  it("pickRoot refuses", async () => {
+    const res = (await invoke(CHANNELS.workspace.pickRoot, PLUGIN_SHELL_FRAME)) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "unauthorized" });
+    expect(showOpenDialogMock).not.toHaveBeenCalled();
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("removeRoot refuses", async () => {
+    const res = (await invoke(CHANNELS.workspace.removeRoot, PLUGIN_SHELL_FRAME, root)) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "unauthorized" });
+    expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("dropPrepare refuses", async () => {
+    const res = (await invoke(CHANNELS.workspace.dropPrepare, PLUGIN_SHELL_FRAME, root)) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "unauthorized" });
+    expect(addAllowedDirectoryPersistMock).not.toHaveBeenCalled();
+  });
+
+  it("reveal refuses", async () => {
+    const res = (await invoke(CHANNELS.workspace.reveal, PLUGIN_SHELL_FRAME, join(root, "docs"))) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "unauthorized" });
+    expect(showItemInFolderMock).not.toHaveBeenCalled();
+  });
+
+  it("a frameless event is refused too (sender frame destroyed mid-invoke)", async () => {
+    const fn = handlers.get(CHANNELS.workspace.removeRoot);
+    if (!fn) throw new Error("no handler for workspace:remove-root");
+    const res = (await fn({ senderFrame: null } as never, root)) as {
+      ok: boolean;
+      error?: string;
+    };
+    expect(res).toMatchObject({ ok: false, error: "unauthorized" });
+    expect(removeAllowedDirectoryPersistMock).not.toHaveBeenCalled();
   });
 });

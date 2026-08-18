@@ -6,7 +6,12 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
-import { invokeRegisteredHandlerWithEvent } from "../../__tests__/test-helpers.js";
+import {
+  foreignFrameEvent,
+  hostFrameEvent,
+  invokeRegisteredHandlerWithEvent,
+  pluginShellFrameEvent,
+} from "../../__tests__/test-helpers.js";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -43,20 +48,8 @@ function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
   return invokeRegisteredHandlerWithEvent(handlers, channel, event, ...args);
 }
 
-function trustedEvent(): IpcMainInvokeEvent {
-  return null as unknown as IpcMainInvokeEvent; // null = trusted (test ergonomics)
-}
-
-function hostRendererEvent(): IpcMainInvokeEvent {
-  return { senderFrame: { url: "file:///C:/Users/ikcha/workspace/lvis-project/lvis-app/dist/src/index.html" } } as unknown as IpcMainInvokeEvent;
-}
-
 function untrustedEvent(): IpcMainInvokeEvent {
-  return { senderFrame: { url: "https://evil.example.com/" } } as unknown as IpcMainInvokeEvent;
-}
-
-function pluginShellEvent(): IpcMainInvokeEvent {
-  return { senderFrame: { url: "file:///C:/Users/ikcha/workspace/lvis-project/lvis-app/dist/src/plugin-ui-shell.html" } } as unknown as IpcMainInvokeEvent;
+  return foreignFrameEvent("https://evil.example.com/");
 }
 
 // ─── Setup ────────────────────────────────────────────────────────────────────
@@ -89,7 +82,7 @@ describe("lvis:usage:summary", () => {
 
   it("calls getUsageSummary with provided days", async () => {
     const { getUsageSummary } = await import("../../engine/usage-stats.js");
-    const result = await invoke("lvis:usage:summary", trustedEvent(), 30) as { days: number };
+    const result = await invoke("lvis:usage:summary", hostFrameEvent(), 30) as { days: number };
     expect(getUsageSummary).toHaveBeenCalledWith(30);
     expect(result.days).toBe(30);
   });
@@ -101,7 +94,7 @@ describe("lvis:usage:summary", () => {
       releaseFlush = resolve;
     }));
 
-    const pending = invoke("lvis:usage:summary", trustedEvent(), 30) as Promise<unknown>;
+    const pending = invoke("lvis:usage:summary", hostFrameEvent(), 30) as Promise<unknown>;
     await Promise.resolve();
     expect(getUsageSummary).not.toHaveBeenCalled();
     releaseFlush?.();
@@ -113,7 +106,7 @@ describe("lvis:usage:summary", () => {
 
   it("defaults to 60 days when no argument", async () => {
     const { getUsageSummary } = await import("../../engine/usage-stats.js");
-    await invoke("lvis:usage:summary", trustedEvent());
+    await invoke("lvis:usage:summary", hostFrameEvent());
     expect(getUsageSummary).toHaveBeenCalledWith(60);
   });
 });
@@ -132,7 +125,7 @@ describe("lvis:usage:range", () => {
   it("calls getUsageRange with opts on authorized sender", async () => {
     const { getUsageRange } = await import("../../engine/usage-stats.js");
     const opts = { dateFrom: "2026-01-01", dateTo: "2026-01-31" };
-    await invoke("lvis:usage:range", trustedEvent(), opts);
+    await invoke("lvis:usage:range", hostFrameEvent(), opts);
     expect(mockAuditLogger.flush).toHaveBeenCalledTimes(1);
     expect(getUsageRange).toHaveBeenCalledWith(opts);
   });
@@ -150,13 +143,13 @@ describe("lvis:usage:daily-summary", () => {
   });
 
   it("rejects plugin shell frames even though they are local file URLs", async () => {
-    const result = await invoke("lvis:usage:daily-summary", pluginShellEvent(), { date: "2026-07-04" });
+    const result = await invoke("lvis:usage:daily-summary", pluginShellFrameEvent(), { date: "2026-07-04" });
     expect(result).toEqual({ ok: false, error: "unauthorized-frame" });
     expect(mockGenerateText).not.toHaveBeenCalled();
   });
 
   it("generates a constrained LLM daily summary from insight payload", async () => {
-    const result = await invoke("lvis:usage:daily-summary", hostRendererEvent(), {
+    const result = await invoke("lvis:usage:daily-summary", hostFrameEvent(), {
       date: "2026-07-04",
       locale: "ko-KR",
       sessions: [{ title: "프로젝트 작업" }],
@@ -176,7 +169,7 @@ describe("lvis:usage:daily-summary", () => {
   });
 
   it("redacts sensitive renderer text before sending the daily summary prompt to the LLM", async () => {
-    const result = await invoke("lvis:usage:daily-summary", hostRendererEvent(), {
+    const result = await invoke("lvis:usage:daily-summary", hostFrameEvent(), {
       date: "2026-07-04",
       locale: "ko-KR",
       sessions: [{ title: "Call foo.bar@example.com", projectName: "010-1234-5678 launch" }],
@@ -196,13 +189,13 @@ describe("lvis:usage:daily-summary", () => {
 
   it("returns a fail-closed result when the LLM summary call fails", async () => {
     mockGenerateText.mockRejectedValueOnce(new Error("LLM provider not configured"));
-    const result = await invoke("lvis:usage:daily-summary", hostRendererEvent(), { date: "2026-07-04" });
+    const result = await invoke("lvis:usage:daily-summary", hostFrameEvent(), { date: "2026-07-04" });
 
     expect(result).toEqual({ ok: false, error: "LLM provider not configured" });
   });
 
   it("normalizes malformed payloads instead of rejecting the IPC handler", async () => {
-    const result = await invoke("lvis:usage:daily-summary", hostRendererEvent(), undefined) as { ok: boolean; summary?: string };
+    const result = await invoke("lvis:usage:daily-summary", hostFrameEvent(), undefined) as { ok: boolean; summary?: string };
 
     expect(result).toMatchObject({ ok: true, summary: "AI daily summary" });
     expect(mockGenerateText).toHaveBeenCalledWith(
@@ -224,7 +217,7 @@ describe("lvis:usage:export-csv", () => {
   });
 
   it("returns { ok: false, canceled: true } when dialog is canceled", async () => {
-    const result = await invoke("lvis:usage:export-csv", trustedEvent(), []) as { ok: boolean; canceled?: boolean };
+    const result = await invoke("lvis:usage:export-csv", hostFrameEvent(), []) as { ok: boolean; canceled?: boolean };
     expect(result.ok).toBe(false);
     expect(result.canceled).toBe(true);
   });
@@ -236,7 +229,7 @@ describe("lvis:usage:export-csv", () => {
       const filePath = join(root, "usage.csv");
       vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath });
 
-      const result = await invoke("lvis:usage:export-csv", trustedEvent(), [
+      const result = await invoke("lvis:usage:export-csv", hostFrameEvent(), [
         {
           date: "2026-05-22",
           vendor: "openai",
