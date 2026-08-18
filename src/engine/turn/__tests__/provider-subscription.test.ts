@@ -137,6 +137,7 @@ describe("buildProvider subscription model overrides", () => {
       preflight: 29_600,
       usableContext: 37_000,
       identity: `subscription:codex/${modelOverride}`,
+      thresholdSource: "subscription-fallback",
     });
   });
 
@@ -164,6 +165,7 @@ describe("buildProvider subscription model overrides", () => {
       preflight: getModelPreflightThreshold("openai", "gpt-5.5-codex"),
       usableContext: getModelUsableContext("openai", "gpt-5.5-codex"),
       identity: "subscription:codex/gpt-5.5-codex",
+      thresholdSource: "context-window",
     });
   });
 

@@ -112,3 +112,22 @@ export function makeConversationTurnProvider() {
     },
   };
 }
+
+/**
+ * Plain-ASCII history whose `estimateMessagesTokens` result exceeds `threshold`.
+ *
+ * Shared because both the preflight-trigger suite and the trace suite need a
+ * history that crosses the same threshold — two copies would drift the moment
+ * the estimator's chars-per-token assumption changes, and only one of them
+ * would be updated.
+ *
+ * ASCII on purpose: the estimator weights Korean text differently, so Latin
+ * filler keeps the size predictable from the character count alone.
+ */
+export function makeHistoryExceedingEstimateThreshold(threshold: number): GenericMessage[] {
+  const charsPerMsg = (threshold / 2 + 500) * 4;
+  return [
+    { role: "user", content: "a".repeat(Math.ceil(charsPerMsg)) },
+    { role: "assistant", content: "b".repeat(Math.ceil(charsPerMsg)) },
+  ];
+}
