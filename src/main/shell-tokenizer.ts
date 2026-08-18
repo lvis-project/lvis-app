@@ -59,6 +59,18 @@ export interface ShellLeaf {
   /** True when the leaf contained `<(...)` or `>(...)` process substitution. */
   hasProcessSubstitution: boolean;
   /**
+   * Parallel to {@link argv}: whether that argument carries a `$` the shell
+   * will actually expand.
+   *
+   * A caller that fails closed on `$` does so because expansion happens AFTER
+   * this tokenizer runs, so `sed $IFS-i f` can split into a `-i` the flag scan
+   * never saw. That reasoning does not apply to a `$` inside `'...'`, where no
+   * expansion occurs at all — `rg 'foo$'` is a regex anchor. Double quotes DO
+   * count: they suppress word splitting but not expansion, and an expanded
+   * value can be a flag in its entirety (`rg "$FLAG" p`).
+   */
+  argvHasExpandableDollar: boolean[];
+  /**
    * Basenames of the wrapper commands (`timeout`, `env`, …) stripped from the
    * front of this leaf, in order. Lets a caller recover the verb of a bare
    * wrapper (`env` alone → prints the environment) when `argv` is empty.
@@ -96,6 +108,8 @@ interface RawWord {
   isOutputRedirect: boolean;
   hasCommandSubstitution: boolean;
   hasProcessSubstitution: boolean;
+  /** See {@link ShellLeaf.argvWithExpandableDollar}. */
+  hasExpandableDollar: boolean;
 }
 
 interface RawLeaf {
@@ -145,6 +159,10 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
 
   let current = "";
   let currentHasCmdSubst = false;
+  // A `$` that the shell will actually expand. Text taken from a single-quoted
+  // run never sets this: inside `'...'` a `$` is literal, so the word-splitting
+  // vector the caller guards against cannot arise there.
+  let currentHasExpandableDollar = false;
   let currentHasProcSubst = false;
   let wordActive = false;
 
@@ -156,10 +174,12 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
         isOutputRedirect: false,
         hasCommandSubstitution: currentHasCmdSubst,
         hasProcessSubstitution: currentHasProcSubst,
+        hasExpandableDollar: currentHasExpandableDollar,
       });
     }
     current = "";
     currentHasCmdSubst = false;
+    currentHasExpandableDollar = false;
     currentHasProcSubst = false;
     wordActive = false;
   };
@@ -170,6 +190,7 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
       value,
       isRedirectOperator: true,
       isOutputRedirect: isOutput,
+      hasExpandableDollar: false,
       hasCommandSubstitution: false,
       hasProcessSubstitution: false,
     });
@@ -191,6 +212,8 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
     if (ch === "'") {
       const close = command.indexOf("'", i + 1);
       if (close === -1) return { leaves: [], parseError: true };
+      // Deliberately does NOT set currentHasExpandableDollar — see its
+      // declaration. `rg 'foo$'` is a regex anchor, not an expansion.
       current += command.slice(i + 1, close);
       wordActive = true;
       i = close + 1;
@@ -203,6 +226,10 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
       const res = consumeDoubleQuote(command, i);
       if (res === null) return { leaves: [], parseError: true };
       current += res.text;
+      // Double quotes suppress word splitting but NOT expansion, and an
+      // expanded value can be a flag in its entirety (`rg "$FLAG" p`), so this
+      // still counts.
+      if (res.text.includes("$")) currentHasExpandableDollar = true;
       if (res.hasCommandSubstitution) currentHasCmdSubst = true;
       wordActive = true;
       i = res.next;
@@ -251,7 +278,10 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
         continue;
       }
       // Plain parameter expansion (`$var`, `${var}`) — part of the current word,
-      // NOT a command substitution (no execution, only value lookup).
+      // NOT a command substitution (no execution, only value lookup). It IS an
+      // expansion though, and unquoted it also word-splits, which is the whole
+      // point of the flag.
+      currentHasExpandableDollar = true;
       current += ch;
       wordActive = true;
       i += 1;
@@ -349,7 +379,8 @@ function scanLeaves(command: string): { leaves: RawLeaf[]; parseError: boolean }
       continue;
     }
 
-    // Ordinary character — part of the current word.
+    // Ordinary character — part of the current word. A `$` never reaches here;
+    // it is claimed by the expansion branch above, which sets the flag.
     current += ch;
     wordActive = true;
     i += 1;
@@ -454,6 +485,7 @@ function stripPath(token: string): string {
  * redirect targets, strip leading assignments and wrapper commands. */
 function buildLeaf(raw: RawLeaf): ShellLeaf {
   const argvWords: string[] = [];
+  const argvWordsExpandable: boolean[] = [];
   const redirectTargets: string[] = [];
   let hasOutputRedirect = false;
   let hasInputRedirect = false;
@@ -491,11 +523,16 @@ function buildLeaf(raw: RawLeaf): ShellLeaf {
       continue;
     }
     argvWords.push(w.value);
+    argvWordsExpandable.push(w.hasExpandableDollar);
   }
 
-  const { argv, strippedWrappers, assignments } = stripAssignmentsAndWrappers(argvWords);
+  const { argv, strippedWrappers, assignments, argvStart } =
+    stripAssignmentsAndWrappers(argvWords);
   return {
     argv,
+    // Sliced at the same index argv was, so the two stay aligned by
+    // construction rather than by a second pass that could drift from it.
+    argvHasExpandableDollar: argvWordsExpandable.slice(argvStart),
     redirectTargets,
     hasOutputRedirect,
     hasInputRedirect,
@@ -522,7 +559,7 @@ const ASSIGNMENT_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
  * assignment can select the interpreter the verb then runs. */
 function stripAssignmentsAndWrappers(
   words: string[],
-): { argv: string[]; strippedWrappers: string[]; assignments: string[] } {
+): { argv: string[]; strippedWrappers: string[]; assignments: string[]; argvStart: number } {
   let i = 0;
   const strippedWrappers: string[] = [];
   const assignments: string[] = [];
@@ -548,5 +585,5 @@ function stripAssignmentsAndWrappers(
       i += 1;
     }
   }
-  return { argv: words.slice(i), strippedWrappers, assignments };
+  return { argv: words.slice(i), strippedWrappers, assignments, argvStart: i };
 }
