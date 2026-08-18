@@ -272,12 +272,14 @@ export class HostApiGenerationScope {
     }
 
     const effect = pathEffectClass(path);
-    if (
-      path === "callTool" ||
-      effect === "write" ||
-      effect === "verb-derived" ||
-      !HOSTAPI_EFFECT_BY_PATH[path]
-    ) {
+    // A path with no entry in the effect SOT is refused, which is what now
+    // covers `callTool`: it was removed from that map when the hostApi surface
+    // was frozen, because the surviving `callTool` is the plugin UI webview
+    // bridge rather than a hostApi member. Naming it here as well restated a
+    // rule the last clause already enforces, and a redundant special case
+    // reads as a rule of its own — someone removing the map entry later would
+    // reasonably assume this line was still doing the work.
+    if (effect === "write" || effect === "verb-derived" || !HOSTAPI_EFFECT_BY_PATH[path]) {
       throw preparationError(this.pluginId, path);
     }
     return method.apply(receiver, args);

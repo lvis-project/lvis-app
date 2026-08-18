@@ -107,4 +107,37 @@ describe("HostApiGenerationScope", () => {
     expect(publish).toHaveBeenCalledTimes(2);
     expect(remove).toHaveBeenCalledTimes(1);
   });
+
+  it("refuses a path the effect SOT does not list, which is what covers callTool", () => {
+    // The refusal used to be written twice — once as `path === "callTool"` and
+    // once as "no entry in HOSTAPI_EFFECT_BY_PATH". Nothing pinned the
+    // behaviour, so removing the redundant clause broke no test, which is
+    // exactly why it needed one.
+    //
+    // `callTool` left the effect SOT when the hostApi surface was frozen: the
+    // surviving `callTool` is the plugin UI webview bridge, not a hostApi
+    // member. If it is ever put back into that map, this test turns red and
+    // says so, rather than the plugin silently gaining a preparation-time call.
+    const scope = new HostApiGenerationScope("ep-api");
+    const callTool = vi.fn();
+    const api = scope.wrapHostApi({ callTool, logEvent: vi.fn() } as never);
+
+    expect(() => (api as unknown as { callTool: () => void }).callTool()).toThrow(
+      /replacement generation is preparing/,
+    );
+    expect(callTool).not.toHaveBeenCalled();
+  });
+
+  it("refuses any other unlisted path the same way", () => {
+    // The rule is "not in the SOT", not "is callTool" — an unknown member must
+    // be refused for the same reason and by the same clause.
+    const scope = new HostApiGenerationScope("ep-api");
+    const invented = vi.fn();
+    const api = scope.wrapHostApi({ someFutureMember: invented, logEvent: vi.fn() } as never);
+
+    expect(() => (api as unknown as { someFutureMember: () => void }).someFutureMember()).toThrow(
+      /replacement generation is preparing/,
+    );
+    expect(invented).not.toHaveBeenCalled();
+  });
 });
