@@ -2648,7 +2648,7 @@ export const jaMessages: Record<string, string> = {
   "toolApprovalDialog.impactWrite": "確認済みの対象にデータを作成または変更します。",
   "toolApprovalDialog.impactNetwork": "ネットワーク経由でデータを送受信します。",
   "toolApprovalDialog.impactShell": "このデバイスでシステムコマンドを実行します。",
-  "toolApprovalDialog.impactMeta": "アプリまたはエージェントの状態を変更します。",
+  "toolApprovalDialog.impactMeta": "アプリまたはエージェントの状態を変更します。「常に許可」を選ぶと、このツールは以降確認を求めません。エージェントを起動したり権限を変更できるツールでは、これは利便性ではなく恒常的な許可です。",
   "toolApprovalDialog.completeRequiredChoices": "承認する前に必須の選択項目を完了してください",
   "toolApprovalDialog.noTypedValueProvided": "事前に指定された値はありません",
   "toolApprovalDialog.typedInputOutsideApproval": "承認カードでは文字入力を受け付けません。任意のテキストは元のリクエストに含めてから再試行してください。",
