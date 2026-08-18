@@ -1702,7 +1702,13 @@ export function assertAsrtUserReady(raw) {
     ["user.in_sandbox_group", user.in_sandbox_group],
     ["user.hidden_from_logon", user.hidden_from_logon],
     ["cred_present", raw.cred_present],
-    ["marker_version", raw.marker_version === 1],
+    // ASRT 0.0.73 moved the sandbox credential, setup marker, and CA record out
+    // of %LOCALAPPDATA%\\sandbox-runtime\\state.db into
+    // HKLM\\SOFTWARE\\sandbox-runtime + %ProgramData%, and stamped the marker
+    // schema 2 along with it. Pinned to the exact version rather than a
+    // minimum: this asserts the shape the rest of these fields are read under,
+    // so a future bump should fail here and be re-read, not pass silently.
+    ["marker_version", raw.marker_version === 2],
     [
       "marker_user_sid",
       typeof user.sid === "string" && raw.marker_user_sid === user.sid,
