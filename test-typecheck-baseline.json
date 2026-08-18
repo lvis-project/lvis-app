@@ -145,7 +145,7 @@
     "src/plugins/runtime/__tests__/notification-events-emitted.test.ts": 2,
     "src/plugins/runtime/__tests__/plugin-operation-account-session.test.ts": 9,
     "src/plugins/runtime/__tests__/set-enabled.test.ts": 4,
-    "src/plugins/whitelist/__tests__/whitelist-registry.test.ts": 2,
+    "src/plugins/whitelist/__tests__/whitelist-registry.test.ts": 1,
     "src/shared/__tests__/a2a.test.ts": 1,
     "src/shared/__tests__/chat-history-meta.test.ts": 2,
     "src/shared/__tests__/llm-vendor-defaults.test.ts": 3,

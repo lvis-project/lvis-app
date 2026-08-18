@@ -959,7 +959,9 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
                               ? t("pluginConfigTab.doctorIncompatibleAppTitle")
                               : selectedPlugin.installFailureKind === "manifest-validation-error"
                                 ? t("pluginConfigTab.doctorManifestValidationTitle")
-                                : t("pluginConfigTab.doctorTitle")}
+                                : selectedPlugin.installFailureKind === "plugin-revoked"
+                                  ? t("pluginConfigTab.doctorRevokedTitle")
+                                  : t("pluginConfigTab.doctorTitle")}
                         </p>
                         <p className="text-[11px] text-destructive/(--opacity-intense)">
                           {selectedPlugin.installFailureKind === "catalog-grant-mismatch"
@@ -968,7 +970,9 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
                               ? t("pluginConfigTab.doctorIncompatibleAppDescription")
                               : selectedPlugin.installFailureKind === "manifest-validation-error"
                                 ? t("pluginConfigTab.doctorManifestValidationDescription")
-                                : t("pluginConfigTab.doctorDescription")}
+                                : selectedPlugin.installFailureKind === "plugin-revoked"
+                                  ? t("pluginConfigTab.doctorRevokedDescription")
+                                  : t("pluginConfigTab.doctorDescription")}
                         </p>
                         {selectedPlugin.installFailureMessage ? (
                           <div className="mt-2 rounded border border-destructive/(--opacity-muted) bg-background/(--opacity-muted) px-2 py-1.5">
