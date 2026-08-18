@@ -1020,7 +1020,17 @@ export interface PluginHostApi {
    * test plugin trigger downstream cascades against marketplace expectations.
    */
   onPluginsChanged(handler: (event: PluginLifecycleEvent) => void): () => void;
-  getSecret(key: string): string | null;
+  /**
+   * Read an allow-listed secret.
+   *
+   * Async because a plugin will run in its own process, and a synchronous
+   * answer cannot cross one: `SharedArrayBuffer` + `Atomics.wait` shares memory
+   * between THREADS, not processes, and pushing a snapshot into the child would
+   * hand it the secrets up front — the opposite of what the gate is for. The
+   * host implementation stays synchronous internally; it is the SIGNATURE that
+   * has to survive the boundary.
+   */
+  getSecret(key: string): Promise<string | null>;
 
   /**
    * #893 Stage 2 — Host-managed LLM key resolver. Mirrors the SDK's
