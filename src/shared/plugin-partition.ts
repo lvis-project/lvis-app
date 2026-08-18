@@ -34,3 +34,15 @@ export function pluginPartitionHash(pluginId: string): string {
 export function pluginPartitionName(pluginId: string): string {
   return `persist:plugin:${pluginPartitionHash(pluginId)}`;
 }
+
+/**
+ * Whether a partition string names a plugin partition.
+ *
+ * Kept beside the constructor so the two cannot drift: main-process guards
+ * decide whether to enforce plugin preferences by asking this, and a predicate
+ * that stopped matching what `pluginPartitionName` produces would silently
+ * turn that enforcement off.
+ */
+export function isPluginPartitionName(partition: string): boolean {
+  return /^persist:plugin:[0-9a-f]{8}$/.test(partition);
+}
