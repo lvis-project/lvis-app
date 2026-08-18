@@ -19,7 +19,7 @@ export const en = {
   "be_agentSpawn.propSourceToolsDescription":
     "List of tool names to expose to the sub-agent. If omitted, the same tool set as the parent is used.",
   "be_agentSpawn.propResumeIdDescription":
-    "Optional: resume a previously-spawned sub-agent by its resumeId (returned in an incomplete result). When set, the sub-agent's history is re-hydrated and continued with instructions as the follow-up prompt; its tool scope stays frozen to the original spawn (not re-granted). Omit to start a fresh sub-agent.",
+    "Optional: continue an EXISTING sub-agent instead of starting a new one — this is the normal way to hand a suspended sub-agent more work, not only an error-recovery path. Takes a resumeId from agent_list or from an incomplete result. The sub-agent's history is re-hydrated and `instructions` becomes its follow-up prompt; its tool scope stays frozen to the original spawn (not re-granted). To steer a sub-agent that is still RUNNING, use agent_guide instead — that delivers a directive without starting a run. Omit to start a fresh sub-agent.",
   "be_agentSpawn.incompleteNotice":
     "This run is NOT finished. The sub-agent hit its round budget mid-task, so the summary above is a partial snapshot, not an answer — do not report it to the user as a result. Call agent_spawn again with resumeId=\"{resumeId}\" and instructions naming what still needs doing; the sub-agent keeps its history and continues from exactly where it stopped. Repeat until it returns without this notice. If you deliberately stop resuming, say so explicitly and tell the user the work was left incomplete.",
   "be_agentSpawn.resumeRetryGuidance":
@@ -56,7 +56,7 @@ export const ko: Record<keyof typeof en, string> = {
   "be_agentSpawn.propSourceToolsDescription":
     "sub-agent 에 노출할 tool 이름 목록. 생략 시 부모와 동일한 tool 셋.",
   "be_agentSpawn.propResumeIdDescription":
-    "선택: 이전에 띄운 sub-agent 를 resumeId (미완료 결과에 반환됨) 로 이어서 실행합니다. 지정 시 sub-agent 히스토리를 재수화하고 instructions 를 후속 프롬프트로 이어갑니다. tool 범위는 최초 spawn 시점으로 고정되어 재부여되지 않습니다. 생략하면 새 sub-agent 를 시작합니다.",
+    "선택: 새로 띄우는 대신 기존 sub-agent 를 이어서 실행합니다 — 중단된 sub-agent 에게 추가 작업을 주는 정상 경로이며 오류 복구 전용이 아닙니다. resumeId 는 agent_list 또는 미완료 결과에서 얻습니다. 지정 시 sub-agent 히스토리를 재수화하고 instructions 를 후속 프롬프트로 이어갑니다. tool 범위는 최초 spawn 시점으로 고정되어 재부여되지 않습니다. 아직 실행 중(running)인 sub-agent 의 방향을 바꾸려면 대신 agent_guide 를 쓰세요 — 새 실행을 시작하지 않고 지시만 전달합니다. 생략하면 새 sub-agent 를 시작합니다.",
   "be_agentSpawn.incompleteNotice":
     "이 실행은 끝나지 않았습니다. sub-agent 가 작업 도중 라운드 예산에 도달했으므로 위 요약은 답이 아니라 중간 스냅샷입니다 — 사용자에게 결과로 보고하지 마세요. agent_spawn 을 resumeId=\"{resumeId}\" 와 남은 작업을 명시한 instructions 로 다시 호출하세요. sub-agent 는 히스토리를 유지한 채 중단된 지점부터 정확히 이어갑니다. 이 안내가 사라질 때까지 반복하세요. 의도적으로 재개를 중단한다면 그 사실을 명시하고 작업이 미완료로 남았음을 사용자에게 알리세요.",
   "be_agentSpawn.resumeRetryGuidance":
