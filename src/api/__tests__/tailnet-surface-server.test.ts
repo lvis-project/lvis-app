@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { request as httpRequest } from "node:http";
+import { Agent as HttpAgent, request as httpRequest } from "node:http";
 import { createServer as createNetServer } from "node:net";
 import { createHash } from "node:crypto";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -234,9 +234,10 @@ async function requestTailnetGet(
   server: TailnetSurfaceServer,
   path: string,
   headers: Record<string, string>,
+  agent?: HttpAgent,
 ): Promise<RawWebDocumentResponse> {
   return new Promise((resolve, reject) => {
-    const request = httpRequest(url(server, path), { method: "GET", headers }, (response) => {
+    const request = httpRequest(url(server, path), { method: "GET", headers, agent }, (response) => {
       let body = "";
       response.setEncoding("utf8");
       response.on("data", (chunk: string) => { body += chunk; });
@@ -898,6 +899,79 @@ describe("Tailnet observer HTTP boundary", () => {
     expect(second.status).toBe(200);
     expect(third.status).toBe(429);
     expect(await third.json()).toMatchObject({ error: "tailnet-rate-limited" });
+  });
+
+  it("does not let a rotated login header multiply tracked identities on one connection", async () => {
+    // S-5: Tailscale-User-Login is a client-supplied claim. A local caller
+    // that rotates it across many values on a single connection must not be
+    // able to mint a fresh tracked-identity bucket per value -- the limiter
+    // pins the bucket to whichever login the connection first authorized
+    // with, so this flood can only ever consume one of the
+    // MAX_TRACKED_RATE_IDENTITIES (128) slots.
+    const { server } = await fixture({ maxRequestsPerWindow: 500, requestWindowMs: 60_000 });
+    const agent = new HttpAgent({ keepAlive: true, maxSockets: 1 });
+    try {
+      for (let i = 0; i < 200; i += 1) {
+        const response = await requestTailnetGet(
+          server,
+          "/tailnet/v1/status",
+          tailnetRoleHeaders(["observer"], `attacker-${i}@example.com`),
+          agent,
+        );
+        expect(response.status).toBe(200);
+      }
+    } finally {
+      agent.destroy();
+    }
+
+    // A different identity, on its own connection, must still be admitted:
+    // the header-rotation flood above could not have exhausted the
+    // tracked-identity map.
+    const legitimate = await requestTailnetGet(
+      server,
+      "/tailnet/v1/status",
+      tailnetRoleHeaders(["observer"], "genuine-owner@example.com"),
+    );
+    expect(legitimate.status).toBe(200);
+  });
+
+  it("keeps serving a previously-tracked identity when the identity map is at capacity", async () => {
+    // S-5: the old limiter returned false for every caller once
+    // MAX_TRACKED_RATE_IDENTITIES (128) buckets were tracked, including
+    // callers with an existing, well-behaved bucket. A caller that is
+    // already tracked must always be served from its own bucket regardless
+    // of how full the map is, and a brand-new identity arriving at capacity
+    // must be admitted by evicting the oldest tracked bucket rather than
+    // being refused outright.
+    const { server } = await fixture({ maxRequestsPerWindow: 500, requestWindowMs: 60_000 });
+    const legitimateHeaders = tailnetRoleHeaders(["observer"], "genuine-owner@example.com");
+
+    const first = await requestTailnetGet(server, "/tailnet/v1/status", legitimateHeaders);
+    expect(first.status).toBe(200);
+
+    // Fill the remaining 127 slots with distinct identities, each on its
+    // own fresh connection, bringing the map to exactly 128 tracked
+    // identities without evicting the one tracked above.
+    for (let i = 0; i < 127; i += 1) {
+      const response = await requestTailnetGet(
+        server,
+        "/tailnet/v1/status",
+        tailnetRoleHeaders(["observer"], `flood-${i}@example.com`),
+      );
+      expect(response.status).toBe(200);
+    }
+
+    const second = await requestTailnetGet(server, "/tailnet/v1/status", legitimateHeaders);
+    expect(second.status).toBe(200);
+
+    // One more genuinely new identity pushes the map past capacity; it must
+    // still be admitted (via eviction), never denied outright.
+    const overflow = await requestTailnetGet(
+      server,
+      "/tailnet/v1/status",
+      tailnetRoleHeaders(["observer"], "overflow-owner@example.com"),
+    );
+    expect(overflow.status).toBe(200);
   });
 
   it("accepts only a controller-gated, idempotent narrow message.send command", async () => {
