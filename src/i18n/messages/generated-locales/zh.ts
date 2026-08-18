@@ -2648,7 +2648,7 @@ export const zhMessages: Record<string, string> = {
   "toolApprovalDialog.impactWrite": "在已审查的目标中创建或更改数据。",
   "toolApprovalDialog.impactNetwork": "通过网络发送或接收数据。",
   "toolApprovalDialog.impactShell": "在此设备上运行系统命令。",
-  "toolApprovalDialog.impactMeta": "更改应用或代理状态。",
+  "toolApprovalDialog.impactMeta": "更改应用或代理状态。选择\"始终允许\"后，此工具不会再询问。对于能启动代理或更改权限的工具，这是常设授权，而非便利设置。",
   "toolApprovalDialog.completeRequiredChoices": "批准前请完成必选项",
   "toolApprovalDialog.noTypedValueProvided": "未预先提供值",
   "toolApprovalDialog.typedInputOutsideApproval": "批准卡不会收集文本输入。请在原始请求中提供可选文本后重试。",
