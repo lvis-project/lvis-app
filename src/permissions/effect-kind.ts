@@ -287,6 +287,13 @@ function spawnWorkerTargetFromArgs(args: readonly unknown[],
  * test fails if ANY real hostApi leaf is missing here; the wrapper's
  * fail-closed default (`unclassifiedHostApiMethod` = write) is the runtime
  * backstop for a method added before its SOT entry.
+ *
+ * `callTool` is deliberately ABSENT. Cross-plugin `hostApi.callTool` was removed
+ * with cross-plugin tool invocation; the surviving `callTool` is the plugin UI
+ * webview bridge (`src/plugin-preload.ts` → `CHANNELS.pluginBridge.callTool` →
+ * `PluginRuntime.callDeclaredAppOnlyTool`), a renderer→main IPC whose effect is
+ * recorded on the executor path it actually takes. Keying it here would claim a
+ * plugin-JS→host method that neither `PluginHostApi` nor `createHostApi` has.
  */
 export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   // ─── storage.* (PluginStorage) ───────────────────────────────────────────
@@ -333,7 +340,6 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   },
   resolveApiKey: { kind: "resolveApiKey", targetFromArgs: objectStringField("purpose"),
   },
-  callTool: { kind: "callTool", targetFromArgs: firstStringArg },
   emitEvent: { kind: "emitEvent", targetFromArgs: firstStringArg },
   onEvent: { kind: "onEvent", targetFromArgs: firstStringArg },
   onPluginsChanged: { kind: "onPluginsChanged" },
