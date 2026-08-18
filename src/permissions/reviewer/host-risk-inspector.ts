@@ -34,7 +34,7 @@
  * exactly where the declared category was consumed before.
  */
 import type { ToolCategory } from "../../tools/types.js";
-import { tokenizeShell, type ShellLeaf } from "../../main/shell-tokenizer.js";
+import { stripCommandPath, tokenizeShell, type ShellLeaf } from "../../main/shell-tokenizer.js";
 import { extractShellCommands } from "../../shared/shell-command-fields.js";
 import { hasNetworkTarget } from "./network-target.js";
 
@@ -456,7 +456,7 @@ function isReadOnlyLeaf(leaf: ShellLeaf): boolean {
     return bareVerb !== undefined && READ_ONLY_COMMANDS.has(bareVerb);
   }
 
-  const verb = stripPath(argv[0]!);
+  const verb = stripCommandPath(argv[0]!);
   if (verb === "git") {
     return isReadOnlyGitLeaf(argv);
   }
@@ -848,7 +848,3 @@ function skipToSedLineEnd(script: string, start: number): number {
 }
 
 /** Reduce `/usr/bin/ls` → `ls`; leave bare verbs unchanged. */
-function stripPath(token: string): string {
-  const slash = token.lastIndexOf("/");
-  return slash >= 0 ? token.slice(slash + 1) : token;
-}
