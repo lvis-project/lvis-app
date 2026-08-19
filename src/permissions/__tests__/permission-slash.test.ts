@@ -16,6 +16,9 @@ import {
 import { validateDirectoryAddition } from "../allowed-directories.js";
 import { PermissionTestResources } from "./test-resources.js";
 
+/** Only ever named in a fault; `normalizePermissionSettings` reads no file. */
+const SETTINGS_PATH = "/nonexistent/settings.json";
+
 const resources = new PermissionTestResources();
 
 function tmpSettingsPath(): string {
@@ -363,7 +366,7 @@ describe("normalizePermissionSettings — canonical permissions", () => {
   it("ignores non-SOT 'allowedDirectories' entries", () => {
     const r = normalizePermissionSettings({
       permissions: { allowedDirectories: ["/legacy/dir"] },
-    });
+    }, SETTINGS_PATH);
     expect(r.permissions.additionalDirectories).toEqual([]);
   });
 
@@ -373,12 +376,12 @@ describe("normalizePermissionSettings — canonical permissions", () => {
         additionalDirectories: ["/new/dir"],
         allowedDirectories: ["/legacy/dir"],
       },
-    });
+    }, SETTINGS_PATH);
     expect(r.permissions.additionalDirectories).toEqual(["/new/dir"]);
   });
 
   it("returns empty when neither key is present", () => {
-    const r = normalizePermissionSettings({ permissions: {} });
+    const r = normalizePermissionSettings({ permissions: {} }, SETTINGS_PATH);
     expect(r.permissions.additionalDirectories).toEqual([]);
   });
 });

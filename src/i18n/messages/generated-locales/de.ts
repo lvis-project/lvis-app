@@ -1429,6 +1429,10 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.unknownPluginId": "Unbekannte Plugin-ID.",
   "formatIpcError.userKeyboardRequired": "Diese Berechtigungsänderung kann nur über aktive Benutzereingaben durchgeführt werden.",
   "formatIpcError.writeFailed": "Einstellungen konnten nicht gespeichert werden.",
+  "formatIpcError.settingsUnreadable":
+    "Deine Einstellungsdatei konnte nicht gelesen werden, daher lassen sich Projekte weder anzeigen noch hinzufügen. Die Datei blieb unverändert — repariere oder stelle ~/.lvis/settings.json wieder her.",
+  "formatIpcError.settingsPendingRemovalsMalformed":
+    "Einige Einträge zum Entfernen von Projekten in der Einstellungsdatei konnten nicht gelesen werden. Sie wurden unverändert behalten und übersprungen; diese Entfernungen werden erst abgeschlossen, wenn ~/.lvis/settings.json repariert ist.",
   "generalTab.appVersionLabel": "App-Version",
   "generalTab.copyButton": "Kopie",
   "generalTab.copyDataPathAriaLabel": "Datenpfad kopieren",

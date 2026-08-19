@@ -135,6 +135,11 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "cannot-remove-default": "formatIpcError.cannotRemoveDefaultRoot",
   "not-an-additional-root": "formatIpcError.notAnAdditionalRoot",
   "persist-failed": "formatIpcError.writeFailed",
+  // Settings-file conditions (permission-settings-store.ts). Separate from
+  // `persist-failed` because neither is about the folder the user picked and
+  // neither clears by retrying the pick.
+  "settings-unreadable": "formatIpcError.settingsUnreadable",
+  "pending-removals-malformed": "formatIpcError.settingsPendingRemovalsMalformed",
   "lifecycle-failed": "formatIpcError.writeFailed",
 
   // ── Args / canonicalization ──

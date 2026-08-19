@@ -17,6 +17,9 @@ import {
 } from "../permission-settings-store.js";
 import { PermissionTestResources } from "./test-resources.js";
 
+/** Only ever named in a fault; `normalizePermissionSettings` reads no file. */
+const SETTINGS_PATH = "/nonexistent/settings.json";
+
 const resources = new PermissionTestResources();
 
 function tmpSettingsPath(): string {
@@ -381,7 +384,7 @@ describe("dispatchPermissionReviewerCommand — persistence", () => {
 
 describe("normalizePermissionSettings — reviewer block", () => {
   it("missing reviewer block → defaults", () => {
-    const settings = normalizePermissionSettings({});
+    const settings = normalizePermissionSettings({}, SETTINGS_PATH);
     expect(settings.permissions.reviewer).toEqual({
       // Default reviewer mode is "llm" (strongest classifier; degrades to rule
       // at boot when no provider is configured). interactive.autoApprove "medium"
@@ -412,7 +415,7 @@ describe("normalizePermissionSettings — reviewer block", () => {
           model: "",
         },
       },
-    });
+    }, SETTINGS_PATH);
     // Unknown enum values fall back to the new "llm" default (external
     // boundary: hand-edited settings file with bad values).
     expect(settings.permissions.reviewer.mode).toBe("llm");
@@ -431,7 +434,7 @@ describe("normalizePermissionSettings — reviewer block", () => {
           fallbackOnError: "deny",
         },
       },
-    });
+    }, SETTINGS_PATH);
     expect(settings.permissions.reviewer).toEqual({
       mode: "llm",
       provider: "anthropic",
@@ -463,7 +466,7 @@ describe("normalizePermissionSettings — reviewer block", () => {
           interactive: { autoApprove: "off" },
         },
       },
-    });
+    }, SETTINGS_PATH);
     expect(settings.permissions.reviewer.mode).toBe("rule");
     expect(settings.permissions.reviewer.interactive.autoApprove).toBe("off");
   });
