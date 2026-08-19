@@ -2,9 +2,11 @@
  * WorkBoardStore — persistent backing for the `work-board` LLM tools and the
  * renderer board panel.
  *
- * Persists work items to `~/.lvis/work-board/board.json` with an in-process
- * async mutex (mirroring {@link RoutinesStore} `withFileLock`) so concurrent
- * add / update / transition / remove operations cannot corrupt the file. Each
+ * Persists work items to `~/.lvis/work-board/board.json`. Mutations are
+ * serialized by `withInProcessFileQueue`, which orders read-modify-write
+ * against other writers IN THIS PROCESS and gives nothing against a second one
+ * -- see its docstring for the precondition that makes that sufficient here.
+ * Each
  * mutation also appends one line to `activity.jsonl` in the same feature
  * directory so report generation can reconstruct the work flow.
  *
@@ -19,7 +21,7 @@
  * AND its `due_at` is strictly in the past — so consumers never re-derive it.
  */
 import { readFile, rename } from "node:fs/promises";
-import { resolve, join, dirname } from "node:path";
+import { join, dirname } from "node:path";
 import { createLogger } from "../lib/logger.js";
 import {
   openFeatureNamespace,
@@ -33,6 +35,7 @@ import {
 } from "../work-board/board-shared.js";
 import { appendActivity } from "../work-board/activity-log.js";
 import { projectRootEquals } from "../shared/project-identity.js";
+import { withInProcessFileQueue } from "../lib/with-file-lock.js";
 
 const log = createLogger("lvis");
 
@@ -91,16 +94,6 @@ const MAX_PROJECT_NAME_LENGTH = 120;
 // Resolved through the feature-namespace helper so `~/.lvis/work-board/` stays
 // the single source of truth for the board file location.
 const DEFAULT_PATH = join(openFeatureNamespace("work-board").dir, "board.json");
-
-const fileLocks = new Map<string, Promise<void>>();
-
-async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
-  const key = resolve(filePath);
-  const prev = fileLocks.get(key) ?? Promise.resolve();
-  const next = prev.then(() => fn());
-  fileLocks.set(key, next.then(() => undefined, () => undefined));
-  return next;
-}
 
 const VALID_STATUSES: readonly WorkItemStatusStored[] = [
   "planned",
@@ -351,7 +344,7 @@ export class WorkBoardStore {
     const projectRoot = normalizeOptionalString(input.projectRoot, MAX_PROJECT_ROOT_LENGTH);
     const projectName = normalizeOptionalString(input.projectName, MAX_PROJECT_NAME_LENGTH);
 
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const board = await readFileOrEmpty(this.filePath);
       if (board.items.length >= MAX_ITEMS) {
         return {
@@ -420,7 +413,7 @@ export class WorkBoardStore {
       return { status: "invalid", itemId: id, reason: "due_at is not a valid ISO timestamp" };
     }
 
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const board = await readFileOrEmpty(this.filePath);
       const idx = board.items.findIndex((i) => i.id === id);
       if (idx === -1) {
@@ -475,7 +468,7 @@ export class WorkBoardStore {
       return { status: "invalid", itemId: id, reason: `invalid target status: ${String(to)}` };
     }
     await this.ensureLoaded();
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const board = await readFileOrEmpty(this.filePath);
       const idx = board.items.findIndex((i) => i.id === id);
       if (idx === -1) {
@@ -541,7 +534,7 @@ export class WorkBoardStore {
     runStatus: WorkItemRunStatus,
   ): Promise<WorkItemUpdateResult> {
     await this.ensureLoaded();
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const board = await readFileOrEmpty(this.filePath);
       const idx = board.items.findIndex((i) => i.id === id);
       if (idx === -1) {
@@ -584,7 +577,7 @@ export class WorkBoardStore {
    */
   async beginRun(id: number, runId: string, startedAt: string): Promise<WorkItemUpdateResult> {
     await this.ensureLoaded();
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const board = await readFileOrEmpty(this.filePath);
       const idx = board.items.findIndex((i) => i.id === id);
       if (idx === -1) {
@@ -637,7 +630,7 @@ export class WorkBoardStore {
    */
   async reconcileInterruptedRuns(): Promise<number> {
     await this.ensureLoaded();
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const board = await readFileOrEmpty(this.filePath);
       const iso = new Date(this.now()).toISOString();
       let count = 0;
@@ -694,7 +687,7 @@ export class WorkBoardStore {
     },
   ): Promise<WorkItemUpdateResult> {
     await this.ensureLoaded();
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const board = await readFileOrEmpty(this.filePath);
       const idx = board.items.findIndex((i) => i.id === id);
       if (idx === -1) {
@@ -754,7 +747,7 @@ export class WorkBoardStore {
   /** Remove an item. */
   async remove(id: number): Promise<WorkItemDeleteResult> {
     await this.ensureLoaded();
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const board = await readFileOrEmpty(this.filePath);
       const item = board.items.find((i) => i.id === id);
       if (!item) {

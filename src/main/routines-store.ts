@@ -1,8 +1,10 @@
 /**
  * RoutinesStore v2 — persistent backing for the `routine_schedule` LLM tool.
  *
- * Persists routines to `~/.lvis/routine/routines.json` with an in-process async mutex
- * (mirroring RemindersStore `withFileLock`) so concurrent add/dismiss operations
+ * Persists routines to `~/.lvis/routine/routines.json`. Mutations are serialized
+ * by `withInProcessFileQueue`, which orders read-modify-write against other
+ * writers IN THIS PROCESS only -- see its docstring. (The mirrored store this
+ * comment used to name, `RemindersStore`, is not in the tree.) Concurrent add/dismiss operations
  * cannot corrupt the file.
  *
  * The store is intentionally pure — it does not own a timer. The
@@ -10,7 +12,7 @@
  * fires execution events when a scheduled routine's next-fire time arrives.
  */
 import { readFile, rename } from "node:fs/promises";
-import { resolve, join } from "node:path";
+import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { isValidCronExpression } from "../routines/cron-evaluator.js";
 import { writeFileAtomicAtPath } from "./storage/feature-namespace.js";
@@ -41,6 +43,7 @@ import type {
 } from "../shared/routines-types.js";
 import { MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES, MAX_ROUTINE_SOURCE_LENGTH } from "../shared/routines-types.js";
 import { openFeatureNamespace } from "./storage/feature-namespace.js";
+import { withInProcessFileQueue } from "../lib/with-file-lock.js";
 
 /** Maximum allowed distance into the future for schedule.at (parity with RemindersStore). */
 const MAX_FUTURE_OFFSET_MS = 5 * 365.25 * 24 * 60 * 60 * 1000;
@@ -126,16 +129,6 @@ export interface RoutinesFile {
 // routine data). Resolved through the feature-namespace helper so the
 // `~/.lvis/<feature>/` location stays the single source of truth.
 const DEFAULT_PATH = join(openFeatureNamespace("routine").dir, "routines.json");
-
-const fileLocks = new Map<string, Promise<void>>();
-
-async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
-  const key = resolve(filePath);
-  const prev = fileLocks.get(key) ?? Promise.resolve();
-  const next = prev.then(() => fn());
-  fileLocks.set(key, next.then(() => undefined, () => undefined));
-  return next;
-}
 
 function workspaceRootKey(root: string): string | null {
   try {
@@ -377,7 +370,7 @@ export class RoutinesStore {
       ...(normalizedSource !== undefined ? { source: normalizedSource } : {}),
     };
 
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
       // llm-session sub-cap check (before total cap to give a specific error).
       if (record.execution === "llm-session") {
@@ -404,7 +397,7 @@ export class RoutinesStore {
 
   async dismiss(id: string): Promise<boolean> {
     if (!this.loaded) await this.load();
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
       const r = file.routines.find((x) => x.id === id);
       if (!r) {
@@ -420,7 +413,7 @@ export class RoutinesStore {
 
   async remove(id: string): Promise<boolean> {
     if (!this.loaded) await this.load();
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
       const before = file.routines.length;
       file.routines = file.routines.filter((r) => r.id !== id);
@@ -453,7 +446,7 @@ export class RoutinesStore {
         && key !== rootKey
         && isWorkspaceKeyAtOrBelow(rootKey, key),
       );
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
       let routinesUpdated = 0;
       let directoriesRemoved = 0;
@@ -491,7 +484,7 @@ export class RoutinesStore {
     patch: Partial<Pick<RoutineRecord, "lastFiredMinuteUTC" | "lastFiredAt" | "lastResultAcknowledgedAt" | "lastRoutineSessionId" | "dismissedAt">>,
   ): Promise<RoutineRecord | null> {
     if (!this.loaded) await this.load();
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
       const r = file.routines.find((x) => x.id === id);
       if (!r) {
@@ -516,7 +509,7 @@ export class RoutinesStore {
    */
   async markFired(id: string): Promise<RoutineRecord | null> {
     if (!this.loaded) await this.load();
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
       const r = file.routines.find((x) => x.id === id);
       if (!r) {

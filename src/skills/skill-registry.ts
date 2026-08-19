@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
+import { withInProcessFileQueue } from "../lib/with-file-lock.js";
 
 export interface SkillRegistryEntry {
   id: string;
@@ -17,8 +18,6 @@ export interface SkillRegistry {
   version: 1;
   skills: SkillRegistryEntry[];
 }
-
-const registryLocks = new Map<string, Promise<void>>();
 
 export async function readSkillRegistry(registryPath: string): Promise<SkillRegistry> {
   let raw: string;
@@ -42,22 +41,11 @@ export async function writeSkillRegistry(registryPath: string, registry: SkillRe
   await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf-8");
 }
 
-export async function withSkillRegistryLock<T>(
-  registryPath: string,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const key = resolve(registryPath);
-  const prev = registryLocks.get(key) ?? Promise.resolve();
-  const next = prev.then(() => fn());
-  registryLocks.set(key, next.then(() => undefined, () => undefined));
-  return next;
-}
-
 export async function updateSkillRegistry(
   registryPath: string,
   mutator: (registry: SkillRegistry) => void | Promise<void>,
 ): Promise<void> {
-  await withSkillRegistryLock(registryPath, async () => {
+  await withInProcessFileQueue(registryPath, async () => {
     const registry = await readSkillRegistry(registryPath);
     await mutator(registry);
     await writeSkillRegistry(registryPath, registry);
