@@ -20,7 +20,11 @@ import { describe, expect, it, vi } from "vitest";
 import { existsSync } from "node:fs";
 import { chmod, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { ArtifactRollbackError, assertSafeArtifactSlug } from "../plugin-artifact-store.js";
+import {
+  ArtifactRollbackError,
+  assertSafeArtifactSlug,
+  selectExpectedArtifactSha256,
+} from "../plugin-artifact-store.js";
 import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
 import { TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
@@ -760,5 +764,53 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
     } finally {
       await cleanupTmpDir(tmp);
     }
+  });
+});
+
+describe("selectExpectedArtifactSha256", () => {
+  /**
+   * A rollback or a pinned install requests a version that is NOT the catalog's
+   * latest. Only the latest hash was read, so those installs had no expected
+   * hash and fell through to the signature alone — which binds the bytes
+   * without saying which plugin or version they are.
+   */
+  const LATEST = "a".repeat(64);
+  const PRIOR = "b".repeat(64);
+  const row = {
+    version: "2.0.0",
+    artifactSha256: LATEST,
+    artifactSha256ByVersion: { "2.0.0": LATEST, "1.0.0": PRIOR },
+  };
+
+  it("returns the PRIOR version's hash for a rollback", () => {
+    expect(selectExpectedArtifactSha256(row, "1.0.0")).toBe(PRIOR);
+  });
+
+  it("returns the latest hash when the latest is what is being installed", () => {
+    expect(selectExpectedArtifactSha256(row, "2.0.0")).toBe(LATEST);
+    expect(selectExpectedArtifactSha256(row, "latest")).toBe(LATEST);
+  });
+
+  it("never returns the latest hash for a different version", () => {
+    // The failure this guards is subtle: comparing against the wrong hash
+    // refuses a CORRECT artifact, which reads as a broken rollback rather than
+    // as a bug in the check.
+    const latestOnly = { version: "2.0.0", artifactSha256: LATEST };
+    expect(selectExpectedArtifactSha256(latestOnly, "1.0.0")).toBeUndefined();
+  });
+
+  it("has no hash for a version the catalog does not list", () => {
+    expect(selectExpectedArtifactSha256(row, "0.9.0")).toBeUndefined();
+  });
+
+  it("falls back to the row hash when the catalog states no version at all", () => {
+    // Local/mock catalogs omit `version`; the row hash is all there is, and it
+    // describes whatever that row serves.
+    const noVersion = { artifactSha256: LATEST };
+    expect(selectExpectedArtifactSha256(noVersion, "1.0.0")).toBe(LATEST);
+  });
+
+  it("returns nothing when the catalog offers nothing", () => {
+    expect(selectExpectedArtifactSha256({ version: "2.0.0" }, "1.0.0")).toBeUndefined();
   });
 });
