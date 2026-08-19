@@ -246,27 +246,12 @@ describe("cluster scope API evaluation", () => {
     ).toThrow("github-file-record-invalid");
   });
 
-  it("rejects duplicate, reordered, saturated, or changing rolling-window pages", () => {
+  it("rejects saturated or changing rolling-window pages", () => {
     const pull = (number: number, updatedAt: string) => ({
       merged_at: "2026-07-12T00:00:00Z",
       number,
       updated_at: updatedAt,
     });
-
-    expect(() =>
-      evaluateSensitiveRollingWindow({
-        repo: REPO,
-        since: "2026-07-01T00:00:00Z",
-        threshold: 3,
-        pageSize: 2,
-        requestPage: (endpoint: string, parameters: { page: number }) => {
-          if (endpoint !== "repos/owner/repo/pulls") throw new Error("unexpected-endpoint");
-          return parameters.page === 1
-            ? [pull(1, "2026-07-12T04:00:00Z"), pull(2, "2026-07-12T03:00:00Z")]
-            : [pull(2, "2026-07-12T03:00:00Z"), pull(3, "2026-07-12T02:00:00Z")];
-        },
-      }),
-    ).toThrow("pull-request-page-duplicate");
 
     expect(() =>
       evaluateSensitiveRollingWindow({
@@ -569,5 +554,75 @@ describe("comment-only exclusion from sensitive-cluster detection", () => {
     // Only page 1: its oldest entry is outside the window, so there is nothing
     // left to find however the entries were ordered within it.
     expect([...requestedPages]).toEqual([1]);
+  });
+
+  it("counts a pull once when a page shift makes it arrive twice", () => {
+    // The other half of the mutable-sort-key story. A pull touched mid-scan
+    // moves toward page one, which pushes its neighbour DOWN past the page
+    // boundary — so an entry already read arrives again. Refusing that is what
+    // failed CI the moment an ordinary merge landed while the scan was running.
+    //
+    // Two properties are pinned here, because tolerating the repeat is only
+    // correct if both hold: the repeat must not be counted twice (which would
+    // inflate the window and fail the gate for the wrong reason), and the scan
+    // must still be complete afterwards.
+    const pulls = {
+      1: [
+        { number: 1, merged_at: "2026-07-12T09:00:00Z", updated_at: "2026-07-12T10:00:00Z" },
+        { number: 2, merged_at: "2026-07-12T07:00:00Z", updated_at: "2026-07-12T08:00:00Z" },
+      ],
+      2: [
+        // Already read on page 1: the shift pushed it down a page.
+        { number: 2, merged_at: "2026-07-12T07:00:00Z", updated_at: "2026-07-12T08:00:00Z" },
+        { number: 3, merged_at: "2026-07-12T05:00:00Z", updated_at: "2026-07-12T06:00:00Z" },
+      ],
+    };
+    const sensitive = [{ status: "modified", filename: "src/boot/start.ts" }];
+    const files = { 1: sensitive, 2: sensitive, 3: sensitive };
+
+    // Three distinct pulls, not four sightings.
+    expect(
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: "2026-07-01T00:00:00Z",
+        threshold: 99,
+        requestPage: rollingWindowRequestPage(pulls, files),
+        pageSize: 2,
+      }),
+    ).toEqual({ count: 3, hit: false });
+  });
+
+  it("still terminates when every entry on a page is a repeat", () => {
+    // The reason the repeat is skipped AFTER the page's oldest entry is
+    // recorded rather than before. A page of nothing but repeats still proves
+    // how far back the scan has reached; skipping first would leave the stop
+    // condition with no evidence and page on to the saturation limit.
+    const pulls = {
+      1: [
+        { number: 1, merged_at: "2026-07-12T09:00:00Z", updated_at: "2026-07-12T10:00:00Z" },
+        { number: 2, merged_at: "2026-07-12T07:00:00Z", updated_at: "2026-07-12T08:00:00Z" },
+      ],
+      2: [
+        { number: 1, merged_at: "2026-07-12T09:00:00Z", updated_at: "2026-07-12T10:00:00Z" },
+        // Outside the window, so this page has reached past it.
+        { number: 2, merged_at: "2026-06-01T00:00:00Z", updated_at: "2026-06-01T01:00:00Z" },
+      ],
+    };
+    const sensitive = [{ status: "modified", filename: "src/boot/start.ts" }];
+    const files = { 1: sensitive, 2: sensitive };
+    const requestedPages = new Set<number>();
+
+    evaluateSensitiveRollingWindow({
+      repo: REPO,
+      since: "2026-07-01T00:00:00Z",
+      threshold: 99,
+      requestPage: rollingWindowRequestPage(pulls, files, (page) =>
+        requestedPages.add(page),
+      ),
+      pageSize: 2,
+    });
+
+    // Stopped at page 2 rather than running to the page limit.
+    expect([...requestedPages]).toEqual([1, 2]);
   });
 });
