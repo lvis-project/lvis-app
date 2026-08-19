@@ -25,7 +25,7 @@ import { t } from "../../i18n/index.js";
 import { promises as fs } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { randomBytes } from "node:crypto";
-import { validateSender, validateHostRendererSender, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { assertReadableFilePath } from "../../tools/file-read-core.js";
@@ -717,7 +717,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
   }
 
   ipcMain.handle(CHANNELS.workspace.listRoots, async (e): Promise<WorkspaceListRootsResult> => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.workspace.listRoots, e);
       return { ok: false, error: "unauthorized" };
     }
@@ -831,7 +831,7 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.workspace.listDir,
     async (e, rawPath: string): Promise<WorkspaceListDirResult> => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.workspace.listDir, e);
         return { ok: false, error: "unauthorized", message: "sender frame not authorized" };
       }

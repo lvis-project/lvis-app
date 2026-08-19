@@ -4,7 +4,7 @@
 
 import { ipcMain } from "electron";
 import { fanOutToAllWindows } from "../broadcast-helpers.js";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import { createLogger } from "../../lib/logger.js";
 import {
@@ -35,7 +35,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
       | { ok: true; state: TourState }
       | { ok: false; error: string; message: string }
     > => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.tour.getState, e);
         return {
           ok: false,
@@ -65,7 +65,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
       | { ok: true; state: TourState }
       | { ok: false; error: string; message: string }
     > => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.tour.markComplete, e);
         return {
           ok: false,
@@ -107,7 +107,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
       | { ok: true; state: TourState }
       | { ok: false; error: string; message: string }
     > => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.tour.dismiss, e);
         return {
           ok: false,
@@ -149,7 +149,7 @@ export function registerTourHandlers(deps: IpcDeps): void {
       | { ok: true; scenarioId: string }
       | { ok: false; error: string; message: string }
     > => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.tour.start, e);
         return {
           ok: false,

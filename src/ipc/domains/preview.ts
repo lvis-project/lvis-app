@@ -11,11 +11,11 @@
  * (`src/tools/file-read-core.ts`). This IPC adds ZERO new read authority.
  *
  * Not in PUBLIC_CHANNELS → external surfaces (local-api / cli / sdk) can never
- * reach it (fail-closed). Frame-guarded via validateSender.
+ * reach it (fail-closed). Frame-guarded via validateHostRendererSender.
  */
 import { ipcMain } from "electron";
 import { promises as fs } from "node:fs";
-import { validateSender, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, auditUnauthorized } from "../gated.js";
 import { redactFsPath } from "../../audit/dlp-filter.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
@@ -72,7 +72,7 @@ export function registerPreviewHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.preview.readFile,
     async (e, rawPath: string): Promise<PreviewReadFileResult> => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.preview.readFile, e);
         return { ok: false, error: "unauthorized", message: "sender frame not authorized" };
       }

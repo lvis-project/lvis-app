@@ -9,7 +9,7 @@ import {
   getModelPreflightThreshold,
 } from "../../engine/auto-compact.js";
 import { getIsPackaged } from "../../boot/dev-flags.js";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
@@ -24,7 +24,7 @@ export function registerDevHandlers(deps: IpcDeps): void {
     if (getIsPackaged()) {
       return { ok: false, error: "production-disabled" } as const;
     }
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.dev.setPreflightOverride, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -41,7 +41,7 @@ export function registerDevHandlers(deps: IpcDeps): void {
     if (getIsPackaged()) {
       return { ok: false, error: "production-disabled" } as const;
     }
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.dev.getPreflightStatus, e);
       return UNAUTHORIZED_FRAME;
     }

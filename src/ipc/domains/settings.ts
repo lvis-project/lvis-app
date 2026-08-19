@@ -6,7 +6,7 @@ import { dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 import { validateExternalUrl } from "../../shared/external-url.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
 import { SETTINGS } from "../../shared/ipc-channels.js";
-import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import { sendToWindow } from "../safe-send.js";
 import { normalizeLocale, setLocale, tryLoadLocaleMessages } from "../../i18n/index.js";
@@ -701,7 +701,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.settings.get, () => rendererSettingsSnapshot(settingsService.getAll()));
 
   ipcMain.handle(CHANNELS.settings.update, async (e, partial) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.update, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.update, e); return UNAUTHORIZED_FRAME; }
     if (partial && typeof partial === "object" && Object.prototype.hasOwnProperty.call(partial, "a2aRemote")) {
       return { ok: false, error: "a2a-remote-settings-main-owned" };
     }
@@ -862,7 +862,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.settings.marketplaceInstallProviderPreset, async (e, preset) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceInstallProviderPreset, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -883,7 +883,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.settings.marketplaceUninstallProviderPreset, async (e, providerId) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceUninstallProviderPreset, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -909,7 +909,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.settings.setApiKey, async (e, vendor: string, apiKey: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.setApiKey, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.setApiKey, e); return UNAUTHORIZED_FRAME; }
     const secretKey = llmSecretKeyForInput(deps, vendor);
     if (!secretKey) {
       return {
@@ -936,7 +936,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.settings.deleteApiKey, async (e, vendor: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteApiKey, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteApiKey, e); return UNAUTHORIZED_FRAME; }
     const secretKey = llmSecretKeyForDeleteInput(deps, vendor);
     if (!secretKey) {
       return {
@@ -956,7 +956,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.settings.listLlmModels, async (e, request: LlmModelListRequest) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.listLlmModels, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.listLlmModels, e); return UNAUTHORIZED_FRAME; }
     const vendor = request && typeof request.vendor === "string"
       ? request.vendor
       : settingsService.get("llm").provider;
@@ -1369,7 +1369,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   );
   // ─── Marketplace API Key ──────────────────────
   ipcMain.handle(CHANNELS.settings.marketplaceSetApiKey, async (e, apiKey: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceSetApiKey, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceSetApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret("marketplace.apiKey", apiKey);
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
@@ -1380,7 +1380,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(CHANNELS.settings.marketplaceDeleteApiKey, async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceDeleteApiKey, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.marketplaceDeleteApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret("marketplace.apiKey");
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
@@ -1388,7 +1388,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
 
   // ─── Shell external link ───────────────────────────
   ipcMain.handle(CHANNELS.shell.openExternal, async (e, url: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.shell.openExternal, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.shell.openExternal, e); return UNAUTHORIZED_FRAME; }
     const { shell } = await import("electron");
     const validated = validateExternalUrl(url);
     if (!validated.ok) return validated;
@@ -1402,7 +1402,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
 
   // ─── Web Search Keys ───────────────────────────
   ipcMain.handle(CHANNELS.settings.setWebApiKey, async (e, provider: string, apiKey: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.setWebApiKey, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.setWebApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.setSecret(`web.apiKey.${provider}`, apiKey);
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
@@ -1414,7 +1414,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.settings.deleteWebApiKey, async (e, provider: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteWebApiKey, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.deleteWebApiKey, e); return UNAUTHORIZED_FRAME; }
     await settingsService.deleteSecret(`web.apiKey.${provider}`);
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
@@ -1422,7 +1422,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
 
   // ─── Telemetry consent ────────────────────────
   ipcMain.handle(CHANNELS.telemetry.consentAnswer, async (e, accepted: boolean) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.telemetry.consentAnswer, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.telemetry.consentAnswer, e); return UNAUTHORIZED_FRAME; }
     await settingsService.patch({
       telemetry: {
         ...settingsService.get("telemetry"),

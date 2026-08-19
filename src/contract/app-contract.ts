@@ -460,7 +460,8 @@ export const CHANNELS = {
   // user-chosen file — it must never be reachable from an external origin
   // (local-api / cli / plugin frame). The fail-closed default
   // (isPublicChannel === false) enforces that; each invoke additionally gates
-  // on validateSender so a plugin-ui-shell frame cannot reach them either.
+  // on validateHostRendererSender so a plugin-ui-shell frame cannot reach them
+  // either.
   diagnostics: {
     export: "lvis:diagnostics:export", // invoke renderer→main → { ok, path } | { ok:false, error }
     crashList: "lvis:diagnostics:crash-list", // invoke → crash-dump metadata list
@@ -543,7 +544,7 @@ export const CHANNELS = {
   // runs arbitrary tools just like the main chat, so it must be unreachable from
   // any external origin (local-api / cli / plugin frame) — the fail-closed
   // default (isPublicChannel === false) enforces that. Each invoke additionally
-  // gates on validateSender so a non-host frame is rejected. The `stream` /
+  // gates on validateHostRendererSender so a non-host frame is rejected. The `stream` /
   // `fallback` events are a DEDICATED channel pair (not `chat.stream`): the main
   // renderer's `onChatStream` subscriber never receives side-chat frames and vice
   // versa, so the two streams stay isolated by wire channel (No-Fallback: the
