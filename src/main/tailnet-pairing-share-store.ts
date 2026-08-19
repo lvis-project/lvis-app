@@ -6,15 +6,11 @@
  * share for one exact current conversation. The persisted state contains no
  * raw Tailnet login, invite code, or conversation id.
  */
-import {
-  createHash,
-  randomBytes as nodeRandomBytes,
-  randomUUID as nodeRandomUuid,
-  timingSafeEqual,
-} from "node:crypto";
+import { createHash, randomBytes as nodeRandomBytes, randomUUID as nodeRandomUuid } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { TailnetPairingShareBinding } from "../shared/chat-origin.js";
+import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
 import {
   openFeatureNamespace,
   type FeatureNamespaceHandle,
@@ -312,12 +308,6 @@ function conversationDigest(value: string): string {
   return hash("tailnet-share-conversation-v1\0" + value);
 }
 
-function sameDigest(left: string, right: string): boolean {
-  const a = Buffer.from(left, "hex");
-  const b = Buffer.from(right, "hex");
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 function permits(granted: TailnetSharePermission, required: TailnetSharePermission): boolean {
   return granted === "control" || required === "observe";
 }
@@ -565,7 +555,7 @@ export class TailnetPairingShareStore {
       const invitationIndex = state.invitations.findIndex((entry) => (
         entry.state === "open"
         && entry.expiresAt > now
-        && sameDigest(entry.codeDigest, codeDigest)
+        && timingSafeEqualHexDigest(entry.codeDigest, codeDigest)
       ));
       if (invitationIndex < 0) return { state, value: null, changed: false };
       if (state.pairings.some((entry) => (
