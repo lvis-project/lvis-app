@@ -30,7 +30,7 @@ import {
 import type { AgentSpawnEvent as SharedAgentSpawnEvent } from "../shared/subagent-events.js";
 import { createDlpSafeUuid } from "../shared/dlp-safe-id.js";
 import { resolveSubAgentCeilingMs } from "../shared/tool-timeout-policy.js";
-import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-rounds.js";
+import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-policy.js";
 import { isDeterministicProviderRequestRejection } from "../engine/llm/error-classifier.js";
 
 /**

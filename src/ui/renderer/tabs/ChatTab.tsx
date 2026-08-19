@@ -8,9 +8,8 @@ import { RadioGroup, RadioGroupItem } from "../../../components/ui/radio-group.j
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_MIN,
-} from "../../../shared/subagent-rounds.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+} from "../../../shared/subagent-policy.js";
+import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 import type { MemoryCaptureMode } from "../types.js";

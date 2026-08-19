@@ -33,7 +33,7 @@ import {
   TOOL_TIMEOUT_POLICY,
   resolveSubAgentCeilingMs,
 } from "../../shared/tool-timeout-policy.js";
-import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../../shared/subagent-rounds.js";
+import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../../shared/subagent-policy.js";
 import { createSkillLoadTool } from "../skill-load.js";
 import { createSkillListTool } from "../skill-list.js";
 import { createAgentListTool } from "../agent-list.js";

@@ -30,7 +30,7 @@ import type { RestoredSubAgentSession } from "../memory/memory-manager.js";
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_MIN,
-} from "../shared/subagent-rounds.js";
+} from "../shared/subagent-policy.js";
 import { createHash } from "node:crypto";
 import { ConversationLoop, type ConversationLoopDeps } from "./conversation-loop.js";
 import { canonicalizePathForMatch } from "../permissions/sensitive-paths.js";

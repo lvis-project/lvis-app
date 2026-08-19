@@ -6,8 +6,7 @@ import { Textarea } from "../../../components/ui/textarea.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { LvisApi } from "../types.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 const EMPTY_DRAFT: RolePreset = { id: "", name: "", systemPromptAdd: "" };
