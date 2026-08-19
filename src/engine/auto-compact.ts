@@ -199,7 +199,7 @@ function serializeMessageForWireEstimate(message: GenericMessage): string {
 
   const content =
     message.meta?.compactedAt !== undefined
-      ? buildToolResultStub(message.toolName, message.meta.truncated?.originalBytes ?? message.content.length)
+      ? buildToolResultStrippedStub(message.toolName, message.meta.truncated?.originalBytes ?? message.content.length)
       : message.meta?.truncated !== undefined
         ? buildToolResultTruncatedStub(message.toolUseId, message.toolName, message.meta.truncated)
         : message.content;
@@ -243,14 +243,6 @@ const DEFAULT_MARK_STALE_CONFIG: MarkStaleConfig = {
   preserveRecentToolResults: 8,
   minStubThreshold: 200,
 };
-
-/**
- * stub 텍스트 — wire/disk 직렬화 시 marked tool_result content 를 이 패턴으로 교체.
- * `wire-serialize.ts` 와 같은 패턴 사용 (단일 source of truth).
- */
-export function buildToolResultStub(toolName: string | undefined, origLen: number): string {
-  return buildToolResultStrippedStub(toolName, origLen);
-}
 
 /**
  * Preventive, LLM-free part marking. Memory verbatim 보존.
@@ -308,7 +300,7 @@ export function markStaleToolResults(
     if (msg.role !== "tool_result") return msg;
 
     const origLen = msg.content.length;
-    const stubLen = buildToolResultStub(msg.toolName, origLen).length;
+    const stubLen = buildToolResultStrippedStub(msg.toolName, origLen).length;
     freedCharsOnSerialize += Math.max(0, origLen - stubLen);
     // Also count the base64 image chars this rebuild drops (see below) — a
     // content-only measure under-reports the bytes actually freed from the wire.

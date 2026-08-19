@@ -30,9 +30,9 @@ import {
 import { createDirStorage, type WorkBoardStorage } from "../work-board/storage.js";
 import {
   BOARD_VERSION,
-  resolveStatus,
+  resolveWorkItemStatus,
   type BoardFile,
-} from "../work-board/board-shared.js";
+} from "../work-board/board-file.js";
 import { appendActivity } from "../work-board/activity-log.js";
 import { projectRootEquals } from "../shared/project-identity.js";
 import { withInProcessFileQueue } from "../lib/with-file-lock.js";
@@ -224,7 +224,7 @@ function cloneItem(it: WorkItem): WorkItem {
 }
 
 function decorate(item: WorkItem, nowMs: number): WorkItemResolved {
-  return { ...item, status_resolved: resolveStatus(item, nowMs) };
+  return { ...item, status_resolved: resolveWorkItemStatus(item, nowMs) };
 }
 
 /**

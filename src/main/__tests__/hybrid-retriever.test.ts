@@ -27,7 +27,7 @@ import {
   type SearchHit,
   type WorkerSearchClient,
 } from "../hybrid-retriever.js";
-import { MockCloudIndexAdapter } from "../cloud-index-adapter.js";
+import { DisabledCloudIndexAdapter } from "../cloud-index-adapter.js";
 
 // ─── Mock WorkerSearchClient ───────────────────────
 
@@ -83,7 +83,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     const vec = [makeHit("chunk-A", 0, "vec")];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, vec),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("test", 5);
     expect(results.length).toBe(1);
@@ -105,7 +105,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     ];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, vec),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("test", 10);
     const b = results.find((r) => r.chunkId === "chunk-B");
@@ -121,7 +121,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     const vec = [makeHit("chunk-C", 0, "vec")];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, vec),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("q", 5);
     expect(results.length).toBe(1);
@@ -132,7 +132,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
   it("case 4: all empty retrievers → []", async () => {
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient([], []),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("q", 5);
     expect(results).toEqual([]);
@@ -147,7 +147,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     );
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, vec),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("q", 3);
     expect(results.length).toBe(3);
@@ -164,7 +164,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     const vec = [makeHit("beta", 0, "vec"), makeHit("gamma", 1, "vec")];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, vec),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("q", 10);
     const byId = new Map(results.map((r) => [r.chunkId, r]));
@@ -182,7 +182,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     const bm25 = [makeHit("ch-Z", 0, "bm25")];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, []),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     expect(await retriever.retrieve("", 5)).toEqual([]);
     expect(await retriever.retrieve("   ", 5)).toEqual([]);
@@ -192,7 +192,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     const bm25 = [makeHit("ch-Z", 0, "bm25")];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, []),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     expect(await retriever.retrieve("q", 0)).toEqual([]);
     expect(await retriever.retrieve("q", -5)).toEqual([]);
@@ -209,7 +209,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     }
     const retriever = new HybridRetriever({
       workerClient: new FlakyClient(),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("q", 5);
     expect(results.length).toBe(1);

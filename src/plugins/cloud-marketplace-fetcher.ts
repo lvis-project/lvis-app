@@ -81,7 +81,7 @@ function genericUpgradeRequiredMessage(): string {
   return "This package is unavailable in this version of LVIS. Update LVIS and try again.";
 }
 
-export interface RealCloudMarketplaceConfig {
+export interface CloudMarketplaceConfig {
   baseUrl: string;
   apiKey?: string;
   /**
@@ -194,7 +194,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
   private readonly artifactReadTimeoutMs: number;
   private readonly envelopeReadTimeoutMs: number;
 
-  constructor(private config: RealCloudMarketplaceConfig) {
+  constructor(private config: CloudMarketplaceConfig) {
     this.artifactLimits = resolveMarketplaceArtifactLimits(config.artifactLimits);
     this.artifactReadTimeoutMs = config.artifactReadTimeoutMs ?? 120_000;
     if (!Number.isSafeInteger(this.artifactReadTimeoutMs) || this.artifactReadTimeoutMs <= 0) {

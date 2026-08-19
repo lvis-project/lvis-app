@@ -1,8 +1,8 @@
 /**
- * IPC fan-out helper — single source of truth for the
+ * Window fan-out — single source of truth for the
  * "send one channel to every open app window" broadcast pattern.
  *
- * Before this helper, every one-way main → renderer fan-out site
+ * Before this module, every one-way main → renderer fan-out site
  * (`tour.ts` tour-start, settings updates, …)
  * re-derived the same loop:
  *
@@ -13,21 +13,20 @@
  *     catch (err) { log.warn(..., "broadcast failed for one window"); }
  *   }
  *
- * This helper composes ON TOP of {@link sendToWindow} from `safe-send.ts`
+ * It composes ON TOP of {@link sendToWindow} from `safe-send.ts`
  * rather than duplicating its destroyed-check + try/catch — `sendToWindow`
  * already owns the per-window "is this WebContents still alive, swallow a
  * send race" contract. `fanOutToAllWindows` adds only the fan-out concern:
  * iterate every window, count successes, and emit a single audit row.
  *
  * The per-window error path is preserved: a `logger`/`SafeSendLogger`
- * forwarded to `sendToWindow` logs each skipped send (matching the prior
- * `log.warn(..., "broadcast failed for one window")` behaviour), and one
- * window's failure never blocks the others.
+ * forwarded to `sendToWindow` logs each skipped send, and one window's
+ * failure never blocks the others.
  */
 import type { BrowserWindow } from "electron";
 import { sendToWindow, type SafeSendLogger } from "./safe-send.js";
 
-/** Minimal audit sink — the subset of `AuditLogger.log` this helper needs. */
+/** Minimal audit sink — the subset of `AuditLogger.log` this module needs. */
 export interface BroadcastAuditLogger {
   log: (entry: {
     timestamp: string;

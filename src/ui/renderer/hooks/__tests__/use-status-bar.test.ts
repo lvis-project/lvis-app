@@ -218,7 +218,7 @@ describe("useStatusBar — install lifecycle producer", () => {
     expect(result.current.toasts[0]?.message).toBe("agent-hub 설치 중…");
   });
 
-  it("safeField strips C0 control characters (0x00–0x1F) from slug", () => {
+  it("sanitizeToastField strips C0 control characters (0x00–0x1F) from slug", () => {
     let capturedHandler:
       | ((payload: InstallProgressPayload) => void)
       | null = null;

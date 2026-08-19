@@ -45,7 +45,7 @@ import type { ApprovalGate } from "../permissions/approval-gate.js";
 import { HybridRetriever } from "../main/hybrid-retriever.js";
 import type { WorkerSearchClient } from "../main/hybrid-retriever.js";
 import type { KnowledgeWorkerClient } from "../tools/knowledge-search.js";
-import { MockCloudIndexAdapter } from "../main/cloud-index-adapter.js";
+import { DisabledCloudIndexAdapter } from "../main/cloud-index-adapter.js";
 import { IdleSchedulerService, adaptPowerMonitor } from "../main/idle-scheduler.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("lvis");
@@ -105,7 +105,7 @@ export async function wireKnowledgeAndIdleScheduler(opts: {
         getStructure: (docId) => withWorkerClient((client) => client.getStructure(docId)),
         getPageContent: (docId, pages) => withWorkerClient((client) => client.getPageContent(docId, pages)),
       };
-      const cloudAdapter = new MockCloudIndexAdapter();
+      const cloudAdapter = new DisabledCloudIndexAdapter();
       const hybridRetriever = new HybridRetriever({
         workerClient: workerSearchClient,
         cloudAdapter,
