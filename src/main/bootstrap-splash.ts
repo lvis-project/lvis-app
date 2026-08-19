@@ -13,11 +13,11 @@ import { getLvisAppVersion } from "../shared/app-version.js";
 import { getMainWindow } from "./app-state.js";
 
 const BOOTSTRAP_STATUS_MESSAGES = [
-  t("be_main.bootstrapStatus0"),
-  t("be_main.bootstrapStatus1"),
-  t("be_main.bootstrapStatus2"),
-  t("be_main.bootstrapStatus3"),
-  t("be_main.bootstrapStatus4"),
+  t("be_main.bootstrapStatusPreparingRuntime"),
+  t("be_main.bootstrapStatusLoadingSettingsAndMemory"),
+  t("be_main.bootstrapStatusVerifyingPluginIntegrity"),
+  t("be_main.bootstrapStatusSyncingMarketplace"),
+  t("be_main.bootstrapStatusOpeningWorkspace"),
 ] as const;
 const BOOTSTRAP_MESSAGE_MIN_VISIBLE_MS = 500;
 const BOOTSTRAP_SPLASH_MIN_VISIBLE_MS = 500;
