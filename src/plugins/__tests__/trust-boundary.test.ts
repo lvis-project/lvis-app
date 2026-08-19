@@ -81,12 +81,13 @@ describe("Phase 1 — plugin trust boundary", () => {
 
   async function writeReceipt(pluginId: string, pluginDir: string): Promise<void> {
     const receipt: PluginInstallReceipt = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       pluginId,
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "a".repeat(64),
       signerKeyId: "prod-v1",
+      admission: null,
       installedAt: new Date(0).toISOString(),
       files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
     };
@@ -307,7 +308,7 @@ describe("Phase 1 — plugin trust boundary", () => {
       await writeFile(
         join(cacheRoot, malformedId, "install-receipt.json"),
         JSON.stringify({
-          schemaVersion: 2,
+          schemaVersion: 3,
           pluginId: malformedId,
           version: "1.0.0",
           installSource: "marketplace",
@@ -475,12 +476,13 @@ describe("Phase 1 — plugin trust boundary", () => {
       const manifestPath = await writePluginAt(pluginDir, "tb-dev-signer");
 
       const devReceipt: PluginInstallReceipt = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         pluginId: "tb-dev-signer",
         version: "1.0.0",
         installSource: "local-dev",
         artifactSha256: null,
         signerKeyId: null,
+        admission: null,
         installedAt: new Date(0).toISOString(),
         files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
       };
@@ -580,12 +582,13 @@ describe("Phase 1 — plugin trust boundary", () => {
       const manifestPath = await writePluginAt(pluginDir, "tb-dev-signer-unpkg");
 
       const devReceipt: PluginInstallReceipt = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         pluginId: "tb-dev-signer-unpkg",
         version: "1.0.0",
         installSource: "local-dev",
         artifactSha256: null,
         signerKeyId: null,
+        admission: null,
         installedAt: new Date(0).toISOString(),
         files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
       };
@@ -610,12 +613,13 @@ describe("Phase 1 — plugin trust boundary", () => {
       const manifestPath = await writePluginAt(pluginDir, "tb-restart-dev-signer");
 
       const devReceipt: PluginInstallReceipt = {
-        schemaVersion: 2,
+        schemaVersion: 3,
         pluginId: "tb-restart-dev-signer",
         version: "1.0.0",
         installSource: "local-dev",
         artifactSha256: null,
         signerKeyId: null,
+        admission: null,
         installedAt: new Date(0).toISOString(),
         files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
       };

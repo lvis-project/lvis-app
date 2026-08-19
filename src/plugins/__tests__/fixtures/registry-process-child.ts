@@ -49,12 +49,13 @@ if (mode === "hold-lock") {
     if (!pluginId) throw new Error("plugin id is required");
     const { writeInstallReceipt } = await import("../../plugin-install-receipt.js");
     await writeInstallReceipt(registryPath, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       pluginId,
       version: "2.0.0",
       installSource: "local-dev",
       artifactSha256: null,
       signerKeyId: null,
+      admission: null,
       installedAt: "2026-07-22T00:00:00.000Z",
       files: [{ path: "plugin.json", sha256: "abc" }],
     });
