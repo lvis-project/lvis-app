@@ -38,6 +38,8 @@ import {
   decodeConfigChange,
   decodeHostEvent,
   decodePluginLifecycle,
+  encodeConfigChange,
+  SECRET_REDACTED_SENTINEL,
 } from "../config-subscription-child.js";
 import type { PluginManifest } from "../../types.js";
 
@@ -155,7 +157,12 @@ function subscriptionIdOf(requests: HostApiRequest[], path: HostApiPath): string
 }
 
 async function harness(
-  options: { config?: Record<string, unknown>; isActive?: () => boolean } = {},
+  options: {
+    config?: Record<string, unknown>;
+    isActive?: () => boolean;
+    /** Omitted deliberately by the cases that assert the unseeded refusal. */
+    appPreferences?: { keys: readonly string[]; values: Record<string, unknown> };
+  } = {},
 ): Promise<Harness> {
   const api = fakeHostApi();
   const notifications: HostApiNotification[] = [];
@@ -199,6 +206,7 @@ async function harness(
       installedPluginIds: [],
       config: options.config ?? { theme: "dark" },
       generationId: GENERATION,
+      ...(options.appPreferences ? { appPreferences: options.appPreferences } : {}),
     },
     channel,
     loadFactory,
@@ -842,5 +850,171 @@ describe("the config snapshot the child reads is re-pushed, not frozen at constr
 
     expect(hostApi.config.get("theme")).toBe("light");
     expect(hostApi.config.get("adhoc")).toBe(41);
+  });
+});
+
+describe("the secret sentinel has a wire form, and it is the only thing that reads as one", () => {
+  it("crosses as a flag beside the key and comes back as the symbol itself", () => {
+    // The whole defect in one line: a Symbol under `value` does not survive
+    // `JSON.stringify`, so the round trip is what has to be asserted — not the
+    // encoder's return value.
+    const onWire = JSON.parse(
+      JSON.stringify(encodeConfigChange("apiKey", SECRET_REDACTED_SENTINEL)),
+    ) as unknown;
+    expect(onWire).toEqual({ key: "apiKey", secretRedacted: true });
+    expect(decodeConfigChange(onWire).value).toBe(SECRET_REDACTED_SENTINEL);
+  });
+
+  it("keeps a cleared key and a changed secret apart across the same round trip", () => {
+    const clearedOnWire = JSON.parse(
+      JSON.stringify(encodeConfigChange("apiKey", undefined)),
+    ) as unknown;
+    expect(decodeConfigChange(clearedOnWire).value).toBeUndefined();
+    expect(decodeConfigChange(clearedOnWire).value).not.toBe(SECRET_REDACTED_SENTINEL);
+  });
+
+  it("cannot be forged by a cleartext value that happens to look like the flag", () => {
+    const onWire = JSON.parse(
+      JSON.stringify(encodeConfigChange("apiKey", { secretRedacted: true })),
+    ) as unknown;
+    expect(decodeConfigChange(onWire).value).toEqual({ secretRedacted: true });
+    expect(decodeConfigChange(onWire).value).not.toBe(SECRET_REDACTED_SENTINEL);
+  });
+
+  it("refuses a marker the two sides disagree about rather than reading it as a clear", () => {
+    for (const payload of [
+      { key: "apiKey", secretRedacted: false },
+      { key: "apiKey", secretRedacted: "yes" },
+      { key: "apiKey", secretRedacted: true, value: "leaked" },
+    ]) {
+      expect(() => decodeConfigChange(payload)).toThrow(/malformed secret marker/u);
+    }
+  });
+
+  it("refuses a value that would silently change shape on the wire", () => {
+    // The sentinel is one instance of a general hazard. A function or a second
+    // symbol vanishes exactly the same way, and the old code would have
+    // delivered every one of them as "cleared".
+    expect(() => encodeConfigChange("k", Symbol("other"))).toThrow(/cannot cross the boundary/u);
+    expect(() => encodeConfigChange("k", () => undefined)).toThrow(/cannot cross the boundary/u);
+    expect(() => encodeConfigChange("k", new Date("2020-01-01"))).toThrow(
+      /cannot cross the boundary/u,
+    );
+  });
+
+  it("reaches the plugin's callback as the sentinel, and leaves config.get alone", async () => {
+    const { hostApi, api } = await harness({ config: { apiKey: "stale-cleartext-copy" } });
+    const seen: unknown[] = [];
+    const readBack: unknown[] = [];
+    hostApi.config.onChange("apiKey", (value) => {
+      seen.push(value);
+      readBack.push(hostApi.config.get("apiKey"));
+    });
+    await flush();
+
+    api.emitConfigChange("apiKey", SECRET_REDACTED_SENTINEL);
+
+    expect(seen).toEqual([SECRET_REDACTED_SENTINEL]);
+    // A secret is stripped out of the cleartext record the host resolves, so
+    // the in-process `config.get` answers `undefined` for one. Storing the
+    // sentinel would hand the plugin a Symbol through a member that has never
+    // produced one.
+    expect(readBack).toEqual([undefined]);
+  });
+});
+
+describe("getAppPreference answers from a snapshot the host keeps current", () => {
+  it("reads the snapshot pushed at construction", async () => {
+    const { hostApi } = await harness({
+      appPreferences: {
+        keys: ["webView.preferredFlow"],
+        values: { "webView.preferredFlow": "in-app" },
+      },
+    });
+    expect(hostApi.getAppPreference!("webView.preferredFlow")).toBe("in-app");
+  });
+
+  it("moves when the host pushes a new snapshot", async () => {
+    // The member used to have no child half BECAUSE this push did not exist: a
+    // plugin reading the preference at call time would have answered with the
+    // construction value for the life of the process.
+    const { child, hostApi } = await harness({
+      appPreferences: {
+        keys: ["webView.preferredFlow"],
+        values: { "webView.preferredFlow": "in-app" },
+      },
+    });
+
+    expect(
+      child.deliver({
+        wire: 1,
+        pluginId: PLUGIN_ID,
+        generationId: GENERATION,
+        kind: "preference-snapshot",
+        keys: ["webView.preferredFlow"],
+        values: { "webView.preferredFlow": "system-browser" },
+      }),
+    ).toBe("delivered");
+
+    expect(hostApi.getAppPreference!("webView.preferredFlow")).toBe("system-browser");
+  });
+
+  it("clears a preference the host no longer resolves", async () => {
+    // `undefined` is not a JSON value, so an unset preference is a key in
+    // `keys` and absent from `values`. A push carrying only an object would
+    // leave the stale value in place.
+    const { child, hostApi } = await harness({
+      appPreferences: {
+        keys: ["webView.preferredFlow"],
+        values: { "webView.preferredFlow": "in-app" },
+      },
+    });
+
+    child.deliver({
+      wire: 1,
+      pluginId: PLUGIN_ID,
+      generationId: GENERATION,
+      kind: "preference-snapshot",
+      keys: ["webView.preferredFlow"],
+      values: {},
+    });
+
+    expect(hostApi.getAppPreference!("webView.preferredFlow")).toBeUndefined();
+  });
+
+  it("answers a key off the host allowlist as unset, exactly as the host reader does", async () => {
+    const { hostApi } = await harness({
+      appPreferences: {
+        keys: ["webView.preferredFlow"],
+        values: { "webView.preferredFlow": "in-app" },
+      },
+    });
+    expect(hostApi.getAppPreference!("llm.provider")).toBeUndefined();
+    expect((hostApi.getAppPreference as (key: unknown) => unknown)(42)).toBeUndefined();
+  });
+
+  it("throws rather than answering when the host published no snapshot at all", async () => {
+    // `getAppPreference` is OPTIONAL on `PluginHostApi`, so "this host has no
+    // preference reader" is a real state — and it is not the same as "this
+    // preference is unset". Answering `undefined` would merge the two into one
+    // reply the plugin cannot take apart.
+    const { hostApi } = await harness();
+    expect(() => hostApi.getAppPreference!("webView.preferredFlow")).toThrow(
+      /published no preference snapshot/u,
+    );
+  });
+
+  it("reports a push to a child that was never seeded, instead of dropping it silently", async () => {
+    const { child } = await harness();
+    expect(
+      child.deliver({
+        wire: 1,
+        pluginId: PLUGIN_ID,
+        generationId: GENERATION,
+        kind: "preference-snapshot",
+        keys: ["webView.preferredFlow"],
+        values: { "webView.preferredFlow": "in-app" },
+      }),
+    ).toBe("unknown-subscription");
   });
 });
