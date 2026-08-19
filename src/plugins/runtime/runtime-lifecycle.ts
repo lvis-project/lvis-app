@@ -39,7 +39,7 @@ import {
 import { createLogger } from "../../lib/logger.js";
 import { isOutOfProcessPlugin } from "../isolation/out-of-process-plugins.js";
 import { createOutOfProcessPluginFactory } from "../isolation/out-of-process-plugin.js";
-import { plog, PluginPhase } from "../lifecycle-log.js";
+import { logPluginLifecycle, PluginPhase } from "../lifecycle-log.js";
 import {
   hasExclusivePluginLifecycleMutation,
   isPluginInstallLockHeld,
@@ -156,7 +156,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
     }
     for (const plan of loadPlan) {
       const pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(plan.manifestPath))}>`;
-      plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
+      logPluginLifecycle("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
     }
     const preflight = await this.preflightBootLoadPlan(loadPlan);
     this.assertPluginIdentityNamespace(
@@ -274,7 +274,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
   ): Promise<void> {
     const { pluginId, runtimeRoot, incarnation } = resources;
     const reason = err instanceof Error ? err.message : String(err);
-    plog(
+    logPluginLifecycle(
       "error",
       { pluginId, phase: PluginPhase.LOAD_FAIL, err, reason: "load_crash" },
       `plugin load crashed: ${reason}`,
@@ -326,7 +326,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
         : (err as Error).message?.includes("schema validation") ? "manifest_schema"
         : (err as NodeJS.ErrnoException).code === "ENOENT" ? "manifest_missing"
         : "manifest_read";
-      plog("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason }, `manifest read failed: ${(err as Error).message}`);
+      logPluginLifecycle("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason }, `manifest read failed: ${(err as Error).message}`);
       if (plan.pluginIdHint) {
         this.markLoadRefused(plan.pluginIdHint, {
           summary: "Plugin manifest could not be loaded.",
@@ -351,7 +351,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       this.failedPluginIds.delete(pluginId);
       this.failedPluginStubs.delete(pluginId);
       this.loadFailureInfo.delete(pluginId);
-      plog(
+      logPluginLifecycle(
         "debug",
         { pluginId, phase: PluginPhase.LOAD_OK, reason: "inactive_pointer" },
         "plugin retained as inactive metadata without runtime admission",
@@ -419,7 +419,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       entryPath = this.resolveEntryPathForPlugin(runtimeRoot, manifest.entry);
     } catch (err) {
       const reason = (err as Error).message;
-      plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "entry_path" }, "entry path rejected");
+      logPluginLifecycle("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "entry_path" }, "entry path rejected");
       this.auditLog?.("error", "plugin_entry_path_rejected", {
         pluginId: manifest.id,
         entry: manifest.entry,
@@ -438,7 +438,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
         manifest,
       );
     } catch (err) {
-      plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "import" }, "import failed");
+      logPluginLifecycle("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "import" }, "import failed");
       this.auditLog?.("error", "plugin_import_failed", {
         pluginId: manifest.id,
         reason: (err as Error).message,
@@ -448,7 +448,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       return;
     }
     if (!createPlugin) {
-      plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin");
+      logPluginLifecycle("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin");
       this.markFailed(manifest.id);
       await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
       return;
@@ -494,12 +494,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       });
       this.markFailed(manifest.id);
       await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
-      plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "factory" }, "plugin factory failed");
+      logPluginLifecycle("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "factory" }, "plugin factory failed");
       return;
     }
 
     const methods = buildMethodMap(manifest, instance, (toolName) =>
-      plog("warn", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler"),
+      logPluginLifecycle("warn", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler"),
     );
     for (const toolName of methods.keys()) {
       if (this.methodMap.has(toolName)) {
@@ -514,7 +514,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
         resources.incarnation = undefined;
         resources.runtimeRoot = undefined;
         const reason = `Duplicate plugin method registered: ${toolName}`;
-        plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, reason: "duplicate_tool_name" }, reason);
+        logPluginLifecycle("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, reason: "duplicate_tool_name" }, reason);
         this.auditLog?.("error", "plugin_duplicate_tool_name", { pluginId: manifest.id, toolName });
         this.markLoadRefused(manifest.id, {
           summary: "Plugin declares a tool name another plugin already owns.",
@@ -526,7 +526,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
     }
     for (const [toolName, handler] of methods) {
       this.methodMap.set(toolName, { pluginId: manifest.id, handler });
-      plog("debug", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_OK, toolName }, "tool registered");
+      logPluginLifecycle("debug", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_OK, toolName }, "tool registered");
     }
 
     commit();
@@ -547,7 +547,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
     this.markPluginUiRevision(manifest.id);
     this.failedPluginIds.delete(manifest.id);
     this.disabledPluginIds.delete(manifest.id);
-    plog("debug", { pluginId: manifest.id, phase: PluginPhase.LOAD_OK }, "plugin loaded");
+    logPluginLifecycle("debug", { pluginId: manifest.id, phase: PluginPhase.LOAD_OK }, "plugin loaded");
     // NOTE: inactive-plugin model visibility is not a runtime load concern.
     // Boot sync still registers loaded tools for host/UI/auth execution;
     // ConversationLoop scope suppresses model-visible tools for inactive
@@ -700,9 +700,9 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       );
       this.resolveCapabilityBlockedRetry(pluginId);
       if (elapsed > SLOW_THRESHOLD_MS) {
-        plog("warn", { pluginId, phase: PluginPhase.START_SLOW, elapsedMs: elapsed }, "plugin start slow");
+        logPluginLifecycle("warn", { pluginId, phase: PluginPhase.START_SLOW, elapsedMs: elapsed }, "plugin start slow");
       } else {
-        plog("debug", { pluginId, phase: PluginPhase.START_OK, elapsedMs: elapsed }, "plugin start ok");
+        logPluginLifecycle("debug", { pluginId, phase: PluginPhase.START_OK, elapsedMs: elapsed }, "plugin start ok");
       }
       return undefined;
     } catch (error) {
@@ -722,7 +722,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
   ): Promise<void> {
     if (this.plugins.get(pluginId) !== plugin) return;
     this.rejectCapabilityBlockedRetry(pluginId, new Error(reason));
-    plog("error", { pluginId, phase: PluginPhase.START_FAIL, reason }, "plugin start failed");
+    logPluginLifecycle("error", { pluginId, phase: PluginPhase.START_FAIL, reason }, "plugin start failed");
     await this.failClosedLoadedPlugin(pluginId, plugin, "start failure cleanup");
     if (plugin.hostEffects?.isPreparing()) plugin.hostEffects.discard();
     await this.removeUnpublishedRuntimeRoot(pluginId, plugin.pluginRoot);
@@ -1010,10 +1010,10 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
     opts: { skipPreparation?: boolean; throwOnFailure?: boolean } = {},
   ): Promise<RestartPluginResult> {
     const generationLifecycle = this.requireCapabilityCommitLifecycle("plugin restart");
-    plog("info", { pluginId, phase: PluginPhase.RESTART_REQUEST }, "restart requested");
+    logPluginLifecycle("info", { pluginId, phase: PluginPhase.RESTART_REQUEST }, "restart requested");
     const plugin = this.plugins.get(pluginId);
     if (!plugin) {
-      plog("warn", { pluginId, phase: PluginPhase.RESTART_REQUEST, reason: "not_loaded" }, "restart no-op — plugin not loaded");
+      logPluginLifecycle("warn", { pluginId, phase: PluginPhase.RESTART_REQUEST, reason: "not_loaded" }, "restart no-op — plugin not loaded");
       return undefined;
     }
     const isCurrent = () =>
@@ -1054,7 +1054,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
         snapshot?.manifest ??
         (await this.readManifest(targetPlan?.manifestPath ?? resolve(pluginRoot, "plugin.json")));
     } catch (err) {
-      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "manifest_read" }, "manifest read failed during restart");
+      logPluginLifecycle("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "manifest_read" }, "manifest read failed during restart");
       return "failed";
     }
     this.assertPluginManifestIdentity(pluginId, manifest.id);
@@ -1103,7 +1103,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
             pluginRoot: pluginRootForPreparation,
           });
         } catch (err) {
-          plog("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
+          logPluginLifecycle("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
           return "failed";
         }
         if (result && typeof (result as Promise<PluginStartPreparationOutcome>).then === "function") {
@@ -1127,7 +1127,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
           if (outcome.status === "cancelled") return "failed";
           preparationResult = outcome.result;
         } catch (err) {
-          plog("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
+          logPluginLifecycle("error", { pluginId, phase: PluginPhase.START_FAIL, err, reason: "restart_dependency_prepare" }, "restart dependency preparation failed");
           return "failed";
         }
       }
@@ -1153,7 +1153,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       entryPath = this.resolveEntryPathForPlugin(runtimeRoot, manifest.entry);
     } catch (error) {
       await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
-      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err: error, reason: "entry_path" }, "entry path rejected during restart");
+      logPluginLifecycle("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err: error, reason: "entry_path" }, "entry path rejected during restart");
       return "failed";
     }
     const resolvedEntryPath = resolveRealEntryPath(entryPath);
@@ -1166,10 +1166,10 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
         manifest,
         true,
       );
-      plog("debug", { pluginId, phase: PluginPhase.RESTART_RELOAD_OK }, "module re-imported");
+      logPluginLifecycle("debug", { pluginId, phase: PluginPhase.RESTART_RELOAD_OK }, "module re-imported");
     } catch (err) {
       await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
-      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err }, "module re-import failed");
+      logPluginLifecycle("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err }, "module re-import failed");
       return "failed";
     }
 
@@ -1180,7 +1180,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
 
     if (!createPlugin) {
       await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
-      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin after restart");
+      logPluginLifecycle("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin after restart");
       return "failed";
     }
 
@@ -1237,7 +1237,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
         drainHostApiOperations: drainReplacementHostApiOperations,
       });
       await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
-      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "createPlugin_failed" }, "createPlugin failed during restart");
+      logPluginLifecycle("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err, reason: "createPlugin_failed" }, "createPlugin failed during restart");
       if (opts.throwOnFailure) throw err;
       return "failed";
     }
@@ -1255,7 +1255,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
     }
 
     const methods = buildMethodMap(manifest, instance, (toolName) =>
-      plog("warn", { pluginId, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler after restart"),
+      logPluginLifecycle("warn", { pluginId, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler after restart"),
     );
 
     try {
@@ -1268,12 +1268,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
           manifest.startupTimeoutMs,
         );
       }
-      plog("debug", { pluginId, phase: PluginPhase.RESTART_START_OK }, "restart complete");
+      logPluginLifecycle("debug", { pluginId, phase: PluginPhase.RESTART_START_OK }, "restart complete");
     } catch (err) {
       if (err instanceof PluginStartupTimeoutError) {
         this.quarantinePluginLifecycle(pluginId, err.message);
       }
-      plog("error", { pluginId, phase: PluginPhase.RESTART_START_FAIL, err }, "start after restart failed");
+      logPluginLifecycle("error", { pluginId, phase: PluginPhase.RESTART_START_FAIL, err }, "start after restart failed");
       deactivateReplacementHostApi();
       hostEffects.discard();
       await this.stopAfterStartFailure(pluginId, instance, replacementLifecycleHookScope);
@@ -1336,7 +1336,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
         drainHostApiOperations: drainReplacementHostApiOperations,
       });
       await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
-      plog("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err: error, reason: "publication" }, "runtime generation publication failed");
+      logPluginLifecycle("error", { pluginId, phase: PluginPhase.RESTART_RELOAD_FAIL, err: error, reason: "publication" }, "runtime generation publication failed");
       return "failed";
     }
     this.onEnable?.(pluginId);

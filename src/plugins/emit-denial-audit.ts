@@ -16,7 +16,7 @@
  */
 import type { AuditEntry } from "../audit/audit-logger.js";
 import { requiredCapabilityForEmit } from "./capabilities.js";
-import { plog, PluginPhase } from "./lifecycle-log.js";
+import { logPluginLifecycle, PluginPhase } from "./lifecycle-log.js";
 
 /**
  * Which production emit lane denied. Recorded as the audit row's `sessionId`,
@@ -51,7 +51,7 @@ export function auditPluginEmitDenial(params: {
       input: `[plugin:${pluginId}] plugin_emit_capability_denied eventType=${eventType} required=${requiredCapability} declaredEmittedEvents=${declaredEmittedEvents.join("|")}`,
     });
   } catch { /* audit must not break host */ }
-  plog(
+  logPluginLifecycle(
     "warn",
     {
       pluginId,

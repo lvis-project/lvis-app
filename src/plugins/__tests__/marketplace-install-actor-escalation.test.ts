@@ -20,7 +20,7 @@ import { tmpdir } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import {
-  MockMarketplaceFetcher,
+  LocalCatalogMarketplaceFetcher,
   PluginInstalledStateUnreadableError,
   PluginMarketplaceService,
   PluginUpdateRecoveryRequiredError,
@@ -147,7 +147,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       registryPath: paths.registryPath,
       pluginsRoot: paths.pluginsRoot,
     });
-    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
     // The AuditLogger interface accepts a structural subset, the test
     // fixture mock matches it via the `log({ ... })` shape only.
     return new TestPluginMarketplaceService(
@@ -394,7 +394,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       registryPath: paths.registryPath,
       pluginsRoot: paths.pluginsRoot,
     });
-    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
     vi.spyOn(fetcher, "listPlugins").mockRejectedValue(new Error("network down"));
     const service = new TestPluginMarketplaceService(
       paths,
@@ -420,7 +420,7 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
       registryPath: paths.registryPath,
       pluginsRoot: paths.pluginsRoot,
     });
-    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
     const listSpy = vi.spyOn(fetcher, "listPlugins");
     const detailSpy = vi.spyOn(fetcher, "getPluginDetail");
     const service = new TestPluginMarketplaceService(

@@ -65,7 +65,7 @@ import type { RoutinesStore } from "../../../main/routines-store.js";
 import { emitEvent, onEvent } from "../../types.js";
 import { t } from "../../../i18n/index.js";
 import { createLogger } from "../../../lib/logger.js";
-import { plog, PluginPhase } from "../../../plugins/lifecycle-log.js";
+import { logPluginLifecycle, PluginPhase } from "../../../plugins/lifecycle-log.js";
 import { incrementHostSecretCounter, sanitizeKeyPrefix } from "../../../telemetry/host-secret-counters.js";
 import { canonicalJSON } from "../../../plugins/whitelist/canonical-json.js";
 import { runSecretGate } from "../../../plugins/whitelist/secret-gate.js";
@@ -531,7 +531,7 @@ export function createHostApiFactory(
         },
       },
       emitEvent: (type, data) => {
-        plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
+        logPluginLifecycle("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
         const declaredEmittedEvents = getDeclaredEmittedEvents(manifest);
         if (!canEmitEvent(type, declaredEmittedEvents)) {
           auditPluginEmitDenial({
@@ -544,7 +544,7 @@ export function createHostApiFactory(
           throw new Error(`Plugin '${pluginId}' is not allowed to emit undeclared event '${type}'`);
         }
         pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
-        plog("debug", { pluginId, phase: PluginPhase.EVENT_EMIT, eventType: type }, "event emitted");
+        logPluginLifecycle("debug", { pluginId, phase: PluginPhase.EVENT_EMIT, eventType: type }, "event emitted");
         emitEvent(type, { ...((data as Record<string, unknown>) ?? {}), pluginId });
       },
       onEvent: (type, handler) => {
@@ -562,7 +562,7 @@ export function createHostApiFactory(
         // and into the process.
         const guardedHandler = hostEffects ? hostEffects.wrapListener(dispatch) : dispatch;
         const unsubscribe = onEvent(type, (data) => { guardedHandler(data); });
-        plog("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
+        logPluginLifecycle("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
         return registerOwnedDisposer(unsubscribe);
       },
       getInstalledPluginIds: () => {

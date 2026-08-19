@@ -208,24 +208,24 @@ export function getIsPackaged(): boolean {
 }
 
 /**
- * Mock fetcher gate — packaged builds must never instantiate
- * `MockMarketplaceFetcher`, which serves catalog from a user-writable
- * `plugins/marketplace.json`. In production the only sanctioned source is
- * `CloudMarketplaceFetcher` talking to the marketplace server (envelope
- * signatures are the trust anchor). Security review showed that allowing
- * the mock in packaged builds would let any user
+ * Local-catalog fetcher gate — packaged builds must never instantiate
+ * `LocalCatalogMarketplaceFetcher`, which serves the catalog from a
+ * user-writable `plugins/marketplace.json`. In production the only sanctioned
+ * source is `CloudMarketplaceFetcher` talking to the marketplace server
+ * (envelope signatures are the trust anchor). A user-writable catalog is not a
+ * trust anchor: a packaged build reading one would let any local user
  * advertise their own plugin as `installPolicy:"admin"` and get it
  * auto-installed by the managed bootstrap.
  *
  * Throws if called in a packaged build. The call site is the
- * `MockMarketplaceFetcher` constructor; the throw is preferred over a quiet
- * return so test fixtures and dev workflows fail loudly when accidentally
- * shipped packaged.
+ * `LocalCatalogMarketplaceFetcher` constructor; the throw is preferred over a
+ * quiet return so dev workflows fail loudly when accidentally shipped
+ * packaged.
  */
-export function assertMockMarketplaceAllowed(packaged: boolean = isPackagedCached): void {
+export function assertLocalCatalogFetcherAllowed(packaged: boolean = isPackagedCached): void {
   if (packaged) {
     throw new Error(
-      "[security] MockMarketplaceFetcher is dev-only — packaged builds must use CloudMarketplaceFetcher",
+      "[security] LocalCatalogMarketplaceFetcher is dev-only — packaged builds must use CloudMarketplaceFetcher",
     );
   }
 }
