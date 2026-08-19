@@ -19,7 +19,7 @@
 import { afterEach, describe, it, expect } from "vitest";
 import { mkdirSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { canonicalizePathForMatch } from "../sensitive-paths.js";
+import { canonicalizePathForMatch, foldCanonicalPathSeparators } from "../sensitive-paths.js";
 import { PermissionTestResources } from "./test-resources.js";
 
 const resources = new PermissionTestResources();
@@ -91,5 +91,41 @@ describe("canonicalizePathForMatch — security MAJOR-3 bypass vectors", () => {
     const once = canonicalizePathForMatch(raw);
     const twice = canonicalizePathForMatch(once);
     expect(twice).toBe(once);
+  });
+});
+
+/**
+ * Windows shapes are pinned against the pure fold rather than
+ * `canonicalizePathForMatch`, because `resolve`/`realpath` follow the HOST's
+ * rules: on the macOS and Linux machines this suite runs on, a
+ * `\\server\share\...` string is just a filename containing backslashes, so
+ * the win32 branch would never execute.
+ */
+describe("foldCanonicalPathSeparators — win32 shapes", () => {
+  it("keeps the leading pair of a UNC path, which names the share", () => {
+    // What `realpathSync.native` hands back for a mapped network drive (Z:\proj)
+    // as well as for a directly picked \\server\share\proj.
+    expect(foldCanonicalPathSeparators("\\\\server\\share\\proj", "win32"))
+      .toBe("//server/share/proj");
+  });
+
+  it("keeps the device-namespace prefix", () => {
+    // The drive letter stays cased here because the lowercase rule is anchored
+    // at the start of the string and this shape puts `//?/` there. Matching is
+    // unaffected: `caseFoldForMatch` folds the whole path on win32.
+    expect(foldCanonicalPathSeparators("\\\\?\\C:\\proj", "win32")).toBe("//?/C:/proj");
+  });
+
+  it("still collapses duplicate separators inside the path", () => {
+    expect(foldCanonicalPathSeparators("\\\\server\\share\\\\a\\\\b", "win32"))
+      .toBe("//server/share/a/b");
+  });
+
+  it("lowercases only the drive letter", () => {
+    expect(foldCanonicalPathSeparators("C:\\Work\\Beta", "win32")).toBe("c:/Work/Beta");
+  });
+
+  it("does not invent a leading pair off win32", () => {
+    expect(foldCanonicalPathSeparators("//server/share/proj", "linux")).toBe("/server/share/proj");
   });
 });

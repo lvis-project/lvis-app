@@ -64,11 +64,13 @@ import { useViewHistoryShortcuts } from "./hooks/use-view-history-shortcuts.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
 import {
   defaultProjectFromProjects,
+  findWorkspaceProject,
   projectIdentityFromPayload,
   reconcileActiveProject,
   workspaceRootsToProjects,
 } from "../../shared/project-identity.js";
 import { formatIpcError } from "./format-ipc-error.js";
+import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
 
 // ─── App ────────────────────────────────────────────
 
@@ -382,10 +384,18 @@ export function App() {
     }
   }, [t]);
 
-  const handleProjectRemoveError = useCallback((error?: string, message?: string) => {
+  const handleProjectError = useCallback<ProjectErrorReporter>((operation, error, message) => {
     statusPushToast({
       severity: "error",
-      message: formatIpcError(error, message, { fallbackContext: t("sidebar.projectMenuRemove") }),
+      message: formatIpcError(error, message, {
+        // Only reached for a code the shared IPC table does not know — every
+        // code these two operations actually return is mapped. The add label is
+        // the file-browser one because the menu entry carries a trailing
+        // ellipsis that reads badly in `<context>: <message>`.
+        fallbackContext: operation === "add"
+          ? t("chatPreviewRail.addProjectRoot")
+          : t("sidebar.projectMenuRemove"),
+      }),
       ttlMs: 10_000,
     });
   }, [statusPushToast, t]);
@@ -394,9 +404,21 @@ export function App() {
     void refreshWorkspaceProjects();
   }, [refreshWorkspaceProjects]);
 
+  /**
+   * Resolve an EXPLICITLY requested project against the known list.
+   *
+   * A request that is not in the list is passed through unchanged rather than
+   * replaced by the default. `workspaceProjects` is a render-time snapshot, so
+   * the folder the user just added is reliably absent from it — the selector's
+   * refresh has not re-rendered this callback yet — and substituting the
+   * default there silently discarded the very choice the user made. The
+   * authority for "may this root be used" is main's
+   * `resolveAuthorizedWorkspaceProject`, which answers `project-not-allowed`;
+   * a renderer-side guess cannot add safety, only wrong answers.
+   */
   const resolveKnownProject = useCallback((project: ProjectIdentity | undefined): ProjectIdentity | undefined => {
     if (!project) return undefined;
-    return reconcileActiveProject(project, workspaceProjects);
+    return findWorkspaceProject(workspaceProjects, project) ?? project;
   }, [workspaceProjects]);
 
   useEffect(() => {
@@ -1000,7 +1022,7 @@ export function App() {
         onNewChat={onNewChat}
         onNewChatForProject={onNewChatForProject}
         onRefreshProjects={refreshWorkspaceProjects}
-        onProjectRemoveError={handleProjectRemoveError}
+        onProjectError={handleProjectError}
         workspaceProjects={workspaceProjects}
         activeProject={activeProject ?? defaultWorkspaceProject}
         onOpenMarketplace={onOpenMarketplace}
@@ -1092,6 +1114,7 @@ export function App() {
             workspaceProjects={workspaceProjects}
             onNewChatForProject={onNewChatForProject}
             onRefreshProjects={refreshWorkspaceProjects}
+            onProjectError={handleProjectError}
             onRunMcpPrompt={handleRunMcpPrompt}
             refreshStarred={refreshStarred}
             onActivateHome={handleActivateHome}
