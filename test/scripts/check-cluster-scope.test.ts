@@ -277,26 +277,38 @@ describe("cluster scope API evaluation", () => {
       }),
     ).toThrow("pull-request-pages-saturated");
 
-    // A page whose entries are NOT descending is accepted. `updated_at` is a
-    // mutable sort key, so a pull touched while the scan paginates moves and
-    // an item can arrive out of sequence. Refusing that made an ordinary merge
-    // landing mid-scan fail CI, and it bought nothing: a pull whose
-    // `updated_at` rises above the prefix a pass already read is missed by
-    // that pass whatever it asserts. The repeated scan is what closes that,
-    // and it is pinned below. This case used to expect
+    // A page whose entries are NOT descending is accepted, and BOTH of them
+    // reach evaluation — which is what `count: 2` says, and is why this
+    // asserts the returned verdict rather than the absence of an error
+    // string. `updated_at` is a mutable sort key, so a pull touched while the
+    // scan paginates moves and an item can arrive out of sequence. Refusing
+    // that made an ordinary merge landing mid-scan fail CI, and it bought
+    // nothing: a pull whose `updated_at` rises above the prefix a pass already
+    // read is missed by that pass whatever it asserts. The repeated scan is
+    // what covers that, pinned in "rolling-window revalidation under
+    // concurrent merge". This case used to expect
     // `pull-request-order-invalid`.
-    expect(() =>
+    //
+    // The break here is WITHIN one page; "still finds every in-window pull
+    // when a page arrives out of order" covers the break at a page boundary.
+    // Page 2 is empty, so the scan terminates on the real stop condition
+    // instead of paginating to the saturation limit the case above already
+    // covers.
+    const sensitive = [{ status: "modified", filename: "src/boot/start.ts" }];
+    expect(
       evaluateSensitiveRollingWindow({
         repo: REPO,
         since: "2026-07-01T00:00:00Z",
         threshold: 3,
         pageSize: 2,
-        requestPage: () => [
-          pull(1, "2026-07-12T03:00:00Z"),
-          pull(2, "2026-07-12T04:00:00Z"),
-        ],
+        requestPage: rollingWindowRequestPage(
+          {
+            1: [pull(1, "2026-07-12T03:00:00Z"), pull(2, "2026-07-12T04:00:00Z")],
+          },
+          { 1: sensitive, 2: sensitive },
+        ),
       }),
-    ).not.toThrow("pull-request-order-invalid");
+    ).toEqual({ count: 2, hit: false });
   });
 
   it("fails closed for incomplete, overflowed, and saturated commit pagination", () => {
@@ -788,6 +800,21 @@ describe("rolling-window revalidation under concurrent merge", () => {
         since: SINCE,
         threshold: 99,
         maxWindowPasses: 0,
+        requestPage: () => [],
+      }),
+    ).toThrow("window-pass-limit-invalid");
+
+    // One is rejected too, and this is the case that used to slip through: a
+    // budget of a single scan is unsatisfiable, because settling is only
+    // observable by comparing a scan against the one after it. A plain
+    // positive-integer check accepted it and then spent a second scan anyway,
+    // so the parameter meant "number of scans" only from two upward.
+    expect(() =>
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: SINCE,
+        threshold: 99,
+        maxWindowPasses: 1,
         requestPage: () => [],
       }),
     ).toThrow("window-pass-limit-invalid");
