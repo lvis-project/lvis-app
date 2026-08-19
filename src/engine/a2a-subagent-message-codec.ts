@@ -12,6 +12,7 @@ import {
   GUIDE_MAX_ENTRIES,
 } from "./turn/guidance-limits.js";
 import { t } from "../i18n/index.js";
+import { hasControlChars } from "../shared/display-safe-text.js";
 
 const MESSAGE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/;
 const MESSAGE_KEYS = new Set([
@@ -61,7 +62,7 @@ function isSafeStructuralId(value: unknown): value is string {
   return typeof value === "string"
     && value.length > 0
     && value.length <= 256
-    && !/[\u0000-\u001f\u007f]/.test(value)
+    && !hasControlChars(value)
     && maskSensitiveData(value).detections.length === 0;
 }
 

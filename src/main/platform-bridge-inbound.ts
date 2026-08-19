@@ -17,6 +17,7 @@ import {
 } from "./conversation-command-port.js";
 import type { TailnetControllerReceiptStore } from "../api/tailnet-controller-receipt-store.js";
 import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-origin.js";
+import { hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
 
 const SHA256_HEX = /^[a-f0-9]{64}$/;
 /** Mirrors the receipt store's own owner grammar so both agree on validity. */
@@ -30,7 +31,6 @@ const DEFAULT_MAX_TRACKED_INBOUND_AUTHORIZED_PAIRS = 128;
 const MAX_IDENTIFIER_CHARS = 256;
 // Tabs and line breaks are normal message text. The rest of C0 controls and
 // DEL make ambiguous provider identifiers, logs, and command prefixes.
-const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 
 /** Raw request material passed to the provider-owned verifier only. */
 export interface PlatformBridgeRawWebhookRequest {
@@ -547,7 +547,7 @@ function isOpaqueIdentifier(value: unknown): value is string {
     && value.length > 0
     && value.length <= MAX_IDENTIFIER_CHARS
     && value.trim().length > 0
-    && !UNSAFE_CONTROL_CHARACTERS.test(value);
+    && !hasNonWhitespaceControlChars(value);
 }
 
 function isSafeText(value: unknown, maxTextChars: number): value is string {
@@ -555,7 +555,7 @@ function isSafeText(value: unknown, maxTextChars: number): value is string {
     && value.length > 0
     && value.length <= maxTextChars
     && value.trim().length > 0
-    && !UNSAFE_CONTROL_CHARACTERS.test(value);
+    && !hasNonWhitespaceControlChars(value);
 }
 
 function receiptKeyDigest(
