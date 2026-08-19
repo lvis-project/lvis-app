@@ -22,6 +22,7 @@ import { isLLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import { isMissingStagedEnvelopeErrorMessage } from "../../../shared/staged-origins.js";
 import type { LvisApi } from "../types.js";
 import { DEFAULT_TOAST_TTL_MS } from "../constants.js";
+import { resetSuggestedReplies } from "./use-suggested-replies.js";
 
 function isMissingStagedEnvelopeIpcError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -782,6 +783,9 @@ export function useChatState(api: LvisApi) {
   // ── Intent methods (replace raw setEntries) ──
   const seedRoutineEntries = useCallback((seeded: ChatEntry[]) => {
     finalAssistantRoundClosedRef.current = false;
+    // Same class as applyLoadedSession: the transcript on screen is replaced,
+    // so the previous conversation's suggestions no longer follow from it.
+    resetSuggestedReplies();
     setEntries(seeded);
   }, []);
 
@@ -791,6 +795,12 @@ export function useChatState(api: LvisApi) {
     thoughtRef.current = "";
     activeStreamIdRef.current = null;
     finalAssistantRoundClosedRef.current = false;
+    // The prior conversation's suggested replies are stale for the same reason
+    // its compact indicator is: they describe a turn the user has left behind.
+    // They are also load-bearing for layout — a leftover snapshot keeps the
+    // brand-new, empty conversation reading as "suggestions on screen", which
+    // holds the composer docked at the bottom instead of centering it.
+    resetSuggestedReplies();
     // New chat: any prior session's in-flight compact indicator is stale.
     setIsCompacting(false);
     setCompactTriggerSource(null);
@@ -842,6 +852,9 @@ export function useChatState(api: LvisApi) {
     activeStreamIdRef.current = null;
     finalAssistantRoundClosedRef.current = false;
     setIsCompacting(false);
+    // The loaded session did not produce the pending suggestions; whatever the
+    // user was reading before is gone from the transcript.
+    resetSuggestedReplies();
     setEntries(loaded);
   }, []);
 
@@ -860,6 +873,9 @@ export function useChatState(api: LvisApi) {
     activeStreamIdRef.current = null;
     finalAssistantRoundClosedRef.current = false;
     setIsCompacting(false);
+    // The rewind drops the assistant turn the suggestions were generated from,
+    // so they no longer describe any reply the user can see.
+    resetSuggestedReplies();
     setEntries((p) => p.slice(0, entryIndex + 1));
   }, []);
 
