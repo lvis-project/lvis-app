@@ -70,6 +70,18 @@ export interface HostSubscription {
   readonly path: HostApiPath;
   /** Undo the host-side registration. Runs exactly once. */
   readonly teardown: (reason: SubscriptionCloseReason) => void;
+  /**
+   * Whether the CHILD holds a matching registration a host-side revocation has
+   * to reach.
+   *
+   * True for the registrations a member handed the plugin something for — a
+   * subscription's handler, a worker handle, a key lease. False for an abort
+   * channel: the id is the child's, but what is registered here is the host's
+   * own `AbortController`, and telling the child that the controller behind a
+   * settled call was disposed would be a message about host bookkeeping it has
+   * no entry for.
+   */
+  readonly notifiesChild: boolean;
 }
 
 /**
@@ -87,7 +99,12 @@ export interface SubscriptionScope {
   /**
    * End one registration from the host side. A handler calls this when the work
    * it was tracking is over — the settled call behind an abort channel, the
-   * exited worker behind a handle.
+   * exited worker behind a handle, a lease the host is taking back.
+   *
+   * Closes as `revoked`, which is the reason that reaches the child: a host
+   * decision is the only one of the three the child cannot already know about.
+   * That is what makes a lease the host drops stop being spendable in the
+   * child, instead of a comment claiming it does.
    */
   release(subscriptionId: string): boolean;
   /**
@@ -397,6 +414,15 @@ export class HostApiDispatcher {
       return;
     }
     if (notification.kind === "abort") {
+      // Only an abort channel may be closed this way. The two registration
+      // kinds share one ledger, so without this an `abort` naming a
+      // subscription id would cancel a worker handle or a key lease through the
+      // cancellation mechanism — and, now that a host-side close is a message,
+      // would bounce a `subscription-closed` back at the child that asked for
+      // it. An id that names no abort channel is left alone.
+      if (this.subscriptions.get(notification.subscriptionId)?.notifiesChild !== false) {
+        return;
+      }
       this.subscriptions.close(notification.subscriptionId, "revoked");
     }
   }
@@ -496,21 +522,53 @@ export class HostApiDispatcher {
       pluginId: this.options.pluginId,
       generationId: this.options.generationId,
     } as const;
-    const release = (subscription: HostSubscription, reason: SubscriptionCloseReason) => {
+    /**
+     * The one place a host-side close becomes a message to the child.
+     *
+     * `subscription-closed` was a notification the child could RECEIVE and
+     * nothing could SEND, which made the child stubs that act on it — the key
+     * lease dropping its copy, a handle letting go of its listeners — controls
+     * that only looked like controls. It belongs here rather than in the six
+     * lifetime-bearing handlers because this is where the envelope already is,
+     * and six senders would be six chances to send the wrong reason.
+     *
+     * Exactly one reason crosses. `disposed` came FROM the child, so echoing it
+     * is a ping-pong; `peer-gone` means the pipe is already closed, so sending
+     * is a write on it. `revoked` is the host's own decision and is the only
+     * one the child cannot otherwise learn.
+     */
+    const release = (
+      subscription: HostSubscription,
+      reason: SubscriptionCloseReason,
+      subscriptionId: string,
+    ) => {
       subscription.teardown(reason);
+      if (reason !== "revoked" || !subscription.notifiesChild) return;
+      this.options.notifications.deliver({
+        ...envelope,
+        kind: "subscription-closed",
+        subscriptionId,
+        reason,
+      });
     };
     return {
       adopt: (subscriptionId, teardown) => {
-        this.subscriptions.adopt(subscriptionId, { path, teardown }, release);
+        this.subscriptions.adopt(
+          subscriptionId,
+          { path, teardown, notifiesChild: true },
+          release,
+        );
       },
-      open: (teardown) => this.subscriptions.open({ path, teardown }, release),
-      release: (subscriptionId) => this.subscriptions.close(subscriptionId, "disposed"),
+      open: (teardown) =>
+        this.subscriptions.open({ path, teardown, notifiesChild: true }, release),
+      release: (subscriptionId) => this.subscriptions.close(subscriptionId, "revoked"),
       abortChannel: (subscriptionId) => {
         const controller = new AbortController();
         this.subscriptions.adopt(
           subscriptionId,
           {
             path,
+            notifiesChild: false,
             // Aborting on EVERY reason is deliberate. `revoked` is the child
             // asking for it; `peer-gone` is the child dying, and work started
             // for a dead child has no one to return to; `disposed` is the call

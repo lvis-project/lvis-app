@@ -17,8 +17,9 @@
 import { safeStorage } from "electron";
 import { realpathSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, sep } from "node:path";
+import { dirname } from "node:path";
 import {
+  isPathWithin,
   resolvePluginStoragePath,
   type PluginStorageRejectionLog,
 } from "./plugin-storage-containment.js";
@@ -140,7 +141,7 @@ export function createPluginStorage(
     for (let depth = 0; depth < 4096; depth++) {
       try {
         const real = await realpath(probe);
-        if (real !== canonicalRoot && !real.startsWith(canonicalRoot + sep)) {
+        if (!isPathWithin(canonicalRoot, real)) {
           log?.(`storage: rejected symlink escape`, { target, probe, real });
           throw new PluginStorageError("symlink escapes plugin storage root", pluginId, target);
         }

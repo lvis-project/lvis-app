@@ -34,6 +34,23 @@ import { PluginStorageError } from "./public-contract.js";
 export type PluginStorageRejectionLog = (message: string, meta?: unknown) => void;
 
 /**
+ * Whether `target` is `root` or lies beneath it.
+ *
+ * Both are expected already ABSOLUTE and lexically normalised; this asks only
+ * the containment question and resolves nothing, because the two callers
+ * normalise differently — one canonicalises with `realpath` first, the other
+ * cannot because the path need not exist yet.
+ *
+ * The `+ sep` is the whole point and is why this is shared rather than written
+ * again at each site: a bare `startsWith(root)` accepts `/data-evil` for a root
+ * of `/data`, and this repository already carries several hand-written copies of
+ * the same three-line predicate. Adding another would make it several plus one.
+ */
+export function isPathWithin(root: string, target: string): boolean {
+  return target === root || target.startsWith(root + sep);
+}
+
+/**
  * Join `segments` under `storageRoot` and refuse anything that leaves it.
  *
  * Lexical only, and callers that go on to touch the disk must follow it with
@@ -60,7 +77,7 @@ export function resolvePluginStoragePath(
     throw new PluginStorageError("absolute paths are not allowed", pluginId, rel);
   }
   const target = resolve(storageRoot, rel);
-  if (target !== storageRoot && !target.startsWith(storageRoot + sep)) {
+  if (!isPathWithin(storageRoot, target)) {
     log?.(`storage: rejected escape attempt`, { rel, resolved: target });
     throw new PluginStorageError("path escapes plugin storage root", pluginId, rel);
   }
