@@ -306,7 +306,13 @@ describe("installer smoke and packaging discipline", () => {
     );
     expect(clusterScope).toContain("previous_filename");
     expect(clusterScope).toContain("github-previous-filename-required");
-    expect(clusterScope).toContain("pull-request-page-duplicate");
+    // Inverted deliberately, in the file whose job is keeping this gate
+    // advisory. A repeated pull is the documented consequence of paging a
+    // MUTABLE sort key while the repo is being merged into, not corruption,
+    // and hard-failing on it turned an ordinary merge landing mid-scan into
+    // a blocked PR. The scan skips the repeat instead; that behaviour is
+    // pinned in test/scripts/check-cluster-scope.test.ts.
+    expect(clusterScope).not.toContain("pull-request-page-duplicate");
     expect(clusterScope).toContain("pull-request-window-changed");
     expect(clusterScope).toContain("pull-request-files-incomplete");
     expect(clusterScope).toContain("pull-request-files-saturated");
