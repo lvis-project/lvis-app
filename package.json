@@ -342,6 +342,7 @@
     },
     "linux": {
       "category": "Office",
+      "icon": "build/icons",
       "target": [
         "AppImage",
         "deb",
