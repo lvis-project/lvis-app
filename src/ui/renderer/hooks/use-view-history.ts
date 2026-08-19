@@ -15,6 +15,12 @@ import { sameViewLocation, type ViewLocation } from "../utils/view-location.js";
  * settings panel's own tab moves — and a push call at each is a rule every
  * future producer has to remember. Watching the location instead means a new
  * producer is recorded by construction.
+ *
+ * The launch RESTORE is the one thing that reports itself, and it is the
+ * exception that proves the rule: it is not a navigation producer, there is
+ * one of it per half of the location, and it is the only mover the location
+ * alone cannot identify. Nothing is asked of the navigation producers, so the
+ * property above still holds for every one of them.
  */
 
 /** Beyond this, the oldest entries are dropped. Entries are two short strings,
