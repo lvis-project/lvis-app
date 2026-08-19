@@ -561,7 +561,7 @@ export interface PluginUiExtension {
 }
 
 /**
- * S2 — Signature envelope sidecar served by `/api/v1/plugins/{slug}/download.sig`.
+ * Signature envelope sidecar served by `/api/v1/plugins/{slug}/download.sig`.
  * Matches the server's §0.1 dual-sign format.
  */
 export interface SignatureEnvelope {
@@ -578,7 +578,7 @@ export interface SignatureEnvelope {
   }>;
 }
 
-/** S2 — result of verifying a {@link SignatureEnvelope} against a tarball. */
+/** Result of verifying a {@link SignatureEnvelope} against a tarball. */
 export interface VerifyResult {
   ok: boolean;
   key_id?: string;
@@ -586,7 +586,7 @@ export interface VerifyResult {
 }
 
 /**
- * S14 — dependency specification extracted from plugin manifest's `requires` block.
+ * Dependency specification extracted from plugin manifest's `requires` block.
  * Capabilities are kebab-case tags matching `^[a-z][a-z0-9-]*$`.
  *
  * NOTE: This interface is the host-side source of truth that the SDK's
@@ -614,7 +614,7 @@ export interface RequiresSpec {
 }
 
 /**
- * S14 — thrown by marketplace install preflight when required capabilities
+ * Thrown by marketplace install preflight when required capabilities
  * are not satisfied by currently-installed plugins.
  */
 export class MissingDependenciesError extends Error {

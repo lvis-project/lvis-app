@@ -1009,7 +1009,7 @@ export function buildInternalApiSurface() {
     /** Permission policy — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
       ipcRenderer.invoke(PERMISSIONS.reviewerDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),
-    /** C3 — check whether a reviewer provider has its required API key stored. */
+    /** Check whether a reviewer provider has its required API key stored. */
     reviewerProviderHasKey: async (provider: string) =>
       ipcRenderer.invoke(PERMISSIONS.reviewerProviderHasKey, provider),
     /** Permission policy — `/permission audit show` — fetch recent permission audit entries. */
@@ -1200,7 +1200,7 @@ export function buildInternalApiSurface() {
     return () => ipcRenderer.removeListener(ROUTINES.fired, listener);
   },
   // Routine running indicator: emitted when a routine LLM session starts/finishes
-  // C1: runningStarted payload enriched to { routineId, firedAt, title } so the
+  // runningStarted payload enriched to { routineId, firedAt, title } so the
   // renderer can push a proper OverlayItem immediately without waiting for fired.
   onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => {
     const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);

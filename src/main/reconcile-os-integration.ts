@@ -1,5 +1,5 @@
 /**
- * E4 — boot-time OS-integration reconcile wiring.
+ * Boot-time OS-integration reconcile wiring.
  *
  * Extracted from `main()` so the "register the global accelerator + login item
  * from persisted settings, and surface a login-item registration that the OS

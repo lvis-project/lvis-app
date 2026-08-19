@@ -1066,7 +1066,7 @@ export class PluginMarketplaceService {
       }
     }
 
-    // S14 — capability preflight. `requires.capabilities[]` is a separate
+    // Capability preflight. `requires.capabilities[]` is a separate
     // contract from plugin-id `dependencies[]`: any installed plugin that
     // advertises a matching `capabilities[]` tag satisfies the requirement.
     const requiredCapabilities = plugin.requires?.capabilities ?? [];
@@ -2218,7 +2218,7 @@ export class PluginMarketplaceService {
   }
 
   /**
-   * S14: load manifests for all currently-installed plugins so the dependency
+   * Load manifests for all currently-installed plugins so the dependency
    * resolver can inspect their `capabilities[]`.  Skips entries whose manifest
    * is missing (ENOENT — stale registry entry, fail-open per §S14: a single
    * stray manifest must not block unrelated installs). Other manifest IO /

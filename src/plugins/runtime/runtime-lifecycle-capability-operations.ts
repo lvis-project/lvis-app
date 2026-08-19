@@ -1225,7 +1225,7 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
     return blocked;
   }
 
-  /** I2 — Plugin live-reload (dev only). */
+  /** Plugin live-reload (dev only). */
   async reloadPlugin(pluginId: string): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(canonicalPluginId);

@@ -407,7 +407,7 @@ export class PermissionManager {
   private rules: PermissionRule[] = [];
   private mode: ExecutionMode = "default";
   /**
-   * P2 — "Allow always" grants keyed by pattern → highest granted {@link
+   * "Allow always" grants keyed by pattern → highest granted {@link
    * GrantTier}. Was a flat `Set<string>` (category-blind). The Map structurally
    * enforces the "1 grant, highest tier" invariant so a re-grant can only widen
    * coverage (monotone), never desynchronize.
@@ -820,7 +820,7 @@ export class PermissionManager {
    * Add a tool-name pattern as a persistent allow rule.
    * Update the in-memory allow cache only after permissions.json is persisted.
    *
-   * P2 — `tier` records how broadly the grant applies. It defaults to `"write"`
+   * `tier` records how broadly the grant applies. It defaults to `"write"`
    * so the non-executor callers (slash `/allow`, the PermissionsTab addRule IPC)
    * keep their category-blind grant (grandfather). The executor passes
    * {@link requiredTier}(invocationCategory) so a grant made on a read tool is

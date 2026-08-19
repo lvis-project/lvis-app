@@ -1131,7 +1131,7 @@ export async function executeAuthorizedToolInvocation(
   // specifically, the LLM doesn't need the raw text in audit — provenance
   // (the question + that the user replied) is what matters.
   //
-  // R2-CR-4: gate on `source === "builtin"` (mirrors the C1 short-circuit
+  // Gate on `source === "builtin"` (mirrors the builtin-only short-circuit
   // pattern at Step 3). Otherwise a plugin/MCP tool that happens to be
   // named `ask_user_question` would have its `freeText` field blindly
   // replaced — a name collision should not trigger host-level redaction.
