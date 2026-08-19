@@ -165,11 +165,6 @@
     {
       "type": "exports",
       "file": "src/agents/agent-registry.ts",
-      "name": "withAgentRegistryLock"
-    },
-    {
-      "type": "exports",
-      "file": "src/agents/agent-registry.ts",
       "name": "writeAgentRegistry"
     },
     {
@@ -971,11 +966,6 @@
       "type": "exports",
       "file": "src/shared/status-bar-emojis.ts",
       "name": "STATUS_BAR_RUNTIME_EMOJIS"
-    },
-    {
-      "type": "exports",
-      "file": "src/skills/skill-registry.ts",
-      "name": "withSkillRegistryLock"
     },
     {
       "type": "exports",
