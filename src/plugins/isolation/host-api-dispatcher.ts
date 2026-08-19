@@ -15,11 +15,11 @@
  *   - a stale generation or a foreign plugin id → refused before dispatch
  *   - arguments or a result that would not survive JSON → refused, not coerced
  *
- * That last one is the check §3.6 shows the CURRENT in-process boundary does not
- * perform: `LoopbackTransport` hands `response.result` across by reference, so a
- * plugin returning a `Date`, a `Map` or a class instance is received as that
- * exact object today and would change shape or vanish over a real wire. Here the
- * shape is checked on both directions of every call.
+ * That last one applies `describeNonJson` — the same predicate
+ * `LoopbackTransport` now uses on the host→plugin direction — to the direction
+ * that transport does not carry. hostApi traffic never passes through it, so
+ * without this check the reverse channel would be exactly the boundary §3.6
+ * describes: one that looks like a wire and passes object references.
  *
  * HOST-SIDE ONLY. This imports the real host error classes to classify a throw
  * by identity rather than by matching its message; several of them reach
@@ -36,6 +36,7 @@ import {
 } from "../public-contract.js";
 import {
   HOST_API_WIRE_VERSION,
+  HostApiBoundaryError,
   inactiveHostApiMessage,
   type ChildNotificationSink,
   type HostApiHandle,
@@ -44,7 +45,6 @@ import {
   type HostApiReply,
   type HostApiRequest,
   type HostApiWireError,
-  type HostApiWireErrorCode,
   type SubscriptionCloseReason,
 } from "./host-api-wire.js";
 import {
@@ -84,6 +84,22 @@ export interface SubscriptionScope {
   open(teardown: (reason: SubscriptionCloseReason) => void): string;
   /** Push a payload to the child's handler for this registration. */
   deliver(subscriptionId: string, payload: unknown): void;
+  /**
+   * End one registration from the host side. A handler calls this when the work
+   * it was tracking is over — the settled call behind an abort channel, the
+   * exited worker behind a handle.
+   */
+  release(subscriptionId: string): boolean;
+  /**
+   * The host end of an abort channel: the child sends an id where an
+   * `AbortSignal` would have been, and the host holds the controller.
+   *
+   * Registered in the SAME ledger as every other lifetime, which is what makes
+   * "the child died" abort the work in flight for it rather than leaving the
+   * host fetching on behalf of a process that no longer exists. Three members
+   * take a signal; without this each of their handlers would keep its own map.
+   */
+  abortChannel(subscriptionId: string): AbortSignal;
 }
 
 /** What a handler may resolve with, derived from its declared `result` axis. */
@@ -115,23 +131,6 @@ export interface HostApiPathHandler {
   readonly contract: HostApiPathContract;
   readonly status: HostApiPathStatus;
   invoke(call: HostApiCall, scope: SubscriptionScope): Promise<unknown>;
-}
-
-/** A refusal raised by the boundary itself, carrying the code that crosses. */
-export class HostApiDispatchError extends Error {
-  readonly code: HostApiWireErrorCode;
-  readonly detail: Record<string, unknown> | undefined;
-
-  constructor(
-    code: HostApiWireErrorCode,
-    message: string,
-    detail?: Record<string, unknown>,
-  ) {
-    super(message);
-    this.name = "HostApiDispatchError";
-    this.code = code;
-    this.detail = detail;
-  }
 }
 
 /**
@@ -166,7 +165,7 @@ export function unimplementedHostApiPath(path: HostApiPath): HostApiPathHandler 
     status: "unimplemented",
     invoke: () =>
       Promise.reject(
-        new HostApiDispatchError(
+        new HostApiBoundaryError(
           "path-not-implemented",
           `[host-api-dispatcher] '${path}' has no handler`,
           { path },
@@ -193,7 +192,7 @@ export function childLocalHostApiPath(path: ChildLocalPath): HostApiPathHandler 
     status: "child-local",
     invoke: () =>
       Promise.reject(
-        new HostApiDispatchError(
+        new HostApiBoundaryError(
           "path-not-dispatchable",
           `[host-api-dispatcher] '${path}' is answered in the child and must never be sent`,
           { path },
@@ -260,7 +259,7 @@ export const HOSTAPI_DISPATCH_TABLE: Record<HostApiPath, HostApiPathHandler> = {
  * identity has to be named explicitly on the way out or it is gone.
  */
 export function classifyHostApiError(error: unknown): HostApiWireError {
-  if (error instanceof HostApiDispatchError) {
+  if (error instanceof HostApiBoundaryError) {
     return {
       code: error.code,
       name: error.name,
@@ -385,12 +384,21 @@ export class HostApiDispatcher {
     }
   }
 
-  /** Child → host notifications. The only one the boundary itself owns is release. */
+  /**
+   * Child → host notifications. Both of the ones the boundary itself owns end a
+   * registration, and both go through the same ledger — an abort is not a
+   * second mechanism, it is a close whose teardown happens to cancel.
+   */
   handleNotification(notification: HostApiNotification): void {
-    if (notification.kind !== "subscription-release") return;
-    // `disposed` rather than `peer-gone`: the child is alive and has already
-    // dropped its side, so the host teardown must not send anything back.
-    this.subscriptions.close(notification.subscriptionId, "disposed");
+    if (notification.kind === "subscription-release") {
+      // `disposed` rather than `peer-gone`: the child is alive and has already
+      // dropped its side, so the host teardown must not send anything back.
+      this.subscriptions.close(notification.subscriptionId, "disposed");
+      return;
+    }
+    if (notification.kind === "abort") {
+      this.subscriptions.close(notification.subscriptionId, "revoked");
+    }
   }
 
   /**
@@ -404,44 +412,44 @@ export class HostApiDispatcher {
 
   private resolve(request: HostApiRequest): HostApiPathHandler {
     if (request.wire !== HOST_API_WIRE_VERSION) {
-      throw new HostApiDispatchError(
+      throw new HostApiBoundaryError(
         "wire-version-mismatch",
         `[host-api-dispatcher] wire ${String(request.wire)} != ${HOST_API_WIRE_VERSION}`,
       );
     }
     if (request.pluginId !== this.options.pluginId) {
-      throw new HostApiDispatchError(
+      throw new HostApiBoundaryError(
         "plugin-mismatch",
         `[host-api-dispatcher] request names plugin '${String(request.pluginId)}'`,
       );
     }
     if (request.generationId !== this.options.generationId) {
-      throw new HostApiDispatchError(
+      throw new HostApiBoundaryError(
         "generation-mismatch",
         `[host-api-dispatcher] request names generation '${String(request.generationId)}'`,
       );
     }
     if (!isHostApiPath(request.path)) {
-      throw new HostApiDispatchError(
+      throw new HostApiBoundaryError(
         "path-unknown",
         `[host-api-dispatcher] '${String(request.path)}' is not a hostApi member`,
       );
     }
     if (!this.options.isActive()) {
-      throw new HostApiDispatchError(
+      throw new HostApiBoundaryError(
         "plugin-inactive",
         inactiveHostApiMessage(this.options.pluginId, `hostApi.${request.path}`),
       );
     }
     if (!Array.isArray(request.args)) {
-      throw new HostApiDispatchError(
+      throw new HostApiBoundaryError(
         "argument-marshalling-rejected",
         `[host-api-dispatcher] '${request.path}': args is not an array`,
       );
     }
     const nonJson = describeNonJson(request.args, `${request.path}(args)`);
     if (nonJson) {
-      throw new HostApiDispatchError(
+      throw new HostApiBoundaryError(
         "argument-marshalling-rejected",
         `[host-api-dispatcher] ${nonJson}`,
       );
@@ -459,7 +467,7 @@ export class HostApiDispatcher {
     const { result } = handler.contract;
     if (result === "void") {
       if (value !== undefined) {
-        throw new HostApiDispatchError(
+        throw new HostApiBoundaryError(
           "result-marshalling-rejected",
           `[host-api-dispatcher] '${handler.path}' declares no result but returned one`,
         );
@@ -467,14 +475,14 @@ export class HostApiDispatcher {
       return undefined;
     }
     if (result === "handle" && !isHandle(value)) {
-      throw new HostApiDispatchError(
+      throw new HostApiBoundaryError(
         "result-marshalling-rejected",
         `[host-api-dispatcher] '${handler.path}' must resolve { handleId: string }`,
       );
     }
     const nonJson = describeNonJson(value, `${handler.path}(result)`);
     if (nonJson) {
-      throw new HostApiDispatchError(
+      throw new HostApiBoundaryError(
         "result-marshalling-rejected",
         `[host-api-dispatcher] ${nonJson}`,
       );
@@ -496,9 +504,33 @@ export class HostApiDispatcher {
         this.subscriptions.adopt(subscriptionId, { path, teardown }, release);
       },
       open: (teardown) => this.subscriptions.open({ path, teardown }, release),
+      release: (subscriptionId) => this.subscriptions.close(subscriptionId, "disposed"),
+      abortChannel: (subscriptionId) => {
+        const controller = new AbortController();
+        this.subscriptions.adopt(
+          subscriptionId,
+          {
+            path,
+            // Aborting on EVERY reason is deliberate. `revoked` is the child
+            // asking for it; `peer-gone` is the child dying, and work started
+            // for a dead child has no one to return to; `disposed` is the call
+            // settling, where abort is a no-op. Distinguishing them would add a
+            // branch whose only effect is to leave one case un-cancelled.
+            teardown: (reason) =>
+              controller.abort(
+                new HostApiBoundaryError(
+                  "subscription-unknown",
+                  `[host-api-dispatcher] '${path}' aborted: ${reason}`,
+                ),
+              ),
+          },
+          release,
+        );
+        return controller.signal;
+      },
       deliver: (subscriptionId, payload) => {
         if (!this.subscriptions.get(subscriptionId)) {
-          throw new HostApiDispatchError(
+          throw new HostApiBoundaryError(
             "subscription-unknown",
             `[host-api-dispatcher] no open subscription '${subscriptionId}'`,
           );

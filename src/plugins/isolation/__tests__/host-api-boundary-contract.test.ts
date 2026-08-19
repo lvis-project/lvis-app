@@ -29,7 +29,6 @@ import {
 } from "../host-api-path-contracts.js";
 import {
   HOSTAPI_DISPATCH_TABLE,
-  HostApiDispatchError,
   HostApiDispatcher,
   childLocalHostApiPath,
   classifyHostApiError,
@@ -40,7 +39,12 @@ import {
 } from "../host-api-dispatcher.js";
 import {
   HOST_API_WIRE_VERSION,
+  HostApiBoundaryError,
   UNIVERSAL_WIRE_ERROR_CODES,
+  WIRE_BYTES_MAX,
+  decodeWireBinary,
+  decodeWireBytes,
+  encodeWireBytes,
   inactiveHostApiMessage,
   reconstructWireError,
   type ArgumentMarshalling,
@@ -431,7 +435,7 @@ describe("error identity survives the wire by code, never by message", () => {
         "plugin-storage-encryption-unavailable",
       ],
       [new PluginStorageError("escapes the root", PLUGIN_ID, "../x"), "plugin-storage"],
-      [new HostApiDispatchError("subscription-unknown", "gone"), "subscription-unknown"],
+      [new HostApiBoundaryError("subscription-unknown", "gone"), "subscription-unknown"],
       [new RangeError("something else entirely"), "host-internal"],
     ];
     for (const [error, code] of cases) {
@@ -471,5 +475,64 @@ describe("error identity survives the wire by code, never by message", () => {
     );
     expect(wire.detail).toBeUndefined();
     expect(JSON.parse(JSON.stringify(wire))).toEqual(wire);
+  });
+});
+
+describe("the shared byte codec, which three members would otherwise each write", () => {
+  it("keeps text and bytes distinguishable, which is the point of the tag", () => {
+    // A plugin writing the literal string "aGk=" and a plugin writing the bytes
+    // "hi" produce the same characters. Without the tag the file lands decoded
+    // in one of those two cases and nothing reports it.
+    const asText = encodeWireBytes("aGk=", "storage.write(data)");
+    const asBytes = encodeWireBytes(new Uint8Array([104, 105]), "storage.write(data)");
+    expect(asText).toEqual({ encoding: "utf8", data: "aGk=" });
+    expect(asBytes).toEqual({ encoding: "base64", data: "aGk=" });
+    expect(decodeWireBytes(asText, "x")).toBe("aGk=");
+    expect(decodeWireBytes(asBytes, "x")).toEqual(new Uint8Array([104, 105]));
+  });
+
+  it("round-trips bytes that are not valid text", () => {
+    const bytes = new Uint8Array([0, 255, 128, 10, 13]);
+    const decoded = decodeWireBinary(encodeWireBytes(bytes, "storage.read()"), "x");
+    expect(decoded).toEqual(bytes);
+  });
+
+  it("survives the JSON hop it exists to survive", () => {
+    const wire = encodeWireBytes(new Uint8Array([1, 2, 3]), "storage.read()");
+    const rehydrated = JSON.parse(JSON.stringify(wire)) as unknown;
+    expect(decodeWireBinary(rehydrated, "x")).toEqual(new Uint8Array([1, 2, 3]));
+  });
+
+  it("throws over the cap rather than truncating, in both directions", () => {
+    const oversized = new Uint8Array(WIRE_BYTES_MAX + 1);
+    expect(() => encodeWireBytes(oversized, "storage.write(data)")).toThrow(
+      HostApiBoundaryError,
+    );
+    try {
+      encodeWireBytes(oversized, "storage.write(data)");
+    } catch (error) {
+      expect((error as HostApiBoundaryError).code).toBe("payload-too-large");
+    }
+    // A truncating codec would return a shorter file and report success — the
+    // caller cannot tell that from a file that really is that short.
+    expect(() =>
+      decodeWireBytes(
+        { encoding: "base64", data: "A".repeat(WIRE_BYTES_MAX * 2) },
+        "storage.read()",
+      ),
+    ).toThrow(/exceeds/u);
+  });
+
+  it("refuses a payload that is not tagged at all", () => {
+    for (const bad of [null, "raw", { data: "aGk=" }, { encoding: "hex", data: "6869" }]) {
+      expect(() => decodeWireBytes(bad, "storage.write(data)"), String(bad)).toThrow(
+        /not a tagged byte payload/u,
+      );
+    }
+  });
+
+  it("refuses text where a member declared it delivers bytes", () => {
+    expect(() => decodeWireBinary({ encoding: "utf8", data: "hi" }, "storage.read()"))
+      .toThrow(/expected bytes/u);
   });
 });
