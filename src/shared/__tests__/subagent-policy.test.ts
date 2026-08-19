@@ -19,8 +19,7 @@ describe("sub-agent orchestration policy", () => {
     expect(SUBAGENT_MAX_ROUNDS_MIN).toBe(1);
   });
 
-  it("ships a round budget default at or above the floor", () => {
+  it("pins the shipped round budget default at 60", () => {
     expect(SUBAGENT_MAX_ROUNDS_DEFAULT).toBe(60);
-    expect(SUBAGENT_MAX_ROUNDS_DEFAULT).toBeGreaterThanOrEqual(SUBAGENT_MAX_ROUNDS_MIN);
   });
 });

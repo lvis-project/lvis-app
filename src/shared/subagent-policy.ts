@@ -31,9 +31,10 @@ export const MAX_TOOL_CALLS_PER_ROUND = MAX_AGENT_SPAWNS_PER_ROUND;
  * work — the exact failure the budget setting exists to let the user avoid.
  * The child ConversationLoop honours the host-assigned `maxRounds` instead of
  * narrowing it to its own default bound.
+ *
+ * Fewer rounds than this minimum and an agent cannot finish even a trivial
+ * tool round-trip.
  */
-
-/** Fewer than this and an agent cannot finish even a trivial tool round-trip. */
 export const SUBAGENT_MAX_ROUNDS_MIN = 1;
 
 /** Shipped default when the user has not configured a budget. */
