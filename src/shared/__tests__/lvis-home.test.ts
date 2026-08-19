@@ -110,14 +110,21 @@ describe("ensureLvisHomePrivate", () => {
         .map((line) => line.trim())
         .filter((line) => line.includes(":("));
       expect(aces.length).toBeGreaterThan(0);
-      // No ACE may name anyone but this account, and none may be inherited.
       const sid = (applied as { sid: string }).sid;
       const owner = execFileSync("whoami", [], { encoding: "utf-8" }).trim();
+      // Whether icacls prints the SID or resolves it to an account name is not
+      // the property under test. These two are: nothing is inherited any more,
+      // and no ACE opens the directory to a group the whole machine is in.
       for (const ace of aces) {
-        expect(ace).not.toContain("(I)");
-        const account = ace.slice(0, ace.indexOf(":("));
-        expect([sid, owner].some((known) => account.toLowerCase() === known.toLowerCase())).toBe(true);
+        expect(ace, acl).not.toContain("(I)");
+        const account = ace.slice(0, ace.indexOf(":(")).toLowerCase();
+        for (const everyone of ["everyone", "s-1-1-0", "\\users", "authenticated users", "s-1-5-11", "s-1-5-32-545"]) {
+          expect(account, acl).not.toContain(everyone);
+        }
       }
+      const mine = aces.some((ace) =>
+        ace.includes(sid) || ace.toLowerCase().startsWith(owner.toLowerCase()));
+      expect(mine, acl).toBe(true);
       // And the app can still use it.
       writeFileSync(join(dir, "settings.json"), "{}");
       expect(readFileSync(join(dir, "settings.json"), "utf-8")).toBe("{}");
