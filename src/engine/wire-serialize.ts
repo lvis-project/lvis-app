@@ -4,8 +4,7 @@
 
 
 import type { GenericMessage } from "./llm/types.js";
-import { buildToolResultStub } from "./auto-compact.js";
-import { buildToolResultTruncatedStub } from "../shared/tool-result-stub.js";
+import { buildToolResultStrippedStub, buildToolResultTruncatedStub } from "../shared/tool-result-stub.js";
 
 /**
  * Stub form for tool_result messages marked by Issue #902's generic size
@@ -66,7 +65,7 @@ export function prepareMarkedToolResultsForWire(messages: GenericMessage[]): Gen
       // turn the original is fully redundant, so the shorter generic
       // stub is right even if the result was *also* size-capped.
       //
-      // origLen passed to `buildToolResultStub`:
+      // origLen passed to `buildToolResultStrippedStub`:
       //   - When the message was *also* truncated, prefer the recorded
       //     `truncated.originalBytes` so the stub reflects the *raw*
       //     payload size (UI / debug tooltips show "100K original" even
@@ -81,7 +80,7 @@ export function prepareMarkedToolResultsForWire(messages: GenericMessage[]): Gen
       //     pre-PR behaviour is preserved: use the in-memory length.
       const compactedResultText =
         msg.meta.compactedAt !== undefined
-          ? buildToolResultStub(msg.toolName, msg.meta.truncated?.originalBytes ?? msg.content.length)
+          ? buildToolResultStrippedStub(msg.toolName, msg.meta.truncated?.originalBytes ?? msg.content.length)
           : buildToolResultTruncatedStubForWire(msg.toolUseId, msg.toolName, msg.meta.truncated!);
       out.push({
         role: "tool_result",

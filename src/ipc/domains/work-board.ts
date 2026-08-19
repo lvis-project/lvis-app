@@ -35,7 +35,7 @@
  */
 import { ipcMain } from "electron";
 import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
-import { fanOutToAllWindows } from "../broadcast-helpers.js";
+import { fanOutToAllWindows } from "../window-fanout.js";
 import type { IpcDeps } from "../types.js";
 import type { WorkItemRunResult } from "../../shared/work-board-types.js";
 import { WORK_BOARD } from "../../shared/ipc-channels.js";

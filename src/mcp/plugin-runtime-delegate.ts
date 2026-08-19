@@ -8,7 +8,7 @@
  *    `isPluginEnabled`-filtered, so this is the authoritative execution gate for
  *    every model path, not merely UI hiding.
  *  - manifest-integrity-disabled plugin → isError.
- *  - {@link ManifestIntegrityViolation} thrown by the read-only fs proxy →
+ *  - {@link ManifestIntegrityError} thrown by the read-only fs proxy →
  *    record the violation (so later calls fail closed + audit + UI emit fire) →
  *    isError.
  *
@@ -40,7 +40,7 @@
 import type { PluginRuntime } from "../plugins/runtime.js";
 import type { PluginToolDelegate, PluginToolOutcome } from "./plugin-mcp-server.js";
 import {
-  ManifestIntegrityViolation,
+  ManifestIntegrityError,
   manifestIntegrityState,
 } from "../permissions/manifest-integrity.js";
 import { checkRuntimeAdmission } from "../plugins/runtime/runtime-admission.js";
@@ -153,7 +153,7 @@ export function pluginRuntimeToolDelegate(
       }
       return { content: [{ type: "text", text }], _meta: meta };
     } catch (err) {
-      if (err instanceof ManifestIntegrityViolation) {
+      if (err instanceof ManifestIntegrityError) {
         let violationAuditError: unknown;
         try {
           await manifestIntegrityState.recordViolation(

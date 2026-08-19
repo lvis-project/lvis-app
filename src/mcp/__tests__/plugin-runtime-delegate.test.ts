@@ -2,7 +2,7 @@
  * `pluginRuntimeToolDelegate` parity (mcp-alignment-design.md §5 plugin-loopback-server).
  *
  * The loopback delegate is the authoritative plugin execution gate:
- * inactive / integrity-disabled fail closed, ManifestIntegrityViolation records
+ * inactive / integrity-disabled fail closed, ManifestIntegrityError records
  * + fails closed, and the structured return value survives as
  * _meta["lvisai/rawResult"]. A host-level test asserts that raw value reaches
  * the registered Tool's metadata.rawResult (the executor.ts / boot.ts contract).
@@ -16,7 +16,7 @@ import { RAW_RESULT_META } from "../protocol-constants.js";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import {
-  ManifestIntegrityViolation,
+  ManifestIntegrityError,
   manifestIntegrityState,
 } from "../../permissions/manifest-integrity.js";
 import type { PluginRuntime } from "../../plugins/runtime.js";
@@ -99,11 +99,11 @@ describe("pluginRuntimeToolDelegate — fail-closed gate parity", () => {
     expect(call).toHaveBeenCalledWith("notes_read", undefined);
   });
 
-  it("ManifestIntegrityViolation → records the violation and fails closed", async () => {
+  it("ManifestIntegrityError → records the violation and fails closed", async () => {
     const delegate = pluginRuntimeToolDelegate(
       fakeRuntime({
         call: vi.fn(async () => {
-          throw new ManifestIntegrityViolation(PLUGIN_ID, "notes_read", "writeFileSync");
+          throw new ManifestIntegrityError(PLUGIN_ID, "notes_read", "writeFileSync");
         }),
       }),
       PLUGIN_ID,

@@ -828,7 +828,7 @@ describe("compactWithBoundary — oversize pre-pass measures WIRE cost, not raw"
   it("does not archive+clip a marked tool_result whose wire form is a short stub", async () => {
     // The damage this pins: `markStaleToolResults` keeps a marked tool_result's
     // content VERBATIM in memory on purpose (UI + checkpoint preview) while the
-    // provider only ever receives `buildToolResultStub`. Measuring the raw
+    // provider only ever receives `buildToolResultStrippedStub`. Measuring the raw
     // content here made the pre-pass archive the message to disk and clip it —
     // saving nothing on the wire and destroying the verbatim copy the marker
     // contract exists to preserve.
