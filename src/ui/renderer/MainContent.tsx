@@ -23,6 +23,7 @@ import type { AppMode } from "./MainToolbar.js";
 import type { ProjectIdentity } from "../../shared/project-identity.js";
 import type { InlineViewKey, PluginViewKey } from "../../shared/view-key.js";
 import type { ExactDenyDraft } from "./exact-permission-decision.js";
+import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
 
 type Api = ReturnType<typeof getApi>;
 type PluginView = Parameters<typeof PluginUiHostView>[0]["view"];
@@ -62,6 +63,7 @@ export interface MainContentProps {
    *  from the composer selector) — the same refresh the sidebar's context
    *  menu already uses. */
   onRefreshProjects?: () => void | Promise<void>;
+  onProjectError?: ProjectErrorReporter;
   refreshStarred: () => void;
   // navigation
   appMode: AppMode;
@@ -188,6 +190,7 @@ function HomeChatPane(props: MainContentProps) {
         workspaceProjects={props.workspaceProjects}
         onNewChatForProject={props.onNewChatForProject}
         onRefreshProjects={props.onRefreshProjects}
+        onProjectError={props.onProjectError}
       />
     </ChatContextProvider>
   );

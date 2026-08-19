@@ -20,6 +20,7 @@ import type { RolePreset } from "../../../data/role-presets.js";
 import type { AppMode } from "../MainToolbar.js";
 import type { AskUserQuestionRequest } from "./AskUserQuestionCard.js";
 import { ComposerProjectSelector } from "./ComposerProjectSelector.js";
+import type { ProjectErrorReporter } from "../hooks/use-add-project-folder.js";
 import { ComposerApiKeyChip } from "./ComposerApiKeyChip.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import type { McpPromptEntry } from "./slash-picker-data.js";
@@ -97,6 +98,7 @@ export interface ChatComposerDockProps {
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   /** Re-fetch the workspace project list after adding a project folder. */
   onRefreshProjects?: () => void | Promise<void>;
+  onProjectError?: ProjectErrorReporter;
   /** Controlled open state for the project selector dropdown — owned by
    *  ChatView so it can be force-closed when the composer leaves the
    *  centered layout. */
@@ -169,6 +171,7 @@ export function ChatComposerDock({
   workspaceProjects,
   onNewChatForProject,
   onRefreshProjects,
+  onProjectError,
   projectSelectorOpen,
   onProjectSelectorOpenChange,
 }: ChatComposerDockProps) {
@@ -311,6 +314,7 @@ export function ChatComposerDock({
                 projects={workspaceProjects ?? (activeProject ? [activeProject] : [])}
                 onSelectProject={onNewChatForProject}
                 onRefreshProjects={onRefreshProjects}
+                onProjectError={onProjectError}
                 open={projectSelectorOpen && centered}
                 onOpenChange={onProjectSelectorOpenChange}
               />

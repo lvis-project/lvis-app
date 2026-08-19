@@ -333,14 +333,42 @@ export function canonicalizePathForMatch(rawPath: string): string {
     }
   }
 
-  return canonical
-    .replace(/\\/g, "/")
-    .replace(/\/+/g, "/")
+  return foldCanonicalPathSeparators(canonical);
+}
+
+/**
+ * Steps 3–5 of {@link canonicalizePathForMatch}: separator folding, duplicate
+ * collapse, NFC, and the win32 drive-letter case fold.
+ *
+ * Exported with an explicit `platform` because the Windows shapes cannot be
+ * exercised through {@link canonicalizePathForMatch} anywhere else: `resolve`
+ * and `realpath` follow the HOST's rules, so a `\\server\share\…` input is just
+ * a filename with backslashes in it on macOS/Linux, and a win32-only assertion
+ * would never run on the machines this is developed and CI'd on.
+ */
+export function foldCanonicalPathSeparators(
+  canonical: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  const slashed = canonical.replace(/\\/g, "/");
+  // A Windows path may legitimately BEGIN with two separators: `\\server\share`
+  // names a network share, `\\?\…` the device namespace. Both arrive here from
+  // `realpathSync.native`, which resolves a mapped network drive (`Z:\proj`) to
+  // its UNC form — so this is not an exotic input, it is what an ordinary
+  // corporate project folder canonicalizes to. Squeezing the pair to one slash
+  // turned `//server/share/proj` into `/server/share/proj`, which Win32 then
+  // resolves against the current drive: a directory that does not exist, so the
+  // caller's `stat` fails and the path is reported missing. The `//server/share`
+  // and `//?/…` forms `isFilesystemRootPath` matches are likewise only
+  // reachable because this keeps the leading pair intact.
+  const startsAtWindowsUncRoot = platform === "win32" && /^\/\/[^/]/.test(slashed);
+  const collapsed = slashed.replace(/\/+/g, "/");
+  return (startsAtWindowsUncRoot ? `/${collapsed}` : collapsed)
     .normalize("NFC")
     .replace(/^([a-zA-Z]:)/, (m) =>
       // Preserve drive-letter case sensitivity on win32 — only lowercase
       // the drive letter (case-insensitive) but the rest is handled below.
-      process.platform === "win32" ? m.toLowerCase() : m,
+      platform === "win32" ? m.toLowerCase() : m,
     );
 }
 
