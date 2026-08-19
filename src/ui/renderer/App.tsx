@@ -367,10 +367,46 @@ export function App() {
     setAttachments([]);
   }, [currentSessionId]);
 
+  const handleProjectError = useCallback<ProjectErrorReporter>((operation, error, message) => {
+    statusPushToast({
+      severity: "error",
+      message: formatIpcError(error, message, {
+        // Only reached for a code the shared IPC table does not know — every
+        // code these operations actually return is mapped. The add label is
+        // the file-browser one because the menu entry carries a trailing
+        // ellipsis that reads badly in `<context>: <message>`.
+        fallbackContext: operation === "add"
+          ? t("chatPreviewRail.addProjectRoot")
+          : operation === "remove"
+            ? t("sidebar.projectMenuRemove")
+            : t("sidebar.projectsLabel"),
+      }),
+      ttlMs: 10_000,
+    });
+  }, [statusPushToast, t]);
+
+  // The project list refreshes on mount and after every add and remove, so a
+  // standing fault would re-toast on each pass. Only a change of condition is
+  // news; a repair clears the memory so the next one is reported again.
+  const reportedListFault = useRef<string | null>(null);
+  const reportProjectListFault = useCallback((code: string) => {
+    if (reportedListFault.current === code) return;
+    reportedListFault.current = code;
+    handleProjectError("list", code);
+  }, [handleProjectError]);
+
   const refreshWorkspaceProjects = useCallback(async () => {
     try {
       const result = await window.lvis?.workspace?.listRoots?.();
-      if (!result?.ok) return;
+      if (!result?.ok) {
+        // An empty project list and a project list main could not read look
+        // identical on screen, so the second one is only ever a condition the
+        // user is told about — never a silently shorter sidebar.
+        if (result?.error) reportProjectListFault(result.error);
+        return;
+      }
+      if (result.settingsFault) reportProjectListFault(result.settingsFault);
+      else reportedListFault.current = null;
       const roots = Array.isArray(result.roots) ? result.roots : [];
       // fallbackName is only a safety net for a root with no resolvable
       // basename — the default project is excluded from every display
@@ -382,23 +418,7 @@ export function App() {
     } catch {
       // The backend still defaults chat creation to the anchored workspace root.
     }
-  }, [t]);
-
-  const handleProjectError = useCallback<ProjectErrorReporter>((operation, error, message) => {
-    statusPushToast({
-      severity: "error",
-      message: formatIpcError(error, message, {
-        // Only reached for a code the shared IPC table does not know — every
-        // code these two operations actually return is mapped. The add label is
-        // the file-browser one because the menu entry carries a trailing
-        // ellipsis that reads badly in `<context>: <message>`.
-        fallbackContext: operation === "add"
-          ? t("chatPreviewRail.addProjectRoot")
-          : t("sidebar.projectMenuRemove"),
-      }),
-      ttlMs: 10_000,
-    });
-  }, [statusPushToast, t]);
+  }, [reportProjectListFault, t]);
 
   useEffect(() => {
     void refreshWorkspaceProjects();

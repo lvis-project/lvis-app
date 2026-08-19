@@ -1447,6 +1447,10 @@ export const jaMessages: Record<string, string> = {
   "formatIpcError.unknownProvider": "不明な LLM プロバイダーです。",
   "formatIpcError.userKeyboardRequired": "この権限の変更は、アクティブなユーザー入力からのみ実行できます。",
   "formatIpcError.writeFailed": "設定の保存に失敗しました。",
+  "formatIpcError.settingsUnreadable":
+    "設定ファイルを読み取れなかったため、プロジェクトの一覧表示や追加ができません。ファイルはそのまま残しています — ~/.lvis/settings.json を修復するか復元してください。",
+  "formatIpcError.settingsPendingRemovalsMalformed":
+    "設定ファイル内のプロジェクト削除待ち項目の一部を読み取れませんでした。該当項目はそのまま保持してスキップしたため、~/.lvis/settings.json を修復するまでその削除は完了しません。",
   "generalTab.appVersionLabel": "アプリのバージョン",
   "generalTab.copyButton": "コピー",
   "generalTab.copyDataPathAriaLabel": "データパスのコピー",

@@ -32,6 +32,7 @@ import type { IpcDeps } from "../types.js";
 import { assertReadableFilePath } from "../../tools/file-read-core.js";
 import {
   readPermissionSettings,
+  PermissionSettingsUnreadableError,
   addAllowedDirectoryPersist,
 } from "../../permissions/permission-settings-store.js";
 import {
@@ -121,6 +122,17 @@ export interface WorkspaceListRootsResult {
   defaultRoot?: string;
   roots?: WorkspaceRoot[];
   cleanupPending?: number;
+  /**
+   * The settings file was read, and the roots below ARE the user's — but part
+   * of it could not be interpreted and stays unacted on. Reported alongside a
+   * successful list because the list is trustworthy and the condition is not
+   * self-announcing: nothing else in the app would ever mention it.
+   *
+   * A file that could not be read at all is not this — it fails the call with
+   * `settings-unreadable`, because a roots array assembled without the user's
+   * directories is not a shorter list, it is a wrong one.
+   */
+  settingsFault?: "pending-removals-malformed";
   error?: string;
 }
 
@@ -710,6 +722,12 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         { err: error, path: opaqueWorkspaceRootAuditRef(picked), gesture },
         "workspace root persist failed; pick refused",
       );
+      // One cause is neither transient nor about this folder: the settings file
+      // itself cannot be parsed, so no add will ever land until it is repaired.
+      // "Failed to save settings" would send the user to retry the pick forever.
+      if (error instanceof PermissionSettingsUnreadableError) {
+        return { ok: false, error: "settings-unreadable", warnings: verdict.adjacencyWarnings };
+      }
       return { ok: false, error: "persist-failed", warnings: verdict.adjacencyWarnings };
     }
     // Audit the allow-list widening: the permission SOT just grew the executor's
@@ -766,12 +784,19 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
         );
       },
     });
+    const settings = readPermissionSettings();
+    if (settings.fault?.kind === "file-unreadable") {
+      return { ok: false, error: "settings-unreadable" };
+    }
     return {
       ok: true,
       defaultRoot: getDefaultWorkspaceRoot(),
       roots: computeRoots(),
       ...(reconciliation.pending?.length
         ? { cleanupPending: reconciliation.pending.length }
+        : {}),
+      ...(settings.fault?.kind === "pending-removals-malformed"
+        ? { settingsFault: settings.fault.kind }
         : {}),
     };
   });

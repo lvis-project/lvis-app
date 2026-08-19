@@ -86,7 +86,7 @@ import { wireAnnouncementCheck, wireReleasePrep, wireUpdateCheck,
 import { migrateCanonicalization } from "./permissions/user-approval-store.js";
 import { reconcileWorkspaceRoots } from "./permissions/workspace-root-reconciler.js";
 import { createLogger } from "./lib/logger.js";
-import { lvisHome } from "./shared/lvis-home.js";
+import { ensureLvisHomePrivate, lvisHome } from "./shared/lvis-home.js";
 import {
   listLvisHomeDocUpgradeMarkers,
   seedLvisHomeDocs,
@@ -180,6 +180,17 @@ export async function bootstrap(
   const ctx = createBootContext({ projectRoot, mainWindow, getMainWindow });
 
   await setupNetworkFetch(ctx);
+
+  // Establish the home directory and its protection before anything writes a
+  // secret, an audit line or a settings key into it. On POSIX that is the
+  // `0o700` mkdir; on Windows `mode` is not a permission at all, so the same
+  // step sets the DACL every file created underneath will inherit.
+  const homePrivacy = ensureLvisHomePrivate();
+  if (homePrivacy.enforcement === "none") {
+    log.error(
+      `boot: ${homePrivacy.home} could not be restricted to this account (${homePrivacy.reason}) — settings, audit log and secrets are protected only by whatever the parent directory grants`,
+    );
+  }
 
   // Seed user-facing docs into `~/.lvis/` before any other component reads
   // home state. AGENTS.md is the LLM-facing system reference; on first boot
