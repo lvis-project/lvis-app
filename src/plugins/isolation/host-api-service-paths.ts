@@ -35,7 +35,9 @@
  * HOST-SIDE ONLY. The child's half is `host-api-service-child.ts`, which imports
  * neither this module nor the dispatcher.
  */
+import { isAbsolute, resolve as resolvePath } from "node:path";
 import type { PluginHostApi, PluginWorkerSpec } from "../public-contract.js";
+import { isPathWithin } from "../plugin-storage-containment.js";
 import {
   defineHostApiPath,
   type HostApiCall,
@@ -73,6 +75,30 @@ export type ServiceHostApi = Pick<
   | "hostFetch"
   | "spawnWorker"
 >;
+
+/**
+ * How far a worker the CHILD asked for may reach.
+ *
+ * The child runs under an ASRT wrap whose filesystem grants are exactly these
+ * two directories (`out-of-process-plugin.ts` composes them), and
+ * `PluginWorkerSpec` lets the caller name its own `allowReadPaths` and
+ * `allowWritePaths`. In one heap those two facts never met: the plugin and the
+ * worker supervisor were the same trust domain. Across the boundary they are
+ * not, and a child that can ask the host to spawn `/bin/sh` with
+ * `allowWritePaths: ["/"]` has escaped its jail by asking someone else to hold
+ * the door — the confinement would be a property of one process rather than of
+ * the plugin.
+ *
+ * So the envelope crosses with the binding, and a delegated worker's grants are
+ * checked against it. Confinement composes: what the plugin cannot reach
+ * itself, it cannot obtain by delegation.
+ */
+export interface DelegatedWorkerConfinement {
+  /** The plugin's immutable runtime root. Readable by the child, never writable. */
+  readonly pluginRoot: string;
+  /** `~/.lvis/plugins/<id>/data`. The only path the child may write. */
+  readonly pluginDataDir: string;
+}
 
 /** The purposes `resolveApiKey` accepts. Anything else is refused, not coerced. */
 const RESOLVE_API_KEY_PURPOSES = ["llm", "stt", "embedding", "vision"] as const;
@@ -365,6 +391,131 @@ function probePrivateHostPath(hostApi: ServiceHostApi): HostApiPathHandler {
 // Worker supervision.
 // ───────────────────────────────────────────────────────────────────────────
 
+/** Read an optional `readonly string[]` field off the child-supplied spec. */
+function optionalStringList(
+  call: HostApiCall,
+  spec: Record<string, unknown>,
+  field: string,
+): readonly string[] | undefined {
+  const value = spec[field];
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string")) {
+    rejectArgument(call.path, `spec.${field} must be an array of strings`);
+  }
+  return value as readonly string[];
+}
+
+/**
+ * Check one delegated grant list against the child's own envelope.
+ *
+ * `resolvePath` first, so `<dataDir>/../../etc` is compared as what it means
+ * rather than as what it says. What is deliberately NOT done here is a
+ * `realpath` walk: the grant may name a directory the worker is about to
+ * create, so the path need not exist. A symlink planted inside the data dir
+ * therefore still points wherever it points — the residual is the worker
+ * supervisor's own to close, and stating it is better than a check that reads
+ * as if it covered it.
+ */
+function assertGrantsWithinEnvelope(
+  call: HostApiCall,
+  field: string,
+  granted: readonly string[] | undefined,
+  envelope: readonly string[],
+): void {
+  for (const path of granted ?? []) {
+    if (!isAbsolute(path)) {
+      rejectArgument(call.path, `spec.${field} entry '${path}' must be an absolute path`);
+    }
+    const target = resolvePath(path);
+    if (envelope.some((root) => isPathWithin(root, target))) continue;
+    throw new HostApiBoundaryError(
+      "effect-boundary-denied",
+      `[host-api-service-paths] '${call.path}': spec.${field} entry '${path}' `
+        + `is outside the plugin's own confinement — a delegated worker cannot be `
+        + `granted a path the plugin process itself may not reach`,
+      { path: call.path, field, granted: path, envelope: [...envelope] },
+    );
+  }
+}
+
+/**
+ * Take a `PluginWorkerSpec` off the wire.
+ *
+ * Every other member in this file type-checks its arguments before handing them
+ * on; this one used to cast a bare record straight into the spec, which put
+ * child-controlled JSON into `spawn()`'s `command` with nothing in between. The
+ * fields are checked because the boundary is where a malformed message is a
+ * malformed message, and an unknown field is REFUSED rather than dropped — a
+ * spec that gains a grant-shaped field must fail here until this decodes it,
+ * not pass it through unexamined.
+ */
+function decodeWorkerSpec(
+  call: HostApiCall,
+  confinement: DelegatedWorkerConfinement,
+): PluginWorkerSpec {
+  const spec = requireRecord(call, 0, "spec");
+  const known = new Set([
+    "workerId",
+    "command",
+    "args",
+    "env",
+    "allowReadPaths",
+    "allowWritePaths",
+    "udsArgName",
+  ]);
+  for (const field of Object.keys(spec)) {
+    if (!known.has(field)) rejectArgument(call.path, `spec has unknown field '${field}'`);
+  }
+  const workerId = spec.workerId;
+  const command = spec.command;
+  if (typeof workerId !== "string") rejectArgument(call.path, "spec.workerId must be a string");
+  if (typeof command !== "string") rejectArgument(call.path, "spec.command must be a string");
+  const args = optionalStringList(call, spec, "args");
+  const allowReadPaths = optionalStringList(call, spec, "allowReadPaths");
+  const allowWritePaths = optionalStringList(call, spec, "allowWritePaths");
+  const env = spec.env;
+  if (
+    env !== undefined
+    && (env === null || typeof env !== "object" || Array.isArray(env)
+      || Object.values(env).some((value) => value !== undefined && typeof value !== "string"))
+  ) {
+    rejectArgument(call.path, "spec.env must be a record of strings");
+  }
+  const udsArgName = spec.udsArgName;
+  if (
+    udsArgName !== undefined
+    && typeof udsArgName !== "string"
+    && !(
+      typeof udsArgName === "object"
+      && udsArgName !== null
+      && typeof (udsArgName as { env?: unknown }).env === "string"
+    )
+  ) {
+    rejectArgument(call.path, "spec.udsArgName must be a string or { env: string }");
+  }
+  // READ may reach the plugin's own code as well as its data; WRITE may reach
+  // only the data directory. That is exactly the child's own ASRT grant set,
+  // which is what makes this composition rather than a second policy.
+  assertGrantsWithinEnvelope(call, "allowReadPaths", allowReadPaths, [
+    confinement.pluginRoot,
+    confinement.pluginDataDir,
+  ]);
+  assertGrantsWithinEnvelope(call, "allowWritePaths", allowWritePaths, [
+    confinement.pluginDataDir,
+  ]);
+  return {
+    workerId,
+    command,
+    ...(args !== undefined ? { args } : {}),
+    ...(env !== undefined ? { env: env as Record<string, string | undefined> } : {}),
+    ...(allowReadPaths !== undefined ? { allowReadPaths } : {}),
+    ...(allowWritePaths !== undefined ? { allowWritePaths } : {}),
+    ...(udsArgName !== undefined
+      ? { udsArgName: udsArgName as PluginWorkerSpec["udsArgName"] }
+      : {}),
+  };
+}
+
 /**
  * `spawnWorker(spec) → SpawnedPluginWorker`.
  *
@@ -382,11 +533,23 @@ function probePrivateHostPath(hostApi: ServiceHostApi): HostApiPathHandler {
  * first subscribe, because output produced between the spawn and the plugin's
  * first `onStdout` call would otherwise be lost — in-process it is lost the same
  * way, but here the round trip makes the window far wider.
+ *
+ * WHAT THE GRANT CHECK DOES AND DOES NOT COVER. It bounds the worker's
+ * filesystem grants by the child's own, so delegation cannot widen the jail.
+ * `command` is deliberately NOT constrained: the worker executes under those
+ * grants plus the shared deny floor, so naming a different binary reaches
+ * nothing the grants do not already allow, and requiring the command to sit
+ * inside the envelope would refuse a PATH-resolved runtime without closing
+ * anything. `env` is likewise the plugin's to choose — it reaches the worker,
+ * which is the plugin's own process either way.
  */
-function spawnWorkerPath(hostApi: ServiceHostApi): HostApiPathHandler {
+function spawnWorkerPath(
+  hostApi: ServiceHostApi,
+  confinement: DelegatedWorkerConfinement,
+): HostApiPathHandler {
   return defineHostApiPath("spawnWorker", async (call, scope) => {
     requireMember(call.path, hostApi.spawnWorker, "spawnWorker");
-    const spec = requireRecord(call, 0, "spec") as unknown as PluginWorkerSpec;
+    const spec = decodeWorkerSpec(call, confinement);
     const worker = await hostApi.spawnWorker!(spec);
 
     let exited = false;
@@ -484,6 +647,13 @@ function hasRoutineBySourcePath(hostApi: ServiceHostApi): HostApiPathHandler {
  */
 export function createServiceHostApiPaths(
   hostApi: ServiceHostApi,
+  /**
+   * The child's own filesystem envelope, so a worker it delegates cannot be
+   * granted more than the child holds. Required rather than optional: an
+   * omitted envelope would silently mean "unbounded", which is the exact
+   * default this exists to remove.
+   */
+  confinement: DelegatedWorkerConfinement,
 ): Record<ServiceHostApiPath, HostApiPathHandler> {
   return {
     getSecret: getSecretPath(hostApi),
@@ -494,6 +664,6 @@ export function createServiceHostApiPaths(
     logEvent: logEventPath(hostApi),
     callLlm: callLlmPath(hostApi),
     hostFetch: hostFetchPath(hostApi),
-    spawnWorker: spawnWorkerPath(hostApi),
+    spawnWorker: spawnWorkerPath(hostApi, confinement),
   };
 }

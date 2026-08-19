@@ -176,7 +176,7 @@ stack, and its ability to crash the host). So each sync member gets a real decis
 | Member | Returns | Decision |
 |---|---|---|
 | `storage.resolve(...segments)` | `string` | **Compute in the child.** It is a pure lexical join under `pluginDataDir`, which the child already has. No IPC. The traversal-rejection logic moves into a shared module both sides import, so the child's answer and the host's enforcement cannot diverge. |
-| `config.get(key)` | `T \| undefined` | **Host-pushed snapshot.** The resolved config object is sent at construction and re-sent on every change; the child reads its local copy. Ordering guarantee: the push is emitted *before* the `config.set` reply, so a plugin that sets-then-gets sees its own write. Cross-plugin config visibility was never a guarantee and is unchanged. |
+| `config.get(key)` | `T \| undefined` | **Host-pushed snapshot.** The resolved config object is sent at construction and re-sent on every change; the child reads its local copy. The re-push is its own notification kind, carrying the key set and the values separately, because `config.get` answers `undefined` for a cleared key and `undefined` is not a JSON value — a plain record would lose the property and the child would keep the value it was supposed to drop. The host subscribes to the change bus's every-key wildcard and rebuilds the snapshot through `config.get`, so there is one authority for what a config value is. The key set is the one the host can enumerate (schema properties, manifest config, construction snapshot); a key a plugin invents at runtime through `config.set` is written by the child when its own call resolves and is not re-pushed. Ordering guarantee: the push is emitted *before* the `config.set` reply, so a plugin that sets-then-gets sees its own write. Cross-plugin config visibility was never a guarantee and is unchanged. |
 | `getInstalledPluginIds()` | `string[]` | **Host-pushed snapshot**, re-sent on the same events `onPluginsChanged` already fires. |
 | `getAppPreference(key)` | `T \| undefined` | **Host-pushed snapshot.** The allow-listed key set is small and host-known. |
 | `getSecret(key)` | `string \| null` | **Contract change: becomes `Promise<string \| null>`.** No alternative exists. It cannot be snapshot-pushed — eagerly shipping secrets into the child is the exact opposite of the goal, and `runSecretGate` is a per-call four-tier decision, not a static grant. This is the one place the migration cannot avoid a flag-day. See Stage 4. |
@@ -218,6 +218,14 @@ functions in a return value.
   closes over `key` and synthesizes `bearer()` / `release()` locally. `release()`
   drops the child's copy and sends `release(leaseId)` so the host drops its own and
   unwires the abort. `bearer()` after release throws, per the existing contract.
+- *The other direction is a message too.* A host-side revocation reaches the child
+  as `subscription-closed`, and the child's lease stub drops its copy of the key on
+  it — otherwise the credential outlives the host's decision to take it back. That
+  notification is sent from the dispatcher's release path and from nowhere else,
+  for exactly one of the three close reasons: `disposed` came from the child so
+  echoing it is a ping-pong, `peer-gone` means the pipe is already closed, and
+  `revoked` is the host's own decision and the only one the child cannot otherwise
+  learn.
 - The `signal` in `opts` becomes an abort-channel id, as above.
 - *Honest note:* an isolated plugin still receives whatever credential the gate
   grants it. Isolation does not shrink what a **granted** plugin can exfiltrate; it
@@ -243,6 +251,28 @@ onStdout(), onStderr(), onExit() }` — live process control.
   permitted to spawn its own workers. ASRT grants are keyed to host-allocated paths
   and, on Windows, to a holder PID; a plugin-spawned grandchild would be outside
   that. The worker stays a child of main.
+- *Confinement composes.* `PluginWorkerSpec` lets the caller name its own
+  `allowReadPaths` and `allowWritePaths`, and in one heap that was harmless — the
+  plugin and the worker supervisor were the same trust domain. Across the boundary
+  they are not: a child that can ask the host to spawn `/bin/sh` with
+  `allowWritePaths: ["/"]` has escaped its jail by asking someone else to hold the
+  door. So the child's own filesystem envelope crosses with the dispatcher binding
+  and a delegated worker's grants are checked against it — read within
+  `pluginRoot` ∪ `pluginDataDir`, write within `pluginDataDir`, which is exactly
+  the pair the child's own wrap grants. `command` and `env` are deliberately not
+  constrained: the worker runs under those grants plus the shared deny floor, so
+  naming a different binary reaches nothing the grants do not already allow.
+  Stated residual: the check is lexical, because a grant may name a directory the
+  worker is about to create, so a symlink planted inside the data directory is the
+  worker supervisor's to catch and not this.
+- *What this makes visible.* `local-indexer`'s worker asks to read a corp CA under
+  `~/.lvis/certs/` and to write the user's chosen index root and workspace — all
+  outside the plugin's own two directories. The composition rule refuses that, and
+  refusing it is the correct answer: the plugin child cannot reach those paths
+  either, so a worker that could would be a widening nobody granted. Moving that
+  plugin therefore starts with the HOST widening the child's own envelope to
+  include them, after which the delegated worker composes with no further change —
+  which is the point of deriving both lists from one place.
 
 **`storage.read → Uint8Array` and `storage.write(data: string | Uint8Array)`.**
 Base64 on the wire with an explicit encoding tag, reconstructed as `Uint8Array` in

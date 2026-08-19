@@ -95,10 +95,18 @@ function writePluginModule(): { dir: string; entryPath: string } {
 function fakeHostApi(): PluginHostApi & {
   emitted: Array<[string, unknown]>;
   logged: Array<[string, string]>;
+  /** Write a config key and fire the bus, as the real `config.set` path does. */
+  setHostConfig: (key: string, value: unknown) => void;
 } {
   const emitted: Array<[string, unknown]> = [];
   const logged: Array<[string, string]> = [];
   const eventHandlers = new Map<string, Set<(data: unknown) => void>>();
+  // The plugin's resolved config, and the every-key wildcard the real change
+  // bus publishes. The host's own snapshot watcher subscribes to `"*"`, so a
+  // fake whose `onChange` ignored its callback would make that watcher
+  // untestable — and a watcher nothing drives is a watcher nothing proves.
+  const configValues = new Map<string, unknown>([["domains", ["lge.com"]]]);
+  const configListeners = new Map<string, Set<(value: unknown) => void>>();
   const hostApi = {
     emitted,
     logged,
@@ -117,9 +125,22 @@ function fakeHostApi(): PluginHostApi & {
       readEncrypted: vi.fn(),
     },
     config: {
-      get: vi.fn(),
+      get: vi.fn((key: string) => configValues.get(key)),
       set: vi.fn(async () => undefined),
-      onChange: vi.fn(() => () => undefined),
+      onChange: vi.fn((key: string, callback: (value: unknown) => void) => {
+        let set = configListeners.get(key);
+        if (!set) {
+          set = new Set();
+          configListeners.set(key, set);
+        }
+        set.add(callback);
+        return () => set?.delete(callback);
+      }),
+    },
+    setHostConfig: (key: string, value: unknown) => {
+      if (value === undefined) configValues.delete(key);
+      else configValues.set(key, value);
+      for (const listener of configListeners.get("*") ?? []) listener(value);
     },
     agentApproval: { request: vi.fn(), respond: vi.fn() },
     getSecret: vi.fn(),
@@ -156,6 +177,7 @@ function fakeHostApi(): PluginHostApi & {
   } as unknown as PluginHostApi & {
     emitted: Array<[string, unknown]>;
     logged: Array<[string, string]>;
+    setHostConfig: (key: string, value: unknown) => void;
   };
   return hostApi;
 }
@@ -197,9 +219,15 @@ function hostContext(
   };
 }
 
+/** The child's own filesystem envelope, as the production factory derives it. */
+const CONFINEMENT = {
+  pluginRoot: "/plugins/work-assistant",
+  pluginDataDir: "/plugins/work-assistant/data",
+};
+
 describe("the dispatch table, assembled from the four group factories", () => {
   it("binds every member the contract says the host answers", () => {
-    const table = createBoundHostApiDispatchTable(fakeHostApi());
+    const table = createBoundHostApiDispatchTable(fakeHostApi(), CONFINEMENT);
     const unbound = (Object.keys(table) as HostApiPath[]).filter(
       (path) => table[path].status === "unimplemented",
     );
@@ -207,7 +235,7 @@ describe("the dispatch table, assembled from the four group factories", () => {
   });
 
   it("leaves the child-local members refusing, rather than servicing them", () => {
-    const table = createBoundHostApiDispatchTable(fakeHostApi());
+    const table = createBoundHostApiDispatchTable(fakeHostApi(), CONFINEMENT);
     const childLocal = (Object.keys(HOSTAPI_PATH_CONTRACTS) as HostApiPath[]).filter(
       (path) => HOSTAPI_PATH_CONTRACTS[path].result === "child-local",
     );
@@ -449,6 +477,66 @@ describe("a child that dies is a failed plugin, never a hung host", () => {
       // The host-side registration is undone even though the child never sent
       // a release — case 2 of the four ways a two-sided lifetime ends.
       expect(unsubscribe).toHaveBeenCalledTimes(1);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("the host keeps the child's config snapshot current", () => {
+  it("re-pushes after a change, so config.get stops answering with the construction value", async () => {
+    // `config.get` is answered in the child from a pushed snapshot. Without a
+    // re-push it answers with whatever the key held when the plugin started —
+    // for the life of the process, with nothing reporting the divergence. The
+    // plugin below subscribes to NOTHING: the member has to be current whether
+    // or not it ever called `config.onChange`.
+    const { dir, entryPath } = writePluginModule();
+    try {
+      const hostApi = fakeHostApi();
+      const { child } = pairedChild();
+      const factory = createOutOfProcessPluginFactory({
+        manifest: {
+          ...MANIFEST,
+          configSchema: { type: "object", properties: { domains: { type: "array" } } },
+        } as PluginManifest,
+        entryPath,
+        connect: async () => child,
+      });
+      const instance = await factory(hostContext(hostApi));
+      const before = (await instance.handlers.pilot_echo!()) as {
+        configuredDomains: unknown;
+      };
+      expect(before.configuredDomains).toEqual(["lge.com"]);
+
+      hostApi.setHostConfig("domains", ["lvisai.xyz"]);
+
+      const after = (await instance.handlers.pilot_echo!()) as {
+        configuredDomains: unknown;
+      };
+      expect(after.configuredDomains).toEqual(["lvisai.xyz"]);
+      await instance.stop?.();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stops watching when the incarnation ends", async () => {
+    // The watcher is the host's own subscription, not one the plugin opened, so
+    // nothing else releases it. A watcher outliving the incarnation would write
+    // into a closed transport on the next settings edit.
+    const { dir, entryPath } = writePluginModule();
+    try {
+      const hostApi = fakeHostApi();
+      const { child } = pairedChild();
+      const factory = createOutOfProcessPluginFactory({
+        manifest: MANIFEST,
+        entryPath,
+        connect: async () => child,
+      });
+      const instance = await factory(hostContext(hostApi));
+      expect(hostApi.config.onChange).toHaveBeenCalledWith("*", expect.any(Function));
+      await instance.stop?.();
+      expect(() => hostApi.setHostConfig("domains", ["after-stop"])).not.toThrow();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
