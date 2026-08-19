@@ -283,4 +283,59 @@ describe("App view history after a restored launch location", () => {
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
     expect(backButton(container).disabled).toBe(true);
   });
+
+  it("leaves a step the user took before the restore undoable after it lands", async () => {
+    const { gate, getSettings } = restoreGate();
+    const { container } = await renderApp({ hasApiKey: true, getSettings });
+    await waitFor(() => expect(container.querySelector('[data-testid="view-path-nav"]')).not.toBeNull());
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="sidebar-routines"]') as HTMLButtonElement);
+    });
+    await waitFor(() => expect(path(container)).toContain("루틴"));
+
+    // The restore now moves the window off the page the user chose. Whatever
+    // else that is, it is not the launch location claiming an empty history —
+    // back has to return the user to where they put themselves.
+    await act(async () => {
+      gate.resolve(settingsWithActiveView("work-board"));
+    });
+    await waitFor(() => expect(path(container)).toContain("업무 보드"));
+
+    await act(async () => {
+      fireEvent.click(backButton(container));
+    });
+    await waitFor(() => expect(path(container)).toContain("루틴"));
+  });
+
+  // The view and the settings page are restored by two SEPARATE reads. Over
+  // IPC those are two round trips and can land in two different commits, in
+  // either order, so each pending read is released in its own commit and both
+  // orders are driven — batching them into one, as the harness otherwise does,
+  // never observes the second half on its own at all.
+  for (const order of ["in call order", "in reverse order"] as const) {
+    it(`takes the restored settings PAGE as the root when the halves land ${order}`, async () => {
+      const gates: Array<ReturnType<typeof deferred<unknown>>> = [];
+      const { container } = await renderApp({
+        hasApiKey: true,
+        getSettings: () => {
+          const gate = deferred<unknown>();
+          gates.push(gate);
+          return gate.promise;
+        },
+      });
+      await waitFor(() => expect(path(container)).toContain("홈"));
+
+      const pending = order === "in reverse order" ? [...gates].reverse() : [...gates];
+      for (const gate of pending) {
+        await act(async () => {
+          gate.resolve(settingsWithActiveView("settings", "permissions"));
+        });
+      }
+
+      await waitFor(() => expect(path(container)).toContain("권한"));
+      // Neither half is a place the user went, so neither may be offered as one.
+      expect(backButton(container).disabled).toBe(true);
+    });
+  }
 });
