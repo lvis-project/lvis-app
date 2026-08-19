@@ -57,6 +57,7 @@ import {
   SubscriptionLedger,
   type SubscriptionRelease,
 } from "./subscription-ledger.js";
+import { createServiceChildMembers } from "./host-api-service-child.js";
 
 /**
  * The construction payload, which is `PluginRuntimeContext` minus the two
@@ -118,6 +119,22 @@ export interface PluginChildRuntime {
     path: HostApiPath,
     handler: (payload: unknown) => void,
   ): { readonly subscriptionId: string; readonly dispose: () => void };
+  /**
+   * Open a child-side registration under a HOST-allocated id, and return the
+   * disposer.
+   *
+   * The counterpart to {@link openSubscription}, and both exist because the two
+   * lifetime-bearing shapes allocate their ids at opposite ends. A
+   * `handler-registration` member (`onEvent`, `config.onChange`, …) is named by
+   * the CHILD so no event can arrive before its handler is registered; a
+   * `handle` member (`spawnWorker`, `resolveApiKey`) is named by the HOST,
+   * because the host owns the resource and cannot be told what to call it.
+   */
+  adoptSubscription(
+    path: HostApiPath,
+    subscriptionId: string,
+    handler: (payload: unknown) => void,
+  ): () => void;
   /**
    * The child end of an abort channel: hand over the `AbortSignal` an argument
    * carried, receive the id that crosses in its place.
@@ -314,6 +331,41 @@ export async function startPluginChildRuntime(
       },
     };
   };
+  const adoptSubscription = (
+    path: HostApiPath,
+    subscriptionId: string,
+    handler: (payload: unknown) => void,
+  ) => {
+    subscriptions.adopt(subscriptionId, { path, handler }, releaseChildSubscription);
+    return () => {
+      subscriptions.close(subscriptionId, "disposed");
+    };
+  };
+  const openAbortChannel = (signal: AbortSignal) => {
+    if (signal.aborted) throw signal.reason;
+    let subscriptionId = "";
+    const onAbort = () => {
+      channel.notify({
+        wire: HOST_API_WIRE_VERSION,
+        pluginId,
+        generationId: context.generationId,
+        kind: "abort",
+        subscriptionId,
+      });
+      abortChannels.close(subscriptionId, "disposed");
+    };
+    subscriptionId = abortChannels.open(
+      { detach: () => signal.removeEventListener("abort", onAbort) },
+      (entry) => entry.detach(),
+    );
+    signal.addEventListener("abort", onAbort, { once: true });
+    return {
+      subscriptionId,
+      release: () => {
+        abortChannels.close(subscriptionId, "disposed");
+      },
+    };
+  };
   const caller = createHostApiCaller(channel, context);
   /**
    * The child's copy of the resolved config.
@@ -331,6 +383,14 @@ export async function startPluginChildRuntime(
    */
   const members: Partial<Record<HostApiPath, (...args: unknown[]) => unknown>> = {
     ...createInteractionChildMembers(caller),
+    ...createServiceChildMembers({
+      pluginId,
+      manifest,
+      call: caller,
+      openAbortChannel,
+      adoptSubscription,
+      report: log,
+    }),
     ...createConfigSubscriptionChildMembers({
       pluginId,
       call: caller,
@@ -395,31 +455,8 @@ export async function startPluginChildRuntime(
       return subscriptions.openCount;
     },
     openSubscription,
-    openAbortChannel(signal) {
-      if (signal.aborted) throw signal.reason;
-      let subscriptionId = "";
-      const onAbort = () => {
-        channel.notify({
-          wire: HOST_API_WIRE_VERSION,
-          pluginId,
-          generationId: context.generationId,
-          kind: "abort",
-          subscriptionId,
-        });
-        abortChannels.close(subscriptionId, "disposed");
-      };
-      subscriptionId = abortChannels.open(
-        { detach: () => signal.removeEventListener("abort", onAbort) },
-        (entry) => entry.detach(),
-      );
-      signal.addEventListener("abort", onAbort, { once: true });
-      return {
-        subscriptionId,
-        release: () => {
-          abortChannels.close(subscriptionId, "disposed");
-        },
-      };
-    },
+    adoptSubscription,
+    openAbortChannel,
     deliver(notification) {
       if (notification.kind === "subscription-closed") {
         return subscriptions.close(notification.subscriptionId, notification.reason)
