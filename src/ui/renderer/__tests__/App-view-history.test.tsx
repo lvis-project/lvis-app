@@ -284,7 +284,10 @@ describe("App view history after a restored launch location", () => {
     expect(backButton(container).disabled).toBe(true);
   });
 
-  it("leaves a step the user took before the restore undoable after it lands", async () => {
+  /** Let every pending restore land before concluding that none moved anything. */
+  const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 100)); });
+
+  it("does not move the user off a step they took before the restore landed", async () => {
     const { gate, getSettings } = restoreGate();
     const { container } = await renderApp({ hasApiKey: true, getSettings });
     await waitFor(() => expect(container.querySelector('[data-testid="view-path-nav"]')).not.toBeNull());
@@ -294,18 +297,66 @@ describe("App view history after a restored launch location", () => {
     });
     await waitFor(() => expect(path(container)).toContain("루틴"));
 
-    // The restore now moves the window off the page the user chose. Whatever
-    // else that is, it is not the launch location claiming an empty history —
-    // back has to return the user to where they put themselves.
+    // The stored location arrives after the user has already chosen one. Being
+    // able to press back afterwards is not the same as not being moved: this
+    // used to land, and the step out of the user's page was undoable rather
+    // than absent.
     await act(async () => {
       gate.resolve(settingsWithActiveView("work-board"));
     });
-    await waitFor(() => expect(path(container)).toContain("업무 보드"));
+    await settle();
+    expect(path(container)).toContain("루틴");
 
+    // What is behind them is their own step off the seed, not a launch
+    // location that never took effect.
     await act(async () => {
       fireEvent.click(backButton(container));
     });
+    await waitFor(() => expect(path(container)).toContain("홈"));
+  });
+
+  /**
+   * The settings PAGE restores from its own read and is NOT discarded by a
+   * navigation here — choosing a view says nothing about which settings page
+   * you want. It still raises the restore count the history reads, though, and
+   * that count is shared between both halves. So the half that was discarded
+   * and the half that was not have to agree about the root: an increase that
+   * belongs to a page nobody is looking at must not turn the user's own step
+   * into the launch location.
+   */
+  it("does not let the settings-page half claim the root after the view half was discarded", async () => {
+    const gates: Array<ReturnType<typeof deferred<unknown>>> = [];
+    const { container } = await renderApp({
+      hasApiKey: true,
+      getSettings: () => {
+        const gate = deferred<unknown>();
+        gates.push(gate);
+        return gate.promise;
+      },
+    });
+    await waitFor(() => expect(container.querySelector('[data-testid="view-path-nav"]')).not.toBeNull());
+
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="sidebar-routines"]') as HTMLButtonElement);
+    });
     await waitFor(() => expect(path(container)).toContain("루틴"));
+
+    // Released one commit at a time — over IPC these are separate round trips,
+    // and batching them never observes the second half on its own.
+    for (const gate of gates) {
+      await act(async () => {
+        gate.resolve(settingsWithActiveView("settings", "permissions"));
+      });
+    }
+    await settle();
+
+    // Neither half moved the window: the view half was discarded, and the page
+    // half is not a place while the user is not in Settings.
+    expect(path(container)).toContain("루틴");
+    await act(async () => {
+      fireEvent.click(backButton(container));
+    });
+    await waitFor(() => expect(path(container)).toContain("홈"));
   });
 
   // The view and the settings page are restored by two SEPARATE reads. Over

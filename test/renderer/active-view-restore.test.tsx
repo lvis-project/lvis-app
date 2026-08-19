@@ -17,7 +17,7 @@ import "./setup.js";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { act, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
-import { activeSettingsTab, settingsWithActiveView } from "./helpers.js";
+import { activeSettingsTab, deferred, settingsWithActiveView } from "./helpers.js";
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -165,5 +165,165 @@ describe("restoring activeView on launch", () => {
     });
 
     await waitFor(() => expect(activeSettingsTab(container)).toBe("permissions"));
+  });
+});
+
+/**
+ * The restore and the user, racing.
+ *
+ * On a fast launch the stored location is in place before anyone can click, so
+ * neither half of this is reachable — every test here holds the settings read
+ * open on purpose, which is the only way to be inside the window at all.
+ *
+ * The pair has to be driven together. "The restore lands" passes on its own
+ * with the discard missing, and "the user's choice survives" passes on its own
+ * with the restore broken outright; only asserting both catches a guard that
+ * bought one by giving up the other.
+ */
+describe("a launch whose stored location has not arrived yet", () => {
+  /** A launch whose settings read is held open until `release()`. */
+  function heldLaunch(stored: ReturnType<typeof settingsWithActiveView>) {
+    const gate = deferred<void>();
+    return {
+      release: () => gate.resolve(),
+      opts: {
+        hasApiKey: true,
+        settings: stored,
+        getSettings: async () => {
+          await gate.promise;
+          return stored;
+        },
+      },
+    };
+  }
+
+  async function clickNav(container: HTMLElement, testId: string) {
+    const el = container.querySelector(`[data-testid="${testId}"]`) as HTMLButtonElement | null;
+    expect(el, `missing [data-testid="${testId}"]`).not.toBeNull();
+    await act(async () => {
+      el!.click();
+    });
+  }
+
+  it("still lands on the stored view when nobody touches the app", async () => {
+    const { release, opts } = heldLaunch(settingsWithActiveView("work-board"));
+    const { container } = await renderApp(opts);
+    // Rendered, interactive, and NOT yet where it is going — the window the
+    // other half of this pair is about.
+    await waitFor(() => expect(atHome(container)).toBe(true));
+
+    await act(async () => {
+      release();
+    });
+
+    await waitFor(() => expect(isActive(container, "toolbar-work-board")).toBe(true));
+  });
+
+  it("keeps the view the user picked while the read was still in flight", async () => {
+    const { release, opts } = heldLaunch(settingsWithActiveView("work-board"));
+    const { container } = await renderApp(opts);
+    await waitFor(() => expect(atHome(container)).toBe(true));
+
+    await clickNav(container, "sidebar-routines");
+    await waitFor(() => expect(isActive(container, "sidebar-routines")).toBe(true));
+
+    // The stored location arrives second. Applying it now would take the screen
+    // the user is on away from them, for a value they have already superseded.
+    await act(async () => {
+      release();
+    });
+    await settle();
+
+    expect(isActive(container, "sidebar-routines")).toBe(true);
+    expect(isActive(container, "toolbar-work-board")).toBe(false);
+  });
+
+  it("holds a restored PLUGIN view back for good once the user has picked a view", async () => {
+    const { release, opts } = heldLaunch(settingsWithActiveView(PLUGIN_VIEW_KEY));
+    const { container } = await renderApp({
+      ...opts,
+      // The plugin is installed and its view does load — so the only thing
+      // keeping the app off it is the user's own navigation. Without the
+      // discard, this restore lands LATER than the built-in one (it waits for
+      // the view list), which is the longer window, not a safer one.
+      pluginUiExtensions: [sidebarView(PLUGIN_ID, VIEW_ID)],
+    });
+    await waitFor(() => expect(atHome(container)).toBe(true));
+
+    await clickNav(container, "sidebar-routines");
+    await waitFor(() => expect(isActive(container, "sidebar-routines")).toBe(true));
+
+    await act(async () => {
+      release();
+    });
+    await settle();
+
+    expect(isActive(container, "sidebar-routines")).toBe(true);
+    expect(isActive(container, PLUGIN_NAV_TESTID)).toBe(false);
+  });
+
+  it("drops a restore ALREADY waiting on its plugin when the list finally loads", async () => {
+    // The other window, and the one the flag on the read cannot reach: here the
+    // settings read has already resolved and been accepted, so the restored key
+    // is parsed and HELD. Nothing about a later navigation goes near that read
+    // again — only discarding what is held can stop it.
+    const lateViews: unknown[] = [];
+    const { container, emitPluginRuntimeUpdated } = await renderApp({
+      hasApiKey: true,
+      settings: settingsWithActiveView(PLUGIN_VIEW_KEY),
+      pluginUiExtensions: lateViews,
+    });
+    await settle();
+    expect(atHome(container)).toBe(true);
+
+    await clickNav(container, "sidebar-routines");
+    await waitFor(() => expect(isActive(container, "sidebar-routines")).toBe(true));
+
+    // The plugin's view turns up late — a slow load, not an uninstall, so the
+    // held key is now perfectly valid and would be entered.
+    lateViews.push(sidebarView(PLUGIN_ID, VIEW_ID));
+    await act(async () => {
+      emitPluginRuntimeUpdated({ pluginId: PLUGIN_ID });
+    });
+    await settle();
+
+    // The row exists now, which is what makes this assertion mean anything.
+    expect(container.querySelector(`[data-testid="${PLUGIN_NAV_TESTID}"]`)).not.toBeNull();
+    expect(isActive(container, "sidebar-routines")).toBe(true);
+    expect(isActive(container, PLUGIN_NAV_TESTID)).toBe(false);
+  });
+
+  it("makes that pick the location the NEXT launch restores, not the superseded one", async () => {
+    const { release, opts } = heldLaunch(settingsWithActiveView("work-board"));
+    const first = await renderApp(opts);
+    await waitFor(() => expect(atHome(first.container)).toBe(true));
+
+    await clickNav(first.container, "sidebar-routines");
+    await waitFor(() => expect(isActive(first.container, "sidebar-routines")).toBe(true));
+    await act(async () => {
+      release();
+    });
+    await settle();
+
+    // Surviving the restore for THIS run is not enough. A choice that is never
+    // written is the same lost place one restart later — the app would open on
+    // the value the user just overrode.
+    await waitFor(() =>
+      expect(first.api.updateSettings).toHaveBeenCalledWith({
+        system: { activeView: "routines" },
+      }),
+    );
+    expect(first.api.updateSettings).not.toHaveBeenCalledWith({
+      system: { activeView: "work-board" },
+    });
+    first.unmount();
+
+    // Relaunched from exactly the patch asserted above, through the normal
+    // restore path — no hand-picked value in between.
+    const second = await renderApp({
+      hasApiKey: true,
+      settings: settingsWithActiveView("routines"),
+    });
+    await waitFor(() => expect(isActive(second.container, "sidebar-routines")).toBe(true));
   });
 });
