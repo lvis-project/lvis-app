@@ -279,8 +279,18 @@ describe("the hostApi stub the child hands the plugin", () => {
   });
 
   it("throws from an unwired member instead of resolving undefined", async () => {
-    const { child } = await harness();
-    expect(() => child.hostApi.getSecret("api-key")).toThrow(/not wired/u);
+    // Built through the stub builder with NOTHING wired, rather than by naming a
+    // member on a live runtime: stubs land group by group, so an assertion that
+    // named one would stop testing the refusal the moment that member was wired.
+    // What is under test is the composition — every declared path, nested,
+    // resolving to the throwing default.
+    const stub = createChildHostApiStub(PLUGIN_ID, (path) =>
+      unimplementedChildMember(PLUGIN_ID, path),
+    ) as unknown as Record<string, (...args: unknown[]) => unknown>;
+    expect(() => stub.getSecret("api-key")).toThrow(/not wired/u);
+    expect(() =>
+      (stub.storage as unknown as Record<string, () => unknown>).readText(),
+    ).toThrow(/not wired/u);
   });
 
   it("routes context.log to the host as a notification", async () => {
