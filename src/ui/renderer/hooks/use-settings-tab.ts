@@ -7,6 +7,13 @@ export interface UseSettingsTabResult {
   settingsTab: SettingsTab;
   /** Set it — persists immediately, same family as `sidebarActiveTab`. */
   setSettingsTab: (tab: string) => void;
+  /**
+   * How many times THIS hook has applied the stored page. Monotonic, and read
+   * the same way as `useActiveView.restoresApplied`: the tab is the other half
+   * of the window's location, so a restore that lands here has to be
+   * distinguishable from a user opening a settings page too.
+   */
+  restoresApplied: number;
 }
 
 /**
@@ -25,6 +32,7 @@ export function useSettingsTab(api: LvisApi): UseSettingsTabResult {
   // A ref, not state: this setter stands in for a `useState` setter at call
   // sites whose dep arrays omit it, so its identity must never change.
   const hydratedRef = useRef(false);
+  const [restoresApplied, setRestoresApplied] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,7 +41,9 @@ export function useSettingsTab(api: LvisApi): UseSettingsTabResult {
       .then((settings) => {
         if (cancelled) return;
         const stored = settings?.system?.settingsTab;
-        if (stored !== undefined) setSettingsTabState(normalizeSettingsTab(stored));
+        if (stored === undefined) return;
+        setSettingsTabState(normalizeSettingsTab(stored));
+        setRestoresApplied((applied) => applied + 1);
       })
       .catch(() => {
         // Non-fatal: the default tab is a valid place to land.
@@ -57,5 +67,5 @@ export function useSettingsTab(api: LvisApi): UseSettingsTabResult {
     [api],
   );
 
-  return { settingsTab, setSettingsTab };
+  return { settingsTab, setSettingsTab, restoresApplied };
 }
