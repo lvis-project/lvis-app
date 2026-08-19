@@ -37,6 +37,8 @@ import {
   importPluginFactory,
 } from "./plugin-loader.js";
 import { createLogger } from "../../lib/logger.js";
+import { isOutOfProcessPlugin } from "../isolation/out-of-process-plugins.js";
+import { createOutOfProcessPluginFactory } from "../isolation/out-of-process-plugin.js";
 import { plog, PluginPhase } from "../lifecycle-log.js";
 import {
   hasExclusivePluginLifecycleMutation,
@@ -57,12 +59,35 @@ import { PluginRuntimeCapabilityLifecycle } from "./runtime-lifecycle-capability
 const log = createLogger("plugin-runtime");
 const BOOT_START_CANCELLED = "plugin start cancelled";
 export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
+  /**
+   * THE routing decision (`docs/blueprints/plugin-process-isolation.md` §9).
+   *
+   * Every instantiation path — boot load, add, restart, capability reload —
+   * reaches the plugin's factory through this one method, so the in-process and
+   * out-of-process arms are chosen in exactly one place. An id in the host-owned
+   * routing SOT gets a factory that spawns a confined child; every other id gets
+   * the dynamic import it has always got, unchanged.
+   *
+   * It is a routing decision and NOT a fallback: nothing here retries in-process
+   * when the child arm fails. A plugin whose child cannot be spawned or confined
+   * fails to load, which is the same outcome an unimportable entry module has.
+   */
   protected async importPluginFactoryForLifecycle(
     pluginId: string,
     resolvedEntryPath: string,
+    manifest: PluginManifest,
     bustCache?: boolean,
   ): Promise<RuntimePluginFactory | undefined> {
     this.assertPluginLifecycleAvailable(pluginId);
+    if (isOutOfProcessPlugin(pluginId)) {
+      // No import happens in main for this plugin, so there is no ESM
+      // evaluation to bound and nothing to quarantine: the child performs the
+      // import, and the whole of it is bounded by the factory timeout the
+      // caller already applies. `bustCache` is irrelevant for the same reason —
+      // a fresh process has an empty module registry, which is a stronger
+      // cache-bust than a query parameter.
+      return createOutOfProcessPluginFactory({ manifest, entryPath: resolvedEntryPath });
+    }
     try {
       return await runPluginImportWithTimeout(
         () => importPluginFactory(resolvedEntryPath, bustCache),
@@ -277,6 +302,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
         createPlugin = await this.importPluginFactoryForLifecycle(
           manifest.id,
           resolvedEntryPath,
+          manifest,
         );
       } catch (err) {
         plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "import" }, "import failed");
@@ -994,6 +1020,7 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       createPlugin = await this.importPluginFactoryForLifecycle(
         pluginId,
         resolvedEntryPath,
+        manifest,
         true,
       );
       plog("debug", { pluginId, phase: PluginPhase.RESTART_RELOAD_OK }, "module re-imported");

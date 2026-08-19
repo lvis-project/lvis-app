@@ -1,10 +1,8 @@
 /**
  * Which plugins load in their own process.
  *
- * It is EMPTY, and empty is the whole point right now: the child runtime and
- * the reverse channel exist, nothing routes to them, and the app behaves exactly
- * as it did. Populating this set one id at a time is how the isolated path gets
- * exercised by real plugins before an untrusted one is ever admitted to it.
+ * Populated one id at a time, which is how the isolated path gets exercised by
+ * real plugins before an untrusted one is ever admitted to it.
  *
  * NO CONFIGURATION READS THIS. Not an environment variable, not a settings key,
  * not a manifest field. A plugin moves out-of-process when a reviewed commit
@@ -24,9 +22,23 @@
  *
  * Frozen so an id cannot be added at runtime — the set a plugin is checked
  * against must be the set that was reviewed.
+ *
+ * `work-assistant` is first because it is the least entangled first-party
+ * plugin, and that was measured rather than assumed. Across the six, its
+ * production sources reach ten hostApi members — `callLlm`, `config.get`,
+ * `config.set`, `emitEvent`, `getInstalledPluginIds`, `hasRoutineBySource`,
+ * `logEvent`, `onEvent`, `onPluginsChanged`, `triggerConversation` — and none
+ * of the ones whose marshalling §3.2 calls out as lossy or stateful: no
+ * `getSecret`, no `hostFetch`, no `resolveApiKey`, no `spawnWorker`, no
+ * `storage.*`, no auth window. It declares three tools, no `uiResources[]`, and
+ * no `networkAccess`, so nothing about it depends on a grant this boundary
+ * cannot express. `meeting` (32 tools, `getSecret` + `hostFetch` +
+ * `resolveApiKey`) and `local-indexer` (`spawnWorker`, whose grandchild is
+ * explicitly outside a plugin child's authority per §3.2) are the far end of
+ * that scale and are deliberately not first.
  */
 export const OUT_OF_PROCESS_PLUGIN_IDS: ReadonlySet<string> = Object.freeze(
-  new Set<string>(),
+  new Set<string>(["work-assistant"]),
 );
 
 /** Whether `pluginId` loads out-of-process. */

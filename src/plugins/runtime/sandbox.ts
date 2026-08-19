@@ -4,7 +4,6 @@
 
 import { mkdirSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 import type { PluginHostApi, PluginManifest } from "../types.js";
 import { createPluginStorage } from "../storage.js";
 import { applyConfigDefaults } from "../config-schema.js";
@@ -80,13 +79,6 @@ export function resolveRealEntryPath(entryPath: string): string {
   }
 }
 
-/**
- * Build a file:// import URL from an entry path.
- */
-export function buildImportUrl(entryPath: string, bustCache = false): string {
-  const url = pathToFileURL(entryPath).href;
-  return bustCache ? `${url}?reload=${Date.now()}` : url;
-}
 
 /**
  * Compute and ensure the plugin's writable data directory at

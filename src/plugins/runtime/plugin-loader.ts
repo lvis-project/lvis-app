@@ -19,7 +19,7 @@ import type {
   RuntimePluginFactory,
 } from "../types.js";
 import { isAppVisible } from "./tool-visibility.js";
-import { buildImportUrl } from "./sandbox.js";
+import { pathToFileURL } from "node:url";
 
 /**
  * #885 v6 — the app-visible method names a manifest declares: the normalized
@@ -49,10 +49,30 @@ function declaredRuntimeMethods(manifest: Pick<PluginManifest, "tools">,
 }
 
 /**
+ * Build a file:// import URL from an entry path.
+ *
+ * It lives HERE rather than in `sandbox.ts` because it is the one line of that
+ * module an isolated plugin child needs, and `sandbox.ts` reaches Electron
+ * through `plugins/storage.ts` (`safeStorage`). A child is a plain Node process
+ * where that import does not resolve, so leaving this function there would have
+ * forced the child to either carry a second copy of it or drag Electron in —
+ * and it is `import()`'s own argument, so the module that performs the import
+ * is where it belongs. Nothing else in `sandbox.ts` used it.
+ */
+export function buildImportUrl(entryPath: string, bustCache = false): string {
+  const url = pathToFileURL(entryPath).href;
+  return bustCache ? `${url}?reload=${Date.now()}` : url;
+}
+
+/**
  * Dynamically import a plugin's resolved entry path and return its factory
  * (`default` preferred, else `createPlugin`), or `undefined` when neither is
  * exported. Import failures propagate to the caller so each site can log /
  * audit them in its own phase.
+ *
+ * ELECTRON-FREE, and that is load-bearing: an out-of-process plugin child calls
+ * this to obtain the same factory the in-process loader obtains, so the two
+ * arms cannot disagree about which export is the plugin.
  */
 export async function importPluginFactory(
   resolvedEntryPath: string,

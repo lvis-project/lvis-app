@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, extname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const SRC_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -58,6 +58,29 @@ const FORBIDDEN_LIVE_APP_LITERALS = [
  */
 const ALLOWED_DIRS = new Set(["onboarding", "i18n"]);
 
+/**
+ * The one file that must name a plugin id, and the only needles it may name.
+ *
+ * `plugins/isolation/out-of-process-plugins.ts` is the routing SOT for the
+ * process boundary (`docs/blueprints/plugin-process-isolation.md` §9): it
+ * records which plugins the host loads in a confined child process instead of
+ * importing into main. That decision cannot live anywhere else, and the design
+ * says so explicitly — not an environment variable (the boundary could change
+ * under a user with no record of it), not a settings key, and above all not a
+ * manifest field, because the plugin is the one party that must not get a say
+ * in whether it is isolated. A reviewed commit adding an id to a frozen set is
+ * the mechanism, which means the id is source and shows up in a diff.
+ *
+ * That is a DIFFERENT concern from the one this audit exists for. The rule here
+ * is that the host must never INVOKE a plugin by a hard-coded id or tool name —
+ * and that rule still holds in this file, which is why the exemption lists only
+ * plugin-id needles. The tool-name needles (`work_assistant`, `msgraph_`,
+ * `agent_hub`) stay forbidden everywhere, this file included.
+ */
+const ALLOWED_FILE_LITERALS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+  ["plugins/isolation/out-of-process-plugins.ts", new Set(["work-assistant"])],
+]);
+
 function listSourceFiles(dir: string): string[] {
   const entries = readdirSync(dir);
   const files: string[] = [];
@@ -82,7 +105,11 @@ describe("app runtime stays decoupled from plugin-specific tool names", () => {
     const violations: string[] = [];
     for (const file of listSourceFiles(SRC_ROOT)) {
       const content = readFileSync(file, "utf-8");
+      const allowed = ALLOWED_FILE_LITERALS.get(
+        relative(SRC_ROOT, file).split(sep).join("/"),
+      );
       for (const forbidden of FORBIDDEN_LIVE_APP_LITERALS) {
+        if (allowed?.has(forbidden.needle)) continue;
         if (content.includes(forbidden.needle)) {
           violations.push(`${relative(SRC_ROOT, file)} contains '${forbidden.needle}' — ${forbidden.reason}`);
         }
