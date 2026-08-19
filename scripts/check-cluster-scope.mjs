@@ -284,8 +284,9 @@ function collectRollingWindowCandidates({
       // mutation turned an ordinary merge landing mid-scan into a hard CI
       // failure, and it bought no completeness. A pull whose `updated_at`
       // rises ABOVE the prefix this pass has already read is never delivered
-      // to this pass, order assertion or not; that hole is closed by the
-      // repeated scan in `evaluateSensitiveRollingWindow`, not here.
+      // to this pass, order assertion or not. That hole is covered by the
+      // repeated scan in `evaluateSensitiveRollingWindow` — within its pass
+      // budget, and only once the pull has stopped moving — not here.
       if (updatedAt < oldestUpdatedInPage) oldestUpdatedInPage = updatedAt;
 
       // Same mutable-sort-key cause as the note above, seen from the other
@@ -311,6 +312,18 @@ function collectRollingWindowCandidates({
       if (mergedAt >= sinceTime) candidates.push(number);
     }
 
+    // Stop once a page has reached past the window. What makes that sound is
+    // `updated_at >= merged_at` — an update is at least as recent as the merge
+    // that caused it — so on a list sorted by `updated_at` descending, a page
+    // whose OLDEST `updated_at` predates the window is followed only by pulls
+    // that also merged before it. Keyed on the page's oldest entry rather than
+    // its last: those coincide only while the ordering holds, and a last-entry
+    // stop would end the scan with in-window pulls still unread.
+    //
+    // Completeness under a sort key that MOVES is not claimed here: a pull
+    // touched mid-scan travels toward page one and can cross a boundary this
+    // scan has already passed. The repeated scan in
+    // `evaluateSensitiveRollingWindow` is what covers that.
     if (pulls.length < pageSize || oldestUpdatedInPage < sinceTime) return candidates;
   }
 
@@ -340,8 +353,12 @@ function collectRollingWindowCandidates({
 // count.
 //
 // Bounded, because "every pass reveals another merge" would otherwise never
-// settle on a busy repository. Exhausting the bound means the verdict genuinely
-// could not be computed, and fails loudly.
+// settle on a busy repository. A settled window costs two scans — one to read
+// it, one to confirm nothing new arrived — and the bound caps the worst case at
+// four. Exhausting the bound does not mean no count exists; it means the window
+// never stopped moving, so the count in hand may be an UNDERCOUNT. Refusing to
+// report a possible undercount is the conservative choice, and it fails loudly
+// rather than passing a number it cannot stand behind.
 export function evaluateSensitiveRollingWindow({
   repo,
   since,
@@ -355,7 +372,14 @@ export function evaluateSensitiveRollingWindow({
   const sinceTime = timestamp(since, "window-since-invalid");
   positiveInteger(threshold, "cluster-threshold-invalid");
   positiveInteger(maxPullPages, "window-page-limit-invalid");
-  positiveInteger(maxWindowPasses, "window-pass-limit-invalid");
+  // Two scans is the floor, not one. Settling is only observable by comparing a
+  // scan against the one after it, so a budget of a single scan can never be
+  // satisfied — it can only fail. Rejected as input rather than accepted and
+  // then quietly spending a second scan the caller did not budget for, which is
+  // what a plain positive-integer check did.
+  if (!Number.isInteger(maxWindowPasses) || maxWindowPasses < 2) {
+    fail("window-pass-limit-invalid");
+  }
 
   const collect = () =>
     collectRollingWindowCandidates({
