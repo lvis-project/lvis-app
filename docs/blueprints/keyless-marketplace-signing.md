@@ -4,10 +4,20 @@ Status: design, not implemented. This document exists because the alternative �
 starting the migration and discovering the crux halfway — leaves the marketplace
 with two signature formats and no finished verifier.
 
-**Recommendation up front: proceed with conditions.** Offline verification is
-workable, and the mechanism that makes it workable is not the part of Sigstore
-most people talk about. The conditions are in §9; the two that can stop this are
-the empirical checks in Stage 1.
+**Recommendation up front: not yet — blocked, and the blocker is commercial
+rather than technical.**
+
+GitHub artifact attestations are **not available for private repositories on the
+GitHub Team plan**. `lvis-project` is on `team`; every plugin repository is
+private. §2.3 has the verbatim source and the check. Until that changes there is
+nothing to build, and the rest of this document is the design that becomes
+correct the day it does.
+
+Everything else came out well, and is worth recording rather than rediscovering:
+offline verification **is** workable, for a better reason than expected (§3), and
+the migration's real prize is not rotation cost but removing the marketplace
+server's ability to sign arbitrary bytes (§5.1). §9 states the recommendation in
+full, including the conditions that apply once the blocker clears.
 
 Anchors: `docs/architecture/architecture.md` (Plugin System, §9), and the code
 named in §1. Where this design asks the architecture to change, the section is
@@ -216,11 +226,59 @@ In place of the log, GitHub's instance supplies a signed timestamp from a
 timestamp authority. That is what pins "the signature was made while the
 certificate was valid" — see §3.2.
 
-### 2.3 `actions/attest-build-provenance`
+### 2.3 The blocker
 
-GA, latest `v4.2.2` (2026-08-06). From its `action.yml`, the inputs that matter:
-`subject-path` / `subject-digest` + `subject-name`, and `github-token`. The
-output that matters:
+`actions/attest-build-provenance`'s own README, verbatim:
+
+> Artifact attestations are available in public repositories for all current
+> GitHub plans. They are not available on legacy plans, such as Bronze, Silver,
+> or Gold. **If you are on a GitHub Free, GitHub Pro, or GitHub Team plan,
+> artifact attestations are only available for public repositories. To use
+> artifact attestations in private or internal repositories, you must be on a
+> GitHub Enterprise Cloud plan.**
+
+And:
+
+```
+$ gh api orgs/lvis-project --jq .plan
+{"name":"team","seats":3,"filled_seats":3,…}
+```
+
+`lvis-project` is on **Team**. Every plugin repository is **private** (§2.2). The
+two facts do not compose.
+
+The escape routes, and why each is closed:
+
+- **Make the plugin repos public.** Not available. `lvis-plugin-ep` is an
+  internal-API integration whose catalog visibility is deliberately gated to the
+  internal network, and `marketplace-internal-visibility` exists precisely to
+  keep its existence off the public catalog. Publishing the repository would
+  defeat that more thoroughly than the catalog gate protects it. The same
+  argument applies to `lvis-plugin-ms-graph`.
+- **Sign against the Sigstore public good instance directly with `cosign`,
+  bypassing GitHub's attestation product.** This works technically — Fulcio
+  accepts the Actions OIDC token from a private repo — but it writes the
+  certificate to public Rekor, which publishes private repository names, tags and
+  commit SHAs to an immutable, globally readable, unremovable log. That is
+  strictly worse than the disclosure the previous bullet rejects. Closed for the
+  same reason.
+- **Upgrade `lvis-project` to GitHub Enterprise Cloud.** The only open route, and
+  it is an owner decision with a price attached, not an engineering one.
+
+This was not visible from the code, the workflows, or the Sigstore documentation.
+It is visible from one `gh api` call and one line of an action's README, and it
+determines whether any of the rest is buildable.
+
+### 2.4 `actions/attest-build-provenance`
+
+GA since 2024-06-25, latest `v4.2.2` (2026-08-06). Its README states that as of
+v4 it "is simply a wrapper on top of `actions/attest`" and that new
+implementations should use `actions/attest` directly — so Stage 3 targets
+`actions/attest`, not the wrapper. Required permissions in v4 are
+`id-token: write`, `attestations: write`, and `artifact-metadata: write`.
+
+From `action.yml`, the inputs that matter: `subject-path` / `subject-digest` +
+`subject-name`, and `github-token`. The output that matters:
 
 ```yaml
 outputs:
@@ -352,18 +410,45 @@ served a split view; that needs gossip or a monitor, and it is a property of
 transparency logs generally rather than of offline verification. For LVIS the
 point is moot in the other direction — §2.2, there is no log at all.
 
-Step 7 needs a decision, not a default. `VerifierOptions` defaults are
-`tlogThreshold: 1`, `timestampThreshold: 1`. GitHub's private instance has **no
-transparency log** (§2.2), so its bundles carry a TSA timestamp and no tlog
-entry, and the default `tlogThreshold: 1` would reject every one of them. The
-correct configuration for the GitHub-private-instance issuer is
-`{ tlogThreshold: 0, timestampThreshold: 1 }`.
+Step 7 needs a decision, not a default, and the defaults are wrong for us in
+**two** places rather than one. `VerifierOptions` defaults are
+`tlogThreshold: 1`, `ctlogThreshold: 1`, `timestampThreshold: 1`. GitHub's
+private instance publishes a trusted root in which **both `tlogs` and `ctlogs`
+are empty** — fetched from `https://tuf-repo.github.com` and confirmed: it
+carries `certificateAuthorities` for `fulcio.githubapp.com` and
+`timestampAuthorities` for `timestamp.githubapp.com`, and nothing else. So its
+bundles carry an RFC3161 timestamp, no transparency-log entry, and no embedded
+SCT to check.
+
+The `gh` CLI encodes exactly this asymmetry: its GitHub-instance verifier is
+constructed with `verify.WithSignedTimestamps(1)` alone, while its public-good
+verifier gets `WithObserverTimestamps(1)` + `WithTransparencyLog(1)`
+(`cli/cli`, `pkg/cmd/attestation/verification/sigstore.go`). The equivalent for
+`@sigstore/verify` is:
+
+```ts
+{ tlogThreshold: 0, ctlogThreshold: 0, timestampThreshold: 1 }
+```
+
+`ctlogThreshold: 0` is not an optional refinement — leaving the default would
+reject every private-instance bundle, and discovering that late is how a
+"temporary" relaxation gets written in the wrong place.
 
 This is exactly the shape of thing that becomes a fallback if written carelessly
-— "try with a tlog, and if there isn't one, don't require it" is a bypass. It
-must be a **constant selected by the pinned issuer**, decided once at module
-scope, never derived from what the bundle happens to contain. A bundle that
-presents no tlog entry *and* no TSA timestamp fails `timestampThreshold`, loudly.
+— "try with a tlog, and if there isn't one, don't require it" is a bypass. Both
+thresholds must be **constants selected by the pinned issuer**, decided once at
+module scope, never derived from what the bundle happens to contain. A bundle
+that presents no tlog entry *and* no TSA timestamp fails `timestampThreshold`,
+loudly.
+
+One further consequence of the empty `ctlogs`: certificate transparency is the
+mechanism by which Fulcio mis-issuance is *supposed* to be detectable, and
+Sigstore's own docs are explicit that "Fulcio itself does not monitor the
+certificate transparency log; users are responsible for monitoring". With
+GitHub's private instance there is no CT log to monitor either. §5.2 point 2
+already says LVIS gets no transparency; this is the second half of that same
+loss, and it means the honest description is *no external detectability at all*,
+not merely *no Rekor*.
 
 ### 3.3 Where the bundle travels
 
@@ -399,6 +484,17 @@ export type VerificationPolicy = {
 Note `CertificateExtensionName = 'issuer'` — `issuer` is the only named
 extension. Everything else is pinned through `oids`, as exact byte-value pairs.
 That is better than a named accessor: it is an equality check on the DER value.
+It is also a trap, in the direction that fails silently — see uncertainty 3.
+
+**The SAN pattern must be anchored, and this is a security requirement rather
+than a style note.** `packages/verify/src/policy.ts` matches with
+`signerIdentity.match(policyIdentity)`, coercing a plain string to a `RegExp`.
+An unanchored `https://github.com/lvis-project/.github` would match
+`https://github.com/lvis-project/.github-evil/...`, and the dots would match any
+character. The pattern below is anchored with `^`/`$` and escapes every literal
+dot; a test must assert that a near-miss identity is rejected, because the
+failure mode of getting this wrong is "accepts more than intended" and nothing
+observable goes wrong until it matters.
 
 For `lvis-plugin-meeting@1.2.3` the pinned claim is, in full:
 
@@ -410,7 +506,15 @@ For `lvis-plugin-meeting@1.2.3` the pinned claim is, in full:
 | OID `…57264.1.15` Source Repository Identifier | the numeric repo id | survives renames; `pageindex → local-indexer` and `work-proactive → work-assistant` both happened |
 | OID `…57264.1.17` Source Repository Owner Identifier | the numeric `lvis-project` org id | a repo named `lvis-project/lvis-plugin-meeting` in a *different* account cannot match |
 | OID `…57264.1.14` Source Repository Ref | `refs/tags/v<version>` — exact, from the catalog version | binds the artifact to the released tag, not to a branch |
+| OID `…57264.1.18` Build Config URI | `https://github.com/lvis-project/<slug-repo>/.github/workflows/publish.yml@refs/tags/v<version>` | the **caller**'s top-level workflow, distinct from the Build Signer above. Pins that the thin caller was the entry point. |
 | OID `…57264.1.11` Runner Environment | `github-hosted` | see §5.2 |
+
+The Build Signer / Build Config distinction is the reusable-workflow shape and it
+is why the SAN alone is not the whole claim: `.1.9` (= the SAN) names the
+reusable workflow that signed, `.1.18` names the caller's workflow that invoked
+it, and `.1.12` names the repository the run belonged to. Pinning all three
+means an attacker needs the reusable workflow *and* the caller *and* the repo to
+line up, not any one of them.
 
 Reading that back as a sentence:
 
@@ -494,6 +598,19 @@ design defends against it. It is a trust-surface expansion and it is in §5.3.
    digest, executes no candidate code) → publish (API key, no id-token). It
    mirrors the existing build/publish split for the same reason and must not be
    collapsed.
+
+   GitHub says this itself, in `gh attestation verify`'s own help text, and it is
+   worth quoting because it also bounds what §4 may safely pin: *"only the
+   `signature.certificate` and the `verifiedTimestamps` properties contain values
+   that cannot be manipulated by the workflow that originated the attestation…
+   should an attacker gain access to your workflow's execution context, they
+   could then falsify the contents of the `statement.predicate`."* Two
+   consequences. First, the recommended mitigation is exactly the trusted-builder
+   shape — a reusable workflow "whose execution cannot be influenced by input
+   provided through the caller workflow" — which is what the sign job must be.
+   Second, **§4 pins certificate extensions only, never predicate fields**, and
+   that is not an accident of drafting; the predicate is attacker-writable under
+   the very compromise this is defending against.
 2. **No transparency log, therefore no external observer.** §2.2. Private repos
    get no Rekor entry. A signature issued through a compromised path is
    undetectable by anyone outside the org, forever. The public-good instance is
@@ -617,9 +734,18 @@ the argument for it.
 
 ## 8. Uncertainties, and what would resolve each
 
-Named rather than hidden. The first two can stop the migration.
+Named rather than hidden. The first one currently stops the migration outright;
+the next two can stop it once the first clears.
 
-1. **What exactly does `job_workflow_ref` contain when the caller pins the
+1. **Is there any path to artifact attestations for private repos on the Team
+   plan?** §2.3 quotes the README and the org plan, and the two do not compose.
+   What is *not* certain is whether the restriction is enforced at the API — a
+   trial run would either produce a bundle or fail with a plan error, and either
+   outcome is worth more than the doc line. **Resolve:** one attestation attempt
+   in a scratch **private** repo under `lvis-project`. If it fails, the question
+   becomes the plan decision in §9 and nothing else in this list matters yet. Do
+   this before anything else; it is ten minutes.
+2. **What exactly does `job_workflow_ref` contain when the caller pins the
    reusable workflow by commit SHA?** The callers use
    `@10c12345af6eb1a4c6ec60216909fe722d3abce6`. If GitHub reports the SAN as
    `…/marketplace-publish.yml@10c12345…`, the SAN changes on every pin bump and
@@ -628,38 +754,55 @@ Named rather than hidden. The first two can stop the migration.
    `@refs/heads/main`, §4 is correct as written. **Resolve:** Stage 1 — run one
    real attestation in a scratch repo and read the certificate. Do not guess this;
    it is the SAN the entire policy anchors on.
-2. **Does GitHub's private Sigstore instance issue bundles that
-   `@sigstore/verify` accepts with `tlogThreshold: 0`, and does the trusted root
-   from `gh attestation trusted-root` contain a timestamp authority entry that
-   `toTrustMaterial` maps into `timestampAuthorities`?** §3.2 reasons this from
-   the source, but it is reasoning, not a passing test. If GitHub's instance
-   turns out to emit something `@sigstore/verify` cannot consume, the JS path
-   collapses and the recommendation changes to "not yet". **Resolve:** Stage 1 —
-   verify a real private-repo bundle in a Node script with a downloaded trusted
-   root. This is the single highest-value experiment in the plan and it costs an
-   afternoon.
-3. **Does `@sigstore/verify` 4.x run under Electron 43's bundled Node?** The
+3. **Does GitHub's private Sigstore instance issue bundles that
+   `@sigstore/verify` accepts with `tlogThreshold: 0, ctlogThreshold: 0,
+   timestampThreshold: 1`?** §3.2 establishes from GitHub's published trusted
+   root that `tlogs` and `ctlogs` are both empty and that the `gh` CLI verifies
+   with signed timestamps alone, so the configuration follows — but that is
+   reasoning about a Go client, not a passing test of the JS one. Two sub-parts
+   need checking together: that `toTrustMaterial` maps
+   `timestamp.githubapp.com` into `timestampAuthorities`, and that
+   `getTSATimestamp` accepts the RFC3161 token GitHub actually emits. If the JS
+   path cannot consume it, keyless is off regardless of the plan question.
+   **Resolve:** Stage 1 — verify a real private-repo bundle in a Node script
+   against a `trusted_root.jsonl` line, offline. Note the file is **JSONL**, one
+   `TrustedRoot` object per line, not a single object; the loader must select the
+   GitHub-instance line rather than parsing the file whole.
+
+   A related trap worth resolving in the same sitting: `policy.oids` compares
+   **raw DER extension bytes**, not decoded strings — `getSigner()` takes
+   `ext.subs[ext.subs.length - 1].value`, which for `.1.9`–`.1.24` is a
+   `UTF8String` with its `0x0C <len>` header intact. A pinned value written as a
+   plain string will silently fail to match, and "silently fails to match" on an
+   identity pin is the worst possible failure direction. Confirm the exact
+   encoding empirically and assert it in a test.
+4. **Does `@sigstore/verify` 4.x run under Electron 43's bundled Node?** The
    package declares `^22.22.2 || ^24.15.0 || >=26.0.0`; `lvis-app` declares
    `node >=22.4` and `electron ^43.0.0`. Engine ranges are advisory, but a real
    API dependency would not be. **Resolve:** Stage 1 — import and verify inside a
    packaged Electron main process, not just under `bun test`.
-4. **How large is the bundle, and does it fit the installer's resource
+5. **How large is the bundle, and does it fit the installer's resource
    ceilings?** `readBoundedSignatureEnvelopeBody` bounds the `.sig` fetch;
    a bundle with a full certificate chain is larger by a wide margin.
    **Resolve:** measure in Stage 1 and set the bound from the measurement, not
    from a guess.
-5. **What does the `publish` job's self-hosted runner tier do to any of this?**
+6. **What does the `publish` job's self-hosted runner tier do to any of this?**
    §5.2 point 7 keeps signing off that runner, but the publish job must now
    upload a second file, and the runner is deliberately network-restricted to
    loopback. **Resolve:** confirm the artifact handoff carries the bundle the same
    way it carries `plugin.zip`, with the same digest check.
-6. **How often does GitHub's Sigstore instance actually rotate?** The doc says "a
-   few times per year" for Sigstore instances generally. LVIS ships app releases
-   more often than that (0.4.x in July, 0.6.2 now), so the coupling in §5.2 point
-   6 is probably slack — but "probably" is not a plan. **Resolve:** owner decision
-   on a refresh cadence, plus a CI job that diffs the embedded root against a
-   freshly fetched one and fails the build when they diverge.
-7. **Is there any consumer of `signerKeyId` outside the receipt?**
+7. **How often does GitHub's Sigstore instance actually rotate, and how long is
+   the overlap?** Better than the generic "a few times per year": GitHub's
+   published trusted root carries six successive `fulcio.githubapp.com` windows
+   from 2023-10-27 to now — roughly a **seven-month cadence with about a month of
+   overlap**, and the current window is open-ended. Against that, LVIS ships app
+   releases far more often (0.4.x in July, 0.6.2 now), so the coupling in §5.2
+   point 6 has real slack. What is *not* established is whether the overlap is a
+   guarantee or an observation. **Resolve:** treat it as an observation, and add
+   a CI job that diffs the embedded root against a freshly fetched one and fails
+   the build when they diverge — so the refresh is forced by tooling rather than
+   remembered.
+8. **Is there any consumer of `signerKeyId` outside the receipt?**
    `plugin-artifact-identity.ts:62` and `plugin-artifact-store.ts:178` both read
    it. **Resolve:** Stage 2 — the receipt schema change is where this surfaces,
    and it must be an exhaustive union rather than a nullable string.
@@ -668,7 +811,16 @@ Named rather than hidden. The first two can stop the migration.
 
 ## 9. Recommendation
 
-**Proceed with conditions.**
+**Not yet. The reason is §2.3: artifact attestations are unavailable for private
+repositories on the GitHub Team plan, and every plugin repository is private.**
+
+This is a clean blocker, not a judgement call, and it should be reported as
+"blocked on an org plan decision" rather than as "keyless was investigated and
+rejected". Nothing here says the approach is wrong. It says the product is not
+sold to us on our current plan, and the two workarounds both require publishing
+things we have deliberately kept private (§2.3).
+
+What the investigation established, and what should not have to be redone:
 
 - Offline verification is **workable**, and for a stronger reason than expected:
   the trusted root is an expiry-free data file, verification in `@sigstore/verify`
@@ -679,20 +831,33 @@ Named rather than hidden. The first two can stop the migration.
   upgrading the claim from "the server accepted this upload" to "this workflow
   built this tag" (§1.2 → §4).
 - It is **not** a transparency-log story for LVIS, and presenting it as one would
-  be false. §2.2.
+  be false. GitHub's private instance has neither a Rekor log nor a CT log
+  (§2.2, §3.2), so the honest description is *no external detectability at all*.
 
-Conditions, all of which are Stage 1:
+The decision this document actually asks for is therefore narrow:
 
-1. Uncertainty 1 (SAN under a SHA-pinned reusable workflow) resolved empirically.
-2. Uncertainty 2 (private-instance bundle verifies in `@sigstore/verify` with an
-   explicit threshold configuration) resolved empirically.
+> Is *"the marketplace server can no longer sign arbitrary bytes, and installs
+> carry a checkable build identity"* worth a GitHub Enterprise Cloud plan?
+
+That is an owner call and this design has no standing to make it. If the answer
+is no, §1.2 still needs writing into the architecture (§11) and `prod-v1` remains
+what it is — a single long-lived anchor whose next rotation costs another
+catalog re-sign. Worth pricing that against the plan difference before deciding.
+
+If the answer is yes, the recommendation becomes **proceed with conditions**, and
+the conditions are all in Stage 1:
+
+1. Uncertainty 2 (SAN under a SHA-pinned reusable workflow) resolved
+   empirically.
+2. Uncertainty 3 (private-instance bundle verifies in `@sigstore/verify` with
+   `tlogThreshold: 0, ctlogThreshold: 0, timestampThreshold: 1`) resolved
+   empirically.
 3. The three-job split (§5.2 point 1) is treated as non-negotiable. If it cannot
    be built, **stop** — signing in a job that executes candidate code is worse
    than the status quo, not better.
 
-If 1 or 2 fail, the answer becomes "not yet", and the reason to state is that the
-JS verification path for GitHub's private Sigstore instance is unproven — not
-that keyless is wrong.
+Independently of all of the above, one thing here is worth doing now and costs
+nothing: §11.
 
 ---
 
@@ -702,19 +867,31 @@ Each stage is independently mergeable and leaves the product working. Stage 1 is
 where the risk is, and it is deliberately cheap. Stage 5 is where it is
 irreversible.
 
-### Stage 1 — Prove the two facts that can stop this
+### Stage 1 — Prove the facts that can stop this
 
-*Scope.* No production code. A scratch private repo under `lvis-project` with the
-reusable workflow pinned exactly as the plugin repos pin it. Run one attestation.
-Dump the certificate: read the SAN and every `1.3.6.1.4.1.57264.1.x` extension.
-Download `trusted_root.jsonl`. Write a Node script using `@sigstore/verify` that
-loads it via `toTrustMaterial`, constructs a `Verifier` with explicit thresholds,
-and verifies the bundle **with the network interface down**. Run the same script
-inside a packaged Electron main process. Measure the bundle size.
+*Scope.* No production code, and it starts with the ten-minute check, not the
+afternoon one.
+
+**First**, a scratch **private** repo under `lvis-project` running
+`actions/attest` once. If the Team plan refuses it (§2.3, uncertainty 1), stop
+here and take the plan question to the owner — everything below is wasted until
+that is answered.
+
+**Then**, if it produces a bundle: pin the reusable workflow exactly as the
+plugin repos pin it, run the attestation through it, and dump the certificate —
+the SAN and every `1.3.6.1.4.1.57264.1.x` extension, with their raw DER bytes,
+not just the decoded strings. Fetch `trusted_root.jsonl`, select the
+GitHub-instance line. Write a Node script using `@sigstore/verify` that loads it
+via `toTrustMaterial`, constructs a `Verifier` with
+`{ tlogThreshold: 0, ctlogThreshold: 0, timestampThreshold: 1 }`, and verifies
+the bundle **with the network interface down**. Run the same script inside a
+packaged Electron main process. Measure the bundle size.
 
 *What proves it.* A recorded transcript of the certificate's extensions, and a
-verification that passes offline and fails when the artifact bytes are mutated by
-one byte. Both outcomes get written into this document.
+verification that passes offline, fails when one artifact byte is mutated, and
+fails when the pinned SAN names a different workflow. All three outcomes get
+written back into this document — particularly the SAN, which uncertainty 2
+cannot resolve any other way.
 
 *Risk: none.* Nothing ships. This is the stage that decides whether the rest
 happens.
@@ -737,13 +914,17 @@ stage writes into.
 ### Stage 3 — Produce and store bundles, verify nothing
 
 *Scope.* Add the **sign** job to `lvis-project/.github`'s reusable workflow,
-between build and publish: `permissions: { id-token: write, contents: read }`,
-`runs-on: ubuntu-latest`, downloads `plugin.zip` by digest, runs
-`actions/attest-build-provenance` with `subject-path`, and passes `bundle-path`
-forward as a second artifact with its own digest handoff check. **The sign job
-executes no candidate code** — no `bun install`, no lifecycle scripts. Publish
-job uploads both files. Marketplace gains `store_bundle` and
-`GET /download.bundle`, and a nullable `attestation_bundle` column.
+between build and publish: `runs-on: ubuntu-latest`, permissions
+`{ id-token: write, attestations: write, artifact-metadata: write, contents: read }`
+(the last two are required by `actions/attest` v4 and are easy to miss), downloads
+`plugin.zip` by digest, runs **`actions/attest`** — not
+`attest-build-provenance`, whose README says as of v4 it is a wrapper and new
+implementations should use `actions/attest` directly — with `subject-path`, and
+passes `bundle-path` forward as a second artifact with its own digest handoff
+check. **The sign job executes no candidate code** — no `bun install`, no
+lifecycle scripts. Publish job uploads both files. Marketplace gains
+`store_bundle` and `GET /download.bundle`, and a nullable `attestation_bundle`
+column.
 
 *What proves it.* Publishing a plugin produces a bundle that
 `gh attestation verify --bundle … --custom-trusted-root …` accepts offline.
@@ -864,8 +1045,21 @@ Primary sources read for this document, not summarised from recall:
   `content/actions/how-tos/secure-your-work/use-artifact-attestations/verify-attestations-offline.md`
   (`gh attestation trusted-root`, no built-in expiration, rotation cadence,
   revocation blind spot)
-- `actions/attest-build-provenance` — `action.yml` at `v4.2.2` (inputs,
-  `bundle-path` output)
+- `actions/attest-build-provenance` — `action.yml` and `README.md` at `v4.2.2`
+  (inputs, `bundle-path` output, the v4 wrapper note, required permissions, and
+  the plan-availability restriction quoted in §2.3)
+- `cli/cli` — `pkg/cmd/attestation/verification/sigstore.go` (the
+  `WithSignedTimestamps(1)` vs `WithObserverTimestamps(1) + WithTransparencyLog(1)`
+  split between the GitHub and public-good verifiers)
+- `https://cli.github.com/manual/gh_attestation_verify` (identity-pinning
+  guidance; the predicate-is-attacker-writable warning quoted in §5.2)
+- `https://tuf-repo.github.com` — GitHub's published `trusted_root.json`
+  (`fulcio.githubapp.com` CA windows, `timestamp.githubapp.com`, empty `tlogs`
+  and `ctlogs`)
+- `https://docs.sigstore.dev/about/security/` and `/about/threat-model/`
+  (OIDC-account compromise is out of scope for Sigstore; users are responsible
+  for monitoring certificate transparency)
+- `gh api orgs/lvis-project` (org plan, §2.3)
 - npm registry — `@sigstore/verify@4.1.2`, `sigstore@5.0.0`, `@sigstore/tuf@5.0.0`
   (versions and engine constraints, as of 2026-08-19)
 - LVIS: `lvis-app/src/plugins/{envelope-verifier,marketplace-keys,marketplace-installer,public-contract,plugin-install-receipt}.ts`,
