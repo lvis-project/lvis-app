@@ -7,13 +7,14 @@
  * imports into the Electron main process.
  */
 import { describe, it, expect } from "vitest";
-import { resolve } from "node:path";
+import { resolve, sep } from "node:path";
 import {
   PLUGIN_DATA_DIR_NAME,
   PLUGIN_WORKER_RUN_DIR_NAME,
   resolvePluginWritableRoot,
 } from "../plugin-storage-layout.js";
 import { lvisHome } from "../../shared/lvis-home.js";
+import { isPathWithin } from "../plugin-storage-containment.js";
 
 const PLUGIN_ID = "lvis-plugin-layout-fixture";
 
@@ -40,5 +41,33 @@ describe("resolvePluginWritableRoot", () => {
     const writable = resolvePluginWritableRoot(PLUGIN_ID);
     const runDir = resolve(pluginRoot, PLUGIN_WORKER_RUN_DIR_NAME);
     expect(runDir.startsWith(`${writable}/`)).toBe(false);
+  });
+});
+
+describe("isPathWithin", () => {
+  const under = (root: string, ...segments: string[]) => resolve(root, ...segments);
+
+  it("accepts a descendant and the root itself", () => {
+    const root = resolve("/srv", "data");
+    expect(isPathWithin(root, under(root, "file.txt"))).toBe(true);
+    expect(isPathWithin(root, root)).toBe(true);
+  });
+
+  it("refuses a sibling whose name merely starts with the root's", () => {
+    // The reason this predicate is shared rather than rewritten per site: a
+    // bare `startsWith` accepts `/srv/data-evil` for a root of `/srv/data`.
+    const root = resolve("/srv", "data");
+    expect(isPathWithin(root, `${root}-evil`)).toBe(false);
+  });
+
+  it("accepts a descendant of a root that already ends in a separator", () => {
+    // A second separator would be appended and match nothing, so a legitimate
+    // path would read as outside its own root. On Windows a drive root is
+    // exactly this shape, which is where it would have surfaced first — as a
+    // plugin whose own directory looks foreign to it, not as an escape.
+    const root = resolve("/srv", "data");
+    const rootWithTrailingSeparator = `${root}${sep}`;
+    expect(isPathWithin(rootWithTrailingSeparator, under(root, "file.txt"))).toBe(true);
+    expect(isPathWithin(rootWithTrailingSeparator, `${root}-evil`)).toBe(false);
   });
 });
