@@ -535,7 +535,7 @@ describe("Sidebar project pinning", () => {
 
   it("keeps the project and surfaces the IPC error when native remove fails", async () => {
     const onRefreshProjects = vi.fn();
-    const onProjectRemoveError = vi.fn();
+    const onProjectError = vi.fn();
     const {
       getByTestId,
       removeRoot,
@@ -546,7 +546,7 @@ describe("Sidebar project pinning", () => {
       projects,
       activeSidebarTab: "projects",
       onRefreshProjects,
-      onProjectRemoveError,
+      onProjectError,
     });
     removeRoot.mockResolvedValueOnce({
       ok: false,
@@ -560,7 +560,8 @@ describe("Sidebar project pinning", () => {
       emitNativeContextCommand("project.remove");
 
       await waitFor(() => {
-        expect(onProjectRemoveError).toHaveBeenCalledWith(
+        expect(onProjectError).toHaveBeenCalledWith(
+          "remove",
           "not-an-additional-root",
           "not registered",
         );
@@ -629,6 +630,29 @@ describe("Sidebar projects tab add-project context menu", () => {
         expect(pickRoot).toHaveBeenCalledTimes(1);
         expect(onRefreshProjects).toHaveBeenCalledTimes(1);
       });
+    } finally {
+      restore();
+    }
+  });
+
+  it("surfaces a refused add instead of leaving the right-click a no-op", async () => {
+    const onRefreshProjects = vi.fn();
+    const onProjectError = vi.fn();
+    const { getByTestId, emitNativeContextCommand, pickRoot, restore } = renderSidebar({
+      sessions: [],
+      projects,
+      activeSidebarTab: "projects",
+      onRefreshProjects,
+      onProjectError,
+    });
+    pickRoot.mockResolvedValueOnce({ ok: false, error: "persist-failed" } as never);
+    try {
+      const tabBody = await waitFor(() => getByTestId("sidebar-projects"));
+      fireEvent.contextMenu(tabBody);
+      emitNativeContextCommand("project.add");
+
+      await waitFor(() => expect(onProjectError).toHaveBeenCalledWith("add", "persist-failed"));
+      expect(onRefreshProjects).not.toHaveBeenCalled();
     } finally {
       restore();
     }
