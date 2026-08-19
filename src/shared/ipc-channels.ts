@@ -19,21 +19,21 @@ export const OVERLAY_V1 = {
   dismiss: "lvis:overlay:dismiss",
 } as const;
 
-export const ROUTINES_V2 = {
-  list: "lvis:routines:v2:list",
-  add: "lvis:routines:v2:add",
-  dismiss: "lvis:routines:v2:dismiss",
-  remove: "lvis:routines:v2:remove",
-  triggerNow: "lvis:routines:v2:trigger-now",
-  fired: "lvis:routines:v2:fired",
-  pendingResults: "lvis:routines:v2:pending-results",
-  acknowledgeResult: "lvis:routines:v2:ack-result",
-  listSessions: "lvis:routines:v2:list-sessions",
+export const ROUTINES = {
+  list: "lvis:routines:list",
+  add: "lvis:routines:add",
+  dismiss: "lvis:routines:dismiss",
+  remove: "lvis:routines:remove",
+  triggerNow: "lvis:routines:trigger-now",
+  fired: "lvis:routines:fired",
+  pendingResults: "lvis:routines:pending-results",
+  acknowledgeResult: "lvis:routines:ack-result",
+  listSessions: "lvis:routines:list-sessions",
   // Running indicator events (renderer reflects LLM session progress)
-  runningStarted: "lvis:routines:v2:running-started",
-  runningFinished: "lvis:routines:v2:running-finished",
+  runningStarted: "lvis:routines:running-started",
+  runningFinished: "lvis:routines:running-finished",
   // Emitted when an LLM session errors out so renderer can clear running state
-  failed: "lvis:routines:v2:failed",
+  failed: "lvis:routines:failed",
 } as const;
 
 export const WORK_BOARD = {
@@ -51,7 +51,7 @@ export const WORK_BOARD = {
   itemChanged: "lvis:work-board:item-changed",
   // Renderer → main: kick off a plan→approve→execute run for one item.
   // Fire-and-forget; the renderer tracks completion via the run-progress
-  // events below (mirroring the ROUTINES_V2 running-* pattern).
+  // events below (mirroring the ROUTINES running-* pattern).
   run: "lvis:work-board:run",
   // Main → renderer: per-phase liveness for an in-flight run (WorkBoardRunEvent).
   runProgress: "lvis:work-board:run-progress",

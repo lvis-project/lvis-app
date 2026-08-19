@@ -1006,20 +1006,20 @@ export type LvisApi = {
     | { ok: true; pluginId: string; enabled: boolean }
     | { ok: false; error: string; message: string }
   >;
-  // routine_schedule v2 — persistent routine list + lifecycle
-  listRoutinesV2: () => Promise<import("../../shared/routines-types.js").RoutineRecord[]>;
-  dismissRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
-  removeRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
-  triggerRoutineNowV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
-  listPendingRoutineResultsV2: () => Promise<import("../../shared/routines-types.js").RoutineFiredPayload[]>;
-  acknowledgeRoutineResultV2: (routineId: string, firedAt: string) => Promise<{ ok: boolean; error?: string }>;
-  addRoutineV2: (
+  // routine_schedule — persistent routine list + lifecycle
+  listRoutines: () => Promise<import("../../shared/routines-types.js").RoutineRecord[]>;
+  dismissRoutine: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  removeRoutine: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  triggerRoutineNow: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  listPendingRoutineResults: () => Promise<import("../../shared/routines-types.js").RoutineFiredPayload[]>;
+  acknowledgeRoutineResult: (routineId: string, firedAt: string) => Promise<{ ok: boolean; error?: string }>;
+  addRoutine: (
     input: import("../../shared/routines-types.js").AddRoutineInput,
   ) => Promise<
     | { ok: true; routine: import("../../shared/routines-types.js").RoutineRecord }
     | { ok: false; error: string }
   >;
-  onRoutineFiredV2: (
+  onRoutineFired: (
     handler: (event: import("../../shared/routines-types.js").RoutineFiredPayload) => void,
   ) => () => void;
   // Routine running indicator
@@ -1027,13 +1027,13 @@ export type LvisApi = {
   onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => () => void;
   onRoutineRunningFinished: (handler: (routineId: string) => void) => () => void;
   // failed: clears running:true stuck OverlayItem when the LLM session throws
-  onRoutineFailedV2: (handler: (event: { routineId: string; error: string }) => void) => () => void;
+  onRoutineFailed: (handler: (event: { routineId: string; error: string }) => void) => () => void;
   // Overlay IPC bridges
   onOverlayShow: (handler: (item: import("./context/OverlayContext.js").OverlayItem) => void) => () => void;
   onOverlayUpdate: (handler: (id: string, patch: Partial<import("./context/OverlayContext.js").OverlayItem>) => void) => () => void;
   onOverlayDismiss: (handler: (id: string) => void) => () => void;
   // Routine session history
-  listRoutineSessionsV2: (
+  listRoutineSessions: (
     routineId: string,
     limit?: number,
   ) => Promise<Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>>;
@@ -1246,7 +1246,7 @@ export type LvisApi = {
   plugins: {
     getPerfStats: () => Promise<Record<string, PluginPerfStats>>;
   };
-  // Workflow tools — routines v2
+  // Workflow tools — routines
   onAskUserQuestion: (
     h: (req: {
       id: string;
