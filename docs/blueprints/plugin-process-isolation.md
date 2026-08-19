@@ -265,6 +265,14 @@ onStdout(), onStderr(), onExit() }` — live process control.
   Stated residual: the check is lexical, because a grant may name a directory the
   worker is about to create, so a symlink planted inside the data directory is the
   worker supervisor's to catch and not this.
+- *What this makes visible.* `local-indexer`'s worker asks to read a corp CA under
+  `~/.lvis/certs/` and to write the user's chosen index root and workspace — all
+  outside the plugin's own two directories. The composition rule refuses that, and
+  refusing it is the correct answer: the plugin child cannot reach those paths
+  either, so a worker that could would be a widening nobody granted. Moving that
+  plugin therefore starts with the HOST widening the child's own envelope to
+  include them, after which the delegated worker composes with no further change —
+  which is the point of deriving both lists from one place.
 
 **`storage.read → Uint8Array` and `storage.write(data: string | Uint8Array)`.**
 Base64 on the wire with an explicit encoding tag, reconstructed as `Uint8Array` in
