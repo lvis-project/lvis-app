@@ -359,8 +359,10 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       return;
     }
     const { manifest, approvedPluginAccess } = outcome;
-    // Reassign to manifest.id so all subsequent phases use the canonical id.
-    pluginId = resources.pluginId = manifest.id;
+    // The id the manifest declares supersedes the registry hint for every
+    // later phase, and `resources` is what carries it there — the local is
+    // not read again in this method.
+    resources.pluginId = manifest.id;
     this.rememberPluginInstallAlias(manifest.id, plan.pluginIdHint);
     this.knownPluginManifests.set(manifest.id, manifest);
     this.failedPluginStubs.delete(manifest.id);
