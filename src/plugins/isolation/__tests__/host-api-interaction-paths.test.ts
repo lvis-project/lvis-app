@@ -173,6 +173,7 @@ async function harness(
       pluginRoot: "/plugins/interaction",
       hostRoot: "/app",
       pluginDataDir: "/plugins/interaction/data",
+      installedPluginIds: [],
       generationId: GENERATION,
     },
     channel,

@@ -1,0 +1,97 @@
+/**
+ * The routing decision itself.
+ *
+ * Every instantiation path — boot load, add, restart, capability reload —
+ * reaches a plugin's factory through `importPluginFactoryForLifecycle`, so this
+ * is the one place the in-process and out-of-process arms are chosen. What
+ * matters is both directions: the pilot must not be imported into main, and
+ * every other plugin must still be.
+ */
+import { describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PluginRuntime, createNoopHostApiForTests } from "../../runtime.js";
+import type { PluginManifest, RuntimePluginFactory } from "../../types.js";
+import { OUT_OF_PROCESS_PLUGIN_IDS } from "../../isolation/out-of-process-plugins.js";
+
+const HOST_ROOT = "/tmp/lvis-out-of-process-routing";
+const IN_PROCESS_MARKER = "imported-into-main";
+
+interface LifecycleRouting {
+  importPluginFactoryForLifecycle(
+    pluginId: string,
+    resolvedEntryPath: string,
+    manifest: PluginManifest,
+    bustCache?: boolean,
+  ): Promise<RuntimePluginFactory | undefined>;
+}
+
+function routing(): LifecycleRouting {
+  return new PluginRuntime({
+    hostRoot: HOST_ROOT,
+    manifestPaths: [],
+    createHostApi: createNoopHostApiForTests,
+  }) as unknown as LifecycleRouting;
+}
+
+function manifestFor(pluginId: string): PluginManifest {
+  return {
+    id: pluginId,
+    name: pluginId,
+    version: "1.0.0",
+    entry: "plugin.mjs",
+    description: "a plugin used to observe which arm the lifecycle chose",
+    tools: [],
+  } as PluginManifest;
+}
+
+describe("importPluginFactoryForLifecycle chooses one arm per plugin", () => {
+  it("does not import the pilot into main — it returns a child-spawning factory", async () => {
+    const [pilot] = [...OUT_OF_PROCESS_PLUGIN_IDS];
+    expect(pilot).toBeTypeOf("string");
+    // A path that CANNOT be imported. In-process the import is the first thing
+    // that happens and this would reject; out-of-process nothing is imported in
+    // main at all, so a factory comes back and the path is the child's problem.
+    const unimportable = join(tmpdir(), "no-such-plugin-entry.mjs");
+    const factory = await routing().importPluginFactoryForLifecycle(
+      pilot!,
+      unimportable,
+      manifestFor(pilot!),
+    );
+    expect(typeof factory).toBe("function");
+  });
+
+  it("still imports every other plugin into main, unchanged", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "in-process-plugin-"));
+    const entryPath = join(dir, "plugin.mjs");
+    writeFileSync(
+      entryPath,
+      `export default () => ({ handlers: {}, marker: ${JSON.stringify(IN_PROCESS_MARKER)} });\n`,
+      "utf-8",
+    );
+    try {
+      const factory = await routing().importPluginFactoryForLifecycle(
+        "meeting",
+        entryPath,
+        manifestFor("meeting"),
+      );
+      expect(typeof factory).toBe("function");
+      // The module's OWN export, which only an in-main dynamic import produces.
+      const instance = (await factory!({} as never)) as { marker?: string };
+      expect(instance.marker).toBe(IN_PROCESS_MARKER);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails an in-process plugin whose entry cannot be imported, as it always has", async () => {
+    await expect(
+      routing().importPluginFactoryForLifecycle(
+        "meeting",
+        join(tmpdir(), "no-such-plugin-entry.mjs"),
+        manifestFor("meeting"),
+      ),
+    ).rejects.toThrow();
+  });
+});

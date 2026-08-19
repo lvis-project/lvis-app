@@ -82,6 +82,7 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
   protected abstract importPluginFactoryForLifecycle(
     pluginId: string,
     resolvedEntryPath: string,
+    manifest: PluginManifest,
     bustCache?: boolean,
   ): Promise<RuntimePluginFactory | undefined>;
 
@@ -525,6 +526,7 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
       createPlugin = await this.importPluginFactoryForLifecycle(
         manifest.id,
         resolvedEntryPath,
+        manifest,
         opts.cacheBust,
       );
     } catch (err) {
@@ -1403,6 +1405,7 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
       createPlugin = await this.importPluginFactoryForLifecycle(
         manifest.id,
         resolveRealEntryPath(entryPath),
+        manifest,
         true,
       );
     } catch (error) {
