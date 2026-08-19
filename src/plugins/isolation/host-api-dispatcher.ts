@@ -34,6 +34,20 @@ import {
   PluginStorageEncryptionUnavailableError,
   PluginStorageError,
 } from "../public-contract.js";
+import type { PluginHostApi } from "../types.js";
+import {
+  listStorageEntries,
+  makeStorageDirectory,
+  readEncryptedStorage,
+  readStorageBytes,
+  readStorageJson,
+  readStorageText,
+  removeStoragePath,
+  storageEntryExists,
+  writeEncryptedStorage,
+  writeStorageBytes,
+  writeStorageJson,
+} from "./host-api-storage-paths.js";
 import {
   HOST_API_WIRE_VERSION,
   HostApiBoundaryError,
@@ -63,6 +77,18 @@ export interface HostApiCall {
   readonly generationId: string;
   /** Positional arguments as they arrived — already JSON, marshalled per contract. */
   readonly args: readonly unknown[];
+  /**
+   * The host-side hostApi for THIS incarnation — the same object the in-process
+   * arm hands the plugin directly.
+   *
+   * It reaches the handler through the call rather than through a module-level
+   * lookup because the dispatch table is one static `Record<HostApiPath, …>`
+   * shared by every plugin, while a hostApi is per-plugin AND per-generation.
+   * A handler that resolved its own would have to re-derive the identity the
+   * envelope check has already established, and re-deriving it is how a stale
+   * generation gets serviced against a live plugin's storage.
+   */
+  readonly hostApi: PluginHostApi;
 }
 
 /** A live host-side registration, held for as long as the child holds its side. */
@@ -214,17 +240,17 @@ export function childLocalHostApiPath(path: ChildLocalPath): HostApiPathHandler 
  */
 export const HOSTAPI_DISPATCH_TABLE: Record<HostApiPath, HostApiPathHandler> = {
   "storage.resolve": childLocalHostApiPath("storage.resolve"),
-  "storage.read": unimplementedHostApiPath("storage.read"),
-  "storage.readText": unimplementedHostApiPath("storage.readText"),
-  "storage.readJson": unimplementedHostApiPath("storage.readJson"),
-  "storage.list": unimplementedHostApiPath("storage.list"),
-  "storage.exists": unimplementedHostApiPath("storage.exists"),
-  "storage.write": unimplementedHostApiPath("storage.write"),
-  "storage.writeJson": unimplementedHostApiPath("storage.writeJson"),
-  "storage.rm": unimplementedHostApiPath("storage.rm"),
-  "storage.mkdir": unimplementedHostApiPath("storage.mkdir"),
-  "storage.writeEncrypted": unimplementedHostApiPath("storage.writeEncrypted"),
-  "storage.readEncrypted": unimplementedHostApiPath("storage.readEncrypted"),
+  "storage.read": defineHostApiPath("storage.read", readStorageBytes),
+  "storage.readText": defineHostApiPath("storage.readText", readStorageText),
+  "storage.readJson": defineHostApiPath("storage.readJson", readStorageJson),
+  "storage.list": defineHostApiPath("storage.list", listStorageEntries),
+  "storage.exists": defineHostApiPath("storage.exists", storageEntryExists),
+  "storage.write": defineHostApiPath("storage.write", writeStorageBytes),
+  "storage.writeJson": defineHostApiPath("storage.writeJson", writeStorageJson),
+  "storage.rm": defineHostApiPath("storage.rm", removeStoragePath),
+  "storage.mkdir": defineHostApiPath("storage.mkdir", makeStorageDirectory),
+  "storage.writeEncrypted": defineHostApiPath("storage.writeEncrypted", writeEncryptedStorage),
+  "storage.readEncrypted": defineHostApiPath("storage.readEncrypted", readEncryptedStorage),
   "config.get": childLocalHostApiPath("config.get"),
   "config.set": unimplementedHostApiPath("config.set"),
   "config.onChange": unimplementedHostApiPath("config.onChange"),
@@ -334,6 +360,12 @@ export interface HostApiDispatcherOptions {
    * because it is on the other side of a pipe.
    */
   readonly isActive: () => boolean;
+  /**
+   * The hostApi this child's calls are serviced against. Required: a dispatcher
+   * without one can service nothing, and defaulting it to an empty object would
+   * turn every member into a `TypeError` classified as `host-internal`.
+   */
+  readonly hostApi: PluginHostApi;
   /** Where host-originated notifications go. */
   readonly notifications: ChildNotificationSink;
   /** Injectable so a handler can be exercised without the whole table. */
@@ -366,6 +398,7 @@ export class HostApiDispatcher {
         pluginId: request.pluginId,
         generationId: request.generationId,
         args: request.args,
+        hostApi: this.options.hostApi,
       };
       const value = await handler.invoke(call, this.scopeFor(handler.path));
       return {

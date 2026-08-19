@@ -17,7 +17,11 @@
 import { safeStorage } from "electron";
 import { realpathSync } from "node:fs";
 import { lstat, mkdir, readFile, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { dirname, sep } from "node:path";
+import {
+  resolvePluginStoragePath,
+  type PluginStorageRejectionLog,
+} from "./plugin-storage-containment.js";
 import {
   PluginStorageEncryptionUnavailableError,
   PluginStorageError,
@@ -37,9 +41,10 @@ const PLUGIN_FILE_MODE = 0o600;
 
 /**
  * Sink invoked when a storage operation is REFUSED by the containment guards.
- * `message` names the refusal; `meta` carries the offending paths.
+ * Declared alongside the lexical guard it is passed to, and re-exported here
+ * because this module is where callers already reach for it.
  */
-export type PluginStorageRejectionLog = (message: string, meta?: unknown) => void;
+export type { PluginStorageRejectionLog };
 
 /**
  * Audit transport a rejection sink writes to. Deliberately narrower than the
@@ -192,45 +197,11 @@ export function createPluginStorage(
   }
 
   async function guard(rel: string): Promise<string> {
-    if (typeof rel !== "string") {
-      throw new PluginStorageError("path must be a string", pluginId, String(rel));
-    }
-    // Refuse absolute paths outright — plugins should think in relative terms.
-    if (isAbsolute(rel)) {
-      throw new PluginStorageError("absolute paths are not allowed", pluginId, rel);
-    }
-    const target = resolve(canonicalRoot, rel);
-    if (target !== canonicalRoot && !target.startsWith(canonicalRoot + sep)) {
-      log?.(`storage: rejected escape attempt`, { rel, resolved: target });
-      throw new PluginStorageError("path escapes plugin storage root", pluginId, rel);
-    }
+    const target = resolvePluginStoragePath(pluginId, canonicalRoot, [rel], log);
     // Lexical containment passed; now verify symlinks don't smuggle the
     // target outside the root. Walks up from `target` until it finds an
     // existing entry and realpath-checks it.
     await realpathContainmentCheck(target);
-    return target;
-  }
-
-  /**
-   * Sync variant for the `resolve(...)` PluginStorage method only — that
-   * method's signature returns `string` (not `Promise<string>`) for ergonomic
-   * reasons. Callers of `resolve()` are expected to use the returned path
-   * inside a subsequent async storage call (which re-runs the async guard),
-   * so the sync variant intentionally omits the realpath check; the async
-   * call that follows will catch any symlink escapes.
-   */
-  function guardLexicalOnly(rel: string): string {
-    if (typeof rel !== "string") {
-      throw new PluginStorageError("path must be a string", pluginId, String(rel));
-    }
-    if (isAbsolute(rel)) {
-      throw new PluginStorageError("absolute paths are not allowed", pluginId, rel);
-    }
-    const target = resolve(canonicalRoot, rel);
-    if (target !== canonicalRoot && !target.startsWith(canonicalRoot + sep)) {
-      log?.(`storage: rejected escape attempt`, { rel, resolved: target });
-      throw new PluginStorageError("path escapes plugin storage root", pluginId, rel);
-    }
     return target;
   }
 
@@ -254,7 +225,10 @@ export function createPluginStorage(
   // PluginRuntime.getPluginStorage), the test-only noop HostApi, and any
   // future storage method.
   const raw: PluginStorage = {
-    resolve: (...segments) => guardLexicalOnly(segments.length === 0 ? "." : join(...segments)),
+    // Lexical only, deliberately: `resolve()` returns `string`, not a promise,
+    // and its result is expected to be fed back into an async storage call that
+    // re-runs the full guard — realpath included.
+    resolve: (...segments) => resolvePluginStoragePath(pluginId, canonicalRoot, segments, log),
 
     async read(rel) {
       const target = await guard(rel);
