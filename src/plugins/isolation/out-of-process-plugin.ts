@@ -165,6 +165,22 @@ function resolvePluginChildEntryPath(): string {
   return join(mainDir, "plugin-child-main.js");
 }
 
+/**
+ * The paths the PLUGIN owns, named once.
+ *
+ * Read by the spawn — which adds the throwaway sandbox HOME on top — and by the
+ * `spawnWorker` grant check, which does not: that HOME belongs to this process
+ * and is not the plugin's to hand on. Deriving both from one function is what
+ * makes the delegation check a check against the ACTUAL jail: widening what a
+ * plugin child may reach widens what it may delegate, in the same edit, instead
+ * of leaving a second list to drift behind the first.
+ */
+function pluginChildConfinement(
+  spec: Pick<ConfinedPluginChildSpec, "pluginRoot" | "pluginDataDir">,
+): DelegatedWorkerConfinement {
+  return { pluginRoot: spec.pluginRoot, pluginDataDir: spec.pluginDataDir };
+}
+
 /** What a confined child needs to exist. */
 export interface ConfinedPluginChildSpec {
   readonly pluginId: string;
@@ -217,6 +233,7 @@ export async function spawnConfinedPluginChild(
   spec: ConfinedPluginChildSpec,
 ): Promise<ConfinedPluginChild> {
   const sandboxHome = createSandboxProcessHome();
+  const confinement = pluginChildConfinement(spec);
   let wrapped = false;
   const releaseSandboxState = (): void => {
     if (wrapped) {
@@ -236,8 +253,8 @@ export async function spawnConfinedPluginChild(
       args: [spec.childEntryPath],
       label: `plugin-child:${spec.pluginId}`,
       grantMode: process.platform === "win32" ? "deny-only" : "allow-list",
-      allowRead: [spec.pluginRoot, spec.pluginDataDir, sandboxHome.path],
-      allowWrite: [spec.pluginDataDir, sandboxHome.path],
+      allowRead: [confinement.pluginRoot, confinement.pluginDataDir, sandboxHome.path],
+      allowWrite: [confinement.pluginDataDir, sandboxHome.path],
       baseEnv: buildSafeChildEnv({ ELECTRON_RUN_AS_NODE: "1" }),
       extraEnv: { ...sandboxHome.env },
       // The child is a JSON-RPC server whose pipes the host owns, so unlike the
@@ -413,10 +430,7 @@ export function createOutOfProcessPluginFactory(
       // one exists so a call arriving after `stop()` is refused at the wire
       // instead of being carried to a hostApi that will refuse it anyway.
       isActive: () => live,
-      table: createBoundHostApiDispatchTable(hostApi, {
-        pluginRoot: context.pluginRoot,
-        pluginDataDir: context.pluginDataDir,
-      }),
+      table: createBoundHostApiDispatchTable(hostApi, pluginChildConfinement(context)),
       link: child.link,
     });
     transport.start();
