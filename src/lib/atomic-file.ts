@@ -16,6 +16,7 @@ import {
   transientFsLockDelayMs,
 } from "./transient-fs-lock-retry.js";
 
+/** POSIX-only — see {@link writeUtf8FileAtomicSync}; Win32 ignores it. */
 const DEFAULT_FILE_MODE = 0o600;
 const DIRECTORY_SYNC_ERROR_CODE = "ATOMIC_FILE_DIRECTORY_SYNC_FAILED";
 
@@ -117,6 +118,16 @@ function syncParentDirectoryAfterRename(
  * on one filesystem. A random name plus exclusive creation prevents writers
  * from sharing a staging file. The staged bytes are fsynced before rename and
  * an uncommitted temporary file is removed on every failure path.
+ *
+ * `mode` is a POSIX control and nothing more. On Windows, Node maps only the
+ * write bit of it onto the read-only ATTRIBUTE and never onto an ACL, so
+ * `0o600` there does NOT keep the file to its owner — who may read it is
+ * decided entirely by the DACL the file inherits from its directory. That is
+ * why `~/.lvis` gets an explicit owner-only DACL at boot
+ * ({@link ../shared/lvis-home.ensureLvisHomePrivate}): under this writer the
+ * mode is the protection on POSIX, and the inherited DACL is the protection on
+ * Win32. A caller passing `mode` outside that tree gets no Win32 protection
+ * from it.
  */
 export function writeUtf8FileAtomicSync(
   filePath: string,

@@ -124,6 +124,7 @@ jobs:
           src/permissions/__tests__/asrt-windows-support.test.ts
           src/tools/__tests__/shell-windows-partial-plan-b.test.ts
           src/lib/__tests__/atomic-file.test.ts
+          src/shared/__tests__/lvis-home.test.ts
           src/lib/__tests__/with-file-lock.test.ts
           src/data/__tests__/secret-document-store.test.ts
           src/plugins/__tests__/registry-atomicity.test.ts

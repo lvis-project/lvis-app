@@ -19,7 +19,7 @@ const ROOTS_AFTER_ADD = [
   { path: ADDED_ROOT, isDefault: false },
 ];
 
-function mountApp(pickRootResult: unknown) {
+function mountApp(pickRootResult: unknown, listRootsResult?: unknown) {
   const { api } = makeMockLvisApi({ currentSession: "s1" });
   const { ns } = makeMockLvisNamespace();
   const workspace = (ns as unknown as {
@@ -27,11 +27,11 @@ function mountApp(pickRootResult: unknown) {
   }).workspace;
 
   let added = false;
-  workspace.listRoots.mockImplementation(async () => ({
+  workspace.listRoots.mockImplementation(async () => listRootsResult ?? {
     ok: true,
     defaultRoot: DEFAULT_ROOT,
     roots: added ? ROOTS_AFTER_ADD : [{ path: DEFAULT_ROOT, isDefault: true }],
-  }));
+  });
   workspace.pickRoot.mockImplementation(async () => {
     added = true;
     return pickRootResult;
@@ -84,6 +84,43 @@ describe("App add-project flow", () => {
 
     const toasts = await findAllByTestId("status-toast-message");
     expect(toasts.map((node) => node.textContent).join(" ").trim().length).toBeGreaterThan(0);
+  });
+
+  /**
+   * A settings file main could not fully read reaches the user here or nowhere:
+   * the project list is the only surface that would otherwise render the gap as
+   * an ordinary absence of projects.
+   */
+  it("says the settings file could not be read instead of drawing an empty project list", async () => {
+    const { findAllByTestId } = mountApp(
+      { ok: true },
+      { ok: false, error: "settings-unreadable" },
+    );
+
+    const toasts = await findAllByTestId("status-toast-message");
+    expect(toasts.map((node) => node.textContent).join(" ")).toContain("설정 파일을 읽을 수 없어");
+  });
+
+  it("reports unreadable cleanup entries alongside a project list that still stands", async () => {
+    const { findAllByTestId, getByTestId } = mountApp(
+      { ok: true },
+      {
+        ok: true,
+        defaultRoot: DEFAULT_ROOT,
+        roots: ROOTS_AFTER_ADD,
+        settingsFault: "pending-removals-malformed",
+      },
+    );
+
+    const toasts = await findAllByTestId("status-toast-message");
+    expect(toasts.map((node) => node.textContent).join(" ")).toContain("삭제 대기 항목");
+    // The roots were readable, so they are still offered — the warning is about
+    // the part of the file that was not.
+    await waitFor(() => expect(getByTestId("composer-project-selector-trigger")).toBeTruthy());
+    openSelector(getByTestId);
+    await waitFor(() =>
+      expect(getByTestId("composer-project-selector-menu").textContent).toContain("beta"),
+    );
   });
 
   it("starts the new chat in the folder just added, not the default project", async () => {
