@@ -21,8 +21,10 @@
  * matching the prior per-store behaviour (the existing tests skip mode
  * assertions on `win32`).
  */
-import { promises as fs } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { constants, promises as fs } from "node:fs";
 import { join, dirname } from "node:path";
+import { platform } from "node:process";
 import { lvisHome } from "../../shared/lvis-home.js";
 
 const DIR_MODE = 0o700;
@@ -59,43 +61,89 @@ export async function readJsonFile<T>(filePath: string, fallback: T): Promise<T>
 }
 
 /**
- * Atomically write `value` (serialized as pretty JSON + trailing newline) to
- * `<dir>/<name>`. The directory is created 0o700; the file is written to a
- * sibling `.tmp` with 0o600 then renamed over the target so a crash mid-write
- * never leaves a half-written file for a subsequent read. A defensive `chmod`
- * tightens the final file mode if the rename target pre-existed wider.
+ * fsync the directory that now holds the renamed entry.
+ *
+ * `rename` orders the replacement but does not make the new directory entry
+ * durable; without this the file survives a process crash and not a power cut,
+ * which is the half of the promise the docstring below used to make and the
+ * code did not keep.
+ *
+ * Skipped entirely on Windows, where a directory cannot be opened for fsync at
+ * all — the same line {@link ../../lib/atomic-file} draws, rather than opening
+ * it and sorting the resulting errno into "expected" and "not".
  */
-export async function writeJsonAtomic<T>(dir: string, name: string, value: T): Promise<void> {
-  await ensureDir(dir);
-  const target = join(dir, name);
-  const tmp = `${target}.tmp`;
-  const body = `${JSON.stringify(value, null, 2)}\n`;
-  await fs.writeFile(tmp, body, { encoding: "utf-8", mode: FILE_MODE });
-  await fs.rename(tmp, target);
+async function syncDirectoryEntry(dir: string): Promise<void> {
+  if (platform === "win32") return;
+  const handle = await fs.open(dir, constants.O_RDONLY);
   try {
-    await fs.chmod(target, FILE_MODE);
-  } catch {
-    /* file mode may already be correct; ignore */
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
 
 /**
- * Atomically write arbitrary string `body` to `filePath`, enforcing 0o700 on
- * the parent directory and 0o600 on the file. Lower-level escape hatch for
- * callers that own a fully-resolved path (e.g. a store whose file path is
- * dependency-injected for tests) rather than a feature id. Composes the same
- * tmpfile + rename + chmod guarantees as {@link writeJsonAtomic}.
+ * Atomically write arbitrary `body` to `filePath`, enforcing 0o700 on the
+ * parent directory and 0o600 on the file.
+ *
+ * The staging file is named with 16 random bytes and created with
+ * `O_CREAT|O_EXCL`. Both halves matter and this helper had neither:
+ *
+ *   - A FIXED `${filePath}.tmp` is a name an attacker can predict, so a symlink
+ *     planted there ahead of time is followed by the write and then renamed over
+ *     the target, leaving the live path pointing wherever the attacker chose.
+ *     `O_EXCL` refuses to open anything that already exists, symlink included.
+ *   - A fixed name is also SHARED. Two writers to `~/.lvis/routine/routines.json`
+ *     staged into one file and then both renamed it; the surviving target could
+ *     hold either one's bytes or a splice of both. Since work-board-store and
+ *     routines-store both route here, that was two live stores.
+ *
+ * The staged bytes are fsynced before the rename and the parent directory after
+ * it, so the durability the callers' own comments claim is the durability they
+ * get. An uncommitted staging file is removed on every failure path.
+ *
+ * No `chmod` after the rename: `O_EXCL` guarantees the staging file is newly
+ * created, so the 0o600 passed to `open` is the mode that lands, and `rename`
+ * carries that inode's mode onto the target regardless of what the target's
+ * mode was. The old defensive chmod was covering for `fs.writeFile`, which
+ * ignores `mode` when the file it opens already exists.
+ *
+ * Mode is POSIX-only: on Windows `fs` does not map it onto an ACL, so what
+ * keeps `~/.lvis` owner-only there is the DACL applied at boot, not this call.
  */
-export async function writeFileAtomicAtPath(filePath: string, body: string): Promise<void> {
-  await ensureDir(dirname(filePath));
-  const tmp = `${filePath}.tmp`;
-  await fs.writeFile(tmp, body, { encoding: "utf-8", mode: FILE_MODE });
-  await fs.rename(tmp, filePath);
+export async function writeFileAtomicAtPath(
+  filePath: string,
+  body: string | Uint8Array,
+): Promise<void> {
+  const dir = dirname(filePath);
+  await ensureDir(dir);
+  const tmp = `${filePath}.${randomBytes(16).toString("hex")}.tmp`;
   try {
-    await fs.chmod(filePath, FILE_MODE);
-  } catch {
-    /* file mode may already be correct; ignore */
+    const handle = await fs.open(
+      tmp,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY,
+      FILE_MODE,
+    );
+    try {
+      await handle.writeFile(body);
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+    await fs.rename(tmp, filePath);
+  } catch (err) {
+    await fs.rm(tmp, { force: true }).catch(() => undefined);
+    throw err;
   }
+  await syncDirectoryEntry(dir);
+}
+
+/**
+ * Atomically write `value` (serialized as pretty JSON + trailing newline) to
+ * `<dir>/<name>`, under the contract {@link writeFileAtomicAtPath} states.
+ */
+export async function writeJsonAtomic<T>(dir: string, name: string, value: T): Promise<void> {
+  await writeFileAtomicAtPath(join(dir, name), `${JSON.stringify(value, null, 2)}\n`);
 }
 
 export interface FeatureNamespaceHandle {
