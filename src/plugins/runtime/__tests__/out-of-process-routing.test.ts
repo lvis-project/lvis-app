@@ -11,12 +11,12 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { PluginRuntime, createNoopHostApiForTests } from "../../runtime.js";
 import type { PluginManifest, RuntimePluginFactory } from "../../types.js";
 import { OUT_OF_PROCESS_PLUGIN_IDS } from "../../isolation/out-of-process-plugins.js";
 
 const HOST_ROOT = "/tmp/lvis-out-of-process-routing";
-const IN_PROCESS_MARKER = "imported-into-main";
 
 interface LifecycleRouting {
   importPluginFactoryForLifecycle(
@@ -67,7 +67,10 @@ describe("importPluginFactoryForLifecycle chooses one arm per plugin", () => {
     const entryPath = join(dir, "plugin.mjs");
     writeFileSync(
       entryPath,
-      `export default () => ({ handlers: {}, marker: ${JSON.stringify(IN_PROCESS_MARKER)} });\n`,
+      // `import.meta.url` rather than an interpolated marker: the module
+      // names ITSELF, so the assertion proves the instance came from this
+      // exact file, and the generated source embeds no value at all.
+      "export default () => ({ handlers: {}, marker: import.meta.url });\n",
       "utf-8",
     );
     try {
@@ -79,7 +82,7 @@ describe("importPluginFactoryForLifecycle chooses one arm per plugin", () => {
       expect(typeof factory).toBe("function");
       // The module's OWN export, which only an in-main dynamic import produces.
       const instance = (await factory!({} as never)) as { marker?: string };
-      expect(instance.marker).toBe(IN_PROCESS_MARKER);
+      expect(instance.marker).toBe(pathToFileURL(entryPath).href);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
