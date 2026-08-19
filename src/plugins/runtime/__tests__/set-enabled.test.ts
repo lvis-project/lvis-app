@@ -120,7 +120,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "a".repeat(64),
-      signerKeyId: "poc-v1",
+      signerKeyId: "prod-v1",
       files: ["entry.mjs", "plugin.json"],
       installedAt: new Date(0).toISOString(),
     });
@@ -238,7 +238,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "c".repeat(64),
-      signerKeyId: "poc-v1",
+      signerKeyId: "prod-v1",
       files: ["entry.mjs", "plugin.json"],
       installedAt: new Date(0).toISOString(),
     });
@@ -247,7 +247,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "d".repeat(64),
-      signerKeyId: "poc-v1",
+      signerKeyId: "prod-v1",
       files: ["entry.mjs", "plugin.json"],
       installedAt: new Date(0).toISOString(),
     });
@@ -283,7 +283,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "b".repeat(64),
-      signerKeyId: "poc-v1",
+      signerKeyId: "prod-v1",
       files: ["entry.mjs", "plugin.json"],
       installedAt: new Date(0).toISOString(),
     });
