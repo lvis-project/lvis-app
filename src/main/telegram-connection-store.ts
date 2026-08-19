@@ -360,14 +360,6 @@ function desiredState(value: unknown): value is TelegramDesiredState {
   return value === "disconnected" || value === "connected" || value === "paused";
 }
 
-/**
- * Compare two 32-byte digests without an early return on the first differing
- * byte. Shape rejection happens before the comparison and leaks nothing about
- * the stored digest: a value that is not 64 hex characters cannot be any
- * digest this store holds, so answering "no" from its length is not a secret-
- * dependent branch. Every accepted value decodes to exactly 32 bytes, so
- * `timingSafeEqual` never sees a length mismatch.
- */
 function validDuration(value: unknown, maximum: number): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= maximum;
 }
