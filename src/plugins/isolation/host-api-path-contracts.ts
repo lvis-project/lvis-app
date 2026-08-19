@@ -224,22 +224,37 @@ export const HOSTAPI_PATH_CONTRACTS = {
   // `options.signal` is an `AbortSignal` → abort-channel id. The return is a
   // plain string, which is why counting non-representable members by return
   // value alone missed this one.
+  //
+  // `child-disposable` because of that signal, not because of the return. The
+  // abort channel IS a registration: the child allocates its id and holds the
+  // release, the host holds the `AbortController`, and a child that dies
+  // mid-call leaves the host generating for nobody unless the host releases it
+  // too — the definition of a two-sided lifetime. Declaring `none` here would
+  // also deny the handler the shared abort registry (`SubscriptionScope` is
+  // handed only to lifetime-bearing members), which is what would push a
+  // handler into inventing a second one.
   callLlm: {
     arguments: "encoded",
     result: "plain-json",
-    lifetime: "none",
+    lifetime: "child-disposable",
     errors: ["effect-boundary-denied"],
   },
   // Both directions non-representable. `init` may carry `Headers`, an
   // `AbortSignal` and a `ReadableStream` body; a stream body is REJECTED with a
   // typed error rather than silently buffered. The reply is
-  // `{ status, statusText, headers, bodyBase64 }` under an explicit maximum —
-  // exceeding it throws, never truncates. Streaming responses stop streaming,
+  // `{ status, statusText, headers, body }` under an explicit maximum —
+  // exceeding it throws, never truncates. `body` is the SHARED tagged byte
+  // payload (`WireBytes`), so the one codec three members already share carries
+  // this one too. Streaming responses stop streaming,
   // and that loss is the decision, not an oversight.
+  // `child-disposable` for the same reason as `callLlm`: `init.signal` becomes
+  // an abort channel the child opens and the host must release when the child
+  // dies, or the host keeps an egress in flight on behalf of a process that no
+  // longer exists.
   hostFetch: {
     arguments: "encoded",
     result: "encoded",
-    lifetime: "none",
+    lifetime: "child-disposable",
     errors: ["effect-boundary-denied"],
   },
   // The host KEEPS OWNING the worker process — the sandbox grant machinery, the
