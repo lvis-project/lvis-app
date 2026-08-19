@@ -253,7 +253,7 @@ export async function bootstrap(
   // Shared AuditLogger + NotificationService + plugin auth-partition seeding.
   await setupAuditAndNotification(ctx);
 
-  // B1 + §F7: ApprovalGate with audit. Constructed BEFORE initPluginRuntime so
+  // §F7: ApprovalGate with audit. Constructed BEFORE initPluginRuntime so
   // the per-plugin HostApi factory can wire `agentApproval` namespace to the
   // live gate — without this ordering, plugins receive a hostApi missing the
   // namespace and §8 main-process approval routing silently no-ops.

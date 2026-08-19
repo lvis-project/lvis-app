@@ -214,7 +214,8 @@ function rendererSettingsSnapshot(snapshot: ReturnType<IpcDeps["settingsService"
   return projected;
 }
 
-/** Minor-1: extracted helper — 6 handlers share identical 5-line broadcast. */
+/** Shared by every handler that mutates settings and must re-broadcast the
+ *  projected snapshot to all windows. */
 async function broadcastSettingsSnapshot(
   deps: IpcDeps,
   shouldBroadcast: () => boolean = () => true,
@@ -270,7 +271,7 @@ function vendorBaseUrlSignature(llm: LLMSettings): string {
 }
 
 /**
- * E4 — stable signature of the shortcut + startup-launch inputs so the
+ * Stable signature of the shortcut + startup-launch inputs so the
  * `settings.update` handler can detect when a patch actually changed them and
  * only then re-register the global shortcut / re-sync the OS login item. Mirrors
  * the `activeLlmIdentity` change-detection pattern used for reviewer rewiring.
@@ -730,7 +731,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     const foundryVendorPatch = (llmPatch?.vendors as Record<string, unknown> | undefined)
       ?.["azure-foundry"] as Record<string, unknown> | undefined;
     if (foundryVendorPatch?.baseUrl !== undefined) {
-      // Minor-4: reject non-string values explicitly before String() coercion.
+      // Reject non-string values explicitly before String() coercion.
       if (typeof foundryVendorPatch.baseUrl !== "string") {
         return { ok: false, error: "invalid-foundry-endpoint", message: "baseUrl must be a string" };
       }
@@ -761,7 +762,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // closure that pushes the new value into the live fetcher instance.
     const prevAllowPrivate =
       settingsService.get("marketplace").cloudAllowPrivateNetwork ?? false;
-    // E4 — capture shortcut/startup signature so we only re-register on change.
+    // Capture shortcut/startup signature so we only re-register on change.
     const prevShortcutStartupSig = shortcutStartupSignature(
       settingsService.get("shortcuts"),
       settingsService.get("system"),
@@ -865,7 +866,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (vendorBaseUrlSignature(newLlm) !== prevVendorBaseUrlSig) {
       deps.refreshSandboxNetworkConfig?.();
     }
-    // E4 — reconcile the OS-level global accelerator + login item to the newly
+    // Reconcile the OS-level global accelerator + login item to the newly
     // persisted shortcut/startup fields (no-op when unchanged; see closure).
     reconcileShortcutStartupIfChanged();
     await broadcastSettingsSnapshot(deps);

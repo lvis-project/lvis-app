@@ -510,11 +510,6 @@
     {
       "type": "exports",
       "file": "src/main/hybrid-retriever.ts",
-      "name": "DEFAULT_HYBRID_WEIGHTS"
-    },
-    {
-      "type": "exports",
-      "file": "src/main/hybrid-retriever.ts",
       "name": "DEFAULT_OVERFETCH_MULTIPLIER"
     },
     {

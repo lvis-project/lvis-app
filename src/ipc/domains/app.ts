@@ -9,8 +9,12 @@
  * dev and packaged builds would disagree. The bootstrap splash resolves the
  * version the same way.
  *
- * Read-only and idempotent, and registered without a sender guard — the same
- * posture as `lvis:settings:get`.
+ * Read-only and idempotent, and registered without a sender guard. That is an
+ * accepted gap, not parity with `lvis:settings:get`: that handler also skips the
+ * guard, but it answers through `rendererSettingsSnapshot()`, which projects the
+ * stored settings before returning them, whereas this handler returns the fields
+ * it assembles as-is. Adding the guard or narrowing the response is a behaviour
+ * change and is tracked separately from the rename that created this module.
  */
 import { ipcMain } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";

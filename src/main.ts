@@ -357,9 +357,10 @@ async function main() {
     log.error({ err }, "telegram bridge failed to start (continuing boot)");
   }
 
-  // P4-5 receiver ingress has an independent immutable gate and listener.
-  // never widens or reuses the ph3/local API route family. The app binds only
-  // loopback; a separately trusted HTTPS tunnel/terminator owns public ingress.
+  // The remote A2A receiver ingress has an independent immutable gate and
+  // listener; it never widens or reuses the local API route family. The app
+  // binds only loopback; a separately trusted HTTPS tunnel/terminator owns
+  // public ingress.
   try {
     const receiver = await maybeStartRemoteA2AReceiverServer({
       services,
@@ -372,7 +373,7 @@ async function main() {
     log.error({ err }, "remote A2A receiver failed to start (continuing boot)");
   }
 
-  // L1: start the routines scheduler AFTER IPC handlers are wired so a
+  // Start the routines scheduler AFTER IPC handlers are wired so a
   // routine past-due at boot fires into a renderer that already has a
   // `lvis:routines:fired` listener attached. The scheduler is otherwise
   // safe to start at any time — `start()` is idempotent.
@@ -387,7 +388,7 @@ async function main() {
   ensureTray();
   setRendererReloadReady(true);
 
-  // E4 — reconcile OS-level global shortcuts + login item from persisted
+  // Reconcile OS-level global shortcuts + login item from persisted
   // settings once the tray + services exist. Registration failures are surfaced
   // via NotificationService (No-Fallback): a global-shortcut conflict inside
   // reconcileGlobalShortcuts, and a login-item apply failure via

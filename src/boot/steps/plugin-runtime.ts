@@ -398,7 +398,7 @@ export async function initPluginRuntime(
   // §Step 1 + §Step 2 — thread the canonical installed-plugin root through
   // the runtime. Install source and receipt metadata, not an unsigned-plugin
   // opt-in, establish the deployment trust classification.
-  // C6 — build the extracted factories. Lazy bindings (pluginRuntime,
+  // Build the extracted factories. Lazy bindings (pluginRuntime,
   // loopbackManager) are passed as getters so the eventual assignments below
   // are visible; both are still unassigned at this point (never value-captured).
   //
@@ -560,7 +560,7 @@ export async function initPluginRuntime(
     void refreshRegistryEntryCache();
   });
 
-  // I2 — Dev-mode live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
+  // Dev-mode live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
   // ToolRegistry resync runs through the runtime's `onEnable` callback wired
   // above — `reloadPlugin` fires it on success — so the watcher only
   // surfaces the hot-reload log line here.

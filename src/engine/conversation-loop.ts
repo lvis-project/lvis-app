@@ -157,7 +157,7 @@ export class ConversationLoop {
   lastContextInputTokens = 0;
   /** Local full-request projection corresponding to `lastContextInputTokens`. */
   lastContextInputProjectionTokens = 0;
-  /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
+  /** Current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
 
 
@@ -286,7 +286,7 @@ export class ConversationLoop {
     this.lastTurnScope?.delete(pluginId);
   }
 
-  /** B4: Abort the current streaming turn. No-op if no turn in flight. */
+  /** Abort the current streaming turn. No-op if no turn in flight. */
   abortCurrentTurn(reason: Error = new Error("user cancelled turn")): void {
     this.currentAbortController?.abort(reason);
   }
