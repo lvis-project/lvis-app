@@ -262,10 +262,9 @@ export function __resetLastThemePayloadForTests(): void {
  * deadline expires, in which case the original "not-registered" sentinel is
  * returned so a truly absent registration is still surfaced).
  *
- * Restored in 2026-05-04 after PR #447 removed it on the assumption that
- * register-before-attach was airtight; the assumption broke in the plugin
- * update lifecycle (plugin webview re-attach with a fresh wcId), where the
- * shell's first paint raced ahead of the host's register IPC.
+ * The wait queue is required, not belt-and-braces: register-before-attach is
+ * NOT airtight. In the plugin update lifecycle (webview re-attach with a fresh
+ * wcId) the shell's first paint races ahead of the host's register IPC.
  */
 const PENDING_ENTRY_URL_DEADLINE_MS = 5_000;
 type PendingEntryUrlResolver = (

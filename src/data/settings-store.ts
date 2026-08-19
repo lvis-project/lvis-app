@@ -418,7 +418,7 @@ export interface AppearanceSettingsV1 {
 }
 
 /**
- * User-configurable font preferences (Track A scope expansion).
+ * User-configurable font preferences.
  *
  * `family` — `"system"` keeps the built-in HOST_FONT_STACK (default). Any other
  * value MUST match `isValidFontFamilyOverride`; rejected values fall back to
@@ -835,10 +835,10 @@ export class SettingsService {
       // subfield at write time. Without this, two consecutive
       // `updateSettings({ appearance: { font: { family } } })` and
       // `updateSettings({ appearance: { font: { sizeScale } } })` calls each
-      // clobber the other's field (PR #672 review CRITICAL #1). And accepting
+      // clobber the other's field. And accepting
       // an unvalidated `family` at patch time + dropping it on next load is a
       // recovery-style fallback the No-Fallback-Code rule explicitly forbids
-      // (PR #672 review MAJOR #4) — validate at every trust boundary.
+      // — validate at every trust boundary.
       // Strip `font` from the outer spread before merging — we always want
       // the nested deep-merge below to be authoritative. Without this,
       // a caller passing `font: null` would land `null` directly via the

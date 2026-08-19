@@ -748,14 +748,14 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // can refresh reviewer wiring and cache scope immediately.
     const prevLlm = settingsService.get("llm");
     const prevActiveLlmIdentity = activeLlmIdentity(prevLlm);
-    // MAJOR-2 legacy guard: still detect Foundry baseUrl changes even when
+    // Legacy guard: still detect Foundry baseUrl changes even when
     // the active provider is not Foundry, preserving the prior explicit rewire.
     const prevBaseUrl = prevLlm.vendors?.["azure-foundry"]?.baseUrl ?? null;
     // ASRT dynamic-endpoint union: capture EVERY vendor baseUrl so a change to
     // any user-configured endpoint (e.g. the indexer's Azure OpenAI resource)
     // triggers a sandbox network live-refresh, not just an active/Foundry change.
     const prevVendorBaseUrlSig = vendorBaseUrlSignature(prevLlm);
-    // PR #795 follow-up: the MarketplaceTab "즉시 적용" badge on the SSRF-bypass
+    // The MarketplaceTab "즉시 적용" badge on the SSRF-bypass
     // toggle promised next-request activation, but the marketplace fetcher was
     // capturing the flag at boot only. Detect a change here and call the boot
     // closure that pushes the new value into the live fetcher instance.
@@ -931,7 +931,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     }
     await settingsService.setSecret(secretKey, apiKey);
     refreshChatRuntimeProviders(deps);
-    // MAJOR-2: rewire reviewer when provider key changes so cacheScope refreshes.
+    // Rewire the reviewer when the provider key changes so cacheScope refreshes.
     deps.rewireReviewerAgent?.();
     // #893 — refresh plugin wildcard with the new key for the active vendor.
     deps.refreshActiveLlmWildcard?.();
@@ -958,7 +958,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     }
     await settingsService.deleteSecret(secretKey);
     refreshChatRuntimeProviders(deps);
-    // MAJOR-2: rewire reviewer when provider key is removed so cacheScope refreshes.
+    // Rewire the reviewer when the provider key is removed so cacheScope refreshes.
     deps.rewireReviewerAgent?.();
     // #893 — refresh plugin wildcard so the now-missing key is cleared.
     deps.refreshActiveLlmWildcard?.();

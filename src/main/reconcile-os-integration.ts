@@ -4,8 +4,8 @@
  * Extracted from `main()` so the "register the global accelerator + login item
  * from persisted settings, and surface a login-item registration that the OS
  * did not apply" wiring can be unit-tested without spinning the whole app boot
- * (cluster-review §6a — the boot path fires a notification on a startup-launch
- * conflict, previously only reachable through a full `main()` startup).
+ * (the boot path fires a notification on a startup-launch conflict, which was
+ * previously only reachable through a full `main()` startup).
  *
  * Unlike the `settings.update` IPC path (which gates on a change signature and
  * runs after a `patch` commit), the boot path reconciles UNCONDITIONALLY: it is

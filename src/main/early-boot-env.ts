@@ -82,7 +82,7 @@ export function runEarlyBootEnv(): void {
   // are advisory rather than load-bearing for trust decisions, but allowing
   // them to flip in packaged builds creates a confusing forensic signal.
   //
-  // Round-3: the prefix scrub now catches `LVIS_DEV_CONSOLE` (renamed from
+  // The prefix scrub catches `LVIS_DEV_CONSOLE` (renamed from
   // `LVIS_ENABLE_DEV_CONSOLE`) automatically. `LVIS_WIN_NO_SANDBOX` is the
   // Windows-only sandbox bypass — it was previously named
   // `LVIS_DEV_NO_SANDBOX`, which made it incorrectly look like a dev flag;

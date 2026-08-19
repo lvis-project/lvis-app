@@ -21,7 +21,7 @@ export interface WhitelistBootstrapInput {
   /** Online toggle — disabled in tests or user-selected offline mode. */
   online?: boolean;
   /**
-   * Cluster review optional fix — app-shutdown AbortSignal. When the app
+   * App-shutdown AbortSignal. When the app
    * quits while a slow CDN response is in flight, this aborts the
    * underlying fetch immediately instead of waiting for the 10s HTTP
    * timeout. Boot passes its lifetime signal here.

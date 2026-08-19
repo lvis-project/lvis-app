@@ -1,5 +1,5 @@
 /**
- * §9.2 Track B — VSCode-style declarative plugin config schema utilities.
+ * §9.2 — VSCode-style declarative plugin config schema utilities.
  *
  * Two responsibilities:
  *  1. Compile a `manifest.configSchema` fragment into an AJV validator that

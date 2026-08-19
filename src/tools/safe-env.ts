@@ -76,7 +76,7 @@ export function buildSafeChildEnv(
  * `envVars.push(...)` block + `TMPDIR`). Anything ASRT might emit outside this
  * list is NOT propagated.
  *
- * Why an explicit allow-list (PR #1356 correctness MAJOR): the previous
+ * Why an explicit allow-list: the previous
  * "overlay any wrapped.env key that DIFFERS from process.env" rule was
  * open-ended. A stripped secret only stays stripped because its value happens
  * to be identical in `process.env` and `wrapped.env`. If a future ASRT version

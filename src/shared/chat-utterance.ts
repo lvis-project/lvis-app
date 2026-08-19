@@ -19,7 +19,7 @@
  * |                    |                 | and its tool results are preserved.     |
  * | `"stop"`           | streaming       | abort current turn, no new turn         |
  *
- * The pre-existing `chat:guide` IPC (PR #621 era, deprecated in #623) had
+ * The deprecated `chat:guide` IPC had
  * abort-and-restart semantics — that behavior is now `"abort-then-start"` of
  * a chatSend with the guidance prompt template. The new `"guide"` mode is
  * deliberately different: it leaves the in-flight turn alone, so a

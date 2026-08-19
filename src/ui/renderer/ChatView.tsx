@@ -659,7 +659,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
           - low    → --success (informational, safe re-approval)
           - medium → --warning (moderate risk)
           - high   → --destructive + role="alert" (urgent — user is re-using a high-risk approval)
-          Cluster review MAJOR-3 — disclosure surface must be visually distinguishable per tier.
+          The disclosure surface must be visually distinguishable per tier.
           Uses semantic theme tokens (--success / --warning / --destructive) so bundles
           (tokyo-night / forest / etc.) supply the actual color — the toast adapts. */}
       {userApprovalHitToast && (() => {

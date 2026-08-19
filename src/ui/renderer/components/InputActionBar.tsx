@@ -221,7 +221,7 @@ export function InputActionBar({
   return (
     <div
       data-testid="input-action-bar"
-      // Tutorial-C SpotlightTour anchor (PR #983 follow-up). Step 2 of
+      // SpotlightTour anchor. Step 2 of
       // `first-boot-essentials` pins to this action-bar root, see
       // `default-tour-scenarios.ts`.
       data-tour-anchor="input-action-bar"

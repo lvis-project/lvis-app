@@ -624,7 +624,7 @@ export class PluginMarketplaceService {
   }
 
   /**
-   * #FU259 accessor — the MCP install IPC needs the same fetcher to
+   * The MCP install IPC needs the same fetcher to
    * resolve catalog detail by slug before driving the artifact store.
    * Read-only escape hatch; callers must not mutate fetcher state.
    */
@@ -1214,7 +1214,7 @@ export class PluginMarketplaceService {
       return result;
     }
     const managed = plugins.filter((p) => normalizeInstallPolicy(p) === "admin");
-    // Round-3 §6: registry read errors must propagate. ENOENT is already
+    // Registry read errors must propagate. ENOENT is already
     // handled inside readPluginRegistry (returns empty default for first
     // boot); a corrupt registry must NOT silently force-reinstall every
     // managed plugin on top of an unknown prior state.
@@ -1820,7 +1820,7 @@ export class PluginMarketplaceService {
    * does not own.
    */
   private async snapshotCurrentInstall(pluginId: string): Promise<void> {
-    // Round-3 §6: do NOT swallow registry read errors here. `readPluginRegistry`
+    // Do NOT swallow registry read errors here. `readPluginRegistry`
     // already returns the empty default on ENOENT (first-boot); any other
     // error (corrupt JSON, IO failure) must propagate so we don't silently
     // skip the rollback snapshot and then overwrite the install with an
@@ -1998,7 +1998,7 @@ export class PluginMarketplaceService {
 
   /** Returns the version string from the currently-installed manifest, or null. */
   async getInstalledVersion(pluginId: string): Promise<string | null> {
-    // Round-3 §6: registry read errors propagate; only the manifest-missing
+    // Registry read errors propagate; only the manifest-missing
     // path returns null (stale registry entry).
     const registry = await readPluginRegistry(this.registryPath);
     return this.readInstalledVersionFromRegistry(registry, pluginId);
@@ -2225,7 +2225,7 @@ export class PluginMarketplaceService {
    * parse errors propagate so corruption is surfaced rather than silently
    * dropping a real plugin from dependency resolution.
    *
-   * Round-3 §6: registry read errors propagate (ENOENT is already returned
+   * Registry read errors propagate (ENOENT is already returned
    * as the empty default inside readPluginRegistry).
    */
   private async loadInstalledManifests(): Promise<PluginManifest[]> {

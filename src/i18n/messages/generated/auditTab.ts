@@ -20,7 +20,7 @@ export const en = {
   "auditTab.colType": "Type",
   "auditTab.colSourceRoute": "Source / Route",
   "auditTab.colMessage": "Message",
-  // #1499 E2 — diagnostics bundle + log viewer + crash list
+  // diagnostics bundle + log viewer + crash list
   "auditTab.diagnosticsTitle": "Diagnostics",
   "auditTab.diagnosticsDescription": "Export a redacted diagnostics bundle, view recent logs, and list crash dumps.",
   "auditTab.bundleSectionTitle": "Diagnostics bundle",
@@ -66,7 +66,7 @@ export const ko: Record<keyof typeof en, string> = {
   "auditTab.colType": "유형",
   "auditTab.colSourceRoute": "소스 / 라우트",
   "auditTab.colMessage": "메시지",
-  // #1499 E2 — 진단 번들 + 로그 뷰어 + 크래시 목록
+  // 진단 번들 + 로그 뷰어 + 크래시 목록
   "auditTab.diagnosticsTitle": "진단",
   "auditTab.diagnosticsDescription": "마스킹된 진단 번들을 내보내고, 최근 로그를 보고, 크래시 덤프를 조회합니다.",
   "auditTab.bundleSectionTitle": "진단 번들",

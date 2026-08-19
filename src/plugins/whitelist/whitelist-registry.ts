@@ -78,7 +78,7 @@ export interface WhitelistInitOptions {
   /** Telemetry sink — incremented for each fetch/cache outcome. */
   telemetry?: (event: string, meta?: Record<string, string>) => void;
   /**
-   * Cluster review optional fix — app-shutdown AbortSignal threaded from
+   * App-shutdown AbortSignal threaded from
    * boot so a slow CDN response doesn't keep the registry's fetch alive
    * after the user quit (up to the 10s HTTP timeout). The signal flows
    * directly into `whitelist-fetcher.ts` and aborts the underlying

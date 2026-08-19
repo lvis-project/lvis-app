@@ -440,7 +440,7 @@ async function scrubLegacyArgsMetadata(): Promise<void> {
 // ─── Migration helpers ────────────────────────────────────────────────────────
 
 /**
- * MAJOR-2 collision resolver: when two stale entries map to the same new key,
+ * Collision resolver: when two stale entries map to the same new key,
  * pick the survivor that preserves the most audit information.
  *
  * Rules (in priority order):
@@ -462,12 +462,12 @@ function chooseSurvivor(existing: UserApprovalEntry, incoming: UserApprovalEntry
 
 /**
  * One-shot boot-time migration: re-canonicalize stored entry keys to match
- * the deep RFC 8785 JCS behaviour introduced in PR #828.
+ * the deep RFC 8785 JCS behaviour.
  *
- * Before #828, nested objects inside arrays were serialized without recursive
- * key-sorting. Entries recorded with the old behavior carry a stale hash key
- * that no longer matches what `entryKey()` produces for the same args, causing
- * silent approval invalidation (issue #837).
+ * Under the previous shallow behaviour, nested objects inside arrays were
+ * serialized without recursive key-sorting. Entries recorded that way carry a
+ * stale hash key that no longer matches what `entryKey()` produces for the
+ * same args, silently invalidating the approval.
  *
  * Entries that stored `args` (written after this change) can be re-keyed
  * precisely. Entries without `args` (written before this field was added)
@@ -507,7 +507,7 @@ export async function migrateCanonicalization(): Promise<void> {
     return;
   }
 
-  // MAJOR-1: wrap entire migration body so a corrupt approvals file or
+  // Wrap the entire migration body so a corrupt approvals file or
   // permission error does not crash boot. On failure, skip writing the marker
   // so the next boot will retry.
   try {
@@ -569,7 +569,7 @@ export async function migrateCanonicalization(): Promise<void> {
           // No change — args had no nested-array-of-objects, already canonical.
           updated[newKey] = entry;
         } else {
-          // MAJOR-2: two stale entries may canonicalize to the same newKey.
+          // Two stale entries may canonicalize to the same newKey.
           // Prefer the revoked entry (revokedAt non-null wins for audit
           // preservation); otherwise prefer the entry with the earlier
           // approvedAt so we don't silently drop historical approvals.
@@ -604,16 +604,16 @@ export async function migrateCanonicalization(): Promise<void> {
     // MEDIUM: route through structured logger (bootAuditLogger not yet
     // available at this call site; createLogger routes to the same sink).
     log.info({
-      event: "r2-canonicalization-migration",
+      event: "canonicalization-migration",
       migrated,
       skipped,
       total,
     });
     await scrubLegacyArgsMetadata();
   } catch (err) {
-    // MAJOR-1: log failure but do NOT write the marker — next boot will retry.
+    // Log the failure but do NOT write the marker — next boot will retry.
     log.warn({
-      event: "r2-canonicalization-migration-failed",
+      event: "canonicalization-migration-failed",
       error: (err as Error).message ?? String(err),
     });
   }

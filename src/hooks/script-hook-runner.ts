@@ -101,8 +101,8 @@ export interface RunnableHook {
   /**
    * Origin discriminant — `.sh` legacy hook vs declarative `hooks.json`
    * `command` entry. Carried through onto every {@link ScriptHookInvocationResult}
-   * so the audit layer can tell config-hook vs `.sh`-hook denials apart (#811
-   * cluster-review follow-up). Defaults to `"sh"` for the legacy adapter.
+   * so the audit layer can tell config-hook vs `.sh`-hook denials apart.
+   * Defaults to `"sh"` for the legacy adapter.
    */
   source?: "sh" | "config";
   /**
@@ -210,7 +210,7 @@ export async function runOneHookScript(
   // Forensic anchors carried onto EVERY result this invocation produces. `source`
   // discriminates `.sh` vs config; `commandIdentity` is the local-script sha (sh)
   // or a hash of the verbatim argv (config). These let the audit layer tell
-  // config-hook from `.sh`-hook denials apart (#811 cluster-review follow-up).
+  // config-hook from `.sh`-hook denials apart.
   const forensics = {
     hookPath: runnable.hookPath,
     hookType: runnable.hookType,

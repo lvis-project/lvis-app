@@ -242,7 +242,7 @@ export function SettingsContent({
   // when nothing is pending, so registering all four is safe.
   // (Note: in the BrowserWindow conversion the hook's own unmount
   // cleanup also fires `cancel()`, so the pre-conversion Dialog
-  // `open=false` cancel-effect was retired — see PR #890 review.)
+  // `open=false` cancel-effect was retired.)
   useEffect(() => {
     window.addEventListener("beforeunload", flushPendingSaves);
     window.addEventListener("pagehide", flushPendingSaves);

@@ -453,7 +453,7 @@ export const CHANNELS = {
     search: "lvis:audit:search",
     stats: "lvis:audit:stats",
   },
-  // ── Diagnostics bundle + production log viewer + crash list (#1499 E2) ──────
+  // ── Diagnostics bundle + production log viewer + crash list ──────
   // ALL INTERNAL: deliberately absent from PUBLIC_CHANNELS / CHANNEL_GESTURE /
   // EXTERNAL_MUTATION_CHANNELS. A diagnostics bundle serializes redacted host
   // state (settings whitelist, audit jsonl, logs, crash-dump metadata) to a
@@ -722,7 +722,7 @@ export const EXTERNAL_MUTATION_DENIED = "external-mutation-denied";
  * `lvis:window:open-html-preview` is intentionally NOT listed — it is
  * registered in-tree by the `window` IPC domain and is already classified
  * (internal: registered-but-not-public) by the channel inventory. For the SAME
- * reason the #1499 E2 diagnostics channels (`lvis:diagnostics:export`,
+ * reason the diagnostics channels (`lvis:diagnostics:export`,
  * `lvis:diagnostics:crash-list`, `lvis:logs:tail`) are NOT listed here — they
  * are registered in-tree by the `diagnostics` IPC domain and classified
  * internal (registered-but-not-public) by the channel inventory; this map is

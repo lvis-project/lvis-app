@@ -170,7 +170,7 @@ export interface TrustedSandboxSettings {
    * Upstream HTTP/HTTPS proxy the sandbox's egress proxy should chain through
    * for outbound connections (corporate-proxy passthrough). TRUSTED-ONLY.
    *
-   * SECURITY (PR #1356 MINOR -- parentProxy explicit, corrected here):
+   * SECURITY (parentProxy is passed explicitly):
    * ASRT's `resolveParentProxy` (parent-proxy.js:46) does
    * `cfg?.http ?? process.env.HTTP_PROXY ?? process.env.http_proxy`. An EMPTY
    * object `{}` has no `http` key, so `cfg?.http` is `undefined` and the `??`
@@ -231,7 +231,7 @@ export interface TrustedSandboxSettings {
  * grants use {@link grantWindowsWorkerFilesystemAccess} with a dedicated
  * holder PID instead of passing allow grants through this per-exec channel.
  *
- * ⚠️ TRUST BOUNDARY (security MINOR from the PR #1355 cluster review) ⚠️
+ * ⚠️ TRUST BOUNDARY ⚠️
  * `wrapWithSandboxArgv` accepts a `customConfig: Partial<SandboxRuntimeConfig>`
  * that ASRT merges over the initialized config for this command only — that is
  * the single channel through which a per-command call could otherwise smuggle
@@ -694,7 +694,7 @@ export function buildSandboxConfig(trustedSettings: TrustedSandboxSettings): San
     trustedSettings.allowUnixSocketDirs.length > 0
       ? { allowUnixSockets: [...trustedSettings.allowUnixSocketDirs] }
       : {}),
-    // parentProxy EXPLICIT (PR #1356 security MINOR — corrected). ASRT's
+    // parentProxy EXPLICIT. ASRT's
     // resolveParentProxy (dist/sandbox/parent-proxy.js:46) reads
     //   `cfg?.http ?? process.env.HTTP_PROXY ?? process.env.http_proxy`.
     // An EMPTY object `{}` has no `http` key ⇒ `cfg?.http` is `undefined` ⇒ the
@@ -1031,7 +1031,7 @@ export async function initializeAsrtSandbox(
   askCb?: SandboxAskCallback,
   enableLogMonitor = false,
 ): Promise<void> {
-  // Idempotency guard (PR #1356 NIT). The boot gate must decide exactly once;
+  // Idempotency guard. The boot gate must decide exactly once;
   // a double-initialize means two boot paths raced or a runtime channel tried
   // to re-seal the sandbox with a different config. Fail loud rather than
   // silently overwriting the live config — use updateAsrtSandboxConfig to
@@ -1102,7 +1102,7 @@ export async function wrapToolCommand(
   command: string,
   options: WrapOptions = {},
 ): Promise<SandboxWrapResult> {
-  // Self-enforcing gate (PR #1356 NIT). Do not depend on the caller to check
+  // Self-enforcing gate. Do not depend on the caller to check
   // isAsrtSandboxActive() first — a wrap with no initialized SandboxManager is
   // a bug, so throw rather than silently wrapping against an uninitialized
   // singleton.
@@ -1220,7 +1220,7 @@ export function computeUnionAllowedDomains(
  * Align an allow-list with ASRT's domain-matching semantics so it enforces the
  * SAME hosts LVIS's host-fetch allow-list does.
  *
- * SEMANTICS DIVERGENCE (PR #1356 MINOR): ASRT's `matchesDomainPattern`
+ * SEMANTICS DIVERGENCE: ASRT's `matchesDomainPattern`
  * (dist/sandbox/domain-pattern.js:23) matches a BARE `example.com` EXACTLY —
  * `h === pattern` — so `sub.example.com` is NOT covered; a strict subdomain
  * needs the explicit `*.example.com` pattern (`h.endsWith('.' + base)`). LVIS's
