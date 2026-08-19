@@ -168,6 +168,101 @@ describe("PluginRuntime boot preflight", () => {
     expect(isReinstallFixableFailureKind(card?.installFailureKind)).toBe(true);
   });
 
+  it("keeps loading the plugins listed after one that throws mid-load", async () => {
+    // Candidate-root materialization sits between the gates that classify
+    // their own refusals, so a throw here is unclassified — and it used to
+    // unwind `load()`'s whole loop. Every plugin AFTER the thrower was then
+    // never attempted: no instance, no failure, and (because a card needs
+    // either a load status or a stub) no row anywhere in the UI, while the
+    // registry kept calling them installed.
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+      createHostApi: createNoopHostApiForTests,
+      installReceiptCacheRoot: join(root, "receipts"),
+    }));
+    const internals = runtime as unknown as {
+      verifyReceiptAndDevGuard(): Promise<{ ok: true }>;
+      readManifest(path: string): Promise<PluginManifest>;
+      materializeImmutableRuntimeRoot(
+        pluginId: string,
+        pluginRoot: string,
+        activationId: string,
+        installId: string,
+      ): Promise<string>;
+    };
+    internals.verifyReceiptAndDevGuard = async () => ({ ok: true });
+    internals.readManifest = async (path) => manifests.get(path.split(/[\\/]/).at(-2)!)!;
+    const materialize = internals.materializeImmutableRuntimeRoot.bind(runtime);
+    internals.materializeImmutableRuntimeRoot = async (pluginId, ...rest) => {
+      if (pluginId === "preflight-1") {
+        throw new Error("ENOSPC: no space left on device, mkdir runtime root");
+      }
+      return materialize(pluginId, ...rest);
+    };
+
+    await expect(runtime.load()).resolves.toBeUndefined();
+
+    // preflight-2 through preflight-5 all come after the thrower in registry
+    // order; every one of them still got its attempt.
+    expect(runtime.listPluginIds()).toEqual([
+      "preflight-0",
+      "preflight-2",
+      "preflight-3",
+      "preflight-4",
+      "preflight-5",
+    ]);
+    const card = runtime.listPluginCards().find((entry) => entry.id === "preflight-1");
+    expect(card?.loadStatus).toBe("failed");
+    expect(card?.installFailureKind).toBe("load-crash");
+    expect(card?.installFailureMessage).toContain("no space left on device");
+  });
+
+  it("surfaces a registry row whose manifest path escapes the plugin root", async () => {
+    // The plan drops this row before anything reads it, so no preflight
+    // outcome and no manifest ever exist for it — only an explicit stub can
+    // put it on a card, and without one the marketplace was left calling it
+    // installed while the app named it nowhere.
+    const strayRoot = join(root, "outside-the-plugin-root");
+    const strayManifestPath = join(strayRoot, "plugin.json");
+    await mkdir(strayRoot, { recursive: true });
+    await writeFile(strayManifestPath, "{}\n", "utf8");
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "stray-registry-plugin", manifestPath: strayManifestPath },
+      { id: "preflight-0", manifestPath: join(pluginsRoot, "preflight-0", "plugin.json") },
+    ]);
+    const readPaths: string[] = [];
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+      createHostApi: createNoopHostApiForTests,
+      installReceiptCacheRoot: join(root, "receipts"),
+    }));
+    const internals = runtime as unknown as {
+      verifyReceiptAndDevGuard(): Promise<{ ok: true }>;
+      readManifest(path: string): Promise<PluginManifest>;
+    };
+    internals.verifyReceiptAndDevGuard = async () => ({ ok: true });
+    internals.readManifest = async (path) => {
+      readPaths.push(path);
+      return manifests.get(path.split(/[\\/]/).at(-2)!)!;
+    };
+
+    await runtime.load();
+
+    expect(readPaths).not.toContain(strayManifestPath);
+    expect(runtime.listPluginIds()).toEqual(["preflight-0"]);
+    const card = runtime.listPluginCards().find((entry) => entry.id === "stray-registry-plugin");
+    expect(card?.loadStatus).toBe("failed");
+    expect(card?.installFailureKind).toBe("untrusted-manifest-path");
+    expect(card?.installFailureMessage).toContain(strayManifestPath);
+    // Distinct from the receipt refusal above, which is unclassified: both are
+    // repairable by reinstalling, but the Doctor must say which one happened.
+    expect(isReinstallFixableFailureKind(card?.installFailureKind)).toBe(true);
+  });
+
   it("isolates an unexpected receipt verifier rejection to its plugin", async () => {
     const rejected: Array<{ pluginId: string; reason: string }> = [];
     const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
