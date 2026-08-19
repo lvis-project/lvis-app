@@ -2,7 +2,7 @@
  * Chat domain IPC handlers.
  * Covers: lvis:chat:*, lvis:memory:*, lvis:starred:*, lvis:feedback:submit,
  *         lvis:ask-user-question:respond
- * Note: routine v2 channels (lvis:routines:v2:*) are handled in misc.ts.
+ * Note: routine channels (lvis:routines:*) are handled in routines.ts.
  *
  * C10 (#1409): the PUBLIC chat channels (send / sessions / get-history /
  * session-history) delegate to transport-agnostic pure handlers in

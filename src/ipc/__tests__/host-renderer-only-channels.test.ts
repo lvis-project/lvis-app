@@ -24,7 +24,7 @@ import type { IpcMainInvokeEvent } from "electron";
 import { hostFrameEvent, pluginShellFrameEvent } from "../../__tests__/test-helpers.js";
 
 const { CHANNELS } = await import("../../contract/app-contract.js");
-const { ROUTINES_V2, WORK_BOARD } = await import("../../shared/ipc-channels.js");
+const { ROUTINES, WORK_BOARD } = await import("../../shared/ipc-channels.js");
 const { setIsPackaged } = await import("../../boot/dev-flags.js");
 
 const handleMap = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
@@ -176,8 +176,8 @@ const HOST_ONLY_CHANNELS: ReadonlyArray<readonly [string, string, unknown[]]> = 
   ["sidechat", CHANNELS.sidechat.send, [{ input: "x" }]],
   ["sidechat", CHANNELS.sidechat.list, []],
   // Routines and the session todo list.
-  ["misc", ROUTINES_V2.list, []],
-  ["misc", CHANNELS.sessionTodo.list, []],
+  ["routines", ROUTINES.list, []],
+  ["session-todo", CHANNELS.sessionTodo.list, []],
   // Work board items drive agent runs.
   ["work-board", WORK_BOARD.list, [{}]],
   ["work-board", WORK_BOARD.run, [{}]],
@@ -215,7 +215,8 @@ beforeEach(async () => {
     { registerSettingsHandlers },
     { registerPluginsHandlers },
     { registerSideChatHandlers },
-    { registerMiscHandlers },
+    { registerRoutineHandlers },
+    { registerSessionTodoHandlers },
     { registerWorkBoardHandlers },
     { registerPromptHandlers },
     { registerTourHandlers },
@@ -230,7 +231,8 @@ beforeEach(async () => {
     import("../domains/settings.js"),
     import("../domains/plugins.js"),
     import("../domains/sidechat.js"),
-    import("../domains/misc.js"),
+    import("../domains/routines.js"),
+    import("../domains/session-todo.js"),
     import("../domains/work-board.js"),
     import("../domains/prompts.js"),
     import("../domains/tour.js"),
@@ -245,7 +247,8 @@ beforeEach(async () => {
   registerSettingsHandlers(deps);
   registerPluginsHandlers(deps);
   registerSideChatHandlers(deps);
-  registerMiscHandlers(deps);
+  registerRoutineHandlers(deps);
+  registerSessionTodoHandlers(deps);
   registerWorkBoardHandlers(deps);
   registerPromptHandlers(deps);
   registerTourHandlers(deps);

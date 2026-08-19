@@ -115,7 +115,7 @@ export function useRoutineOverlay({
     // Major fix: clears running:true stuck OverlayItem when LLM session fails.
     // Uses the same stale-replace path as fired so the running OverlayItem
     // transitions to a visible error summary instead of staying spinning.
-    const unsubFailed = api.onRoutineFailedV2((evt) => {
+    const unsubFailed = api.onRoutineFailed((evt) => {
       setRunningRoutines((prev) => {
         const next = new Set(prev);
         next.delete(evt.routineId);
@@ -132,7 +132,7 @@ export function useRoutineOverlay({
 
     void (async () => {
       try {
-        const pending = await api.listPendingRoutineResultsV2();
+        const pending = await api.listPendingRoutineResults();
         for (const result of pending) pushRoutineResult(result);
       } catch (err) {
         console.warn("[lvis] listPendingRoutineResults failed:", (err as Error).message);
@@ -140,7 +140,7 @@ export function useRoutineOverlay({
     })();
 
     // M1: fired payload uses explicit allowlist fields only (no ...routine spread)
-    const unsubFired = api.onRoutineFiredV2(pushRoutineResult);
+    const unsubFired = api.onRoutineFired(pushRoutineResult);
 
     return () => { unsubStarted(); unsubFinished(); unsubFailed(); unsubFired(); };
   }, [api, pushRoutineResult, t]);
@@ -208,7 +208,7 @@ export function useRoutineOverlay({
 
   const handleRoutineAcknowledge = useCallback(
     (routineId: string, firedAt: string) => {
-      void api.acknowledgeRoutineResultV2(routineId, firedAt).catch((err) => {
+      void api.acknowledgeRoutineResult(routineId, firedAt).catch((err) => {
         console.warn("[lvis] acknowledgeRoutineResult failed:", (err as Error).message);
       });
     },

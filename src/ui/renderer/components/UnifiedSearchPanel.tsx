@@ -118,7 +118,7 @@ export function UnifiedSearchPanel({
     if (!open) return;
     let alive = true;
     setRoutinesLoading(true);
-    void api.listRoutinesV2()
+    void api.listRoutines()
       .then((list) => {
         if (alive) setRoutines(list ?? []);
       })

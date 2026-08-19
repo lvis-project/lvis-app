@@ -330,7 +330,7 @@ export function AddRoutineModal({ api, onClose, onAdded }: AddRoutineModalProps)
     setSubmitting(true);
     setError("");
     try {
-      const result = await api.addRoutineV2(input);
+      const result = await api.addRoutine(input);
       if (result.ok) {
         onAdded();
         onClose();
@@ -627,16 +627,16 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
   useEffect(() => () => { mountedRef.current = false; }, []);
 
   const refresh = useCallback(async () => {
-    if (typeof api.listRoutinesV2 !== "function") return;
+    if (typeof api.listRoutines !== "function") return;
     setLoading(true);
     try {
-      const list = await api.listRoutinesV2();
+      const list = await api.listRoutines();
       const sessions = (
         await Promise.all(
           list
             .filter((routine) => routine.execution === "llm-session")
             .map(async (routine) => {
-              const records = await api.listRoutineSessionsV2(routine.id, 10);
+              const records = await api.listRoutineSessions(routine.id, 10);
               const routineTitle =
                 routine.title ?? routine.notificationTitle ?? routine.prePrompt?.slice(0, 30) ?? routine.id.slice(0, 8);
               return records.map((record) => ({
@@ -662,8 +662,8 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
 
   useEffect(() => {
     void refresh();
-    if (typeof api.onRoutineFiredV2 !== "function") return undefined;
-    const unsub = api.onRoutineFiredV2((r) => {
+    if (typeof api.onRoutineFired !== "function") return undefined;
+    const unsub = api.onRoutineFired((r) => {
       setRecentlyFired((prev) => (prev.includes(r.id) ? prev : [...prev, r.id]));
       void refresh();
     });
@@ -672,7 +672,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
 
   const handleDismiss = useCallback(
     async (id: string) => {
-      await api.dismissRoutineV2(id);
+      await api.dismissRoutine(id);
       await refresh();
     },
     [api, refresh],
@@ -680,7 +680,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
 
   const handleRemove = useCallback(
     async (id: string) => {
-      await api.removeRoutineV2(id);
+      await api.removeRoutine(id);
       await refresh();
     },
     [api, refresh],
@@ -688,7 +688,7 @@ export function RoutinePanel({ api, onOpenSession }: RoutinePanelProps) {
 
   const handleTriggerNow = useCallback(
     async (id: string) => {
-      await api.triggerRoutineNowV2(id);
+      await api.triggerRoutineNow(id);
       setRecentlyFired((prev) => (prev.includes(id) ? prev : [...prev, id]));
       await refresh();
     },
