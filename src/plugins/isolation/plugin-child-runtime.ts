@@ -40,6 +40,7 @@ import type {
   RuntimePlugin,
   RuntimePluginFactory,
 } from "../types.js";
+import { createInteractionChildMembers } from "./host-api-interaction-child.js";
 import {
   HOSTAPI_PATH_CONTRACTS,
   type HostApiPath,
@@ -270,8 +271,18 @@ export async function startPluginChildRuntime(
   const abortChannels = new SubscriptionLedger<{ readonly detach: () => void }>(
     `plugin-child:${pluginId}:abort`,
   );
-  const hostApi = createChildHostApiStub(pluginId, (path) =>
-    unimplementedChildMember(pluginId, path),
+  const call = createHostApiCaller(channel, context);
+  // One entry per group of members, merged into a partial map. A path with no
+  // stub yet keeps the THROWING default rather than an absent member or a
+  // resolved `undefined`, so "not wired" can never read as an answer.
+  const wiredMembers: Partial<
+    Record<HostApiPath, (...args: unknown[]) => unknown>
+  > = {
+    ...createInteractionChildMembers(call),
+  };
+  const hostApi = createChildHostApiStub(
+    pluginId,
+    (path) => wiredMembers[path] ?? unimplementedChildMember(pluginId, path),
   );
 
   const runtimeContext: PluginRuntimeContext = {
