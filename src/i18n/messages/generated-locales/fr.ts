@@ -1432,6 +1432,10 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.unknownPluginId": "ID de plugin inconnu.",
   "formatIpcError.userKeyboardRequired": "Cette modification d'autorisation ne peut être effectuée qu'à partir d'une entrée utilisateur active.",
   "formatIpcError.writeFailed": "Échec de l'enregistrement des paramètres.",
+  "formatIpcError.settingsUnreadable":
+    "Votre fichier de paramètres n'a pas pu être lu, les projets ne peuvent donc pas être listés ni ajoutés. Le fichier a été laissé intact — réparez ou restaurez ~/.lvis/settings.json.",
+  "formatIpcError.settingsPendingRemovalsMalformed":
+    "Certaines entrées de suppression de projet du fichier de paramètres n'ont pas pu être lues. Elles ont été conservées telles quelles et ignorées : ces suppressions ne se termineront pas tant que ~/.lvis/settings.json n'est pas réparé.",
   "generalTab.appVersionLabel": "Version de l'application",
   "generalTab.copyButton": "Copie",
   "generalTab.copyDataPathAriaLabel": "Copier le chemin des données",

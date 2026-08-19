@@ -1443,6 +1443,10 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.unknownPluginId": "ID de complemento desconocido.",
   "formatIpcError.userKeyboardRequired": "Este cambio de permiso solo se puede realizar a partir de la entrada del usuario activo.",
   "formatIpcError.writeFailed": "No se pudo guardar la configuración.",
+  "formatIpcError.settingsUnreadable":
+    "No se pudo leer tu archivo de configuración, por lo que no se pueden listar ni añadir proyectos. El archivo se dejó intacto: repara o restaura ~/.lvis/settings.json.",
+  "formatIpcError.settingsPendingRemovalsMalformed":
+    "No se pudieron leer algunas entradas de eliminación de proyectos del archivo de configuración. Se conservaron tal cual y se omitieron, así que esas eliminaciones no terminarán hasta que se repare ~/.lvis/settings.json.",
   "generalTab.appVersionLabel": "Versión de la aplicación",
   "generalTab.copyButton": "Copiar",
   "generalTab.copyDataPathAriaLabel": "Copiar ruta de datos",

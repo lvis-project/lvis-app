@@ -122,6 +122,10 @@ export const en = {
   "formatIpcError.persistFailed": "Failed to persist the change.",
   "formatIpcError.invalidScenarioId": "The selected guide tour item is invalid.",
   "formatIpcError.writeFailed": "Failed to save settings.",
+  "formatIpcError.settingsUnreadable":
+    "Your settings file could not be read, so projects cannot be listed or added. The file was left untouched — repair or restore ~/.lvis/settings.json.",
+  "formatIpcError.settingsPendingRemovalsMalformed":
+    "Some project-removal entries in your settings file could not be read. They were kept as they are and skipped, so those removals will not finish until ~/.lvis/settings.json is repaired.",
   "formatIpcError.rateLimited": "Too many requests. Please try again in a moment.",
   "formatIpcError.crossServerCallDenied": "This app tried to use a tool that does not belong to its own server. The request was blocked.",
   "formatIpcError.invalidBinding": "This card could not be identified, so the app request was blocked.",
@@ -291,6 +295,10 @@ export const ko: Record<keyof typeof en, string> = {
   "formatIpcError.persistFailed": "변경 사항을 저장하지 못했습니다.",
   "formatIpcError.invalidScenarioId": "선택한 가이드 투어 항목이 올바르지 않습니다.",
   "formatIpcError.writeFailed": "설정을 저장하지 못했습니다.",
+  "formatIpcError.settingsUnreadable":
+    "설정 파일을 읽을 수 없어 프로젝트를 표시하거나 추가할 수 없습니다. 파일은 그대로 두었습니다 — ~/.lvis/settings.json 을 복구하거나 되돌려 주세요.",
+  "formatIpcError.settingsPendingRemovalsMalformed":
+    "설정 파일의 프로젝트 삭제 대기 항목 중 일부를 읽을 수 없습니다. 해당 항목은 그대로 보존하고 건너뛰었으며, ~/.lvis/settings.json 을 복구해야 그 삭제가 마무리됩니다.",
   "formatIpcError.rateLimited": "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요.",
   "formatIpcError.crossServerCallDenied": "이 앱이 자기 서버의 것이 아닌 도구를 호출하려 했습니다. 요청이 차단되었습니다.",
   "formatIpcError.invalidBinding": "이 카드를 식별할 수 없어 앱 요청을 차단했습니다.",

@@ -234,8 +234,61 @@ export interface PendingWorkspaceRootRemoval {
   source: string;
 }
 
+/**
+ * What a read could NOT interpret in the on-disk file.
+ *
+ * The settings file is an external boundary: it is hand-editable, it is
+ * restored from backups, and a half-written predecessor of the atomic writer
+ * could survive a crash. None of that may be answered by pretending the user
+ * simply has no projects — "we could not read your settings" and "you have no
+ * extra directories" are different facts and the UI owes the user the first
+ * one. So a read reports the condition here instead of erasing it, and the
+ * file itself is left byte-for-byte as it was found.
+ */
+type PermissionSettingsFault =
+  | {
+      /** The whole file failed to parse. No grant in it can be honoured. */
+      kind: "file-unreadable";
+      filePath: string;
+      detail: string;
+    }
+  | {
+      /** Individual cleanup-journal entries failed validation. */
+      kind: "pending-removals-malformed";
+      filePath: string;
+      /** How many entries were kept on disk but not interpreted. */
+      entries: number;
+    };
+
 export interface PermissionSettingsFile {
   permissions: PermissionSettingsBlock;
+  /**
+   * `null` when the file was interpreted whole. Callers that GATE on the
+   * settings (the executor allow-list, the reviewer) deliberately ignore it:
+   * with an uninterpretable SOT the only honest gate answer is the deny-shaped
+   * default this read returns with it. Callers that DISPLAY the settings must
+   * not — a fault means the list they are about to draw is not the user's.
+   */
+  fault: PermissionSettingsFault | null;
+}
+
+/**
+ * A write path found the settings file unparseable.
+ *
+ * Merging into `{}` instead would let the next write replace every unrelated
+ * top-level key the user has in that file, so a write refuses. The file is
+ * left untouched for a hand-repair or a restore.
+ */
+export class PermissionSettingsUnreadableError extends Error {
+  readonly code = "settings-unreadable";
+  constructor(
+    readonly filePath: string,
+    readonly detail: string,
+    options?: { cause?: unknown },
+  ) {
+    super(`permission settings at ${filePath} are unreadable: ${detail}`, options);
+    this.name = "PermissionSettingsUnreadableError";
+  }
 }
 
 const DEFAULT_REVIEWER: ReviewerSettingsBlock = {
@@ -308,6 +361,7 @@ const DEFAULT_FILE: PermissionSettingsFile = {
     pendingWorkspaceRootRemovals: [],
     reviewer: { ...DEFAULT_REVIEWER },
   },
+  fault: null,
 };
 
 const REVIEWER_MODES: ReadonlySet<ReviewerMode> = new Set([
@@ -325,8 +379,13 @@ function defaultPath(): string {
 }
 
 /**
- * Read `~/.lvis/settings.json`. Missing file → DEFAULT_FILE; malformed
- * file → DEFAULT_FILE + warn (atomic cutover: do NOT silently allow).
+ * Read `~/.lvis/settings.json`. Missing file → DEFAULT_FILE.
+ *
+ * A file that exists but cannot be interpreted returns the deny-shaped
+ * DEFAULT_FILE *carrying* {@link PermissionSettingsFile.fault}, logs at error,
+ * and rewrites nothing. Deny is the only honest gate answer when the grant SOT
+ * is unreadable; the fault is what keeps that answer from reading as "the user
+ * has no projects" on the surfaces that show them.
  *
  * Issue #664 migration: when a pre-#664 file is detected (mode:"disabled"
  * without `disabledMigratedAt` marker), the reviewer mode is rewritten to
@@ -341,11 +400,24 @@ function defaultPath(): string {
 export function readPermissionSettings(pathOverride?: string): PermissionSettingsFile {
   const filePath = pathOverride ?? defaultPath();
   if (!existsSync(filePath)) return structuredClone(DEFAULT_FILE);
+  let parsed: Record<string, unknown>;
   try {
-    const raw = readFileSync(filePath, "utf-8");
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    parsed = readSettingsDocument(filePath);
+  } catch (err) {
+    const detail = (err as Error).message;
+    log.error(
+      "permission settings at %s are unreadable: %s — file preserved untouched, no directories granted",
+      filePath,
+      detail,
+    );
+    return {
+      ...structuredClone(DEFAULT_FILE),
+      fault: { kind: "file-unreadable", filePath, detail },
+    };
+  }
+  {
     const migrated = migrateLegacyDisabledMode(parsed);
-    const normalized = normalizePermissionSettings(parsed);
+    const normalized = normalizePermissionSettings(parsed, filePath);
     if (migrated) {
       // Persist the migration synchronously so the file converges to the
       // post-#664 shape. We do a best-effort write — if the file is locked
@@ -362,12 +434,42 @@ export function readPermissionSettings(pathOverride?: string): PermissionSetting
       }
     }
     return normalized;
+  }
+}
+
+/**
+ * Read the settings document off disk, throwing when it cannot be interpreted.
+ *
+ * An empty file is not damage: `withFileLock` creates the target as a
+ * zero-byte placeholder so `proper-lockfile` can stat it, so every first write
+ * this store ever performs starts from one. A non-object root (`null`, an
+ * array, a bare number) IS damage — every reader below indexes the result as a
+ * record — so it is rejected here rather than in each of them.
+ */
+function readSettingsDocument(filePath: string): Record<string, unknown> {
+  const raw = readFileSync(filePath, "utf-8");
+  if (raw.trim().length === 0) return {};
+  const parsed = JSON.parse(raw) as unknown;
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("settings root is not a JSON object");
+  }
+  return parsed as Record<string, unknown>;
+}
+
+/**
+ * Read the settings object a write path is about to merge into.
+ *
+ * Refusing an unparseable file is the whole point: the previous `catch {}`
+ * here merged into an empty object, so the next successful write replaced the
+ * user's entire settings document — every unrelated top-level key included —
+ * with whatever that one mutation happened to hold.
+ */
+function readSettingsObjectForUpdate(filePath: string): Record<string, unknown> {
+  if (!existsSync(filePath)) return {};
+  try {
+    return readSettingsDocument(filePath);
   } catch (err) {
-    log.warn(
-      `failed to read ${filePath}: %s — falling back to defaults`,
-      (err as Error).message,
-    );
-    return structuredClone(DEFAULT_FILE);
+    throw new PermissionSettingsUnreadableError(filePath, (err as Error).message, { cause: err });
   }
 }
 
@@ -419,14 +521,34 @@ export function migrateLegacyDisabledMode(parsed: Record<string, unknown>): bool
  */
 export function normalizePermissionSettings(
   parsed: Record<string, unknown>,
+  filePath: string,
 ): PermissionSettingsFile {
   const perm = (parsed.permissions ?? {}) as Record<string, unknown>;
-  const pendingWorkspaceRootRemovals = normalizePendingWorkspaceRootRemovals(
-    perm.pendingWorkspaceRootRemovals,
-  );
+  const journal = partitionPendingWorkspaceRootRemovals(perm.pendingWorkspaceRootRemovals);
+  const pendingWorkspaceRootRemovals = journal.intents;
+  if (journal.malformed.length > 0) {
+    log.error(
+      "permissions.pendingWorkspaceRootRemovals in %s holds %d entry/entries that could not be interpreted — kept on disk, skipped at runtime",
+      filePath,
+      journal.malformed.length,
+    );
+  }
+  // A damaged entry can still NAME a root. Every path it names is honoured as
+  // a pending removal even though the entry as a whole cannot be acted on, so
+  // corrupting the journal can never be the way a removed root comes back.
+  const pendingPaths = [
+    ...pendingWorkspaceRootRemovals.map((intent) => intent.runtimePath),
+    ...journal.malformed.flatMap((entry) => {
+      if (entry === null || typeof entry !== "object") return [];
+      const value = entry as Record<string, unknown>;
+      return [value.runtimePath, value.storedPath].filter(
+        (candidate): candidate is string => typeof candidate === "string" && candidate.length > 0,
+      );
+    }),
+  ];
   const pendingKeys = new Set(
-    pendingWorkspaceRootRemovals.flatMap((intent) => {
-      const key = allowedDirectoryKey(intent.runtimePath);
+    pendingPaths.flatMap((path) => {
+      const key = allowedDirectoryKey(path);
       return key === null ? [] : [key];
     }),
   );
@@ -446,21 +568,51 @@ export function normalizePermissionSettings(
       pendingWorkspaceRootRemovals,
       reviewer: normalizeReviewerBlock(perm.reviewer),
     },
+    fault:
+      journal.malformed.length > 0
+        ? {
+            kind: "pending-removals-malformed",
+            filePath,
+            entries: journal.malformed.length,
+          }
+        : null,
   };
 }
 
-function normalizePendingWorkspaceRootRemovals(
+/**
+ * The cleanup journal split into what can be acted on and what cannot.
+ *
+ * It used to throw on the first bad entry, and every caller — the reader and
+ * all three writers — called it outside their own error handling, so one
+ * malformed entry took out every directory ADD as well: the settings file had
+ * no route back to a valid journal from inside the app, and the reader
+ * answered the same corruption with an empty project list. Splitting is what
+ * removes the deadlock without deciding, on the user's behalf, that their
+ * queued removals were worthless: the malformed entries stay verbatim in
+ * {@link PendingWorkspaceRootRemovalJournal.malformed} so a write puts them
+ * back exactly as it found them, and the read reports them as a fault.
+ */
+interface PendingWorkspaceRootRemovalJournal {
+  intents: PendingWorkspaceRootRemoval[];
+  /** Entries kept verbatim, never interpreted and never dropped. */
+  malformed: unknown[];
+}
+
+function partitionPendingWorkspaceRootRemovals(
   parsed: unknown,
-): PendingWorkspaceRootRemoval[] {
-  if (parsed === undefined) return [];
-  if (!Array.isArray(parsed)) {
-    throw new Error("permissions.pendingWorkspaceRootRemovals must be an array");
-  }
+): PendingWorkspaceRootRemovalJournal {
+  if (parsed === undefined) return { intents: [], malformed: [] };
+  // A non-array value carries no entry to keep apart, so the value itself is
+  // the thing preserved — a later write returns it to the journal as its sole
+  // element rather than deleting a key it cannot read.
+  if (!Array.isArray(parsed)) return { intents: [], malformed: [parsed] };
   const seenOperations = new Set<string>();
-  const result: PendingWorkspaceRootRemoval[] = [];
+  const intents: PendingWorkspaceRootRemoval[] = [];
+  const malformed: unknown[] = [];
   for (const candidate of parsed) {
     if (!candidate || typeof candidate !== "object") {
-      throw new Error("permissions.pendingWorkspaceRootRemovals contains an invalid intent");
+      malformed.push(candidate);
+      continue;
     }
     const value = candidate as Record<string, unknown>;
     if (
@@ -476,10 +628,11 @@ function normalizePendingWorkspaceRootRemovals(
       || value.source.length === 0
       || seenOperations.has(value.operationId)
     ) {
-      throw new Error("permissions.pendingWorkspaceRootRemovals contains an invalid intent");
+      malformed.push(candidate);
+      continue;
     }
     seenOperations.add(value.operationId);
-    result.push({
+    intents.push({
       operationId: value.operationId,
       storedPath: value.storedPath,
       runtimePath: value.runtimePath,
@@ -487,7 +640,18 @@ function normalizePendingWorkspaceRootRemovals(
       source: value.source,
     });
   }
-  return result;
+  return { intents, malformed };
+}
+
+/**
+ * The journal a write persists: the intents it decided on, followed by the
+ * entries it could not read and therefore has no standing to remove.
+ */
+function composePendingWorkspaceRootRemovals(
+  intents: readonly PendingWorkspaceRootRemoval[],
+  malformed: readonly unknown[],
+): unknown[] {
+  return [...intents, ...malformed];
 }
 
 /**
@@ -631,14 +795,7 @@ export async function writePermissionSettings(
 ): Promise<void> {
   const filePath = pathOverride ?? defaultPath();
   await withFileLock(filePath, async () => {
-    let existing: Record<string, unknown> = {};
-    if (existsSync(filePath)) {
-      try {
-        existing = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
-      } catch {
-        existing = {};
-      }
-    }
+    const existing = readSettingsObjectForUpdate(filePath);
     const existingPerm = (existing.permissions ?? {}) as Record<string, unknown>;
     // Drop the deprecated alias key on write — settings file converges
     // on the canonical name with each persist.
@@ -748,24 +905,17 @@ async function mutateAllowedDirectoriesPersist(
   const filePath = pathOverride ?? defaultPath();
   let result: string[] = [];
   await withFileLock(filePath, async () => {
-    let existing: Record<string, unknown> = {};
-    if (existsSync(filePath)) {
-      try {
-        existing = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
-      } catch {
-        existing = {};
-      }
-    }
+    const existing = readSettingsObjectForUpdate(filePath);
     const existingPerm = { ...((existing.permissions ?? {}) as Record<string, unknown>) };
     const current = Array.isArray(existingPerm.additionalDirectories)
       ? existingPerm.additionalDirectories.filter(
           (value): value is string => typeof value === "string",
         )
       : [];
-    const pending = normalizePendingWorkspaceRootRemovals(
+    const journal = partitionPendingWorkspaceRootRemovals(
       existingPerm.pendingWorkspaceRootRemovals,
     );
-    const next = mutation(current, pending);
+    const next = mutation(current, journal.intents);
     result = [...next];
     if (
       next.length === current.length &&
@@ -862,23 +1012,17 @@ export async function beginWorkspaceRootRemovalPersist(
   const filePath = pathOverride ?? defaultPath();
   let result: BeginWorkspaceRootRemovalResult | null = null;
   await withFileLock(filePath, async () => {
-    let existing: Record<string, unknown> = {};
-    if (existsSync(filePath)) {
-      try {
-        existing = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
-      } catch {
-        existing = {};
-      }
-    }
+    const existing = readSettingsObjectForUpdate(filePath);
     const existingPerm = { ...((existing.permissions ?? {}) as Record<string, unknown>) };
     const current = Array.isArray(existingPerm.additionalDirectories)
       ? existingPerm.additionalDirectories.filter(
           (value): value is string => typeof value === "string" && value.length > 0,
         )
       : [];
-    const pending = normalizePendingWorkspaceRootRemovals(
+    const journal = partitionPendingWorkspaceRootRemovals(
       existingPerm.pendingWorkspaceRootRemovals,
     );
+    const pending = journal.intents;
     const targetKey = allowedDirectoryKey(root);
     const existingIntent = pending.find((intent) =>
       targetKey === null
@@ -916,7 +1060,10 @@ export async function beginWorkspaceRootRemovalPersist(
       permissions: {
         ...existingPerm,
         additionalDirectories: activeDirectories,
-        pendingWorkspaceRootRemovals: nextPending,
+        pendingWorkspaceRootRemovals: composePendingWorkspaceRootRemovals(
+          nextPending,
+          journal.malformed,
+        ),
         reviewer: normalizeReviewerBlock(existingPerm.reviewer),
       },
     };
@@ -946,18 +1093,12 @@ export async function completeWorkspaceRootRemovalPersist(
   const filePath = pathOverride ?? defaultPath();
   let completed = false;
   await withFileLock(filePath, async () => {
-    let existing: Record<string, unknown> = {};
-    if (existsSync(filePath)) {
-      try {
-        existing = JSON.parse(readFileSync(filePath, "utf-8")) as Record<string, unknown>;
-      } catch {
-        existing = {};
-      }
-    }
+    const existing = readSettingsObjectForUpdate(filePath);
     const existingPerm = { ...((existing.permissions ?? {}) as Record<string, unknown>) };
-    const pending = normalizePendingWorkspaceRootRemovals(
+    const journal = partitionPendingWorkspaceRootRemovals(
       existingPerm.pendingWorkspaceRootRemovals,
     );
+    const pending = journal.intents;
     const intent = pending.find((candidate) => candidate.operationId === operationId);
     if (!intent) return;
     const intentKey = allowedDirectoryKey(intent.runtimePath);
@@ -976,8 +1117,9 @@ export async function completeWorkspaceRootRemovalPersist(
       permissions: {
         ...existingPerm,
         additionalDirectories: activeDirectories,
-        pendingWorkspaceRootRemovals: pending.filter(
-          (candidate) => candidate.operationId !== operationId,
+        pendingWorkspaceRootRemovals: composePendingWorkspaceRootRemovals(
+          pending.filter((candidate) => candidate.operationId !== operationId),
+          journal.malformed,
         ),
         reviewer: normalizeReviewerBlock(existingPerm.reviewer),
       },
