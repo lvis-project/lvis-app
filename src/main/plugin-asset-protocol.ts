@@ -67,18 +67,18 @@ export async function resolvePluginAssetRequest(
     return null;
   }
 
-  let realRoot: string;
-  let realAsset: string;
+  let resolvedRoot: string;
+  let resolvedAsset: string;
   try {
-    realRoot = options.rootIsReal ? pluginRoot : await realpath(pluginRoot);
-    realAsset = await realpath(path.resolve(realRoot, relPath));
+    resolvedRoot = options.rootIsReal ? pluginRoot : await realpath(pluginRoot);
+    resolvedAsset = await realpath(path.resolve(resolvedRoot, relPath));
   } catch {
     return null;
   }
-  if (!isPathWithin(realRoot, realAsset)) {
+  if (!isPathWithin(resolvedRoot, resolvedAsset)) {
     return null;
   }
-  return realAsset;
+  return resolvedAsset;
 }
 
 type PartitionAssetRoot = {
