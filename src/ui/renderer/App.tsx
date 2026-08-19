@@ -169,7 +169,8 @@ export function App() {
   // onOpenSettings below), so these drive it in both modes.
   // Persisted alongside the view (#1995), so a restart resumes the exact page
   // inside Settings rather than the tab it was last opened on.
-  const { settingsTab, setSettingsTab } = useSettingsTab(api);
+  const { settingsTab, setSettingsTab, restoresApplied: settingsTabRestoresApplied } =
+    useSettingsTab(api);
   // Workspace mode (Chat / Work) + coupled shell layout state. The hook owns the
   // seed-before-paint state, the no-op-guarded persistence, and the
   // appMode-transition effects (rail-width coupling, resizeForMode). See
@@ -265,8 +266,12 @@ export function App() {
     () => pluginViews.map((view) => toViewKey(view)),
     [pluginViews],
   );
-  const { activeView, setActiveView, restoring: activeViewRestoring } =
+  const { activeView, setActiveView, restoresApplied: activeViewRestoresApplied } =
     useActiveView(api, loadedPluginViewKeys);
+  // The location has two halves and each restores itself, so the history needs
+  // one signal covering both. Each count only ever rises, so their sum rises
+  // exactly when either half is restored — which is all the history reads.
+  const restoresApplied = activeViewRestoresApplied + settingsTabRestoresApplied;
   // Where the window IS, as one value — the pair the top-bar path renders and
   // the unit visit history records. Settings is one view key but several
   // places, so the tab belongs in the location or the path would say
@@ -281,7 +286,7 @@ export function App() {
     if (to.view === "settings") setSettingsTab(to.settingsTab ?? "llm");
     setActiveView(to.view);
   }, [setSettingsTab, setActiveView]);
-  const viewHistory = useViewHistory(location, navigateToLocation, activeViewRestoring);
+  const viewHistory = useViewHistory(location, navigateToLocation, restoresApplied);
   useViewHistoryShortcuts(viewHistory);
 
   const handleOpenPermanentDeny = useCallback((
