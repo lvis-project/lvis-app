@@ -220,7 +220,7 @@ function subscribe(
  * `plugin-child-runtime.ts` composes the groups in one place — four authors
  * adding four spreads, instead of four authors editing one switch.
  */
-export function configSubscriptionChildMembers(
+export function createConfigSubscriptionChildMembers(
   deps: ConfigSubscriptionChildDeps,
 ): Record<ConfigSubscriptionPath, ChildMember> {
   const { pluginId } = deps;
