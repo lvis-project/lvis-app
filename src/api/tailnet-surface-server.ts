@@ -35,6 +35,7 @@ import {
   type ConversationCommandPort,
 } from "../main/conversation-command-port.js";
 import type { TailnetControllerReceiptStore } from "./tailnet-controller-receipt-store.js";
+import { hasControlChars } from "../shared/display-safe-text.js";
 import {
   createTailnetAttachmentStagingStore,
   type TailnetAttachmentStagingStore,
@@ -2893,7 +2894,7 @@ function isSafeLogin(value: string | undefined): value is string {
     && value.length > 0
     && value.length <= 512
     && value.trim().length > 0
-    && !/[\u0000-\u001f\u007f]/.test(value);
+    && !hasControlChars(value);
 }
 
 function isCapabilityKey(value: string): boolean {
@@ -2903,7 +2904,10 @@ function isCapabilityKey(value: string): boolean {
     && value !== "__proto__"
     && value !== "constructor"
     && value !== "prototype"
-    && !/[\u0000-\u0020\u007f]/.test(value);
+    && !hasControlChars(value)
+    // A capability key is a token spliced into grant strings, so a SPACE in one
+    // would split it in two. Stricter than the shared class on purpose.
+    && !value.includes(" ");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

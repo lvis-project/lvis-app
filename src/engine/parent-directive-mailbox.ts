@@ -19,6 +19,7 @@ import { randomUUID } from "node:crypto";
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
 import { GUIDE_MAX_CHARS } from "./turn/guidance-limits.js";
 import { PARENT_DIRECTIVE_MAX_PENDING } from "./parent-directive.js";
+import { hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
 
 const DIRECTIVE_FILE = "parent-directives.json";
 const DIRECTIVE_VERSION = 1 as const;
@@ -58,7 +59,7 @@ function isSafeString(value: unknown, maxLength: number): value is string {
   return typeof value === "string"
     && value.length > 0
     && value.length <= maxLength
-    && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value);
+    && !hasNonWhitespaceControlChars(value);
 }
 
 function normalizeEntry(value: unknown): ParentDirectiveEntry | null {
