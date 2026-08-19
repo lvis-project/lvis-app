@@ -25,7 +25,8 @@
  * why the five plugins that are not the pilot keep loading as they did.
  */
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { mkdirSync } from "node:fs";
+import { isAbsolute, join, resolve as resolvePath } from "node:path";
 import { createLogger } from "../../lib/logger.js";
 import { mainDir } from "../../main/main-paths.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
@@ -39,6 +40,18 @@ import { buildSafeChildEnv } from "../../tools/safe-env.js";
 // of that list would be a second answer to a security question.
 import { HOST_PUBLIC_PREFERENCE_KEYS } from "../../boot/steps/plugin-runtime/app-preference.js";
 import { subscribeAppPreferenceChange } from "../config-change-bus.js";
+import {
+  isPathAllowed,
+  sanitizeAllowedDirectories,
+} from "../../permissions/allowed-directories.js";
+import { readPermissionSettings } from "../../permissions/permission-settings-store.js";
+import {
+  canonicalizePathForMatch,
+  caseFoldForMatch,
+  isSensitivePath,
+} from "../../permissions/sensitive-paths.js";
+import { lvisHome } from "../../shared/lvis-home.js";
+import { isPathWithin } from "../plugin-storage-containment.js";
 import type {
   PluginHostApi,
   PluginManifest,
@@ -122,11 +135,12 @@ export type DispatchableHostApi = Parameters<typeof createStorageHostApiPaths>[0
 export function createBoundHostApiDispatchTable(
   hostApi: DispatchableHostApi,
   /**
-   * The two directories the child's own ASRT wrap grants it, so `spawnWorker`
-   * can refuse a delegated worker that would reach further. It is the SAME pair
-   * `spawnConfinedPluginChild` passes to the wrap, taken from the same context,
-   * because a boundary that checked against a differently-derived envelope
-   * would be checking against something other than the jail.
+   * The roots the child's own ASRT wrap grants it, so `spawnWorker` can refuse
+   * a delegated worker that would reach further. It is the SAME value
+   * `spawnConfinedPluginChild` passes to the wrap — one
+   * {@link derivePluginChildEnvelope} result, held by the factory — because a
+   * boundary that checked against a differently-derived envelope would be
+   * checking against something other than the jail.
    */
   confinement: DelegatedWorkerConfinement,
 ): Record<HostApiPath, HostApiPathHandler> {
@@ -178,7 +192,219 @@ function resolvePluginChildEntryPath(): string {
 }
 
 /**
- * The paths the PLUGIN owns, named once.
+ * One directory the HOST has decided a named plugin's child may reach beyond
+ * its own two.
+ *
+ * The two shapes are not interchangeable, and the difference is the whole
+ * safety argument:
+ *
+ *  - `hostDirectory` names a LITERAL location under `~/.lvis`, written out in
+ *    this file and changed only by a reviewed commit. Nothing outside the host
+ *    can influence which path it resolves to. It is granted READ, and the only
+ *    reason a read grant is not inert is that ASRT's read model is deny-only:
+ *    `allowRead` re-allows a region inside a covering deny (`asrt-sandbox.ts`
+ *    documents this, and `confined-plugin-child.test.ts` proves it against the
+ *    real sandbox). So a host directory the deny floor covers — `certs` — can
+ *    be re-opened for exactly one plugin, and a host directory the floor does
+ *    NOT cover — `runtime` — is readable anyway and appears here because the
+ *    delegated-worker check compares against this list rather than against the
+ *    floor.
+ *
+ *  - `userChosenDirectory` names a CONFIG KEY, never a path. The host reads the
+ *    key, and admits the value only if it lies inside the plugin's own envelope
+ *    or inside a directory the USER approved through the host's workspace-root
+ *    flow. The plugin can therefore choose WHERE under the user's ceiling it
+ *    works, and cannot raise the ceiling: `config.set(key, "/")` produces a
+ *    refusal at the next spawn, not a wider jail. It is granted WRITE (and, per
+ *    the read ⊇ write invariant, read) because a read-only grant here would be
+ *    inert — an ordinary user directory is on no deny list.
+ */
+type PluginEnvelopeGrant =
+  | {
+      readonly kind: "hostDirectory";
+      /** Path segments under `lvisHome()`. */
+      readonly segments: readonly string[];
+      readonly why: string;
+    }
+  | {
+      readonly kind: "userChosenDirectory";
+      /** The `config.get` key the host reads the directory out of. */
+      readonly configKey: string;
+      readonly why: string;
+    };
+
+/**
+ * Which plugin's child gets which extra reach.
+ *
+ * A HOST-OWNED TABLE, and every word of that matters. It is not the manifest,
+ * because a manifest field would let the plugin assert its own envelope — the
+ * one party that must not have a say. It is not an environment variable or a
+ * settings key either, because the SHAPE of a plugin's reach would then change
+ * under a user with no record of it. A plugin's child reaches further when a
+ * reviewed commit adds a row here, which means the widening is visible in a
+ * diff and revertable by a revert — the same discipline the routing SOT
+ * (`out-of-process-plugins.ts`) applies to the boundary itself.
+ *
+ * A `userChosenDirectory` row is not an exception to that. What the row decides
+ * is that this plugin may hold ONE directory named by that key at all; which
+ * directory it turns out to be is the user's, bounded by their own approvals,
+ * and the plugin cannot widen the bound by writing its own config.
+ *
+ * An entry is INERT until the plugin is actually routed out-of-process: nothing
+ * reads this table for an in-process plugin, which still loads in main with no
+ * confinement of its own.
+ *
+ * `local-indexer`'s row is derived from what its worker spawn actually asks for
+ * (`allowReadPaths: [pythonExecutable, workerScriptPath, corpCaPath?]`,
+ * `allowWritePaths: [indexRoot, workspace]`), not from what it might want.
+ */
+const PLUGIN_ENVELOPE_GRANTS: ReadonlyMap<string, readonly PluginEnvelopeGrant[]> = new Map([
+  [
+    "local-indexer",
+    [
+      {
+        kind: "hostDirectory",
+        segments: ["runtime"],
+        why:
+          "the Python interpreter the indexer's worker executes. `PythonRuntimeBootstrapper` "
+          + "provisions it at `~/.lvis/runtime/python-envs/<target>/venv/bin/python` and boot "
+          + "injects the path, so it is host-owned and the plugin merely names it back",
+      },
+      {
+        kind: "hostDirectory",
+        segments: ["certs"],
+        why:
+          "the corporate CA bundle `corp-ca-loader` caches at `~/.lvis/certs/corp-ca.pem`. The "
+          + "worker points `SSL_CERT_FILE` at it so internal TLS verifies rather than being "
+          + "disabled. This path IS on the sensitive deny floor and the grant pierces it for "
+          + "this plugin alone; a root CA certificate is a trust anchor rather than a "
+          + "credential, which is what makes that a proportionate host decision",
+      },
+      {
+        kind: "userChosenDirectory",
+        configKey: "indexStorageRoot",
+        why:
+          "where the index itself is written. Unset, it defaults to `<pluginDataDir>/index`, "
+          + "which is already inside the envelope; a user who moves it onto another volume "
+          + "needs the grant to follow",
+      },
+      {
+        kind: "userChosenDirectory",
+        configKey: "workspace",
+        why:
+          "the worker's scratch + state directory. Unset, it defaults under the index root, "
+          + "so this grant only has an effect once the user has moved it out",
+      },
+    ],
+  ],
+]);
+
+/**
+ * What the derivation needs that it cannot read for itself.
+ *
+ * `configValue` is `hostApi.config.get`, taken from the incarnation rather than
+ * re-read from settings: `config.get` is the merge of schema defaults, manifest
+ * config and the user's saved value, and a second reader assembled here would
+ * answer a different question from the one the plugin's own code asks.
+ */
+export interface PluginChildEnvelopeInputs {
+  readonly pluginId: string;
+  /** The plugin's immutable runtime root; the child reads its code from here. */
+  readonly pluginRoot: string;
+  /** `~/.lvis/plugins/<id>/data`. */
+  readonly pluginDataDir: string;
+  readonly configValue: (key: string) => unknown;
+}
+
+/**
+ * Refuse a widening, and say which grant asked for what.
+ *
+ * A plain `Error` rather than a boundary error: this runs on the SPAWN path, so
+ * a refusal here fails the plugin's construction — there is no child yet to
+ * answer, and a plugin whose declared envelope cannot be honoured must not load
+ * with a quietly smaller one.
+ */
+function rejectEnvelopeGrant(pluginId: string, configKey: string, detail: string): never {
+  throw new Error(
+    `[out-of-process-plugin] ${pluginId}: cannot widen the child's envelope for `
+      + `config key '${configKey}': ${detail}`,
+  );
+}
+
+/**
+ * Resolve one `userChosenDirectory` grant, or refuse it.
+ *
+ * Returns `undefined` when the key names nothing — an unset key means the
+ * plugin is using the default that already lives inside its data directory, so
+ * there is no widening to perform. That is the set being empty, not a rescue
+ * branch: a key that IS set and cannot be honoured throws.
+ *
+ * The ceiling is the plugin's own envelope UNIONED WITH the directories the
+ * user approved through the host's workspace-root flow — the same
+ * `permissions.additionalDirectories` list that already widens a plugin-owned
+ * tool's write jail (`sandbox-write-jail.ts`). The comparison goes through
+ * `isPathAllowed` against `sanitizeAllowedDirectories`, which is the host's own
+ * predicate for "did the user authorise this", so there is no second notion of
+ * approval here to drift from the first.
+ *
+ * The host DEFAULTS that scope normally carries — the process cwd and
+ * `~/.lvis` — are deliberately left out. They are where the app happens to be
+ * running and where the host keeps its own state; neither is a directory the
+ * user chose for a plugin, and including them would widen every plugin with a
+ * row here by accident rather than by decision.
+ */
+function resolveUserChosenDirectory(
+  inputs: PluginChildEnvelopeInputs,
+  grant: Extract<PluginEnvelopeGrant, { kind: "userChosenDirectory" }>,
+  ownRoots: readonly string[],
+): string | undefined {
+  const raw = inputs.configValue(grant.configKey);
+  // `""` is the default several plugin config schemas ship for an unset string
+  // key, and `resolve("")` is the host's cwd — a value that would silently
+  // grant something nobody chose.
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (typeof raw !== "string") {
+    rejectEnvelopeGrant(inputs.pluginId, grant.configKey, `expected a string, got ${typeof raw}`);
+  }
+  if (!isAbsolute(raw)) {
+    // Including a leading `~`: the plugin resolves this value with `resolve()`,
+    // which does not expand it either, so accepting one here would grant a
+    // directory the plugin will never open.
+    rejectEnvelopeGrant(inputs.pluginId, grant.configKey, `'${raw}' is not an absolute path`);
+  }
+  const target = resolvePath(raw);
+  const folded = caseFoldForMatch(canonicalizePathForMatch(target));
+  // The read half of this grant re-allows inside the deny floor exactly as a
+  // `hostDirectory` grant does, and unlike a `hostDirectory` grant the value is
+  // reachable by anything that can write the plugin's config. Without this the
+  // user approving `~/.lvis` as a workspace root — which the approval flow
+  // permits, since `~/.lvis` is not itself a sensitive path — would let a
+  // config value point the grant at `~/.lvis/secrets` and re-open it.
+  const sensitive = isSensitivePath(folded);
+  if (sensitive) {
+    rejectEnvelopeGrant(
+      inputs.pluginId,
+      grant.configKey,
+      `'${target}' matches the sensitive-path rule '${sensitive}'`,
+    );
+  }
+  if (ownRoots.some((root) => isPathWithin(root, target))) return target;
+  const approved = sanitizeAllowedDirectories(
+    readPermissionSettings().permissions.additionalDirectories,
+  );
+  if (!isPathAllowed(folded, { directories: approved })) {
+    rejectEnvelopeGrant(
+      inputs.pluginId,
+      grant.configKey,
+      `'${target}' is outside the plugin's own directories and no workspace root the user `
+        + `approved covers it — approve the directory in the host first`,
+    );
+  }
+  return target;
+}
+
+/**
+ * The paths the PLUGIN owns, plus whatever the host decided it also reaches.
  *
  * Read by the spawn — which adds the throwaway sandbox HOME on top — and by the
  * `spawnWorker` grant check, which does not: that HOME belongs to this process
@@ -186,24 +412,71 @@ function resolvePluginChildEntryPath(): string {
  * makes the delegation check a check against the ACTUAL jail: widening what a
  * plugin child may reach widens what it may delegate, in the same edit, instead
  * of leaving a second list to drift behind the first.
+ *
+ * PER INCARNATION, and not by preference. ASRT applies the wrap to the child's
+ * argv at exec, so the jail is fixed for the life of that process — a directory
+ * the user approves afterwards does not widen a running child, and one they
+ * revoke does not narrow it. The delegated-worker check therefore has to read
+ * this same snapshot rather than a fresh derivation, or the boundary would
+ * admit a grant the child's own kernel-level jail denies.
+ *
+ * WHAT THIS DOES NOT DO IS TOUCH THE DISK for the roots it names. A declared
+ * directory that does not exist yet is still in the envelope, because
+ * containment is a lexical question and the answer must not depend on what
+ * happens to be mounted. Materialising the roots belongs to the ONE caller that
+ * hands them to the kernel — {@link spawnConfinedPluginChild} — and it is done
+ * there rather than skipped, for a reason that is not cosmetic: Linux ASRT
+ * grants by `--bind`, whose source must exist, so a missing directory fails the
+ * spawn there while macOS's lexical seatbelt rule tolerates it.
  */
-function pluginChildConfinement(
-  spec: Pick<ConfinedPluginChildSpec, "pluginRoot" | "pluginDataDir">,
+export function derivePluginChildEnvelope(
+  inputs: PluginChildEnvelopeInputs,
 ): DelegatedWorkerConfinement {
-  return { pluginRoot: spec.pluginRoot, pluginDataDir: spec.pluginDataDir };
+  const read = [inputs.pluginRoot, inputs.pluginDataDir];
+  const write = [inputs.pluginDataDir];
+  for (const grant of PLUGIN_ENVELOPE_GRANTS.get(inputs.pluginId) ?? []) {
+    if (grant.kind === "hostDirectory") {
+      const directory = join(lvisHome(), ...grant.segments);
+      read.push(directory);
+      // Logged, not merely declared: a child running with more reach than the
+      // base envelope is an operational fact, and `why` is the reviewed reason
+      // it holds — which is worth having in the log of the run rather than only
+      // in the diff that added it.
+      log.info(`[${inputs.pluginId}] envelope widened: read ${directory} — ${grant.why}`);
+      continue;
+    }
+    const chosen = resolveUserChosenDirectory(inputs, grant, [
+      inputs.pluginRoot,
+      inputs.pluginDataDir,
+    ]);
+    if (chosen === undefined) continue;
+    // Read as well as write: the plugin has to list and re-open what it wrote,
+    // and the invariant this type publishes is read ⊇ write.
+    read.push(chosen);
+    write.push(chosen);
+    log.info(
+      `[${inputs.pluginId}] envelope widened: write ${chosen} `
+        + `(config '${grant.configKey}') — ${grant.why}`,
+    );
+  }
+  return { read: [...new Set(read)], write: [...new Set(write)] };
 }
 
 /** What a confined child needs to exist. */
 export interface ConfinedPluginChildSpec {
   readonly pluginId: string;
-  /** The plugin's immutable runtime root; the child reads its code from here. */
-  readonly pluginRoot: string;
   /**
-   * `~/.lvis/plugins/<id>/data` — the only DURABLE path this spawn grants the
-   * child for writing. Not the only path it can write: see the spawn's own
-   * filesystem note below, and axis 6 in `out-of-process-plugins.ts`.
+   * Every root the child may reach, as {@link derivePluginChildEnvelope}
+   * produced it. Carried as ONE value rather than as the two directories it
+   * used to be spelled out as, so the ASRT wrap below and the delegated-worker
+   * check in `host-api-service-paths.ts` are looking at the same object rather
+   * than at two derivations of it.
+   *
+   * `envelope.write` is what this spawn GRANTS for writing, not the whole set
+   * the child can write: see the spawn's own filesystem note below, and axis 6
+   * in `out-of-process-plugins.ts`.
    */
-  readonly pluginDataDir: string;
+  readonly envelope: DelegatedWorkerConfinement;
   /** The child's own entry module. Injected so a test can serve a stand-in. */
   readonly childEntryPath: string;
 }
@@ -224,12 +497,12 @@ export interface ConfinedPluginChild {
  *
  * Filesystem grants, and why each is the size it is:
  *
- *  - WRITE is a real jail, and what this spawn grants is `pluginDataDir` plus
- *    the throwaway sandbox HOME. Not `pluginRoot`: that is the immutable
- *    runtime root the integrity check covers, and a plugin that could rewrite
- *    it could rewrite the bytes its own manifest hash was taken over.
- *    THE CHILD'S ALLOW SET IS LARGER THAN THESE TWO, and not by this spawn's
- *    choice: ASRT composes the write allow-list as
+ *  - WRITE is a real jail, and what THIS SPAWN puts into it is `envelope.write`
+ *    plus the throwaway sandbox HOME. `pluginRoot` is never in it: that is the
+ *    immutable runtime root the integrity check covers, and a plugin that could
+ *    rewrite it could rewrite the bytes its own manifest hash was taken over.
+ *    THE CHILD'S ALLOW SET IS LARGER THAN WHAT THIS SPAWN GRANTS, and not by
+ *    this spawn's choice: ASRT composes the write allow-list as
  *    `[...getDefaultWritePaths(), ...userAllowWrite]`, so its own defaults —
  *    the `/dev` entries, `/tmp/claude`, `/private/tmp/claude`,
  *    `<real home>/.npm/_logs`, `<real home>/.claude/debug` — are merged into
@@ -243,10 +516,12 @@ export interface ConfinedPluginChild {
  *    covering deny and is inert without one (see `asrt-sandbox.ts`). The deny
  *    floor covers the Electron userData directory, which is where plugins are
  *    installed, so the child would not be able to read its OWN code or data
- *    without these two re-allows. This is not a widening of the floor; it is
- *    the floor's own carve-out for the one plugin this child serves — and it is
- *    what makes "cannot read another plugin's data directory" true rather than
- *    aspirational.
+ *    without these re-allows. For the plugin's own two directories this is not
+ *    a widening of the floor; it is the floor's own carve-out for the one plugin
+ *    this child serves — and it is what makes "cannot read another plugin's data
+ *    directory" true rather than aspirational. A `hostDirectory` grant in
+ *    {@link PLUGIN_ENVELOPE_GRANTS} DOES widen the floor, deliberately, for the
+ *    one plugin whose row names it.
  *
  * On Windows ASRT 0.0.73 supports no per-exec allow grants at all — passing any
  * makes `wrapWorkerCommand` throw — so the wrap carries the deny floor alone
@@ -260,7 +535,16 @@ export async function spawnConfinedPluginChild(
   spec: ConfinedPluginChildSpec,
 ): Promise<ConfinedPluginChild> {
   const sandboxHome = createSandboxProcessHome();
-  const confinement = pluginChildConfinement(spec);
+  // Every root the wrap is about to grant is created first, `0o700` — the same
+  // thing `worker-spawn.ts` does for the control-socket dir it grants. Linux
+  // ASRT binds each allow path and a missing source aborts the spawn, so
+  // without this a directory the host decided the child reaches would work on
+  // macOS and fail the plugin on Linux. `read` is a superset of `write`, so one
+  // pass covers both. A creation failure throws, and the plugin does not load
+  // with an envelope smaller than the one that was reviewed.
+  for (const directory of spec.envelope.read) {
+    mkdirSync(directory, { recursive: true, mode: 0o700 });
+  }
   let wrapped = false;
   const releaseSandboxState = (): void => {
     if (wrapped) {
@@ -287,8 +571,8 @@ export async function spawnConfinedPluginChild(
       args: [spec.childEntryPath],
       label: `plugin-child:${spec.pluginId}`,
       grantMode: process.platform === "win32" ? "deny-only" : "allow-list",
-      allowRead: [confinement.pluginRoot, confinement.pluginDataDir, sandboxHome.path],
-      allowWrite: [confinement.pluginDataDir, sandboxHome.path],
+      allowRead: [...spec.envelope.read, sandboxHome.path],
+      allowWrite: [...spec.envelope.write, sandboxHome.path],
       baseEnv: buildSafeChildEnv({ ELECTRON_RUN_AS_NODE: "1" }),
       extraEnv: { ...sandboxHome.env },
       // The child is a JSON-RPC server whose pipes the host owns, so unlike the
@@ -446,12 +730,18 @@ export function createOutOfProcessPluginFactory(
     // different one is refused; a fresh id per construction is exactly that.
     const generationId = randomUUID();
     const hostApi = context.hostApi as unknown as DispatchableHostApi;
-    const child = await connect({
+    // Derived ONCE, here, and then held: the spawn wraps the child with it and
+    // the dispatch table checks delegated workers against it, so the two cannot
+    // be looking at different answers to the same question. Deriving it before
+    // the spawn is also what makes a refused widening fail construction rather
+    // than produce a child confined more narrowly than the host decided.
+    const envelope = derivePluginChildEnvelope({
       pluginId,
       pluginRoot: context.pluginRoot,
       pluginDataDir: context.pluginDataDir,
-      childEntryPath,
+      configValue: (key) => hostApi.config.get(key),
     });
+    const child = await connect({ pluginId, envelope, childEntryPath });
 
     let live = true;
     const transport = new PluginChildTransport({
@@ -464,7 +754,7 @@ export function createOutOfProcessPluginFactory(
       // one exists so a call arriving after `stop()` is refused at the wire
       // instead of being carried to a hostApi that will refuse it anyway.
       isActive: () => live,
-      table: createBoundHostApiDispatchTable(hostApi, pluginChildConfinement(context)),
+      table: createBoundHostApiDispatchTable(hostApi, envelope),
       link: child.link,
     });
     transport.start();
