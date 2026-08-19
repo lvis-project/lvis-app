@@ -1654,7 +1654,7 @@ describe("PluginMarketplaceService install()", () => {
 
     await expect(
       readFile(join(cacheRoot, "test-plugin", "install-receipt.json"), "utf-8"),
-    ).resolves.toContain('"schemaVersion": 2');
+    ).resolves.toContain('"schemaVersion": 3');
     await expect(
       readFile(join(installedDir, "test-plugin", "dist", "hostPlugin.js"), "utf-8"),
     ).resolves.toContain("createPlugin");

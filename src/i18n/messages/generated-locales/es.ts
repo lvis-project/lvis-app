@@ -1310,6 +1310,7 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.verdictMismatch": "El riesgo mostrado ya no coincide con la solicitud pendiente del host. Vuelve a abrir la aprobación.",
   "formatIpcError.incompatibleAppVersion": "Este complemento requiere una versión más reciente de LVIS. Por favor actualice la aplicación.",
   "formatIpcError.pluginRevoked": "El marketplace ha bloqueado esta versión del complemento por motivos de seguridad.",
+  "formatIpcError.pluginNotAdmitted": "Esta versión del complemento no está autorizada para instalarse. No se pudo verificar la lista de admisión del marketplace o esa versión ya no se ofrece.",
   "formatIpcError.indexOutOfRange": "El índice está fuera de rango.",
   "formatIpcError.invalidSessionId": "El id de sesión no es válido.",
   "formatIpcError.invalidOriginSessionId": "El id de sesión principal no es válido.",

@@ -141,4 +141,24 @@ export class SignedDocumentCache {
     await mkdir(this.rootDir, { recursive: true });
     await atomicWrite(this.metaPath, JSON.stringify(meta, null, 2));
   }
+
+  /**
+   * Discard the cached document, its sidecar, and its meta.
+   *
+   * For a cached body that no longer parses or no longer verifies against a
+   * current trust anchor: it is not evidence of anything, so keeping it means
+   * re-reading and re-rejecting it on every boot, and means the meta's
+   * `highestSeenIssuedAt` outlives the only document that ever justified it.
+   * Missing files are not an error — the point is the post-state.
+   */
+  async clear(): Promise<void> {
+    await Promise.all(
+      [this.bodyPath, this.sigPath, this.metaPath].map((path) =>
+        unlink(path).catch((err) => {
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+          log.warn(`clear ${path} failed: %s`, (err as Error).message);
+        }),
+      ),
+    );
+  }
 }

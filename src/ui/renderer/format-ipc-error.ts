@@ -224,6 +224,12 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   // or the version is below the plugin's pinned minimum (install-time twin
   // of the `plugin-revoked` Doctor panel case for the LOAD-boundary gate).
   "plugin-revoked": "formatIpcError.pluginRevoked",
+  // Signed admission catalog did not authorise this `slug@version`. The
+  // OPPOSITE polarity to `plugin-revoked` above: that one fires because the
+  // marketplace said "not this version", this one because the distributor
+  // said nothing we could verify — the catalog was unreachable, expired, or
+  // does not list this version. Separate copy because the remedies differ.
+  "plugin-not-admitted": "formatIpcError.pluginNotAdmitted",
   // A plugin webview that survived a runtime replacement no longer owns the
   // active binding. The existing frame-trust message gives the correct user
   // remediation (refresh the window or restart the app) without exposing the

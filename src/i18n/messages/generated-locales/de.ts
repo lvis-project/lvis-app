@@ -1296,6 +1296,7 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.verdictMismatch": "Die angezeigte Risikobewertung stimmt nicht mehr mit der ausstehenden Host-Anfrage überein. Öffnen Sie die Genehmigung erneut.",
   "formatIpcError.incompatibleAppVersion": "Dieses Plugin erfordert eine neuere Version von LVIS. Bitte aktualisieren Sie die App.",
   "formatIpcError.pluginRevoked": "Diese Plugin-Version wurde vom Marketplace aus Sicherheitsgründen blockiert.",
+  "formatIpcError.pluginNotAdmitted": "Diese Plugin-Version ist nicht zur Installation zugelassen. Die Zulassungsliste des Marketplace konnte nicht verifiziert werden, oder diese Version wird nicht mehr angeboten.",
   "formatIpcError.indexOutOfRange": "Der Index liegt außerhalb des zulässigen Bereichs.",
   "formatIpcError.invalidSessionId": "Die Sitzungs-ID ist ungültig.",
   "formatIpcError.invalidOriginSessionId": "Die übergeordnete Sitzungs-ID ist ungültig.",

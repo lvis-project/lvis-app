@@ -55,6 +55,7 @@ import { tombstoneAndDeferredRemove } from "./installed-entry-fs.js";
 import {
   buildInstallReceipt,
   restoreInstallReceiptRaw,
+  type PluginAdmissionRecord,
   type PluginInstallReceipt,
 } from "./plugin-install-receipt.js";
 import { createLogger } from "../lib/logger.js";
@@ -74,8 +75,12 @@ import {
 import { withMarketplaceArtifactResourceSlot } from "./marketplace-artifact-resource-gate.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
 import { assertPluginCandidateAppCompatible } from "./update-condition.js";
-import { PluginRevokedError } from "../shared/plugin-install-result.js";
+import { PluginNotAdmittedError, PluginRevokedError } from "../shared/plugin-install-result.js";
 import { revocationRegistry } from "./revocation/revocation-registry.js";
+import {
+  admissionRegistry,
+  ADMISSION_ENFORCEMENT,
+} from "./admission/admission-registry.js";
 import {
   isCommittedPluginGenerationPublicationError,
   type CommittedPluginGenerationPublicationError,
@@ -111,6 +116,95 @@ export function assertMarketplaceNotRevoked(
   }
 }
 const log = createLogger("plugin-artifact-store");
+
+/**
+ * Resolve the sha256 the downloaded bytes must match, from the signed
+ * admission catalog.
+ *
+ * This is the install-time ALLOW gate, and it is the only place the catalog is
+ * consulted. It runs BEFORE any bytes move, so a refusal costs one conditional
+ * GET rather than a full artifact download.
+ *
+ * Three things happen here that the pre-catalog path could not do:
+ *
+ *  1. The version is resolved to a concrete one first. `downloadVerifiedArtifact`
+ *     accepts the literal `"latest"`, which an allow list cannot look up — it
+ *     can only admit a name it holds. `"latest"` resolves through the catalog
+ *     row's own `version`; if that is absent the install is REFUSED rather than
+ *     admitted against an unspecified version.
+ *  2. The hash the download is checked against comes from a SIGNED statement.
+ *     Before this it came from the marketplace's unsigned catalog JSON, served
+ *     by the same origin as the bytes, so it was a consistency check and not
+ *     evidence — and `selectExpectedArtifactSha256` returns `undefined` for a
+ *     pinned or rollback install whose exact hash the row does not carry,
+ *     leaving no catalog cross-check at all for precisely those installs.
+ *  3. The unsigned catalog row's hash, when it has one, is cross-checked
+ *     against the signed row BEFORE the download. A disagreement means the
+ *     marketplace is offering bytes the distributor did not admit, which on
+ *     the happy path never happens, so it is surfaced as an integrity event
+ *     rather than as a routine mismatch.
+ *
+ * While {@link ADMISSION_ENFORCEMENT} is `"observe"` the same decision is
+ * computed and logged but not thrown, and the legacy unsigned hash is returned
+ * so behaviour is unchanged. That mode never turns a refusal into an
+ * admission: there is no path here that reports success on a missing catalog.
+ */
+async function resolveMarketplaceAdmission(
+  plugin: Pick<
+    PluginMarketplaceItem,
+    "id" | "slug" | "version" | "artifactSha256" | "artifactSha256ByVersion"
+  >,
+  version: string,
+  signal?: AbortSignal,
+): Promise<{
+  expectedArtifactSha256: string | undefined;
+  admission: PluginAdmissionRecord | null;
+}> {
+  const slug = plugin.slug ?? plugin.id;
+  const catalogSha256 = selectExpectedArtifactSha256(plugin, version);
+  const resolvedVersion = version === "latest" ? (plugin.version ?? version) : version;
+
+  await admissionRegistry.ensureFresh(signal);
+  const decision = admissionRegistry.evaluate(slug, resolvedVersion);
+
+  if (decision.kind === "refused") {
+    if (ADMISSION_ENFORCEMENT === "enforce") {
+      throw new PluginNotAdmittedError(plugin.id, resolvedVersion, decision.code, decision.detail);
+    }
+    log.warn(
+      `admission would refuse '${slug}@${resolvedVersion}': ${decision.code} — ${decision.detail}`,
+    );
+    return { expectedArtifactSha256: catalogSha256, admission: null };
+  }
+
+  const admittedSha256 = decision.entry.artifactSha256;
+  if (catalogSha256 && catalogSha256.trim().toLowerCase() !== admittedSha256) {
+    const detail =
+      `the marketplace catalog offers sha256=${catalogSha256} for '${slug}@${resolvedVersion}'`
+      + ` but the distributor admitted sha256=${admittedSha256}`;
+    if (ADMISSION_ENFORCEMENT === "enforce") {
+      throw new PluginNotAdmittedError(
+        plugin.id,
+        resolvedVersion,
+        "admission-hash-mismatch",
+        detail,
+      );
+    }
+    log.error(`admission hash mismatch (not enforced): ${detail}`);
+    return { expectedArtifactSha256: catalogSha256, admission: null };
+  }
+
+  const admission: PluginAdmissionRecord = {
+    issuedAt: decision.issuedAt,
+    documentSha256: decision.documentSha256,
+    publisher: decision.entry.publisher,
+  };
+  return {
+    expectedArtifactSha256:
+      ADMISSION_ENFORCEMENT === "enforce" ? admittedSha256 : catalogSha256,
+    admission,
+  };
+}
 
 /**
  * Windows transient-lock codes for the directory-swap / `rm()` paths. The set
@@ -176,6 +270,13 @@ export interface VerifiedArtifact {
   zipBuffer: Buffer;
   artifactSha256: string;
   signerKeyId: string;
+  /**
+   * The catalog statement that authorised this install, or `null` when none
+   * did. Carried out of the download so the install receipt records the
+   * authority rather than re-deriving it from a registry that may have
+   * refreshed in between.
+   */
+  admission: PluginAdmissionRecord | null;
 }
 
 export interface PreparedArtifactCommit<T> {
@@ -455,16 +556,21 @@ export class PluginArtifactStore {
         `marketplace fetcher for "${plugin.id}" does not support signed artifact verification`,
       );
     }
-    const expectedArtifactSha256 = selectExpectedArtifactSha256(plugin, version);
+    const { expectedArtifactSha256, admission } = await resolveMarketplaceAdmission(
+      plugin,
+      version,
+      signal,
+    );
     const verified = await installFromMarketplace(slug, version, {
       http: this.fetcher,
       publicKeys: this.publicKeys,
       downloadRoot: resolve(this.cacheRoot, "verified-downloads"),
       cacheBase: this.tarballCacheBase,
-      // Catalog rows expose the latest artifact hash. Explicit prior-version
-      // installs (rollback, pinned installPlugin) must rely on the versioned
-      // download header + signature envelope instead of comparing against the
-      // latest hash.
+      // Under enforcement this is the signed admission row's hash, present for
+      // EVERY version including pinned and rollback installs. Until then it is
+      // the marketplace catalog's own hash, which is only available when the
+      // requested version is the row's latest — see
+      // `resolveAdmittedArtifactSha256`.
       expectedArtifactSha256,
       artifactLimits: this.artifactLimits,
       onProgress,
@@ -479,6 +585,7 @@ export class PluginArtifactStore {
       zipBuffer: verified.zipBuffer,
       artifactSha256: verified.sha256,
       signerKeyId: verified.signerKeyId,
+      admission,
     };
   }
 
@@ -859,6 +966,7 @@ export class PluginArtifactStore {
       installSource: "marketplace" | "local-dev";
       artifactSha256: string | null;
       signerKeyId: string | null;
+      admission?: PluginAdmissionRecord | null;
       files: string[];
       installedAt?: string;
     },
