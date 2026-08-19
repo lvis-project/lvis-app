@@ -15,39 +15,65 @@
  * Every other member is plain JSON in and plain JSON out. Written apart, those
  * four exceptions would be four independent judgement calls.
  *
+ * WHY A FACTORY RATHER THAN STATIC TABLE ENTRIES. A handler has to reach the
+ * plugin incarnation's own `PluginStorage` — the instance rooted at THIS
+ * plugin's `pluginDataDir`, canonicalised at construction, and wrapped by the
+ * effect recorder. `HostApiCall` carries identity and arguments, not host
+ * state, so the binding can only be a closure. The caller composes the bound
+ * entries over `HOSTAPI_DISPATCH_TABLE` with object spread; the shipped table
+ * stays unbound, which is what stops a storage read being serviced on behalf of
+ * no plugin in particular.
+ *
  * ARGUMENT VALIDATION IS A BOUNDARY CONCERN, NOT A STORAGE ONE. `args` arrives
  * from the least-trusted process in the system, so each member checks its own
  * positional arguments against its declared signature and refuses a mismatch
- * with `argument-marshalling-rejected`. Stated deviation: in-process, a
- * non-string `relPath` reaches `guard()` and comes back as a
- * `PluginStorageError`; across the boundary it is refused here instead, because
- * a message whose arguments do not match the member's signature is a malformed
- * message and the storage implementation is not the right place to discover
- * that. A plugin passing the argument its own types declare never sees the
- * difference.
+ * with `argument-marshalling-rejected`. This is not a second copy of a host
+ * rule: the containment decision — absolute paths, `..`, symlink escape — stays
+ * entirely inside `PluginStorage.guard`, and nothing here anticipates it.
+ * Stated deviation: in-process, a non-string `relPath` reaches `guard()` and
+ * comes back as a `PluginStorageError`; across the boundary it is refused here
+ * instead, because a message whose arguments do not match the member's
+ * signature is a malformed message. A plugin passing the argument its own types
+ * declare never sees the difference.
  *
  * Nothing here catches. A refused path, a missing file, a denied effect and an
  * unavailable keychain all propagate as the host classes they already are;
  * `classifyHostApiError` maps each to the code the member's contract lists.
  * There is no default value and no silent skip anywhere in this file.
+ *
+ * HOST-SIDE ONLY. `host-api-dispatcher.ts` reaches Electron through the
+ * approval gate; the child's half of these members is
+ * `host-api-storage-child.ts`, which imports neither.
  */
-import type { StorageEncoding } from "../public-contract.js";
-import type { HostApiCall } from "./host-api-dispatcher.js";
+import type { PluginHostApi, StorageEncoding } from "../public-contract.js";
+import {
+  defineHostApiPath,
+  type HostApiCall,
+  type HostApiPathHandler,
+} from "./host-api-dispatcher.js";
+import type { DispatchedStorageHostApiPath } from "./host-api-storage-child.js";
 import {
   HostApiBoundaryError,
   decodeWireBytes,
   encodeWireBytes,
-  type WireBytes,
 } from "./host-api-wire.js";
+
+/**
+ * The subset of `hostApi` this group services.
+ *
+ * Narrowed rather than taking the whole surface so a handler cannot quietly
+ * start calling a member that belongs to another group's contract.
+ */
+export type StorageHostApi = Pick<PluginHostApi, "storage">;
 
 /**
  * Every `StorageEncoding`, as a runtime membership test.
  *
  * `Record<StorageEncoding, true>` rather than an array: adding a member to the
  * union without adding it here is a COMPILE error, so the set cannot drift
- * behind the type it is guarding. Unvalidated, an attacker-chosen encoding
- * reaches `readFile`/`writeFile` and comes back as an opaque `host-internal`
- * throw; validated, it is the boundary refusal it actually is.
+ * behind the type it is guarding. Unvalidated, a child-chosen encoding reaches
+ * `readFile`/`writeFile` and comes back as an opaque `host-internal` throw;
+ * validated, it is the boundary refusal it actually is.
  */
 const STORAGE_ENCODINGS: Record<StorageEncoding, true> = {
   "utf-8": true,
@@ -122,8 +148,7 @@ function optionalRemoveOptionsArg(
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     reject(call, index, "an options object when present");
   }
-  const entries = Object.entries(value as Record<string, unknown>);
-  for (const [key, item] of entries) {
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
     if (key !== "recursive" || typeof item !== "boolean") {
       reject(call, index, "an options object with only a boolean 'recursive'");
     }
@@ -132,82 +157,100 @@ function optionalRemoveOptionsArg(
 }
 
 /**
- * `storage.read` — the one member whose RESULT is re-encoded.
+ * Bind this group's handlers to one plugin incarnation's `hostApi`.
  *
- * It declares `Uint8Array` and delivers a Node `Buffer`, and `Buffer` carries a
- * `toJSON()`: a naive round trip does not throw, it SUCCEEDS into
- * `{ type: "Buffer", data: number[] }` — a different type that reads as a
- * successful read. Tagging the bytes as base64 is what keeps bytes bytes.
+ * Composed over the dispatch table by the caller that owns the child, so the
+ * table keeps naming every member exactly once and an unbound member keeps its
+ * throwing default.
  */
-export async function readStorageBytes(call: HostApiCall): Promise<WireBytes> {
-  const bytes = await call.hostApi.storage.read(stringArg(call, 0));
-  return encodeWireBytes(bytes, `${call.path}(result)`);
-}
+export function createStorageHostApiPaths(
+  hostApi: StorageHostApi,
+): Record<DispatchedStorageHostApiPath, HostApiPathHandler> {
+  // The five `void`-declared members RETURN the host's promise rather than
+  // awaiting and discarding it. Discarding would also discard a host that
+  // started resolving a value, and the dispatcher's void check — the one thing
+  // that catches the child's stub and the host's implementation disagreeing
+  // about a member — would never see it. A drift is refused, not absorbed.
+  return {
+    /**
+     * The one member whose RESULT is re-encoded.
+     *
+     * It declares `Uint8Array` and delivers a Node `Buffer`, and `Buffer`
+     * carries a `toJSON()`: a naive round trip does not throw, it SUCCEEDS into
+     * `{ type: "Buffer", data: number[] }` — a different type that reads as a
+     * successful read. Tagging the bytes as base64 is what keeps bytes bytes.
+     */
+    "storage.read": defineHostApiPath("storage.read", async (call) =>
+      encodeWireBytes(
+        await hostApi.storage.read(stringArg(call, 0)),
+        `${call.path}(result)`,
+      ),
+    ),
 
-export async function readStorageText(call: HostApiCall): Promise<string> {
-  return call.hostApi.storage.readText(
-    stringArg(call, 0),
-    optionalEncodingArg(call, 1),
-  );
-}
+    "storage.readText": defineHostApiPath("storage.readText", (call) =>
+      hostApi.storage.readText(stringArg(call, 0), optionalEncodingArg(call, 1)),
+    ),
 
-/** Resolves `null` for a missing file — the member's declared answer, not a fallback. */
-export async function readStorageJson(call: HostApiCall): Promise<unknown> {
-  return call.hostApi.storage.readJson(stringArg(call, 0));
-}
+    // Resolves `null` for a missing file — the member's declared answer, not a
+    // fallback the boundary invented.
+    "storage.readJson": defineHostApiPath("storage.readJson", (call) =>
+      hostApi.storage.readJson(stringArg(call, 0)),
+    ),
 
-export async function listStorageEntries(call: HostApiCall): Promise<string[]> {
-  return call.hostApi.storage.list(optionalStringArg(call, 0));
-}
+    "storage.list": defineHostApiPath("storage.list", (call) =>
+      hostApi.storage.list(optionalStringArg(call, 0)),
+    ),
 
-export async function storageEntryExists(call: HostApiCall): Promise<boolean> {
-  return call.hostApi.storage.exists(stringArg(call, 0));
-}
+    "storage.exists": defineHostApiPath("storage.exists", (call) =>
+      hostApi.storage.exists(stringArg(call, 0)),
+    ),
 
-/**
- * `storage.write` — the one member whose ARGUMENTS are re-encoded.
- *
- * `data` is `string | Uint8Array`, and the tag is what keeps the two branches
- * apart: without it a base64 STRING the plugin meant to write verbatim is
- * indistinguishable from bytes the child encoded, and the file lands decoded.
- * The separate `encoding` argument is orthogonal — it says how the host should
- * interpret a string it was given, not how the string crossed.
- */
-export async function writeStorageBytes(call: HostApiCall): Promise<void> {
-  const relPath = stringArg(call, 0);
-  const data = decodeWireBytes(call.args[1], `${call.path}(data)`);
-  await call.hostApi.storage.write(relPath, data, optionalEncodingArg(call, 2));
-}
+    /**
+     * The one member whose ARGUMENTS are re-encoded.
+     *
+     * `data` is `string | Uint8Array`, and the tag is what keeps the two
+     * branches apart: without it a base64 STRING the plugin meant to write
+     * verbatim is indistinguishable from bytes the child encoded, and the file
+     * lands decoded. The separate `encoding` argument is orthogonal — it says
+     * how the host should interpret a string it was given, not how the string
+     * crossed.
+     */
+    "storage.write": defineHostApiPath("storage.write", (call) => {
+      const relPath = stringArg(call, 0);
+      const data = decodeWireBytes(call.args[1], `${call.path}(data)`);
+      return hostApi.storage.write(relPath, data, optionalEncodingArg(call, 2));
+    }),
 
-export async function writeStorageJson(call: HostApiCall): Promise<void> {
-  const relPath = stringArg(call, 0);
-  if (call.args.length < 2) reject(call, 1, "present");
-  await call.hostApi.storage.writeJson(
-    relPath,
-    call.args[1],
-    optionalIndentArg(call, 2),
-  );
-}
+    "storage.writeJson": defineHostApiPath("storage.writeJson", (call) => {
+      const relPath = stringArg(call, 0);
+      // An omitted value is not `undefined`-the-value: `JSON.stringify`
+      // produces nothing for it and the write would fail deep inside `fs`.
+      if (call.args.length < 2) reject(call, 1, "present");
+      return hostApi.storage.writeJson(relPath, call.args[1], optionalIndentArg(call, 2));
+    }),
 
-export async function removeStoragePath(call: HostApiCall): Promise<void> {
-  const relPath = stringArg(call, 0);
-  await call.hostApi.storage.rm(relPath, optionalRemoveOptionsArg(call, 1));
-}
+    "storage.rm": defineHostApiPath("storage.rm", (call) => {
+      const relPath = stringArg(call, 0);
+      return hostApi.storage.rm(relPath, optionalRemoveOptionsArg(call, 1));
+    }),
 
-export async function makeStorageDirectory(call: HostApiCall): Promise<void> {
-  await call.hostApi.storage.mkdir(stringArg(call, 0));
-}
+    "storage.mkdir": defineHostApiPath("storage.mkdir", (call) =>
+      hostApi.storage.mkdir(stringArg(call, 0)),
+    ),
 
-/**
- * Fails closed on a missing OS keychain with
- * `plugin-storage-encryption-unavailable`, which is a DIFFERENT answer from a
- * missing file: nothing was written, and the plaintext never reached the disk.
- */
-export async function writeEncryptedStorage(call: HostApiCall): Promise<void> {
-  const relPath = stringArg(call, 0);
-  await call.hostApi.storage.writeEncrypted(relPath, stringArg(call, 1));
-}
+    /**
+     * Fails closed on a missing OS keychain with
+     * `plugin-storage-encryption-unavailable`, which is a DIFFERENT answer from
+     * a missing file: nothing was written, and the plaintext never reached the
+     * disk.
+     */
+    "storage.writeEncrypted": defineHostApiPath("storage.writeEncrypted", (call) => {
+      const relPath = stringArg(call, 0);
+      return hostApi.storage.writeEncrypted(relPath, stringArg(call, 1));
+    }),
 
-export async function readEncryptedStorage(call: HostApiCall): Promise<string> {
-  return call.hostApi.storage.readEncrypted(stringArg(call, 0));
+    "storage.readEncrypted": defineHostApiPath("storage.readEncrypted", (call) =>
+      hostApi.storage.readEncrypted(stringArg(call, 0)),
+    ),
+  };
 }
