@@ -162,6 +162,33 @@ export function acceptSuggestedReply(
   notify();
 }
 
+/**
+ * Drop the current suggestions because the conversation that produced them is
+ * no longer the one on screen (new chat, session switch, transcript rewind).
+ *
+ * Suggestions belong to one assistant turn of one conversation, but this store
+ * is a renderer singleton that deliberately outlives view remounts so a
+ * Composer remount mid-turn does not lose them (see `ensureIpcWired`). Nothing
+ * else bounds their lifetime, so without this reset the previous
+ * conversation's snapshot survives into the next one — where an empty
+ * transcript still reads as "suggestions active" and suppresses the
+ * empty-state centered composer (and with it the project selector, which is
+ * only mounted in that layout).
+ *
+ * Deliberately records no telemetry: `ignored` counts a suggestion the user
+ * saw and passed over within a live turn, and abandoning the whole
+ * conversation is a different act.
+ *
+ * Idempotent — safe to call when the store is already empty.
+ */
+export function resetSuggestedReplies(): void {
+  dismissLatch = false;
+  priorActiveUnused = false;
+  if (snapshot === EMPTY_SNAPSHOT) return;
+  snapshot = EMPTY_SNAPSHOT;
+  notify();
+}
+
 // Test-only: reset between cases.
 export function __resetSuggestedRepliesStoreForTests(): void {
   snapshot = EMPTY_SNAPSHOT;

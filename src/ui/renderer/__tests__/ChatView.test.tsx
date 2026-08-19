@@ -263,6 +263,42 @@ describe("ChatView", () => {
     });
   });
 
+  it("re-centers the empty composer when a new chat follows a turn that suggested replies", async () => {
+    const { container, emitChatStream } = await renderApp({ hasApiKey: true });
+    const dock = () => container.querySelector("[data-composer-placement]");
+
+    await waitFor(() => {
+      expect(dock()).toHaveAttribute("data-composer-placement", "center");
+      expect(container.querySelector('[data-testid="composer-project-selector-slot"]')).not.toBeNull();
+    });
+
+    // Turn end. Suggestions legitimately drop the centered layout — the ghost
+    // text and chip row need the docked composer.
+    await act(async () => {
+      emitChatStream({ type: "suggested_replies", replies: ["다음 작업 진행", "나중에 할게요"] });
+    });
+    await waitFor(() => {
+      expect(dock()).toHaveAttribute("data-composer-placement", "bottom");
+    });
+
+    // The user starts a brand-new conversation. The suggestion store is a
+    // renderer singleton that outlives the view, so unless the new-chat path
+    // resets it the empty conversation still reads as "suggestions on screen":
+    // the composer stays docked at the bottom and the project selector — which
+    // is mounted only in the centered layout — never comes back.
+    const newChat = container.querySelector('[data-testid="sidebar-new-chat"]') as HTMLElement | null;
+    expect(newChat).not.toBeNull();
+    await act(async () => {
+      fireEvent.click(newChat!);
+    });
+
+    await waitFor(() => {
+      expect(dock()).toHaveAttribute("data-composer-placement", "center");
+      expect(container.querySelector('[data-testid="composer-project-selector-slot"]')).not.toBeNull();
+      expect(container.querySelector('[data-testid="suggested-replies-ghost"]')).toBeNull();
+    });
+  });
+
   it("does not render the no-key chip once a key (or keyless readiness) resolves", async () => {
     const { container } = await renderApp({ hasApiKey: true });
 
