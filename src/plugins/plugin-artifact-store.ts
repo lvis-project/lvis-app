@@ -31,7 +31,8 @@
 import AdmZip from "adm-zip";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { isResolvedPathWithin } from "./plugin-storage-containment.js";
 import { randomUUID } from "node:crypto";
 
 import {
@@ -429,7 +430,7 @@ export class PluginArtifactStore {
   installDirFor(slug: string): string {
     const safeSlug = assertSafeArtifactSlug(slug);
     const installDir = resolve(this.installRoot, safeSlug);
-    if (!isWithin(resolve(this.installRoot), installDir)) {
+    if (!isResolvedPathWithin(resolve(this.installRoot), installDir)) {
       throw new Error(`artifact slug "${slug}" escapes install root`);
     }
     return installDir;
@@ -631,7 +632,7 @@ export class PluginArtifactStore {
     );
     const installDir = this.installDirFor(safeSlug);
     const stageDir = resolve(this.installRoot, `.${safeSlug}.stage-${randomUUID()}`);
-    if (!isWithin(resolve(this.installRoot), stageDir)) {
+    if (!isResolvedPathWithin(resolve(this.installRoot), stageDir)) {
       throw new Error(`artifact slug "${slug}" escapes install root`);
     }
     await rm(stageDir, { recursive: true, force: true });
@@ -645,7 +646,7 @@ export class PluginArtifactStore {
         const safeEntryPath = sanitizeZipEntryPath(safeSlug, entry.entryName);
         if (!safeEntryPath) continue;
         const targetPath = resolve(stageDir, safeEntryPath);
-        if (!isWithin(stageDir, targetPath)) {
+        if (!isResolvedPathWithin(stageDir, targetPath)) {
           throw new Error(`"${safeSlug}" zip entry escapes install root: ${entry.entryName}`);
         }
         if (entry.isDirectory) {
@@ -1132,15 +1133,4 @@ export class PluginArtifactStore {
   private async removeAbandonedStage(path: string): Promise<void> {
     await rm(path, { recursive: true, force: true });
   }
-}
-
-/**
- * Path-relative containment check. `path.relative` returns empty when
- * `parent === candidate` (degenerate — a directory, not a file we'd
- * import) and `..`-prefixed when candidate is outside parent. Mirrors
- * the helper in `runtime.ts` rather than importing across a layer.
- */
-function isWithin(parent: string, candidate: string): boolean {
-  const rel = relative(parent, candidate);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
