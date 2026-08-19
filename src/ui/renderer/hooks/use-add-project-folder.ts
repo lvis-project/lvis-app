@@ -7,15 +7,44 @@ export interface PendingRootWarning {
   ackToken: string;
 }
 
+/**
+ * How a project surface hands a refused mutation to the app-level toast.
+ *
+ * The operation is passed rather than a ready-made sentence because the code
+ * usually resolves to a localized message on its own; the operation only names
+ * the context for a code the shared IPC table does not know.
+ */
+export type ProjectErrorReporter = (
+  operation: "add" | "remove",
+  error?: string,
+  message?: string,
+) => void;
+
+/**
+ * What one `pickRoot` round trip actually did.
+ *
+ * The four outcomes used to collapse into a single `null`, which is why a
+ * refused add — an unwritable settings file, a denied path, a rejected sender
+ * frame — reached the user as nothing at all: indistinguishable from pressing
+ * Escape in the folder dialog. They are separate cases because the UI owes the
+ * user a different response to each, and only `failed` carries a code the
+ * shared IPC error table can render.
+ */
+export type AddProjectFolderOutcome =
+  | { status: "added"; roots: WorkspaceRootIdentity[]; added: string | null }
+  | { status: "canceled" }
+  | { status: "needs-acknowledgement" }
+  | { status: "failed"; error?: string };
+
 export interface UseAddProjectFolderResult {
   /** Adjacency warnings awaiting acknowledgement — null when idle. */
   pendingWarning: PendingRootWarning | null;
-  /** Open the native folder picker (`workspace.pickRoot`). Resolves the new
-   *  root list on success; caller decides what to do with it (e.g. switch the
-   *  active project, refresh a project list). */
-  addFolder: () => Promise<{ roots: WorkspaceRootIdentity[]; added: string | null } | null>;
+  /** Open the native folder picker (`workspace.pickRoot`). The caller owns what
+   *  happens to the resulting root list (e.g. switch the active project,
+   *  refresh a project list) AND surfacing a `failed` outcome. */
+  addFolder: () => Promise<AddProjectFolderOutcome>;
   /** Echo the pending warning's ackToken to confirm the add despite adjacency warnings. */
-  confirmPendingFolder: () => Promise<{ roots: WorkspaceRootIdentity[]; added: string | null } | null>;
+  confirmPendingFolder: () => Promise<AddProjectFolderOutcome>;
   /** Dismiss the pending warning without adding the folder. */
   cancelPendingFolder: () => void;
   /** Raw setter — for producers that resolve a pending warning through a
@@ -40,27 +69,31 @@ export interface UseAddProjectFolderResult {
 export function useAddProjectFolder(): UseAddProjectFolderResult {
   const [pendingWarning, setPendingWarning] = useState<PendingRootWarning | null>(null);
 
-  const addFolder = useCallback(async () => {
+  const addFolder = useCallback(async (): Promise<AddProjectFolderOutcome> => {
     const res = await window.lvis.workspace.pickRoot();
-    if (!res.ok) return null;
+    if (!res.ok) return { status: "failed", ...(res.error ? { error: res.error } : {}) };
     if (res.requiresAcknowledgement && res.pendingPath && res.ackToken) {
       setPendingWarning({ path: res.pendingPath, warnings: res.warnings ?? [], ackToken: res.ackToken });
-      return null;
+      return { status: "needs-acknowledgement" };
     }
-    if (!res.roots) return null;
-    return { roots: res.roots, added: res.added ?? null };
+    // `ok` without a root list is the dialog being dismissed — main answers a
+    // cancel with `{ ok: true, canceled: true, roots }`, so an absent list can
+    // only mean the pick produced nothing to apply.
+    if (!res.roots) return { status: "canceled" };
+    return { status: "added", roots: res.roots, added: res.added ?? null };
   }, []);
 
-  const confirmPendingFolder = useCallback(async () => {
+  const confirmPendingFolder = useCallback(async (): Promise<AddProjectFolderOutcome> => {
     const pending = pendingWarning;
-    if (!pending) return null;
+    if (!pending) return { status: "canceled" };
     // Second, explicit confirmation — echo the one-time token (never a path).
     // Main persists the token-bound dialog path and still hard-refuses a
     // sensitive/root path even when acknowledged.
     const res = await window.lvis.workspace.pickRoot({ ackToken: pending.ackToken });
     setPendingWarning(null);
-    if (!res.ok || !res.roots) return null;
-    return { roots: res.roots, added: res.added ?? null };
+    if (!res.ok) return { status: "failed", ...(res.error ? { error: res.error } : {}) };
+    if (!res.roots) return { status: "canceled" };
+    return { status: "added", roots: res.roots, added: res.added ?? null };
   }, [pendingWarning]);
 
   const cancelPendingFolder = useCallback(() => {

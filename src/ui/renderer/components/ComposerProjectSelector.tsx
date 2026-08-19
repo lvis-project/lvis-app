@@ -11,7 +11,12 @@ import {
 import { useTranslation } from "../../../i18n/react.js";
 import type { ProjectIdentity } from "../../../shared/project-identity.js";
 import { projectRootEquals } from "../../../shared/project-identity.js";
-import { useAddProjectFolder, addedRootDisplayName } from "../hooks/use-add-project-folder.js";
+import {
+  useAddProjectFolder,
+  addedRootDisplayName,
+  type AddProjectFolderOutcome,
+  type ProjectErrorReporter,
+} from "../hooks/use-add-project-folder.js";
 
 export interface ComposerProjectSelectorProps {
   /** Currently active project — drives the trigger label. */
@@ -27,6 +32,9 @@ export interface ComposerProjectSelectorProps {
   /** Re-fetch the workspace project list after a folder is added — the same
    *  refresh App.tsx already exposes to the sidebar's context menu. */
   onRefreshProjects?: () => void | Promise<void>;
+  /** Surface a refused add — the same App-level toast the sidebar's project
+   *  context menu reports its own failures through. */
+  onProjectError?: ProjectErrorReporter;
   /** Controls the dropdown's open state so the caller (ChatComposerDock) can
    *  force-close it when the composer transitions off the centered layout
    *  (first message sent) — see the close-animation requirement. */
@@ -55,6 +63,7 @@ export function ComposerProjectSelector({
   projects,
   onSelectProject,
   onRefreshProjects,
+  onProjectError,
   open,
   onOpenChange,
 }: ComposerProjectSelectorProps) {
@@ -82,17 +91,27 @@ export function ComposerProjectSelector({
     });
   };
 
+  // A refused pick reaches the user as an error rather than as the dropdown
+  // simply closing: the native dialog dismissing itself looks the same whether
+  // the folder was persisted or rejected. `needs-acknowledgement` is answered
+  // by the warning block below, and `canceled` is the user's own decision.
+  const applyAddOutcome = async (outcome: AddProjectFolderOutcome) => {
+    if (outcome.status === "failed") {
+      onProjectError?.("add", outcome.error);
+      return;
+    }
+    if (outcome.status !== "added") return;
+    await onRefreshProjects?.();
+    const addedRoot = outcome.added ?? outcome.roots.find((r) => !r.isDefault)?.path;
+    if (!addedRoot) return;
+    onOpenChange(false);
+    void onSelectProject({ projectRoot: addedRoot, projectName: addedRootDisplayName(addedRoot) });
+  };
+
   const handleAddProject = async () => {
     setBusy(true);
     try {
-      const result = await addFolder();
-      if (!result) return; // canceled, failed, or awaiting ack (pendingWarning renders below)
-      await onRefreshProjects?.();
-      const addedRoot = result.added ?? result.roots.find((r) => !r.isDefault)?.path;
-      if (addedRoot) {
-        onOpenChange(false);
-        void onSelectProject({ projectRoot: addedRoot, projectName: addedRootDisplayName(addedRoot) });
-      }
+      await applyAddOutcome(await addFolder());
     } finally {
       setBusy(false);
     }
@@ -101,14 +120,7 @@ export function ComposerProjectSelector({
   const handleConfirmPending = async () => {
     setBusy(true);
     try {
-      const result = await confirmPendingFolder();
-      if (!result) return;
-      await onRefreshProjects?.();
-      const addedRoot = result.added ?? result.roots.find((r) => !r.isDefault)?.path;
-      if (addedRoot) {
-        onOpenChange(false);
-        void onSelectProject({ projectRoot: addedRoot, projectName: addedRootDisplayName(addedRoot) });
-      }
+      await applyAddOutcome(await confirmPendingFolder());
     } finally {
       setBusy(false);
     }

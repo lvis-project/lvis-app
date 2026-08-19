@@ -26,7 +26,10 @@ import { normalizeBrowserNavigationUrl } from "../preview/url-safety.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import { VerticalSplitLayout } from "./VerticalSplitLayout.js";
 import { useVerticalSplit } from "../hooks/use-vertical-split.js";
-import { useAddProjectFolder } from "../hooks/use-add-project-folder.js";
+import {
+  useAddProjectFolder,
+  type AddProjectFolderOutcome,
+} from "../hooks/use-add-project-folder.js";
 import { useNativeContextMenu } from "../hooks/use-native-context-menu.js";
 import {
   ListDetailWorkspace,
@@ -343,10 +346,32 @@ function ProjectRootsBrowser({
     }
   };
 
+  // Surface a mutating-op IPC failure inline. `path-not-allowed` /
+  // `sensitive-path` used to need a local override because the shared IPC map
+  // did not know them; it does now (format-ipc-error.ts), so this is a plain
+  // pass-through and the mapping lives in exactly one place.
+  const formatOpError = useCallback(
+    (error: string | undefined, message: string | undefined) => formatIpcError(error, message),
+    [],
+  );
+
+  // A refused pick lands in the SAME inline error slot the drag-drop add already
+  // uses — the picker closing on its own is otherwise indistinguishable from a
+  // rejected path. `needs-acknowledgement` is answered by the warning panel and
+  // `canceled` is the user's own decision, so neither reports anything.
+  const applyAddOutcome = useCallback((outcome: AddProjectFolderOutcome) => {
+    if (outcome.status === "failed") {
+      setOpError(formatOpError(outcome.error, undefined));
+      return;
+    }
+    if (outcome.status !== "added") return;
+    setOpError(null);
+    applyRoots(outcome.roots, outcome.added);
+  }, [applyRoots, formatOpError]);
+
   const addFolder = useCallback(async () => {
-    const result = await pickProjectFolder();
-    if (result) applyRoots(result.roots, result.added);
-  }, [applyRoots, pickProjectFolder]);
+    applyAddOutcome(await pickProjectFolder());
+  }, [applyAddOutcome, pickProjectFolder]);
 
   // ⌘O / Ctrl+O opens the folder picker when focus is within the panel (scoped —
   // no global shortcut pollution).
@@ -363,15 +388,6 @@ function ProjectRootsBrowser({
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [addFolder]);
-
-  // Surface a mutating-op IPC failure inline. `path-not-allowed` /
-  // `sensitive-path` used to need a local override because the shared IPC map
-  // did not know them; it does now (format-ipc-error.ts), so this is a plain
-  // pass-through and the mapping lives in exactly one place.
-  const formatOpError = useCallback(
-    (error: string | undefined, message: string | undefined) => formatIpcError(error, message),
-    [],
-  );
 
   // Drag-drop add-root (#1458). A dropped folder path is renderer-NAMED — the
   // preload webUtils bridge turns the dropped File into a candidate path, which
@@ -412,8 +428,7 @@ function ProjectRootsBrowser({
   };
 
   const confirmPendingFolder = async () => {
-    const result = await confirmPendingFolderShared();
-    if (result) applyRoots(result.roots, result.added);
+    applyAddOutcome(await confirmPendingFolderShared());
   };
 
   const activeRootIsDefault = Boolean(

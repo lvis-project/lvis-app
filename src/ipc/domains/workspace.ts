@@ -26,6 +26,7 @@ import { promises as fs } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { randomBytes } from "node:crypto";
 import { validateHostRendererSender, auditUnauthorized } from "../gated.js";
+import { createLogger } from "../../lib/logger.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { assertReadableFilePath } from "../../tools/file-read-core.js";
@@ -54,6 +55,8 @@ import { withWorkspaceRootLifecycleLock } from "../../permissions/workspace-root
 import { setWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
 import { getActivePluginSurfacePermissionScope } from "../../boot/plugin-surface-permissions.js";
 import { detachWorkspaceRootSessions } from "../../memory/workspace-root-session-lifecycle.js";
+
+const log = createLogger("lvis");
 
 /** Max directory entries returned per lazy listing (bounds huge dirs). */
 const MAX_DIR_ENTRIES = 1_000;
@@ -684,13 +687,29 @@ export function registerWorkspaceHandlers(deps: IpcDeps): void {
       if (!stat.isDirectory()) {
         return { ok: false, error: "not-a-dir", warnings: verdict.adjacencyWarnings };
       }
-    } catch {
+    } catch (error: unknown) {
+      // The code alone cannot distinguish a folder that vanished from a
+      // canonical form the OS cannot resolve, and the renderer only ever sees
+      // the code — so the cause is logged here or it is lost. The path is not:
+      // it goes through the same redaction the success audit below uses.
+      log.warn(
+        { err: error, path: opaqueWorkspaceRootAuditRef(picked), gesture },
+        "workspace root stat failed; pick refused",
+      );
       return { ok: false, error: "not-found", warnings: verdict.adjacencyWarnings };
     }
     // Persist the identity that passed validation, freezing symlink aliases.
     try {
       await allowPersistedWorkspaceRoot(canonicalPicked, CHANNELS.workspace.pickRoot);
-    } catch {
+    } catch (error: unknown) {
+      // `persist-failed` covers a settings write the OS refused, a pending
+      // removal for the same root, and a lifecycle dependency that boot never
+      // constructed. Which one it was decides what the user should do, and only
+      // this log carries it.
+      log.error(
+        { err: error, path: opaqueWorkspaceRootAuditRef(picked), gesture },
+        "workspace root persist failed; pick refused",
+      );
       return { ok: false, error: "persist-failed", warnings: verdict.adjacencyWarnings };
     }
     // Audit the allow-list widening: the permission SOT just grew the executor's
