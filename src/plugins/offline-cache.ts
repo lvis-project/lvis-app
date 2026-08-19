@@ -7,11 +7,11 @@
  *
  * No telemetry is emitted from cache operations.
  */
-import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import type { PluginMarketplaceItem } from "./types.js";
 import { createLogger } from "../lib/logger.js";
+import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
 import {
   MarketplaceArtifactLimitError,
   readCompressedArtifactFile,
@@ -261,24 +261,11 @@ async function evictLru(
 // ---------------------------------------------------------------------------
 
 async function atomicWrite(dest: string, data: string | Buffer): Promise<void> {
-  // Use a unique temp path (pid + random) to avoid concurrent-writer collisions
-  // and stale-tmp-from-prior-crash interference.
-  const tmp = `${dest}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-  try {
-    await writeFile(tmp, data);
-    try {
-      await rename(tmp, dest);
-    } catch (renameErr) {
-      if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
-        await rm(dest, { force: true });
-        // If this rename also fails, the outer catch cleans up tmp.
-        await rename(tmp, dest);
-      } else {
-        throw renameErr;
-      }
-    }
-  } catch (err) {
-    await rm(tmp, { force: true }).catch(() => undefined);
-    throw err;
-  }
+  // The EEXIST rm-then-rename recovery this used to carry is gone on purpose.
+  // `transient-fs-lock-retry.ts` -- the authority on which errno a file rename
+  // can actually produce -- states that EEXIST is directory-shaped and
+  // unreachable when renaming one file onto another. The branch never ran, and
+  // what it would have done if it had is delete the live file and then rename,
+  // which is the opposite of the atomic replace this function exists to give.
+  await writeFileAtomicAtPath(dest, data);
 }
