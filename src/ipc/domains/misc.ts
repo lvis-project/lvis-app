@@ -4,7 +4,7 @@
  * Reminder IPC (lvis:reminders:*) removed — absorbed by lvis:routines:v2:* (atomic cutover).
  */
 import { ipcMain } from "electron";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import type { RoutineExecution, RoutineFiredPayload, RoutineSchedule } from "../../shared/routines-types.js";
@@ -18,7 +18,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
 
   // ─── Routines v2 ────────────────────────────────
   ipcMain.handle(ROUTINES_V2.list, (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, ROUTINES_V2.list, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -27,7 +27,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(ROUTINES_V2.dismiss, async (e, id: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, ROUTINES_V2.dismiss, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -37,7 +37,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(ROUTINES_V2.remove, async (e, id: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, ROUTINES_V2.remove, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -52,7 +52,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(ROUTINES_V2.triggerNow, async (e, id: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, ROUTINES_V2.triggerNow, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -67,7 +67,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(ROUTINES_V2.pendingResults, async (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, ROUTINES_V2.pendingResults, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -102,7 +102,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(ROUTINES_V2.acknowledgeResult, async (e, routineId: string, firedAt: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, ROUTINES_V2.acknowledgeResult, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -126,7 +126,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
         notificationBody?: string;
       },
     ) => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, ROUTINES_V2.add, e);
         return UNAUTHORIZED_FRAME;
       }
@@ -141,7 +141,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(ROUTINES_V2.listSessions, async (e, routineId: string, limit?: number) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, ROUTINES_V2.listSessions, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -184,7 +184,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
 
   // ─── Session Todo ────────────────────────────────
   ipcMain.handle(CHANNELS.sessionTodo.list, (e, sessionId?: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.sessionTodo.list, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -193,7 +193,7 @@ export function registerMiscHandlers(deps: IpcDeps): void {
     return sessionTodoStore.list(sid);
   });
   ipcMain.handle(CHANNELS.sessionTodo.clear, (e, sessionId?: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.sessionTodo.clear, e);
       return UNAUTHORIZED_FRAME;
     }

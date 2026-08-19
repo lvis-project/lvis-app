@@ -23,14 +23,14 @@
  * shared channel.
  *
  * TRUST BOUNDARY: side chat runs arbitrary tools like the main chat, so every
- * invoke gates on {@link validateSender} and the channels are absent from
+ * invoke gates on {@link validateHostRendererSender} and the channels are absent from
  * PUBLIC_CHANNELS (fail-closed `isPublicChannel`). Error contract: kebab-case
  * English `error` (project CLAUDE.md — IPC English / UI Korean).
  */
 import { ipcMain } from "electron";
 import type { WebContents } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { sendToWebContents } from "../safe-send.js";
 import { createLogger } from "../../lib/logger.js";
 import { createLegacyChatStreamEventSink } from "../../api/platform-conversation-legacy-adapter.js";
@@ -57,23 +57,23 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
   if (!sideChatConversationLoop) {
     const unavailable = () => ({ ok: false as const, error: "side-chat-unavailable" });
     ipcMain.handle(CHANNELS.sidechat.send, (e) => {
-      if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.send, e); return UNAUTHORIZED_FRAME; }
+      if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.send, e); return UNAUTHORIZED_FRAME; }
       return unavailable();
     });
     ipcMain.handle(CHANNELS.sidechat.new, (e) => {
-      if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.new, e); return UNAUTHORIZED_FRAME; }
+      if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.new, e); return UNAUTHORIZED_FRAME; }
       return unavailable();
     });
     ipcMain.handle(CHANNELS.sidechat.load, (e) => {
-      if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.load, e); return UNAUTHORIZED_FRAME; }
+      if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.load, e); return UNAUTHORIZED_FRAME; }
       return { ok: false as const, error: "side-chat-unavailable", messages: [] };
     });
     ipcMain.handle(CHANNELS.sidechat.list, (e) => {
-      if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.list, e); return UNAUTHORIZED_FRAME; }
+      if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.list, e); return UNAUTHORIZED_FRAME; }
       return { current: null, sessions: [] };
     });
     ipcMain.handle(CHANNELS.sidechat.abort, (e) => {
-      if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.abort, e); return UNAUTHORIZED_FRAME; }
+      if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.abort, e); return UNAUTHORIZED_FRAME; }
       return unavailable();
     });
     return;
@@ -107,7 +107,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
   };
 
   ipcMain.handle(CHANNELS.sidechat.send, async (e, payload: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.send, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.send, e); return UNAUTHORIZED_FRAME; }
     const p = (payload ?? {}) as { input?: unknown; attachments?: unknown };
     if (typeof p.input !== "string" || p.input.trim().length === 0) {
       return { ok: false as const, error: "empty-text" };
@@ -159,7 +159,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.sidechat.new, async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.new, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.new, e); return UNAUTHORIZED_FRAME; }
     // Abort any in-flight turn first so its remaining frames never leak into the
     // fresh session (mirrors abort handler; contrast the prior unguarded call).
     await abortActiveSideTurn();
@@ -168,7 +168,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.sidechat.load, async (e, sessionId: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.load, e); return { ok: false as const, error: "unauthorized-frame", messages: [] }; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.load, e); return { ok: false as const, error: "unauthorized-frame", messages: [] }; }
     if (!isSafeSessionId(sessionId)) {
       return { ok: false as const, error: "invalid-session-id", messages: [] };
     }
@@ -188,7 +188,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.sidechat.list, (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.sidechat.list, e);
       // Fail closed: an unauthorized frame gets NO data — not even the real
       // current session id (info disclosure). Same empty shape as the
@@ -207,7 +207,7 @@ export function registerSideChatHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.sidechat.abort, async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.abort, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.sidechat.abort, e); return UNAUTHORIZED_FRAME; }
     await abortActiveSideTurn();
     return { ok: true as const };
   });
