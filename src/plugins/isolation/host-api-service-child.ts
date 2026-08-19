@@ -85,6 +85,12 @@ export interface ServiceChildMemberDeps {
     path: HostApiPath,
     subscriptionId: string,
     handler: (payload: unknown) => void,
+    /**
+     * Run when the HOST revokes the registration — state the ledger cannot drop
+     * on its own, because it lives in the stub's closure rather than in the
+     * entry.
+     */
+    onRevoked?: () => void,
   ) => () => void;
   /**
    * `context.log`, so a failure with no caller left to throw at is still seen.
@@ -264,12 +270,26 @@ export function createServiceChildMembers(
         ) as unknown as WireApiKeyLease;
         if (!lease.ok) return { ok: false as const, reason: lease.reason };
         let key: string | undefined = lease.key;
-        const dispose = deps.adoptSubscription("resolveApiKey", lease.handleId, () => {
-          // The host ended the lease (plugin retired, host shutting down). Drop
-          // the child's copy so a later `bearer()` cannot return a credential
-          // the host has already unwired.
-          key = undefined;
-        });
+        const dispose = deps.adoptSubscription(
+          "resolveApiKey",
+          lease.handleId,
+          // A lease carries no events. One arriving means the host is pushing
+          // on a registration it has nothing to push for, which is reported
+          // rather than ignored: silently dropping it would hide a real
+          // disagreement about what this member's id means.
+          () => {
+            deps.report("hostApi.resolveApiKey: the host pushed an event on a lease", {
+              handleId: lease.handleId,
+            });
+          },
+          // The host revoked the lease. Drop the child's copy so a later
+          // `bearer()` cannot return a credential the host has already unwired.
+          // This is the whole reason the credential is held as a mutable
+          // closure variable rather than a constant.
+          () => {
+            key = undefined;
+          },
+        );
         return {
           ok: true as const,
           vendor: lease.vendor,
@@ -320,13 +340,12 @@ export function createServiceChildMembers(
         for (const listener of exit) {
           listener({ code: event.code, signal: event.signal as NodeJS.Signals | null });
         }
-        // The process is gone, so this side lets go too. The host released its
-        // own entry when the worker exited and a host-side release does NOT
-        // reach the child — without this the child would hold the listener
-        // arrays, and the plugin closure behind them, for the life of the
-        // process. The release notification this sends finds nothing open on
-        // the host and is a no-op there.
-        dispose();
+        // This side does NOT let go here. The host owns the process, so the
+        // host owns the news that it ended: it releases its own registration
+        // and the `subscription-closed` that follows drops this one. Disposing
+        // here as well would be a second authority for one fact, and it was
+        // only ever written because a host-side release could not reach the
+        // child — which it now can.
       });
       const worker: SpawnedPluginWorker = {
         socketPath: handle.socketPath,

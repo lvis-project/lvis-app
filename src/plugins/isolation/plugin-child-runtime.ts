@@ -93,6 +93,13 @@ export type PluginFactoryLoader = (
 interface ChildSubscription {
   readonly path: HostApiPath;
   readonly handler: (payload: unknown) => void;
+  /**
+   * What to run when the HOST ends this registration, for the members that own
+   * something the child must let go of — the key a lease closed over being the
+   * one that matters. Absent for a registration whose only state is the handler
+   * itself, which the ledger drops on its own.
+   */
+  readonly onRevoked?: () => void;
 }
 
 /** What `deliver` did, so a dropped notification is reported rather than silent. */
@@ -143,6 +150,14 @@ export interface PluginChildRuntime {
     path: HostApiPath,
     subscriptionId: string,
     handler: (payload: unknown) => void,
+    /**
+     * Run when the HOST revokes this registration, never when the child
+     * disposes it and never when the host is simply gone. `resolveApiKey` uses
+     * it to drop the credential it closed over: a lease the host has taken back
+     * must stop being spendable in the child, and the child cannot learn that
+     * from an event because a revoked registration delivers none.
+     */
+    onRevoked?: () => void,
   ): () => void;
   /**
    * The child end of an abort channel: hand over the `AbortSignal` an argument
@@ -310,10 +325,14 @@ export async function startPluginChildRuntime(
     });
   };
   const releaseChildSubscription: SubscriptionRelease<ChildSubscription> = (
-    _subscription,
+    subscription,
     reason,
     subscriptionId,
   ) => {
+    // A host revocation is the one close the MEMBER has to act on: the ledger
+    // dropping the entry releases the handler, but not whatever the stub closed
+    // over on the plugin's behalf.
+    if (reason === "revoked") subscription.onRevoked?.();
     // Only a child-initiated dispose owes the host a message. `revoked` came
     // FROM the host and `peer-gone` means there is no host to tell.
     if (reason !== "disposed") return;
@@ -344,8 +363,13 @@ export async function startPluginChildRuntime(
     path: HostApiPath,
     subscriptionId: string,
     handler: (payload: unknown) => void,
+    onRevoked?: () => void,
   ) => {
-    subscriptions.adopt(subscriptionId, { path, handler }, releaseChildSubscription);
+    subscriptions.adopt(
+      subscriptionId,
+      { path, handler, ...(onRevoked ? { onRevoked } : {}) },
+      releaseChildSubscription,
+    );
     return () => {
       subscriptions.close(subscriptionId, "disposed");
     };
@@ -513,6 +537,27 @@ export async function startPluginChildRuntime(
     deliver(notification) {
       if (notification.kind === "installed-plugins") {
         installedPluginIds = [...notification.pluginIds];
+        return "delivered";
+      }
+      if (notification.kind === "config-snapshot") {
+        // MUTATED IN PLACE, never rebound: `createConfigSubscriptionChildMembers`
+        // captured this object, so a fresh one would leave `config.get` reading
+        // the record the construction push seeded and nothing would report it.
+        //
+        // Only the keys the push ENUMERATES are touched. A key the plugin set
+        // itself and the host cannot enumerate keeps the value the child wrote
+        // when its own `config.set` resolved, instead of being erased by a
+        // snapshot that never knew about it.
+        for (const key of notification.keys) {
+          if (Object.hasOwn(notification.values, key)) {
+            config[key] = notification.values[key];
+          } else {
+            // Absent from `values` means unset, which is what `config.get`
+            // answers `undefined` for. Deleted rather than assigned
+            // `undefined` so `Object.keys(config)` stays the truth.
+            delete config[key];
+          }
+        }
         return "delivered";
       }
       if (notification.kind === "subscription-closed") {

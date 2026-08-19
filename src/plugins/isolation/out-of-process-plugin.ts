@@ -44,7 +44,10 @@ import type {
 } from "../types.js";
 import { createConfigSubscriptionHostApiPaths } from "./config-subscription-host.js";
 import { createInteractionHostApiPaths } from "./host-api-interaction-paths.js";
-import { createServiceHostApiPaths } from "./host-api-service-paths.js";
+import {
+  createServiceHostApiPaths,
+  type DelegatedWorkerConfinement,
+} from "./host-api-service-paths.js";
 import { createStorageHostApiPaths } from "./host-api-storage-paths.js";
 import {
   HOSTAPI_DISPATCH_TABLE,
@@ -106,14 +109,46 @@ export type DispatchableHostApi = Parameters<typeof createStorageHostApiPaths>[0
  */
 export function createBoundHostApiDispatchTable(
   hostApi: DispatchableHostApi,
+  /**
+   * The two directories the child's own ASRT wrap grants it, so `spawnWorker`
+   * can refuse a delegated worker that would reach further. It is the SAME pair
+   * `spawnConfinedPluginChild` passes to the wrap, taken from the same context,
+   * because a boundary that checked against a differently-derived envelope
+   * would be checking against something other than the jail.
+   */
+  confinement: DelegatedWorkerConfinement,
 ): Record<HostApiPath, HostApiPathHandler> {
   return {
     ...HOSTAPI_DISPATCH_TABLE,
     ...createStorageHostApiPaths(hostApi),
     ...createConfigSubscriptionHostApiPaths(hostApi),
     ...createInteractionHostApiPaths(hostApi),
-    ...createServiceHostApiPaths(hostApi),
+    ...createServiceHostApiPaths(hostApi, confinement),
   };
+}
+
+/**
+ * Every config key the host can resolve for this plugin.
+ *
+ * `config.get` merges schema defaults, the manifest's own config, a host
+ * wildcard slot and the user's saved settings, and `PluginHostApi` publishes no
+ * way to enumerate the result — so the key set is assembled from the three
+ * sources the host DOES hold: the schema's declared properties, the manifest's
+ * config, and the construction snapshot (which is the merge, as it stood when
+ * the plugin started). Their union is what the settings surface can change,
+ * which is what a re-push has to cover.
+ */
+function resolvableConfigKeys(
+  manifest: PluginManifest,
+  constructionConfig: Record<string, unknown> | undefined,
+): readonly string[] {
+  return [
+    ...new Set([
+      ...Object.keys(manifest.configSchema?.properties ?? {}),
+      ...Object.keys(manifest.config ?? {}),
+      ...Object.keys(constructionConfig ?? {}),
+    ]),
+  ];
 }
 
 /**
@@ -128,6 +163,22 @@ export function createBoundHostApiDispatchTable(
  */
 function resolvePluginChildEntryPath(): string {
   return join(mainDir, "plugin-child-main.js");
+}
+
+/**
+ * The paths the PLUGIN owns, named once.
+ *
+ * Read by the spawn — which adds the throwaway sandbox HOME on top — and by the
+ * `spawnWorker` grant check, which does not: that HOME belongs to this process
+ * and is not the plugin's to hand on. Deriving both from one function is what
+ * makes the delegation check a check against the ACTUAL jail: widening what a
+ * plugin child may reach widens what it may delegate, in the same edit, instead
+ * of leaving a second list to drift behind the first.
+ */
+function pluginChildConfinement(
+  spec: Pick<ConfinedPluginChildSpec, "pluginRoot" | "pluginDataDir">,
+): DelegatedWorkerConfinement {
+  return { pluginRoot: spec.pluginRoot, pluginDataDir: spec.pluginDataDir };
 }
 
 /** What a confined child needs to exist. */
@@ -182,6 +233,7 @@ export async function spawnConfinedPluginChild(
   spec: ConfinedPluginChildSpec,
 ): Promise<ConfinedPluginChild> {
   const sandboxHome = createSandboxProcessHome();
+  const confinement = pluginChildConfinement(spec);
   let wrapped = false;
   const releaseSandboxState = (): void => {
     if (wrapped) {
@@ -201,8 +253,8 @@ export async function spawnConfinedPluginChild(
       args: [spec.childEntryPath],
       label: `plugin-child:${spec.pluginId}`,
       grantMode: process.platform === "win32" ? "deny-only" : "allow-list",
-      allowRead: [spec.pluginRoot, spec.pluginDataDir, sandboxHome.path],
-      allowWrite: [spec.pluginDataDir, sandboxHome.path],
+      allowRead: [confinement.pluginRoot, confinement.pluginDataDir, sandboxHome.path],
+      allowWrite: [confinement.pluginDataDir, sandboxHome.path],
       baseEnv: buildSafeChildEnv({ ELECTRON_RUN_AS_NODE: "1" }),
       extraEnv: { ...sandboxHome.env },
       // The child is a JSON-RPC server whose pipes the host owns, so unlike the
@@ -378,7 +430,7 @@ export function createOutOfProcessPluginFactory(
       // one exists so a call arriving after `stop()` is refused at the wire
       // instead of being carried to a hostApi that will refuse it anyway.
       isActive: () => live,
-      table: createBoundHostApiDispatchTable(hostApi),
+      table: createBoundHostApiDispatchTable(hostApi, pluginChildConfinement(context)),
       link: child.link,
     });
     transport.start();
@@ -396,6 +448,49 @@ export function createOutOfProcessPluginFactory(
         pluginIds: hostApi.getInstalledPluginIds(),
       });
     });
+
+    /**
+     * The host re-pushes the config snapshot the child answers `config.get`
+     * from. Also the host's OWN subscription, and for the same reason as the
+     * one above: `config.get` has to answer whether or not the plugin ever
+     * called `config.onChange`, and without a re-push it would answer with the
+     * value the key had at construction for the life of the process.
+     *
+     * `"*"` is the change bus's every-key wildcard, so this fires for a user's
+     * settings edit and for the plugin's own `config.set` alike. The bus emits
+     * INSIDE `config.set`'s persistence chain, before that call's reply is
+     * produced — which is what makes the contract's ordering obligation ("the
+     * push is emitted before the `config.set` reply") hold on the wire rather
+     * than by luck: both are written to the same pipe in that order.
+     *
+     * The callback's value is ignored on purpose. It carries one key's new
+     * value and not which key, and a snapshot rebuilt through `config.get` is
+     * the same merge the in-process member reads — one authority for what a
+     * config value is, rather than a second assembled from change events.
+     */
+    const configKeys = resolvableConfigKeys(spec.manifest, context.config);
+    const stopWatchingConfig = hostApi.config.onChange("*", () => {
+      const values: Record<string, unknown> = {};
+      for (const key of configKeys) {
+        const value = hostApi.config.get(key);
+        // Absent, not `undefined`: the wire distinguishes "unset" from "has a
+        // value" by presence in this record, because JSON has no `undefined`.
+        if (value !== undefined) values[key] = value;
+      }
+      transport.sendToChild({
+        wire: HOST_API_WIRE_VERSION,
+        pluginId,
+        generationId,
+        kind: "config-snapshot",
+        keys: configKeys,
+        values,
+      });
+    });
+    /** Both host-owned watchers, ended together wherever the incarnation ends. */
+    const stopHostWatchers = (): void => {
+      stopWatchingPluginSet();
+      stopWatchingConfig();
+    };
 
     const childContext: PluginChildContext = {
       pluginId,
@@ -428,7 +523,7 @@ export function createOutOfProcessPluginFactory(
       )) as PluginConstructResult;
     } catch (error) {
       live = false;
-      stopWatchingPluginSet();
+      stopHostWatchers();
       transport.close(`[out-of-process-plugin] ${pluginId}: construction failed`);
       throw error;
     }
@@ -461,7 +556,7 @@ export function createOutOfProcessPluginFactory(
        * optional and the teardown is not.
        */
       stop: async () => {
-        stopWatchingPluginSet();
+        stopHostWatchers();
         try {
           if (construction.lifecycleHooks.includes("stop")) {
             await transport.request(
