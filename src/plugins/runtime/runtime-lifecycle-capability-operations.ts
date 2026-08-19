@@ -409,7 +409,15 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
       );
       if (!canCommit()) return "cancelled";
       if (!integrityResult.ok) {
-        this.markFailed(plan.pluginIdHint);
+        // Keyed by the canonical manifest id — the caller already remembered
+        // the manifest under it, so the registry-id key the receipt check uses
+        // would leave that card reporting a non-failed status and strip the
+        // reason from `throwIfPluginFailedAfterAdd`.
+        this.markReceiptIntegrityFailed(
+          manifest.id,
+          integrityResult.reason,
+          manifest.name ?? manifest.id,
+        );
         return "failed";
       }
     }

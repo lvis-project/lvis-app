@@ -153,7 +153,12 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       if (!outcome.ok) {
         if (outcome.kind === "integrity") {
           if (plan.pluginIdHint) {
-            this.markFailed(plan.pluginIdHint);
+            // Keyed by the registry id: the manifest was never read, so the
+            // canonical id is unknown at this boundary.
+            this.markReceiptIntegrityFailed(
+              plan.pluginIdHint,
+              outcome.integrityResult.reason,
+            );
           }
           continue;
         }
