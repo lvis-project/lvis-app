@@ -2,7 +2,7 @@ import {
   __resetActiveSandboxCapabilityForTest,
   setActiveSandboxCapability,
   setSandboxRequestedAtBoot,
-} from "../permissions/sandbox-capability.js";
+} from "../../permissions/sandbox-capability.js";
 import { setProcessPlatform } from "./process-platform.js";
 
 export type HostShellSandboxFixturePlatform = "darwin" | "linux" | "win32";

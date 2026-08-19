@@ -6,7 +6,7 @@
  * that the length cap is enforced at the tool boundary.
  */
 import { describe, it, expect } from "vitest";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";

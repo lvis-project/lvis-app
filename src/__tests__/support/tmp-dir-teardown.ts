@@ -31,7 +31,7 @@
  */
 import { rm } from "node:fs/promises";
 
-import { retryOnTransientFsLock } from "../plugins/plugin-artifact-store.js";
+import { retryOnTransientFsLock } from "../../plugins/plugin-artifact-store.js";
 
 /** Remove a test's scratch directory, retrying the transient lock codes. */
 export async function cleanupTmpDir(dir: string): Promise<void> {

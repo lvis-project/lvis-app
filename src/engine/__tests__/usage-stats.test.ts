@@ -3,7 +3,7 @@ import { appendFileSync, mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
 import { gzipSync } from "node:zlib";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const auditStatGate = vi.hoisted(() => ({
   target: undefined as string | undefined,

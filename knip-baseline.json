@@ -1064,7 +1064,7 @@
     },
     {
       "type": "exports",
-      "file": "src/ui/renderer/hooks/status-bar/utils.ts",
+      "file": "src/ui/renderer/hooks/status-bar/toast-field.ts",
       "name": "TOAST_FIELD_MAX"
     },
     {
@@ -1869,11 +1869,6 @@
     },
     {
       "type": "types",
-      "file": "src/ipc/broadcast-helpers.ts",
-      "name": "BroadcastAuditLogger"
-    },
-    {
-      "type": "types",
       "file": "src/ipc/domains/preview.ts",
       "name": "PreviewReadFileResult"
     },
@@ -1926,6 +1921,11 @@
       "type": "types",
       "file": "src/ipc/index.ts",
       "name": "IpcDeps"
+    },
+    {
+      "type": "types",
+      "file": "src/ipc/window-fanout.ts",
+      "name": "BroadcastAuditLogger"
     },
     {
       "type": "types",

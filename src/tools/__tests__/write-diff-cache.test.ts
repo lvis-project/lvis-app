@@ -11,7 +11,7 @@
  *   7. purgeStaleSessionDiffDirs: removes dirs older than maxAgeMs
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { mkdtempSync, existsSync, readFileSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

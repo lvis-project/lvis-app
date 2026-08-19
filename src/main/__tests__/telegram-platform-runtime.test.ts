@@ -14,7 +14,7 @@ import {
   ensureTelegramPlatformActorSecret,
   TELEGRAM_PLATFORM_ACTOR_SECRET_NAME,
 } from "../telegram-platform-runtime.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const OWNER_ID = "123456789";
 const BOT_FINGERPRINT = "a".repeat(64);

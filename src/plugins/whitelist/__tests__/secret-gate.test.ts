@@ -16,7 +16,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runSecretGate } from "../secret-gate.js";
 import type { SecretGateInput } from "../secret-gate.js";
 import { whitelistRegistry } from "../whitelist-registry.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 const tempCacheRoots: string[] = [];
 

@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { invokeRegisteredHandlerWithEvent } from "../../../__tests__/test-helpers.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const showSaveDialog = vi.fn();

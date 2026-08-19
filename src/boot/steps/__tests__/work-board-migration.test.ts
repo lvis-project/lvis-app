@@ -20,7 +20,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync } from 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { migrateAgentHubBoardToWorkBoard } from "../work-board-migration.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 const SAMPLE_BOARD = { version: 1, nextId: 3, items: [{ id: 1, title: "legacy task", status: "planned", priority: "medium", created_at: "x", updated_at: "x" }] };
 

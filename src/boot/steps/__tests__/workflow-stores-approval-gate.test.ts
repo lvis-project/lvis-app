@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 // `mkdtempSync`, not `join(tmpdir(), random)`. The latter builds a path and
 // then creates it non-exclusively, so anything already sitting at that path —

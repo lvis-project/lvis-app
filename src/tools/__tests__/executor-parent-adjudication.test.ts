@@ -30,7 +30,7 @@ import type {
 } from "../../permissions/parent-adjudicator.js";
 import type { PermissionReviewEvent } from "../../shared/permission-review-status.js";
 import { makeWriteProbeTool } from "./approval-memory-test-fixtures.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { makeMockWebContents } from "../../__tests__/test-helpers.js";
 
 const CHILD_SESSION = "sub-11112222-3333-child";

@@ -41,7 +41,7 @@ import {
   setSandboxRequestedAtBoot,
 } from "../../permissions/sandbox-capability.js";
 import { __resetShellResolverCache } from "../../lib/shell-resolver.js";
-import { setProcessPlatform } from "../../testing/process-platform.js";
+import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
 
 const ORIGINAL_PLATFORM = process.platform;
 const CHILD_OUTPUT = "native Windows Plan-B child output";

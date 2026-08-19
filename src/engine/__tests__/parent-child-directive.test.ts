@@ -40,7 +40,7 @@ import {
 import type { FeatureNamespaceHandle } from "../../main/storage/feature-namespace.js";
 import type { LLMProvider, StreamEvent, StreamTurnParams } from "../llm/types.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const ROOT_SESSION = "11111111-1111-4111-8111-111111111111";
 const OTHER_ROOT = "22222222-2222-4222-8222-222222222222";

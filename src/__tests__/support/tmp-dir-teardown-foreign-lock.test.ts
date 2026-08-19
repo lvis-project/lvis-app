@@ -31,7 +31,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { cleanupTmpDir } from "../tmp-dir-teardown.js";
+import { cleanupTmpDir } from "./tmp-dir-teardown.js";
 
 const isWindows = process.platform === "win32";
 

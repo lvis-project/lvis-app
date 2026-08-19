@@ -22,7 +22,7 @@ import {
   writeJsonAtomic,
   writeFileAtomicAtPath,
 } from "../feature-namespace.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 const POSIX = process.platform !== "win32";
 

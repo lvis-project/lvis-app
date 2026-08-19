@@ -3,7 +3,7 @@ import { mkdtempSync, realpathSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ensureWorkspaceCwd } from "../ensure-workspace-cwd.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 describe("ensureWorkspaceCwd", () => {
   let prevCwd: string;

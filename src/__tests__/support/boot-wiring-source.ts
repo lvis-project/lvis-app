@@ -8,13 +8,14 @@ import { readFile, readdir } from "node:fs/promises";
  * (single source) so boot-llm-fetch-source and main-plugin-lifecycle-source share
  * one implementation.
  *
- * Path note: this module lives at `src/testing/`, one level under `src/`, so the
- * `../boot*` specifiers resolve to `src/boot*` exactly as they did from
- * `src/__tests__/`.
+ * Path note: this module lives at `src/__tests__/support/`, two levels under
+ * `src/`, so the `../../boot*` specifiers resolve to `src/boot*`. These are
+ * runtime `import.meta.url` reads, not module specifiers — a wrong depth fails
+ * at ENOENT, not at compile time.
  */
 export async function readBootWiring(): Promise<string> {
-  const parts: string[] = [await readFile(new URL("../boot.ts", import.meta.url), "utf8")];
-  for (const dir of ["../boot/", "../boot/steps/"]) {
+  const parts: string[] = [await readFile(new URL("../../boot.ts", import.meta.url), "utf8")];
+  for (const dir of ["../../boot/", "../../boot/steps/"]) {
     const dirUrl = new URL(dir, import.meta.url);
     const entries = await readdir(dirUrl);
     for (const name of entries.sort()) {

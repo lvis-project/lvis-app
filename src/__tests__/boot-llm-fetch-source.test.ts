@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
-import { readBootWiring } from "../testing/boot-wiring-source.js";
+import { readBootWiring } from "../__tests__/support/boot-wiring-source.js";
 
 async function readSource(relative: string): Promise<string> {
   return readFile(new URL(relative, import.meta.url), "utf8");

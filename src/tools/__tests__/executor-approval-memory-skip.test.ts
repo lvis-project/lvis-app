@@ -22,7 +22,7 @@
  *       for foreground plugin asks, while hard/forceModal asks still prompt
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

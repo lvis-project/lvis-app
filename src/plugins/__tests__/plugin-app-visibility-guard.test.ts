@@ -8,7 +8,7 @@ import {
   pureTool,
   TestPluginRuntime as PluginRuntime,
 } from "./test-helpers.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);

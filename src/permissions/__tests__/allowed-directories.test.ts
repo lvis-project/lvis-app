@@ -29,7 +29,7 @@ import {
   canonicalizePathForMatch,
   caseFoldForMatch,
 } from "../sensitive-paths.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 function fold(raw: string): string {
   return caseFoldForMatch(canonicalizePathForMatch(raw));
