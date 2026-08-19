@@ -81,6 +81,7 @@ import { McpAppModelContextStore } from "./mcp/mcp-app-model-context.js";
 import { initPluginRuntime } from "./boot/steps/plugin-runtime.js";
 import { wireWhitelistRegistry } from "./boot/steps/whitelist-bootstrap.js";
 import { wireRevocationRegistry } from "./boot/steps/revocation-bootstrap.js";
+import { wireAdmissionRegistry } from "./boot/steps/admission-bootstrap.js";
 import { wireAnnouncementCheck, wireReleasePrep, wireUpdateCheck,
 } from "./boot/steps/post-boot.js";
 import { migrateCanonicalization } from "./permissions/user-approval-store.js";
@@ -506,6 +507,12 @@ export async function bootstrap(
   // registry the first time it runs. Resolves on every path (fresh, offline,
   // cached) — fail-open on a fetch failure, never blocks boot.
   await wireRevocationRegistry({ bootAuditLogger: ctx.bootAuditLogger });
+
+  // Warm the admission catalog. Unlike the two registries above this is not an
+  // ordering requirement — admission is consulted at install, not at load, and
+  // the install path re-checks freshness itself. Warming here only saves the
+  // first install of a session a cold fetch.
+  await wireAdmissionRegistry({ bootAuditLogger: ctx.bootAuditLogger });
 
   // Cluster review M1 — PermissionManager is built BEFORE initPluginRuntime
   // so its per-plugin revoke signal can be wired into the resolveApiKey host

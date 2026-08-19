@@ -43,6 +43,46 @@ export class PluginRevokedError extends Error {
 }
 
 /**
+ * Stable English IPC code for {@link PluginNotAdmittedError}. Follows
+ * {@link PLUGIN_REVOKED_CODE}: not exported, because
+ * `buildInstallFailureResult` below is the only consumer and the renderer's
+ * `formatIpcError` map matches the literal string.
+ */
+const PLUGIN_NOT_ADMITTED_CODE = "plugin-not-admitted";
+
+/**
+ * Install refused because the signed admission catalog does not authorise
+ * this exact `slug@version`.
+ *
+ * The OPPOSITE polarity to {@link PluginRevokedError}, and that is the reason
+ * this is a separate error rather than another `ruleKind` on that one.
+ * Revocation is a BLOCK list: it fires because the distributor said "not this
+ * one". Admission is an ALLOW list: it fires because the distributor did not
+ * say anything — the catalog is unreachable, stale, or simply does not name
+ * this artifact. Collapsing the two would tell a user their plugin was
+ * blocked when in fact the device could not reach the catalog host, which
+ * points at the wrong remedy.
+ *
+ * `refusalCode` carries which condition fired. The renderer keeps one string
+ * for the family, so the specific code travels in the message for the log and
+ * the audit trail rather than fanning out the locale table.
+ */
+export class PluginNotAdmittedError extends Error {
+  constructor(
+    public readonly pluginId: string,
+    public readonly pluginVersion: string,
+    public readonly refusalCode: string,
+    public readonly reasonDetail: string,
+  ) {
+    super(
+      `plugin '${pluginId}@${pluginVersion}' is not admitted by the marketplace admission catalog`
+        + ` (${refusalCode}): ${reasonDetail}`,
+    );
+    this.name = "PluginNotAdmittedError";
+  }
+}
+
+/**
  * Uninstall refused because the package is not installed (plugin, agent, skill).
  *
  * Deliberately NOT the existing `not-found` code. This condition is reached from
@@ -121,7 +161,9 @@ export function buildInstallFailureResult(
       ? MARKETPLACE_DISABLED_CODE
       : error instanceof PluginRevokedError
         ? PLUGIN_REVOKED_CODE
-        : undefined;
+        : error instanceof PluginNotAdmittedError
+          ? PLUGIN_NOT_ADMITTED_CODE
+          : undefined;
   return {
     slug,
     success: false,

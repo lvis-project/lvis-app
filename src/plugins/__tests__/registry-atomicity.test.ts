@@ -267,7 +267,7 @@ describe("plugin registry transaction atomicity", () => {
     const result = await waitForExit(child);
     expect(result.code).toBe(0);
     const receipt = JSON.parse(await readFile(receiptPath, "utf-8")) as { schemaVersion: number; version: string };
-    expect(receipt).toMatchObject({ schemaVersion: 2, version: "2.0.0" });
+    expect(receipt).toMatchObject({ schemaVersion: 3, version: "2.0.0" });
   });
 
   it("converges an exact raw receipt restore after failed directory sync", async () => {
