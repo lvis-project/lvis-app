@@ -87,7 +87,7 @@ export function useRoutineOverlay({
     });
   }, []);
 
-  // C1+M4: single subscription for routine IPC events. runningStarted pushes a
+  // Single subscription for routine IPC events. runningStarted pushes a
   // running OverlayItem immediately (running:true); fired replaces it with the
   // completed item (running:false + summary). runningRoutines Set is kept in
   // sync for OverlayContextProvider to derive running flags on queue items.
@@ -139,7 +139,7 @@ export function useRoutineOverlay({
       }
     })();
 
-    // M1: fired payload uses explicit allowlist fields only (no ...routine spread)
+    // Fired payload uses explicit allowlist fields only (no ...routine spread)
     const unsubFired = api.onRoutineFired(pushRoutineResult);
 
     return () => { unsubStarted(); unsubFinished(); unsubFailed(); unsubFired(); };

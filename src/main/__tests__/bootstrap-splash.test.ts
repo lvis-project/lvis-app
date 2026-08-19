@@ -19,10 +19,15 @@ import { t } from "../../i18n/index.js";
 
 const SOURCE = resolve(import.meta.dirname, "../bootstrap-splash.ts");
 
+/** Every `t("...")` literal the splash module names, read from its source. */
+function splashKeysFromSource(): string[] {
+  const source = readFileSync(SOURCE, "utf-8");
+  return [...source.matchAll(/\bt\("([^"]+)"\)/g)].map((m) => m[1]!);
+}
+
 describe("bootstrap splash status messages", () => {
   it("resolves every t() key the splash module names", () => {
-    const source = readFileSync(SOURCE, "utf-8");
-    const keys = [...source.matchAll(/\bt\("([^"]+)"\)/g)].map((m) => m[1]!);
+    const keys = splashKeysFromSource();
     expect(keys.length).toBeGreaterThan(0);
     const catalog = generatedEn as Record<string, string>;
     for (const key of keys) {
@@ -32,11 +37,19 @@ describe("bootstrap splash status messages", () => {
 
   it("serves markup carrying translated status lines, not raw keys", async () => {
     const { BOOTSTRAP_SPLASH } = await import("../bootstrap-splash.js");
-    // The <p id="status"> seed and the JSON-encoded idle-cycle array both come
-    // from BOOTSTRAP_STATUS_MESSAGES, so a key that failed to resolve would
-    // reach the served HTML verbatim.
+    const keys = splashKeysFromSource();
+    expect(keys.length).toBeGreaterThan(0);
+    // The <p id="status"> seed, the JSON-encoded idle-cycle array and the
+    // version-panel aria-label are all interpolated into BOOTSTRAP_SPLASH, so a
+    // key that failed to resolve would reach the served HTML verbatim.
     expect(BOOTSTRAP_SPLASH).not.toMatch(/be_main\.[A-Za-z]/);
-    expect(BOOTSTRAP_SPLASH).toContain(t("be_main.bootstrapStatusPreparingRuntime"));
-    expect(BOOTSTRAP_SPLASH).toContain(t("be_main.bootstrapStatusOpeningWorkspace"));
+    // Derived from the module source rather than re-listed, so renaming a key
+    // (module + all catalogs) or adding a message needs no edit here.
+    for (const key of keys) {
+      expect(
+        BOOTSTRAP_SPLASH,
+        `splash markup is missing the translation of ${key}`,
+      ).toContain(t(key));
+    }
   });
 });

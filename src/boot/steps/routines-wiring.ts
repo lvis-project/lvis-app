@@ -29,7 +29,7 @@ export function wireRoutinesScheduler(ctx: BootContext): void {
       const firedAt = routine.lastFiredAt ?? new Date().toISOString();
       const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
 
-      // C1: runningStarted before the headless turn finishes — enriched payload
+      // runningStarted fires before the headless turn finishes — enriched payload
       // with title+firedAt so renderer can push a proper running OverlayItem
       // immediately. The completed event later carries the routineSessionId.
       try {
@@ -127,7 +127,7 @@ export function wireRoutinesScheduler(ctx: BootContext): void {
       log.warn("routines notification fired emit failed: %s", (err as Error).message);
     }
   });
-  // L1: NOT started here. Boot order matters — if scheduler.start() runs
+  // NOT started here. Boot order matters — if scheduler.start() runs
   // before the renderer has its IPC listeners attached, a past-due
   // routine fires immediately into a void. main.ts now invokes
   // `services.startRoutinesScheduler()` AFTER `registerIpcHandlers()` to
