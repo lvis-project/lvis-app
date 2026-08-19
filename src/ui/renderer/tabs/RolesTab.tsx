@@ -5,7 +5,7 @@ import { Input } from "../../../components/ui/input.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { LvisApi } from "../types.js";
-import { useNotifySaved } from "../contexts/saved-toast.js";
+import { useNotifySaved } from "../context/SavedToastContext.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 

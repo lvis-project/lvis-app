@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
 import { useContainerNarrow } from "./hooks/use-container-narrow.js";
-import { SavedToastFloating, SavedToastProvider } from "./contexts/saved-toast.js";
+import { SavedToastFloating, SavedToastProvider } from "./context/SavedToastContext.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
 import { PermissionsTab } from "./tabs/PermissionsTab.js";
@@ -136,7 +136,7 @@ function TabSaveBar({
 }
 
 
-// `./contexts/saved-toast.tsx` so PluginConfigTab can import the consumer
+// `./context/SavedToastContext.tsx` so PluginConfigTab can import the consumer
 // hook without forming a circular import with SettingsContent (which
 // itself imports PluginConfigTab in this file).
 

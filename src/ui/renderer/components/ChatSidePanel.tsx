@@ -40,7 +40,7 @@ import {
   BrowserWorkspace,
   FileBrowserWorkspace,
   PreviewWorkspace,
-} from "./chat-side-panel-workspaces.js";
+} from "./ChatSidePanelWorkspaces.js";
 import {
   BROWSER_TARGET_KINDS,
   FILE_TARGET_KINDS,
@@ -49,7 +49,7 @@ import {
   PreviewBody,
   UrlDocumentViewer,
   tabIcon,
-} from "./chat-side-panel-preview.js";
+} from "./ChatSidePanelPreview.js";
 
 
 /** Status tone for the sub-agent list row badge. */

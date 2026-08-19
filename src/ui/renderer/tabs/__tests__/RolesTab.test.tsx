@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { RolesTab } from "../RolesTab.js";
 import type { LvisApi } from "../../types.js";
-import { SavedToastProvider } from "../../contexts/saved-toast.js";
+import { SavedToastProvider } from "../../context/SavedToastContext.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { t } from "../../../../i18n/runtime.js";
 

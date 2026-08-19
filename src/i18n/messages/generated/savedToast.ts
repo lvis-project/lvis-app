@@ -1,4 +1,4 @@
-// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/contexts/saved-toast.tsx. Do not edit by hand.
+// AUTO-GENERATED — i18n migration. Source: src/ui/renderer/context/SavedToastContext.tsx. Do not edit by hand.
 export const en = {
   "savedToast.saved": "Saved",
 } as const;
