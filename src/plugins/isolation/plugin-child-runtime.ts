@@ -40,7 +40,7 @@ import type {
   RuntimePlugin,
   RuntimePluginFactory,
 } from "../types.js";
-import { configSubscriptionChildMembers } from "./config-subscription-child.js";
+import { createConfigSubscriptionChildMembers } from "./config-subscription-child.js";
 import { createInteractionChildMembers } from "./host-api-interaction-child.js";
 import {
   HOSTAPI_PATH_CONTRACTS,
@@ -330,7 +330,7 @@ export async function startPluginChildRuntime(
    */
   const members: Partial<Record<HostApiPath, (...args: unknown[]) => unknown>> = {
     ...createInteractionChildMembers(caller),
-    ...configSubscriptionChildMembers({
+    ...createConfigSubscriptionChildMembers({
       pluginId,
       call: caller,
       openSubscription,
