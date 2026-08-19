@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import {
   chmodSync,
   closeSync,
@@ -24,6 +24,7 @@ import {
   type RationaleUiAuditProjection,
 } from "../tools/pipeline/rationale-resume-contract.js";
 import type { RationaleTicketStoreAuditEvent } from "../tools/pipeline/rationale-ticket-store.js";
+import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
 
 export const RATIONALE_AUDIT_SCHEMA_VERSION = 1 as const;
 export const RATIONALE_AUDIT_MAX_DAILY_BYTES = 64 * 1024 * 1024;
@@ -186,11 +187,6 @@ function hasExactKeys(value: Record<string, unknown>, keys: readonly string[]): 
   return actual.length === expected.length && actual.every((key, index) => key === expected[index]);
 }
 
-function safeEqualHex(left: string, right: string): boolean {
-  if (!HMAC_RE.test(left) || !HMAC_RE.test(right)) return false;
-  return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
-}
-
 function parseFingerprint(value: unknown): FileFingerprint | null {
   if (value === null) return null;
   if (!isPlainRecord(value) || !hasExactKeys(value, ["dev", "ino", "size", "mtimeNs", "ctimeNs"]) ||
@@ -238,7 +234,7 @@ function parseCheckpoint(raw: string, day: string, slot: CheckpointSlot, secret:
     lastRowMac: value.lastRowMac,
     fingerprint: parseFingerprint(value.fingerprint),
   };
-  if (!safeEqualHex(value.seal, computeLineHmac(secret, JSON.stringify(unsigned)))) {
+  if (!timingSafeEqualHexDigest(value.seal, computeLineHmac(secret, JSON.stringify(unsigned)))) {
     throw new Error("rationale audit checkpoint seal mismatch");
   }
   return { ...unsigned, seal: value.seal };
@@ -297,7 +293,7 @@ function validateRow(line: string, day: string, sequence: number, previousMac: s
         "prevHash", "sequence", "rowMac"]) ||
       typeof parsed.auditId !== "string" || typeof parsed.sessionId !== "string" ||
       typeof parsed.at !== "number" || parsed.sequence !== sequence ||
-      typeof parsed.prevHash !== "string" || !safeEqualHex(parsed.prevHash, previousMac) ||
+      typeof parsed.prevHash !== "string" || !timingSafeEqualHexDigest(parsed.prevHash, previousMac) ||
       typeof parsed.rowMac !== "string" || !HMAC_RE.test(parsed.rowMac)) {
     throw new Error("invalid rationale audit row envelope");
   }
@@ -318,7 +314,7 @@ function validateRow(line: string, day: string, sequence: number, previousMac: s
   }
   const entry = parsed as unknown as RationaleAuditEntry;
   const expectedMac = computeLineHmac(secret, JSON.stringify(rowUnsigned(entry)));
-  if (!safeEqualHex(entry.rowMac, expectedMac)) throw new Error("rationale audit row MAC mismatch");
+  if (!timingSafeEqualHexDigest(entry.rowMac, expectedMac)) throw new Error("rationale audit row MAC mismatch");
   return entry;
 }
 
@@ -680,7 +676,7 @@ export class DurableRationaleAuditAdapter implements RationaleAuditSink {
     }
     const genesisMac = computeLineHmac(this.#secret, GENESIS_MARKER);
     if (checkpoint.sequence === 0) {
-      if (checkpoint.byteLength !== 0 || !safeEqualHex(checkpoint.lastRowMac, genesisMac)) {
+      if (checkpoint.byteLength !== 0 || !timingSafeEqualHexDigest(checkpoint.lastRowMac, genesisMac)) {
         throw new Error("invalid rationale audit genesis checkpoint");
       }
     } else if (checkpoint.byteLength === 0 || checkpoint.fingerprint === null) {
@@ -722,7 +718,7 @@ export class DurableRationaleAuditAdapter implements RationaleAuditSink {
     const cached = this.#verifiedByDay.get(day);
     if (cached !== undefined && cached.checkpointGeneration === checkpoint.generation &&
         cached.sequence === checkpoint.sequence && cached.byteLength === checkpoint.byteLength &&
-        safeEqualHex(cached.lastRowMac, checkpoint.lastRowMac) &&
+        timingSafeEqualHexDigest(cached.lastRowMac, checkpoint.lastRowMac) &&
         sameFingerprint(cached.fingerprint, fingerprint) &&
         sameFingerprint(checkpoint.fingerprint, fingerprint)) {
       return cached;
@@ -748,7 +744,7 @@ export class DurableRationaleAuditAdapter implements RationaleAuditSink {
 
     if (verified.sequence !== checkpoint.sequence ||
         verified.byteLength !== checkpoint.byteLength ||
-        !safeEqualHex(verified.lastRowMac, checkpoint.lastRowMac) ||
+        !timingSafeEqualHexDigest(verified.lastRowMac, checkpoint.lastRowMac) ||
         !sameFingerprint(verified.fingerprint, checkpoint.fingerprint)) {
       verified = this.#advanceCheckpoint(verified);
     }
@@ -765,7 +761,7 @@ export class DurableRationaleAuditAdapter implements RationaleAuditSink {
     let byteLength = base.byteLength;
     let lastRowMac = base.lastRowMac;
     let checkpointMatched = sequence === checkpoint.sequence &&
-      byteLength === checkpoint.byteLength && safeEqualHex(lastRowMac, checkpoint.lastRowMac);
+      byteLength === checkpoint.byteLength && timingSafeEqualHexDigest(lastRowMac, checkpoint.lastRowMac);
     const suffixLength = fingerprint.size - base.byteLength;
     if (suffixLength > 0) {
       const suffix = readRange(filePath, base.byteLength, suffixLength);
@@ -785,7 +781,7 @@ export class DurableRationaleAuditAdapter implements RationaleAuditSink {
         lastRowMac = row.rowMac;
         if (sequence === checkpoint.sequence) {
           if (byteLength !== checkpoint.byteLength ||
-              !safeEqualHex(lastRowMac, checkpoint.lastRowMac)) {
+              !timingSafeEqualHexDigest(lastRowMac, checkpoint.lastRowMac)) {
             throw new Error("rationale audit checkpoint does not anchor its file prefix");
           }
           checkpointMatched = true;
