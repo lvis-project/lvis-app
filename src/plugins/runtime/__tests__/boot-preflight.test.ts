@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import { isReinstallFixableFailureKind } from "../../../shared/plugin-install-failure.js";
+import { OUT_OF_PROCESS_PLUGIN_IDS } from "../../isolation/out-of-process-plugins.js";
 import type { PluginManifest } from "../../types.js";
 import {
   bindTestPluginRuntimeGeneration,
@@ -217,6 +218,64 @@ describe("PluginRuntime boot preflight", () => {
     expect(card?.loadStatus).toBe("failed");
     expect(card?.installFailureKind).toBe("load-crash");
     expect(card?.installFailureMessage).toContain("no space left on device");
+  });
+
+  it("keeps the sequence when the thrower is an out-of-process plugin", async () => {
+    // The per-plugin boundary wraps the whole attempt, so it cannot depend on
+    // which arm `importPluginFactoryForLifecycle` took. `work-assistant` is the
+    // one id in OUT_OF_PROCESS_PLUGIN_IDS, and the data directory is created
+    // after that arm has already produced its child-backed factory — so a throw
+    // there is an unclassified crash on the isolated path specifically.
+    const isolatedId = [...OUT_OF_PROCESS_PLUGIN_IDS][0]!;
+    const isolatedRoot = join(pluginsRoot, isolatedId);
+    await mkdir(isolatedRoot, { recursive: true });
+    await writeFile(
+      join(isolatedRoot, "entry.mjs"),
+      "export default async () => ({ handlers: {}, start: async () => {} });\n",
+      "utf8",
+    );
+    await writeFile(join(isolatedRoot, "plugin.json"), "{}\n", "utf8");
+    manifests.set(isolatedId, {
+      id: isolatedId,
+      name: isolatedId,
+      version: "1.0.0",
+      description: "out-of-process fixture",
+      publisher: "test",
+      entry: "entry.mjs",
+      tools: [],
+    });
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: isolatedId, manifestPath: join(isolatedRoot, "plugin.json") },
+      { id: "preflight-0", manifestPath: join(pluginsRoot, "preflight-0", "plugin.json") },
+    ]);
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+      createHostApi: createNoopHostApiForTests,
+      installReceiptCacheRoot: join(root, "receipts"),
+    }));
+    const internals = runtime as unknown as {
+      verifyReceiptAndDevGuard(): Promise<{ ok: true }>;
+      readManifest(path: string): Promise<PluginManifest>;
+      ensureDataDir(pluginId: string, pluginRoot: string): string;
+    };
+    internals.verifyReceiptAndDevGuard = async () => ({ ok: true });
+    internals.readManifest = async (path) => manifests.get(path.split(/[\\/]/).at(-2)!)!;
+    const ensureDataDir = internals.ensureDataDir.bind(runtime);
+    internals.ensureDataDir = (pluginId, pluginRoot) => {
+      if (pluginId === isolatedId) {
+        throw new Error("EACCES: permission denied, mkdir plugin data dir");
+      }
+      return ensureDataDir(pluginId, pluginRoot);
+    };
+
+    await expect(runtime.load()).resolves.toBeUndefined();
+
+    expect(runtime.listPluginIds()).toEqual(["preflight-0"]);
+    const card = runtime.listPluginCards().find((entry) => entry.id === isolatedId);
+    expect(card?.installFailureKind).toBe("load-crash");
+    expect(card?.installFailureMessage).toContain("permission denied");
   });
 
   it("surfaces a registry row whose manifest path escapes the plugin root", async () => {
