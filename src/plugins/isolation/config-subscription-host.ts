@@ -115,17 +115,21 @@ function adoptOrUndo(
  * table already refuses it, and servicing it here would make the
  * round-trip-free decision untrue in a way nothing would report.
  */
-export function configSubscriptionDispatchPaths(
+export function createConfigSubscriptionHostApiPaths(
   hostApi: ConfigSubscriptionHostApi,
 ): Record<DispatchedConfigSubscriptionPath, HostApiPathHandler> {
   return {
     "config.set": defineHostApiPath("config.set", async (call) => {
       requireArity(call, 2);
       const key = stringArgument(call, 0, "key");
-      // The value is whatever the plugin passed; the dispatcher has already
-      // proven it survives JSON, and the schema decision belongs to the host
-      // implementation, not to this handler.
-      await hostApi.config.set(key, call.args[1]);
+      // RETURNED, not awaited-and-discarded. `await` here would resolve
+      // `undefined` whatever the host produced, which quietly disables the
+      // dispatcher's own check that a `void` member returned nothing — the one
+      // thing between a drifted host implementation and a child stub that
+      // silently ignores its result. The value itself is whatever the plugin
+      // passed; the dispatcher has already proven it survives JSON, and the
+      // schema decision belongs to the host implementation, not here.
+      return hostApi.config.set(key, call.args[1]);
     }),
 
     "config.onChange": defineHostApiPath("config.onChange", async (call, scope) => {
@@ -189,7 +193,10 @@ export function configSubscriptionDispatchPaths(
         ended = true;
         finish?.();
       });
-      hostApi.onShutdown(async () => {
+      // Returned for the same reason `config.set` is: this member declares no
+      // result, and a handler that discarded the host's is a handler the
+      // void-drift check can never fire on.
+      return hostApi.onShutdown(async () => {
         // Already released — the child is gone, or the incarnation was torn
         // down. There is no handler left to wait for.
         if (ended) return;

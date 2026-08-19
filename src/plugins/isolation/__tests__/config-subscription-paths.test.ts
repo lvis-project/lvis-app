@@ -31,7 +31,7 @@ import {
   type PluginFactoryLoader,
 } from "../plugin-child-runtime.js";
 import {
-  configSubscriptionDispatchPaths,
+  createConfigSubscriptionHostApiPaths,
   type ConfigSubscriptionHostApi,
 } from "../config-subscription-host.js";
 import {
@@ -181,7 +181,7 @@ async function harness(
     notifications: { deliver: (notification) => child.deliver(notification) },
     table: {
       ...HOSTAPI_DISPATCH_TABLE,
-      ...configSubscriptionDispatchPaths(api.hostApi),
+      ...createConfigSubscriptionHostApiPaths(api.hostApi),
     } as Record<HostApiPath, HostApiPathHandler>,
   });
 
@@ -672,7 +672,7 @@ describe("the payload codecs both sides share", () => {
 describe("the group binds to one incarnation and claims exactly its own members", () => {
   it("services every member of the group except the child-local one", async () => {
     const api = fakeHostApi();
-    const paths = Object.keys(configSubscriptionDispatchPaths(api.hostApi)).sort();
+    const paths = Object.keys(createConfigSubscriptionHostApiPaths(api.hostApi)).sort();
     expect(paths).toEqual([
       "config.onChange",
       "config.set",
@@ -684,11 +684,68 @@ describe("the group binds to one incarnation and claims exactly its own members"
 
   it("keys every handler to the contract SOT rather than to a local copy", () => {
     const api = fakeHostApi();
-    const handlers = configSubscriptionDispatchPaths(api.hostApi);
+    const handlers = createConfigSubscriptionHostApiPaths(api.hostApi);
     for (const [path, handler] of Object.entries(handlers)) {
       expect(handler.path).toBe(path);
       expect(handler.contract).toBe(HOSTAPI_PATH_CONTRACTS[path as HostApiPath]);
       expect(handler.status).toBe("implemented");
+    }
+  });
+
+  it("leaves the shipped table unbound, because a module constant has no incarnation", () => {
+    // Publishing a bound handler into `HOSTAPI_DISPATCH_TABLE` would be a
+    // handler that names no plugin: `config.set` writes SOMEONE's settings and
+    // `onEvent` asserts SOMEONE's event access. Nothing routes out-of-process
+    // yet, and the shipped table staying unbound is what says so.
+    expect(HOSTAPI_DISPATCH_TABLE["config.get"].status).toBe("child-local");
+    for (const path of [
+      "config.set",
+      "config.onChange",
+      "onEvent",
+      "onPluginsChanged",
+      "onShutdown",
+    ] as const) {
+      expect(HOSTAPI_DISPATCH_TABLE[path].status, path).toBe("unimplemented");
+    }
+  });
+
+  it("reports a host that drifts into returning a value from a void member", async () => {
+    // The check exists on the dispatcher; a handler that awaited the host's
+    // promise and resolved `undefined` of its own accord would make it
+    // unreachable, and the drift would reach the child's stub unannounced.
+    const drifted = {
+      config: {
+        get: () => undefined,
+        set: async () => "persisted" as unknown as void,
+        onChange: () => () => {},
+      } as PluginHostApi["config"],
+      onEvent: () => () => {},
+      onPluginsChanged: () => () => {},
+      onShutdown: (() => () => {}) as unknown as PluginHostApi["onShutdown"],
+    } satisfies ConfigSubscriptionHostApi;
+    const host = new HostApiDispatcher({
+      pluginId: PLUGIN_ID,
+      generationId: GENERATION,
+      isActive: () => true,
+      notifications: { deliver: () => {} },
+      table: {
+        ...HOSTAPI_DISPATCH_TABLE,
+        ...createConfigSubscriptionHostApiPaths(drifted),
+      } as Record<HostApiPath, HostApiPathHandler>,
+    });
+    const envelope = {
+      wire: HOST_API_WIRE_VERSION,
+      pluginId: PLUGIN_ID,
+      generationId: GENERATION,
+    } as const;
+    for (const [path, args] of [
+      ["config.set", ["theme", "light"]],
+      ["onShutdown", ["s1"]],
+    ] as const) {
+      const reply = await host.handle({ ...envelope, callId: "c1", path, args });
+      expect(reply.ok, path).toBe(false);
+      if (reply.ok) continue;
+      expect(reply.error.code, path).toBe("result-marshalling-rejected");
     }
   });
 
@@ -698,7 +755,7 @@ describe("the group binds to one incarnation and claims exactly its own members"
     const spy = vi.spyOn(second.hostApi.config, "set");
     const table = {
       ...HOSTAPI_DISPATCH_TABLE,
-      ...configSubscriptionDispatchPaths(first.hostApi),
+      ...createConfigSubscriptionHostApiPaths(first.hostApi),
     } as Record<HostApiPath, HostApiPathHandler>;
     const host = new HostApiDispatcher({
       pluginId: PLUGIN_ID,
