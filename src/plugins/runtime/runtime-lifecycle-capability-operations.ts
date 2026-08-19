@@ -66,6 +66,25 @@ type PreparedArtifactHostApiIncarnation = {
   lifecycleHookScope: PluginLifecycleHookScope;
 };
 export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePublicationState {
+  /**
+   * Install-receipt integrity gate (LOAD boundary). Same "skip this plugin,
+   * keep loading everything else" shape as the gates below. The kind stays
+   * unclassified on purpose: reinstalling rewrites payload and receipt
+   * together, which is the repair `isReinstallFixableFailureKind(undefined)`
+   * lets the Doctor offer.
+   */
+  protected markReceiptIntegrityFailed(
+    pluginId: string,
+    reason: string,
+    displayName: string = pluginId,
+  ): void {
+    this.markLoadRefused(pluginId, {
+      summary: "Plugin files do not match their install receipt.",
+      reason,
+      displayName,
+    });
+  }
+
   private readonly capabilityBlockedRetries = new Map<
     string,
     CapabilityBlockedRetry
