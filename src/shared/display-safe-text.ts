@@ -88,9 +88,9 @@ export function hasInvisibleOrReorderingChars(value: string): boolean {
 }
 
 // The VALIDATION class, kept here rather than at the boundaries because the
-// boundaries kept getting it different. Twelve modules each wrote the range out
-// by hand and landed on four different answers; the union below is what those
-// authors between them found to matter, and no single site had all of it.
+// boundaries kept getting it different. Ten modules each wrote the range out by
+// hand; between them they produced four distinct answers, and the union below
+// is what those authors found to matter. No single site had all of it.
 //
 //   - C0 (U+0000-U+001F) and DEL: every copy had these.
 //   - C1 (U+0080-U+009F): only `tool-use-id` had these. U+0085 is NEL, a line
