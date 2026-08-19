@@ -92,7 +92,10 @@ vi.mock("../../plugins/registry.js", () => ({
   readPluginRegistry: harness.readPluginRegistry,
 }));
 
-import { describeNonJson } from "../../shared/json-representable.js";
+import {
+  base64DecodedLength,
+  describeNonJson,
+} from "../../shared/json-representable.js";
 import { HOSTAPI_EFFECT_BY_PATH } from "../effect-kind.js";
 import { buildRealHostApi, collectFunctionPaths } from "./real-host-api.js";
 import { PermissionTestResources } from "./test-resources.js";
@@ -443,6 +446,28 @@ describe("hostApi marshalling — the surface a process boundary must carry", ()
     const cyclic: Record<string, unknown> = {};
     cyclic.self = cyclic;
     expect(describeNonJson(cyclic, "v")).toContain("cycle");
+  });
+
+  it("the base64 size rule bounds a payload before it is decoded", () => {
+    // The rule the MCP app download parser and the plugin process boundary now
+    // share. Padding is the whole subtlety: ignoring it over-reports by up to
+    // two bytes per payload, which is a cap that means something slightly
+    // different in each place that reimplements it.
+    expect(base64DecodedLength("")).toBe(0);
+    expect(base64DecodedLength(Buffer.from("a").toString("base64"))).toBe(1); // "YQ=="
+    expect(base64DecodedLength(Buffer.from("ab").toString("base64"))).toBe(2); // "YWI="
+    expect(base64DecodedLength(Buffer.from("abc").toString("base64"))).toBe(3); // "YWJj"
+
+    // An UPPER bound, never an undercount: `Buffer.from(…, "base64")` drops
+    // characters outside the alphabet, so the decoded length can only shrink.
+    for (const text of ["", "a", "ab", "abc", "abcd", "x".repeat(1000)]) {
+      const encoded = Buffer.from(text).toString("base64");
+      expect(base64DecodedLength(encoded)).toBe(Buffer.byteLength(text));
+      expect(
+        base64DecodedLength(`${encoded}\n`),
+        "whitespace must not make the estimate an undercount",
+      ).toBeGreaterThanOrEqual(Buffer.from(`${encoded}\n`, "base64").byteLength);
+    }
   });
 
   it("the disposer-returning subscriptions really do hand back a function", async () => {

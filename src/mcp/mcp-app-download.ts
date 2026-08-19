@@ -23,6 +23,7 @@
  * BOUNDS it; the user's own save dialog is the authorization.
  */
 import { basename } from "node:path";
+import { base64DecodedLength } from "../shared/json-representable.js";
 
 /**
  * Hard cap on the TOTAL decoded bytes one `ui/download-file` request may carry. Generous
@@ -107,12 +108,6 @@ export function sanitizeDownloadFilename(raw: unknown): string {
     .slice(0, MCP_APP_DOWNLOAD_MAX_FILENAME_CHARS);
 
   return name.length > 0 ? name : MCP_APP_DOWNLOAD_FALLBACK_FILENAME;
-}
-
-/** Decoded size of a base64 payload — computed from the ENCODED string, before decoding. */
-function base64DecodedLength(b64: string): number {
-  const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
-  return Math.max(0, Math.floor((b64.length * 3) / 4) - padding);
 }
 
 /**
