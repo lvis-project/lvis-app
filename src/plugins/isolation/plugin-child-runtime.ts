@@ -115,6 +115,24 @@ export interface PluginChildRuntime {
     path: HostApiPath,
     handler: (payload: unknown) => void,
   ): { readonly subscriptionId: string; readonly dispose: () => void };
+  /**
+   * The child end of an abort channel: hand over the `AbortSignal` an argument
+   * carried, receive the id that crosses in its place.
+   *
+   * Shared rather than per-member for the same reason the subscription ledger
+   * is: `hostFetch`, `callLlm` and `resolveApiKey` all take a signal, and three
+   * private listener maps would be three chances to leave a listener attached
+   * to a signal whose call ended.
+   *
+   * An ALREADY-aborted signal throws its own reason instead of opening a
+   * channel — that is what the in-process call does, and opening a channel the
+   * host would immediately be told to abort turns an instant rejection into a
+   * round trip.
+   */
+  openAbortChannel(signal: AbortSignal): {
+    readonly subscriptionId: string;
+    readonly release: () => void;
+  };
   /** Host → child notification. */
   deliver(notification: HostApiNotification): NotificationOutcome;
   /**
@@ -233,9 +251,9 @@ function assertStubIsTotal(pluginId: string, root: Record<string, unknown>): voi
  *
  * The tool delegate is the child's half of §3.5: a result that would not survive
  * JSON is refused HERE, at the plugin that produced it, rather than arriving at
- * the host as a shape the host cannot explain. §3.6 is why this check has to
- * exist at all — the in-process loopback passes results by reference, so today a
- * plugin returning a `Date` or a `Map` is never told it cannot.
+ * the host as a shape the host cannot explain. `LoopbackTransport` refuses the
+ * same shapes on the in-process arm; refusing them here too means a plugin gets
+ * one answer about its own return value rather than one answer per transport.
  */
 export async function startPluginChildRuntime(
   options: PluginChildRuntimeOptions,
@@ -245,6 +263,12 @@ export async function startPluginChildRuntime(
 
   const subscriptions = new SubscriptionLedger<ChildSubscription>(
     `plugin-child:${pluginId}`,
+  );
+  // A second instance of the SAME primitive, not a second primitive: an abort
+  // channel is a registration with a different teardown, and keeping it in its
+  // own ledger stops an abort id colliding with a subscription id.
+  const abortChannels = new SubscriptionLedger<{ readonly detach: () => void }>(
+    `plugin-child:${pluginId}:abort`,
   );
   const hostApi = createChildHostApiStub(pluginId, (path) =>
     unimplementedChildMember(pluginId, path),
@@ -337,6 +361,31 @@ export async function startPluginChildRuntime(
         },
       };
     },
+    openAbortChannel(signal) {
+      if (signal.aborted) throw signal.reason;
+      let subscriptionId = "";
+      const onAbort = () => {
+        channel.notify({
+          wire: HOST_API_WIRE_VERSION,
+          pluginId,
+          generationId: context.generationId,
+          kind: "abort",
+          subscriptionId,
+        });
+        abortChannels.close(subscriptionId, "disposed");
+      };
+      subscriptionId = abortChannels.open(
+        { detach: () => signal.removeEventListener("abort", onAbort) },
+        (entry) => entry.detach(),
+      );
+      signal.addEventListener("abort", onAbort, { once: true });
+      return {
+        subscriptionId,
+        release: () => {
+          abortChannels.close(subscriptionId, "disposed");
+        },
+      };
+    },
     deliver(notification) {
       if (notification.kind === "subscription-closed") {
         return subscriptions.close(notification.subscriptionId, notification.reason)
@@ -350,7 +399,7 @@ export async function startPluginChildRuntime(
       return "delivered";
     },
     hostGone() {
-      return subscriptions.end("peer-gone");
+      return subscriptions.end("peer-gone") + abortChannels.end("peer-gone");
     },
   };
 }

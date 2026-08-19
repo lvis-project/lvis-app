@@ -1,5 +1,16 @@
 /**
- * Whether a value survives a JSON round-trip UNCHANGED.
+ * What a JSON wire can carry, and how the escape hatch is sized when it cannot.
+ *
+ * {@link describeNonJson} answers the first half. {@link base64DecodedLength}
+ * answers the second: base64 is what every caller reaches for once the
+ * predicate says "these are bytes", and a base64 payload's decoded size has to
+ * be known BEFORE it is decoded, or the cap is enforced after the memory it was
+ * meant to bound is already allocated. Its two callers — the MCP app download
+ * parser and the plugin process boundary — share one implementation here,
+ * because a padding rule that drifts between copies is a size cap that means
+ * two different things in two places.
+ *
+ * ── Whether a value survives a JSON round-trip UNCHANGED.
  *
  * Not the same question as "does `JSON.stringify` throw". `Date` and `URL`
  * stringify without complaint and come back as strings; `Buffer` carries a
@@ -71,4 +82,18 @@ export function describeNonJson(
     if (reason) return reason;
   }
   return null;
+}
+
+/**
+ * Decoded size of a base64 payload, computed from the ENCODED string.
+ *
+ * The point is to bound a payload before `Buffer.from(…, "base64")` allocates
+ * it. It is an upper bound rather than an exact answer, because that decode is
+ * LENIENT — it silently drops characters outside the base64 alphabet — so a
+ * caller enforcing a cap must re-check the decoded length afterwards rather
+ * than trusting this number alone.
+ */
+export function base64DecodedLength(b64: string): number {
+  const padding = b64.endsWith("==") ? 2 : b64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((b64.length * 3) / 4) - padding);
 }

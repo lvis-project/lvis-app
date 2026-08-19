@@ -24,6 +24,7 @@
  * or `ManifestIntegrityViolation` means importing modules that reach Electron
  * through the approval gate.
  */
+import { base64DecodedLength } from "../../shared/json-representable.js";
 import type { HostApiPath } from "./host-api-path-contracts.js";
 
 /**
@@ -101,6 +102,17 @@ export type HostApiNotification =
       readonly kind: "subscription-release";
       readonly subscriptionId: string;
     })
+  /**
+   * child → host: cancel the work behind an abort channel.
+   *
+   * An `AbortSignal` cannot cross, so the child sends an id and the host holds
+   * the `AbortController`. Three members carry one (`hostFetch`, `callLlm`,
+   * `resolveApiKey`), which is why it is a shared mechanism and not three.
+   */
+  | (HostApiEnvelope & {
+      readonly kind: "abort";
+      readonly subscriptionId: string;
+    })
   /** child → host: `context.log`, which is a host closure today (§3.4). */
   | (HostApiEnvelope & {
       readonly kind: "log";
@@ -136,8 +148,10 @@ export type ArgumentMarshalling =
  * How a member's RETURN reaches the child.
  *
  * - `plain-json` — crosses unchanged, and the dispatcher rejects a return value
- *   that would not survive the round-trip. This is the check §3.6 shows the
- *   current in-process "boundary" does not perform.
+ *   that would not survive the round-trip. `LoopbackTransport` now applies the
+ *   same rule to the host→plugin direction, so this is that rule extended to
+ *   the direction it does not carry: hostApi traffic is not MCP traffic and
+ *   never passes through that transport.
  * - `void` — nothing comes back.
  * - `encoded` — the child reconstructs a non-clonable value (a `Response`, a
  *   `Uint8Array`) from a JSON body.
@@ -214,6 +228,7 @@ export type HostApiWireErrorCode =
   | "path-not-implemented"
   | "argument-marshalling-rejected"
   | "result-marshalling-rejected"
+  | "payload-too-large"
   | "subscription-unknown"
   // ── Host decisions the plugin is expected to branch on.
   | "effect-boundary-denied"
@@ -240,8 +255,33 @@ export const UNIVERSAL_WIRE_ERROR_CODES: readonly HostApiWireErrorCode[] = [
   "path-not-implemented",
   "argument-marshalling-rejected",
   "result-marshalling-rejected",
+  "payload-too-large",
   "host-internal",
 ];
+
+/**
+ * A coded refusal raised by the boundary itself, on EITHER side.
+ *
+ * It lives here rather than with the dispatcher because the child raises the
+ * same codes the host does — a payload the child refuses to encode and a
+ * payload the host refuses to decode are the same failure seen from two ends,
+ * and giving them two error types would mean two ways to report one thing.
+ */
+export class HostApiBoundaryError extends Error {
+  readonly code: HostApiWireErrorCode;
+  readonly detail: Record<string, unknown> | undefined;
+
+  constructor(
+    code: HostApiWireErrorCode,
+    message: string,
+    detail?: Record<string, unknown>,
+  ) {
+    super(message);
+    this.name = "HostApiBoundaryError";
+    this.code = code;
+    this.detail = detail;
+  }
+}
 
 /**
  * A host error in transit. `name` carries the host class's own name because
@@ -322,4 +362,102 @@ export interface HostApiChannel {
 /** The host's half: where host-originated notifications go. */
 export interface ChildNotificationSink {
   deliver(notification: HostApiNotification): void;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Byte payloads (§3.2). One codec, because three members carry bytes.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Hard ceiling on ONE byte payload crossing the boundary, in decoded bytes.
+ *
+ * Exceeding it THROWS. It never truncates, because a truncated read is a
+ * successful call that returned the wrong file, and nothing downstream can tell
+ * the difference. Base64 inflates the encoded form by 4/3, so the framed
+ * message is up to ~21 MB — bounded, and bounded is the requirement.
+ */
+export const WIRE_BYTES_MAX = 16 * 1024 * 1024;
+
+/**
+ * Bytes or text on the wire, with the encoding stated rather than inferred.
+ *
+ * The tag is load-bearing. `storage.write` takes `string | Uint8Array`, and
+ * without a tag a base64 STRING the plugin meant to write verbatim is
+ * indistinguishable from bytes the child encoded — so the file lands decoded.
+ * Nothing in JSON objects to that; the tag is what makes the two branches
+ * different values instead of the same one.
+ */
+export interface WireBytes {
+  readonly encoding: "utf8" | "base64";
+  readonly data: string;
+}
+
+/** Put `string | Uint8Array` on the wire with its branch preserved. */
+export function encodeWireBytes(
+  value: string | Uint8Array,
+  label: string,
+): WireBytes {
+  if (typeof value === "string") {
+    assertWithinWireBytesMax(Buffer.byteLength(value, "utf8"), label);
+    return { encoding: "utf8", data: value };
+  }
+  assertWithinWireBytesMax(value.byteLength, label);
+  return { encoding: "base64", data: Buffer.from(value).toString("base64") };
+}
+
+/** Take `string | Uint8Array` off the wire, with the branch it was sent as. */
+export function decodeWireBytes(
+  value: unknown,
+  label: string,
+): string | Uint8Array {
+  const wire = asWireBytes(value, label);
+  if (wire.encoding === "utf8") {
+    assertWithinWireBytesMax(Buffer.byteLength(wire.data, "utf8"), label);
+    return wire.data;
+  }
+  // Bounded BEFORE decoding, which is the only place the bound can prevent the
+  // allocation rather than observe it.
+  assertWithinWireBytesMax(base64DecodedLength(wire.data), label);
+  const bytes = Buffer.from(wire.data, "base64");
+  // `Buffer.from(…, "base64")` is LENIENT — it drops characters outside the
+  // alphabet — so the pre-decode figure is an upper bound, not the answer.
+  assertWithinWireBytesMax(bytes.byteLength, label);
+  return new Uint8Array(bytes);
+}
+
+/** Take bytes off the wire from a member DECLARED to deliver bytes. */
+export function decodeWireBinary(value: unknown, label: string): Uint8Array {
+  const decoded = decodeWireBytes(value, label);
+  if (typeof decoded === "string") {
+    throw new HostApiBoundaryError(
+      "result-marshalling-rejected",
+      `[host-api-wire] ${label}: expected bytes, received utf8-tagged text`,
+    );
+  }
+  return decoded;
+}
+
+function asWireBytes(value: unknown, label: string): WireBytes {
+  const candidate = value as WireBytes | null;
+  if (
+    candidate === null
+    || typeof candidate !== "object"
+    || typeof candidate.data !== "string"
+    || (candidate.encoding !== "utf8" && candidate.encoding !== "base64")
+  ) {
+    throw new HostApiBoundaryError(
+      "argument-marshalling-rejected",
+      `[host-api-wire] ${label}: not a tagged byte payload`,
+    );
+  }
+  return candidate;
+}
+
+function assertWithinWireBytesMax(byteLength: number, label: string): void {
+  if (byteLength <= WIRE_BYTES_MAX) return;
+  throw new HostApiBoundaryError(
+    "payload-too-large",
+    `[host-api-wire] ${label}: ${byteLength} bytes exceeds the ${WIRE_BYTES_MAX}-byte boundary limit`,
+    { byteLength, limit: WIRE_BYTES_MAX },
+  );
 }
