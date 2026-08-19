@@ -47,7 +47,15 @@ export type PluginStorageRejectionLog = (message: string, meta?: unknown) => voi
  * the same three-line predicate. Adding another would make it several plus one.
  */
 export function isPathWithin(root: string, target: string): boolean {
-  return target === root || target.startsWith(root + sep);
+  if (target === root) return true;
+  // A root that ALREADY ends in a separator would otherwise be given a second
+  // one and match nothing — `/data/` would reject `/data/x`, and on Windows a
+  // drive root is exactly that shape (`C:\\`), so `C:\\foo` would read as
+  // outside `C:\\`. In a containment check a false negative refuses a
+  // legitimate path, which is how this surfaces: not as an escape, but as a
+  // plugin whose own directory looks foreign to it.
+  const rootWithSep = root.endsWith(sep) ? root : root + sep;
+  return target.startsWith(rootWithSep);
 }
 
 /**

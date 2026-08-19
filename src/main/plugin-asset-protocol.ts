@@ -2,6 +2,7 @@ import type { Session } from "electron";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { isPathWithin } from "../plugins/plugin-storage-containment.js";
 
 export const PLUGIN_ASSET_SCHEME = "lvis-plugin";
 const PLUGIN_ASSET_HOST = "asset";
@@ -74,8 +75,7 @@ export async function resolvePluginAssetRequest(
   } catch {
     return null;
   }
-  const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-  if (realAsset !== realRoot && !realAsset.startsWith(rootWithSep)) {
+  if (!isPathWithin(realRoot, realAsset)) {
     return null;
   }
   return realAsset;
