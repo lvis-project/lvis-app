@@ -10,7 +10,8 @@
  */
 import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { isAbsolute, relative, resolve, dirname } from "node:path";
+import { isAbsolute, resolve, dirname } from "node:path";
+import { isResolvedPathWithin } from "./plugin-storage-containment.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { readPluginRegistry } from "./registry.js";
 import { createLogger } from "../lib/logger.js";
@@ -125,7 +126,7 @@ export class PluginUpdateDetector {
     // directory (= pluginsRoot — every install lives at
     // `<pluginsRoot>/<id>/plugin.json`). A crafted registry entry like
     // "../../etc/passwd" is rejected.
-    if (!isWithin(registryDir, abs)) {
+    if (!isResolvedPathWithin(registryDir, abs)) {
       throw new Error(`installed plugin manifest escapes registry root: ${manifestPath}`);
     }
     try {
@@ -170,9 +171,4 @@ function shouldAdvertisePluginUpdate(
 function canonicalizeExistingPath(path: string): string {
   const absolute = resolve(path);
   return existsSync(absolute) ? realpathSync(absolute) : absolute;
-}
-
-function isWithin(basePath: string, targetPath: string): boolean {
-  const rel = relative(basePath, targetPath);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }

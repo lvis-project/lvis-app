@@ -23,8 +23,8 @@ import {
   dirname,
   join,
   resolve as pathResolve,
-  sep,
 } from "node:path";
+import { isPathWithin } from "../plugins/plugin-storage-containment.js";
 import { expandLeadingTilde } from "../shared/home-tilde.js";
 
 export interface SandboxValidationResult {
@@ -49,13 +49,13 @@ export function validateSandboxPath(
   const resolved = canonicalize(path);
   const resolvedCwd = canonicalize(cwd);
 
-  if (isWithin(resolved, resolvedCwd)) {
+  if (isWithin(resolvedCwd, resolved)) {
     return { allowed: true, reason: "" };
   }
 
   for (const allowed of extraAllowed) {
     const resolvedAllowed = canonicalize(expandLeadingTilde(allowed));
-    if (isWithin(resolved, resolvedAllowed)) {
+    if (isWithin(resolvedAllowed, resolved)) {
       return { allowed: true, reason: "" };
     }
   }
@@ -87,13 +87,22 @@ function canonicalize(path: string): string {
   return suffix.length > 0 ? join(canonicalParent, ...suffix) : canonicalParent;
 }
 
-function isWithin(child: string, parent: string): boolean {
-  const normalizedChild = normalizeForBoundaryCompare(child);
-  const normalizedParentBase = normalizeForBoundaryCompare(parent);
-  const normalizedParent = normalizedParentBase.endsWith(sep)
-    ? normalizedParentBase
-    : normalizedParentBase + sep;
-  return normalizedChild === normalizedParentBase || normalizedChild.startsWith(normalizedParent);
+/**
+ * `(parent, child)` — the argument order every other containment predicate in
+ * this tree uses. It read `(child, parent)` until the two orders were noticed
+ * side by side; a reader who copies the wrong one inverts a sandbox boundary
+ * without the types objecting, since both arguments are `string`.
+ *
+ * The containment question itself is {@link isPathWithin}. What stays here is
+ * the case policy, which is this layer's and not the storage layer's: macOS and
+ * Windows are case-insensitive by default, so a tool asking for `/Users/example/PROJ`
+ * inside a sandbox rooted at `/Users/example/proj` is asking for a path the
+ * filesystem will hand it either way. {@link canonicalize} has usually already
+ * settled the casing via `realpathSync.native`; this covers the paths that do
+ * not exist yet and so cannot be canonicalised.
+ */
+function isWithin(parent: string, child: string): boolean {
+  return isPathWithin(normalizeForBoundaryCompare(parent), normalizeForBoundaryCompare(child));
 }
 
 function normalizeForBoundaryCompare(path: string): string {
