@@ -1,9 +1,10 @@
-const { mkdirSync, readFileSync, writeFileSync } = require("node:fs");
+const { mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs");
 const { join, relative, resolve, sep } = require("node:path");
 const { deflateSync } = require("node:zlib");
 
 const root = resolve(__dirname, "..");
 const buildDir = join(root, "build");
+const desktopIconSetDir = join(buildDir, "icons");
 const logoSourcePath = join(root, "src", "shared", "lvis-logo.ts");
 const manifestPath = join(buildDir, "generated-assets.json");
 
@@ -18,6 +19,14 @@ const TRAY_ICON_SCALE_FACTORS = [1, 2];
 const TRAY_ICON_PADDING_RATIO = 0.12;
 const TRAY_ICON_STROKE_RATIO = 0.028;
 const WINDOWS_ICO_SIZES = [16, 32, 64, 128, 256];
+// Linux desktop environments resolve `Icon=lvis-app` through the freedesktop
+// icon theme spec, which only searches the directories the hicolor theme's
+// `index.theme` declares. Every size below is one of those declared app
+// directories; a size outside them installs to a path the lookup never walks,
+// so the launcher falls back to a generic icon no matter how good the artwork
+// is. 512 is the largest hicolor app size, which is why the ladder stops there
+// rather than carrying the 1024 master through.
+const DESKTOP_ICON_SET_SIZES = [16, 24, 32, 48, 64, 128, 256, 512];
 const GRADIENT_STOPS = [
   { at: 0, color: [255, 75, 46] },
   { at: 0.56, color: [255, 63, 110] },
@@ -347,6 +356,59 @@ function downsample(source, sourceSize, factor, targetSize = TARGET_SIZE, solidC
   return target;
 }
 
+/**
+ * Area-average resample to any target size, including sizes the source is not
+ * an integer multiple of. `downsample` above needs a whole-pixel factor, which
+ * covers the supersampling and the Windows `.ico` ladder but excludes 24 and
+ * 48 — two sizes the freedesktop icon theme searches and Linux launchers
+ * routinely pick. Each destination pixel integrates the source rectangle it
+ * covers, weighting partially covered source pixels by their overlap.
+ *
+ * Colour is accumulated premultiplied by alpha: the master icon stores RGB 0
+ * under its fully transparent margin, so averaging straight colour would pull
+ * a dark fringe into every antialiased edge of the shrunken icon.
+ */
+function resampleArea(source, sourceSize, targetSize) {
+  const target = Buffer.alloc(targetSize * targetSize * 4);
+  const scale = sourceSize / targetSize;
+  for (let y = 0; y < targetSize; y += 1) {
+    const topEdge = y * scale;
+    const bottomEdge = (y + 1) * scale;
+    for (let x = 0; x < targetSize; x += 1) {
+      const leftEdge = x * scale;
+      const rightEdge = (x + 1) * scale;
+      let red = 0;
+      let green = 0;
+      let blue = 0;
+      let alpha = 0;
+      let coverage = 0;
+      for (let sy = Math.floor(topEdge); sy < Math.ceil(bottomEdge); sy += 1) {
+        const heightWeight = Math.min(bottomEdge, sy + 1) - Math.max(topEdge, sy);
+        for (let sx = Math.floor(leftEdge); sx < Math.ceil(rightEdge); sx += 1) {
+          const widthWeight = Math.min(rightEdge, sx + 1) - Math.max(leftEdge, sx);
+          const weight = heightWeight * widthWeight;
+          const offset = (sy * sourceSize + sx) * 4;
+          const sourceAlpha = source[offset + 3] / 255;
+          red += source[offset] * sourceAlpha * weight;
+          green += source[offset + 1] * sourceAlpha * weight;
+          blue += source[offset + 2] * sourceAlpha * weight;
+          alpha += source[offset + 3] * weight;
+          coverage += weight;
+        }
+      }
+      const averageAlpha = alpha / coverage;
+      const targetOffset = (y * targetSize + x) * 4;
+      // Undo the premultiplication so the stored pixel is straight RGBA again.
+      const unpremultiply = averageAlpha === 0 ? 0 : coverage * (averageAlpha / 255);
+      target[targetOffset] = unpremultiply === 0 ? 0 : Math.round(red / unpremultiply);
+      target[targetOffset + 1] = unpremultiply === 0 ? 0 : Math.round(green / unpremultiply);
+      target[targetOffset + 2] = unpremultiply === 0 ? 0 : Math.round(blue / unpremultiply);
+      target[targetOffset + 3] = Math.round(averageAlpha);
+    }
+  }
+  return target;
+}
+
 function distanceSquaredToSegment(px, py, ax, ay, bx, by) {
   const vx = bx - ax;
   const vy = by - ay;
@@ -526,6 +588,19 @@ function main() {
     emit(
       join(buildDir, `tray-iconTemplate${suffix}.png`),
       encodePng(targetSize, targetSize, rasterizeTrayLineIcon(logoPath, viewBox, targetSize, [0, 0, 0, 255])),
+    );
+  }
+
+  // Rebuilt from empty so a size dropped from the ladder also leaves the tree,
+  // rather than lingering as an orphan the packager would still install.
+  rmSync(desktopIconSetDir, { recursive: true, force: true });
+  mkdirSync(desktopIconSetDir, { recursive: true });
+  for (const size of DESKTOP_ICON_SET_SIZES) {
+    // electron-builder reads the pixel size out of the filename when it walks
+    // an icon-set directory, so the name is load-bearing, not descriptive.
+    emit(
+      join(desktopIconSetDir, `${size}x${size}.png`),
+      encodePng(size, size, resampleArea(iconRgba, TARGET_SIZE, size)),
     );
   }
 
