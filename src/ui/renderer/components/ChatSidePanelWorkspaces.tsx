@@ -35,7 +35,7 @@ import {
   ListDetailWorkspace,
   SearchInput,
   TargetRows,
-} from "./chat-side-panel-layout.js";
+} from "./ChatSidePanelLayout.js";
 import {
   BrowserDocumentViewer,
   DetailHeader,
@@ -50,7 +50,7 @@ import {
   isPathWithinRoot,
   matchesQuery,
   toRelativePath,
-} from "./chat-side-panel-preview.js";
+} from "./ChatSidePanelPreview.js";
 
 
 type WorkspaceDirEntry = { name: string; path: string; type: "file" | "directory" };
