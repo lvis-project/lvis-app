@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
+import { isReinstallFixableFailureKind } from "../../../shared/plugin-install-failure.js";
 import type { PluginManifest } from "../../types.js";
 import {
   bindTestPluginRuntimeGeneration,
@@ -128,6 +129,43 @@ describe("PluginRuntime boot preflight", () => {
     }
     expect(runtime.resolveToolOwner("rejected_tool")).toBeUndefined();
     expect(runtime.listPluginCards().find((card) => card.id === "preflight-3")?.loadStatus).toBe("failed");
+  });
+
+  it("surfaces a receipt-rejected plugin as a repairable failed card", async () => {
+    // A receipt refusal is decided before the manifest is read, so nothing but
+    // an explicit stub can put the plugin on a card. Without one the install
+    // stays on disk and in the registry — the marketplace keeps calling it
+    // installed — while every UI surface that lists plugins (sidebar, Settings,
+    // Plugin Doctor) projects from the card list and therefore shows nothing at
+    // all. The user gets an install they cannot see, diagnose, or repair.
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+      createHostApi: createNoopHostApiForTests,
+      installReceiptCacheRoot: join(root, "receipts"),
+    }));
+    const internals = runtime as unknown as {
+      verifyReceiptAndDevGuard(
+        pluginId: string,
+      ): Promise<{ ok: true } | { ok: false; reason: string }>;
+      readManifest(path: string): Promise<PluginManifest>;
+    };
+    internals.verifyReceiptAndDevGuard = async (pluginId) =>
+      pluginId === "preflight-1"
+        ? { ok: false, reason: "receipt hash mismatch: dist/index.js" }
+        : { ok: true };
+    internals.readManifest = async (path) => manifests.get(path.split(/[\\/]/).at(-2)!)!;
+
+    await runtime.load();
+
+    expect(runtime.listPluginIds()).not.toContain("preflight-1");
+    const card = runtime.listPluginCards().find((entry) => entry.id === "preflight-1");
+    expect(card?.loadStatus).toBe("failed");
+    expect(card?.installFailureMessage).toBe("receipt hash mismatch: dist/index.js");
+    // Reinstalling rewrites payload and receipt together, so the Doctor must be
+    // allowed to offer that repair rather than only a diagnosis.
+    expect(isReinstallFixableFailureKind(card?.installFailureKind)).toBe(true);
   });
 
   it("isolates an unexpected receipt verifier rejection to its plugin", async () => {
