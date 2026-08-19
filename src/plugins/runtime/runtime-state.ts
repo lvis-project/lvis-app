@@ -59,7 +59,7 @@ import { ConfigOverrideStore } from "./config-overrides.js";
 import { PreparationTracker } from "./preparation.js";
 import { isModelVisible } from "./tool-visibility.js";
 import { createLogger } from "../../lib/logger.js";
-import { plog, PluginPhase } from "../lifecycle-log.js";
+import { logPluginLifecycle, PluginPhase } from "../lifecycle-log.js";
 import type {
   PluginHostApiIncarnation,
   PluginRuntimeOptions,
@@ -1112,11 +1112,11 @@ export abstract class PluginRuntimeState {
           );
         }),
       ]);
-      plog("debug", { pluginId, phase: PluginPhase.STOP_OK }, "stopped after start failure");
+      logPluginLifecycle("debug", { pluginId, phase: PluginPhase.STOP_OK }, "stopped after start failure");
       return true;
     } catch (err) {
       this.quarantinePluginLifecycle(pluginId, (err as Error).message);
-      plog("error", { pluginId, phase: PluginPhase.STOP_FAIL, err }, "stop after start failure failed");
+      logPluginLifecycle("error", { pluginId, phase: PluginPhase.STOP_FAIL, err }, "stop after start failure failed");
       return false;
     } finally {
       if (timer) clearTimeout(timer);
@@ -1133,7 +1133,7 @@ export abstract class PluginRuntimeState {
       return true;
     } catch (err) {
       this.quarantinePluginLifecycle(pluginId, (err as Error).message);
-      plog(
+      logPluginLifecycle(
         "error",
         { pluginId, phase: PluginPhase.STOP_FAIL, err },
         "HostApi operation drain failed",
