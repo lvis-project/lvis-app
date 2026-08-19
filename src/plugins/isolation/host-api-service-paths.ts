@@ -80,30 +80,43 @@ export type ServiceHostApi = Pick<
  * How far a worker the CHILD asked for may reach.
  *
  * The child runs under an ASRT wrap whose filesystem grants are exactly these
- * two directories (`out-of-process-plugin.ts` composes them), and
- * `PluginWorkerSpec` lets the caller name its own `allowReadPaths` and
- * `allowWritePaths`. In one heap those two facts never met: the plugin and the
- * worker supervisor were the same trust domain. Across the boundary they are
- * not, and a child that can ask the host to spawn `/bin/sh` with
- * `allowWritePaths: ["/"]` has escaped its jail by asking someone else to hold
- * the door — the confinement would be a property of one process rather than of
- * the plugin.
+ * two lists (`out-of-process-plugin.ts` derives them and hands the SAME object
+ * to the wrap and to this check), and `PluginWorkerSpec` lets the caller name
+ * its own `allowReadPaths` and `allowWritePaths`. In one heap those two facts
+ * never met: the plugin and the worker supervisor were the same trust domain.
+ * Across the boundary they are not, and a child that can ask the host to spawn
+ * `/bin/sh` with `allowWritePaths: ["/"]` has escaped its jail by asking
+ * someone else to hold the door — the confinement would be a property of one
+ * process rather than of the plugin.
  *
  * So the envelope crosses with the binding, and a delegated worker's grants are
  * checked against it. Confinement composes: what the plugin cannot reach
  * itself, it cannot obtain by delegation.
+ *
+ * TWO LISTS RATHER THAN TWO NAMED DIRECTORIES. The pair used to be
+ * `{ pluginRoot, pluginDataDir }`, which made the envelope's SIZE a constant of
+ * the type: there was no way for the host to decide that one plugin's child
+ * reaches further, so a plugin whose legitimate work lives outside those two
+ * directories could not be isolated at all. Widening is a host decision
+ * (`PLUGIN_ENVELOPE_GRANTS`), and it belongs in the value, not in a second
+ * check bolted onto the delegation path — widen the child and the delegated
+ * worker composes with no further change, because both lists come from one
+ * derivation.
  */
 export interface DelegatedWorkerConfinement {
-  /** The plugin's immutable runtime root. Readable by the child, never writable. */
-  readonly pluginRoot: string;
+  /** Every root the child may read. Always a superset of {@link write}. */
+  readonly read: readonly string[];
   /**
-   * `~/.lvis/plugins/<id>/data`. The only path this pair GRANTS for writing —
-   * not the only path the child can reach, since ASRT merges its own default
-   * write paths into every wrap (`out-of-process-plugins.ts`, axis 6). What
-   * matters for a delegated worker is that this is the boundary it is checked
-   * against, and it is the same pair the plugin child's own wrap carries.
+   * Every root the child may write.
+   *
+   * Every root this pair GRANTS for writing, rather than every root the child
+   * can reach: ASRT merges its own default write paths into every wrap
+   * (`out-of-process-plugins.ts`, axis 6), and no grant here subtracts from
+   * them. What matters for a delegated worker is that this list is the boundary
+   * its `allowWritePaths` are checked against, and it is the same list the
+   * plugin child's own wrap carries.
    */
-  readonly pluginDataDir: string;
+  readonly write: readonly string[];
 }
 
 /** The purposes `resolveApiKey` accepts. Anything else is refused, not coerced. */
@@ -499,16 +512,15 @@ function decodeWorkerSpec(
   ) {
     rejectArgument(call.path, "spec.udsArgName must be a string or { env: string }");
   }
-  // READ may reach the plugin's own code as well as its data; WRITE may reach
-  // only the data directory. That is exactly the child's own ASRT grant set,
-  // which is what makes this composition rather than a second policy.
-  assertGrantsWithinEnvelope(call, "allowReadPaths", allowReadPaths, [
-    confinement.pluginRoot,
-    confinement.pluginDataDir,
-  ]);
-  assertGrantsWithinEnvelope(call, "allowWritePaths", allowWritePaths, [
-    confinement.pluginDataDir,
-  ]);
+  // The child's OWN ASRT grant set, member for member — not a restatement of
+  // it. `spawnConfinedPluginChild` wraps the child with these very arrays, the
+  // only addition being the throwaway sandbox HOME, which belongs to the host
+  // process and is deliberately absent here because it is not the plugin's to
+  // hand on. So there is no second policy to drift away from the jail, and a
+  // host decision that widens the child widens what it may delegate in the same
+  // edit rather than leaving a second list behind.
+  assertGrantsWithinEnvelope(call, "allowReadPaths", allowReadPaths, confinement.read);
+  assertGrantsWithinEnvelope(call, "allowWritePaths", allowWritePaths, confinement.write);
   return {
     workerId,
     command,

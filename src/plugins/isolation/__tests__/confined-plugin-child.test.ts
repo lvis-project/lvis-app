@@ -83,7 +83,11 @@ import { basename, join } from "node:path";
 // does not ship.
 import { buildChildEntry, childBundleDir, repositoryRoot } from "./child-entry-bundle.js";
 import type { PluginHostApi, PluginManifest, PluginRuntimeContext } from "../../types.js";
-import { createOutOfProcessPluginFactory } from "../out-of-process-plugin.js";
+import type { DelegatedWorkerConfinement } from "../host-api-service-paths.js";
+import {
+  createOutOfProcessPluginFactory,
+  derivePluginChildEnvelope,
+} from "../out-of-process-plugin.js";
 import {
   initializeAsrtSandbox,
   isAsrtSandboxActive,
@@ -93,7 +97,14 @@ import { asrtCanInitialize } from "../../../permissions/__tests__/test-helpers.j
 import { spawnConfinedPluginChild } from "../out-of-process-plugin.js";
 
 const PLUGIN_ID = "work-assistant";
+/**
+ * The one plugin `PLUGIN_ENVELOPE_GRANTS` carries a row for, so the widening
+ * case drives the production table rather than a fixture that stands in for it.
+ */
+const WIDENED_PLUGIN_ID = "local-indexer";
 const SECRET_TEXT = "the-host-secret-the-child-must-not-read";
+/** The bytes the host-owned trust-anchor file holds, so "the child read it" is checkable. */
+const CA_TEXT = "-----BEGIN CERTIFICATE-----\nthe-corporate-trust-anchor\n";
 /** The bytes an un-migrated session file holds, so "nothing moved" is checkable. */
 const LEGACY_SESSION_BYTES = "the session that predates pluginDataDir";
 /** Stands in for the plugin's own code: readable out of `pluginRoot`, never writable back into it. */
@@ -153,6 +164,17 @@ interface Fixture {
    * in it. Which is the finding the case using this asserts.
    */
   readonly sharedTempName: string;
+  /** `<LVIS_HOME>/certs/corp-ca.pem` — host-owned AND on the read-deny floor. */
+  readonly caFile: string;
+  /** A directory the user approved, standing in for a chosen index root. */
+  readonly userRoot: string;
+  /** Its name-prefix sibling, which no grant covers. */
+  readonly userRootSibling: string;
+  /**
+   * A chosen directory INSIDE the approved root that does not exist yet — the
+   * case that decides what "the declared path is not there" means.
+   */
+  readonly pendingWorkspace: string;
 }
 
 let fixture: Fixture | undefined;
@@ -169,16 +191,35 @@ function makeFixture(): Fixture {
   const root = mkdtempSync(join(tmpdir(), "confined-plugin-"));
   const lvisHome = join(root, ".lvis");
   const secretsDir = join(lvisHome, "secrets");
+  const certsDir = join(lvisHome, "certs");
   const pluginRoot = join(lvisHome, "plugins", PLUGIN_ID);
   const pluginDataDir = join(pluginRoot, "data");
+  const userRoot = join(root, "chosen-index-root");
+  const userRootSibling = `${userRoot}-elsewhere`;
+  // Deliberately NOT created: the spawn is what materialises a granted root.
+  const pendingWorkspace = join(userRoot, "pending-workspace");
   mkdirSync(secretsDir, { recursive: true, mode: 0o700 });
+  mkdirSync(certsDir, { recursive: true, mode: 0o700 });
   mkdirSync(pluginDataDir, { recursive: true, mode: 0o700 });
+  mkdirSync(userRoot, { recursive: true, mode: 0o700 });
+  mkdirSync(userRootSibling, { recursive: true, mode: 0o700 });
   const secretFile = join(secretsDir, "api-key.txt");
+  const caFile = join(certsDir, "corp-ca.pem");
   writeFileSync(secretFile, SECRET_TEXT, "utf-8");
+  writeFileSync(caFile, CA_TEXT, "utf-8");
   writeFileSync(join(pluginDataDir, "own-data.txt"), "the plugin's own bytes", "utf-8");
   writeFileSync(join(pluginRoot, "own-code.js"), PLUGIN_CODE_BYTES, "utf-8");
   const hostRoot = join(root, "app-root");
   mkdirSync(hostRoot, { recursive: true });
+  // The user's own workspace-root approvals, read back by the envelope
+  // derivation through `readPermissionSettings()`. Written as a file rather
+  // than stubbed because the ceiling on a user-chosen directory is exactly this
+  // list, and a stub would prove the test's copy of the rule.
+  writeFileSync(
+    join(lvisHome, "settings.json"),
+    JSON.stringify({ permissions: { additionalDirectories: [userRoot] } }, null, 2),
+    "utf-8",
+  );
   return {
     root,
     lvisHome,
@@ -188,6 +229,10 @@ function makeFixture(): Fixture {
     outsideFile: join(root, "outside-the-jail.txt"),
     hostRoot,
     sharedTempName: `${basename(root)}.txt`,
+    caFile,
+    userRoot,
+    userRootSibling,
+    pendingWorkspace,
   };
 }
 
@@ -289,6 +334,11 @@ const report = {
   // the bytes back to show the last part.
   childTmpdir: tmpdir(),
   writeChildTmpdir: attempt(() => { mkdirSync(tmpdir(), { recursive: true }); writeFileSync(join(tmpdir(), ${JSON.stringify(fx.sharedTempName)}), ${JSON.stringify(SHARED_TEMP_BYTES)}); return "written"; }),
+  readCa: attempt(() => readFileSync(${JSON.stringify(fx.caFile)}, "utf-8")),
+  writeCa: attempt(() => { writeFileSync(${JSON.stringify(fx.caFile)}, "rewritten"); return "written"; }),
+  writeUserRoot: attempt(() => { writeFileSync(${JSON.stringify(join(fx.userRoot, "index.bin"))}, "index"); return "written"; }),
+  writeUserRootSibling: attempt(() => { writeFileSync(${JSON.stringify(join(fx.userRootSibling, "index.bin"))}, "escaped"); return "written"; }),
+  writePendingWorkspace: attempt(() => { writeFileSync(${JSON.stringify(join(fx.pendingWorkspace, "state.json"))}, "{}"); return "written"; }),
   electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,
   // The process IS Electron — this is the binary the host runs as — and the
   // next two lines are what it can do with that.
@@ -356,6 +406,11 @@ interface ProbeReport {
   readonly writeChildHome: ProbeAttempt;
   readonly childTmpdir: string;
   readonly writeChildTmpdir: ProbeAttempt;
+  readonly readCa: ProbeAttempt;
+  readonly writeCa: ProbeAttempt;
+  readonly writeUserRoot: ProbeAttempt;
+  readonly writeUserRootSibling: ProbeAttempt;
+  readonly writePendingWorkspace: ProbeAttempt;
   readonly electronRunAsNode: string | null;
   readonly electronVersion: string | null;
   readonly requireElectron: ProbeModuleAttempt;
@@ -364,11 +419,27 @@ interface ProbeReport {
   readonly namedImportElectron: ProbeModuleAttempt;
 }
 
-async function runProbe(fx: Fixture): Promise<ProbeReport> {
-  const child = await spawnConfinedPluginChild({
+/**
+ * The envelope an UNWIDENED plugin gets: its own two directories and nothing
+ * else, as `derivePluginChildEnvelope` produces for a plugin with no row in
+ * `PLUGIN_ENVELOPE_GRANTS`.
+ */
+function baseEnvelope(fx: Fixture): DelegatedWorkerConfinement {
+  return derivePluginChildEnvelope({
     pluginId: PLUGIN_ID,
     pluginRoot: fx.pluginRoot,
     pluginDataDir: fx.pluginDataDir,
+    configValue: () => undefined,
+  });
+}
+
+async function runProbe(
+  fx: Fixture,
+  envelope: DelegatedWorkerConfinement = baseEnvelope(fx),
+): Promise<ProbeReport> {
+  const child = await spawnConfinedPluginChild({
+    pluginId: PLUGIN_ID,
+    envelope,
     childEntryPath: writeProbeModule(fx),
   });
   return await new Promise<ProbeReport>((resolve, reject) => {
@@ -454,6 +525,165 @@ afterEach(async () => {
   fixture = undefined;
 });
 
+/**
+ * What the host decided, before any of it reaches a kernel.
+ *
+ * These drive `derivePluginChildEnvelope` directly because the interesting
+ * cases are REFUSALS, and a refusal has no child to probe. The approved-root
+ * ceiling is read from the fixture's real `settings.json` through
+ * `readPermissionSettings()`, so what is under test is the host's own notion of
+ * "the user authorised this directory" rather than a copy of it.
+ */
+describe("the host decides how far a plugin child reaches", () => {
+  /** `PLUGIN_ID` has no row in the table, so it gets the unwidened envelope. */
+  it("gives a plugin with no host decision exactly its own two directories", () => {
+    const fx = fixture!;
+    expect(
+      derivePluginChildEnvelope({
+        pluginId: PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: () => undefined,
+      }),
+    ).toEqual({
+      read: [fx.pluginRoot, fx.pluginDataDir],
+      write: [fx.pluginDataDir],
+    });
+  });
+
+  it("adds the host-owned directories its row names, to READ only", () => {
+    const fx = fixture!;
+    const envelope = derivePluginChildEnvelope({
+      pluginId: WIDENED_PLUGIN_ID,
+      pluginRoot: fx.pluginRoot,
+      pluginDataDir: fx.pluginDataDir,
+      configValue: () => undefined,
+    });
+    expect(envelope.read).toEqual([
+      fx.pluginRoot,
+      fx.pluginDataDir,
+      join(fx.lvisHome, "runtime"),
+      join(fx.lvisHome, "certs"),
+    ]);
+    // The row is READ, and nothing turns it into a write. A child that could
+    // rewrite `~/.lvis/runtime` would be rewriting the interpreter its own
+    // worker is about to execute.
+    expect(envelope.write).toEqual([fx.pluginDataDir]);
+  });
+
+  it("admits a chosen directory the user approved, as read AND write", () => {
+    const fx = fixture!;
+    const envelope = derivePluginChildEnvelope({
+      pluginId: WIDENED_PLUGIN_ID,
+      pluginRoot: fx.pluginRoot,
+      pluginDataDir: fx.pluginDataDir,
+      configValue: (key) => (key === "indexStorageRoot" ? fx.userRoot : undefined),
+    });
+    expect(envelope.read).toContain(fx.userRoot);
+    expect(envelope.write).toEqual([fx.pluginDataDir, fx.userRoot]);
+  });
+
+  it("refuses a chosen directory no approved workspace root covers", () => {
+    // THE ESCALATION THIS EXISTS TO STOP. `config.set` is a member the plugin
+    // holds, so a widening that trusted the config value would let the plugin
+    // name its own envelope. The host names the KEY; the user names the ceiling.
+    const fx = fixture!;
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: (key) => (key === "indexStorageRoot" ? fx.userRootSibling : undefined),
+      }),
+    ).toThrow(/no workspace root the user approved covers it/);
+  });
+
+  it("refuses the filesystem root, which no approval can cover", () => {
+    const fx = fixture!;
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: (key) => (key === "workspace" ? "/" : undefined),
+      }),
+    ).toThrow(/no workspace root the user approved covers it/);
+  });
+
+  it("refuses a sensitive path even when an approved root contains it", () => {
+    // `~/.lvis` is not itself a sensitive path, so the approval flow accepts it
+    // as a workspace root — and `~/.lvis/secrets` is on the read-deny floor
+    // that `allowRead` re-opens. Without this refusal the config key would be a
+    // way to hand the floor's own contents to a plugin child.
+    const fx = fixture!;
+    writeFileSync(
+      join(fx.lvisHome, "settings.json"),
+      JSON.stringify({ permissions: { additionalDirectories: [fx.lvisHome] } }, null, 2),
+      "utf-8",
+    );
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: (key) =>
+          key === "indexStorageRoot" ? join(fx.lvisHome, "secrets") : undefined,
+      }),
+    ).toThrow(/matches the sensitive-path rule/);
+  });
+
+  it("admits a chosen directory inside the plugin's own data dir with no approval", () => {
+    // It adds nothing the child did not already hold, so requiring an approval
+    // would refuse the plugin's own default location.
+    const fx = fixture!;
+    const inside = join(fx.pluginDataDir, "index");
+    const envelope = derivePluginChildEnvelope({
+      pluginId: WIDENED_PLUGIN_ID,
+      pluginRoot: fx.pluginRoot,
+      pluginDataDir: fx.pluginDataDir,
+      configValue: (key) => (key === "indexStorageRoot" ? inside : undefined),
+    });
+    expect(envelope.write).toEqual([fx.pluginDataDir, inside]);
+  });
+
+  it("refuses a relative value rather than resolving it against the host's cwd", () => {
+    const fx = fixture!;
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: (key) => (key === "indexStorageRoot" ? "index" : undefined),
+      }),
+    ).toThrow(/is not an absolute path/);
+  });
+
+  it("refuses a value that is not a string", () => {
+    const fx = fixture!;
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: (key) => (key === "indexStorageRoot" ? 7 : undefined),
+      }),
+    ).toThrow(/expected a string, got number/);
+  });
+
+  it("treats an unset and an empty key as no widening, not as the host's cwd", () => {
+    // `""` is the default several plugin config schemas ship for an unset
+    // string key, and `resolve("")` is the process working directory.
+    const fx = fixture!;
+    const envelope = derivePluginChildEnvelope({
+      pluginId: WIDENED_PLUGIN_ID,
+      pluginRoot: fx.pluginRoot,
+      pluginDataDir: fx.pluginDataDir,
+      configValue: (key) => (key === "indexStorageRoot" ? "" : undefined),
+    });
+    expect(envelope.write).toEqual([fx.pluginDataDir]);
+  });
+});
+
 describe("a plugin that cannot be confined is not spawned", () => {
   it("throws rather than producing an unconfined child when ASRT is inactive", async () => {
     const fx = fixture!;
@@ -461,8 +691,7 @@ describe("a plugin that cannot be confined is not spawned", () => {
     await expect(
       spawnConfinedPluginChild({
         pluginId: PLUGIN_ID,
-        pluginRoot: fx.pluginRoot,
-        pluginDataDir: fx.pluginDataDir,
+        envelope: baseEnvelope(fx),
         childEntryPath: writeProbeModule(fx),
       }),
     ).rejects.toThrow(/sandbox is not active/i);
@@ -553,6 +782,13 @@ describe("the confined child, against the real sandbox", () => {
         rmSync(sharedTemp, { force: true });
       }
 
+      // Nothing the host DID NOT widen this plugin with is reachable — the
+      // corporate CA the deny floor covers, and a directory the user approved
+      // for the host's own tools. Asserted on the unwidened plugin so the
+      // widened case below is a difference rather than a claim.
+      expect(report.readCa.ok, JSON.stringify(report.readCa)).toBe(false);
+      expect(report.writeUserRoot.ok, JSON.stringify(report.writeUserRoot)).toBe(false);
+
       // …and the plugin still works, which is the other half of the claim.
       expect(report.readOwnData.ok, JSON.stringify(report.readOwnData)).toBe(true);
       expect(report.readOwnData.value).toBe("the plugin's own bytes");
@@ -608,6 +844,78 @@ describe("the confined child, against the real sandbox", () => {
         report.namedImportElectron,
         JSON.stringify(report.namedImportElectron),
       ).toMatchObject({ ok: false, code: "SyntaxError" });
+    },
+    60_000,
+  );
+});
+
+/**
+ * The widening, end to end: the host-owned table decides, the derivation
+ * resolves, the wrap grants, and the kernel is asked.
+ *
+ * The point of running the WHOLE chain rather than handing the spawn a
+ * hand-built envelope is that the interesting claims are about the derivation's
+ * output — that a `hostDirectory` row re-opens a path the deny floor closed,
+ * that a `userChosenDirectory` row admits the user's directory and only it, and
+ * that neither one turns a read grant into a write. A fixture envelope would
+ * prove the wrap works and say nothing about what the host decided.
+ */
+describe("a child the host widened reaches exactly what the host widened it with", () => {
+  it.runIf(process.platform === "darwin" || process.platform === "linux")(
+    "opens the corporate CA and the user's chosen root, and nothing beside them",
+    async () => {
+      if (!(await asrtCanInitialize())) return;
+      const fx = fixture!;
+      const envelope = derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        // `indexStorageRoot` is one of the two config keys the table names for
+        // this plugin; the value is admitted because the fixture's settings
+        // file lists it as a user-approved workspace root.
+        configValue: (key) =>
+          key === "indexStorageRoot"
+            ? fx.userRoot
+            : key === "workspace"
+              ? fx.pendingWorkspace
+              : undefined,
+      });
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+
+      const report = await runProbe(fx, envelope);
+
+      // The two widenings, proven by the syscalls they exist for.
+      expect(report.readCa.ok, JSON.stringify(report.readCa)).toBe(true);
+      expect(report.readCa.value).toBe(CA_TEXT);
+      expect(report.writeUserRoot.ok, JSON.stringify(report.writeUserRoot)).toBe(true);
+      expect(readFileSync(join(fx.userRoot, "index.bin"), "utf-8")).toBe("index");
+
+      // …and nothing beside them. The CA stays UNWRITABLE, and the honest
+      // attribution is that the write-deny floor takes precedence over
+      // `allowWrite` — so this holds even for a row that mistakenly asked for
+      // write, which is why it is asserted here rather than assumed. That a
+      // `hostDirectory` row grants READ ONLY is a property of the derivation
+      // and is proven above, against the envelope it returns.
+      expect(report.writeCa.ok, JSON.stringify(report.writeCa)).toBe(false);
+      // The sibling shares the user root's name as a string prefix and is not
+      // inside it, which is the case a `startsWith` containment check admits.
+      expect(
+        report.writeUserRootSibling.ok,
+        JSON.stringify(report.writeUserRootSibling),
+      ).toBe(false);
+      // A granted root that did not exist is CREATED by the spawn rather than
+      // dropped from the grant. Without that the child gets an envelope smaller
+      // than the host decided, which surfaces as this `ENOENT` — and on Linux,
+      // where ASRT binds each allow path, as a child that never starts at all.
+      expect(
+        report.writePendingWorkspace.ok,
+        JSON.stringify(report.writePendingWorkspace),
+      ).toBe(true);
+
+      // The floor the widening pierced for `certs` is otherwise untouched.
+      expect(report.readSecret.ok, JSON.stringify(report.readSecret)).toBe(false);
+      expect(report.writeOutside.ok, JSON.stringify(report.writeOutside)).toBe(false);
+      expect(report.writeSecrets.ok, JSON.stringify(report.writeSecrets)).toBe(false);
     },
     60_000,
   );
