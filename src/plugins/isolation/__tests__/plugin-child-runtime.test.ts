@@ -193,8 +193,9 @@ describe("the child serves its plugin over framed stdio", () => {
   });
 
   it("refuses a tool result the boundary cannot carry", async () => {
-    // §3.6: the in-process loopback passes results across by reference, so a
-    // plugin returning a Map is never told it cannot. Out-of-process it is told.
+    // A Map is a successful JSON round-trip into `{}` — no exception, no
+    // symptom, wrong value. `LoopbackTransport` refuses it on the in-process
+    // arm; the child refuses it here so a plugin gets the same answer on both.
     const { toChild, fromChild } = await harness({
       instance: { handlers: { echo_back: () => new Map([["a", 1]]) } },
     });
@@ -513,5 +514,87 @@ describe("a subscription releases on both sides, whichever side dies", () => {
 
     subscription.dispose();
     expect(() => push?.({ taskId: "t2" })).toThrow(/no open subscription/u);
+  });
+});
+
+describe("an abort channel replaces the AbortSignal three members carry", () => {
+  /** A host handler that takes a signal the way `callLlm` will. */
+  function abortingTable(observed: { signal?: AbortSignal }) {
+    return {
+      ...HOSTAPI_DISPATCH_TABLE,
+      onEvent: defineHostApiPath("onEvent", async (invocation, scope) => {
+        const channelId = invocation.args[0] as string;
+        observed.signal = scope.abortChannel(channelId);
+        return { handleId: channelId };
+      }),
+    };
+  }
+
+  it("cancels the host's work when the plugin aborts", async () => {
+    const observed: { signal?: AbortSignal } = {};
+    const wired = await harness({ table: abortingTable(observed) });
+    const controller = new AbortController();
+    const channel = wired.child.openAbortChannel(controller.signal);
+    await wired.call("onEvent", [channel.subscriptionId]);
+    expect(observed.signal?.aborted).toBe(false);
+
+    controller.abort(new Error("the plugin changed its mind"));
+
+    expect(observed.signal?.aborted).toBe(true);
+    expect(wired.host.openSubscriptionCount).toBe(0);
+  });
+
+  it("cancels work started for a child that has since died", async () => {
+    // The host is fetching on behalf of a process that no longer exists. Not
+    // aborting leaves the request in flight with nowhere to deliver its answer.
+    const observed: { signal?: AbortSignal } = {};
+    const wired = await harness({ table: abortingTable(observed) });
+    const controller = new AbortController();
+    const channel = wired.child.openAbortChannel(controller.signal);
+    await wired.call("onEvent", [channel.subscriptionId]);
+
+    wired.host.childGone();
+
+    expect(observed.signal?.aborted).toBe(true);
+  });
+
+  it("detaches the child's listener when the call settles", async () => {
+    const observed: { signal?: AbortSignal } = {};
+    const wired = await harness({ table: abortingTable(observed) });
+    const controller = new AbortController();
+    const channel = wired.child.openAbortChannel(controller.signal);
+    await wired.call("onEvent", [channel.subscriptionId]);
+    const before = wired.childNotifications.length;
+
+    channel.release();
+    controller.abort(new Error("too late"));
+
+    // No abort notification: the channel was already closed, so the listener is
+    // gone. A channel that stayed attached would keep the settled call's
+    // closure alive for as long as the plugin holds the signal.
+    expect(wired.childNotifications).toHaveLength(before);
+    expect(observed.signal?.aborted).toBe(false);
+  });
+
+  it("throws the signal's own reason instead of opening a doomed channel", async () => {
+    const wired = await harness();
+    const controller = new AbortController();
+    const reason = new Error("already cancelled");
+    controller.abort(reason);
+    expect(() => wired.child.openAbortChannel(controller.signal)).toThrow(reason);
+  });
+
+  it("drops its channels when the host dies", async () => {
+    const observed: { signal?: AbortSignal } = {};
+    const wired = await harness({ table: abortingTable(observed) });
+    const controller = new AbortController();
+    const channel = wired.child.openAbortChannel(controller.signal);
+    await wired.call("onEvent", [channel.subscriptionId]);
+    const before = wired.childNotifications.length;
+
+    expect(wired.child.hostGone()).toBe(1);
+    controller.abort(new Error("nobody listening"));
+
+    expect(wired.childNotifications).toHaveLength(before);
   });
 });
