@@ -8,7 +8,7 @@ import {
   openSync,
   readSync,
 } from "node:fs";
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import { dirname, isAbsolute } from "node:path";
 import { platform } from "node:process";
 import { computeLineHmac, type SecretStore } from "../../audit/hmac-chain.js";
@@ -31,6 +31,7 @@ import {
   type InvocationAuditSink,
 } from "./rationale-ticket-lifecycle.js";
 import type { RationaleRequiredControl } from "./rationale-control.js";
+import { timingSafeEqualHexDigest } from "../../lib/hex-digest-equal.js";
 
 const JOURNAL_SCHEMA_VERSION = 1 as const;
 const MAX_JOURNAL_BYTES = 16 * 1024 * 1024;
@@ -176,11 +177,6 @@ function equal(left: unknown, right: unknown): boolean {
 function isMissingPathError(error: unknown): boolean {
   const code = (error as NodeJS.ErrnoException).code;
   return code === "ENOENT" || code === "ENOTDIR";
-}
-
-function safeEqualHex(left: string, right: string): boolean {
-  if (!DIGEST_PATTERN.test(left) || !DIGEST_PATTERN.test(right)) return false;
-  return timingSafeEqual(Buffer.from(left, "hex"), Buffer.from(right, "hex"));
 }
 
 function sameFileIdentity(
@@ -425,7 +421,7 @@ function parseEnvelope(
     snapshot: decoded.snapshot,
   };
   const expectedMac = computeLineHmac(secret, canonicalStringify(unsigned));
-  if (!safeEqualHex(decoded.mac, expectedMac)) {
+  if (!timingSafeEqualHexDigest(decoded.mac, expectedMac)) {
     throw new Error("invocation journal HMAC mismatch");
   }
   const envelope: InvocationJournalEnvelope = {
@@ -500,7 +496,7 @@ function parseCheckpoint(
     journalMac: decoded.journalMac,
   };
   const expectedSeal = computeLineHmac(secret, canonicalStringify(unsigned));
-  if (!safeEqualHex(decoded.seal, expectedSeal)) {
+  if (!timingSafeEqualHexDigest(decoded.seal, expectedSeal)) {
     throw new Error("invocation journal checkpoint seal mismatch");
   }
   const checkpoint: InvocationJournalCheckpoint = {
@@ -564,7 +560,7 @@ function parseHead(raw: string, secret: string): InvocationJournalHead {
     journalMac: decoded.journalMac,
   };
   const expectedSeal = computeLineHmac(secret, canonicalStringify(unsigned));
-  if (!safeEqualHex(decoded.seal, expectedSeal)) {
+  if (!timingSafeEqualHexDigest(decoded.seal, expectedSeal)) {
     throw new Error("invocation journal head seal mismatch");
   }
   const head: InvocationJournalHead = {
@@ -980,7 +976,7 @@ export class DurableHostInvocationStartCasStore implements HostInvocationStartCa
 
     const revision = envelope.snapshot.revision;
     if (revision === 0 &&
-        (!safeEqualHex(envelope.previousMac, this.#genesisMac) ||
+        (!timingSafeEqualHexDigest(envelope.previousMac, this.#genesisMac) ||
           Object.keys(envelope.snapshot.entries).length !== 0)) {
       throw new Error("invocation journal genesis root mismatch");
     }
@@ -997,9 +993,9 @@ export class DurableHostInvocationStartCasStore implements HostInvocationStartCa
 
     if (checkpoint.generation === head.generation + 1) {
       if (revision !== checkpoint.journalRevision ||
-          !safeEqualHex(envelope.mac, checkpoint.journalMac) ||
+          !timingSafeEqualHexDigest(envelope.mac, checkpoint.journalMac) ||
           revision !== head.journalRevision + 1 ||
-          !safeEqualHex(envelope.previousMac, head.journalMac)) {
+          !timingSafeEqualHexDigest(envelope.previousMac, head.journalMac)) {
         throw new Error("invocation journal checkpoint is not anchored to its head");
       }
       this.#persistEnvelope(envelope);
@@ -1008,11 +1004,11 @@ export class DurableHostInvocationStartCasStore implements HostInvocationStartCa
     }
 
     if (checkpoint.journalRevision !== head.journalRevision ||
-        !safeEqualHex(checkpoint.journalMac, head.journalMac)) {
+        !timingSafeEqualHexDigest(checkpoint.journalMac, head.journalMac)) {
       throw new Error("invocation journal checkpoint/head root mismatch");
     }
     if (revision === head.journalRevision) {
-      if (!safeEqualHex(envelope.mac, head.journalMac)) {
+      if (!timingSafeEqualHexDigest(envelope.mac, head.journalMac)) {
         throw new Error("invocation journal/checkpoint root mismatch");
       }
       return { envelope, checkpoint, head };
@@ -1021,7 +1017,7 @@ export class DurableHostInvocationStartCasStore implements HostInvocationStartCa
       throw new Error("invocation journal rollback detected");
     }
     if (revision === head.journalRevision + 1 &&
-        safeEqualHex(envelope.previousMac, head.journalMac)) {
+        timingSafeEqualHexDigest(envelope.previousMac, head.journalMac)) {
       this.#persistEnvelope(envelope);
       const repaired = this.#advanceCheckpoint(checkpoint, envelope);
       const repairedHead = this.#writeHead(repaired);
@@ -1082,9 +1078,9 @@ export class DurableHostInvocationStartCasStore implements HostInvocationStartCa
     if (snapshot.revision !== previous.envelope.snapshot.revision + 1 ||
         previous.checkpoint.journalRevision !==
           previous.envelope.snapshot.revision ||
-        !safeEqualHex(previous.checkpoint.journalMac, previous.envelope.mac) ||
+        !timingSafeEqualHexDigest(previous.checkpoint.journalMac, previous.envelope.mac) ||
         previous.head.journalRevision !== previous.envelope.snapshot.revision ||
-        !safeEqualHex(previous.head.journalMac, previous.envelope.mac)) {
+        !timingSafeEqualHexDigest(previous.head.journalMac, previous.envelope.mac)) {
       throw new Error("invocation journal mutation skipped a revision");
     }
     if (!snapshotFitsByteLimit(snapshot, this.#maxBytes)) {
@@ -1105,7 +1101,7 @@ export class DurableHostInvocationStartCasStore implements HostInvocationStartCa
   ): InvocationJournalCheckpoint {
     if (envelope.snapshot.revision !== 0 ||
         Object.keys(envelope.snapshot.entries).length !== 0 ||
-        !safeEqualHex(envelope.previousMac, this.#genesisMac)) {
+        !timingSafeEqualHexDigest(envelope.previousMac, this.#genesisMac)) {
       throw new Error("invalid invocation journal genesis envelope");
     }
     const checkpoint = sealCheckpoint(this.#checkpointSecret, {
@@ -1129,7 +1125,7 @@ export class DurableHostInvocationStartCasStore implements HostInvocationStartCa
     if (!Number.isSafeInteger(generation) ||
         revision !== previous.journalRevision + 1 ||
         generation !== revision ||
-        !safeEqualHex(envelope.previousMac, previous.journalMac)) {
+        !timingSafeEqualHexDigest(envelope.previousMac, previous.journalMac)) {
       throw new Error("invocation journal checkpoint advance is invalid");
     }
     const slot: InvocationJournalCheckpointSlot =
