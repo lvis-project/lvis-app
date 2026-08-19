@@ -7,6 +7,7 @@ const DEFAULT_PAGE_SIZE = 100;
 const DEFAULT_MAX_FILES = 3000;
 const DEFAULT_MAX_COMMITS = 250;
 const DEFAULT_MAX_PULL_PAGES = 1000;
+const DEFAULT_MAX_WINDOW_PASSES = 4;
 const SHA_PATTERN = /^[0-9a-fA-F]{40}$/;
 const REPOSITORY_PATTERN = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 const FILE_STATUSES = new Set([
@@ -272,18 +273,19 @@ function collectRollingWindowCandidates({
       const number = positiveInteger(pull.number, "pull-request-number-invalid");
       const updatedAt = timestamp(pull.updated_at, "pull-request-updated-at-invalid");
       // Deliberately NOT asserted to be descending. `updated_at` is a MUTABLE
-      // sort key: a pull touched while this scan is paginating moves, and an
-      // item can then appear on a later page carrying a newer timestamp than
-      // the previous page's tail. Observed on a real repository — one break,
-      // exactly at a page boundary, and that particular shift produced no
-      // repeat, so the `seen` set below did not register it either.
+      // sort key: a pull touched while this scan is paginating moves toward
+      // page one, and an item can then appear on a later page carrying a newer
+      // timestamp than the previous page's tail. Observed on a real
+      // repository — one break, exactly at a page boundary, and that
+      // particular shift produced no repeat, so the `seen` set below did not
+      // register it either.
       //
-      // The scan does not need the order to hold. `updated_at >= merged_at`
-      // always, so reading until the window is exhausted cannot skip a pull
-      // whose `merged_at` is inside it, whatever sequence the pages arrive in.
       // Asserting an order the API does not guarantee under concurrent
-      // mutation added no safety and turned an ordinary merge landing
-      // mid-scan into a hard CI failure.
+      // mutation turned an ordinary merge landing mid-scan into a hard CI
+      // failure, and it bought no completeness. A pull whose `updated_at`
+      // rises ABOVE the prefix this pass has already read is never delivered
+      // to this pass, order assertion or not; that hole is closed by the
+      // repeated scan in `evaluateSensitiveRollingWindow`, not here.
       if (updatedAt < oldestUpdatedInPage) oldestUpdatedInPage = updatedAt;
 
       // Same mutable-sort-key cause as the note above, seen from the other
@@ -303,13 +305,10 @@ function collectRollingWindowCandidates({
 
       if (pull.merged_at === null) continue;
       const mergedAt = timestamp(pull.merged_at, "pull-request-merged-at-invalid");
-      if (mergedAt >= sinceTime) {
-        candidates.push({
-          merged_at: pull.merged_at,
-          number,
-          updated_at: pull.updated_at,
-        });
-      }
+      // Only the number is carried out. `updated_at` and `merged_at` decide
+      // membership and nothing downstream, and keeping them made two passes
+      // over the same members compare unequal whenever one of them advanced.
+      if (mergedAt >= sinceTime) candidates.push(number);
     }
 
     if (pulls.length < pageSize || oldestUpdatedInPage < sinceTime) return candidates;
@@ -318,6 +317,31 @@ function collectRollingWindowCandidates({
   fail("pull-request-pages-saturated");
 }
 
+// The window is read more than once on purpose, and the passes are UNIONED
+// rather than compared for equality.
+//
+// Reading it once is not enough. `updated_at` is a mutable sort key, so a pull
+// touched mid-scan moves toward page one; one that crosses above the prefix a
+// pass has already consumed is never delivered to that pass. A later pass, run
+// once the move has settled, does deliver it.
+//
+// Comparing the passes for equality was the previous shape and it was wrong in
+// both directions. It fired on differences that mean nothing — a candidate's
+// `updated_at` advancing, the same members arriving in another order — so one
+// unrelated merge landing during the evaluation failed the run. And on the one
+// difference that does mean something, an in-window pull the first pass missed,
+// it produced a red check instead of counting the pull.
+//
+// The union is safe to take because the verdict is monotone: `sensitive` counts
+// distinct pull numbers and only ever rises, so absorbing a late arrival can
+// turn `hit` from false to true but never the reverse. That is also why a
+// candidate seen by one pass and absent from the next is not an error — its
+// verdict is already recorded, and losing the later sighting cannot lower the
+// count.
+//
+// Bounded, because "every pass reveals another merge" would otherwise never
+// settle on a busy repository. Exhausting the bound means the verdict genuinely
+// could not be computed, and fails loudly.
 export function evaluateSensitiveRollingWindow({
   repo,
   since,
@@ -326,49 +350,58 @@ export function evaluateSensitiveRollingWindow({
   pageSize = DEFAULT_PAGE_SIZE,
   maxFiles = DEFAULT_MAX_FILES,
   maxPullPages = DEFAULT_MAX_PULL_PAGES,
+  maxWindowPasses = DEFAULT_MAX_WINDOW_PASSES,
 }) {
   const sinceTime = timestamp(since, "window-since-invalid");
   positiveInteger(threshold, "cluster-threshold-invalid");
   positiveInteger(maxPullPages, "window-page-limit-invalid");
+  positiveInteger(maxWindowPasses, "window-pass-limit-invalid");
 
-  const candidates = collectRollingWindowCandidates({
-    repo,
-    sinceTime,
-    requestPage,
-    pageSize,
-    maxPullPages,
-  });
+  const collect = () =>
+    collectRollingWindowCandidates({
+      repo,
+      sinceTime,
+      requestPage,
+      pageSize,
+      maxPullPages,
+    });
 
+  const evaluated = new Set();
   let sensitive = 0;
-  for (const pull of candidates) {
-    const detail = pullDetail(repo, pull.number, requestPage);
-    if (
-      pullRequestTouchesSensitiveFiles({
-        repo,
-        number: pull.number,
-        expectedFileCount: detail.changed_files,
-        requestPage,
-        pageSize,
-        maxFiles,
-      })
-    ) {
-      sensitive += 1;
-      if (sensitive >= threshold) return { count: sensitive, hit: true };
+  let pending = collect();
+
+  // `pass` numbers the scan the bottom of the loop is about to make; the one
+  // above already happened, which is why it starts at two.
+  for (let pass = 2; ; pass += 1) {
+    for (const number of pending) {
+      evaluated.add(number);
+
+      const detail = pullDetail(repo, number, requestPage);
+      if (
+        pullRequestTouchesSensitiveFiles({
+          repo,
+          number,
+          expectedFileCount: detail.changed_files,
+          requestPage,
+          pageSize,
+          maxFiles,
+        })
+      ) {
+        sensitive += 1;
+        // No further pass can undo this: the count only rises.
+        if (sensitive >= threshold) return { count: sensitive, hit: true };
+      }
     }
-  }
 
-  const revalidatedCandidates = collectRollingWindowCandidates({
-    repo,
-    sinceTime,
-    requestPage,
-    pageSize,
-    maxPullPages,
-  });
-  if (JSON.stringify(revalidatedCandidates) !== JSON.stringify(candidates)) {
-    fail("pull-request-window-changed");
+    // Only what no pass has evaluated yet, and the whole of the cross-scan
+    // deduplication — `collect` already returns each pull once per scan, so a
+    // pull delivered by several passes is fetched and counted exactly once.
+    // Deliberately the ONLY guard: a second one inside the loop above would be
+    // unreachable, and two overlapping guards each hide the other's removal.
+    pending = collect().filter((number) => !evaluated.has(number));
+    if (pending.length === 0) return { count: sensitive, hit: false };
+    if (pass >= maxWindowPasses) fail("pull-request-window-unsettled");
   }
-
-  return { count: sensitive, hit: false };
 }
 
 export function evaluateClusterScope({
