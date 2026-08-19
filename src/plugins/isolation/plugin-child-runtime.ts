@@ -40,6 +40,7 @@ import type {
   RuntimePlugin,
   RuntimePluginFactory,
 } from "../types.js";
+import { createConfigSubscriptionChildMembers } from "./config-subscription-child.js";
 import { createInteractionChildMembers } from "./host-api-interaction-child.js";
 import {
   HOSTAPI_PATH_CONTRACTS,
@@ -271,18 +272,75 @@ export async function startPluginChildRuntime(
   const abortChannels = new SubscriptionLedger<{ readonly detach: () => void }>(
     `plugin-child:${pluginId}:abort`,
   );
-  const call = createHostApiCaller(channel, context);
-  // One entry per group of members, merged into a partial map. A path with no
-  // stub yet keeps the THROWING default rather than an absent member or a
-  // resolved `undefined`, so "not wired" can never read as an answer.
-  const wiredMembers: Partial<
-    Record<HostApiPath, (...args: unknown[]) => unknown>
-  > = {
-    ...createInteractionChildMembers(call),
+  const log = (message: string, meta?: unknown): void => {
+    channel.notify({
+      wire: HOST_API_WIRE_VERSION,
+      pluginId,
+      generationId: context.generationId,
+      kind: "log",
+      message,
+      meta,
+    });
+  };
+  const releaseChildSubscription: SubscriptionRelease<ChildSubscription> = (
+    _subscription,
+    reason,
+    subscriptionId,
+  ) => {
+    // Only a child-initiated dispose owes the host a message. `revoked` came
+    // FROM the host and `peer-gone` means there is no host to tell.
+    if (reason !== "disposed") return;
+    channel.notify({
+      wire: HOST_API_WIRE_VERSION,
+      pluginId,
+      generationId: context.generationId,
+      kind: "subscription-release",
+      subscriptionId,
+    });
+  };
+  const openSubscription = (
+    path: HostApiPath,
+    handler: (payload: unknown) => void,
+  ) => {
+    const subscriptionId = subscriptions.open(
+      { path, handler },
+      releaseChildSubscription,
+    );
+    return {
+      subscriptionId,
+      dispose: () => {
+        subscriptions.close(subscriptionId, "disposed");
+      },
+    };
+  };
+  const caller = createHostApiCaller(channel, context);
+  /**
+   * The child's copy of the resolved config.
+   *
+   * Seeded from the construction push and never re-read from `context`, so
+   * `config.get` answers from one place. `ctx.config` keeps pointing at the
+   * construction object the in-process contract gives it — a plugin that
+   * captured it sees exactly what it sees today.
+   */
+  const config: Record<string, unknown> = { ...(context.config ?? {}) };
+  /**
+   * The wired members, composed group by group. One spread per group keeps four
+   * parallel authors out of each other's lines; a member no group claims still
+   * throws rather than resolving `undefined`.
+   */
+  const members: Partial<Record<HostApiPath, (...args: unknown[]) => unknown>> = {
+    ...createInteractionChildMembers(caller),
+    ...createConfigSubscriptionChildMembers({
+      pluginId,
+      call: caller,
+      openSubscription,
+      config,
+      report: log,
+    }),
   };
   const hostApi = createChildHostApiStub(
     pluginId,
-    (path) => wiredMembers[path] ?? unimplementedChildMember(pluginId, path),
+    (path) => members[path] ?? unimplementedChildMember(pluginId, path),
   );
 
   const runtimeContext: PluginRuntimeContext = {
@@ -291,16 +349,7 @@ export async function startPluginChildRuntime(
     hostRoot: context.hostRoot,
     pluginDataDir: context.pluginDataDir,
     config: context.config,
-    log: (message, meta) => {
-      channel.notify({
-        wire: HOST_API_WIRE_VERSION,
-        pluginId,
-        generationId: context.generationId,
-        kind: "log",
-        message,
-        meta,
-      });
-    },
+    log,
     hostApi,
   };
 
@@ -337,41 +386,13 @@ export async function startPluginChildRuntime(
   const server = new PluginMcpServer(manifest, delegate, options.uiResources);
   new StdioServerLoop(options.input, options.output, server).start();
 
-  const releaseChildSubscription: SubscriptionRelease<ChildSubscription> = (
-    _subscription,
-    reason,
-    subscriptionId,
-  ) => {
-    // Only a child-initiated dispose owes the host a message. `revoked` came
-    // FROM the host and `peer-gone` means there is no host to tell.
-    if (reason !== "disposed") return;
-    channel.notify({
-      wire: HOST_API_WIRE_VERSION,
-      pluginId,
-      generationId: context.generationId,
-      kind: "subscription-release",
-      subscriptionId,
-    });
-  };
-
   return {
     instance,
     hostApi,
     get openSubscriptionCount() {
       return subscriptions.openCount;
     },
-    openSubscription(path, handler) {
-      const subscriptionId = subscriptions.open(
-        { path, handler },
-        releaseChildSubscription,
-      );
-      return {
-        subscriptionId,
-        dispose: () => {
-          subscriptions.close(subscriptionId, "disposed");
-        },
-      };
-    },
+    openSubscription,
     openAbortChannel(signal) {
       if (signal.aborted) throw signal.reason;
       let subscriptionId = "";
