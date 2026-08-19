@@ -374,7 +374,7 @@ async function main() {
 
   // L1: start the routines scheduler AFTER IPC handlers are wired so a
   // routine past-due at boot fires into a renderer that already has a
-  // `lvis:routines:v2:fired` listener attached. The scheduler is otherwise
+  // `lvis:routines:fired` listener attached. The scheduler is otherwise
   // safe to start at any time — `start()` is idempotent.
   services.startRoutinesScheduler?.();
 

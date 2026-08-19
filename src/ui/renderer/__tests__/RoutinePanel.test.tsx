@@ -3,7 +3,7 @@
  *
  * Asserts the contract surfaced by the panel: when the user clicks the
  * "선택 해제 (플러그인 사용 안 함)" button or leaves the plugin list empty,
- * the resulting `addRoutineV2` payload uses `{ mode: "deny-all" }` per
+ * the resulting `addRoutine` payload uses `{ mode: "deny-all" }` per
  * spec §3 Layer 4 (RoutinePluginScope discriminated union). Catches a
  * regression the panel already had once: the label said "전체 허용" while the
  * actual semantic is deny-all — copy and behavior must agree.
@@ -17,12 +17,12 @@ import type { AddRoutineInput, RoutineRecord } from "../../../shared/routines-ty
 
 function makeStubApi(opts: {
   pluginCards?: PluginCardSummary[];
-  addRoutineV2: ReturnType<typeof vi.fn>;
+  addRoutine: ReturnType<typeof vi.fn>;
 }): LvisApi {
   const cards = opts.pluginCards ?? [];
   return {
     listPluginCards: vi.fn().mockResolvedValue(cards),
-    addRoutineV2: opts.addRoutineV2,
+    addRoutine: opts.addRoutine,
   } as unknown as LvisApi;
 }
 
@@ -50,7 +50,7 @@ function validFutureDate(): string {
 
 describe("RoutinePanel scope payload mapping", () => {
   it("empty plugin selection submits scope.pluginIds = { mode: 'deny-all' }", async () => {
-    const addRoutineV2 = vi.fn().mockResolvedValue({ ok: true, routine: makeRoutineRecord() });
+    const addRoutine = vi.fn().mockResolvedValue({ ok: true, routine: makeRoutineRecord() });
     const api = makeStubApi({
       pluginCards: [
         {
@@ -63,7 +63,7 @@ describe("RoutinePanel scope payload mapping", () => {
           loadStatus: "loaded",
         },
       ],
-      addRoutineV2,
+      addRoutine,
     });
     const onClose = vi.fn();
     const onAdded = vi.fn();
@@ -101,9 +101,9 @@ describe("RoutinePanel scope payload mapping", () => {
     });
 
     await waitFor(() => {
-      expect(addRoutineV2).toHaveBeenCalledTimes(1);
+      expect(addRoutine).toHaveBeenCalledTimes(1);
     });
-    const payload = addRoutineV2.mock.calls[0]![0] as AddRoutineInput;
+    const payload = addRoutine.mock.calls[0]![0] as AddRoutineInput;
     expect(payload.scope).toBeDefined();
     expect(payload.scope?.pluginIds).toEqual({ mode: "deny-all" });
     // Sanity: forcedPluginIds + directories defaults preserved.
@@ -112,7 +112,7 @@ describe("RoutinePanel scope payload mapping", () => {
   });
 
   it("non-empty plugin selection submits scope.pluginIds = { mode: 'allow', ids }", async () => {
-    const addRoutineV2 = vi.fn().mockResolvedValue({ ok: true, routine: makeRoutineRecord() });
+    const addRoutine = vi.fn().mockResolvedValue({ ok: true, routine: makeRoutineRecord() });
     const api = makeStubApi({
       pluginCards: [
         {
@@ -125,7 +125,7 @@ describe("RoutinePanel scope payload mapping", () => {
           loadStatus: "loaded",
         },
       ],
-      addRoutineV2,
+      addRoutine,
     });
 
     const { getByTestId, getByText } = render(
@@ -147,9 +147,9 @@ describe("RoutinePanel scope payload mapping", () => {
     });
 
     await waitFor(() => {
-      expect(addRoutineV2).toHaveBeenCalledTimes(1);
+      expect(addRoutine).toHaveBeenCalledTimes(1);
     });
-    const payload = addRoutineV2.mock.calls[0]![0] as AddRoutineInput;
+    const payload = addRoutine.mock.calls[0]![0] as AddRoutineInput;
     expect(payload.scope?.pluginIds).toEqual({ mode: "allow", ids: ["plugin-a"] });
   });
 });

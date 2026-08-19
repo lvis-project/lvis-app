@@ -14,7 +14,7 @@ function defaultProps(overrides: Partial<UnifiedSearchPanelProps> = {}): Unified
     sessions: [{ id: "sess-1", title: "검색 세션", modifiedAt: "2026-05-11T00:00:00.000Z" }],
     starred: [{ id: "star-1", sessionId: "sess-1", messageIndex: 2, role: "assistant", text: "중요 즐겨찾기", starredAt: "2026-05-11T00:00:00.000Z" }],
   });
-  (api.listRoutinesV2 as ReturnType<typeof vi.fn>).mockResolvedValue([
+  (api.listRoutines as ReturnType<typeof vi.fn>).mockResolvedValue([
     {
       id: "routine-1",
       trigger: "schedule",

@@ -11,7 +11,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it, expect } from "vitest";
-import { OVERLAY_V1, PERMISSIONS, ROUTINES_V2 } from "../../src/shared/ipc-channels.js";
+import { OVERLAY_V1, PERMISSIONS, ROUTINES } from "../../src/shared/ipc-channels.js";
 import { CHANNELS } from "../../src/contract/app-contract.js";
 import { validateSender } from "../../src/ipc/gated.js";
 import type { IpcMainInvokeEvent } from "electron";
@@ -102,12 +102,12 @@ const CHANNEL_MANIFEST: Record<string, "mutating" | "sensitive" | "public-read">
   // Telemetry
   "lvis:telemetry:consent-answer": "mutating",
   // Routines v2 — invoke channels only (fired/running-started/running-finished are main→renderer push, no handle)
-  "lvis:routines:v2:list": "public-read",
-  "lvis:routines:v2:add": "mutating",
-  "lvis:routines:v2:dismiss": "mutating",
-  "lvis:routines:v2:remove": "mutating",
-  "lvis:routines:v2:trigger-now": "mutating",
-  "lvis:routines:v2:list-sessions": "public-read",
+  "lvis:routines:list": "public-read",
+  "lvis:routines:add": "mutating",
+  "lvis:routines:dismiss": "mutating",
+  "lvis:routines:remove": "mutating",
+  "lvis:routines:trigger-now": "mutating",
+  "lvis:routines:list-sessions": "public-read",
 };
 
 // ─── validateSender unit tests ───────────────────────────────────────────────
@@ -159,16 +159,16 @@ describe("ipc-bridge.ts — mutating/sensitive channels have a sender guard", ()
   // src/ipc/domains/*. Aggregate the full source so the channel + guard checks
   // remain valid against the actual implementation files.
   const domainDir = join(__dirname, "../../src/ipc/domains");
-  const domainFiles = ["settings.ts", "chat.ts", "plugins.ts", "usage.ts", "audit.ts", "permissions.ts", "window.ts", "misc.ts"];
+  const domainFiles = ["settings.ts", "chat.ts", "plugins.ts", "usage.ts", "audit.ts", "permissions.ts", "window.ts", "routines.ts", "session-todo.ts"];
   // Inline IPC channel SoT constants (`shared/ipc-channels.ts`) into the
-  // aggregated source so handlers written as `ipcMain.handle(ROUTINES_V2.list,
-  // ...)` are matched by the same `ipcMain.handle("lvis:routines:v2:list"`
-  // pattern the test runs for the other channels. Without this, Routine v2 +
+  // aggregated source so handlers written as `ipcMain.handle(ROUTINES.list,
+  // ...)` are matched by the same `ipcMain.handle("lvis:routines:list"`
+  // pattern the test runs for the other channels. Without this, routine +
   // Overlay V1 channels read as "not found in source" even though their
-  // handlers live in `misc.ts`.
+  // handlers live in `routines.ts`.
   const constInlinePairs: Array<[string, string]> = [];
-  for (const [key, value] of Object.entries(ROUTINES_V2)) {
-    constInlinePairs.push([`ROUTINES_V2.${key}`, `"${value}"`]);
+  for (const [key, value] of Object.entries(ROUTINES)) {
+    constInlinePairs.push([`ROUTINES.${key}`, `"${value}"`]);
   }
   for (const [key, value] of Object.entries(OVERLAY_V1)) {
     constInlinePairs.push([`OVERLAY_V1.${key}`, `"${value}"`]);
@@ -190,8 +190,8 @@ describe("ipc-bridge.ts — mutating/sensitive channels have a sender guard", ()
   };
   walkChannels(CHANNELS, "CHANNELS");
   // Substitute longer reference strings first so prefix collisions don't
-  // corrupt later replacements (e.g. `ROUTINES_V2.list` would otherwise
-  // partially rewrite `ROUTINES_V2.listSessions`).
+  // corrupt later replacements (e.g. `ROUTINES.list` would otherwise
+  // partially rewrite `ROUTINES.listSessions`).
   constInlinePairs.sort((a, b) => b[0].length - a[0].length);
   const rawSource = domainFiles
     .map((f) => readFileSync(join(domainDir, f), "utf-8"))
@@ -209,12 +209,12 @@ describe("ipc-bridge.ts — mutating/sensitive channels have a sender guard", ()
     .filter(([, access]) => access === "public-read")
     .map(([channel]) => channel);
   const channelConstantAliases: Record<string, string> = {
-    "lvis:routines:v2:list": "ROUTINES_V2.list",
-    "lvis:routines:v2:add": "ROUTINES_V2.add",
-    "lvis:routines:v2:dismiss": "ROUTINES_V2.dismiss",
-    "lvis:routines:v2:remove": "ROUTINES_V2.remove",
-    "lvis:routines:v2:trigger-now": "ROUTINES_V2.triggerNow",
-    "lvis:routines:v2:list-sessions": "ROUTINES_V2.listSessions",
+    "lvis:routines:list": "ROUTINES.list",
+    "lvis:routines:add": "ROUTINES.add",
+    "lvis:routines:dismiss": "ROUTINES.dismiss",
+    "lvis:routines:remove": "ROUTINES.remove",
+    "lvis:routines:trigger-now": "ROUTINES.triggerNow",
+    "lvis:routines:list-sessions": "ROUTINES.listSessions",
     "lvis:permission:get-mode": "PERMISSIONS.getMode",
     "lvis:permission:set-mode": "PERMISSIONS.setMode",
     "lvis:permission:list-rules": "PERMISSIONS.listRules",
