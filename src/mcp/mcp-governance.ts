@@ -24,6 +24,7 @@ import {
   RESERVED_HEADERS,
 } from "./safe-names.js";
 import { t } from "../i18n/index.js";
+import { isLoopbackUrlHostname } from "../shared/loopback-url.js";
 const log = createLogger("mcp-governance");
 
 /**
@@ -562,8 +563,10 @@ export class McpGovernance {
     }
     if (parsed.protocol === "https:") return { valid: true };
     if (parsed.protocol === "http:") {
-      const host = parsed.hostname.replace(/^\[|\]$/g, "");
-      if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+      // Shared with the marketplace provider gate, which asked the same
+      // question and answered it differently: a server on 127.0.0.2 is loopback
+      // and was refused here as needing HTTPS.
+      if (isLoopbackUrlHostname(parsed.hostname)) {
         return { valid: true };
       }
       return {
