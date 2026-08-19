@@ -5,7 +5,16 @@ import { parseInlineViewKey, type InlineViewKey } from "../../../shared/view-key
 export interface UseActiveViewResult {
   /** Where the main window is. */
   activeView: InlineViewKey;
-  /** Navigate — persists immediately (same durable-preference family as `sidebarActiveTab`). */
+  /**
+   * Navigate — persists immediately, INCLUDING before the initial read has
+   * resolved. That last part is a deliberate divergence from `useSidebarTab`
+   * and `useSettingsTab`, which suppress writes until their own read lands:
+   * those two let the read win the race and overwrite local state with the
+   * stored value, so a write made before it arrives has nothing to protect.
+   * This hook lets the NAVIGATION win it instead, so the same suppression
+   * would leave the location it just discarded as the one the next launch
+   * restores.
+   */
   setActiveView: (next: InlineViewKey | ((current: InlineViewKey) => InlineViewKey)) => void;
   /**
    * How many times THIS hook has applied the stored location. Monotonic; the
@@ -59,7 +68,15 @@ export interface UseActiveViewResult {
  * stored location without replacing it would leave the user where they chose
  * for this run and back on the stale location at the next launch — the same
  * lost place by a slower route — so the first navigation is what the next
- * launch restores, exactly as every later one is.
+ * launch restores, exactly as every later one is, no-op or not.
+ *
+ * One navigation INTENT does not reach this hook at all: selecting an unauthed
+ * plugin's view runs its login tool and defers the open, so nothing here
+ * learns that the user has chosen a destination and the stored location can
+ * still move the window while the sign-in is up. The deferred open lands where
+ * they asked once auth completes, so they end in the right place, but the
+ * screen moves under them on the way. Closing that needs the choice to be
+ * declared at the point it is made, in `usePluginViewRouting`.
  *
  * The OTHER half of the location — the settings PAGE, restored by its own read
  * in `useSettingsTab` — is deliberately outside this rule, and still lands
@@ -156,11 +173,18 @@ export function useActiveView(
     (next: InlineViewKey | ((current: InlineViewKey) => InlineViewKey)) => {
       // Every caller of this is a deliberate destination: a sidebar or toolbar
       // row, the command palette, the app menu's `view:activate`, a clicked
-      // notification, a back/forward replay. The single non-gesture caller —
-      // the uninstalled-plugin bounce in `usePluginViewRouting` — is gated on
-      // `activeView` ALREADY being a `plugin:` key, which nothing but a
-      // navigation or a completed restore can make it, so it cannot pass for a
-      // choice the user has not made.
+      // notification, a back/forward replay. The only caller not traceable to a
+      // user gesture — the uninstalled-plugin bounce in `usePluginViewRouting`
+      // — is gated on `activeView` ALREADY being a `plugin:` key, which nothing
+      // but a navigation or a completed restore can make it, so it cannot pass
+      // for a choice the user has not made. The auth-gate drain in that same
+      // hook also reaches here from an effect, but it replays a DEFERRED
+      // gesture: its queue is filled only by the plugin row the user clicked
+      // while that plugin was still unauthed.
+      //
+      // Read before the flag, because setting the flag is what stops this from
+      // being the first navigation. The write at the bottom is the only reader.
+      const firstNavigation = !userNavigatedRef.current;
       userNavigatedRef.current = true;
       // Retires a restore that already arrived and is waiting on its plugin
       // list; the flag above is what stops one that has not been read yet.
@@ -170,8 +194,21 @@ export function useActiveView(
       applyView(resolved);
       // Nothing is held back until the initial read resolves: the read can no
       // longer overwrite this, because the flag above has just discarded it.
-      // Only a no-op navigation is skipped, since it has nothing to record.
-      if (resolved !== current) {
+      //
+      // The FIRST navigation is written even when it resolves to the view the
+      // window is already showing. Until one has been written, `current` is
+      // whatever the mount seed or a restore left there, so `resolved ===
+      // current` cannot tell "that value is already stored" apart from "the
+      // stored one was discarded a line ago and nothing replaced it". Skipping
+      // the write on the second reading is the same lost place by a slower
+      // route the discard exists to prevent: re-selecting the row you are
+      // already on during a slow launch would keep you here for this run and
+      // reopen the discarded location at the next one. Writing on both readings
+      // costs one redundant write in the first. From the second navigation on
+      // the two do agree — nothing but this setter can move the window once the
+      // flag is set, and it writes wherever it moves — so repeating a
+      // destination genuinely has nothing to record.
+      if (resolved !== current || firstNavigation) {
         void api.updateSettings({ system: { activeView: resolved } });
       }
     },
