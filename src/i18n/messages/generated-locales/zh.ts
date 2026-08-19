@@ -1447,6 +1447,10 @@ export const zhMessages: Record<string, string> = {
   "formatIpcError.unknownProvider": "未知的法学硕士提供者。",
   "formatIpcError.userKeyboardRequired": "此权限更改只能通过活动用户输入来执行。",
   "formatIpcError.writeFailed": "无法保存设置。",
+  "formatIpcError.settingsUnreadable":
+    "无法读取你的设置文件，因此无法列出或添加项目。文件已原样保留 — 请修复或还原 ~/.lvis/settings.json。",
+  "formatIpcError.settingsPendingRemovalsMalformed":
+    "设置文件中的部分项目移除待办条目无法读取。这些条目已原样保留并被跳过，在修复 ~/.lvis/settings.json 之前这些移除不会完成。",
   "generalTab.appVersionLabel": "应用程序版本",
   "generalTab.copyButton": "复制",
   "generalTab.copyDataPathAriaLabel": "复制数据路径",

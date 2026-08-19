@@ -61,6 +61,8 @@
     "shadcn"
   ],
   "ignoreBinaries": [
+    // Windows ACL inspection from the lvis-home privacy regression.
+    "icacls",
     "lsof",
     "mountvol",
     "mkfifo",
