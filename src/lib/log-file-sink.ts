@@ -9,7 +9,7 @@
  *
  * Transport choice: NO pino worker transport. Worker transports resolve a
  * separate worker entry file, which breaks inside a packaged `app.asar` (the
- * PR #684 `ERR_MODULE_NOT_FOUND` regression class). Instead this uses
+ * `ERR_MODULE_NOT_FOUND` regression class). Instead this uses
  * {@link SonicBoom} directly — in-process and packaging-safe. Writes here run
  * in async-batched mode (`sync:false`), so a chunk is buffered and hits disk
  * on the next flush, not synchronously at the call site; `destroy()` drains
@@ -69,7 +69,7 @@ const SonicBoomCtor = sonicBoomDefault as unknown as {
  * SOT {@link ../shared/log-retention.LOG_RETENTION_DAYS} so this sink and the
  * settings store (`DEFAULT_SETTINGS.diagnostics.logRetentionDays`) share one
  * literal — a drift between the boot-time prune window and the UI-reported value
- * is impossible by construction (#1499 E2 cluster-review architect MAJOR).
+ * is impossible by construction.
  */
 export { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
 
@@ -81,7 +81,7 @@ export { LOG_RETENTION_DAYS } from "../shared/log-retention.js";
 export const LOG_MAX_BYTES = 10 * 1024 * 1024;
 
 /**
- * Per-day sequence-file COUNT ceiling (#1499 E2 hardening). Date-in-filename
+ * Per-day sequence-file COUNT ceiling. Date-in-filename
  * rotation + the {@link LOG_MAX_BYTES} size guard together let a single busy day
  * spawn unbounded `lvis-<date>.<seq>.log` files. Once a day has more than this
  * many files, the OLDEST sequences for that day are pruned so the sequence set
@@ -91,7 +91,7 @@ export const LOG_MAX_BYTES = 10 * 1024 * 1024;
 export const LOG_MAX_FILES_PER_DAY = 20;
 
 /**
- * Whole-tree TOTAL byte ceiling (#1499 E2 hardening). Independent of per-day
+ * Whole-tree TOTAL byte ceiling. Independent of per-day
  * count and per-file size — a defence against many small days summing to a large
  * tree. When the `logs/` dir exceeds this at init/roll, the oldest files (by
  * embedded date, then sequence) are deleted until the tree is back under the cap.
@@ -280,7 +280,7 @@ export function capLogTree(
 
 /**
  * Re-prune the log tree with a persisted (user-configured) retention window at
- * boot (#1499 E2). The sink already pruned at {@link LOG_RETENTION_DAYS} before
+ * boot. The sink already pruned at {@link LOG_RETENTION_DAYS} before
  * settings loaded (hoisted so early boot lines are captured); once settings
  * exist, honour a tightened/loosened window. No-op when `retentionDays` equals
  * the default (the sink already applied it). Runs {@link capLogTree} after the

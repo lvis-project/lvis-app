@@ -438,11 +438,11 @@ export function buildInternalApiSurface() {
       protocol?: string;
       message?: string;
     }>,
-  // #FU259 — MCP marketplace catalog + install
+  // MCP marketplace catalog + install
   listMcpCatalog: async () => ipcRenderer.invoke(CHANNELS.mcp.catalogList),
   installMcpFromMarketplace: async (slug: string) =>
     ipcRenderer.invoke(CHANNELS.mcp.installFromMarketplace, slug),
-  // #FU262 — Claude Desktop config import (two-phase: preview → apply).
+  // Claude Desktop config import (two-phase: preview → apply).
   previewClaudeDesktopMcpImport: async (raw: string) =>
     ipcRenderer.invoke(CHANNELS.mcp.importClaudeDesktopPreview, raw),
   applyClaudeDesktopMcpImport: async (payload: { raw: string; conflictPolicy?: "skip" | "overwrite" }) =>
@@ -1112,7 +1112,7 @@ export function buildInternalApiSurface() {
     getStats: async (lastDays: number) => ipcRenderer.invoke(CHANNELS.audit.stats, lastDays),
   },
 
-  // ─── Diagnostics bundle + crash list (#1499 E2) ──
+  // ─── Diagnostics bundle + crash list ──
   diagnostics: {
     /** Build a redacted diagnostics ZIP and save via native dialog. */
     export: async (opts?: { dateFrom?: string; dateTo?: string; includeCrashDumps?: boolean }) =>
@@ -1121,7 +1121,7 @@ export function buildInternalApiSurface() {
     crashList: async () => ipcRenderer.invoke(CHANNELS.diagnostics.crashList),
   },
 
-  // ─── Production log tail viewer (#1499 E2) ──
+  // ─── Production log tail viewer ──
   logs: {
     /** Recent N redacted log lines, optional level filter. */
     tail: async (args?: { lines?: number; level?: string }) =>

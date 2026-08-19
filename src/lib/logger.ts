@@ -79,7 +79,7 @@ const consoleStream: NodeJS.WritableStream = useJsonFormat
   : // pino-pretty as a STREAM (not a worker transport) so it can coexist with
     // the file stream inside a single pino.multistream. Worker transports are
     // avoided here because they resolve a separate worker entry file, which
-    // breaks in a packaged app.asar (PR #684 regression class).
+    // breaks in a packaged app.asar.
     prettyStream({
       colorize: true,
       translateTime: "SYS:HH:MM:ss.l",

@@ -9,7 +9,7 @@ import { isCanonicalPowerShellTool, validatePowerShellCommand } from "./powershe
 // enters a `runWithInvocationOrigin` frame for every card/panel/plugin call, so this
 // is defined ("mcp-app" | "ui" | "plugin") ONLY on that path; the model's main-loop
 // executor runs in no frame → `undefined`. That is the one signal separating a
-// governed card/panel invocation from the model lane (MAJOR-1). Leaf module (imports
+// governed card/panel invocation from the model lane. Leaf module (imports
 // only node:async_hooks) — no cycle.
 import { currentInvocationOrigin } from "../plugins/runtime/origin-chain.js";
 import type {
@@ -367,7 +367,7 @@ export async function runToolInvocation(
       return withHostShellExecutionPlan({ tool_use_id: toolUse.id, content, is_error: true, durationMs });
     };
 
-    // ── MAJOR-1 (cluster review) — the model MUST NOT execute a tool hidden from it ──
+    // ── The model MUST NOT execute a tool hidden from it ──
     // `findByName` deliberately does NOT filter `modelVisible` (an app-only tool is a
     // registry `Tool` precisely so its CARD's governed call can run under the gate — see
     // `isModelExposedTool` / `ToolRegistry.getModelVisibleTools`). That same resolution

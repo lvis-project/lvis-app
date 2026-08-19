@@ -61,7 +61,7 @@ export type HostSecretDeniedReason =
   | "whitelist-stale-exceeded";
 
 /**
- * PR #894 review B7 — Known, bounded set of key prefixes the host counter
+ * Known, bounded set of key prefixes the host counter
  * map will accept. An attacker-controlled plugin could otherwise call
  * `hostApi.getSecret("<random>.x")` in a loop and balloon the counter map
  * with one entry per attacker-chosen prefix (memory DoS). Anything outside

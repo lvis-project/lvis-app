@@ -27,7 +27,7 @@ export interface EventHint {
 /**
  * Build the plugin configOverrides map: non-secret metadata only.
  *
- * PR #894 Cycle 3 CRIT-1 — the wildcard slot must never carry `llmApiKey`.
+ * The wildcard slot must never carry `llmApiKey`.
  * Plugins receive the actual key via `hostApi.getSecret("llm.apiKey.<vendor>")`,
  * which routes through the three-tier `hostSecrets.read[]` allowlist gate.
  * Injecting the key here would bypass the gate and leak the secret to every
@@ -44,8 +44,8 @@ export function buildPluginConfigOverrides(settings: SettingsService): Record<st
   const llm = settings.get("llm");
 
   // Wildcard slot carries only non-secret metadata. The host secret stays
-  // gated behind getSecret(); the previous `llmApiKey` injection (Cycle 2)
-  // bypassed `hostSecrets.read[]` and is removed in Cycle 3 (CRIT-1).
+  // gated behind getSecret(). Injecting `llmApiKey` here would bypass
+  // `hostSecrets.read[]`, so this slot deliberately carries no key.
   const hostApiVendor = activeHostApiVendor(llm);
   if (hostApiVendor) {
     overrides["*"] = { hostApiVendor };

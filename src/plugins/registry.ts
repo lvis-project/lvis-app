@@ -9,9 +9,9 @@ import { assertSafeArtifactSlug } from "./plugin-id.js";
 import { resolveTrustedRegistryManifestPath } from "./registry-manifest-trust.js";
 
 /**
- * Pre-PR #430 registry shape — `installedBy` ("admin"|"user") and
+ * Legacy registry shape — `installedBy` ("admin"|"user") and
  * `_devLinked` (boolean) carried the install-source signal as two
- * orthogonal fields. PR #430 collapsed both into the single
+ * orthogonal fields, now collapsed into the single
  * `installSource` enum. {@link migrateLegacyEntry} maps the legacy
  * shape onto the new enum and strips the deprecated fields, and
  * {@link readPluginRegistry} migrates the legacy form in memory. Persistence

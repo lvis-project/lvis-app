@@ -44,11 +44,11 @@ export interface McpServerDisconnectedSinkDeps {
  *   1. broadcast `serverDisconnected` to every non-destroyed window — the
  *      `isDestroyed()` guard + swallowed send cover the `disconnectAll`-at-shutdown
  *      case (Q4);
- *   2. `clearStorageData()` on the ephemeral per-server partition (MAJOR-2) —
+ *   2. `clearStorageData()` on the ephemeral per-server partition —
  *      an in-memory Session persists for the whole process lifetime, so a
  *      remove→re-add of the same id would otherwise inherit stale storage.
  *
- * The WHOLE body is wrapped in try/catch (MINOR-A): the MINOR-4 encode-time
+ * The WHOLE body is wrapped in try/catch: the encode-time
  * length guard throws SYNCHRONOUSLY through `mcpAppPartitionName` (step 2) — the
  * `.catch()` on `clearStorageData()` only covers the async rejection — so without
  * the outer guard a tampered >128-char id (arriving via the

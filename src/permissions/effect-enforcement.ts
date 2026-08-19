@@ -11,8 +11,8 @@
  * mutation executes); a denial throws so the plugin handler surfaces a tool error;
  * reads never prompt.
  *
- * ── Three hard guarantees (the recorder's cluster review was brutal about
- *    fail-open / behaviour-change) ──────────────────────────────────────────────
+ * ── Three hard guarantees (fail-open and behaviour-change are both
+ *    unacceptable here) ─────────────────────────────────────────────────────
  *
  *  1. FLAG OFF = ZERO behaviour change. When {@link EffectEnforcementDeps.flagEnabled}
  *     returns false (the default), the wrapped method is a DIRECT pass-through:
@@ -47,7 +47,7 @@
  * Enforcement is applied as the OUTER layer over the recorder
  * (`enforceMutatingEffects(instrumentEffectsByPath(raw))`), NOT inner, for two
  * reasons: (a) the pure recorder stays byte-for-byte untouched and its idempotence
- * symbol is never disturbed (the cluster-reviewed wrapper is a hard "do not
+ * symbol is never disturbed (that wrapper is a hard "do not
  * modify"); (b) a DENIED effect is therefore never recorded as a host-observed
  * mutation — the recorder only sees effects that actually proceed to the real impl,
  * so a denied write produces no phantom row in the shadow dataset. Per gated call

@@ -1,5 +1,5 @@
 /**
- * Diagnostics surface (#1499 E2) — rendered at the bottom of the Audit tab.
+ * Diagnostics surface — rendered at the bottom of the Audit tab.
  * Three sub-sections:
  *   1. Bundle export — build a redacted diagnostics ZIP (+ includeCrashDumps).
  *   2. Log tail viewer — recent redacted log lines with a level filter.

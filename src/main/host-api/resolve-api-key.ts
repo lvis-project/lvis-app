@@ -92,7 +92,7 @@ export interface ResolveApiKeyDeps {
   settingsService: Pick<SettingsService, "get" | "getSecret">;
   auditLogger: Pick<AuditLogger, "log">;
   /**
-   * Cluster review M1 — optional accessor for the PermissionManager's
+   * Optional accessor for the PermissionManager's
    * per-plugin revoke signal. When provided, the returned bearer is wired
    * to release on EITHER the caller's signal OR this signal — so a
    * permission rule change aborts the outstanding bearer mid-flight even
@@ -218,7 +218,7 @@ export async function resolveApiKey(
   request: ResolveApiKeyRequest,
   deps: ResolveApiKeyDeps,
 ): Promise<ResolveApiKeyResult> {
-  // Cluster review M1 — merge the caller's per-request signal with the
+  // Merge the caller's per-request signal with the
   // PermissionManager's per-plugin revoke signal so a permission rule
   // change aborts an in-flight bearer even when the plugin's own signal
   // never fires. The merged signal flows into `makeSuccess` and short-
@@ -412,7 +412,7 @@ function grantAuditSource(
 }
 
 /**
- * Cluster review M1 — combine the caller's per-request signal with the
+ * Combine the caller's per-request signal with the
  * PermissionManager's per-plugin revoke signal into a single AbortSignal.
  * Returns `undefined` when both inputs are absent so the bearer thunk skips
  * the listener wiring entirely. Falls back gracefully when `AbortSignal.any`

@@ -87,7 +87,7 @@ runEarlyBootEnv();
  *
  * Verifies that the named plugins mount + init correctly during boot, then
  * exits 0 (success) or 1 (any plugin missing / failed to initialize). Used
- * by per-plugin smoke tests in CI and by the Cycle 2 verification gate.
+ * by per-plugin smoke tests in CI and by the boot verification gate.
  *
  * Returns null if the flag is not present.
  */
@@ -161,7 +161,7 @@ async function main() {
   }
 
   // Window IPC handlers registered after bootstrap so auditLogger is available
-  // for validateSender + viewKey security guards added in PR #354 follow-up.
+  // for the validateSender + viewKey security guards.
   windowManager.registerIpc(services.auditLogger);
 
   // One host-owned source for every main-conversation surface. It outlives the

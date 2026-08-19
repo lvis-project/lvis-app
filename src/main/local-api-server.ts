@@ -282,7 +282,7 @@ async function initializeA2ARouter(
  * `deny-once` on timeout / send-failure) is treated as DENIED; a thrown error is
  * caught, logged (English, no secrets), and returned as `false`.
  *
- * ATTENTION-DoS HARDENING (security MINOR-1, #1441 cluster review), fail-closed:
+ * ATTENTION-DoS HARDENING, fail-closed:
  * an in-flight cap prevents an external caller from flooding the user with
  * concurrent ApprovalGate prompts for the same approver instance. While a
  * previous external-mutation approval is still pending, a new ask returns

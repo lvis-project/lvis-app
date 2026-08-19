@@ -95,7 +95,7 @@ export function isUsableMcpServerId(value: unknown): value is string {
  * at e20fea2a (the merge base) finds `main/window-manager.ts` (a bare `startsWith` on a detach
  * payload), `mcp-governance.ts` (a local const), and the renderer's bridge handler (a local
  * const) — and NOT `McpClient.readResource`, which is the one place that issues the
- * request. A cluster review found the consequence. `resources/read` is ONE wire method
+ * request. The consequence: `resources/read` is ONE wire method
  * serving two host paths with different gates — `readDeclaredResource` (listed-set) and
  * `readResource` (Apps) — so a renderer that named a non-`ui:` URI on the Apps path reached
  * a read that neither gate covered: the listed-set check belongs to the other method, and

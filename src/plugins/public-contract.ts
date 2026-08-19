@@ -395,7 +395,7 @@ export interface PluginManifest {
   startupTimeoutMs?: number;
 
   /**
-   * §9.2 Track B — declarative settings schema. When present, the host
+   * §9.2 — declarative settings schema. When present, the host
    * renders a typed configuration form in `PluginConfigTab` (string →
    * TextInput, number → NumberInput, boolean → Switch, enum → Select,
    * array of strings → TagInput, `format: "secret"` → masked SecretInput
@@ -482,7 +482,7 @@ export interface PluginContributionDeclaration {
 }
 
 /**
- * §9.2 Track B — declarative settings schema. JSON Schema draft-07 subset
+ * §9.2 — declarative settings schema. JSON Schema draft-07 subset
  * (the same dialect a tool's `inputSchema` uses) with one UI/storage hint:
  * `format: "secret"` routes the field through
  * `hostApi.setSecret` / `getSecret` so the cleartext `pluginConfigs`
@@ -960,7 +960,7 @@ export interface PluginHostApi {
    */
   storage: PluginStorage;
   /**
-   * §9.2 Track B — typed access to this plugin's saved config. Reads return
+   * §9.2 — typed access to this plugin's saved config. Reads return
    * the merged `manifest.config` defaults + saved overrides, scoped strictly
    * to the calling plugin's id (plugin A cannot read plugin B's config).
    * Writes persist via the same `setPluginConfig` IPC bridge used by the
