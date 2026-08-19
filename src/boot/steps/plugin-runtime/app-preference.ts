@@ -1,10 +1,22 @@
 /**
- * Boot §4.2 / §B3 — host public preference reader.
+ * Boot §4.2 / §B3 — host public preference reader, and the signal that says it
+ * moved.
  *
- * Extracted from `plugin-runtime.ts` (C5, behavior-preserving). Owns the
- * explicit allowlist of host preference keys readable by plugins via
- * `hostApi.getAppPreference(key)` and the reader closure factory.
+ * Owns the explicit allowlist of host preference keys readable by plugins via
+ * `hostApi.getAppPreference(key)`, the reader closure factory, and the
+ * publisher that turns a settings save into a change announcement on the
+ * plugin-config bus.
+ *
+ * WHY A PUBLISHER LIVES WITH THE READER. `getAppPreference` is synchronous, so
+ * an out-of-process plugin answers it from a host-pushed snapshot rather than a
+ * round trip — and a snapshot with no change signal is a value frozen at plugin
+ * start. Deciding "did anything a plugin can read actually change" needs the
+ * allowlist and the reader, both of which are here; announcing it needs only a
+ * listener set, which is in `plugins/config-change-bus.ts`. Split along that
+ * line, the settings domain calls ONE function and neither half re-derives the
+ * other's knowledge.
  */
+import { emitAppPreferenceChange } from "../../../plugins/config-change-bus.js";
 import type { SettingsService } from "../../../data/settings-store.js";
 
 /**
@@ -24,6 +36,71 @@ export type HostPublicPreferenceKey = (typeof HOST_PUBLIC_PREFERENCE_KEYS)[numbe
 
 function isHostPublicPreferenceKey(key: string): key is HostPublicPreferenceKey {
   return (HOST_PUBLIC_PREFERENCE_KEYS as readonly string[]).includes(key);
+}
+
+/**
+ * Read ONE allow-listed preference from live settings.
+ *
+ * The single reader arm. `buildAppPreferenceReader` (what a plugin calls) and
+ * `publishAppPreferenceChange` (what decides a change happened) both go through
+ * it, so "what a plugin sees" and "what counts as a change" can never be two
+ * different answers. The exhaustiveness check keeps it in lockstep with the
+ * allowlist: adding a key without an arm here does not compile.
+ */
+function readHostPublicPreference(
+  settingsService: SettingsService,
+  key: HostPublicPreferenceKey,
+): unknown {
+  switch (key) {
+    case "webView.preferredFlow":
+      return settingsService.get("webView")?.preferredFlow;
+    default: {
+      const _exhaustive: never = key;
+      void _exhaustive;
+      return undefined;
+    }
+  }
+}
+
+/**
+ * The last set of values this module announced, as a stable signature.
+ *
+ * `undefined` until the first publish, which is why the first call after boot
+ * always announces: the publisher is only ever called AFTER a settings write
+ * committed, so "we have never looked" and "it changed" want the same outcome —
+ * a push. Treating the first observation as a silent baseline instead would
+ * drop exactly the first preference edit of a session.
+ */
+let lastPublishedPreferenceSignature: string | undefined;
+
+/**
+ * Announce a host public preference change, if there is one.
+ *
+ * Called from the settings domain wherever a settings mutation is broadcast.
+ * It compares the allow-listed values against the last announced set and emits
+ * only on a real move, so the many settings saves that touch nothing a plugin
+ * can read (theme, model, shortcuts) push nothing across a process boundary.
+ *
+ * The signature is built by iterating the allowlist IN ORDER, so it does not
+ * depend on object key ordering, and `null` stands in for an unset key —
+ * `JSON.stringify` would drop an `undefined` property and make "cleared" look
+ * identical to "unchanged".
+ */
+export function publishAppPreferenceChange(settingsService: SettingsService): void {
+  const signature = JSON.stringify(
+    HOST_PUBLIC_PREFERENCE_KEYS.map((key) => {
+      const value = readHostPublicPreference(settingsService, key);
+      return [key, value === undefined ? null : value];
+    }),
+  );
+  if (signature === lastPublishedPreferenceSignature) return;
+  lastPublishedPreferenceSignature = signature;
+  emitAppPreferenceChange();
+}
+
+/** Test-only: forget what was last announced, so a suite starts from boot state. */
+export function _resetAppPreferencePublisher(): void {
+  lastPublishedPreferenceSignature = undefined;
 }
 
 /**
@@ -67,16 +144,6 @@ export function buildAppPreferenceReader(
       }
       return undefined;
     }
-    switch (key) {
-      case "webView.preferredFlow":
-        return settingsService.get("webView")?.preferredFlow;
-      default: {
-        // Exhaustiveness: if a key is added to HOST_PUBLIC_PREFERENCE_KEYS but
-        // not wired here, fall through and warn so it's caught in tests.
-        const _exhaustive: never = key;
-        void _exhaustive;
-        return undefined;
-      }
-    }
+    return readHostPublicPreference(settingsService, key);
   };
 }
