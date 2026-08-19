@@ -56,11 +56,11 @@ export const en = {
   "be_main.menuApp": "App",
 
   // bootstrap status messages
-  "be_main.bootstrapStatus0": "Preparing runtime...",
-  "be_main.bootstrapStatus1": "Loading user settings and memory...",
-  "be_main.bootstrapStatus2": "Verifying plugin integrity...",
-  "be_main.bootstrapStatus3": "Syncing with marketplace...",
-  "be_main.bootstrapStatus4": "Opening workspace...",
+  "be_main.bootstrapStatusPreparingRuntime": "Preparing runtime...",
+  "be_main.bootstrapStatusLoadingSettingsAndMemory": "Loading user settings and memory...",
+  "be_main.bootstrapStatusVerifyingPluginIntegrity": "Verifying plugin integrity...",
+  "be_main.bootstrapStatusSyncingMarketplace": "Syncing with marketplace...",
+  "be_main.bootstrapStatusOpeningWorkspace": "Opening workspace...",
 
   // splash status updates in main()
   "be_main.splashCheckingCerts": "Checking network certificates...",
@@ -120,11 +120,11 @@ export const ko: Record<keyof typeof en, string> = {
   "be_main.menuSelectAll": "전체 선택",
   "be_main.menuApp": "앱",
 
-  "be_main.bootstrapStatus0": "런타임을 준비하는 중...",
-  "be_main.bootstrapStatus1": "사용자 설정과 메모리를 불러오는 중...",
-  "be_main.bootstrapStatus2": "플러그인 무결성을 확인하는 중...",
-  "be_main.bootstrapStatus3": "마켓플레이스와 동기화하는 중...",
-  "be_main.bootstrapStatus4": "작업 화면을 여는 중...",
+  "be_main.bootstrapStatusPreparingRuntime": "런타임을 준비하는 중...",
+  "be_main.bootstrapStatusLoadingSettingsAndMemory": "사용자 설정과 메모리를 불러오는 중...",
+  "be_main.bootstrapStatusVerifyingPluginIntegrity": "플러그인 무결성을 확인하는 중...",
+  "be_main.bootstrapStatusSyncingMarketplace": "마켓플레이스와 동기화하는 중...",
+  "be_main.bootstrapStatusOpeningWorkspace": "작업 화면을 여는 중...",
 
   "be_main.splashCheckingCerts": "네트워크 인증서를 확인하는 중...",
   "be_main.splashLoadingSettings": "사용자 설정과 메모리를 불러오는 중...",
