@@ -47,10 +47,22 @@ import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
 import { PluginStorageError } from "../../public-contract.js";
 import { createNoopHostApi } from "../../runtime/sandbox.js";
 import type { PluginHostApi, PluginStorage } from "../../types.js";
-import { createChildStorageMembers } from "../child-storage-members.js";
-import { HostApiDispatcher, type HostApiCall } from "../host-api-dispatcher.js";
-import { readStorageBytes } from "../host-api-storage-paths.js";
-import { HOSTAPI_PATH_CONTRACTS } from "../host-api-path-contracts.js";
+import {
+  HOSTAPI_DISPATCH_TABLE,
+  HostApiDispatcher,
+  type HostApiPathHandler,
+} from "../host-api-dispatcher.js";
+import {
+  STORAGE_HOSTAPI_PATHS,
+  createStorageChildMembers,
+  type ChildHostApiMember,
+  type DispatchedStorageHostApiPath,
+} from "../host-api-storage-child.js";
+import { createStorageHostApiPaths } from "../host-api-storage-paths.js";
+import {
+  HOSTAPI_PATH_CONTRACTS,
+  type HostApiPath,
+} from "../host-api-path-contracts.js";
 import {
   HOST_API_WIRE_VERSION,
   PluginHostApiError,
@@ -99,15 +111,27 @@ afterEach(async () => {
   await cleanupTmpDir(dataDir);
 });
 
-/** Both ends wired together; `hostApi` overrides the host implementation. */
-function harness(hostApi: PluginHostApi = createNoopHostApi(PLUGIN_ID, dataDir)): Harness {
+/**
+ * Both ends wired together; `hostApi` overrides the host implementation.
+ *
+ * The bound entries are composed OVER the shipped table, which is the only way
+ * a handler can reach this plugin incarnation's own `PluginStorage`. Passing
+ * `bind: false` exercises the table as it ships.
+ */
+function harness(
+  hostApi: PluginHostApi = createNoopHostApi(PLUGIN_ID, dataDir),
+  options: { readonly bind?: boolean } = {},
+): Harness {
   const requests: HostApiRequest[] = [];
   const host = new HostApiDispatcher({
     pluginId: PLUGIN_ID,
     generationId: GENERATION,
     isActive: () => true,
-    hostApi,
     notifications: silentSink,
+    table:
+      options.bind === false
+        ? HOSTAPI_DISPATCH_TABLE
+        : { ...HOSTAPI_DISPATCH_TABLE, ...createStorageHostApiPaths(hostApi) },
   });
   const channel: HostApiChannel = {
     call: (request) => {
@@ -117,11 +141,15 @@ function harness(hostApi: PluginHostApi = createNoopHostApi(PLUGIN_ID, dataDir))
     notify: () => {},
   };
   const context = { pluginId: PLUGIN_ID, generationId: GENERATION };
-  const members = createChildStorageMembers({
-    pluginId: PLUGIN_ID,
-    pluginDataDir: dataDir,
-    call: createHostApiCaller(channel, context),
-  });
+  // Merged into the same partial map the child runtime builds, so an unwired
+  // member falls through to the throwing default exactly as it does in
+  // production rather than being a type error only this test would see.
+  const members: Partial<Record<HostApiPath, ChildHostApiMember>> = {
+    ...createStorageChildMembers(createHostApiCaller(channel, context), {
+      pluginId: PLUGIN_ID,
+      pluginDataDir: dataDir,
+    }),
+  };
   // Assembled the way the child runtime assembles it, so the nesting under
   // `storage.` is the production one rather than a hand-built object.
   const stub = createChildHostApiStub(
@@ -247,24 +275,16 @@ describe("bytes survive the boundary unchanged", () => {
   });
 
   it("refuses an over-limit READ rather than handing back part of the file", async () => {
+    const base = createNoopHostApi(PLUGIN_ID, dataDir);
     const oversized: PluginHostApi = {
-      ...createNoopHostApi(PLUGIN_ID, dataDir),
+      ...base,
       storage: {
-        ...createNoopHostApi(PLUGIN_ID, dataDir).storage,
+        ...base.storage,
         read: async () => new Uint8Array(WIRE_BYTES_MAX + 1),
       },
     };
-    const call: HostApiCall = {
-      path: "storage.read",
-      callId: "c1",
-      pluginId: PLUGIN_ID,
-      generationId: GENERATION,
-      args: ["big.bin"],
-      hostApi: oversized,
-    };
-    await expect(readStorageBytes(call)).rejects.toMatchObject({
-      code: "payload-too-large",
-    });
+    const { storage } = harness(oversized);
+    expect(await codeOf(storage.read("big.bin"))).toBe("payload-too-large");
   });
 });
 
@@ -416,6 +436,102 @@ describe("every member reports the errors its contract lists", () => {
   });
 });
 
+describe("the group binds to one incarnation and to nothing else", () => {
+  const dispatched = STORAGE_HOSTAPI_PATHS.filter(
+    (path): path is DispatchedStorageHostApiPath => path !== "storage.resolve",
+  );
+
+  it("declares a handler for every dispatchable member of the group", () => {
+    const handlers: Record<DispatchedStorageHostApiPath, HostApiPathHandler> =
+      createStorageHostApiPaths(createNoopHostApi(PLUGIN_ID, dataDir));
+    expect(Object.keys(handlers).sort()).toEqual([...dispatched].sort());
+    for (const path of dispatched) {
+      expect(handlers[path].path).toBe(path);
+      expect(handlers[path].status).toBe("implemented");
+      expect(handlers[path].contract).toBe(HOSTAPI_PATH_CONTRACTS[path]);
+    }
+  });
+
+  it("leaves the shipped table unbound, so nothing is implemented by accident", async () => {
+    // The routing SOT is empty and the default table has no plugin instance to
+    // bind to. A storage handler published into the shipped table would be one
+    // reading and writing files on behalf of nobody in particular.
+    const { raw } = harness(undefined, { bind: false });
+    for (const path of dispatched) {
+      expect(await codeOf(raw(path, ["a.txt"])), path).toBe("path-not-implemented");
+    }
+  });
+
+  it("services each call against the hostApi its own binding closed over", async () => {
+    const first = mkdtempSync(join(tmpdir(), "lvis-storage-first-"));
+    const second = mkdtempSync(join(tmpdir(), "lvis-storage-second-"));
+    try {
+      const toFirst = harness(createNoopHostApi(PLUGIN_ID, first));
+      const toSecond = harness(createNoopHostApi(PLUGIN_ID, second));
+      await toFirst.storage.write("who.txt", "first");
+      await toSecond.storage.write("who.txt", "second");
+      expect(readFileSync(join(first, "who.txt"), "utf-8")).toBe("first");
+      expect(readFileSync(join(second, "who.txt"), "utf-8")).toBe("second");
+    } finally {
+      await Promise.all([cleanupTmpDir(first), cleanupTmpDir(second)]);
+    }
+  });
+
+  it("keeps the void-drift check reachable by returning the host's promise", async () => {
+    const base = createNoopHostApi(PLUGIN_ID, dataDir);
+    const drifting: PluginHostApi = {
+      ...base,
+      // A host implementation that started resolving a value where the contract
+      // says `void`. Awaiting and DISCARDING it in the handler would swallow
+      // the drift and make the dispatcher's void check unreachable.
+      storage: { ...base.storage, mkdir: (async () => "created") as unknown as PluginStorage["mkdir"] },
+    };
+    const { storage } = harness(drifting);
+    expect(await codeOf(storage.mkdir("nested"))).toBe("result-marshalling-rejected");
+  });
+
+  it("refuses to build a relaying stub for a member whose contract moved", () => {
+    // The guard's input is a compile-time constant, so the only way to prove it
+    // FIRES — rather than merely exists — is to move the constant under it. The
+    // SOT is restored before the assertion's outcome can leak into another test.
+    const contracts = HOSTAPI_PATH_CONTRACTS as unknown as Record<
+      string,
+      { arguments: string; result: string; lifetime: string }
+    >;
+    const original = contracts["storage.list"];
+    contracts["storage.list"] = { ...original, arguments: "encoded" };
+    let thrown: unknown;
+    try {
+      createStorageChildMembers(async () => undefined, {
+        pluginId: PLUGIN_ID,
+        pluginDataDir: dataDir,
+      });
+    } catch (error) {
+      thrown = error;
+    } finally {
+      contracts["storage.list"] = original;
+    }
+    expect(String(thrown)).toMatch(/'storage.list' no longer crosses as plain JSON/);
+  });
+
+  it("carries no lifetime, so there is no disposer to own", () => {
+    // Every member of this group declares `lifetime: "none"` — the reply
+    // settles the call and nothing survives it. If one ever grows a disposer,
+    // this fails here rather than leaking a registration nobody releases.
+    for (const path of STORAGE_HOSTAPI_PATHS) {
+      expect(HOSTAPI_PATH_CONTRACTS[path].lifetime, path).toBe("none");
+    }
+  });
+
+  it("refuses a member of the group the binding does not cover", () => {
+    const handlers = createStorageHostApiPaths(createNoopHostApi(PLUGIN_ID, dataDir));
+    // `storage.resolve` is answered in the child; a host binding for it would
+    // be a second implementation of the join, free to disagree with the one the
+    // plugin actually calls.
+    expect(Object.keys(handlers)).not.toContain("storage.resolve");
+  });
+});
+
 describe("malformed arguments are refused, never coerced", () => {
   it("refuses a non-string path", async () => {
     const { raw } = harness();
@@ -481,12 +597,13 @@ describe("malformed arguments are refused, never coerced", () => {
 
 describe("the boundary refuses a member the plugin is no longer entitled to", () => {
   it("stops a storage call from a retired incarnation", async () => {
+    const hostApi = createNoopHostApi(PLUGIN_ID, dataDir);
     const host = new HostApiDispatcher({
       pluginId: PLUGIN_ID,
       generationId: GENERATION,
       isActive: () => false,
-      hostApi: createNoopHostApi(PLUGIN_ID, dataDir),
       notifications: silentSink,
+      table: { ...HOSTAPI_DISPATCH_TABLE, ...createStorageHostApiPaths(hostApi) },
     });
     writeFileSync(join(dataDir, "live.txt"), "live");
     const reply = await host.handle({

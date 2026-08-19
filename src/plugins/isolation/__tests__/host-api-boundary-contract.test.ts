@@ -10,10 +10,6 @@
  * was written to pin.
  */
 import { describe, expect, it } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { createNoopHostApi } from "../../runtime/sandbox.js";
 import {
   ENFORCEMENT_EXCLUSIONS,
   EffectBoundaryDeniedError,
@@ -69,16 +65,6 @@ const GENERATION = "gen-1";
 
 const silentSink: ChildNotificationSink = { deliver: () => {} };
 
-/**
- * A real hostApi over a throwaway data dir. Every dispatcher needs one — the
- * handlers are serviced against it — and the noop factory is the harness the
- * runtime tests already inject, so this is not a second test double.
- */
-const HOST_API = createNoopHostApi(
-  PLUGIN_ID,
-  mkdtempSync(join(tmpdir(), "lvis-hostapi-contract-")),
-);
-
 /** The identity every message carries; the host checks all three of it. */
 const ENVELOPE: HostApiEnvelope = {
   wire: HOST_API_WIRE_VERSION,
@@ -103,7 +89,6 @@ function dispatcher(
     pluginId: PLUGIN_ID,
     generationId: GENERATION,
     isActive: () => true,
-    hostApi: HOST_API,
     notifications: silentSink,
     ...options,
   });
@@ -181,11 +166,10 @@ describe("the marshalling contract covers exactly the classified hostApi surface
     );
   });
 
-  it("names every member that has left the unimplemented state", () => {
-    // Handlers land one group at a time. Spelling out the implemented SET
-    // rather than counting it means a member changing status is a deliberate
-    // line in this list, not an untracked change of behaviour — and a group
-    // landing appends to the list instead of rewriting a number.
+  it("starts with every dispatchable member unimplemented", () => {
+    // The routing SOT is empty, so nothing calls these yet. Recording the
+    // starting state means a handler landing later is visible as a diff in this
+    // count rather than as an untracked change of behaviour.
     const byStatus = new Map<HostApiPathStatus, string[]>();
     for (const handler of Object.values(HOSTAPI_DISPATCH_TABLE)) {
       byStatus.set(handler.status, [
@@ -193,23 +177,10 @@ describe("the marshalling contract covers exactly the classified hostApi surface
         handler.path,
       ]);
     }
-    const implemented = byStatus.get("implemented") ?? [];
-    expect([...implemented].sort()).toEqual([
-      "storage.exists",
-      "storage.list",
-      "storage.mkdir",
-      "storage.read",
-      "storage.readEncrypted",
-      "storage.readJson",
-      "storage.readText",
-      "storage.rm",
-      "storage.write",
-      "storage.writeEncrypted",
-      "storage.writeJson",
-    ]);
+    expect(byStatus.get("implemented")).toBeUndefined();
     expect(byStatus.get("child-local")).toHaveLength(4);
     expect(byStatus.get("unimplemented")).toHaveLength(
-      Object.keys(HOSTAPI_PATH_CONTRACTS).length - 4 - implemented.length,
+      Object.keys(HOSTAPI_PATH_CONTRACTS).length - 4,
     );
   });
 
@@ -240,17 +211,13 @@ describe("the marshalling contract covers exactly the classified hostApi surface
       }),
     };
     await dispatcher({ table }).handle(request());
-    const { hostApi, ...identity } = seen ?? ({} as HostApiCall);
-    expect(identity).toEqual({
+    expect(seen).toEqual({
       path: "hasRoutineBySource",
       callId: "c1",
       pluginId: PLUGIN_ID,
       generationId: GENERATION,
       args: ["nightly"],
     });
-    // The handler is handed the SAME hostApi the dispatcher was built with —
-    // per plugin and per generation, never a module-level lookup.
-    expect(hostApi).toBe(HOST_API);
   });
 
   it("marks a member child-local in the table exactly when its contract says so", () => {

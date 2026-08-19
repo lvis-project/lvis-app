@@ -11,11 +11,7 @@
  * releases on BOTH sides whichever one dies first.
  */
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { createNoopHostApi } from "../../runtime/sandbox.js";
 import { frameMessage, StdioFrameDecoder } from "../../../mcp/stdio-framing.js";
 import type { PluginManifest, RuntimePlugin } from "../../types.js";
 import {
@@ -115,12 +111,10 @@ async function harness(
     },
   };
 
-  const pluginDataDir = mkdtempSync(join(tmpdir(), "lvis-child-runtime-"));
   host = new HostApiDispatcher({
     pluginId: PLUGIN_ID,
     generationId: GENERATION,
     isActive: options.isActive ?? (() => true),
-    hostApi: createNoopHostApi(PLUGIN_ID, pluginDataDir),
     notifications: { deliver: (notification) => child.deliver(notification) },
     table: (options.table ?? HOSTAPI_DISPATCH_TABLE) as typeof HOSTAPI_DISPATCH_TABLE,
   });

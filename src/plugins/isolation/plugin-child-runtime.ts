@@ -42,7 +42,7 @@ import type {
 } from "../types.js";
 import { createConfigSubscriptionChildMembers } from "./config-subscription-child.js";
 import { createInteractionChildMembers } from "./host-api-interaction-child.js";
-import { createChildStorageMembers } from "./child-storage-members.js";
+import { createStorageChildMembers } from "./host-api-storage-child.js";
 import {
   HOSTAPI_PATH_CONTRACTS,
   type HostApiPath,
@@ -331,11 +331,6 @@ export async function startPluginChildRuntime(
    */
   const members: Partial<Record<HostApiPath, (...args: unknown[]) => unknown>> = {
     ...createInteractionChildMembers(caller),
-    ...createChildStorageMembers({
-      pluginId,
-      pluginDataDir: context.pluginDataDir,
-      call,
-    }),
     ...createConfigSubscriptionChildMembers({
       pluginId,
       call: caller,
@@ -343,6 +338,7 @@ export async function startPluginChildRuntime(
       config,
       report: log,
     }),
+    ...createStorageChildMembers(caller, context),
   };
   const hostApi = createChildHostApiStub(
     pluginId,
