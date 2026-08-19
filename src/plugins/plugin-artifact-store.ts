@@ -253,6 +253,40 @@ function isVerifiedMarketplaceFetcher(fetcher: MarketplaceFetcher): fetcher is V
   );
 }
 
+/**
+ * The catalog hash to compare the downloaded bytes against, or `undefined`
+ * when the catalog offers none for this version.
+ *
+ * An explicit prior-version install — a rollback, or a pinned `installPlugin` —
+ * used to get `undefined` unconditionally, because only the LATEST hash was
+ * read off the catalog row. That left the signature alone to carry it, and a
+ * signature binds the BYTES without saying which plugin or version they belong
+ * to, so a different validly-signed artifact served in place of the requested
+ * one would have installed.
+ *
+ * Exported so the selection can be tested directly: it is the decision this
+ * change is about, and reaching it through a download requires standing up the
+ * whole fetch path.
+ */
+export function selectExpectedArtifactSha256(
+  plugin: Pick<PluginMarketplaceItem, "version" | "artifactSha256" | "artifactSha256ByVersion">,
+  version: string,
+): string | undefined {
+  // A hash for the exact version wins — this is the case the latest-only read
+  // could not serve.
+  if (version !== "latest") {
+    const exact = plugin.artifactSha256ByVersion?.[version];
+    if (exact !== undefined) return exact;
+  }
+  // Otherwise the row's latest hash applies only when the version being
+  // installed IS the latest. Returning it for some other version would compare
+  // against the wrong artifact and refuse a correct one.
+  if (!plugin.version || plugin.version === version || version === "latest") {
+    return plugin.artifactSha256;
+  }
+  return undefined;
+}
+
 export class PluginArtifactStore {
   private readonly installRoot: string;
   private readonly cacheRoot: string;
@@ -421,10 +455,7 @@ export class PluginArtifactStore {
         `marketplace fetcher for "${plugin.id}" does not support signed artifact verification`,
       );
     }
-    const expectedArtifactSha256 =
-      !plugin.version || plugin.version === version || version === "latest"
-        ? plugin.artifactSha256
-        : undefined;
+    const expectedArtifactSha256 = selectExpectedArtifactSha256(plugin, version);
     const verified = await installFromMarketplace(slug, version, {
       http: this.fetcher,
       publicKeys: this.publicKeys,
