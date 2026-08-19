@@ -169,3 +169,48 @@ describe("validateSandboxPath", () => {
     expect(result.allowed).toBe(false);
   });
 });
+
+describe("validateSandboxPath boundary direction", () => {
+  let sandboxCwd: string;
+  let outsideDir: string;
+  const cleanup: string[] = [];
+
+  beforeEach(() => {
+    sandboxCwd = realpathSync(mkdtempSync(join(tmpdir(), "lvis-sandbox-dir-")));
+    outsideDir = realpathSync(mkdtempSync(join(tmpdir(), "lvis-outside-dir-")));
+    cleanup.push(sandboxCwd, outsideDir);
+  });
+
+  afterEach(async () => {
+    while (cleanup.length > 0) {
+      const dir = cleanup.pop()!;
+      await cleanupTmpDir(dir);
+    }
+  });
+
+  it("does not read the boundary backwards", () => {
+    // The internal predicate took `(child, parent)` while every other
+    // containment helper in the tree takes `(parent, candidate)`. Both
+    // arguments are `string`, so a flip type-checks and silently inverts the
+    // sandbox: the parent would be tested for containment in the child. This
+    // pins the direction — a child of the sandbox is in, and the sandbox is NOT
+    // "inside" its own child.
+    const child = join(sandboxCwd, "nested", "file.txt");
+    mkdirSync(join(sandboxCwd, "nested"), { recursive: true });
+    writeFileSync(child, "x");
+    expect(validateSandboxPath(child, sandboxCwd).allowed).toBe(true);
+    expect(validateSandboxPath(sandboxCwd, join(sandboxCwd, "nested")).allowed).toBe(false);
+  });
+
+  it("keeps a directory whose name begins with two dots inside the sandbox", () => {
+    const dotted = join(sandboxCwd, "..cache");
+    mkdirSync(dotted, { recursive: true });
+    writeFileSync(join(dotted, "f.txt"), "x");
+    expect(validateSandboxPath(join(dotted, "f.txt"), sandboxCwd).allowed).toBe(true);
+  });
+
+  it("still refuses a sibling whose name merely extends the sandbox root", () => {
+    expect(validateSandboxPath(`${sandboxCwd}-evil`, sandboxCwd).allowed).toBe(false);
+    expect(validateSandboxPath(join(outsideDir, "f.txt"), sandboxCwd).allowed).toBe(false);
+  });
+});

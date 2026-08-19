@@ -15,6 +15,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
+import { isResolvedPathWithin } from "../plugins/plugin-storage-containment.js";
 import type { BrowserWindow } from "electron";
 import { t } from "../i18n/index.js";
 import { createLogger } from "../lib/logger.js";
@@ -117,11 +118,6 @@ export function buildPipSyncFallbackArgs(
 ): string[] | null {
   if (platform !== "win32") return null;
   return [...buildPipSyncArgs(lockFile, pythonPath), "--no-cache", "--link-mode", "copy"];
-}
-
-function isWithinDirectory(candidatePath: string, directoryPath: string): boolean {
-  const relativePath = path.relative(directoryPath, candidatePath);
-  return relativePath === "" || (!!relativePath && !relativePath.startsWith("..") && !path.isAbsolute(relativePath));
 }
 
 // ─── PythonRuntimeBootstrapper ───────────────────────
@@ -380,7 +376,7 @@ export class PythonRuntimeBootstrapper {
           await this.log(`[python-runtime] plugin manifest lockfile declaration rejected (absolute path): ${manifestPath}`);
         } else {
           const resolved = path.resolve(manifestDir, declared);
-          if (isWithinDirectory(resolved, manifestDir)) {
+          if (isResolvedPathWithin(manifestDir, resolved)) {
             candidates.push(resolved);
           } else {
             await this.log(`[python-runtime] plugin manifest lockfile declaration rejected (outside plugin directory): ${manifestPath}`);
