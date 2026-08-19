@@ -27,7 +27,7 @@ import {
   type NotificationContextRef,
   type NotificationKind,
 } from "../../main/notification-service.js";
-import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
+import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized, validatePluginFrame } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWindow } from "../safe-send.js";
@@ -428,7 +428,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   };
   // Bootstrap retry
   ipcMain.handle(CHANNELS.bootstrap.retry, async (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.bootstrap.retry, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -446,7 +446,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.plugins.install, async (e, pluginId: string, options?: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.install, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.install, e); return UNAUTHORIZED_FRAME; }
     const lifecycleSlug = pluginId;
     const installOptions = asPlainRecord(options);
     const expectedVersionValue = installOptions.expectedVersion;
@@ -488,7 +488,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.plugins.rollback, async (e, pluginId: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.plugins.rollback, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -503,7 +503,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.plugins.uninstall, async (e, pluginId: string, rawOptions?: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.uninstall, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.uninstall, e); return UNAUTHORIZED_FRAME; }
     const broadcastUninstallResult = (payload: { slug: string; success: boolean; error?: string }) => {
       broadcastPluginLifecycleEvent(CHANNELS.plugins.uninstallResult, payload);
     };
@@ -605,7 +605,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   );
 
   ipcMain.handle(CHANNELS.plugins.installLocal, async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.installLocal, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.plugins.installLocal, e); return UNAUTHORIZED_FRAME; }
     if (!isDevModeUnlocked()) {
       throw new Error("[security] dev mode not unlocked — enable a supported LVIS_DEV* flag in a non-packaged build");
     }
@@ -650,7 +650,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.plugins.uiList, () => pluginRuntime.listUiExtensions());
 
   ipcMain.handle(CHANNELS.plugins.uiReadModule, async (e, payload?: { pluginId?: string; viewId?: string }) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.plugins.uiReadModule, e);
       throw new Error("Unauthorized renderer frame for lvis:plugins:ui:read-module");
     }
@@ -746,7 +746,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.runtime.counts, (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.counts, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.counts, e); return UNAUTHORIZED_FRAME; }
     return {
       // The user-facing tool COUNT reflects the model's tools — getModelVisibleTools,
       // not `size` (every registered tool). `size` now includes app-only tools + the
@@ -759,7 +759,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.runtime.env, async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.env, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.runtime.env, e); return UNAUTHORIZED_FRAME; }
     const os = await import("node:os");
     return {
       platform: process.platform,
@@ -769,7 +769,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.marketplace.ping, async (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.marketplace.ping, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.marketplace.ping, e); return UNAUTHORIZED_FRAME; }
     return runMarketplacePing();
   });
 
@@ -777,7 +777,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   ipcMain.handle(CHANNELS.plugins.marketplaceList, () => handleMarketplaceList(deps));
 
   ipcMain.handle(CHANNELS.agents.list, async (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.agents.list, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -793,7 +793,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.skills.list, async (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.skills.list, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -802,7 +802,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.agents.install, async (e, slug: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.agents.install, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -856,7 +856,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.agents.uninstall, async (e, slug: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.agents.uninstall, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -886,7 +886,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.skills.install, async (e, slug: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.skills.install, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -937,7 +937,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.skills.uninstall, async (e, slug: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.skills.uninstall, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -967,7 +967,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.plugins.configGet, (e, pluginId: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.plugins.configGet, e);
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
@@ -979,7 +979,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.plugins.configSet, async (e, pluginId: string, config: unknown) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.plugins.configSet, e);
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
@@ -1025,7 +1025,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.plugins.configSchemaGet, (e, pluginId: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.plugins.configSchemaGet, e);
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
@@ -1038,7 +1038,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.plugins.configSecretSet, async (e, pluginId: string, key: string, value: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.plugins.configSecretSet, e);
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
@@ -1108,7 +1108,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.plugins.configSecretListKeys, (e, pluginId: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.plugins.configSecretListKeys, e);
       return pluginConfigError("unauthorized-frame", t("mainDialog.unauthorizedFrame"));
     }
@@ -1243,34 +1243,34 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   };
 
   ipcMain.handle(CHANNELS.mcp.servers, (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.servers, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.servers, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.listServers();
   });
   ipcMain.handle(CHANNELS.mcp.kill, (e, serverId: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.kill, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.kill, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.killSwitch(serverId);
   });
   ipcMain.handle(CHANNELS.mcp.configGet, (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configGet, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configGet, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.getConfigs();
   });
   ipcMain.handle(CHANNELS.mcp.configPath, (e) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configPath, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configPath, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.getConfigPath();
   });
   ipcMain.handle(CHANNELS.mcp.configAdd, async (e, config: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configAdd, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configAdd, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.addConfig(config as import("../../mcp/types.js").McpServerConfig);
   });
   ipcMain.handle(CHANNELS.mcp.configSetApiKey, async (e, serverId: string, apiKey: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configSetApiKey, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configSetApiKey, e); return UNAUTHORIZED_FRAME; }
     if (!checkSetApiKeyRateLimit(String(serverId))) {
       throw new Error("Rate limit exceeded: lvis:mcp:config:set-api-key (5/min per server)");
     }
     return deps.mcpManager.setApiKey(serverId, apiKey);
   });
   ipcMain.handle(CHANNELS.mcp.configRemove, async (e, serverId: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configRemove, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.configRemove, e); return UNAUTHORIZED_FRAME; }
     return deps.mcpManager.removeConfig(serverId);
   });
   // Deliberately NOT rate-limited, and this is a decision rather than an omission.
@@ -1293,7 +1293,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // If this ever needs bounding, it needs its OWN budget sized for rendering plus a way to
   // tell a mint for a live card from a mint for one already gone — not this bucket.
   ipcMain.handle(CHANNELS.mcp.uiResource, async (e, serverId: string, uri: string, generationId?: string) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.uiResource, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.uiResource, e); return UNAUTHORIZED_FRAME; }
     // b1 — install the per-server network gate BEFORE the resource is read. (It is
     // the deny-by-default declared-origin gate now, not the old CDN allowlist.)
     // This is the single chokepoint every card render passes
@@ -1354,11 +1354,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   //     `userAction` is never set (see mcp-ui-tool-call.ts): a gesture claim made inside
   //     an untrusted iframe is not verifiable.
   //
-  // Sender: `validateHostRendererSender` (NOT the base `validateSender` the read-only
-  // render channel uses) — this channel RUNS A TOOL, so it takes the mutating-channel
-  // validator (fails closed on an empty frame URL, rejects plugin-ui-shell frames),
-  // exactly like `plugins.call` and `mcp.uiMessage`. The MCP-app <webview> itself
-  // is on the `lvis-mcp-app:` scheme and could never pass either validator.
+  // Sender: `validateHostRendererSender` — this channel RUNS A TOOL, so it takes
+  // the validator that fails closed on an empty frame URL and rejects
+  // plugin-ui-shell frames, exactly like `plugins.call` and `mcp.uiMessage`. The
+  // MCP-app <webview> itself is on the `lvis-mcp-app:` scheme and could never
+  // pass either validator.
   ipcMain.handle(CHANNELS.mcp.callTool, async (e, serverId: unknown, name: unknown, args: unknown, generationId?: unknown) => {
     if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.mcp.callTool, e);
@@ -2048,13 +2048,13 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // cards does not let the global LRU evict a STILL-MOUNTED card's token (which would
   // 404 that card's next reload). Idempotent; a bad/absent token is a no-op.
   ipcMain.handle(CHANNELS.mcp.disposeUiSession, (e, token: unknown) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.disposeUiSession, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.mcp.disposeUiSession, e); return UNAUTHORIZED_FRAME; }
     if (typeof token === "string" && token.length > 0) disposeMcpAppProxySession(token);
     return { ok: true as const };
   });
 
   ipcMain.handle(CHANNELS.mcp.catalogList, async (e) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.mcp.catalogList, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -2063,7 +2063,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.mcp.installFromMarketplace, async (e, slug: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.mcp.installFromMarketplace, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -2103,7 +2103,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.mcp.importClaudeDesktopPreview, async (e, raw: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.mcp.importClaudeDesktopPreview, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -2123,7 +2123,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       e,
       payload: { raw: string; conflictPolicy?: "skip" | "overwrite" },
     ) => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.mcp.importClaudeDesktopApply, e);
         return UNAUTHORIZED_FRAME;
       }
@@ -2224,7 +2224,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
   };
   ipcMain.handle(CHANNELS.pluginBridge.registerWebview, (e, payload: { webContentsId: number; pluginId: string; entryUrl: string }) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.pluginBridge.registerWebview, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -2726,7 +2726,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
   // every registered plugin webview via the existing lvis:plugin:event channel
   // and publishes the same host event for plugin host services.
   ipcMain.handle(CHANNELS.host.pluginThemeNotify, (e, payload: unknown) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.host.pluginThemeNotify, e);
       return UNAUTHORIZED_FRAME;
     }

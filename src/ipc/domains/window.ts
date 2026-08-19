@@ -13,7 +13,7 @@ import {
   RENDER_HTML_PARTITION,
   type OpenHtmlPreviewWindowResult,
 } from "../../shared/render-html-preview.js";
-import { validateSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../gated.js";
+import { validateHostRendererSender, auditUnauthorized, UNAUTHORIZED_FRAME } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { isWindowControlOwned } from "../window-control-registry.js";
@@ -26,7 +26,7 @@ export function registerWindowHandlers(deps: IpcDeps): void {
   const getSenderWindowOrMain = (e: IpcMainInvokeEvent): ElectronBrowserWindow | null =>
     getSenderWindow(e) ?? getMainWindow();
   const canUseWindowControl = (e: IpcMainInvokeEvent): boolean =>
-    validateSender(e) || isWindowControlOwned(e.sender);
+    validateHostRendererSender(e) || isWindowControlOwned(e.sender);
 
   ipcMain.handle(CHANNELS.window.minimize, (e) => {
     if (!canUseWindowControl(e)) { auditUnauthorized(auditLogger, CHANNELS.window.minimize, e); return; }
@@ -62,7 +62,7 @@ export function registerWindowHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.window.openHtmlPreview, async (e, payload): Promise<OpenHtmlPreviewWindowResult> => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.window.openHtmlPreview, e);
       return { ok: false, error: UNAUTHORIZED_FRAME.error };
     }
