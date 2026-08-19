@@ -1,6 +1,50 @@
+/**
+ * The page chrome, whole: the outer page frame (`PageShell`), the unframed
+ * section grouping inside it (`SettingsSection`), the settings page header, and
+ * the "?" help popover that the header and the section both render.
+ *
+ * They live together because they only make sense together — the header and the
+ * section each render the popover, and a reader asking "how is a page laid out"
+ * should find the whole answer in one place. There is exactly one section
+ * implementation; a second name for it is a copy waiting to drift.
+ */
 import { type ReactNode } from "react";
 import { cn } from "../../../lib/utils.js";
-import { SettingsHelpPopover } from "./SettingsHelpPopover.js";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "../../../components/ui/popover.js";
+
+export interface SettingsHelpPopoverProps {
+  children: ReactNode;
+  ariaLabel?: string;
+  testId?: string;
+}
+
+export function SettingsHelpPopover({
+  children,
+  ariaLabel,
+  testId,
+}: SettingsHelpPopoverProps) {
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          aria-label={ariaLabel}
+          data-testid={testId}
+          className="inline-flex size-5 shrink-0 items-center justify-center rounded-full border border-border text-xs font-semibold text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
+          ?
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-80 text-sm leading-6 text-muted-foreground">
+        {children}
+      </PopoverContent>
+    </Popover>
+  );
+}
 
 export interface PageShellProps {
   title?: ReactNode;
@@ -79,17 +123,52 @@ export function PageShell({
   );
 }
 
-export interface PageSectionProps {
+export interface SettingsPageHeaderProps {
+  title: string;
+  description?: ReactNode;
+}
+
+export function SettingsPageHeader({ title, description }: SettingsPageHeaderProps) {
+  return (
+    <header className="pt-2 mb-6">
+      {/* Symmetric stack — both sidebar and right pane use pt-2 (8px) on
+          their outer column wrapper to create matching top breathing
+          room, then h2 inherits TabsContent's `mt-2` (8px) + this
+          header's `pt-2` (8px) for a total Y=24 box top, matching the
+          sidebar wrapper `pt-2 (8) + TabsList p-2 (8) + trigger py-2 (8)
+          = 24` text box top. Both end at the same baseline.
+          h2 uses `leading-9` so its line-box (36px) matches the sidebar
+          trigger row height. */}
+      <div className="flex min-w-0 items-center gap-2">
+        <h2
+          tabIndex={-1}
+          className="min-w-0 truncate rounded-sm text-xl font-semibold leading-9 tracking-normal outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          data-testid="settings-page-title"
+        >
+          {title}
+        </h2>
+        {description ? (
+          <SettingsHelpPopover ariaLabel={title} testId="settings-page-help">
+            {description}
+          </SettingsHelpPopover>
+        ) : null}
+      </div>
+    </header>
+  );
+}
+
+export interface SettingsSectionProps {
   title?: ReactNode;
   description?: ReactNode;
   badge?: ReactNode;
   actions?: ReactNode;
+  /** Optional id for anchor scroll. */
   id?: string;
   className?: string;
   children: ReactNode;
 }
 
-export function PageSection({
+export function SettingsSection({
   title,
   description,
   badge,
@@ -97,7 +176,7 @@ export function PageSection({
   id,
   className,
   children,
-}: PageSectionProps) {
+}: SettingsSectionProps) {
   return (
     <section
       id={id}

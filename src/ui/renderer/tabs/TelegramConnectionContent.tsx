@@ -13,7 +13,7 @@ import {
   type TelegramConnectionSnapshot,
   type TelegramCreatedPairingCode,
 } from "../../../shared/telegram-connection.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsSection } from "../components/PageShell.js";
 import { formatIpcError } from "../format-ipc-error.js";
 import { AwayAuthorityContent } from "./AwayAuthorityContent.js";
 import type { LvisApi } from "../types.js";

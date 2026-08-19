@@ -18,8 +18,7 @@ import {
   marketplaceTrustLabelKeysForPackage,
   type MarketplacePackageFilter,
 } from "../../../shared/marketplace-package-sections.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { PluginInstallDialog } from "../dialogs/PluginInstallDialog.js";
 import { mergeMarketplaceCandidates } from "../marketplace-candidates.js";
 import { useTranslation } from "../../../i18n/react.js";

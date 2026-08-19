@@ -9,7 +9,7 @@ import type {
 } from "../../../shared/codex-subscription.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { LvisApi } from "../types.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsSection } from "../components/PageShell.js";
 
 const STATUS_POLL_INTERVAL_MS = 1_500;
 

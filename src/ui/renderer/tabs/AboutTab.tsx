@@ -3,8 +3,7 @@ import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Brain, Cpu, FolderOpen } from "lucide-react";
 import type { LvisApi } from "../types.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 
 export interface AboutTabProps {
   api: LvisApi;

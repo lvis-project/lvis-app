@@ -7,8 +7,7 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "../../../components/ui/radio-group.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { getApi } from "../api-client.js";
 import { normalizeAccelerator } from "../../../shared/shortcuts.js";
 import { eventToAccelerator } from "../utils/accelerator-capture.js";

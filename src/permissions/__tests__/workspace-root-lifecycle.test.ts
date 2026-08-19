@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { withWorkspaceRootLifecycleLock } from "../workspace-root-lifecycle-lock.js";
+import { withWorkspaceRootLifecycleLock } from "../workspace-root-lifecycle.js";
 
 describe("workspace root lifecycle lock", () => {
   it("serializes parent removal with a concurrently requested child addition", async () => {
