@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -232,25 +233,28 @@ describe("workspace-root settings mutations", () => {
     ]);
   });
 
-  it("fails closed for a present malformed journal instead of reviving active roots", async () => {
+  it("keeps a root out of the active list when a damaged journal entry still names it", () => {
     const { root, settings } = fixture();
     const project = join(root, "project");
+    const other = join(root, "other");
     mkdirSync(project);
+    mkdirSync(other);
     writeFileSync(settings, JSON.stringify({
       permissions: {
-        additionalDirectories: [project],
-        pendingWorkspaceRootRemovals: [{ operationId: "not-a-uuid" }],
+        additionalDirectories: [project, other],
+        // Not actionable as an intent — but it names a root, and that half is
+        // readable, so the root it names stays removed.
+        pendingWorkspaceRootRemovals: [{ operationId: "not-a-uuid", runtimePath: project }],
       },
     }));
 
-    expect(readPermissionSettings(settings).permissions.additionalDirectories).toEqual([]);
-    await expect(
-      beginWorkspaceRootRemovalPersist(project, "workspace-remove-root", settings),
-    ).rejects.toThrow("invalid intent");
+    const read = readPermissionSettings(settings);
+    expect(read.permissions.additionalDirectories).toEqual([other]);
+    expect(read.fault).toMatchObject({ kind: "pending-removals-malformed", entries: 1 });
   });
 
   it.each([null, "primitive", 7])(
-    "fails closed for a non-object pending journal entry: %j",
+    "leaves the active list alone for a pending journal entry that names nothing: %j",
     (candidate) => {
       const { root, settings } = fixture();
       const project = join(root, "project");
@@ -262,7 +266,12 @@ describe("workspace-root settings mutations", () => {
         },
       }));
 
-      expect(readPermissionSettings(settings).permissions.additionalDirectories).toEqual([]);
+      // This used to answer with an empty list, which the sidebar drew as "you
+      // have no projects". An entry that names no root cannot be protecting
+      // one, so the honest answer is the user's list plus the fault.
+      const read = readPermissionSettings(settings);
+      expect(read.permissions.additionalDirectories).toEqual([project]);
+      expect(read.fault).toMatchObject({ kind: "pending-removals-malformed", entries: 1 });
     },
   );
 
@@ -286,5 +295,141 @@ describe("workspace-root settings mutations", () => {
       additionalDirectories: [],
       pendingWorkspaceRootRemovals: [],
     });
+  });
+});
+
+/**
+ * A settings file can be malformed for reasons that have nothing to do with a
+ * bug — a hand edit, a restored backup, a half-written predecessor. These
+ * drive the real file: they write the damage to disk and then call the same
+ * functions the folder picker calls.
+ */
+describe("a settings file the store cannot fully interpret", () => {
+  const VALID_INTENT = {
+    operationId: "3f7d0c1a-2b4e-4d8f-9a1c-5e6f70819234",
+    storedPath: "",
+    runtimePath: "",
+    requestedAt: "2026-08-18T00:00:00.000Z",
+    source: "workspace-remove-root",
+  };
+
+  function corruptedJournalFixture(): {
+    settings: string;
+    project: string;
+    second: string;
+    queued: string;
+  } {
+    const { root, settings } = fixture();
+    const project = canonicalizePathForMatch(join(root, "project"));
+    const second = canonicalizePathForMatch(join(root, "second"));
+    const queued = canonicalizePathForMatch(join(root, "queued"));
+    mkdirSync(join(root, "project"));
+    mkdirSync(join(root, "second"));
+    writeFileSync(settings, JSON.stringify({
+      // An unrelated key: a write must never be allowed to drop it.
+      appearance: { theme: "dark" },
+      permissions: {
+        additionalDirectories: [project],
+        pendingWorkspaceRootRemovals: [
+          { ...VALID_INTENT, storedPath: queued, runtimePath: queued },
+          { operationId: "not-a-uuid", storedPath: 7 },
+        ],
+      },
+    }, null, 2));
+    return { settings, project, second, queued };
+  }
+
+  function journalOnDisk(settings: string): unknown[] {
+    const parsed = JSON.parse(readFileSync(settings, "utf-8")) as {
+      permissions: { pendingWorkspaceRootRemovals: unknown[] };
+    };
+    return parsed.permissions.pendingWorkspaceRootRemovals;
+  }
+
+  it("keeps accepting directories while one cleanup entry stays unreadable", async () => {
+    const { settings, project, second } = corruptedJournalFixture();
+
+    // The reported symptom was that EVERY add after the corruption failed, for
+    // good: two in a row, and the second one after a re-read, is the proof it
+    // is not a one-shot that a retry clears.
+    expect(await addAllowedDirectoryPersist(second, settings)).toEqual([project, second]);
+    const third = join(second, "..", "project");
+    expect(await addAllowedDirectoryPersist(third, settings)).toEqual([project, second]);
+    expect(readPermissionSettings(settings).permissions.additionalDirectories)
+      .toEqual([project, second]);
+  });
+
+  it("reports the unreadable entries instead of showing the user an empty project list", () => {
+    const { settings, project } = corruptedJournalFixture();
+
+    const read = readPermissionSettings(settings);
+    expect(read.permissions.additionalDirectories).toEqual([project]);
+    expect(read.fault).toEqual({
+      kind: "pending-removals-malformed",
+      filePath: settings,
+      entries: 1,
+    });
+  });
+
+  it("leaves the unreadable entry on disk verbatim across a write", async () => {
+    const { settings, second, queued } = corruptedJournalFixture();
+    const before = journalOnDisk(settings);
+
+    await addAllowedDirectoryPersist(second, settings);
+    expect(journalOnDisk(settings)).toEqual(before);
+
+    // A write that DOES rewrite the journal still has no standing to drop what
+    // it could not read: the new intent joins it, the damaged entry stays.
+    const begun = await beginWorkspaceRootRemovalPersist(second, "workspace-remove-root", settings);
+    expect(begun?.created).toBe(true);
+    expect(journalOnDisk(settings)).toContainEqual({ operationId: "not-a-uuid", storedPath: 7 });
+
+    expect(await completeWorkspaceRootRemovalPersist(begun!.intent.operationId, settings)).toBe(true);
+    expect(journalOnDisk(settings)).toEqual([
+      { ...VALID_INTENT, storedPath: queued, runtimePath: queued },
+      { operationId: "not-a-uuid", storedPath: 7 },
+    ]);
+    expect((JSON.parse(readFileSync(settings, "utf-8")) as { appearance: unknown }).appearance)
+      .toEqual({ theme: "dark" });
+  });
+
+  it("still enforces the readable cleanup entries beside the unreadable one", async () => {
+    const { settings, queued } = corruptedJournalFixture();
+
+    await expect(addAllowedDirectoryPersist(queued, settings)).rejects.toMatchObject({
+      code: "WORKSPACE_ROOT_REMOVAL_PENDING",
+    });
+    expect(readPermissionSettings(settings).permissions.pendingWorkspaceRootRemovals)
+      .toEqual([{ ...VALID_INTENT, storedPath: queued, runtimePath: queued }]);
+  });
+});
+
+describe("a settings file the store cannot parse at all", () => {
+  const DAMAGED = '{ "permissions": { "additionalDirectories": ["/srv/keep"], ';
+
+  it("reports the condition rather than answering with an empty directory list", () => {
+    const { settings } = fixture();
+    writeFileSync(settings, DAMAGED);
+
+    const read = readPermissionSettings(settings);
+    // The gate answer is deny — but it arrives WITH the reason, so a caller
+    // that shows projects can tell it apart from a user who has none.
+    expect(read.permissions.additionalDirectories).toEqual([]);
+    expect(read.fault).toMatchObject({ kind: "file-unreadable", filePath: settings });
+    expect(readFileSync(settings, "utf-8")).toBe(DAMAGED);
+  });
+
+  it("refuses to write over it instead of replacing the user's document", async () => {
+    const { root, settings } = fixture();
+    const project = join(root, "project");
+    mkdirSync(project);
+    writeFileSync(settings, DAMAGED);
+
+    await expect(addAllowedDirectoryPersist(project, settings)).rejects.toMatchObject({
+      code: "settings-unreadable",
+    });
+    // The old write path merged into `{}` here, so this same call used to leave
+    // the file holding nothing but the one directory it had just added.
+    expect(readFileSync(settings, "utf-8")).toBe(DAMAGED);
   });
 });

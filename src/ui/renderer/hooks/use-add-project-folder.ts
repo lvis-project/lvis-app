@@ -8,14 +8,15 @@ export interface PendingRootWarning {
 }
 
 /**
- * How a project surface hands a refused mutation to the app-level toast.
+ * How a project surface hands a refused mutation — or a project list the
+ * backend could not vouch for — to the app-level toast.
  *
  * The operation is passed rather than a ready-made sentence because the code
  * usually resolves to a localized message on its own; the operation only names
  * the context for a code the shared IPC table does not know.
  */
 export type ProjectErrorReporter = (
-  operation: "add" | "remove",
+  operation: "add" | "remove" | "list",
   error?: string,
   message?: string,
 ) => void;
