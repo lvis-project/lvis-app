@@ -1793,3 +1793,92 @@ describe("CloudMarketplaceFetcher app-version resolver detail", () => {
   });
 
 });
+
+describe("per-version artifact hashes", () => {
+  /**
+   * The catalog carries a hash for every version it lists; only the latest was
+   * read. An explicit prior-version install — rollback, or a pinned
+   * installPlugin — therefore had NOTHING to compare its bytes against and
+   * relied on the signature alone, which binds the bytes without saying which
+   * plugin or version they belong to.
+   */
+  const SHA_LATEST = "a".repeat(64);
+  const SHA_PRIOR = "b".repeat(64);
+
+  function detailRow(versions: unknown) {
+    return {
+      id: "acme-notes",
+      name: "Acme Notes",
+      description: "Note plugin",
+      packageName: "@acme/notes",
+      packageSpec: "@acme/notes@2.0.0",
+      version: "2.0.0",
+      latest_artifact_sha256: SHA_LATEST,
+      versions,
+    };
+  }
+
+  it("collects a hash for every listed version, not just the latest", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse(
+        detailRow([
+          { version: "2.0.0", artifact_sha256: SHA_LATEST },
+          { version: "1.0.0", artifact_sha256: SHA_PRIOR },
+        ]),
+      ),
+    );
+
+    const item = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    }).getPluginDetail("acme-notes");
+
+    expect(item?.artifactSha256ByVersion).toEqual({
+      "2.0.0": SHA_LATEST,
+      "1.0.0": SHA_PRIOR,
+    });
+    expect(item?.artifactSha256).toBe(SHA_LATEST);
+  });
+
+  it("lower-cases digests so the comparison is not case-sensitive", async () => {
+    mockedFetchPublic.mockResolvedValueOnce(
+      jsonResponse(detailRow([{ version: "1.0.0", artifact_sha256: SHA_PRIOR.toUpperCase() }])),
+    );
+
+    const item = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    }).getPluginDetail("acme-notes");
+
+    expect(item?.artifactSha256ByVersion?.["1.0.0"]).toBe(SHA_PRIOR);
+  });
+
+  it.each([
+    ["a malformed digest", [{ version: "1.0.0", artifact_sha256: "not-a-digest" }]],
+    ["a missing digest", [{ version: "1.0.0" }]],
+    ["a missing version", [{ artifact_sha256: "c".repeat(64) }]],
+    ["a non-object row", ["1.0.0"]],
+  ])("drops %s rather than defaulting it", async (_label, versions) => {
+    // A dropped entry makes the install refuse for want of an expected hash.
+    // A wrong entry would refuse a CORRECT artifact, and a permissive one
+    // would defeat the check — dropping is the only safe direction.
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse(detailRow(versions)));
+
+    const item = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    }).getPluginDetail("acme-notes");
+
+    expect(item?.artifactSha256ByVersion?.["1.0.0"]).toBeUndefined();
+  });
+
+  it("leaves the map absent when the response carries no version list", async () => {
+    // Absence must stay distinguishable from "listed with no hash": the
+    // install path treats a listed version without a hash as unverifiable.
+    mockedFetchPublic.mockResolvedValueOnce(jsonResponse(detailRow(undefined)));
+
+    const item = await new CloudMarketplaceFetcher({
+      baseUrl: "https://marketplace.example.com",
+    }).getPluginDetail("acme-notes");
+
+    expect(item?.artifactSha256ByVersion).toBeUndefined();
+    expect(item?.artifactSha256).toBe(SHA_LATEST);
+  });
+});

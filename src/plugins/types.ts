@@ -65,6 +65,21 @@ export interface PluginMarketplaceItem {
   version?: string;
   /** SHA-256 of the latest stable marketplace artifact. Used to invalidate stale same-version cache entries. */
   artifactSha256?: string;
+  /**
+   * `version → SHA-256` for every version the catalog lists, when the response
+   * carried them.
+   *
+   * `artifactSha256` above covers only the latest, so an explicit prior-version
+   * install — a rollback, or a pinned `installPlugin` — had nothing to compare
+   * the downloaded bytes against and fell back to the signature alone. The
+   * signature binds the BYTES but not which plugin or version they belong to,
+   * so that path could not tell a correct artifact from a different valid one
+   * served in its place.
+   *
+   * Optional because a catalog response may omit the version list; absence
+   * must not be read as "no hash to check" for a version that IS listed.
+   */
+  artifactSha256ByVersion?: Readonly<Record<string, string>>;
   /** S8 — release channel. "stable" (default) or "canary". */
   channel?: "stable" | "canary";
   /**

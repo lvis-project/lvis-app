@@ -671,6 +671,37 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     };
   }
 
+  /**
+   * Collect `version → sha256` from the catalog's version list.
+   *
+   * The catalog carries a hash for every version it lists, but only the latest
+   * was ever read. That left an explicit prior-version install — a rollback or
+   * a pinned `installPlugin` — with nothing to compare its bytes against.
+   *
+   * Rows whose version or digest is malformed are DROPPED rather than
+   * defaulted: a missing entry makes the install refuse for want of an
+   * expected hash, whereas a wrong entry would refuse a correct artifact, and
+   * a permissive one would defeat the check entirely.
+   */
+  private artifactHashesByVersion(
+    row: ServerCatalogRow,
+  ): Readonly<Record<string, string>> | undefined {
+    const versions = (row as { versions?: unknown }).versions;
+    if (!Array.isArray(versions)) return undefined;
+    const map: Record<string, string> = {};
+    for (const entry of versions) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const { version, artifact_sha256: sha } = entry as {
+        version?: unknown;
+        artifact_sha256?: unknown;
+      };
+      if (typeof version !== "string" || version.length === 0) continue;
+      if (typeof sha !== "string" || !/^[a-f0-9]{64}$/i.test(sha)) continue;
+      map[version] = sha.toLowerCase();
+    }
+    return Object.keys(map).length > 0 ? Object.freeze(map) : undefined;
+  }
+
   private mapCatalogItem(row: ServerCatalogRow): PluginMarketplaceItem {
     if (typeof row.id === "string" && !SAFE_ID_RE.test(row.id)) {
       throw new Error(`marketplace row has invalid id format: "${row.id}"`);
@@ -798,6 +829,10 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     if (version) item.version = version;
     if (typeof row.latest_artifact_sha256 === "string" && /^[a-f0-9]{64}$/i.test(row.latest_artifact_sha256)) {
       item.artifactSha256 = row.latest_artifact_sha256.toLowerCase();
+    }
+    const byVersion = this.artifactHashesByVersion(row);
+    if (byVersion !== undefined) {
+      item.artifactSha256ByVersion = byVersion;
     }
     if (row.channel === "canary") item.channel = "canary";
     else if (version) item.channel = "stable";
