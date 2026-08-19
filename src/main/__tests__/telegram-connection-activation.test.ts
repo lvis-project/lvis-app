@@ -25,7 +25,7 @@ import {
 } from "../telegram-connection-store.js";
 import { telegramConversationDigest } from "../telegram-platform-runtime.js";
 import { namespaceAt } from "./telegram-connection-namespace.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const BOT_TOKEN = "8112233445:activation-suite-bot-token";
 /** The store only ever holds digests, so the fingerprint is what it is given. */

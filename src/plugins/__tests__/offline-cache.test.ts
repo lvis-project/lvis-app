@@ -16,7 +16,7 @@ import {
   setCachedTarball
 } from "../offline-cache.js";
 import type { PluginMarketplaceItem } from "../types.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 function makeItem(id: string): PluginMarketplaceItem {
   return {

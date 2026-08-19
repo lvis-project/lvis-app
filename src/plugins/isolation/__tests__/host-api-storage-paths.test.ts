@@ -43,7 +43,7 @@ const mockedElectron = vi.hoisted(() => {
 vi.mock("electron", () => ({ safeStorage: mockedElectron.safeStorage }));
 
 import { EffectBoundaryDeniedError } from "../../../permissions/effect-enforcement.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 import { PluginStorageError } from "../../public-contract.js";
 import { createNoopHostApi } from "../../runtime/sandbox.js";
 import type { PluginHostApi, PluginStorage } from "../../types.js";

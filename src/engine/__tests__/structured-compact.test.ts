@@ -18,7 +18,7 @@ import {
 } from "../structured-compact.js";
 import type { GenericMessage } from "../llm/types.js";
 import { markStaleToolResults } from "../auto-compact.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 let originalLvisHome: string | undefined;
 let testLvisHome: string | null = null;

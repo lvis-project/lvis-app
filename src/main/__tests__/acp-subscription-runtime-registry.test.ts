@@ -13,7 +13,7 @@ import type { AcpSubscriptionPromptHandle } from "../acp-subscription-session-cl
 import type { AcpSubscriptionProviderId } from "../../shared/acp-subscription.js";
 import type { AcpSubscriptionMcpServerConfig } from "../acp-subscription-runtime-config.js";
 import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const roots: string[] = [];
 

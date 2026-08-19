@@ -26,7 +26,7 @@ import {
   LOG_MAX_TOTAL_BYTES,
 } from "../log-file-sink.js";
 import { LOG_RETENTION_DAYS as SHARED_LOG_RETENTION_DAYS } from "../../shared/log-retention.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 let logDir: string;
 

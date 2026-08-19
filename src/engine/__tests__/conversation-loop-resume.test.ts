@@ -19,7 +19,7 @@ import type { GenericMessage } from "../llm/types.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { wireHookSystem } from "../../boot/steps/hook-system-wiring.js";
 import { t } from "../../i18n/index.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import {
   makeConversationLoopDeps,
   makeConversationLoopLongHistory,

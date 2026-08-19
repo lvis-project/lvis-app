@@ -17,8 +17,8 @@ import { revocationRegistry } from "../revocation-registry.js";
 import { RevocationCache } from "../revocation-cache.js";
 import { parseRevocationDocument } from "../revocation-schema.js";
 import { WHITELIST_PRIMARY_KEY_ID as REVOCATION_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
-import { signEnvelopeFixture } from "../../../testing/sign-envelope-fixture.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // ---------------------------------------------------------------------
 // Helpers

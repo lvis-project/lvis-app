@@ -177,7 +177,7 @@ const SERVICE_KEYS: (string | symbol)[] = [
   "scriptHookManager",
 ];
 
-import { makeDeepProxy } from "../../testing/deep-proxy.js";
+import { makeDeepProxy } from "../../__tests__/support/deep-proxy.js";
 
 beforeAll(() => {
   channels.length = 0;

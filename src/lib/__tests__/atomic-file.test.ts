@@ -23,7 +23,7 @@ import {
   transientFsLockDelayMs,
 } from "../transient-fs-lock-retry.js";
 import { retryOnTransientFsLock } from "../../plugins/plugin-artifact-store.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 let dir: string;
 

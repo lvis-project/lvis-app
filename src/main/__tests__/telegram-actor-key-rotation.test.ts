@@ -36,7 +36,7 @@ import {
   telegramConversationDigest,
 } from "../telegram-platform-runtime.js";
 import { namespaceAt } from "./telegram-connection-namespace.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const OWNER_ID = "776655443322";
 const BOT_FINGERPRINT = "a".repeat(64);

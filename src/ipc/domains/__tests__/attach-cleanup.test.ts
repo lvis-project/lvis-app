@@ -3,7 +3,7 @@ import { existsSync, mkdtempSync, renameSync, rmSync, statSync, writeFileSync } 
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { invokeAppIpcHandler } from "./test-helpers.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 const { handlers, showOpenDialogMock } = vi.hoisted(() => ({
   handlers: new Map<string, (...args: unknown[]) => unknown>(),

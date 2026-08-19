@@ -43,7 +43,7 @@ import { createDynamicTool } from "../../../tools/base.js";
 import { readPermissionSettings } from "../../../permissions/permission-settings-store.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../../../permissions/sensitive-paths.js";
 import { makeMockWebContents } from "../../../__tests__/test-helpers.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 const workspaceDeps = {
   auditLogger: { log: vi.fn() },

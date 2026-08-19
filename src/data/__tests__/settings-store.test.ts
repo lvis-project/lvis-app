@@ -24,8 +24,8 @@ import {
   LOG_RETENTION_MAX_DAYS,
 } from "../../shared/log-retention.js";
 import { BUNDLE_IDS, DEFAULT_BUNDLE_ID } from "../../shared/theme-bundles.js";
-import { setProcessPlatform } from "../../testing/process-platform.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import {
   DEFAULT_LLM_VENDOR,
   freshAllVendorBlocks,

@@ -30,7 +30,7 @@ import { UNAUTHORIZED_FRAME } from "../gated.js";
 import { onEvent } from "../../boot/types.js";
 import { HOST_ONLY_EMIT_NAMESPACES } from "../../plugins/capabilities.js";
 import type { IpcDeps } from "../types.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 type IpcHandler = (...args: unknown[]) => unknown;
 const pluginFixtureRoots: string[] = [];

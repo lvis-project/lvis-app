@@ -15,7 +15,7 @@ import { resolve as resolvePath } from "node:path";
 import { fileURLToPath } from "node:url";
 import { SkillStore, SKILL_MAX_BODY_BYTES } from "../skill-store.js";
 import type { ActivePluginGeneration } from "../../plugins/plugin-generation-coordinator.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 function pluginGeneration(pluginId: string, generationId: string, body: string): ActivePluginGeneration {
   const fingerprint = (generationId === "g1" ? "a" : "b").repeat(64);
