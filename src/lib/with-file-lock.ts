@@ -15,7 +15,47 @@
  */
 import lockfile from "proper-lockfile";
 import { mkdir, open } from "node:fs/promises";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
+
+/**
+ * Serialize `fn` against every other call for the same path IN THIS PROCESS.
+ *
+ * NOT a lock, and named so that no one reads it as one. Five modules had this
+ * exact six-line promise chain, and three of them called it `withFileLock` --
+ * the name of the cross-process lock defined below in this same file. A reader
+ * who sees `await withFileLock(this.filePath, ...)` in a store and assumes the
+ * imported helper is wrong about what is protecting the file.
+ *
+ * WHAT IT GIVES: read-modify-write on a JSON store cannot interleave with
+ * another read-modify-write issued from the same module instance. That is the
+ * whole guarantee.
+ *
+ * WHAT IT DOES NOT GIVE: anything at all against a second process -- the CLI, a
+ * utility process, a plugin child, a second app instance -- or against another
+ * copy of the same module loaded into a different JS realm. The queue is a
+ * module-local Map; a second realm gets a second Map and the two writers do not
+ * see each other. Callers relying on this are relying on the file having ONE
+ * writer process, which is a real property of the host-owned `~/.lvis` stores
+ * and is stated here so it can be checked rather than assumed.
+ *
+ * Use {@link withFileLock} instead when a second process can write the file.
+ *
+ * A rejected `fn` does not wedge the queue: the chain stored for the next
+ * caller swallows both settlement paths, while the rejection itself is returned
+ * to the caller that produced it.
+ */
+export async function withInProcessFileQueue<T>(
+  filePath: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const key = resolve(filePath);
+  const previous = inProcessFileQueues.get(key) ?? Promise.resolve();
+  const next = previous.then(() => fn());
+  inProcessFileQueues.set(key, next.then(() => undefined, () => undefined));
+  return next;
+}
+
+const inProcessFileQueues = new Map<string, Promise<void>>();
 
 export interface FileLockOptions {
   /**

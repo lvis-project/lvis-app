@@ -1,5 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { dirname } from "node:path";
+import { withInProcessFileQueue } from "../lib/with-file-lock.js";
 
 export interface AgentRegistryEntry {
   id: string;
@@ -17,8 +18,6 @@ export interface AgentRegistry {
   version: 1;
   agents: AgentRegistryEntry[];
 }
-
-const registryLocks = new Map<string, Promise<void>>();
 
 export async function readAgentRegistry(registryPath: string): Promise<AgentRegistry> {
   let raw: string;
@@ -42,22 +41,11 @@ export async function writeAgentRegistry(registryPath: string, registry: AgentRe
   await writeFile(registryPath, `${JSON.stringify(registry, null, 2)}\n`, "utf-8");
 }
 
-export async function withAgentRegistryLock<T>(
-  registryPath: string,
-  fn: () => Promise<T>,
-): Promise<T> {
-  const key = resolve(registryPath);
-  const prev = registryLocks.get(key) ?? Promise.resolve();
-  const next = prev.then(() => fn());
-  registryLocks.set(key, next.then(() => undefined, () => undefined));
-  return next;
-}
-
 export async function updateAgentRegistry(
   registryPath: string,
   mutator: (registry: AgentRegistry) => void | Promise<void>,
 ): Promise<void> {
-  await withAgentRegistryLock(registryPath, async () => {
+  await withInProcessFileQueue(registryPath, async () => {
     const registry = await readAgentRegistry(registryPath);
     await mutator(registry);
     await writeAgentRegistry(registryPath, registry);
