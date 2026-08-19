@@ -58,6 +58,7 @@ bun.lockb
 # from the tree. `scripts/check-generated-assets.mjs` keeps the tracked ones
 # equal to the generator's output.
 build/icon.png
+build/icons/
 build/tray-icon.png
 build/tray-icon@2x.png
 build/tray-iconTemplate.png
