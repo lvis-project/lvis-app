@@ -284,19 +284,61 @@ describe("workspace-root settings mutations", () => {
       // have no projects". An entry that names no root may well BE protecting
       // one — nothing here can tell — but emptying the list would trade every
       // readable grant for one unreadable non-grant while defending nothing:
-      // the same writer could have put `[]` here, a valid journal that
-      // reactivates every queued root and raises no fault at all. The fault is
-      // how the user is told.
+      // the same hand edit that left the path in the list could have put `[]`
+      // here instead, a valid journal that raises no fault and leaves that path
+      // just as active. (Only for THAT edit are the two equivalent — an empty
+      // journal on its own reactivates nothing, which the sibling test
+      // "an emptied journal does not bring a root back" pins.) The fault is how
+      // the user is told.
       const read = readPermissionSettings(settings);
       expect(read.permissions.additionalDirectories).toEqual([project]);
       expect(read.fault).toMatchObject({ kind: "pending-removals-malformed", entries: 1 });
     },
   );
 
-  // The one shape where a removed root really does come back. The entry is
-  // recognisably a damaged INTENT — valid operation id, timestamp, source — but
-  // its paths are gone, and the active list has the path anyway. Nothing here
-  // can name the root that intent was protecting, so the list entry stands.
+  // Pins the scope of the argument above. Emptying the journal is only an
+  // equally-easy substitute for an unattributable entry when the path is back
+  // in the active list too; on its own it reactivates nothing, because the
+  // write that queued the intent dropped the path from `additionalDirectories`
+  // at the same time. Stated as a claim next to the code, so it is tested here.
+  it("an emptied journal does not bring a root back", async () => {
+    const { root, settings } = fixture();
+    const project = join(root, "project");
+    mkdirSync(project);
+    await addAllowedDirectoryPersist(project, settings);
+    expect(readPermissionSettings(settings).permissions.additionalDirectories).toHaveLength(1);
+
+    const begun = await beginWorkspaceRootRemovalPersist(
+      project,
+      "workspace-remove-root",
+      settings,
+    );
+    expect(begun?.created).toBe(true);
+    // The same write that queued the intent already took the path out.
+    expect(readPermissionSettings(settings).permissions.additionalDirectories).toEqual([]);
+    expect(journalOnDisk(settings)).toHaveLength(1);
+
+    // Hand-clear the journal, the substitute the comment calls equally easy.
+    const onDisk = JSON.parse(readFileSync(settings, "utf-8")) as {
+      permissions: Record<string, unknown>;
+    };
+    onDisk.permissions.pendingWorkspaceRootRemovals = [];
+    writeFileSync(settings, JSON.stringify(onDisk, null, 2));
+
+    // The root stays gone and nothing is reported: clearing the journal is not
+    // a general reactivation.
+    const read = readPermissionSettings(settings);
+    expect(read.permissions.additionalDirectories).toEqual([]);
+    expect(read.fault).toBeNull();
+  });
+
+  // The one shape where a surviving entry is recognisably a removal INTENT —
+  // valid operation id, timestamp, source — and still cannot name its root: the
+  // paths are gone, and the active list has the path anyway. Nothing here can
+  // name the root that intent was protecting, so the list entry stands. Not the
+  // only shape that leaves such a path active — a journal that is not a list at
+  // all does too, and names nothing either (see the test below) — only the one
+  // where the evidence of an intent survives its subject.
   // Pinned as a test because the alternative to stating the limit is a comment
   // claiming a guarantee this store does not make.
   it("cannot mask a root when a damaged intent lost its paths and the list still has it", () => {
@@ -348,8 +390,9 @@ describe("workspace-root settings mutations", () => {
     expect(journalOnDisk(settings)).toEqual("replaced-by-something-outside-the-app");
 
     // A write that DOES rewrite the journal cannot leave a non-array where an
-    // array belongs, so it re-seats the unreadable value as the sole element
-    // rather than dropping the key. Still preserved, now well-shaped.
+    // array belongs, so it re-seats the unreadable value as one element of the
+    // array — after the intent this write decided on — rather than dropping the
+    // key. Still preserved, now well-shaped.
     const begun = await beginWorkspaceRootRemovalPersist(
       added[added.length - 1]!,
       "workspace-remove-root",
