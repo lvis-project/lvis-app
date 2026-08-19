@@ -34,7 +34,11 @@ import {
   useNativeContextMenu,
   type NativeContextMenuHandlers,
 } from "../hooks/use-native-context-menu.js";
-import { useAddProjectFolder } from "../hooks/use-add-project-folder.js";
+import {
+  useAddProjectFolder,
+  type AddProjectFolderOutcome,
+  type ProjectErrorReporter,
+} from "../hooks/use-add-project-folder.js";
 import { isSidebarTab } from "../../../shared/sidebar-tab.js";
 import type { InlineViewKey } from "../../../shared/view-key.js";
 import type { PluginCardSummary, PluginUiExtension } from "../types.js";
@@ -119,8 +123,8 @@ export interface SidebarProps {
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   /** Re-fetch the workspace project list (after a context-menu mutation e.g. remove). */
   onRefreshProjects?: () => void | Promise<void>;
-  /** Surface a project-removal IPC failure without hiding the row. */
-  onProjectRemoveError?: (error?: string, message?: string) => void;
+  /** Surface a refused project mutation — an add or a remove — to the user. */
+  onProjectError?: ProjectErrorReporter;
   /** Active sidebar tab ("chats" = ungrouped conversation list, "projects" = named-project groups). Persisted (SystemSettings). */
   activeSidebarTab?: SidebarTab;
   /** Switch the active sidebar tab — persists immediately. */
@@ -590,7 +594,7 @@ function ProjectSessionList({
   onLoadSession,
   onNewChatForProject,
   onRefreshProjects,
-  onProjectRemoveError,
+  onProjectError,
   projects: projectsProp,
   activeTab,
   onActiveTabChange,
@@ -606,7 +610,7 @@ function ProjectSessionList({
   onLoadSession?: (sessionId: string) => boolean | void | Promise<boolean | void>;
   onNewChatForProject?: (project: { projectRoot?: string; projectName?: string }) => void | Promise<void>;
   onRefreshProjects?: () => void | Promise<void>;
-  onProjectRemoveError?: (error?: string, message?: string) => void;
+  onProjectError?: ProjectErrorReporter;
   projects?: ProjectIdentity[];
   activeTab: SidebarTab;
   onActiveTabChange: (tab: SidebarTab) => void;
@@ -622,17 +626,24 @@ function ProjectSessionList({
   // `workspace.pickRoot` + adjacency-acknowledgement state machine, so this is
   // a third ENTRY POINT into one implementation, not a third implementation.
   const { pendingWarning, addFolder, confirmPendingFolder, cancelPendingFolder } = useAddProjectFolder();
-  const addProject = async (): Promise<void> => {
-    const result = await addFolder();
-    // null = canceled, failed, or awaiting acknowledgement (the warning block
-    // below renders and `confirmPendingFolder` finishes the add).
-    if (!result) return;
+  // A refused add is reported for the same reason a refused remove is: the user
+  // asked for a change and did not get one, and the picker dismissing itself
+  // looks identical whether the folder was persisted or rejected.
+  // `needs-acknowledgement` stays quiet because the warning block below IS the
+  // response, and `canceled` is the user's own decision.
+  const applyAddOutcome = async (outcome: AddProjectFolderOutcome): Promise<void> => {
+    if (outcome.status === "failed") {
+      onProjectError?.("add", outcome.error);
+      return;
+    }
+    if (outcome.status !== "added") return;
     await onRefreshProjects?.();
   };
+  const addProject = async (): Promise<void> => {
+    await applyAddOutcome(await addFolder());
+  };
   const confirmAddProject = async (): Promise<void> => {
-    const result = await confirmPendingFolder();
-    if (!result) return;
-    await onRefreshProjects?.();
+    await applyAddOutcome(await confirmPendingFolder());
   };
   // The one command a right-click offers wherever there is no project row —
   // the Projects tab trigger, its empty area, and the collapsed rail icon.
@@ -653,12 +664,12 @@ function ProjectSessionList({
     try {
       const result = await window.lvis?.workspace?.removeRoot?.(project.projectRoot);
       if (!result?.ok) {
-        onProjectRemoveError?.(result?.error, result?.message);
+        onProjectError?.("remove", result?.error, result?.message);
         return;
       }
       await onRefreshProjects?.();
     } catch (error) {
-      onProjectRemoveError?.("remove-failed", error instanceof Error ? error.message : undefined);
+      onProjectError?.("remove", "remove-failed", error instanceof Error ? error.message : undefined);
     }
   };
   const isSessionPinned = (sessionId: string) => Boolean(isSessionStarred?.(sessionId));
@@ -1118,7 +1129,7 @@ export function Sidebar({
   currentSessionId,
   onLoadSession,
   onRefreshProjects,
-  onProjectRemoveError,
+  onProjectError,
   activeSidebarTab = "chats",
   onActiveSidebarTabChange,
   isSessionStarred,
@@ -1417,7 +1428,7 @@ export function Sidebar({
                     onLoadSession={onLoadSession}
                     onNewChatForProject={onNewChatForProject}
                     onRefreshProjects={onRefreshProjects}
-                    onProjectRemoveError={onProjectRemoveError}
+                    onProjectError={onProjectError}
                     activeTab={activeSidebarTab}
                     onActiveTabChange={onActiveSidebarTabChange ?? (() => {})}
                     isSessionStarred={isSessionStarred}
