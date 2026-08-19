@@ -17,7 +17,26 @@
  * behaviour a normal test would observe — every install keeps working, which
  * is exactly why nothing would catch it.
  */
+import { readdirSync, readFileSync, statSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { describe, expect, it } from "vitest";
+
+/** Every .ts/.tsx file under the given roots, skipping build output. */
+function sourceFilesUnder(...roots: string[]): string[] {
+  const found: string[] = [];
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      if (entry === "node_modules" || entry === "dist") continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (/\.tsx?$/.test(entry)) found.push(full);
+    }
+  };
+  for (const root of roots) walk(root);
+  return found;
+}
 
 import { MARKETPLACE_PUBLIC_KEYS } from "../marketplace-keys.js";
 
@@ -50,5 +69,30 @@ describe("marketplace trust anchors", () => {
 
   it("is frozen so a caller cannot add an anchor at runtime", () => {
     expect(Object.isFrozen(MARKETPLACE_PUBLIC_KEYS)).toBe(true);
+  });
+
+  it("no fixture signs with the burned key id either", () => {
+    // Removing the anchor made `poc-v1` a value nothing can present any more.
+    // A fixture still using it stages a state that cannot occur, which reads
+    // as a normal case to whoever edits the test next.
+    //
+    // `signerKeyId` is recorded on the install receipt rather than verified
+    // against — `installSource` is the authoritative trust signal — so this
+    // never affected behaviour. That is exactly why nothing else catches it.
+    //
+    // The prose above and in `marketplace-keys.ts` keeps the name on purpose:
+    // explaining why a key was retired requires naming it. This looks only at
+    // code that USES the id as a value.
+    const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+    const offenders: string[] = [];
+    for (const file of sourceFilesUnder(join(root, "src"), join(root, "test"))) {
+      const text = readFileSync(file, "utf8");
+      for (const [index, line] of text.split("\n").entries()) {
+        if (/(signerKeyId|signerId)\s*:\s*["'`]poc-v1["'`]/.test(line)) {
+          offenders.push(`${relative(root, file)}:${index + 1}`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });

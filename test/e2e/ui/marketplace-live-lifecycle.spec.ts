@@ -691,7 +691,7 @@ test("publish, approve, install, update, rollback, disable, re-enable, and unins
         sdkSha: process.env.SDK_SHA ?? null,
         epApiSha: process.env.EP_API_SHA ?? null,
         approval: { slug: managedSlug, hiddenBeforeApproval: true, state: approval.approval_state },
-        artifact: { slug, hashes: { "1.0.0": sha256(v1), "2.0.0": sha256(v2) }, signerId: "poc-v1" },
+        artifact: { slug, hashes: { "1.0.0": sha256(v1), "2.0.0": sha256(v2) }, signerId: "prod-v1" },
         transitions,
         zeroOrphans,
       },

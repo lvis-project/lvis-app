@@ -86,7 +86,7 @@ describe("Phase 1 — plugin trust boundary", () => {
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "a".repeat(64),
-      signerKeyId: "poc-v1",
+      signerKeyId: "prod-v1",
       installedAt: new Date(0).toISOString(),
       files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
     };
@@ -551,7 +551,7 @@ describe("Phase 1 — plugin trust boundary", () => {
         pluginId: "tb-v1-mkt",
         version: "1.0.0",
         artifactSha256: "a".repeat(64),
-        signerKeyId: "poc-v1",
+        signerKeyId: "prod-v1",
         installedAt: new Date(0).toISOString(),
         files: await hashReceiptFiles(pluginDir, ["entry.mjs", "plugin.json"]),
       };
