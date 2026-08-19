@@ -72,6 +72,44 @@ try {
       `[knip-self-test] actual gate lacked the expected diagnostic: ${evidence}`,
     );
   }
+
+  // The other direction. A gate that only rejects additions lets the debt
+  // figure freeze: removing unused code passes while the baseline keeps
+  // claiming it is still there. Proven by execution, not by reading the
+  // branch — the fixture below has a baseline entry whose file is gone.
+  writeFileSync(join(fixtureRoot, "knip-baseline.json"), `${JSON.stringify({
+    schemaVersion: 1,
+    knipVersion: KNIP_VERSION,
+    entries: [
+      { type: "files", file: "src/already-deleted.ts", name: "src/already-deleted.ts" },
+    ],
+  }, null, 2)}\n`, "utf8");
+  rmSync(join(fixtureSource, "unused.ts"), { force: true });
+
+  const staleResult = spawnSync(
+    process.execPath,
+    [
+      GATE_SCRIPT,
+      "--root", fixtureRoot,
+      "--config", "knip.json",
+      "--baseline", "knip-baseline.json",
+      "--knip-binary", KNIP_BINARY,
+    ],
+    { cwd: fixtureRoot, encoding: "utf8", maxBuffer: 16 * 1024 * 1024 },
+  );
+  if (staleResult.error) throw staleResult.error;
+  if (staleResult.signal || staleResult.status !== 1) {
+    throw new Error(
+      `[knip-self-test] actual gate accepted a baseline entry that no longer exists`
+      + ` (${staleResult.signal ?? staleResult.status}): ${staleResult.stderr}`,
+    );
+  }
+  if (!staleResult.stderr.includes("that no longer exist")
+      || !staleResult.stderr.includes("src/already-deleted.ts")) {
+    throw new Error(
+      `[knip-self-test] stale-entry rejection lacked the expected diagnostic: ${staleResult.stderr}`,
+    );
+  }
 } finally {
   rmSync(fixtureRoot, { recursive: true, force: true });
 }
