@@ -42,8 +42,7 @@ import {
 } from "../../../shared/parent-adjudication-bounds.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import { AuditPanel } from "../components/permissions/AuditPanel.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { getApi } from "../api-client.js";
 import { isIpcErrorResult } from "../types.js";
 import { canonicalStringify } from "../../../shared/canonical-json.js";

@@ -52,8 +52,10 @@ import {
   retainedDescendantWorkspaceRoots,
   opaqueWorkspaceRootAuditRef,
 } from "../../permissions/workspace-root-reconciler.js";
-import { withWorkspaceRootLifecycleLock } from "../../permissions/workspace-root-lifecycle-lock.js";
-import { setWorkspaceRootLifecycle } from "../../permissions/workspace-root-lifecycle.js";
+import {
+  setWorkspaceRootLifecycle,
+  withWorkspaceRootLifecycleLock,
+} from "../../permissions/workspace-root-lifecycle.js";
 import { getActivePluginSurfacePermissionScope } from "../../boot/plugin-surface-permissions.js";
 import { detachWorkspaceRootSessions } from "../../memory/workspace-root-session-lifecycle.js";
 
