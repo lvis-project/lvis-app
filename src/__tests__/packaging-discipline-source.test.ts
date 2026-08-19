@@ -313,7 +313,15 @@ describe("installer smoke and packaging discipline", () => {
     // a blocked PR. The scan skips the repeat instead; that behaviour is
     // pinned in test/scripts/check-cluster-scope.test.ts.
     expect(clusterScope).not.toContain("pull-request-page-duplicate");
-    expect(clusterScope).toContain("pull-request-window-changed");
+    // Inverted for the same reason, one layer up. `pull-request-window-changed`
+    // compared two scans of the rolling window and hard-failed on ANY
+    // difference between them — a candidate's `updated_at` advancing, the same
+    // members arriving in another order, or one unrelated pull merging between
+    // the scans. The scans are unioned now, so a late arrival is evaluated
+    // instead of reported as corruption. What survives is a BOUNDED settle
+    // check: a window that never stops moving still fails, loudly and rarely.
+    expect(clusterScope).not.toContain("pull-request-window-changed");
+    expect(clusterScope).toContain("pull-request-window-unsettled");
     expect(clusterScope).toContain("pull-request-files-incomplete");
     expect(clusterScope).toContain("pull-request-files-saturated");
     expect(clusterScope).toContain("pull-request-commits-saturated");
