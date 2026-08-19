@@ -34,7 +34,7 @@
  * `{ ok: false, error: "no-reporter" }`.
  */
 import { ipcMain } from "electron";
-import { validateSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { fanOutToAllWindows } from "../broadcast-helpers.js";
 import type { IpcDeps } from "../types.js";
 import type { WorkItemRunResult } from "../../shared/work-board-types.js";
@@ -133,7 +133,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
 
   // ─── List ────────────────────────────────────────
   ipcMain.handle(WORK_BOARD.list, async (e, filter?: WorkItemListFilter) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, WORK_BOARD.list, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -143,7 +143,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
 
   // ─── Get ─────────────────────────────────────────
   ipcMain.handle(WORK_BOARD.get, async (e, id: number) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, WORK_BOARD.get, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -153,7 +153,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
 
   // ─── Add ─────────────────────────────────────────
   ipcMain.handle(WORK_BOARD.add, async (e, input: WorkItemCreateInput) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, WORK_BOARD.add, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -167,7 +167,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
 
   // ─── Update ──────────────────────────────────────
   ipcMain.handle(WORK_BOARD.update, async (e, id: number, patch: WorkItemUpdateInput) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, WORK_BOARD.update, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -181,7 +181,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
 
   // ─── Transition ──────────────────────────────────
   ipcMain.handle(WORK_BOARD.transition, async (e, id: number, to: WorkItemStatusStored) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, WORK_BOARD.transition, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -195,7 +195,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
 
   // ─── Complete ────────────────────────────────────
   ipcMain.handle(WORK_BOARD.complete, async (e, id: number) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, WORK_BOARD.complete, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -209,7 +209,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
 
   // ─── Reopen ──────────────────────────────────────
   ipcMain.handle(WORK_BOARD.reopen, async (e, id: number) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, WORK_BOARD.reopen, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -223,7 +223,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
 
   // ─── Remove ──────────────────────────────────────
   ipcMain.handle(WORK_BOARD.remove, async (e, id: number) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, WORK_BOARD.remove, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -243,7 +243,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
   // handler owns only the coarse started/finished/failed markers so every window
   // can show/clear a per-item running indicator without re-listing.
   ipcMain.handle(WORK_BOARD.run, async (e, id: number, opts?: { agentName?: string }) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, WORK_BOARD.run, e);
       return UNAUTHORIZED_FRAME;
     }
@@ -295,7 +295,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
       kind: "daily" | "weekly",
       input?: { date?: string; weekIso?: string; weekOffset?: number; projectRoot?: string; includeUnscoped?: boolean },
     ) => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, WORK_BOARD.generateReport, e);
         return UNAUTHORIZED_FRAME;
       }
@@ -313,7 +313,7 @@ export function registerWorkBoardHandlers(deps: IpcDeps): void {
   // Renderer → main: read a past run's persisted plan+execute conversation for
   // the run-history view. Returns `{ events }` (empty when the file is absent).
   ipcMain.handle(WORK_BOARD.runTranscript, async (e, itemId: number, runId: string) => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, WORK_BOARD.runTranscript, e);
       return UNAUTHORIZED_FRAME;
     }

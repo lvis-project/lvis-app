@@ -21,10 +21,12 @@ import { isPluginShellFrameUrl } from "../shared/plugin-shell-frame.js";
  * sending frame is destroyed or navigated away between `invoke` and handler
  * execution, so an absent frame is an unprovable sender, not a trusted one.
  *
- * Read-only channels may use this. State-mutating / sensitive host channels
- * must use {@link validateHostRendererSender} instead — it additionally
- * rejects an empty frame URL and plugin-ui-shell frames, neither of which
- * this base validator does.
+ * This is the protocol allow-list only: it admits plugin-ui-shell frames,
+ * which are also `file://`. Host IPC handlers must therefore call
+ * {@link validateHostRendererSender}, which layers the shell rejection on top;
+ * the plugin bridge calls {@link validatePluginFrame}, which admits only the
+ * shell. Nothing else should gate on this directly — "the sender is one of our
+ * own origins" does not answer "which of our own trust domains is it".
  */
 export function validateSender(event: IpcMainInvokeEvent | null | undefined): boolean {
   const frame = event?.senderFrame;
@@ -42,9 +44,15 @@ export function validateSender(event: IpcMainInvokeEvent | null | undefined): bo
 }
 
 /**
- * Host renderer validation for state-mutating host IPC. Plugin UI shells are
- * also file:// frames but intentionally receive only `window.lvisPlugin`, not
- * host-wide `window.lvisApi`; reject them explicitly at sensitive channels.
+ * Host renderer validation for host IPC. Plugin UI shells are also file://
+ * frames but intentionally receive only `window.lvisPlugin`, not host-wide
+ * `window.lvisApi`; reject them explicitly.
+ *
+ * The narrow preload is not the boundary — it only shapes what plugin AUTHORS
+ * can call. A compromised plugin renderer process reaches `ipcRenderer` itself
+ * and can invoke any channel name it likes, so the frame check in main is the
+ * only thing that actually holds. Every host channel gets it, read-only ones
+ * included: a read still discloses host state to the plugin domain.
  */
 export function validateHostRendererSender(event: IpcMainInvokeEvent | null | undefined): boolean {
   // `validateSender` already applied the accepted-protocol allow-list, already

@@ -11,7 +11,7 @@ import { t } from "../../i18n/index.js";
 import { promises as fs } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { validateHostRendererSender, validateSender, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { DENY_EXTENSIONS as DENY_LIST } from "../../shared/attachments-deny-list.js";
@@ -156,7 +156,7 @@ export function registerAttachHandlers(deps: IpcDeps): void {
   const { auditLogger, getMainWindow } = deps;
 
   ipcMain.handle(CHANNELS.attach.openFile, async (e): Promise<OpenFileResult> => {
-    if (!validateSender(e)) {
+    if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.attach.openFile, e);
       return { canceled: true, files: [], rejected: [] };
     }
@@ -205,7 +205,7 @@ export function registerAttachHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.attach.readImage,
     async (e, filePath: string): Promise<ReadImageResult> => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.attach.readImage, e);
         return { ok: false, error: "unauthorized" };
       }
@@ -268,7 +268,7 @@ export function registerAttachHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.attach.saveClipboardImage,
     async (e, input: SaveClipboardImageInput): Promise<SaveClipboardImageResult> => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.attach.saveClipboardImage, e);
         return { ok: false, error: "unauthorized" };
       }
@@ -362,7 +362,7 @@ export function registerAttachHandlers(deps: IpcDeps): void {
   ipcMain.handle(
     CHANNELS.attach.openExternal,
     async (e, filePath: string): Promise<{ ok: boolean; error?: string }> => {
-      if (!validateSender(e)) {
+      if (!validateHostRendererSender(e)) {
         auditUnauthorized(auditLogger, CHANNELS.attach.openExternal, e);
         return { ok: false, error: "unauthorized" };
       }

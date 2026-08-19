@@ -3,7 +3,7 @@
  * Covers: lvis:usage:*
  */
 import { ipcMain } from "electron";
-import { validateSender, validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
+import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { handleUsageSummary, handleUsageRange, handleUsageDailySummary, type UsageDailySummaryInput } from "../handlers/usage.js";
@@ -16,7 +16,7 @@ export function registerUsageHandlers(deps: IpcDeps): void {
 
   // read-only; sender guard optional but added for cross-window consistency
   ipcMain.handle(CHANNELS.usage.range, async (e, opts: { dateFrom: string; dateTo: string }) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.usage.range, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.usage.range, e); return UNAUTHORIZED_FRAME; }
     return handleUsageRange(opts, auditLogger);
   });
 
@@ -26,7 +26,7 @@ export function registerUsageHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.usage.exportCsv, async (e, rows: Array<Record<string, string | number>>) => {
-    if (!validateSender(e)) { auditUnauthorized(auditLogger, CHANNELS.usage.exportCsv, e); return UNAUTHORIZED_FRAME; }
+    if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.usage.exportCsv, e); return UNAUTHORIZED_FRAME; }
     const { dialog, BrowserWindow } = await import("electron");
     const win = BrowserWindow.getFocusedWindow() ?? undefined;
     const result = win
