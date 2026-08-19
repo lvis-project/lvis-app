@@ -46,11 +46,9 @@ import {
 import { checkRuntimeAdmission } from "../plugins/runtime/runtime-admission.js";
 import { createLogger } from "../lib/logger.js";
 import type { McpUiSlot, McpUiToolMeta } from "./types.js";
+import { RAW_RESULT_META } from "./protocol-constants.js";
 
 const log = createLogger("plugin-runtime-delegate");
-
-/** Reserved `_meta` key carrying the plugin's raw (non-text) return value. */
-export const RAW_RESULT_META = "lvisai/rawResult";
 
 function errorOutcome(text: string): PluginToolOutcome {
   return { content: [{ type: "text", text }], isError: true };

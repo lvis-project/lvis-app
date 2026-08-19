@@ -135,6 +135,7 @@ async function harness(
       pluginRoot: "/plugins/child",
       hostRoot: "/app",
       pluginDataDir: "/plugins/child/data",
+      installedPluginIds: [],
       config: { enabled: true },
       generationId: GENERATION,
     },
@@ -223,6 +224,7 @@ describe("the child serves its plugin over framed stdio", () => {
           pluginRoot: "/plugins/child",
           hostRoot: "/app",
           pluginDataDir: "/plugins/child/data",
+          installedPluginIds: [],
           generationId: GENERATION,
         },
         channel: { call: () => Promise.reject(new Error("unused")), notify: () => {} },
@@ -304,6 +306,7 @@ describe("the hostApi stub the child hands the plugin", () => {
         pluginRoot: "/plugins/child",
         hostRoot: "/app",
         pluginDataDir: "/plugins/child/data",
+        installedPluginIds: [],
         generationId: GENERATION,
       },
       channel: {

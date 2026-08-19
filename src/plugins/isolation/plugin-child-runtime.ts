@@ -33,6 +33,7 @@ import {
 } from "../../mcp/plugin-mcp-server.js";
 import type { PluginUiResourceProvider } from "../../mcp/plugin-ui-resource-provider.js";
 import { describeNonJson } from "../../shared/json-representable.js";
+import { RAW_RESULT_META } from "../../mcp/protocol-constants.js";
 import type {
   PluginHostApi,
   PluginManifest,
@@ -73,6 +74,14 @@ export interface PluginChildContext {
   readonly config?: Record<string, unknown>;
   /** The incarnation this child serves. Stamped on every outbound message. */
   readonly generationId: string;
+  /**
+   * The installed-plugin ids as of construction.
+   *
+   * `getInstalledPluginIds` is synchronous, so §3.1 answers it from a
+   * host-pushed snapshot; this is the first push. Later ones arrive as
+   * `installed-plugins` notifications.
+   */
+  readonly installedPluginIds: readonly string[];
 }
 
 /** How the child obtains the plugin's factory export. */
@@ -377,6 +386,21 @@ export async function startPluginChildRuntime(
    */
   const config: Record<string, unknown> = { ...(context.config ?? {}) };
   /**
+   * The child's copy of the installed-plugin set, and the member that reads it.
+   *
+   * It lives here rather than in one of the four bound groups because it
+   * belongs to none of them: there is no host handler to bind: the contract
+   * says `child-local`, and the dispatcher REFUSES the path if it is ever sent.
+   * A group factory for a member with no dispatched half would be a factory
+   * that binds nothing.
+   *
+   * A COPY is returned per call. Handing out the array itself would let a
+   * plugin mutate the snapshot the next `getInstalledPluginIds` reads, which
+   * the in-process member — a fresh array from the registry each time — cannot
+   * do.
+   */
+  let installedPluginIds: readonly string[] = [...context.installedPluginIds];
+  /**
    * The wired members, composed group by group. One spread per group keeps four
    * parallel authors out of each other's lines; a member no group claims still
    * throws rather than resolving `undefined`.
@@ -399,7 +423,23 @@ export async function startPluginChildRuntime(
       report: log,
     }),
     ...createStorageChildMembers(caller, context),
+    getInstalledPluginIds: () => [...installedPluginIds],
   };
+  /**
+   * `getAppPreference` is deliberately NOT here, and its absence is a decision
+   * rather than an omission.
+   *
+   * §3.1 answers it with a host-pushed snapshot, and a snapshot is only correct
+   * while something re-pushes it. The in-process member reads
+   * `settingsService` LIVE on every call, and `hostApi` exposes no
+   * preference-change signal for the host end of a child to subscribe to — so a
+   * snapshot would silently answer with the value the preference had when the
+   * plugin started. That is the shape of wrong answer this boundary exists to
+   * make impossible, so the member keeps its throwing stub: a plugin that reads
+   * a preference cannot be routed out-of-process until that signal exists. The
+   * pilot does not read one (verified against its sources); `ms-graph` does,
+   * which makes this the first thing to build before it moves.
+   */
   const hostApi = createChildHostApiStub(
     pluginId,
     (path) => members[path] ?? unimplementedChildMember(pluginId, path),
@@ -428,7 +468,13 @@ export async function startPluginChildRuntime(
     if (!handler) {
       throw new Error(`[plugin-child:${pluginId}] tool '${name}' has no handler`);
     }
-    const value = await handler(args);
+    // `{}` becomes NO payload, which is the convention the in-process delegate
+    // already applies (`plugin-runtime-delegate.ts`) because some plugins
+    // distinguish an absent payload from an empty object. MCP has no way to
+    // carry "absent" — `tools/call` params are an object — so the two arms have
+    // to agree on where the conversion happens, and this is that place on the
+    // isolated arm.
+    const value = await handler(Object.keys(args).length > 0 ? args : undefined);
     const nonJson = describeNonJson(value, `${name}(result)`);
     if (nonJson) {
       throw new Error(
@@ -442,6 +488,13 @@ export async function startPluginChildRuntime(
           text: typeof value === "string" ? value : JSON.stringify(value ?? null),
         },
       ],
+      // The text branch is LOSSY and cannot be the only carrier: a plugin
+      // returning the string `'{"a":1}'` and one returning the object `{a:1}`
+      // produce identical text, so a host reading only `content[0].text` would
+      // have to guess which it was. `_meta` carries the value itself — the same
+      // key, for the same reason, as the in-process delegate. It is safe to put
+      // here because `describeNonJson` above has already proven it survives.
+      _meta: { [RAW_RESULT_META]: value },
     };
   };
 
@@ -458,6 +511,10 @@ export async function startPluginChildRuntime(
     adoptSubscription,
     openAbortChannel,
     deliver(notification) {
+      if (notification.kind === "installed-plugins") {
+        installedPluginIds = [...notification.pluginIds];
+        return "delivered";
+      }
       if (notification.kind === "subscription-closed") {
         return subscriptions.close(notification.subscriptionId, notification.reason)
           ? "closed"

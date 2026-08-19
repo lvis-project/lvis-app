@@ -20,7 +20,7 @@
  * correct, but nothing tells the seventh. Callers of this primitive pass allow
  * paths only; the floor is not theirs to forget.
  */
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type StdioOptions } from "node:child_process";
 
 import {
   getDefaultSensitiveReadDenyPaths,
@@ -76,6 +76,17 @@ export interface ConfinedChildSpec {
    * where the caller records that the wrap happened.
    */
   readonly onWrapped?: () => void;
+  /**
+   * The child's standard streams.
+   *
+   * Defaults to `["ignore", "pipe", "pipe"]` — the Python worker takes its
+   * orders over a Unix socket and has nothing to say on stdin, so leaving it
+   * open would be an idle descriptor into a confined process. A JS plugin child
+   * is the opposite case: it is a JSON-RPC server whose pipes the host owns, so
+   * it asks for `"pipe"` on stdin and that is the whole reason this is a
+   * parameter rather than a constant.
+   */
+  readonly stdio?: StdioOptions;
 }
 
 /**
@@ -103,7 +114,7 @@ export async function spawnConfinedChild(spec: ConfinedChildSpec): Promise<Child
 
   assertManagedChildProcessAdmissionOpen(spec.label);
   const child = spawn(executable, wrappedArgs, {
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: spec.stdio ?? ["ignore", "pipe", "pipe"],
     shell: false,
     windowsHide: true,
     env: composeConfinedEnv(spec.baseEnv, env, spec.extraEnv ?? {}),
