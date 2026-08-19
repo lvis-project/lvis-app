@@ -62,12 +62,13 @@ export default async function createPlugin(ctx) {
     }), "utf8");
     const receiptFiles = ["entry.mjs", "plugin.json", "value.txt"];
     await writeInstallReceipt(cacheRoot, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       pluginId: installId,
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "a".repeat(64),
       signerKeyId: "test-v1",
+      admission: null,
       installedAt: new Date(0).toISOString(),
       files: await hashReceiptFiles(pluginRoot, receiptFiles),
     });
@@ -122,12 +123,13 @@ export default async function createPlugin(ctx) {
     expect(access.acquire).toHaveBeenCalled();
 
     await writeInstallReceipt(cacheRoot, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       pluginId: installId,
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "b".repeat(64),
       signerKeyId: "test-v1",
+      admission: null,
       installedAt: new Date(1).toISOString(),
       files: await hashReceiptFiles(pluginRoot, receiptFiles),
     });
@@ -138,12 +140,13 @@ export default async function createPlugin(ctx) {
     const generationIdsBeforeFailedRestart = await readdir(generationsRoot);
     await writeFile(join(pluginRoot, "entry.mjs"), "export default {", "utf8");
     await writeInstallReceipt(cacheRoot, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       pluginId: installId,
       version: "1.0.0",
       installSource: "marketplace",
       artifactSha256: "c".repeat(64),
       signerKeyId: "test-v1",
+      admission: null,
       installedAt: new Date(2).toISOString(),
       files: await hashReceiptFiles(pluginRoot, receiptFiles),
     });

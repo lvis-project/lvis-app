@@ -316,12 +316,13 @@ async function seedE2ePlugins(
       "utf-8",
     );
     await writeInstallReceipt(cacheRoot, {
-      schemaVersion: 2,
+      schemaVersion: 3,
       pluginId: manifest.id,
       version: manifest.version,
       installSource: "local-dev",
       artifactSha256: null,
       signerKeyId: null,
+      admission: null,
       installedAt: new Date().toISOString(),
       files: await hashReceiptFiles(pluginDir, ["plugin.json", manifest.entry]),
     });
@@ -446,12 +447,13 @@ async function seedE2ePlugins(
         }
       }
       await writeInstallReceipt(cacheRoot, {
-        schemaVersion: 2,
+        schemaVersion: 3,
         pluginId: manifest.id,
         version: manifest.version,
         installSource: "local-dev",
         artifactSha256: null,
         signerKeyId: null,
+        admission: null,
         installedAt: new Date().toISOString(),
         files: await hashReceiptFiles(pluginDir, receiptFiles),
       });

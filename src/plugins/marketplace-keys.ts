@@ -64,6 +64,44 @@ export const WHITELIST_PUBLIC_KEYS: Readonly<Record<string, PublicKeyInput>> = O
 
 export const WHITELIST_PRIMARY_KEY_ID = "whitelist-v1" as const;
 
+/**
+ * Trust roots for the plugin ADMISSION CATALOG (`plugins/admission/`) — the
+ * signed document that binds `slug@version → sha256 + publisher` and is the
+ * authority for whether an artifact may be installed at all.
+ *
+ * A THIRD, SEPARATE domain, and both separations are load-bearing:
+ *
+ * - Not `MARKETPLACE_PUBLIC_KEYS`. The catalog and the per-artifact envelope
+ *   are verified conjunctively while both exist, and the entire value of that
+ *   overlap is that one compromised key is not sufficient. Sharing the anchor
+ *   would collapse the conjunction back to a single key.
+ * - Not the whitelist/revocation domain. Compromising an admission key means
+ *   admitting arbitrary bytes under arbitrary slugs — the same power that
+ *   compromising the artifact key has today. The revocation document is what
+ *   a defender reaches for when exactly that has happened, so it cannot be
+ *   signed by the key under suspicion; sharing would hand the same attacker
+ *   the ability to un-revoke.
+ *
+ * Retirement works by REMOVAL, not by annotation: `verifyEnvelope` accepts any
+ * key in the map it is handed, so a key that stays in this map stays an
+ * admission authority no matter what a comment says about it. Rotation is
+ * O(1) here — add the new id, re-sign the ONE document, drop the old id after
+ * one catalog TTL — which is the property the per-artifact envelope lacks,
+ * where retiring an anchor cost a re-sign of 804 of 860 version rows.
+ *
+ * EMPTY TODAY, and that is the fail-closed state rather than a placeholder:
+ * `admission-registry.ts` refuses every install while this map is empty, and
+ * says so with a distinct reason instead of reporting a signature failure.
+ * The issuance keypair is generated and held by the operator of
+ * `lvis-project/marketplace-whitelist` as a workflow-scoped secret — the same
+ * custody model as `WHITELIST_SIGNING_KEY` — so the public half arrives here
+ * in the commit that publishes the first catalog and flips
+ * `ADMISSION_ENFORCEMENT` to `"enforce"`. Provisioning a value here before
+ * that document exists would put a trust anchor in the client for a signer
+ * nobody holds.
+ */
+export const ADMISSION_PUBLIC_KEYS: Readonly<Record<string, PublicKeyInput>> = Object.freeze({});
+
 // Trust root for the plugin revocation registry (min-version pins +
 // an explicit `slug@version` blocklist, see `plugins/revocation/`).
 //

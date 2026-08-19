@@ -13,11 +13,50 @@ export interface InstallReceiptFile {
 }
 
 /**
- * Schema v2 — written by all new installs.
+ * Which signed admission catalog authorised this install.
+ *
+ * Recorded because `signerKeyId` alone cannot answer "under whose authority is
+ * this on disk" once the artifact key stops being the authority — and because
+ * `documentSha256` makes the claim checkable after the fact: given a receipt,
+ * an operator can fetch the archived issuance, hash it, and confirm the
+ * distributor really made that statement.
+ */
+export interface PluginAdmissionRecord {
+  /** `issuedAt` of the authorising catalog document. */
+  issuedAt: string;
+  /** Hex sha256 of that document's exact body bytes. */
+  documentSha256: string;
+  /** Who the distributor attributed the artifact to. */
+  publisher: string;
+}
+
+/**
+ * Schema v3 — written by all new installs.
  * installSource is the authoritative trust signal; signerKeyId / artifactSha256
  * are null for local-dev installs (no signed artifact to validate against).
+ *
+ * `admission` is null for local-dev installs, exactly as `signerKeyId` already
+ * is, and for marketplace installs performed while the admission catalog is
+ * not yet the authority. A null there is a true statement — "no catalog
+ * authorised this" — not a missing value to be defaulted.
  */
 export interface PluginInstallReceipt {
+  schemaVersion: 3;
+  pluginId: string;
+  version: string;
+  installSource: "marketplace" | "local-dev";
+  artifactSha256: string | null;
+  signerKeyId: string | null;
+  admission: PluginAdmissionRecord | null;
+  installedAt: string;
+  files: InstallReceiptFile[];
+}
+
+/**
+ * On-disk shape of receipts written before schema v3. Normalised by
+ * `verifyInstallReceiptRaw`; the only difference is the absent `admission`.
+ */
+interface PluginInstallReceiptV2 {
   schemaVersion: 2;
   pluginId: string;
   version: string;
@@ -87,17 +126,19 @@ export async function buildInstallReceipt(
     installSource: "marketplace" | "local-dev";
     artifactSha256: string | null;
     signerKeyId: string | null;
+    admission?: PluginAdmissionRecord | null;
     files: string[];
     installedAt?: string;
   },
 ): Promise<{ receipt: PluginInstallReceipt; raw: string }> {
   const receipt: PluginInstallReceipt = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     pluginId: input.pluginId,
     version: input.version,
     installSource: input.installSource,
     artifactSha256: input.artifactSha256,
     signerKeyId: input.signerKeyId,
+    admission: input.admission ?? null,
     installedAt: input.installedAt ?? new Date().toISOString(),
     files: await hashReceiptFiles(pluginRoot, input.files),
   };
@@ -192,22 +233,30 @@ export async function verifyInstallReceiptRaw(
     const installSource: "marketplace" | "local-dev" =
       typeof rawSigner === "string" && rawSigner.startsWith("dev:") ? "local-dev" : "marketplace";
     receipt = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       pluginId: v1.pluginId,
       version: v1.version,
       installSource,
       artifactSha256: installSource === "local-dev" ? null : v1.artifactSha256,
       signerKeyId: installSource === "local-dev" ? null : (typeof rawSigner === "string" ? rawSigner : null),
+      admission: null,
       installedAt: v1.installedAt,
       files: v1.files,
     };
-  } else if (candidate.schemaVersion === 2) {
-    const v2 = candidate as unknown as PluginInstallReceipt;
+  } else if (candidate.schemaVersion === 2 || candidate.schemaVersion === 3) {
+    const stored = candidate as unknown as PluginInstallReceiptV2 | PluginInstallReceipt;
     // Runtime enum validation — JSON.parse+as-cast cannot enforce union literals.
-    if (v2.installSource !== "marketplace" && v2.installSource !== "local-dev") {
-      return { ok: false, reason: `invalid receipt installSource: ${String(v2.installSource)}` };
+    if (stored.installSource !== "marketplace" && stored.installSource !== "local-dev") {
+      return { ok: false, reason: `invalid receipt installSource: ${String(stored.installSource)}` };
     }
-    receipt = v2;
+    // v2 → v3: the absence of an admission record means no catalog authorised
+    // this install, which is exactly what it says. Not a default that papers
+    // over a missing value.
+    receipt = {
+      ...stored,
+      schemaVersion: 3,
+      admission: "admission" in stored ? stored.admission : null,
+    };
   } else {
     return { ok: false, reason: `unsupported install receipt schema: ${String(candidate.schemaVersion)}` };
   }

@@ -55,7 +55,7 @@ import {
   stageRemovalTransaction,
   type RemovalTransactionKind,
 } from "./plugin-removal-transaction.js";
-import type { PluginInstallReceipt } from "./plugin-install-receipt.js";
+import type { PluginAdmissionRecord, PluginInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
 import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
@@ -2265,6 +2265,7 @@ export class PluginMarketplaceService {
       installSource: "marketplace" | "local-dev";
       artifactSha256: string | null;
       signerKeyId: string | null;
+      admission?: PluginAdmissionRecord | null;
       files: string[];
       installedAt?: string;
     },
@@ -2366,6 +2367,7 @@ export class PluginMarketplaceService {
                   installSource: "marketplace",
                   artifactSha256: verified.artifactSha256,
                   signerKeyId: verified.signerKeyId,
+                  admission: verified.admission,
                   files: [...files],
                 });
                 return opts.activatePreparedArtifact({
