@@ -1270,6 +1270,39 @@ export abstract class PluginRuntimeState {
   }
 
   /**
+   * Install-receipt integrity gate (LOAD boundary). Same "skip this plugin,
+   * keep loading everything else" shape as the minimum-version and revocation
+   * gates below, and — critically — the same STUB obligation.
+   *
+   * A receipt failure is decided in the boot preflight, BEFORE the manifest is
+   * read, so `knownPluginManifests` never learns the plugin exists.
+   * `listPluginCards()` projects exactly two maps — `knownPluginManifests` and
+   * `failedPluginStubs` — so marking the id failed without a stub produces NO
+   * card at all: the plugin vanishes from the sidebar, from Settings, and from
+   * the Plugin Doctor, while its registry row keeps reporting it as installed
+   * in the marketplace. The user is left with an install that exists
+   * everywhere except where it can be repaired. The stub is what makes the
+   * refusal reachable.
+   *
+   * The failure kind stays unclassified on purpose: reinstalling rewrites both
+   * the payload and its receipt, so this IS locally repairable, and
+   * `isReinstallFixableFailureKind(undefined)` is what lets the Doctor offer
+   * that repair.
+   */
+  protected markReceiptIntegrityFailed(
+    pluginId: string,
+    reason: string,
+    displayName: string = pluginId,
+  ): void {
+    this.markFailed(pluginId, {
+      name: displayName,
+      description: "Plugin files do not match their install receipt.",
+    }, {
+      installFailureMessage: reason,
+    });
+  }
+
+  /**
    * Plugin↔app minimum-version gate (LOAD boundary). Returns `true` and marks
    * the plugin failed when `manifest.requires.minAppVersion` is higher than the
    * running LVIS app version; the caller then skips `start()`. Returns `false`
