@@ -72,8 +72,9 @@ function sign(body: string, key: KeyObject = signingKey, keyId = ANCHOR_KEY_ID):
 }
 
 // ---------------------------------------------------------------------
-// A real origin. Each route is a function so a test can change what the
-// server does between two refreshes of the same registry.
+// A real origin. Routes are plain records a test replaces between two
+// refreshes of the same registry, so the server never dispatches a value
+// derived from the request path.
 // ---------------------------------------------------------------------
 
 interface Route {
@@ -83,10 +84,10 @@ interface Route {
 
 let server: Server;
 let baseUrl: string;
-let routes: Map<string, () => Route>;
+let routes: Map<string, Route>;
 
-function serve(path: string, route: Route | (() => Route)): void {
-  routes.set(path, typeof route === "function" ? route : () => route);
+function serve(path: string, route: Route): void {
+  routes.set(path, route);
 }
 
 function serveSignedCatalog(body: string, signature = sign(body)): void {
@@ -124,8 +125,7 @@ beforeEach(async () => {
       res.writeHead(404).end("not found");
       return;
     }
-    const { status, body } = route();
-    res.writeHead(status, { "content-type": "application/json" }).end(body);
+    res.writeHead(route.status, { "content-type": "application/json" }).end(route.body);
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   baseUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
