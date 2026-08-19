@@ -8,6 +8,7 @@ import {
   dismissSuggestedReplies,
   acceptSuggestedReply,
   clearDismissedReplies,
+  resetSuggestedReplies,
   __resetSuggestedRepliesStoreForTests,
   __teardownSuggestedRepliesIpcForTests,
 } from "../use-suggested-replies.js";
@@ -202,6 +203,36 @@ describe("useSuggestedReplies", () => {
     act(() => { pushSuggestedReplies(["둘"]); });
     expect(getSuggestedRepliesCounters().ignored).toBe(0);
     expect(getSuggestedRepliesCounters().dismissed).toBe(1);
+  });
+
+  it("resetSuggestedReplies clears an active snapshot and notifies subscribers", () => {
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["첫", "둘"]); });
+    expect(result.current.best).toBe("첫");
+
+    act(() => { resetSuggestedReplies(); });
+
+    expect(result.current).toEqual({ best: null, alternates: [], isDismissed: false });
+  });
+
+  it("resetSuggestedReplies releases the dismiss latch so the next conversation renders fresh", () => {
+    const { result } = renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["첫"]); });
+    act(() => { dismissSuggestedReplies(); });
+
+    act(() => { resetSuggestedReplies(); });
+    act(() => { pushSuggestedReplies(["새 대화의 제안"]); });
+
+    expect(result.current.best).toBe("새 대화의 제안");
+    expect(result.current.isDismissed).toBe(false);
+  });
+
+  it("resetSuggestedReplies does not record an ignored event — leaving a conversation is not passing one over", () => {
+    renderHook(() => useSuggestedReplies());
+    act(() => { pushSuggestedReplies(["첫"]); });
+    act(() => { resetSuggestedReplies(); });
+    act(() => { pushSuggestedReplies(["둘"]); });
+    expect(getSuggestedRepliesCounters().ignored).toBe(0);
   });
 
   it("telemetry: shown is NOT counted when push lands while dismiss latch is set", () => {
