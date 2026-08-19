@@ -20,6 +20,7 @@ import type {
 } from "./platform-bridge-inbound.js";
 import type { PlatformBridgeBinding, PlatformBridgeGuard } from "../shared/chat-origin.js";
 import { isTelegramConversationId } from "../shared/telegram-connection.js";
+import { hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
 
 export const TELEGRAM_PLATFORM_ACTOR_SECRET_NAME = "telegram-platform-bridge-actor-v1.key";
 
@@ -30,7 +31,6 @@ const TELEGRAM_ID_PATTERN = /^[1-9][0-9]{0,15}$/;
 
 const MAX_DELIVERY_ID_CHARS = 256;
 const MAX_TEXT_CHARS = 24_000;
-const UNSAFE_CONTROL_CHARACTERS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
 const ACTOR_HMAC_DOMAIN = "lvis/telegram-platform-bridge/actor/v1\0";
 const ACTOR_KEY_HMAC_DOMAIN = "lvis/telegram-platform-bridge/actor-key/v1\0";
 const BINDING_HMAC_DOMAIN = "lvis/telegram-platform-bridge/binding/v1\0";
@@ -489,7 +489,7 @@ function isOpaqueIdentifier(value: unknown): value is string {
     && value.length > 0
     && value.length <= MAX_DELIVERY_ID_CHARS
     && value.trim().length > 0
-    && !UNSAFE_CONTROL_CHARACTERS.test(value);
+    && !hasNonWhitespaceControlChars(value);
 }
 
 function isSafeText(value: unknown): value is string {
@@ -497,7 +497,7 @@ function isSafeText(value: unknown): value is string {
     && value.length > 0
     && value.length <= MAX_TEXT_CHARS
     && value.trim().length > 0
-    && !UNSAFE_CONTROL_CHARACTERS.test(value);
+    && !hasNonWhitespaceControlChars(value);
 }
 
 /**
