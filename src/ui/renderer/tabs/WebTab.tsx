@@ -6,7 +6,7 @@ import { Label } from "../../../components/ui/label.js";
 import { WEB_PROVIDERS } from "../constants.js";
 import type { LvisApi } from "../types.js";
 import { getApi } from "../api-client.js";
-import { useNotifySaved } from "../contexts/saved-toast.js";
+import { useNotifySaved } from "../context/SavedToastContext.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 

@@ -24,7 +24,7 @@ import { VIOLET_PAIR_IDS, loadThemeBundles, visibleBundlesFor } from "../theme/i
 import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
-import { useNotifySaved } from "../contexts/saved-toast.js";
+import { useNotifySaved } from "../context/SavedToastContext.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import {
   LOCALE_INFO,
