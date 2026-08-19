@@ -2,7 +2,8 @@ import "../../../../test/renderer/setup.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { renderApp } from "../../../../test/renderer/render-app.js";
-import { settingsWithActiveView } from "../../../../test/renderer/helpers.js";
+import { deferred, settingsWithActiveView } from "../../../../test/renderer/helpers.js";
+import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.js";
 
 /**
  * Visit history and the top-bar path, driven the way a user drives them:
@@ -229,5 +230,57 @@ describe("App view history after a restored launch location", () => {
       fireEvent.click(container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement);
     });
     await waitFor(() => expect(path(container)).toContain("업무 보드"));
+  });
+
+  /**
+   * The two halves of the pair, driven against a restore that is genuinely
+   * still in flight: the settings read is held open, so the app renders and
+   * accepts clicks while the launch location has not arrived yet. A restore
+   * that resolves before the first paint exercises neither half.
+   */
+  const restoreGate = () => {
+    const gate = deferred<unknown>();
+    return { gate, getSettings: () => gate.promise };
+  };
+
+  const backButton = (container: HTMLElement) =>
+    container.querySelector('[data-testid="view-path-back"]') as HTMLButtonElement;
+
+  it("counts a navigation made before the restore lands as a visit", async () => {
+    const { gate, getSettings } = restoreGate();
+    const { container } = await renderApp({ hasApiKey: true, getSettings });
+    await waitFor(() => expect(container.querySelector('[data-testid="view-path-nav"]')).not.toBeNull());
+
+    // The user acts while the launch location is still in flight. This is a
+    // deliberate step away from home, not the app settling into where it left
+    // off — losing it strands the user with a dead back button.
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="sidebar-routines"]') as HTMLButtonElement);
+    });
+    await waitFor(() => expect(path(container)).toContain("루틴"));
+
+    await act(async () => {
+      gate.resolve(MOCK_DEFAULT_SETTINGS);
+    });
+
+    await waitFor(() => expect(backButton(container).disabled).toBe(false));
+    await act(async () => {
+      fireEvent.click(backButton(container));
+    });
+    await waitFor(() => expect(path(container)).toContain("홈"));
+  });
+
+  it("still makes a late-landing restore the root rather than a step from home", async () => {
+    const { gate, getSettings } = restoreGate();
+    const { container } = await renderApp({ hasApiKey: true, getSettings });
+    await waitFor(() => expect(path(container)).toContain("홈"));
+
+    // Nobody navigated; the app simply arrived where it was left. A restart
+    // must not offer "back" to the home screen it passed through.
+    await act(async () => {
+      gate.resolve(settingsWithActiveView("work-board"));
+    });
+    await waitFor(() => expect(path(container)).toContain("업무 보드"));
+    expect(backButton(container).disabled).toBe(true);
   });
 });

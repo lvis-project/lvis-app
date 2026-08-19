@@ -8,17 +8,19 @@ export interface UseActiveViewResult {
   /** Navigate — persists immediately (same durable-preference family as `sidebarActiveTab`). */
   setActiveView: (next: InlineViewKey | ((current: InlineViewKey) => InlineViewKey)) => void;
   /**
-   * True while the stored location is still being applied — the initial read,
-   * plus any plugin restore waiting on its view list.
+   * How many times THIS hook has applied the stored location. Monotonic; the
+   * count itself means nothing, an increase is the whole signal.
    *
    * Restoring MOVES `activeView` without the user going anywhere, so anything
-   * that records where the user has been must be able to tell the two apart.
-   * Visit history treats a change during this window as settling into the
-   * launch location rather than as a step away from `home`; otherwise a
-   * restart would leave a back button pointing at a home screen nobody
-   * visited.
+   * that records where the user has been must be able to tell the two apart —
+   * and a window of time cannot, because a click and the restore can fall
+   * inside the same window. This counts the restore's own moves instead, which
+   * no user navigation can be mistaken for. Visit history reads a location
+   * change that arrives with an increase as the launch location taking its
+   * place as the root; without it a restart would leave a back button pointing
+   * at a home screen nobody visited.
    */
-  restoring: boolean;
+  restoresApplied: number;
 }
 
 /**
@@ -59,10 +61,10 @@ export function useActiveView(
   // rightly omit it; an identity that changed once hydration finished would
   // leave those closures holding a setter that no longer persists.
   const hydratedRef = useRef(false);
-  // State as well as the ref: consumers have to RE-RENDER when the restore
-  // window closes, and the ref exists to keep `setActiveView`'s identity
-  // stable, so it cannot do that job too.
-  const [hydrated, setHydrated] = useState(false);
+  // STATE: a consumer has to re-render to observe the restore's move, and it
+  // has to land in the SAME commit as the move itself or the two would be
+  // observed as separate changes.
+  const [restoresApplied, setRestoresApplied] = useState(0);
   // STATE, not a ref: the "has it loaded yet?" effect must re-run when EITHER
   // the pending key or the loaded list changes. Holding this in a ref made the
   // restore depend on the list changing AFTER the settings read resolved — with
@@ -77,6 +79,13 @@ export function useActiveView(
     activeViewRef.current = next;
     setActiveViewState(next);
   }, []);
+  // The ONE way a restore moves the window. Both restore paths go through it,
+  // so the count cannot drift from the moves it describes — and a future
+  // restore path declares itself by construction rather than by remembering.
+  const restoreView = useCallback((next: InlineViewKey) => {
+    setRestoresApplied((applied) => applied + 1);
+    applyView(next);
+  }, [applyView]);
 
   useEffect(() => {
     let cancelled = false;
@@ -93,7 +102,7 @@ export function useActiveView(
           setPendingPluginView(parsed.key);
           return;
         }
-        applyView(parsed.key);
+        restoreView(parsed.key);
       })
       .catch(() => {
         // Non-fatal: home is a valid place to be. The next navigation persists.
@@ -101,12 +110,11 @@ export function useActiveView(
       .finally(() => {
         if (cancelled) return;
         hydratedRef.current = true;
-        setHydrated(true);
       });
     return () => {
       cancelled = true;
     };
-  }, [api, applyView]);
+  }, [api, restoreView]);
 
   useEffect(() => {
     if (!pendingPluginView) return;
@@ -114,8 +122,8 @@ export function useActiveView(
     // the plugin was uninstalled — home is where the app stays.
     if (!loadedPluginViewKeys.includes(pendingPluginView)) return;
     setPendingPluginView(null);
-    applyView(pendingPluginView);
-  }, [applyView, loadedPluginViewKeys, pendingPluginView]);
+    restoreView(pendingPluginView);
+  }, [restoreView, loadedPluginViewKeys, pendingPluginView]);
 
   const setActiveView = useCallback(
     (next: InlineViewKey | ((current: InlineViewKey) => InlineViewKey)) => {
@@ -133,5 +141,5 @@ export function useActiveView(
     [api, applyView],
   );
 
-  return { activeView, setActiveView, restoring: !hydrated || pendingPluginView !== null };
+  return { activeView, setActiveView, restoresApplied };
 }
