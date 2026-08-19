@@ -14,7 +14,11 @@ import type { ExactDenyDraft } from "./exact-permission-decision.js";
 import { getApi, getPluginViewLabel, toViewKey } from "./api-client.js";
 import type { PluginEntry } from "./components/PluginGridButton.js";
 import { getPluginInstallAliases } from "./utils/plugin-install-aliases.js";
-import { parsePluginDoctorViewKey, toPluginDoctorViewKey } from "./utils/plugin-doctor-view.js";
+import {
+  parsePluginDoctorViewKey,
+  parsePluginSettingsViewKey,
+  toPluginDoctorViewKey,
+} from "./utils/plugin-doctor-view.js";
 import { buildQuickActions } from "./components/command-actions.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { useAppMode } from "./hooks/use-app-mode.js";
@@ -680,6 +684,21 @@ export function App() {
     );
   }, [pluginCards, pluginViews]);
 
+  // A plugin the user switched off keeps its card (`loadStatus: "disabled"`)
+  // but has no live view, so the sidebar used to render nothing for it — the
+  // same "installed everywhere except in the app" dead end a dropped plugin
+  // produces. Scoped to manifests that declare a sidebar extension: those are
+  // the plugins whose absence from THIS list is what a user notices, and the
+  // row stands in the slot the plugin will occupy once re-enabled.
+  const inactivePluginCards = useMemo(() => {
+    const pluginIdsWithViews = new Set(pluginViews.map((view) => view.pluginId));
+    return pluginCards.filter((card) =>
+      card.loadStatus === "disabled"
+      && !pluginIdsWithViews.has(card.id)
+      && (card.uiExtensions?.length ?? 0) > 0
+    );
+  }, [pluginCards, pluginViews]);
+
   // Marketplace URL — sourced from settings (marketplace.cloudBaseUrl).
   const { marketplaceUrl, loaded: marketplaceUrlLoaded } = useMarketplaceUrl(api);
   // Ready only when settings have been fetched AND the URL is non-empty.
@@ -735,6 +754,12 @@ export function App() {
   }, []);
 
   const handleViewSelectWithDoctor = useCallback((key: string) => {
+    // An inactive plugin's row is a shortcut to the toggle that turned it off,
+    // not an incident: it opens Plugin Settings with no warning toast.
+    if (parsePluginSettingsViewKey(key)) {
+      onOpenSettings("plugin-config");
+      return;
+    }
     const doctorPluginId = parsePluginDoctorViewKey(key);
     if (doctorPluginId) {
       const card = pluginCards.find((candidate) => candidate.id === doctorPluginId);
@@ -1037,6 +1062,7 @@ export function App() {
         onSelectView={handleViewSelectWithDoctor}
         pluginViews={pluginViews}
         failedPluginCards={failedPluginCards}
+        inactivePluginCards={inactivePluginCards}
         pluginAuthStatuses={pluginAuthStatuses}
         onOpenSettings={onOpenSettings}
         onNewChat={onNewChat}

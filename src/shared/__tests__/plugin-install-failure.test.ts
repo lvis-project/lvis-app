@@ -65,7 +65,11 @@ describe("isReinstallFixableFailureKind", () => {
     const notFixable = PLUGIN_INSTALL_FAILURE_KINDS.filter(
       (kind) => !isReinstallFixableFailureKind(kind),
     );
-    expect(fixable).toEqual(["manifest-validation-error"]);
+    expect(fixable).toEqual([
+      "manifest-validation-error",
+      "untrusted-manifest-path",
+      "load-crash",
+    ]);
     expect(notFixable).toEqual([
       "catalog-grant-mismatch",
       "incompatible-app-version",

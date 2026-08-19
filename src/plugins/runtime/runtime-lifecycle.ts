@@ -55,9 +55,28 @@ import {
   type BootPreflightOutcome,
   type PluginIntegrityCheckResult,
 } from "./runtime-preflight.js";
+import type { RegistryLoadRefusal } from "./snapshots.js";
 import { PluginRuntimeCapabilityLifecycle } from "./runtime-lifecycle-capability-operations.js";
 const log = createLogger("plugin-runtime");
 const BOOT_START_CANCELLED = "plugin start cancelled";
+
+/**
+ * What one in-flight load attempt has taken from the host so far, so that a
+ * throw anywhere inside it can still be unwound and named. `pluginId` starts
+ * as the registry id and narrows to the canonical manifest id the moment the
+ * manifest is in hand — a crash before that point is still attributable.
+ */
+type PluginLoadAttemptResources = {
+  pluginId: string;
+  /** Materialized candidate generation root; unpublished until `commit()`. */
+  runtimeRoot?: string;
+  incarnation?: {
+    deactivate: () => void;
+    disposers: Array<() => void>;
+    drainOperations: () => Promise<void>;
+    hostEffects: HostApiGenerationScope;
+  };
+};
 export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
   /**
    * THE routing decision (`docs/blueprints/plugin-process-isolation.md` §9).
@@ -122,7 +141,19 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
   async load(): Promise<void> {
     this.requireGenerationLifecycle("plugin load");
     if (this.loaded) return;
-    const loadPlan = await this.resolveManifestLoadPlanInternal();
+    // Registry rows refused for an untrusted manifest path never reach the
+    // plan (see `RegistryLoadRefusal`), so this callback is the only chance to
+    // give them a card. Reporting them BEFORE the loop is deliberate: a later
+    // plan entry that loads the same canonical id clears `failedPluginIds`,
+    // `failedPluginStubs` and `loadFailureInfo` for it, so a genuine load wins
+    // over a stale refusal rather than the other way round.
+    const untrustedRegistryRows: RegistryLoadRefusal[] = [];
+    const loadPlan = await this.resolveManifestLoadPlanInternal(
+      (refusal) => untrustedRegistryRows.push(refusal),
+    );
+    for (const refusal of untrustedRegistryRows) {
+      this.markUntrustedManifestPath(refusal);
+    }
     for (const plan of loadPlan) {
       const pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(plan.manifestPath))}>`;
       plog("debug", { pluginId, phase: PluginPhase.LOAD_START }, "loading plugin");
@@ -171,246 +202,358 @@ export class PluginRuntimeLifecycle extends PluginRuntimeCapabilityLifecycle {
       }
     }
     for (const outcome of preflight) {
-      const { plan } = outcome;
-      const manifestPath = plan.manifestPath;
-      const pluginRoot = dirname(manifestPath);
-      let pluginId = plan.pluginIdHint ?? `<unresolved:${basename(dirname(manifestPath))}>`;
-      if (!outcome.ok) {
-        if (outcome.kind === "integrity") {
-          if (plan.pluginIdHint) {
-            // Keyed by the registry id: the manifest was never read, so the
-            // canonical id is unknown at this boundary.
-            this.markReceiptIntegrityFailed(
-              plan.pluginIdHint,
-              outcome.integrityResult.reason,
-            );
-          }
-          continue;
-        }
-        const err = outcome.error;
-        const reason =
-          err instanceof SyntaxError ? "manifest_parse"
-          : (err as Error).message?.includes("schema validation") ? "manifest_schema"
-          : (err as NodeJS.ErrnoException).code === "ENOENT" ? "manifest_missing"
-          : "manifest_read";
-        plog("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason }, `manifest read failed: ${(err as Error).message}`);
-        if (plan.pluginIdHint) {
-          this.markFailed(plan.pluginIdHint, {
-            name: plan.pluginIdHint,
-            description: "Plugin manifest could not be loaded.",
-          }, {
-            ...(reason === "manifest_schema"
-              ? { installFailureKind: "manifest-validation-error" as const }
-              : {}),
-            installFailureMessage: (err as Error).message,
-          });
-        }
-        continue;
-      }
-      if (!plan.enabled) {
-        pluginId = outcome.manifest.id;
-        this.rememberPluginInstallAlias(pluginId, plan.pluginIdHint);
-        this.rememberPluginManifest(
-          pluginId,
-          outcome.manifest,
-          outcome.approvedPluginAccess,
-        );
-        this.inactivePluginIds.add(pluginId);
-        this.disabledPluginIds.add(pluginId);
-        this.failedPluginIds.delete(pluginId);
-        this.failedPluginStubs.delete(pluginId);
-        this.loadFailureInfo.delete(pluginId);
-        plog(
-          "debug",
-          { pluginId, phase: PluginPhase.LOAD_OK, reason: "inactive_pointer" },
-          "plugin retained as inactive metadata without runtime admission",
-        );
-        continue;
-      }
-      const { manifest, approvedPluginAccess } = outcome;
-      // Reassign to manifest.id so all subsequent phases use the canonical id.
-      pluginId = manifest.id;
-      this.rememberPluginInstallAlias(manifest.id, plan.pluginIdHint);
-      this.knownPluginManifests.set(manifest.id, manifest);
-      this.failedPluginStubs.delete(manifest.id);
-      this.loadFailureInfo.delete(manifest.id);
-      this.inactivePluginIds.delete(manifest.id);
-      this.disabledPluginIds.delete(manifest.id);
-      this.failedPluginIds.delete(manifest.id);
-      // Plugin↔app minimum-version gate — HARD BLOCK at LOAD. A plugin already
-      // on disk (e.g. installed against a newer host, then the user downgraded
-      // the app, or a sideload) must NOT silently run against a too-old app.
-      // Skip activation, log an English reason, surface a "needs newer app"
-      // stub. Other plugins continue to load (isolation).
-      if (this.markIncompatibleAppVersion(manifest)) {
-        continue;
-      }
-      // Plugin revocation gate. Same LOAD-boundary shape as the
-      // version gate immediately above: skip this plugin, keep loading
-      // everything else (isolation).
-      if (this.markRevoked(manifest)) {
-        continue;
-      }
-      const requiredCapabilities = manifest.requires?.capabilities ?? [];
-      if (requiredCapabilities.length > 0) {
-        const availableManifests = [...enabledManifestSnapshots.values()]
-          .filter((candidate) => candidate.manifest.id !== manifest.id)
-          .map((candidate) => candidate.manifest);
-        const dependencyResult = resolveDependencies(requiredCapabilities, availableManifests);
-        if (!dependencyResult.ok) {
-          const reason = `missing required capabilities: ${dependencyResult.missing.join(", ")}`;
-          log.error(`${manifest.id} rejected — ${reason}`);
-          this.auditLog?.("error", "plugin_dependency_missing", {
-            pluginId: manifest.id,
-            missing: dependencyResult.missing,
-          });
-          this.markFailed(manifest.id, {
-            name: manifest.name ?? manifest.id,
-            description: `Missing capabilities: ${dependencyResult.missing.join(", ")}`,
-          });
-          continue;
-        }
-      }
-      if (this.preparation.deferStart(plan, manifest, approvedPluginAccess)) {
-        continue;
-      }
-      const activationId = randomUUID();
-      const runtimeRoot = await this.materializeImmutableRuntimeRoot(
-        manifest.id,
-        pluginRoot,
-        activationId,
-        plan.pluginIdHint ?? manifest.id,
-      );
-      let entryPath: string;
-      try {
-        entryPath = this.resolveEntryPathForPlugin(runtimeRoot, manifest.entry);
-      } catch (err) {
-        const reason = (err as Error).message;
-        plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "entry_path" }, "entry path rejected");
-        this.auditLog?.("error", "plugin_entry_path_rejected", {
-          pluginId: manifest.id,
-          entry: manifest.entry,
-          reason,
-        });
-        this.markFailed(manifest.id);
-        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
-        continue;
-      }
-      const resolvedEntryPath = resolveRealEntryPath(entryPath);
-      let createPlugin: RuntimePluginFactory | undefined;
-      try {
-        createPlugin = await this.importPluginFactoryForLifecycle(
-          manifest.id,
-          resolvedEntryPath,
-          manifest,
-        );
-      } catch (err) {
-        plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "import" }, "import failed");
-        this.auditLog?.("error", "plugin_import_failed", {
-          pluginId: manifest.id,
-          reason: (err as Error).message,
-        });
-        this.markFailed(manifest.id);
-        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
-        continue;
-      }
-      if (!createPlugin) {
-        plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin");
-        this.markFailed(manifest.id);
-        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
-        continue;
-      }
-
-      const pluginDataDir = this.ensureDataDir(manifest.id, pluginRoot);
-      const hostEffects = new HostApiGenerationScope(manifest.id);
-      const { hostApi, disposers, deactivate, drainOperations, commit, lifecycleHookScope } =
-        this.buildHostApiIncarnation(manifest.id, manifest, pluginDataDir, hostEffects);
-
-      let instance: RuntimePlugin;
-      try {
-        instance = await runPluginFactoryWithTimeout(
-          () => this.runPluginLifecycleHook(
-            lifecycleHookScope,
-            () => createPlugin(
-              buildPluginContext({
-                pluginId: manifest.id,
-                pluginRoot: runtimeRoot,
-                hostRoot: this.hostRoot,
-                pluginDataDir,
-                manifest,
-                configOverrides: this.configOverrides,
-                hostApi,
-              }),
-            ),
-          ),
-          async (lateInstance) => {
-            deactivate();
-            await this.stopAfterStartFailure(manifest.id, lateInstance, lifecycleHookScope);
-          },
-        );
-      } catch (err) {
-        deactivate();
-        hostEffects.discard();
-        if (err instanceof PluginFactoryTimeoutError) {
-          this.quarantinePluginLifecycle(manifest.id, err.message);
-        }
-        this.runDisposerList(disposers, "failed load factory");
-        await this.drainPluginHostApiOperations(manifest.id, {
-          drainHostApiOperations: drainOperations,
-        });
-        this.markFailed(manifest.id);
-        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
-        plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "factory" }, "plugin factory failed");
-        continue;
-      }
-
-      const methods = buildMethodMap(manifest, instance, (toolName) =>
-        plog("warn", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler"),
-      );
-      for (const toolName of methods.keys()) {
-        if (this.methodMap.has(toolName)) {
-          deactivate();
-          hostEffects.discard();
-          await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
-          this.runDisposerList(disposers, "duplicate load method");
-          await this.drainPluginHostApiOperations(manifest.id, {
-            drainHostApiOperations: drainOperations,
-          });
-          await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
-          throw new Error(`Duplicate plugin method registered: ${toolName}`);
-        }
-      }
-      for (const [toolName, handler] of methods) {
-        this.methodMap.set(toolName, { pluginId: manifest.id, handler });
-        plog("debug", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_OK, toolName }, "tool registered");
-      }
-
-      commit();
-      this.plugins.set(manifest.id, {
-        activationId,
-        manifest,
-        pluginRoot: runtimeRoot,
-        instance,
-        methods,
-        approvedPluginAccess,
-        hostEffects,
-        started: false,
-        deactivateHostApi: deactivate,
-        drainHostApiOperations: drainOperations,
-        lifecycleHookScope,
-      });
-      this.disposers.set(manifest.id, disposers);
-      this.markPluginUiRevision(manifest.id);
-      this.failedPluginIds.delete(manifest.id);
-      this.disabledPluginIds.delete(manifest.id);
-      plog("debug", { pluginId: manifest.id, phase: PluginPhase.LOAD_OK }, "plugin loaded");
-      // NOTE: inactive-plugin model visibility is not a runtime load concern.
-      // Boot sync still registers loaded tools for host/UI/auth execution;
-      // ConversationLoop scope suppresses model-visible tools for inactive
-      // plugins.
+      await this.admitPreflightedPlugin(outcome, enabledManifestSnapshots);
     }
     this.loaded = true;
   }
+
+  /**
+   * Registry manifest-path trust gate (LOAD boundary). The row named a manifest
+   * outside the plugin root, so the runtime refused to read it — which means,
+   * like the receipt gate, the verdict lands before any manifest exists and
+   * only a stub can carry it to a surface.
+   */
+  private markUntrustedManifestPath(refusal: RegistryLoadRefusal): void {
+    log.error(`${refusal.pluginId} rejected — ${refusal.reason}`);
+    this.auditLog?.("error", "plugin_manifest_path_untrusted", {
+      pluginId: refusal.pluginId,
+      manifestPath: refusal.manifestPath,
+    });
+    this.markLoadRefused(refusal.pluginId, {
+      summary: "Plugin registry entry points outside the plugin folder.",
+      reason: refusal.reason,
+      kind: "untrusted-manifest-path",
+    });
+  }
+
+  /**
+   * One plugin's whole load attempt, isolated.
+   *
+   * The refusals `instantiatePreflightedPlugin` decides for itself (bad entry
+   * path, failed import, missing capability, …) each leave a card and return.
+   * What this wrapper exists for is everything it does NOT decide: a throw out
+   * of `materializeImmutableRuntimeRoot`, `ensureDataDir`,
+   * `buildHostApiIncarnation`, or `buildMethodMap` used to unwind through
+   * `load()`'s `for` loop, which meant a single failing plugin denied every
+   * plugin AFTER it in registry order any load attempt at all — and left
+   * `this.loaded` false, so nothing retried. Those plugins were not refused;
+   * they were never considered, which is why nothing anywhere named them.
+   *
+   * Catching here converts that into the same per-plugin refusal every gate
+   * already produces: the plugin gets a `load-crash` card carrying the throw's
+   * message, and the loop moves on to the next entry.
+   */
+  private async admitPreflightedPlugin(
+    outcome: BootPreflightOutcome,
+    enabledManifestSnapshots: Map<string, ManifestSnapshot>,
+  ): Promise<void> {
+    const resources: PluginLoadAttemptResources = {
+      pluginId: outcome.plan.pluginIdHint
+        ?? `<unresolved:${basename(dirname(outcome.plan.manifestPath))}>`,
+    };
+    try {
+      await this.instantiatePreflightedPlugin(outcome, enabledManifestSnapshots, resources);
+    } catch (err) {
+      await this.abandonCrashedPluginLoad(resources, err);
+    }
+  }
+
+  /**
+   * Release whatever the crashed attempt had already taken, then report it.
+   *
+   * The candidate runtime root is on disk and the HostApi incarnation may be
+   * live but unpublished; neither has an owner once the attempt is abandoned.
+   * Teardown is skipped for a plugin that already reached `this.plugins` — the
+   * throw came after it was published, so it is running and must not be pulled
+   * out from under its own tools. `listPluginCards()` reads `this.plugins`
+   * ahead of `failedPluginIds`, so that plugin still projects as loaded.
+   */
+  private async abandonCrashedPluginLoad(
+    resources: PluginLoadAttemptResources,
+    err: unknown,
+  ): Promise<void> {
+    const { pluginId, runtimeRoot, incarnation } = resources;
+    const reason = err instanceof Error ? err.message : String(err);
+    plog(
+      "error",
+      { pluginId, phase: PluginPhase.LOAD_FAIL, err, reason: "load_crash" },
+      `plugin load crashed: ${reason}`,
+    );
+    this.auditLog?.("error", "plugin_load_crashed", { pluginId, reason });
+    if (incarnation && !this.plugins.has(pluginId)) {
+      incarnation.deactivate();
+      incarnation.hostEffects.discard();
+      this.runDisposerList(incarnation.disposers, "crashed plugin load");
+      await this.drainPluginHostApiOperations(pluginId, {
+        drainHostApiOperations: incarnation.drainOperations,
+      });
+    }
+    if (runtimeRoot) {
+      await this.removeUnpublishedRuntimeRoot(pluginId, runtimeRoot);
+    }
+    this.markLoadRefused(pluginId, {
+      summary: "Plugin crashed while loading.",
+      reason,
+      kind: "load-crash",
+      displayName: this.knownPluginManifests.get(pluginId)?.name ?? pluginId,
+    });
+  }
+
+  private async instantiatePreflightedPlugin(
+    outcome: BootPreflightOutcome,
+    enabledManifestSnapshots: Map<string, ManifestSnapshot>,
+    resources: PluginLoadAttemptResources,
+  ): Promise<void> {
+    const { plan } = outcome;
+    const manifestPath = plan.manifestPath;
+    const pluginRoot = dirname(manifestPath);
+    let pluginId = resources.pluginId;
+    if (!outcome.ok) {
+      if (outcome.kind === "integrity") {
+        if (plan.pluginIdHint) {
+          // Keyed by the registry id: the manifest was never read, so the
+          // canonical id is unknown at this boundary.
+          this.markReceiptIntegrityFailed(
+            plan.pluginIdHint,
+            outcome.integrityResult.reason,
+          );
+        }
+        return;
+      }
+      const err = outcome.error;
+      const reason =
+        err instanceof SyntaxError ? "manifest_parse"
+        : (err as Error).message?.includes("schema validation") ? "manifest_schema"
+        : (err as NodeJS.ErrnoException).code === "ENOENT" ? "manifest_missing"
+        : "manifest_read";
+      plog("error", { pluginId, phase: PluginPhase.VALIDATION_FAIL, err, reason }, `manifest read failed: ${(err as Error).message}`);
+      if (plan.pluginIdHint) {
+        this.markLoadRefused(plan.pluginIdHint, {
+          summary: "Plugin manifest could not be loaded.",
+          reason: (err as Error).message,
+          ...(reason === "manifest_schema"
+            ? { kind: "manifest-validation-error" as const }
+            : {}),
+        });
+      }
+      return;
+    }
+    if (!plan.enabled) {
+      pluginId = resources.pluginId = outcome.manifest.id;
+      this.rememberPluginInstallAlias(pluginId, plan.pluginIdHint);
+      this.rememberPluginManifest(
+        pluginId,
+        outcome.manifest,
+        outcome.approvedPluginAccess,
+      );
+      this.inactivePluginIds.add(pluginId);
+      this.disabledPluginIds.add(pluginId);
+      this.failedPluginIds.delete(pluginId);
+      this.failedPluginStubs.delete(pluginId);
+      this.loadFailureInfo.delete(pluginId);
+      plog(
+        "debug",
+        { pluginId, phase: PluginPhase.LOAD_OK, reason: "inactive_pointer" },
+        "plugin retained as inactive metadata without runtime admission",
+      );
+      return;
+    }
+    const { manifest, approvedPluginAccess } = outcome;
+    // The id the manifest declares supersedes the registry hint for every
+    // later phase, and `resources` is what carries it there — the local is
+    // not read again in this method.
+    resources.pluginId = manifest.id;
+    this.rememberPluginInstallAlias(manifest.id, plan.pluginIdHint);
+    this.knownPluginManifests.set(manifest.id, manifest);
+    this.failedPluginStubs.delete(manifest.id);
+    this.loadFailureInfo.delete(manifest.id);
+    this.inactivePluginIds.delete(manifest.id);
+    this.disabledPluginIds.delete(manifest.id);
+    this.failedPluginIds.delete(manifest.id);
+    // Plugin↔app minimum-version gate — HARD BLOCK at LOAD. A plugin already
+    // on disk (e.g. installed against a newer host, then the user downgraded
+    // the app, or a sideload) must NOT silently run against a too-old app.
+    // Skip activation, log an English reason, surface a "needs newer app"
+    // stub. Other plugins continue to load (isolation).
+    if (this.markIncompatibleAppVersion(manifest)) {
+      return;
+    }
+    // Plugin revocation gate. Same LOAD-boundary shape as the
+    // version gate immediately above: skip this plugin, keep loading
+    // everything else (isolation).
+    if (this.markRevoked(manifest)) {
+      return;
+    }
+    const requiredCapabilities = manifest.requires?.capabilities ?? [];
+    if (requiredCapabilities.length > 0) {
+      const availableManifests = [...enabledManifestSnapshots.values()]
+        .filter((candidate) => candidate.manifest.id !== manifest.id)
+        .map((candidate) => candidate.manifest);
+      const dependencyResult = resolveDependencies(requiredCapabilities, availableManifests);
+      if (!dependencyResult.ok) {
+        const reason = `missing required capabilities: ${dependencyResult.missing.join(", ")}`;
+        log.error(`${manifest.id} rejected — ${reason}`);
+        this.auditLog?.("error", "plugin_dependency_missing", {
+          pluginId: manifest.id,
+          missing: dependencyResult.missing,
+        });
+        this.markFailed(manifest.id, {
+          name: manifest.name ?? manifest.id,
+          description: `Missing capabilities: ${dependencyResult.missing.join(", ")}`,
+        });
+        return;
+      }
+    }
+    if (this.preparation.deferStart(plan, manifest, approvedPluginAccess)) {
+      return;
+    }
+    const activationId = randomUUID();
+    const runtimeRoot = resources.runtimeRoot = await this.materializeImmutableRuntimeRoot(
+      manifest.id,
+      pluginRoot,
+      activationId,
+      plan.pluginIdHint ?? manifest.id,
+    );
+    let entryPath: string;
+    try {
+      entryPath = this.resolveEntryPathForPlugin(runtimeRoot, manifest.entry);
+    } catch (err) {
+      const reason = (err as Error).message;
+      plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "entry_path" }, "entry path rejected");
+      this.auditLog?.("error", "plugin_entry_path_rejected", {
+        pluginId: manifest.id,
+        entry: manifest.entry,
+        reason,
+      });
+      this.markFailed(manifest.id);
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+      return;
+    }
+    const resolvedEntryPath = resolveRealEntryPath(entryPath);
+    let createPlugin: RuntimePluginFactory | undefined;
+    try {
+      createPlugin = await this.importPluginFactoryForLifecycle(
+        manifest.id,
+        resolvedEntryPath,
+        manifest,
+      );
+    } catch (err) {
+      plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "import" }, "import failed");
+      this.auditLog?.("error", "plugin_import_failed", {
+        pluginId: manifest.id,
+        reason: (err as Error).message,
+      });
+      this.markFailed(manifest.id);
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+      return;
+    }
+    if (!createPlugin) {
+      plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, reason: "no_default_export" }, "entry does not export default/createPlugin");
+      this.markFailed(manifest.id);
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+      return;
+    }
+
+    const pluginDataDir = this.ensureDataDir(manifest.id, pluginRoot);
+    const hostEffects = new HostApiGenerationScope(manifest.id);
+    const { hostApi, disposers, deactivate, drainOperations, commit, lifecycleHookScope } =
+      this.buildHostApiIncarnation(manifest.id, manifest, pluginDataDir, hostEffects);
+    resources.incarnation = { deactivate, disposers, drainOperations, hostEffects };
+
+    let instance: RuntimePlugin;
+    try {
+      instance = await runPluginFactoryWithTimeout(
+        () => this.runPluginLifecycleHook(
+          lifecycleHookScope,
+          () => createPlugin(
+            buildPluginContext({
+              pluginId: manifest.id,
+              pluginRoot: runtimeRoot,
+              hostRoot: this.hostRoot,
+              pluginDataDir,
+              manifest,
+              configOverrides: this.configOverrides,
+              hostApi,
+            }),
+          ),
+        ),
+        async (lateInstance) => {
+          deactivate();
+          await this.stopAfterStartFailure(manifest.id, lateInstance, lifecycleHookScope);
+        },
+      );
+    } catch (err) {
+      deactivate();
+      hostEffects.discard();
+      if (err instanceof PluginFactoryTimeoutError) {
+        this.quarantinePluginLifecycle(manifest.id, err.message);
+      }
+      this.runDisposerList(disposers, "failed load factory");
+      await this.drainPluginHostApiOperations(manifest.id, {
+        drainHostApiOperations: drainOperations,
+      });
+      this.markFailed(manifest.id);
+      await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+      plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, err, reason: "factory" }, "plugin factory failed");
+      return;
+    }
+
+    const methods = buildMethodMap(manifest, instance, (toolName) =>
+      plog("warn", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" }, "tool disabled — missing handler"),
+    );
+    for (const toolName of methods.keys()) {
+      if (this.methodMap.has(toolName)) {
+        deactivate();
+        hostEffects.discard();
+        await this.stopAfterStartFailure(manifest.id, instance, lifecycleHookScope);
+        this.runDisposerList(disposers, "duplicate load method");
+        await this.drainPluginHostApiOperations(manifest.id, {
+          drainHostApiOperations: drainOperations,
+        });
+        await this.removeUnpublishedRuntimeRoot(manifest.id, runtimeRoot);
+        resources.incarnation = undefined;
+        resources.runtimeRoot = undefined;
+        const reason = `Duplicate plugin method registered: ${toolName}`;
+        plog("error", { pluginId: manifest.id, phase: PluginPhase.LOAD_FAIL, reason: "duplicate_tool_name" }, reason);
+        this.auditLog?.("error", "plugin_duplicate_tool_name", { pluginId: manifest.id, toolName });
+        this.markLoadRefused(manifest.id, {
+          summary: "Plugin declares a tool name another plugin already owns.",
+          reason,
+          displayName: manifest.name ?? manifest.id,
+        });
+        return;
+      }
+    }
+    for (const [toolName, handler] of methods) {
+      this.methodMap.set(toolName, { pluginId: manifest.id, handler });
+      plog("debug", { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_OK, toolName }, "tool registered");
+    }
+
+    commit();
+    this.plugins.set(manifest.id, {
+      activationId,
+      manifest,
+      pluginRoot: runtimeRoot,
+      instance,
+      methods,
+      approvedPluginAccess,
+      hostEffects,
+      started: false,
+      deactivateHostApi: deactivate,
+      drainHostApiOperations: drainOperations,
+      lifecycleHookScope,
+    });
+    this.disposers.set(manifest.id, disposers);
+    this.markPluginUiRevision(manifest.id);
+    this.failedPluginIds.delete(manifest.id);
+    this.disabledPluginIds.delete(manifest.id);
+    plog("debug", { pluginId: manifest.id, phase: PluginPhase.LOAD_OK }, "plugin loaded");
+    // NOTE: inactive-plugin model visibility is not a runtime load concern.
+    // Boot sync still registers loaded tools for host/UI/auth execution;
+    // ConversationLoop scope suppresses model-visible tools for inactive
+    // plugins.
+  }
+
 
   async startAll(): Promise<void> {
     this.requireGenerationLifecycle("plugin start");
