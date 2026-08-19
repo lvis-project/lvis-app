@@ -20,12 +20,37 @@ const log = createLogger("plugin-runtime");
 export { isTrustedRegistryManifestPath } from "../registry-manifest-trust.js";
 
 /**
+ * A registry row the load plan refuses to carry: it names an installed plugin
+ * — `marketplace.list()` keeps reporting it as installed — whose manifest the
+ * runtime must never read, so it cannot become a plan entry.
+ *
+ * It is reported OUT OF BAND rather than as a plan entry carrying a flag, and
+ * that is the point. `readEnabledManifestSnapshots`, `restartAll`, `addPlugin`
+ * and the re-enable path all consume the plan and all reach for
+ * `plan.manifestPath`. A refused row inside the plan would be one forgotten
+ * `if` away from handing an untrusted path to `readManifest`; keeping the plan
+ * exclusively trusted makes that mistake unavailable rather than merely
+ * avoided.
+ */
+export type RegistryLoadRefusal = {
+  pluginId: string;
+  /** The resolved candidate, for the diagnostic the user is shown. Never read. */
+  manifestPath: string;
+  reason: string;
+};
+
+/**
  * Build a ManifestLoadPlan from manifestPaths + registry.
+ *
+ * `onRefused` receives every registry row dropped for an untrusted
+ * `manifestPath`. Callers that only need the trusted plan omit it; boot passes
+ * one so the drop reaches a card instead of only a log line.
  */
 export async function resolveManifestLoadPlan(opts: {
   manifestPaths: string[];
   registryPath?: string;
   pluginsRoot?: string;
+  onRefused?: (refusal: RegistryLoadRefusal) => void;
 }): Promise<ManifestLoadPlan[]> {
   const plans: ManifestLoadPlan[] = opts.manifestPaths.map((manifestPath) => ({
     manifestPath,
@@ -46,9 +71,11 @@ export async function resolveManifestLoadPlan(opts: {
         ? entry.manifestPath
         : resolve(dirname(opts.registryPath!), entry.manifestPath);
       if (!opts.pluginsRoot || !isTrustedRegistryManifestPath(manifestPath, opts.pluginsRoot)) {
-        log.warn(
-          `ignoring untrusted registry manifest path for ${entry.id}: ${manifestPath}`,
-        );
+        const reason = opts.pluginsRoot
+          ? `registry manifest path is not inside the plugin root: ${manifestPath}`
+          : `registry manifest path cannot be trusted without a plugin root: ${manifestPath}`;
+        log.warn(`ignoring untrusted registry manifest path for ${entry.id}: ${manifestPath}`);
+        opts.onRefused?.({ pluginId: entry.id, manifestPath, reason });
         return [];
       }
       return [{

@@ -11,6 +11,7 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Pin,
+  PowerOff,
   Plus,
   Repeat2,
   Search,
@@ -25,7 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../../../components/ui
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { getPluginViewLabel, toViewKey } from "../api-client.js";
-import { toPluginDoctorViewKey } from "../utils/plugin-doctor-view.js";
+import { toPluginDoctorViewKey, toPluginSettingsViewKey } from "../utils/plugin-doctor-view.js";
 import { pluginIconFor } from "../utils/plugin-icon.js";
 import { sortWithPinnedFirst } from "../utils/pinned-sort.js";
 import type { SidebarTab } from "../hooks/use-sidebar-tab.js";
@@ -63,6 +64,13 @@ export interface SidebarProps {
   pluginViews: PluginUiExtension[];
   /** Installed plugins that failed to load and therefore need Settings → Plugin Doctor. */
   failedPluginCards?: PluginCardSummary[];
+  /**
+   * Installed plugins the user has switched off that reserve a sidebar slot.
+   * They are shown here — greyed, badged "off", no repair affordance — because
+   * an inactive plugin that renders nowhere is indistinguishable from one the
+   * app dropped, which is the exact confusion this list exists to end.
+   */
+  inactivePluginCards?: PluginCardSummary[];
   /** Auth-status map: pluginId → { kind: "authed" | "unauthed" | ... }. */
   pluginAuthStatuses?: ReadonlyMap<string, { kind: string }>;
   /** Whether the user has an API key configured — drives the settings warning. */
@@ -363,6 +371,89 @@ function FailedPluginNavItem({
         viewKey={viewKey}
         label={label}
         icon={icon}
+        isActive={false}
+        onClick={() => onSelect(viewKey)}
+        collapsed={collapsed}
+        data-testid={`sidebar-${viewKey.replace(/:/g, "-")}`}
+        data-viewkey={viewKey}
+        title={title}
+        tooltipLabel={title}
+        trailingSlot={collapsed ? undefined : trailingSlot}
+      />
+    </Suspense>
+  );
+}
+
+// ─── InactivePluginNavItem ───────────────────────────────────────────────────
+
+/**
+ * An installed plugin the user switched off, holding the sidebar slot it would
+ * occupy when active.
+ *
+ * Deliberately NOT styled as a failure. `enabled: false` is a choice the user
+ * made, so it gets no destructive colour, no wrench, and no Doctor — those
+ * would tell the user something is broken and invite a repair for a plugin
+ * that is working exactly as configured. What it does get is presence: before
+ * this row existed, an inactive plugin rendered nowhere in the app while the
+ * marketplace still listed it as installed, which is the same dead end as a
+ * silently dropped one. Selecting it opens Plugin Settings, where the toggle
+ * that turned it off is.
+ */
+function InactivePluginNavItem({
+  plugin,
+  onSelect,
+  collapsed,
+}: {
+  plugin: PluginCardSummary;
+  onSelect: (key: string) => void;
+  collapsed: boolean;
+}) {
+  const { t } = useTranslation();
+  const viewKey = toPluginSettingsViewKey(plugin.id);
+  const label = plugin.name || plugin.id;
+  const title = t("sidebar.pluginInactiveTitle", { label });
+  const IconComponent = pluginIconFor({
+    icon: plugin.icon,
+    iconText: plugin.iconText,
+  });
+  const trailingSlot = (
+    <span
+      className="rounded-full bg-muted px-1.5 py-px text-[9px] font-medium text-muted-foreground"
+      aria-label={t("sidebar.pluginInactiveAriaLabel")}
+    >
+      {t("sidebar.pluginInactiveBadge")}
+    </span>
+  );
+
+  return (
+    <Suspense
+      fallback={
+        <NavItem
+          viewKey={viewKey}
+          label={label}
+          icon={<PowerOff className="h-4 w-4 text-muted-foreground" />}
+          isActive={false}
+          onClick={() => onSelect(viewKey)}
+          collapsed={collapsed}
+          data-testid={`sidebar-${viewKey.replace(/:/g, "-")}`}
+          data-viewkey={viewKey}
+          title={title}
+          tooltipLabel={title}
+          trailingSlot={collapsed ? undefined : trailingSlot}
+        />
+      }
+    >
+      <NavItem
+        viewKey={viewKey}
+        label={label}
+        icon={
+          <span className="relative h-4 w-4">
+            <IconComponent className="h-4 w-4 text-muted-foreground" />
+            <span className="absolute -right-1 -top-1 flex h-3 w-3 items-center justify-center rounded-full bg-muted text-muted-foreground">
+              <PowerOff className="h-2 w-2" aria-hidden="true" />
+            </span>
+          </span>
+        }
         isActive={false}
         onClick={() => onSelect(viewKey)}
         collapsed={collapsed}
@@ -1103,6 +1194,7 @@ export function Sidebar({
   onSelect,
   pluginViews,
   failedPluginCards = [],
+  inactivePluginCards = [],
   pluginAuthStatuses,
   subscriptionRuntimePolicy,
   hasApiKey,
@@ -1166,7 +1258,9 @@ export function Sidebar({
   // The collapsed rail shows icons only; `compact` mirrors `collapsed`. There is
   // no hover-expand — the card is a consistent floating panel in every mode.
   const compact = collapsed;
-  const hasPluginEntries = pluginViews.length > 0 || failedPluginCards.length > 0;
+  const hasPluginEntries = pluginViews.length > 0
+    || failedPluginCards.length > 0
+    || inactivePluginCards.length > 0;
   // On darwin the OS traffic lights (x:18,y:16) sit just left of the cluster
   // Subscription readiness is distinct from API-key presence: when a login
   // runtime is selected, never describe its verification state as an API-key
@@ -1409,6 +1503,14 @@ export function Sidebar({
                 {failedPluginCards.map((plugin) => (
                   <FailedPluginNavItem
                     key={`doctor:${plugin.id}`}
+                    plugin={plugin}
+                    onSelect={onSelect}
+                    collapsed={compact}
+                  />
+                ))}
+                {inactivePluginCards.map((plugin) => (
+                  <InactivePluginNavItem
+                    key={`inactive:${plugin.id}`}
                     plugin={plugin}
                     onSelect={onSelect}
                     collapsed={compact}
