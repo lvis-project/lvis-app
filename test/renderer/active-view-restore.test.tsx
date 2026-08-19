@@ -293,6 +293,35 @@ describe("a launch whose stored location has not arrived yet", () => {
     expect(isActive(container, PLUGIN_NAV_TESTID)).toBe(false);
   });
 
+  it("records a pick that changes nothing on screen, since it still supersedes the stored one", async () => {
+    // The shape where the discard and the write disagree about what happened.
+    // Selecting Home while the window is on the seed `home` moves nothing, so
+    // it reads as a navigation with nothing to record — but it supersedes the
+    // stored location just as any other does, and the app is left holding a
+    // location the user has already overridden.
+    const { release, opts } = heldLaunch(settingsWithActiveView("work-board"));
+    const { container, api } = await renderApp(opts);
+    await waitFor(() => expect(atHome(container)).toBe(true));
+
+    await clickNav(container, "sidebar-home");
+    await act(async () => {
+      release();
+    });
+    await settle();
+
+    // Both halves, because either one passes with the other broken: the
+    // discard holds with nothing written at all, and the write holds with the
+    // restore landing on top of it.
+    expect(atHome(container)).toBe(true);
+    expect(isActive(container, "toolbar-work-board")).toBe(false);
+    await waitFor(() =>
+      expect(api.updateSettings).toHaveBeenCalledWith({ system: { activeView: "home" } }),
+    );
+    expect(api.updateSettings).not.toHaveBeenCalledWith({
+      system: { activeView: "work-board" },
+    });
+  });
+
   it("makes that pick the location the NEXT launch restores, not the superseded one", async () => {
     const { release, opts } = heldLaunch(settingsWithActiveView("work-board"));
     const first = await renderApp(opts);
