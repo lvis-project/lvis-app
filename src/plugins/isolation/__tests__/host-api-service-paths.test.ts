@@ -36,6 +36,7 @@ import {
   WIRE_BYTES_MAX,
   type HostApiChannel,
   type HostApiNotification,
+  type HostApiReply,
   type HostApiRequest,
 } from "../host-api-wire.js";
 import {
@@ -43,7 +44,10 @@ import {
   type PluginChildRuntime,
 } from "../plugin-child-runtime.js";
 import { SERVICE_HOSTAPI_PATHS } from "../host-api-service-child.js";
-import { createServiceHostApiPaths } from "../host-api-service-paths.js";
+import {
+  createServiceHostApiPaths,
+  type DelegatedWorkerConfinement,
+} from "../host-api-service-paths.js";
 import type {
   WireHttpResponse,
   WireRequestInit,
@@ -51,6 +55,14 @@ import type {
 
 const PLUGIN_ID = "com.example.service";
 const GENERATION = "gen-3";
+/**
+ * The child's own filesystem envelope — the same pair the ASRT wrap grants it.
+ * A worker the plugin delegates is checked against exactly this.
+ */
+const CONFINEMENT: DelegatedWorkerConfinement = {
+  pluginRoot: "/plugins/service",
+  pluginDataDir: "/plugins/service/data",
+};
 
 /** Bytes no UTF-8 round trip survives: a NUL, a lone continuation byte, 0xFF. */
 const HOSTILE_BYTES = new Uint8Array([0x00, 0x80, 0xff, 0xfe, 0x41, 0xc3, 0x28]);
@@ -99,6 +111,10 @@ interface ServiceHarness {
   readonly requests: HostApiRequest[];
   /** Every notification either side emitted, in order. */
   readonly notifications: HostApiNotification[];
+  /** Every notification the HOST pushed at the child, in order. */
+  readonly pushed: HostApiNotification[];
+  /** Every reply the host produced, in order, so a handle id can be named. */
+  readonly replies: HostApiReply[];
   /** Drop the child, as the host does on child exit. */
   readonly killChild: () => number;
 }
@@ -116,13 +132,17 @@ async function createServiceHarness(
 ): Promise<ServiceHarness> {
   const requests: HostApiRequest[] = [];
   const notifications: HostApiNotification[] = [];
+  const pushed: HostApiNotification[] = [];
+  const replies: HostApiReply[] = [];
   let host!: HostApiDispatcher;
   let child!: PluginChildRuntime;
 
   const channel: HostApiChannel = {
-    call: (request) => {
+    call: async (request) => {
       requests.push(request);
-      return host.handle(request);
+      const reply = await host.handle(request);
+      replies.push(reply);
+      return reply;
     },
     notify: (notification) => {
       notifications.push(notification);
@@ -135,11 +155,19 @@ async function createServiceHarness(
     pluginId: PLUGIN_ID,
     generationId: GENERATION,
     isActive: () => true,
-    notifications: { deliver: (notification) => child.deliver(notification) },
+    notifications: {
+      deliver: (notification) => {
+        pushed.push(notification);
+        child.deliver(notification);
+      },
+    },
     // Bound entries composed OVER the shipped table, which stays unbound: a
     // static entry could never reach an incarnation's hostApi, so the binding
     // is a closure and the composition happens where the child is owned.
-    table: { ...HOSTAPI_DISPATCH_TABLE, ...createServiceHostApiPaths(api) },
+    table: {
+      ...HOSTAPI_DISPATCH_TABLE,
+      ...createServiceHostApiPaths(api, CONFINEMENT),
+    },
   });
 
   child = await startPluginChildRuntime({
@@ -148,9 +176,9 @@ async function createServiceHarness(
     manifest,
     context: {
       pluginId: PLUGIN_ID,
-      pluginRoot: "/plugins/service",
+      pluginRoot: CONFINEMENT.pluginRoot,
       hostRoot: "/app",
-      pluginDataDir: "/plugins/service/data",
+      pluginDataDir: CONFINEMENT.pluginDataDir,
       installedPluginIds: [],
       generationId: GENERATION,
     },
@@ -164,6 +192,8 @@ async function createServiceHarness(
     api,
     requests,
     notifications,
+    pushed,
+    replies,
     killChild: () => host.childGone(),
   };
 }
@@ -195,7 +225,7 @@ function detachedLog(harness: ServiceHarness): { message: string; meta?: unknown
 
 describe("this group implements exactly the members left after the other three", () => {
   it("binds every service-reaching member, and only against a real hostApi", () => {
-    const bound = createServiceHostApiPaths({} as PluginHostApi);
+    const bound = createServiceHostApiPaths({} as PluginHostApi, CONFINEMENT);
     expect(Object.keys(bound).sort()).toEqual([...SERVICE_HOSTAPI_PATHS].sort());
     for (const path of SERVICE_HOSTAPI_PATHS) {
       expect(bound[path].status).toBe("implemented");
@@ -764,9 +794,10 @@ describe("spawnWorker crosses as an id, never as a live handle", () => {
     await settle();
     expect(exits).toEqual([{ code: 0, signal: null }]);
     expect(harness.host.openSubscriptionCount).toBe(0);
-    // BOTH sides. The host releasing its own entry does not reach the child, so
-    // a child that did not let go on `exit` would hold the listener arrays —
-    // and the whole plugin closure behind them — for the life of the process.
+    // BOTH sides, from ONE decision. The host owns the process, so it releases
+    // its own entry and the `subscription-closed` that follows drops the
+    // child's — rather than each side deciding separately that the worker is
+    // gone.
     expect(harness.child.openSubscriptionCount).toBe(0);
     // A worker that already exited must NOT be stopped: `stop()` signals a pid,
     // and a reaped pid can belong to something else by then.
@@ -900,5 +931,242 @@ describe("logEvent crosses as plain data", () => {
     await settle();
     expect(logEvent).not.toHaveBeenCalled();
     expect(detachedLog(harness).message).toBe("hostApi.logEvent failed after returning");
+  });
+});
+
+/** The `handleId` the host allocated for the first call to `path`. */
+function handleIdOf(harness: ServiceHarness, path: string): string {
+  const index = harness.requests.findIndex((request) => request.path === path);
+  expect(index, `no '${path}' request was sent`).toBeGreaterThanOrEqual(0);
+  const reply = harness.replies[index];
+  expect(reply?.ok, `'${path}' did not succeed`).toBe(true);
+  return (reply as { value: { handleId: string } }).value.handleId;
+}
+
+/** Every `subscription-closed` the host pushed at the child. */
+function closures(harness: ServiceHarness): { subscriptionId: string; reason: string }[] {
+  return harness.pushed
+    .filter((notification) => notification.kind === "subscription-closed")
+    .map((notification) => {
+      const closed = notification as unknown as { subscriptionId: string; reason: string };
+      return { subscriptionId: closed.subscriptionId, reason: closed.reason };
+    });
+}
+
+describe("a delegated worker cannot reach further than the plugin process itself", () => {
+  it("passes grants that lie inside the child's own envelope straight through", async () => {
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await harness.child.hostApi.spawnWorker!({
+      workerId: "indexer",
+      command: "/usr/bin/python3",
+      allowReadPaths: [`${CONFINEMENT.pluginRoot}/runtime`, CONFINEMENT.pluginDataDir],
+      allowWritePaths: [`${CONFINEMENT.pluginDataDir}/index`],
+    });
+    expect(spawnWorker).toHaveBeenCalledWith({
+      workerId: "indexer",
+      command: "/usr/bin/python3",
+      allowReadPaths: [`${CONFINEMENT.pluginRoot}/runtime`, CONFINEMENT.pluginDataDir],
+      allowWritePaths: [`${CONFINEMENT.pluginDataDir}/index`],
+    });
+  });
+
+  it("refuses a write grant outside the jail, and never reaches the supervisor", async () => {
+    // The escape this check exists for: the child cannot write outside its data
+    // directory, so it asks the host to spawn something that can. A refusal
+    // that still spawned would be no refusal at all, which is why the spy is
+    // asserted as well as the rejection.
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "escape",
+        command: "/bin/sh",
+        allowWritePaths: ["/"],
+      }),
+    ).rejects.toMatchObject({ code: "effect-boundary-denied" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("refuses a read grant outside the plugin's own two directories", async () => {
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "peek",
+        command: "/usr/bin/python3",
+        allowReadPaths: ["/etc"],
+      }),
+    ).rejects.toMatchObject({ code: "effect-boundary-denied" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("compares what a grant MEANS, not what it says", async () => {
+    // `<dataDir>/../..` starts with the data dir as a string and is not inside
+    // it. A containment check that skipped the resolve would admit it.
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "traverse",
+        command: "/bin/sh",
+        allowWritePaths: [`${CONFINEMENT.pluginDataDir}/../../../etc`],
+      }),
+    ).rejects.toMatchObject({ code: "effect-boundary-denied" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("refuses a sibling directory whose name merely starts with the jail's", async () => {
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "prefix",
+        command: "/bin/sh",
+        allowWritePaths: [`${CONFINEMENT.pluginDataDir}-elsewhere`],
+      }),
+    ).rejects.toMatchObject({ code: "effect-boundary-denied" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("refuses a relative grant rather than resolving it against the host's cwd", async () => {
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "relative",
+        command: "/bin/sh",
+        allowWritePaths: ["data"],
+      }),
+    ).rejects.toMatchObject({ code: "argument-marshalling-rejected" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("refuses a spec field the boundary does not decode", async () => {
+    // A spec that grows a grant-shaped field must FAIL here until this decodes
+    // it. Passing an unknown field through unexamined is how a future grant
+    // reaches the supervisor without ever meeting the envelope check.
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "future",
+        command: "/bin/sh",
+        allowNetworkTo: ["*"],
+      } as never),
+    ).rejects.toMatchObject({ code: "argument-marshalling-rejected" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("refuses a spec whose command is not a string", async () => {
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({ workerId: "typed", command: 7 } as never),
+    ).rejects.toMatchObject({ code: "argument-marshalling-rejected" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+});
+
+describe("a host-side revocation reaches the child", () => {
+  it("tells the child when the host releases a registration it still holds", async () => {
+    const worker = makeFakeWorker();
+    const harness = await createServiceHarness({ spawnWorker: async () => worker });
+    await harness.child.hostApi.spawnWorker!({ workerId: "indexer", command: "/bin/true" });
+    const handleId = handleIdOf(harness, "spawnWorker");
+    expect(closures(harness)).toEqual([]);
+
+    worker.emitExit(0, null);
+    await settle();
+
+    // `subscription-closed` had a receiver and no sender until this: the child
+    // could act on it and nothing could produce it.
+    expect(closures(harness)).toEqual([{ subscriptionId: handleId, reason: "revoked" }]);
+  });
+
+  it("does not echo a close the child asked for", async () => {
+    const worker = makeFakeWorker();
+    const harness = await createServiceHarness({ spawnWorker: async () => worker });
+    const handle = await harness.child.hostApi.spawnWorker!({
+      workerId: "indexer",
+      command: "/bin/true",
+    });
+    handle.stop();
+    await settle();
+    expect(closures(harness)).toEqual([]);
+  });
+
+  it("does not write to a child that is already gone", async () => {
+    const worker = makeFakeWorker();
+    const harness = await createServiceHarness({ spawnWorker: async () => worker });
+    await harness.child.hostApi.spawnWorker!({ workerId: "indexer", command: "/bin/true" });
+    expect(harness.killChild()).toBe(1);
+    await settle();
+    expect(closures(harness)).toEqual([]);
+  });
+
+  it("says nothing about an abort channel, which the child has no entry for", async () => {
+    const controller = new AbortController();
+    const harness = await createServiceHarness({ callLlm: async () => "answered" });
+    await harness.child.hostApi.callLlm("hello", { signal: controller.signal });
+    await settle();
+    // The call settled, so the host released its own controller — bookkeeping
+    // the child registered nothing for, and a close it would report as an
+    // unknown subscription.
+    expect(closures(harness)).toEqual([]);
+    expect(harness.host.openSubscriptionCount).toBe(0);
+  });
+
+  it("refuses to cancel a subscription through the abort mechanism", async () => {
+    // The two registration kinds share one ledger. Without the guard an `abort`
+    // naming a worker handle would stop the worker through the cancellation
+    // path — and would bounce a close back at the child that sent it.
+    const worker = makeFakeWorker();
+    const harness = await createServiceHarness({ spawnWorker: async () => worker });
+    await harness.child.hostApi.spawnWorker!({ workerId: "indexer", command: "/bin/true" });
+    const handleId = handleIdOf(harness, "spawnWorker");
+    harness.host.handleNotification({
+      wire: 1,
+      pluginId: PLUGIN_ID,
+      generationId: GENERATION,
+      kind: "abort",
+      subscriptionId: handleId,
+    });
+    await settle();
+    expect(harness.host.openSubscriptionCount).toBe(1);
+    expect(worker.stopped()).toBe(0);
+    expect(closures(harness)).toEqual([]);
+  });
+});
+
+describe("a revoked key lease stops being spendable in the child", () => {
+  it("drops the child's copy when the host takes the lease back", async () => {
+    const release = vi.fn();
+    const harness = await createServiceHarness({
+      resolveApiKey: async () => ({
+        ok: true as const,
+        vendor: "openai" as const,
+        bearer: () => "sk-live-credential",
+        release,
+      }),
+    });
+    const lease = await harness.child.hostApi.resolveApiKey!({ purpose: "llm" });
+    expect(lease.ok).toBe(true);
+    if (!lease.ok) return;
+    expect(lease.bearer()).toBe("sk-live-credential");
+
+    const handleId = handleIdOf(harness, "resolveApiKey");
+    harness.child.deliver({
+      wire: 1,
+      pluginId: PLUGIN_ID,
+      generationId: GENERATION,
+      kind: "subscription-closed",
+      subscriptionId: handleId,
+      reason: "revoked",
+    });
+
+    // The credential is a mutable closure variable precisely so this can drop
+    // it. Before the sender existed the child held it until the process ended.
+    expect(() => lease.bearer()).toThrow(/lease already released/);
   });
 });

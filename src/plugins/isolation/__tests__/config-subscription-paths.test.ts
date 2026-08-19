@@ -778,3 +778,69 @@ describe("the group binds to one incarnation and claims exactly its own members"
     expect(spy).not.toHaveBeenCalled();
   });
 });
+
+describe("the config snapshot the child reads is re-pushed, not frozen at construction", () => {
+  it("moves a value the host changed without the plugin subscribing to anything", async () => {
+    // `config.get` is child-local by contract, so a snapshot that is never
+    // re-pushed answers with the construction value forever — a wrong answer
+    // that reads exactly like a right one. Nothing here subscribes: the point
+    // is that the member has to be current whether or not the plugin ever
+    // called `config.onChange`.
+    const { child, hostApi } = await harness({ config: { theme: "dark", locale: "ko" } });
+    expect(hostApi.config.get("theme")).toBe("dark");
+
+    expect(
+      child.deliver({
+        wire: 1,
+        pluginId: PLUGIN_ID,
+        generationId: GENERATION,
+        kind: "config-snapshot",
+        keys: ["theme", "locale"],
+        values: { theme: "light", locale: "ko" },
+      }),
+    ).toBe("delivered");
+
+    expect(hostApi.config.get("theme")).toBe("light");
+    expect(hostApi.config.get("locale")).toBe("ko");
+  });
+
+  it("clears a key the host no longer resolves", async () => {
+    // A cleared key has no JSON representation as a value — `undefined` is not
+    // one — so `keys` carries it and `values` does not. A push that only
+    // carried an object would silently leave the stale value in place.
+    const { child, hostApi } = await harness({ config: { token: "abc" } });
+    expect(hostApi.config.get("token")).toBe("abc");
+
+    child.deliver({
+      wire: 1,
+      pluginId: PLUGIN_ID,
+      generationId: GENERATION,
+      kind: "config-snapshot",
+      keys: ["token"],
+      values: {},
+    });
+
+    expect(hostApi.config.get("token")).toBeUndefined();
+  });
+
+  it("leaves a key the push does not enumerate alone", async () => {
+    // A key the plugin invented through `config.set` is not one the host can
+    // enumerate. Replacing the whole record would erase it; only the enumerated
+    // keys are touched.
+    const { child, hostApi } = await harness({ config: { theme: "dark" } });
+    await hostApi.config.set("adhoc", 41);
+    expect(hostApi.config.get("adhoc")).toBe(41);
+
+    child.deliver({
+      wire: 1,
+      pluginId: PLUGIN_ID,
+      generationId: GENERATION,
+      kind: "config-snapshot",
+      keys: ["theme"],
+      values: { theme: "light" },
+    });
+
+    expect(hostApi.config.get("theme")).toBe("light");
+    expect(hostApi.config.get("adhoc")).toBe(41);
+  });
+});

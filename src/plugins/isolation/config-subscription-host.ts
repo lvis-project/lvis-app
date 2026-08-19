@@ -20,11 +20,12 @@
  *
  * WHY NO HANDLER TELLS THE CHILD IT WAS CLOSED. A host-side teardown runs for
  * three reasons and only one of them is a message: `disposed` came from the
- * child, `peer-gone` means there is nobody to write to, and `revoked` — the one
- * that would need a `subscription-closed` notification — has no host-side
- * trigger today (`SubscriptionScope.release` closes as `disposed`). When one is
- * added it belongs in the dispatcher's own release path, which already owns the
- * envelope, rather than in six handlers each stamping their own.
+ * child, `peer-gone` means there is nobody to write to, and `revoked` is the
+ * host's own decision. That third one IS sent, and it is sent from the
+ * dispatcher's release path — the one place that already owns the envelope —
+ * rather than from six handlers each stamping their own. Nothing in this file
+ * writes a notification; `SubscriptionScope.release` is the whole interface to
+ * it.
  */
 import type { PluginHostApi } from "../types.js";
 import {
