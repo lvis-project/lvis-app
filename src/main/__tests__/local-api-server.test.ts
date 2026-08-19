@@ -30,14 +30,14 @@ import {
   type A2ARouterRuntime,
   type LocalApiServerInfoFile,
 } from "../local-api-server.js";
-import { makeDeepProxy } from "../../testing/deep-proxy.js";
+import { makeDeepProxy } from "../../__tests__/support/deep-proxy.js";
 import type { AppServices } from "../../boot.js";
 import type { SettingsService } from "../../data/settings-store.js";
 import type { FeatureFlags, SystemSettings } from "../../data/settings-store.js";
 import type { ApprovalGate } from "../../permissions/approval-gate.js";
 import type { A2AHttpRouter } from "../../api/a2a-router.js";
 import { PERMISSIONS, EXTERNAL_MUTATION_DENIED } from "../../contract/app-contract.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 /** Minimal SettingsService stub for the independently snapshotted route gates. */
 function stubSettings(

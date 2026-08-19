@@ -21,8 +21,8 @@ import { createHash, generateKeyPairSync, sign as edSign, type KeyObject } from 
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
-import { signEnvelopeFixture } from "../../../testing/sign-envelope-fixture.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
 import { PluginNotAdmittedError } from "../../../shared/plugin-install-result.js";
 import type { MarketplaceFetcher } from "../../marketplace-fetcher.js";
 import type { PluginMarketplaceItem, SignatureEnvelope } from "../../types.js";

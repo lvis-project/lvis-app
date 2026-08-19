@@ -36,7 +36,7 @@ import {
   MemorySecretStore,
   sealDayFromFile,
 } from "../../audit/hmac-chain.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 let workDir: string;
 

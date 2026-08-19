@@ -34,7 +34,7 @@ import { MemoryManager } from "../../memory/memory-manager.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
 import { serializeHistoryMessage } from "../../shared/chat-history.js";
 import { historyToEntries } from "../../ui/renderer/utils/history.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const SESSION_ID = "durability-session";
 

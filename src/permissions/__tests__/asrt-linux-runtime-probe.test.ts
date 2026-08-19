@@ -8,7 +8,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EventEmitter } from "node:events";
-import { setProcessPlatform } from "../../testing/process-platform.js";
+import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
 
 const h = vi.hoisted(() => ({
   initialize: vi.fn(),

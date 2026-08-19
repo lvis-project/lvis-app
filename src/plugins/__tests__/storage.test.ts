@@ -31,7 +31,7 @@ vi.mock("electron", () => ({ safeStorage: mockedElectron.safeStorage }));
 
 import { createPluginStorage } from "../storage.js";
 import { PluginStorageEncryptionUnavailableError } from "../types.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const dirLinkType = process.platform === "win32" ? "junction" : "dir";
 

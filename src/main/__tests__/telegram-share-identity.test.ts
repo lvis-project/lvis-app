@@ -19,7 +19,7 @@ import {
 import { createTelegramShareChangeWatcher } from "../telegram-share-identity.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
 import { conversationDigestFor, namespaceAt } from "./telegram-connection-namespace.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const RAW_CONVERSATION_ID = "sentinel-share-identity-conversation-7c19";
 const AWAY_SCOPE = "/srv/away-share-scope";

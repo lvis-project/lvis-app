@@ -7,7 +7,7 @@
  * `execute(rawInput, ctx)` contract directly — no Electron / IPC.
  */
 import { describe, expect, it, vi } from "vitest";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join, resolve as resolvePath } from "node:path";
 import { tmpdir } from "node:os";

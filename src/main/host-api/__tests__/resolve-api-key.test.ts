@@ -23,7 +23,7 @@ import { WhitelistCache } from "../../../plugins/whitelist/whitelist-cache.js";
 import { canonicalJSON } from "../../../plugins/whitelist/canonical-json.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../../plugins/marketplace-keys.js";
 import { resetHostSecretCountersForTesting } from "../../../telemetry/host-secret-counters.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 import type { SignatureEnvelope } from "../../../plugins/types.js";
 import type { PluginManifest } from "../../../plugins/types.js";
 

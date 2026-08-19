@@ -5,7 +5,7 @@ import { join } from "node:path";
 
 import { PermissionManager } from "../../../permissions/permission-manager.js";
 import type { LLMProvider } from "../../../engine/llm/types.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 describe("wireReviewerAndPermissions subscription runtime", () => {
   it("uses the shared active subscription factory and a transport-scoped reviewer identity", async () => {

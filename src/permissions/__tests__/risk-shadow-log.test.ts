@@ -18,7 +18,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emitRiskShadowLog, emitEffectShadowLog } from "../reviewer/risk-shadow-log.js";
 import { AuditLogger, type AuditEntry } from "../../audit/audit-logger.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 function collectingAudit(): { entries: AuditEntry[]; logger: AuditLogger } {
   const entries: AuditEntry[] = [];

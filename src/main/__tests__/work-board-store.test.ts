@@ -25,7 +25,7 @@ import {
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WorkBoardStore, MAX_ITEMS } from "../work-board-store.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 function tempBoard(now?: () => number) {
   const dir = mkdtempSync(join(tmpdir(), "lvis-wb-"));

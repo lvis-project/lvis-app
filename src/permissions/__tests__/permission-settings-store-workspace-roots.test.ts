@@ -20,7 +20,7 @@ import {
 } from "../permission-settings-store.js";
 import * as atomicFile from "../../lib/atomic-file.js";
 import { canonicalizePathForMatch } from "../sensitive-paths.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const tempRoots: string[] = [];
 

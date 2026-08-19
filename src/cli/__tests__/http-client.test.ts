@@ -32,8 +32,8 @@ import type { ConversationCommandPort } from "../../main/conversation-command-po
 import type { IpcDeps } from "../../ipc/types.js";
 import { openFeatureNamespace } from "../../main/storage/feature-namespace.js";
 import { LOCAL_API_INFO_FILE, type LocalApiServerInfoFile } from "../../main/local-api-server.js";
-import { makeDeepProxy } from "../../testing/deep-proxy.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { makeDeepProxy } from "../../__tests__/support/deep-proxy.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { createLvisClient } from "../../sdk/index.js";
 import { CHANNELS, PERMISSIONS } from "../../contract/app-contract.js";
 import {

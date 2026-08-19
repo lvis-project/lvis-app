@@ -3,7 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 import { UNAUTHORIZED_FRAME } from "../../gated.js";
 import { setWorkspaceRootLifecycle } from "../../../permissions/workspace-root-lifecycle.js";
 import {

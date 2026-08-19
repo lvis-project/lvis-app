@@ -23,7 +23,7 @@ import {
 } from "../telegram-connection-store.js";
 import { mintTelegramPairingCode, telegramPairingCodeDigest } from "../telegram-pairing-code.js";
 import { conversationDigestFor, namespaceAt } from "./telegram-connection-namespace.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 /** The service must mint codes the ingress-side authority can redeem. */
 function redeemableDigest(code: string): string {

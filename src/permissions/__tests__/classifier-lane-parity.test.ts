@@ -32,7 +32,7 @@ import { VerdictCache } from "../reviewer/verdict-cache.js";
 import { DeferredQueue } from "../reviewer/deferred-queue.js";
 import { maskToolInputForDisplay } from "../../tools/pipeline/display-mask.js";
 import { makeRiskClassifierContext } from "./test-helpers.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const rb = new RuleBasedRiskClassifier();
 
