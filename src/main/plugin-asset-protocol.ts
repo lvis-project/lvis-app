@@ -2,6 +2,7 @@ import type { Session } from "electron";
 import { realpath } from "node:fs/promises";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { isPathWithin } from "../plugins/plugin-storage-containment.js";
 
 export const PLUGIN_ASSET_SCHEME = "lvis-plugin";
 const PLUGIN_ASSET_HOST = "asset";
@@ -66,19 +67,18 @@ export async function resolvePluginAssetRequest(
     return null;
   }
 
-  let realRoot: string;
-  let realAsset: string;
+  let resolvedRoot: string;
+  let resolvedAsset: string;
   try {
-    realRoot = options.rootIsReal ? pluginRoot : await realpath(pluginRoot);
-    realAsset = await realpath(path.resolve(realRoot, relPath));
+    resolvedRoot = options.rootIsReal ? pluginRoot : await realpath(pluginRoot);
+    resolvedAsset = await realpath(path.resolve(resolvedRoot, relPath));
   } catch {
     return null;
   }
-  const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-  if (realAsset !== realRoot && !realAsset.startsWith(rootWithSep)) {
+  if (!isPathWithin(resolvedRoot, resolvedAsset)) {
     return null;
   }
-  return realAsset;
+  return resolvedAsset;
 }
 
 type PartitionAssetRoot = {

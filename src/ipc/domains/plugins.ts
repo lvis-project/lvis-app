@@ -101,6 +101,7 @@ import {
 import { lvisHome } from "../../shared/lvis-home.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import { isPluginInstallFailureKind, type PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
+import { isPathWithin } from "../../plugins/plugin-storage-containment.js";
 import {
   handlePluginBundleE2eSnapshot,
   handlePluginCards,
@@ -678,17 +679,16 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       throw new Error(`Plugin root not found (plugin=${pluginId}).`);
     }
     const pluginRoot = realpathSync(rawPluginRoot);
-    let realEntryPath: string;
+    let resolvedEntryPath: string;
     try {
-      realEntryPath = realpathSync(entryPath);
+      resolvedEntryPath = realpathSync(entryPath);
     } catch {
       throw new Error(`Plugin UI entry path could not be resolved (plugin=${pluginId}).`);
     }
-    const rootWithSep = pluginRoot.endsWith(path.sep) ? pluginRoot : pluginRoot + path.sep;
-    if (realEntryPath !== pluginRoot && !realEntryPath.startsWith(rootWithSep)) {
+    if (!isPathWithin(pluginRoot, resolvedEntryPath)) {
       throw new Error(`Plugin UI entry path escapes plugin directory (plugin=${pluginId}).`);
     }
-    return readFile(realEntryPath, "utf-8");
+    return readFile(resolvedEntryPath, "utf-8");
   });
 
   // read-only, sender guard optional
@@ -2259,11 +2259,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-entry-url" }, "webview register rejected");
       return { ok: false, error: "invalid-entry-url" };
     }
-    let realRoot: string;
-    let realEntry: string;
+    let resolvedRoot: string;
+    let resolvedEntry: string;
     try {
-      realRoot = realpathSync(rawInstallRoot);
-      realEntry = realpathSync(entryFsPath);
+      resolvedRoot = realpathSync(rawInstallRoot);
+      resolvedEntry = realpathSync(entryFsPath);
     } catch (err) {
       // Classify ENOENT separately from genuine boundary violations.
       // ENOENT here means the install dir was deleted under us — either a
@@ -2294,13 +2294,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
-    const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-    if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
-      logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, realEntry, realRoot });
+    if (!isPathWithin(resolvedRoot, resolvedEntry)) {
+      logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, resolvedEntry, resolvedRoot });
       plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
-    const assetEntryUrl = pluginAssetUrlFromRealPath(realRoot, realEntry);
+    const assetEntryUrl = pluginAssetUrlFromRealPath(resolvedRoot, resolvedEntry);
     // Carry the runtime-revision cache-bust query through to the asset URL so
     // the shell's import() gets a fresh ESM cache key after plugin reload.
     // entryUrl already parsed successfully via fileURLToPath above, so this
