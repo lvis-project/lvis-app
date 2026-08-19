@@ -540,18 +540,29 @@ export function normalizePermissionSettings(
   // from `additionalDirectories` in the SAME atomic write that appends the
   // intent, so a root with a removal in flight is already absent from the list.
   // The masking therefore only decides the case where the path is in the list
-  // anyway — a hand edit or an interrupted legacy write — and there the journal
-  // wins over the list.
+  // anyway — a hand edit or an interrupted legacy write, not an in-app add,
+  // which `addAllowedDirectoryPersist` refuses outright while an intent for that
+  // root is pending — and there the journal wins over the list.
   //
   // What it is NOT. An entry that names nothing (`null`, `7`, an object with no
   // readable path) masks nothing, so a path a hand edit put back stays active.
   // That residual is deliberate, and it is not a hole in a defence because
-  // there is no defence here to hole: the same writer could have written
-  // `pendingWorkspaceRootRemovals: []`, a VALID journal that reactivates every
-  // queued root and raises no fault at all. This journal is crash recovery, not
-  // tamper-evidence. Emptying the list on an unattributable entry would trade
-  // every readable grant for one unreadable non-grant and buy nothing, so the
-  // entry is reported as a fault the UI must show instead.
+  // there is no defence here to hole: the same hand edit that put the path back
+  // could have written `pendingWorkspaceRootRemovals: []` instead — a valid
+  // journal that raises no fault and leaves that path exactly as active.
+  //
+  // Mind the scope of that argument, because its general form is FALSE: an
+  // empty journal reactivates nothing by itself. After a normal
+  // `beginWorkspaceRootRemovalPersist` the path is already gone from
+  // `additionalDirectories`, so clearing the journal leaves the read answering
+  // with the root still absent and no fault. `[]` is an equally easy substitute
+  // for the unattributable entry only in the case this paragraph is about,
+  // where the path is back in the list as well.
+  //
+  // This journal is crash recovery, not tamper-evidence. Emptying the list on an
+  // unattributable entry would trade every readable grant for one unreadable
+  // non-grant and buy nothing, so the entry is reported as a fault the UI must
+  // show instead.
   const pendingPaths = [
     ...pendingWorkspaceRootRemovals.map((intent) => intent.runtimePath),
     ...journal.malformed.flatMap((entry) => {
@@ -619,8 +630,10 @@ function partitionPendingWorkspaceRootRemovals(
 ): PendingWorkspaceRootRemovalJournal {
   if (parsed === undefined) return { intents: [], malformed: [] };
   // A non-array value carries no entry to keep apart, so the value itself is
-  // the thing preserved — a later write returns it to the journal as its sole
-  // element rather than deleting a key it cannot read.
+  // the thing preserved — a later write returns it to the journal as one
+  // element of the array, after whatever intents that write decided on, rather
+  // than deleting a key it cannot read. It is the sole element only when the
+  // write leaves no intents behind.
   if (!Array.isArray(parsed)) return { intents: [], malformed: [parsed] };
   const seenOperations = new Set<string>();
   const intents: PendingWorkspaceRootRemoval[] = [];
