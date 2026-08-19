@@ -81,6 +81,217 @@ state durable constraints here and put detailed designs in their owning docs.
   anchor from shipped code is a specification, not a record: its comparison
   section is removable, the document is not.
 
+## Naming
+
+Rules are stated positively: what a name must be. The process-metadata ban is
+one clause of this, not the whole of it. Counts are the current `main` tree and
+are the evidence each clause rests on — cite the count instead of arguing
+taste. Where the tree disagrees with itself, the majority side is the standard
+and the minority is listed under `Known naming divergences`, not quietly
+tolerated as a second convention.
+
+### Casing by kind
+
+- Types, interfaces, and classes are `PascalCase`: 2304 type/interface
+  declarations and 223 classes, no exceptions.
+- Functions, methods, parameters, locals, and object fields are `camelCase`.
+- A module-level `const` bound to a fixed literal or frozen table is
+  `SCREAMING_SNAKE_CASE` (588). A module-level `const` bound to a constructed
+  instance, singleton, or function stays `camelCase` (55: `logger`,
+  `admissionRegistry`, `backgroundShellManager`, `projectRoot`). The casing
+  says which of the two it is; it is not an emphasis marker.
+- A module-level `const` is `PascalCase` only when the binding *is* a type-like
+  or component-like thing: a React component, a schema object
+  (`ReadFileInputSchema`), or a frozen map standing in for an enum
+  (`A2ATaskState`, `PluginPhase`). All 25 today are one of those three.
+- A leading underscore marks an export that exists but is not part of the
+  module's API — a test seam or an internals bag (`_internal`, `__internals`,
+  `__test`). It is a visibility marker, not a casing rule; the rest of the name
+  still follows the clauses above.
+- `enum` is not the pattern here — one declaration exists in the whole tree.
+  Model a closed set as a string-literal union, adding a frozen companion
+  object only when the values must be enumerated at runtime.
+- Directories are lowercase kebab-case (70), except the dunder test
+  directories `__tests__`, `__fixtures__`, `__probes__`.
+
+### Files
+
+- A `.ts` module is kebab-case: 945 of 945 hand-written files. The 192
+  camelCase and `be_`-prefixed `.ts` files all sit under
+  `src/i18n/messages/generated/` and belong to their generator, not to this
+  rule; do not hand-edit them and do not cite them as precedent.
+- A `.tsx` file whose reason to exist is one React component is `PascalCase`
+  and carries that component's exact name (135 files; 134 hold a same-named
+  export).
+- A `.tsx` file that exports several components or helpers, or no component at
+  all, is kebab-case: `chat-side-panel-layout.tsx`, `preview-renderers.tsx`.
+  `src/components/ui/*` is vendored primitive code and keeps its upstream
+  kebab names.
+- `export default` is not used: 0 in 945 hand-written `.ts`, 2 in 166 non-test
+  `.tsx`. So "the file name matches the default export" does not arise: the
+  file name matches the single component the file exists to hold. When such a
+  file grows a second exported component, either rename the file to kebab-case
+  or move the second component out; never leave a `PascalCase` file whose name
+  matches nothing in it.
+- Before adding a file at all, apply the order in `Change and PR discipline`:
+  an existing function, then a function in an existing file, then a new file.
+
+### Booleans and predicates
+
+- A boolean-valued field is a state adjective or past participle: `enabled`,
+  `open`, `truncated`, `active`, `collapsed`, `connected`, `cancelled` — 1169
+  of 1483 boolean fields. Do not prefix stored state with `is` to make it look
+  boolean.
+- `is`/`has`/`can`/`should` belong on *derived* answers rather than stored
+  state (174 fields, and the majority of boolean-returning functions).
+- A function returning `boolean` is named as a proposition the caller reads as
+  a question — `isSensitivePath`, `hasApiKey`, `grantCovers`,
+  `pathEntryExists`, `vendorSupportsLengthContinuation`. Subject-first is fine;
+  imperative is not. 375 functions declare a `boolean` return.
+- A boolean-returning function named as a command leaves the caller unable to
+  tell whether `true` means "it is so" or "I did it". Name it for the question
+  or return a result object.
+- An option is named for what it turns *on*: `allowPrivateNetworks`,
+  `includeUnscoped`, `enableThinking`. A `disableX` flag double-negates at
+  every call site.
+
+### Async
+
+- Async functions carry no suffix — 502 `async function` declarations, none
+  named `*Async`. The return type already says it. The eight `*Async` bindings
+  in the tree are import aliases or `promisify` results disambiguating a
+  same-named synchronous API (`stat as statAsync`, `promisify(execFile)`).
+- `*Sync` is reserved for the synchronous sibling of an operation that is
+  otherwise async, matching the `node:fs` convention (`ensureDir` /
+  `ensureDirSync`). A `*Sync` name with no async sibling carries no
+  information — drop the suffix.
+
+### Events and handlers
+
+- A callback slot — a prop, an option field, a subscription argument — is
+  `on<Event>`: `onError`, `onProgress`, `onToolStart`. It names the event, not
+  the reaction: `onPluginsChanged`, never `onRefreshList`.
+- The local function supplied to that slot is `handle<Event>` (161
+  declarations). The pair is what makes direction readable at the call site.
+- Bus event ids are `<pluginId>.<noun>.<pastTenseVerb>`, lowercase and
+  dot-separated: `calendar.event.created`, `host.theme.changed`,
+  `email.invite.detected`.
+- IPC channels are `lvis:<domain>:<action>` with kebab-case segments (259 of
+  266).
+- The three plugin namespaces stay literal and unconverted, each with its own
+  shape: manifest plugin id `^[a-z][a-z0-9-]*$`, LLM tool name
+  `^[a-zA-Z_][a-zA-Z0-9_]*$` (underscore form, `meeting_start`), and the event
+  id above.
+
+### Errors and audit keys
+
+- An error class is `<Domain><Condition>Error` and ends in `Error`:
+  `PluginStartupTimeoutError`, `SecretDocumentDecryptionError` — 69 of the 70
+  classes extending `Error`. The suffix is what lets a `catch` read as a
+  sentence.
+- Stable IPC error codes are kebab-case; the renderer maps a code to localized
+  text rather than surfacing the raw error.
+- Audit `type` keys are `snake_case`: `tool_call`, `mcp_apikey_set`,
+  `kill_switch`, `sandbox_gate` — 11 of 12.
+- An audit key is a persisted value, not just an identifier. Changing one is a
+  log migration that strands historical rows, so treat shipped keys as frozen
+  and add rather than rename.
+
+### Test doubles
+
+- `mock` and `fake` do not appear in a production path in any form. Every
+  double-prefixed file in the tree lives under `__tests__/` or `test/` (4
+  files), and no production identifier uses either word.
+- Shared test support that several suites import lives in `src/testing/` and is
+  named for what it provides — `sign-envelope-fixture.ts`,
+  `host-shell-sandbox-fixtures.ts` — never for being fake. Nothing outside
+  tests imports it (0 inbound production imports).
+- A production seam that exists for tests is suffixed `ForTest` and carries a
+  leading underscore marking it as outside the module's API:
+  `__resetSessionStoreForTest`, `_resetForTest`. One suffix spelling; see
+  `Known naming divergences` for the two others still in the tree.
+- `real` and `stub` are ordinary domain words here and stay. `real*` is the
+  result of POSIX `realpath` — `realRoot`, `realDir`, `realFile`,
+  `realParent`, `realAsset` (13 sites). `stub*` is a compaction stub, the
+  placeholder that replaces dropped content —
+  `src/shared/tool-result-stub.ts`, `BOUNDARY_STUB_TEMPLATE` (12 sites).
+  Neither is a double. The test is what the word denotes: a name meaning "not
+  the production thing" is banned; a name denoting a thing production code
+  builds is not.
+- `.github/workflows/naming-gate.yml` therefore matches only `mock` and `fake`
+  as identifiers. A lone `Real*`/`Stub*` production identifier that really is
+  half of a double split is a reviewer call, not a gate finding — the gate
+  cannot separate it from `realpath` and compaction vocabulary, and a check
+  that cannot separate them only teaches authors to argue with grep. The
+  reviewer question is whether a `Mock*`/`Fake*` counterpart exists; without
+  one there is no split and the name stays.
+
+### Domain labels versus process labels
+
+Applied to any numbered or lettered label, the question is: **can a reader
+resolve this label from a document the repository ships?**
+
+- Yes — it is a domain label and it stays. `Layer 0`–`Layer 8` (permission
+  policy design, 189 uses), `Tier A`–`Tier D` and `Tier 1`–`Tier 4` (plugin
+  permission tiers), `§4.5` architecture anchors (632), `#811` issue anchors
+  (855).
+- No — it resolves only against a work plan, a review round, or PR history, so
+  it is a process label and does not enter an identifier, filename, comment,
+  audit key, or shipped document: `H2`, `Phase 2b`, `PR-A4`, `Wave F`,
+  `Sprint 3-C`, `R-2`, `§M9`, `round3`, `pr1114`. The production tree contains
+  zero of these today.
+- A `-v2` suffix is a process label unless the earlier version is a live
+  sibling in the same directory. If `foo-v2.ts` exists and `foo.ts` does not,
+  the suffix records when the file was written, not what it is.
+- Commit messages, PR bodies, and issues are outside this rule and are the
+  right place for schedule coordinates.
+- The gate blocks new process labels in a PR diff. It checks file *names* only
+  on added and renamed paths, so a grandfathered name never becomes a
+  standing ban on editing that file.
+
+### Known naming divergences
+
+Backlog, not permission. Each is the minority side of a rule above; fix
+opportunistically when already editing the file, and do not cite any of them as
+precedent.
+
+- `src/ui/renderer/contexts/i18n-settings-provider.tsx` exports exactly one
+  component, `I18nSettingsProvider`, under a kebab-case name.
+- `src/ui/renderer/components/permissions/PermissionDecisionCard.tsx` is
+  `PascalCase` but exports a set of helpers with no `PermissionDecisionCard` in
+  it. Three modules import it for those helpers.
+- Two remaining `export default` sites: `SlashPickerPanel.tsx`,
+  `CommandPopoverPanel.tsx`.
+- Three spellings of the test-seam suffix: `ForTest` (36), `ForTests` (28),
+  `ForTesting` (19).
+- Seven camelCase IPC channel leaves against 259 kebab: `lvis:attach:openFile`,
+  `openExternal`, `readImage`, `saveClipboardImage`, `discardClipboardImage`,
+  and `lvis:dev:getPreflightStatus`, `setPreflightOverride`. These strings
+  cross the preload boundary, so renaming is a coordinated change.
+- `ManifestIntegrityViolation` is the only error class without the `Error`
+  suffix.
+- The audit `type` value `diagnostics-export` is kebab among eleven
+  `snake_case` siblings. It is a persisted key, so this is a log migration
+  rather than a rename.
+- Six `*Sync` functions have no async sibling, so the suffix carries nothing:
+  `copyOpenFileSync`, `findLastCompleteJsonlBoundarySync`,
+  `publishOpenFileArchiveSync`, `readFrontmatterSync`,
+  `readLastCompleteLineSync`, `readLastNonEmptyLineSync`,
+  `writeUtf8FileAtomicSync`.
+- Five `*Async` names have no synchronous counterpart to disambiguate from:
+  `installWindowsSandboxAsync`, `checkDependenciesAsync`,
+  `checkWindowsSandboxStatusAsync`, `checkWindowsDependenciesAsync`,
+  `getCompressedDataAsync`.
+- Boolean-returning functions named as commands: `loadSession`,
+  `verifyEntryHmac`, `repairSecretFileMode`, `migrateLegacyDisabledMode`,
+  `focusPendingQuestion`.
+- The `realFs` parameter of `createReadOnlyFsProxy` in
+  `src/permissions/manifest-integrity.ts` is the one `real*` name that is not a
+  `realpath` result — it contrasts the
+  unwrapped module with its `Proxy`. `target` is the `Proxy` vocabulary for it.
+- `docs/architecture/session-model-v2.md` carries a `-v2` suffix with no
+  earlier sibling in `docs/architecture/`.
+
 ## Architecture and security invariants
 
 - Keep core logic vendor-neutral through the `GenericMessage` abstraction.
