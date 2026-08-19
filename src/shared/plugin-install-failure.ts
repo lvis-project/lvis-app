@@ -3,6 +3,8 @@ export const PLUGIN_INSTALL_FAILURE_KINDS = [
   "manifest-validation-error",
   "incompatible-app-version",
   "plugin-revoked",
+  "untrusted-manifest-path",
+  "load-crash",
 ] as const;
 
 export type PluginInstallFailureKind = (typeof PLUGIN_INSTALL_FAILURE_KINDS)[number];
@@ -27,6 +29,13 @@ export function isPluginInstallFailureKind(value: unknown): value is PluginInsta
  *     genuine upgrade rather than a "repair" — either way looping a reinstall
  *     here is not the right remedy; the Doctor must show the block reason and
  *     point at Remove instead.
+ *
+ * `untrusted-manifest-path` and `load-crash` are deliberately NOT listed: both
+ * are repaired by a reinstall. A marketplace install rewrites the registry row
+ * with a `manifestPath` relative to the plugin root (see `marketplace.ts`
+ * `commit`), which is exactly the containment the trust predicate demands; and
+ * a crash part-way through a load is most often an incomplete or damaged
+ * payload, which a reinstall replaces wholesale.
  */
 const REINSTALL_NOT_FIXABLE_KINDS: ReadonlySet<PluginInstallFailureKind> = new Set([
   "catalog-grant-mismatch",
@@ -39,6 +48,10 @@ const REINSTALL_NOT_FIXABLE_KINDS: ReadonlySet<PluginInstallFailureKind> = new S
  * reinstalling the latest marketplace version:
  *   - `manifest-validation-error` — a stale/pre-v6/schema-invalid on-disk
  *     manifest; the latest marketplace package ships a valid manifest.
+ *   - `untrusted-manifest-path` — the registry row names a manifest outside the
+ *     plugin root; a marketplace reinstall rewrites that row in place.
+ *   - `load-crash` — the load sequence threw somewhere the runtime does not
+ *     classify; a reinstall replaces the payload it was reading.
  *   - `undefined` — an unclassified load failure (missing/corrupt files, entry
  *     import error, …). Treated as fixable so the Doctor still offers one
  *     reinstall attempt; if it fails, the caller degrades to the diagnostic +

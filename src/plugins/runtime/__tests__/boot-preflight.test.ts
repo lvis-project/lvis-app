@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import { isReinstallFixableFailureKind } from "../../../shared/plugin-install-failure.js";
+import { OUT_OF_PROCESS_PLUGIN_IDS } from "../../isolation/out-of-process-plugins.js";
 import type { PluginManifest } from "../../types.js";
 import {
   bindTestPluginRuntimeGeneration,
@@ -165,6 +166,159 @@ describe("PluginRuntime boot preflight", () => {
     expect(card?.installFailureMessage).toBe("receipt hash mismatch: dist/index.js");
     // Reinstalling rewrites payload and receipt together, so the Doctor must be
     // allowed to offer that repair rather than only a diagnosis.
+    expect(isReinstallFixableFailureKind(card?.installFailureKind)).toBe(true);
+  });
+
+  it("keeps loading the plugins listed after one that throws mid-load", async () => {
+    // Candidate-root materialization sits between the gates that classify
+    // their own refusals, so a throw here is unclassified — and it used to
+    // unwind `load()`'s whole loop. Every plugin AFTER the thrower was then
+    // never attempted: no instance, no failure, and (because a card needs
+    // either a load status or a stub) no row anywhere in the UI, while the
+    // registry kept calling them installed.
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+      createHostApi: createNoopHostApiForTests,
+      installReceiptCacheRoot: join(root, "receipts"),
+    }));
+    const internals = runtime as unknown as {
+      verifyReceiptAndDevGuard(): Promise<{ ok: true }>;
+      readManifest(path: string): Promise<PluginManifest>;
+      materializeImmutableRuntimeRoot(
+        pluginId: string,
+        pluginRoot: string,
+        activationId: string,
+        installId: string,
+      ): Promise<string>;
+    };
+    internals.verifyReceiptAndDevGuard = async () => ({ ok: true });
+    internals.readManifest = async (path) => manifests.get(path.split(/[\\/]/).at(-2)!)!;
+    const materialize = internals.materializeImmutableRuntimeRoot.bind(runtime);
+    internals.materializeImmutableRuntimeRoot = async (pluginId, ...rest) => {
+      if (pluginId === "preflight-1") {
+        throw new Error("ENOSPC: no space left on device, mkdir runtime root");
+      }
+      return materialize(pluginId, ...rest);
+    };
+
+    await expect(runtime.load()).resolves.toBeUndefined();
+
+    // preflight-2 through preflight-5 all come after the thrower in registry
+    // order; every one of them still got its attempt.
+    expect(runtime.listPluginIds()).toEqual([
+      "preflight-0",
+      "preflight-2",
+      "preflight-3",
+      "preflight-4",
+      "preflight-5",
+    ]);
+    const card = runtime.listPluginCards().find((entry) => entry.id === "preflight-1");
+    expect(card?.loadStatus).toBe("failed");
+    expect(card?.installFailureKind).toBe("load-crash");
+    expect(card?.installFailureMessage).toContain("no space left on device");
+  });
+
+  it("keeps the sequence when the thrower is an out-of-process plugin", async () => {
+    // The per-plugin boundary wraps the whole attempt, so it cannot depend on
+    // which arm `importPluginFactoryForLifecycle` took. `work-assistant` is the
+    // one id in OUT_OF_PROCESS_PLUGIN_IDS, and the data directory is created
+    // after that arm has already produced its child-backed factory — so a throw
+    // there is an unclassified crash on the isolated path specifically.
+    const isolatedId = [...OUT_OF_PROCESS_PLUGIN_IDS][0]!;
+    const isolatedRoot = join(pluginsRoot, isolatedId);
+    await mkdir(isolatedRoot, { recursive: true });
+    await writeFile(
+      join(isolatedRoot, "entry.mjs"),
+      "export default async () => ({ handlers: {}, start: async () => {} });\n",
+      "utf8",
+    );
+    await writeFile(join(isolatedRoot, "plugin.json"), "{}\n", "utf8");
+    manifests.set(isolatedId, {
+      id: isolatedId,
+      name: isolatedId,
+      version: "1.0.0",
+      description: "out-of-process fixture",
+      publisher: "test",
+      entry: "entry.mjs",
+      tools: [],
+    });
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: isolatedId, manifestPath: join(isolatedRoot, "plugin.json") },
+      { id: "preflight-0", manifestPath: join(pluginsRoot, "preflight-0", "plugin.json") },
+    ]);
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+      createHostApi: createNoopHostApiForTests,
+      installReceiptCacheRoot: join(root, "receipts"),
+    }));
+    const internals = runtime as unknown as {
+      verifyReceiptAndDevGuard(): Promise<{ ok: true }>;
+      readManifest(path: string): Promise<PluginManifest>;
+      ensureDataDir(pluginId: string, pluginRoot: string): string;
+    };
+    internals.verifyReceiptAndDevGuard = async () => ({ ok: true });
+    internals.readManifest = async (path) => manifests.get(path.split(/[\\/]/).at(-2)!)!;
+    const ensureDataDir = internals.ensureDataDir.bind(runtime);
+    internals.ensureDataDir = (pluginId, pluginRoot) => {
+      if (pluginId === isolatedId) {
+        throw new Error("EACCES: permission denied, mkdir plugin data dir");
+      }
+      return ensureDataDir(pluginId, pluginRoot);
+    };
+
+    await expect(runtime.load()).resolves.toBeUndefined();
+
+    expect(runtime.listPluginIds()).toEqual(["preflight-0"]);
+    const card = runtime.listPluginCards().find((entry) => entry.id === isolatedId);
+    expect(card?.installFailureKind).toBe("load-crash");
+    expect(card?.installFailureMessage).toContain("permission denied");
+  });
+
+  it("surfaces a registry row whose manifest path escapes the plugin root", async () => {
+    // The plan drops this row before anything reads it, so no preflight
+    // outcome and no manifest ever exist for it — only an explicit stub can
+    // put it on a card, and without one the marketplace was left calling it
+    // installed while the app named it nowhere.
+    const strayRoot = join(root, "outside-the-plugin-root");
+    const strayManifestPath = join(strayRoot, "plugin.json");
+    await mkdir(strayRoot, { recursive: true });
+    await writeFile(strayManifestPath, "{}\n", "utf8");
+    await writeTestPluginRegistry({ registryPath }, [
+      { id: "stray-registry-plugin", manifestPath: strayManifestPath },
+      { id: "preflight-0", manifestPath: join(pluginsRoot, "preflight-0", "plugin.json") },
+    ]);
+    const readPaths: string[] = [];
+    const runtime = bindTestPluginRuntimeGeneration(new PluginRuntime({
+      hostRoot,
+      pluginsRoot,
+      registryPath,
+      createHostApi: createNoopHostApiForTests,
+      installReceiptCacheRoot: join(root, "receipts"),
+    }));
+    const internals = runtime as unknown as {
+      verifyReceiptAndDevGuard(): Promise<{ ok: true }>;
+      readManifest(path: string): Promise<PluginManifest>;
+    };
+    internals.verifyReceiptAndDevGuard = async () => ({ ok: true });
+    internals.readManifest = async (path) => {
+      readPaths.push(path);
+      return manifests.get(path.split(/[\\/]/).at(-2)!)!;
+    };
+
+    await runtime.load();
+
+    expect(readPaths).not.toContain(strayManifestPath);
+    expect(runtime.listPluginIds()).toEqual(["preflight-0"]);
+    const card = runtime.listPluginCards().find((entry) => entry.id === "stray-registry-plugin");
+    expect(card?.loadStatus).toBe("failed");
+    expect(card?.installFailureKind).toBe("untrusted-manifest-path");
+    expect(card?.installFailureMessage).toContain(strayManifestPath);
+    // Distinct from the receipt refusal above, which is unclassified: both are
+    // repairable by reinstalling, but the Doctor must say which one happened.
     expect(isReinstallFixableFailureKind(card?.installFailureKind)).toBe(true);
   });
 
