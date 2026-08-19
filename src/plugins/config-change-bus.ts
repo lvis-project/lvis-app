@@ -37,22 +37,15 @@ const log = createLogger("plugin-config-change");
  *   }
  * });
  * ```
- */
-
-/**
- * Sentinel value passed to `emitPluginConfigChange` (and therefore to
- * `hostApi.config.onChange` listeners) when a secret field is updated.
  *
- * Using a unique Symbol guarantees identity-safe equality checks:
- *   `value === SECRET_REDACTED_SENTINEL` → secret was updated, actual
- *   value is in the keychain, never in the listener payload.
- *
- * Prefer `Symbol.for(...)` so the sentinel is stable across module
- * reloads (e.g. Electron renderer hot-reloads or test re-imports).
+ * The sentinel itself is DECLARED in `isolation/config-subscription-child.ts`
+ * and re-exported here. This module builds a pino logger at import, pino writes
+ * to fd 1, and fd 1 in a plugin child is the framed protocol — so the one value
+ * both processes need could not be declared next to a stdout writer. See that
+ * file for the full reasoning; the re-export keeps this module the doorway the
+ * emit site and this documentation already point at.
  */
-export const SECRET_REDACTED_SENTINEL: unique symbol = Symbol.for(
-  "lvis.config.secret.redacted",
-);
+export { SECRET_REDACTED_SENTINEL } from "./isolation/config-subscription-child.js";
 
 type ConfigChangeListener = (key: string, value: unknown) => void;
 
@@ -145,7 +138,77 @@ export function emitPluginConfigChange(
   }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Host public preferences — the OTHER config value a plugin reads.
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * Listeners for "an allow-listed host preference changed".
+ *
+ * WHY THIS SIGNAL EXISTS. `hostApi.getAppPreference(key)` is SYNCHRONOUS, so an
+ * out-of-process plugin cannot answer it with a round trip — §3.1 answers such
+ * members from a host-pushed snapshot instead. A snapshot is only correct while
+ * something re-pushes it, and `hostApi` exposed nothing to re-push from: the
+ * in-process member reads `settingsService` live on every call, so an isolated
+ * plugin would have answered with the value the preference held when it
+ * started, forever, with nothing reporting the divergence. That is why
+ * `getAppPreference` was the one member the child left unwired.
+ *
+ * VALUE-FREE ON PURPOSE, exactly like `onPluginsChanged`. A listener re-reads
+ * through `getAppPreference`, which is the same reader the in-process member
+ * uses, so there is ONE authority for what a preference is rather than a second
+ * one assembled out of change events.
+ *
+ * It lives in this module rather than beside the reader because the reader is
+ * in `boot/`: the host-side watcher that pushes to a child is in
+ * `plugins/isolation/`, and a plugins-layer module reaching up into a boot step
+ * for a subscription would invert the dependency this bus already gets right
+ * for `config.onChange`.
+ */
+type AppPreferenceChangeListener = () => void;
+
+const appPreferenceListeners = new Set<AppPreferenceChangeListener>();
+
+/**
+ * Register a listener for host public preference changes. Returns a disposer.
+ *
+ * Not plugin-scoped, and that is the difference from the bus above: a host
+ * preference belongs to the app, not to a plugin, so every listener sees every
+ * change. The allowlist — not this bus — is what keeps host-private settings
+ * out of a plugin's reach (`boot/steps/plugin-runtime/app-preference.ts`).
+ */
+export function subscribeAppPreferenceChange(
+  listener: AppPreferenceChangeListener,
+): () => void {
+  appPreferenceListeners.add(listener);
+  return () => {
+    appPreferenceListeners.delete(listener);
+  };
+}
+
+/**
+ * Announce that at least one allow-listed host preference now reads differently.
+ *
+ * The CALLER decides that: `publishAppPreferenceChange` in
+ * `boot/steps/plugin-runtime/app-preference.ts` compares the allow-listed
+ * values against the last published set and calls this only when they moved, so
+ * a settings save that touched nothing a plugin can read pushes nothing.
+ */
+export function emitAppPreferenceChange(): void {
+  for (const listener of appPreferenceListeners) {
+    try {
+      listener();
+    } catch (err) {
+      log.warn(
+        `app-preference listener failed: %s`,
+        (err as Error).message,
+      );
+    }
+  }
+}
+
 /** Test-only: drop every registered listener. */
 export function _resetPluginConfigChangeBus(): void {
   listenersByPlugin.clear();
+  appPreferenceListeners.clear();
 }

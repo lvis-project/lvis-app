@@ -7,8 +7,10 @@
  * Splitting them across the two sides of the boundary would put the encode and
  * the decode of the same payload in two files that nothing forces to agree, so
  * the payload codecs live HERE and the host handler imports them — this file is
- * Electron-free (it reaches only `host-api-wire.ts` and the public contract),
- * and `config-subscription-host.ts` is not.
+ * Electron-free (it reaches only `host-api-wire.ts`, the shared JSON predicate
+ * and the public contract), and `config-subscription-host.ts` is not. That is
+ * also why `SECRET_REDACTED_SENTINEL` now lives here: it is the one value both
+ * processes must agree on, and its former home builds a logger at import.
  *
  * WHAT A `handler-registration` MEMBER ACTUALLY DOES. The plugin passes a
  * function; a function cannot cross. The child registers it locally under an id
@@ -26,10 +28,36 @@
  * reported through the log channel and the local registration is dropped, never
  * left half-open pretending to be subscribed.
  */
+import { describeNonJson } from "../../shared/json-representable.js";
 import type { PluginLifecycleEvent } from "../types.js";
 import { HostApiBoundaryError } from "./host-api-wire.js";
 import type { HostApiPath } from "./host-api-path-contracts.js";
 import type { HostApiCaller } from "./plugin-child-runtime.js";
+
+/**
+ * The value `config.onChange` delivers when a `format: "secret"` field changed.
+ *
+ * DECLARED HERE, and the location is the decision. It used to live in
+ * `plugins/config-change-bus.ts`, which builds a pino logger at module load —
+ * pino writes to fd 1 directly, and fd 1 in a plugin child is the framed
+ * protocol, so importing that module into a child would put a stdout writer
+ * beside the wire. This file is the one both halves already reach: it is
+ * Electron-free, the child imports it to decode, the host handler imports it to
+ * encode, and the bus re-exports it so the emit site keeps the import it has.
+ *
+ * A unique Symbol makes `value === SECRET_REDACTED_SENTINEL` an identity check
+ * that cannot be produced by a cleartext value, the way the `"[REDACTED]"`
+ * string it replaced could. `Symbol.for` rather than `Symbol` so the identity is
+ * a process-wide registry entry: a plugin bundled apart from the host — and,
+ * since the boundary, one running in a DIFFERENT process — resolves the same
+ * symbol from the same key.
+ */
+export const SECRET_REDACTED_SENTINEL: unique symbol = Symbol.for(
+  "lvis.config.secret.redacted",
+);
+
+/** The wire field that says "this change was a secret's". */
+const SECRET_REDACTED_WIRE_FIELD = "secretRedacted";
 
 /** The members this pair implements, named once so both sides agree. */
 export type ConfigSubscriptionPath =
@@ -82,6 +110,46 @@ function asEventRecord(payload: unknown, label: string): Record<string, unknown>
   return payload as Record<string, unknown>;
 }
 
+/**
+ * Put a `config.onChange` event ON the wire.
+ *
+ * THE SENTINEL NEEDS A WIRE FORM OF ITS OWN. `SECRET_REDACTED_SENTINEL` is a
+ * Symbol, and `JSON.stringify` drops a symbol-valued property entirely — so a
+ * plain `{ key, value }` would reach an isolated plugin as `{ key }`, its
+ * callback would receive `undefined`, and `undefined` on this member means "the
+ * key was cleared". The documented `value === SECRET_REDACTED_SENTINEL` check
+ * would then never match and the plugin would never reload its secret, with
+ * nothing failing anywhere. So the sentinel crosses as a FLAG beside the key,
+ * and the decoder turns the flag back into the symbol.
+ *
+ * The flag is a sibling of `key` rather than the value itself: a plugin whose
+ * cleartext value happens to be `{ secretRedacted: true }` sends that under
+ * `value`, where it cannot be mistaken for this.
+ *
+ * Every other value is REFUSED unless it survives JSON. The sentinel is one
+ * instance of a general hazard — a function, a bigint or a second symbol
+ * vanishes the same way — and the boundary's own rule for arguments and results
+ * is that a value which would not round-trip is rejected rather than silently
+ * changed. The throw lands inside the host's `config.onChange` callback, which
+ * the change bus already catches and logs per listener, so a host that emits an
+ * uncarryable value produces a logged failure instead of a plugin that quietly
+ * reads it as "cleared".
+ */
+export function encodeConfigChange(key: string, value: unknown): Record<string, unknown> {
+  if (value === SECRET_REDACTED_SENTINEL) {
+    return { key, [SECRET_REDACTED_WIRE_FIELD]: true };
+  }
+  const nonJson = describeNonJson(value, "config.onChange(value)");
+  if (nonJson) {
+    throw new HostApiBoundaryError(
+      "argument-marshalling-rejected",
+      `[config-subscription-child] config.onChange: value cannot cross the boundary — ${nonJson}`,
+      { key },
+    );
+  }
+  return { key, value };
+}
+
 /** Take a `config.onChange` event off the wire. */
 export function decodeConfigChange(payload: unknown): ConfigChangeEvent {
   const record = asEventRecord(payload, "config.onChange");
@@ -91,6 +159,19 @@ export function decodeConfigChange(payload: unknown): ConfigChangeEvent {
       "argument-marshalling-rejected",
       `[config-subscription-child] config.onChange: event names no key`,
     );
+  }
+  if (Object.hasOwn(record, SECRET_REDACTED_WIRE_FIELD)) {
+    // Strict on BOTH halves. A flag that is not exactly `true`, or one arriving
+    // together with a value, means the two sides disagree about this payload —
+    // and the wrong reading of either is "the key was cleared", the one answer
+    // this member must never invent.
+    if (record[SECRET_REDACTED_WIRE_FIELD] !== true || Object.hasOwn(record, "value")) {
+      throw new HostApiBoundaryError(
+        "argument-marshalling-rejected",
+        `[config-subscription-child] config.onChange: malformed secret marker for key '${key}'`,
+      );
+    }
+    return { key, value: SECRET_REDACTED_SENTINEL };
   }
   return { key, value: record.value };
 }
@@ -259,7 +340,18 @@ export function createConfigSubscriptionChildMembers(
           // The snapshot moves BEFORE the callback runs, so a callback that
           // reads `config.get(key)` sees the value it was just handed rather
           // than the one it replaced.
-          deps.config[change.key] = change.value;
+          if (change.value === SECRET_REDACTED_SENTINEL) {
+            // The sentinel is NOT a config value and must never enter the
+            // snapshot. A secret lives in the keychain and is stripped out of
+            // the cleartext `pluginConfigs` record the host resolves, so the
+            // in-process `config.get` answers `undefined` for a secret key —
+            // and the secret-set path deletes any stray cleartext copy. Storing
+            // the sentinel here would make `config.get` hand the plugin a
+            // Symbol that no in-process plugin can ever see.
+            delete deps.config[change.key];
+          } else {
+            deps.config[change.key] = change.value;
+          }
           callback(change.value);
         },
       );

@@ -34,6 +34,11 @@ import { spawnConfinedChild } from "../../permissions/confined-child.js";
 import { createSandboxProcessHome } from "../../permissions/sandbox-process-home.js";
 import { cleanupAsrtSandboxAfterCommand } from "../../permissions/asrt-sandbox.js";
 import { buildSafeChildEnv } from "../../tools/safe-env.js";
+// The allowlist is READ where it is declared rather than mirrored here. It is
+// the host's answer to "which preferences may a plugin see", and a second copy
+// of that list would be a second answer to a security question.
+import { HOST_PUBLIC_PREFERENCE_KEYS } from "../../boot/steps/plugin-runtime/app-preference.js";
+import { subscribeAppPreferenceChange } from "../config-change-bus.js";
 import type {
   PluginHostApi,
   PluginManifest,
@@ -90,7 +95,14 @@ export type DispatchableHostApi = Parameters<typeof createStorageHostApiPaths>[0
    * from — so it is named here rather than inside a group whose job is binding
    * handlers.
    */
-  Pick<PluginHostApi, "getInstalledPluginIds">;
+  Pick<PluginHostApi, "getInstalledPluginIds">
+  /**
+   * `getAppPreference` joins it for the same reason and stays OPTIONAL, because
+   * it is optional on `PluginHostApi`. A host that does not implement it
+   * publishes no preference snapshot at all, and the child's member then throws
+   * instead of answering `undefined` — see `PluginChildContext.appPreferences`.
+   */
+  & Pick<PluginHostApi, "getAppPreference">;
 
 /**
  * Bind every dispatched member to ONE plugin incarnation's `hostApi`.
@@ -486,12 +498,65 @@ export function createOutOfProcessPluginFactory(
         values,
       });
     });
-    /** Both host-owned watchers, ended together wherever the incarnation ends. */
+    /**
+     * The allow-listed host preferences, read through the SAME member a plugin
+     * would call — so the snapshot is the reader's answer, not a second one.
+     *
+     * `undefined` when this host implements no `getAppPreference`: the member
+     * is optional on `PluginHostApi`, and a child seeded with an empty snapshot
+     * could not tell "unset" from "unavailable". Not seeding at all keeps those
+     * apart, because the child's member throws when nothing was seeded.
+     */
+    const readAppPreferences = ():
+      | { keys: readonly string[]; values: Record<string, unknown> }
+      | undefined => {
+      const read = hostApi.getAppPreference;
+      if (typeof read !== "function") return undefined;
+      const values: Record<string, unknown> = {};
+      for (const key of HOST_PUBLIC_PREFERENCE_KEYS) {
+        const value = read.call(hostApi, key);
+        // Absent, not `undefined`: the wire distinguishes "unset" from "has a
+        // value" by presence in this record, because JSON has no `undefined`.
+        if (value !== undefined) values[key] = value;
+      }
+      return { keys: HOST_PUBLIC_PREFERENCE_KEYS, values };
+    };
+
+    /**
+     * The host re-pushes the preference snapshot the child answers
+     * `getAppPreference` from — the third host-owned watcher, and the one that
+     * makes the member answerable out of process at all.
+     *
+     * `getAppPreference` is synchronous, so §3.1 answers it from a snapshot,
+     * and a snapshot with no re-push is the value the preference held at plugin
+     * start. `ms-graph` reads `webView.preferredFlow` at CALL time, so it would
+     * have read a stale answer for the life of the process with nothing
+     * reporting it. The bus announces only a REAL change to an allow-listed
+     * key (`publishAppPreferenceChange` diffs before emitting), so an unrelated
+     * settings save costs nothing here.
+     */
+    const stopWatchingPreferences = subscribeAppPreferenceChange(() => {
+      const snapshot = readAppPreferences();
+      // A host with no reader never seeded the child, so there is nothing this
+      // push could correct.
+      if (!snapshot) return;
+      transport.sendToChild({
+        wire: HOST_API_WIRE_VERSION,
+        pluginId,
+        generationId,
+        kind: "preference-snapshot",
+        keys: snapshot.keys,
+        values: snapshot.values,
+      });
+    });
+    /** Every host-owned watcher, ended together wherever the incarnation ends. */
     const stopHostWatchers = (): void => {
       stopWatchingPluginSet();
       stopWatchingConfig();
+      stopWatchingPreferences();
     };
 
+    const constructionPreferences = readAppPreferences();
     const childContext: PluginChildContext = {
       pluginId,
       pluginRoot: context.pluginRoot,
@@ -500,6 +565,9 @@ export function createOutOfProcessPluginFactory(
       generationId,
       installedPluginIds: hostApi.getInstalledPluginIds(),
       ...(context.config !== undefined ? { config: context.config } : {}),
+      // Omitted entirely when the host implements no reader, which is what lets
+      // the child tell "unset" from "unavailable".
+      ...(constructionPreferences ? { appPreferences: constructionPreferences } : {}),
     };
     const constructParams: PluginConstructParams = {
       wire: PLUGIN_INSTANCE_WIRE_VERSION,
