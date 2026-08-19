@@ -3,9 +3,9 @@ name: Naming Gate (process-metadata + de-identification)
 # 두 개의 독립 job:
 #
 # 1. naming-gate — 식별자/파일명에 process-derived 메타데이터(H1/H2, Phase-N,
-#    real-/fake- prefix, Tier-as-process audit key, version-suffix, PR-number
-#    fixture path)가 새로 추가되지 못하도록 차단한다.
-#    SOT: `feedback_naming_process_metadata.md`.
+#    mock-/fake- prefix, Tier-as-process audit key, version-suffix, PR-number
+#    fixture path)가 새로 추가되지 못하도록 차단한다. 규칙 원문(positive form)은
+#    `AGENTS.md` > `Naming`.
 #
 # 2. deidentification-gate — 이 저장소는 PUBLIC 이다. 고용사 브랜드명, 사내
 #    시스템명, 사내 호스트명이 새로 추가되지 못하도록 차단한다. 사내 구현은
@@ -14,6 +14,10 @@ name: Naming Gate (process-metadata + de-identification)
 #
 # 두 job 모두 diff-based: PR 의 변경분만 검사한다. 기존 위반은 grandfather;
 # sweep PR 으로 별도 제거. 이 gate 는 *새 callsite 차단* 이 목적.
+#
+# naming-gate 가 검사하지 *않는* 것은 `AGENTS.md` > `Naming` 이 reviewer 규칙으로
+# 명시한다. grep 이 도메인 의미와 process 의미를 구분할 수 없는 단어는 패턴에서
+# 빼고 규칙 문서에 남긴다 — 저자가 grep 과 말싸움하게 만들지 않기 위해서다.
 
 on:
   pull_request:
@@ -35,33 +39,64 @@ jobs:
         run: |
           base_sha=$(git merge-base origin/${{ github.base_ref }} HEAD)
           echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
-          # Exclude DELETED files (--diff-filter=d): a deletion cannot introduce a
-          # prohibited identifier or a new prefixed file, and checking a deleted
-          # path makes the `head -30 "$file"` prefix-justification check fail
-          # spuriously (the file is gone) — e.g. removing a legacy `fake-*.ts`.
+          exclude_re='^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)'
+          include_re='\.(ts|tsx|py|js|mjs|cjs|md)$'
+          # Content check: every changed file except DELETED ones (--diff-filter=d).
+          # A deletion cannot introduce a prohibited identifier.
           git diff --name-only --diff-filter=d "$base_sha"...HEAD \
-            | grep -Ev '^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)' \
-            | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' > /tmp/changed.txt || true
+            | grep -Ev "$exclude_re" \
+            | grep -E "$include_re" > /tmp/changed.txt || true
+          # Filename check: ADDED and RENAMED files only (--diff-filter=AR).
+          # A file name is decided once, when the path first appears. Re-checking
+          # it on every later edit turns a grandfathered name into a permanent
+          # ban on touching that file at all — `docs/architecture/session-model-v2.md`
+          # is exactly that case in this tree. `R` is kept so a rename INTO a
+          # prohibited name is still caught.
+          git diff --name-only --diff-filter=AR "$base_sha"...HEAD \
+            | grep -Ev "$exclude_re" \
+            | grep -E "$include_re" > /tmp/added.txt || true
           echo "changed files:"
           cat /tmp/changed.txt
+          echo "added/renamed files:"
+          cat /tmp/added.txt
 
       - name: Grep diff for prohibited identifiers
         run: |
           base_sha="${{ steps.diff.outputs.base_sha }}"
           violations=0
 
-          if [ ! -s /tmp/changed.txt ]; then
+          if [ ! -s /tmp/changed.txt ] && [ ! -s /tmp/added.txt ]; then
             echo "no production-path file changes — skipping."
             exit 0
           fi
 
-          # NOTE: review-round R is matched only with a hyphen (`R-2`) to avoid
-          # flagging domain risk-register ids (`R1`..`R8` in threat tables).
-          # NOTE: review-round R matched hyphen-only (`R-2`) so domain
-          # risk-register ids (`R1`..`R8`) are spared. D-decision matched
-          # with a colon (`D5:`) so bare `D1` identifiers/hex are spared.
-          # Permanent anchors (`#NNN` issue refs, `§9.6` arch section refs)
-          # are intentionally NOT flagged.
+          # Review-round R is matched only with a hyphen (`R-2`) so domain
+          # risk-register ids (`R1`..`R8` in threat tables) are spared, and
+          # D-decision only with a colon (`D5:`) so bare `D1` identifiers and hex
+          # are spared. Permanent anchors (`#NNN` issue refs, `§9.6` architecture
+          # section refs) are intentionally NOT flagged: they resolve against a
+          # document the repository ships, which is what makes a label domain
+          # rather than process.
+          #
+          # `H[1-9]` is case-sensitive on purpose. HTML heading vocabulary in
+          # this tree is lowercase (`<h2`, 192 uses; zero uppercase `H2`), so it
+          # needs no carve-out.
+          #
+          # Test-double words: only `mock` and `fake` are matched as identifiers.
+          # `real` and `stub` are ordinary domain vocabulary here and are
+          # deliberately NOT matched:
+          #   * `real*` is the result of POSIX `realpath` — `realRoot`, `realDir`,
+          #     `realFile`, `realParent`, `realAsset` (13 sites).
+          #   * `stub*` is a compaction stub, the placeholder that replaces
+          #     dropped content — `src/shared/tool-result-stub.ts`,
+          #     `BOUNDARY_STUB_TEMPLATE` (12 sites).
+          # Those two produced only false positives and never a true one: the old
+          # pattern was anchored on a lowercase first letter, so it could not
+          # match `RealCloudMarketplaceFetcher` / `MockMarketplaceFetcher`, the
+          # class names the rule was written for. `mock`/`fake` now match both
+          # spellings and have zero legitimate production uses. A lone `Real*`
+          # identifier with no double beside it is a reviewer rule, not a gate
+          # rule — see `AGENTS.md` > `Naming` > `Test doubles`.
           patterns=(
             '\bH[1-9][0-9]?\b'
             '\bR-[1-9][0-9]?\b'
@@ -78,14 +113,33 @@ jobs:
             '\b[rR]ound[0-9]+\b'
             '\b[tT]ier[0-9]+-(bypass|skip|excluded|ignored)'
             '\bpr[0-9]{3,}\b'
-            '^\+.*\b(real|mock|fake|stub)[A-Z][a-zA-Z]+\b'
+            '^\+.*\b[Mm]ock[A-Z][A-Za-z0-9]*\b'
+            '^\+.*\b[Ff]ake[A-Z][A-Za-z0-9]*\b'
           )
+
+          # Added lines of one file, as the patterns see them.
+          #
+          # In Markdown a backticked span is a *mention*, not a use: the rule
+          # document has to be able to write `H2` and `Phase 2b` to say they are
+          # banned, and a doc naming a badly-named path quotes it rather than
+          # creating it. Inline code spans are therefore stripped from `.md`
+          # before matching. Prose outside backticks is still matched, so a bare
+          # `Phase 2` in a sentence is still a violation. Nothing is stripped
+          # from code files, where backticks are template literals and their
+          # contents are ordinary program text.
+          added_lines() {
+            if [ "${1##*.}" = "md" ]; then
+              git diff "$base_sha"...HEAD -- "$1" | grep -E "^\+" | sed 's/`[^`]*`//g'
+            else
+              git diff "$base_sha"...HEAD -- "$1" | grep -E "^\+"
+            fi
+          }
 
           for pattern in "${patterns[@]}"; do
             while IFS= read -r file; do
               [ -z "$file" ] && continue
               [ ! -f "$file" ] && continue
-              if git diff "$base_sha"...HEAD -- "$file" | grep -E "^\+" | grep -Pn "$pattern" > /tmp/hits.txt; then
+              if added_lines "$file" | grep -Pn "$pattern" > /tmp/hits.txt; then
                 if [ -s /tmp/hits.txt ]; then
                   echo "::error file=$file::process-metadata pattern '$pattern' added"
                   cat /tmp/hits.txt
@@ -95,28 +149,53 @@ jobs:
             done < /tmp/changed.txt
           done
 
-          # filename-level checks (new files only)
+          # filename-level checks — added and renamed files only
           while IFS= read -r file; do
+            [ -z "$file" ] && continue
             base=$(basename "$file")
+            dir=$(dirname "$file")
+            ext="${base##*.}"
             if echo "$base" | grep -qE '^(real|mock|fake|stub)-'; then
-              # Skip domain-exception files: `fake-sandbox.ts` is OK (see feedback memory).
-              # New `real-/mock-/fake-/stub-` prefixed files in production paths require
-              # a "Why <prefix>:" header comment justifying the domain semantics.
+              # A test-double prefix in a production path names the file for what
+              # it is NOT. It is allowed only when the prefix is the domain word —
+              # a deliberately simulated implementation the product ships — and
+              # then the file says so in its first 30 lines with a `Why <prefix>:`
+              # header. No file in this tree carries one; the hatch exists so a
+              # genuine simulation does not have to argue with this gate.
               if ! head -30 "$file" 2>/dev/null | grep -qE 'Why (real|mock|fake|stub):'; then
                 echo "::error file=$file::new $base prefix in production path without 'Why <prefix>:' header justification"
                 violations=$((violations + 1))
               fi
             fi
             if echo "$base" | grep -qE '\-v[0-9]+\.(ts|tsx|py|md)$'; then
-              echo "::error file=$file::version-suffix filename in production path — use behavior-based suffix"
-              violations=$((violations + 1))
+              # A version suffix records WHEN the file was written unless the
+              # earlier version is a live sibling beside it — only then does `-v2`
+              # say which of two parallel implementations this is.
+              stem=$(echo "$base" | sed -E "s/-v[0-9]+\.${ext}\$//")
+              sibling=""
+              if [ -f "$dir/$stem.$ext" ]; then
+                sibling="$dir/$stem.$ext"
+              else
+                for cand in "$dir/$stem"-v[0-9]*."$ext"; do
+                  if [ -f "$cand" ] && [ "$cand" != "$file" ]; then
+                    sibling="$cand"
+                    break
+                  fi
+                done
+              fi
+              if [ -n "$sibling" ]; then
+                echo "note: $file keeps its version suffix — earlier sibling $sibling is live"
+              else
+                echo "::error file=$file::version-suffix filename with no earlier sibling in $dir — the suffix records when it was written, not what it is; use a behavior-based name"
+                violations=$((violations + 1))
+              fi
             fi
-          done < /tmp/changed.txt
+          done < /tmp/added.txt
 
           if [ "$violations" -gt 0 ]; then
             echo ""
             echo "::error::naming-gate found $violations process-metadata violation(s)."
-            echo "See feedback_naming_process_metadata.md for the rule + conversion guide."
+            echo "See AGENTS.md > Naming for the rule and the conversion guide."
             exit 1
           fi
 
