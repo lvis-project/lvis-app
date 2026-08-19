@@ -118,6 +118,19 @@ export type HostApiNotification =
       readonly kind: "log";
       readonly message: string;
       readonly meta?: unknown;
+    })
+  /**
+   * host → child: the installed-plugin set changed.
+   *
+   * `getInstalledPluginIds` is synchronous and a process boundary is not, so
+   * §3.1 answers it with a host-pushed snapshot rather than a round trip. The
+   * push is a NOTIFICATION and not a subscription because the child holds no
+   * handler for it: the snapshot is read by a member, and the member has to
+   * answer whether or not the plugin ever subscribed to `onPluginsChanged`.
+   */
+  | (HostApiEnvelope & {
+      readonly kind: "installed-plugins";
+      readonly pluginIds: readonly string[];
     });
 
 // ───────────────────────────────────────────────────────────────────────────

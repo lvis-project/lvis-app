@@ -10,7 +10,7 @@ import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { buildImportUrl } from "../sandbox.js";
+import { buildImportUrl } from "../plugin-loader.js";
 import {
   makeTestPluginRuntime,
   TestPluginRuntime,

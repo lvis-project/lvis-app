@@ -44,14 +44,12 @@ import {
   META_PROTOCOL_VERSION,
   META_CLIENT_INFO,
   META_CLIENT_CAPABILITIES,
+  RAW_RESULT_META,
 } from "./protocol-constants.js";
 
 const CLIENT_INFO = { name: "lvis-app", version: "0.1.0" } as const;
 /** First-party host advertises elicitation; sampling/roots are deprecated (§8 SEP-2577). */
 const CLIENT_CAPABILITIES = { elicitation: { form: {}, url: {} }, extensions: {} } as const;
-
-/** Reserved `_meta` key carrying the plugin's raw (non-text) return value. */
-const RAW_RESULT_META = "lvisai/rawResult";
 
 /** RC `CallToolResult` (the `complete` branch this host consumes). */
 interface RcToolCallResult {

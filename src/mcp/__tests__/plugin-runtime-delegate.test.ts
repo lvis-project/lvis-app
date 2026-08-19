@@ -11,8 +11,8 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   pluginRuntimeToolDelegate,
   splitPluginToolUiMeta,
-  RAW_RESULT_META,
 } from "../plugin-runtime-delegate.js";
+import { RAW_RESULT_META } from "../protocol-constants.js";
 import { PluginMcpHost } from "../plugin-mcp-host.js";
 import { ToolRegistry } from "../../tools/registry.js";
 import {
