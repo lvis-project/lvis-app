@@ -270,16 +270,13 @@ function collectRollingWindowCandidates({
     for (const pull of pulls) {
       if (!pull || typeof pull !== "object") fail("pull-request-record-invalid");
       const number = positiveInteger(pull.number, "pull-request-number-invalid");
-      if (seen.has(number)) fail("pull-request-page-duplicate");
-      seen.add(number);
-
       const updatedAt = timestamp(pull.updated_at, "pull-request-updated-at-invalid");
       // Deliberately NOT asserted to be descending. `updated_at` is a MUTABLE
       // sort key: a pull touched while this scan is paginating moves, and an
       // item can then appear on a later page carrying a newer timestamp than
       // the previous page's tail. Observed on a real repository — one break,
-      // exactly at a page boundary, with zero duplicates, so the `seen` set
-      // above does not notice it either.
+      // exactly at a page boundary, and that particular shift produced no
+      // repeat, so the `seen` set below did not register it either.
       //
       // The scan does not need the order to hold. `updated_at >= merged_at`
       // always, so reading until the window is exhausted cannot skip a pull
@@ -288,6 +285,21 @@ function collectRollingWindowCandidates({
       // mutation added no safety and turned an ordinary merge landing
       // mid-scan into a hard CI failure.
       if (updatedAt < oldestUpdatedInPage) oldestUpdatedInPage = updatedAt;
+
+      // Same mutable-sort-key cause as the note above, seen from the other
+      // side. When a pull's `updated_at` rises mid-scan it moves toward page
+      // one, which pushes a neighbour DOWN across the page boundary — so an
+      // entry already read arrives a second time. That is the API behaving as
+      // documented under concurrent mutation, not corruption, and a repeat
+      // carries no information the first sighting did not.
+      //
+      // It is skipped rather than counted, because counting it twice would
+      // inflate the cluster window and fail the gate for the wrong reason.
+      // The skip happens AFTER `oldestUpdatedInPage`: the stop condition is a
+      // property of the page that arrived, and a page whose entries were all
+      // repeats would otherwise contribute nothing and never terminate.
+      if (seen.has(number)) continue;
+      seen.add(number);
 
       if (pull.merged_at === null) continue;
       const mergedAt = timestamp(pull.merged_at, "pull-request-merged-at-invalid");
