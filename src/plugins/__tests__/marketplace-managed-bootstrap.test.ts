@@ -3,7 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 
 import { dirname, join, resolve } from "node:path";
-import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
+import { LocalCatalogMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import type { PluginMarketplaceItem } from "../types.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import {
@@ -15,7 +15,7 @@ import { removeQuiescentPluginResidualState } from "../uninstall-lifecycle.js";
 
 function makeManagedService(testDir: string, marketplacePath: string): PluginMarketplaceService {
   const paths = makeTestPluginPaths({ rootDir: testDir });
-  const fetcher = new MockMarketplaceFetcher(marketplacePath);
+  const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
   return new TestPluginMarketplaceService(paths, fetcher);
 }
 

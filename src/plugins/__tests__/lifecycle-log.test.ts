@@ -1,10 +1,10 @@
 /**
  * Unit tests for lifecycle-log.ts:
  * 1. Phase constant shape consistency (all values match naming convention)
- * 2. plog() forwards the correct structured object + phase field to the logger
+ * 2. logPluginLifecycle() forwards the correct structured object + phase field to the logger
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { PluginPhase, plog } from "../lifecycle-log.js";
+import { PluginPhase, logPluginLifecycle } from "../lifecycle-log.js";
 
 // ─── Phase constant shape ─────────────────────────────────────────────────────
 
@@ -55,9 +55,9 @@ describe("PluginPhase constants", () => {
   });
 });
 
-// ─── plog() wiring ────────────────────────────────────────────────────────────
+// ─── logPluginLifecycle() wiring ────────────────────────────────────────────────────────────
 
-describe("plog()", () => {
+describe("logPluginLifecycle()", () => {
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -67,7 +67,7 @@ describe("plog()", () => {
     // console.log(prefix + msg, ctx). Assert the context object (2nd arg) carries
     // pluginId and phase, not just that the message appears somewhere.
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    plog("debug", { pluginId: "test-plugin", phase: PluginPhase.LOAD_START }, "loading plugin");
+    logPluginLifecycle("debug", { pluginId: "test-plugin", phase: PluginPhase.LOAD_START }, "loading plugin");
     expect(consoleSpy).toHaveBeenCalled();
     const callArgs = consoleSpy.mock.calls[0];
     // callArgs[0] = "[plugin-lifecycle] loading plugin" (prefix + msg)
@@ -79,19 +79,19 @@ describe("plog()", () => {
 
   it("routes error level through console.error", () => {
     const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-    plog("error", { pluginId: "test-plugin", phase: PluginPhase.LOAD_FAIL, reason: "import", err: new Error("bad") }, "import failed");
+    logPluginLifecycle("error", { pluginId: "test-plugin", phase: PluginPhase.LOAD_FAIL, reason: "import", err: new Error("bad") }, "import failed");
     expect(consoleSpy).toHaveBeenCalled();
   });
 
   it("routes warn level through console.warn", () => {
     const consoleSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
-    plog("warn", { pluginId: "test-plugin", phase: PluginPhase.REGISTER_TOOL_SKIP, toolName: "my_tool", reason: "missing_handler" }, "tool disabled — missing handler");
+    logPluginLifecycle("warn", { pluginId: "test-plugin", phase: PluginPhase.REGISTER_TOOL_SKIP, toolName: "my_tool", reason: "missing_handler" }, "tool disabled — missing handler");
     expect(consoleSpy).toHaveBeenCalled();
   });
 
   it("routes info level through console.log (test mode maps info→log)", () => {
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
-    plog("info", { pluginId: "test-plugin", phase: PluginPhase.RESTART_REQUEST }, "restart requested");
+    logPluginLifecycle("info", { pluginId: "test-plugin", phase: PluginPhase.RESTART_REQUEST }, "restart requested");
     expect(consoleSpy).toHaveBeenCalled();
     const argsFlat = consoleSpy.mock.calls[0].join(" ");
     expect(argsFlat).toContain("restart requested");

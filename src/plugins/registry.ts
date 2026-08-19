@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { dirname, resolve } from "node:path";
 import type { InstallPolicy, PluginAccessSpec, PluginRegistry, PluginRegistryEntry, PluginRegistryEntryInstallSource } from "./types.js";
-import { plog, PluginPhase } from "./lifecycle-log.js";
+import { logPluginLifecycle, PluginPhase } from "./lifecycle-log.js";
 import { writeUtf8FileAtomicSync } from "../lib/atomic-file.js";
 import { FileLockReleaseError, withFileLock } from "../lib/with-file-lock.js";
 import { assertSafeArtifactSlug } from "./plugin-id.js";
@@ -137,7 +137,7 @@ function migrateLegacyEntry(
 }
 
 export async function readPluginRegistry(registryPath: string): Promise<PluginRegistry> {
-  plog("debug", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_START, registryPath }, "registry read");
+  logPluginLifecycle("debug", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_START, registryPath }, "registry read");
   let raw: string;
   try {
     raw = await readFile(registryPath, "utf-8");
@@ -147,7 +147,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     // — return the empty default so PluginRuntime.startAll can proceed and
     // the registry will be lazily created by the first install/uninstall.
     if ((err as NodeJS.ErrnoException).code === "ENOENT") {
-      plog("info", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_SKIP, reason: "first_boot_no_registry" }, "no registry — first boot");
+      logPluginLifecycle("info", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_SKIP, reason: "first_boot_no_registry" }, "no registry — first boot");
       return { version: 1, plugins: [] };
     }
     throw err;
@@ -156,11 +156,11 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
   try {
     parsed = JSON.parse(raw) as unknown;
   } catch (err) {
-    plog("error", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_FAIL, err, reason: "invalid_json", registryPath }, "registry parse failed");
+    logPluginLifecycle("error", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_FAIL, err, reason: "invalid_json", registryPath }, "registry parse failed");
     throw err;
   }
   if (!isRecord(parsed) || !Array.isArray(parsed.plugins)) {
-    plog("error", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_FAIL, reason: "invalid_format", registryPath }, "registry malformed");
+    logPluginLifecycle("error", { pluginId: "<registry>", phase: PluginPhase.DISCOVERY_FAIL, reason: "invalid_format", registryPath }, "registry malformed");
     throw new Error(`Invalid plugin registry: ${registryPath}`);
   }
   if (parsed.version !== undefined && typeof parsed.version !== "number") {
@@ -188,7 +188,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
     // Loud one-shot audit warning. Existing dev-link entries cannot load
     // any longer (receipt verification now applies unconditionally) so
     // the operator MUST notice this rewrite — there is no silent fallback.
-    plog(
+    logPluginLifecycle(
       "warn",
       {
         pluginId: "<registry>",
@@ -203,7 +203,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
   }
   if (migratedCount > 0) {
     if (out.legacyToolGrantsRemoved) {
-      plog(
+      logPluginLifecycle(
         "info",
         {
           pluginId: "<registry>",
@@ -215,7 +215,7 @@ export async function readPluginRegistry(registryPath: string): Promise<PluginRe
       );
     }
 
-    plog(
+    logPluginLifecycle(
       "info",
       {
         pluginId: "<registry>",
@@ -426,7 +426,7 @@ export function resolveManifestPathsFromRegistry(
     .flatMap((entry) => {
       const trusted = resolveTrustedRegistryManifestPath(entry.manifestPath, pluginsRoot);
       if (trusted === null) {
-        plog(
+        logPluginLifecycle(
           "warn",
           {
             pluginId: entry.id,
@@ -484,7 +484,7 @@ async function withRegistryTransaction<T>(
             if (!isCommittedAtomicWriteError(error)) throw error;
             const persisted = await readFile(key, "utf-8");
             if (persisted !== content) throw error;
-            plog(
+            logPluginLifecycle(
               "warn",
               {
                 pluginId: "<registry>",
@@ -504,7 +504,7 @@ async function withRegistryTransaction<T>(
       const committed = error.result as { content: string; mutationResult: T };
       const persisted = await readFile(key, "utf-8");
       if (persisted !== committed.content) throw error;
-      plog(
+      logPluginLifecycle(
         "warn",
         {
           pluginId: "<registry>",

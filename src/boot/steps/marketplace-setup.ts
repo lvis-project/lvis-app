@@ -34,7 +34,7 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   // Marketplace fetcher selection — single production path:
   //   - real-cloud + URL → CloudMarketplaceFetcher
   //   - otherwise (no URL configured) → DisabledMarketplaceFetcher
-  // No `MockMarketplaceFetcher` fallback at boot. Default points at the
+  // No `LocalCatalogMarketplaceFetcher` fallback at boot. Default points at the
   // production tunnel (`https://marketplace.lvisai.xyz`); dev operators
   // running the marketplace server locally override via the settings UI.
   // Tests inject their own fetcher.

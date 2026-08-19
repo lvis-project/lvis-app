@@ -1,14 +1,14 @@
 /**
  * Plugin Lifecycle Log — structured debug logging for the plugin subsystem.
  *
- * Prefer `plog()` for all new plugin lifecycle logs so entries share a
+ * Prefer `logPluginLifecycle()` for all new plugin lifecycle logs so entries share a
  * consistent shape: `{ pluginId, phase, ...ctx }`. This lets a single
  *
  *   grep '"phase":"lifecycle:restart' ~/.lvis/logs/main.jsonl
  *
  * reveal the full restart trace across the plugin subsystem. Legacy direct
- * `log.info/warn/error` calls in the plugin area will be migrated to `plog()`
- * incrementally; new code MUST use `plog()` from the outset.
+ * `log.info/warn/error` calls in the plugin area will be migrated to `logPluginLifecycle()`
+ * incrementally; new code MUST use `logPluginLifecycle()` from the outset.
  *
  * Why this exists:
  *   The plugin area absorbed 50+ patches in 24h with repeated regressions
@@ -137,7 +137,7 @@ export interface PluginLogContext {
  *   - warn:  recoverable skip / fallback branches
  *   - error: caught failures that mark the plugin as failed
  */
-export function plog(
+export function logPluginLifecycle(
   level: "debug" | "info" | "warn" | "error",
   ctx: PluginLogContext,
   msg: string,
