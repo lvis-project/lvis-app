@@ -55,13 +55,23 @@ import type {
 
 const PLUGIN_ID = "com.example.service";
 const GENERATION = "gen-3";
+const PLUGIN_ROOT = "/plugins/service";
+const PLUGIN_DATA_DIR = "/plugins/service/data";
 /**
- * The child's own filesystem envelope — the same pair the ASRT wrap grants it.
+ * A host-widened root, standing in for the kind of grant
+ * `PLUGIN_ENVELOPE_GRANTS` produces (a host-owned directory under `~/.lvis`).
+ * It is READ-only here, so the same fixture proves both that a widened read is
+ * admitted and that widening READ does not widen WRITE.
+ */
+const WIDENED_READ_ROOT = "/host/runtime";
+
+/**
+ * The child's own filesystem envelope — the same lists the ASRT wrap grants it.
  * A worker the plugin delegates is checked against exactly this.
  */
 const CONFINEMENT: DelegatedWorkerConfinement = {
-  pluginRoot: "/plugins/service",
-  pluginDataDir: "/plugins/service/data",
+  read: [PLUGIN_ROOT, PLUGIN_DATA_DIR, WIDENED_READ_ROOT],
+  write: [PLUGIN_DATA_DIR],
 };
 
 /** Bytes no UTF-8 round trip survives: a NUL, a lone continuation byte, 0xFF. */
@@ -176,9 +186,9 @@ async function createServiceHarness(
     manifest,
     context: {
       pluginId: PLUGIN_ID,
-      pluginRoot: CONFINEMENT.pluginRoot,
+      pluginRoot: PLUGIN_ROOT,
       hostRoot: "/app",
-      pluginDataDir: CONFINEMENT.pluginDataDir,
+      pluginDataDir: PLUGIN_DATA_DIR,
       installedPluginIds: [],
       generationId: GENERATION,
     },
@@ -960,14 +970,14 @@ describe("a delegated worker cannot reach further than the plugin process itself
     await harness.child.hostApi.spawnWorker!({
       workerId: "indexer",
       command: "/usr/bin/python3",
-      allowReadPaths: [`${CONFINEMENT.pluginRoot}/runtime`, CONFINEMENT.pluginDataDir],
-      allowWritePaths: [`${CONFINEMENT.pluginDataDir}/index`],
+      allowReadPaths: [`${PLUGIN_ROOT}/runtime`, PLUGIN_DATA_DIR],
+      allowWritePaths: [`${PLUGIN_DATA_DIR}/index`],
     });
     expect(spawnWorker).toHaveBeenCalledWith({
       workerId: "indexer",
       command: "/usr/bin/python3",
-      allowReadPaths: [`${CONFINEMENT.pluginRoot}/runtime`, CONFINEMENT.pluginDataDir],
-      allowWritePaths: [`${CONFINEMENT.pluginDataDir}/index`],
+      allowReadPaths: [`${PLUGIN_ROOT}/runtime`, PLUGIN_DATA_DIR],
+      allowWritePaths: [`${PLUGIN_DATA_DIR}/index`],
     });
   });
 
@@ -988,7 +998,7 @@ describe("a delegated worker cannot reach further than the plugin process itself
     expect(spawnWorker).not.toHaveBeenCalled();
   });
 
-  it("refuses a read grant outside the plugin's own two directories", async () => {
+  it("refuses a read grant outside every root the child holds", async () => {
     const spawnWorker = vi.fn(async () => makeFakeWorker());
     const harness = await createServiceHarness({ spawnWorker });
     await expect(
@@ -996,6 +1006,53 @@ describe("a delegated worker cannot reach further than the plugin process itself
         workerId: "peek",
         command: "/usr/bin/python3",
         allowReadPaths: ["/etc"],
+      }),
+    ).rejects.toMatchObject({ code: "effect-boundary-denied" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("admits a read grant inside a root the HOST widened the child with", async () => {
+    // The composition claim, driven rather than asserted: the check reads the
+    // envelope, so a root the host added to it is delegable with no change to
+    // this file. Without the widening this exact grant is the refusal above.
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await harness.child.hostApi.spawnWorker!({
+      workerId: "indexer",
+      command: `${WIDENED_READ_ROOT}/venv/bin/python`,
+      allowReadPaths: [`${WIDENED_READ_ROOT}/venv/bin/python`],
+    });
+    expect(spawnWorker).toHaveBeenCalledWith({
+      workerId: "indexer",
+      command: `${WIDENED_READ_ROOT}/venv/bin/python`,
+      allowReadPaths: [`${WIDENED_READ_ROOT}/venv/bin/python`],
+    });
+  });
+
+  it("does not let a widened READ root become writable", async () => {
+    // The two lists are separate for exactly this: a host decision that the
+    // child may READ the provisioned runtime must not hand it the ability to
+    // rewrite that runtime through a delegated worker.
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "rewrite-runtime",
+        command: "/bin/sh",
+        allowWritePaths: [`${WIDENED_READ_ROOT}/venv`],
+      }),
+    ).rejects.toMatchObject({ code: "effect-boundary-denied" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("refuses a sibling of the widened root, not merely its string prefix", async () => {
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "near-miss",
+        command: "/usr/bin/python3",
+        allowReadPaths: [`${WIDENED_READ_ROOT}-elsewhere`],
       }),
     ).rejects.toMatchObject({ code: "effect-boundary-denied" });
     expect(spawnWorker).not.toHaveBeenCalled();
@@ -1010,7 +1067,7 @@ describe("a delegated worker cannot reach further than the plugin process itself
       harness.child.hostApi.spawnWorker!({
         workerId: "traverse",
         command: "/bin/sh",
-        allowWritePaths: [`${CONFINEMENT.pluginDataDir}/../../../etc`],
+        allowWritePaths: [`${PLUGIN_DATA_DIR}/../../../etc`],
       }),
     ).rejects.toMatchObject({ code: "effect-boundary-denied" });
     expect(spawnWorker).not.toHaveBeenCalled();
@@ -1023,7 +1080,7 @@ describe("a delegated worker cannot reach further than the plugin process itself
       harness.child.hostApi.spawnWorker!({
         workerId: "prefix",
         command: "/bin/sh",
-        allowWritePaths: [`${CONFINEMENT.pluginDataDir}-elsewhere`],
+        allowWritePaths: [`${PLUGIN_DATA_DIR}-elsewhere`],
       }),
     ).rejects.toMatchObject({ code: "effect-boundary-denied" });
     expect(spawnWorker).not.toHaveBeenCalled();
