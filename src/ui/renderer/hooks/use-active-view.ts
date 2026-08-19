@@ -27,10 +27,9 @@ export interface UseActiveViewResult {
  * The main window's location, persisted so a restart resumes it.
  *
  * Mirrors `useSidebarTab`: mount-seed from `SystemSettings`, then a single
- * setter that updates local state and writes through, guarded so the seed is
- * not written straight back before the initial read resolves. A navigation is
- * discrete and has no uncommitted intermediate state (unlike a width drag), so
- * every switch persists rather than debouncing.
+ * setter that updates local state and writes through. A navigation is discrete
+ * and has no uncommitted intermediate state (unlike a width drag), so every
+ * switch persists rather than debouncing.
  *
  * Restoring a PLUGIN view has to WAIT rather than navigate.
  * `parseInlineViewKey` answers "is this a key the main window can be at?", and
@@ -47,8 +46,30 @@ export interface UseActiveViewResult {
  * Built-ins carry no such doubt and are applied straight away, so the common
  * case has no delay.
  *
- * The pending restore is dropped the moment the user navigates: a late-arriving
- * plugin list must never yank someone off a view they chose themselves.
+ * A NAVIGATION ENDS THE RESTORE, whichever part of it is still outstanding.
+ * The stored location is authoritative only until the user chooses one; from
+ * the first navigation on it is stale, and applying it — now, if the settings
+ * read is still in flight, or later, when a slow plugin list finally admits a
+ * key that was held back — moves the user off a screen they picked themselves.
+ * Both windows have to be covered, because neither guard reaches the other's:
+ * clearing the held key cannot stop one that has not been read yet, and
+ * refusing a late read cannot retract one already waiting.
+ *
+ * The same moment is what makes that navigation writable. Discarding the
+ * stored location without replacing it would leave the user where they chose
+ * for this run and back on the stale location at the next launch — the same
+ * lost place by a slower route — so the first navigation is what the next
+ * launch restores, exactly as every later one is.
+ *
+ * The OTHER half of the location — the settings PAGE, restored by its own read
+ * in `useSettingsTab` — is deliberately outside this rule, and still lands
+ * after a navigation here. Choosing a view says nothing about which settings
+ * page you want, so dropping the page restore because someone clicked Home
+ * would discard a preference they never expressed. Note that half currently
+ * lands unconditionally: `useSettingsTab` has no discard of its own, so
+ * choosing a settings PAGE inside the restore window is still overridden. That
+ * is this same defect on the other axis, and the fix belongs in that hook next
+ * to the read it has to race.
  */
 export function useActiveView(
   api: LvisApi,
@@ -56,11 +77,16 @@ export function useActiveView(
   loadedPluginViewKeys: readonly string[],
 ): UseActiveViewResult {
   const [activeView, setActiveViewState] = useState<InlineViewKey>("home");
+  // Set by the first navigation and never cleared: the point after which the
+  // user, not the stored value, says where the window is.
+  //
   // A ref, not state, so `setActiveView` keeps ONE identity for the life of the
   // app. It stands in for a `useState` setter at call sites whose dep arrays
-  // rightly omit it; an identity that changed once hydration finished would
-  // leave those closures holding a setter that no longer persists.
-  const hydratedRef = useRef(false);
+  // rightly omit it; an identity that changed the first time someone navigated
+  // would leave those closures holding a setter that no longer persists. Being
+  // a ref is also what lets the settings continuation — which closed over the
+  // render that started the read — see a navigation made after it was created.
+  const userNavigatedRef = useRef(false);
   // STATE: a consumer has to re-render to observe the restore's move, and it
   // has to land in the SAME commit as the move itself or the two would be
   // observed as separate changes.
@@ -93,6 +119,11 @@ export function useActiveView(
       .getSettings()
       .then((settings) => {
         if (cancelled) return;
+        // The user got here first. A stored location that arrives after someone
+        // has chosen one is stale by definition: entering it would move the
+        // window off their choice, and merely HOLDING it (the plugin arm below)
+        // would do the same the moment the view list loaded.
+        if (userNavigatedRef.current) return;
         const stored = settings?.system?.activeView;
         if (typeof stored !== "string") return;
         const parsed = parseInlineViewKey(stored);
@@ -106,10 +137,6 @@ export function useActiveView(
       })
       .catch(() => {
         // Non-fatal: home is a valid place to be. The next navigation persists.
-      })
-      .finally(() => {
-        if (cancelled) return;
-        hydratedRef.current = true;
       });
     return () => {
       cancelled = true;
@@ -127,14 +154,24 @@ export function useActiveView(
 
   const setActiveView = useCallback(
     (next: InlineViewKey | ((current: InlineViewKey) => InlineViewKey)) => {
-      // A deliberate navigation retires any restore still waiting on plugins.
+      // Every caller of this is a deliberate destination: a sidebar or toolbar
+      // row, the command palette, the app menu's `view:activate`, a clicked
+      // notification, a back/forward replay. The single non-gesture caller —
+      // the uninstalled-plugin bounce in `usePluginViewRouting` — is gated on
+      // `activeView` ALREADY being a `plugin:` key, which nothing but a
+      // navigation or a completed restore can make it, so it cannot pass for a
+      // choice the user has not made.
+      userNavigatedRef.current = true;
+      // Retires a restore that already arrived and is waiting on its plugin
+      // list; the flag above is what stops one that has not been read yet.
       setPendingPluginView(null);
       const current = activeViewRef.current;
       const resolved = typeof next === "function" ? next(current) : next;
       applyView(resolved);
-      // Guard against persisting the seed value back before the initial read
-      // resolves, and against a redundant write for a no-op navigation.
-      if (hydratedRef.current && resolved !== current) {
+      // Nothing is held back until the initial read resolves: the read can no
+      // longer overwrite this, because the flag above has just discarded it.
+      // Only a no-op navigation is skipped, since it has nothing to record.
+      if (resolved !== current) {
         void api.updateSettings({ system: { activeView: resolved } });
       }
     },
