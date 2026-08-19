@@ -28,7 +28,7 @@ vi.mock("electron", () => {
 });
 
 vi.mock("../../gated.js", () => ({
-  validateSender: () => true,
+  validateHostRendererSender: () => true,
   UNAUTHORIZED_FRAME: { ok: false, error: "unauthorized-frame" },
   auditUnauthorized: vi.fn(),
 }));

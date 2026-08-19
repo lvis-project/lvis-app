@@ -1,5 +1,5 @@
 import { ipcMain } from "electron";
-import { auditUnauthorized, UNAUTHORIZED_FRAME, validateSender } from "../gated.js";
+import { auditUnauthorized, UNAUTHORIZED_FRAME, validateHostRendererSender } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 
@@ -39,7 +39,7 @@ export function registerPromptHandlers(deps: IpcDeps): void {
   const { auditLogger, personaPromptStore } = deps;
 
   ipcMain.handle(CHANNELS.prompts.list, async (event) => {
-    if (!validateSender(event)) {
+    if (!validateHostRendererSender(event)) {
       auditUnauthorized(auditLogger, CHANNELS.prompts.list, event);
       return UNAUTHORIZED_FRAME;
     }
@@ -52,7 +52,7 @@ export function registerPromptHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.prompts.listSummaries, async (event) => {
-    if (!validateSender(event)) {
+    if (!validateHostRendererSender(event)) {
       auditUnauthorized(auditLogger, CHANNELS.prompts.listSummaries, event);
       return UNAUTHORIZED_FRAME;
     }
@@ -64,7 +64,7 @@ export function registerPromptHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.prompts.save, async (event, payload: unknown) => {
-    if (!validateSender(event)) {
+    if (!validateHostRendererSender(event)) {
       auditUnauthorized(auditLogger, CHANNELS.prompts.save, event);
       return UNAUTHORIZED_FRAME;
     }
@@ -89,7 +89,7 @@ export function registerPromptHandlers(deps: IpcDeps): void {
   });
 
   ipcMain.handle(CHANNELS.prompts.delete, async (event, id: unknown) => {
-    if (!validateSender(event)) {
+    if (!validateHostRendererSender(event)) {
       auditUnauthorized(auditLogger, CHANNELS.prompts.delete, event);
       return UNAUTHORIZED_FRAME;
     }
