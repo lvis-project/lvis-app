@@ -31,7 +31,7 @@ export function ReviewRow({
 }: {
   label: string;
   children: ReactNode;
-  // Round-3 UX MAJOR — allow the row wrapper itself to carry a
+  // Lets the row wrapper itself carry a
   // data-testid so prose rows (non-monospace) can be selected without
   // forcing them into the `<pre>` branch (which mis-renders human-
   // readable sentences as terminal output).
@@ -51,11 +51,12 @@ export function ReviewRow({
 }
 
 /**
- * Round-7 architect MAJOR — canonical Korean label for a {@link RiskLevel}.
+ * Canonical Korean label for a {@link RiskLevel}.
+ *
  * Centralized here so every risk-display site (ToolApprovalContent
  * badge / reviewer-verdict row, DeferredQueuePanel header + review
- * row, future surfaces) reads the same translation. Round-6 partial
- * fix translated only the primary badge; the two remaining
+ * row, future surfaces) reads the same translation. Translating only
+ * the primary badge is the failure mode this replaced: the remaining
  * `level.toUpperCase()` callers leaked raw English to users.
  */
 export function riskLevelKoLabel(level: RiskLevel): string {

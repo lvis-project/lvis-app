@@ -113,7 +113,7 @@ export async function dispatchAppOnlyRuntimeInvocation(
   ceilingMs?: number,
   beforeHandler?: () => void,
 ): Promise<unknown> {
-  // Defense-in-depth (cluster-review security LOW): this function is exported
+  // Defense-in-depth: this function is exported
   // and trusts its caller to have routed here via `isAppOnlyRuntimeInvocation`,
   // which fail-closes a model-visible tool to the governed ToolExecutor path.
   // Re-assert that app-only invariant at the boundary itself so a future caller

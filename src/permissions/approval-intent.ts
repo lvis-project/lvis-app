@@ -47,8 +47,8 @@ const APPROVE_PATTERNS: ReadonlyArray<RegExp> = [
   // Short affirmatives — accepted only when the text is *just* the
   // affirmative (no other content). The ^...$ shape is enforced by
   // the lonely-token check below; here we just list the tokens.
-  // Round-1 security review: dropped single-letter "y" — typo risk too
-  // high (a user mid-typing "next question" would fire approve).
+  // No single-letter "y": the typo risk is too high — a user mid-typing
+  // "next question" would fire approve.
   /^(yes|ok|okay|sure|네|예|응|좋아|좋아요|그래)$/iu,
 ];
 
@@ -193,7 +193,6 @@ export function detectApprovalIntent(rawText: string): ApprovalIntent {
   if (typeof rawText !== "string") return { kind: "none" };
   // Normalize composed/decomposed Hangul + Latin so paste-from-Finder
   // (NFD) and typed text (NFC) produce identical match results.
-  // Round-1 code-reviewer finding (unicode normalization).
   const text = rawText.normalize("NFC").trim();
   if (text.length === 0) return { kind: "none" };
   if (text.length > MAX_INTENT_TEXT_LENGTH) return { kind: "none" };
@@ -225,7 +224,7 @@ export function detectApprovalIntent(rawText: string): ApprovalIntent {
     return { kind: "approve", matchedPhrase: approveMatch };
   }
   if (rejectMatch) {
-    // Round-1 critic CRITICAL: symmetric negation for reject path.
+    // Symmetric negation for the reject path.
     // Only treat as none when the negation appears *after* a reject
 
 
@@ -238,7 +237,7 @@ export function detectApprovalIntent(rawText: string): ApprovalIntent {
 }
 
 function hasNegationAfterRejectVerb(text: string): boolean {
-  // Round-2 code-reviewer + critic — slice the lowercased text itself
+  // Slice the lowercased text itself
   // so head/tail indices stay self-consistent. Locale-aware lowering
   // (Turkish İ → two units) would otherwise drift the slice indices.
   const lower = text.toLowerCase();

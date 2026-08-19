@@ -130,7 +130,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
   // notifications render in the user's language. See src/i18n.
   await applyBootLocale(settingsService);
 
-  // #1499 E2: apply the user's diagnostics.logRetentionDays to the log tree.
+  // Apply the user's diagnostics.logRetentionDays to the log tree.
   // The file sink pruned at LOG_RETENTION_DAYS (the SOT default) before settings
   // were loaded — hoisted so early boot lines are captured. Now that settings
   // exist, honour a tightened/loosened window (no-op if unchanged). Best-effort —

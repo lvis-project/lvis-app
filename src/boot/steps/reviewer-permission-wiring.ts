@@ -221,7 +221,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
     sendToWindow(getMainWindow(), PERMISSIONS.userApprovalHit, payload, log);
   });
 
-  // Round-4 fix: PermissionManager is the architectural choke point for
+  // PermissionManager is the architectural choke point for
   // every persisted rule mutation (addAlwaysAllowedPersist /
   // addAlwaysDeniedPersist / removeRule). Wiring the broadcast here means
   // executor-side dialog approvals (always allow / always deny), slash

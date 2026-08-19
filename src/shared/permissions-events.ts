@@ -30,10 +30,10 @@ export type UserApprovalDecision = "allow" | "deny";
  * Approval-verdict literal. Same rationale as `UserApprovalScope`.
  *
  * NOTE: this is the verdict captured at approval time. Older on-disk
- * entries (written before the field existed in PR #786 R3) may carry
+ * entries (written before the field existed) may carry
  * `null` in storage; the broadcaster in `permission-manager.ts` coerces
  * nullable stored values up to this non-null surface before emit so
- * downstream consumers (#793 chat-toast subscriber) can rely on a
+ * downstream consumers (the chat-toast subscriber) can rely on a
  * concrete verdict literal.
  */
 export type UserApprovalVerdict = "low" | "medium" | "high";

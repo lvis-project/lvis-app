@@ -546,7 +546,7 @@ export class ConversationLoop {
   addSessionAdditionalDirectory(path: string): void {
     if (!this.sessionAdditionalDirectories.includes(path)) {
       this.sessionAdditionalDirectories.push(path);
-      // Round-3 fix: every callsite that mutates the session list must
+      // Every callsite that mutates the session list must
       // notify multi-window PermissionsTab subscribers. The slash-dispatch
       // path also broadcasts (ipc/domains/permissions.ts) — this closes
       // the executor-callback path that was previously silent.

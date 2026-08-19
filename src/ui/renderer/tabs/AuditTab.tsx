@@ -327,7 +327,7 @@ export function AuditTab() {
           )}
         </SettingsSection>
 
-        {/* ── Diagnostics (#1499 E2): bundle export + log tail + crash list ── */}
+        {/* ── Diagnostics: bundle export + log tail + crash list ── */}
         <DiagnosticsSection defaultDateFrom={dateFrom} defaultDateTo={dateTo} />
       </div>
     </div>

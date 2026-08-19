@@ -366,8 +366,9 @@ export type AppSettings = {
     /**
      * Permission policy host-classifies-risk migration gate. Mirrors the
      * main-process SOT in `src/data/settings-store.ts`
-     * `FeatureFlags.hostClassifiesRisk`. Default true on ALL platforms (PR #1390
-     * — host classifies plugin risk + foreground plugin read-relaxation). Safe
+     * `FeatureFlags.hostClassifiesRisk`. Default true on ALL platforms: the
+     * host classifies plugin risk and grants foreground plugin
+     * read-relaxation. Safe
      * all-platform because the read-relaxation is COUPLED to the OS sandbox
      * being active: on a non-sandbox platform it falls back to the pre-exec ask.
      */
@@ -783,7 +784,7 @@ export type LvisApi = {
     protocol?: string;
     message?: string;
   }>;
-  /** #FU259 — MCP catalog (filtered to plugin_type === "mcp"). */
+  /** MCP catalog (filtered to plugin_type === "mcp"). */
   listMcpCatalog: () => Promise<Array<{
     id: string;
     name: string;
@@ -799,7 +800,7 @@ export type LvisApi = {
     | { ok: true; slug: string; installDir: string; connected: boolean; warning?: string; needsCredential: boolean; authMode: "none" | "api-key" | "sso" | "oauth" }
     | { ok: false; error: string; message: string }
   >;
-  /** #FU262 — Claude Desktop config import. */
+  /** Claude Desktop config import. */
   previewClaudeDesktopMcpImport: (raw: string) => Promise<{
     entries: Array<{
       id: string;

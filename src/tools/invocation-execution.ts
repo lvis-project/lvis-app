@@ -1142,7 +1142,7 @@ export async function executeAuthorizedToolInvocation(
   // Forensic hook chain on the success/post path: the pre hooks that allowed
   // this call plus the post hooks that ran after it. `undefined` when neither
   // fired (keeps non-hook rows clean). config-hook vs `.sh`-hook is now
-  // distinguishable via each row's `source` (#811 cluster-review follow-up).
+  // distinguishable via each row's `source`.
   const successHookChain = mergeHookChains(
     hookChainFromDispatch("pre", scriptPre),
     hookChainFromDispatch("post", scriptPost),

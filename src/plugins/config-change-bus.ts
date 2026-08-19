@@ -2,7 +2,7 @@ import { createLogger } from "../lib/logger.js";
 const log = createLogger("plugin-config-change");
 
 /**
- * §9.2 Track B — strictly plugin-scoped config-change emitter.
+ * §9.2 — strictly plugin-scoped config-change emitter.
  *
  * Backs `hostApi.config.onChange()`. Listeners are keyed by `pluginId`
  * so plugin A can NEVER observe plugin B's config writes — the IPC

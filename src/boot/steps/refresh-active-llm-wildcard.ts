@@ -1,7 +1,7 @@
 /**
  * Active LLM vendor → plugin runtime wildcard config-override bridge.
  *
- * Extracted from `boot.ts` (#893 / PR #894) as a standalone factory so the
+ * A standalone factory, rather than inline in `boot.ts`, so the
  * debounce + vendor-change-restart contract can be unit-tested without a
  * full Electron bootstrap.
  *
@@ -101,7 +101,7 @@ export function createRefreshActiveLlmWildcard(
     const raw = deps.getActiveVendor();
     const activeVendor = typeof raw === "string" ? raw.trim() || undefined : undefined;
 
-    // Defensive cleanup — older builds (pre-#894 review B2) populated
+    // Defensive cleanup — older builds populated
     // `hostApiKey` here. A soft reload after upgrade would otherwise
     // leave a ghost value visible to plugins via `config.get(...)`.
     deps.clearWildcardConfigOverride(["hostApiKey", "hostApiVendor"]);

@@ -213,7 +213,7 @@ export function createAutoUpdater(deps: AutoUpdaterDeps): {
       // is generating a spurious event (e.g., delta probe, blockmap fetch)
       // and we MUST NOT broadcast — otherwise the badge tooltip would
       // render "v 다운로드 중 — N%" with an empty version string (the
-      // exact MAJOR finding from PR #876 review).
+      // empty version string).
       if (lastState.kind !== "downloading" && lastState.kind !== "available") {
         return;
       }

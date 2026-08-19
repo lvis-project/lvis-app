@@ -180,7 +180,7 @@ export interface InitPluginRuntimeInput {
    */
   shellOpenExternal: (url: string) => Promise<void>;
   /**
-   * Cluster review M1 — optional PermissionManager reference. When provided,
+   * Optional PermissionManager reference. When provided,
    * the per-plugin `resolveApiKey` host implementation merges the manager's
    * `getPluginRevokeSignal` with the caller's request signal so a permission
    * rule change aborts outstanding bearers across plugins. Optional so unit

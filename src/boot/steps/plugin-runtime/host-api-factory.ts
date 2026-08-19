@@ -397,7 +397,7 @@ export function createHostApiFactory(
         pluginDataDir,
         createPluginStorageAuditSink(pluginId, pluginRuntimeAuditLog),
       ),
-      // §9.2 Track B — typed plugin config access, scoped to this pluginId.
+      // §9.2 — typed plugin config access, scoped to this pluginId.
       // `get` reads the live merged config (manifest defaults + saved
       //   overrides) directly from settingsService so a write from another
       //   surface (renderer, IPC, sibling plugin) is visible without reload.
@@ -411,7 +411,7 @@ export function createHostApiFactory(
       //   the underlying bus rejects cross-plugin observation.
       config: {
         get: <T = unknown>(key: string): T | undefined => {
-          // PR #894 B2 follow-up — merge wildcard slot (`hostApiVendor` etc.)
+          // Merge the wildcard slot (`hostApiVendor` etc.)
           // BETWEEN manifest defaults and plugin-specific overrides so a
           // plugin's own config can shadow a host-injected value (rare, but
           // useful for test fixtures and explicit per-plugin overrides),
@@ -625,7 +625,7 @@ export function createHostApiFactory(
                 ...(entry?.manifestSha256 !== undefined ? { registryManifestSha256: entry.manifestSha256 } : {}),
               };
             })(),
-            // Cluster review M1 — bind the permission-manager revoke signal
+            // Bind the permission-manager revoke signal
             // accessor so an in-flight bearer aborts when permissions
             // change for this plugin. When permissionManager is not wired
             // (test runtimes) the host-api falls back to caller-signal-only.
@@ -651,7 +651,7 @@ export function createHostApiFactory(
         // authority `resolveApiKey` above also calls; everything below is this
         // API's own audit vocabulary, counters, and `string | null` shape.
         //
-        // PR #894 review B7 — `keyPrefix` is folded through `sanitizeKeyPrefix`
+        // `keyPrefix` is folded through `sanitizeKeyPrefix`
         // before it reaches the in-process counter map. An attacker plugin
         // could otherwise call `hostApi.getSecret("<random-prefix>.x")` in a
         // loop and grow the counter map unboundedly via the `denied` branch

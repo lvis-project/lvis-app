@@ -340,12 +340,12 @@ function FontFamilyCustomInput({
   // when an Escape handler calls `inputElement.blur()`. Without this flag,
   // React 18+ batches `setRaw(initial)`, then `blur()` runs `onBlur` with
   // the still-typed `raw` closure → commit("user typed text") → the very
-  // bug Escape was meant to cancel (PR #672 3차 critic MAJOR M1).
+  // bug Escape was meant to cancel.
   const escapingRef = useRef(false);
   // Re-sync when upstream changes (preset click, cross-window broadcast, …).
   // Guard against overwriting in-progress typing — if the input is currently
   // focused, the user is editing and we must not stomp their text with a
-  // sibling-window broadcast (PR #672 2차 critic minor N2).
+  // sibling-window broadcast.
   useEffect(() => {
     if (document.activeElement === inputRef.current) return;
     setRaw(initial);

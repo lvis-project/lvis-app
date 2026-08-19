@@ -487,7 +487,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
     ? (selectedPlugin.active ?? selectedPlugin.loadStatus !== "disabled")
     : false;
   const selectedPluginRuntimeLoaded = selectedPlugin ? isRuntimeCallablePlugin(selectedPlugin) : false;
-  // §9.2 Track B — merge schema-declared defaults with the saved config
+  // §9.2 — merge schema-declared defaults with the saved config
   // so the typed form always shows the value the plugin will actually
   // receive (defaults first, saved overrides win).
   const mergedConfigValues = useMemo(() => {
@@ -1169,7 +1169,7 @@ export function PluginConfigTab({ api }: { api?: LvisApi } = {}) {
                 <Separator />
 
                 {selectedPlugin.configSchema ? (
-                  // §9.2 Track B — declarative form. Cleartext fields go
+                  // §9.2 — declarative form. Cleartext fields go
                   // through pluginConfig.set; format:'secret' fields go
                   // through pluginConfig.setSecret so values land in the
                   // encrypted keychain instead of cleartext settings.json.

@@ -96,7 +96,7 @@ export function createLifecycleCallbacks(
     },
     // Symmetric to `onDisable` — re-registers tools after a successful
     // restart/add/reload. Without this every chat-surface tool call hits
-    // `도구를 찾을 수 없습니다` post-restart (see PR #760). Non-fatal:
+    // `도구를 찾을 수 없습니다` post-restart. Non-fatal:
     // a sync exception is logged but does not become `runtime reload failed`.
     onEnable: (pluginId) => {
       // Register the partition preload on every live enable/reload path so the
