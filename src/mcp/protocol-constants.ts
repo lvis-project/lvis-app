@@ -44,6 +44,19 @@ export const META_CLIENT_CAPABILITIES = "io.modelcontextprotocol/clientCapabilit
 /** Reserved result-`_meta` key a server SHOULD stamp with its identity. */
 export const META_SERVER_INFO = "io.modelcontextprotocol/serverInfo";
 
+/**
+ * LVIS-reserved result-`_meta` key carrying a plugin tool's raw (non-text)
+ * return value.
+ *
+ * MCP's content model is text-first, so a structured return rides `_meta`. It
+ * is stated here with the rest of the wire vocabulary because THREE modules
+ * spoke it from three private copies — the delegate that writes it, the host
+ * that reads it, and the out-of-process arm that now carries it across a real
+ * process boundary. A vendor key that only agrees by coincidence is the same
+ * failure mode the per-module error-code copies had.
+ */
+export const RAW_RESULT_META = "lvisai/rawResult";
+
 // ─── JSON-RPC 2.0 codes ───
 export const RPC_INVALID_PARAMS = -32602;
 export const RPC_METHOD_NOT_FOUND = -32601;

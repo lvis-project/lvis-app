@@ -151,6 +151,7 @@ async function createServiceHarness(
       pluginRoot: "/plugins/service",
       hostRoot: "/app",
       pluginDataDir: "/plugins/service/data",
+      installedPluginIds: [],
       generationId: GENERATION,
     },
     channel,

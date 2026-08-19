@@ -43,10 +43,10 @@ import {
   resolveManifestLoadPlan,
 } from "./snapshots.js";
 import {
-  buildImportUrl,
   ensurePluginDataDir,
   resolveEntryPath,
 } from "./sandbox.js";
+import { buildImportUrl } from "./plugin-loader.js";
 import type {
   LoadedPlugin,
   ManifestLoadPlan,
