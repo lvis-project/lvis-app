@@ -1299,6 +1299,7 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.verdictMismatch": "Le niveau de risque affiché ne correspond plus à la demande en attente de l’hôte. Rouvrez l’approbation.",
   "formatIpcError.incompatibleAppVersion": "Ce plugin nécessite une version plus récente de LVIS. Veuillez mettre à jour l'application.",
   "formatIpcError.pluginRevoked": "Cette version du plugin a été bloquée par la marketplace pour des raisons de sécurité.",
+  "formatIpcError.pluginNotAdmitted": "Cette version du plugin n'est pas autorisée à l'installation. La liste d'admission de la marketplace n'a pas pu être vérifiée, ou cette version n'est plus proposée.",
   "formatIpcError.indexOutOfRange": "L'indice est hors de portée.",
   "formatIpcError.invalidSessionId": "L'identifiant de session est invalide.",
   "formatIpcError.invalidOriginSessionId": "L'identifiant de session parent est invalide.",

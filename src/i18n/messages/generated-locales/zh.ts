@@ -1317,6 +1317,7 @@ export const zhMessages: Record<string, string> = {
   "formatIpcError.importTooManyMessages": "对话有太多消息需要导入。",
   "formatIpcError.incompatibleAppVersion": "该插件需要较新版本的 LVIS。请更新应用程序。",
   "formatIpcError.pluginRevoked": "出于安全原因，市场已阻止此插件版本。",
+  "formatIpcError.pluginNotAdmitted": "此插件版本未获准安装。无法验证市场的准入清单，或该版本已不再提供。",
   "formatIpcError.indexOutOfRange": "索引超出范围。",
   "formatIpcError.installFailed": "插件安装失败。",
   "formatIpcError.invalidAction": "该操作是不允许的。",

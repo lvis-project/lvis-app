@@ -76,6 +76,7 @@ function makeStore(buffer: Buffer): PluginArtifactStore & {
       zipBuffer: buffer,
       artifactSha256: "abc123",
       signerKeyId: "test-key",
+      admission: null,
     }));
   vi.spyOn(store, "extractZip").mockResolvedValue(["plugin.json"]);
   vi.spyOn(store, "installDirFor").mockReturnValue(installRoot);
@@ -304,7 +305,7 @@ describe("assistant package installers", () => {
     vi.mocked(agentStore.downloadVerifiedArtifact).mockImplementationOnce(async () => {
       agentDownloadEntered = true;
       await agentBlocked;
-      return { zipBuffer: agentBuffer, artifactSha256: "agent-sha", signerKeyId: "test-key" };
+      return { zipBuffer: agentBuffer, artifactSha256: "agent-sha", signerKeyId: "test-key", admission: null };
     });
     const skillDownload = vi.mocked(skillStore.downloadVerifiedArtifact);
     const installs: Array<Promise<unknown>> = [];

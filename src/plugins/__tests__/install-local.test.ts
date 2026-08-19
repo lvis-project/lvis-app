@@ -205,7 +205,7 @@ describe("PluginMarketplaceService.installLocal", () => {
     expect(existsSync(receiptPath)).toBe(true);
 
     const receipt = JSON.parse(await readFile(receiptPath, "utf-8"));
-    expect(receipt.schemaVersion).toBe(2);
+    expect(receipt.schemaVersion).toBe(3);
     expect(receipt.installSource).toBe("local-dev");
     expect(receipt.pluginId).toBe("test-plugin");
     expect(receipt.version).toBe("1.2.3");
@@ -626,5 +626,34 @@ describe("PluginMarketplaceService.installLocal", () => {
       "test-plugin",
       sourceDir,
     )).resolves.toEqual(expect.objectContaining({ ok: false }));
+  });
+
+  it("keeps an existing schema-v2 receipt valid, reading its absent admission as none", async () => {
+    // A receipt written before the admission catalog existed says, truthfully,
+    // that no catalog authorised it. That is a fact to preserve, not a missing
+    // field to default — so it normalises to null rather than failing or being
+    // back-filled with the current document.
+    const { hashReceiptFiles, listFilesRecursive, verifyInstallReceiptRaw } = await import(
+      "../plugin-install-receipt.js"
+    );
+    const files = await hashReceiptFiles(sourceDir, await listFilesRecursive(sourceDir));
+    const result = await verifyInstallReceiptRaw(
+      JSON.stringify({
+        schemaVersion: 2,
+        pluginId: "test-plugin",
+        version: "1.2.3",
+        installSource: "local-dev",
+        artifactSha256: null,
+        signerKeyId: null,
+        installedAt: new Date(0).toISOString(),
+        files,
+      }),
+      "test-plugin",
+      sourceDir,
+    );
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.receipt.schemaVersion).toBe(3);
+    expect(result.receipt.admission).toBeNull();
   });
 });

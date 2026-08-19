@@ -1317,6 +1317,7 @@ export const jaMessages: Record<string, string> = {
   "formatIpcError.importTooManyMessages": "会話にインポートするにはメッセージが多すぎます。",
   "formatIpcError.incompatibleAppVersion": "このプラグインには、新しいバージョンの LVIS が必要です。アプリを更新してください。",
   "formatIpcError.pluginRevoked": "このプラグインのバージョンは、セキュリティ上の理由によりマーケットプレイスでブロックされています。",
+  "formatIpcError.pluginNotAdmitted": "このプラグインのバージョンはインストールが承認されていません。マーケットプレイスの承認リストを検証できないか、このバージョンが提供されなくなっています。",
   "formatIpcError.indexOutOfRange": "インデックスが範囲外です。",
   "formatIpcError.installFailed": "プラグインのインストールに失敗しました。",
   "formatIpcError.invalidAction": "その行為は許可されていません。",
