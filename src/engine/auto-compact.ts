@@ -299,9 +299,11 @@ export function markStaleToolResults(
     if (!markCandidateIdxSet.has(i)) return msg;
     if (msg.role !== "tool_result") return msg;
 
-    const origLen = msg.content.length;
-    const stubLen = buildToolResultStrippedStub(msg.toolName, origLen).length;
-    freedCharsOnSerialize += Math.max(0, origLen - stubLen);
+    const originalLength = msg.content.length;
+    // Names the *stripped* form specifically: the truncated stub is a different,
+    // much longer text, so measuring the wrong one mis-reports what is freed.
+    const strippedStubLength = buildToolResultStrippedStub(msg.toolName, originalLength).length;
+    freedCharsOnSerialize += Math.max(0, originalLength - strippedStubLength);
     // Also count the base64 image chars this rebuild drops (see below) — a
     // content-only measure under-reports the bytes actually freed from the wire.
     freedCharsOnSerialize += msg.image?.data.length ?? 0;
