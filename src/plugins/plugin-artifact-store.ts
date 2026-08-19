@@ -430,7 +430,7 @@ export class PluginArtifactStore {
   installDirFor(slug: string): string {
     const safeSlug = assertSafeArtifactSlug(slug);
     const installDir = resolve(this.installRoot, safeSlug);
-    if (!isResolvedPathWithin(resolve(this.installRoot), installDir)) {
+    if (!isResolvedPathWithin(this.installRoot, installDir)) {
       throw new Error(`artifact slug "${slug}" escapes install root`);
     }
     return installDir;
@@ -632,7 +632,7 @@ export class PluginArtifactStore {
     );
     const installDir = this.installDirFor(safeSlug);
     const stageDir = resolve(this.installRoot, `.${safeSlug}.stage-${randomUUID()}`);
-    if (!isResolvedPathWithin(resolve(this.installRoot), stageDir)) {
+    if (!isResolvedPathWithin(this.installRoot, stageDir)) {
       throw new Error(`artifact slug "${slug}" escapes install root`);
     }
     await rm(stageDir, { recursive: true, force: true });
