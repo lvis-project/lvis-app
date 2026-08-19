@@ -101,6 +101,7 @@ import {
 import { lvisHome } from "../../shared/lvis-home.js";
 import type { NetworkAccessAcknowledgement } from "../../shared/network-access.js";
 import { isPluginInstallFailureKind, type PluginInstallFailureKind } from "../../shared/plugin-install-failure.js";
+import { isPathWithin } from "../../plugins/plugin-storage-containment.js";
 import {
   handlePluginBundleE2eSnapshot,
   handlePluginCards,
@@ -684,8 +685,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     } catch {
       throw new Error(`Plugin UI entry path could not be resolved (plugin=${pluginId}).`);
     }
-    const rootWithSep = pluginRoot.endsWith(path.sep) ? pluginRoot : pluginRoot + path.sep;
-    if (realEntryPath !== pluginRoot && !realEntryPath.startsWith(rootWithSep)) {
+    if (!isPathWithin(pluginRoot, realEntryPath)) {
       throw new Error(`Plugin UI entry path escapes plugin directory (plugin=${pluginId}).`);
     }
     return readFile(realEntryPath, "utf-8");
@@ -2294,8 +2294,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
-    const rootWithSep = realRoot.endsWith(path.sep) ? realRoot : realRoot + path.sep;
-    if (realEntry !== realRoot && !realEntry.startsWith(rootWithSep)) {
+    if (!isPathWithin(realRoot, realEntry)) {
       logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, realEntry, realRoot });
       plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
