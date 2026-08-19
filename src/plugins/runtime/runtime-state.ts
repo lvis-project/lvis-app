@@ -39,9 +39,7 @@ import {
   getDeclaredEmittedEvents,
   parsePluginJson,
 } from "./manifest-validation.js";
-import {
-  resolveManifestLoadPlan,
-} from "./snapshots.js";
+import { resolveManifestLoadPlan, type RegistryLoadRefusal } from "./snapshots.js";
 import {
   ensurePluginDataDir,
   resolveEntryPath,
@@ -586,11 +584,12 @@ export abstract class PluginRuntimeState {
 
   // ─── Load Plan & Snapshots ─────────────────────────────────────────────────
 
-  protected async resolveManifestLoadPlanInternal(): Promise<ManifestLoadPlan[]> {
+  protected async resolveManifestLoadPlanInternal(onRefused?: (refusal: RegistryLoadRefusal) => void): Promise<ManifestLoadPlan[]> {
     return resolveManifestLoadPlan({
       manifestPaths: this.manifestPaths,
       registryPath: this.registryPath,
       pluginsRoot: this.pluginsRoot,
+      onRefused,
     });
   }
 
@@ -1270,35 +1269,37 @@ export abstract class PluginRuntimeState {
   }
 
   /**
-   * Install-receipt integrity gate (LOAD boundary). Same "skip this plugin,
-   * keep loading everything else" shape as the minimum-version and revocation
-   * gates below, and — critically — the same STUB obligation.
+   * THE reporter for every LOAD-boundary refusal: each gate decides *whether*
+   * to refuse and supplies the wording, none decides *how* it reaches the user.
    *
-   * A receipt failure is decided in the boot preflight, BEFORE the manifest is
-   * read, so `knownPluginManifests` never learns the plugin exists.
-   * `listPluginCards()` projects exactly two maps — `knownPluginManifests` and
-   * `failedPluginStubs` — so marking the id failed without a stub produces NO
-   * card at all: the plugin vanishes from the sidebar, from Settings, and from
-   * the Plugin Doctor, while its registry row keeps reporting it as installed
-   * in the marketplace. The user is left with an install that exists
-   * everywhere except where it can be repaired. The stub is what makes the
-   * refusal reachable.
+   * The obligation it discharges is the STUB. `listPluginCards()` projects
+   * exactly two maps — `knownPluginManifests` and `failedPluginStubs` — so a
+   * gate that reaches its verdict before the manifest is read (receipt check,
+   * registry-path trust check) and marks the id failed WITHOUT a stub produces
+   * no card at all: the plugin vanishes from the sidebar, Settings and the
+   * Plugin Doctor while its registry row still reports it installed.
    *
-   * The failure kind stays unclassified on purpose: reinstalling rewrites both
-   * the payload and its receipt, so this IS locally repairable, and
-   * `isReinstallFixableFailureKind(undefined)` is what lets the Doctor offer
-   * that repair.
+   * `kind` is what makes one refusal distinguishable from another: it selects
+   * the remedy sentence AND whether a reinstall is offered at all
+   * ({@link isReinstallFixableFailureKind}); undefined means unclassified,
+   * which is treated as reinstall-repairable. `summary` becomes the card
+   * description, `reason` the Doctor's "Error detail".
    */
-  protected markReceiptIntegrityFailed(
+  protected markLoadRefused(
     pluginId: string,
-    reason: string,
-    displayName: string = pluginId,
+    refusal: {
+      summary: string;
+      reason: string;
+      kind?: PluginInstallFailureKind;
+      displayName?: string;
+    },
   ): void {
     this.markFailed(pluginId, {
-      name: displayName,
-      description: "Plugin files do not match their install receipt.",
+      name: refusal.displayName ?? pluginId,
+      description: refusal.summary,
     }, {
-      installFailureMessage: reason,
+      ...(refusal.kind ? { installFailureKind: refusal.kind } : {}),
+      installFailureMessage: refusal.reason,
     });
   }
 
@@ -1325,15 +1326,14 @@ export abstract class PluginRuntimeState {
       required: minAppVersion,
       current: currentAppVersion,
     });
-    this.markFailed(manifest.id, {
-      name: manifest.name ?? manifest.id,
-      description: `plugin requires LVIS >= ${minAppVersion}, current ${currentAppVersion}`,
-    }, {
+    this.markLoadRefused(manifest.id, {
+      summary: `plugin requires LVIS >= ${minAppVersion}, current ${currentAppVersion}`,
+      reason: `plugin requires LVIS >= ${minAppVersion}, current ${currentAppVersion}`,
       // NOT locally reinstall-fixable — the marketplace ships the same too-new
       // package, so a reinstall re-throws. The Doctor must fall back to a
       // diagnosis directing the user to update the app.
-      installFailureKind: "incompatible-app-version",
-      installFailureMessage: `plugin requires LVIS >= ${minAppVersion}, current ${currentAppVersion}`,
+      kind: "incompatible-app-version",
+      displayName: manifest.name ?? manifest.id,
     });
     return true;
   }
@@ -1364,16 +1364,15 @@ export abstract class PluginRuntimeState {
       ruleKind: decision.ruleKind,
       reason: decision.reason,
     });
-    this.markFailed(manifest.id, {
-      name: manifest.name ?? manifest.id,
-      description: decision.reason,
-    }, {
+    this.markLoadRefused(manifest.id, {
+      summary: decision.reason,
+      reason: decision.reason,
       // NOT locally reinstall-fixable — a reinstall from the marketplace
       // either re-fetches the same blocked version (the install path
       // enforces the same registry) or is a genuine version upgrade, not a
       // "repair". The Doctor must show the block reason and offer Remove.
-      installFailureKind: "plugin-revoked",
-      installFailureMessage: decision.reason,
+      kind: "plugin-revoked",
+      displayName: manifest.name ?? manifest.id,
     });
     return true;
   }
