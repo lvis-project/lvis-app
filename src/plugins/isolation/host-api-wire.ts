@@ -91,7 +91,16 @@ export type HostApiNotification =
       readonly subscriptionId: string;
       readonly payload: unknown;
     })
-  /** host → child: the host ended a subscription (plugin retired, host shutting down). */
+  /**
+   * host → child: the host ended a subscription the child still holds.
+   *
+   * Sent for exactly one of the three close reasons — `revoked`, the one the
+   * HOST decided. `disposed` came from the child and echoing it back would be a
+   * ping-pong; `peer-gone` means the pipe is already closed and sending would
+   * be a write on it. The single sender is the dispatcher's own release path,
+   * which owns the envelope, rather than each lifetime-bearing handler stamping
+   * its own.
+   */
   | (HostApiEnvelope & {
       readonly kind: "subscription-closed";
       readonly subscriptionId: string;
@@ -131,6 +140,37 @@ export type HostApiNotification =
   | (HostApiEnvelope & {
       readonly kind: "installed-plugins";
       readonly pluginIds: readonly string[];
+    })
+  /**
+   * host → child: the plugin's resolved config changed.
+   *
+   * `config.get` is synchronous, so §3.1 answers it from a host-pushed snapshot
+   * — and a snapshot is only correct while something re-pushes it. The
+   * construction push seeds the child's copy; this is every push after it, and
+   * without it a value the user edits in Settings would be answered by the
+   * child with whatever it held when the plugin started, forever, with nothing
+   * anywhere reporting the divergence.
+   *
+   * TWO FIELDS, NOT ONE OBJECT, because "the key is unset" has to survive.
+   * `config.get` answers `undefined` for a cleared key, and `undefined` is not
+   * a JSON value: a plain record would simply lose the property and the child
+   * would keep the stale value it was supposed to drop. So `keys` carries the
+   * full key set the host resolves and `values` carries only the ones that have
+   * a value — a key present in `keys` and absent from `values` is unset, and
+   * the child deletes it.
+   *
+   * The push covers the keys the HOST can enumerate (the plugin's config
+   * schema, its manifest config, and the construction snapshot). A key a plugin
+   * invents at runtime through `config.set` is not among them and is not
+   * re-pushed: the child already wrote it locally when its own `config.set`
+   * resolved, and the host's settings surface is schema-driven, so nothing else
+   * can change it. That is the limit of this member, stated rather than left to
+   * be discovered.
+   */
+  | (HostApiEnvelope & {
+      readonly kind: "config-snapshot";
+      readonly keys: readonly string[];
+      readonly values: Record<string, unknown>;
     });
 
 // ───────────────────────────────────────────────────────────────────────────

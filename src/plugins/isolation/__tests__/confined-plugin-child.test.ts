@@ -34,7 +34,7 @@
  *    different on each platform and an internet probe would pass on an offline
  *    machine for the wrong reason.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -230,6 +230,51 @@ describe("the confined child, against the real sandbox", () => {
   );
 });
 
+/** The repository root, from this test file's own location. */
+function repositoryRoot(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
+}
+
+/**
+ * Where the bundled child entry is emitted.
+ *
+ * INSIDE the repository, not in the fixture's temp dir. The bundle keeps `pino`
+ * and ASRT external — for reasons the shipped build documents at length — so it
+ * must sit where `node_modules` resolves, which is exactly the relationship
+ * `dist/src/main/` has in production.
+ */
+function childBundleDir(repoRoot: string): string {
+  return join(repoRoot, ".cache", "plugin-child-confined-e2e");
+}
+
+/**
+ * Build the REAL child entry, against the real bundle boundary.
+ *
+ * Shared by both end-to-end cases rather than written twice: the externals, the
+ * banner and the target are the shipped build's, and two copies of them are two
+ * chances for one case to prove something about a child that does not ship.
+ */
+async function buildChildEntry(repoRoot: string): Promise<string> {
+  const childEntryPath = join(childBundleDir(repoRoot), "plugin-child-main.mjs");
+  await build({
+    absWorkingDir: repoRoot,
+    entryPoints: [join(repoRoot, "src/plugins/isolation/plugin-child-main.ts")],
+    outfile: childEntryPath,
+    bundle: true,
+    format: "esm",
+    platform: "node",
+    target: ["node22"],
+    external: [...MAIN_BUNDLE_EXTERNALS],
+    logLevel: "silent",
+    banner: {
+      js:
+        'import { createRequire as __r } from "node:module";\n'
+        + "const require = __r(import.meta.url);\n",
+    },
+  });
+  return childEntryPath;
+}
+
 /**
  * The pilot's own tool, invoked out of process AND confined, through the
  * production factory.
@@ -247,29 +292,9 @@ describe("the pilot's tools, out of process and confined", () => {
     async () => {
       if (!(await asrtCanInitialize())) return;
       const fx = fixture!;
-      const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-      // Emitted INSIDE the repository, not into the fixture's temp dir. The
-      // bundle keeps `pino` and ASRT external — for reasons the shipped build
-      // documents at length — so it must sit where `node_modules` resolves,
-      // which is exactly the relationship `dist/src/main/` has in production.
-      const childOutDir = join(repoRoot, ".cache", "plugin-child-confined-e2e");
-      const childEntryPath = join(childOutDir, "plugin-child-main.mjs");
-      await build({
-        absWorkingDir: repoRoot,
-        entryPoints: [join(repoRoot, "src/plugins/isolation/plugin-child-main.ts")],
-        outfile: childEntryPath,
-        bundle: true,
-        format: "esm",
-        platform: "node",
-        target: ["node22"],
-        external: [...MAIN_BUNDLE_EXTERNALS],
-        logLevel: "silent",
-        banner: {
-          js:
-            'import { createRequire as __r } from "node:module";\n'
-            + "const require = __r(import.meta.url);\n",
-        },
-      });
+      const repoRoot = repositoryRoot();
+      const childOutDir = childBundleDir(repoRoot);
+      const childEntryPath = await buildChildEntry(repoRoot);
 
       // The plugin lives inside the child's own read carve-out, which is where
       // an installed plugin lives in production.
@@ -314,6 +339,7 @@ export const createPlugin = async (context) => ({
         callLlm: async () => "the host answered",
         getInstalledPluginIds: () => ["work-assistant"],
         onPluginsChanged: () => () => undefined,
+        config: { get: () => undefined, set: async () => undefined, onChange: () => () => undefined },
       } as unknown as PluginHostApi;
       const instance = await factory({
         pluginId: PLUGIN_ID,
@@ -332,6 +358,251 @@ export const createPlugin = async (context) => ({
         expect(result.installed).toEqual(["work-assistant"]);
         // …and the same process could not read the host's secrets while doing it.
         expect(String(result.secretRead)).toMatch(/^DENIED:/);
+      } finally {
+        await instance.stop?.();
+        rmSync(childOutDir, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+});
+
+/**
+ * The members §3.2 calls lossy or stateful, exercised by a REAL confined child.
+ *
+ * `host-api-service-paths.test.ts` drives the same members across a real
+ * dispatcher and a real child runtime over an in-memory channel, which proves
+ * the marshalling and proves nothing about the jail. This proves both at once,
+ * and it is the only place that can: the question "can the plugin reach the
+ * secret it was not handed" has two answers — one from the gate and one from
+ * the sandbox — and only a real process has both.
+ */
+describe("the lossy and stateful members, across a real confined boundary", () => {
+  it.runIf(process.platform === "darwin" || process.platform === "linux")(
+    "hands over what the gate grants, refuses what it does not, and cannot be reached around",
+    async () => {
+      if (!(await asrtCanInitialize())) return;
+      const fx = fixture!;
+      const repoRoot = repositoryRoot();
+      const childOutDir = childBundleDir(repoRoot);
+      const childEntryPath = await buildChildEntry(repoRoot);
+
+      const entryPath = join(fx.pluginRoot, "plugin.mjs");
+      writeFileSync(
+        entryPath,
+        `import { readFileSync } from "node:fs";
+const attempt = async (fn) => {
+  try { return { ok: true, value: await fn() }; }
+  catch (error) { return { ok: false, code: error.code ?? error.name, message: String(error.message ?? "") }; }
+};
+export const createPlugin = async (context) => {
+  const api = context.hostApi;
+  return {
+    handlers: {
+      // What the gate hands over, versus what the filesystem does.
+      probe_credentials: async () => ({
+        granted: await api.getSecret("granted"),
+        denied: await api.getSecret("denied"),
+        directRead: await attempt(() => readFileSync(${JSON.stringify(fx.secretFile)}, "utf-8")),
+      }),
+      // A lease: two closures in the return value, neither of which crosses.
+      probe_lease: async () => {
+        const lease = await api.resolveApiKey({ purpose: "llm" });
+        const spent = lease.bearer();
+        lease.release();
+        const afterRelease = await attempt(() => lease.bearer());
+        return { ok: lease.ok, vendor: lease.vendor, spent, afterRelease };
+      },
+      // A Response with a streaming body and bytes no text codec survives.
+      probe_fetch: async () => {
+        const response = await api.hostFetch("https://example.invalid/bytes");
+        const bytes = new Uint8Array(await response.arrayBuffer());
+        return { status: response.status, header: response.headers.get("x-lvis"), bytes: [...bytes] };
+      },
+      // Delegation: the plugin asks the host to spawn something that can reach
+      // further than the plugin process may.
+      probe_worker_escape: async () => await attempt(() => api.spawnWorker({
+        workerId: "escape",
+        command: "/bin/sh",
+        allowWritePaths: ["/"],
+      })),
+      probe_worker_allowed: async () => {
+        const worker = await api.spawnWorker({
+          workerId: "indexer",
+          command: "/usr/bin/true",
+          allowReadPaths: [context.pluginRoot],
+          allowWritePaths: [context.pluginDataDir],
+        });
+        return {
+          socketPath: worker.socketPath,
+          pid: worker.pid,
+          // A live handle would carry these. An id carries none of them.
+          fields: Object.keys(worker).sort(),
+        };
+      },
+      probe_config: async () => api.config.get("watched") ?? null,
+    },
+  };
+};
+`,
+        "utf-8",
+      );
+
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+
+      const release = vi.fn();
+      const spawnWorker = vi.fn(async () => ({
+        socketPath: "/run/indexer.sock",
+        pid: 31337,
+        stop: () => undefined,
+        onStdout: () => undefined,
+        onStderr: () => undefined,
+        onExit: () => undefined,
+      }));
+      const configValues = new Map<string, unknown>([["watched", "before"]]);
+      const configListeners = new Set<(value: unknown) => void>();
+      const hostApi = {
+        // The four-tier gate, standing in for its verdict: one key granted, one
+        // refused. The boundary's job is to carry the verdict, not to make it.
+        getSecret: async (key: string) => (key === "granted" ? SECRET_TEXT : null),
+        resolveApiKey: async () => ({
+          ok: true as const,
+          vendor: "openai" as const,
+          bearer: () => "sk-lease-credential",
+          release,
+        }),
+        hostFetch: async () =>
+          new Response(new Uint8Array([0x00, 0x80, 0xff, 0x41]), {
+            status: 207,
+            headers: { "x-lvis": "from-the-host" },
+          }),
+        spawnWorker,
+        getInstalledPluginIds: () => ["work-assistant"],
+        onPluginsChanged: () => () => undefined,
+        config: {
+          get: (key: string) => configValues.get(key),
+          set: async () => undefined,
+          onChange: (_key: string, callback: (value: unknown) => void) => {
+            configListeners.add(callback);
+            return () => configListeners.delete(callback);
+          },
+        },
+      } as unknown as PluginHostApi;
+
+      const factory = createOutOfProcessPluginFactory({
+        manifest: {
+          id: PLUGIN_ID,
+          name: "Work Assistant",
+          version: "0.10.14",
+          entry: "plugin.mjs",
+          description: "the lossy members, confined",
+          configSchema: { type: "object", properties: { watched: { type: "string" } } },
+          tools: [
+            "probe_credentials",
+            "probe_lease",
+            "probe_fetch",
+            "probe_worker_escape",
+            "probe_worker_allowed",
+            "probe_config",
+          ].map((name) => ({
+            name,
+            description: name,
+            inputSchema: { type: "object", properties: {} },
+          })),
+        } as PluginManifest,
+        entryPath,
+        childEntryPath,
+      });
+      const instance = await factory({
+        pluginId: PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        hostRoot: repoRoot,
+        pluginDataDir: fx.pluginDataDir,
+        config: { watched: "before" },
+        log: () => undefined,
+        hostApi,
+      } as PluginRuntimeContext);
+
+      try {
+        // ── getSecret ──────────────────────────────────────────────────────
+        const credentials = (await instance.handlers.probe_credentials!()) as {
+          granted: string | null;
+          denied: string | null;
+          directRead: { ok: boolean; value?: string };
+        };
+        // The value DOES cross. The gate is the control, and a plugin the gate
+        // granted holds the same string it would hold in-process.
+        expect(credentials.granted).toBe(SECRET_TEXT);
+        // …and one it did not is `null`, not a throw and not a stale value.
+        expect(credentials.denied).toBeNull();
+        // The half isolation adds: the same process cannot reach around the
+        // gate to the file, so the gate's verdict is the ONLY way in.
+        expect(credentials.directRead.ok).toBe(false);
+        expect(credentials.directRead.value).toBeUndefined();
+
+        // ── resolveApiKey ──────────────────────────────────────────────────
+        const lease = (await instance.handlers.probe_lease!()) as {
+          ok: boolean;
+          vendor: string;
+          spent: string;
+          afterRelease: { ok: boolean; message: string };
+        };
+        expect(lease).toMatchObject({ ok: true, vendor: "openai", spent: "sk-lease-credential" });
+        // `release()` is a real release on BOTH sides: the child's copy is gone
+        // and the host's lease was told.
+        expect(lease.afterRelease.ok).toBe(false);
+        expect(lease.afterRelease.message).toMatch(/lease already released/);
+        expect(release).toHaveBeenCalledTimes(1);
+
+        // ── hostFetch ──────────────────────────────────────────────────────
+        const fetched = (await instance.handlers.probe_fetch!()) as {
+          status: number;
+          header: string;
+          bytes: number[];
+        };
+        expect(fetched.status).toBe(207);
+        expect(fetched.header).toBe("from-the-host");
+        // A NUL, a lone continuation byte and a 0xFF. A text codec replaces all
+        // three with U+FFFD and reports success.
+        expect(fetched.bytes).toEqual([0x00, 0x80, 0xff, 0x41]);
+
+        // ── spawnWorker ────────────────────────────────────────────────────
+        const escape = (await instance.handlers.probe_worker_escape!()) as {
+          ok: boolean;
+          message: string;
+        };
+        expect(escape.ok).toBe(false);
+        expect(escape.message).toMatch(/outside the plugin's own confinement/);
+        // Refused at the boundary, so the supervisor never saw it. A refusal
+        // that still spawned would be no refusal.
+        expect(spawnWorker).not.toHaveBeenCalled();
+
+        const spawned = (await instance.handlers.probe_worker_allowed!()) as {
+          socketPath: string;
+          pid: number;
+          fields: string[];
+        };
+        expect(spawnWorker).toHaveBeenCalledTimes(1);
+        expect(spawned.socketPath).toBe("/run/indexer.sock");
+        expect(spawned.pid).toBe(31337);
+        // The plugin holds an id and two scalars behind four local methods —
+        // nothing that could be a `ChildProcess`.
+        expect(spawned.fields).toEqual([
+          "onExit",
+          "onStderr",
+          "onStdout",
+          "pid",
+          "socketPath",
+          "stop",
+        ]);
+
+        // ── config.get, re-pushed ──────────────────────────────────────────
+        await expect(instance.handlers.probe_config!()).resolves.toBe("before");
+        configValues.set("watched", "after");
+        for (const listener of configListeners) listener("after");
+        // The child answers `config.get` from a snapshot, so this is the whole
+        // difference between a current answer and a permanently stale one.
+        await expect(instance.handlers.probe_config!()).resolves.toBe("after");
       } finally {
         await instance.stop?.();
         rmSync(childOutDir, { recursive: true, force: true });
