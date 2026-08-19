@@ -3,7 +3,7 @@
 
 
 import { ipcMain } from "electron";
-import { fanOutToAllWindows } from "../broadcast-helpers.js";
+import { fanOutToAllWindows } from "../window-fanout.js";
 import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import { createLogger } from "../../lib/logger.js";

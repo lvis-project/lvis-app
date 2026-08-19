@@ -6,7 +6,7 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import * as nodeFs from "node:fs";
 import {
-  ManifestIntegrityViolation,
+  ManifestIntegrityError,
   ManifestIntegrityState,
   bindManifestIntegrityAudit,
   createReadOnlyFsProxy,
@@ -29,20 +29,20 @@ describe("Permission policy P4 createReadOnlyFsProxy", () => {
     expect(typeof (proxy as { readdirSync: unknown }).readdirSync).toBe("function");
   });
 
-  it("throws ManifestIntegrityViolation on writeFileSync", () => {
+  it("throws ManifestIntegrityError on writeFileSync", () => {
     const proxy = createReadOnlyFsProxy(nodeFs as unknown as Record<string, unknown>, {
       pluginId: "rogue-plugin",
       toolName: "rogue-tool",
     });
     const writeFn = (proxy as { writeFileSync: (...args: unknown[]) => void }).writeFileSync;
-    expect(() => writeFn("/tmp/x", "data")).toThrow(ManifestIntegrityViolation);
+    expect(() => writeFn("/tmp/x", "data")).toThrow(ManifestIntegrityError);
     try {
       writeFn("/tmp/x", "data");
     } catch (err) {
-      expect((err as ManifestIntegrityViolation).code).toBe("MANIFEST_INTEGRITY_VIOLATION");
-      expect((err as ManifestIntegrityViolation).pluginId).toBe("rogue-plugin");
-      expect((err as ManifestIntegrityViolation).toolName).toBe("rogue-tool");
-      expect((err as ManifestIntegrityViolation).attemptedMethod).toBe("writeFileSync");
+      expect((err as ManifestIntegrityError).code).toBe("MANIFEST_INTEGRITY_VIOLATION");
+      expect((err as ManifestIntegrityError).pluginId).toBe("rogue-plugin");
+      expect((err as ManifestIntegrityError).toolName).toBe("rogue-tool");
+      expect((err as ManifestIntegrityError).attemptedMethod).toBe("writeFileSync");
     }
   });
 
@@ -55,7 +55,7 @@ describe("Permission policy P4 createReadOnlyFsProxy", () => {
     for (const method of sample) {
       const fn = (proxy as Record<string, unknown>)[method];
       expect(typeof fn).toBe("function");
-      expect(() => (fn as () => void)()).toThrow(ManifestIntegrityViolation);
+      expect(() => (fn as () => void)()).toThrow(ManifestIntegrityError);
     }
   });
 
@@ -65,7 +65,7 @@ describe("Permission policy P4 createReadOnlyFsProxy", () => {
       toolName: "t",
     });
     const captured = (proxy as { writeFileSync: () => void }).writeFileSync;
-    expect(() => captured()).toThrow(ManifestIntegrityViolation);
+    expect(() => captured()).toThrow(ManifestIntegrityError);
   });
 });
 
@@ -84,7 +84,7 @@ describe("Permission policy P4 createReadOnlyFsPromisesProxy", () => {
       toolName: "t1",
     });
     const writeFn = (proxy as { writeFile: () => Promise<void> }).writeFile;
-    await expect(writeFn()).rejects.toThrow(ManifestIntegrityViolation);
+    await expect(writeFn()).rejects.toThrow(ManifestIntegrityError);
   });
 });
 

@@ -23,7 +23,7 @@
 import { ipcMain } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";
 import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
-import { fanOutToAllWindows } from "../broadcast-helpers.js";
+import { fanOutToAllWindows } from "../window-fanout.js";
 import { createLogger } from "../../lib/logger.js";
 import {
   setTerminalEmitter,

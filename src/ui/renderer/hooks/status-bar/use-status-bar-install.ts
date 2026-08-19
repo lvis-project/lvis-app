@@ -4,7 +4,7 @@ import type { PluginInstallResultPayload } from "../../../../contract/app-contra
 import { formatIpcError } from "../../format-ipc-error.js";
 import type { LvisApi } from "../../types.js";
 import type { StatusBarSeverity } from "./types.js";
-import { safeField } from "./utils.js";
+import { sanitizeToastField } from "./toast-field.js";
 
 interface Options {
   api: LvisApi;
@@ -51,7 +51,7 @@ export function useStatusBarInstall({ api, pushToast, upsertToast }: Options): v
       label = "",
       kind: InstallTargetKind = "plugin",
     ) => {
-      const safeSlug = safeField(payload.slug, 64);
+      const safeSlug = sanitizeToastField(payload.slug, 64);
       const target = targetLabel(safeSlug, label);
       let message: string;
       if (payload.phase === "downloading") {
@@ -82,7 +82,7 @@ export function useStatusBarInstall({ api, pushToast, upsertToast }: Options): v
       label = "",
       kind: InstallTargetKind = "plugin",
     ) => {
-      const safeSlug = safeField(slug, 64);
+      const safeSlug = sanitizeToastField(slug, 64);
       const target = targetLabel(safeSlug, label);
       if (success) {
         upsertToast(installToastId(kind, safeSlug), {
@@ -103,7 +103,7 @@ export function useStatusBarInstall({ api, pushToast, upsertToast }: Options): v
           // instead of a bare identifier.
           message: t("useStatusBarInstall.installFailure", {
             target,
-            error: safeField(formatIpcError(error, message)),
+            error: sanitizeToastField(formatIpcError(error, message)),
           }),
           ttlMs: 10000,
         });
@@ -113,13 +113,13 @@ export function useStatusBarInstall({ api, pushToast, upsertToast }: Options): v
       { slug, success, error, message }: InstallResultPayload,
       label = "",
     ) => {
-      const target = targetLabel(safeField(slug, 64), label);
+      const target = targetLabel(sanitizeToastField(slug, 64), label);
       if (success) pushToast({ severity: "success", message: t("useStatusBarInstall.uninstallSuccess", { target }) });
       else pushToast({
         severity: "error",
         message: t("useStatusBarInstall.uninstallFailure", {
           target,
-          error: safeField(formatIpcError(error, message)),
+          error: sanitizeToastField(formatIpcError(error, message)),
         }),
         ttlMs: 10000,
       });

@@ -7,7 +7,7 @@
  * declared category is `read`, the host expects the plugin tool to be
  * non-mutating. This module provides a runtime sanity-check: a thin
  * proxy over `node:fs` whose write methods throw a synchronous
- * {@link ManifestIntegrityViolation}. The runtime catches the throw,
+ * {@link ManifestIntegrityError}. The runtime catches the throw,
  * audits it, disables the offending plugin, and surfaces an IPC
  * notification to the renderer.
  *
@@ -80,7 +80,7 @@ export const READ_ONLY_FS_DENY_METHODS: ReadonlySet<string> = new Set([
   // names live there too).
 ]);
 
-export class ManifestIntegrityViolation extends Error {
+export class ManifestIntegrityError extends Error {
   readonly code = "MANIFEST_INTEGRITY_VIOLATION" as const;
 
   constructor(
@@ -92,14 +92,14 @@ export class ManifestIntegrityViolation extends Error {
       `Plugin '${pluginId}' tool '${toolName}' violated manifest integrity by ` +
       `attempting '${attemptedMethod}'. Plugin disabled — reinstall required.`,
     );
-    this.name = "ManifestIntegrityViolation";
+    this.name = "ManifestIntegrityError";
   }
 }
 
 /**
  * Build a Proxy that wraps a real `fs` module. Reading members is
  * allowed; calling any method in {@link READ_ONLY_FS_DENY_METHODS}
- * throws {@link ManifestIntegrityViolation} *synchronously* — the
+ * throws {@link ManifestIntegrityError} *synchronously* — the
  * caller's audit + disable hooks fire before the promise/callback
  * orchestration starts.
  *
@@ -119,7 +119,7 @@ export function createReadOnlyFsProxy(
         // lookup time. Some callers do `const w = fs.writeFile;` then
         // call `w(...)`; we want the throw to fire at the *call*.
         return (..._args: unknown[]) => {
-          throw new ManifestIntegrityViolation(ctx.pluginId, ctx.toolName, key);
+          throw new ManifestIntegrityError(ctx.pluginId, ctx.toolName, key);
         };
       }
       // Pass through everything else (read methods, constants, …).
@@ -143,7 +143,7 @@ export function createReadOnlyFsPromisesProxy(
       const key = typeof prop === "symbol" ? prop.description ?? "" : String(prop);
       if (READ_ONLY_FS_DENY_METHODS.has(key)) {
         return async (..._args: unknown[]) => {
-          throw new ManifestIntegrityViolation(ctx.pluginId, ctx.toolName, key);
+          throw new ManifestIntegrityError(ctx.pluginId, ctx.toolName, key);
         };
       }
       return Reflect.get(target, prop, receiver);

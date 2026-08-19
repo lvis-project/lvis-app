@@ -21,7 +21,7 @@
  * the child is a plain Node process where `import("electron")` yields nothing.
  * The host-side classification of a thrown host error into a wire error lives in
  * `host-api-dispatcher.ts` instead, because recognising `EffectBoundaryDeniedError`
- * or `ManifestIntegrityViolation` means importing modules that reach Electron
+ * or `ManifestIntegrityError` means importing modules that reach Electron
  * through the approval gate.
  */
 import { base64DecodedLength } from "../../shared/json-representable.js";

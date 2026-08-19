@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { LvisApi } from "../../types.js";
 import type { StatusBarSeverity, NotificationToastMeta } from "./types.js";
-import { safeField } from "./utils.js";
+import { sanitizeToastField } from "./toast-field.js";
 
 interface Options {
   api: LvisApi;
@@ -27,7 +27,7 @@ export function useStatusBarNotifications({ api, pushToast }: Options): void {
               : "info";
       pushToast({
         severity,
-        message: `${safeField(p.title, 64)}: ${safeField(p.body, 80)}`,
+        message: `${sanitizeToastField(p.title, 64)}: ${sanitizeToastField(p.body, 80)}`,
         ttlMs: p.kind === "approval" ? 10_000 : 5_000,
         notification: { kind: p.kind, contextRef: p.contextRef },
       });
