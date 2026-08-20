@@ -256,11 +256,18 @@ export async function spawnConfinedPluginChild(
   };
   try {
     const child = await spawnConfinedChild({
-      // `process.execPath` is the Electron binary in production and `node` in a
-      // test runner. `ELECTRON_RUN_AS_NODE` makes the former behave as the
-      // latter, which is also what strips `electron` from the child's module
-      // registry — §4's "No Electron" is this environment variable plus the
-      // absence of a renderer, not a promise.
+      // `process.execPath` is the Electron binary — in production AND under
+      // this repository's own test runner, which launches Vitest through that
+      // binary (`scripts/run-vitest-under-electron.mjs`). A child spawned from
+      // a test is therefore spawned from the executable production spawns
+      // from, which is what makes the confinement suite's `electron` answers
+      // measurements rather than artefacts of a Node-versus-Electron runner.
+      // `ELECTRON_RUN_AS_NODE` makes that binary behave as Node, which is what
+      // removes `electron` from the child's CJS registry — §4's "No Electron"
+      // is this environment variable plus the absence of a renderer, not a
+      // promise. It does NOT act uniformly across module systems, so
+      // `confined-plugin-child.test.ts` asserts each form separately rather
+      // than one on the others' behalf.
       command: process.execPath,
       args: [spec.childEntryPath],
       label: `plugin-child:${spec.pluginId}`,
