@@ -620,7 +620,15 @@ export function fileBasename(path: string): string {
  */
 export function isPathWithinRoot(root: string, candidate: string): boolean {
   if (candidate === root) return true;
-  return candidate.startsWith(root) && /[/\\]/.test(candidate.charAt(root.length));
+  if (!candidate.startsWith(root)) return false;
+  // A root that ALREADY ends in a separator has no boundary character left at
+  // the split point: `/a/` against `/a/b` lands on `b`, so the segment test
+  // would reject a path plainly inside the root. A Windows drive root (`C:\`)
+  // is exactly this shape. Same false negative the host-side `isPathWithin`
+  // carries a guard for; the renderer cannot import it (no `node:path` here),
+  // so the guard is restated rather than shared.
+  if (/[/\\]$/.test(root)) return true;
+  return /[/\\]/.test(candidate.charAt(root.length));
 }
 
 /**

@@ -13,7 +13,7 @@
  *   - openFeatureNamespace rejects path-traversal feature ids.
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, statSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+import { mkdtempSync, statSync, writeFileSync, readdirSync, existsSync, symlinkSync, readFileSync, lstatSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -102,6 +102,59 @@ describe("feature-namespace", () => {
     await ns.writeJson("config.json", { a: 1 });
     const entries = readdirSync(join(tempDir, "widgets"));
     expect(entries).toEqual(["config.json"]);
+  });
+
+  it("does not write through a symlink planted at the staging path", async () => {
+    // The staging name was a FIXED `${target}.tmp`. Anything that could predict
+    // the target could therefore plant that path first, and `fs.writeFile`
+    // follows a symlink: the payload landed at the planter's destination and
+    // the subsequent `rename` moved the LINK over the live path, leaving
+    // `~/.lvis/<feature>/<file>` pointing wherever they chose. A random name
+    // plus O_CREAT|O_EXCL means the writer never opens a path that exists.
+    const featureDir = join(tempDir, "widgets");
+    mkdirSync(featureDir, { recursive: true, mode: 0o700 });
+    const target = join(featureDir, "config.json");
+    const outside = join(tempDir, "attacker-owned.json");
+    writeFileSync(outside, "untouched");
+    const predictableStaging = `${target}.tmp`;
+    symlinkSync(outside, predictableStaging);
+
+    await writeFileAtomicAtPath(target, "fresh");
+
+    expect(readFileSync(target, "utf-8")).toBe("fresh");
+    // Nothing was written through the link, and the link was not renamed onto
+    // the live path.
+    expect(readFileSync(outside, "utf-8")).toBe("untouched");
+    expect(lstatSync(predictableStaging).isSymbolicLink()).toBe(true);
+    expect(lstatSync(target).isSymbolicLink()).toBe(false);
+  });
+
+  it("gives two concurrent writers to one target their own staging file", async () => {
+    // With a fixed `${target}.tmp` both writers staged into the same file and
+    // both renamed it, so the survivor could hold either payload or a splice of
+    // the two. work-board-store and routines-store both route here, so that was
+    // two live stores under ~/.lvis.
+    const featureDir = join(tempDir, "widgets");
+    mkdirSync(featureDir, { recursive: true, mode: 0o700 });
+    const target = join(featureDir, "shared.json");
+    const a = "A".repeat(200_000);
+    const b = "B".repeat(200_000);
+    await Promise.all([
+      writeFileAtomicAtPath(target, a),
+      writeFileAtomicAtPath(target, b),
+    ]);
+    expect([a, b]).toContain(readFileSync(target, "utf-8"));
+    expect(readdirSync(featureDir)).toEqual(["shared.json"]);
+  });
+
+  it("leaves no staging file behind when the write fails", async () => {
+    const featureDir = join(tempDir, "widgets");
+    mkdirSync(featureDir, { recursive: true, mode: 0o700 });
+    const target = join(featureDir, "config.json");
+    // A directory at the target makes `rename` fail after the bytes are staged.
+    mkdirSync(target, { recursive: true });
+    await expect(writeFileAtomicAtPath(target, "fresh")).rejects.toThrow();
+    expect(readdirSync(featureDir)).toEqual(["config.json"]);
   });
 
   it("childDir materializes a 0o700 subdirectory", async () => {

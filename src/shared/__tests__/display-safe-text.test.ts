@@ -15,7 +15,7 @@
  * prevent.
  */
 import { describe, expect, it } from "vitest";
-import { displaySafeLabel } from "../display-safe-text.js";
+import { displaySafeLabel, hasControlChars, hasInvisibleOrReorderingChars, hasNonWhitespaceControlChars } from "../display-safe-text.js";
 
 const cp = (value: number) => String.fromCodePoint(value);
 const ZWSP = cp(0x200b);
@@ -104,5 +104,46 @@ describe("displaySafeLabel", () => {
     // the shared class refuses it for identifiers. See the module comment.
     const VS16 = String.fromCodePoint(0xfe0f);
     expect(displaySafeLabel(`⚠${VS16} alert.md`, 128)).toBe("⚠ alert.md");
+  });
+});
+
+describe("hasControlChars / hasNonWhitespaceControlChars", () => {
+  it("catches the C1 controls that only one of twelve hand-written copies had", () => {
+    // U+0085 is NEL, a line terminator. U+009B is CSI, the 8-bit form of the
+    // `ESC [` that opens an ANSI escape sequence. A validator that refuses
+    // U+001B (which every copy did) and admits U+009B is missing a case, not
+    // expressing a policy.
+    expect(hasControlChars(`a${"\u001b"}b`)).toBe(true);
+    expect(hasControlChars(`a${"\u009b"}b`)).toBe(true);
+    expect(hasControlChars(`a${"\u0085"}b`)).toBe(true);
+    expect(hasNonWhitespaceControlChars(`a${"\u009b"}b`)).toBe(true);
+    expect(hasNonWhitespaceControlChars(`a${"\u0085"}b`)).toBe(true);
+  });
+
+  it("catches U+2028/U+2029, the line breaks a C0 range does not cover", () => {
+    expect(hasControlChars(`a${"\u2028"}b`)).toBe(true);
+    expect(hasControlChars(`a${"\u2029"}b`)).toBe(true);
+    expect(hasNonWhitespaceControlChars(`a${"\u2028"}b`)).toBe(true);
+  });
+
+  it("splits on tab/newline/CR and nothing else", () => {
+    for (const ws of ["\t", "\n", "\r"]) {
+      expect(hasControlChars(`a${ws}b`)).toBe(true);
+      expect(hasNonWhitespaceControlChars(`a${ws}b`)).toBe(false);
+    }
+    expect(hasControlChars("plain text")).toBe(false);
+    expect(hasNonWhitespaceControlChars("plain text")).toBe(false);
+  });
+
+  it("leaves bidi, zero-width and variation selectors to the display class", () => {
+    // Stated so the omission reads as a decision. These classes are applied by
+    // different operations: the display one DELETES, so losing a variation
+    // selector costs a monochrome glyph; these two REFUSE, so folding the same
+    // members in would drop a user's emoji-bearing message outright.
+    expect(hasControlChars(`a${"\u202e"}b`)).toBe(false);
+    expect(hasControlChars(`a${"\u200b"}b`)).toBe(false);
+    expect(hasControlChars(`ok${"\ufe0f"}`)).toBe(false);
+    expect(hasInvisibleOrReorderingChars(`a${"\u202e"}b`)).toBe(true);
+    expect(hasInvisibleOrReorderingChars(`a${"\u200b"}b`)).toBe(true);
   });
 });

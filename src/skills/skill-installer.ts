@@ -1,5 +1,6 @@
 import { rm } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { resolve } from "node:path";
+import { isResolvedPathWithin } from "../plugins/plugin-storage-containment.js";
 
 import {
   assertMarketplaceAppUpgradeNotRequired,
@@ -130,17 +131,13 @@ export async function uninstallSkillPackage(
   });
   if (!found) throw new Error(`Skill package not installed: ${slug}`);
   const target = resolve(opts.installRoot, slug);
-  if (!isWithin(opts.installRoot, target)) {
+  if (!isResolvedPathWithin(opts.installRoot, target)) {
     throw new Error(`refusing to remove outside skill install root: ${target}`);
   }
   await rm(target, { recursive: true, force: true });
   return { skillId: slug, slug, uninstalled: true };
 }
 
-function isWithin(parent: string, candidate: string): boolean {
-  const rel = relative(parent, candidate);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
 
 function throwIfMarketplaceInstallAborted(signal: AbortSignal | undefined, slug: string): void {
   if (!signal?.aborted) return;

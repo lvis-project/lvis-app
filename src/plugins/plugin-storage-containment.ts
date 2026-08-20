@@ -59,6 +59,33 @@ export function isPathWithin(root: string, target: string): boolean {
 }
 
 /**
+ * Whether `target` is `root` or lies beneath it, resolving both sides first.
+ *
+ * The sibling of {@link isPathWithin} for callers that hold raw filesystem
+ * input rather than an already-normalised absolute path. `resolve` collapses
+ * `.`/`..` and anchors a relative argument to `process.cwd()`; the containment
+ * question is then the same one, asked the same way.
+ *
+ * WHY THIS SHAPE AND NOT `path.relative`. Seven call sites across plugins,
+ * agents, skills and the python runtime each carried the identical two-liner
+ * `relative(a, b)` + `!rel.startsWith("..")`. That form answers NO for a
+ * directory whose own name begins with two dots — `relative("/a", "/a/..foo")`
+ * is `"..foo"`, and `startsWith("..")` reads that as an escape — so a
+ * legitimately contained path was refused. The prefix form has no such blind
+ * spot.
+ *
+ * CASE IS COMPARED EXACTLY, on every platform. `path.win32.relative` folds
+ * case, so on Windows this is strictly stricter than the form it replaces: it
+ * can only ever refuse a path the old form admitted, never the reverse. Every
+ * caller derives its candidate from the root it checks against (`resolve(root,
+ * …)`, `join(root, …)`, or `realpath` applied to both), so the two sides carry
+ * the same casing by construction and no caller loses a path it used to keep.
+ */
+export function isResolvedPathWithin(root: string, target: string): boolean {
+  return isPathWithin(resolve(root), resolve(target));
+}
+
+/**
  * Join `segments` under `storageRoot` and refuse anything that leaves it.
  *
  * Lexical only, and callers that go on to touch the disk must follow it with

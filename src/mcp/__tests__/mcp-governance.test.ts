@@ -618,3 +618,40 @@ describe("McpGovernance — per-request capability gate (governance-per-request)
     expect(gov.validateRequestCapability("unknown-server", "server/discover").valid).toBe(false);
   });
 });
+
+describe("McpGovernance.validateServer — http scheme", () => {
+  function httpPolicy(): McpGovernancePolicy {
+    return basePolicy({
+      transport: "http",
+      allowedCommands: [],
+      requiredAuth: "none",
+    });
+  }
+
+  function validateUrl(url: string) {
+    return governanceWithPolicy(httpPolicy()).validateServer({
+      id: "browser-use",
+      transport: "http",
+      url,
+      auth: "none",
+    });
+  }
+
+  it("admits plain http anywhere in the loopback block, not just 127.0.0.1", () => {
+    // This gate matched `localhost` / `127.0.0.1` / `::1` exactly, so a server
+    // on 127.0.0.2 -- loopback, traffic never leaving the host -- was told it
+    // needed HTTPS, while the marketplace provider gate admitted the same
+    // address. One question, two doors, two answers.
+    expect(validateUrl("http://127.0.0.1:9000/mcp").valid).toBe(true);
+    expect(validateUrl("http://127.0.0.2:9000/mcp").valid).toBe(true);
+    expect(validateUrl("http://localhost:9000/mcp").valid).toBe(true);
+    expect(validateUrl("http://[::1]:9000/mcp").valid).toBe(true);
+  });
+
+  it("still requires https for anything that is not literally local", () => {
+    expect(validateUrl("http://example.com/mcp").valid).toBe(false);
+    expect(validateUrl("http://127.0.0.1.evil.com/mcp").valid).toBe(false);
+    expect(validateUrl("http://ollama.localhost/mcp").valid).toBe(false);
+    expect(validateUrl("https://example.com/mcp").valid).toBe(true);
+  });
+});

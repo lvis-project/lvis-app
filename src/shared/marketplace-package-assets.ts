@@ -16,6 +16,7 @@ import {
   isMarketplaceEligibleThemeBundleId,
   type MarketplaceEligibleThemeBundleId,
 } from "./theme-bundles.js";
+import { isLoopbackHttpUrl } from "./loopback-url.js";
 
 export interface MarketplaceProviderPackageAsset {
   type: "provider";
@@ -223,33 +224,9 @@ function usesHttpsUrl(value: string): boolean {
   }
 }
 
-function usesLoopbackHttpUrl(value: string): boolean {
-  let parsed: URL;
-  try {
-    parsed = new URL(value);
-  } catch {
-    return false;
-  }
-  if (parsed.protocol !== "http:") return false;
-
-  const hostname = parsed.hostname.toLowerCase().replace(/\.$/, "");
-  if (hostname === "localhost" || hostname.endsWith(".localhost")) return true;
-  if (hostname === "::1" || hostname === "[::1]") return true;
-
-  const octets = hostname.split(".");
-  return (
-    octets.length === 4 &&
-    octets[0] === "127" &&
-    octets.every((part) => {
-      if (!/^\d+$/.test(part)) return false;
-      const value = Number(part);
-      return value >= 0 && value <= 255;
-    })
-  );
-}
 
 function isAllowedProviderBaseUrl(value: string, requiresApiKey: boolean): boolean {
-  return usesHttpsUrl(value) || (!requiresApiKey && usesLoopbackHttpUrl(value));
+  return usesHttpsUrl(value) || (!requiresApiKey && isLoopbackHttpUrl(value));
 }
 
 function cleanModelOptions(value: unknown): string[] {
