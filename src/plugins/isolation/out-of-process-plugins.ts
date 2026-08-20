@@ -104,9 +104,16 @@
  *
  *    Measured on macOS through this branch's production spawn: the host's
  *    `os.tmpdir()` was its per-user temp directory and the child's was
- *    `/tmp/claude`. Not run on Linux here — but the end-to-end case asserts the
- *    substituted path BY VALUE, so on any machine the case runs on, a Linux one
- *    included, a different answer is a failure rather than a silent pass.
+ *    `/tmp/claude`. The end-to-end case carries only HALF of that to other
+ *    platforms, and the halves are worth keeping apart. The case NAMES the
+ *    substitute itself, so what it asserts wherever it runs is that the
+ *    substitution HAPPENS: the child's `os.tmpdir()` comes back equal to the
+ *    path the case supplied and UNEQUAL to the host's. That the fallback —
+ *    with nothing supplied — is the literal `/tmp/claude` is read from the
+ *    runtime source above and measured on macOS only; NO case asserts it, on
+ *    Linux or anywhere. That gap is tolerable only because the fallback's
+ *    identity is not the failure axis. Its ABSENCE is, and the case does
+ *    assert that.
  *
  *    That substituted path is on ASRT's own default WRITE allow-list, and
  *    NOTHING CREATES IT — not this repository, not the sandbox runtime, which
