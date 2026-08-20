@@ -686,6 +686,12 @@ function runAppChecks(dir) {
   runPackageScripts(dir, ["lint", "check:knip"]);
   runAppTypecheckGate(dir, "full checks");
   runPackageScripts(dir, ["test", "build"]);
+  // After the suite and the build, not before them and not inside `build`.
+  // This gate reads a hand-written ledger of source paths, so an unrelated
+  // deletion makes it fail; ahead of the suite that failure would end the push
+  // gate without a test having run. It used to be the first command of the
+  // `build` script, which is where CI hit exactly that.
+  runPackageScripts(dir, ["check:sunset-inventory"]);
   runJavaScriptFile(dir, "scripts/check-tool-namespace.mjs");
 }
 

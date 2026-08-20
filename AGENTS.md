@@ -766,6 +766,80 @@ manually duplicate the full trio. After failure, rerun only failed or invalidate
 checks; the next push performs the complete gate. Full Playwright E2E belongs to
 CI/release; locally run only changed-flow specs unless the task requires more.
 
+### CI job composition
+
+A CI job stops at its first failed step, so every step gates every step after
+it. Two kinds of step share these jobs:
+
+- **Verification** — it compiles, it builds, its tests pass. A failure means the
+  code is wrong. `build-and-test` in `.github/workflows/ci.yml`; `build` in
+  `web-ci.yml`.
+- **Repository hygiene** — a manifest, a baseline ledger, a source-policy
+  assertion, or the self-test of a gate that reads one. A failure means a
+  bookkeeping file is stale, not that the product is broken. In `ci.yml` these
+  are the last four steps of `build-and-test`; `screenshot-provenance` in
+  `web-ci.yml`; both jobs of `naming-gate.yml`.
+
+**A hygiene gate runs after every compile and test step in its job, or in a job
+of its own.** Put one first and a stale bookkeeping file skips the steps that
+verify the code, and the red check that results reports "nothing was verified"
+while being indistinguishable from "something was verified and failed" — worse
+than having no gate at all. That is not hypothetical: one change declared every
+tracked image in a manifest, another deleted some of those images, they landed
+the same day, and typecheck, the build, and the whole suite stopped running on
+`main`. The rule is written as an absolute and this repository is not yet all
+the way at it — *Where it does not reach* below names the commands that still
+sit ahead of the suite from inside `bun run build`.
+
+**Splitting a gate into a job of its own also moves it out of a check name.**
+Branch protection on `main` requires particular check names; read the current
+list with `gh api repos/lvis-project/lvis-app/branches/main/protection --jq
+.required_status_checks.contexts`. A new job reports under a new name, and a
+name that list does not contain cannot block a merge — so the split quietly
+turns a merge requirement into an advisory one, which is how a gate ends up
+green-lighting the very thing it was written to stop. Split a gate out only in a
+change that adds the new job's check name to that list at the same time.
+`ci.yml`'s four gates stay inside `build-and-test`, last, for this reason;
+`web-ci.yml`'s gate is a separate job because `build` carries no required name
+either.
+
+A `needs:` edge puts the skipping back across jobs — a failed hygiene job
+reports its dependants as skipped — so none joins the two kinds.
+
+The rule reaches into the scripts a job calls, and it reaches unevenly — a
+workflow step can be one command or fifteen. `check:test-quality` runs the
+duplicate-helper scan before the suite, so CI invokes its two halves separately
+and the composite remains a local convenience. `check:sunset-inventory` reads a
+hand-written ledger naming source paths that any unrelated change can delete, so
+it left the `build` composite it used to open — one nonexistent path made
+`bun run build` exit at `[sunset-inventory]` before a single file was compiled —
+and runs as its own step at the end of `build-and-test`.
+
+**Where it does not reach, stated rather than claimed away.** `bun run build` is
+one workflow step and fifteen commands, nine of which assert rather than
+compile; four of those nine sit ahead of a later compile command in the same
+composite (`check:import-cycles`, `check-generated-assets`,
+`check:i18n-catalog`, `check:i18n-barrels`), and all nine sit ahead of the suite
+in the job. Any of them can fail `ci.yml`'s build step and skip the steps behind
+it — the same masking shape, narrowed to those nine. They stay because each
+reads the sources being compiled or the bytes the build itself just wrote, and a
+local `bun run build` is where that drift has to surface. Treat this as a
+residual with a fixed membership, not as compliance: adding a tenth needs an
+argument, and the test below fails until the list changes with it.
+
+`src/__tests__/packaging-discipline-source.test.ts` enforces the ordering over
+every file in `.github/workflows/`, pins the `ci.yml` gates to `build-and-test`,
+fails when any workflow calls the composite, fails when a hygiene gate re-enters
+the `build` script, and pins the nine asserting commands that remain inside it.
+It recognises a gate by name in both the package.json and the file-name
+spelling, and checks that pair against package.json so a rename cannot leave the
+list stale — but a gate new to the repository still has to be added to the list
+by hand. It recognises a verification step by deriving the compile and test
+script names from package.json, so a new `build:*` or `test:*` script needs no
+edit; the exception is a workflow that invokes a compiler directly instead of
+through package.json, which is still a hand list (`tsc --noEmit`,
+`playwright test`) and still has that gap.
+
 ## Change and PR discipline
 
 - Keep a PR cohesive and reviewable; prefer existing utilities and patterns over
