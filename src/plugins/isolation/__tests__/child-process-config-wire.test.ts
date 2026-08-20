@@ -13,6 +13,21 @@
  *  - `getAppPreference` had no child half at all, because a snapshot with no
  *    re-push answers with the value a preference held at plugin start.
  *
+ * A third claim needs a real child for a different reason — the child has to be
+ * a separate PROCESS with its own lifecycle, not an object the host already
+ * finished building:
+ *
+ *  - A preference that moves while the child is still CONSTRUCTING. The child
+ *    has no runtime to route a notification through until its plugin module has
+ *    imported and its factory has run, so the push that announcement triggers
+ *    is dropped — and nothing announces the same value a second time.
+ *
+ * The inherited-key assertions below are NOT in that class:
+ * `config-subscription-paths.test.ts` pins the same member in memory. They are
+ * here because this is where the call is a PLUGIN's, and `typeof` read on the
+ * far side is the answer a plugin receives rather than the one the member
+ * returned.
+ *
  * So this file spawns an actual child, over actual pipes, with actual JSON
  * framing, and asks a plugin what it got. The plugin performs the identity
  * check the way a real plugin must — `Symbol.for(...)` in its OWN realm, a
@@ -29,12 +44,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
-// The SAME external boundary the shipped entry is built against, so the child
-// bundled here is the child that ships.
-import { MAIN_BUNDLE_EXTERNALS } from "../../../../scripts/lib/main-bundle-externals.mjs";
+import { join } from "node:path";
+// The child entry is bundled by the shared module rather than here, so this
+// suite and `confined-plugin-child.test.ts` cannot drift into exercising two
+// different bundles while reading like they exercise one.
+import { buildChildEntry, childBundleDir, repositoryRoot } from "./child-entry-bundle.js";
 import type { PluginHostApi, PluginManifest, PluginRuntimeContext, RuntimePlugin } from "../../types.js";
 import {
   createOutOfProcessPluginFactory,
@@ -69,40 +83,29 @@ interface RecordedChange {
 interface PreferenceProbe {
   readonly preferredFlow: string | null;
   readonly offAllowlist: string | null;
+  /**
+   * `typeof` rather than the value: a key inherited from `Object.prototype`
+   * answers with a FUNCTION when the snapshot is indexed bare, and a function
+   * cannot cross back as itself.
+   */
+  readonly inheritedKind: string;
+  readonly constructorKind: string;
 }
 
 let temporaryRoot: string | undefined;
 const spawnedChildren = new Set<ChildProcess>();
 
-function repositoryRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-}
+/** Emitted inside the repository, under a name only this suite cleans up. */
+const CHILD_BUNDLE_CACHE = "plugin-child-config-wire";
 
-/** Inside the repository, so the bundle's externals resolve from node_modules. */
-function childBundleDir(): string {
-  return join(repositoryRoot(), ".cache", "plugin-child-config-wire");
-}
-
-async function buildChildEntry(): Promise<string> {
-  const childEntryPath = join(childBundleDir(), "plugin-child-main.mjs");
-  await build({
-    absWorkingDir: repositoryRoot(),
-    entryPoints: [join(repositoryRoot(), "src/plugins/isolation/plugin-child-main.ts")],
-    outfile: childEntryPath,
-    bundle: true,
-    format: "esm",
-    platform: "node",
-    target: ["node22"],
-    external: [...MAIN_BUNDLE_EXTERNALS],
-    logLevel: "silent",
-    banner: {
-      js:
-        'import { createRequire as __r } from "node:module";\n'
-        + "const require = __r(import.meta.url);\n",
-    },
-  });
-  return childEntryPath;
-}
+/**
+ * How long the construct-window case holds the plugin module at import.
+ *
+ * Long enough that a host announcement fired a quarter of the way in lands
+ * while the child still has no runtime, without approaching the construct
+ * deadline (`pluginImportMs + pluginFactoryMs`, 20s).
+ */
+const CONSTRUCT_WINDOW_MS = 1_200;
 
 /**
  * The plugin under test, as a real module the child imports.
@@ -111,12 +114,17 @@ async function buildChildEntry(): Promise<string> {
  * that is the only route a plugin bundled apart from the host has, it is what
  * the contract documents, and it is what makes the identity check meaningful
  * across two realms.
+ *
+ * `importDelayMs` holds the module at TOP LEVEL, which is the widest part of
+ * the window the child cannot receive notifications in: the child assigns the
+ * runtime that routes them only after this module has imported and its factory
+ * has run, so anything the host pushes while this await is pending is dropped.
  */
-function writePluginEntry(root: string): string {
+function writePluginEntry(root: string, importDelayMs = 0): string {
   const entryPath = join(root, "plugin.mjs");
   writeFileSync(
     entryPath,
-    `const SENTINEL = Symbol.for("lvis.config.secret.redacted");
+    `${importDelayMs > 0 ? `await new Promise((settle) => setTimeout(settle, ${importDelayMs}));\n` : ""}const SENTINEL = Symbol.for("lvis.config.secret.redacted");
 const describe = (value) => (typeof value === "symbol" ? "SYMBOL:" + value.description : JSON.stringify(value ?? null));
 export const createPlugin = async (context) => {
   const api = context.hostApi;
@@ -139,6 +147,11 @@ export const createPlugin = async (context) => {
       probe_preference: async () => ({
         preferredFlow: api.getAppPreference("webView.preferredFlow") ?? null,
         offAllowlist: api.getAppPreference("llm.provider") ?? null,
+        // Keys the snapshot object inherits rather than owns. A bare index
+        // answers these with Object.prototype's functions; the host reader
+        // answers undefined, because they are not on the allowlist.
+        inheritedKind: typeof api.getAppPreference("toString"),
+        constructorKind: typeof api.getAppPreference("constructor"),
       }),
     },
   };
@@ -277,7 +290,7 @@ afterEach(() => {
   _resetAppPreferencePublisher();
   if (temporaryRoot) rmSync(temporaryRoot, { recursive: true, force: true });
   temporaryRoot = undefined;
-  rmSync(childBundleDir(), { recursive: true, force: true });
+  rmSync(childBundleDir(CHILD_BUNDLE_CACHE), { recursive: true, force: true });
 });
 
 describe("the config values a plugin reads, across a real child process", () => {
@@ -292,7 +305,7 @@ describe("the config values a plugin reads, across a real child process", () => 
       const factory = createOutOfProcessPluginFactory({
         manifest: MANIFEST,
         entryPath: writePluginEntry(root),
-        childEntryPath: await buildChildEntry(),
+        childEntryPath: await buildChildEntry(CHILD_BUNDLE_CACHE),
         connect: connectPlainChild,
       });
       const instance = await factory({
@@ -361,7 +374,7 @@ describe("the config values a plugin reads, across a real child process", () => 
       const factory = createOutOfProcessPluginFactory({
         manifest: MANIFEST,
         entryPath: writePluginEntry(root),
-        childEntryPath: await buildChildEntry(),
+        childEntryPath: await buildChildEntry(CHILD_BUNDLE_CACHE),
         connect: connectPlainChild,
       });
       const instance = await factory({
@@ -379,6 +392,12 @@ describe("the config values a plugin reads, across a real child process", () => 
         // A key off the host allowlist is not in the snapshot at all, which is
         // the same answer the in-process reader gives for one.
         expect(seeded.offAllowlist).toBeNull();
+        // …and "not in the snapshot" has to mean it for a key the snapshot
+        // object INHERITS too. `appPreferences["toString"]` is a function, and
+        // a plugin handed a function where the host reader hands `undefined` is
+        // reading a different member on each side of the boundary.
+        expect(seeded.inheritedKind).toBe("undefined");
+        expect(seeded.constructorKind).toBe("undefined");
 
         // THE DEFECT. The member used to have no child half precisely because
         // this move had no signal behind it: a plugin reading the preference at
@@ -397,6 +416,54 @@ describe("the config values a plugin reads, across a real child process", () => 
         publishAppPreferenceChange(service);
         const afterNoop = (await instance.handlers.probe_preference!()) as PreferenceProbe;
         expect(afterNoop.preferredFlow).toBe("system-browser");
+      } finally {
+        await instance.stop?.();
+      }
+    },
+    180_000,
+  );
+
+  it(
+    "answers with a preference that moved while the child was still constructing",
+    async () => {
+      const root = temporaryRoot!;
+      const pluginDataDir = join(root, "data");
+      mkdirSync(pluginDataDir, { recursive: true });
+      const { service, set } = fakeSettingsService("in-app");
+      const { hostApi } = hostApiFor(service);
+      const factory = createOutOfProcessPluginFactory({
+        manifest: MANIFEST,
+        // The plugin module sleeps at import, so the child spends this long
+        // with no runtime to route a host notification through.
+        entryPath: writePluginEntry(root, CONSTRUCT_WINDOW_MS),
+        childEntryPath: await buildChildEntry(CHILD_BUNDLE_CACHE),
+        connect: connectPlainChild,
+      });
+      const constructing = factory({
+        pluginId: PLUGIN_ID,
+        pluginRoot: root,
+        hostRoot: repositoryRoot(),
+        pluginDataDir,
+        config: {},
+        log: () => undefined,
+        hostApi,
+      } as PluginRuntimeContext);
+
+      // Well inside the sleep above. The snapshot that went into the construct
+      // params was read BEFORE this, and the push this announcement triggers
+      // reaches a child that has no runtime yet and is dropped.
+      await new Promise((settle) => setTimeout(settle, CONSTRUCT_WINDOW_MS / 4));
+      set("system-browser");
+      publishAppPreferenceChange(service);
+
+      const instance = await constructing;
+      try {
+        // THE DEFECT this case exists for. Nothing announces the preference a
+        // second time — the bus fires only on a MOVE, and the value has already
+        // moved — so without a push once construct resolves the plugin would
+        // read "in-app" until someone changed the preference AGAIN.
+        const probed = (await instance.handlers.probe_preference!()) as PreferenceProbe;
+        expect(probed.preferredFlow).toBe("system-browser");
       } finally {
         await instance.stop?.();
       }

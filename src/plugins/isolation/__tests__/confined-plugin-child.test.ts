@@ -37,12 +37,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
-import { build } from "esbuild";
-// The SAME external boundary the shipped entry is built against, so the child
-// bundled here is the child that ships rather than one built to different rules.
-import { MAIN_BUNDLE_EXTERNALS } from "../../../../scripts/lib/main-bundle-externals.mjs";
+import { join } from "node:path";
+// The child entry is bundled by the shared module rather than here: its
+// externals, banner and target are the shipped build's, and a second copy of
+// them is a second chance for one case to prove something about a child that
+// does not ship.
+import { buildChildEntry, childBundleDir, repositoryRoot } from "./child-entry-bundle.js";
 import type { PluginHostApi, PluginManifest, PluginRuntimeContext } from "../../types.js";
 import { createOutOfProcessPluginFactory } from "../out-of-process-plugin.js";
 import {
@@ -230,50 +230,8 @@ describe("the confined child, against the real sandbox", () => {
   );
 });
 
-/** The repository root, from this test file's own location. */
-function repositoryRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
-}
-
-/**
- * Where the bundled child entry is emitted.
- *
- * INSIDE the repository, not in the fixture's temp dir. The bundle keeps `pino`
- * and ASRT external — for reasons the shipped build documents at length — so it
- * must sit where `node_modules` resolves, which is exactly the relationship
- * `dist/src/main/` has in production.
- */
-function childBundleDir(repoRoot: string): string {
-  return join(repoRoot, ".cache", "plugin-child-confined-e2e");
-}
-
-/**
- * Build the REAL child entry, against the real bundle boundary.
- *
- * Shared by both end-to-end cases rather than written twice: the externals, the
- * banner and the target are the shipped build's, and two copies of them are two
- * chances for one case to prove something about a child that does not ship.
- */
-async function buildChildEntry(repoRoot: string): Promise<string> {
-  const childEntryPath = join(childBundleDir(repoRoot), "plugin-child-main.mjs");
-  await build({
-    absWorkingDir: repoRoot,
-    entryPoints: [join(repoRoot, "src/plugins/isolation/plugin-child-main.ts")],
-    outfile: childEntryPath,
-    bundle: true,
-    format: "esm",
-    platform: "node",
-    target: ["node22"],
-    external: [...MAIN_BUNDLE_EXTERNALS],
-    logLevel: "silent",
-    banner: {
-      js:
-        'import { createRequire as __r } from "node:module";\n'
-        + "const require = __r(import.meta.url);\n",
-    },
-  });
-  return childEntryPath;
-}
+/** Emitted inside the repository, under a name only this suite cleans up. */
+const CHILD_BUNDLE_CACHE = "plugin-child-confined-e2e";
 
 /**
  * The pilot's own tool, invoked out of process AND confined, through the
@@ -293,8 +251,8 @@ describe("the pilot's tools, out of process and confined", () => {
       if (!(await asrtCanInitialize())) return;
       const fx = fixture!;
       const repoRoot = repositoryRoot();
-      const childOutDir = childBundleDir(repoRoot);
-      const childEntryPath = await buildChildEntry(repoRoot);
+      const childOutDir = childBundleDir(CHILD_BUNDLE_CACHE);
+      const childEntryPath = await buildChildEntry(CHILD_BUNDLE_CACHE);
 
       // The plugin lives inside the child's own read carve-out, which is where
       // an installed plugin lives in production.
@@ -384,8 +342,8 @@ describe("the lossy and stateful members, across a real confined boundary", () =
       if (!(await asrtCanInitialize())) return;
       const fx = fixture!;
       const repoRoot = repositoryRoot();
-      const childOutDir = childBundleDir(repoRoot);
-      const childEntryPath = await buildChildEntry(repoRoot);
+      const childOutDir = childBundleDir(CHILD_BUNDLE_CACHE);
+      const childEntryPath = await buildChildEntry(CHILD_BUNDLE_CACHE);
 
       const entryPath = join(fx.pluginRoot, "plugin.mjs");
       writeFileSync(

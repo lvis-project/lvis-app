@@ -159,11 +159,18 @@ export function emitPluginConfigChange(
  * uses, so there is ONE authority for what a preference is rather than a second
  * one assembled out of change events.
  *
- * It lives in this module rather than beside the reader because the reader is
- * in `boot/`: the host-side watcher that pushes to a child is in
- * `plugins/isolation/`, and a plugins-layer module reaching up into a boot step
- * for a subscription would invert the dependency this bus already gets right
- * for `config.onChange`.
+ * WHY HERE AND NOT BESIDE THE READER. This module is already the doorway for
+ * "a config value a plugin reads has moved" — `subscribePluginConfigChange`
+ * above, and the sentinel re-export this file's header documents to plugin
+ * authors. A second such doorway in `boot/steps/` would mean a reader looking
+ * for the signal has two files to know about instead of one.
+ *
+ * NOT A DEPENDENCY-DIRECTION ARGUMENT, and one would be false here:
+ * `out-of-process-plugin.ts` — the plugins-layer module that subscribes below —
+ * imports `HOST_PUBLIC_PREFERENCE_KEYS` straight out of that boot step, because
+ * a second copy of the allowlist would be a second answer to a security
+ * question. The layers already run that way; this placement is about where the
+ * signal is FOUND, not about which module may import which.
  */
 type AppPreferenceChangeListener = () => void;
 

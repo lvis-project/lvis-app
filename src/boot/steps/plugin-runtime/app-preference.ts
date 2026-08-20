@@ -25,8 +25,10 @@ import type { SettingsService } from "../../../data/settings-store.js";
  * surface change: it must be reviewed for "does this leak host-private
  * state?" (secrets, auth tokens, plugin configs all stay OFF this list).
  *
- * Reader logic in `buildAppPreferenceReader()` must be updated in lockstep —
- * a key on this list with no reader returns `undefined` (safe failure).
+ * `readHostPublicPreference()` below is the single reader arm, and the lockstep
+ * is enforced by the compiler rather than by this note: its switch ends in a
+ * `never` exhaustiveness check, so adding an entry here without adding an arm
+ * there does not build.
  */
 export const HOST_PUBLIC_PREFERENCE_KEYS = [
   "webView.preferredFlow",
@@ -81,10 +83,15 @@ let lastPublishedPreferenceSignature: string | undefined;
  * only on a real move, so the many settings saves that touch nothing a plugin
  * can read (theme, model, shortcuts) push nothing across a process boundary.
  *
- * The signature is built by iterating the allowlist IN ORDER, so it does not
- * depend on object key ordering, and `null` stands in for an unset key —
- * `JSON.stringify` would drop an `undefined` property and make "cleared" look
- * identical to "unchanged".
+ * The signature iterates the allowlist IN ORDER and pairs each key with its
+ * value, so it does not depend on object key ordering. An unset key is written
+ * as `null` EXPLICITLY — not because `JSON.stringify` would otherwise lose it:
+ * dropping an `undefined` is its rule for object PROPERTIES, and inside an
+ * array it already writes `null`. Spelling it out keeps the comparison from
+ * resting on which of those two rules a future shape would pick up. What it
+ * does cost is that an unset key and one explicitly set to `null` sign the
+ * same; every key on the allowlist reads a required string union out of
+ * settings, so no value here can be `null` in the first place.
  */
 export function publishAppPreferenceChange(settingsService: SettingsService): void {
   const signature = JSON.stringify(
