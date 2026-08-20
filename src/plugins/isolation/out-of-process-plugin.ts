@@ -222,11 +222,26 @@ function resolvePluginChildEntryPath(): string {
  *    what keeps the two lists in the relation `DelegatedWorkerConfinement`
  *    describes.
  *
- *  A `userChosenDirectory` value can therefore never name a directory a
- *  `hostDirectory` row granted: every such row resolves under `lvisHome()` by
- *  construction, and `lvisHome()` is one of the subtracted roots. That is what
- *  makes "the host granting READ never yields WRITE" a property of the shapes
- *  rather than of which rows the table happens to hold.
+ *  KEEPING A READ GRANT FROM BECOMING A WRITE GRANT IS DONE BY SUBTRACTING THE
+ *  ROWS, not by reasoning about their shape. {@link ceilingSubtractions} puts
+ *  the directory every `hostDirectory` row in this table resolves to into the
+ *  set a `userChosenDirectory` value is refused for naming, and the comparison
+ *  is canonical on both sides.
+ *
+ *  Subtracting `lvisHome()` alone is NOT the same thing, and the difference is
+ *  easy to miss because in a home made only of real directories the two
+ *  coincide. A row is a LEXICAL join onto the home; a granted directory that is
+ *  itself a symlink out of the home has a canonical form the home does not
+ *  contain, and the comparison then misses. `confined-plugin-child.test.ts` pins that case for the `runtime`
+ *  row — the interpreter tree moved to another volume, the volume approved as
+ *  a workspace root — asked with the linked spelling and with the target's own
+ *  spelling; with the home entry alone, both spellings reached
+ *  `envelope.write`.
+ *
+ *  WHAT IS NOT CLAIMED is that this holds for all time. Each row is resolved
+ *  when the envelope is derived; a link swapped between that moment and the
+ *  child's use of the grant is a residual this does not close, and it is the
+ *  same check-time/use-time residual the delegated-worker grant check carries.
  */
 type PluginEnvelopeGrant =
   | {
@@ -256,16 +271,22 @@ type PluginEnvelopeGrant =
  *
  * A `userChosenDirectory` row is not an exception to that. What the row decides
  * is that this plugin may hold ONE directory named by that key at all; which
- * directory it turns out to be is the user's, bounded by their own approvals,
- * and the plugin cannot widen the bound by writing its own config.
+ * directory it turns out to be is the user's, bounded by their own approvals.
  *
  * Said precisely, because the value and the bound are different questions:
  * `config.get` merges the plugin's own `manifest.config` and `configSchema`
  * defaults under the user's saved setting, and `config.set` is a member the
- * plugin holds — so the plugin CAN put the value there. What it cannot do is
- * move the ceiling that value is checked against, which is why
- * {@link resolveUserChosenDirectory} owns the whole safety argument and why its
- * ceiling is compared in canonical form.
+ * plugin holds — so the plugin CAN put any value there. Moving the CEILING that
+ * value is checked against is a different reach, and it is
+ * {@link resolveUserChosenDirectory} that has to deny it, which is why that
+ * function owns the whole safety argument and why its ceiling is compared in
+ * canonical form. The reaches that were tried and refused are the ones
+ * `confined-plugin-child.test.ts` names: the filesystem root, a sensitive path
+ * under an approved root, this plugin's bundle and a neighbour's, a bundle root
+ * that is a symlink, a directory a `hostDirectory` row granted READ, the same
+ * directory once the row's target is moved onto another volume, and a link
+ * planted inside the plugin's own data directory. A reach nobody has tried is
+ * not covered by that list.
  *
  * An entry is INERT until the plugin is actually routed out-of-process: nothing
  * reads this table for an in-process plugin, which still loads in main with no
@@ -309,8 +330,12 @@ const PLUGIN_ENVELOPE_GRANTS: ReadonlyMap<string, readonly PluginEnvelopeGrant[]
         kind: "userChosenDirectory",
         configKey: "workspace",
         why:
-          "the worker's scratch + state directory. Unset, it defaults under the index root, "
-          + "so this grant only has an effect once the user has moved it out",
+          "the worker's scratch + state directory. Unset, the plugin resolves it under its "
+          + "own data directory — a SIBLING of the default index root rather than a child of "
+          + "it — so both defaults are already inside the envelope and this grant only has an "
+          + "effect once the user names a directory outside. The host requires an absolute "
+          + "value for this key even though the plugin accepts a relative one; see "
+          + "{@link resolveUserChosenDirectory} for why the host cannot resolve one",
       },
     ],
   ],
@@ -349,8 +374,23 @@ function rejectEnvelopeGrant(pluginId: string, configKey: string, detail: string
 }
 
 /**
- * The roots a `userChosenDirectory` value may never name, whatever the user
- * approved, and why each one is on the list.
+ * Where one `hostDirectory` row resolves.
+ *
+ * ONE answer, read by the derivation that grants the directory and by the
+ * subtraction that keeps a config value from naming it. Spelled out twice,
+ * the two could come to disagree about where a row points, and the disagreement
+ * would be invisible: the grant would still be read-only and the subtraction
+ * would still refuse something — just not the same directory.
+ */
+function hostGrantDirectory(
+  grant: Extract<PluginEnvelopeGrant, { kind: "hostDirectory" }>,
+): string {
+  return join(lvisHome(), ...grant.segments);
+}
+
+/**
+ * The roots a `userChosenDirectory` value is refused for naming, whatever the
+ * user approved, and why each one is on the list.
  *
  * These are SUBTRACTED from the ceiling rather than left out of one half of it,
  * and the difference is not stylistic. The ceiling's own-roots half and its
@@ -395,21 +435,55 @@ function ceilingSubtractions(
         + "each install receipt is taken over",
     },
     {
-      // `~/.lvis`. Every `hostDirectory` grant resolves under it BY
-      // CONSTRUCTION — the shape stores segments and joins them onto
-      // `lvisHome()` — so excluding the home excludes every such grant without
-      // enumerating the table, present rows and future ones alike. That is
-      // what makes "a root the host granted READ does not become writable" a
-      // property of the derivation rather than of which rows exist today. The
-      // rest of the home is the host's own storage namespace: the parts of it
-      // that are secret are already refused by the sensitive-path gate in
+      // `~/.lvis` — the host's own storage namespace. The parts of it that are
+      // secret are already refused by the sensitive-path gate in
       // {@link resolveUserChosenDirectory}, and this entry is what covers the
-      // parts that are merely host-owned —
-      // `runtime`, where the interpreter a worker executes is provisioned,
-      // among them.
+      // parts that are merely host-owned: session transcripts, the routine
+      // store, the audit log, and any directory a later host feature adds
+      // under the home without anyone editing this list.
+      //
+      // It is NOT what keeps a `hostDirectory` grant out of the write list.
+      // Every row does join onto `lvisHome()`, so in a home whose entries are
+      // all real directories this entry happens to cover them — but that is a
+      // fact about one filesystem, not about the shapes, and the entries below
+      // are what actually carry the exclusion.
       root: lvisHome(),
       detail: "resolves inside the host's own storage namespace",
     },
+    {
+      // This plugin's OWN bundle root, named separately from the install root
+      // above even though the shipped layout puts it inside. The row above is
+      // `resolvePath(pluginRoot, "..")` — a LEXICAL parent, which is the right
+      // way to name the install root and the wrong way to name a bundle that
+      // is a symlink out of it, because the caller canonicalises what it is
+      // handed. Naming the bundle root itself is what makes the two agree when
+      // the install directory is a link.
+      root: inputs.pluginRoot,
+      detail: "resolves inside the plugin's own bundle root",
+    },
+    // Every directory a `hostDirectory` row resolves to — the WHOLE table's,
+    // not this plugin's alone, because what is being excluded is the class
+    // "somewhere the host handed a plugin child READ" and a value that names a
+    // neighbour's granted directory raises the same question as one that names
+    // its own. The rows are enumerated rather than covered by the `lvisHome()`
+    // entry above: a row is a LEXICAL join onto the home, the caller compares
+    // in canonical form, and a granted directory that is itself a symlink out
+    // of the home therefore has a canonical form the home entry does not
+    // contain. Moving a multi-gigabyte interpreter tree to another volume and
+    // linking it back is the ordinary reason for that to be true on a real
+    // machine.
+    ...[...PLUGIN_ENVELOPE_GRANTS.values()].flatMap((grants) =>
+      grants.flatMap((grant) =>
+        grant.kind === "hostDirectory"
+          ? [
+              {
+                root: hostGrantDirectory(grant),
+                detail: "resolves inside a directory the host's own table grants a plugin READ",
+              },
+            ]
+          : [],
+      ),
+    ),
   ];
 }
 
@@ -462,8 +536,10 @@ function ceilingSubtractions(
  *    the directory in the host first", which is advice that cannot work. One
  *    case goes red on that move, and it goes red on the message.
  *
- * EVERY CONTAINMENT QUESTION IS ASKED ON THE CANONICAL FORM, never on the
- * lexical one — the two ceiling halves and the subtractions between them alike.
+ * ALL FOUR CONTAINMENT QUESTIONS THIS FUNCTION ASKS ARE ASKED ON THE CANONICAL
+ * FORM, not on the lexical one: the value, the plugin's own writable root, each
+ * subtracted root, and the user's approved roots (`sanitizeAllowedDirectories`
+ * canonicalises and case-folds what it returns, so that side arrives that way).
  * `config.set` is a member the plugin holds and `pluginDataDir` is a directory
  * the plugin writes, so a lexical containment test is one the plugin can
  * satisfy with a symlink it planted itself. A link at `<pluginDataDir>/x` pointing at a
@@ -503,10 +579,28 @@ function resolveUserChosenDirectory(
     rejectEnvelopeGrant(inputs.pluginId, grant.configKey, `expected a string, got ${typeof raw}`);
   }
   if (!isAbsolute(raw)) {
-    // Including a leading `~`: the plugin resolves this value with `resolve()`,
-    // which does not expand it either, so accepting one here would grant a
-    // directory the plugin will never open.
-    rejectEnvelopeGrant(inputs.pluginId, grant.configKey, `'${raw}' is not an absolute path`);
+    // A relative value has no meaning HERE, and the reason is not that it is
+    // suspicious. The directory it is relative to is the PLUGIN's to choose,
+    // and the host holds no way to learn which one a given key is resolved
+    // against — so honouring one would mean guessing a base and then handing
+    // the kernel a write grant over the guess. A leading `~` lands here for the
+    // same reason and is expanded nowhere on this path.
+    //
+    // WHAT THIS COSTS is worth stating rather than discovering: a relative
+    // value the plugin itself accepts and resolves fails the plugin's whole
+    // construction here, because {@link rejectEnvelopeGrant} runs on the spawn
+    // path. That is the fail-closed direction — the alternative is a child
+    // loaded with an envelope quietly smaller than the reviewed one — but it
+    // means such a setting has to be made absolute BEFORE the plugin holding it
+    // is routed out of process. Stated here rather than discovered there: today
+    // no plugin routed out of process holds either key, so the cost is latent
+    // and this comment is the notice.
+    rejectEnvelopeGrant(
+      inputs.pluginId,
+      grant.configKey,
+      `'${raw}' is not an absolute path — the host cannot resolve a relative value, because `
+        + `the directory it would be relative to is the plugin's to choose`,
+    );
   }
   const target = resolvePath(raw);
   const folded = caseFoldForMatch(canonicalizePathForMatch(target));
@@ -589,7 +683,7 @@ export function derivePluginChildEnvelope(
   const write = [inputs.pluginDataDir];
   for (const grant of PLUGIN_ENVELOPE_GRANTS.get(inputs.pluginId) ?? []) {
     if (grant.kind === "hostDirectory") {
-      const directory = join(lvisHome(), ...grant.segments);
+      const directory = hostGrantDirectory(grant);
       read.push(directory);
       // Logged, not merely declared: a child running with more reach than the
       // base envelope is an operational fact, and `why` is the reviewed reason
@@ -650,21 +744,9 @@ export interface ConfinedPluginChild {
  * Filesystem grants, and why each is the size it is:
  *
  *  - WRITE is a real jail, and what THIS SPAWN puts into it is `envelope.write`
- *    plus the throwaway sandbox HOME. `pluginRoot` itself is never in it. What
- *    CAN be in it under that root is `pluginDataDir` — the plugin's own storage
- *    namespace, which the production layout nests inside it
- *    (`~/.lvis/plugins/<id>/data`, `plugin-storage-layout.ts`) — and
- *    directories INSIDE `pluginDataDir`, because a `userChosenDirectory` value
- *    may name the plugin's own default index location and that is where it
- *    lives. Nothing else beneath the runtime root can get in: that root is the
- *    one the integrity check covers, and a plugin that could rewrite it could
- *    rewrite the bytes its own manifest hash was taken over. Because the data
- *    directory is nested there, the exclusion cannot be expressed by omitting a
- *    name from one list — it is {@link ceilingSubtractions}, applied between the
- *    two halves of {@link resolveUserChosenDirectory}'s ceiling, that keeps this
- *    true, and it covers every sibling plugin's root on the same argument.
- *    THE CHILD'S ALLOW SET IS LARGER THAN WHAT THIS SPAWN GRANTS, and not by
- *    this spawn's choice: ASRT composes the write allow-list as
+ *    plus the throwaway sandbox HOME — no other path is added on this path.
+ *    THE CHILD'S ALLOW SET IS LARGER THAN THAT, and not by this spawn's
+ *    choice: ASRT composes the write allow-list as
  *    `[...getDefaultWritePaths(), ...userAllowWrite]`, so its own defaults —
  *    the `/dev` entries, `/tmp/claude`, `/private/tmp/claude`,
  *    `<real home>/.npm/_logs`, `<real home>/.claude/debug` — are merged into
@@ -674,6 +756,34 @@ export interface ConfinedPluginChild {
  *    paths are per-machine rather than per-plugin, so two confined children
  *    share them. `out-of-process-plugins.ts` axis 6 carries the full record,
  *    including what closing it would take and why that is not done here.
+ *    Everything below is about the host's decision — which paths THIS SPAWN
+ *    grants — rather than about the kernel's final set.
+ *    What the host does NOT put in it is `pluginRoot`. A value under this
+ *    plugin's bundle root, a value under a SIBLING's bundle under the same
+ *    install root, and a value under a bundle root that is itself a symlink out
+ *    of that install root are each refused by {@link ceilingSubtractions}, and
+ *    each of those three has a case in `confined-plugin-child.test.ts` that
+ *    goes red when its entry is removed.
+ *    That root is the one the integrity check covers, and a plugin that could
+ *    rewrite it could rewrite the bytes its own manifest hash was taken over.
+ *    What CAN be in it under that root is `pluginDataDir` — the plugin's own
+ *    storage namespace, which the production layout nests inside it
+ *    (`~/.lvis/plugins/<id>/data`, `plugin-storage-layout.ts`) — and
+ *    directories INSIDE `pluginDataDir`, because a `userChosenDirectory` value
+ *    may name the plugin's own default index location and that is where it
+ *    lives. Because the data directory is nested there, the exclusion cannot be
+ *    expressed by omitting a name from one list; it is the subtraction, applied
+ *    between the two halves of {@link resolveUserChosenDirectory}'s ceiling,
+ *    that carries it.
+ *
+ *    THE UNRESOLVED SIBLING is the edge this does not reach. The install-root
+ *    entry is the lexical parent of THIS bundle, so a NEIGHBOUR's bundle that
+ *    is itself a symlink out of the install root has a canonical form that
+ *    entry does not contain, and no entry enumerates the neighbours — that
+ *    would mean reading the install directory on every derivation. Stated as a
+ *    residual rather than closed, and it is narrower than it sounds: the host
+ *    is what creates an install directory, so a bundle root that is a link is a
+ *    layout nothing in the app produces on its own.
  *  - READ in ASRT is deny-only — `allowRead` re-allows a region INSIDE a
  *    covering deny and is inert without one (see `asrt-sandbox.ts`). The deny
  *    floor covers the Electron userData directory, which is where plugins are
@@ -697,24 +807,6 @@ export async function spawnConfinedPluginChild(
   spec: ConfinedPluginChildSpec,
 ): Promise<ConfinedPluginChild> {
   const sandboxHome = createSandboxProcessHome();
-  // Every root the wrap is about to grant is created first, `0o700` — the same
-  // thing `worker-spawn.ts` does for the control-socket dir it grants. An allow
-  // path that does not exist at wrap time is SILENTLY SKIPPED rather than
-  // refused: ASRT 0.0.73's Linux backend drops a non-existent write path and a
-  // non-existent read allow path from the bwrap argv with a debug line and no
-  // error, and macOS's lexical rule admits the path but the kernel still has no
-  // directory to open. Neither reports anything, so without this pass the child
-  // would come up with an envelope quietly unequal to the one that was
-  // reviewed — the failure to avoid is the silent inequality, not a crash.
-  // BOTH lists are walked rather than `read` alone: `read` is documented as a
-  // superset of `write`, but nothing in the type or at runtime enforces that,
-  // and a write-only root that slipped past it would be the one root this pass
-  // exists for and the one it skipped. A creation failure throws, and the
-  // plugin then does not load at all rather than loading with an envelope the
-  // host did not decide on.
-  for (const directory of [...spec.envelope.read, ...spec.envelope.write]) {
-    mkdirSync(directory, { recursive: true, mode: 0o700 });
-  }
   let wrapped = false;
   const releaseSandboxState = (): void => {
     if (wrapped) {
@@ -724,6 +816,31 @@ export async function spawnConfinedPluginChild(
     sandboxHome.cleanup();
   };
   try {
+    // Every root the wrap is about to grant is created first, `0o700` — the
+    // same thing `worker-spawn.ts` does for the control-socket dir it grants.
+    // An allow path that does not exist at wrap time is SILENTLY SKIPPED rather
+    // than refused: ASRT 0.0.73's Linux backend drops a non-existent write path
+    // and a non-existent read allow path from the bwrap argv with a debug line
+    // and no error, and macOS's lexical rule admits the path but the kernel
+    // still has no directory to open. Neither reports anything, so without this
+    // pass the child would come up with an envelope quietly unequal to the one
+    // that was reviewed — the failure to avoid is the silent inequality, not a
+    // crash.
+    // BOTH lists are walked rather than `read` alone: `read` is documented as a
+    // superset of `write`, but nothing in the type or at runtime enforces that,
+    // and a write-only root that slipped past it would be the one root this
+    // pass exists for and the one it skipped. A creation failure throws, and
+    // the plugin then does not load at all rather than loading with an envelope
+    // the host did not decide on.
+    // IT SITS INSIDE THE `try`, and not for tidiness: the throwaway HOME above
+    // is a `mkdtemp` directory that only `releaseSandboxState` removes, and a
+    // dangling-symlink grant makes this loop throw on the documented
+    // fail-closed path. Run ahead of the `try` it left one such directory
+    // behind per failed load, and `config.set` restarts the plugin, so a
+    // setting that keeps failing kept accumulating them.
+    for (const directory of [...spec.envelope.read, ...spec.envelope.write]) {
+      mkdirSync(directory, { recursive: true, mode: 0o700 });
+    }
     const child = await spawnConfinedChild({
       // `process.execPath` is the Electron binary — in production AND under
       // this repository's own test runner, which launches Vitest through that
