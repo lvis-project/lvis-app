@@ -141,11 +141,11 @@ run_case "rule-doc-bare-label" BLOCK doc_base edit_rule_doc_bare
 # ---------------------------------------------------------------------------
 double_base() {
   mkdir -p src web/components/landing
-  echo "export class MockCloudIndexAdapter {}" > src/adapter.ts
+  echo "export class MockShell {}" > src/adapter.ts
   echo "function MockShell() { return null; }" > web/components/landing/workday.tsx
 }
 
-edit_touch_allowed_use() { echo "const a = new MockCloudIndexAdapter();" >> src/adapter.ts; }
+edit_touch_allowed_use() { echo "const a = new MockShell();" >> src/adapter.ts; }
 run_case "allowed-double-stays-editable" PASS double_base edit_touch_allowed_use
 
 edit_touch_allowed_jsx() { echo "const b = <MockShell kicker=\"x\" />;" >> web/components/landing/workday.tsx; }
@@ -160,7 +160,7 @@ run_case "new-fake-blocks" BLOCK double_base edit_new_fake
 edit_derived_from_allowed() { echo "export function MockShellHeader() {}" >> src/adapter.ts; }
 run_case "name-derived-from-an-allowed-one-blocks" BLOCK double_base edit_derived_from_allowed
 
-edit_allowed_and_new_on_one_line() { echo "const c = new MockCloudIndexAdapter(); class MockBar {}" >> src/adapter.ts; }
+edit_allowed_and_new_on_one_line() { echo "const c = new MockShell(); class MockBar {}" >> src/adapter.ts; }
 run_case "allowed-name-does-not-shield-a-new-one" BLOCK double_base edit_allowed_and_new_on_one_line
 
 edit_realpath_vocabulary() { echo "const realRoot = realpathSync(p); const stubText = BOUNDARY_STUB_TEMPLATE;" >> src/adapter.ts; }

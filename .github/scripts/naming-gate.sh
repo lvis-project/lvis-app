@@ -154,19 +154,12 @@ patterns=(
 # same list with the reason for each, and the self-test asserts every entry
 # still exists in the tree, so the list cannot outlive the names it excuses.
 #
-#   MockMarketplaceFetcher  dev-only catalog fetcher; the packaged build throws
-#                           rather than construct it. "Mock" is the backend
-#                           kind, the same axis as `CloudMarketplaceFetcher`.
-#   MockCloudIndexAdapter   placeholder cloud adapter — this one IS named for
-#                           what it is not, and is listed in `AGENTS.md` >
-#                           `Known naming divergences` to be renamed. Allowed
-#                           here so the rename is not blocked by its own edits.
 #   MockShell               `web/` landing-page mock-UP frame — the same
 #                           mock-UP vocabulary as
 #                           `web/components/docs/mockup-frame.tsx`, which sits
 #                           in a different directory. A different word that
 #                           happens to share four letters.
-MOCK_FAKE_ALLOWED='MockMarketplaceFetcher|MockCloudIndexAdapter|MockShell'
+MOCK_FAKE_ALLOWED='MockShell'
 
 # The two test-double patterns are built from that list with a PCRE negative
 # lookahead rather than by deleting the words from the line first: a line that
