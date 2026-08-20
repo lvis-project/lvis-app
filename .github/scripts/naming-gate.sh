@@ -104,11 +104,13 @@ fi
 # flagged: they resolve against a document the repository ships, which is what
 # makes a label domain rather than process.
 #
-# `H[1-9]` is case-sensitive on purpose. HTML heading vocabulary in this tree is
-# lowercase: 340 lowercase `<h2` across tracked text files, and no uppercase
-# `<H2` in any of them except this sentence. So the pattern needs no carve-out.
-# Measured with `git ls-files | xargs grep -Iho '<h2'`; `-I` matters, because a
-# tracked binary can contain those two bytes by coincidence and does.
+# `H[1-9]` is case-sensitive on purpose. HTML heading vocabulary in this tree
+# is lowercase: 341 lowercase `<h2` across tracked text files, two of them in
+# this comment, because a count of a token includes the sentence that states
+# it. The tree's only uppercase `<H2` is in this comment too. So the pattern
+# needs no carve-out. Measured with `git ls-files | xargs grep -Iho '<h2'`;
+# `-I` matters, because a tracked binary contains those two bytes by
+# coincidence and does.
 #
 # Test-double words: only `mock` and `fake` are matched as identifiers. `real`
 # and `stub` are ordinary domain vocabulary here and are deliberately NOT

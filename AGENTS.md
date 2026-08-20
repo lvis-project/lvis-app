@@ -116,7 +116,7 @@ than trusted. Every query below that says `<file set>` means this pipeline;
 
 ### Casing by kind
 
-- Types, interfaces, and classes are `PascalCase`, with no exceptions: 3018
+- Types, interfaces, and classes are `PascalCase`, with no exceptions: 3019
   top-level `type`/`interface` declarations and 259 `class` declarations, and
   zero of them begin with a lowercase letter.
 - Functions, methods, parameters, locals, and object fields are `camelCase`.
@@ -124,8 +124,8 @@ than trusted. Every query below that says `<file set>` means this pipeline;
   `SCREAMING_SNAKE_CASE`. A module-level `const` bound to a constructed
   instance, singleton, or function stays `camelCase` (`logger`,
   `admissionRegistry`, `backgroundShellManager`, `projectRoot`). The casing
-  says which of the two it is; it is not an emphasis marker. Of 2443
-  module-level `const` declarations: 1993 screaming, 351 camelCase (184
+  says which of the two it is; it is not an emphasis marker. Of 2446
+  module-level `const` declarations: 1994 screaming, 353 camelCase (185
   distinct names), 82 `PascalCase`, and 17 with a leading underscore.
 - A module-level `const` is `PascalCase` only when the binding *is* a type-like
   or component-like thing. All 82 are one of five: a React component or a lazy
@@ -302,10 +302,11 @@ there breaks the build. Concretely, and measured over `web/`:
   - `MockCloudIndexAdapter` (`src/main/cloud-index-adapter.ts`, 3 lines) is the
     one that really is named for what it is not: it is the only implementation
     of `CloudIndexAdapter`, it returns no hits, and it reports itself
-    unavailable. It is constructed in exactly one place — `src/boot/tools.ts`,
-    inside the branch that runs only when a plugin declaring the
-    `worker-client` capability is installed *and* exposes `getWorkerClient()`,
-    so on an install with no such plugin it is never constructed at all. It is
+    unavailable. It has exactly one construction site in a production path —
+    `src/boot/tools.ts`, inside the branch that runs only when a plugin
+    declaring the `worker-client` capability is installed *and* exposes
+    `getWorkerClient()`, so on an install with no such plugin it is never
+    constructed at all. Its tests construct it thirteen more times. It is
     listed under `Known naming divergences` to be renamed for the behavior it
     has.
 - The gate carries those three names as a closed allow-list so their lines stay
@@ -355,7 +356,7 @@ resolve this label from a document the repository ships?**
 
 - Yes — it is a domain label and it stays. `Layer 0`–`Layer 8` (permission
   policy design, 191 uses), `Tier A`–`Tier D` and `Tier 1`–`Tier 4` (plugin
-  permission tiers), `§4.5` architecture anchors (633), `#811` issue anchors
+  permission tiers), `§4.5` architecture anchors (636), `#811` issue anchors
   (834). Those three counts are over the files the gate scans, not the `src/`
   file set — this clause is the one that applies everywhere.
 - No — it resolves only against a work plan, a review round, or PR history, so
@@ -366,8 +367,12 @@ resolve this label from a document the repository ships?**
   review-round list in `.omc/plans/open-questions.md`, a planning artifact
   rather than shipped code. That measurement is over the gate's scope, which
   is narrower than "shipped document": `docs/blueprints/` and `docs/ko/` are
-  shipped and excluded, and 24 of those 69 files carry a `Phase N` label. The
-  rule still binds there; only the enforcement stops at the gate's edge.
+  shipped and excluded, and 24 of those 69 files carry a phase label. That 24
+  is the gate's own pattern, not the two words as this sentence spells them —
+  matching only the spaced capitalized spelling finds 18 of the same 69, which
+  is why the query in `How the counts were taken` reads the pattern out of the
+  gate rather than retyping it. The rule still binds in those directories;
+  only the enforcement stops at the gate's edge.
 - A `-v2` suffix is a process label unless the earlier version is a live
   sibling in the same directory. If `foo-v2.ts` exists and `foo.ts` does not,
   the suffix records when the file was written, not what it is.
@@ -429,16 +434,23 @@ it from the pattern of the ones around it.
   code talks to stays, a name that decorates an explanation goes. The
   difference is the consequence — a vendor name is an attribution problem, this
   one is a disclosure.
-- Enforcement belongs in a diff-scanning CI job — `deidentification-gate` in
-  `.github/workflows/naming-gate.yml`, beside the process-label job that
-  `Domain labels versus process labels` describes, because both answer the same
-  question about a token in a diff. The pattern list lives with that job and
-  deliberately not here: writing the literals into this file in order to ban
-  them would republish exactly what the rule removes, and a second copy of a
-  pattern list is the split this file exists to prevent. This clause owns the
-  rule; the job owns the patterns. Where no job is matching yet, the clause
-  still binds as a reviewer rule — the same split this document uses for
-  everything grep cannot decide.
+- **No CI job enforces this clause today.** As of this commit
+  `.github/workflows/naming-gate.yml` defines exactly one job, `naming-gate`,
+  and what that job matches is process labels, test-double words, and file
+  names. No pattern in it looks for an organizational identifier, and no other
+  workflow does. So this clause binds as a reviewer rule and nothing else. That
+  is stated here rather than left to be discovered, because a clause about
+  permanent public disclosure is the last one that may read as machine-checked
+  while it is not — an author who believes a gate is watching stops looking,
+  which is the failure mode this rule cannot afford.
+- A diff-scanning job is the right home for it, beside the process-label job,
+  because both answer the same question about a token in a diff. When one is
+  written the pattern list belongs with it and deliberately not here: writing
+  the literals into this file in order to ban them would republish exactly what
+  the rule removes, and a second copy of a pattern list is the split this file
+  exists to prevent. This clause owns the rule; a job would own the patterns.
+  Check the workflow to see whether that job has landed — do not infer it from
+  this sentence.
 - Deriving an assertion from a manifest or a bundle beats copying a literal
   into a test. A test that hard-codes the identifier both leaks it and pins one
   value; reading it from the artifact under test does neither.
@@ -508,8 +520,9 @@ precedent.
   what it does: it reports unavailable and returns no hits. `src/boot/tools.ts`
   constructs it only inside the branch guarded on a `worker-client`-capability
   plugin being present and exposing `getWorkerClient()`, so the rename touches
-  that one call site. The gate allow-lists the name meanwhile so the rename is
-  not blocked by its own edits, and that entry comes out with the rename.
+  one production call site and the two test files that exercise it. The gate
+  allow-lists the name meanwhile so the rename is not blocked by its own edits,
+  and that entry comes out with the rename.
 
 ### How the counts were taken
 
@@ -525,19 +538,22 @@ two spelled `grep -P` need PCRE, which stock macOS grep does not have — it
 rejects the option and exits 2, so that one fails loudly. The audit-key query
 is spelled `sed -E` because the basic-regex `\|` alternation it used to carry
 is a GNU extension that BSD sed matches literally, printing nothing and exiting
-0 — a silence indistinguishable from a real zero. State a number only for the
-scope you ran it over; a query that cannot run is not a query that returned
+0 — a silence indistinguishable from a real zero. The two queries that read a
+pattern out of the gate abort when the extraction comes back empty, for the
+same reason: with no pattern, one of them matches every file and the other
+matches none, and both results look like measurements. State a number only for
+the scope you ran it over; a query that cannot run is not a query that returned
 zero.
 
     # <gate scan> — every file the naming gate reads (1640)
     git ls-files | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' \
       | grep -Ev '^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)'
 
-    # Casing: 3018 type/interface + 259 class, 0 lowercase-initial
+    # Casing: 3019 type/interface + 259 class, 0 lowercase-initial
     <file set> | xargs grep -hoE \
       '^(export )?(declare )?(abstract )?(class|interface|type) [A-Za-z_$][A-Za-z0-9_$]*'
 
-    # Casing: 2443 module-level const declarations, split 1993 / 351 / 82 / 17
+    # Casing: 2446 module-level const declarations, split 1994 / 353 / 82 / 17
     <file set> | xargs grep -hoE '^(export )?const [A-Za-z_$][A-Za-z0-9_$]*' \
       | sed -E 's/^(export )?const //'
       #   screaming   grep -cE '^[A-Z][A-Z0-9_]*$'
@@ -598,6 +614,23 @@ zero.
     sed -E -n '/export interface (AuditEntry|SandboxGateAuditEntry)/,/^}/p' \
       src/audit/audit-logger.ts | grep -E '^  type: ' | grep -oE '"[a-z0-9_-]+"' | sort -u
 
+    # enum: one declaration in the whole tree
+    git ls-files | grep -E '\.(ts|tsx)$' \
+      | xargs grep -nE '^(export )?(declare )?(const )?enum [A-Za-z]'
+
+    # src/testing/: 0 inbound imports from outside a test
+    <file set> | grep -v '^src/testing/' \
+      | xargs grep -nE "from ['\"][^'\"]*/testing/"
+
+    # PermissionDecisionCard.tsx: 3 importing modules. The generated i18n
+    # message module shares the stem and is not one of them.
+    <file set> | xargs grep -ln 'PermissionDecisionCard'
+
+    # *Sync inventory. The eleven this repository declares itself are the
+    # names left after node:fs, node:zlib, node:crypto and sonic-boom
+    # spellings are struck out; which is which is inspection, not grep.
+    <file set> | xargs grep -hoE '\b[a-z][A-Za-z0-9_$]*Sync\b' | sort | uniq -c | sort -rn
+
     # Test doubles: the four double-prefixed filenames, all under a test dir
     git ls-files | while read -r f; do case "$(basename "$f")" in \
       real-*|mock-*|fake-*|stub-*) echo "$f";; esac; done
@@ -619,10 +652,23 @@ zero.
     # Directories: 73 path segments under src/, 70 kebab + 3 dunder
     git ls-files 'src/**' | xargs -n1 dirname | tr '/' '\n' | sort -u
 
-    # Domain labels: 191 Layer N, 633 section anchors, 834 issue anchors
+    # Domain labels: 191 Layer N, 636 section anchors, 834 issue anchors
     <gate scan> | xargs grep -hoE '\bLayer [0-9]'
     <gate scan> | xargs grep -hoE '§[0-9]+(\.[0-9]+)*'
     <gate scan> | xargs grep -hoE '#[0-9]+\b'
+
+    # Shipped but out of the gate's reach: 69 files under docs/blueprints/
+    # and docs/ko/ that the gate reads by extension and skips by path, of
+    # which 24 carry a phase label. The pattern is read out of the gate rather
+    # than retyped, both to avoid a second copy and because the plain two-word
+    # spelling is a different measurement — it matches 18 of the same 69.
+    phase=$(sed -n '/^patterns=(/,/^)/p' .github/scripts/naming-gate.sh \
+      | grep -oE "'[^']*hase[^']*'" | tr -d "'")
+    [ -n "$phase" ] || { echo "no phase pattern found in the gate"; exit 2; }
+    git ls-files 'docs/blueprints/**' 'docs/ko/**' \
+      | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' > /tmp/excluded-docs
+    wc -l < /tmp/excluded-docs
+    xargs grep -lP "$phase" < /tmp/excluded-docs | wc -l
 
     # Process labels surviving anywhere the gate reads. Every pattern in the
     # gate's `patterns=(...)` array is run, not just one; the two test-double
@@ -632,10 +678,11 @@ zero.
     # which is why the gate strips its code spans. Exactly one line survives:
     # a review-round list in .omc/plans/open-questions.md, a planning artifact.
     sed -n '/^patterns=(/,/^)/p' .github/scripts/naming-gate.sh \
-      | grep -oE "'[^']+'" | tr -d "'" \
-      | while IFS= read -r pat; do
-          <gate scan> | grep -Ev '^(AGENTS|CLAUDE)\.md$' | xargs grep -nP "$pat"
-        done
+      | grep -oE "'[^']+'" | tr -d "'" > /tmp/gate-patterns
+    [ -s /tmp/gate-patterns ] || { echo "no patterns extracted"; exit 2; }
+    while IFS= read -r pat; do
+      <gate scan> | grep -Ev '^(AGENTS|CLAUDE)\.md$' | xargs grep -nP "$pat"
+    done < /tmp/gate-patterns
 
 ## Architecture and security invariants
 
