@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pendingReplacementBaseline": 43,
+  "pendingReplacementBaseline": 26,
   "seededAccounts": [
     "work-board-seed",
     "marketplace-dev",
@@ -108,108 +108,6 @@
       "surface": "host chat surface",
       "data": "owner",
       "action": "none"
-    },
-    "screenshots/ep-approval.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-attendance-2.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-attendance-3.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-attendance.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-lgenie-2.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-lgenie.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-login.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-meeting-room-2.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-meeting-room-3.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-meeting-room-4.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-meeting-room-5.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-meeting-room.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-parking.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-video-call-2.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-video-call-3.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-video-call-4.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
-    },
-    "screenshots/ep-video-call.png": {
-      "surface": "internal portal plugin panel",
-      "data": "third-party",
-      "action": "remove",
-      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
     },
     "screenshots/local-indexer-add-folder.png": {
       "surface": "local-indexer plugin panel",
