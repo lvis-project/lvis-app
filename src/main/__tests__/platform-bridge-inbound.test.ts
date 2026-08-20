@@ -206,6 +206,29 @@ describe("PlatformBridgeInboundGateway", () => {
     expect(oversized.verify).not.toHaveBeenCalled();
   });
 
+  it("refuses the control characters a hand-written C0 range walks past", async () => {
+    // The inbound class used to be spelled out here as a C0 range plus DEL. It
+    // therefore admitted U+009B (CSI, the 8-bit ANSI escape introducer) and
+    // U+2028 (LINE SEPARATOR) in provider-supplied text and identifiers, while
+    // refusing U+001B and "\n" -- the same categories, written two ways. The
+    // shared class covers all of them.
+    for (const hostile of ["\u009b", "\u0085", "\u2028", "\u2029"]) {
+      const inText = createFixture({ verify: () => envelope({ text: `hello${hostile}world` }) });
+      await expect(inText.gateway.handleWebhook(request())).resolves.toBe("invalid-envelope");
+      expect(inText.authorize).not.toHaveBeenCalled();
+
+      const inId = createFixture({ verify: () => envelope({ senderId: `sender${hostile}001` }) });
+      await expect(inId.gateway.handleWebhook(request())).resolves.toBe("invalid-envelope");
+      expect(inId.authorize).not.toHaveBeenCalled();
+    }
+  });
+
+  it("still admits the tab, newline and carriage return that are message content", async () => {
+    const multiline = createFixture({ verify: () => envelope({ text: "line one\nline\ttwo\r" }) });
+    await expect(multiline.gateway.handleWebhook(request())).resolves.toBe("accepted");
+    expect(multiline.submit).toHaveBeenCalledTimes(1);
+  });
+
   it("rechecks a host-owned pairing guard after durable reservation and releases a revoked delivery", async () => {
     let current = true;
     const directory = mkdtempSync(join(tmpdir(), "lvis-platform-bridge-inbound-revoke-"));

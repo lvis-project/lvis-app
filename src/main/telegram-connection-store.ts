@@ -32,9 +32,10 @@
  * store's actor grammar is `tailnet:<hex>` and its persist re-validates, so a
  * Telegram actor stored there would reject the whole Tailnet document.
  */
-import { randomUUID as nodeRandomUuid, timingSafeEqual } from "node:crypto";
+import { randomUUID as nodeRandomUuid } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { timingSafeEqualHexDigest } from "../lib/hex-digest-equal.js";
 import {
   TELEGRAM_PAIRING_CODE_TTL_MS,
   isTelegramConnectionErrorCode,
@@ -359,21 +360,6 @@ function desiredState(value: unknown): value is TelegramDesiredState {
   return value === "disconnected" || value === "connected" || value === "paused";
 }
 
-/**
- * Compare two 32-byte digests without an early return on the first differing
- * byte. Shape rejection happens before the comparison and leaks nothing about
- * the stored digest: a value that is not 64 hex characters cannot be any
- * digest this store holds, so answering "no" from its length is not a secret-
- * dependent branch. Every accepted value decodes to exactly 32 bytes, so
- * `timingSafeEqual` never sees a length mismatch.
- */
-function sameDigest(left: unknown, right: unknown): boolean {
-  if (!digest(left) || !digest(right)) return false;
-  const a = Buffer.from(left, "hex");
-  const b = Buffer.from(right, "hex");
-  return a.length === b.length && timingSafeEqual(a, b);
-}
-
 function validDuration(value: unknown, maximum: number): value is number {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= maximum;
 }
@@ -672,7 +658,7 @@ export function createTelegramConnectionStore(
    */
   const liveApprovals = (value: StoreDocument): readonly StoredApproval[] =>
     value.approvals.filter((approval) => approval.state === "active"
-      && sameDigest(
+      && timingSafeEqualHexDigest(
         conversationDigestOf(value.botFingerprint, approval.conversationId),
         approval.conversationDigest,
       ));
@@ -754,7 +740,7 @@ export function createTelegramConnectionStore(
   const reconcileActorKey = async (actorKeyDigest: string): Promise<boolean> => {
     if (!digest(actorKeyDigest)) throw inputInvalid();
     return await mutate((current, now) => {
-      if (current.actorKeyDigest !== null && sameDigest(current.actorKeyDigest, actorKeyDigest)) {
+      if (current.actorKeyDigest !== null && timingSafeEqualHexDigest(current.actorKeyDigest, actorKeyDigest)) {
         return { document: current, value: false, changed: false };
       }
       const pairing = current.pairing;
@@ -780,7 +766,7 @@ export function createTelegramConnectionStore(
       // Actor digests are derived from the bot identity, so a different bot
       // makes every stored digest meaningless rather than merely stale.
       const sameBot = current.botFingerprint !== null
-        && sameDigest(current.botFingerprint, fingerprint);
+        && timingSafeEqualHexDigest(current.botFingerprint, fingerprint);
       return {
         document: {
           ...current,
@@ -904,7 +890,7 @@ export function createTelegramConnectionStore(
       if (current.pendingCode === null) {
         return { document: current, value: null, changed: false };
       }
-      if (!sameDigest(current.pendingCode.codeDigest, input.codeDigest)) {
+      if (!timingSafeEqualHexDigest(current.pendingCode.codeDigest, input.codeDigest)) {
         const charged = chargeAttempt(current);
         return { document: charged.document, value: null, changed: true };
       }
@@ -965,7 +951,7 @@ export function createTelegramConnectionStore(
       // The seam check. The caller derived the digest from its own injection; if
       // that disagrees with this store's, the grant would be written and then be
       // unresolvable forever, which is far harder to diagnose than a refusal.
-      if (!sameDigest(
+      if (!timingSafeEqualHexDigest(
         conversationDigestOf(current.botFingerprint, input.conversationId),
         input.conversationDigest,
       )) {
@@ -1038,7 +1024,7 @@ export function createTelegramConnectionStore(
     return current.desiredState !== "connected"
       || pairing === null
       || pairing.state !== "active"
-      || !sameDigest(pairing.actorDigest, actorDigest)
+      || !timingSafeEqualHexDigest(pairing.actorDigest, actorDigest)
       ? null
       : pairing;
   };
@@ -1056,7 +1042,7 @@ export function createTelegramConnectionStore(
       // on liveness, so an approval that is still "active" in this view is
       // already known to be unexpired and bound to this pairing at this epoch.
       const approval = liveApprovals(current).find((entry) => (
-        sameDigest(entry.conversationDigest, conversationDigest)
+        timingSafeEqualHexDigest(entry.conversationDigest, conversationDigest)
       ));
       return approval === undefined ? null : authority(pairing, approval);
     } catch {

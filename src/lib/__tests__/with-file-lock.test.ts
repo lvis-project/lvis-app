@@ -10,7 +10,7 @@ import { mkdtempSync, writeFileSync, readFileSync, mkdirSync, existsSync } from 
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import lockfile from "proper-lockfile";
-import { FileLockReleaseError, withFileLock } from "../with-file-lock.js";
+import { FileLockReleaseError, withFileLock, withInProcessFileQueue } from "../with-file-lock.js";
 import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
 
 let tmpDir: string;
@@ -111,5 +111,60 @@ describe("withFileLock", () => {
     expect((error as FileLockReleaseError<string>).releaseError).toEqual(
       new Error("injected release failure"),
     );
+  });
+});
+
+describe("withInProcessFileQueue", () => {
+  it("serializes read-modify-write against the same path", async () => {
+    // The property the five copied queues existed for: two interleaved
+    // read-modify-writes must not both read 0 and both write 1.
+    const order: string[] = [];
+    const bump = (tag: string) => withInProcessFileQueue(testFile, async () => {
+      const current = JSON.parse(readFileSync(testFile, "utf-8")) as { counter: number };
+      order.push(`${tag}:read=${current.counter}`);
+      await new Promise((r) => setTimeout(r, 5));
+      writeFileSync(testFile, JSON.stringify({ counter: current.counter + 1 }), "utf-8");
+      order.push(`${tag}:wrote=${current.counter + 1}`);
+    });
+    await Promise.all([bump("a"), bump("b")]);
+    expect(JSON.parse(readFileSync(testFile, "utf-8"))).toEqual({ counter: 2 });
+    expect(order).toEqual(["a:read=0", "a:wrote=1", "b:read=1", "b:wrote=2"]);
+  });
+
+  it("does not serialize across different paths", async () => {
+    const other = join(tmpDir, "other.json");
+    let releaseFirst: (() => void) | undefined;
+    const first = withInProcessFileQueue(testFile, () => new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    }));
+    let secondRan = false;
+    const second = withInProcessFileQueue(other, async () => {
+      secondRan = true;
+    });
+    await second;
+    expect(secondRan).toBe(true);
+    releaseFirst?.();
+    await first;
+  });
+
+  it("keeps the queue moving after a rejected callback", async () => {
+    // A poisoned entry that wedged the chain would take the store offline for
+    // the rest of the session, so the stored link swallows both settlements
+    // while the rejection still reaches the caller that caused it.
+    await expect(
+      withInProcessFileQueue(testFile, async () => {
+        throw new Error("boom");
+      }),
+    ).rejects.toThrow("boom");
+    await expect(withInProcessFileQueue(testFile, async () => "after")).resolves.toBe("after");
+  });
+
+  it("is not the cross-process lock and creates no lockfile", async () => {
+    // The three stores that named this `withFileLock` sat next to thirteen
+    // modules importing the real one. Nothing here touches proper-lockfile.
+    await withInProcessFileQueue(testFile, async () => undefined);
+    expect(existsSync(`${testFile}.lock`)).toBe(false);
+    await withFileLock(testFile, async () => undefined);
+    expect(existsSync(`${testFile}.lock`)).toBe(false);
   });
 });

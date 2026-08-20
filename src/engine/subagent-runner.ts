@@ -92,6 +92,7 @@ import type {
 } from "./a2a-agent-message-bus.js";
 import type { A2AAgentMailboxEntry } from "./a2a-agent-message-mailbox.js";
 import { sanitizeA2ALabel } from "./a2a-subagent-message-codec.js";
+import { hasControlChars } from "../shared/display-safe-text.js";
 import {
   formatParentDirective,
   hasUnsafeDirectiveControlChars,
@@ -375,8 +376,9 @@ export type A2AWireCancelResult =
 
 const A2A_WIRE_APPROVAL_REASON_PREFIX = "[A2A Wire]" as const;
 const A2A_WIRE_ID_MAX_CHARS = 256;
-const A2A_WIRE_CONTROL_CHAR = /[\u0000-\u001f\u007f]/;
-const A2A_WIRE_LABEL_FORBIDDEN = /[\u0000-\u001f\u007f\[\]]/;
+// Brackets on top of the control class: a label is spliced into the bracketed
+// `[A2A Wire]` approval prefix, so one in the value could forge a second tag.
+const A2A_WIRE_LABEL_BRACKET = /[\[\]]/;
 
 interface SubAgentExecutionPolicy {
   inputOrigin: "agent-message";
@@ -415,8 +417,8 @@ function isValidOptionalA2AWireText(
       typeof value === "string"
       && value.trim().length > 0
       && value.length <= maxChars
-      && !A2A_WIRE_CONTROL_CHAR.test(value)
-      && (!displayLabel || !A2A_WIRE_LABEL_FORBIDDEN.test(value))
+      && !hasControlChars(value)
+      && (!displayLabel || !A2A_WIRE_LABEL_BRACKET.test(value))
       && maskSensitiveData(value).detections.length === 0
     );
 }
@@ -483,7 +485,7 @@ export function isValidA2AWireHostBinding(binding: A2AWireHostBinding): boolean 
     && typeof profileName === "string"
     && profileName.trim().length > 0
     && profileName.length <= 120
-    && !A2A_WIRE_LABEL_FORBIDDEN.test(profileName)
+    && !hasControlChars(profileName) && !A2A_WIRE_LABEL_BRACKET.test(profileName)
     && maskSensitiveData(profileName).detections.length === 0
     && typeof binding.profile.body === "string"
     && Array.isArray(binding.profile.sourceTools)
@@ -494,7 +496,7 @@ export function isValidA2AWireHostBinding(binding: A2AWireHostBinding): boolean 
     && typeof projectRoot === "string"
     && projectRoot.trim().length > 0
     && projectRoot.length <= 2_048
-    && !A2A_WIRE_CONTROL_CHAR.test(projectRoot)
+    && !hasControlChars(projectRoot)
     && isValidOptionalA2AWireText(binding.project.name, 120, true);
 }
 

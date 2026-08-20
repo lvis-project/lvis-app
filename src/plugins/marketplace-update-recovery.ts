@@ -15,7 +15,8 @@
  */
 import { createHash } from "node:crypto";
 import { cp, mkdir, readFile, rename, rm } from "node:fs/promises";
-import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
+import { isResolvedPathWithin } from "./plugin-storage-containment.js";
 
 import { retryOnTransientFsLock } from "./plugin-artifact-store.js";
 import {
@@ -54,10 +55,6 @@ function ownedManifestPath(paths: PluginPaths, pluginId: string): string {
   return resolve(ownedInstallDir(paths, pluginId), "plugin.json");
 }
 
-function isWithin(parent: string, candidate: string): boolean {
-  const rel = relative(resolve(parent), resolve(candidate));
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
-}
 
 function assertOwnedBackupPath(
   paths: PluginPaths,
@@ -66,7 +63,7 @@ function assertOwnedBackupPath(
   mode: "rename" | "copy" | undefined,
 ): string {
   const safePluginId = assertSafeArtifactSlug(pluginId);
-  if (!backupDir || !mode || !isWithin(paths.pluginsRoot, backupDir)) {
+  if (!backupDir || !mode || !isResolvedPathWithin(paths.pluginsRoot, backupDir)) {
     throw new Error(`Invalid recovery backup metadata for plugin: ${pluginId}`);
   }
   const name = basename(backupDir);

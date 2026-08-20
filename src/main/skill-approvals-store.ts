@@ -44,6 +44,7 @@ import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
+import { withInProcessFileQueue } from "../lib/with-file-lock.js";
 
 export interface SkillApprovalRecord {
   /** Record key from the caller — a skill name, or `<name>#bundled`. */
@@ -59,16 +60,6 @@ export interface SkillApprovalsFile {
 }
 
 const DEFAULT_PATH = resolve(lvisHome(), "skill-approvals.json");
-
-const fileLocks = new Map<string, Promise<void>>();
-
-async function withFileLock<T>(filePath: string, fn: () => Promise<T>): Promise<T> {
-  const key = resolve(filePath);
-  const prev = fileLocks.get(key) ?? Promise.resolve();
-  const next = prev.then(() => fn());
-  fileLocks.set(key, next.then(() => undefined, () => undefined));
-  return next;
-}
 
 /**
  * Hash the approval material so a record binds to exactly what the user said yes
@@ -157,7 +148,7 @@ export class SkillApprovalsStore {
    * derivation, and a mismatch between the two would silently re-prompt forever.
    */
   async approve(recordKey: string, currentMaterial: string): Promise<void> {
-    return withFileLock(this.filePath, async () => {
+    return withInProcessFileQueue(this.filePath, async () => {
       const file = await readFileOrEmpty(this.filePath);
       const newHash = hashSkillMaterial(currentMaterial);
       const existing = file.approvedSkills.find((r) => r.name === recordKey);

@@ -1,15 +1,11 @@
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { isResolvedPathWithin } from "./plugin-storage-containment.js";
 
 function looksLikePath(token: string): boolean {
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(token)) return false;
   return token.startsWith(".") || token.startsWith("~") || token.includes("/") || token.includes("\\");
-}
-
-function isContained(root: string, candidate: string): boolean {
-  const rel = relative(root, candidate);
-  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
 /**
@@ -38,10 +34,10 @@ export function anchorBundledCommand(
       throw new Error(`${label} command path must be relative to its bundled descriptor`);
     }
     const candidate = resolve(descriptorDirectory, token);
-    if (!isContained(rootReal, candidate)) throw new Error(`${label} command path escapes the retained plugin generation`);
+    if (!isResolvedPathWithin(rootReal, candidate)) throw new Error(`${label} command path escapes the retained plugin generation`);
     let candidateReal: string | undefined;
     try { candidateReal = realpathSync(candidate); } catch { candidateReal = undefined; }
-    if (!candidateReal || !isContained(rootReal, candidateReal)) {
+    if (!candidateReal || !isResolvedPathWithin(rootReal, candidateReal)) {
       throw new Error(`${label} command path is not a retained package file`);
     }
     const rel = relative(rootReal, candidateReal).split("\\").join("/");

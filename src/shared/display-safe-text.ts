@@ -87,6 +87,58 @@ export function hasInvisibleOrReorderingChars(value: string): boolean {
   return CONTROL_AND_INVISIBLE_RE.test(value);
 }
 
+// The VALIDATION class, kept here rather than at the boundaries because the
+// boundaries kept getting it different. Ten modules each wrote the range out by
+// hand; between them they produced four distinct answers, and the union below
+// is what those authors found to matter. No single site had all of it.
+//
+//   - C0 (U+0000-U+001F) and DEL: every copy had these.
+//   - C1 (U+0080-U+009F): only `tool-use-id` had these. U+0085 is NEL, a line
+//     terminator, and U+009B is CSI - the 8-bit form of the `ESC [` that
+//     introduces an ANSI escape sequence. A validator that refuses U+001B and
+//     admits U+009B is not expressing a policy, it is missing a case.
+//   - U+2028 / U+2029: only `memory-capture-service` had these. They are LINE
+//     SEPARATOR and PARAGRAPH SEPARATOR - line breaks that a C0 range does not
+//     cover and that JSON carries through unescaped.
+//
+// Deliberately NOT folded in: the bidi and `Default_Ignorable` members of
+// `CONTROL_AND_INVISIBLE_RE` above. That class is applied by DELETING from a
+// string; this one is applied by REFUSING one. The accepted cost recorded above
+// - variation selectors go with it - is a monochrome glyph when you delete and
+// a dropped user message when you refuse. Those are not the same price, so the
+// two classes stay apart and each one says which operation it is for.
+const CONTROL_CHAR_RE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
+// The same class with the three characters that are real whitespace put back.
+// Tab, newline and carriage return are ordinary content in a chat message, a
+// formatted transcript, or a directive; the rest of C0 is not.
+const NON_WHITESPACE_CONTROL_CHAR_RE = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f-\u009f\u2028\u2029]/;
+
+/**
+ * Does `value` carry a control character of any kind?
+ *
+ * For fields where no whitespace is content: identifiers, session ids, logins,
+ * capability keys, model and mode names, single-line titles. Refusing is the
+ * caller's job; this only answers the question.
+ */
+export function hasControlChars(value: string): boolean {
+  return CONTROL_CHAR_RE.test(value);
+}
+
+/**
+ * Does `value` carry a control character other than tab, newline or carriage
+ * return?
+ *
+ * For fields where line structure is content: a message body, a formatted
+ * transcript, a directive. Use {@link hasControlChars} for anything that has to
+ * stay on one line - the difference between these two is the difference between
+ * prose and an identifier, and the sites that had it wrong had it wrong by
+ * copying the neighbouring field's check rather than by choosing.
+ */
+export function hasNonWhitespaceControlChars(value: string): boolean {
+  return NON_WHITESPACE_CONTROL_CHAR_RE.test(value);
+}
+
 /**
  * Collapse everything invisible or reordering out of `value`, bound it, and trim.
  * Returns `""` for a non-string or an all-invisible input, which the caller shows as a

@@ -7,6 +7,7 @@ import {
   type ChatInputOrigin,
 } from "../shared/chat-origin.js";
 import type { MemoryReviewerCallOptions } from "./memory-reviewer-service.js";
+import { hasControlChars } from "../shared/display-safe-text.js";
 import type {
   MemoryKind,
   MemoryManager,
@@ -350,7 +351,7 @@ function parseReviewedCapture(raw: string, source: string): ReviewedCapture | nu
   const content = value.content.trim();
   const evidence = value.evidence.trim();
   if (!title || !content || !evidence || title.length > MAX_TITLE_CHARS || content.length > MAX_CONTENT_CHARS || evidence.length > MAX_EVIDENCE_CHARS) return null;
-  if (/[\u0000-\u001F\u007F\u2028\u2029]/.test(title) || /<!--\s*lvis:/i.test(`${title}\n${content}`)) return null;
+  if (hasControlChars(title) || /<!--\s*lvis:/i.test(`${title}\n${content}`)) return null;
   if (maskSensitiveData(`${title}\n${content}`).detections.length > 0 || scrubSecretsForLLM(`${title}\n${content}`) !== `${title}\n${content}`) return null;
   if (!normalizeEvidence(source).includes(normalizeEvidence(evidence))) return null;
   if (/(?:ignore|disregard)\s+(?:previous|all)|system\s+(?:prompt|message)|developer\s+message|이전\s*지시|시스템\s*(?:프롬프트|메시지)|지시\s*무시/i.test(content)) return null;
@@ -373,7 +374,7 @@ function normalizeRequestedTitle(value: string | undefined): string | undefined 
   if (value === undefined) return undefined;
   if (typeof value !== "string") return null;
   const normalized = value.normalize("NFKC").trim();
-  if (!normalized || normalized.length > MAX_TITLE_CHARS || /[\u0000-\u001F\u007F\u2028\u2029]/.test(normalized)) {
+  if (!normalized || normalized.length > MAX_TITLE_CHARS || hasControlChars(normalized)) {
     return null;
   }
   return normalized;
