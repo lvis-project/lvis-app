@@ -12,14 +12,17 @@
  *    asks for, and it is real because the ASRT deny floor covers that path.
  *  - The child cannot WRITE the fixture paths outside its allow set. Write in
  *    ASRT IS an allow-jail, so this one is a jail assertion rather than a deny
- *    assertion. "Its allow set" is larger than the two paths
- *    `spawnConfinedPluginChild` names: ASRT merges its OWN default write paths
- *    into every wrap, which include the temp root it also points the child's
- *    `TMPDIR` at. So this proves the child cannot reach the fixture paths; it
- *    does NOT prove the jail is those two directories and nothing else, and the
- *    next bullet is the case that says so out loud.
- *  - The child CAN write, durably, to a path in NEITHER named grant: the temp
- *    root ASRT substitutes, which is one of the default write paths it merges.
+ *    assertion. "Its allow set" is larger than what `spawnConfinedPluginChild`
+ *    grants — `envelope.write` plus the throwaway sandbox HOME, which for the
+ *    unwidened pilot the probe below uses is its own data directory and that
+ *    HOME: ASRT merges its OWN default write paths into every wrap, which
+ *    include the temp root it also points the child's `TMPDIR` at. So this
+ *    proves the child cannot reach the fixture paths; it does NOT prove the
+ *    jail is what the spawn granted and nothing else, and the next bullet is
+ *    the case that says so out loud.
+ *  - The child CAN write, durably, to a path the spawn granted no part of: the
+ *    temp root ASRT substitutes, which is one of the default write paths it
+ *    merges.
  *    Asserted here — with the host reading the bytes back — because the routing
  *    SOT and the blueprint both said the write jail was exactly two paths, and
  *    a sentence with no case behind it is how a false one survives review.
@@ -43,12 +46,13 @@
  *  - "Cannot read another plugin's data directory" is only true where the
  *    plugins live under a path the deny floor covers — in production the
  *    Electron userData dir, which the floor denies wholesale and which this
- *    spawn re-allows for exactly one plugin's two directories. ASRT's read model
- *    is DENY-ONLY (`asrt-sandbox.ts` says so at length): `allowRead` re-allows
- *    inside a covering deny and is inert without one, so a path on no deny list
- *    stays readable. A test cannot write fixtures into the real userData dir, so
- *    the composition of the allow set is asserted separately and honestly as
- *    wiring rather than dressed up as a containment result.
+ *    spawn re-allows only for the roots in one plugin's own `envelope.read`.
+ *    ASRT's read model is DENY-ONLY (`asrt-sandbox.ts` says so at length):
+ *    `allowRead` re-allows inside a covering deny and is inert without one, so
+ *    a path on no deny list stays readable. A test cannot write fixtures into
+ *    the real userData dir, so the composition of the allow set is asserted
+ *    separately and honestly as wiring rather than dressed up as a containment
+ *    result.
  *  - That the temp root the child is given EXISTS. It usually will not: ASRT
  *    substitutes its own `TMPDIR` and creates nothing, so the meeting case
  *    below asserts what a child does when that path is absent rather than
@@ -58,20 +62,28 @@
  *    different on each platform and an internet probe would pass on an offline
  *    machine for the wrong reason.
  *  - Anything at all, on a machine where the sandbox backend cannot
- *    initialize. The four cases below need a live sandbox, and where
+ *    initialize — for the five cases that need a live one. Where
  *    `asrtCanInitialize()` answers false they return before measuring. That is
  *    not a hypothetical machine: the Linux runner that runs the whole suite on
  *    every pull request has no bubblewrap — nothing in `.github/` or `scripts/`
  *    installs it and ASRT vendors only seccomp and srt-win — so on that runner
- *    the four sandbox cases return without spawning anything. To see what that
- *    looks like, make `asrtCanInitialize()` return false and run this file: all
- *    five cases pass, in milliseconds, with no skip mark and no warning.
+ *    those five return without spawning anything. To see what that looks like,
+ *    make `asrtCanInitialize()` return false and run this file: on darwin/arm64
+ *    all 28 cases pass in milliseconds, with no skip mark and no warning, where
+ *    the five take hundreds of milliseconds each when the backend is there.
  *    `sandboxCasesRun()` below is what stops that from being invisible: an
  *    environment that is SUPPOSED to run them sets
  *    `LVIS_REQUIRE_SANDBOX_CASES=1` and gets a failure instead of a silent
  *    pass. The macOS job in `ci.yml` sets it, because the macOS backend needs
  *    no install; the Linux job does not, and there these cases still return
  *    without measuring.
+ *
+ *    The OTHER 23 cases need no sandbox: they drive `derivePluginChildEnvelope`
+ *    directly, or they drive the spawn's refusal paths, which run ahead of the
+ *    wrap. Measured with `asrtCanInitialize()` forced false on darwin/arm64:
+ *    23 passed and 5 failed under `LVIS_REQUIRE_SANDBOX_CASES=1`. So the
+ *    envelope decisions this file pins keep being measured on a machine that
+ *    cannot sandbox; what stops being measured there is the kernel half.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -128,8 +140,10 @@ const SHARED_TEMP_BYTES = "bytes one confined child left where another confined 
  * Returning false lets the file be developed on a machine without the backend.
  * It is ALSO how these cases pass without measuring anything, which is not a
  * theoretical concern: the Linux runner that runs the whole suite on every pull
- * request has no bubblewrap, so `asrtCanInitialize()` is false there and four of
- * this file's five cases return immediately — no skip mark, no warning, green.
+ * request has no bubblewrap, so `asrtCanInitialize()` is false there and the
+ * five cases that call this return immediately — no skip mark, no warning,
+ * green. Every case that calls it is an `it.runIf` spawning a real child; the
+ * file's other 23 cases do not call it and keep measuring there.
  *
  * `LVIS_REQUIRE_SANDBOX_CASES` is how an environment that is supposed to run
  * them says so. With it set, a machine that cannot initialize the sandbox fails
@@ -371,8 +385,8 @@ const report = {
   // returns \`written\` and the bytes are gone by the next start.
   childHome: homedir(),
   writeChildHome: attempt(() => { writeFileSync(join(homedir(), "state.json"), "state"); return "written"; }),
-  // The FOURTH answer, and the one that falsifies "the jail is those two
-  // paths". ASRT merges its own default write paths into every wrap, and the
+  // The FOURTH answer, and the one that falsifies "the jail is what the spawn
+  // granted". ASRT merges its own default write paths into every wrap, and the
   // temp root it substitutes is one of them — so this write is outside
   // \`pluginDataDir\`, outside the substituted HOME, and DURABLE. The host reads
   // the bytes back to show the last part.
@@ -506,11 +520,15 @@ async function runProbe(
 /**
  * A SECOND confined child, from a second plugin, reading one absolute path.
  *
- * Spawned through the same production spawn with a different `pluginRoot` and
- * `pluginDataDir`, so the only thing the two children share is what ASRT gives
- * every wrap. That is the whole question: the routing SOT's write jail is
- * per-plugin, but the default write paths ASRT merges are not, so a path on
- * that list is reachable by both. This returns what the second child got.
+ * Spawned through the same production spawn, and through the same production
+ * derivation, with a different `pluginRoot` and `pluginDataDir` — so the only
+ * thing the two children share is what ASRT gives every wrap. The second
+ * plugin's id carries no row in `PLUGIN_ENVELOPE_GRANTS`, so its envelope is
+ * its own two directories and the difference between the two children is
+ * exactly those directories. That is the whole question: the routing SOT's
+ * write jail is per-plugin, but the default write paths ASRT merges are not, so
+ * a path on that list is reachable by both. This returns what the second child
+ * got.
  */
 async function runCrossPluginReadProbe(
   fx: Fixture,
@@ -528,8 +546,12 @@ process.stdout.write("PROBE:" + JSON.stringify(attempt(() => readFileSync(${JSON
   );
   const child = await spawnConfinedPluginChild({
     pluginId: reader.pluginId,
-    pluginRoot: reader.pluginRoot,
-    pluginDataDir: reader.pluginDataDir,
+    envelope: derivePluginChildEnvelope({
+      pluginId: reader.pluginId,
+      pluginRoot: reader.pluginRoot,
+      pluginDataDir: reader.pluginDataDir,
+      configValue: () => undefined,
+    }),
     childEntryPath: probePath,
   });
   return await new Promise<ProbeAttempt>((resolve, reject) => {
@@ -1047,12 +1069,13 @@ describe("the confined child, against the real sandbox", () => {
 
       // ── the FOURTH answer: outside both grants, and DURABLE ────────────
       //
-      // The write jail is NOT the two paths the spawn names. ASRT merges its
-      // own default write paths into every wrap it builds, and the temp root
-      // it substitutes is one of them — so this is a path in neither grant
-      // that the child writes and the HOST then reads back. Asserted rather
-      // than described because "exactly two paths" survived two revisions of
-      // the routing SOT and the blueprint with no case able to contradict it.
+      // The write jail is NOT what the spawn names. ASRT merges its own
+      // default write paths into every wrap it builds, and the temp root it
+      // substitutes is one of them — so this is a path in no grant this spawn
+      // made, that the child writes and the HOST then reads back. Asserted
+      // rather than described because "exactly two paths" survived two
+      // revisions of the routing SOT and the blueprint with no case able to
+      // contradict it.
       // Written against `tmpdir()` rather than a literal so it asks the same
       // question whichever backend is underneath.
       const sharedTemp = join(report.childTmpdir, fx.sharedTempName);
@@ -1170,7 +1193,7 @@ describe("a child the host widened reaches exactly what the host widened it with
   it.runIf(process.platform === "darwin" || process.platform === "linux")(
     "opens the corporate CA and the user's chosen root, and nothing beside them",
     async () => {
-      if (!(await asrtCanInitialize())) return;
+      if (!(await sandboxCasesRun())) return;
       const fx = fixture!;
       const envelope = derivePluginChildEnvelope({
         pluginId: WIDENED_PLUGIN_ID,
