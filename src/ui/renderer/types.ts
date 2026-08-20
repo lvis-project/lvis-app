@@ -1754,7 +1754,7 @@ export type LvisPermissionApi = {
     }) => void,
   ) => () => void;
   /**
-   * Permission policy CRITICAL 4.1 — subscribe to user-approval memory-hit
+   * Permission policy — subscribe to user-approval memory-hit
    * disclosure events. Fires when a user-approval cache entry auto-resolves
    * a tool invocation that would otherwise have prompted. Renderer is
    * expected to surface a transient toast/banner so the user sees that a

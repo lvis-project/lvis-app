@@ -677,9 +677,8 @@ export function registerChatHandlers(deps: IpcDeps): void {
   //
   // Atomicity: the `currentAbortController` check is folded INTO
   // `queueGuidance` so the renderer can never lose a guide to a turn that
-  // ended between the active-turn check and the enqueue (critic MAJOR #2 /
-  // code-reviewer MAJOR #3). The IPC return value drives the renderer's
-  // "keep typed text vs. clear" decision.
+  // ended between the active-turn check and the enqueue. The IPC return value
+  // drives the renderer's "keep typed text vs. clear" decision.
   ipcMain.handle(CHANNELS.chat.guide, async (e, input: string) => {
     if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.chat.guide, e);

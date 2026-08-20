@@ -302,7 +302,7 @@ export class ConversationLoop {
    *
    * Atomically checks `hasActiveTurn()` inline so the IPC handler cannot
    * race the turn's `finally` block and silently leak a queued guide
-   * into the next turn (critic MAJOR #2 / code-reviewer MAJOR #3).
+   * into the next turn.
    *
    * Returns:
    *   - `"queued"` on success

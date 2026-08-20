@@ -362,13 +362,13 @@ export function createHostApiFactory(
       // post-install manifest swap (different tools / wider hostSecrets.read)
       // forces a fresh whitelist roll.
       //
-      // Ralph cycle 1 fix — previously this used the REPLACER-ARRAY form of
-      // `JSON.stringify(manifest, Object.keys(manifest).sort())` which only
-      // filters top-level keys and emits every nested object as `{}`. As a
-      // result every plugin's manifest hashed to (nearly) the same sha and
-      // the Tier-3 pin was defeated. Switching to a recursive canonical
-      // JSON serializer (RFC 8785 JCS-style — sort keys at every depth,
-      // preserve array element order) restores the pin.
+      // The digest MUST come from a recursive canonical serializer
+      // (`canonicalJSON` — RFC 8785 JCS-style: sort keys at every depth,
+      // preserve array element order). The replacer-array form
+      // `JSON.stringify(manifest, Object.keys(manifest).sort())` does NOT
+      // work here: it filters only top-level keys and emits every nested
+      // object as `{}`, so distinct manifests collapse onto near-identical
+      // digests and the Tier-3 pin stops discriminating.
       const canonical = canonicalJSON(manifest);
       const manifestSha256 = createHash("sha256").update(canonical).digest("hex");
       // Structural effect observability — wrap the whole hostApi so EVERY method
@@ -724,7 +724,7 @@ export function createHostApiFactory(
           incrementHostSecretCounter("hostSecret_read", pluginId, keyPrefix);
           return value;
         }
-        // #958 round-1 security MEDIUM — admin-bypass audit + counter. Emit
+        // Admin-bypass audit + counter. Emit
         // BEFORE the host-secret read line so operators can pivot on
         // `policy=admin manifest-allowlist-bypassed` in the audit log. The
         // dedicated `hostSecret_admin_bypass` counter is on top of the regular

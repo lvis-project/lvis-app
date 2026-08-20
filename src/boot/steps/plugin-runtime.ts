@@ -46,21 +46,21 @@ import { PluginLoopbackManager } from "../../mcp/plugin-loopback-manager.js";
 import type { PluginBundleLifecycleHandler } from "../../plugins/plugin-bundle-lifecycle.js";
 import { createLogger } from "../../lib/logger.js";
 
-// ── C5 extraction — pure/self-contained clusters now live under
-//    ./plugin-runtime/*; imported here for the C6 orchestrator body and
-//    re-exported below so the public contract stays importable from this path.
+// ── Pure/self-contained clusters live under ./plugin-runtime/*; imported
+//    here for the orchestrator body below and re-exported further down so
+//    the public contract stays importable from this path.
 import { approvalIssuerRegistry } from "./plugin-runtime/approval-gating.js";
 import { buildAppPreferenceReader } from "./plugin-runtime/app-preference.js";
-// ── C6 extraction — HIGH-RISK orchestrator clusters (HostApi factory +
-//    lifecycle callbacks + registry-entry cache) now live under
-//    ./plugin-runtime/*; wired into initPluginRuntime below.
+// ── HIGH-RISK orchestrator clusters (HostApi factory + lifecycle callbacks
+//    + registry-entry cache) live under ./plugin-runtime/*; wired into
+//    initPluginRuntime below.
 import { createHostApiFactory } from "./plugin-runtime/host-api-factory.js";
 import { createLifecycleCallbacks } from "./plugin-runtime/lifecycle.js";
 import { createRegistryEntryCache } from "./plugin-runtime/registry-cache.js";
 import { PluginRuntimePreStartPhase } from "./plugin-runtime/pre-start-phase.js";
 const log = createLogger("lvis");
 
-// ── C5 re-exports — preserve this module path's public export contract. ──────
+// ── Re-exports — preserve this module path's public export contract. ────────
 export { declaresHostManagedPythonRuntime } from "./plugin-runtime/manifest.js";
 export { approvalIssuerRegistry, auditApprovalViolation,
 } from "./plugin-runtime/approval-gating.js";
