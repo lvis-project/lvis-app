@@ -630,7 +630,7 @@ export function buildInternalApiSurface() {
       error?: string;
     }>,
 
-  // ─── Marketplace update notifications (S8) ───────
+  // ─── Marketplace update notifications ────────────
   onMarketplaceUpdatesAvailable: (handler: (updates: Array<{
     pluginId: string;
     pluginName?: string;
@@ -1140,7 +1140,7 @@ export function buildInternalApiSurface() {
     return () => ipcRenderer.removeListener(CHANNELS.view.activate, listener);
   },
 
-  // ─── Workflow tools (S1+S2) ──────────────────────
+  // ─── Workflow tools ──────────────────────────────
   // ask_user_question — main process pushes FIFO question requests to the
   // renderer's non-modal composer dock; the card resolves via this channel.
   onAskUserQuestion: (

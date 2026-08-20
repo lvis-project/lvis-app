@@ -314,7 +314,7 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "export-failed": "formatIpcError.exportFailed",
   "crash-list-failed": "formatIpcError.crashListFailed",
   "logs-tail-failed": "formatIpcError.logsTailFailed",
-  // ── Conversation import (lvis:chat:import — #1500 / E3) ──
+  // ── Conversation import (lvis:chat:import) ──
   "file-not-found": "formatIpcError.importFileNotFound",
   "file-too-large": "formatIpcError.importFileTooLarge",
   "invalid-json": "formatIpcError.importInvalidJson",
