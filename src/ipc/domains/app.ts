@@ -9,15 +9,13 @@
  * dev and packaged builds would disagree. The bootstrap splash resolves the
  * version the same way.
  *
- * Read-only, and still gated on `validateHostRendererSender`. A read is a
- * disclosure: the response is assembled and returned as-is rather than being
- * projected the way `lvis:settings:get` projects through
- * `rendererSettingsSnapshot()`, so the frame check is the only thing standing
- * between the plugin trust domain and these fields. That is the rule
- * `validateHostRendererSender` states for every host channel, read-only ones
- * included; `ipc/__tests__/host-renderer-only-channels.test.ts` pins both
- * directions for this channel — the plugin shell is refused, the host renderer
- * is not.
+ * Read-only, and gated on `validateHostRendererSender`. A read is still a
+ * disclosure: this handler returns the fields it assembles as-is, where
+ * `lvis:settings:get` answers through `rendererSettingsSnapshot()` and so
+ * projects what it returns. Nothing here narrows the response, which leaves
+ * the frame check as the only thing between it and a caller.
+ * `ipc/__tests__/host-renderer-only-channels.test.ts` pins both directions for
+ * this channel — the plugin shell is refused, the host renderer is not.
  */
 import { ipcMain } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";
