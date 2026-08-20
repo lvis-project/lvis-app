@@ -209,14 +209,20 @@
  *      WRITE is a real jail, but it is NOT the two paths this spawn names. It
  *    is those two — `pluginDataDir` and the throwaway sandbox HOME
  *    (`out-of-process-plugin.ts`, `spawnConfinedPluginChild`) — PLUS the
- *    default write paths ASRT merges into every wrap it builds. The merge is
- *    unconditional: `sandbox-manager.js` composes the allow-list as
- *    `[...getDefaultWritePaths(), ...userAllowWrite]`, so an ALLOW grant cannot
- *    subtract from it. A DENY grant can, which is the lever named at the end of
- *    this outcome list. READ OUT OF ASRT 0.0.73's `getDefaultWritePaths()`, the
- *    merged list is `/dev/stdout`, `/dev/stderr`, `/dev/null`, `/dev/tty`,
- *    `/dev/dtracehelper`, `/dev/autofs_nowait`, `/tmp/claude`,
- *    `/private/tmp/claude`, `<real home>/.npm/_logs` and
+ *    default write paths ASRT merges into every wrap it builds. "Two" is a fact
+ *    about the plugins listed here rather than about the spawn: the spawn grants
+ *    the child's `envelope.write`, and none of the ids in
+ *    `OUT_OF_PROCESS_PLUGIN_IDS` holds a row in `PLUGIN_ENVELOPE_GRANTS`, so for
+ *    each of them that list is `pluginDataDir` alone. Routing a plugin that does
+ *    hold a row makes this count wrong, and the count is what the outcomes below
+ *    are written against.
+ *      The merge is unconditional: `sandbox-manager.js` composes the
+ *    allow-list as `[...getDefaultWritePaths(), ...userAllowWrite]`, so an
+ *    ALLOW grant cannot subtract from it. A DENY grant can, which is the lever
+ *    named at the end of this outcome list. READ OUT OF ASRT 0.0.73's
+ *    `getDefaultWritePaths()`, the merged list is `/dev/stdout`, `/dev/stderr`,
+ *    `/dev/null`, `/dev/tty`, `/dev/dtracehelper`, `/dev/autofs_nowait`,
+ *    `/tmp/claude`, `/private/tmp/claude`, `<real home>/.npm/_logs` and
  *    `<real home>/.claude/debug` — and those last two are under the USER'S OWN
  *    home, not the substituted one. Measured through this spawn on macOS/arm64
  *    with the sandbox active: writes to `/tmp/claude`, `/private/tmp/claude`,

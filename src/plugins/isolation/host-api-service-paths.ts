@@ -119,8 +119,8 @@ export interface DelegatedWorkerConfinement {
   /**
    * Every root the child may write.
    *
-   * Every root this pair GRANTS for writing, rather than every root the child
-   * can reach: ASRT merges its own default write paths into every wrap
+   * Every root this envelope GRANTS for writing, rather than every root the
+   * child can reach: ASRT merges its own default write paths into every wrap
    * (`out-of-process-plugins.ts`, axis 6), and no grant here subtracts from
    * them. What matters for a delegated worker is that this list is the boundary
    * its `allowWritePaths` are checked against, and it is the same list the
