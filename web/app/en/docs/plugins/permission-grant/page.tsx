@@ -22,7 +22,7 @@ export default function Page() {
 
       <h2 id="what">Items reviewed from the manifest</h2>
       <ul>
-        <li><strong>capabilities</strong>: format-validated capability tags. The host <strong>enforces exactly two of them as gates</strong>; no other string is a grant on its own. But "not a grant" is not the same as "no effect" — there are places where the host uses one of these strings as a <em>lookup key</em> to find which plugin fills a role, so a single declaration can be what wires that role's whole tool surface to that plugin.</li>
+        <li><strong>capabilities</strong>: format-validated capability tags. The host's runtime enforcement set holds <strong>exactly two ids</strong>, and a string outside that set does not open one of those two gates. But "not a gate" is not the same as "no effect" — there are places where the host uses one of these strings as a <em>lookup key</em> to find which plugin fills a role, so a single declaration can be what wires that role's whole tool surface to that plugin.</li>
         <li><strong>tools[]</strong>: pure MCP <code>Tool</code> objects. The Host classifies risk from each input schema and execution path; signed operation policy may only raise the minimum risk or require read-before-write.</li>
         <li><strong>pluginAccess</strong>: which other plugin's tools/events this plugin will use (e.g. work-assistant calling ms-graph's <code>msgraph_calendar_today</code>).</li>
         <li><strong>agentApprovalScopes</strong>: standard labels for cross-plugin risky actions (e.g. <code>agent_file_share</code>, <code>agent_task_delegate</code>, <code>agent_external_api_call</code>).</li>
