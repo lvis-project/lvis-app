@@ -724,8 +724,8 @@ export function createHostApiFactory(
           incrementHostSecretCounter("hostSecret_read", pluginId, keyPrefix);
           return value;
         }
-        // Admin-bypass audit + counter. Emit
-        // BEFORE the host-secret read line so operators can pivot on
+        // Admin-bypass audit + counter. Emit BEFORE the host-secret read
+        // line so operators can pivot on
         // `policy=admin manifest-allowlist-bypassed` in the audit log. The
         // dedicated `hostSecret_admin_bypass` counter is on top of the regular
         // `hostSecret_read` increment below so totals stay comparable across

@@ -310,8 +310,9 @@ export interface ReviewerDispatchInput {
   allowedDirectories: string[];
   sensitivePathsAdjacent: string[];
   /**
-   * Cache identity must include the caller's trust origin. A high-trust verdict cached for `user-keyboard`
-   * is unsafe to serve to an `llm-tool-arg` invocation of the same shape — the
+   * Cache identity must include the caller's trust origin. A high-trust
+   * verdict cached for `user-keyboard` is unsafe to serve to an
+   * `llm-tool-arg` invocation of the same shape — the
    * underlying intent differs even when arguments match. Required so the
    * verdict-cache lookupKey hash always includes origin.
    */
