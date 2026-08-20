@@ -13,7 +13,6 @@ import {
   readFileSync,
   existsSync,
   symlinkSync,
-  lstatSync,
 } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -130,10 +129,17 @@ describe("SkillApprovalsStore — atomic-write convergence (feature-namespace au
     const store = new SkillApprovalsStore(file);
     await store.approve("report-writing", "body-v1");
 
-    // The attacker's file must be untouched, and the live path must be a real
-    // regular file carrying the approval — not a symlink to `outside`.
+    // Both outcomes below fail if the write had followed the planted symlink:
+    // a redirected write leaves `outside` holding the approval JSON (so the
+    // first assertion catches it) and `file` a symlink to that now-populated
+    // `outside`; a redirected write to the ORIGINAL empty `outside` instead
+    // leaves `file` a symlink to an empty target, so reading `file` yields "" and
+    // the JSON.parse throws. Only a safe write — staged into a random O_EXCL name
+    // and renamed onto `file` — leaves `outside` empty AND `file` a real regular
+    // file with the record. (No lstat-then-read on `file`: that check-then-use
+    // pair is a file-system-race pattern, and the two reads already pin the
+    // guarantee without it.)
     expect(readFileSync(outside, "utf-8")).toBe("");
-    expect(lstatSync(file).isSymbolicLink()).toBe(false);
     const onDisk = JSON.parse(readFileSync(file, "utf-8")) as {
       approvedSkills: Array<{ name: string; sha256: string }>;
     };
