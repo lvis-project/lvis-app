@@ -46,15 +46,16 @@ export default function Page() {
         ]}
       />
       <p>
-        In every mode, <strong>only what the user typed themselves</strong> is eligible as a memory candidate. Attachment bodies, messages from other agents,
-        and turns that arrived through an external surface are excluded — otherwise a sentence someone else wrote could harden into a permanent fact about the user.
+        This <em>automatic</em> extraction, in any of the three modes above, considers <strong>only turns the user typed at the keyboard</strong>. Attachment bodies, messages from other agents,
+        and turns that arrived through an external surface are filtered out at the candidate stage — otherwise a sentence someone else wrote could harden into a permanent fact about the user.
+        (A user explicitly saying "remember this" is a separate path from this automatic extraction.)
       </p>
 
       <h2 id="project">It also reads instructions the project carries</h2>
       <p>
         If the project folder you are working in has a team-shared <code>AGENTS.md</code>, the host reads that too and takes it into account.
-        It is treated as a <strong>separate layer</strong> from the user's personal memory, and personal memory wins where they conflict.
-        LVIS does not rewrite the project file — it only reads it.
+        It is treated as a <strong>separate layer</strong> from the user's personal instructions, and it sits <em>below</em> the personal one.
+        There is no path that rewrites that project file — the one place the host writes an <code>AGENTS.md</code> is in the user's own area (<code>~/.lvis</code>).
       </p>
 
       <h2 id="where">Where is it stored?</h2>

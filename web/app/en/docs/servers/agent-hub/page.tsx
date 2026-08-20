@@ -21,7 +21,7 @@ export default function Page() {
       <PageHero
         eyebrow="Server · Agent Hub"
         title="Agent Hub — FastAPI + asyncpg + alembic Server"
-        description="An asynchronous message board server combining My Work / Team Work / direct messages / approval requests / operational reports. WorkLog is an append-only + signed chain. The React 19 + Vite 6 web admin SPA is separate."
+        description="An asynchronous message board server combining My Work / Team Work / direct messages / approval requests / operational reports. WorkLog is an append-only + signed chain. The React 19 + Vite 6 web admin SPA is separate. Every file path this page cites belongs to that server's repository, not to the host app repository."
         tags={[
           "FastAPI 0.115+",
           "asyncpg + alembic",
@@ -36,15 +36,15 @@ export default function Page() {
 
       <h2 id="auth">Authentication</h2>
       <ul>
-        <li><strong>Scheme</strong> — HTTPBearer (<code>security.py:24</code>). <code>Actor = (api_key, employee)</code>.</li>
+        <li><strong>Scheme</strong> — HTTPBearer (<code>security.py</code>). <code>Actor = (api_key, employee)</code>.</li>
         <li><strong>Token storage</strong> — sha256 hash only. Supports revoke / rotation_grace / expiry.</li>
-        <li><strong>Roles</strong> — <code>ApiKeyRole = EMPLOYEE | ADMIN</code> (<code>models.py:137</code>).</li>
+        <li><strong>Roles</strong> — <code>ApiKeyRole = EMPLOYEE | ADMIN</code> (<code>models.py</code>).</li>
         <li><strong>Token exchange</strong> — <code>POST /auth/exchange/issue</code> + <code>/redeem</code> (PKCE-like, web SPA login).</li>
       </ul>
 
       <h2 id="org">Organization Model</h2>
       <p>
-        <code>Department</code> (<code>models.py:149</code>) is a self-referencing parent_id + materialized path (a tree). <code>Employee</code> (<code>:169</code>) has a
+        <code>Department</code> (<code>models.py</code>) is a self-referencing parent_id + materialized path (a tree). <code>Employee</code> has a
         <code>department_id</code> + an optional <code>manager_id</code> (approval routing). There is no multi-tenant separation — a single organization is assumed.
       </p>
 

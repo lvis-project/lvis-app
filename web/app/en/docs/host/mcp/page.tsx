@@ -80,10 +80,17 @@ export default function Page() {
         The host neutralizes the delimiter characters so a server cannot close that block or open a new one to pass itself off as the user, and there are length caps.
       </Callout>
 
-      <Callout tone="security" title="External server tools ask every time">
-        The host treats tools from an external MCP server at the lowest trust level. In the default modes that means <strong>they ask the user every time, regardless of risk band or category</strong> —
-        read-only tools included. There is <strong>no mechanism today</strong> by which a tool you have grown comfortable with graduates to running automatically.
-        The only way past that prompt is for the user to switch the permission mode itself to "allow all."
+      <Callout tone="security" title="External server tools go through a prompt by default">
+        The host sorts a tool's origin into three trust levels (built-in · plugin · external MCP) and puts external MCP servers at the lowest of the three.
+        So <strong>on the paths that auto-allow by risk band or category, an external MCP tool is filtered out and sent to a confirmation card instead</strong> — read-only tools included.
+      </Callout>
+
+      <Callout tone="info" title="What the user allows is remembered, though">
+        Three documented cases skip the prompt, and all three are something the user did deliberately.
+        <strong>① The user pressed "Always allow" on the card</strong> — that choice is stored for <em>the same tool with the same arguments</em>, and if the arguments change in a more dangerous direction the stored choice does not apply and the prompt returns.
+        <strong>② The user added an allow rule for that tool in settings.</strong>
+        <strong>③ The user switched the permission mode to "allow all."</strong>
+        What is not here is the host promoting a tool to auto-run on its own, from usage alone.
       </Callout>
 
       <PageNav />

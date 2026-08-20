@@ -27,15 +27,15 @@ export default function Page() {
 
       <h2 id="register">등록 흐름</h2>
       <ol>
-        <li>Storefront에서 <code>lvis://mcp-login/&lt;slug&gt;</code> deeplink (PluginDetailPage:178) 발사 또는 직접 endpoint 입력.</li>
+        <li>Storefront에서 <code>lvis://mcp-login/&lt;slug&gt;</code> deeplink 발사 또는 직접 endpoint 입력. (Storefront 는 별도 저장소인 marketplace 웹 앱입니다.)</li>
         <li>호스트가 MCP handshake 로 서버 메타 / 도구 목록 fetch 후 <code>~/.lvis/mcp/&lt;slug&gt;/</code> 에 metadata 저장.</li>
-        <li><code>~/.lvis/mcp/servers.json</code> 에 등록 (boot.ts:1012-1016).</li>
-        <li>Tool Registry 에 source='mcp' 로 등록. Reviewer 가 기본 RiskLevel = <code>medium</code> 으로 분류.</li>
+        <li><code>~/.lvis/mcp/servers.json</code> 에 등록 (호스트 경로: <code>src/mcp/mcp-manager.ts</code>).</li>
+        <li>Tool Registry 에 source=&apos;mcp&apos; 로 등록. 호스트는 이 출처를 세 신뢰 등급 중 가장 낮은 등급에 둡니다 (<code>src/tools/types.ts</code>).</li>
       </ol>
 
-      <Callout tone="security" title="MCP 도구의 RiskLevel">
-        외부 MCP 서버의 도구는 <strong>기본 medium</strong>. publisher 가 risk meta 를 제공해도 admin 단계에서 reclassify 됩니다.
-        자동 실행 (low) 으로 노출되려면 명시적 admin 승인이 필요합니다.
+      <Callout tone="security" title="등록했다고 자동 실행되지는 않습니다">
+        외부 MCP 서버의 도구는 호스트가 세 신뢰 등급 중 가장 낮은 등급으로 다루고, <strong>위험도로 자동 허용되는 경로에서 걸러져 확인 카드로 갑니다</strong> — 읽기만 하는 도구도 마찬가지입니다.
+        확인이 생략되는 경우와 그 범위는 <a href="/docs/host/mcp#beyond-tools">MCP 서버 문서</a> 에 정리돼 있습니다.
       </Callout>
 
       <PageNav />
