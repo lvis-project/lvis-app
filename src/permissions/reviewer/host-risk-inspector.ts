@@ -266,13 +266,19 @@ const GIT_INSPECTION_READ_ONLY_SHORT_LETTERS: ReadonlySet<string> = new Set([
 const GIT_READ_ONLY_FLAGS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
   // `git config --list`, `git config --get key`, `git config --get-all key`
   // are reads. `git config section.key value` or any write flag mutates.
+  // `-e`/`--edit` are deliberately EXCLUDED from this read set: they open the
+  // config file in $GIT_EDITOR/$EDITOR (an arbitrary process the classifier
+  // cannot see the argv of) AND leave the file writable, so an edit can install
+  // an alias or a `core.pager`/`core.editor` value that runs a command on a
+  // later git call. Both are non-read effects, so `git config -e` escalates to
+  // shell rather than passing on the subcommand+flag name alone.
   ["config", new Set(["-l", "--list", "--get", "--get-all", "--get-regexp",
                       "--get-urlmatch", "--global", "--system", "--local",
                       "--worktree", "--show-origin", "--show-scope",
                       "--type", "--bool", "--int", "--bool-or-int",
                       "--path", "--expiry-date", "--null", "-z",
                       "--name-only", "--includes", "--no-includes",
-                      "--default", "-e", "--edit"])],
+                      "--default"])],
   // `git tag` / `git tag -l` / `git tag --list` are reads.
   // `git tag v2`, `git tag -d v1`, `git tag -a v2` etc. mutate.
   ["tag",    new Set(["-l", "--list", "--sort", "--format", "--color",
