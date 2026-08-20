@@ -21,7 +21,7 @@ export default function Page() {
       <PageHero
         eyebrow="Server · Agent Hub"
         title="Agent Hub — FastAPI + asyncpg + alembic 서버"
-        description="My Work / Team Work / 직접 메시지 / 승인 요청 / 운영 리포트를 모은 비동기 메시지 보드 서버. WorkLog 는 append-only + signed chain. React 19 + Vite 6 web admin SPA 별도."
+        description="My Work / Team Work / 직접 메시지 / 승인 요청 / 운영 리포트를 모은 비동기 메시지 보드 서버. WorkLog 는 append-only + signed chain. React 19 + Vite 6 web admin SPA 별도. 이 페이지가 가리키는 파일 경로는 그 서버 저장소의 것으로, 호스트 앱 저장소에는 없습니다."
         tags={[
           "FastAPI 0.115+",
           "asyncpg + alembic",
@@ -36,15 +36,15 @@ export default function Page() {
 
       <h2 id="auth">인증</h2>
       <ul>
-        <li><strong>Scheme</strong> — HTTPBearer (<code>security.py:24</code>). <code>Actor = (api_key, employee)</code>.</li>
+        <li><strong>Scheme</strong> — HTTPBearer (<code>security.py</code>). <code>Actor = (api_key, employee)</code>.</li>
         <li><strong>Token storage</strong> — sha256 hash 만. revoke / rotation_grace / expiry 지원.</li>
-        <li><strong>Roles</strong> — <code>ApiKeyRole = EMPLOYEE | ADMIN</code> (<code>models.py:137</code>).</li>
+        <li><strong>Roles</strong> — <code>ApiKeyRole = EMPLOYEE | ADMIN</code> (<code>models.py</code>).</li>
         <li><strong>Token exchange</strong> — <code>POST /auth/exchange/issue</code> + <code>/redeem</code> (PKCE-like, web SPA 로그인).</li>
       </ul>
 
       <h2 id="org">조직 모델</h2>
       <p>
-        <code>Department</code> (<code>models.py:149</code>) 가 self-ref parent_id + materialized path (트리). <code>Employee</code> (<code>:169</code>) 가
+        <code>Department</code> (<code>models.py</code>) 가 self-ref parent_id + materialized path (트리). <code>Employee</code> 가
         <code>department_id</code> + 선택적 <code>manager_id</code> (승인 routing). 멀티-테넌트 분리는 없음 — 단일 organization 가정.
       </p>
 

@@ -16,8 +16,8 @@ export const searchIndex: SearchEntry[] = [
   { group: "시작하기", href: "/docs/getting-started/updates", title: "앱 업데이트", snippet: "electron-updater · autoDownload=false · 4h interval · channel=latest" },
 
   // Host · Chat
-  { group: "채팅", href: "/docs/chat/layout", title: "채팅 화면 구성", snippet: "App.tsx · MainToolbar · ChatView · MessageQueuePanel · SessionTodoPanel" },
-  { group: "채팅", href: "/docs/chat/message-queue", title: "메시지 큐 & TODO", snippet: "MessageQueuePanel + SessionTodoPanel · emitEvent → host UI 렌더" },
+  { group: "채팅", href: "/docs/chat/layout", title: "채팅 화면 구성", snippet: "AppShell · Sidebar · MainToolbar · MainContent · ChatView" },
+  { group: "채팅", href: "/docs/chat/message-queue", title: "메시지 큐 & TODO", snippet: "MessageQueuePanel + SessionTodoPanel · 컴포저 위 · 비어 있으면 표시 안 함" },
   { group: "채팅", href: "/docs/chat/tool-thinking", title: "Tool & Thinking 표시", snippet: "Tool Registry · 출처 3종 · 백그라운드 셸 · 이미지 보기 · 도구 검색" },
   { group: "채팅", href: "/docs/chat/question-cards", title: "질문 카드", snippet: "AskUserQuestionItem · choice-only · choice/choices · recommendedIndex · altIndices" },
   { group: "채팅", href: "/docs/chat/plugin-panel", title: "플러그인 패널", snippet: "manifest ui[] 슬롯 · 번들 Skill · 순수 Tool · 정규식 ^[a-zA-Z_][a-zA-Z0-9_]*$" },
@@ -39,7 +39,7 @@ export const searchIndex: SearchEntry[] = [
   { group: "루틴", href: "/docs/routines/meeting-end", title: "미팅 종료 → 자동 작업", snippet: "meeting.summary.created → work-assistant meeting-summary detector" },
 
   // Plugins
-  { group: "플러그인", href: "/docs/plugins", title: "플러그인 — 개요", snippet: "6 active plugins · 정적 manifest · runtime register 없음" },
+  { group: "플러그인", href: "/docs/plugins", title: "플러그인 — 개요", snippet: "정적 manifest · 호스트가 매니페스트만 읽음 · 도구 목록은 서버 세대 단위 고정" },
   { group: "플러그인", href: "/docs/plugins/permission-grant", title: "권한 허용 흐름", snippet: "capabilities 12종 · tools[] · pluginAccess · agentApprovalScopes" },
   { group: "플러그인", href: "/docs/plugins/local-indexer", title: "Local Indexer", snippet: "kiwipiepy Pattern B · pymupdf4llm · FTS5 + LanceDB · chokidar · RRF (K=60)", keywords: ["RAG", "rrf", "fts5", "kiwi"] },
   { group: "플러그인", href: "/docs/plugins/ms-graph", title: "Microsoft 365 (Outlook)", snippet: "MSAL OAuth · safeStorage · 31개 도구 · scopes: User.Read Mail.* Calendars.*", keywords: ["outlook", "calendar", "mail"] },
@@ -62,7 +62,7 @@ export const searchIndex: SearchEntry[] = [
   { group: "서버", href: "/docs/servers/agent-hub/subscription", title: "Agent Hub — 팀 피드 구독", snippet: "Subscription = team-feed opt-in (플랜/라이선스 모델 없음)" },
 
   // Architecture
-  { group: "아키텍처", href: "/docs/architecture/overview", title: "시스템 한 눈에 보기", snippet: "4 layers · 6 active plugins · ~/.lvis · servers" },
+  { group: "아키텍처", href: "/docs/architecture/overview", title: "시스템 한 눈에 보기", snippet: "4 layers · 플러그인 · ~/.lvis · servers" },
   { group: "아키텍처", href: "/docs/architecture/diagrams", title: "다이어그램 (스택 · 흐름 · 의사결정)", snippet: "Stack · data flow · permission decision tree · plugin lifecycle SVG", keywords: ["diagram", "visual", "topology"] },
   { group: "아키텍처", href: "/docs/architecture/host-api", title: "HostApi 컨트랙트", snippet: "PluginHostApi 표면 · 자식 프로세스 경계 · 비동기 비밀값 조회", keywords: ["hostapi", "격리", "프로세스", "isolation"] },
   { group: "아키텍처", href: "/docs/architecture/storage", title: "스토리지 — ~/.lvis", snippet: "도메인 namespace · 0o700 dir · 0o600 file · audit/<YYYY-MM-DD>.jsonl" },

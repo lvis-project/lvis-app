@@ -13,9 +13,9 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="Chat Screen Layout"
-        description="AppShell wraps the main screen in CustomTitleBar + MainToolbar, and the MainContent inside it mounts ChatView. MessageQueuePanel · SessionTodoPanel always float beside the ChatView body, and useChatContext() manages session/queue/TODO state together."
+        description="AppShell wraps the main screen in CustomTitleBar + MainToolbar, floats a collapsible Sidebar, and the MainContent inside it mounts ChatView. SessionTodoPanel · MessageQueuePanel stack directly above the composer, and ChatView reads session/queue/TODO state together through useChatContext()."
         tags={[
-          "AppShell + MainContent",
+          "AppShell + Sidebar + MainContent",
           "ChatView",
           "MessageQueuePanel + SessionTodoPanel",
         ]}
@@ -26,7 +26,7 @@ export default function Page() {
         items={[
           { title: "① CustomTitleBar + MainToolbar", body: <>Window controls + session/plugin/permission toolbar. Mounted by <code>src/ui/renderer/AppShell.tsx</code>.</>, tone: "teal" },
           { title: "② ChatView body", body: <>Conversation + tool cards + thinking + question cards. <code>src/ui/renderer/ChatView.tsx</code>.</> },
-          { title: "③ Queue + TODO panels", body: <>External signal queue + session TODOs. <code>src/ui/renderer/components/MessageQueuePanel.tsx</code> · <code>SessionTodoPanel.tsx</code>.</>, tone: "citron" },
+          { title: "③ Queue + TODO panels", body: <>External signal queue + session TODOs. They sit directly above the composer (<code>src/ui/renderer/components/ChatComposerDock.tsx</code>) and draw nothing when they have no items.</>, tone: "citron" },
         ]}
       />
 
@@ -43,9 +43,10 @@ export default function Page() {
         <li><code>PermissionReviewStatusCard.tsx</code> — reviewer mode/status card.</li>
       </ul>
 
-      <Callout tone="info" title="Settings screen — a separate sidebar">
-        The SettingsContent screen has its own Sidebar column (<code>src/ui/renderer/SettingsContent.tsx</code>).
-        The main chat is a single-column + toolbar + panels layout, so there is no separate sidebar there.
+      <Callout tone="info" title="There are two separate sidebars">
+        The main chat screen has a <strong>collapsible floating Sidebar</strong> — session, project, and plugin views live in it, and it can be collapsed and resized.
+        <code>src/ui/renderer/AppShell.tsx</code> renders it.
+        The settings screen has its own <strong>nav column</strong>, separate from that one (<code>src/ui/renderer/SettingsContent.tsx</code>).
       </Callout>
 
       <PageNav />

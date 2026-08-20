@@ -21,7 +21,7 @@ export default function Page() {
 
       <h2 id="how">데이터 모델</h2>
       <p>
-        Marketplace DB 에는 <code>Plugin</code> 모델 단 하나만 존재 (<code>server/src/lvis_marketplace/models.py:31</code>). <code>plugin_type</code> 컬럼이 plugin / agent / mcp / skill 을 구분.
+        Marketplace DB 에는 <code>Plugin</code> 모델 단 하나만 존재 (<code>server/src/lvis_marketplace/models.py</code>). <code>plugin_type</code> 컬럼이 plugin / agent / mcp / skill 을 구분.
         Agents 페이지의 카드는 <code>GET /api/v1/catalog?plugin_type=agent</code> 응답을 그대로 렌더.
       </p>
 

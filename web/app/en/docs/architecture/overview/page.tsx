@@ -75,7 +75,7 @@ export default function Page() {
         eyebrow="Architecture"
         title="LVIS system at a glance"
         description="LVIS is structured around four layers — the Electron host, the plugin runtime, local storage (~/.lvis), and servers — all operating on the same user signals. Every domain feature is split out into plugins, and the host never imports domain-specific code (enforced at the CI stage)."
-        tags={["6 active plugins", "static manifest", "no fallback"]}
+        tags={["static manifest", "no fallback"]}
       />
 
       <Reveal>
@@ -111,11 +111,6 @@ export default function Page() {
 
       <h2 id="data-flow">Data flow — one user message turn</h2>
       <StepList steps={flowSteps} />
-
-      <Callout tone="info" title="6 active plugins (2026-05-20)">
-        ms-graph (v0.3.28) · local-indexer (v0.4.11) · meeting (v0.4.18) · work-assistant (v0.7.0) ·
-        agent-hub (v0.8.1) · internal portal plugin (v0.12.9). Archived: lvis-plugin-email (2026-04-28), lvis-plugin-calendar (2026-04-30) — both consolidated into ms-graph.
-      </Callout>
 
       <Callout tone="security" title="Architecture doc consistency">
         Every implementation is rooted in <code>lvis-app/docs/architecture/architecture.md</code> (v4 Final), and

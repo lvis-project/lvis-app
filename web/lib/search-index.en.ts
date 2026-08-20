@@ -8,8 +8,8 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Getting Started", href: "/en/docs/getting-started/updates", title: "App Updates", snippet: "electron-updater · autoDownload=false · 4h interval · channel=latest" },
 
   // Host · Chat
-  { group: "Chat", href: "/en/docs/chat/layout", title: "Chat Screen Layout", snippet: "App.tsx · MainToolbar · ChatView · MessageQueuePanel · SessionTodoPanel" },
-  { group: "Chat", href: "/en/docs/chat/message-queue", title: "Message Queue & TODO", snippet: "MessageQueuePanel + SessionTodoPanel · emitEvent → host UI render" },
+  { group: "Chat", href: "/en/docs/chat/layout", title: "Chat Screen Layout", snippet: "AppShell · Sidebar · MainToolbar · MainContent · ChatView" },
+  { group: "Chat", href: "/en/docs/chat/message-queue", title: "Message Queue & TODO", snippet: "MessageQueuePanel + SessionTodoPanel · above the composer · hidden when empty" },
   { group: "Chat", href: "/en/docs/chat/tool-thinking", title: "Tool & Thinking Display", snippet: "Tool Registry · three sources · background shell · view image · tool search" },
   { group: "Chat", href: "/en/docs/chat/question-cards", title: "Question Cards", snippet: "AskUserQuestionItem · choice-only · choice/choices · recommendedIndex · altIndices" },
   { group: "Chat", href: "/en/docs/chat/plugin-panel", title: "Plugin Panel", snippet: "manifest ui[] slots · bundled Skills · pure Tools · regex ^[a-zA-Z_][a-zA-Z0-9_]*$" },
@@ -31,7 +31,7 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Routines", href: "/en/docs/routines/meeting-end", title: "Meeting End → Automatic Task", snippet: "meeting.summary.created → work-assistant meeting-summary detector" },
 
   // Plugins
-  { group: "Plugins", href: "/en/docs/plugins", title: "Plugins — Overview", snippet: "6 active plugins · static manifest · no runtime register" },
+  { group: "Plugins", href: "/en/docs/plugins", title: "Plugins — Overview", snippet: "static manifest · the host reads only the manifest · tool list fixed per server generation" },
   { group: "Plugins", href: "/en/docs/plugins/permission-grant", title: "Permission Grant Flow", snippet: "12 capabilities · tools[] · pluginAccess · agentApprovalScopes" },
   { group: "Plugins", href: "/en/docs/plugins/local-indexer", title: "Local Indexer", snippet: "kiwipiepy Pattern B · pymupdf4llm · FTS5 + LanceDB · chokidar · RRF (K=60)", keywords: ["RAG", "rrf", "fts5", "kiwi"] },
   { group: "Plugins", href: "/en/docs/plugins/ms-graph", title: "Microsoft 365 (Outlook)", snippet: "MSAL OAuth · safeStorage · 31 tools · scopes: User.Read Mail.* Calendars.*", keywords: ["outlook", "calendar", "mail", "ms-graph"] },
@@ -54,7 +54,7 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Servers", href: "/en/docs/servers/agent-hub/subscription", title: "Agent Hub — Team Feed Subscription", snippet: "Subscription = team-feed opt-in (no plan/license model)" },
 
   // Architecture
-  { group: "Architecture", href: "/en/docs/architecture/overview", title: "System at a Glance", snippet: "4 layers · 6 active plugins · ~/.lvis · servers" },
+  { group: "Architecture", href: "/en/docs/architecture/overview", title: "System at a Glance", snippet: "4 layers · plugins · ~/.lvis · servers" },
   { group: "Architecture", href: "/en/docs/architecture/diagrams", title: "Diagrams (Stack · Flow · Decisions)", snippet: "Stack · data flow · permission decision tree · plugin lifecycle SVG", keywords: ["diagram", "visual", "topology"] },
   { group: "Architecture", href: "/en/docs/architecture/host-api", title: "HostApi Contract", snippet: "PluginHostApi surface · child-process boundary · asynchronous secret lookup", keywords: ["hostapi", "isolation", "process"] },
   { group: "Architecture", href: "/en/docs/architecture/storage", title: "Storage — ~/.lvis", snippet: "Domain namespace · 0o700 dir · 0o600 file · audit/<YYYY-MM-DD>.jsonl" },
