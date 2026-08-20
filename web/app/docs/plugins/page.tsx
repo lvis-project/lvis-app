@@ -11,7 +11,6 @@ const plugins = [
   { slug: "meeting", title: "Meeting", id: "meeting", ver: "0.4.18", scope: "Audio · STT", desc: "OpenAI Whisper API (gpt-4o-transcribe) + PCM16LE 16kHz/3sec 청크.", color: "from-coral/10 to-transparent" },
   { slug: "work-assistant", title: "Work Assistant (업무도우미)", id: "work-assistant", ver: "0.7.0", scope: "Proactive", desc: "10+ detector → triggerConversation. mail/calendar/meeting 신호 통합.", color: "from-citron/30 to-transparent" },
   { slug: "agent-hub", title: "Agent Hub Sidebar", id: "agent-hub", ver: "0.8.1", scope: "Host UI Plugin", desc: "‘업무 보드’ 사이드바 + 43개 도구 + 5분 polling. agent-hub.lvisai.xyz 와 통신.", color: "from-ink/[0.06] to-transparent" },
-  { slug: "ep-api", title: "the internal portal (포털)", id: "ep-api", ver: "0.12.9", scope: "사내 포털", desc: "EP/Space/the HR system/internal search/주차 — 24개 도구. openAuthWindow 세션 + 사내망 DNS 게이트.", color: "from-coral/10 to-transparent" },
 ];
 
 export const metadata = { title: "플러그인 — 개요" };
@@ -66,6 +65,7 @@ export default function Page() {
         <ul className="my-1 list-disc pl-5">
           <li><strong>lvis-plugin-email</strong> + <strong>lvis-plugin-calendar</strong> → <strong>ms-graph</strong> 로 통합 (2026-04-28/04-30 archive).</li>
           <li><strong>work-assistant</strong> 가 proactive 업무 제안 기능을 담당합니다.</li>
+          <li>사내망 전용 <strong>사내 포털 플러그인</strong> 은 6번째 active 플러그인이지만, 사내망 밖에서는 설치·동작하지 않아 공개 문서에는 개별 페이지를 두지 않습니다.</li>
         </ul>
       </Callout>
 

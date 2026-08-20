@@ -57,7 +57,6 @@ export const navigationEn: NavGroup[] = [
       { title: "Meeting (Recording)", href: "/en/docs/plugins/meeting" },
       { title: "Work Assistant", href: "/en/docs/plugins/work-assistant" },
       { title: "Agent Hub", href: "/en/docs/plugins/agent-hub" },
-      { title: "the internal portal", href: "/en/docs/plugins/ep-api", badge: "Internal" },
     ],
   },
   {

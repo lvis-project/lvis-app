@@ -31,7 +31,7 @@ WORKDIR /workspace/lvis-plugin-ep
 RUN bun install --frozen-lockfile \
     && bun run build \
     && test -f dist/hostPlugin.js \
-    && test -f dist/ui/ep-control.js \
+    && bun -e 'const m = await Bun.file("plugin.json").json(); const declared = [...new Set(JSON.stringify(m.ui ?? []).match(/dist\/[A-Za-z0-9._\/-]+/g) ?? [])]; if (declared.length === 0) throw new Error("plugin.json ui[] declares no dist asset"); for (const p of declared) { if (!(await Bun.file(p).exists())) throw new Error("declared ui asset missing from build: " + p); } console.log("ui assets present: " + declared.join(", "));' \
     && zip -X -q -r "/out/lvis-plugin-ep-${EP_API_SHA}.zip" plugin.json dist skills \
     && test -s "/out/lvis-plugin-ep-${EP_API_SHA}.zip"
 

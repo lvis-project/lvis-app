@@ -11,7 +11,6 @@ const plugins = [
   { slug: "meeting", title: "Meeting", id: "meeting", ver: "0.4.18", scope: "Audio · STT", desc: "OpenAI Whisper API (gpt-4o-transcribe) + PCM16LE 16kHz/3sec chunks.", color: "from-coral/10 to-transparent" },
   { slug: "work-assistant", title: "Work Assistant", id: "work-assistant", ver: "0.7.0", scope: "Proactive", desc: "10+ detectors → triggerConversation. Unifies mail/calendar/meeting signals.", color: "from-citron/30 to-transparent" },
   { slug: "agent-hub", title: "Agent Hub Sidebar", id: "agent-hub", ver: "0.8.1", scope: "Host UI Plugin", desc: "Work board sidebar + 43 tools + 5-minute polling. Talks to agent-hub.lvisai.xyz.", color: "from-ink/[0.06] to-transparent" },
-  { slug: "ep-api", title: "the internal portal", id: "ep-api", ver: "0.12.9", scope: "Corporate portal", desc: "EP/Space/the HR system/internal search/parking — 24 tools. openAuthWindow session + intranet DNS gate.", color: "from-coral/10 to-transparent" },
 ];
 
 export const metadata = { title: "Plugins — Overview" };
@@ -66,6 +65,7 @@ export default function Page() {
         <ul className="my-1 list-disc pl-5">
           <li><strong>lvis-plugin-email</strong> + <strong>lvis-plugin-calendar</strong> merged into <strong>ms-graph</strong> (archived 2026-04-28/04-30).</li>
           <li><strong>work-assistant</strong> now handles proactive work suggestions.</li>
+          <li>The intranet-only <strong>internal portal plugin</strong> is the sixth active plugin, but it neither installs nor runs outside the internal network, so it has no individual page in the public docs.</li>
         </ul>
       </Callout>
 
