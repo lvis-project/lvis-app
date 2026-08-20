@@ -83,8 +83,10 @@
     },
     "screenshots/chat-permission-llm-review.png": {
       "surface": "host chat surface",
-      "data": "owner",
-      "action": "none"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true
     },
     "screenshots/chat-permission-risk.png": {
       "surface": "host chat surface",

@@ -55,11 +55,17 @@ for (const [key, entry] of Object.entries(scenarios)) {
     if (entry.reviewerMode) {
       test.use({ reviewerMode: entry.reviewerMode });
     }
+    if (entry.executionMode) {
+      test.use({ executionMode: entry.executionMode });
+    }
     if (entry.seededCorpus) {
       test.use({ seededCorpus: entry.seededCorpus });
     }
     if (entry.uiLocale) {
       test.use({ uiLocale: entry.uiLocale });
+    }
+    if (entry.captureViewport) {
+      test.use({ captureViewport: entry.captureViewport });
     }
 
     test(`capture: ${key}`, async ({ app, mainWindow, scriptedProvider }) => {
