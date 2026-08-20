@@ -5,6 +5,8 @@
 import os from "node:os";
 import { pathToFileURL } from "node:url";
 
+import { PII_PATTERNS } from "../shared/dlp.js";
+
 export type { DlpResult } from "../shared/dlp.js";
 export { maskSensitiveData, scrubSecretsForLLM } from "../shared/dlp.js";
 
@@ -15,29 +17,6 @@ export interface RedactResult {
   redacted: string;
   counts: Record<string, number>;
   totalCount: number;
-}
-
-const EMAIL_RE = /[\w.+-]+@[\w.-]+\.\w+/g;
-const PHONE_KR_RE = /01[016789]-?\d{3,4}-?\d{4}/g;
-const PHONE_US_RE = /(?:\(\d{3}\)\s?|\b\d{3}[-.])\d{3}[-.\s]\d{4}\b/g;
-const SSN_KR_RE = /\b\d{6}-[1-4]\d{6}\b/g;
-const CC_CAND_RE = /\b(?:\d[ -]?){12,18}\d\b/g;
-
-function luhnValid(num: string): boolean {
-  const digits = num.replace(/[^\d]/g, "");
-  if (digits.length < 13 || digits.length > 19) return false;
-  let sum = 0;
-  let alt = false;
-  for (let i = digits.length - 1; i >= 0; i--) {
-    let n = Number(digits[i]);
-    if (alt) {
-      n *= 2;
-      if (n > 9) n -= 9;
-    }
-    sum += n;
-    alt = !alt;
-  }
-  return sum % 10 === 0;
 }
 
 /** Optional auditLogger injected at boot to record DLP hits. */
@@ -59,15 +38,16 @@ export function redactForLLM(text: string, turnId?: string): RedactResult {
 
   let out = text;
 
-  out = out.replace(SSN_KR_RE, () => (bump("SSN_KR"), "[REDACTED:SSN]"));
-  out = out.replace(EMAIL_RE, () => (bump("EMAIL"), "[REDACTED:EMAIL]"));
-  out = out.replace(PHONE_KR_RE, () => (bump("PHONE_KR"), "[REDACTED:PHONE]"));
-  out = out.replace(PHONE_US_RE, () => (bump("PHONE_US"), "[REDACTED:PHONE]"));
-  out = out.replace(CC_CAND_RE, (m) => {
-    if (!luhnValid(m)) return m;
-    bump("CREDIT_CARD");
-    return "[REDACTED:CC]";
-  });
+  // Same converged detection set as maskSensitiveData, in the same order; this
+  // entry point applies full redaction instead of the display-shape mask.
+  for (const spec of PII_PATTERNS) {
+    spec.pattern.lastIndex = 0;
+    out = out.replace(spec.pattern, (match: string): string => {
+      if (spec.valid && !spec.valid(match)) return match;
+      bump(spec.kind);
+      return spec.redactToken;
+    });
+  }
 
   const totalCount = Object.values(counts).reduce((a, b) => a + b, 0);
   if (totalCount > 0 && _auditLogger) {

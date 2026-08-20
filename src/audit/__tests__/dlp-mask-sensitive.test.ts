@@ -4,7 +4,7 @@
  * UQ-QUALITY SEV-2 #2
  */
 import { describe, it, expect } from "vitest";
-import { maskSensitiveData } from "../dlp-filter.js";
+import { maskSensitiveData, redactForLLM } from "../dlp-filter.js";
 import { fixtureSecret } from "./secret-fixtures.js";
 
 describe("maskSensitiveData — 주민등록번호 (Korean RRN)", () => {
@@ -30,23 +30,36 @@ describe("maskSensitiveData — 주민등록번호 (Korean RRN)", () => {
 });
 
 describe("maskSensitiveData — 신용카드 (credit card)", () => {
-  it("masks a 16-digit card number with spaces, preserves last 4", () => {
-    const { masked, detections } = maskSensitiveData("카드: 1234 5678 9012 3456");
-    expect(masked).not.toContain("1234 5678 9012 3456");
-    expect(masked).toContain("****-****-****-3456");
+  // A Luhn-valid 16-digit test card. Its checksum makes it a card to the
+  // converged detector; the last four digits survive, the rest are masked, and
+  // the original separators are preserved.
+  it("masks a Luhn-valid 16-digit card with spaces, preserves last 4 and grouping", () => {
+    const { masked, detections } = maskSensitiveData("카드: 4111 1111 1111 1111");
+    expect(masked).not.toContain("4111 1111 1111 1111");
+    expect(masked).toContain("**** **** **** 1111");
     expect(detections).toContain("신용카드");
   });
 
-  it("masks a 16-digit card number with hyphens", () => {
-    const { masked } = maskSensitiveData("card: 1234-5678-9012-3456");
-    expect(masked).not.toContain("1234-5678-9012-3456");
-    expect(masked).toContain("****-****-****-3456");
+  it("masks a Luhn-valid 16-digit card with hyphens", () => {
+    const { masked } = maskSensitiveData("card: 4111-1111-1111-1111");
+    expect(masked).not.toContain("4111-1111-1111-1111");
+    expect(masked).toContain("****-****-****-1111");
   });
 
-  it("masks a 16-digit card number without separators", () => {
-    const { masked, detections } = maskSensitiveData("num: 1234567890123456");
-    expect(masked).not.toContain("1234567890123456");
+  it("masks a Luhn-valid 16-digit card without separators", () => {
+    const { masked, detections } = maskSensitiveData("num: 4111111111111111");
+    expect(masked).not.toContain("4111111111111111");
+    expect(masked).toContain("************1111");
     expect(detections).toContain("신용카드");
+  });
+
+  // Convergence: the display masker now applies the same Luhn gate as the LLM
+  // redactor, so a card-length digit run that fails Luhn is a non-card and is
+  // left intact by BOTH — it is not masked with a fake silhouette.
+  it("leaves a card-length digit run that fails Luhn intact", () => {
+    const { masked, detections } = maskSensitiveData("주문번호: 1234 5678 9012 3456");
+    expect(masked).toContain("1234 5678 9012 3456");
+    expect(detections).not.toContain("신용카드");
   });
 });
 
@@ -140,5 +153,64 @@ describe("maskSensitiveData — clean text (no false positives)", () => {
     const { masked, detections } = maskSensitiveData("");
     expect(masked).toBe("");
     expect(detections).toHaveLength(0);
+  });
+});
+
+// Both entry points must share one detection set. Each case drives BOTH
+// maskSensitiveData (display-shape mask) and redactForLLM (full redaction) and
+// asserts they AGREE on detection — a hit is a hit for both, a miss for both.
+// The two forms below are exactly the ones that previously split: the display
+// masker missed them while the redactor caught them.
+describe("converged detection — maskSensitiveData and redactForLLM agree", () => {
+  it("both catch a dashless Korean mobile form", () => {
+    const text = "번호 01098765432";
+    const { masked, detections } = maskSensitiveData(text);
+    expect(masked).not.toContain("01098765432");
+    expect(masked).toContain("010********");
+    expect(detections).toContain("전화번호");
+
+    const r = redactForLLM(text);
+    expect(r.redacted).not.toContain("01098765432");
+    expect(r.counts.PHONE_KR).toBe(1);
+  });
+
+  it("both catch a non-010 carrier-prefix mobile form", () => {
+    const text = "번호 016-234-5678";
+    expect(maskSensitiveData(text).detections).toContain("전화번호");
+    expect(redactForLLM(text).counts.PHONE_KR).toBe(1);
+  });
+
+  it("both catch a 15-digit Luhn-valid card", () => {
+    // 15-digit Amex-shaped test number; passes Luhn.
+    const text = "카드 378282246310005";
+    const { masked, detections } = maskSensitiveData(text);
+    expect(masked).not.toContain("378282246310005");
+    expect(masked).toContain("***********0005");
+    expect(detections).toContain("신용카드");
+
+    const r = redactForLLM(text);
+    expect(r.redacted).not.toContain("378282246310005");
+    expect(r.counts.CREDIT_CARD).toBe(1);
+  });
+
+  it("both catch a US phone number", () => {
+    const text = "call 415-555-1234";
+    expect(maskSensitiveData(text).detections).toContain("전화번호");
+    expect(redactForLLM(text).counts.PHONE_US).toBe(1);
+  });
+
+  // Drift the other way: neither over-masks. A card-length run failing Luhn and
+  // a resident-ID shape embedded inside a longer digit run are non-PII to both.
+  it("both leave a non-Luhn card-length run intact", () => {
+    const text = "주문 1234 5678 9012 3456";
+    expect(maskSensitiveData(text).masked).toContain("1234 5678 9012 3456");
+    expect(redactForLLM(text).counts.CREDIT_CARD ?? 0).toBe(0);
+  });
+
+  it("both leave a resident-ID shape embedded in a longer digit run intact", () => {
+    // No word boundary before the 6-1-6 shape: it is part of a longer number.
+    const text = "ref 99900101-1234567";
+    expect(maskSensitiveData(text).detections).not.toContain("주민등록번호");
+    expect(redactForLLM(text).counts.SSN_KR ?? 0).toBe(0);
   });
 });
