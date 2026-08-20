@@ -631,7 +631,7 @@ export async function bootstrap(
   ctx.pluginPaths = pluginPaths;
   ctx.pluginLoopbackManager = loopbackManager;
 
-  // Workflow system tools (S1+S2) — services constructed up-front so the
+  // Workflow system tools — services constructed up-front so the
   // tool registry can register them in one pass below. Late bindings
   // (subAgentRunner, askUserQuestionGate) hop through closures so the
   // ConversationLoop / BrowserWindow are available before the tool fires.

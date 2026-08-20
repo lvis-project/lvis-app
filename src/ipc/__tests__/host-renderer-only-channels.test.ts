@@ -10,14 +10,21 @@
  * `ipcRenderer` itself and can invoke any channel name, so the main-side frame
  * check is the only thing that holds.
  *
- * Each domain is asserted in BOTH directions: the plugin shell is refused, and
- * the host renderer is NOT. A suite pinning only the refusal would stay green
- * if a channel started refusing everyone.
+ * Each channel in the table is driven from BOTH frames, and what the table
+ * asserts is the guard's reject branch: an `ipc-guard` audit row appears for
+ * the plugin shell and does not appear for the host renderer. Driving only the
+ * plugin direction would stay green if a channel started refusing everyone.
  *
- * The guard's observable is the `ipc-guard` audit row rather than the return
- * value, because rejection sentinels differ per handler (some return
- * `UNAUTHORIZED_FRAME`, some a domain-shaped empty result, some nothing at all)
- * while the audit row is uniform.
+ * The audit row is the table's observable because the rejection sentinels
+ * differ per handler (some return `UNAUTHORIZED_FRAME`, some a domain-shaped
+ * empty result, some nothing at all) while `auditUnauthorized` is one shared
+ * call site. It is a proxy, and worth naming as one: it shows the guard took
+ * its reject branch, not that the handler returned nothing afterwards. A
+ * handler that audited and then answered anyway would keep the table green.
+ *
+ * `lvis:app:info` is additionally asserted by return value at the bottom of
+ * this file, where "refused" means the caller got `UNAUTHORIZED_FRAME` and none
+ * of the host fields.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { IpcMainInvokeEvent } from "electron";
@@ -26,6 +33,7 @@ import { hostFrameEvent, pluginShellFrameEvent } from "../../__tests__/test-help
 const { CHANNELS } = await import("../../contract/app-contract.js");
 const { ROUTINES, WORK_BOARD } = await import("../../shared/ipc-channels.js");
 const { setIsPackaged } = await import("../../boot/dev-flags.js");
+const { UNAUTHORIZED_FRAME } = await import("../gated.js");
 
 const handleMap = new Map<string, (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown>();
 
@@ -138,14 +146,20 @@ function guardRowsFor(channel: string): AuditRow[] {
   });
 }
 
-async function invoke(channel: string, event: IpcMainInvokeEvent, args: unknown[]): Promise<void> {
+/** What {@link invoke} returns when the handler threw. */
+const THREW = Symbol("handler threw");
+
+async function invoke(channel: string, event: IpcMainInvokeEvent, args: unknown[]): Promise<unknown> {
   const handler = handleMap.get(channel);
   expect(handler, `${channel} was never registered`).toBeDefined();
   try {
-    await handler!(event, ...args);
+    return await handler!(event, ...args);
   } catch {
     // A throw means the handler ran past its guard into a stubbed dependency,
-    // which is exactly what the host-renderer direction is asserting.
+    // which is exactly what the host-renderer direction is asserting. Returned
+    // as `THREW` rather than `undefined` so a value assertion cannot mistake a
+    // crash for a handler that legitimately answered with nothing.
+    return THREW;
   }
 }
 
@@ -275,5 +289,27 @@ describe("host-renderer-only IPC channels", () => {
   it.each(HOST_ONLY_CHANNELS)("%s %s does not refuse the host renderer", async (_domain, channel, args) => {
     await invoke(channel, hostFrameEvent(), args);
     expect(guardRowsFor(channel)).toEqual([]);
+  });
+});
+
+/**
+ * The table above cannot assert refusal by value — the sentinels are not
+ * uniform. This channel's are: `UNAUTHORIZED_FRAME` on the reject branch, a
+ * plain object of host fields on the pass branch, neither of which needs a
+ * stub to produce. So the one channel whose module docstring claims a refusal
+ * is the one channel where the refusal itself is pinned.
+ */
+describe("lvis:app:info — refusal by returned value, not only by audit row", () => {
+  it("answers a plugin shell frame with UNAUTHORIZED_FRAME and no host fields", async () => {
+    const result = await invoke(CHANNELS.app.info, pluginShellFrameEvent(), []);
+    expect(result).toEqual(UNAUTHORIZED_FRAME);
+    expect(Object.keys(result as Record<string, unknown>)).toEqual(["ok", "error"]);
+  });
+
+  it("answers the host renderer with the host fields", async () => {
+    const result = (await invoke(CHANNELS.app.info, hostFrameEvent(), [])) as Record<string, unknown>;
+    expect(result).toMatchObject({ platform: process.platform, arch: process.arch });
+    expect(typeof result.version).toBe("string");
+    expect(typeof result.userDataPath).toBe("string");
   });
 });

@@ -861,7 +861,7 @@ export type LvisApi = {
   chatContinueLastUser: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
   chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
-  /** #1500 (E3) — reverse of chatExport. Always creates a brand-new session (never overwrites). */
+  /** Reverse of chatExport. Always creates a brand-new session (never overwrites). */
   chatImport: () => Promise<
     { ok: true; sessionId: string; messageCount: number } | { ok: false; error?: string; canceled?: boolean }
   >;
@@ -1539,7 +1539,7 @@ import type {
 
 export type LvisUserApprovalApi = {
   record: (entry: {
-    /** #799 P0: ID of the in-flight ApprovalRequest. Main process reads the
+    /** ID of the in-flight ApprovalRequest. Main process reads the
      *  authoritative trustOrigin/source/approvalCacheKey from this ID via
      *  ApprovalGate.getRequestSnapshot — renderer-supplied authority fields
      *  below are ignored (kept on the wire for legacy callers + audit). */

@@ -14,8 +14,12 @@
  * `lvis:settings:get` answers through `rendererSettingsSnapshot()` and so
  * projects what it returns. Nothing here narrows the response, which leaves
  * the frame check as the only thing between it and a caller.
- * `ipc/__tests__/host-renderer-only-channels.test.ts` pins both directions for
- * this channel — the plugin shell is refused, the host renderer is not.
+ *
+ * `ipc/__tests__/host-renderer-only-channels.test.ts` drives this channel from
+ * both frames and asserts what it returned: a plugin-shell frame gets
+ * `UNAUTHORIZED_FRAME` and none of the fields below, the host renderer gets
+ * them. The rest of that suite asserts the guard's audit row instead, which
+ * shows the reject branch was taken but not that the handler stopped there.
  */
 import { ipcMain } from "electron";
 import { CHANNELS } from "../../contract/app-contract.js";

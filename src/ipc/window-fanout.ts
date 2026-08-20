@@ -1,27 +1,17 @@
 /**
- * Window fan-out — single source of truth for the
- * "send one channel to every open app window" broadcast pattern.
+ * Window fan-out — `fanOutToAllWindows`: send one channel to every window in a
+ * list, and count the deliveries.
  *
- * Before this module, every one-way main → renderer fan-out site
- * (`tour.ts` tour-start, settings updates, …)
- * re-derived the same loop:
+ * It composes ON TOP of {@link sendToWindow} from `safe-send.ts` rather than
+ * duplicating its destroyed-check + try/catch — `sendToWindow` already owns the
+ * per-window "is this WebContents still alive, swallow a send race" contract,
+ * so a send that fails on one window returns `false` there and the loop carries
+ * on. This module adds only the fan-out concern: iterate, count, and — when the
+ * caller passes an `auditLogger` — emit one audit row for the whole fan-out.
  *
- *   const targets = deps.getAppWindows?.() ?? [deps.getMainWindow()];
- *   for (const win of targets) {
- *     if (!win || win.isDestroyed?.()) continue;
- *     try { win.webContents.send(channel, payload); }
- *     catch (err) { log.warn(..., "broadcast failed for one window"); }
- *   }
- *
- * It composes ON TOP of {@link sendToWindow} from `safe-send.ts`
- * rather than duplicating its destroyed-check + try/catch — `sendToWindow`
- * already owns the per-window "is this WebContents still alive, swallow a
- * send race" contract. `fanOutToAllWindows` adds only the fan-out concern:
- * iterate every window, count successes, and emit a single audit row.
- *
- * The per-window error path is preserved: a `logger`/`SafeSendLogger`
- * forwarded to `sendToWindow` logs each skipped send, and one window's
- * failure never blocks the others.
+ * It is not the only fan-out in `src/ipc`, and nothing here makes it so. Other
+ * domains resolve the same window list and then either call in here or walk it
+ * themselves; `grep -rnF 'getAppWindows?.()' src/ipc` lists both kinds.
  */
 import type { BrowserWindow } from "electron";
 import { sendToWindow, type SafeSendLogger } from "./safe-send.js";

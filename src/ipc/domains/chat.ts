@@ -1,10 +1,10 @@
 /**
  * Chat domain IPC handlers.
- * Covers: lvis:chat:*, lvis:memory:*, lvis:starred:*, lvis:feedback:submit,
- *         lvis:ask-user-question:respond
+ * Covers: lvis:chat:*, lvis:llm:*, lvis:memory:*, lvis:starred:*,
+ *         lvis:feedback:submit, lvis:ask-user-question:respond
  * Note: routine channels (lvis:routines:*) are handled in routines.ts.
  *
- * C10 (#1409): the PUBLIC chat channels (send / sessions / get-history /
+ * The PUBLIC chat channels (send / sessions / get-history /
  * session-history) delegate to transport-agnostic pure handlers in
  * `../handlers/chat.ts`; this module keeps only the thin `ipcMain.handle`
  * wrappers (trust boundary + semantic-event sink construction) and the
@@ -77,7 +77,7 @@ function isMissingStagedEnvelopeError(error: unknown): boolean {
     && isMissingStagedEnvelopeErrorMessage(error.message);
 }
 
-// ─── Chat import (#1500 / E3) — reverse of chat.export ────────────────────
+// ─── Chat import — reverse of chat.export ─────────────────────────────────
 // Mirrors the export SOT shape (chat.export handler below, JSON branch):
 // `{ sessionId, exportedAt, messages: GenericMessage[] }`. Import re-uses
 // the same size guard the session-search linear scan used to enforce
@@ -1123,7 +1123,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
     return { ok: true, filePath: res.filePath };
   });
 
-  // #1500 (E3) — reverse of chat.export. INTERNAL (mutating; not in
+  // Reverse of chat.export. INTERNAL (mutating; not in
   // PUBLIC_CHANNELS — same classification as chat.new/chat.fork above).
   // ALWAYS creates a brand-new DLP-safe UUID session — importing
   // NEVER overwrites an existing session, matching chat.fork's pattern.

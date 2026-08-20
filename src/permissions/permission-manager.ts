@@ -1058,7 +1058,7 @@ export class PermissionManager {
           this.rules.unshift(rule); // deny has highest priority.
         } else {
           this.rules.push(rule);
-          // Reflect allow rules in the alwaysAllowed Map as well (P2: preserve tier).
+          // Reflect allow rules in the alwaysAllowed Map as well, preserving tier.
           // normalizeTier grandfathers a legacy/absent tier to write; maxTier
           // keeps the highest tier if the pattern is hydrated more than once.
           if (!rule.source) {
