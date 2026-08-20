@@ -79,6 +79,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -749,6 +750,63 @@ describe("the host decides how far a plugin child reaches", () => {
     ).toThrow(/resolves inside the host's own storage namespace/);
   });
 
+  it("refuses a host root the row granted even when it links out of the host's home", () => {
+    // WHAT THE `~/.lvis` SUBTRACTION ALONE DOES NOT REACH, and the reason the
+    // grant rows are enumerated. A `hostDirectory` row is a LEXICAL join onto
+    // `lvisHome()`; the value it is compared against is canonical. Point the
+    // granted directory at another volume — the ordinary operational reason
+    // being that a multi-gigabyte interpreter tree does not belong on the boot
+    // disk — and the two forms stop agreeing, so a home-shaped subtraction
+    // stops covering the row. Both spellings are asked because the plugin can
+    // write either: the target's own path, and the link's, which is the one
+    // that is byte-identical to what the row itself joins.
+    const fx = fixture!;
+    const volume = join(fx.root, "volume");
+    const movedRuntime = join(volume, "lvis-runtime");
+    mkdirSync(join(movedRuntime, "python-envs"), { recursive: true, mode: 0o700 });
+    rmSync(fx.hostRuntimeDir, { recursive: true, force: true });
+    symlinkSync(movedRuntime, fx.hostRuntimeDir);
+    approveWorkspaceRoot(fx, volume);
+    for (const spelling of [
+      join(movedRuntime, "python-envs"),
+      join(fx.hostRuntimeDir, "python-envs"),
+    ]) {
+      expect(() =>
+        derivePluginChildEnvelope({
+          pluginId: WIDENED_PLUGIN_ID,
+          pluginRoot: fx.pluginRoot,
+          pluginDataDir: fx.pluginDataDir,
+          configValue: (key) => (key === "workspace" ? spelling : undefined),
+        }),
+      ).toThrow(/the host's own table grants a plugin READ/);
+    }
+  });
+
+  it("refuses a chosen directory under a bundle root that is itself a symlink", () => {
+    // The same divergence, on the other subtraction. The install-root entry is
+    // the LEXICAL parent of this plugin's bundle, which is the right way to
+    // name the directory every install lives in and the wrong way to name a
+    // bundle that resolves somewhere else — so the bundle root is named on its
+    // own line too. Without that line an approved root covering the real
+    // bundle admits a write over the module the next load imports.
+    const fx = fixture!;
+    const elsewhere = join(fx.root, "bundles", WIDENED_PLUGIN_ID);
+    mkdirSync(join(elsewhere, "dist"), { recursive: true, mode: 0o700 });
+    const linkedRoot = join(fx.lvisHome, "plugins", WIDENED_PLUGIN_ID);
+    symlinkSync(elsewhere, linkedRoot);
+    const linkedDataDir = join(linkedRoot, "data");
+    mkdirSync(linkedDataDir, { recursive: true, mode: 0o700 });
+    approveWorkspaceRoot(fx, fx.root);
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: linkedRoot,
+        pluginDataDir: linkedDataDir,
+        configValue: (key) => (key === "workspace" ? join(elsewhere, "dist") : undefined),
+      }),
+    ).toThrow(/resolves inside the plugin's own bundle root/);
+  });
+
   it("refuses a chosen directory inside ANOTHER plugin's bundle", () => {
     // The same argument the own-root subtraction rests on, applied to the
     // party it was never applied to: a neighbour's `dist/` is the module the
@@ -910,6 +968,39 @@ describe("a plugin that cannot be confined is not spawned", () => {
         childEntryPath: writeProbeModule(fx),
       }),
     ).rejects.toThrow(/ENOENT/);
+  });
+
+  it("releases the throwaway sandbox HOME when a granted root cannot be created", async () => {
+    // The refusal above is the DOCUMENTED fail-closed path, so it is the one
+    // that must not leave anything behind. `createSandboxProcessHome()` runs
+    // first and only `releaseSandboxState()` removes what it made, so a
+    // materialisation pass placed ahead of the `try` leaked one `mkdtemp`
+    // directory per failed load — and `config.set` restarts the plugin, so a
+    // setting that keeps failing kept adding to the pile. Counted inside a
+    // private `TMPDIR` rather than against the machine's, so the assertion is
+    // about this spawn and not about whatever else the run has left in /tmp.
+    const fx = fixture!;
+    const dangling = join(fx.pluginDataDir, "dangling");
+    symlinkSync(join(fx.root, "target-that-does-not-exist"), dangling);
+    const previousTmpDir = process.env.TMPDIR;
+    const privateTmpDir = mkdtempSync(join(tmpdir(), "sandbox-home-probe-"));
+    process.env.TMPDIR = privateTmpDir;
+    try {
+      for (let attempt = 0; attempt < 3; attempt++) {
+        await expect(
+          spawnConfinedPluginChild({
+            pluginId: PLUGIN_ID,
+            envelope: { read: [fx.pluginRoot, fx.pluginDataDir, dangling], write: [dangling] },
+            childEntryPath: writeProbeModule(fx),
+          }),
+        ).rejects.toThrow(/ENOENT/);
+      }
+      expect(readdirSync(privateTmpDir)).toEqual([]);
+    } finally {
+      if (previousTmpDir === undefined) delete process.env.TMPDIR;
+      else process.env.TMPDIR = previousTmpDir;
+      rmSync(privateTmpDir, { recursive: true, force: true });
+    }
   });
 });
 
