@@ -35,7 +35,10 @@ import {
   type SubscriptionScope,
 } from "./host-api-dispatcher.js";
 import { HostApiBoundaryError } from "./host-api-wire.js";
-import type { ConfigSubscriptionPath } from "./config-subscription-child.js";
+import {
+  encodeConfigChange,
+  type ConfigSubscriptionPath,
+} from "./config-subscription-child.js";
 
 /** The members the host actually services; `config.get` never arrives. */
 export type DispatchedConfigSubscriptionPath = Exclude<
@@ -138,7 +141,12 @@ export function createConfigSubscriptionHostApiPaths(
       const key = stringArgument(call, 0, "key");
       const subscriptionId = stringArgument(call, 1, "subscriptionId");
       const unsubscribe = hostApi.config.onChange(key, (value) => {
-        scope.deliver(subscriptionId, { key, value });
+        // ENCODED, not spread. `SECRET_REDACTED_SENTINEL` is a Symbol and
+        // `JSON.stringify` drops a symbol-valued property, so `{ key, value }`
+        // would reach the child as `{ key }` — read there as "cleared" — and
+        // the plugin would never learn its secret changed. The encoder lives
+        // beside the decoder so the two halves cannot drift.
+        scope.deliver(subscriptionId, encodeConfigChange(key, value));
       });
       adoptOrUndo(scope, subscriptionId, unsubscribe);
       return { handleId: subscriptionId };
