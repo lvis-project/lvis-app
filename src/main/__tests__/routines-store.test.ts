@@ -13,7 +13,7 @@ import { mkdtempSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir, platform } from "node:os";
 import { RoutinesStore, MAX_PERSISTED_ROUTINES, MAX_LLM_SESSION_ROUTINES, MAX_ROUTINE_SOURCE_LENGTH } from "../routines-store.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 function tempStore() {
   const dir = mkdtempSync(join(tmpdir(), "lvis-rs-v2-"));

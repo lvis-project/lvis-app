@@ -13,7 +13,7 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { WorkBoardStore } from "../../main/work-board-store.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { createWorkBoardEngine } from "../work-board-engine.js";
 import type {
   SubAgentRunner,

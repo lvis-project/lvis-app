@@ -39,7 +39,7 @@ export function CommandPopover({ actions, onInsert, open, onOpenChange }: Comman
               className="h-7 w-7 shrink-0 bg-input-bar p-0"
               aria-label={t("commandPopover.ariaLabel")}
               data-testid="command-popover-trigger"
-              // Tutorial-C SpotlightTour anchor (PR #983 follow-up). Step 3
+              // SpotlightTour anchor. Step 3
               // of `first-boot-essentials` highlights this ⌘K toggle, see
               // `default-tour-scenarios.ts`.
               data-tour-anchor="command-palette-toggle"

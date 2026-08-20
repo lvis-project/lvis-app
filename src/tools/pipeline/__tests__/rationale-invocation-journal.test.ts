@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { platform } from "node:process";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 import {
   MemorySecretStore,
   type SecretStore,

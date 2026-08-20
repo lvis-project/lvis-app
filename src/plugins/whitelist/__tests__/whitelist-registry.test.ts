@@ -14,8 +14,8 @@ import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { whitelistRegistry } from "../whitelist-registry.js";
 import { WhitelistCache } from "../whitelist-cache.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../marketplace-keys.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
-import { signEnvelopeFixture } from "../../../testing/sign-envelope-fixture.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 // ---------------------------------------------------------------------
 // Helpers

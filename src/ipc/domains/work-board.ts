@@ -8,13 +8,13 @@
  *
  * After every SUCCESSFUL mutating call (add / update / transition / complete /
  * reopen / remove) the handler broadcasts a {@link WORK_BOARD.itemChanged}
- * event to all renderer windows (mirroring how the routines v2 domain fans out
+ * event to all renderer windows (mirroring how the routines domain fans out
  * its events). The board panel subscribes to this and re-lists, so the view
  * stays live across windows and LLM-tool mutations without polling.
  *
  * Every channel validates the sender frame and audits rejected calls through
- * the shared {@link auditUnauthorized} sink (mirroring the routines v2 domain in
- * `misc.ts`). When the store is absent (boot did not construct it) the handlers
+ * the shared {@link auditUnauthorized} sink (mirroring the routines domain in
+ * `routines.ts`). When the store is absent (boot did not construct it) the handlers
  * return an English kebab-case `{ ok: false, error: "no-store" }` code so the
  * renderer can branch without parsing exceptions.
  *
@@ -35,7 +35,7 @@
  */
 import { ipcMain } from "electron";
 import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
-import { fanOutToAllWindows } from "../broadcast-helpers.js";
+import { fanOutToAllWindows } from "../window-fanout.js";
 import type { IpcDeps } from "../types.js";
 import type { WorkItemRunResult } from "../../shared/work-board-types.js";
 import { WORK_BOARD } from "../../shared/ipc-channels.js";

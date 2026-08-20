@@ -7,7 +7,7 @@ import {
   parsePersonaPromptFrontmatter,
   renderPersonaPromptFile,
 } from "../persona-prompt-store.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const tempDirs: string[] = [];
 

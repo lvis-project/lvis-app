@@ -192,7 +192,7 @@ export const SENSITIVE_PATH_ENTRIES: readonly SensitiveEntry[] = Object.freeze([
     why: "audit log + rotated archives",
   },
   { anchor: "lvis-home", segments: ["sessions"], kind: "dir", why: "chat session JSONL" },
-  { anchor: "lvis-home", segments: ["routine"], kind: "dir", why: "routine v2 session history" },
+  { anchor: "lvis-home", segments: ["routine"], kind: "dir", why: "routine session history" },
   {
     anchor: "lvis-home",
     segments: ["plugins", "auth-partitions.json"],

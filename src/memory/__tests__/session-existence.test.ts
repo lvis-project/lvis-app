@@ -10,7 +10,7 @@ import { mkdtempSync, unlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { MemoryManager } from "../memory-manager.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const SESSION_A = "aaaaaaaa-1111-2222-3333-444444444444";
 const SESSION_B = "bbbbbbbb-1111-2222-3333-444444444444";

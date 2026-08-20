@@ -177,7 +177,7 @@ const SERVICE_KEYS: (string | symbol)[] = [
   "scriptHookManager",
 ];
 
-import { makeDeepProxy } from "../../testing/deep-proxy.js";
+import { makeDeepProxy } from "../../__tests__/support/deep-proxy.js";
 
 beforeAll(() => {
   channels.length = 0;
@@ -362,14 +362,14 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:prompts:list",
         "lvis:prompts:list-summaries",
         "lvis:prompts:save",
-        "lvis:routines:v2:ack-result",
-        "lvis:routines:v2:add",
-        "lvis:routines:v2:dismiss",
-        "lvis:routines:v2:list",
-        "lvis:routines:v2:list-sessions",
-        "lvis:routines:v2:pending-results",
-        "lvis:routines:v2:remove",
-        "lvis:routines:v2:trigger-now",
+        "lvis:routines:ack-result",
+        "lvis:routines:add",
+        "lvis:routines:dismiss",
+        "lvis:routines:list",
+        "lvis:routines:list-sessions",
+        "lvis:routines:pending-results",
+        "lvis:routines:remove",
+        "lvis:routines:trigger-now",
         "lvis:runtime:counts",
         "lvis:runtime:env",
         "lvis:session-todo:clear",

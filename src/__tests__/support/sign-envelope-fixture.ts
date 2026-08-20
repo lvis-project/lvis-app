@@ -10,7 +10,7 @@
  * `check:test-duplicates` flags a second copy of this helper.
  */
 import { createHash, sign, type KeyObject } from "node:crypto";
-import type { SignatureEnvelope } from "../plugins/types.js";
+import type { SignatureEnvelope } from "../../plugins/types.js";
 
 /**
  * Sign `body` (utf-8) with `privateKey`, returning the JSON-stringified

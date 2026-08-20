@@ -4,7 +4,7 @@ import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { ensureLvisHomePrivate, lvisHome } from "../lvis-home.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const originalLvisHome = process.env.LVIS_HOME;
 

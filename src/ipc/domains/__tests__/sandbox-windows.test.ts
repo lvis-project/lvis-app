@@ -11,7 +11,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PERMISSIONS } from "../../../shared/ipc-channels.js";
 import { UNAUTHORIZED_FRAME } from "../../gated.js";
-import { setProcessPlatform } from "../../../testing/process-platform.js";
+import { setProcessPlatform } from "../../../__tests__/support/process-platform.js";
 import { foreignFrameEvent, hostFrameEvent } from "../../../__tests__/test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();

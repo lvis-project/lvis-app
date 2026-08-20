@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { MAX_TOOL_RESULT_ARTIFACT_BYTES, MemoryManager } from "../memory-manager.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const SESSION_ID = "artifact-session-0001";
 const TRUNCATED = {

@@ -6,7 +6,7 @@ import type { PluginHostApiIncarnation } from "../index.js";
 import { PluginRuntime, type PluginRuntimeOptions } from "../index.js";
 import { createNoopHostApi } from "../sandbox.js";
 import type { PluginManifest } from "../../types.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 type IncarnationCleanup = {
   disposers: Array<() => void>;

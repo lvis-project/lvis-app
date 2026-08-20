@@ -16,7 +16,7 @@ import {
   GROK_BUILD_REQUIRED_MINIMUM_VERSION,
   grokBuildGovernedAgentDefinitionPath,
 } from "../acp-subscription-runtime-config.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 type Spawn = NonNullable<AcpSubscriptionRuntimeClientOptions["spawn"]>;
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 
-import { setProcessPlatform } from "../../testing/process-platform.js";
+import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
 
 import {
   __resetActiveSandboxCapabilityForTest,

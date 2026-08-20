@@ -22,7 +22,7 @@ import {
   hasPluginInstallInFlight,
   withPluginInstallLock,
 } from "../../plugins/install-lifecycle.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 function fakeWindow() {
   const sent: Array<{ channel: string; payload: unknown }> = [];

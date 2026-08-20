@@ -15,7 +15,7 @@ import { updatePermissionsFile } from "../permissions-store.js";
 import { mkdtempSync, realpathSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 // ─── Mock permissions-store ───────────────────────────
 // We mock the store module so tests don't touch the real filesystem.

@@ -46,21 +46,21 @@ import { PluginLoopbackManager } from "../../mcp/plugin-loopback-manager.js";
 import type { PluginBundleLifecycleHandler } from "../../plugins/plugin-bundle-lifecycle.js";
 import { createLogger } from "../../lib/logger.js";
 
-// ── C5 extraction — pure/self-contained clusters now live under
-//    ./plugin-runtime/*; imported here for the C6 orchestrator body and
-//    re-exported below so the public contract stays importable from this path.
+// ── Pure/self-contained clusters live under ./plugin-runtime/*; imported
+//    here for the orchestrator body below and re-exported further down so
+//    the public contract stays importable from this path.
 import { approvalIssuerRegistry } from "./plugin-runtime/approval-gating.js";
 import { buildAppPreferenceReader } from "./plugin-runtime/app-preference.js";
-// ── C6 extraction — HIGH-RISK orchestrator clusters (HostApi factory +
-//    lifecycle callbacks + registry-entry cache) now live under
-//    ./plugin-runtime/*; wired into initPluginRuntime below.
+// ── HIGH-RISK orchestrator clusters (HostApi factory + lifecycle callbacks
+//    + registry-entry cache) live under ./plugin-runtime/*; wired into
+//    initPluginRuntime below.
 import { createHostApiFactory } from "./plugin-runtime/host-api-factory.js";
 import { createLifecycleCallbacks } from "./plugin-runtime/lifecycle.js";
 import { createRegistryEntryCache } from "./plugin-runtime/registry-cache.js";
 import { PluginRuntimePreStartPhase } from "./plugin-runtime/pre-start-phase.js";
 const log = createLogger("lvis");
 
-// ── C5 re-exports — preserve this module path's public export contract. ──────
+// ── Re-exports — preserve this module path's public export contract. ────────
 export { declaresHostManagedPythonRuntime } from "./plugin-runtime/manifest.js";
 export { approvalIssuerRegistry, auditApprovalViolation,
 } from "./plugin-runtime/approval-gating.js";
@@ -180,7 +180,7 @@ export interface InitPluginRuntimeInput {
    */
   shellOpenExternal: (url: string) => Promise<void>;
   /**
-   * Cluster review M1 — optional PermissionManager reference. When provided,
+   * Optional PermissionManager reference. When provided,
    * the per-plugin `resolveApiKey` host implementation merges the manager's
    * `getPluginRevokeSignal` with the caller's request signal so a permission
    * rule change aborts outstanding bearers across plugins. Optional so unit
@@ -398,7 +398,7 @@ export async function initPluginRuntime(
   // §Step 1 + §Step 2 — thread the canonical installed-plugin root through
   // the runtime. Install source and receipt metadata, not an unsigned-plugin
   // opt-in, establish the deployment trust classification.
-  // C6 — build the extracted factories. Lazy bindings (pluginRuntime,
+  // Build the extracted factories. Lazy bindings (pluginRuntime,
   // loopbackManager) are passed as getters so the eventual assignments below
   // are visible; both are still unassigned at this point (never value-captured).
   //
@@ -560,7 +560,7 @@ export async function initPluginRuntime(
     void refreshRegistryEntryCache();
   });
 
-  // I2 — Dev-mode live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
+  // Dev-mode live-reload watcher. No-op unless LVIS_DEV_RELOAD=1.
   // ToolRegistry resync runs through the runtime's `onEnable` callback wired
   // above — `reloadPlugin` fires it on success — so the watcher only
   // surfaces the hot-reload log line here.

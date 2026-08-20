@@ -25,7 +25,7 @@
  *   `~/.ssh` / `~/.lvis/secrets` / …) AND `getDefaultSensitiveWriteDenyPaths()`
  *   (else the shell could WRITE `~/.zshrc` / `~/.ssh` / `~/.config` /
  *   `~/Library/LaunchAgents` / cron — persistence/re-exec that later runs
- *   OUTSIDE the sandbox; cluster-review MAJOR).
+ *   OUTSIDE the sandbox).
  *
  * WRITE-JAIL ANCHOR: the cwd anchors the write-jail, so it DEFAULTS to the
  * workspace root (process.cwd(), anchored to `~/.lvis/workspace` at boot), NEVER
@@ -327,8 +327,7 @@ async function spawnNewTerminal(
   // denyWrite = the RESTATED sensitive WRITE floor (shell-rc / ~/.ssh / ~/.config
   // / LaunchAgents / cron persistence + the read floor): ASRT applies it as
   // denyWithinAllow with PRECEDENCE over allowWrite, so even if the write-jail
-  // ever covers $HOME the shell can never write these re-exec vectors
-  // (cluster-review MAJOR).
+  // ever covers $HOME the shell can never write these re-exec vectors.
   const allowWrite = [
     ...deriveSandboxWritePaths({ allowedDirectories: [cwd] }),
     sandboxHome.path,

@@ -157,7 +157,7 @@ export class ConversationLoop {
   lastContextInputTokens = 0;
   /** Local full-request projection corresponding to `lastContextInputTokens`. */
   lastContextInputProjectionTokens = 0;
-  /** B4: current turn's AbortController — abortCurrentTurn() calls .abort() */
+  /** Current turn's AbortController — abortCurrentTurn() calls .abort() */
   currentAbortController: AbortController | null = null;
 
 
@@ -286,7 +286,7 @@ export class ConversationLoop {
     this.lastTurnScope?.delete(pluginId);
   }
 
-  /** B4: Abort the current streaming turn. No-op if no turn in flight. */
+  /** Abort the current streaming turn. No-op if no turn in flight. */
   abortCurrentTurn(reason: Error = new Error("user cancelled turn")): void {
     this.currentAbortController?.abort(reason);
   }
@@ -302,7 +302,7 @@ export class ConversationLoop {
    *
    * Atomically checks `hasActiveTurn()` inline so the IPC handler cannot
    * race the turn's `finally` block and silently leak a queued guide
-   * into the next turn (critic MAJOR #2 / code-reviewer MAJOR #3).
+   * into the next turn.
    *
    * Returns:
    *   - `"queued"` on success
@@ -546,7 +546,7 @@ export class ConversationLoop {
   addSessionAdditionalDirectory(path: string): void {
     if (!this.sessionAdditionalDirectories.includes(path)) {
       this.sessionAdditionalDirectories.push(path);
-      // Round-3 fix: every callsite that mutates the session list must
+      // Every callsite that mutates the session list must
       // notify multi-window PermissionsTab subscribers. The slash-dispatch
       // path also broadcasts (ipc/domains/permissions.ts) — this closes
       // the executor-callback path that was previously silent.

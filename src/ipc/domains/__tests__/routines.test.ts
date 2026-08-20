@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { ROUTINES_V2 } from "../../../shared/ipc-channels.js";
+import { ROUTINES } from "../../../shared/ipc-channels.js";
 import { hostFrameEvent } from "../../../__tests__/test-helpers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
@@ -56,9 +56,9 @@ async function setup(
   lastRoutineSessionId?: string,
 ) {
   handlers.clear();
-  const { registerMiscHandlers } = await import("../misc.js");
+  const { registerRoutineHandlers } = await import("../routines.js");
   const deps = makeDeps(sessions, lastRoutineSessionId);
-  registerMiscHandlers(deps as any);
+  registerRoutineHandlers(deps as any);
   return deps;
 }
 
@@ -79,7 +79,7 @@ describe("routine pending results", () => {
       { id: "exact-session", routineFiredAt: "2026-05-16T12:00:00.000Z", preview: "exact preview" },
     ], "exact-session");
 
-    const results = await invoke(ROUTINES_V2.pendingResults);
+    const results = await invoke(ROUTINES.pendingResults);
 
     expect(results).toEqual([
       expect.objectContaining({
@@ -95,7 +95,7 @@ describe("routine pending results", () => {
       { id: "latest-wrong", routineFiredAt: "2026-05-16T13:00:00.000Z", preview: "wrong preview" },
     ]);
 
-    const results = await invoke(ROUTINES_V2.pendingResults);
+    const results = await invoke(ROUTINES.pendingResults);
 
     expect(results).toEqual([
       expect.not.objectContaining({
@@ -111,7 +111,7 @@ describe("routine pending results", () => {
       { id: "fired-at-match", routineFiredAt: "2026-05-16T12:00:00.000Z", preview: "fired-at preview" },
     ], "missing-session");
 
-    const results = await invoke(ROUTINES_V2.pendingResults);
+    const results = await invoke(ROUTINES.pendingResults);
 
     expect(results[0]).not.toHaveProperty("routineSessionId");
     expect(results[0]).toHaveProperty("summary", "");
@@ -127,7 +127,7 @@ describe("routine pending results", () => {
       },
     ]);
 
-    const results = await invoke(ROUTINES_V2.listSessions, "routine-a", 10);
+    const results = await invoke(ROUTINES.listSessions, "routine-a", 10);
 
     expect(results).toEqual([
       {
@@ -154,7 +154,7 @@ describe("routine pending results", () => {
       await deleteGate;
     });
     let settled = false;
-    const removing = invoke(ROUTINES_V2.remove, "routine-a").then((result) => {
+    const removing = invoke(ROUTINES.remove, "routine-a").then((result) => {
       settled = true;
       return result;
     });

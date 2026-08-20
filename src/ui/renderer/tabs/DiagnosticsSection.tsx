@@ -1,5 +1,5 @@
 /**
- * Diagnostics surface (#1499 E2) — rendered at the bottom of the Audit tab.
+ * Diagnostics surface — rendered at the bottom of the Audit tab.
  * Three sub-sections:
  *   1. Bundle export — build a redacted diagnostics ZIP (+ includeCrashDumps).
  *   2. Log tail viewer — recent redacted log lines with a level filter.
@@ -91,9 +91,9 @@ export function DiagnosticsSection({ defaultDateFrom, defaultDateTo }: Diagnosti
   /**
    * Toggle the crash-dump opt-in. The persisted setting is the AUTHORITATIVE
    * SOT for the export handler (which only NARROWS by the renderer arg, never
-   * widens — security M2), so save the patch FIRST, then reflect it locally.
-   * Without this the checkbox was cosmetic — the handler always sent a defined
-   * boolean, so the persisted setting never governed (critic M1).
+   * widens), so save the patch FIRST, then reflect it locally. Skipping the
+   * persist would leave the checkbox cosmetic: this component always sends a
+   * defined boolean, and a renderer `true` cannot widen past a stored `false`.
    */
   const handleToggleCrashDumps = useCallback(
     async (next: boolean) => {
@@ -157,7 +157,7 @@ export function DiagnosticsSection({ defaultDateFrom, defaultDateTo }: Diagnosti
     void refreshLogs();
     void refreshCrashes();
     // Seed the checkbox from the persisted setting so it reflects the true SOT
-    // the export handler reads, not a hardcoded default (critic M1).
+    // the export handler reads, not a hardcoded default.
     void (async () => {
       try {
         const settings = await api().getSettings();

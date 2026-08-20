@@ -23,7 +23,7 @@ import {
   type TraceEntry,
 } from "../../observability/conversation-trace.js";
 import { fakeLlmSettings } from "../../shared/__tests__/fake-llm-settings.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;

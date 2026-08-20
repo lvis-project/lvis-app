@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PluginMarketplaceService, type MarketplaceFetcher } from "../marketplace.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import {
   makeTestPluginPaths,
   writeTestPlugin,

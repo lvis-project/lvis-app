@@ -11,7 +11,7 @@ import {
   ensureAcpSubscriptionNativePolicy,
   validateAcpSubscriptionMcpServerConfigs,
 } from "../acp-subscription-runtime-config.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const runtimeRoots: string[] = [];
 

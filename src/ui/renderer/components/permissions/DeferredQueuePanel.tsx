@@ -92,7 +92,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
   const hasPending = pending.length > 0;
   const activeEntry = pending[0];
   const activeLevel = activeEntry?.verdict.level ?? "low";
-  // Round-7 architect MAJOR — Korean risk label (was raw English
+  // Korean risk label (raw English
   // `activeLevel.toUpperCase()` → `LOW`/`MEDIUM`/`HIGH` leaking into UI).
   const queueBadge = hasPending ? riskLevelKoLabel(activeLevel) : t("deferredQueuePanel.noQueue");
   const badgeClassName = levelBadgeClass(activeLevel);
@@ -243,7 +243,7 @@ export function DeferredQueuePanel({ showEmpty = false, onClose }: DeferredQueue
 
 function reviewRows(entry: DeferredQueueEntry): ReviewBasisRow[] {
   const parsed = parseInputSummary(entry.inputSummary);
-  // Round-7 architect MAJOR — Korean risk label in the review row.
+  // Korean risk label in the review row.
   const verdict = `${riskLevelKoLabel(entry.verdict.level)} · ${entry.verdict.reason}`;
   const common = { label: t("deferredQueuePanel.rowLabelVerdict"), value: verdict };
   if (entry.category === "read") {

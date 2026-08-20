@@ -16,12 +16,12 @@ import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, delimiter } from "node:path";
 
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import {
   resolvePowerShellExecutable,
   binShellForExecutable,
 } from "../powershell.js";
-import { setProcessPlatform } from "../../testing/process-platform.js";
+import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
 
 const ORIGINAL_PLATFORM = process.platform;
 const ORIGINAL_PATH = process.env["PATH"];

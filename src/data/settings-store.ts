@@ -360,13 +360,13 @@ export interface AppSettings {
   audit: AuditSettings;
   /** §E2 (#1499) — diagnostics bundle + log retention. */
   diagnostics: DiagnosticsSettings;
-  /** UX Track 3 — visual theme + future UI preferences. */
+  /** Visual theme and UI preferences. */
   appearance: AppearanceSettings;
   /** §B1 — external URL viewer policy (in-app BrowserWindow vs system browser). */
   webView: WebViewSettings;
   /** Window close-button behaviour (hide-to-tray vs quit). */
   system: SystemSettings;
-  /** E4 — global keyboard shortcuts (show/hide window toggle). */
+  /** Global keyboard shortcuts (show/hide window toggle). */
   shortcuts: ShortcutSettings;
   /** Plugin settings reserved for non-trust UI preferences. Trust gates are host-owned. */
   plugins: PluginSettings;
@@ -384,7 +384,7 @@ export interface AppSettings {
 export interface PluginSettings {}
 
 /**
- * UX Track 3 — visual appearance preferences (schema v2).
+ * Visual appearance preferences (schema v2).
  *
  * v2 replaces the three-axis model (theme × chatTheme × codeTheme) with a
  * single paired bundle selected by `bundleId`. Each bundle is a fully-
@@ -418,7 +418,7 @@ export interface AppearanceSettingsV1 {
 }
 
 /**
- * User-configurable font preferences (Track A scope expansion).
+ * User-configurable font preferences.
  *
  * `family` — `"system"` keeps the built-in HOST_FONT_STACK (default). Any other
  * value MUST match `isValidFontFamilyOverride`; rejected values fall back to
@@ -502,14 +502,14 @@ export interface SystemSettings {
   /** Persisted workspace mode (chat vs work). Default "work". */
   appMode: SystemAppMode;
   /**
-   * E4 — launch LVIS automatically at OS login. Applied via
+   * Launch LVIS automatically at OS login. Applied via
    * `app.setLoginItemSettings({ openAtLogin })` (see
    * `src/main/startup-launch.ts`). Default `false`. No-op in dev (unpackaged)
    * builds — the login item would point at the Electron dev binary.
    */
   launchAtStartup?: boolean;
   /**
-   * E4 — when launching at startup, start hidden (tray only) instead of showing
+   * When launching at startup, start hidden (tray only) instead of showing
    * the main window. macOS: `openAsHidden`; Windows: a `--hidden` launch arg
    * the boot path reads. Default `false`. Only meaningful when
    * `launchAtStartup` is `true`.
@@ -606,7 +606,6 @@ export interface UpdateSettings {
  * Production release prep — anonymous opt-in telemetry.
  * Default OFF. Requires explicit user action to enable.
  *
- * S12:
  *   - `telemetryPromptAnswered` — true once the user has dismissed the
  *     first-boot consent prompt (regardless of Yes/No). Events are NEVER
  *     sent before this is true.
@@ -617,7 +616,7 @@ export interface TelemetrySettings {
   sentryDsn?: string;
   crashReportEndpoint?: string;
   crashReportingEnabled?: boolean;
-  /** S12: true once the user has answered the one-time opt-in prompt. */
+  /** True once the user has answered the one-time opt-in prompt. */
   telemetryPromptAnswered?: boolean;
 }
 
@@ -657,16 +656,16 @@ export interface MarketplaceSettings {
   /** Local dev/test only: bypass SSRF guard for loopback servers. */
   cloudAllowPrivateNetwork?: boolean;
   /**
-   * S8 — enable/disable plugin update detection at boot. Default true.
+   * Enable/disable plugin update detection at boot. Default true.
    */
   updateCheckEnabled?: boolean;
   /**
-   * S8 — update-check interval in milliseconds. Default 10 minutes (600_000 ms).
+   * Update-check interval in milliseconds. Default 10 minutes (600_000 ms).
    * Set to 0 to disable periodic checks (manual / on-open only).
    */
   updateCheckIntervalMs?: number;
   /**
-   * S8 — when true, canary/pre-release catalog entries are included in
+   * When true, canary/pre-release catalog entries are included in
    * update notifications. Default false (stable only).
    */
   canaryOptIn?: boolean;
@@ -835,10 +834,10 @@ export class SettingsService {
       // subfield at write time. Without this, two consecutive
       // `updateSettings({ appearance: { font: { family } } })` and
       // `updateSettings({ appearance: { font: { sizeScale } } })` calls each
-      // clobber the other's field (PR #672 review CRITICAL #1). And accepting
+      // clobber the other's field. And accepting
       // an unvalidated `family` at patch time + dropping it on next load is a
       // recovery-style fallback the No-Fallback-Code rule explicitly forbids
-      // (PR #672 review MAJOR #4) — validate at every trust boundary.
+      // — validate at every trust boundary.
       // Strip `font` from the outer spread before merging — we always want
       // the nested deep-merge below to be authoritative. Without this,
       // a caller passing `font: null` would land `null` directly via the
@@ -975,7 +974,7 @@ export class SettingsService {
           this.settings.system.localApiServer,
         );
       }
-      // E4 — launch-at-startup + launch-minimized booleans (same validate-at-
+      // Launch-at-startup + launch-minimized booleans (same validate-at-
       // boundary pattern as localApiServer: invalid → keep prior value).
       const rawLaunchAtStartup = partial.system.launchAtStartup;
       if (typeof rawLaunchAtStartup === "boolean") {

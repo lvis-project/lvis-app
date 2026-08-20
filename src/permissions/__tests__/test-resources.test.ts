@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { PermissionTestResources } from "./test-resources.js";
 
 describe("PermissionTestResources cleanup failures", () => {

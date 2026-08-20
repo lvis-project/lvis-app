@@ -214,7 +214,8 @@ function rendererSettingsSnapshot(snapshot: ReturnType<IpcDeps["settingsService"
   return projected;
 }
 
-/** Minor-1: extracted helper — 6 handlers share identical 5-line broadcast. */
+/** Shared by every handler that mutates settings and must re-broadcast the
+ *  projected snapshot to all windows. */
 async function broadcastSettingsSnapshot(
   deps: IpcDeps,
   shouldBroadcast: () => boolean = () => true,
@@ -270,7 +271,7 @@ function vendorBaseUrlSignature(llm: LLMSettings): string {
 }
 
 /**
- * E4 — stable signature of the shortcut + startup-launch inputs so the
+ * Stable signature of the shortcut + startup-launch inputs so the
  * `settings.update` handler can detect when a patch actually changed them and
  * only then re-register the global shortcut / re-sync the OS login item. Mirrors
  * the `activeLlmIdentity` change-detection pattern used for reviewer rewiring.
@@ -730,7 +731,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     const foundryVendorPatch = (llmPatch?.vendors as Record<string, unknown> | undefined)
       ?.["azure-foundry"] as Record<string, unknown> | undefined;
     if (foundryVendorPatch?.baseUrl !== undefined) {
-      // Minor-4: reject non-string values explicitly before String() coercion.
+      // Reject non-string values explicitly before String() coercion.
       if (typeof foundryVendorPatch.baseUrl !== "string") {
         return { ok: false, error: "invalid-foundry-endpoint", message: "baseUrl must be a string" };
       }
@@ -748,20 +749,20 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // can refresh reviewer wiring and cache scope immediately.
     const prevLlm = settingsService.get("llm");
     const prevActiveLlmIdentity = activeLlmIdentity(prevLlm);
-    // MAJOR-2 legacy guard: still detect Foundry baseUrl changes even when
+    // Legacy guard: still detect Foundry baseUrl changes even when
     // the active provider is not Foundry, preserving the prior explicit rewire.
     const prevBaseUrl = prevLlm.vendors?.["azure-foundry"]?.baseUrl ?? null;
     // ASRT dynamic-endpoint union: capture EVERY vendor baseUrl so a change to
     // any user-configured endpoint (e.g. the indexer's Azure OpenAI resource)
     // triggers a sandbox network live-refresh, not just an active/Foundry change.
     const prevVendorBaseUrlSig = vendorBaseUrlSignature(prevLlm);
-    // PR #795 follow-up: the MarketplaceTab "즉시 적용" badge on the SSRF-bypass
+    // The MarketplaceTab "즉시 적용" badge on the SSRF-bypass
     // toggle promised next-request activation, but the marketplace fetcher was
     // capturing the flag at boot only. Detect a change here and call the boot
     // closure that pushes the new value into the live fetcher instance.
     const prevAllowPrivate =
       settingsService.get("marketplace").cloudAllowPrivateNetwork ?? false;
-    // E4 — capture shortcut/startup signature so we only re-register on change.
+    // Capture shortcut/startup signature so we only re-register on change.
     const prevShortcutStartupSig = shortcutStartupSignature(
       settingsService.get("shortcuts"),
       settingsService.get("system"),
@@ -771,8 +772,8 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // this request's exact LLM snapshot before another renderer can supersede it.
     const appliedLlm = settingsService.get("llm");
     const result = await persistSettings;
-    // E4 (security M1 drift) — reconcile the OS-level global shortcut + login
-    // item when the shortcut/startup fields actually changed. Defined as a
+    // Reconcile the OS-level global shortcut + login item when the
+    // shortcut/startup fields actually changed. Defined as a
     // closure and invoked on BOTH the success path AND the reviewer-rewire
     // failure early-return: the shortcuts/system fields are already persisted by
     // the `patch` above, so a subsequent rewire failure must NOT skip syncing
@@ -793,9 +794,9 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
         launchAtStartup: newSystem.launchAtStartup ?? false,
         launchMinimized: newSystem.launchMinimized ?? false,
       };
-      // security M2 / critic M2 — a login-item registration that the OS did not
-      // apply is surfaced to the user, mirroring the shortcut-conflict path,
-      // instead of the `applied:false` result being silently dropped.
+      // A login-item registration the OS did not apply is surfaced to the user,
+      // mirroring the shortcut-conflict path, instead of the `applied:false`
+      // result being silently dropped.
       const launchState = reconcileStartupLaunch(launchInput);
       notifyStartupLaunchFailureIfNeeded(launchInput, launchState);
     };
@@ -842,7 +843,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
         }
         refreshChatRuntimeProviders(deps);
         deps.refreshActiveLlmWildcard?.();
-        // security M1 drift — the shortcuts/system fields were already persisted
+        // The shortcuts/system fields were already persisted
         // by `patch`; reconcile the OS state to disk even though the reviewer
         // rewire failed, so a combined patch doesn't leave the accelerator /
         // login item out of sync with what the user just saved.
@@ -865,7 +866,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     if (vendorBaseUrlSignature(newLlm) !== prevVendorBaseUrlSig) {
       deps.refreshSandboxNetworkConfig?.();
     }
-    // E4 — reconcile the OS-level global accelerator + login item to the newly
+    // Reconcile the OS-level global accelerator + login item to the newly
     // persisted shortcut/startup fields (no-op when unchanged; see closure).
     reconcileShortcutStartupIfChanged();
     await broadcastSettingsSnapshot(deps);
@@ -931,7 +932,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     }
     await settingsService.setSecret(secretKey, apiKey);
     refreshChatRuntimeProviders(deps);
-    // MAJOR-2: rewire reviewer when provider key changes so cacheScope refreshes.
+    // Rewire the reviewer when the provider key changes so cacheScope refreshes.
     deps.rewireReviewerAgent?.();
     // #893 — refresh plugin wildcard with the new key for the active vendor.
     deps.refreshActiveLlmWildcard?.();
@@ -958,7 +959,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     }
     await settingsService.deleteSecret(secretKey);
     refreshChatRuntimeProviders(deps);
-    // MAJOR-2: rewire reviewer when provider key is removed so cacheScope refreshes.
+    // Rewire the reviewer when the provider key is removed so cacheScope refreshes.
     deps.rewireReviewerAgent?.();
     // #893 — refresh plugin wildcard so the now-missing key is cleared.
     deps.refreshActiveLlmWildcard?.();

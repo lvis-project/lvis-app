@@ -304,7 +304,7 @@ function extractMessageText(msg: GenericMessage): string {
   }
   // tool_result — include toolName + isError marker for provenance so the
   // archive file is self-describing without cross-referencing the assistant's
-  // toolCalls metadata (critic MINOR-1).
+  // toolCalls metadata.
   const provenance = `[tool_result: tool=${msg.toolName ?? "?"}${msg.isError ? " error" : ""}]\n`;
   return `${provenance}${msg.content}`;
 }

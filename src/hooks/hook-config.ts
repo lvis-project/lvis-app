@@ -5,7 +5,7 @@
  * milestone) + issue #811. This is the PURE, INERT foundation: it parses an
  * already-deserialized `hooks.json` value into normalized config entries. It does
  * NO I/O (no fs, no spawn), and nothing in the boot / runner / trust pipeline
- * imports it yet — wiring lands in a separate cluster-reviewed PR.
+ * imports it yet — wiring lands separately.
  *
  * What it implements (the decisions already made for #811 m1, do not re-litigate):
  *

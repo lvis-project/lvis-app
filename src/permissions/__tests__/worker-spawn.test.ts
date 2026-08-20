@@ -127,7 +127,7 @@ import {
   __resetWrappedPluginWorkersForTest,
   isPluginWorkerWrapped,
 } from "../sandbox-capability.js";
-import { withPlatformForTest } from "../../__tests__/test-helpers.js";
+import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
 
 /** A minimal child-process double (NOT a shared helper — local to this file). */
 class StubWorkerChild extends EventEmitter {
@@ -198,7 +198,7 @@ afterEach(() => {
   } else {
     process.env.WINDIR = REAL_WINDIR;
   }
-  withPlatformForTest(REAL_PLATFORM);
+  setProcessPlatform(REAL_PLATFORM);
   __resetActiveSandboxCapabilityForTest();
   __resetWrappedPluginWorkersForTest();
 });
@@ -260,7 +260,7 @@ describe("spawnWorker — gate OFF (default)", () => {
 
 describe("spawnWorker — gate ON (macOS)", () => {
   it("registers the socketDir on the shared config, wraps with allowWrite=[socketDir,…] (FS jail only), marks wrapped, socketPath non-null", async () => {
-    withPlatformForTest("darwin");
+    setProcessPlatform("darwin");
     gateActive = true;
     setActiveSandboxCapability({
       kind: "asrt",
@@ -345,7 +345,7 @@ describe("spawnWorker — gate ON (macOS)", () => {
   });
 
   it("injects the UDS path via env when udsArgName is the env form", async () => {
-    withPlatformForTest("darwin");
+    setProcessPlatform("darwin");
     gateActive = true;
     wrapWorkerCommandMock.mockResolvedValueOnce({
       argv: ["/bin/bash", "-c", "wrapped"],
@@ -374,7 +374,7 @@ describe("spawnWorker — gate ON (macOS)", () => {
 
 describe("spawnWorker — gate ON (linux)", () => {
   it("registers the socketDir on the shared config and wraps with the FS jail only (no per-command UDS option)", async () => {
-    withPlatformForTest("linux");
+    setProcessPlatform("linux");
     gateActive = true;
     wrapWorkerCommandMock.mockResolvedValueOnce({
       argv: ["/bin/bash", "-c", "wrapped"],
@@ -406,7 +406,7 @@ describe("spawnWorker — gate ON (linux)", () => {
 
 describe("spawnWorker — idempotent any-exit cleanup", () => {
   it("unmarks the worker + cleans up ONCE on child exit, then reviewer is none", async () => {
-    withPlatformForTest("darwin");
+    setProcessPlatform("darwin");
     gateActive = true;
     setActiveSandboxCapability({
       kind: "asrt",
@@ -447,7 +447,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
   });
 
   it("stop() retains confinement and HOME ownership until exit", async () => {
-    withPlatformForTest("linux");
+    setProcessPlatform("linux");
     gateActive = true;
     wrapWorkerCommandMock.mockResolvedValueOnce({
       argv: ["/bin/bash", "-c", "wrapped"],
@@ -474,7 +474,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
   });
 
   it("onExit forwards the child's exit (code + signal) to the consumer", async () => {
-    withPlatformForTest("darwin");
+    setProcessPlatform("darwin");
     gateActive = true;
     setActiveSandboxCapability({
       kind: "asrt",
@@ -505,7 +505,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
   });
 
   it("keeps a live worker confined when a process operation emits error", async () => {
-    withPlatformForTest("darwin");
+    setProcessPlatform("darwin");
     gateActive = true;
     wrapWorkerCommandMock.mockResolvedValueOnce({
       argv: ["/bin/bash", "-c", "wrapped"],
@@ -532,7 +532,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
   });
 
   it("rejects a same-key replacement until the old wrapped worker exits", async () => {
-    withPlatformForTest("darwin");
+    setProcessPlatform("darwin");
     gateActive = true;
     wrapWorkerCommandMock
       .mockResolvedValueOnce({ argv: ["/bin/bash", "-c", "old"], env: { ...process.env } })
@@ -563,7 +563,7 @@ describe("spawnWorker — idempotent any-exit cleanup", () => {
 
 describe("spawnWorker — Windows with gate ON", () => {
   it("wraps the worker with a dedicated holder PID ACL grant and keeps TCP control", async () => {
-    withPlatformForTest("win32");
+    setProcessPlatform("win32");
     gateActive = true;
     const restoreEnv = setEnvForTest({
       COMSPEC: "C:\\Windows\\System32\\cmd.exe",
@@ -695,7 +695,7 @@ describe("spawnWorker — Windows with gate ON", () => {
 
   it("terminates the Windows worker and releases grants when the holder exits first", async () => {
     vi.useFakeTimers();
-    withPlatformForTest("win32");
+    setProcessPlatform("win32");
     gateActive = true;
     setActiveSandboxCapability({
       kind: "asrt",
@@ -742,7 +742,7 @@ describe("spawnWorker — Windows with gate ON", () => {
   });
 
   it("aborts Windows worker spawn if the holder exits during grant setup", async () => {
-    withPlatformForTest("win32");
+    setProcessPlatform("win32");
     gateActive = true;
     const holder = new StubWorkerChild();
     holder.pid = 5101;
@@ -775,7 +775,7 @@ describe("spawnWorker — Windows with gate ON", () => {
   });
 
   it("consumes the Windows holder spawn error when no holder pid is published", async () => {
-    withPlatformForTest("win32");
+    setProcessPlatform("win32");
     gateActive = true;
     const holder = new StubWorkerChild();
     (holder as unknown as { pid?: number }).pid = undefined;
@@ -797,7 +797,7 @@ describe("spawnWorker — Windows with gate ON", () => {
   });
 
   it("continues Windows cleanup when grant release throws", async () => {
-    withPlatformForTest("win32");
+    setProcessPlatform("win32");
     gateActive = true;
     setActiveSandboxCapability({
       kind: "asrt",
@@ -837,7 +837,7 @@ describe("spawnWorker — Windows with gate ON", () => {
   });
 
   it("rolls back the holder grant when the Windows wrap fails", async () => {
-    withPlatformForTest("win32");
+    setProcessPlatform("win32");
     gateActive = true;
     const holder = new StubWorkerChild();
     holder.pid = 5101;

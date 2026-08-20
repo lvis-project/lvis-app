@@ -12,22 +12,26 @@
  * 검증 케이스:
  *   1) RRF 수학 정확성 — bm25 rank 0 + vec rank 0 동일 chunkId → ≈ 0.0164
  *   2) RRF 수학 정확성 — bm25 rank 0 + vec rank 4 동일 chunkId → ≈ 0.0159
- *   3) cloud Mock (weight 0) → 결합 결과에 cloud source 미포함
+ *   3) disabled cloud adapter (weight 0) → 결합 결과에 cloud source 미포함
  *   4) 빈 결과 처리 — 모든 retriever 빈 배열 → []
  *   5) topK 잘림 정확
  *   6) 소스별 분리 — 서로 다른 chunkId는 독립 aggregate
  *   7) empty query returns []
  *   8) topK<=0 returns []
  *   9) worker bm25 failure → degrades to vec only
+ *  10) boot-shaped wiring (no `weights`) never calls cloudAdapter.search()
+ *  11) raised cloud weight → DisabledCloudIndexAdapter contributes nothing, no throw
  */
 import { describe, it, expect } from "vitest";
 import {
   HybridRetriever,
   DEFAULT_RRF_K,
+  DEFAULT_HYBRID_WEIGHTS,
   type SearchHit,
   type WorkerSearchClient,
 } from "../hybrid-retriever.js";
-import { MockCloudIndexAdapter } from "../cloud-index-adapter.js";
+import { DisabledCloudIndexAdapter } from "../cloud-index-adapter.js";
+import type { CloudIndexAdapter, CloudIndexHit } from "../cloud-index-adapter.js";
 
 // ─── Mock WorkerSearchClient ───────────────────────
 
@@ -83,7 +87,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     const vec = [makeHit("chunk-A", 0, "vec")];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, vec),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("test", 5);
     expect(results.length).toBe(1);
@@ -105,7 +109,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     ];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, vec),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("test", 10);
     const b = results.find((r) => r.chunkId === "chunk-B");
@@ -116,12 +120,12 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     expect(b!.sources.length).toBe(2);
   });
 
-  it("case 3: cloud Mock (weight 0) yields no cloud sources", async () => {
+  it("case 3: disabled cloud adapter (weight 0) yields no cloud sources", async () => {
     const bm25 = [makeHit("chunk-C", 0, "bm25")];
     const vec = [makeHit("chunk-C", 0, "vec")];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, vec),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("q", 5);
     expect(results.length).toBe(1);
@@ -132,7 +136,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
   it("case 4: all empty retrievers → []", async () => {
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient([], []),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("q", 5);
     expect(results).toEqual([]);
@@ -147,7 +151,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     );
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, vec),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("q", 3);
     expect(results.length).toBe(3);
@@ -164,7 +168,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     const vec = [makeHit("beta", 0, "vec"), makeHit("gamma", 1, "vec")];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, vec),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("q", 10);
     const byId = new Map(results.map((r) => [r.chunkId, r]));
@@ -182,7 +186,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     const bm25 = [makeHit("ch-Z", 0, "bm25")];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, []),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     expect(await retriever.retrieve("", 5)).toEqual([]);
     expect(await retriever.retrieve("   ", 5)).toEqual([]);
@@ -192,7 +196,7 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     const bm25 = [makeHit("ch-Z", 0, "bm25")];
     const retriever = new HybridRetriever({
       workerClient: new StubWorkerClient(bm25, []),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     expect(await retriever.retrieve("q", 0)).toEqual([]);
     expect(await retriever.retrieve("q", -5)).toEqual([]);
@@ -209,10 +213,49 @@ describe("SECURITY_GATE: HybridRetriever RRF 수학", () => {
     }
     const retriever = new HybridRetriever({
       workerClient: new FlakyClient(),
-      cloudAdapter: new MockCloudIndexAdapter(),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
     });
     const results = await retriever.retrieve("q", 5);
     expect(results.length).toBe(1);
     expect(results[0].chunkId).toBe("vec-only");
+  });
+
+  // The `DisabledCloudIndexAdapter` docstring claims the shipped wiring never
+  // reaches `search()`. Cases 10 and 11 are what make that claim falsifiable:
+  // 10 pins the reach, 11 pins the contract if the weight is ever raised.
+  it("case 10: boot-shaped wiring (no weights override) never calls cloudAdapter.search()", async () => {
+    const searchCalls: Array<{ query: string; topK: number }> = [];
+    const recordingAdapter: CloudIndexAdapter = {
+      async search(query: string, topK: number): Promise<CloudIndexHit[]> {
+        searchCalls.push({ query, topK });
+        return [];
+      },
+      async isAvailable(): Promise<boolean> {
+        return false;
+      },
+    };
+    // Exactly the shape src/boot/tools.ts constructs: workerClient + cloudAdapter,
+    // no `weights`, so `weights` resolves to DEFAULT_HYBRID_WEIGHTS.
+    const retriever = new HybridRetriever({
+      workerClient: new StubWorkerClient([makeHit("chunk-D", 0, "bm25")], []),
+      cloudAdapter: recordingAdapter,
+    });
+    const results = await retriever.retrieve("q", 5);
+
+    expect(DEFAULT_HYBRID_WEIGHTS.cloud).toBe(0);
+    expect(searchCalls).toEqual([]);
+    // and the query still succeeds on the local legs alone
+    expect(results.map((r) => r.chunkId)).toEqual(["chunk-D"]);
+  });
+
+  it("case 11: with the cloud weight raised, the disabled adapter yields nothing and does not throw", async () => {
+    const retriever = new HybridRetriever({
+      workerClient: new StubWorkerClient([makeHit("chunk-E", 0, "bm25")], []),
+      cloudAdapter: new DisabledCloudIndexAdapter(),
+      weights: { bm25: 0.5, vec: 0.5, cloud: 0.5 },
+    });
+    const results = await retriever.retrieve("q", 5);
+    expect(results.length).toBe(1);
+    expect(results.flatMap((r) => r.sources.map((sc) => sc.source))).not.toContain("cloud");
   });
 });

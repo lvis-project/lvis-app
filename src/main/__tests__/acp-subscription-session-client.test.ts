@@ -15,7 +15,7 @@ import {
 } from "../acp-subscription-session-client.js";
 import type { AcpSubscriptionMcpServerConfig } from "../acp-subscription-runtime-config.js";
 import { MAX_SUBSCRIPTION_ATTACHMENT_BYTES } from "../subscription-attachment-input.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 interface RpcMessage {
   jsonrpc?: unknown;

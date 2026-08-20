@@ -87,7 +87,7 @@ runEarlyBootEnv();
  *
  * Verifies that the named plugins mount + init correctly during boot, then
  * exits 0 (success) or 1 (any plugin missing / failed to initialize). Used
- * by per-plugin smoke tests in CI and by the Cycle 2 verification gate.
+ * by per-plugin smoke tests in CI and by the boot verification gate.
  *
  * Returns null if the flag is not present.
  */
@@ -161,7 +161,7 @@ async function main() {
   }
 
   // Window IPC handlers registered after bootstrap so auditLogger is available
-  // for validateSender + viewKey security guards added in PR #354 follow-up.
+  // for the validateSender + viewKey security guards.
   windowManager.registerIpc(services.auditLogger);
 
   // One host-owned source for every main-conversation surface. It outlives the
@@ -357,9 +357,10 @@ async function main() {
     log.error({ err }, "telegram bridge failed to start (continuing boot)");
   }
 
-  // P4-5 receiver ingress has an independent immutable gate and listener.
-  // never widens or reuses the ph3/local API route family. The app binds only
-  // loopback; a separately trusted HTTPS tunnel/terminator owns public ingress.
+  // The remote A2A receiver ingress has an independent immutable gate and
+  // listener; it never widens or reuses the local API route family. The app
+  // binds only loopback; a separately trusted HTTPS tunnel/terminator owns
+  // public ingress.
   try {
     const receiver = await maybeStartRemoteA2AReceiverServer({
       services,
@@ -372,9 +373,9 @@ async function main() {
     log.error({ err }, "remote A2A receiver failed to start (continuing boot)");
   }
 
-  // L1: start the routines scheduler AFTER IPC handlers are wired so a
+  // Start the routines scheduler AFTER IPC handlers are wired so a
   // routine past-due at boot fires into a renderer that already has a
-  // `lvis:routines:v2:fired` listener attached. The scheduler is otherwise
+  // `lvis:routines:fired` listener attached. The scheduler is otherwise
   // safe to start at any time — `start()` is idempotent.
   services.startRoutinesScheduler?.();
 
@@ -387,7 +388,7 @@ async function main() {
   ensureTray();
   setRendererReloadReady(true);
 
-  // E4 — reconcile OS-level global shortcuts + login item from persisted
+  // Reconcile OS-level global shortcuts + login item from persisted
   // settings once the tray + services exist. Registration failures are surfaced
   // via NotificationService (No-Fallback): a global-shortcut conflict inside
   // reconcileGlobalShortcuts, and a login-item apply failure via

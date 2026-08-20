@@ -65,7 +65,7 @@ import type { RoutinesStore } from "../../../main/routines-store.js";
 import { emitEvent, onEvent } from "../../types.js";
 import { t } from "../../../i18n/index.js";
 import { createLogger } from "../../../lib/logger.js";
-import { plog, PluginPhase } from "../../../plugins/lifecycle-log.js";
+import { logPluginLifecycle, PluginPhase } from "../../../plugins/lifecycle-log.js";
 import { incrementHostSecretCounter, sanitizeKeyPrefix } from "../../../telemetry/host-secret-counters.js";
 import { canonicalJSON } from "../../../plugins/whitelist/canonical-json.js";
 import { runSecretGate } from "../../../plugins/whitelist/secret-gate.js";
@@ -362,13 +362,13 @@ export function createHostApiFactory(
       // post-install manifest swap (different tools / wider hostSecrets.read)
       // forces a fresh whitelist roll.
       //
-      // Ralph cycle 1 fix — previously this used the REPLACER-ARRAY form of
-      // `JSON.stringify(manifest, Object.keys(manifest).sort())` which only
-      // filters top-level keys and emits every nested object as `{}`. As a
-      // result every plugin's manifest hashed to (nearly) the same sha and
-      // the Tier-3 pin was defeated. Switching to a recursive canonical
-      // JSON serializer (RFC 8785 JCS-style — sort keys at every depth,
-      // preserve array element order) restores the pin.
+      // The digest MUST come from a recursive canonical serializer
+      // (`canonicalJSON` — RFC 8785 JCS-style: sort keys at every depth,
+      // preserve array element order). The replacer-array form
+      // `JSON.stringify(manifest, Object.keys(manifest).sort())` does NOT
+      // work here: it filters only top-level keys and emits every nested
+      // object as `{}`, so distinct manifests collapse onto near-identical
+      // digests and the Tier-3 pin stops discriminating.
       const canonical = canonicalJSON(manifest);
       const manifestSha256 = createHash("sha256").update(canonical).digest("hex");
       // Structural effect observability — wrap the whole hostApi so EVERY method
@@ -397,7 +397,7 @@ export function createHostApiFactory(
         pluginDataDir,
         createPluginStorageAuditSink(pluginId, pluginRuntimeAuditLog),
       ),
-      // §9.2 Track B — typed plugin config access, scoped to this pluginId.
+      // §9.2 — typed plugin config access, scoped to this pluginId.
       // `get` reads the live merged config (manifest defaults + saved
       //   overrides) directly from settingsService so a write from another
       //   surface (renderer, IPC, sibling plugin) is visible without reload.
@@ -411,7 +411,7 @@ export function createHostApiFactory(
       //   the underlying bus rejects cross-plugin observation.
       config: {
         get: <T = unknown>(key: string): T | undefined => {
-          // PR #894 B2 follow-up — merge wildcard slot (`hostApiVendor` etc.)
+          // Merge the wildcard slot (`hostApiVendor` etc.)
           // BETWEEN manifest defaults and plugin-specific overrides so a
           // plugin's own config can shadow a host-injected value (rare, but
           // useful for test fixtures and explicit per-plugin overrides),
@@ -531,7 +531,7 @@ export function createHostApiFactory(
         },
       },
       emitEvent: (type, data) => {
-        plog("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
+        logPluginLifecycle("debug", { pluginId, phase: PluginPhase.CAPABILITY_CHECK, eventType: type }, "checking emit capability");
         const declaredEmittedEvents = getDeclaredEmittedEvents(manifest);
         if (!canEmitEvent(type, declaredEmittedEvents)) {
           auditPluginEmitDenial({
@@ -544,7 +544,7 @@ export function createHostApiFactory(
           throw new Error(`Plugin '${pluginId}' is not allowed to emit undeclared event '${type}'`);
         }
         pluginRuntime.assertPluginEventEmitAccess(pluginId, type);
-        plog("debug", { pluginId, phase: PluginPhase.EVENT_EMIT, eventType: type }, "event emitted");
+        logPluginLifecycle("debug", { pluginId, phase: PluginPhase.EVENT_EMIT, eventType: type }, "event emitted");
         emitEvent(type, { ...((data as Record<string, unknown>) ?? {}), pluginId });
       },
       onEvent: (type, handler) => {
@@ -562,7 +562,7 @@ export function createHostApiFactory(
         // and into the process.
         const guardedHandler = hostEffects ? hostEffects.wrapListener(dispatch) : dispatch;
         const unsubscribe = onEvent(type, (data) => { guardedHandler(data); });
-        plog("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
+        logPluginLifecycle("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
         return registerOwnedDisposer(unsubscribe);
       },
       getInstalledPluginIds: () => {
@@ -625,7 +625,7 @@ export function createHostApiFactory(
                 ...(entry?.manifestSha256 !== undefined ? { registryManifestSha256: entry.manifestSha256 } : {}),
               };
             })(),
-            // Cluster review M1 — bind the permission-manager revoke signal
+            // Bind the permission-manager revoke signal
             // accessor so an in-flight bearer aborts when permissions
             // change for this plugin. When permissionManager is not wired
             // (test runtimes) the host-api falls back to caller-signal-only.
@@ -651,7 +651,7 @@ export function createHostApiFactory(
         // authority `resolveApiKey` above also calls; everything below is this
         // API's own audit vocabulary, counters, and `string | null` shape.
         //
-        // PR #894 review B7 — `keyPrefix` is folded through `sanitizeKeyPrefix`
+        // `keyPrefix` is folded through `sanitizeKeyPrefix`
         // before it reaches the in-process counter map. An attacker plugin
         // could otherwise call `hostApi.getSecret("<random-prefix>.x")` in a
         // loop and grow the counter map unboundedly via the `denied` branch
@@ -724,8 +724,8 @@ export function createHostApiFactory(
           incrementHostSecretCounter("hostSecret_read", pluginId, keyPrefix);
           return value;
         }
-        // #958 round-1 security MEDIUM — admin-bypass audit + counter. Emit
-        // BEFORE the host-secret read line so operators can pivot on
+        // Admin-bypass audit + counter. Emit BEFORE the host-secret read
+        // line so operators can pivot on
         // `policy=admin manifest-allowlist-bypassed` in the audit log. The
         // dedicated `hostSecret_admin_bypass` counter is on top of the regular
         // `hostSecret_read` increment below so totals stay comparable across
