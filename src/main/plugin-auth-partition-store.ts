@@ -14,10 +14,10 @@
  * - One serial mutation queue owns both writes and deletes. Every caller's
  *   promise settles only after its exact snapshot mutation reaches disk.
  */
-import { mkdir, readdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
+import { readdir, readFile, unlink } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
-import { randomBytes } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
+import { writeFileAtomicAtPath } from "./storage/feature-namespace.js";
 
 /** Shape written to disk. */
 interface PartitionsFile {
@@ -70,17 +70,16 @@ function snapshotMap(partitions: ReadonlyMap<string, ReadonlySet<string>>): Part
   return data;
 }
 
-/** Execute a single disk write for `snapshot`. Never throws (errors returned). */
+/**
+ * Execute a single disk write for `snapshot` through the shared atomic-write
+ * authority ({@link writeFileAtomicAtPath}): 0o700 dir, 0o600 file, random
+ * staging name with `O_CREAT|O_EXCL`, and — the guarantee this store's own
+ * "atomic write" comment claimed but the prior `writeFile`+`rename` did not
+ * deliver — an fsync of the staged bytes and the parent directory before the
+ * caller's promise settles.
+ */
 async function doActualWrite(snapshot: PartitionsFile): Promise<void> {
-  const path = filePath();
-  const dir = dirname(path);
-  await mkdir(dir, { recursive: true, mode: 0o700 });
-  const tmp = `${path}.${randomBytes(6).toString("hex")}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(snapshot, null, 2)}\n`, {
-    encoding: "utf8",
-    mode: 0o600,
-  });
-  await rename(tmp, path);
+  await writeFileAtomicAtPath(filePath(), `${JSON.stringify(snapshot, null, 2)}\n`);
 }
 
 /**
