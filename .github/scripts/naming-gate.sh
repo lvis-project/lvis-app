@@ -36,11 +36,44 @@ trap 'rm -rf "$work"' EXIT
 exclude_re='^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)'
 include_re='\.(ts|tsx|py|js|mjs|cjs|md)$'
 
+# Narrow the path list to what this gate reads. `grep` exit 1 means "no path
+# survived the filter", which is a real answer and leaves an empty file; exit 2
+# or more means grep itself failed and the gate cannot decide. Only the first
+# is tolerated.
+filter_paths() {
+  local src="$1" dest="$2" code
+  grep -Ev "$exclude_re" < "$src" > "$work/filter-stage.txt"
+  code=$?
+  if [ "$code" -gt 1 ]; then return "$code"; fi
+  grep -E "$include_re" < "$work/filter-stage.txt" > "$dest"
+  code=$?
+  if [ "$code" -gt 1 ]; then return "$code"; fi
+  return 0
+}
+
+# `git diff` failing must abort. Piping it into `grep ... || true` swallowed the
+# failure: an unresolvable base sha produced two `fatal:` lines, an empty file
+# list, and a clean exit 0 — a gate that gated nothing and said so in the
+# affirmative. Same reasoning as the PCRE preflight above.
+list_diff_paths() {
+  local filter="$1" dest="$2" code
+  git diff --name-only "--diff-filter=$filter" "$base_sha...$head_rev" > "$work/raw.txt"
+  code=$?
+  if [ "$code" -ne 0 ]; then
+    echo "::error::naming-gate could not diff '$base_sha...$head_rev' (git exit $code). The gate cannot decide, so it fails closed."
+    exit 2
+  fi
+  filter_paths "$work/raw.txt" "$dest"
+  code=$?
+  if [ "$code" -ne 0 ]; then
+    echo "::error::naming-gate: grep failed (exit $code) while filtering the --diff-filter=$filter path list"
+    exit 2
+  fi
+}
+
 # Content check: every changed file except DELETED ones (--diff-filter=d).
 # A deletion cannot introduce a prohibited identifier.
-git diff --name-only --diff-filter=d "$base_sha...$head_rev" \
-  | grep -Ev "$exclude_re" \
-  | grep -E "$include_re" > "$work/changed.txt" || true
+list_diff_paths d "$work/changed.txt"
 
 # Filename check: ADDED and RENAMED files only (--diff-filter=AR).
 # A file name is decided once, when the path first appears. Re-checking it on
@@ -48,9 +81,7 @@ git diff --name-only --diff-filter=d "$base_sha...$head_rev" \
 # that file at all — `docs/architecture/session-model-v2.md` is exactly that
 # case in this tree. `R` is kept so a rename INTO a prohibited name is still
 # caught.
-git diff --name-only --diff-filter=AR "$base_sha...$head_rev" \
-  | grep -Ev "$exclude_re" \
-  | grep -E "$include_re" > "$work/added.txt" || true
+list_diff_paths AR "$work/added.txt"
 
 echo "changed files:"
 cat "$work/changed.txt"
@@ -73,8 +104,9 @@ fi
 # flagged: they resolve against a document the repository ships, which is what
 # makes a label domain rather than process.
 #
-# `H[1-9]` is case-sensitive on purpose. HTML heading vocabulary in this tree
-# is lowercase (`<h2`, 192 uses; zero uppercase `H2`), so it needs no carve-out.
+# `H[1-9]` is case-sensitive on purpose. HTML heading vocabulary in this tree is
+# lowercase — 340 `<h2` and zero `<H2` across tracked files — so it needs no
+# carve-out.
 #
 # Test-double words: only `mock` and `fake` are matched as identifiers. `real`
 # and `stub` are ordinary domain vocabulary here and are deliberately NOT
@@ -122,9 +154,11 @@ patterns=(
 #                           what it is not, and is listed in `AGENTS.md` >
 #                           `Known naming divergences` to be renamed. Allowed
 #                           here so the rename is not blocked by its own edits.
-#   MockShell               `web/` landing-page mock-UP frame, sibling of
-#                           `mockup-frame.tsx`. A different word that happens
-#                           to share four letters.
+#   MockShell               `web/` landing-page mock-UP frame — the same
+#                           mock-UP vocabulary as
+#                           `web/components/docs/mockup-frame.tsx`, which sits
+#                           in a different directory. A different word that
+#                           happens to share four letters.
 MOCK_FAKE_ALLOWED='MockMarketplaceFetcher|MockCloudIndexAdapter|MockShell'
 
 # The two test-double patterns are built from that list with a PCRE negative
@@ -150,22 +184,33 @@ is_rule_document() {
   esac
 }
 
-# Added lines of one file, as the patterns see them.
+# Added lines of one file, written to $work/lines.txt as the patterns see them.
+# It writes a file rather than printing to a pipe on purpose: in
+# `added_lines "$f" | grep ...` the function runs in a subshell, so a `git`
+# failure inside it could only end that subshell — grep would then read empty
+# input, exit 1, and the loop would score the file clean. Writing to a file
+# keeps the function in this shell, where its `exit` actually stops the gate.
 added_lines() {
-  local file="$1"
-  local raw
-  raw=$(git diff "$base_sha...$head_rev" -- "$file" | grep -E "^\+")
+  local file="$1" raw code
+  raw=$(git diff "$base_sha...$head_rev" -- "$file")
+  code=$?
+  if [ "$code" -ne 0 ]; then
+    echo "::error::naming-gate could not diff $file (git exit $code) — failing closed."
+    exit 2
+  fi
+  raw=$(printf '%s\n' "$raw" | grep -E "^\+")
   if is_rule_document "$file"; then
     raw=$(printf '%s\n' "$raw" | sed 's/`[^`]*`//g')
   fi
-  printf '%s\n' "$raw"
+  printf '%s\n' "$raw" > "$work/lines.txt"
 }
 
 for pattern in "${patterns[@]}"; do
   while IFS= read -r file; do
     [ -z "$file" ] && continue
     [ ! -f "$file" ] && continue
-    added_lines "$file" | grep -Pn "$pattern" > "$work/hits.txt"
+    added_lines "$file"
+    grep -Pn "$pattern" "$work/lines.txt" > "$work/hits.txt"
     grep_code=$?
     # 0 = matched, 1 = no match, anything else = grep itself failed. The last
     # case must not be read as "clean".
