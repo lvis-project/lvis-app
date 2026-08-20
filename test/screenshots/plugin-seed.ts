@@ -20,9 +20,11 @@ import { canonicalJSON } from '../../src/plugins/whitelist/canonical-json.js';
  * real plugin screens, not placeholder text.
  *
  * The plugin repos live as siblings of this app repo (or of any linked git
- * worktree) at `../lvis-plugin-<slug>/`. They ship a committed `dist/` (built
- * via `bun run build` in each repo), so no per-run build is required — the
- * harness copies the already-built bundle verbatim.
+ * worktree) at `../lvis-plugin-<slug>/`. Their `dist/` is NOT committed, so a
+ * fresh clone has to be built once (`bun install && bun run build` in that repo)
+ * before the harness can seed it; the harness copies the already-built bundle
+ * verbatim and never builds. A repo with no `dist/` is reported as missing and
+ * the scenario that asked for it captures nothing meaningful.
  *
  * Receipt verification (`plugin-install-receipt.ts`, enforced unconditionally
  * at load since the receipt-check-bypass removal) only validates the files it
@@ -136,6 +138,44 @@ export interface SeedRealPluginsResult {
 }
 
 /**
+ * Write `permissions.reviewer.mode` into the isolated profile's
+ * `~/.lvis/settings.json`.
+ *
+ * `disabled` carries the `disabledMigratedAt` marker because without it
+ * `migrateLegacyDisabledMode` rewrites `disabled` -> `strict` (defer every
+ * HIGH) at load, which is the opposite of what the caller asked for — see
+ * src/permissions/permission-settings-store.ts.
+ */
+export function seedReviewerMode(
+  lvisHomeForTest: string,
+  mode: 'disabled' | 'rule' | 'llm' | 'strict',
+): void {
+  const lvisHomeSettingsPath = path.join(lvisHomeForTest, 'settings.json');
+  let lvisHomeSettings: Record<string, unknown> = {};
+  try {
+    // Read directly and treat ENOENT like malformed JSON — avoids the
+    // exists-then-read TOCTOU race (CodeQL js/file-system-race).
+    lvisHomeSettings = JSON.parse(fs.readFileSync(lvisHomeSettingsPath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    lvisHomeSettings = {};
+  }
+  const existingPerms =
+    (lvisHomeSettings.permissions as Record<string, unknown> | undefined) ?? {};
+  lvisHomeSettings.permissions = {
+    ...existingPerms,
+    reviewer: {
+      mode,
+      ...(mode === 'disabled' ? { disabledMigratedAt: new Date().toISOString() } : {}),
+    },
+  };
+  fs.mkdirSync(path.dirname(lvisHomeSettingsPath), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(lvisHomeSettingsPath, `${JSON.stringify(lvisHomeSettings, null, 2)}\n`, {
+    encoding: 'utf-8',
+    mode: 0o600,
+  });
+}
+
+/**
  * Copy the REAL built bundles of the requested plugins into the isolated
  * `~/.lvis/plugins/` and write the registry + receipts + signed whitelist
  * snapshot so the host loads them as local-dev installs at boot.
@@ -172,29 +212,7 @@ export async function seedRealPlugins(
   // to the "Approve Tool Execution" modal. That modal IS the capture target for
   // the `plugin-permission-grant` docs key, so that one scenario opts out here.
   if (disableReviewer) {
-    const lvisHomeSettingsPath = path.join(lvisHomeForTest, 'settings.json');
-    let lvisHomeSettings: Record<string, unknown> = {};
-    try {
-      // Read directly and treat ENOENT like malformed JSON — avoids the
-      // exists-then-read TOCTOU race (CodeQL js/file-system-race).
-      lvisHomeSettings = JSON.parse(fs.readFileSync(lvisHomeSettingsPath, 'utf-8')) as Record<string, unknown>;
-    } catch {
-      lvisHomeSettings = {};
-    }
-    const existingPerms =
-      (lvisHomeSettings.permissions as Record<string, unknown> | undefined) ?? {};
-    lvisHomeSettings.permissions = {
-      ...existingPerms,
-      reviewer: {
-        mode: 'disabled',
-        disabledMigratedAt: new Date().toISOString(),
-      },
-    };
-    fs.mkdirSync(path.dirname(lvisHomeSettingsPath), { recursive: true, mode: 0o700 });
-    fs.writeFileSync(lvisHomeSettingsPath, `${JSON.stringify(lvisHomeSettings, null, 2)}\n`, {
-      encoding: 'utf-8',
-      mode: 0o600,
-    });
+    seedReviewerMode(lvisHomeForTest, 'disabled');
   }
 
   const sourceRoot = resolvePluginSourceRoot(repoRoot);
