@@ -221,8 +221,8 @@ function hostContext(
 
 /** The child's own filesystem envelope, as the production factory derives it. */
 const CONFINEMENT = {
-  pluginRoot: "/plugins/work-assistant",
-  pluginDataDir: "/plugins/work-assistant/data",
+  read: ["/plugins/work-assistant", "/plugins/work-assistant/data"],
+  write: ["/plugins/work-assistant/data"],
 };
 
 describe("the dispatch table, assembled from the four group factories", () => {

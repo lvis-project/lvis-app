@@ -55,13 +55,32 @@ import type {
 
 const PLUGIN_ID = "com.example.service";
 const GENERATION = "gen-3";
+const PLUGIN_ROOT = "/plugins/service";
+const PLUGIN_DATA_DIR = "/plugins/service/data";
 /**
- * The child's own filesystem envelope — the same pair the ASRT wrap grants it.
+ * A host-widened root, standing in for the kind of grant
+ * `PLUGIN_ENVELOPE_GRANTS` produces (a host-owned directory under `~/.lvis`).
+ *
+ * READ-only, which is the shape `derivePluginChildEnvelope` produces for a
+ * `hostDirectory` row: it pushes the directory into `read` alone, and a
+ * `userChosenDirectory` value naming it back is refused by the entry
+ * `ceilingSubtractions` carries for that row — one per `hostDirectory` row in
+ * the table. NOT by the `lvisHome()` entry: a row is a lexical join onto the
+ * home and the containment question is asked on the canonical form, so a
+ * granted directory that links out of the home escapes that entry.
+ * `confined-plugin-child.test.ts` drives the production derivation for that
+ * half. This fixture is therefore the derivation's own output shape rather than
+ * a convenient one, and what it exercises is the boundary that consumes it.
+ */
+const WIDENED_READ_ROOT = "/host/runtime";
+
+/**
+ * The child's own filesystem envelope — the same lists the ASRT wrap grants it.
  * A worker the plugin delegates is checked against exactly this.
  */
 const CONFINEMENT: DelegatedWorkerConfinement = {
-  pluginRoot: "/plugins/service",
-  pluginDataDir: "/plugins/service/data",
+  read: [PLUGIN_ROOT, PLUGIN_DATA_DIR, WIDENED_READ_ROOT],
+  write: [PLUGIN_DATA_DIR],
 };
 
 /** Bytes no UTF-8 round trip survives: a NUL, a lone continuation byte, 0xFF. */
@@ -176,9 +195,9 @@ async function createServiceHarness(
     manifest,
     context: {
       pluginId: PLUGIN_ID,
-      pluginRoot: CONFINEMENT.pluginRoot,
+      pluginRoot: PLUGIN_ROOT,
       hostRoot: "/app",
-      pluginDataDir: CONFINEMENT.pluginDataDir,
+      pluginDataDir: PLUGIN_DATA_DIR,
       installedPluginIds: [],
       generationId: GENERATION,
     },
@@ -960,14 +979,14 @@ describe("a delegated worker cannot reach further than the plugin process itself
     await harness.child.hostApi.spawnWorker!({
       workerId: "indexer",
       command: "/usr/bin/python3",
-      allowReadPaths: [`${CONFINEMENT.pluginRoot}/runtime`, CONFINEMENT.pluginDataDir],
-      allowWritePaths: [`${CONFINEMENT.pluginDataDir}/index`],
+      allowReadPaths: [`${PLUGIN_ROOT}/runtime`, PLUGIN_DATA_DIR],
+      allowWritePaths: [`${PLUGIN_DATA_DIR}/index`],
     });
     expect(spawnWorker).toHaveBeenCalledWith({
       workerId: "indexer",
       command: "/usr/bin/python3",
-      allowReadPaths: [`${CONFINEMENT.pluginRoot}/runtime`, CONFINEMENT.pluginDataDir],
-      allowWritePaths: [`${CONFINEMENT.pluginDataDir}/index`],
+      allowReadPaths: [`${PLUGIN_ROOT}/runtime`, PLUGIN_DATA_DIR],
+      allowWritePaths: [`${PLUGIN_DATA_DIR}/index`],
     });
   });
 
@@ -988,7 +1007,7 @@ describe("a delegated worker cannot reach further than the plugin process itself
     expect(spawnWorker).not.toHaveBeenCalled();
   });
 
-  it("refuses a read grant outside the plugin's own two directories", async () => {
+  it("refuses a read grant outside every root the child holds", async () => {
     const spawnWorker = vi.fn(async () => makeFakeWorker());
     const harness = await createServiceHarness({ spawnWorker });
     await expect(
@@ -996,6 +1015,83 @@ describe("a delegated worker cannot reach further than the plugin process itself
         workerId: "peek",
         command: "/usr/bin/python3",
         allowReadPaths: ["/etc"],
+      }),
+    ).rejects.toMatchObject({ code: "effect-boundary-denied" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("admits a read grant inside a root the HOST widened the child with", async () => {
+    // The composition claim, driven rather than asserted: the check reads the
+    // envelope, so a root the host added to it is delegable with no change to
+    // this file. Without the widening this exact grant is the refusal above.
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await harness.child.hostApi.spawnWorker!({
+      workerId: "indexer",
+      command: `${WIDENED_READ_ROOT}/venv/bin/python`,
+      allowReadPaths: [`${WIDENED_READ_ROOT}/venv/bin/python`],
+    });
+    expect(spawnWorker).toHaveBeenCalledWith({
+      workerId: "indexer",
+      command: `${WIDENED_READ_ROOT}/venv/bin/python`,
+      allowReadPaths: [`${WIDENED_READ_ROOT}/venv/bin/python`],
+    });
+  });
+
+  it("does not let a widened READ root become writable through a worker", async () => {
+    // The delegated half of the same rule the derivation enforces.
+    // `derivePluginChildEnvelope` subtracts each `hostDirectory` row's own
+    // resolved directory from the ceiling a `userChosenDirectory` value is
+    // bounded by, so such a root cannot be in `write` in the first place —
+    // `confined-plugin-child.test.ts` drives the production derivation for that
+    // half, including the case where the granted directory links out of the
+    // host's home. What THIS pins is the boundary that CONSUMES the two lists:
+    // a host decision that the child may READ the provisioned runtime must not
+    // hand it the ability to rewrite that runtime by asking the host to spawn a
+    // worker that can. The fixture's `write` omits the widened root because the
+    // derivation would too.
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "rewrite-runtime",
+        command: "/bin/sh",
+        allowWritePaths: [`${WIDENED_READ_ROOT}/venv`],
+      }),
+    ).rejects.toMatchObject({ code: "effect-boundary-denied" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("does not let the plugin's own runtime root become writable through a worker", async () => {
+    // The delegated half of the ceiling. `PLUGIN_ROOT` is in `read` and its
+    // `data` subdirectory is in `write`, which is the production shape — so a
+    // grant naming a SIBLING of the data directory under that same root is the
+    // one a string-prefix reading of "inside my envelope" would wave through.
+    // What it names is the bundle the next load imports into the main process,
+    // and a worker must not reach it merely because the plugin process may read
+    // it. `derivePluginChildEnvelope` refuses to put such a path into `write` at
+    // all; this pins the boundary that CONSUMES that list, so the refusal does
+    // not rest on the derivation alone staying correct.
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "rewrite-bundle",
+        command: "/bin/sh",
+        allowWritePaths: [`${PLUGIN_ROOT}/dist`],
+      }),
+    ).rejects.toMatchObject({ code: "effect-boundary-denied" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
+  it("refuses a sibling of the widened root, not merely its string prefix", async () => {
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "near-miss",
+        command: "/usr/bin/python3",
+        allowReadPaths: [`${WIDENED_READ_ROOT}-elsewhere`],
       }),
     ).rejects.toMatchObject({ code: "effect-boundary-denied" });
     expect(spawnWorker).not.toHaveBeenCalled();
@@ -1010,7 +1106,7 @@ describe("a delegated worker cannot reach further than the plugin process itself
       harness.child.hostApi.spawnWorker!({
         workerId: "traverse",
         command: "/bin/sh",
-        allowWritePaths: [`${CONFINEMENT.pluginDataDir}/../../../etc`],
+        allowWritePaths: [`${PLUGIN_DATA_DIR}/../../../etc`],
       }),
     ).rejects.toMatchObject({ code: "effect-boundary-denied" });
     expect(spawnWorker).not.toHaveBeenCalled();
@@ -1023,7 +1119,7 @@ describe("a delegated worker cannot reach further than the plugin process itself
       harness.child.hostApi.spawnWorker!({
         workerId: "prefix",
         command: "/bin/sh",
-        allowWritePaths: [`${CONFINEMENT.pluginDataDir}-elsewhere`],
+        allowWritePaths: [`${PLUGIN_DATA_DIR}-elsewhere`],
       }),
     ).rejects.toMatchObject({ code: "effect-boundary-denied" });
     expect(spawnWorker).not.toHaveBeenCalled();
