@@ -1,8 +1,8 @@
 /**
  * #893 Stage 2 — Host implementation of `hostApi.resolveApiKey()`.
  *
- * Wraps the four-tier secret gate (`runSecretGate`) and
- * returns the SDK's discriminated union (`@lvis/plugin-sdk` → `ResolveApiKeyResult`).
+ * Wraps the four-tier secret gate (`runSecretGate`) and returns the SDK's
+ * discriminated union (`@lvis/plugin-sdk` → `ResolveApiKeyResult`).
  * On `ok=true` the host yields a one-shot bearer thunk + `release()`; plugins
  * should call `release()` in a `finally` block so the in-memory copy of the
  * key has a deterministic lifetime.
@@ -102,9 +102,9 @@ export interface ResolveApiKeyDeps {
    */
   getPluginRevokeSignal?: (pluginId: string) => AbortSignal;
   /**
-   * Install-source from the on-disk plugin
-   * registry (`PluginRegistryEntry.installSource`). This is the only value
-   * that can activate the Tier-3 admin-bypass gate:
+   * Install-source from the on-disk plugin registry
+   * (`PluginRegistryEntry.installSource`). This is the only value that can
+   * activate the Tier-3 admin-bypass gate:
    *   - `registry.installSource` is written by the host at install time
    *     under a verified actor; the file lives at
    *     `~/.lvis/plugins/registry.json` and is not part of the plugin's
@@ -159,9 +159,9 @@ function audit(deps: ResolveApiKeyDeps, level: "info" | "warn", message: string)
 }
 
 /**
- * One-shot bearer thunk wired to the request's
- * `AbortSignal`. The captured string is dropped after `release()` so
- * subsequent `bearer()` calls throw `Error("released")` per SDK contract
+ * One-shot bearer thunk wired to the request's `AbortSignal`. The captured
+ * string is dropped after `release()` so subsequent `bearer()` calls throw
+ * `Error("released")` per SDK contract
  * (see `sdk/src/index.ts` `bearer()` docs). Strings in JS are immutable
  * so we cannot literally zero the buffer; the "zeroize" here is a
  * best-effort signal: the reference is dropped, and tests can assert
@@ -210,8 +210,8 @@ function makeSuccess(
 
 /**
  * Resolve an API key for a plugin. Runs the same 4-tier `runSecretGate` as
- * `hostApi.getSecret`, returning the SDK's discriminated union so
- * plugins can branch on each refusal cause.
+ * `hostApi.getSecret`, returning the SDK's discriminated union so plugins can
+ * branch on each refusal cause.
  */
 export async function resolveApiKey(
   request: ResolveApiKeyRequest,
@@ -236,9 +236,9 @@ export async function resolveApiKey(
   };
   const defaultActiveProvider =
     typeof llmSettings.provider === "string" ? llmSettings.provider : "";
-  // Map the SDK vendor enum to the host vendor name so
-  // a Claude-default user + `vendor:"anthropic"` request lands on
-  // `llm.apiKey.claude` not a non-existent `llm.apiKey.anthropic`.
+  // Map the SDK vendor enum to the host vendor name so a Claude-default user
+  // + `vendor:"anthropic"` request lands on `llm.apiKey.claude`, not a
+  // non-existent `llm.apiKey.anthropic`.
   const requestedVendor = request.vendor ?? defaultActiveProvider;
   const normalizedVendor =
     typeof requestedVendor === "string" ? normalizeVendor(requestedVendor) : requestedVendor;
@@ -333,8 +333,8 @@ export async function resolveApiKey(
     // `not-whitelisted` slot. The precise reason lives in the audit log.
     return { ok: false, reason: "not-whitelisted" };
   }
-  // Admin-bypass audit + counter. Emit an
-  // explicit audit line BEFORE the host-secret read so operators can pivot on
+  // Admin-bypass audit + counter. Emit an explicit audit line BEFORE the
+  // host-secret read so operators can pivot on
   // `policy=admin manifest-allowlist-bypassed` in the audit log even if the
   // subsequent settings lookup fails for an unrelated reason. The dedicated
   // `hostSecret_admin_bypass` counter is on top of the regular
