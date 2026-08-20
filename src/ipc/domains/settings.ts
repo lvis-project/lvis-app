@@ -11,6 +11,7 @@ import { CHANNELS } from "../../contract/app-contract.js";
 import { sendToWindow } from "../safe-send.js";
 import { normalizeLocale, setLocale, tryLoadLocaleMessages } from "../../i18n/index.js";
 import { reconcileGlobalShortcuts } from "../../main/global-shortcuts.js";
+import { publishAppPreferenceChange } from "../../boot/steps/plugin-runtime/app-preference.js";
 import {
   reconcileStartupLaunch,
   notifyStartupLaunchFailureIfNeeded,
@@ -219,6 +220,16 @@ async function broadcastSettingsSnapshot(
   shouldBroadcast: () => boolean = () => true,
 ): Promise<void> {
   const snapshot = deps.settingsService.getAll();
+  // Plugins, not just windows. `hostApi.getAppPreference` reads live settings
+  // in process, but an ISOLATED plugin answers it from a host-pushed snapshot
+  // that has to be re-pushed to stay true — this is the announcement that
+  // re-pushes it. Called BEFORE the locale await below and outside its
+  // staleness guard: that guard suppresses a superseded RENDERER snapshot, and
+  // suppressing the preference announcement instead of superseding it would
+  // drop the change rather than re-order it. `publishAppPreferenceChange`
+  // compares the allow-listed values itself, so calling it on every settings
+  // broadcast announces only the saves that moved one.
+  publishAppPreferenceChange(deps.settingsService);
   const snapshotSignature = canonicalStringify(snapshot);
   // Keep the main-process UI locale in sync with the persisted language so
   // dialogs/menus/notifications shown after a language switch use it too.
