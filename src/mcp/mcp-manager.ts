@@ -2,10 +2,9 @@
 
 
 
-import { randomBytes } from "node:crypto";
-import { readFile, writeFile, mkdir, rename, rm } from "node:fs/promises";
+import { readFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join, dirname } from "node:path";
+import { join } from "node:path";
 import type {
   McpResourceSummary,
   McpResourceTemplateSummary,
@@ -23,6 +22,7 @@ import type { PermissionManager } from "../permissions/permission-manager.js";
 import type { AuditLogger } from "../audit/audit-logger.js";
 import type { McpInputRequestResolver } from "./mcp-client.js";
 import { withFileLock } from "../lib/with-file-lock.js";
+import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
 import { MAX_SERVER_ID_LEN } from "../shared/mcp-app-partition.js";
@@ -902,55 +902,21 @@ export class McpManager {
     });
   }
 
-  /** configPath 에 서버 목록을 원자적으로 저장 (temp file → rename) */
+  /**
+   * `configPath` 에 서버 목록을 원자적으로 저장. Routes through the shared
+   * atomic-write authority ({@link writeFileAtomicAtPath}): random staging name
+   * + `O_CREAT|O_EXCL`, fsync of the staged bytes and parent directory, and a
+   * Windows transient-lock retry on the rename. That retry replaces the bespoke
+   * `EEXIST` backup-and-restore dance this used to carry — `EEXIST` is
+   * unreachable for a file-onto-file rename (Win32 `rename` replaces the target),
+   * whereas a scanner briefly locking the config is the case the old dance
+   * missed and the authority's retry now covers.
+   */
   private async saveConfigs(configs: McpServerConfig[]): Promise<void> {
-    const dir = dirname(this.configPath);
-    await mkdir(dir, { recursive: true });
-    const tmpPath = `${this.configPath}.${process.pid}.${randomBytes(4).toString("hex")}.tmp`;
-    try {
-      await writeFile(tmpPath, JSON.stringify({ servers: configs }, null, 2), {
-        encoding: "utf-8",
-        mode: 0o600,
-      });
-      try {
-        await rename(tmpPath, this.configPath);
-      } catch (renameErr) {
-        // Windows rename() may throw EEXIST when the destination already exists.
-        // Preserve the old file until the new one is successfully promoted so a
-        // failed retry cannot delete both copies at once.
-        if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
-          // Windows: move existing config to a unique .old path before promoting
-          // the new file so the original is preserved if the retry rename fails.
-          const bakPath = `${this.configPath}.${process.pid}.${randomBytes(4).toString("hex")}.old`;
-          if (existsSync(this.configPath)) {
-            await rename(this.configPath, bakPath);
-          }
-          try {
-            await rename(tmpPath, this.configPath);
-            // Promote succeeded — erase the backup so secrets don't linger.
-            await rm(bakPath, { force: true }).catch((cleanupErr) => {
-              log.warn({ err: cleanupErr, bakPath }, `saveConfigs: backup cleanup failed — ${bakPath}`);
-            });
-          } catch (retryErr) {
-            // Restore original config from backup.
-            if (existsSync(bakPath)) {
-              await rename(bakPath, this.configPath).catch((restoreErr) => {
-                log.error(
-                  { err: restoreErr, bakPath },
-                  `saveConfigs: restore failed — stale backup at ${bakPath}`,
-                );
-              });
-            }
-            throw retryErr;
-          }
-        } else {
-          throw renameErr;
-        }
-      }
-    } catch (e) {
-      await rm(tmpPath, { force: true }).catch(() => undefined);
-      throw e;
-    }
+    await writeFileAtomicAtPath(
+      this.configPath,
+      JSON.stringify({ servers: configs }, null, 2),
+    );
   }
 
   private toConfigDto(config: McpServerConfig): McpServerConfigDto {
