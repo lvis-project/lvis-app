@@ -521,32 +521,35 @@ describe("the confined child, against the real sandbox", () => {
       // Written against `tmpdir()` rather than a literal so it asks the same
       // question whichever backend is underneath.
       const sharedTemp = join(report.childTmpdir, fx.sharedTempName);
-      expect(report.childTmpdir).not.toBe(report.childHome);
-      expect(report.childTmpdir.startsWith(fx.pluginDataDir)).toBe(false);
-      expect(report.childTmpdir.startsWith(report.childHome)).toBe(false);
-      expect(report.writeChildTmpdir.ok, JSON.stringify(report.writeChildTmpdir)).toBe(true);
-      // Durable, which is what separates this outcome from the `homedir()`
-      // one: the bytes are still there, read from the unconfined host.
-      expect(readFileSync(sharedTemp, "utf-8")).toBe(SHARED_TEMP_BYTES);
-
-      // …and that path is SHARED. A second confined child, from a second
-      // plugin with its own `pluginRoot` and `pluginDataDir`, reads the first
-      // one's bytes. The per-plugin jail is per-plugin; the default paths ASRT
-      // merges are not, so two confined plugins have a write channel between
-      // them that neither manifest declares. Recorded as a defect rather than
-      // closed here — the SOT's axis 6 says what closing it would take and
-      // what it would cost.
-      const crossPluginRead = await runCrossPluginReadProbe(
-        fx,
-        installPlugin(fx, "a-second-confined-plugin"),
-        sharedTemp,
-      );
+      // The shared root outlives the fixture, so this file is the one artefact
+      // `afterEach` cannot reclaim — and it lands in a directory every other
+      // confined child on the machine also reaches. The cleanup wraps every
+      // assertion that follows the write, so a failing one does not leave it
+      // there.
       try {
+        expect(report.childTmpdir).not.toBe(report.childHome);
+        expect(report.childTmpdir.startsWith(fx.pluginDataDir)).toBe(false);
+        expect(report.childTmpdir.startsWith(report.childHome)).toBe(false);
+        expect(report.writeChildTmpdir.ok, JSON.stringify(report.writeChildTmpdir)).toBe(true);
+        // Durable, which is what separates this outcome from the `homedir()`
+        // one: the bytes are still there, read from the unconfined host.
+        expect(readFileSync(sharedTemp, "utf-8")).toBe(SHARED_TEMP_BYTES);
+
+        // …and that path is SHARED. A second confined child, from a second
+        // plugin with its own `pluginRoot` and `pluginDataDir`, reads the first
+        // one's bytes. The per-plugin jail is per-plugin; the default paths
+        // ASRT merges are not, so two confined plugins have a write channel
+        // between them that neither manifest declares. Recorded as a defect
+        // rather than closed here — the SOT's axis 6 says what closing it would
+        // take and what it would cost.
+        const crossPluginRead = await runCrossPluginReadProbe(
+          fx,
+          installPlugin(fx, "a-second-confined-plugin"),
+          sharedTemp,
+        );
         expect(crossPluginRead.ok, JSON.stringify(crossPluginRead)).toBe(true);
         expect(crossPluginRead.value).toBe(SHARED_TEMP_BYTES);
       } finally {
-        // The shared root outlives the fixture, so this is the one artefact
-        // the fixture teardown cannot reclaim.
         rmSync(sharedTemp, { force: true });
       }
 
