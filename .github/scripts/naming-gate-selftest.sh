@@ -203,6 +203,43 @@ edit_clean_line() { echo "export const b = 2;" >> src/a.ts; }
 run_case "grep-without-pcre-aborts" BLOCK pcreless_base edit_clean_line
 
 # ---------------------------------------------------------------------------
+# A diff the gate cannot compute must abort, not report clean
+#
+# `run_case` always hands the gate a base it just committed, so it cannot reach
+# this path. Driven directly instead: a base sha the fixture does not contain
+# makes `git diff` fail, which once produced an empty file list and exit 0 —
+# a gate that checked nothing and reported success.
+# ---------------------------------------------------------------------------
+echo ""
+echo "unresolvable base sha:"
+badbase_dir="$sandbox/unresolvable-base-sha"
+mkdir -p "$badbase_dir"
+(
+  cd "$badbase_dir" || exit 1
+  git init -q .
+  git config user.email a@b.c
+  git config user.name t
+  git config commit.gpgsign false
+  mkdir -p src
+  echo "export const a = 1;" > src/a.ts
+  git add -A
+  git commit -qm base
+  "$gate" 0000000000000000000000000000000000000000 HEAD
+) > "$sandbox/unresolvable-base-sha.log" 2>&1
+badbase_code=$?
+if [ "$badbase_code" -eq 0 ]; then
+  echo "  FAIL  unresolvable-base-sha-aborts: gate reported clean (exit 0) on a diff it could not compute"
+  sed 's/^/        /' "$sandbox/unresolvable-base-sha.log"
+  fail=$((fail + 1))
+elif [ "$badbase_code" -eq 127 ]; then
+  echo "  FAIL  unresolvable-base-sha-aborts: gate could not be executed"
+  fail=$((fail + 1))
+else
+  echo "  ok    unresolvable-base-sha-aborts (exit $badbase_code)"
+  pass=$((pass + 1))
+fi
+
+# ---------------------------------------------------------------------------
 # The allow-list may not outlive the names it excuses
 # ---------------------------------------------------------------------------
 echo ""
