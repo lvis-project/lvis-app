@@ -168,21 +168,20 @@
  * OVERSIGHT. Every hostApi member it touches has a wire form, and a measurement
  * that counted only `hostApi.*` calls therefore read as "ready". That
  * measurement was of the wrong set. `ep-api` never calls `hostApi.hostFetch`:
- * its attendance, parking, approval, video-conference and portal clients all
- * reach the network through the global `fetch`, which is the direct egress
- * point 1 above measures a confined child as NOT having. Its LGenie flow drives
- * a browser the plugin launches itself, which would be a grandchild of that
- * child and would inherit its fence. So admitting `ep-api` would fail its network
- * tools at the first request rather than isolate them. What it needs first, in
- * order:
+ * every one of its REST clients reaches the network through the global
+ * `fetch`, which is the direct egress point 1 above measures a confined child
+ * as NOT having. One of its flows additionally drives a browser the plugin
+ * launches itself, which would be a grandchild of that child and would inherit
+ * its fence. So admitting `ep-api` would fail its network tools at the first
+ * request rather than isolate them. What it needs first, in order:
  *   - its HTTP clients call `hostApi.hostFetch` rather than `fetch`, because
  *     host-mediated egress is the only kind this boundary can express (its
  *     manifest already declares the `external-auth-consumer` capability and the
  *     hosts, which is what that path is checked against);
  *   - the browser-driven flow gets an answer that is not "the plugin launches
  *     a browser". A process a confined child starts is a grandchild of it and
- *     inherits its fence, so the manifest's browser/direct-intranet exception
- *     stops being expressible the moment the plugin moves out of main;
+ *     inherits its fence, so the manifest's browser-launch exception stops
+ *     being expressible the moment the plugin moves out of main;
  *   - the reach is measured again over BOTH sets — `hostApi.*` AND the direct
  *     network and process APIs — since it was the second set that decided this.
  * Until then `ep-api` belongs in neither this set nor a carve-out from it.
