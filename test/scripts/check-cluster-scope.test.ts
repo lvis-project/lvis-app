@@ -16,30 +16,51 @@ function sha(character: string): string {
 }
 
 /**
- * Serve the rolling-window endpoints from fixed page and file maps.
+ * Serve the rolling-window endpoints from page and file maps.
  *
- * Shared because three cases need the same shape and a copy per case is how
+ * Shared because every case needs the same shape and a copy per case is how
  * they drift: a fixture that answers `/pulls` one way and `/pulls/N/files`
  * another stops testing the thing it was written for.
  *
+ * `pulls` is either one page map — the same snapshot on every scan — or one
+ * page map PER SCAN, which is how the concurrent-merge cases move the window
+ * between passes. A new scan is recognised by its request for page 1, and the
+ * last snapshot serves any further scan. Extending this fixture rather than
+ * adding a second one keeps the two shapes from diverging.
+ *
  * `onPullsPage` observes which page numbers were requested, which is how the
  * stop-condition cases tell "the scan ended here" from "the scan ran again" —
- * the evaluation deliberately re-scans to detect a window that moved.
+ * the evaluation deliberately re-scans to pick up what an earlier pass missed.
  */
 function rollingWindowRequestPage(
-  pulls: Record<number, unknown[]>,
+  pulls: Record<number, unknown[]> | Record<number, unknown[]>[],
   files: Record<number, unknown[]>,
   onPullsPage?: (page: number) => void,
 ) {
+  const snapshots = Array.isArray(pulls) ? pulls : [pulls];
+  let scan = -1;
   return (endpoint: string, parameters: { page?: number }) => {
     if (endpoint === "repos/owner/repo/pulls") {
-      onPullsPage?.(parameters.page as number);
-      return pulls[parameters.page as number] ?? [];
+      const page = parameters.page as number;
+      if (page === 1) scan += 1;
+      onPullsPage?.(page);
+      return snapshots[Math.min(scan, snapshots.length - 1)]![page] ?? [];
     }
     const match = endpoint.match(/^repos\/owner\/repo\/pulls\/(\d+)(\/files)?$/);
     if (!match) throw new Error("unexpected-endpoint");
     const number = Number(match[1]);
     return match[2] ? files[number]! : { changed_files: files[number]!.length };
+  };
+}
+
+function trackPullDetailRequests(
+  base: (endpoint: string, parameters: { page?: number }) => unknown,
+  detailed: number[],
+) {
+  return (endpoint: string, parameters: { page?: number }) => {
+    const match = endpoint.match(/^repos\/owner\/repo\/pulls\/(\d+)$/);
+    if (match) detailed.push(Number(match[1]));
+    return base(endpoint, parameters);
   };
 }
 
@@ -246,7 +267,7 @@ describe("cluster scope API evaluation", () => {
     ).toThrow("github-file-record-invalid");
   });
 
-  it("rejects saturated or changing rolling-window pages", () => {
+  it("rejects a saturated page budget and accepts an out-of-order page", () => {
     const pull = (number: number, updatedAt: string) => ({
       merged_at: "2026-07-12T00:00:00Z",
       number,
@@ -267,50 +288,38 @@ describe("cluster scope API evaluation", () => {
       }),
     ).toThrow("pull-request-pages-saturated");
 
-    // A page whose entries are NOT descending is accepted. `updated_at` is a
-    // mutable sort key, so a pull touched while the scan paginates moves and
-    // an item can arrive out of sequence. Refusing that made an ordinary merge
-    // landing mid-scan fail CI, and it protected nothing: `updated_at >=
-    // merged_at` always, so reading until the window is exhausted cannot skip
-    // a pull whose `merged_at` is inside it, whatever order the pages arrive
-    // in. This case used to expect `pull-request-order-invalid`.
-    expect(() =>
+    // A page whose entries are NOT descending is accepted, and BOTH of them
+    // reach evaluation — which is what `count: 2` says, and is why this
+    // asserts the returned verdict rather than the absence of an error
+    // string. `updated_at` is a mutable sort key, so a pull touched while the
+    // scan paginates moves and an item can arrive out of sequence. Refusing
+    // that made an ordinary merge landing mid-scan fail CI, and it bought
+    // nothing: a pull whose `updated_at` rises above the prefix a pass already
+    // read is missed by that pass whatever it asserts. The repeated scan is
+    // what covers that, pinned in "rolling-window revalidation under
+    // concurrent merge". This case used to expect
+    // `pull-request-order-invalid`.
+    //
+    // The break here is WITHIN one page; "still finds every in-window pull
+    // when a page arrives out of order" covers the break at a page boundary.
+    // Page 2 is empty, so the scan terminates on the real stop condition
+    // instead of paginating to the saturation limit the case above already
+    // covers.
+    const sensitive = [{ status: "modified", filename: "src/boot/start.ts" }];
+    expect(
       evaluateSensitiveRollingWindow({
         repo: REPO,
         since: "2026-07-01T00:00:00Z",
         threshold: 3,
         pageSize: 2,
-        requestPage: () => [
-          pull(1, "2026-07-12T03:00:00Z"),
-          pull(2, "2026-07-12T04:00:00Z"),
-        ],
+        requestPage: rollingWindowRequestPage(
+          {
+            1: [pull(1, "2026-07-12T03:00:00Z"), pull(2, "2026-07-12T04:00:00Z")],
+          },
+          { 1: sensitive, 2: sensitive },
+        ),
       }),
-    ).not.toThrow("pull-request-order-invalid");
-
-    let listCalls = 0;
-    expect(() =>
-      evaluateSensitiveRollingWindow({
-        repo: REPO,
-        since: "2026-07-01T00:00:00Z",
-        threshold: 2,
-        pageSize: 2,
-        requestPage: (endpoint: string) => {
-          if (endpoint === "repos/owner/repo/pulls") {
-            listCalls += 1;
-            return [
-              listCalls === 1
-                ? pull(1, "2026-07-12T04:00:00Z")
-                : pull(2, "2026-07-12T04:00:00Z"),
-            ];
-          }
-          if (endpoint.endsWith("/pulls/1")) return { changed_files: 1 };
-          if (endpoint.endsWith("/pulls/1/files")) {
-            return [{ filename: "src/ui/view.tsx", status: "modified" }];
-          }
-          throw new Error("unexpected-endpoint");
-        },
-      }),
-    ).toThrow("pull-request-window-changed");
+    ).toEqual({ count: 2, hit: false });
   });
 
   it("fails closed for incomplete, overflowed, and saturated commit pagination", () => {
@@ -518,10 +527,14 @@ describe("comment-only exclusion from sensitive-cluster detection", () => {
   });
 
   it("stops on the page's OLDEST entry, not on its last one", () => {
-    // Those differ exactly when the order broke. Keying the stop on the last
-    // entry would end the scan while an in-window pull was still unread on the
-    // next page — the completeness bug that swapping the assertion for a
-    // minimum is there to avoid.
+    // Those differ exactly when the order broke, and this pins WHICH of them
+    // the stop reads. Not that reading the minimum is the more complete choice:
+    // it is the less complete one. The minimum is `<=` the last entry, so this
+    // stop fires whenever a last-entry stop would and sometimes a page sooner.
+    // Pull 4 below is inside the window and sensitive, and no scan fetches it —
+    // a last-entry stop would page on and count it. Both halves are asserted
+    // rather than described, because the comment that stood here claimed the
+    // opposite. The trade is documented at the stop in check-cluster-scope.mjs.
     const pulls = {
       1: [
         { number: 1, merged_at: "2026-07-12T09:00:00Z", updated_at: "2026-07-12T10:00:00Z" },
@@ -534,26 +547,33 @@ describe("comment-only exclusion from sensitive-cluster detection", () => {
     };
     const sensitive = [{ status: "modified", filename: "src/boot/start.ts" }];
     const files = { 1: sensitive, 2: sensitive, 3: sensitive, 4: sensitive };
-    // Page NUMBERS, not request count: the evaluation runs the scan twice — the
-    // second pass re-derives the candidates and fails the run if the window
-    // moved underneath it — so counting requests would count that revalidation.
+    // Page NUMBERS, not request count: the evaluation scans the window more than
+    // once and unions the passes, so counting requests would count the rescan.
     const requestedPages = new Set<number>();
+    const detailed: number[] = [];
 
-    const requestPage = rollingWindowRequestPage(pulls, files, (page) =>
-      requestedPages.add(page),
+    const requestPage = trackPullDetailRequests(
+      rollingWindowRequestPage(pulls, files, (page) => requestedPages.add(page)),
+      detailed,
     );
 
-    evaluateSensitiveRollingWindow({
-      repo: REPO,
-      since: "2026-07-01T00:00:00Z",
-      threshold: 99,
-      requestPage,
-      pageSize: 3,
-    });
+    expect(
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: "2026-07-01T00:00:00Z",
+        threshold: 99,
+        requestPage,
+        pageSize: 3,
+      }),
+    ).toEqual({ count: 2, hit: false });
 
-    // Only page 1: its oldest entry is outside the window, so there is nothing
-    // left to find however the entries were ordered within it.
+    // Only page 1: entry 2 is older than the window, so the page minimum ends
+    // the scan even though the last entry is still inside it.
     expect([...requestedPages]).toEqual([1]);
+    // And the cost of that key, pinned so it cannot be restated as a win: pull
+    // 4 merged inside the window, touches a sensitive path, and is never
+    // fetched. The count above is 2 rather than 3 for exactly this reason.
+    expect(detailed).toEqual([1, 3]);
   });
 
   it("counts a pull once when a page shift makes it arrive twice", () => {
@@ -624,5 +644,190 @@ describe("comment-only exclusion from sensitive-cluster detection", () => {
 
     // Stopped at page 2 rather than running to the page limit.
     expect([...requestedPages]).toEqual([1, 2]);
+  });
+});
+
+describe("rolling-window revalidation under concurrent merge", () => {
+  const SINCE = "2026-07-01T00:00:00Z";
+  const SENSITIVE = [{ status: "modified", filename: "src/boot/start.ts" }];
+  const BENIGN = [{ status: "modified", filename: "src/ui/view.tsx" }];
+
+  const merged = (number: number, updatedAt = "2026-07-12T10:00:00Z") => ({
+    merged_at: "2026-07-12T09:00:00Z",
+    number,
+    updated_at: updatedAt,
+  });
+
+  /**
+   * Record which pull numbers had their detail fetched, in order.
+   *
+   * That is the observable difference between "the second pass evaluated the
+   * new pull" and "the second pass merely tolerated it", and between counting a
+   * pull once and counting it per sighting.
+   */
+  it("evaluates a pull that merged between the scans instead of failing the run", () => {
+    // The defect, in its plainest form: an unrelated PR lands mid-evaluation.
+    // Comparing the two scans made that a hard `pull-request-window-changed`
+    // failure. The pull is now evaluated on the second pass and folded in.
+    const detailed: number[] = [];
+    const requestPage = trackPullDetailRequests(
+      rollingWindowRequestPage(
+        [{ 1: [merged(1)] }, { 1: [merged(2), merged(1)] }],
+        { 1: BENIGN, 2: SENSITIVE },
+      ),
+      detailed,
+    );
+
+    expect(
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: SINCE,
+        threshold: 3,
+        requestPage,
+        pageSize: 5,
+      }),
+    ).toEqual({ count: 1, hit: false });
+    // Fetched, not waved through: the late arrival is what raised the count.
+    expect(detailed).toEqual([1, 2]);
+  });
+
+  it("counts a pull the first scan never delivered, to the point of changing the verdict", () => {
+    // Why the second scan is kept rather than deleted. `updated_at` is mutable,
+    // so a pull whose timestamp rises above the prefix pass one already read is
+    // never delivered to pass one at all. Pass two, run after the move settled,
+    // delivers it — and here it is the pull that reaches the threshold.
+    expect(
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: SINCE,
+        threshold: 2,
+        requestPage: rollingWindowRequestPage(
+          [{ 1: [merged(1)] }, { 1: [merged(2), merged(1)] }],
+          { 1: SENSITIVE, 2: SENSITIVE },
+        ),
+        pageSize: 5,
+      }),
+    ).toEqual({ count: 2, hit: true });
+  });
+
+  it("treats an advanced updated_at and a reordered page as the same window", () => {
+    // Neither difference means anything to the verdict, and both were enough to
+    // fail the run while the passes were compared as JSON: `updated_at` was
+    // carried on the candidate, and the comparison was order-sensitive.
+    const detailed: number[] = [];
+    const requestPage = trackPullDetailRequests(
+      rollingWindowRequestPage(
+        [
+          { 1: [merged(1, "2026-07-12T10:00:00Z"), merged(2, "2026-07-12T09:00:00Z")] },
+          { 1: [merged(2, "2026-07-12T11:00:00Z"), merged(1, "2026-07-12T10:00:00Z")] },
+        ],
+        { 1: SENSITIVE, 2: BENIGN },
+      ),
+      detailed,
+    );
+
+    expect(
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: SINCE,
+        threshold: 3,
+        requestPage,
+        pageSize: 5,
+      }),
+    ).toEqual({ count: 1, hit: false });
+    // Once each: the union is keyed on the number, so a second sighting costs
+    // no request and cannot count again.
+    expect(detailed).toEqual([1, 2]);
+  });
+
+  it("keeps the verdict of a pull the rescan no longer delivers", () => {
+    // The mirror of the missed-pull case: the LATER pass is the one with the
+    // hole. Recomputing the verdict from the last scan would silently drop a
+    // sensitive pull already proven to be in the window, which is the one
+    // direction that must never lower the count.
+    expect(
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: SINCE,
+        threshold: 3,
+        requestPage: rollingWindowRequestPage(
+          [{ 1: [merged(1), merged(2)] }, { 1: [merged(2)] }],
+          { 1: SENSITIVE, 2: SENSITIVE },
+        ),
+        pageSize: 5,
+      }),
+    ).toEqual({ count: 2, hit: false });
+  });
+
+  it("settles within the pass budget, and fails loudly when it cannot", () => {
+    // Each snapshot reveals one more merged pull, so the number of snapshots is
+    // the number of scans the window needs to go quiet.
+    const growing = (count: number) =>
+      Array.from({ length: count }, (_unused, index) => ({
+        1: Array.from({ length: index + 1 }, (_entry, offset) =>
+          merged(index + 1 - offset),
+        ),
+      }));
+    const files = { 1: BENIGN, 2: BENIGN, 3: BENIGN, 4: BENIGN };
+
+    // Three moving scans settle on the fourth under the shipped budget of 4.
+    expect(
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: SINCE,
+        threshold: 99,
+        requestPage: rollingWindowRequestPage(growing(3), files),
+        pageSize: 5,
+      }),
+    ).toEqual({ count: 0, hit: false });
+
+    // A fourth still-moving scan exhausts it. Loud, not absorbed: at that point
+    // the window is genuinely unread, and the count would be an undercount.
+    expect(() =>
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: SINCE,
+        threshold: 99,
+        requestPage: rollingWindowRequestPage(growing(4), files),
+        pageSize: 5,
+      }),
+    ).toThrow("pull-request-window-unsettled");
+
+    // The budget is read, not hardcoded at the call site.
+    expect(() =>
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: SINCE,
+        threshold: 99,
+        maxWindowPasses: 2,
+        requestPage: rollingWindowRequestPage(growing(3), files),
+        pageSize: 5,
+      }),
+    ).toThrow("pull-request-window-unsettled");
+
+    expect(() =>
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: SINCE,
+        threshold: 99,
+        maxWindowPasses: 0,
+        requestPage: () => [],
+      }),
+    ).toThrow("window-pass-limit-invalid");
+
+    // One is rejected too, and this is the case that used to slip through — not
+    // because a single scan can only fail. A plain positive-integer check
+    // accepted `1`, then spent a second scan anyway and returned a verdict on a
+    // settled window: the budget was overspent rather than refused, so the
+    // parameter carried its stated meaning only from two upward.
+    expect(() =>
+      evaluateSensitiveRollingWindow({
+        repo: REPO,
+        since: SINCE,
+        threshold: 99,
+        maxWindowPasses: 1,
+        requestPage: () => [],
+      }),
+    ).toThrow("window-pass-limit-invalid");
   });
 });
