@@ -540,9 +540,25 @@ export function normalizePermissionSettings(
   // from `additionalDirectories` in the SAME atomic write that appends the
   // intent, so a root with a removal in flight is already absent from the list.
   // The masking therefore only decides the case where the path is in the list
-  // anyway — a hand edit or an interrupted legacy write, not an in-app add,
-  // which `addAllowedDirectoryPersist` refuses outright while an intent for that
-  // root is pending — and there the journal wins over the list.
+  // anyway, and there the journal wins over the list.
+  //
+  // Three things can leave it there, not two. A hand edit and an interrupted
+  // legacy write are the outside ones. The third is an in-app add, and only
+  // while the entry naming that root is MALFORMED: the add guard in
+  // `addAllowedDirectoryPersist` is handed `journal.intents`, so it refuses an
+  // add that keys onto a READABLE intent and never sees one that only a damaged
+  // entry names, while the salvage below reads paths out of both. That add is
+  // therefore accepted and persisted, and this read then takes back out the
+  // path the add just returned. As answered here the direction is a grant
+  // vanishing rather than appearing, and the same read raises the fault below —
+  // but the store does say yes and then no, and the fault names the file, not
+  // the root, so nothing tells the user which add it was. Repairing the journal
+  // makes the persisted add live. Pinned by "accepts an add for a root only the
+  // unreadable entry names, then drops it on the next read".
+  //
+  // Read that as the routes that exist today, not as a closed set: the masking
+  // does not ask which one put the path there, and a new writer could add a
+  // fourth without this line noticing.
   //
   // What it is NOT. An entry that names nothing (`null`, `7`, an object with no
   // readable path) masks nothing, so a path a hand edit put back stays active.
@@ -585,7 +601,7 @@ export function normalizePermissionSettings(
     dirs = additional.filter((s): s is string => {
       if (typeof s !== "string" || s.length === 0) return false;
       const key = allowedDirectoryKey(s);
-      // Pending wins over a conflicting hand edit or interrupted legacy write.
+      // Pending wins over a conflicting list entry, however it got there.
       return key === null || !pendingKeys.has(key);
     });
   }

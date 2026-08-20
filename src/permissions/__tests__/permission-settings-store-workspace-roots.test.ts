@@ -525,6 +525,54 @@ describe("a settings file the store cannot fully interpret", () => {
     expect(readPermissionSettings(settings).permissions.pendingWorkspaceRootRemovals)
       .toEqual([{ ...VALID_INTENT, storedPath: queued, runtimePath: queued }]);
   });
+
+  // The mirror of the test above, and the limit of that guard: it is handed
+  // `journal.intents`, so an entry it could not read names nothing to it while
+  // still naming its root to the reader's masking. The add is accepted, and the
+  // next read takes the path back out. Written down because the alternative is
+  // the comment beside the masking claiming an in-app add cannot reach this
+  // state — it can.
+  it("accepts an add for a root only the unreadable entry names, then drops it on the next read", async () => {
+    const { root, settings } = fixture();
+    const project = canonicalizePathForMatch(join(root, "project"));
+    mkdirSync(join(root, "project"));
+    writeFileSync(settings, JSON.stringify({
+      permissions: {
+        additionalDirectories: [],
+        // An interrupted legacy write: the paths are readable, so the masking
+        // honours them, but `source` never landed, so the entry is not
+        // actionable as an intent and the add guard never sees it.
+        pendingWorkspaceRootRemovals: [{
+          operationId: VALID_INTENT.operationId,
+          storedPath: project,
+          runtimePath: project,
+          requestedAt: VALID_INTENT.requestedAt,
+        }],
+      },
+    }, null, 2));
+
+    // Not refused, unlike the readable entry above, and it reaches the file.
+    expect(await addAllowedDirectoryPersist(project, settings)).toEqual([project]);
+    const onDisk = JSON.parse(readFileSync(settings, "utf-8")) as {
+      permissions: { additionalDirectories: string[]; pendingWorkspaceRootRemovals: unknown };
+    };
+    expect(onDisk.permissions.additionalDirectories).toEqual([project]);
+
+    // The same read that reports the fault drops the path the add returned.
+    const read = readPermissionSettings(settings);
+    expect(read.permissions.additionalDirectories).toEqual([]);
+    expect(read.fault).toMatchObject({ kind: "pending-removals-malformed", entries: 1 });
+
+    // The grant was persisted, so repairing the journal makes it live. That is
+    // the other half of the comment's claim, and it is why this is a store that
+    // answers yes and then no rather than one that refused. Repair the bytes the
+    // add actually left behind, not a fresh file.
+    onDisk.permissions.pendingWorkspaceRootRemovals = [];
+    writeFileSync(settings, JSON.stringify(onDisk, null, 2));
+    const repaired = readPermissionSettings(settings);
+    expect(repaired.permissions.additionalDirectories).toEqual([project]);
+    expect(repaired.fault).toBeNull();
+  });
 });
 
 describe("a settings file the store cannot parse at all", () => {
