@@ -508,16 +508,22 @@ export function createHostApiFactory(
           key: string,
           callback: (value: T | undefined) => void,
         ): (() => void) => {
+          const invoke = (nextValue: T | undefined) => {
+            if (!hostIncarnation.isActive()) return;
+            callback(nextValue);
+          };
+          // `wrapListener`, not a `void`-discarded `wrapCallback`. The bus
+          // contains a synchronous listener's throw with its own try/catch and
+          // a `log.warn`; a discarded promise skips that entirely and rejects
+          // with nothing attached, which on Node's defaults ends the main
+          // process. Both arms of the ternary therefore fail the same way: the
+          // wrapped one inside `wrapListener`, the bare one in the bus's catch.
+          const notify = hostEffects ? hostEffects.wrapListener(invoke) : invoke;
           const unsubscribe = subscribePluginConfigChange(
             pluginId,
             key,
             (_changedKey, value) => {
-              const invoke = (nextValue: T | undefined) => {
-                if (!hostIncarnation.isActive()) return;
-                callback(nextValue);
-              };
-              if (hostEffects) void hostEffects.wrapCallback(invoke)(value as T | undefined);
-              else invoke(value as T | undefined);
+              notify(value as T | undefined);
             },
           );
           // Auto-cleanup on plugin disable to mirror onEvent semantics.
@@ -550,8 +556,12 @@ export function createHostApiFactory(
         const dispatch = (data: unknown) => {
           if (hostIncarnation.isActive()) handler(data);
         };
-        const guardedHandler = hostEffects ? hostEffects.wrapCallback(dispatch) : dispatch;
-        const unsubscribe = onEvent(type, (data) => { void guardedHandler(data); });
+        // Contained for the same reason `config.onChange` is: `emitEvent`
+        // catches what a synchronous handler throws, and a `void`-discarded
+        // promise would route the wrapped handler's failure around that catch
+        // and into the process.
+        const guardedHandler = hostEffects ? hostEffects.wrapListener(dispatch) : dispatch;
+        const unsubscribe = onEvent(type, (data) => { guardedHandler(data); });
         plog("debug", { pluginId, phase: PluginPhase.EVENT_LISTEN, eventType: type }, "event listener registered");
         return registerOwnedDisposer(unsubscribe);
       },
@@ -573,10 +583,11 @@ export function createHostApiFactory(
           if (typeof subjectId !== "string" || subjectId === pluginId) return;
           handler({ type: "uninstalled", pluginId: subjectId });
         };
-        const guardedInstalled = hostEffects ? hostEffects.wrapCallback(dispatchInstalled) : dispatchInstalled;
-        const guardedUninstalled = hostEffects ? hostEffects.wrapCallback(dispatchUninstalled) : dispatchUninstalled;
-        const unsubInstalled = onEvent("plugin.installed", (data) => { void guardedInstalled(data); });
-        const unsubUninstalled = onEvent("plugin.uninstalled", (data) => { void guardedUninstalled(data); });
+        // Contained, not discarded — see the note on `onEvent` above.
+        const guardedInstalled = hostEffects ? hostEffects.wrapListener(dispatchInstalled) : dispatchInstalled;
+        const guardedUninstalled = hostEffects ? hostEffects.wrapListener(dispatchUninstalled) : dispatchUninstalled;
+        const unsubInstalled = onEvent("plugin.installed", (data) => { guardedInstalled(data); });
+        const unsubUninstalled = onEvent("plugin.uninstalled", (data) => { guardedUninstalled(data); });
         const unsubscribe = () => { unsubInstalled(); unsubUninstalled(); };
         return registerOwnedDisposer(unsubscribe);
       },
