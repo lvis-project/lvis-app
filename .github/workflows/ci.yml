@@ -46,28 +46,14 @@ jobs:
       - name: Ensure uv toolchain
         working-directory: lvis-app
         run: node scripts/fetch-uv.mjs
-      # Source-only assertions over the release-signing workflow: the action
-      # pins, the trust boundaries, and the absence of privileged inputs on
-      # unprivileged jobs. It runs under `node --test`, not vitest, so it was
-      # invoked by nothing and sat red for twelve days after a batch
-      # dependency merge moved a pin without moving its assertion. Costs
-      # ~0.3s; a supply-chain control nothing executes is not a control.
-      - name: Verify release-signing workflow invariants
-        working-directory: lvis-app
-        run: bun run test:a2a-p4-5:evidence
-      - name: Run deterministic Knip gate
-        working-directory: lvis-app
-        run: bun run check:knip && bun run test:knip-gate
-      # The docs-site images are published publicly, and the batch that is there
-      # now was captured by hand from a live session — see
-      # docs/development/screenshot-reshoot.md. This gate cannot read pixels; it
-      # refuses an image that arrives without a written provenance claim, and
-      # ratchets the backlog of images still awaiting replacement. The self-test
-      # runs beside it because a gate nothing exercises reports green after it
-      # has stopped comparing.
-      - name: Screenshot provenance gate
-        working-directory: lvis-app
-        run: bun run check:screenshot-provenance:self-test && bun run check:screenshot-provenance
+      # The steps above are preconditions, not gates: without a checkout, an
+      # install and the uv toolchain there is nothing to verify, so a red job
+      # there genuinely means "could not verify". From here down the job
+      # compiles, builds and tests the product — every step below is one of
+      # those, except `Remove root-level Bun binary shims`, which prepares the
+      # runner for the step after it — and the repository-hygiene gates run
+      # after all of it, at the end of this job. The block above them says why
+      # they are there and not above.
       - name: Typecheck
         working-directory: lvis-app
         run: bun run typecheck
@@ -87,11 +73,133 @@ jobs:
       - name: Remove root-level Bun binary shims before Vitest
         working-directory: lvis-app
         run: rm -f ajv pino
-      - name: Run quality-gated tests
+      - name: Run the suite and its coverage gate
         # The suite resolves entirely from lvis-app/src. Sibling slugs appear
         # only as fixtures or mocked installer inputs.
-        run: bun run check:test-quality
+        #
+        # `check:test-coverage`, not `check:test-quality`: that composite runs
+        # `check:test-duplicates` first, so a duplicated test helper would end
+        # this step before a single test executed — the same masking defect one
+        # layer down, in an npm script instead of a workflow. This job calls the
+        # composite's two halves separately, the duplicate scan last;
+        # `check:test-quality` stays as the local one-shot README.md documents.
+        run: bun run check:test-coverage
         working-directory: lvis-app
+      # A test suite, not a policy gate, which is why it sits with the
+      # verification steps: alongside its source-only assertions over the
+      # release-signing workflow it exercises the release-tooling libraries
+      # themselves — descriptor reading, signed-manifest verification, packaged
+      # executable selection. Failure means that code is wrong. It runs under
+      # `node --test` rather than vitest, so it needs its own step; it was
+      # invoked by nothing and sat red for twelve days after a batch dependency
+      # merge moved a pin without moving its assertion.
+      #
+      # Last of the verification steps, so this narrow suite does not skip the
+      # broad one. `packaging-discipline-source.test.ts` pins that position —
+      # "keeps the release-tooling suite last among the verification steps"
+      # fails if any later command in this job compiles, builds or tests. The
+      # reverse ordering would only cost information: a red build-and-test says
+      # the code failed either way.
+      - name: Run release-tooling tests
+        working-directory: lvis-app
+        run: bun run test:a2a-p4-5:evidence
+      # Repository hygiene: manifests, baseline ledgers, and the self-tests of
+      # the gates that read them. Nothing below compiles or runs the product; a
+      # failure here means a bookkeeping file is stale, not that the code is
+      # broken.
+      #
+      # Two of the four used to run ahead of Typecheck; the duplicate scan ran
+      # ahead of the suite from inside `check:test-quality`, and the sunset
+      # ledger ahead of every compile from inside `bun run build`. Two changes
+      # landed the same day — one declared every tracked image in a manifest,
+      # the other deleted some of those images — and the merge left the
+      # manifest stale. The gate failed, and because a job stops at its first
+      # failed step, Typecheck, the test-typecheck ratchet, the build and the
+      # entire suite were skipped. `main` carried a red check that meant
+      # "nothing was verified", which is indistinguishable from "something was
+      # verified and failed" and so is worse than having no gate at all.
+      # Running these four after every verification step ends that for them.
+      # It does not end it for the repository: the paragraph below names the
+      # commands where the same shape survives, inside `bun run build`.
+      #
+      # Last *in this job* rather than in a job of their own, because the check
+      # name `build-and-test` is one of the two required status checks on
+      # `main`; the other is `naming-gate`. Read the current list with
+      #   gh api repos/lvis-project/lvis-app/branches/main/protection \
+      #     --jq .required_status_checks.contexts
+      # A separate job reports under a separate check name, and a name branch
+      # protection does not list cannot block a merge. That is measured, not
+      # feared: an earlier revision of this change put these three in a
+      # `repo-hygiene` job, and on a commit carrying a deliberately stale
+      # manifest entry both required contexts reported success. Two checks did
+      # go red on it — `Repository hygiene gates` here and `Screenshot
+      # provenance` in web-ci.yml — and neither name is in the required list,
+      # so neither stood between that manifest and a merge. Two jobs is the
+      # better shape and stays available — but the required-contexts list has to
+      # gain the new name in the same change, or the split trades a masking bug
+      # for a silent hole.
+      #
+      # Within this trailing group the first failure still skips the rest: a red
+      # Knip gate leaves the screenshot, duplicate and sunset scans reported as
+      # skipped. That is accepted, not overlooked. Every verification step has
+      # already run and reported its own result by then, and the failing step
+      # names itself, so the red says one true thing — a ledger is stale, and
+      # this is the first one. Reporting all four independently would need `if:
+      # always()` on each, which also runs them after a genuine build failure
+      # and chains bookkeeping noise onto a red that already has its answer, or
+      # one runner per gate.
+      #
+      # What this ordering does NOT reach: `bun run build` above is one workflow
+      # step and fifteen commands, and nine of those assert rather than compile.
+      # Four of the nine — `check:import-cycles`, `check-generated-assets`,
+      # `check:i18n-catalog`, `check:i18n-barrels` — sit ahead of a later
+      # compile command inside the composite, and all nine sit ahead of the
+      # suite in this job, so any of them can fail the build step and skip the
+      # steps after it. That residual is deliberate and bounded: each reads
+      # either the sources being compiled or the bytes the build itself just
+      # wrote, and a local `bun run build` is where their drift has to surface.
+      # `check:sunset-inventory` was the one that did not fit that description —
+      # it reads a hand-written ledger naming source paths that any unrelated
+      # change can delete, the same shape as the manifest incident above — so it
+      # left the composite and runs here instead. Measured on this tree before
+      # the move: one nonexistent path added to the inventory made `bun run
+      # build` exit 1 at `[sunset-inventory]`, with clean-dist, build:icons,
+      # build:main and build:webpack never reached.
+      #
+      # `src/__tests__/packaging-discipline-source.test.ts` fails if any job in
+      # .github/workflows/ puts one of these gates ahead of a compile or test
+      # step, if these gates leave `build-and-test`, if one of them re-enters
+      # the `build` composite, and if the set of asserting commands inside that
+      # composite changes without the list above changing with it.
+      - name: Run deterministic Knip gate
+        working-directory: lvis-app
+        run: bun run check:knip && bun run test:knip-gate
+      # The docs-site images are published publicly, and the batch that is there
+      # now was captured by hand from a live session — see
+      # docs/development/screenshot-reshoot.md. This gate cannot read pixels; it
+      # refuses an image that arrives without a written provenance claim, and
+      # ratchets the backlog of images still awaiting replacement. The self-test
+      # runs beside it because a gate nothing exercises reports green after it
+      # has stopped comparing.
+      - name: Screenshot provenance gate
+        working-directory: lvis-app
+        run: bun run check:screenshot-provenance:self-test && bun run check:screenshot-provenance
+      # The other half of `check:test-quality`. Duplicated test helpers are a
+      # bookkeeping fact about the test tree, not a statement about whether the
+      # product works, so this scan runs after the suite it would otherwise be
+      # able to end.
+      - name: Scan for duplicate test helpers
+        working-directory: lvis-app
+        run: bun run check:test-duplicates -- --fail-on-duplicates
+      # `docs/development/legacy-sunset-inventory.json` declares, per temporary
+      # code path, the source files that carry it. It goes stale the way the
+      # screenshot manifest did — one change deletes a file, this ledger keeps
+      # naming it — which is why it is here and not in the `build` composite it
+      # used to open. Appended last so the step numbers of the steps above are
+      # the ones the pull request's evidence table records.
+      - name: Legacy sunset inventory gate
+        working-directory: lvis-app
+        run: bun run check:sunset-inventory
 
   windows-permission-tests:
     name: Windows permission path tests
