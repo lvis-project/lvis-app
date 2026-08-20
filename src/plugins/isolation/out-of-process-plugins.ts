@@ -103,7 +103,9 @@
  *    `undefined` and a guard on it throws. The denial is NOT uniform across
  *    module systems, and the difference decides WHERE a plugin breaks:
  *    measured in the same child, `import("electron")` RESOLVES — to an inert
- *    namespace whose `BrowserWindow` is `undefined` — while
+ *    namespace: `BrowserWindow` is `undefined` on the namespace AND its
+ *    `default`, which is where a CJS module reached through the ESM resolver
+ *    would carry the API, is an EMPTY object — while
  *    `import { BrowserWindow } from "electron"` fails to link at all with a
  *    `SyntaxError`. So a `require` plugin fails at resolution, an ESM plugin
  *    with a named import fails before it runs a line, and an ESM plugin that
