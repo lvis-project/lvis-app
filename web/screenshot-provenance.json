@@ -1,0 +1,406 @@
+{
+  "schemaVersion": 1,
+  "pendingReplacementBaseline": 43,
+  "seededAccounts": [
+    "work-board-seed",
+    "marketplace-dev",
+    "host-capture-seed"
+  ],
+  "images": {
+    "favicon.svg": {
+      "surface": "site brand mark",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "lvis-mark.svg": {
+      "surface": "site brand mark",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/agent-hub-my-work.png": {
+      "surface": "work board plugin panel",
+      "data": "third-party",
+      "action": "redact"
+    },
+    "screenshots/agent-hub-team-board.png": {
+      "surface": "work board plugin panel",
+      "data": "third-party",
+      "action": "redact"
+    },
+    "screenshots/ah-dashboard.png": {
+      "surface": "work board web app",
+      "data": "seeded",
+      "action": "none",
+      "account": "work-board-seed",
+      "overlayChecked": true
+    },
+    "screenshots/ah-inbox.png": {
+      "surface": "work board web app",
+      "data": "seeded",
+      "action": "none",
+      "account": "work-board-seed",
+      "overlayChecked": true
+    },
+    "screenshots/ah-report.png": {
+      "surface": "work board web app",
+      "data": "seeded",
+      "action": "none",
+      "account": "work-board-seed",
+      "overlayChecked": true
+    },
+    "screenshots/ah-subscription.png": {
+      "surface": "work board web app",
+      "data": "seeded",
+      "action": "none",
+      "account": "work-board-seed",
+      "overlayChecked": true
+    },
+    "screenshots/ah-workboard.png": {
+      "surface": "work board web app",
+      "data": "seeded",
+      "action": "none",
+      "account": "work-board-seed",
+      "overlayChecked": true
+    },
+    "screenshots/ah-worklog.png": {
+      "surface": "work board web app",
+      "data": "seeded",
+      "action": "none",
+      "account": "work-board-seed",
+      "overlayChecked": true
+    },
+    "screenshots/chat-app-update.png": {
+      "surface": "host chat surface",
+      "data": "owner",
+      "action": "none"
+    },
+    "screenshots/chat-permission-directory.png": {
+      "surface": "host chat surface",
+      "data": "owner",
+      "action": "none"
+    },
+    "screenshots/chat-permission-llm-review.png": {
+      "surface": "host chat surface",
+      "data": "owner",
+      "action": "none"
+    },
+    "screenshots/chat-permission-risk.png": {
+      "surface": "host chat surface",
+      "data": "owner",
+      "action": "none"
+    },
+    "screenshots/chat-plugin-panel.png": {
+      "surface": "host chat surface",
+      "data": "owner",
+      "action": "none"
+    },
+    "screenshots/chat-question-card.png": {
+      "surface": "host chat surface",
+      "data": "owner",
+      "action": "none"
+    },
+    "screenshots/chat-todo-queue.png": {
+      "surface": "host chat surface",
+      "data": "owner",
+      "action": "none"
+    },
+    "screenshots/chat-tool-thinking.png": {
+      "surface": "host chat surface",
+      "data": "owner",
+      "action": "none"
+    },
+    "screenshots/ep-approval.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-attendance-2.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-attendance-3.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-attendance.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-internal-search-2.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-internal-search.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-login.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-meeting-room-2.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-meeting-room-3.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-meeting-room-4.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-meeting-room-5.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-meeting-room.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-parking.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-video-call-2.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-video-call-3.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-video-call-4.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/ep-video-call.png": {
+      "surface": "internal portal plugin panel",
+      "data": "third-party",
+      "action": "remove",
+      "note": "Internal-portal page and its assets are removed by the in-flight de-identification change; no capture work here."
+    },
+    "screenshots/local-indexer-add-folder.png": {
+      "surface": "local-indexer plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/local-indexer-home.png": {
+      "surface": "local-indexer plugin panel",
+      "data": "owner",
+      "action": "none"
+    },
+    "screenshots/local-indexer-index-search.png": {
+      "surface": "local-indexer plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/local-indexer-indexing.png": {
+      "surface": "local-indexer plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/local-indexer-search-2.webp": {
+      "surface": "local-indexer plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/local-indexer-search-3.webp": {
+      "surface": "local-indexer plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/local-indexer-search.webp": {
+      "surface": "local-indexer plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/meeting-minutes-2.png": {
+      "surface": "meeting plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/meeting-minutes-3.png": {
+      "surface": "meeting plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/meeting-minutes.png": {
+      "surface": "meeting plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/meeting-outlook-mail-2.png": {
+      "surface": "meeting + mail integration",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/meeting-outlook-mail.png": {
+      "surface": "meeting + mail integration",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/meeting-record-stt.png": {
+      "surface": "meeting plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/meeting-record.png": {
+      "surface": "meeting plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/meeting-upcoming.png": {
+      "surface": "meeting plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/mp-admin-2.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/mp-admin-3.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/mp-admin-4.png": {
+      "surface": "marketplace web app",
+      "data": "owner",
+      "action": "redact",
+      "note": "Admin key inventory: labels plus truncated key prefixes. Project-owned dev keys, not third-party data, but the prefix column should not be public."
+    },
+    "screenshots/mp-admin-5.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/mp-admin.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/mp-agents.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/mp-login.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/mp-mcp.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/mp-plugin.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/mp-publisher-2.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/mp-publisher.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/mp-skills.png": {
+      "surface": "marketplace web app",
+      "data": "synthetic",
+      "action": "none"
+    },
+    "screenshots/outlook-login-after.png": {
+      "surface": "ms-graph plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/outlook-login-trigger.png": {
+      "surface": "ms-graph plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/outlook-login-window.png": {
+      "surface": "ms-graph plugin panel",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/outlook-logout.png": {
+      "surface": "ms-graph plugin panel",
+      "data": "owner",
+      "action": "none"
+    },
+    "screenshots/plugin-permission-grant.png": {
+      "surface": "host plugin dialog",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/work-assistant-conflict-2.png": {
+      "surface": "work-assistant host notification card",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/work-assistant-conflict.png": {
+      "surface": "work-assistant host notification card",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/work-assistant-meeting-end-trigger-2.png": {
+      "surface": "work-assistant host notification card",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/work-assistant-meeting-end-trigger.png": {
+      "surface": "work-assistant host notification card",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/work-assistant-reminder-2.png": {
+      "surface": "work-assistant host notification card",
+      "data": "third-party",
+      "action": "reshoot"
+    },
+    "screenshots/work-assistant-reminder.png": {
+      "surface": "work-assistant host notification card",
+      "data": "third-party",
+      "action": "reshoot"
+    }
+  }
+}
