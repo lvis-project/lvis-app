@@ -105,15 +105,20 @@ fi
 # makes a label domain rather than process.
 #
 # `H[1-9]` is case-sensitive on purpose. HTML heading vocabulary in this tree is
-# lowercase — 340 `<h2` and zero `<H2` across tracked files — so it needs no
-# carve-out.
+# lowercase: 340 lowercase `<h2` across tracked text files, and no uppercase
+# `<H2` in any of them except this sentence. So the pattern needs no carve-out.
+# Measured with `git ls-files | xargs grep -Iho '<h2'`; `-I` matters, because a
+# tracked binary can contain those two bytes by coincidence and does.
 #
 # Test-double words: only `mock` and `fake` are matched as identifiers. `real`
 # and `stub` are ordinary domain vocabulary here and are deliberately NOT
-# matched — `real*` names a POSIX `realpath` result and `stub*` names a
-# compaction stub. The old pattern was anchored on a lowercase first letter, so
-# it could not match the `Mock*`/`Real*` class names the rule was written for
-# and produced only false positives. `mock`/`fake` now match both spellings.
+# matched — `real*` is a POSIX `realpath` result in six of its eight spellings,
+# and every `stub*` is a compaction stub. The two `real*` names that are not
+# realpath results are in `AGENTS.md` > `Known naming divergences`; neither is
+# half of a double split, which is the reviewer question this check defers to.
+# The old pattern was anchored on a lowercase first letter, so it could not
+# match the `Mock*`/`Real*` class names the rule was written for, and produced
+# only false positives. `mock`/`fake` now match both spellings.
 #
 # They are NOT free of legitimate production uses, so the match is filtered
 # through MOCK_FAKE_ALLOWED below rather than asserted to be clean.
@@ -240,7 +245,8 @@ while IFS= read -r file; do
     # compaction stub); as a filename PREFIX they are adjectives and the
     # contrast is the whole meaning. The hatch is a `Why <prefix>:` header in
     # the first 30 lines, for a simulation the product deliberately ships. No
-    # file in this tree carries one.
+    # file in this tree uses the hatch; the only place that literal appears is
+    # the self-test fixture that proves it works.
     if ! head -30 "$file" 2>/dev/null | grep -qE 'Why (real|mock|fake|stub):'; then
       echo "::error file=$file::new $base prefix in production path without 'Why <prefix>:' header justification"
       violations=$((violations + 1))

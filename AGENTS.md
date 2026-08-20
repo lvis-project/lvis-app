@@ -107,9 +107,8 @@ wrong, and not licence to leave it stale. A clause with no query behind it has
 no number in it: the rule is stated, and the reader is told it is unmeasured.
 
 The file set the counts are taken over, so a clause can be rechecked rather
-than trusted. Every query below that says `<file set>` means this pipeline, and
-every one of them needs a PCRE-capable `grep` — GNU grep, not the BSD grep
-macOS ships:
+than trusted. Every query below that says `<file set>` means this pipeline;
+`How the counts were taken` records which queries need which tools, and why:
 
     git ls-files 'src/**' | grep -E '\.(ts|tsx)$' \
       | grep -Ev '(__tests__/|__mocks__/|\.test\.|\.spec\.)' \
@@ -233,11 +232,15 @@ there breaks the build. Concretely, and measured over `web/`:
   function, never as a declaration here. An external API's spelling is not this
   standard's to fix.
 - `*Sync` is reserved for the synchronous sibling of an operation that is
-  otherwise async, matching the `node:fs` convention (`ensureDir` /
-  `ensureDirSync`). A `*Sync` name with no async sibling carries no
-  information — drop the suffix. Eleven such names are in `src/`, listed under
-  `Known naming divergences`; `node:fs` and other third-party `*Sync` names are
-  out of scope for the same reason the `*Async` clause gives.
+  otherwise async — the `node:fs` convention, whose own pairs are `readFile` /
+  `readFileSync` and `stat` / `statSync`. It has no `ensureDir`; this
+  repository's nearest instance of the shape is its own `ensureDir`
+  (`src/main/storage/feature-namespace.ts`) against `ensureDirSync`
+  (`src/memory/session-search-index.ts`), which is two helpers in two modules
+  rather than one module's pair. A `*Sync` name with no async counterpart
+  carries no information — drop the suffix. Eleven such names are in `src/`,
+  listed under `Known naming divergences`; `node:fs` and other third-party
+  `*Sync` names are out of scope for the same reason the `*Async` clause gives.
 
 ### Events and handlers
 
@@ -280,10 +283,12 @@ there breaks the build. Concretely, and measured over `web/`:
 ### Test doubles
 
 - No *file* outside a test directory is named for being a double. All four
-  double-prefixed filenames in the tree live under `__tests__/` or `test/`.
+  `real-`/`mock-`/`fake-`/`stub-`-prefixed filenames in the tree live under
+  `__tests__/` or `test/`.
 - Three *identifiers* spelled `Mock*` do live in production paths, and they are
-  the whole of it — 44 lines across six files, reproduced by the first query in
-  `How the counts were taken`. Two of the three are legitimate and one is not:
+  the whole of it — 44 lines across six files, reproduced by the `Test doubles`
+  query in `How the counts were taken`. Two of the three are legitimate and one
+  is not:
   - `MockMarketplaceFetcher` (`src/plugins/marketplace.ts`, 8 lines) is a
     backend kind, the same axis as `CloudMarketplaceFetcher`: it serves the
     catalog from a local file for development, and its constructor throws in a
@@ -338,8 +343,9 @@ there breaks the build. Concretely, and measured over `web/`:
   contrast to some other file is the whole meaning; in an identifier they are
   nouns here. A file whose subject really is a stub says so in noun position,
   the way `tool-result-stub.ts` does. The hatch for a simulation the product
-  deliberately ships is a `Why <prefix>:` header in the first 30 lines; no file
-  in this tree carries one.
+  deliberately ships is a `Why <prefix>:` header in the first 30 lines. No file
+  in this tree uses the hatch; the only place the literal appears is the
+  fixture in `.github/scripts/naming-gate-selftest.sh` that proves it works.
 - Both checks are reproducible; the queries are in `How the counts were taken`.
 
 ### Domain labels versus process labels
@@ -400,10 +406,13 @@ resolve this label from a document the repository ships?**
 
 ### Organizational identifiers
 
-`lvis-project/lvis-app` is a public repository. Every plugin repository it
-describes is private, so "internal implementation stays private" is already the
-boundary — a name committed here crosses it, permanently, in a clone anyone can
-take.
+`lvis-project/lvis-app` is a public repository: this file, every file beside
+it, and the whole commit history are readable by anyone. The plugin
+repositories that integrate with an internal system are private — the SDK is
+public, the integrations are not — so "the integration details stay private" is
+already the boundary. A name committed here crosses it permanently, in a clone
+that cannot be recalled. Check a repository's visibility rather than assuming
+it from the pattern of the ones around it.
 
 - The employer's name and brand, its internal system and product names, its
   internal hostnames and network coordinates, and colleagues' names do not
@@ -420,11 +429,16 @@ take.
   code talks to stays, a name that decorates an explanation goes. The
   difference is the consequence — a vendor name is an attribution problem, this
   one is a disclosure.
-- Enforcement belongs in CI, and the pattern list belongs with the enforcement,
-  not in this document. Writing the literals here in order to ban them would
-  republish exactly what the rule removes, and a second copy of a pattern list
-  is the split this file exists to prevent. This clause owns the rule; the job
-  owns the patterns.
+- Enforcement belongs in a diff-scanning CI job — `deidentification-gate` in
+  `.github/workflows/naming-gate.yml`, beside the process-label job that
+  `Domain labels versus process labels` describes, because both answer the same
+  question about a token in a diff. The pattern list lives with that job and
+  deliberately not here: writing the literals into this file in order to ban
+  them would republish exactly what the rule removes, and a second copy of a
+  pattern list is the split this file exists to prevent. This clause owns the
+  rule; the job owns the patterns. Where no job is matching yet, the clause
+  still binds as a reviewer rule — the same split this document uses for
+  everything grep cannot decide.
 - Deriving an assertion from a manifest or a bundle beats copying a literal
   into a test. A test that hard-codes the identifier both leaks it and pins one
   value; reading it from the artifact under test does neither.
@@ -499,10 +513,21 @@ precedent.
 
 ### How the counts were taken
 
-Every number in `Naming` is the output of one of these, run with GNU grep from
-the repository root. `<file set>` is the pipeline in `Scope`; `<gate scan>` is
-the second pipeline below, which is the set the gate itself reads. Re-run the
-query before disputing a number, and update the clause when it has drifted.
+Every number in `Naming` is the output of one of these, run from the repository
+root. `<file set>` is the pipeline in `Scope`; `<gate scan>` is the first query
+printed below, which is the set the gate itself reads. Re-run the query before
+disputing a number, and update the clause when it has drifted.
+
+These were last taken with GNU grep 3.11 and git 2.47 on Linux, the same pair
+CI runs, and the `grep -E` queries were cross-checked against BSD grep 2.6 on
+macOS with identical results. Three queries below depend on the toolchain. The
+two spelled `grep -P` need PCRE, which stock macOS grep does not have — it
+rejects the option and exits 2, so that one fails loudly. The audit-key query
+is spelled `sed -E` because the basic-regex `\|` alternation it used to carry
+is a GNU extension that BSD sed matches literally, printing nothing and exiting
+0 — a silence indistinguishable from a real zero. State a number only for the
+scope you ran it over; a query that cannot run is not a query that returned
+zero.
 
     # <gate scan> — every file the naming gate reads (1640)
     git ls-files | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' \
@@ -545,9 +570,13 @@ query before disputing a number, and update the clause when it has drifted.
     # Booleans: 1483 boolean-typed names, 173 is/has/can/should-prefixed
     <file set> | xargs grep -hoE '\b[a-zA-Z_$][A-Za-z0-9_$]*\??: boolean' \
       | sed -E 's/\??: boolean//'
+      #   prefixed   grep -cE '^(is|has|can|should)[A-Z]'
 
-    # Booleans: 415 boolean-returning function declarations, 366 distinct
-    <file set> | xargs grep -hoE 'function [a-zA-Z_$][A-Za-z0-9_$]*\([^)]*\): boolean'
+    # Booleans: 415 boolean-returning function declarations, 366 distinct,
+    # 292 of the declarations opening with a question word
+    <file set> | xargs grep -hoE 'function [a-zA-Z_$][A-Za-z0-9_$]*\([^)]*\): boolean' \
+      | sed -E 's/^function ([A-Za-z0-9_$]*).*/\1/'
+      #   question-opening   grep -cE '^(is|has|can|should|are|does)[A-Z]'
 
     # Async: 502 async function declarations, 0 named *Async; 8 *Async spellings
     <file set> | xargs grep -hoE 'async function [a-zA-Z_$][A-Za-z0-9_$]*'
@@ -562,9 +591,16 @@ query before disputing a number, and update the clause when it has drifted.
     # Errors: 70 classes extending an Error type, 69 ending in Error
     <file set> | xargs grep -hoE 'class [A-Za-z0-9_$]+ extends [A-Za-z0-9_$.]*Error\b'
 
-    # Audit: the 12 admitted type keys, 11 snake_case and 1 kebab
-    sed -n '/export interface \(AuditEntry\|SandboxGateAuditEntry\)/,/^}/p' \
+    # Audit: the 12 admitted type keys, 11 snake_case and 1 kebab.
+    # `sed -E`, not a BRE with `\|`: alternation in a basic regex is a GNU
+    # extension that BSD sed matches literally, so the BRE spelling prints
+    # nothing at all on macOS and the query reports zero keys instead of 12.
+    sed -E -n '/export interface (AuditEntry|SandboxGateAuditEntry)/,/^}/p' \
       src/audit/audit-logger.ts | grep -E '^  type: ' | grep -oE '"[a-z0-9_-]+"' | sort -u
+
+    # Test doubles: the four double-prefixed filenames, all under a test dir
+    git ls-files | while read -r f; do case "$(basename "$f")" in \
+      real-*|mock-*|fake-*|stub-*) echo "$f";; esac; done
 
     # Test doubles: the 44 production-path Mock*/Fake* lines in six files.
     # AGENTS.md and CLAUDE.md are excluded for the same reason the gate strips
@@ -588,9 +624,18 @@ query before disputing a number, and update the clause when it has drifted.
     <gate scan> | xargs grep -hoE '§[0-9]+(\.[0-9]+)*'
     <gate scan> | xargs grep -hoE '#[0-9]+\b'
 
-    # Process labels surviving anywhere the gate reads: one line, in
-    # .omc/plans/open-questions.md. Run each pattern from the gate's own list:
-    <gate scan> | xargs grep -nP '\bR-[1-9][0-9]?\b'
+    # Process labels surviving anywhere the gate reads. Every pattern in the
+    # gate's `patterns=(...)` array is run, not just one; the two test-double
+    # patterns are appended to that array separately and are measured by the
+    # test-double query above instead. This document is excluded for the same
+    # reason that query excludes it — a rule document has to name what it bans,
+    # which is why the gate strips its code spans. Exactly one line survives:
+    # a review-round list in .omc/plans/open-questions.md, a planning artifact.
+    sed -n '/^patterns=(/,/^)/p' .github/scripts/naming-gate.sh \
+      | grep -oE "'[^']+'" | tr -d "'" \
+      | while IFS= read -r pat; do
+          <gate scan> | grep -Ev '^(AGENTS|CLAUDE)\.md$' | xargs grep -nP "$pat"
+        done
 
 ## Architecture and security invariants
 

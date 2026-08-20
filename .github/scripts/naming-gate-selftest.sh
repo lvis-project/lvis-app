@@ -9,6 +9,14 @@
 # the gate: the assertions are about behavior, so a change in the gate that
 # alters behavior fails here.
 #
+# Each case names one of the gate's three outcomes, because they are not
+# interchangeable: PASS is exit 0, BLOCK is exit 1 and means the gate matched a
+# violation, ABORT is exit 2 or more and means the gate refused to decide. A
+# harness that folded ABORT into BLOCK would score every BLOCK case green on a
+# host where the gate cannot run at all — 19 vacuous passes on stock macOS,
+# where `grep` has no `-P`. That is the same fail-open the gate itself aborts
+# to avoid, so it is spelled out here rather than left to a non-zero test.
+#
 # Usage: naming-gate-selftest.sh [path/to/naming-gate.sh] [repo-root]
 # Exit 0 when every case matches its expectation. `repo-root` is the checkout
 # the allow-list liveness check reads; it defaults to this script's repository.
@@ -29,12 +37,24 @@ fi
 # report as a passing assertion.
 gate="$(cd "$(dirname "$gate")" && pwd)/$(basename "$gate")"
 
+# The gate aborts on a `grep` without PCRE, so on such a host every case would
+# reach that abort instead of the pattern it is meant to exercise. Refuse to
+# report a score at all rather than print one that means nothing. The
+# `grep-without-pcre-aborts` case below is unaffected: it shims a PCRE-less
+# `grep` onto `PATH` inside its own fixture, so it does not depend on the host
+# lacking one.
+if ! printf 'a\n' | grep -qP 'a' 2>/dev/null; then
+  echo "FATAL: naming-gate-selftest requires a grep with PCRE support (-P)."
+  echo "       Stock macOS grep has none; install GNU grep or run this in CI."
+  exit 2
+fi
+
 pass=0
 fail=0
 sandbox=$(mktemp -d)
 trap 'rm -rf "$sandbox"' EXIT
 
-# run_case <name> <BLOCK|PASS> <base-setup-fn> <edit-fn>
+# run_case <name> <PASS|BLOCK|ABORT> <base-setup-fn> <edit-fn>
 #
 # base-setup-fn writes the pre-change tree; edit-fn writes the change. Both run
 # with the fixture repository as the working directory.
@@ -64,8 +84,11 @@ run_case() {
     fail=$((fail + 1))
     return
   fi
+  # 0 / 1 / >=2 are three different answers from the gate, not two. Collapsing
+  # the last two would let a gate that died score as a gate that matched.
   local actual="PASS"
-  [ "$code" -ne 0 ] && actual="BLOCK"
+  [ "$code" -eq 1 ] && actual="BLOCK"
+  [ "$code" -gt 1 ] && actual="ABORT"
   if [ "$actual" = "$expect" ]; then
     echo "  ok    $name ($actual)"
     pass=$((pass + 1))
@@ -200,7 +223,7 @@ SHIM
   export PATH="$PWD/bin:$PATH"
 }
 edit_clean_line() { echo "export const b = 2;" >> src/a.ts; }
-run_case "grep-without-pcre-aborts" BLOCK pcreless_base edit_clean_line
+run_case "grep-without-pcre-aborts" ABORT pcreless_base edit_clean_line
 
 # ---------------------------------------------------------------------------
 # A diff the gate cannot compute must abort, not report clean
