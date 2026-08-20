@@ -345,7 +345,14 @@ way to ship a boundary that reassures without protecting.
   audit logger. This is the largest gain, it is total, and nothing else in the stack
   provides it.
 - **No Electron.** `require("electron")` in the child yields nothing. `BrowserWindow`,
-  `session`, and `app` become unreachable.
+  `session`, and `app` become unreachable. Measured, not assumed:
+  `confined-plugin-child.test.ts` drives a real confined child and gets
+  `MODULE_NOT_FOUND` — while `process.versions.electron` in that same child still
+  reports a version, so a plugin gating on the version reaches the call anyway.
+  Shipping the `electron` package does not restore it either: the package's entry
+  exports the binary's **path as a string**, so `BrowserWindow` is `undefined`.
+  This is a gain **and** an admission constraint — a plugin that owns a window of
+  its own is not a migration candidate. See Stage 8.
 - **A structural chokepoint.** Every hostApi call becomes a message the host
   services. `instrumentEffectsByPath` stops being "a wrapper we hope is total,
   guarded by a completeness test" and becomes "the only way in".
@@ -700,11 +707,86 @@ test suite must assert that residual explicitly rather than skipping the platfor
 
 *Scope.* One PR per plugin, adding its id to the routing SOT.
 
-*What proves it.* Per-plugin e2e, same shape as Stage 6.
+*What proves it.* Per-plugin e2e, same shape as Stage 6, **plus the admission
+criterion below**. The e2e alone is not enough and that is not hypothetical: two
+plugins were judged migratable on a per-plugin census of their `hostApi` surface and
+both judgements were wrong, in the same direction, for the same reason.
+
+#### The admission criterion, and why the obvious one fails
+
+The criterion cannot be "does every hostApi member it calls have a wire form",
+because §2.2's wire is complete — that question can only answer "ready". A plugin's
+capabilities arrive from two places, and the wire preserves only one of them:
+
+- **Mediated** — what the host hands it as `hostApi`. The wire preserves this.
+- **Ambient** — what the runtime hands it merely by being loaded in main: the global
+  scope, the built-in modules, the identity of the process. Nothing mediates this,
+  which is exactly what §4 says the boundary takes away.
+
+So the question that decides admission is *which ambient capabilities does this
+plugin use, and does a mediated form of each exist*. Measured over both sets, over
+the plugin's **dependencies** as well as its own sources, and against a real confined
+child. The axes, with what a child measurably gets — each was driven through the
+production spawn rather than reasoned about. **Measured** and **asserted** are not
+the same thing, so the last column says which: an assertion is a case that goes red
+when the fact stops holding, and two of these five have none.
+
+| Ambient axis | What a confined child gets | Mediated form | Pinned by a case? |
+|---|---|---|---|
+| Direct network egress (global `fetch`, `node:http`/`https`/`net`/`tls`/`dgram`, an HTTP client library, a dependency with its own socket) | None. Against an **allow-listed** host: `fetch` fails, DNS fails `ENOTFOUND`, and a raw connect to a literal IP fails `EPERM` at the syscall. The child's env names the loopback listener that enforces the allow-list; `NODE_USE_ENV_PROXY` is absent, so Node's own clients ignore it. | `hostApi.hostFetch`. Declaring the host does **not** help — the request never reaches the allow-list. | **No.** macOS fences through a proxy and Linux through a namespace, so one probe means different things per platform, and an internet probe passes on an offline machine for the wrong reason. Resolved by a per-platform case against a host-controlled listener. |
+| Electron main-process APIs | None — `MODULE_NOT_FOUND`, while `process.versions.electron` still answers. Vendoring the package yields the binary path as a string. | Only `openExternalUrl`, `openAuthWindow`, `openAuthPartitionViewer`, `clearAuthPartition`. **No** form of `BrowserWindow`, `screen`, `session`, `ipcMain`. | Yes. |
+| Process spawning | A grandchild inherits the child's fence (asserted in both directions). On Windows the sandbox does not confine process creation at all — §4's residual. | `hostApi.spawnWorker`, inside the same confinement envelope. | Yes, in both directions. |
+| Native modules (`.node`, or a dependency that loads one) | They **load**. `process.dlopen` of a prebuilt addon inside the read carve-out succeeds. It is compiled against the child binary's ABI, which is Electron's and not plain Node's, so a plain-Node prebuild breaks — and an addon is ambient code the wire cannot see, so the sandbox is the only thing between it and the OS. | None, and none is wanted. This axis is an argument for the sandbox being mandatory, not for a wire. | **No.** The measurement loaded a prebuilt addon already in this repository's dependency tree for one platform; a case pinned to that path would assert a fixture. Resolved by an addon the suite builds for the platform it runs on. |
+| The process's own identity (`os.tmpdir()`, cwd, home) | The sandbox **substitutes** the temp root and creates nothing, so `os.tmpdir()` routinely does not exist: `readdirSync`/`mkdtempSync` fail `ENOENT` while a recursive `mkdir` on the same path succeeds. | None needed — `pluginDataDir` is granted and exists before the child starts. | Yes. |
+
+A plugin passes when every axis it touches has a mediated form **and already uses
+it**. "Could be changed to use it" is a backlog item, not an admission. Per-plugin
+status, with assumptions marked as assumptions, lives beside the set in
+`src/plugins/isolation/out-of-process-plugins.ts` — that file is the SOT for
+*whether*, this section is the SOT for *how it is decided*.
+
+#### The windowing question, answered rather than deferred
+
+One first-party plugin is refused on the Electron axis: its primary tool opens a
+floating recorder window. The obvious next move is "build a windowing wire". That
+move is **not worth making**, and the reason is that "the plugin needs a window" is
+three requests wearing one coat:
+
+1. **Window lifecycle and geometry** — create, position from the primary display's
+   work area, always-on-top, frameless, fixed size, close. This part marshals
+   cleanly: a declarative window spec crosses, the host owns `screen` and
+   `BrowserWindow`, an opaque handle comes back. Nothing here is hard.
+2. **The window's contents** — plugin-authored markup and script, with a
+   plugin-authored preload, in a renderer. This part is where a windowing wire
+   would undo the stage. Shipping plugin code into a renderer is a **second
+   evaluation of plugin JavaScript in a process the child does not control and the
+   sandbox does not wrap**, and its preload holds an `ipcRenderer` channel to main.
+   The boundary exists because plugin JS should not run beside host authority;
+   re-admitting it through a window is the same defect at a different address.
+   The host already has the safe version of this: `ui[]` `embedded-module` slots,
+   loaded by the renderer out of the plugin root, which is why the recorder's
+   sidebar entry is unaffected by the move at all.
+3. **System-audio capture** — a partition-bound session whose display-media request
+   handler the plugin installs, plus the platform flag for the OS audio tap. This is
+   not windowing in any sense. The display-media handler decides *what the user's
+   machine records*; letting a confined plugin install one would hand it a
+   capability strictly more dangerous than `getSecret`, through a hole opened for
+   window frames.
+
+So the answer is not a windowing wire. It is that a recorder surface has to become a
+**host capability**: the host owns the window, the partition and the display-media
+handler behind its own declared permission and its own consent, and the plugin
+contributes a UI module through the mechanism that already exists plus ordinary tool
+calls. That is a host feature with a user-facing consent story, not a plugin
+migration — and until it exists, the plugin **stays in-process** and its id stays out
+of the routing SOT. Recording something the boundary cannot express is a better
+outcome than a migration that silently ends it.
 
 *Risk: low per PR, and it declines with each one.* If a plugin needs a marshalling
 decision §3 did not anticipate, that decision lands here — visibly, one plugin at a
-time, rather than as a surprise in a big-bang cutover.
+time, rather than as a surprise in a big-bang cutover. What raises the risk is not
+marshalling but the ambient axes above, and those are why the criterion is a gate
+rather than a checklist.
 
 ### Stage 9 — Admit third-party plugins
 

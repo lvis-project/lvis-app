@@ -22,6 +22,11 @@
  *    the positive case is part of the proof.
  *  - Confinement is MANDATORY: with ASRT inactive the spawn throws and no child
  *    exists. There is no unconfined child to fall back to.
+ *  - `electron` is UNREACHABLE in the child. §4 lists that as a gain of the
+ *    boundary; it is also the reason a plugin that owns a window cannot be
+ *    admitted, so it is asserted here rather than described. Both the bare
+ *    require and the shipped package are covered, because the second is what an
+ *    author reaches for after the first.
  *
  * WHAT IS NOT PROVEN HERE, stated rather than implied:
  *
@@ -156,10 +161,28 @@ function installPlugin(fx: Fixture, pluginId: string): InstalledPlugin {
  */
 function writeProbeModule(fx: Fixture): string {
   const probePath = join(fx.root, "probe.mjs");
+  // The `electron` npm package's entry, in the shape that matters: it exports
+  // the PATH of the binary as a string. Planted from the host, inside the
+  // child's read carve-out, because the child could not create it and because
+  // the question it answers — "what if the plugin ships the package?" — is
+  // about what the entry EXPORTS, not about module resolution.
+  const vendoredDir = join(fx.pluginRoot, "vendored-electron");
+  mkdirSync(vendoredDir, { recursive: true });
+  writeFileSync(
+    join(vendoredDir, "index.js"),
+    "module.exports = '/path/to/an/Electron/binary';\n",
+    "utf-8",
+  );
   writeFileSync(
     probePath,
     `import { readFileSync, writeFileSync } from "node:fs";
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
 const attempt = (fn) => { try { return { ok: true, value: fn() }; } catch (error) { return { ok: false, code: error.code ?? error.name }; } };
+/** What \`typeof\` says about a resolved module's \`BrowserWindow\`, or the kind of the module itself. */
+const describeModule = (value) => (value && typeof value === "object")
+  ? { kind: "object", browserWindow: typeof value.BrowserWindow }
+  : { kind: typeof value, browserWindow: "undefined" };
 const report = {
   readSecret: attempt(() => readFileSync(${JSON.stringify(fx.secretFile)}, "utf-8")),
   readOwnData: attempt(() => readFileSync(${JSON.stringify(join(fx.pluginDataDir, "own-data.txt"))}, "utf-8")),
@@ -167,6 +190,13 @@ const report = {
   writeOutside: attempt(() => { writeFileSync(${JSON.stringify(fx.outsideFile)}, "escaped"); return "written"; }),
   writeSecrets: attempt(() => { writeFileSync(${JSON.stringify(join(fx.lvisHome, "secrets", "planted.txt"))}, "escaped"); return "written"; }),
   electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,
+  // The process IS Electron — this is the binary the host runs as — and the
+  // next two lines are what it can do with that.
+  electronVersion: process.versions.electron ?? null,
+  requireElectron: (() => { const r = attempt(() => require("electron")); return r.ok ? { ok: true, module: describeModule(r.value) } : r; })(),
+  // The package, resolved by absolute path so the answer is about what the
+  // ENTRY exports rather than about where resolution happened to look.
+  requirePackagedElectron: (() => { const r = attempt(() => require(${JSON.stringify(join(fx.pluginRoot, "vendored-electron", "index.js"))})); return r.ok ? { ok: true, module: describeModule(r.value) } : r; })(),
 };
 process.stdout.write("PROBE:" + JSON.stringify(report) + "\\n");
 `,
@@ -181,6 +211,18 @@ interface ProbeAttempt {
   readonly code?: string;
 }
 
+/** What a resolved module turned out to be, from inside the child. */
+interface ProbeModule {
+  readonly kind: string;
+  readonly browserWindow: string;
+}
+
+interface ProbeModuleAttempt {
+  readonly ok: boolean;
+  readonly module?: ProbeModule;
+  readonly code?: string;
+}
+
 interface ProbeReport {
   readonly readSecret: ProbeAttempt;
   readonly readOwnData: ProbeAttempt;
@@ -188,6 +230,9 @@ interface ProbeReport {
   readonly writeOutside: ProbeAttempt;
   readonly writeSecrets: ProbeAttempt;
   readonly electronRunAsNode: string | null;
+  readonly electronVersion: string | null;
+  readonly requireElectron: ProbeModuleAttempt;
+  readonly requirePackagedElectron: ProbeModuleAttempt;
 }
 
 async function runProbe(fx: Fixture): Promise<ProbeReport> {
@@ -277,9 +322,32 @@ describe("the confined child, against the real sandbox", () => {
         "hello",
       );
 
-      // The child runs as plain Node, which is what makes `electron`
-      // unreachable in it (§4).
+      // ── §4's "No Electron", as a measurement rather than a sentence ────
+      //
+      // This used to assert the environment variable alone, under a comment
+      // saying `electron` was unreachable — a control claimed in prose beside
+      // code that never checked it. The variable is the MECHANISM; these are
+      // the answers.
       expect(report.electronRunAsNode).toBe("1");
+      // The process is Electron: `process.execPath` is the Electron binary in
+      // production and, because this repository runs its own tests under that
+      // binary, here too. So this is not a Node-versus-Electron artifact of the
+      // runner — and the version being present while the API is not is the
+      // trap: a plugin gating on `process.versions.electron` gets YES and walks
+      // into the call below.
+      expect(report.electronVersion).not.toBeNull();
+      expect(report.requireElectron, JSON.stringify(report.requireElectron)).toMatchObject({
+        ok: false,
+        code: "MODULE_NOT_FOUND",
+      });
+      // And shipping the package does not answer it: its entry exports the
+      // binary's PATH as a string, so `BrowserWindow` is `undefined` and any
+      // guard on it throws. Both halves are asserted because a plugin author
+      // hitting the first will try the second.
+      expect(
+        report.requirePackagedElectron,
+        JSON.stringify(report.requirePackagedElectron),
+      ).toMatchObject({ ok: true, module: { kind: "string", browserWindow: "undefined" } });
     },
     60_000,
   );
@@ -626,9 +694,30 @@ export const createPlugin = async (context) => {
 });
 
 /**
- * `meeting`, out of process and confined, through the production factory.
+ * A CANDIDATE's members, driven through the production factory.
  *
- * THE POINT OF THIS ONE IS THE GATE. In one heap `hostApi.getSecret` was a
+ * The plugin modelled here is `meeting`, and the routing SOT REFUSES it. This
+ * case is what produced that refusal and what keeps it honest: it drives the
+ * members that plugin reaches against a real confined child and reports, in one
+ * run, both what survives the move and what does not. Read as "evidence the
+ * plugin is ready" it would be misread — a case that only ever exercised the
+ * surviving members is exactly the measurement that admitted two plugins
+ * wrongly, and the refusing assertions below are here so that shape cannot come
+ * back.
+ *
+ * WHAT REFUSES IT, and each is independently sufficient:
+ *
+ *  - Its primary tool opens a floating recorder window through `electron`, and
+ *    a confined child has no `electron` — the window handler below runs the
+ *    plugin's own pre-flight guard and is denied. There is no wire form for
+ *    `BrowserWindow`, `screen`, `session` or `ipcMain`, so this is not a
+ *    marshalling gap but the boundary working as designed.
+ *  - Its `createPlugin` sweeps `os.tmpdir()` unguarded before anything else, and
+ *    the substituted temp root does not exist on an ordinary machine — so the
+ *    plugin would not load at all, which is a different and worse failure than
+ *    a degraded one.
+ *
+ * THE POINT OF THE REST OF IT IS THE GATE. In one heap `hostApi.getSecret` was a
  * function `meeting` could simply not call: the secret gate lives in the same
  * process as the plugin, and `<LVIS_HOME>/secrets/` is a `readFileSync` away.
  * Out of process it is the only entrance, so the interesting assertion is not
@@ -661,9 +750,9 @@ export const createPlugin = async (context) => {
  *    `/tmp/claude` happens to exist, which is the only reason the first
  *    measurement of this consequence read as green.
  */
-describe("meeting, out of process and confined", () => {
+describe("a refused candidate's members, out of process and confined", () => {
   it.runIf(process.platform === "darwin" || process.platform === "linux")(
-    "carries the gate's verdict both ways while the secrets file stays out of reach",
+    "carries the gate's verdict both ways, and refuses the window its primary tool opens",
     async () => {
       if (!(await asrtCanInitialize())) return;
       const fx = fixture!;
@@ -687,7 +776,9 @@ describe("meeting, out of process and confined", () => {
         `import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
+const require = createRequire(import.meta.url);
 const attempt = async (fn) => {
   try { return { ok: true, value: await fn() }; }
   catch (error) { return { ok: false, code: error.code ?? error.name, message: String(error.message ?? "") }; }
@@ -730,6 +821,23 @@ export const createPlugin = async (context) => {
         };
       },
       meeting_prompts_probe: async () => ({ ...observedPrompts }),
+      // The primary tool's own pre-flight, transcribed from the plugin: resolve
+      // \`electron\`, insist \`BrowserWindow\` is constructible and \`screen\` can
+      // answer for the display, then bind a partitioned session for the
+      // recorder's audio capture. The plugin runs exactly this BEFORE it
+      // side-effects, and wraps a failure as "floating window unsupported".
+      // Reproduced rather than imported because the plugin lives in another
+      // repository; what makes it a measurement is that the shape of the guard
+      // is the plugin's and the answer is a real confined child's.
+      meeting_window_probe: async () => await attempt(() => {
+        const electron = require("electron");
+        if (typeof electron.BrowserWindow !== "function"
+          || typeof electron.screen?.getPrimaryDisplay !== "function") {
+          throw new Error("BrowserWindow/screen unavailable in this host context");
+        }
+        electron.session.fromPartition("persist:recorder");
+        return "the recorder window would open";
+      }),
       // FFmpeg: staged under pluginDataDir exactly where ffmpegRuntime.ts puts
       // it, then run. The plugin is useless without this, and it is the second
       // thing a jail could plausibly break.
@@ -858,6 +966,7 @@ export const createPlugin = async (context) => {
             "meeting_credentials_probe",
             "meeting_transcription_probe",
             "meeting_prompts_probe",
+            "meeting_window_probe",
             "meeting_ffmpeg_probe",
             "meeting_legacy_session_probe",
             "meeting_tmpdir_probe",
@@ -942,6 +1051,22 @@ export const createPlugin = async (context) => {
           // assertion that would go red if it started reading back as `null`.
           intermediate: ["undefined", null],
         });
+
+        // ── the window its primary tool opens, which does NOT survive ──────
+        const window = (await instance.handlers.meeting_window_probe!()) as {
+          ok: boolean;
+          code?: string;
+          value?: string;
+        };
+        // The guard fails at RESOLUTION, before it can even ask whether
+        // `BrowserWindow` is a constructor. Asserted by code so a future child
+        // that resolved `electron` to something inert would fail here loudly
+        // rather than by returning a shape the guard happens to reject.
+        expect(window, JSON.stringify(window)).toMatchObject({
+          ok: false,
+          code: "MODULE_NOT_FOUND",
+        });
+        expect(window.value).toBeUndefined();
 
         // ── the FFmpeg runtime the plugin stages and runs itself ───────────
         const ffmpeg = (await instance.handlers.meeting_ffmpeg_probe!()) as {
