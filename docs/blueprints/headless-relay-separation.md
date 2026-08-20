@@ -126,9 +126,47 @@ given and the call is deferred to the implementing review.
 | # | Coupling | Verdict | Evidence |
 |---|---|---|---|
 | A | **Consent** — `ApprovalGate` constructor takes a `WebContents` | **One essential requirement, incidental mechanism** | Essential: a mutating external-origin request must reach a live surface that a principal can answer, or be denied. Incidental: that surface being an Electron `WebContents` — Telegram already answers through `resolve` with no `WebContents` (§2.3). |
-| B | **IpcDeps** — non-optional `getMainWindow` | **Incidental** | Consumed at one site, `broadcastPermissionModeChanged` in `src/ipc/handlers/permissions.ts`, via `deps.getMainWindow?.()` and `deps.getAppWindows?.()`; `sendToWindow(null, …)` returns `false` (a no-op). It is a renderer cache-refresh notice, not on the request-execution path. The Electron import here is `import type { BrowserWindow }` (erased). |
+| B | **IpcDeps** — non-optional `getMainWindow` | **Incidental — broad in extent, shallow in kind** | Every consumer is an outbound *UI-surface* notice (`webContents.send`, dialog-parent lookup), none on the request-execution or consent path; the import is `import type { BrowserWindow }` (erased). But the accessor is read at **25 sites across 16 `src/ipc` files, not one** — `broadcastPermissionModeChanged` is only one of them, and one of the *already null-safe* ones. See the census below; it corrects an inversion in an earlier draft. |
 | C | **Secret store** — `safeStorage` value-imports | **Incidental for the seam'd runtimes; unresolved for `settings-store`** | The `SecretEncryption` interface (`src/data/secret-document-store.ts`) imports no Electron. Three optional relay runtimes already inject it: `tailnet-paired-sharing-runtime.ts`, `a2a-remote-runtime.ts`, `telegram-platform-runtime.ts` each default `options.encryption ?? safeStorage`. But `src/data/settings-store.ts` hardwires `encryption: safeStorage` and does not expose the seam — a fourth value-import the design must account for, not paper over (§4, Step 3). |
 | D | **Placement / entry** — relay modules in `src/main`, sole entry is Electron boot | **Incidental** | The relay ingress modules are Electron-free or type-only (`local-api-server.ts` only `import type { BrowserWindow }`; `conversation-command-port.ts` imports no Electron). The one true runtime value-import that forces a window is the entry itself: `src/main.ts` imports `app` from Electron. |
+
+### Coupling B census — the window accessor
+
+`IpcDeps.getMainWindow` (`src/ipc/types.ts`, declared non-optional
+`() => BrowserWindow | null`) is invoked at **25 consumer sites across 16
+files** under `src/ipc` (Appendix A; a 26th grep match, `src/ipc/index.ts`, is
+the registrar's default-param wiring, not a consumer). Step 4 proposes making
+that accessor *optional* so a windowless process need not fabricate a getter.
+The 25 sites split two ways against that change:
+
+- **Already null-tolerant of a missing accessor — 5 sites / 4 files.**
+  `deps.getMainWindow?.()` in `domains/permissions.ts` (×2),
+  `domains/tailnet-sharing.ts`, `domains/telegram-connection.ts`, and
+  `handlers/permissions.ts:broadcastPermissionModeChanged`. An optional
+  accessor changes nothing here. This is the inversion to correct: the earlier
+  draft named `broadcastPermissionModeChanged` as *the* single consumer and the
+  proof that "runtime already tolerates a missing window", when it is in fact
+  one of the *already-`?.()`* sites — so it is exactly the site the change does
+  **not** touch, not the site the change is sized by.
+
+- **Type-fragile direct calls — 20 sites / 12 files.** `getMainWindow()`
+  without accessor-level optional chaining, in `domains/`: `attach.ts`,
+  `chat.ts` (×3), `diagnostics.ts`, `plugins.ts` (×5), `prompts.ts`,
+  `session-todo.ts`, `sidechat.ts`, `terminal.ts`, `tour.ts`, `window.ts` (×2),
+  `work-board.ts` (×2), `workspace.ts`. Making `getMainWindow` optional on
+  `IpcDeps` turns each into a compile error — measured by flipping the field to
+  optional and running `bun run typecheck`: **exactly 20 `TS2722` "cannot invoke
+  an object which is possibly undefined" diagnostics**, one per site. These, not
+  the broadcast, are the worklist Step 4 must size to.
+
+The verdict stays **Incidental**, and deliberately so: none of the 25 sites sit
+on the request-execution or consent path. Each is a renderer-facing event push
+(`webContents.send`) or a dialog-parent lookup — work a windowless process
+simply has nowhere to deliver, so denying it a window is inert, not a security
+change. What "incidental" does *not* mean is "small": the accessor is threaded
+through most of the IPC domain surface, and severing it is a 20-callsite edit,
+not a one-consumer swap. Kind and extent are separate axes; the coupling is
+incidental in kind and broad in extent.
 
 ## 4. The six steps
 
@@ -219,20 +257,28 @@ real security decision: what `SecretEncryption` a non-Electron process uses.
 (the current `secret-document-store.ts` contract), never silently downgrade to
 plaintext.
 
-### Step 4 — IpcDeps: an honest, optional surface-broadcast
+### Step 4 — IpcDeps: an honest, optional window accessor
 
-**What changes.** Make the window accessor honest about a windowless world:
-either mark `getMainWindow` optional on `IpcDeps` or replace the single
-consumer (`broadcastPermissionModeChanged`) with a surface-broadcast port that
-fans out to whatever surfaces are attached and no-ops with zero. Behavior is
-already null-safe (§3.B); this step removes the *type* obligation that a window
-exists.
+**What changes.** Make the window accessor honest about a windowless world by
+marking `getMainWindow` optional on `IpcDeps`. Per the §3.B census, the 5
+already-`?.()` consumers (including `broadcastPermissionModeChanged`) need no
+edit; the **20 direct `getMainWindow()` callsites across 12 domain files** each
+become a compile error and must be updated to tolerate a missing accessor —
+either `getMainWindow?.()` at the callsite or routed through one shared helper
+(e.g. `resolveMainWindow(deps): BrowserWindow | null` returning `null` when the
+accessor is absent). Runtime behavior is unchanged: the accessor's declared
+return is `BrowserWindow | null`, so the clean baseline typecheck already forces
+every one of these sites to handle a null window today; this step only removes
+the *type* obligation that the accessor itself exists.
 
-**Why.** So the headless entry need not fabricate a `BrowserWindow` to satisfy
-`IpcDeps`. This is a type-honesty change, not a behavior change.
+**Why.** So the headless entry need not fabricate a `BrowserWindow` — nor a fake
+`getMainWindow` getter — to satisfy `IpcDeps`. Type-honesty, not behavior
+change.
 
-**Size.** Small. One type and one function; the runtime already tolerates a
-missing window.
+**Size.** Medium-small, and mechanical. One type-field flip fans out to ~20
+callsites in 12 files; the 20 `TS2722` diagnostics the flip produces are the
+exact, checker-enforced worklist, and each fix is a local `?.` or helper call
+with no behavior change.
 
 ### Step 5 — Consent-surface port *(the hard step — full analysis in §5)*
 
@@ -386,6 +432,16 @@ grep -rlE "from ['\"]electron['\"]|require\(['\"]electron['\"]\)" src/api src/en
 #         (expect: src/data/settings-store.ts only)
 grep -rn "from ['\"]electron['\"]" src/engine src/api src/permissions src/data \
   --include="*.ts" | grep -v "import type" | grep -v "__tests__"
+
+# §3.B — every IpcDeps.getMainWindow invocation
+#         (expect: 26 grep matches = 25 consumer sites across 16 files
+#          + 1 default-param wiring line in src/ipc/index.ts)
+grep -rnE "getMainWindow(\(|\?\.\()" src/ipc --include="*.ts" | grep -v "__tests__"
+# §3.B — the type-fragile subset. Flip getMainWindow to optional in
+#         src/ipc/types.ts (getMainWindow?: () => BrowserWindow | null) and run
+#         `bun run typecheck`: expect exactly 20 TS2722 "cannot invoke an object
+#         which is possibly 'undefined'" errors, across 12 files. The 5 ?.()
+#         consumers stay green. Revert the flip afterward.
 
 # §3.C — the three seam'd secret-store runtimes (expect: 3 files, 4 hits)
 grep -rn "options.encryption ?? safeStorage" src --include="*.ts" | grep -v __tests__
