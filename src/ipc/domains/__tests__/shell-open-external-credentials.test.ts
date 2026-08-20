@@ -17,7 +17,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { CHANNELS } from "../../../contract/app-contract.js";
 import { makeAppIpcInvoker } from "./test-helpers.js";
-import { createOnOpenLink } from "../../../ui/renderer/components/mcp-app-bridge/handlers/on-open-link.js";
+import { createOnOpenLink } from "../../../ui/renderer/components/mcp-app-bridge/handlers.js";
 
 const handlers = new Map<string, (...args: unknown[]) => unknown>();
 const openExternalSpy = vi.hoisted(() => vi.fn(async () => undefined));

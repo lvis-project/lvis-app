@@ -15,7 +15,7 @@ import { McpAppFullscreenPanel } from "../McpAppFullscreenPanel.js";
 import { McpAppView } from "../McpAppView.js";
 import { McpAppPipPanel } from "../McpAppPipPanel.js";
 import { stubMcpLvis, ThemeWrapper } from "./mcp-app-test-helpers.js";
-import { createOnRequestDisplayMode } from "../mcp-app-bridge/handlers/on-request-display-mode.js";
+import { createOnRequestDisplayMode } from "../mcp-app-bridge/handlers.js";
 import {
   __resetMcpAppCardLocationStoreForTests,
   getCardLocation,

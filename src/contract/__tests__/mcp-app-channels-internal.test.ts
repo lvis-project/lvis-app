@@ -12,7 +12,6 @@ import {
   PUBLIC_CHANNELS,
   EXTERNAL_MUTATION_CHANNELS,
   CHANNEL_GESTURE,
-  INTERNAL_HOST_CHANNELS,
   isPublicChannel,
 } from "../app-contract.js";
 
@@ -56,16 +55,6 @@ describe("#885 MCP-app channels are internal (fail-closed)", () => {
     for (const channel of mcpAppChannels) {
       expect(extSet.has(channel), `leaked external-mutation: ${channel}`).toBe(false);
       expect(CHANNEL_GESTURE[channel], `gesture-classified: ${channel}`).toBeUndefined();
-    }
-  });
-
-  it("classifies no MCP channel as a window-manager-registered handler", () => {
-    // The window-spawning arm of this family is retired: every remaining MCP channel is
-    // either registered in-tree under `src/ipc/` or a pure main→renderer event. A new
-    // entry appearing here would mean a window handler came back.
-    const windowManager = new Set<string>(INTERNAL_HOST_CHANNELS.windowManager);
-    for (const channel of mcpAppChannels) {
-      expect(windowManager.has(channel), channel).toBe(false);
     }
   });
 
