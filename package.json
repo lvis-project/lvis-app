@@ -68,6 +68,8 @@
     "test:knip-gate": "node --test test/scripts/knip-baseline.test.mjs && node scripts/check-knip-gate-self-test.mjs",
     "check:no-inline-channels": "node scripts/check-no-inline-channels.mjs",
     "check:source-text-safe": "node --test test/scripts/source-text-safe.test.mjs && node scripts/check-source-text-safe.mjs",
+    "check:screenshot-provenance": "node scripts/check-screenshot-provenance.mjs",
+    "check:screenshot-provenance:self-test": "node scripts/check-screenshot-provenance-self-test.mjs",
     "check:knip": "node scripts/check-knip-baseline.mjs",
     "check:knip:engine": "knip --config knip.jsonc --reporter json",
     "check:knip:self-test": "node scripts/check-knip-gate-self-test.mjs",
