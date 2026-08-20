@@ -1045,6 +1045,28 @@ describe("a delegated worker cannot reach further than the plugin process itself
     expect(spawnWorker).not.toHaveBeenCalled();
   });
 
+  it("does not let the plugin's own runtime root become writable through a worker", async () => {
+    // The delegated half of the ceiling. `PLUGIN_ROOT` is in `read` and its
+    // `data` subdirectory is in `write`, which is the production shape — so a
+    // grant naming a SIBLING of the data directory under that same root is the
+    // one a string-prefix reading of "inside my envelope" would wave through.
+    // What it names is the bundle the next load imports into the main process,
+    // and a worker must not reach it merely because the plugin process may read
+    // it. `derivePluginChildEnvelope` refuses to put such a path into `write` at
+    // all; this pins the boundary that CONSUMES that list, so the refusal does
+    // not rest on the derivation alone staying correct.
+    const spawnWorker = vi.fn(async () => makeFakeWorker());
+    const harness = await createServiceHarness({ spawnWorker });
+    await expect(
+      harness.child.hostApi.spawnWorker!({
+        workerId: "rewrite-bundle",
+        command: "/bin/sh",
+        allowWritePaths: [`${PLUGIN_ROOT}/dist`],
+      }),
+    ).rejects.toMatchObject({ code: "effect-boundary-denied" });
+    expect(spawnWorker).not.toHaveBeenCalled();
+  });
+
   it("refuses a sibling of the widened root, not merely its string prefix", async () => {
     const spawnWorker = vi.fn(async () => makeFakeWorker());
     const harness = await createServiceHarness({ spawnWorker });

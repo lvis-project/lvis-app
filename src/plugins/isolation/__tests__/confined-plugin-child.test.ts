@@ -669,7 +669,52 @@ describe("the host decides how far a plugin child reaches", () => {
         pluginDataDir: fx.pluginDataDir,
         configValue: (key) => (key === "workspace" ? join(fx.pluginRoot, "dist") : undefined),
       }),
-    ).toThrow(/no workspace root the user approved covers it/);
+    ).toThrow(/resolves inside the plugin's own immutable runtime root/);
+  });
+
+  it("refuses that runtime root even when an approved workspace root covers it", () => {
+    // THE ARM THE TEST ABOVE DOES NOT REACH. That one leaves the runtime root
+    // outside every approved root, so the refusal it observes could come from
+    // the approval half alone. In the production layout `pluginDataDir` is a
+    // CHILD of `pluginRoot` (`~/.lvis/plugins/<id>/data`), so a user who
+    // approves any workspace root at or above the install location pulls the
+    // runtime root back inside their own approvals — and an exclusion that
+    // lives only on the own-root half is then not an exclusion at all. The
+    // ceiling has two halves and the bundle has to be out of both.
+    const fx = fixture!;
+    writeFileSync(
+      join(fx.lvisHome, "settings.json"),
+      JSON.stringify({ permissions: { additionalDirectories: [fx.root] } }, null, 2),
+      "utf-8",
+    );
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: (key) => (key === "workspace" ? join(fx.pluginRoot, "dist") : undefined),
+      }),
+    ).toThrow(/resolves inside the plugin's own immutable runtime root/);
+  });
+
+  it("still admits the plugin's own data dir when an approved root covers the runtime root", () => {
+    // The refusal above must not swallow the data directory, which is itself
+    // under `pluginRoot`. If it did, the fix would be a plugin that cannot
+    // write anywhere dressed as a containment result.
+    const fx = fixture!;
+    writeFileSync(
+      join(fx.lvisHome, "settings.json"),
+      JSON.stringify({ permissions: { additionalDirectories: [fx.root] } }, null, 2),
+      "utf-8",
+    );
+    const inside = join(fx.pluginDataDir, "index");
+    const envelope = derivePluginChildEnvelope({
+      pluginId: WIDENED_PLUGIN_ID,
+      pluginRoot: fx.pluginRoot,
+      pluginDataDir: fx.pluginDataDir,
+      configValue: (key) => (key === "indexStorageRoot" ? inside : undefined),
+    });
+    expect(envelope.write).toEqual([fx.pluginDataDir, inside]);
   });
 
   it("refuses a chosen directory that reaches out of the data dir through a symlink", () => {
@@ -990,8 +1035,10 @@ describe("a child the host widened reaches exactly what the host widened it with
       ).toBe(false);
       // A granted root that did not exist is CREATED by the spawn rather than
       // dropped from the grant. Without that the child gets an envelope smaller
-      // than the host decided, which surfaces as this `ENOENT` — and on Linux,
-      // where ASRT binds each allow path, as a child that never starts at all.
+      // than the host decided and is told nothing about it: here that surfaces
+      // as this `ENOENT`, and on Linux as an allow path ASRT skips out of the
+      // bwrap argv with a debug line. Neither raises, which is why the
+      // materialisation is asserted rather than assumed.
       expect(
         report.writePendingWorkspace.ok,
         JSON.stringify(report.writePendingWorkspace),

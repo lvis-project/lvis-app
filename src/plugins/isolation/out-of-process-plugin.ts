@@ -354,13 +354,23 @@ function rejectEnvelopeGrant(pluginId: string, configKey: string, detail: string
  * the user authorise this", so there is no second notion of approval here to
  * drift from the first.
  *
- * `pluginRoot` is NOT part of that ceiling, and leaving it out is the point.
- * What this resolves is a WRITE grant, while `pluginRoot` is the immutable
- * runtime root the install receipt is taken over: a value under it would put
- * the bundle the next load imports into the child's kernel-level write jail,
- * which is the primitive {@link spawnConfinedPluginChild} removes rather than
- * merely detects. A root the child may only READ cannot bound a grant that
- * carries write.
+ * `pluginRoot` IS SUBTRACTED FROM THE WHOLE CEILING, and that it is subtracted
+ * rather than merely left out of one half is the point. What this resolves is a
+ * WRITE grant, while `pluginRoot` is the immutable runtime root the install
+ * receipt is taken over: a value under it would put the bundle the next load
+ * imports into the child's kernel-level write jail, which is the primitive
+ * {@link spawnConfinedPluginChild} removes rather than merely detects. A root
+ * the child may only READ cannot bound a grant that carries write.
+ *
+ * Omitting it from the own-roots half alone would NOT have achieved that, and
+ * the reason is the production layout: `pluginDataDir` is a CHILD of
+ * `pluginRoot` (`~/.lvis/plugins/<id>/data`, `plugin-storage-layout.ts`). Any
+ * workspace root the user approves at or above the install location therefore
+ * contains the runtime root as well, and the approval half would readmit
+ * exactly what the own-roots half declined to name — with no symlink and no
+ * race, on one `config.set`. So the subtraction is asked BEFORE either half can
+ * answer, and the only part of that root any value may still name is the data
+ * directory the plugin already writes.
  *
  * BOTH HALVES COMPARE THE CANONICAL FORM, never the lexical one. `config.set`
  * is a member the plugin holds and `pluginDataDir` is a directory the plugin
@@ -423,6 +433,21 @@ function resolveUserChosenDirectory(
   }
   const ownWritableRoot = caseFoldForMatch(canonicalizePathForMatch(inputs.pluginDataDir));
   if (isPathAllowed(folded, { directories: [ownWritableRoot] })) return target;
+  // Asked after the data directory and before the user's approvals, because
+  // the data directory is itself INSIDE this root and an approved workspace
+  // root may be too. Refusing here is what makes the exclusion hold on both
+  // halves of the ceiling rather than only on the one that runs first; no
+  // approval can open the bundle to write, so the message must not send the
+  // user to the approval flow for a directory that flow cannot help with.
+  const immutableRuntimeRoot = caseFoldForMatch(canonicalizePathForMatch(inputs.pluginRoot));
+  if (isPathAllowed(folded, { directories: [immutableRuntimeRoot] })) {
+    rejectEnvelopeGrant(
+      inputs.pluginId,
+      grant.configKey,
+      `'${target}' resolves inside the plugin's own immutable runtime root, which carries the `
+        + `bundle the next load imports — no approval can open it to write`,
+    );
+  }
   const approved = sanitizeAllowedDirectories(
     readPermissionSettings().permissions.additionalDirectories,
   );
@@ -458,9 +483,10 @@ function resolveUserChosenDirectory(
  * that does not exist yet is still in the envelope; creating it belongs to the
  * ONE caller that hands the lists to the kernel —
  * {@link spawnConfinedPluginChild} — and it is done there rather than skipped,
- * for a reason that is not cosmetic: Linux ASRT grants by `--bind`, whose
- * source must exist, so a missing directory fails the spawn there while macOS's
- * lexical seatbelt rule tolerates it.
+ * for a reason that is not cosmetic: a root that is absent at wrap time is
+ * DROPPED FROM THE GRANT rather than refused, so the child would start with an
+ * envelope quietly unequal to the reviewed one. Creating it first is what keeps
+ * the enforced set and the decided set the same set.
  *
  * It does READ the disk, and it has to. A `userChosenDirectory` grant is
  * bounded by the user's approvals in `~/.lvis/settings.json` and compared in
@@ -535,11 +561,16 @@ export interface ConfinedPluginChild {
  * Filesystem grants, and why each is the size it is:
  *
  *  - WRITE is a real jail, and what THIS SPAWN puts into it is `envelope.write`
- *    plus the throwaway sandbox HOME. `pluginRoot` is never in it — not as the
- *    root and not as anything under it, which is why the ceiling on a
- *    `userChosenDirectory` grant is `pluginDataDir` alone: that root is the
- *    immutable runtime root the integrity check covers, and a plugin that could
- *    rewrite it could rewrite the bytes its own manifest hash was taken over.
+ *    plus the throwaway sandbox HOME. `pluginRoot` itself is never in it, and
+ *    the ONLY thing under it that ever is, is `pluginDataDir` — the plugin's own
+ *    storage namespace, which the production layout nests inside that root
+ *    (`~/.lvis/plugins/<id>/data`, `plugin-storage-layout.ts`). Everything else
+ *    beneath it stays unwritable: that root is the immutable runtime root the
+ *    integrity check covers, and a plugin that could rewrite it could rewrite
+ *    the bytes its own manifest hash was taken over. Because the data directory
+ *    is nested there, the exclusion cannot be expressed by omitting a name from
+ *    one list — it is {@link resolveUserChosenDirectory} subtracting that root
+ *    from BOTH halves of its ceiling that keeps this true.
  *    THE CHILD'S ALLOW SET IS LARGER THAN WHAT THIS SPAWN GRANTS, and not by
  *    this spawn's choice: ASRT composes the write allow-list as
  *    `[...getDefaultWritePaths(), ...userAllowWrite]`, so its own defaults —
@@ -575,13 +606,21 @@ export async function spawnConfinedPluginChild(
 ): Promise<ConfinedPluginChild> {
   const sandboxHome = createSandboxProcessHome();
   // Every root the wrap is about to grant is created first, `0o700` — the same
-  // thing `worker-spawn.ts` does for the control-socket dir it grants. Linux
-  // ASRT binds each allow path and a missing source aborts the spawn, so
-  // without this a directory the host decided the child reaches would work on
-  // macOS and fail the plugin on Linux. `read` is a superset of `write`, so one
-  // pass covers both. A creation failure throws, and the plugin does not load
-  // with an envelope smaller than the one that was reviewed.
-  for (const directory of spec.envelope.read) {
+  // thing `worker-spawn.ts` does for the control-socket dir it grants. An allow
+  // path that does not exist at wrap time is SILENTLY SKIPPED rather than
+  // refused: ASRT 0.0.73's Linux backend drops a non-existent write path and a
+  // non-existent read allow path from the bwrap argv with a debug line and no
+  // error, and macOS's lexical rule admits the path but the kernel still has no
+  // directory to open. Neither reports anything, so without this pass the child
+  // would come up with an envelope quietly unequal to the one that was
+  // reviewed — the failure to avoid is the silent inequality, not a crash.
+  // BOTH lists are walked rather than `read` alone: `read` is documented as a
+  // superset of `write`, but nothing in the type or at runtime enforces that,
+  // and a write-only root that slipped past it would be the one root this pass
+  // exists for and the one it skipped. A creation failure throws, and the
+  // plugin then does not load at all rather than loading with an envelope the
+  // host did not decide on.
+  for (const directory of [...spec.envelope.read, ...spec.envelope.write]) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
   let wrapped = false;
