@@ -12,10 +12,11 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="Message Queue & TODO Panels"
-        description="Two panels always shown beside the ChatView body — MessageQueuePanel (pending external signals) + SessionTodoPanel (session TODOs). Both are React components rendered from ChatView.tsx, with data managed by workflowApi."
+        description="Two panels stacked directly above the composer — SessionTodoPanel (session TODOs) and MessageQueuePanel (pending external signals). Both are rendered by ChatComposerDock, and each draws nothing when it has no items."
         tags={[
-          "ChatView.tsx:1417 MessageQueuePanel",
-          "ChatView.tsx:1416 SessionTodoPanel",
+          "rendered by ChatComposerDock",
+          "MessageQueuePanel + SessionTodoPanel",
+          "hidden when empty",
         ]}
       />
 

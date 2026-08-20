@@ -75,7 +75,7 @@ export default function Page() {
         eyebrow="Architecture"
         title="LVIS 시스템 한 눈에 보기"
         description="LVIS는 네 개의 레이어 — Electron 호스트, 플러그인 런타임, 로컬 스토리지(~/.lvis), 서버 — 가 같은 사용자 신호 위에서 움직이는 구조입니다. 모든 도메인 기능은 플러그인으로 분리되고, 호스트는 도메인 specific 코드를 import 하지 않습니다 (CI 단계 차단)."
-        tags={["6 active plugins", "static manifest", "no fallback"]}
+        tags={["static manifest", "no fallback"]}
       />
 
       <Reveal>
@@ -111,11 +111,6 @@ export default function Page() {
 
       <h2 id="data-flow">데이터 흐름 — 사용자 메시지 한 턴</h2>
       <StepList steps={flowSteps} />
-
-      <Callout tone="info" title="6개 active 플러그인 (2026-05-20)">
-        ms-graph (v0.3.28) · local-indexer (v0.4.11) · meeting (v0.4.18) · work-assistant (v0.7.0) ·
-        agent-hub (v0.8.1) · 사내 포털 플러그인 (v0.12.9). archived: lvis-plugin-email (2026-04-28), lvis-plugin-calendar (2026-04-30) — 둘 다 ms-graph 로 통합됨.
-      </Callout>
 
       <Callout tone="security" title="아키텍처 문서 정합성">
         모든 구현은 <code>lvis-app/docs/architecture/architecture.md</code> (v4 Final) 에 뿌리를 두며,

@@ -49,8 +49,8 @@ export default function Page() {
         It splits a large job into pieces, handles each piece in its own context, and brings back only the result.
       </p>
       <ul>
-        <li><strong>It starts on a clean context.</strong> A sub-agent does not inherit the parent's conversation history. It can use only the tools the parent named, and that scope is frozen at spawn — it never widens later.</li>
-        <li><strong>Nobody waits.</strong> Sub-agents always run in the background; the parent gets a run handle immediately and the result arrives later as a message.</li>
+        <li><strong>It starts on a clean context.</strong> A sub-agent does not inherit the parent's conversation history. The tool list it may use is resolved and recorded at spawn, and a run that stops partway is re-scoped to <em>that recorded list</em> when it resumes — resuming does not re-grant permission.</li>
+        <li><strong>Usually nobody waits.</strong> <strong>On a surface that can deliver their results back to the parent</strong>, sub-agents run in the background — the parent gets a run handle immediately and the result arrives later as a message. The surface decides this, not the model: a model asking to run one in the foreground is ignored. On a surface with no delivery path, the run is foreground and the parent waits for it.</li>
         <li><strong>A run that stops partway can be continued.</strong> A sub-agent that exhausts its budget before finishing is marked <em>incomplete</em> and returns a ticket to resume. That ticket continues <strong>the same sub-agent</strong> from where it stopped — it does not start a new one.</li>
         <li><strong>It can be steered while it runs.</strong> A parent can push one more directive into a sub-agent that is still running.</li>
         <li><strong>Its thinking is visible.</strong> What a sub-agent is doing streams into a panel while it works. The result does not just appear out of nowhere.</li>
@@ -58,7 +58,7 @@ export default function Page() {
 
       <Callout tone="security" title="A sub-agent's permission questions go to the parent first">
         When a sub-agent asks to use a tool, that question goes to the parent agent before it reaches the user.
-        There is a ceiling on what the parent may decide, and <strong>high risk always goes to the user</strong> — see the <a href="/docs/architecture/permissions#subagent">permission model</a>.
+        There is a ceiling on what the parent may decide, and the only values that ceiling accepts are low and medium — so <strong>high risk cannot pass through and goes to the user</strong> — see the <a href="/en/docs/architecture/permissions#subagent">permission model</a>.
       </Callout>
 
       <h2 id="where">Where is it stored?</h2>

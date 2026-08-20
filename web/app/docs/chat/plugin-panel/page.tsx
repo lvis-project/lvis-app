@@ -36,9 +36,15 @@ export default function Page() {
         <li><strong>플러그인 id</strong>: 보통 kebab-case (예: <code>local-indexer</code>, <code>ms-graph</code>). manifest <code>id</code> 필드.</li>
       </ul>
 
-      <Callout tone="info" title="런타임 register API가 없음">
-        호스트 부팅 시점에 <code>src/boot/plugins.ts</code> 가 모든 plugin manifest 의 <code>tools[]</code> 를 Tool Registry 에 등록합니다.
-        실행 중에 도구를 동적으로 추가하는 API는 없습니다 — 도구 변경은 plugin 재배포 + 재시작이 필요합니다.
+      <Callout tone="info" title="플러그인 도구는 매니페스트에서 옵니다">
+        호스트는 각 플러그인을 <strong>자기 프로세스 안의 MCP 서버</strong> 로 띄우고, 그 서버가 내놓는 도구 목록을 읽어 Tool Registry 에 넣습니다.
+        서버는 플러그인 매니페스트를 그대로 투영해서 만들어지고 (<code>src/mcp/plugin-server-projection.ts</code>), 배선은 부팅 단계에서 이뤄집니다 (<code>src/mcp/plugin-loopback-manager.ts</code> · <code>src/boot/steps/plugin-runtime.ts</code>).
+      </Callout>
+
+      <Callout tone="info" title="그 목록은 서버 세대 단위로 고정입니다">
+        플러그인이 띄우는 서버는 <em>목록이 바뀌면 알려주겠다</em> 고 광고하지 않습니다 — 알림을 보낼 통로가 없어서 <code>listChanged: false</code> 로 내보냅니다 (<code>src/mcp/plugin-server-projection.ts</code>).
+        도구를 바꾸려면 플러그인을 다시 배포하고 서버를 다시 띄워야 합니다.
+        <strong>외부 MCP 서버는 다릅니다</strong> — 외부 서버는 목록 변경 알림을 보낼 수 있고, 받으면 호스트가 도구 목록을 다시 가져옵니다 (<code>src/mcp/mcp-client.ts</code>).
       </Callout>
 
       <PageNav />
