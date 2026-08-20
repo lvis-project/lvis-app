@@ -24,8 +24,8 @@ import {
 } from "../shared/ipc-channels.js";
 
 // Re-export the pre-existing per-domain SOT groups so `src/contract/` is the
-// single import surface for the wire contract. The preload sweep (C11) and the
-// external API/CLI/SDK surfaces will consume these from here.
+// single import surface for the wire contract. The preload surfaces and the
+// external API/CLI/SDK surfaces consume these from here.
 export {
   PERMISSIONS,
   MARKETPLACE,
@@ -406,7 +406,7 @@ export const CHANNELS = {
     dailySummary: "lvis:usage:daily-summary",
     exportCsv: "lvis:usage:export-csv",
   },
-  // ── preload-swept channel groups (C11: #1409 + #1411) ──────────────────────
+  // ── preload-swept channel groups ───────────────────────────────────────────
   // Added so the preload surfaces (public/internal) reference the contract SOT
   // instead of inline `"lvis:*"` literals. Byte-identical to the strings the
   // preload previously inlined; registered-handler groups are cross-checked by

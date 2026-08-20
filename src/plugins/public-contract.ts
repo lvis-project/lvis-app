@@ -212,10 +212,10 @@ export interface EventSubscription {
 /* ============================================================================
  * Plugin Contract v6 (#885) — pure MCP `Tool` object surface.
  *
- * These types define the v6 "manifest == wire" tool contract. Phase R removed the
- * legacy triple — a `string[]` tool list plus separate `toolSchemas` and per-tool
- * app-action maps — entirely:
- * `PluginManifest.tools` is now `Tool[]` and every host consumer reads surface
+ * These types define the v6 "manifest == wire" tool contract. There is no legacy
+ * triple — no `string[]` tool list, no separate `toolSchemas`, no per-tool
+ * app-action map:
+ * `PluginManifest.tools` is `Tool[]` and every host consumer reads surface
  * visibility off each tool's `_meta.ui.visibility` (materialized once at manifest
  * load by `parsePluginJson`). The SDK public surface (`@lvis/plugin-sdk`) mirrors
  * these via `sync-from-host`.

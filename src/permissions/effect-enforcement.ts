@@ -47,8 +47,8 @@
  * Enforcement is applied as the OUTER layer over the recorder
  * (`enforceMutatingEffects(instrumentEffectsByPath(raw))`), NOT inner, for two
  * reasons: (a) the pure recorder stays byte-for-byte untouched and its idempotence
- * symbol is never disturbed (that wrapper is a hard "do not
- * modify"); (b) a DENIED effect is therefore never recorded as a host-observed
+ * symbol is never disturbed (that wrapper is a hard "do not modify"); (b) a
+ * DENIED effect is therefore never recorded as a host-observed
  * mutation — the recorder only sees effects that actually proceed to the real impl,
  * so a denied write produces no phantom row in the shadow dataset. Per gated call
  * the order is gate → record → real impl. (hostFetch self-records before its inline

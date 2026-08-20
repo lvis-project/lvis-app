@@ -360,7 +360,7 @@ export interface AppSettings {
   audit: AuditSettings;
   /** §E2 (#1499) — diagnostics bundle + log retention. */
   diagnostics: DiagnosticsSettings;
-  /** UX Track 3 — visual theme + future UI preferences. */
+  /** Visual theme and UI preferences. */
   appearance: AppearanceSettings;
   /** §B1 — external URL viewer policy (in-app BrowserWindow vs system browser). */
   webView: WebViewSettings;
@@ -384,7 +384,7 @@ export interface AppSettings {
 export interface PluginSettings {}
 
 /**
- * UX Track 3 — visual appearance preferences (schema v2).
+ * Visual appearance preferences (schema v2).
  *
  * v2 replaces the three-axis model (theme × chatTheme × codeTheme) with a
  * single paired bundle selected by `bundleId`. Each bundle is a fully-
