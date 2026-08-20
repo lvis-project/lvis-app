@@ -285,20 +285,29 @@ describe("the marshalling contract covers exactly the classified hostApi surface
 });
 
 describe("the routing set names the isolated plugins and nothing else", () => {
-  it("carries the pilot alone, and no configuration can widen it", () => {
+  it("carries exactly the reviewed ids, and no configuration can widen it", () => {
     // Named exactly. A test asserting only "non-empty" would stay green if a
-    // second plugin were routed out-of-process without its own e2e evidence —
-    // and the whole point of a per-plugin SOT is that each addition is a
-    // reviewed, visible decision.
+    // plugin were routed out-of-process without its own e2e evidence — and the
+    // whole point of a per-plugin SOT is that each addition is a reviewed,
+    // visible decision.
     expect([...OUT_OF_PROCESS_PLUGIN_IDS]).toEqual(["work-assistant"]);
     expect(isOutOfProcessPlugin("work-assistant")).toBe(true);
-    expect(isOutOfProcessPlugin("com.lvis.meeting")).toBe(false);
+    // The three first-party ids the SOT names in prose as REFUSED, each for a
+    // measured ambient dependency the boundary removes: `meeting` reaches the
+    // windowing system through `electron`, `ep-api` reaches the network through
+    // the global `fetch`, `local-indexer` operates its own egress leg. Asserted
+    // by id so the prose and the set cannot drift apart — the prose is the only
+    // record of WHY, and a set that quietly gained one of them would leave that
+    // record describing something untrue.
+    expect(isOutOfProcessPlugin("meeting")).toBe(false);
+    expect(isOutOfProcessPlugin("ep-api")).toBe(false);
+    expect(isOutOfProcessPlugin("local-indexer")).toBe(false);
     expect(Object.isFrozen(OUT_OF_PROCESS_PLUGIN_IDS)).toBe(true);
   });
 
   it("reports the in-process loader as still needed while any plugin is in-process", () => {
-    expect(allPluginsAreOutOfProcess(["com.lvis.meeting"])).toBe(false);
-    expect(allPluginsAreOutOfProcess(["work-assistant", "com.lvis.meeting"])).toBe(false);
+    expect(allPluginsAreOutOfProcess(["local-indexer"])).toBe(false);
+    expect(allPluginsAreOutOfProcess(["work-assistant", "local-indexer"])).toBe(false);
     expect(allPluginsAreOutOfProcess(["work-assistant"])).toBe(true);
     // An empty install list is not "all isolated" — it is no evidence either way.
     expect(allPluginsAreOutOfProcess([])).toBe(false);
