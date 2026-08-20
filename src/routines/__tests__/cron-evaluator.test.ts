@@ -142,6 +142,31 @@ describe("matchesCron — day-of-month / day-of-week OR rule (standard cron)", (
     expect(matchesCron("0 0 * * 1", new Date("2026-05-11T00:00:00Z"))).toBe(true);
     expect(matchesCron("0 0 * * 1", new Date("2026-05-05T00:00:00Z"))).toBe(false);
   });
+
+  it("stepped day-of-month '*/2' is a star field → ANDs with day-of-week, not OR", () => {
+    // Vixie rule: a field whose first char is '*' (bare '*' or stepped '*/N')
+    // is a "star", so dom '*/2' AND dow '1-5' (weekday). '*/2' on day-of-month
+    // matches odd days (1,3,5,... since range start is 1, step 2).
+    // 2026-05-01 is Friday and the 1st (odd) — both sides true → fires.
+    expect(matchesCron("0 9 */2 * 1-5", new Date("2026-05-01T09:00:00Z"))).toBe(true);
+    // 2026-05-05 is Tuesday and the 5th (odd) — both true → fires.
+    expect(matchesCron("0 9 */2 * 1-5", new Date("2026-05-05T09:00:00Z"))).toBe(true);
+    // 2026-05-04 is Monday (weekday) but the 4th (even) — under the buggy OR this
+    // would fire via the weekday side; correct AND requires odd day too → false.
+    expect(matchesCron("0 9 */2 * 1-5", new Date("2026-05-04T09:00:00Z"))).toBe(false);
+    // 2026-05-03 is the 3rd (odd) but a Sunday — under the buggy OR this would
+    // fire via the odd-day side; correct AND requires a weekday too → false.
+    expect(matchesCron("0 9 */2 * 1-5", new Date("2026-05-03T09:00:00Z"))).toBe(false);
+  });
+
+  it("plain '*' day-of-month does NOT restrict the day the way '*/2' does", () => {
+    // Guards the two cases against collapsing into each other: with a bare '*'
+    // dom the day-of-month never restricts, so an even weekday fires...
+    expect(matchesCron("0 9 * * 1-5", new Date("2026-05-04T09:00:00Z"))).toBe(true);
+    // ...whereas the stepped '*/2' dom (still a star for the AND decision) DOES
+    // restrict to odd days, so the same even weekday does not fire.
+    expect(matchesCron("0 9 */2 * 1-5", new Date("2026-05-04T09:00:00Z"))).toBe(false);
+  });
 });
 
 describe("nextCronFire", () => {
