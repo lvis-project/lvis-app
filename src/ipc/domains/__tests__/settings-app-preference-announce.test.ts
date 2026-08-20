@@ -9,12 +9,16 @@
  *
  * MUTATION CONTRACT:
  *  - Deleting the `publishAppPreferenceChange` call from
- *    `broadcastSettingsSnapshot` makes "announces a webView.preferredFlow
- *    change" fail: nothing else in the app calls it.
+ *    `broadcastSettingsSnapshot` makes "announces the save that MOVED
+ *    webView.preferredFlow" fail: nothing else in the app calls it.
  *  - Removing the signature comparison inside `publishAppPreferenceChange`
- *    makes "does NOT announce a save that moved no allow-listed preference"
- *    fail, because every unrelated settings save would then push to every
- *    isolated plugin.
+ *    makes both cases fail, because every unrelated settings save would then
+ *    push to every isolated plugin.
+ *  - Making the fake `patch` stop applying `webView.preferredFlow` makes the
+ *    first case fail at its last assertion. That is the point of spending the
+ *    documented first-publish on an unrelated save: without it, a case that
+ *    never moves the preference still sees one announcement and reads as
+ *    though it had proved change detection.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { makeAppIpcInvoker } from "./test-helpers.js";
@@ -49,13 +53,15 @@ vi.mock("../../../main/startup-launch.js", () => ({
 const invoke = makeAppIpcInvoker(handlers);
 
 /**
- * A settings service whose `webView` block moves when the caller says so.
+ * A settings service whose `webView` block moves when a patch says so.
  *
- * `flipTo` is applied by `patch`, which is what reproduces the real
- * before/after the handler sees: the announcement is decided AFTER the write
- * committed, from live settings, not from the patch payload.
+ * `patch` APPLIES the payload rather than taking a per-suite instruction, which
+ * is what reproduces the real before/after the handler sees: the announcement is
+ * decided AFTER the write committed, from live settings, not from the payload.
+ * A fake that moved on every save would let a case that never moves the
+ * preference still see an announcement and read as if it had proved one.
  */
-function makeDeps(options: { initialFlow: WebViewPreferredFlow; flipTo?: WebViewPreferredFlow }) {
+function makeDeps(options: { initialFlow: WebViewPreferredFlow }) {
   let flow = options.initialFlow;
   const llm = { provider: "openai", vendors: { "azure-foundry": { baseUrl: null } } };
   return {
@@ -70,7 +76,9 @@ function makeDeps(options: { initialFlow: WebViewPreferredFlow; flipTo?: WebView
         return {};
       }),
       patch: vi.fn(async (patched: unknown) => {
-        if (options.flipTo) flow = options.flipTo;
+        const next = (patched as { webView?: { preferredFlow?: WebViewPreferredFlow } })
+          .webView?.preferredFlow;
+        if (next) flow = next;
         return patched;
       }),
       replaceLlm: vi.fn(async (next: unknown) => next),
@@ -92,16 +100,30 @@ beforeEach(() => {
 });
 
 describe("settings.update and the host public preference signal", () => {
-  it("announces a webView.preferredFlow change once the save has committed", async () => {
+  it("announces the save that MOVED webView.preferredFlow, and not the one before it", async () => {
     const announcements: number[] = [];
     const stop = subscribeAppPreferenceChange(() => announcements.push(1));
-    const deps = makeDeps({ initialFlow: "in-app", flipTo: "system-browser" });
+    const deps = makeDeps({ initialFlow: "in-app" });
     const { registerSettingsHandlers } = await import("../settings.js");
     registerSettingsHandlers(deps as never);
 
     try {
-      await invoke("lvis:settings:update", { webView: { preferredFlow: "system-browser" } });
+      // The FIRST publish after boot always announces, by design — the
+      // publisher has no baseline to compare against and a silent first
+      // observation would drop a session's first preference edit. So spend it
+      // on a save that moves nothing, and every count after this one is
+      // change-detection rather than that documented first push.
+      await invoke("lvis:settings:update", { chat: { fontScale: 1.1 } });
       expect(announcements).toHaveLength(1);
+
+      // A second save that also moves nothing adds no announcement: the
+      // baseline is established and the value has not left it.
+      await invoke("lvis:settings:update", { chat: { fontScale: 1.2 } });
+      expect(announcements).toHaveLength(1);
+
+      // Only this one moves the allow-listed value.
+      await invoke("lvis:settings:update", { webView: { preferredFlow: "system-browser" } });
+      expect(announcements).toHaveLength(2);
     } finally {
       stop();
     }
@@ -110,7 +132,7 @@ describe("settings.update and the host public preference signal", () => {
   it("does NOT announce a save that moved no allow-listed preference", async () => {
     const announcements: number[] = [];
     const stop = subscribeAppPreferenceChange(() => announcements.push(1));
-    const deps = makeDeps({ initialFlow: "in-app", flipTo: "system-browser" });
+    const deps = makeDeps({ initialFlow: "in-app" });
     const { registerSettingsHandlers } = await import("../settings.js");
     registerSettingsHandlers(deps as never);
 

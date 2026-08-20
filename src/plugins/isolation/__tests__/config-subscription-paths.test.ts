@@ -993,6 +993,23 @@ describe("getAppPreference answers from a snapshot the host keeps current", () =
     expect((hostApi.getAppPreference as (key: unknown) => unknown)(42)).toBeUndefined();
   });
 
+  it("answers a key inherited from Object.prototype as unset, not with the prototype member", async () => {
+    // The snapshot is a plain object, so a bare index answers `toString` and
+    // `constructor` with `Object.prototype`'s functions. The host reader tests
+    // the key against the allowlist and answers `undefined` for both, and a
+    // plugin handed a function where the host hands `undefined` is reading a
+    // different member on each side of the boundary.
+    const { hostApi } = await harness({
+      appPreferences: {
+        keys: ["webView.preferredFlow"],
+        values: { "webView.preferredFlow": "in-app" },
+      },
+    });
+    for (const inherited of ["toString", "constructor", "hasOwnProperty", "__proto__"]) {
+      expect(hostApi.getAppPreference!(inherited)).toBeUndefined();
+    }
+  });
+
   it("throws rather than answering when the host published no snapshot at all", async () => {
     // `getAppPreference` is OPTIONAL on `PluginHostApi`, so "this host has no
     // preference reader" is a real state — and it is not the same as "this

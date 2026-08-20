@@ -487,14 +487,21 @@ export async function startPluginChildRuntime(
      *
      * The missing half is now `subscribeAppPreferenceChange`
      * (`plugins/config-change-bus.ts`), which the host end of every child
-     * subscribes to; each announcement re-pushes this snapshot. What the member
-     * reads is therefore never older than the last change the host published.
+     * subscribes to; each announcement re-pushes this snapshot, and the host
+     * pushes once more as soon as the construct reply lands so the value read
+     * for the construct params cannot be left behind by a change that raced it
+     * (`out-of-process-plugin.ts`).
      *
      * A key OFF the host allowlist answers `undefined`, which is what the
      * in-process reader answers for it too — the allowlist is `keys`, and a
      * denied key is simply not in the snapshot. The one thing the child cannot
      * reproduce is the host reader's warn-once-per-denied-key line, which is
      * host-side observability and not part of the answer.
+     *
+     * NOT AN ANSWER THE HOST CAN MAKE: this member throwing when nothing was
+     * seeded. `host-api-factory.ts` always defines `getAppPreference`, so every
+     * child the app builds is seeded; the throw exists because the member is
+     * OPTIONAL on `PluginHostApi` and a partial hostApi can therefore omit it.
      */
     getAppPreference: (...args) => {
       if (!appPreferences) {
@@ -504,10 +511,15 @@ export async function startPluginChildRuntime(
         );
       }
       const key = args[0];
-      // Non-string keys answer `undefined` exactly as the host reader does
-      // (which warns once and returns undefined); no allow-listed key can be
-      // reached by one, so the two ends agree on the value.
-      return typeof key === "string" ? appPreferences[key] : undefined;
+      // `Object.hasOwn`, not a bare index. The snapshot is a plain object, so
+      // `appPreferences["toString"]` would answer with `Object.prototype`'s
+      // member — a FUNCTION where the host reader, which tests the key against
+      // the allowlist, answers `undefined`. Non-string keys answer `undefined`
+      // for the same reason: no allow-listed key can be reached by one, so the
+      // two ends agree on the value.
+      return typeof key === "string" && Object.hasOwn(appPreferences, key)
+        ? appPreferences[key]
+        : undefined;
     },
   };
   const hostApi = createChildHostApiStub(
@@ -612,6 +624,12 @@ export async function startPluginChildRuntime(
         // to a child it never seeded would otherwise leave `getAppPreference`
         // throwing while the pushes looked like they landed: the member reads
         // the seeded object, and there is no seeded object to move.
+        //
+        // The production host cannot reach it — `out-of-process-plugin.ts`
+        // pushes only when it seeded, and it always seeds because
+        // `host-api-factory.ts` always implements the reader. It is the same
+        // defensive pair as the member's throw above, kept because the two
+        // halves are wired by separate objects in tests.
         if (!appPreferences) return "unknown-subscription";
         // MUTATED IN PLACE for the same reason `config-snapshot` is: the member
         // above captured this object.
