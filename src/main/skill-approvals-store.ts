@@ -40,11 +40,12 @@
  * on-disk body is user-editable post-seed; hash-binding closes the
  * post-approval mutation TOCTOU window (see `skill-load.ts`).
  */
-import { mkdir, readFile, writeFile, rename } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
 import { withInProcessFileQueue } from "../lib/with-file-lock.js";
+import { writeFileAtomicAtPath } from "./storage/feature-namespace.js";
 
 export interface SkillApprovalRecord {
   /** Record key from the caller — a skill name, or `<name>#bundled`. */
@@ -109,11 +110,16 @@ async function readFileOrEmpty(filePath: string): Promise<SkillApprovalsFile> {
   }
 }
 
+/**
+ * Persist the approvals file through the shared atomic-write authority
+ * ({@link writeFileAtomicAtPath}): random staging name + `O_CREAT|O_EXCL`, so a
+ * symlink planted at a predictable staging path can no longer redirect the
+ * write, plus the staged bytes and the parent directory are fsynced. This
+ * previously used a FIXED `${filePath}.tmp` staging name with neither guard —
+ * exactly the symlink-plant + shared-collision vector the authority documents.
+ */
 async function writeAtomic(filePath: string, data: SkillApprovalsFile): Promise<void> {
-  await mkdir(dirname(filePath), { recursive: true, mode: 0o700 });
-  const tmp = `${filePath}.tmp`;
-  await writeFile(tmp, `${JSON.stringify(data, null, 2)}\n`, { encoding: "utf-8", mode: 0o600 });
-  await rename(tmp, filePath);
+  await writeFileAtomicAtPath(filePath, `${JSON.stringify(data, null, 2)}\n`);
 }
 
 export class SkillApprovalsStore {
