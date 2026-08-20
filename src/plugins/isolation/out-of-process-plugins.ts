@@ -76,8 +76,14 @@
  *    `EPERM` at the connect syscall. The child's env carries a proxy variable
  *    pointing at the loopback listener that enforces the allow-list, and
  *    `NODE_USE_ENV_PROXY` is absent, so Node's own clients ignore it and go
- *    direct into that denial. An unconfined request to the same host on the
- *    same machine answers, so this is the fence rather than an offline box.
+ *    direct into that denial. What separates that from an OFFLINE machine is
+ *    the code itself: `EPERM` is a permission verdict, where an unreachable
+ *    network answers `ENETUNREACH`, `EHOSTUNREACH` or a timeout. Measured
+ *    beside it, the same connect from the UNCONFINED host process succeeds.
+ *    "Does an unconfined HTTPS request answer" is NOT the discriminator, and
+ *    saying so is worth the line: on a network that intercepts TLS the host's
+ *    own request fails for a reason that has nothing to do with the child,
+ *    which is what happened when this axis was re-measured.
  *    MEDIATED FORM: `hostApi.hostFetch`. Declaring the host does NOT help —
  *    the request never reaches the allow-list. NOT ASSERTED: the confinement
  *    suite says why in its own header — the macOS backend fences egress through
@@ -94,7 +100,16 @@
  *    Electron API, and a plugin gated on it walks straight into the call.
  *    Vendoring the `electron` package does not restore it either: measured,
  *    its entry resolves to the binary PATH as a STRING, so `BrowserWindow` is
- *    `undefined` and a guard on it throws. MEDIATED FORM: only for the
+ *    `undefined` and a guard on it throws. The denial is NOT uniform across
+ *    module systems, and the difference decides WHERE a plugin breaks:
+ *    measured in the same child, `import("electron")` RESOLVES — to an inert
+ *    namespace whose `BrowserWindow` is `undefined` — while
+ *    `import { BrowserWindow } from "electron"` fails to link at all with a
+ *    `SyntaxError`. So a `require` plugin fails at resolution, an ESM plugin
+ *    with a named import fails before it runs a line, and an ESM plugin that
+ *    reads the namespace fails only once it CALLS. Three failure sites for one
+ *    absent capability, which is why each form is asserted rather than one
+ *    standing in for the others. MEDIATED FORM: only for the
  *    interaction members the wire carries — `openExternalUrl`,
  *    `openAuthWindow`, `openAuthPartitionViewer`, `clearAuthPartition`. There
  *    is NO mediated form of `BrowserWindow`, `screen`, `session` or `ipcMain`,
@@ -168,7 +183,8 @@
  *   the plugin. Axis 2 has no mediated form for any of those members, so
  *   admitting it would not degrade recording, it would END it. KNOWN also, and
  *   independently sufficient: its `createPlugin` sweeps `os.tmpdir()`
- *   unconditionally as its first statement, so on a machine where the
+ *   unguarded in its activation body — not behind a `try`, not deferred to a
+ *   tool call, so it runs on every load — and on a machine where the
  *   substituted temp root is absent (axis 5) the `ENOENT` escapes activation
  *   and the plugin does not load at all — no tools, no UI entry. And its media
  *   runtime auto-install reaches the network over `node:https` directly (axis
@@ -200,11 +216,14 @@
  *   separate interpreter process through `hostApi.spawnWorker` at a dozen call
  *   sites. The broker's upstream leg is exactly the direct egress axis 1
  *   measures a child as not having, so the broker would stop at its first
- *   request. ASSUMED: whether `spawnWorker`'s confinement envelope can carry
- *   that worker at all, and whether the worker's own egress — which is not the
- *   plugin's — has any mediated form. Both are open questions rather than
- *   wiring, and they are why this id is also the in-process counter-example
- *   the routing tests use.
+ *   request. It is also on axis 2, which no `hostApi` census would have
+ *   surfaced: its folder picker reaches `dialog` through the same runtime
+ *   `require("electron")` the windowed plugin uses, and `dialog` has no
+ *   mediated form either. ASSUMED: whether `spawnWorker`'s confinement
+ *   envelope can carry that worker at all, and whether the worker's own
+ *   egress — which is not the plugin's — has any mediated form. Both are open
+ *   questions rather than wiring, and they are why this id is also the
+ *   in-process counter-example the routing tests use.
  *
  * `ms-graph` — the only remaining CANDIDATE, and it is a candidate rather than
  *   an admission because the difference is what this comment is about. KNOWN
