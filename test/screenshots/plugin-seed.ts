@@ -176,6 +176,27 @@ export function seedReviewerMode(
 }
 
 /**
+ * Write the permission execution mode into the isolated profile's
+ * `permissions.json`.
+ *
+ * The WHOLE `PermissionsFile` shape is written on purpose: `readPermissionsFile`
+ * discards the file unless `version === 1` and `rules` is an array, and a
+ * discarded file leaves the manager on `default` — a partial seed would look
+ * like it worked while the mode never changed.
+ */
+export function seedExecutionMode(
+  lvisHomeForTest: string,
+  mode: 'default' | 'strict' | 'auto' | 'allow',
+): void {
+  fs.mkdirSync(lvisHomeForTest, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(
+    path.join(lvisHomeForTest, 'permissions.json'),
+    `${JSON.stringify({ version: 1, rules: [], mode, updatedAt: new Date().toISOString() }, null, 2)}\n`,
+    { encoding: 'utf-8', mode: 0o600 },
+  );
+}
+
+/**
  * Copy the REAL built bundles of the requested plugins into the isolated
  * `~/.lvis/plugins/` and write the registry + receipts + signed whitelist
  * snapshot so the host loads them as local-dev installs at boot.

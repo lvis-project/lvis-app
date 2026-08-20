@@ -13,9 +13,9 @@ import {
   buildIsolatedElectronEnv,
   buildLlmSettings,
 } from '../e2e/ui/seeded-electron.js';
-import { seedRealPlugins, seedReviewerMode } from './plugin-seed.js';
+import { seedExecutionMode, seedRealPlugins, seedReviewerMode } from './plugin-seed.js';
 import { PROVIDER_PING_SYSTEM_PROMPT } from '../../src/engine/turn/provider.js';
-import { PERMISSION_REVIEWER_FRAMEWORK_VERSION } from '../../src/shared/permission-reviewer-framework.js';
+import { PERMISSION_REVIEWER_SYSTEM_PROMPT } from '../../src/shared/permission-reviewer-framework.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../..');
@@ -98,9 +98,17 @@ function reuseRealPythonRuntime(lvisHomeForTest: string, seededIds: readonly str
  * element after capture — see README.md "Aspect ratio" section) — 1600x1000
  * gives enough width for the expanded work-mode rail plus a chat column
  * without clipping, and is large enough that per-key crops (locator
- * screenshots) still have full-resolution source pixels to crop from.
+ * screenshots) still have full-resolution source pixels to crop from. A
+ * scenario that needs a tighter frame overrides it per key — see the
+ * `captureViewport` option below.
  */
 export const CAPTURE_VIEWPORT = { width: 1600, height: 1000 } as const;
+
+/** Window size for one capture, in CSS pixels. */
+export interface CaptureViewport {
+  width: number;
+  height: number;
+}
 
 // ─── Scripted provider ────────────────────────────────────────────────────
 //
@@ -115,14 +123,26 @@ export const CAPTURE_VIEWPORT = { width: 1600, height: 1000 } as const;
 // (src/engine/llm/marketplace-provider-fetch.ts). Nothing under `src/` knows
 // this endpoint exists — it is the same code path a self-hosted endpoint takes.
 //
-// Fail-closed by construction: an unscripted request is answered with an error
-// the transport surfaces, never with an improvised completion, and every such
-// request is recorded on the handle so the spec fails instead of capturing a
-// frame produced by a fallback.
+// Fail-closed by construction: a chat-completions request leaves the handler as
+// the fixed connectivity-probe reply, a turn the script named, or an error.
+// There is no fourth branch, and none of the three improvises an answer to what
+// was asked. Every refused request is recorded on the handle, and the spec
+// asserts that list is empty, so a script that no longer matches the host's call
+// sequence fails the capture rather than producing a frame of the
+// transport-error state.
 
-/** Model id the scripted endpoint serves. Any non-empty id would do — the
- *  endpoint replays a script and never dispatches on the model. */
-const SCRIPTED_PROVIDER_MODEL_ID = 'lvis-capture-scripted';
+/**
+ * Model id the scripted endpoint serves.
+ *
+ * Nothing in the request handler reads the incoming `model` field — the endpoint
+ * replays a script — so the value is free. It is not invisible, though: the
+ * composer's status row prints
+ * `<vendor> · <model>`, and a full-window capture of a `chat-*` key carries that
+ * row into a published docs frame. So it is a neutral, self-describing name
+ * rather than one that would put the capture harness's own identifiers on the
+ * docs site.
+ */
+const SCRIPTED_PROVIDER_MODEL_ID = 'local-model';
 
 /** One streamed piece of a scripted assistant turn. */
 type ScriptedPart =
@@ -147,12 +167,20 @@ type ScriptedPart =
 
 /**
  * Which caller a scripted response answers. The host sends three shapes of
- * request through the same provider, distinguished by their system prompt:
- * the conversation turn, the permission reviewer's classification call
- * (`PERMISSION_REVIEWER_SYSTEM_PROMPT`), and `pingProvider`'s connectivity
- * probe. The probe is answered inline and never consumes a scripted turn —
- * it fires on a renderer-driven status check whose timing a capture must not
+ * request through the same provider, told apart by their system prompt: the
+ * conversation turn, the permission reviewer's classification call
+ * (`PERMISSION_REVIEWER_SYSTEM_PROMPT`, sent verbatim by
+ * `LlmRiskClassifier.runProviderWithRetry`), and `pingProvider`'s connectivity
+ * probe (`PROVIDER_PING_SYSTEM_PROMPT`). Both markers are imported from the
+ * modules that define them, so an edit to either prompt moves this check with
+ * it. The probe is answered inline, before the queue is consulted at all — it
+ * fires on a renderer-driven status check whose timing a capture must not
  * depend on.
+ *
+ * A conversation turn is anything else. That is the right default rather than a
+ * third exact match: the assistant system prompt is assembled per session from
+ * memory, skills and tool descriptions, so there is no fixed string to compare
+ * it against.
  */
 type ScriptedCaller = 'assistant' | 'reviewer';
 
@@ -300,7 +328,7 @@ function systemPromptOf(body: unknown): string {
 }
 
 function callerOf(systemPrompt: string): ScriptedCaller {
-  return systemPrompt.includes(PERMISSION_REVIEWER_FRAMEWORK_VERSION) ? 'reviewer' : 'assistant';
+  return systemPrompt === PERMISSION_REVIEWER_SYSTEM_PROMPT ? 'reviewer' : 'assistant';
 }
 
 async function readBody(req: http.IncomingMessage): Promise<string> {
@@ -430,8 +458,11 @@ export type ScreenshotFixtures = {
    *  allowed directories, so seeded files under it are readable by tools. */
   lvisHome: string;
   /**
-   * Null unless the scenario declared `scriptedTurns`. When present the app was
-   * launched against it and the spec asserts the script was consumed exactly.
+   * Null unless the scenario declared `scriptedScript`. When present the app was
+   * launched against it and the spec asserts the handle recorded no refused
+   * request. A turn the script still holds when the capture ends is not
+   * checked — see the `violations` note in capture.spec.ts for why that
+   * direction is deliberately one-way.
    */
   scriptedProvider: ScriptedProviderHandle | null;
 };
@@ -466,6 +497,17 @@ export type ScreenshotOptions = {
    */
   reviewerMode: 'disabled' | 'rule' | 'llm' | 'strict' | null;
   /**
+   * Permission execution mode written to the isolated profile's
+   * `permissions.json`, or null to leave the host default (`default`).
+   *
+   * Only `auto` routes a foreground write/shell/network call through the
+   * reviewer before the approval dock opens
+   * (`PermissionManager.shouldRouteForegroundReviewer` requires
+   * `mode === "auto"`); under `default` such a call reaches the dock straight
+   * from the category rule, with no classification call in between.
+   */
+  executionMode: 'default' | 'strict' | 'auto' | 'allow' | null;
+  /**
    * Fabricated files written under the isolated profile's LVIS home before
    * launch, keyed by path relative to it. That directory is one of the two
    * default allowed roots (`computeDefaultAllowedDirectories`), so a scripted
@@ -479,6 +521,17 @@ export type ScreenshotOptions = {
    * plugin-panel keys keep the harness's original English.
    */
   uiLocale: 'ko' | 'en';
+  /**
+   * Window size for this capture, or null for {@link CAPTURE_VIEWPORT}.
+   *
+   * The default is sized for the widest screens the harness has to fit (the
+   * expanded work-mode rail plus a chat column). A key whose subject is a few
+   * transcript rows fills a fraction of that, and the docs site scales the
+   * whole frame down to its content width — so the subject arrives small
+   * inside a large empty background. Naming a smaller window keeps the app's
+   * real layout and just gives the subject less room to float in.
+   */
+  captureViewport: CaptureViewport | null;
 };
 
 /**
@@ -500,7 +553,9 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
   keepReviewer: [false, { option: true }],
   scriptedScript: [null, { option: true }],
   uiLocale: ['en', { option: true }],
+  captureViewport: [null, { option: true }],
   reviewerMode: [null, { option: true }],
+  executionMode: [null, { option: true }],
   seededCorpus: [{}, { option: true }],
 
   scriptedProvider: async ({ scriptedScript, lvisHome, seededCorpus }, use) => {
@@ -531,7 +586,7 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
     await use(dir);
   },
 
-  app: async ({ userDataDir, lvisHome, installPlugins, keepReviewer, scriptedProvider, uiLocale, reviewerMode, seededCorpus }, use) => {
+  app: async ({ userDataDir, lvisHome, installPlugins, keepReviewer, scriptedProvider, uiLocale, reviewerMode, executionMode, seededCorpus }, use) => {
     const mainEntry = path.join(REPO_ROOT, 'dist/src/main/main.js');
     if (!fs.existsSync(mainEntry)) {
       throw new Error(
@@ -568,6 +623,7 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
     // so the actual UI renders (see plugin-seed.ts), and a signed whitelist
     // snapshot is produced for any host-secret grants they declare.
     if (reviewerMode) seedReviewerMode(lvisHomeForTest, reviewerMode);
+    if (executionMode) seedExecutionMode(lvisHomeForTest, executionMode);
     for (const [relative, contents] of Object.entries(seededCorpus)) {
       const target = path.join(lvisHomeForTest, relative);
       fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
@@ -621,9 +677,9 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
     await app.close().catch(() => {});
   },
 
-  mainWindow: async ({ app }, use) => {
+  mainWindow: async ({ app, captureViewport }, use) => {
     const win = await app.firstWindow();
-    await win.setViewportSize(CAPTURE_VIEWPORT);
+    await win.setViewportSize(captureViewport ?? CAPTURE_VIEWPORT);
     await win.locator('[data-testid="main-toolbar"]').first().waitFor({
       state: 'visible',
       timeout: 60_000,

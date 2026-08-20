@@ -1,6 +1,6 @@
 import type { ElectronApplication, Page } from 'playwright';
 import { openInlineSettings } from '../e2e/ui/inline-settings.js';
-import type { ScriptedScript } from './fixtures.js';
+import type { CaptureViewport, ScriptedScript } from './fixtures.js';
 
 /**
  * Data-driven scenario matrix: one entry per docs-site screenshot key
@@ -51,16 +51,31 @@ export interface ScenarioEntry {
    * "Scripted provider"), one entry per model call the scenario's `steps`
    * cause. Set this and the app is launched pointing at that endpoint instead
    * of a vendor it cannot reach; leave it unset for scenarios that never start
-   * a turn. The spec fails the capture if the script is not consumed exactly.
+   * a turn. The spec fails the capture when the endpoint refused a request it
+   * could not answer; a trailing turn the capture stopped before is not
+   * checked.
    */
   scriptedScript?: ScriptedScript;
   /** Reviewer mode for the isolated profile. Plugin scenarios leave this to
    *  `plugin-seed.ts`, which already picks the mode their panel needs. */
   reviewerMode?: 'disabled' | 'rule' | 'llm' | 'strict';
+  /**
+   * Permission execution mode for the isolated profile. Omit for the host
+   * default (`default`). `auto` is what routes a foreground shell/write/network
+   * call through the reviewer before the approval dock opens — see the option's
+   * JSDoc in fixtures.ts.
+   */
+  executionMode?: 'default' | 'strict' | 'auto' | 'allow';
   /** Fabricated files written under the isolated LVIS home before launch. */
   seededCorpus?: Readonly<Record<string, string>>;
   /** UI locale for this capture. The published docs images are Korean. */
   uiLocale?: 'ko' | 'en';
+  /**
+   * Window size for this capture. Omit for the harness default
+   * (`CAPTURE_VIEWPORT`, 1600x1000); set it for a key whose subject is a short
+   * transcript, which the default frames inside a lot of empty background.
+   */
+  captureViewport?: CaptureViewport;
 }
 
 async function openWorkMode(page: Page): Promise<void> {
@@ -184,6 +199,7 @@ export const scenarios: Record<string, ScenarioEntry> = {
     topic: 'chat',
     uiLocale: 'ko',
     reviewerMode: 'disabled',
+    captureViewport: { width: 1440, height: 780 },
     // Two model calls: the first writes the session TODO list, the second is a
     // long answer streamed slowly so messages typed while it runs land in the
     // queue instead of starting a turn of their own. Both panels are then on
@@ -260,27 +276,22 @@ export const scenarios: Record<string, ScenarioEntry> = {
     topic: 'chat',
     uiLocale: 'ko',
     reviewerMode: 'disabled',
+    captureViewport: { width: 1440, height: 660 },
     seededCorpus: {
       [SEEDED_NOTE_PATH]: SEEDED_NOTE_BODY,
       [SEEDED_SUMMARY_PATH]: SEEDED_SUMMARY_BODY,
     },
-    // Two reads with thinking between them, the second turn's reasoning
-    // streamed slowly. The capture is taken while that second turn is still
-    // arriving, so the finished tool row and live thinking share the frame —
-    // once a turn completes the transcript collapses its tool rows into a step
-    // summary and neither is visible any more.
+    // The caption this key carries promises tool execution AND thinking tokens
+    // arriving, so the capture has to land inside a turn, not after one: the
+    // first turn reads a file, and the second streams its reasoning slowly
+    // enough that the finished tool row and a growing thinking body share the
+    // frame. Only the second turn has reasoning, so the "thinking..." header the
+    // steps click is unambiguously the live one.
     scriptedScript: {
       turns: [
         {
           expect: 'assistant',
-          chunkDelayMs: 20,
           parts: [
-            {
-              kind: 'reasoning',
-              text:
-                '먼저 노트 파일을 읽어서 어떤 자료가 들어 있는지 확인한다. ' +
-                '목록이 짧으면 그대로 요약하고, 길면 주제별로 묶는 편이 낫다.',
-            },
             {
               kind: 'tool',
               id: 'capture-read-notes',
@@ -292,13 +303,15 @@ export const scenarios: Record<string, ScenarioEntry> = {
         },
         {
           expect: 'assistant',
-          chunkDelayMs: 420,
+          chunkDelayMs: 350,
           parts: [
             {
               kind: 'reasoning',
               text:
-                '세 항목 모두 서로 다른 주제라 한 문단으로 묶기는 어렵다. ' +
-                '이전 요약본이 남아 있는지 확인한 뒤 형식을 맞추는 편이 좋겠다.',
+                '노트에는 세 항목이 있고 서로 주제가 달라서 한 문단으로 묶기는 어렵다. ' +
+                '조석과 하구는 챕터별 질문이 남아 있고, 등대 관리와 종이 마블링은 각각 ' +
+                '한 줄짜리 메모라 분량이 맞지 않는다. 이전 요약본이 남아 있는지 먼저 ' +
+                '확인한 뒤 같은 형식으로 맞추는 편이 좋겠다.',
             },
             {
               kind: 'tool',
@@ -325,39 +338,79 @@ export const scenarios: Record<string, ScenarioEntry> = {
     steps: async ({ page }) => {
       await openWorkMode(page);
       await sendChatMessage(page, '노트에 정리해 둔 읽을 자료들 좀 요약해 줘.');
-      // The final answer only renders once the last scripted turn has streamed,
-      // so this is the whole conversation being on screen.
+      // The first turn's read has finished — its row carries a duration badge,
+      // which only appears once the tool returned.
       await page
-        .locator('[data-testid="assistant-message-body"]')
-        .first()
-        .waitFor({ state: 'visible', timeout: 40_000 });
-      // A finished turn collapses its thinking and tool rows behind the
-      // WorkGroup header (WorkGroup.tsx re-collapses on stream end). Expand it —
-      // the same click a reader makes — so the rows this key exists to show are
-      // in frame.
-      await page.locator('[data-testid="work-group"]').first().locator('button').first().click();
-      const workGroup = page.locator('[data-testid="work-group"]').first();
-      await workGroup
         .locator('[data-testid="tool-duration"]')
         .first()
-        .waitFor({ state: 'visible', timeout: 15_000 });
-      // Expand the first thinking row too, so the reasoning this key is about
-      // is legible rather than a collapsed one-line summary.
-      await workGroup.getByText('생각 완료', { exact: false }).first().click();
+        .waitFor({ state: 'visible', timeout: 30_000 });
+      // ReasoningCard.tsx starts collapsed and expands only on click, streaming
+      // or not, so the live thinking body is behind one click. The entry is
+      // still the turn's last one at this point, so it holds that open state
+      // until the turn ends and the transcript re-groups it.
+      const liveThinking = page.getByText('생각 중...', { exact: false }).first();
+      await liveThinking.waitFor({ state: 'visible', timeout: 30_000 });
+      await liveThinking.click();
+      // Mid-stream by construction: this clause is roughly two thirds through
+      // the scripted reasoning, so the frame is taken with a couple of lines
+      // already rendered and the rest still arriving.
+      await page.getByText('등대 관리와', { exact: false }).first().waitFor({
+        state: 'visible',
+        timeout: 20_000,
+      });
     },
   },
 
   'chat-permission-llm-review': {
     topic: 'chat',
-    skip:
-      'The reviewer verdict itself IS scriptable now — reviewerMode "llm" sends the ' +
-      'classification call to the same scripted endpoint, which chat-permission-risk uses ' +
-      'to capture the HIGH verdict. What this key needs is the transcript WHILE that call ' +
-      'is outstanding, and there is no such surface: during the reviewer call the group ' +
-      'renders only its "working" header, and PermissionReviewStatusCard is skipped for ' +
-      'entries that render on a tool row (TranscriptRenderer rendersOnToolRow). Verified by ' +
-      'holding the scripted verdict open for ~11s and finding no ' +
-      'permission-review-status-card in the DOM. Needs a renderer change, not a harness one.',
+    uiLocale: 'ko',
+    reviewerMode: 'llm',
+    executionMode: 'auto',
+    captureViewport: { width: 1440, height: 660 },
+    // The same shell call as chat-permission-risk, captured one step earlier:
+    // while the reviewer's answer is still on the wire. The reviewer runs
+    // BEFORE the tool starts, so no tool row exists for that toolUseId yet and
+    // TranscriptRenderer's `rendersOnToolRow` is false — which is exactly the
+    // case its comment reserves the standalone PermissionReviewStatusCard for.
+    // `chunkDelayMs` on the reviewer turn is what holds that state open long
+    // enough to wait on.
+    scriptedScript: {
+      turns: [
+        {
+          expect: 'assistant',
+          parts: [
+            {
+              kind: 'text',
+              text: '문서 폴더에 어떤 파일이 있는지 먼저 확인하겠습니다.',
+            },
+            {
+              kind: 'tool',
+              id: 'capture-review-shell',
+              name: 'bash',
+              input: { command: 'ls -la ~/Documents' },
+            },
+          ],
+        },
+        {
+          expect: 'reviewer',
+          chunkDelayMs: 900,
+          parts: [
+            {
+              kind: 'text',
+              text: '{ "level": "high", "reason": "reads a directory outside the allowed scope" }',
+            },
+          ],
+        },
+      ],
+    },
+    steps: async ({ page }) => {
+      await openWorkMode(page);
+      await sendChatMessage(page, '문서 폴더에 뭐가 있는지 확인해 줘.');
+      await page
+        .locator('[data-testid="permission-review-status-card"]')
+        .first()
+        .waitFor({ state: 'visible', timeout: 30_000 });
+    },
   },
 
   'chat-permission-directory': {
@@ -402,6 +455,12 @@ export const scenarios: Record<string, ScenarioEntry> = {
     topic: 'chat',
     uiLocale: 'ko',
     reviewerMode: 'llm',
+    // `auto` is the mode this key documents — the branch where the reviewer
+    // grades a shell call first and only a verdict above the auto-approve
+    // threshold reaches the user. Under the default mode the dock opens
+    // straight from the category rule, no classification call is made, and the
+    // scripted reviewer turn below is not requested at all.
+    executionMode: 'auto',
     locator: '[data-testid="approval-dock"]',
     // Same flow as chat-permission-llm-review, captured one step later: the
     // verdict has landed and the dock is showing what the risk level means for
@@ -507,14 +566,14 @@ export const scenarios: Record<string, ScenarioEntry> = {
   },
   'chat-plugin-panel': {
     topic: 'chat',
-    plugins: ['work-assistant'],
-    steps: async ({ page }) => {
-      // A real plugin's own bundled panel UI rendered inside the host, loaded via
-      // manifest `ui[].entry` from the REAL lvis-plugin-work-assistant dist (not
-      // the E2E "E2E Plugin UI" stub). Shows the work-assistant "스마트 감지"
-      // detector-toggle panel — the plugin's actual UI bundle in a webview.
-      await openPluginPanel(page, '업무 도우미');
-    },
+    skip:
+      "The plugin whose panel this key shows does not load in the isolated profile: its " +
+      "bundle's factory spawns a confined child before the ASRT sandbox is active there, so " +
+      "the runtime tears the plugin down and no panel mounts (\"wrapWorkerCommand: ASRT " +
+      "sandbox is not active\"). Recorded as reproducing on an unmodified checkout, so it is " +
+      "not caused by this change; host-side and outside this harness. On a checkout with no " +
+      "sibling plugin clone it fails earlier still — plugin-seed reports the bundle missing " +
+      "and nothing renders.",
   },
 
   // ---- plugin common ----------------------------------------------------
