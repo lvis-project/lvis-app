@@ -166,10 +166,20 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-ci-nm-${{ hashFiles('lvis-app/bun.lock') }}
       - run: bun install --frozen-lockfile
         working-directory: lvis-app
+      # The plugin-confinement cases need a LIVE sandbox, and the Linux job that
+      # runs the whole suite has no bubblewrap — so there they return early and
+      # pass without measuring anything. macOS needs no backend install, which
+      # makes this the one job in CI that can actually execute them.
+      # `LVIS_REQUIRE_SANDBOX_CASES=1` is what stops that from being a silent
+      # arrangement: if the sandbox cannot initialize here, the cases FAIL
+      # instead of reporting a measurement they never took.
       - name: Run macOS permission regressions
         working-directory: lvis-app
+        env:
+          LVIS_REQUIRE_SANDBOX_CASES: "1"
         run: >
           bun run test --
+          src/plugins/isolation/__tests__/confined-plugin-child.test.ts
           src/permissions/__tests__/allowed-directories.test.ts
           src/permissions/__tests__/permission-manager-meta-override.test.ts
           src/tools/__tests__/registry-meta-governance.test.ts

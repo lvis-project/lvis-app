@@ -198,7 +198,11 @@ export interface ConfinedPluginChildSpec {
   readonly pluginId: string;
   /** The plugin's immutable runtime root; the child reads its code from here. */
   readonly pluginRoot: string;
-  /** `~/.lvis/plugins/<id>/data` — the ONLY path the child may write. */
+  /**
+   * `~/.lvis/plugins/<id>/data` — the only DURABLE path this spawn grants the
+   * child for writing. Not the only path it can write: see the spawn's own
+   * filesystem note below, and axis 6 in `out-of-process-plugins.ts`.
+   */
   readonly pluginDataDir: string;
   /** The child's own entry module. Injected so a test can serve a stand-in. */
   readonly childEntryPath: string;
@@ -220,10 +224,21 @@ export interface ConfinedPluginChild {
  *
  * Filesystem grants, and why each is the size it is:
  *
- *  - WRITE is a real jail, and it is exactly `pluginDataDir` plus the throwaway
- *    sandbox HOME. Not `pluginRoot`: that is the immutable runtime root the
- *    integrity check covers, and a plugin that could rewrite it could rewrite
- *    the bytes its own manifest hash was taken over.
+ *  - WRITE is a real jail, and what this spawn grants is `pluginDataDir` plus
+ *    the throwaway sandbox HOME. Not `pluginRoot`: that is the immutable
+ *    runtime root the integrity check covers, and a plugin that could rewrite
+ *    it could rewrite the bytes its own manifest hash was taken over.
+ *    THE CHILD'S ALLOW SET IS LARGER THAN THESE TWO, and not by this spawn's
+ *    choice: ASRT composes the write allow-list as
+ *    `[...getDefaultWritePaths(), ...userAllowWrite]`, so its own defaults —
+ *    the `/dev` entries, `/tmp/claude`, `/private/tmp/claude`,
+ *    `<real home>/.npm/_logs`, `<real home>/.claude/debug` — are merged into
+ *    every wrap and no argument here removes them. Measured on macOS/arm64
+ *    with the sandbox active: a child spawned by this function wrote into all
+ *    four of the non-`/dev` paths and the host read the bytes back. Those
+ *    paths are per-machine rather than per-plugin, so two confined children
+ *    share them. `out-of-process-plugins.ts` axis 6 carries the full record,
+ *    including what closing it would take and why that is not done here.
  *  - READ in ASRT is deny-only — `allowRead` re-allows a region INSIDE a
  *    covering deny and is inert without one (see `asrt-sandbox.ts`). The deny
  *    floor covers the Electron userData directory, which is where plugins are
