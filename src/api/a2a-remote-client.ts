@@ -109,6 +109,19 @@ export type A2ARemoteClientResult =
       record?: A2ARemoteAttemptRecord;
     };
 
+/**
+ * A replay source that has cleared {@link A2ARemoteClient.bindReplaySource}: the
+ * stored payload identity and messageId are all proven present, so the replay
+ * body-recovery path can consume them without re-checking for undefined.
+ */
+type BoundReplaySource = A2ARemoteAttemptRecord & {
+  prepared: A2ARemoteAttemptRecord["prepared"] & {
+    payloadRecordId: string;
+    payloadBodySha256: string;
+    messageId: string;
+  };
+};
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -391,6 +404,62 @@ export class A2ARemoteClient {
     return { ok: false, outcome: "intended-credential-revision-conflict", record };
   }
 
+  /**
+   * The replay binding predicate: a replay attempt may proceed ONLY when the
+   * recovered replay source binds to THIS call — same stored payload
+   * (payloadRecordId + payloadBodySha256 present), same messageId, same
+   * lineage, and a resolved predecessor whose credential revision matches the
+   * one this replay declares. Any mismatch fails closed.
+   *
+   * This is the single authority for that check. It was previously inlined at
+   * two callsites; the second copy had already drifted — it always reported
+   * `unknown-manual-reconciliation-required` and silently dropped the
+   * `retention-expired` signal that the first copy surfaced by inspecting the
+   * latest operation stage. Both callsites now consume this helper, so the
+   * retention-expired outcome (the STRONGER, more specific classification) is
+   * reported at both binding points, not just the first.
+   *
+   * On failure the outcome is derived from the latest operation stage:
+   * `RETENTION_EXPIRED` → `"retention-expired"` (the payload was aged out and
+   * cannot be recovered), otherwise `"unknown-manual-reconciliation-required"`.
+   */
+  private async bindReplaySource(
+    input: Readonly<A2ARemoteExecuteInput>,
+    replaySource: A2ARemoteAttemptRecord | null,
+  ): Promise<
+    | { ok: true; source: BoundReplaySource }
+    | {
+        ok: false;
+        outcome: "retention-expired" | "unknown-manual-reconciliation-required";
+        record?: A2ARemoteAttemptRecord;
+      }
+  > {
+    const predecessor = await this.options.store.latestResolvedAttempt(input.operationId);
+    if (
+      !replaySource?.prepared.payloadRecordId
+      || !replaySource.prepared.payloadBodySha256
+      || !replaySource.prepared.messageId
+      || replaySource.prepared.messageId !== input.messageId
+      || !sameA2ARemoteLineage(replaySource.prepared.lineage, input.lineage)
+      || !predecessor?.resolved
+      || input.predecessorCredentialRevisionId !== predecessor.resolved.credentialRevisionId
+    ) {
+      const latest = await this.options.store.latestOperation(input.operationId);
+      return {
+        ok: false,
+        outcome: latest?.stage === "RETENTION_EXPIRED"
+          ? "retention-expired"
+          : "unknown-manual-reconciliation-required",
+        ...(latest ? { record: latest } : {}),
+      };
+    }
+    // The guard above proved payloadRecordId, payloadBodySha256, and messageId
+    // are all present on this record; TypeScript narrows those property reads
+    // but cannot lift that into the object type, so the assertion restates an
+    // invariant just checked on the lines above — not a widening.
+    return { ok: true, source: replaySource as BoundReplaySource };
+  }
+
   private async executeOwned(input: Readonly<A2ARemoteExecuteInput>): Promise<A2ARemoteClientResult> {
     validateOperationMethod(input);
     if (!this.options.enabled) {
@@ -423,20 +492,14 @@ export class A2ARemoteClient {
 
     let replaySource: A2ARemoteAttemptRecord | null = null;
     if (input.operation === "replay") {
-      replaySource = await this.options.store.findReplaySource(input.operationId);
-      const predecessor = await this.options.store.latestResolvedAttempt(input.operationId);
-      if (!replaySource?.prepared.payloadRecordId
-        || !replaySource.prepared.payloadBodySha256
-        || !replaySource.prepared.messageId
-        || replaySource.prepared.messageId !== input.messageId
-        || !sameA2ARemoteLineage(replaySource.prepared.lineage, input.lineage)
-        || !predecessor?.resolved
-        || input.predecessorCredentialRevisionId !== predecessor.resolved.credentialRevisionId) {
-        const latest = await this.options.store.latestOperation(input.operationId);
-        return { ok: false, outcome: latest?.stage === "RETENTION_EXPIRED"
-          ? "retention-expired"
-          : "unknown-manual-reconciliation-required", ...(latest ? { record: latest } : {}) };
+      const binding = await this.bindReplaySource(
+        input,
+        await this.options.store.findReplaySource(input.operationId),
+      );
+      if (!binding.ok) {
+        return { ok: false, outcome: binding.outcome, ...(binding.record ? { record: binding.record } : {}) };
       }
+      replaySource = binding.source;
     }
 
     let approvalDecisionId: string | undefined = replaySource?.prepared.approvalDecisionId;
@@ -486,39 +549,40 @@ export class A2ARemoteClient {
     }
     let replayRequestId = input.request.id;
     if (input.operation === "replay") {
-      const predecessor = await this.options.store.latestResolvedAttempt(input.operationId);
-      if (
-        !replaySource?.prepared.payloadRecordId
-        || !replaySource.prepared.payloadBodySha256
-        || !replaySource.prepared.messageId
-        || replaySource.prepared.messageId !== input.messageId
-        || !sameA2ARemoteLineage(replaySource.prepared.lineage, input.lineage)
-        || !predecessor?.resolved
-        || input.predecessorCredentialRevisionId !== predecessor.resolved.credentialRevisionId
-      ) {
+      // Re-bind against fresh store state (TOCTOU guard): the predecessor may
+      // have been resolved/retired since the first bind. Same helper, same
+      // predicate — including the retention-expired classification that this
+      // second check previously flattened to unknown-manual-reconciliation.
+      const binding = await this.bindReplaySource(input, replaySource);
+      if (!binding.ok) {
         body.fill(0);
-        return { ok: false, outcome: "unknown-manual-reconciliation-required" };
+        return { ok: false, outcome: binding.outcome, ...(binding.record ? { record: binding.record } : {}) };
       }
+      // `source` carries the bound-source narrowing (payloadRecordId /
+      // payloadBodySha256 / messageId proven present); const narrowing survives
+      // the awaits below where a reassignable `let` would not.
+      const source = binding.source;
+      replaySource = source;
       const sourceAad = createA2APayloadAad({
         ownerId: input.authorization.ownerId,
         operationId: input.operationId,
-        messageId: replaySource.prepared.messageId,
-        bodySha256: replaySource.prepared.payloadBodySha256,
-        lineage: replaySource.prepared.lineage,
+        messageId: source.prepared.messageId,
+        bodySha256: source.prepared.payloadBodySha256,
+        lineage: source.prepared.lineage,
       });
-      const recovered = await this.options.store.readPayload(replaySource.prepared.attemptId, sourceAad);
+      const recovered = await this.options.store.readPayload(source.prepared.attemptId, sourceAad);
       body.fill(0);
       if (!recovered) {
         const record = await this.options.store.terminalizeUnrecoverableReplay({
-          sourceAttemptId: replaySource.prepared.attemptId,
+          sourceAttemptId: source.prepared.attemptId,
           operationId: input.operationId,
           ownerDigestSha256: sha256(input.authorization.ownerId),
           projectRootDigestSha256: sha256(input.authorization.projectRoot),
           profileDigestSha256: sha256(input.authorization.profileId),
           originDigestSha256: sha256(input.authorization.origin),
           lineage: input.lineage,
-          messageId: replaySource.prepared.messageId,
-          semanticRequestHash: replaySource.prepared.semanticRequestHash,
+          messageId: source.prepared.messageId,
+          semanticRequestHash: source.prepared.semanticRequestHash,
         });
         return { ok: false, outcome: "retention-expired", record };
       }
@@ -530,7 +594,7 @@ export class A2ARemoteClient {
         return { ok: false, outcome: "unknown-manual-reconciliation-required" };
       }
       replayRequestId = sourceEnvelope.id as A2ARemoteRequestEnvelope["id"];
-      semanticRequestHash = replaySource.prepared.semanticRequestHash;
+      semanticRequestHash = source.prepared.semanticRequestHash;
     }
     const createdAt = replaySource ? new Date(replaySource.prepared.createdAt) : this.now();
     const attemptDeadline = replaySource?.prepared.attemptDeadline
