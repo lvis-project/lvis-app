@@ -320,7 +320,7 @@ Strict mode is mode-first: it asks for `read` as well, including headless read i
 
 ### §3.5 — Manifest integrity (NEW, critic C2)
 
-Plugin 이 선언한 path-field metadata 가 부정확할 때 *runtime sanity check* 가 catch 한다. path 판정 SOT 는 tool 객체의 `_meta["lvisai/pathFields"]` 이고 (per-tool category 는 host 가 분류 — manifest 필드 아님, #885 Phase R), host 는 이 metadata 를 Tool Registry authority 로 등록하되 거짓 선언은 검사를 늘릴 뿐 우회하지 못한다. app-local tool-name inference 나 plugin-id mapping extension 은 두지 않는다. `ManifestIntegrityViolation` 이 host→plugin fs boundary 에서 발생하면 plugin disable + audit/UI surface 를 fail-closed 로 수행한다.
+Plugin 이 선언한 path-field metadata 가 부정확할 때 *runtime sanity check* 가 catch 한다. path 판정 SOT 는 tool 객체의 `_meta["lvisai/pathFields"]` 이고 (per-tool category 는 host 가 분류 — manifest 필드 아님, #885 Phase R), host 는 이 metadata 를 Tool Registry authority 로 등록하되 거짓 선언은 검사를 늘릴 뿐 우회하지 못한다. app-local tool-name inference 나 plugin-id mapping extension 은 두지 않는다. `ManifestIntegrityError` 이 host→plugin fs boundary 에서 발생하면 plugin disable + audit/UI surface 를 fail-closed 로 수행한다.
 
 ```typescript
 class ManifestIntegrityProxy {
@@ -337,7 +337,7 @@ class ManifestIntegrityProxy {
 }
 ```
 
-**Current host behavior:** plugin tool 은 SDK schema SOT 의 `category/pathFields` 로 등록한다. `category` 누락은 boot-time manifest rejection/fail-closed 로 처리하며, `pathFields` 는 Layer 0 sensitive path + Layer 1 allowed-directory + Layer 5 reviewer 에 동일하게 전달한다. `ManifestIntegrityViolation` 이 runtime boundary 에서 발생하면 panic + audit + plugin disable + user notification. Audit append 실패는 caller 에 전파한다.
+**Current host behavior:** plugin tool 은 SDK schema SOT 의 `category/pathFields` 로 등록한다. `category` 누락은 boot-time manifest rejection/fail-closed 로 처리하며, `pathFields` 는 Layer 0 sensitive path + Layer 1 allowed-directory + Layer 5 reviewer 에 동일하게 전달한다. `ManifestIntegrityError` 이 runtime boundary 에서 발생하면 panic + audit + plugin disable + user notification. Audit append 실패는 caller 에 전파한다.
 
 **Future direction:** sandboxed plugin runtime 이 도입되면 `category === "read"` 도구의 fs boundary 를 runtime capability 로 더 강하게 격리한다. 현재는 SDK manifest authority + host boundary guard 가 SOT 이다.
 
