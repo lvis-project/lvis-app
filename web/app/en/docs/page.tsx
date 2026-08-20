@@ -30,7 +30,7 @@ const features = [
 
 const tour = [
   { step: "01", time: "5 min", title: "Install → Log in", desc: "First run after installing the OS build. Marketplace SSO + ApiKey sha256." },
-  { step: "02", time: "10 min", title: "Grant plugin permissions", desc: "One combined dialog for 12 capabilities + tools[] + pluginAccess." },
+  { step: "02", time: "10 min", title: "Grant plugin permissions", desc: "One combined dialog for capabilities + tools[] + pluginAccess." },
   { step: "03", time: "15 min", title: "Routines + first card", desc: "Register a schedule trigger and receive your first work-assistant proactive card." },
 ];
 
