@@ -85,7 +85,9 @@ import * as attach from "../domains/attach.js";
 import * as audit from "../domains/audit.js";
 import * as chat from "../domains/chat.js";
 import * as dev from "../domains/dev.js";
-import * as misc from "../domains/misc.js";
+import * as app from "../domains/app.js";
+import * as routines from "../domains/routines.js";
+import * as sessionTodo from "../domains/session-todo.js";
 import * as permissions from "../domains/permissions.js";
 import * as plugins from "../domains/plugins.js";
 import * as prompts from "../domains/prompts.js";
@@ -105,7 +107,9 @@ describe("IPC domain runtime named-export lock", () => {
       audit: keys(audit),
       chat: keys(chat),
       dev: keys(dev),
-      misc: keys(misc),
+      app: keys(app),
+      routines: keys(routines),
+      "session-todo": keys(sessionTodo),
       permissions: keys(permissions),
       plugins: keys(plugins),
       prompts: keys(prompts),
@@ -118,6 +122,9 @@ describe("IPC domain runtime named-export lock", () => {
     };
     expect(exportsByDomain).toMatchInlineSnapshot(`
       {
+        "app": [
+          "registerAppHandlers",
+        ],
         "attach": [
           "registerAttachHandlers",
         ],
@@ -129,9 +136,6 @@ describe("IPC domain runtime named-export lock", () => {
         ],
         "dev": [
           "registerDevHandlers",
-        ],
-        "misc": [
-          "registerMiscHandlers",
         ],
         "permissions": [
           "broadcastPermissionConfigChanged",
@@ -151,6 +155,12 @@ describe("IPC domain runtime named-export lock", () => {
         "prompts": [
           "PROMPTS_UPDATED",
           "registerPromptHandlers",
+        ],
+        "routines": [
+          "registerRoutineHandlers",
+        ],
+        "session-todo": [
+          "registerSessionTodoHandlers",
         ],
         "settings": [
           "registerSettingsHandlers",

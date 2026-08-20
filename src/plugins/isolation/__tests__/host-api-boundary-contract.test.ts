@@ -16,7 +16,7 @@ import {
   GATED_EFFECT_PATHS,
 } from "../../../permissions/effect-enforcement.js";
 import { HOSTAPI_EFFECT_BY_PATH } from "../../../permissions/effect-kind.js";
-import { ManifestIntegrityViolation } from "../../../permissions/manifest-integrity.js";
+import { ManifestIntegrityError } from "../../../permissions/manifest-integrity.js";
 import { PluginRuntimeDetachedOperationError } from "../../runtime/detached-operation.js";
 import {
   PluginStorageEncryptionUnavailableError,
@@ -427,7 +427,7 @@ describe("error identity survives the wire by code, never by message", () => {
         "effect-boundary-denied",
       ],
       [
-        new ManifestIntegrityViolation(PLUGIN_ID, "tool_x", "writeFileSync"),
+        new ManifestIntegrityError(PLUGIN_ID, "tool_x", "writeFileSync"),
         "manifest-integrity-violation",
       ],
       [

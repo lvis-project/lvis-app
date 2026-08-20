@@ -38,9 +38,8 @@ const TYPE_BADGE: Record<string, string> = {
   // Permission HMAC-chain AuditCommon decisions (src/audit/audit-schema.ts:85+).
   // Rows in the permission-audit jsonl have no `type` field; the row
   // normalize step falls back to `decision`. Without these keys every
-  // permission row used to render the neutral muted badge — code-reviewer
-  // round-3 MAJOR finding. Color-coded so allow/ask/deny are visually
-  // distinct at a glance.
+  // permission row falls through to the neutral muted badge. Color-coded so
+  // allow/ask/deny are visually distinct at a glance.
   allow: "bg-success/(--opacity-soft) text-success",
   ask: "bg-warning/(--opacity-soft) text-warning",
   deny: "bg-destructive/(--opacity-soft) text-destructive",
@@ -327,7 +326,7 @@ export function AuditTab() {
           )}
         </SettingsSection>
 
-        {/* ── Diagnostics (#1499 E2): bundle export + log tail + crash list ── */}
+        {/* ── Diagnostics: bundle export + log tail + crash list ── */}
         <DiagnosticsSection defaultDateFrom={dateFrom} defaultDateTo={dateTo} />
       </div>
     </div>

@@ -87,7 +87,7 @@ export function useRoutineOverlay({
     });
   }, []);
 
-  // C1+M4: single subscription for routine IPC events. runningStarted pushes a
+  // Single subscription for routine IPC events. runningStarted pushes a
   // running OverlayItem immediately (running:true); fired replaces it with the
   // completed item (running:false + summary). runningRoutines Set is kept in
   // sync for OverlayContextProvider to derive running flags on queue items.
@@ -115,7 +115,7 @@ export function useRoutineOverlay({
     // Major fix: clears running:true stuck OverlayItem when LLM session fails.
     // Uses the same stale-replace path as fired so the running OverlayItem
     // transitions to a visible error summary instead of staying spinning.
-    const unsubFailed = api.onRoutineFailedV2((evt) => {
+    const unsubFailed = api.onRoutineFailed((evt) => {
       setRunningRoutines((prev) => {
         const next = new Set(prev);
         next.delete(evt.routineId);
@@ -132,15 +132,15 @@ export function useRoutineOverlay({
 
     void (async () => {
       try {
-        const pending = await api.listPendingRoutineResultsV2();
+        const pending = await api.listPendingRoutineResults();
         for (const result of pending) pushRoutineResult(result);
       } catch (err) {
         console.warn("[lvis] listPendingRoutineResults failed:", (err as Error).message);
       }
     })();
 
-    // M1: fired payload uses explicit allowlist fields only (no ...routine spread)
-    const unsubFired = api.onRoutineFiredV2(pushRoutineResult);
+    // Fired payload uses explicit allowlist fields only (no ...routine spread)
+    const unsubFired = api.onRoutineFired(pushRoutineResult);
 
     return () => { unsubStarted(); unsubFinished(); unsubFailed(); unsubFired(); };
   }, [api, pushRoutineResult, t]);
@@ -208,7 +208,7 @@ export function useRoutineOverlay({
 
   const handleRoutineAcknowledge = useCallback(
     (routineId: string, firedAt: string) => {
-      void api.acknowledgeRoutineResultV2(routineId, firedAt).catch((err) => {
+      void api.acknowledgeRoutineResult(routineId, firedAt).catch((err) => {
         console.warn("[lvis] acknowledgeRoutineResult failed:", (err as Error).message);
       });
     },

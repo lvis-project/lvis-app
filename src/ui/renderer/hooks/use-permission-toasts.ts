@@ -39,7 +39,7 @@ export function usePermissionToasts(): UsePermissionToastsResult {
 
   // Subscribe to user-approval-hit broadcasts. Returned closure both
   // unsubscribes the IPC listener and cancels any in-flight dismiss timer.
-  // Cluster review S-Med-2: defense-in-depth structural validation of the
+  // Defense-in-depth structural validation of the
   // IPC payload — TS type guarantees only compile-time; a future bug in
   // permission-manager emitting `null` / `""` / `"critical"` would otherwise
   // propagate to `.toUpperCase()` (throws) or render unexpected text.

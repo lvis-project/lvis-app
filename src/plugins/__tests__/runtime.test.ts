@@ -3526,15 +3526,15 @@ export default async function createPlugin() {
   });
 });
 
-// ─── Lifecycle plog emission smoke tests ─────────────────────────────────────
+// ─── Lifecycle log emission smoke tests ────────────────────────────────────
 
-describe("PluginRuntime lifecycle plog emission", () => {
+describe("PluginRuntime lifecycle log emission", () => {
   let testDir: string;
   let installedDir: string;
   let registryPath: string;
 
   beforeEach(async () => {
-    testDir = mkdtempSync(join(tmpdir(), "lvis-plog-"));
+    testDir = mkdtempSync(join(tmpdir(), "lvis-lifecycle-log-"));
     installedDir = join(testDir, "plugins");
     await mkdir(installedDir, { recursive: true });
     registryPath = join(installedDir, "registry.json");
@@ -3572,9 +3572,9 @@ describe("PluginRuntime lifecycle plog emission", () => {
   }
 
   it("emits LOAD_START phase for each plugin entry during load()", async () => {
-    const manifestPath = await writeFakePlugin("plog-test");
+    const manifestPath = await writeFakePlugin("lifecycle-log-test");
     await writeTestPluginRegistry({ registryPath }, [
-      { id: "plog-test", manifestPath, enabled: true },
+      { id: "lifecycle-log-test", manifestPath, enabled: true },
     ]);
     // In test mode, createLogger maps debug→console.log.
     // The ctx object is passed as 2nd arg; check the message string + ctx via JSON.
@@ -3601,9 +3601,9 @@ describe("PluginRuntime lifecycle plog emission", () => {
   });
 
   it("emits LOAD_OK phase after a plugin successfully loads", async () => {
-    const manifestPath = await writeFakePlugin("plog-ok");
+    const manifestPath = await writeFakePlugin("lifecycle-log-ok");
     await writeTestPluginRegistry({ registryPath }, [
-      { id: "plog-ok", manifestPath, enabled: true },
+      { id: "lifecycle-log-ok", manifestPath, enabled: true },
     ]);
     const calls: unknown[][] = [];
     const spy = vi.spyOn(console, "log").mockImplementation((...args) => {
@@ -3628,9 +3628,9 @@ describe("PluginRuntime lifecycle plog emission", () => {
   });
 
   it("emits RESTART_REQUEST phase when restartPlugin is called", async () => {
-    const manifestPath = await writeFakePlugin("plog-restart");
+    const manifestPath = await writeFakePlugin("lifecycle-log-restart");
     await writeTestPluginRegistry({ registryPath }, [
-      { id: "plog-restart", manifestPath, enabled: true },
+      { id: "lifecycle-log-restart", manifestPath, enabled: true },
     ]);
     const runtime = makeGenerationBoundRuntime({
       hostRoot: testDir,
@@ -3642,7 +3642,7 @@ describe("PluginRuntime lifecycle plog emission", () => {
     const spyLog = vi.spyOn(console, "log").mockImplementation((...args) => {
       calls.push(args);
     });
-    await runtime.restartPlugin("plog-restart");
+    await runtime.restartPlugin("lifecycle-log-restart");
     const hasRestartRequest = calls.some((args) => {
       const flat = args
         .map((a) => (typeof a === "object" ? JSON.stringify(a) : String(a)))

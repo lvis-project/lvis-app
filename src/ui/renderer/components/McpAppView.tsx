@@ -397,7 +397,7 @@ export function McpAppView({
     return unsub;
   }, [payload.serverId]);
 
-  // MAJOR-1 — attach the AppBridge via a ref callback keyed to the mounted node,
+  // Attach the AppBridge via a ref callback keyed to the mounted node,
   // NOT a post-mount `setAttribute` effect. Electron binds `partition` only when
   // it is present BEFORE `src` loads, so the sandbox attributes are declared as
   // `createElement` props (below); the bridge lifecycle rides the ref callback so
@@ -419,7 +419,7 @@ export function McpAppView({
         bundle.html,
         node as unknown as BridgeWebviewElement,
         // Seed the initial standard host context. Read the latest builder via ref
-        // so this callback stays keyed on [payload, bundle] (MAJOR-1 lifecycle).
+        // so this callback stays keyed on [payload, bundle].
         buildHostContextRef.current(),
         // React-owned adapters: resize drives card state; open-link reuses the host's
         // existing effect-gated egress (`window.lvisApi.openExternalUrl`); call-tool

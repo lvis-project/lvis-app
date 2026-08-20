@@ -7,7 +7,7 @@
  * right, both of which the host copy already carries a guard for.
  */
 import { describe, it, expect } from "vitest";
-import { isPathWithinRoot, toRelativePath } from "../chat-side-panel-preview.js";
+import { isPathWithinRoot, toRelativePath } from "../ChatSidePanelPreview.js";
 
 describe("isPathWithinRoot", () => {
   it("accepts a descendant of a root that already ends in a separator", () => {

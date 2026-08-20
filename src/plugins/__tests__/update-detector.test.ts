@@ -14,7 +14,7 @@ import { PluginUpdateDetector, isUpdateCheckEnabled } from "../update-detector.j
 import { isNewerPluginVersion } from "../update-condition.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 

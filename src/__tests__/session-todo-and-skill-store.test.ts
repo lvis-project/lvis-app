@@ -11,7 +11,7 @@ import {
   SessionTodoStore,
 } from "../main/session-todo-store.js";
 import { SkillStore, parseFrontmatter } from "../main/skill-store.js";
-import { cleanupTmpDir } from "../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../__tests__/support/tmp-dir-teardown.js";
 
 const REPO_ROOT = resolvePath(
   fileURLToPath(new URL(".", import.meta.url)),

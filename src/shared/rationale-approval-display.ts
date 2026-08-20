@@ -285,9 +285,9 @@ function sealText(
  *
  * A silent tail cut is a distortion, not a repair: a truncated path or URL
  * reads as a COMPLETE, different value, and the user approves that other
- * value (review MAJOR-1). The ellipsis makes every cut visible. The character
+ * value. The ellipsis makes every cut visible. The character
  * before it is checked for a lone high surrogate so a code point is never
- * split in half (review NIT-2) — a lone surrogate would render as U+FFFD and
+ * split in half — a lone surrogate would render as U+FFFD and
  * read as corruption rather than truncation.
  */
 function truncateVisibly(value: string, maxLength: number): string {

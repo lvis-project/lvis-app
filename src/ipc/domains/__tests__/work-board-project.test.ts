@@ -6,7 +6,7 @@ import { WORK_BOARD } from "../../../shared/ipc-channels.js";
 import { registerWorkBoardHandlers } from "../work-board.js";
 import type { IpcDeps } from "../../types.js";
 import type { WorkItemResolved } from "../../../main/work-board-store.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 const ipc = vi.hoisted(() => {
   const handlers = new Map<string, (...args: unknown[]) => unknown>();

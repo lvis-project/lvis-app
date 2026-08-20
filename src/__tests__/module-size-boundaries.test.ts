@@ -16,9 +16,9 @@ const scopedModules = [
   "src/data/settings-defaults.ts",
   "src/data/settings-normalization.ts",
   "src/ui/renderer/components/ChatSidePanel.tsx",
-  "src/ui/renderer/components/chat-side-panel-preview.tsx",
-  "src/ui/renderer/components/chat-side-panel-layout.tsx",
-  "src/ui/renderer/components/chat-side-panel-workspaces.tsx",
+  "src/ui/renderer/components/ChatSidePanelPreview.tsx",
+  "src/ui/renderer/components/ChatSidePanelLayout.tsx",
+  "src/ui/renderer/components/ChatSidePanelWorkspaces.tsx",
 ] as const;
 
 describe("large module ownership boundaries", () => {

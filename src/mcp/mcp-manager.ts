@@ -740,7 +740,7 @@ export class McpManager {
     if (!normalizedId) {
       throw new Error(`[mcp-manager] ${t("be_mcpManager.serverIdBlank")}`);
     }
-    // #885 b1 (MINOR-4) — bound the id at ingestion. This is the primary guard;
+    // Bound the id at ingestion. This is the primary guard;
     // `encodeMcpServerId` applies the same bound defensively for the
     // `loadFromConfig`/servers.json path that bypasses addConfig. English throw
     // (developer-facing tamper path, per CLAUDE.md IPC error-language convention).

@@ -31,7 +31,7 @@ import {
 import { spawnWorker, type SpawnedWorker } from "../worker-spawn.js";
 import { __resetWrappedPluginWorkersForTest } from "../sandbox-capability.js";
 import { asrtCanInitialize } from "./test-helpers.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 /** GET over a UDS from the HOST (outside the sandbox). */
 function udsGet(

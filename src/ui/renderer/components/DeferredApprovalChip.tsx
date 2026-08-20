@@ -51,7 +51,7 @@ export function DeferredApprovalChip({
   const { t } = useTranslation();
   const [pending, setPending] = useState<DeferredQueueEntry[]>([]);
   const [busy, setBusy] = useState(false);
-  // Round-2 code-reviewer MAJOR — synchronous re-entry guard. `useState`
+  // Synchronous re-entry guard. `useState`
   // updates batch + flush asynchronously in React 18, so a fast double
   // click could fire two `handle()` invocations before the first
   // `setBusy(true)` committed. A ref check that flips synchronously
@@ -118,7 +118,7 @@ export function DeferredApprovalChip({
     setBusy(true);
     setError(null);
     try {
-      // Round-1 security MAJOR-1 (TOCTOU on pending[0]): re-fetch the
+      // TOCTOU on pending[0]: re-fetch the
       // queue *at click time* and confirm (a) exactly one entry still
       // pending, (b) it is the same id we showed in the chip label.
       // Without this, a race that adds a new pending entry between
@@ -126,31 +126,30 @@ export function DeferredApprovalChip({
       if (listApi) {
         const current = await listApi();
         if (!current.ok) {
-          // Round-6 UX MINOR — plain Korean; raw `current.error` value
+          // Plain Korean; the raw `current.error` value
           // never reaches UI.
           setError(t("deferredApprovalChip.checkQueueFailed"));
           return;
         }
         if (current.pending.length !== 1 || current.pending[0]?.id !== target.id) {
-          // Round-6 UX MINOR — "pending 큐" English-Korean mix replaced
-          // with plain Korean. Tells the user what happened + the
-          // next step.
+          // Plain Korean, not an English-Korean mix: tells the user
+          // what happened and what the next step is.
           setError(t("deferredApprovalChip.queueChanged"));
           await refresh();
           return;
         }
       }
-      // Round-1 critic MAJOR-4 (stale closure on intent): re-run the
+      // Stale closure on intent: re-run the
       // matcher on the live draftText so the click can't act on an
       // intent that no longer reflects the composer.
       const liveIntent = detectApprovalIntent(draftText);
       if (liveIntent.kind !== intent.kind) {
-        // Round-5 UX NIT — "의도가 변경되었습니다" is internal-state
+        // "의도가 변경되었습니다" is internal-state
         // language. Plain Korean for what actually happened.
         setError(t("deferredApprovalChip.intentChanged"));
         return;
       }
-      // Round-3 critic MAJOR — the audit `reason` field is HMAC-chained
+      // The audit `reason` field is HMAC-chained
       // tamper-evident storage. Passing the matched phrase verbatim
       // could land user-typed text (potentially PII / secrets adjacent
       // to the approve verb) in immutable forensic logs. The
@@ -168,7 +167,7 @@ export function DeferredApprovalChip({
         livePlan ? { scope: livePlan.scope } : undefined,
       );
       if (!r.ok) {
-        // Round-6 UX MINOR — sanitize raw IPC error string before
+        // Sanitize the raw IPC error string before
         // surfacing. The error code may be a developer-facing token.
         setError(t("deferredApprovalChip.resolveError"));
         return;
@@ -183,16 +182,13 @@ export function DeferredApprovalChip({
     }
   };
 
-  // Round-1 architect MAJOR-2 / round-2 code-reviewer MINOR / round-5
-  // critic MAJOR-2 — surface the entry source so the user sees whether
-  // they're approving a builtin host tool, a plugin tool, or an MCP-
-  // bridged tool. Round-5 fix: every source gets a badge so screen
-  // readers always receive a provenance announcement (previous builtin
-  // case rendered no badge, leaving SR users unable to distinguish a
-  // builtin `fs_write` from a plugin tool of the same shape).
-  // Round-5 UX MAJOR — visible badge text in Korean (matches the
-  // aria-label) so non-technical users aren't confronted with raw
-  // English tokens like "mcp" or "builtin".
+  // Surface the entry source so the user sees whether they're approving
+  // a builtin host tool, a plugin tool, or an MCP-bridged tool. EVERY
+  // source gets a badge, builtin included — a missing badge leaves screen
+  // reader users unable to tell a builtin `fs_write` from a plugin tool of
+  // the same shape. The visible badge text is Korean and matches the
+  // aria-label, so non-technical users never meet a raw "mcp" / "builtin"
+  // token.
   const sourceBadgeText =
     target.source === "plugin"
       ? t("deferredApprovalChip.sourcePlugin")
@@ -205,8 +201,8 @@ export function DeferredApprovalChip({
       : target.source === "mcp"
         ? t("deferredApprovalChip.sourceMcpTool")
         : t("deferredApprovalChip.sourceBuiltinTool");
-  // Round-5 UX MAJOR — "호출" is dev jargon; "실행" reads as
-  // conversational confirmation rather than legal-permission form.
+  // "호출" is dev jargon; "실행" reads as conversational confirmation
+  // rather than a legal-permission form.
   // The confirmation line. It states the resolved breadth and the
   // host-derived path in concrete terms — never a paraphrase of what the user
   // typed — so that what the click will do is legible before it happens.
@@ -227,7 +223,7 @@ export function DeferredApprovalChip({
       : t("deferredApprovalChip.actionReject");
 
   return (
-    // Round-3 UX MAJOR — switched to `flex-col` so the error row drops
+    // `flex-col` so the error row drops
     // below the main row at narrow viewports instead of overflowing
     // beside the [허용]/[거절] button. The action row stays as a
     // horizontal flex inside.
@@ -243,10 +239,9 @@ export function DeferredApprovalChip({
           className="inline-block h-2 w-2 rounded-full bg-primary"
         />
         <span className="flex-1 min-w-0">
-          {/* Round-5 UX MAJOR — drop the "의도 감지" framing (sounds
-              like surveillance to non-technical users). The chip's job
-              is to ask, not to announce that the system read the
-              user's input. */}
+          {/* No "의도 감지" framing — it reads as surveillance to
+              non-technical users. The chip's job is to ask, not to
+              announce that the system read the user's input. */}
           {sourceBadgeText && sourceBadgeAriaLabel ? (
             <span
               aria-label={sourceBadgeAriaLabel}

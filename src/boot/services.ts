@@ -130,7 +130,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
   // notifications render in the user's language. See src/i18n.
   await applyBootLocale(settingsService);
 
-  // #1499 E2: apply the user's diagnostics.logRetentionDays to the log tree.
+  // Apply the user's diagnostics.logRetentionDays to the log tree.
   // The file sink pruned at LOG_RETENTION_DAYS (the SOT default) before settings
   // were loaded — hoisted so early boot lines are captured. Now that settings
   // exist, honour a tightened/loosened window (no-op if unchanged). Best-effort —
@@ -155,7 +155,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
     memoryManager.closeSearchIndex();
   });
   log.info("boot: memory loaded from %s", memoryManager.getDir());
-  // #1500 (E3): FTS5 search index integrity check → rebuild-from-JSONL if
+  // FTS5 search index integrity check → rebuild-from-JSONL if
   // corrupt/missing. No-Fallback — this is the only recovery path; search
   // never falls back to a linear scan.
   await memoryManager.verifyOrRebuildSearchIndex().catch((err: unknown) => {
@@ -169,7 +169,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
 
   const inputClassifier = new InputClassifier();
   const toolRegistry = new ToolRegistry();
-  // Tier A1: BashTool registers directly — it implements the canonical
+  // BashTool registers directly — it implements the canonical
   // Tool contract via ZodTool and is tagged source="builtin" + category
   // "shell" so the §6.3 permission stack handles approval correctly
   // (Layer 3 + Bash AST validation gate at executor Step 2.5).

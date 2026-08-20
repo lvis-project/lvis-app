@@ -84,7 +84,7 @@ export class MessageQueueStore {
     if (trimmed.length === 0) {
       throw new Error("MessageQueueStore.add: empty text rejected");
     }
-    // Cap: economic DoS / API cost blast 방어 (security review MAJOR-1).
+    // Cap: economic DoS / API cost blast 방어.
     // 사용자 button-mash 사고로 1000+ 항목 누적 시 formatQueueInject 의 거대
     // string 이 다음 brake-point 에 통째로 paid LLM API 로 전송되는 것 차단.
     if (trimmed.length > MessageQueueStore.MAX_ITEM_CHARS) {

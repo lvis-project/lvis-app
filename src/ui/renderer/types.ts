@@ -340,12 +340,12 @@ export type AppSettings = {
     settingsTab?: SettingsTab;
     /** Pinned project roots — sort to the top of the sidebar's Projects tab. SOT: `SystemSettings`. */
     pinnedProjectRoots?: string[];
-    /** E4 — auto-launch LVIS at OS login. SOT: `SystemSettings`. Default false. */
+    /** Auto-launch LVIS at OS login. SOT: `SystemSettings`. Default false. */
     launchAtStartup?: boolean;
-    /** E4 — when launching at startup, start hidden in the tray. SOT: `SystemSettings`. Default false. */
+    /** When launching at startup, start hidden in the tray. SOT: `SystemSettings`. Default false. */
     launchMinimized?: boolean;
   };
-  /** E4 — global keyboard shortcuts. SOT: `ShortcutSettings` in settings-store. */
+  /** Global keyboard shortcuts. SOT: `ShortcutSettings` in settings-store. */
   shortcuts?: {
     /** Accelerator for the show/hide window toggle, or null when unset. */
     toggleWindow: string | null;
@@ -366,8 +366,9 @@ export type AppSettings = {
     /**
      * Permission policy host-classifies-risk migration gate. Mirrors the
      * main-process SOT in `src/data/settings-store.ts`
-     * `FeatureFlags.hostClassifiesRisk`. Default true on ALL platforms (PR #1390
-     * — host classifies plugin risk + foreground plugin read-relaxation). Safe
+     * `FeatureFlags.hostClassifiesRisk`. Default true on ALL platforms: the
+     * host classifies plugin risk and grants foreground plugin
+     * read-relaxation. Safe
      * all-platform because the read-relaxation is COUPLED to the OS sandbox
      * being active: on a non-sandbox platform it falls back to the pre-exec ask.
      */
@@ -783,7 +784,7 @@ export type LvisApi = {
     protocol?: string;
     message?: string;
   }>;
-  /** #FU259 — MCP catalog (filtered to plugin_type === "mcp"). */
+  /** MCP catalog (filtered to plugin_type === "mcp"). */
   listMcpCatalog: () => Promise<Array<{
     id: string;
     name: string;
@@ -799,7 +800,7 @@ export type LvisApi = {
     | { ok: true; slug: string; installDir: string; connected: boolean; warning?: string; needsCredential: boolean; authMode: "none" | "api-key" | "sso" | "oauth" }
     | { ok: false; error: string; message: string }
   >;
-  /** #FU262 — Claude Desktop config import. */
+  /** Claude Desktop config import. */
   previewClaudeDesktopMcpImport: (raw: string) => Promise<{
     entries: Array<{
       id: string;
@@ -860,7 +861,7 @@ export type LvisApi = {
   chatContinueLastUser: (sessionId: string) => Promise<{ ok: boolean; error?: string }>;
   chatRetryEffort: (opts?: { thinkingBudgetTokens?: number; enableThinking?: boolean }) => Promise<{ ok: boolean; error?: string }>;
   chatExport: (format: "markdown" | "json") => Promise<{ ok: boolean; filePath?: string; canceled?: boolean; error?: string }>;
-  /** #1500 (E3) — reverse of chatExport. Always creates a brand-new session (never overwrites). */
+  /** Reverse of chatExport. Always creates a brand-new session (never overwrites). */
   chatImport: () => Promise<
     { ok: true; sessionId: string; messageCount: number } | { ok: false; error?: string; canceled?: boolean }
   >;
@@ -1006,34 +1007,34 @@ export type LvisApi = {
     | { ok: true; pluginId: string; enabled: boolean }
     | { ok: false; error: string; message: string }
   >;
-  // routine_schedule v2 — persistent routine list + lifecycle
-  listRoutinesV2: () => Promise<import("../../shared/routines-types.js").RoutineRecord[]>;
-  dismissRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
-  removeRoutineV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
-  triggerRoutineNowV2: (id: string) => Promise<{ ok: boolean; error?: string }>;
-  listPendingRoutineResultsV2: () => Promise<import("../../shared/routines-types.js").RoutineFiredPayload[]>;
-  acknowledgeRoutineResultV2: (routineId: string, firedAt: string) => Promise<{ ok: boolean; error?: string }>;
-  addRoutineV2: (
+  // routine_schedule — persistent routine list + lifecycle
+  listRoutines: () => Promise<import("../../shared/routines-types.js").RoutineRecord[]>;
+  dismissRoutine: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  removeRoutine: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  triggerRoutineNow: (id: string) => Promise<{ ok: boolean; error?: string }>;
+  listPendingRoutineResults: () => Promise<import("../../shared/routines-types.js").RoutineFiredPayload[]>;
+  acknowledgeRoutineResult: (routineId: string, firedAt: string) => Promise<{ ok: boolean; error?: string }>;
+  addRoutine: (
     input: import("../../shared/routines-types.js").AddRoutineInput,
   ) => Promise<
     | { ok: true; routine: import("../../shared/routines-types.js").RoutineRecord }
     | { ok: false; error: string }
   >;
-  onRoutineFiredV2: (
+  onRoutineFired: (
     handler: (event: import("../../shared/routines-types.js").RoutineFiredPayload) => void,
   ) => () => void;
   // Routine running indicator
-  // C1: enriched payload includes title+firedAt so renderer can push OverlayItem immediately
+  // Enriched payload includes title+firedAt so renderer can push OverlayItem immediately
   onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => () => void;
   onRoutineRunningFinished: (handler: (routineId: string) => void) => () => void;
   // failed: clears running:true stuck OverlayItem when the LLM session throws
-  onRoutineFailedV2: (handler: (event: { routineId: string; error: string }) => void) => () => void;
+  onRoutineFailed: (handler: (event: { routineId: string; error: string }) => void) => () => void;
   // Overlay IPC bridges
   onOverlayShow: (handler: (item: import("./context/OverlayContext.js").OverlayItem) => void) => () => void;
   onOverlayUpdate: (handler: (id: string, patch: Partial<import("./context/OverlayContext.js").OverlayItem>) => void) => () => void;
   onOverlayDismiss: (handler: (id: string) => void) => () => void;
   // Routine session history
-  listRoutineSessionsV2: (
+  listRoutineSessions: (
     routineId: string,
     limit?: number,
   ) => Promise<Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>>;
@@ -1246,7 +1247,7 @@ export type LvisApi = {
   plugins: {
     getPerfStats: () => Promise<Record<string, PluginPerfStats>>;
   };
-  // Workflow tools — routines v2
+  // Workflow tools — routines
   onAskUserQuestion: (
     h: (req: {
       id: string;
@@ -1538,7 +1539,7 @@ import type {
 
 export type LvisUserApprovalApi = {
   record: (entry: {
-    /** #799 P0: ID of the in-flight ApprovalRequest. Main process reads the
+    /** ID of the in-flight ApprovalRequest. Main process reads the
      *  authoritative trustOrigin/source/approvalCacheKey from this ID via
      *  ApprovalGate.getRequestSnapshot — renderer-supplied authority fields
      *  below are ignored (kept on the wire for legacy callers + audit). */
@@ -1753,7 +1754,7 @@ export type LvisPermissionApi = {
     }) => void,
   ) => () => void;
   /**
-   * Permission policy CRITICAL 4.1 — subscribe to user-approval memory-hit
+   * Permission policy — subscribe to user-approval memory-hit
    * disclosure events. Fires when a user-approval cache entry auto-resolves
    * a tool invocation that would otherwise have prompted. Renderer is
    * expected to surface a transient toast/banner so the user sees that a

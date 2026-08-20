@@ -45,7 +45,7 @@ import { createWorkBoardReporter, type WorkBoardReporter,
 } from "../../work-board/work-report.js";
 import { appendMemory } from "../../work-board/work-memory.js";
 import { WORK_BOARD } from "../../shared/ipc-channels.js";
-import { fanOutToAllWindows } from "../../ipc/broadcast-helpers.js";
+import { fanOutToAllWindows } from "../../ipc/window-fanout.js";
 import { emitEvent } from "../types.js";
 import { createLogger } from "../../lib/logger.js";
 import { createSubscriptionLlmProvider } from "../../main/subscription-llm-provider.js";

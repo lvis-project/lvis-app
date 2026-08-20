@@ -11,7 +11,7 @@ import {
   sanitizedCodexConversationEnvironment,
   type CodexConversationRuntimeOptions,
 } from "../codex-conversation-runtime.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 type Spawn = NonNullable<CodexConversationRuntimeOptions["spawn"]>;
 type JsonRecord = Record<string, unknown>;

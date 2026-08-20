@@ -277,14 +277,14 @@ export interface ApprovalRequest {
    */
   trustOrigin?: string;
   /**
-   * Issue #691 round-1 user request — OS-level execution sandbox SOT,
+   * Issue #691 — OS-level execution sandbox SOT,
    * surfaced to the approval dock so the user can see whether the
    * tool will run under the ASRT OS sandbox (macOS Seatbelt / Linux bwrap)
    * or with no isolation. Captured at request build time by the executor
    * (and by {@link ApprovalGate} for non-tool approvals) from
    * {@link detectSandboxCapability}; immutable thereafter.
    *
-   * Round-3 code-reviewer MAJOR — typed as the canonical
+   * Typed as the canonical
    * {@link SandboxCapability} (not a structural mirror) to keep the
    * `platform: NodeJS.Platform` enum tight. Mirror declarations in the
    * renderer type SHOULD use the same shape.
@@ -2183,8 +2183,7 @@ export class ApprovalGate {
     }
     const executionPlanAudit = boundExecutionPlan ?? suppliedExecutionPlan;
 
-    // Round-3 code-reviewer MAJOR + round-4 critic CRITICAL + round-5
-    // critic MAJOR-1 — sandbox capability injection is scoped to the
+    // Sandbox capability injection is scoped to the
     // tool-execution approval surface. Non-execution surfaces
     // (out-of-allowed-dir directory confirm, agent-action/mode-change
     // config asks)
@@ -2646,7 +2645,7 @@ export class ApprovalGate {
       // than emitting an unparseable display), so this throw path should be
       // unreachable — but an unreachable throw that would strand the pending
       // entry until timeout is still a liveness hole. Mirror the send-failure
-      // branch below: clear pending, audit, deny once (review MINOR-2).
+      // branch below: clear pending, audit, deny once.
       let maskedSignedReq: ApprovalRequest;
       try {
         maskedSignedReq =

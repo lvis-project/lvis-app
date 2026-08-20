@@ -67,7 +67,7 @@ export interface ChatViewProps {
   onRetryEffort: () => void | Promise<void>;
   onContinueFromLastUser?: (sessionId: string) => void | Promise<void>;
   isEntryStarred: (idx: number) => string | null;
-  /** B4: abort current streaming turn */
+  /** Abort current streaming turn */
   onAbort: () => void | Promise<void>;
   /** Mid-stream "guide" utterance — non-interrupting direction adjustment. Returns IPC result so caller can preserve typed text on rejection. */
   onGuide: (text: string) => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -565,7 +565,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
   // No transcript auto-scroll is needed for the composer-dock question overlay:
   // it stays visible independently of the transcript scroll position.
 
-  // B4: Ctrl/Cmd+C while streaming and no text selected → abort
+  // Ctrl/Cmd+C while streaming and no text selected → abort
   useEffect(() => {
     if (!streaming) return;
     const handler = (e: KeyboardEvent) => {
@@ -655,11 +655,11 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         </div>
       )}
       {/* User-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s.
-          Verdict-tier tint surfaces the trust gradient (CRITICAL 4.1 disclosure):
+          Verdict-tier tint surfaces the trust gradient:
           - low    → --success (informational, safe re-approval)
           - medium → --warning (moderate risk)
           - high   → --destructive + role="alert" (urgent — user is re-using a high-risk approval)
-          Cluster review MAJOR-3 — disclosure surface must be visually distinguishable per tier.
+          The disclosure surface must be visually distinguishable per tier.
           Uses semantic theme tokens (--success / --warning / --destructive) so bundles
           (tokyo-night / forest / etc.) supply the actual color — the toast adapts. */}
       {userApprovalHitToast && (() => {

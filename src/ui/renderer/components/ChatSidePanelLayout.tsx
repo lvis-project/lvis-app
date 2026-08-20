@@ -11,7 +11,7 @@ import {
   PreviewBody,
   statusTone,
   targetIcon,
-} from "./chat-side-panel-preview.js";
+} from "./ChatSidePanelPreview.js";
 
 export function SearchInput({
   query,

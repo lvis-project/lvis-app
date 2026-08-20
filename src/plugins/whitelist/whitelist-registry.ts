@@ -78,7 +78,7 @@ export interface WhitelistInitOptions {
   /** Telemetry sink — incremented for each fetch/cache outcome. */
   telemetry?: (event: string, meta?: Record<string, string>) => void;
   /**
-   * Cluster review optional fix — app-shutdown AbortSignal threaded from
+   * App-shutdown AbortSignal threaded from
    * boot so a slow CDN response doesn't keep the registry's fetch alive
    * after the user quit (up to the 10s HTTP timeout). The signal flows
    * directly into `whitelist-fetcher.ts` and aborts the underlying
@@ -101,7 +101,7 @@ class WhitelistRegistry {
   /** Set when a fetch attempt found no cache and offline → permanent deny. */
   private noCacheOffline = false;
   /**
-   * Ralph cycle 1 HIGH fix — trust roots used for signature verification.
+   * Trust roots used for signature verification.
    * Defaults to the frozen production `WHITELIST_PUBLIC_KEYS` map; tests
    * inject a per-run keypair via the singleton's
    * `setPublicKeysForTesting()` helper instead of mutating the module
@@ -128,7 +128,7 @@ class WhitelistRegistry {
   }
 
   /**
-   * Ralph cycle 1 — test-only key injection. Production callers use the
+   * Test-only key injection. Production callers use the
    * frozen module-level `WHITELIST_PUBLIC_KEYS` map; tests generate a
    * fresh ed25519 keypair per run and swap it in via this helper without
    * mutating the frozen production constant.
@@ -274,10 +274,9 @@ class WhitelistRegistry {
       return { kind: "deny", reason: "whitelist-stale-exceeded" };
     }
     if (status.state === "stale-within-grace") {
-      // Ralph cycle 1 MEDIUM fix — emit the previously-declared but
-      // never-called `whitelist_cache_stale` counter so operators see
-      // when the registry is serving grants from a past-expiry doc
-      // inside the 7d grace window. `keyPrefix` carries the requested
+      // Emit the `whitelist_cache_stale` counter so operators see when the
+      // registry is serving grants from a past-expiry doc inside the 7d
+      // grace window. `keyPrefix` carries the requested
       // key's namespace (folded through `sanitizeKeyPrefix` so unknown
       // namespaces don't balloon the counter map).
       incrementHostSecretCounter(

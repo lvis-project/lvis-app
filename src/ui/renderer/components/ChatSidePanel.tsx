@@ -40,7 +40,7 @@ import {
   BrowserWorkspace,
   FileBrowserWorkspace,
   PreviewWorkspace,
-} from "./chat-side-panel-workspaces.js";
+} from "./ChatSidePanelWorkspaces.js";
 import {
   BROWSER_TARGET_KINDS,
   FILE_TARGET_KINDS,
@@ -49,7 +49,7 @@ import {
   PreviewBody,
   UrlDocumentViewer,
   tabIcon,
-} from "./chat-side-panel-preview.js";
+} from "./ChatSidePanelPreview.js";
 
 
 /** Status tone for the sub-agent list row badge. */
@@ -226,7 +226,7 @@ function SubAgentTranscriptDetail({
 }
 
 /**
- * Sub-agent viewer tab (R4). Top pane = the list of this chat's sub-agent spawns
+ * Sub-agent viewer tab. Top pane = the list of this chat's sub-agent spawns
  * (live + completed); bottom pane = the SELECTED spawn's transcript/tool-activity
  * via a sub-agent-only expanded transcript renderer. Only the selected spawn is
  * rendered in detail (not every transcript), and the list rows are memoized, so a chat that fanned out many
@@ -603,7 +603,7 @@ export interface ChatSidePanelProps {
   workspaceTabs: WorkspaceTabsStore;
   /**
    * This chat's sub-agent spawns (live + completed), sourced from ChatView's
-   * spawn stream. Drives the subagent viewer tab (R4). Prop-drilled rather than
+   * spawn stream. Drives the subagent viewer tab. Prop-drilled rather than
    * re-subscribed here so there is one spawn source of truth.
    */
   subAgentSpawns: SubAgentSpawn[];

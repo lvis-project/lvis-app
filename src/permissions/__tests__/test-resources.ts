@@ -2,7 +2,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import { VerdictCache } from "../reviewer/verdict-cache.js";
 
 interface FlushableResource {

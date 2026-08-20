@@ -10,7 +10,7 @@ import { Separator } from "../../../components/ui/separator.js";
 import { Textarea } from "../../../components/ui/textarea.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../types.js";
 import { LONG_TOAST_TTL_MS } from "../constants.js";
-import { useNotifySaved } from "../contexts/saved-toast.js";
+import { useNotifySaved } from "../context/SavedToastContext.js";
 import { SettingsPageHeader } from "../components/PageShell.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";

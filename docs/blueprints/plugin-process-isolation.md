@@ -293,7 +293,7 @@ string union; `triggerConversation` → `ConversationTriggerResult`;
 ### 3.3 Error identity
 
 Errors currently cross as `Error` instances and the host distinguishes several by
-identity — `ManifestIntegrityViolation`, `PluginRuntimeDetachedOperationError`,
+identity — `ManifestIntegrityError`, `PluginRuntimeDetachedOperationError`,
 and the `[plugin:<id>] <member>: plugin instance is no longer active` string thrown
 by `assertActiveHostApi`. Over a wire an `Error` degrades to `{ message, stack }`.
 

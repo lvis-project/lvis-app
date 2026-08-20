@@ -8,8 +8,8 @@
  *
  * The routine-overlay IPC subscriptions are ALREADY covered and are NOT
  * duplicated here:
- *   - onRoutineFiredV2 → OverlayCard renders: test/renderer/routine-flow.test.tsx
- *     ("onRoutineFiredV2 renders the OverlayCard" and siblings).
+ *   - onRoutineFired → OverlayCard renders: test/renderer/routine-flow.test.tsx
+ *     ("onRoutineFired renders the OverlayCard" and siblings).
  *   - onOverlayShow (plugin overlay) → card + primary action → handleAsk
  *     trigger-import: src/ui/renderer/__tests__/ChatView.test.tsx
  *     ("keeps overlay-import tool and final assistant output in the normal chat

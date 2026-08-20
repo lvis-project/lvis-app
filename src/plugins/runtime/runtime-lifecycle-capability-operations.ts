@@ -44,7 +44,7 @@ import {
   buildMethodMap,
 } from "./plugin-loader.js";
 import { createLogger } from "../../lib/logger.js";
-import { plog, PluginPhase } from "../lifecycle-log.js";
+import { logPluginLifecycle, PluginPhase } from "../lifecycle-log.js";
 import { withPluginInstallLock } from "../install-lifecycle.js";
 import { type RestartPluginResult } from "./runtime-state.js";
 import { PluginRuntimePublicationState } from "./runtime-publication-state.js";
@@ -626,7 +626,7 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
     }
 
     const methods = buildMethodMap(manifest, instance, (toolName) =>
-      plog(
+      logPluginLifecycle(
         "warn",
         { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" },
         "tool disabled — missing handler",
@@ -1225,7 +1225,7 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
     return blocked;
   }
 
-  /** I2 — Plugin live-reload (dev only). */
+  /** Plugin live-reload (dev only). */
   async reloadPlugin(pluginId: string): Promise<void> {
     const canonicalPluginId = this.resolveKnownPluginId(pluginId);
     this.assertPluginLifecycleAvailable(canonicalPluginId);
@@ -1495,7 +1495,7 @@ export abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePubl
         },
       );
       const methods = buildMethodMap(manifest, instance, (toolName) =>
-        plog(
+        logPluginLifecycle(
           "warn",
           { pluginId: manifest.id, phase: PluginPhase.REGISTER_TOOL_SKIP, toolName, reason: "missing_handler" },
           "tool disabled — missing handler in prepared artifact",

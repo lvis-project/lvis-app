@@ -17,7 +17,7 @@
  *     heuristic (4 categories × 3 dir-relations × 3 confidence levels).
  *   - `llm`      → LlmRiskClassifier — multi-vendor LLM call. Always
  *     runs RuleBased first; takes `max(ruleVerdict, llmVerdict)`
- *     (LLM cannot downgrade — security M1).
+ *     (LLM cannot downgrade).
  *   - `strict`   → StrictRiskClassifier — always HIGH + defer-all. Use this for
  *     hardened deployments where every headless mutation must be manually
  *     approved. Equivalent to the pre-#664 "disabled" semantic.
@@ -438,7 +438,7 @@ function isGraphMetadataRead(input: Record<string, unknown>, target: NetworkTarg
  * against `process.cwd()` rather than the invocation cwd, so the reviewer used
  * to compute its verdict about a path Layer 1 never checks.
  *
- * Step 2 — canonicalize for matching. Security MAJOR-3 (cluster review):
+ * Step 2 — canonicalize for matching:
  * `..` segments / NFD unicode forms / trailing spaces / mixed-case
  * (darwin/win32) / duplicate slashes are all collapsed via
  * {@link canonicalizePathForMatch} before any prefix compare. Without
@@ -489,7 +489,7 @@ function extractDeclaredPaths(ctx: ToolInvocationContext): string[] {
  * "is this inside the authorized scope" exactly as enforcement does, or a
  * verdict is computed about a containment the enforcer disagrees with.
  *
- * Security MAJOR-3 — the inputs MUST already be canonicalized
+ * The inputs MUST already be canonicalized
  * ({@link canonicalizePathForMatch}). Layer 1 canonicalizes allowed dirs
  * at settings load; {@link extractDeclaredPaths} canonicalizes path-field
  * values. The compare is therefore a plain prefix compare, and the
@@ -599,7 +599,7 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     // Canonicalize the sandbox root on the producer's behalf so the
     // path-traversal defense holds even if a caller forgets to pre-
     // canonicalize. Both sides of the prefix compare are now bit-
-    // identical canonical strings (security MAJOR-3).
+    // identical canonical strings.
     const canonicalRoot = caseFoldForMatch(canonicalizePathForMatch(ctx.ownerPluginSandboxRoot));
     const allInside = paths.every((p) =>
       isInsideAllowed(p, [canonicalRoot]),
@@ -860,7 +860,7 @@ async function abortableSleep(ms: number, signal?: AbortSignal): Promise<boolean
     };
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
-      // Microtask-race guard (critic R1 MAJOR-3): the abort event may fire
+      // Microtask-race guard: the abort event may fire
       // AFTER setTimeout queued this callback but BEFORE it executed. In
       // that window `clearTimeout` is a no-op and `onAbort.resolve(false)`
       // races our `resolve(true)`. Re-check the signal here so the sleep
@@ -935,7 +935,7 @@ function isHostDeterminedRiskTool(input: ToolInvocationContext): boolean {
   // Co-scoped with the rule that justifies each bypass (category included):
   // those LOW rules key on (category, source, toolName), and keying the bypass
   // on fewer axes would let a category drift hand the final verdict to a
-  // DIFFERENT rule with no LLM cross-check (architect review MINOR-1).
+  // DIFFERENT rule with no LLM cross-check.
   if (input.source !== "builtin") return false;
   return HOST_DETERMINED_RISK_TOOLS.get(input.toolName) === input.category;
 }
@@ -961,7 +961,7 @@ export class LlmRiskClassifier implements RiskClassifier {
     userPrompt: string,
     abortSignal: AbortSignal | undefined,
   ): Promise<{ completion: Awaited<ReturnType<LlmReviewerProvider["complete"]>>; attempts: number }> {
-    // Clamp config defensively (critic R1 MAJOR-1): caller may pass an
+    // Clamp config defensively: the caller may pass an
     // unvalidated config from settings or a future runtime knob —
     // `maxAttempts > 10` would risk retry storms, `jitterPct > 100` would
     // collapse to zero-delay retry through `Math.max(0, …)`, `jitterPct < 0`
@@ -1024,7 +1024,7 @@ export class LlmRiskClassifier implements RiskClassifier {
     input: ToolInvocationContext,
     opts?: { abortSignal?: AbortSignal },
   ): Promise<LlmRiskClassificationTrace> {
-    // Composition baseline (security M1) — rule first, LLM cannot downgrade.
+    // Composition baseline — rule first, LLM cannot downgrade.
     const ruleVerdict = this.rule.classify(input);
 
     // Host-determined tools never consult the LLM: their risk is settled by
@@ -1067,9 +1067,9 @@ export class LlmRiskClassifier implements RiskClassifier {
     } catch (err) {
       // Any provider error (after retry exhaustion or terminal-classified)
       // → fallbackOnError policy. Surface the worst-case attempt count to
-      // telemetry (critic R1 MINOR-4) so dashboards can distinguish
-      // first-try-failure from retry-exhaustion — the exhaustion rate is
-      // the exact signal #865 reliability work cares about.
+      // telemetry so dashboards can distinguish first-try-failure from
+      // retry-exhaustion; the exhaustion rate is the signal that matters
+      // for provider reliability.
       this.telemetry.onCall?.({
         tokensIn: 0,
         tokensOut: 0,
@@ -1079,7 +1079,7 @@ export class LlmRiskClassifier implements RiskClassifier {
       });
       if (this.fallbackOnError === "deny") {
         // DLP-mask the provider error message before embedding into the
-        // verdict reason (security R1 MINOR-3): provider errors sometimes
+        // verdict reason: provider errors sometimes
         // echo request body fragments back, which would otherwise land in
         // audit logs + UI without redaction.
         const rawMsg = err instanceof Error ? err.message ?? "error" : "error";

@@ -34,7 +34,7 @@ const {
 } = await import("node:fs");
 const { tmpdir } = await import("node:os");
 const { join } = await import("node:path");
-const { cleanupTmpDir } = await import("../../testing/tmp-dir-teardown.js");
+const { cleanupTmpDir } = await import("../../__tests__/support/tmp-dir-teardown.js");
 const { SecretDocumentStore, SecretDocumentValidationError } = await import(
   "../secret-document-store.js"
 );

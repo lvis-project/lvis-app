@@ -41,7 +41,7 @@ export function handleGetMode(deps: IpcDeps): { mode: string } {
  * loose shape into the strict `PermissionModeApprovalBypass` happens in
  * `resolvePermissionModeApprovalBypass`
  * (`src/permissions/permission-mode-apply.ts`) — the one auditable choke point
- * where the fail-closed trust conditions live (security-lane MINOR-3). This
+ * where the fail-closed trust conditions live. This
  * transport alias exists so IPC signatures do not have to name a permissions
  * type; it is the SAME type, not a second declaration.
  */

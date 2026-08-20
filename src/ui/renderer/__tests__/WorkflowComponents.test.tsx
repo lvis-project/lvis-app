@@ -21,11 +21,11 @@ function fakeApi(overrides: Partial<LvisApi> = {}): LvisApi {
   return {
     // Only methods used by the components under test need real impls;
     // the rest are stubbed minimally to satisfy the type.
-    listRoutinesV2: () => Promise.resolve([]),
-    dismissRoutineV2: stub as never,
-    removeRoutineV2: stub as never,
-    listRoutineSessionsV2: () => Promise.resolve([]),
-    onRoutineFiredV2: noopUnsub as never,
+    listRoutines: () => Promise.resolve([]),
+    dismissRoutine: stub as never,
+    removeRoutine: stub as never,
+    listRoutineSessions: () => Promise.resolve([]),
+    onRoutineFired: noopUnsub as never,
     listSessionTodos: () => Promise.resolve([]),
     onSessionTodoChanged: noopUnsub as never,
     respondAskUserQuestion: stub as never,
@@ -318,7 +318,7 @@ describe("RoutinePanel", () => {
 
   it("renders an active routine card", async () => {
     const api = fakeApi({
-      listRoutinesV2: () =>
+      listRoutines: () =>
         Promise.resolve([
           {
             id: "r1",
@@ -335,7 +335,7 @@ describe("RoutinePanel", () => {
   });
 
   it("renders past LLM routine sessions beside the routine list", async () => {
-    const listRoutineSessionsV2 = vi.fn(async () => [
+    const listRoutineSessions = vi.fn(async () => [
       {
         routineId: "r-llm",
         firedAt: "2026-05-11T04:00:00.003Z",
@@ -346,7 +346,7 @@ describe("RoutinePanel", () => {
     ]);
     const onOpenSession = vi.fn();
     const api = fakeApi({
-      listRoutinesV2: () =>
+      listRoutines: () =>
         Promise.resolve([
           {
             id: "r-llm",
@@ -357,7 +357,7 @@ describe("RoutinePanel", () => {
             createdAt: "2024-01-01T00:00:00.000Z",
           },
         ]),
-      listRoutineSessionsV2: listRoutineSessionsV2 as never,
+      listRoutineSessions: listRoutineSessions as never,
     });
     const { findByTestId } = render(<RoutinePanel api={api} onOpenSession={onOpenSession} />);
 
@@ -367,7 +367,7 @@ describe("RoutinePanel", () => {
       expect(sessionList.textContent).toContain("뉴스 요약");
       expect(sessionList.textContent).toContain("뉴스 요약 완료");
     });
-    expect(listRoutineSessionsV2).toHaveBeenCalledWith("r-llm", 10);
+    expect(listRoutineSessions).toHaveBeenCalledWith("r-llm", 10);
 
     fireEvent.click(within(sessionList).getByText("열기"));
     expect(onOpenSession).toHaveBeenCalledWith("session-routine-1");

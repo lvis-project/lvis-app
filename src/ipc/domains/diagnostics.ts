@@ -1,5 +1,5 @@
 /**
- * Diagnostics domain IPC handlers (#1499 E2).
+ * Diagnostics domain IPC handlers.
  * Covers: lvis:diagnostics:export, lvis:diagnostics:crash-list, lvis:logs:tail.
  *
  * ALL INTERNAL — none appear in PUBLIC_CHANNELS, so an external origin
@@ -7,7 +7,7 @@
  * Each handler additionally calls validateHostRendererSender (NOT the base
  * validateSender) — these channels expose host-wide state (settings snapshot,
  * production logs, crash metadata), so a plugin-ui-shell frame is rejected even
- * though it is also a file:// origin (#1499 E2 cluster-review security m1). On
+ * though it is also a file:// origin. On
  * rejection each emits an auditUnauthorized warn row + returns UNAUTHORIZED_FRAME.
  *
  * IPC error convention: return codes are kebab-case English; the renderer maps
@@ -63,7 +63,7 @@ async function crashDumpsDir(): Promise<string> {
  * with PII + credential DLP and applying the optional level filter. Newest file first;
  * reads only enough files to satisfy `lines`.
  *
- * KNOWN LIMITATION (accepted, #1499 E2 cluster-review NIT): this loads each
+ * KNOWN LIMITATION (accepted): this loads each
  * needed file fully into memory before slicing to the tail. Files are bounded by
  * the sink's LOG_MAX_BYTES (10 MB/file) and we stop reading once `lines` is
  * satisfied, so worst-case memory is small and O(files-needed). A streaming
@@ -126,7 +126,7 @@ export function registerDiagnosticsHandlers(deps: IpcDeps): void {
       try {
         const settings = settingsService.getAll();
         // Persisted setting is AUTHORITATIVE; the renderer arg may only NARROW,
-        // never widen (#1499 E2 cluster-review security MAJOR M2). Crash dumps
+        // never widen. Crash dumps
         // are only ever included when the persisted opt-in is true AND the caller
         // did not explicitly opt out — a renderer that sends `true` can never
         // force-include dumps the user's setting has disabled.
@@ -158,7 +158,7 @@ export function registerDiagnosticsHandlers(deps: IpcDeps): void {
 
         const { writeFile } = await import("node:fs/promises");
         await writeFile(res.filePath, buffer);
-        // Forensic record of the export (#1499 E2 cluster-review security m2):
+        // Forensic record of the export:
         // a diagnostics bundle is a sanctioned exfiltration of redacted host
         // state, so log WHO exported WHAT — the effective includeCrashDumps
         // (post-M2 narrowing), the date window, byte size, and the destination

@@ -17,7 +17,7 @@
 export type HostSecretCounterEvent =
   | "hostSecret_read"
   | "hostSecret_denied"
-  // #958 round-1 security MEDIUM — separate counter for admin-install
+  // Separate counter for admin-install
   // Tier-3 bypass events so anomaly detection can spot an unexpected
   // burst of admin-bypass reads (e.g. a runaway plugin, or one whose
   // installSource was upgraded without operator awareness). Bucketed
@@ -61,7 +61,7 @@ export type HostSecretDeniedReason =
   | "whitelist-stale-exceeded";
 
 /**
- * PR #894 review B7 — Known, bounded set of key prefixes the host counter
+ * Known, bounded set of key prefixes the host counter
  * map will accept. An attacker-controlled plugin could otherwise call
  * `hostApi.getSecret("<random>.x")` in a loop and balloon the counter map
  * with one entry per attacker-chosen prefix (memory DoS). Anything outside

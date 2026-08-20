@@ -8,7 +8,7 @@
  * `onNotification` fires an OS notification. The scheduler is NOT started here —
  * main.ts calls `services.startRoutinesScheduler()` after IPC handlers attach.
  */
-import { ROUTINES_V2 } from "../../shared/ipc-channels.js";
+import { ROUTINES } from "../../shared/ipc-channels.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
@@ -29,11 +29,11 @@ export function wireRoutinesScheduler(ctx: BootContext): void {
       const firedAt = routine.lastFiredAt ?? new Date().toISOString();
       const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
 
-      // C1: runningStarted before the headless turn finishes — enriched payload
+      // runningStarted fires before the headless turn finishes — enriched payload
       // with title+firedAt so renderer can push a proper running OverlayItem
       // immediately. The completed event later carries the routineSessionId.
       try {
-        getMainWindow()?.webContents.send(ROUTINES_V2.runningStarted, {
+        getMainWindow()?.webContents.send(ROUTINES.runningStarted, {
           routineId: routine.id,
           firedAt,
           title,
@@ -58,14 +58,14 @@ export function wireRoutinesScheduler(ctx: BootContext): void {
         if (routineSessionId) {
           const updated = await routinesStore.update(routine.id, { lastRoutineSessionId: routineSessionId });
           if (!updated) {
-            log.warn("routines v2 llm-session session id persist failed: routine not found (%s)", routine.id);
+            log.warn("routines llm-session session id persist failed: routine not found (%s)", routine.id);
           }
         }
       } catch (err) {
-        log.warn("routines v2 llm-session run failed: %s", (err as Error).message);
+        log.warn("routines llm-session run failed: %s", (err as Error).message);
         // Emit failed so renderer knows to clear running state.
         try {
-          getMainWindow()?.webContents.send(ROUTINES_V2.failed, {
+          getMainWindow()?.webContents.send(ROUTINES.failed, {
             routineId: routine.id,
             error: (err as Error).message,
           });
@@ -75,7 +75,7 @@ export function wireRoutinesScheduler(ctx: BootContext): void {
       } finally {
       // Always clear running state regardless of success/failure.
         try {
-          getMainWindow()?.webContents.send(ROUTINES_V2.runningFinished, routine.id);
+          getMainWindow()?.webContents.send(ROUTINES.runningFinished, routine.id);
         } catch {
           // non-fatal
         }
@@ -84,7 +84,7 @@ export function wireRoutinesScheduler(ctx: BootContext): void {
       const summary = runSummary;
       // Explicit allowlist payload — no ...routine spread to prevent PII leak.
       try {
-        getMainWindow()?.webContents.send(ROUTINES_V2.fired, {
+        getMainWindow()?.webContents.send(ROUTINES.fired, {
           id: routine.id,
           trigger: routine.trigger,
           execution: routine.execution,
@@ -94,7 +94,7 @@ export function wireRoutinesScheduler(ctx: BootContext): void {
           ...(routineSessionId ? { routineSessionId } : {}),
         } satisfies import("../../shared/routines-types.js").RoutineFiredPayload);
       } catch (err) {
-        log.warn("routines v2 llm-session emit failed: %s", (err as Error).message);
+        log.warn("routines llm-session emit failed: %s", (err as Error).message);
       }
     })();
   });
@@ -107,7 +107,7 @@ export function wireRoutinesScheduler(ctx: BootContext): void {
         contextRef: { routineId: routine.id },
       });
     } catch (err) {
-      log.warn("routines v2 notification emit failed: %s", (err as Error).message);
+      log.warn("routines notification emit failed: %s", (err as Error).message);
     }
     // Emit fired event for notification-only branch so the UI reflects the
     // fire consistently across both execution modes.
@@ -115,7 +115,7 @@ export function wireRoutinesScheduler(ctx: BootContext): void {
     try {
       const firedAt = routine.lastFiredAt ?? new Date().toISOString();
       const title = routine.title ?? routine.notificationTitle ?? routine.id.slice(0, 8);
-      getMainWindow()?.webContents.send(ROUTINES_V2.fired, {
+      getMainWindow()?.webContents.send(ROUTINES.fired, {
         id: routine.id,
         trigger: routine.trigger,
         execution: routine.execution,
@@ -124,10 +124,10 @@ export function wireRoutinesScheduler(ctx: BootContext): void {
         summary: "",
       } satisfies import("../../shared/routines-types.js").RoutineFiredPayload);
     } catch (err) {
-      log.warn("routines v2 notification fired emit failed: %s", (err as Error).message);
+      log.warn("routines notification fired emit failed: %s", (err as Error).message);
     }
   });
-  // L1: NOT started here. Boot order matters — if scheduler.start() runs
+  // NOT started here. Boot order matters — if scheduler.start() runs
   // before the renderer has its IPC listeners attached, a past-due
   // routine fires immediately into a void. main.ts now invokes
   // `services.startRoutinesScheduler()` AFTER `registerIpcHandlers()` to

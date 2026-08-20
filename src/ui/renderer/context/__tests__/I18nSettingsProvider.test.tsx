@@ -6,7 +6,7 @@ import { cleanup } from "@testing-library/react";
 import { useTranslation } from "../../../../i18n/react.js";
 import type { Locale } from "../../../../i18n/locale.js";
 import { __setLocaleLoaderForTest } from "../../../../i18n/messages/index.js";
-import { I18nSettingsProvider } from "../i18n-settings-provider.js";
+import { I18nSettingsProvider } from "../I18nSettingsProvider.js";
 
 function installApi(initialLanguage: Locale = "en") {
   const settingsUpdatedHandlers: Array<(settings: { appearance?: { language?: Locale } }) => void> = [];

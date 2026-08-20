@@ -81,7 +81,7 @@ function genericUpgradeRequiredMessage(): string {
   return "This package is unavailable in this version of LVIS. Update LVIS and try again.";
 }
 
-export interface RealCloudMarketplaceConfig {
+export interface CloudMarketplaceConfig {
   baseUrl: string;
   apiKey?: string;
   /**
@@ -128,7 +128,7 @@ interface ServerCatalogRow {
   channel?: string;
   /** Catalog-approved capabilities declared by this plugin (not dependency requirements). */
   capabilities?: unknown;
-  /** S14: requires.capabilities[] (+ optional min_app_version) exposed by the server catalog. */
+  /** `requires.capabilities[]` (+ optional min_app_version) exposed by the server catalog. */
   requires?: {
     capabilities?: unknown;
     min_app_version?: unknown;
@@ -194,7 +194,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
   private readonly artifactReadTimeoutMs: number;
   private readonly envelopeReadTimeoutMs: number;
 
-  constructor(private config: RealCloudMarketplaceConfig) {
+  constructor(private config: CloudMarketplaceConfig) {
     this.artifactLimits = resolveMarketplaceArtifactLimits(config.artifactLimits);
     this.artifactReadTimeoutMs = config.artifactReadTimeoutMs ?? 120_000;
     if (!Number.isSafeInteger(this.artifactReadTimeoutMs) || this.artifactReadTimeoutMs <= 0) {
@@ -726,7 +726,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
       throw new Error("marketplace row missing id/name");
     }
 
-    // M3: enforce strict id format — id is used as a filesystem directory name.
+    // Enforce strict id format — id is used as a filesystem directory name.
     if (!SAFE_ID_RE.test(id)) {
       throw new Error(`marketplace row has invalid id format: "${id}"`);
     }
@@ -825,7 +825,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
     );
     if (networkAccess) item.networkAccess = networkAccess;
 
-    // S8: expose version and channel for update detection
+    // Expose version and channel for update detection
     if (version) item.version = version;
     if (typeof row.latest_artifact_sha256 === "string" && /^[a-f0-9]{64}$/i.test(row.latest_artifact_sha256)) {
       item.artifactSha256 = row.latest_artifact_sha256.toLowerCase();
@@ -848,7 +848,7 @@ export class CloudMarketplaceFetcher implements MarketplaceFetcher, MarketplaceH
         : [];
     }
 
-    // S14: map requires.capabilities[] (+ min_app_version) from the catalog row
+    // Map requires.capabilities[] (+ min_app_version) from the catalog row
     if (row.requires && typeof row.requires === "object") {
       const caps = row.requires.capabilities;
       const requires: RequiresSpec = {

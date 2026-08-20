@@ -14,7 +14,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { setProcessPlatform } from "../../testing/process-platform.js";
+import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
 
 const appended: Array<{ name: string; value?: string }> = [];
 
@@ -53,7 +53,7 @@ vi.mock("../mcp-app-protocol.js", () => ({
 }));
 
 import { runEarlyBootEnv } from "../early-boot-env.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 describe("runEarlyBootEnv", () => {
   let userDataPath: string;

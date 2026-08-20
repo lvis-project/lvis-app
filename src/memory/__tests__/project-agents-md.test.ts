@@ -10,7 +10,7 @@ import {
   discoverProjectAgentsMd,
   PROJECT_AGENTS_MD_MAX_TOTAL_BYTES,
 } from "../project-agents-md.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 describe("discoverProjectAgentsMd", () => {
   let root: string;

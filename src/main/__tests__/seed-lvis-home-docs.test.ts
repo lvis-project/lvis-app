@@ -51,7 +51,7 @@ import {
   seedLvisHomeDocs,
 } from "../seed-lvis-home-docs.js";
 import * as atomicFile from "../../lib/atomic-file.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 let fixtures: string;
 let home: string;

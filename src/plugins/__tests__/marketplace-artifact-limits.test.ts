@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { readCompressedArtifactFile } from "../marketplace-artifact-limits.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 describe("readCompressedArtifactFile", () => {
   it.runIf(process.platform !== "win32")(

@@ -9,7 +9,7 @@ import {
   type TelegramConnectionStore,
 } from "../telegram-connection-store.js";
 import { conversationDigestFor, namespaceAt } from "./telegram-connection-namespace.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 /**
  * Distinct raw values that must never reach the file. Each one is what the

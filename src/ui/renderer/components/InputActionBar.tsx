@@ -1,9 +1,8 @@
 /**
  * InputActionBar — the single unified action bar inside the composer input box.
  *
- * History: this absorbs the former BottomActionRow (shortcuts / thinking /
- * cancel / send) so there is ONE action bar rather than a top action row plus a
- * separate bottom turn-control row (L24246). Layout:
+ * There is ONE action bar in the composer — shortcuts, thinking, cancel and
+ * send live here rather than in a second turn-control row below it. Layout:
  *
  *   ACTION ROW (single line):
  *     LEADING:  [⌘ slash/command picker] → [persona] → [attach]
@@ -221,7 +220,7 @@ export function InputActionBar({
   return (
     <div
       data-testid="input-action-bar"
-      // Tutorial-C SpotlightTour anchor (PR #983 follow-up). Step 2 of
+      // SpotlightTour anchor. Step 2 of
       // `first-boot-essentials` pins to this action-bar root, see
       // `default-tour-scenarios.ts`.
       data-tour-anchor="input-action-bar"

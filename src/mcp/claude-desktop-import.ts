@@ -1,5 +1,5 @@
 /**
- * #FU262 — Claude Desktop config importer.
+ * Claude Desktop config importer.
  *
  * Maps the Claude Desktop `claude_desktop_config.json` schema onto LVIS's
  * `McpServerConfig` discriminated union so users migrating from Claude

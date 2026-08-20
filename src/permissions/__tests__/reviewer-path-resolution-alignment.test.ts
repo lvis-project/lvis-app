@@ -33,7 +33,7 @@ import { dispatchReviewerForHeadless } from "../../tools/pipeline/reviewer-dispa
 import type { Tool } from "../../tools/base.js";
 import type { ToolPermissionContext } from "../../tools/executor.js";
 import { makeRiskClassifierContext } from "./test-helpers.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const rb = new RuleBasedRiskClassifier();
 

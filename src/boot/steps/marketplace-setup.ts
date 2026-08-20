@@ -34,7 +34,7 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   // Marketplace fetcher selection — single production path:
   //   - real-cloud + URL → CloudMarketplaceFetcher
   //   - otherwise (no URL configured) → DisabledMarketplaceFetcher
-  // No `MockMarketplaceFetcher` fallback at boot. Default points at the
+  // No `LocalCatalogMarketplaceFetcher` fallback at boot. Default points at the
   // production tunnel (`https://marketplace.lvisai.xyz`); dev operators
   // running the marketplace server locally override via the settings UI.
   // Tests inject their own fetcher.
@@ -77,18 +77,18 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   // boot (after plugin runtime is available) and again after every
   // llm-settings IPC change.
   //
-  // PR #894 review B2: we no longer inject `hostApiKey` here. The actual
+  // The wildcard slot deliberately carries no `hostApiKey`. The actual
   // secret must always flow through `hostApi.getSecret("llm.apiKey.<vendor>")`,
   // which routes through the three-tier allowlist gate (only plugins that
   // declare the matching `hostSecrets.read[]` entry receive the key).
-  // Injecting the apiKey into a wildcard config slot bypassed that gate
-  // — every plugin received the key via `config.get("hostApiKey")`
-  // regardless of its manifest. Removing it closes that hole.
-  // PR #894 Cycle 3 T1-2 — factory extracted to
-  // `boot/steps/refresh-active-llm-wildcard.ts` so the debounce + vendor-
-  // change-restart contract is independently unit-testable. Same semantics
-  // as before: first call seeds, subsequent vendor changes trigger a
-  // debounced restart sweep of every loaded plugin.
+  // Injecting the apiKey into a wildcard config slot would bypass that gate:
+  // every plugin would receive the key via `config.get("hostApiKey")`
+  // regardless of its manifest.
+  //
+  // The factory lives in `boot/steps/refresh-active-llm-wildcard.ts` so the
+  // debounce + vendor-change-restart contract is independently unit-testable:
+  // the first call seeds, and subsequent vendor changes trigger a debounced
+  // restart sweep of every loaded plugin.
   const {
     refresh: refreshActiveLlmWildcard,
     dispose: disposeRefreshActiveLlmWildcard,

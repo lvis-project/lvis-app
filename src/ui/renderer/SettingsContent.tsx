@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "../../lib/utils.js";
 import { useContainerNarrow } from "./hooks/use-container-narrow.js";
-import { SavedToastFloating, SavedToastProvider } from "./contexts/saved-toast.js";
+import { SavedToastFloating, SavedToastProvider } from "./context/SavedToastContext.js";
 import type { LvisApi } from "./types.js";
 import { RolesTab } from "./tabs/RolesTab.js";
 import { PermissionsTab } from "./tabs/PermissionsTab.js";
@@ -136,7 +136,7 @@ function TabSaveBar({
 }
 
 
-// `./contexts/saved-toast.tsx` so PluginConfigTab can import the consumer
+// `./context/SavedToastContext.tsx` so PluginConfigTab can import the consumer
 // hook without forming a circular import with SettingsContent (which
 // itself imports PluginConfigTab in this file).
 
@@ -242,7 +242,7 @@ export function SettingsContent({
   // when nothing is pending, so registering all four is safe.
   // (Note: in the BrowserWindow conversion the hook's own unmount
   // cleanup also fires `cancel()`, so the pre-conversion Dialog
-  // `open=false` cancel-effect was retired — see PR #890 review.)
+  // `open=false` cancel-effect was retired.)
   useEffect(() => {
     window.addEventListener("beforeunload", flushPendingSaves);
     window.addEventListener("pagehide", flushPendingSaves);

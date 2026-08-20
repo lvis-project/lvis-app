@@ -48,4 +48,4 @@ export function makeTmpDir(prefix = "artifact-store-"): string {
  * implementation — and the reasoning behind it — lives in one place for every
  * suite that needs a scratch directory.
  */
-export { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+export { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";

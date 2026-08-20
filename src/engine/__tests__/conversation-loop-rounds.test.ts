@@ -20,7 +20,7 @@ import { SkillStore } from "../../main/skill-store.js";
 import { createSkillLoadTool } from "../../tools/skill-load.js";
 import { MCP_RESOURCE_FENCE_OPEN } from "../../shared/mcp-resource-bounds.js";
 import type { SubscriptionRuntimeId } from "../../shared/subscription-runtime.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 class FakeProvider implements LLMProvider {
   readonly vendor = "openai" as const;
