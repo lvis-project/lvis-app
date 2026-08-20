@@ -12,6 +12,11 @@
  *    asks for, and it is real because the ASRT deny floor covers that path.
  *  - The child cannot WRITE outside its allow set. Write in ASRT IS an
  *    allow-jail, so this one is a jail assertion rather than a deny assertion.
+ *    "Its allow set" is larger than the two paths `spawnConfinedPluginChild`
+ *    names: ASRT adds its own default write paths, which include the temp root
+ *    it also points the child's `TMPDIR` at. So this proves the child cannot
+ *    reach the fixture paths outside the jail; it does not prove the jail is
+ *    those two directories and nothing else.
  *  - The child CAN read and write its own `pluginDataDir`. A confinement that
  *    also broke the plugin would be indistinguishable from one that worked, so
  *    the positive case is part of the proof.
@@ -29,6 +34,10 @@
  *    stays readable. A test cannot write fixtures into the real userData dir, so
  *    the composition of the allow set is asserted separately and honestly as
  *    wiring rather than dressed up as a containment result.
+ *  - That the temp root the child is given EXISTS. It usually will not: ASRT
+ *    substitutes its own `TMPDIR` and creates nothing, so the meeting case
+ *    below asserts what a child does when that path is absent rather than
+ *    assuming the host's temp directory carried over.
  *  - Network confinement. The macOS backend filters egress through a proxy
  *    rather than a namespace, so a localhost probe would prove something
  *    different on each platform and an internet probe would pass on an offline
@@ -55,6 +64,8 @@ import { spawnConfinedPluginChild } from "../out-of-process-plugin.js";
 
 const PLUGIN_ID = "work-assistant";
 const SECRET_TEXT = "the-host-secret-the-child-must-not-read";
+/** The bytes an un-migrated session file holds, so "nothing moved" is checkable. */
+const LEGACY_SESSION_BYTES = "the session that predates pluginDataDir";
 
 interface Fixture {
   readonly root: string;
@@ -74,6 +85,13 @@ interface Fixture {
 
 let fixture: Fixture | undefined;
 let previousLvisHome: string | undefined;
+/**
+ * ASRT reads this out of the HOST env when it builds the wrap, and it decides
+ * the child's `TMPDIR`. One case sets it to reproduce the absent temp root an
+ * ordinary machine has, so it is restored the same way `LVIS_HOME` is — a case
+ * that leaked it would hand the next case a temp root that does not exist.
+ */
+let previousSandboxTmpdir: string | undefined;
 
 function makeFixture(): Fixture {
   const root = mkdtempSync(join(tmpdir(), "confined-plugin-"));
@@ -199,6 +217,7 @@ async function runProbe(fx: Fixture): Promise<ProbeReport> {
 beforeEach(() => {
   fixture = makeFixture();
   previousLvisHome = process.env.LVIS_HOME;
+  previousSandboxTmpdir = process.env.CLAUDE_CODE_TMPDIR;
   // The deny floor is derived from `lvisHome()`, so pointing it at the fixture
   // is what makes `<LVIS_HOME>/secrets` a real denied path with a real file in
   // it rather than an assertion about the developer's own home directory.
@@ -209,6 +228,8 @@ afterEach(async () => {
   if (isAsrtSandboxActive()) await resetAsrtSandbox();
   if (previousLvisHome === undefined) delete process.env.LVIS_HOME;
   else process.env.LVIS_HOME = previousLvisHome;
+  if (previousSandboxTmpdir === undefined) delete process.env.CLAUDE_CODE_TMPDIR;
+  else process.env.CLAUDE_CODE_TMPDIR = previousSandboxTmpdir;
   if (fixture) rmSync(fixture.root, { recursive: true, force: true });
   fixture = undefined;
 });
@@ -622,11 +643,23 @@ export const createPlugin = async (context) => {
  * try both directions of the jail — a confinement that ended at the first
  * `spawn()` would leave every assertion above true and worthless.
  *
- * The last handler drives the one of `meeting`'s CHANGED paths that a test can
- * reach without a live egress fence: the legacy session move out of
- * `<hostRoot>`, which is outside the write jail and now fails instead of
- * succeeding. It is asserted here so the routing SOT's note about it is a
- * measurement rather than a prediction.
+ * The last two handlers drive the two of `meeting`'s CHANGED paths a test can
+ * reach without a live egress fence, and each is asserted here so the routing
+ * SOT's note about it is a measurement rather than a prediction:
+ *
+ *  - The legacy session move out of `<hostRoot>`. An un-migrated file is
+ *    PLANTED from the host side first, so the handler runs the plugin's own
+ *    `renameSync` out of that directory rather than a stand-in `mkdir` — the
+ *    two land outside the same jail but they are different syscalls, and only
+ *    one of them is the operation the plugin performs.
+ *  - The temp root the sandbox substitutes. `CLAUDE_CODE_TMPDIR` is pointed at
+ *    a path that does NOT exist, which is the state an ordinary machine is in:
+ *    ASRT rewrites the child's `TMPDIR` to `/tmp/claude` when nothing names
+ *    another, that path is on its default WRITE allow-list, and nothing
+ *    creates it. Pointing it at an absent path INSIDE this child's own write
+ *    jail reproduces that state on any machine — including one whose
+ *    `/tmp/claude` happens to exist, which is the only reason the first
+ *    measurement of this consequence read as green.
  */
 describe("meeting, out of process and confined", () => {
   it.runIf(process.platform === "darwin" || process.platform === "linux")(
@@ -639,10 +672,20 @@ describe("meeting, out of process and confined", () => {
       const childOutDir = childBundleDir(repoRoot);
       const childEntryPath = await buildChildEntry(repoRoot);
 
+      // The un-migrated state the plugin's own guard requires before it will
+      // attempt the move at all, planted from the HOST side because a confined
+      // child could not have created it. Without this the handler below would
+      // exercise a `mkdir` the plugin never performs and report the same
+      // denial for a different reason.
+      const legacyDir = join(fx.hostRoot, ".meeting-sessions");
+      mkdirSync(legacyDir, { recursive: true });
+      writeFileSync(join(legacyDir, "session-1.json"), LEGACY_SESSION_BYTES, "utf-8");
+
       const entryPath = join(plugin.pluginRoot, "plugin.mjs");
       writeFileSync(
         entryPath,
-        `import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+        `import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 const attempt = async (fn) => {
@@ -703,14 +746,36 @@ export const createPlugin = async (context) => {
         if (run.error) return { started: false, code: run.error.code ?? run.error.name };
         return { started: true, status: run.status, stdout: String(run.stdout).trim().split("\\n") };
       },
-      // The one-time move of the pre-\`pluginDataDir\` session directory, at the
-      // path the plugin builds it from: \`join(context.hostRoot, ...)\`.
-      meeting_legacy_session_probe: async () => ({
-        legacyDir: join(context.hostRoot, ".meeting-sessions"),
-        migrate: await attempt(() => {
-          mkdirSync(join(context.hostRoot, ".meeting-sessions"), { recursive: true });
-          return "made";
-        }),
+      // The one-time move of the pre-\`pluginDataDir\` session directory, run as
+      // the plugin runs it: the source path built off \`context.hostRoot\`, the
+      // destination inside \`pluginDataDir\`, and the move itself a
+      // \`renameSync\` per file rather than a directory creation.
+      meeting_legacy_session_probe: async () => {
+        const legacyDir = join(context.hostRoot, ".meeting-sessions");
+        const sessionsDir = join(context.pluginDataDir, "sessions");
+        return {
+          legacyDir,
+          listed: await attempt(() => readdirSync(legacyDir)),
+          prepared: await attempt(() => { mkdirSync(sessionsDir, { recursive: true }); return "made"; }),
+          migrate: await attempt(() => {
+            for (const file of readdirSync(legacyDir)) {
+              renameSync(join(legacyDir, file), join(sessionsDir, file));
+            }
+            return "moved";
+          }),
+        };
+      },
+      // The temp root the plugin stages under. \`readdirSync(tmpdir())\` is the
+      // first statement of the sweep its own \`createPlugin\` runs unguarded,
+      // and \`mkdtempSync(join(tmpdir(), ...))\` is how it stages an upload.
+      meeting_tmpdir_probe: async () => ({
+        tmpdir: tmpdir(),
+        sweep: await attempt(() => readdirSync(tmpdir()).length),
+        stage: await attempt(() => mkdtempSync(join(tmpdir(), "lvis-meeting-upload-"))),
+        // The plugin does not do this, and that is the point: the path is
+        // inside the write jail, so creating it succeeds. Absence is the
+        // failure, not permission.
+        create: await attempt(() => { mkdirSync(tmpdir(), { recursive: true }); return "made"; }),
       }),
     },
   };
@@ -795,6 +860,7 @@ export const createPlugin = async (context) => {
             "meeting_prompts_probe",
             "meeting_ffmpeg_probe",
             "meeting_legacy_session_probe",
+            "meeting_tmpdir_probe",
           ].map((name) => ({
             name,
             description: name,
@@ -804,6 +870,16 @@ export const createPlugin = async (context) => {
         entryPath,
         childEntryPath,
       });
+      // Reproduce, on THIS machine, the temp root an ordinary machine has:
+      // one the sandbox hands the child and that does not exist. It is placed
+      // inside `pluginDataDir` so it is WRITE-ALLOWED and merely absent, which
+      // is exactly `/tmp/claude`'s status — on ASRT's default write allow-list
+      // and created by nothing. Read by ASRT out of the HOST env while it
+      // builds the wrap, so it must be set before the spawn.
+      const absentSandboxTmp = join(plugin.pluginDataDir, "sandbox-tmp-that-is-absent");
+      expect(existsSync(absentSandboxTmp)).toBe(false);
+      process.env.CLAUDE_CODE_TMPDIR = absentSandboxTmp;
+
       const instance = await factory({
         pluginId: "meeting",
         pluginRoot: plugin.pluginRoot,
@@ -885,15 +961,58 @@ export const createPlugin = async (context) => {
         // ── the legacy session move, which this boundary CHANGES ───────────
         const legacy = (await instance.handlers.meeting_legacy_session_probe!()) as {
           legacyDir: string;
+          listed: { ok: boolean; value?: string[] };
+          prepared: { ok: boolean; code?: string };
           migrate: { ok: boolean; code?: string };
         };
         // The plugin still builds the path off `hostRoot`, and it arrives in
         // the child unchanged…
-        expect(legacy.legacyDir).toBe(join(fx.hostRoot, ".meeting-sessions"));
-        // …but the move out of it now fails closed rather than silently
+        expect(legacy.legacyDir).toBe(legacyDir);
+        // …the child can SEE the un-migrated file, so what follows is a WRITE
+        // denial and not a child that simply found nothing to move…
+        expect(legacy.listed.ok, JSON.stringify(legacy.listed)).toBe(true);
+        expect(legacy.listed.value).toEqual(["session-1.json"]);
+        // …its destination inside the jail is created without complaint…
+        expect(legacy.prepared.ok, JSON.stringify(legacy.prepared)).toBe(true);
+        // …but the move itself now fails closed rather than silently
         // succeeding, which is the consequence the routing SOT names.
         expect(legacy.migrate.ok, JSON.stringify(legacy.migrate)).toBe(false);
-        expect(existsSync(legacy.legacyDir)).toBe(false);
+        // And nothing moved: the file is where it was, and none landed. A
+        // partially-completed migration would be worse than a refused one.
+        expect(readFileSync(join(legacyDir, "session-1.json"), "utf-8")).toBe(
+          LEGACY_SESSION_BYTES,
+        );
+        expect(existsSync(join(plugin.pluginDataDir, "sessions", "session-1.json"))).toBe(
+          false,
+        );
+
+        // ── the temp root the sandbox substitutes, and its absence ─────────
+        const temp = (await instance.handlers.meeting_tmpdir_probe!()) as {
+          tmpdir: string;
+          sweep: { ok: boolean; code?: string };
+          stage: { ok: boolean; code?: string };
+          create: { ok: boolean; code?: string };
+        };
+        // The host's own temp directory is IRRELEVANT: the child never sees
+        // it. ASRT rewrites `TMPDIR` for any wrap that carries a write policy,
+        // and this spawn's does.
+        expect(temp.tmpdir).toBe(absentSandboxTmp);
+        expect(temp.tmpdir).not.toBe(tmpdir());
+        // The sweep the plugin runs unguarded inside `createPlugin` — this
+        // `ENOENT` is what escapes it and stops the plugin loading at all.
+        expect(temp.sweep, JSON.stringify(temp.sweep)).toMatchObject({
+          ok: false,
+          code: "ENOENT",
+        });
+        // …and the upload staging, for the same reason.
+        expect(temp.stage, JSON.stringify(temp.stage)).toMatchObject({
+          ok: false,
+          code: "ENOENT",
+        });
+        // The failure axis is ABSENCE, not permission: the same path is
+        // writable the moment it exists. A jail denial would fail this too and
+        // would mean something entirely different about the fix.
+        expect(temp.create, JSON.stringify(temp.create)).toMatchObject({ ok: true });
       } finally {
         await instance.stop?.();
         rmSync(childOutDir, { recursive: true, force: true });

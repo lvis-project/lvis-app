@@ -60,10 +60,17 @@
  * (`plugin-ui-host.tsx` mounts it from an `entryUrl`), not by the plugin
  * factory, so it never depended on which process the factory ran in.
  *
- * THREE CONSEQUENCES THAT ARE CHANGES, NOT REGRESSIONS, AND ARE NAMED HERE
- * RATHER THAN DISCOVERED LATER. Each was MEASURED against a real confined
- * child rather than inferred from the hostApi surface — that inference is
- * exactly what got `ep-api` wrong below.
+ * FOUR CONSEQUENCES OF MOVING IT, NAMED HERE RATHER THAN DISCOVERED LATER.
+ * Two are behaviour this boundary deliberately removes (1 and 3); two are ways
+ * the plugin BREAKS on an ordinary machine and must be fixed on the plugin
+ * side (2 and 4). Each was MEASURED against a real confined child rather than
+ * inferred from the hostApi surface — that inference is exactly what got
+ * `ep-api` wrong below.
+ *
+ * A measurement is only as portable as the machine it ran on, so where one
+ * depended on something the measuring machine HAPPENED to already have, that
+ * dependency is named rather than left implicit. Consequence 2 is exactly such
+ * a case: stated without it, a measurement reads as a guarantee.
  *
  * 1. THE FFMPEG AUTO-INSTALL NOW FAILS CLOSED. When no runtime is found
  *    `meeting` downloads one over `node:https` DIRECTLY. In main that egress
@@ -84,23 +91,71 @@
  *    runtime under `pluginDataDir` is unaffected and is covered by the
  *    end-to-end case.
  *
- * 2. TEMP STAGING FOLLOWS `TMPDIR`, NOT `/tmp`. `meeting` stages uploaded audio
- *    and the FFmpeg unpack under `os.tmpdir()`. Measured: a confined child CAN
- *    write under the `TMPDIR` it is given and CANNOT write the literal `/tmp`
- *    root. So that staging keeps working wherever `TMPDIR` is set — measured on
- *    macOS, where it is — and fails closed where it is unset and `os.tmpdir()`
- *    falls back to `/tmp`, which this file has not measured. The durable fix is
- *    the plugin staging under its own `pluginDataDir`, which is inside the jail
- *    on every platform.
+ * 2. TEMP STAGING BREAKS, AND THE HOST'S OWN `TMPDIR` HAS NOTHING TO DO WITH
+ *    IT. `meeting` stages uploaded audio and the FFmpeg unpack under
+ *    `os.tmpdir()`. The child does not inherit the host's: ASRT REWRITES
+ *    `TMPDIR` for any wrap that carries a write policy — which this spawn's
+ *    does — to `CLAUDE_CODE_TMPDIR`, else `CLAUDE_TMPDIR`, else the literal
+ *    `/tmp/claude`. That is `sandbox-runtime`'s `generateProxyEnvVars`, whose
+ *    `skipTmpdir` argument the macOS and the Linux backend both pass as
+ *    `writeConfig === undefined` — and ASRT assembles a write config whenever
+ *    its filesystem policy is on, which this spawn requires, since it refuses
+ *    to produce a child at all when the sandbox is inactive.
+ *
+ *    Measured on macOS through this branch's production spawn: the host's
+ *    `os.tmpdir()` was its per-user temp directory and the child's was
+ *    `/tmp/claude`. Not run on Linux here — but the end-to-end case asserts the
+ *    substituted path BY VALUE, so on any machine the case runs on, a Linux one
+ *    included, a different answer is a failure rather than a silent pass.
+ *
+ *    That substituted path is on ASRT's own default WRITE allow-list, and
+ *    NOTHING CREATES IT — not this repository, not the sandbox runtime, which
+ *    allows it and never makes it. So the failure axis is the directory's
+ *    ABSENCE rather than a permission, and the axis is NOT "a platform whose
+ *    `TMPDIR` is unset" — the host's variable never reaches the child either
+ *    way. It is "a machine that has never run a tool which makes
+ *    `/tmp/claude`", and that machine hands the child an `os.tmpdir()` that
+ *    does not exist. Measured against an absent path that IS inside the
+ *    write jail: `readdirSync` and `mkdtempSync` on it both fail `ENOENT`,
+ *    while `mkdirSync(…, { recursive: true })` on the same path SUCCEEDS —
+ *    which is what distinguishes "absent" from "denied" and decides what the
+ *    fix has to be.
+ *
+ *    A machine that already has `/tmp/claude` — anything that has run Claude
+ *    Code — sees none of this, which is why the end-to-end case points
+ *    `CLAUDE_CODE_TMPDIR` at an absent path instead of trusting the developer
+ *    machine's answer. The durable fix is the plugin staging under its own
+ *    `pluginDataDir`, which this spawn grants and which exists before the child
+ *    starts.
  *
  * 3. THE LEGACY SESSION MOVE IS DENIED RATHER THAN SILENT. `meeting` still
- *    carries a one-time migration that moves `<hostRoot>/.meeting-sessions`
- *    into its own data directory. `hostRoot` is the app root, which is outside
- *    the child's write jail — measured `EPERM` — so on an install that still
- *    holds unmigrated files there, which is the only state the plugin's own
- *    guard lets reach the move, it now throws where it used to succeed. The
- *    end-to-end case drives exactly that path, so the denial is a tested fact
- *    rather than a prediction.
+ *    carries a one-time migration that moves a directory under `hostRoot` into
+ *    its own data directory. `hostRoot` is the app root, which is outside the
+ *    child's write jail — measured `EPERM` — so on an install that still holds
+ *    un-migrated files there, which is the only state the plugin's own guard
+ *    lets reach the move, it now throws where it used to succeed. The
+ *    end-to-end case plants an un-migrated file from the host side and then
+ *    runs the plugin's own operation on it — the per-file `renameSync` out of
+ *    `hostRoot`, not a stand-in `mkdir`; both land outside the same jail, but
+ *    only one of them is what the plugin does — so the denial is a measured
+ *    fact rather than a prediction, and the case also asserts that nothing
+ *    moved.
+ *
+ * 4. `meeting` THROWS DURING ACTIVATION WHERE CONSEQUENCE 2'S PATH IS ABSENT,
+ *    WHICH IS NOT A DEGRADED FEATURE BUT NO PLUGIN AT ALL. Its `createPlugin`
+ *    runs a stale-staging sweep unconditionally, and that sweep's FIRST
+ *    statement iterates `readdirSync(os.tmpdir())` outside any `try`. On the
+ *    machine consequence 2 describes — the ordinary one, where the substituted
+ *    temp root was never created — that `ENOENT` escapes `createPlugin`, so
+ *    the plugin does not load: no tools registered, no UI entry, not a lost
+ *    transcode. It is recorded separately from 2 because "uploads do not
+ *    stage" and "the plugin never starts" are different failures, and folding
+ *    the second into the first is how it went unnoticed. The end-to-end case
+ *    pins the mechanism by pointing `CLAUDE_CODE_TMPDIR` at an absent path
+ *    inside the write jail and asserting the child's `readdirSync(os.tmpdir())`
+ *    fails `ENOENT` while `mkdirSync` on the same path succeeds. It pins the
+ *    MECHANISM and not the plugin's own call site, which lives in another
+ *    repository; the fix belongs there.
  *
  * `ep-api` IS NOT HERE, AND ITS ABSENCE IS THE MEASURED ANSWER RATHER THAN AN
  * OVERSIGHT. Every hostApi member it touches has a wire form, and a measurement
