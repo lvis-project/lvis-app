@@ -90,7 +90,7 @@ export default function Page() {
         <strong>① The user pressed "Always allow" on the card</strong> — that choice is stored for <em>the same tool with the same arguments</em>, and if the arguments change in a more dangerous direction the stored choice does not apply and the prompt returns.
         <strong>② The user added an allow rule for that tool in settings.</strong>
         <strong>③ The user switched the permission mode to "allow all."</strong>
-        What is not here is the host promoting a tool to auto-run on its own, from usage alone.
+        None of those three is the host promoting a tool to auto-run on its own, from usage alone.
       </Callout>
 
       <PageNav />
