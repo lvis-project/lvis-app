@@ -700,48 +700,6 @@ export type ExternalMutationChannel = (typeof EXTERNAL_MUTATION_CHANNELS)[number
  */
 export const EXTERNAL_MUTATION_DENIED = "external-mutation-denied";
 
-// ─── Host-internal out-of-tree channel families ─────────────────────────────
-
-/**
- * Channel families whose `ipcMain.handle` / `ipcMain.on` registrations live
- * OUTSIDE `src/ipc/` — the two "out-of-tree" host surfaces:
- *   - `windowManager`  → registered in `src/main/window-manager.ts`.
- *   - `autoUpdater`    → registered in `src/main/auto-updater.ts`.
- *
- * Recorded here so the contract's public/internal classification is COMPLETE —
- * there is no longer an "unclassified" out-of-tree hole. Both are
- * INTERNAL: none appear in {@link PUBLIC_CHANNELS}, so an external
- * (local-api / cli / sdk) {@link import("./trust-origin.js").TrustOrigin} can
- * never reach them — {@link isPublicChannel} fails closed. They are host-only
- * surfaces (main-window layout management and the packaged auto-updater) with
- * no external wire contract.
- *
- * BYTE-IDENTICAL: values mirror {@link CHANNELS} exactly, which already match
- * the literals at the registration sites. C12 only RECORDS the classification;
- * the C17 sweep replaces the inline literals at those sites with these consts.
- * `lvis:window:open-html-preview` is intentionally NOT listed — it is
- * registered in-tree by the `window` IPC domain and is already classified
- * (internal: registered-but-not-public) by the channel inventory. For the SAME
- * reason the diagnostics channels (`lvis:diagnostics:export`,
- * `lvis:diagnostics:crash-list`, `lvis:logs:tail`) are NOT listed here — they
- * are registered in-tree by the `diagnostics` IPC domain and classified
- * internal (registered-but-not-public) by the channel inventory; this map is
- * ONLY for the out-of-tree host surfaces above.
- */
-export const INTERNAL_HOST_CHANNELS = {
-  windowManager: [
-    CHANNELS.window.resizeForMode,
-    CHANNELS.window.resizeForSidePanel,
-  ],
-  autoUpdater: [
-    CHANNELS.update.state,
-    CHANNELS.update.getState,
-    CHANNELS.update.downloadNow,
-    CHANNELS.update.installNow,
-    CHANNELS.update.skipVersion,
-  ],
-} as const;
-
 /**
  * Payload of the `plugins.installResult` / `plugins.uninstallResult` broadcasts
  * (main -> renderer). Single declaration for the channel: the preload bridge,
