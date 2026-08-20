@@ -155,7 +155,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
     memoryManager.closeSearchIndex();
   });
   log.info("boot: memory loaded from %s", memoryManager.getDir());
-  // #1500 (E3): FTS5 search index integrity check → rebuild-from-JSONL if
+  // FTS5 search index integrity check → rebuild-from-JSONL if
   // corrupt/missing. No-Fallback — this is the only recovery path; search
   // never falls back to a linear scan.
   await memoryManager.verifyOrRebuildSearchIndex().catch((err: unknown) => {
