@@ -35,7 +35,7 @@
  *    machine for the wrong reason.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 // The child entry is bundled by the shared module rather than here: its
@@ -63,6 +63,13 @@ interface Fixture {
   readonly pluginRoot: string;
   readonly pluginDataDir: string;
   readonly outsideFile: string;
+  /**
+   * Stands in for what production passes as `context.hostRoot`: the app root,
+   * which is NOT the plugin's data directory and NOT inside its write jail.
+   * A case that passed the repository root here would assert the same denial
+   * against a directory the developer's own machine happens to own.
+   */
+  readonly hostRoot: string;
 }
 
 let fixture: Fixture | undefined;
@@ -79,6 +86,8 @@ function makeFixture(): Fixture {
   const secretFile = join(secretsDir, "api-key.txt");
   writeFileSync(secretFile, SECRET_TEXT, "utf-8");
   writeFileSync(join(pluginDataDir, "own-data.txt"), "the plugin's own bytes", "utf-8");
+  const hostRoot = join(root, "app-root");
+  mkdirSync(hostRoot, { recursive: true });
   return {
     root,
     lvisHome,
@@ -86,7 +95,32 @@ function makeFixture(): Fixture {
     pluginRoot,
     pluginDataDir,
     outsideFile: join(root, "outside-the-jail.txt"),
+    hostRoot,
   };
+}
+
+/** Where a second plugin's code and data live under the same fixture home. */
+interface InstalledPlugin {
+  readonly pluginId: string;
+  readonly pluginRoot: string;
+  readonly pluginDataDir: string;
+}
+
+/**
+ * Install another plugin beside the pilot, in the same fixture home.
+ *
+ * The fixture is shared rather than copied because everything that makes it a
+ * fixture is plugin-independent: the deny floor is derived from `LVIS_HOME`,
+ * the secret it protects is one file, and the write-jail escape target is one
+ * path outside it. What varies per plugin is two directories, which is what
+ * this returns. A second `makeFixture` would be a second copy of the deny
+ * floor's own premise, and the two would only have to disagree once.
+ */
+function installPlugin(fx: Fixture, pluginId: string): InstalledPlugin {
+  const pluginRoot = join(fx.lvisHome, "plugins", pluginId);
+  const pluginDataDir = join(pluginRoot, "data");
+  mkdirSync(pluginDataDir, { recursive: true, mode: 0o700 });
+  return { pluginId, pluginRoot, pluginDataDir };
 }
 
 /**
@@ -561,6 +595,305 @@ export const createPlugin = async (context) => {
         // The child answers `config.get` from a snapshot, so this is the whole
         // difference between a current answer and a permanently stale one.
         await expect(instance.handlers.probe_config!()).resolves.toBe("after");
+      } finally {
+        await instance.stop?.();
+        rmSync(childOutDir, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+});
+
+/**
+ * `meeting`, out of process and confined, through the production factory.
+ *
+ * THE POINT OF THIS ONE IS THE GATE. In one heap `hostApi.getSecret` was a
+ * function `meeting` could simply not call: the secret gate lives in the same
+ * process as the plugin, and `<LVIS_HOME>/secrets/` is a `readFileSync` away.
+ * Out of process it is the only entrance, so the interesting assertion is not
+ * that a granted key crosses — it is all three answers side by side, from one
+ * child inside one call: the granted key comes back as its value, the refused
+ * key comes back as `null`, and the file itself comes back denied. Any two of
+ * those without the third is a weaker claim than it reads as.
+ *
+ * `meeting` also runs FFmpeg, which it stages under its own `pluginDataDir`
+ * and executes. That is a grandchild of a confined child, so one handler stages
+ * an executable exactly where `ffmpegRuntime.ts` puts it, runs it, and makes it
+ * try both directions of the jail — a confinement that ended at the first
+ * `spawn()` would leave every assertion above true and worthless.
+ *
+ * The last handler drives the one of `meeting`'s CHANGED paths that a test can
+ * reach without a live egress fence: the legacy session move out of
+ * `<hostRoot>`, which is outside the write jail and now fails instead of
+ * succeeding. It is asserted here so the routing SOT's note about it is a
+ * measurement rather than a prediction.
+ */
+describe("meeting, out of process and confined", () => {
+  it.runIf(process.platform === "darwin" || process.platform === "linux")(
+    "carries the gate's verdict both ways while the secrets file stays out of reach",
+    async () => {
+      if (!(await asrtCanInitialize())) return;
+      const fx = fixture!;
+      const plugin = installPlugin(fx, "meeting");
+      const repoRoot = repositoryRoot();
+      const childOutDir = childBundleDir(repoRoot);
+      const childEntryPath = await buildChildEntry(repoRoot);
+
+      const entryPath = join(plugin.pluginRoot, "plugin.mjs");
+      writeFileSync(
+        entryPath,
+        `import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { spawnSync } from "node:child_process";
+const attempt = async (fn) => {
+  try { return { ok: true, value: await fn() }; }
+  catch (error) { return { ok: false, code: error.code ?? error.name, message: String(error.message ?? "") }; }
+};
+export const createPlugin = async (context) => {
+  const api = context.hostApi;
+  // The plugin's own view of the two prompt keys it watches. Written by the
+  // host's change push, read back by a tool, so the assertion is on what the
+  // PLUGIN saw rather than on what the host sent.
+  const observedPrompts = {};
+  // Tagged with \`typeof\` rather than normalised with \`?? null\`, because the
+  // claim being made is that a CLEARED key arrives as \`undefined\` and not as
+  // \`null\`. A stub that folded both into \`null\` would report the same thing
+  // either way, and the wire's reason for wrapping the value would go untested.
+  const observe = (value) => [typeof value, value ?? null];
+  api.config.onChange("customSummaryFinalPrompt", (value) => { observedPrompts.final = observe(value); });
+  api.config.onChange("customSummaryIntermediatePrompt", (value) => { observedPrompts.intermediate = observe(value); });
+  return {
+    handlers: {
+      // The three answers to "can this plugin have the STT key", together.
+      meeting_credentials_probe: async () => ({
+        granted: await api.getSecret("llm.apiKey.openai"),
+        denied: await api.getSecret("llm.apiKey.azure-foundry"),
+        directRead: await attempt(() => readFileSync(${JSON.stringify(fx.secretFile)}, "utf-8")),
+      }),
+      // The transcription round: a lease, the Whisper egress, the summary.
+      meeting_transcription_probe: async () => {
+        const lease = await api.resolveApiKey({ purpose: "stt" });
+        const bearer = lease.bearer();
+        lease.release();
+        const afterRelease = await attempt(() => lease.bearer());
+        const response = await api.hostFetch("https://api.openai.com/v1/audio/transcriptions", { method: "POST" });
+        return {
+          vendor: lease.vendor,
+          bearer,
+          afterRelease,
+          status: response.status,
+          transcript: [...new Uint8Array(await response.arrayBuffer())],
+          summary: await api.callLlm("summarise the meeting"),
+        };
+      },
+      meeting_prompts_probe: async () => ({ ...observedPrompts }),
+      // FFmpeg: staged under pluginDataDir exactly where ffmpegRuntime.ts puts
+      // it, then run. The plugin is useless without this, and it is the second
+      // thing a jail could plausibly break.
+      meeting_ffmpeg_probe: async () => {
+        const binDir = join(context.pluginDataDir, "vendor", "ffmpeg", "bin");
+        mkdirSync(binDir, { recursive: true });
+        const staged = join(binDir, "ffmpeg");
+        writeFileSync(staged, "#!/bin/sh\\n"
+          + "echo staged-runtime-ran\\n"
+          + "cat " + ${JSON.stringify(fx.secretFile)} + " 2>/dev/null && echo LEAKED || echo denied\\n"
+          + "echo escaped > " + ${JSON.stringify(fx.outsideFile)} + " 2>/dev/null && echo wrote || echo denied\\n");
+        chmodSync(staged, 0o755);
+        const run = spawnSync(staged, [], { encoding: "utf-8" });
+        if (run.error) return { started: false, code: run.error.code ?? run.error.name };
+        return { started: true, status: run.status, stdout: String(run.stdout).trim().split("\\n") };
+      },
+      // The one-time move of the pre-\`pluginDataDir\` session directory, at the
+      // path the plugin builds it from: \`join(context.hostRoot, ...)\`.
+      meeting_legacy_session_probe: async () => ({
+        legacyDir: join(context.hostRoot, ".meeting-sessions"),
+        migrate: await attempt(() => {
+          mkdirSync(join(context.hostRoot, ".meeting-sessions"), { recursive: true });
+          return "made";
+        }),
+      }),
+    },
+  };
+};
+`,
+        "utf-8",
+      );
+
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+
+      const release = vi.fn();
+      const configValues = new Map<string, unknown>([
+        ["customSummaryFinalPrompt", "the original final prompt"],
+        ["customSummaryIntermediatePrompt", "the original intermediate prompt"],
+      ]);
+      /**
+       * Per-key listeners, because the host's own change bus is per-key.
+       *
+       * A single undifferentiated set would deliver every notification to
+       * every subscriber, and the assertion below — that the plugin's two
+       * prompt watchers each saw THEIR key's value — would pass no matter
+       * which key actually changed.
+       */
+      const configListeners = new Map<string, Set<(value: unknown) => void>>();
+      const changeConfig = (key: string, value: unknown): void => {
+        if (value === undefined) configValues.delete(key);
+        else configValues.set(key, value);
+        // `"*"` is the bus's every-key wildcard, which is what the factory's own
+        // snapshot re-push subscribes to.
+        for (const listener of configListeners.get(key) ?? []) listener(value);
+        for (const listener of configListeners.get("*") ?? []) listener(value);
+      };
+      const hostApi = {
+        // The four-tier gate, standing in for its verdict. Both keys are ones
+        // `meeting` really declares under `hostSecrets.read`, so the shape of
+        // the question is the plugin's own.
+        getSecret: async (key: string) =>
+          key === "llm.apiKey.openai" ? SECRET_TEXT : null,
+        resolveApiKey: async () => ({
+          ok: true as const,
+          vendor: "openai" as const,
+          bearer: () => "sk-stt-lease",
+          release,
+        }),
+        hostFetch: async () =>
+          new Response(new Uint8Array([0x00, 0x80, 0xff, 0x41]), { status: 200 }),
+        callLlm: async () => "three action items",
+        emitEvent: () => undefined,
+        logEvent: () => undefined,
+        onEvent: () => () => undefined,
+        getInstalledPluginIds: () => ["meeting"],
+        onPluginsChanged: () => () => undefined,
+        config: {
+          get: (key: string) => configValues.get(key),
+          set: async () => undefined,
+          onChange: (key: string, callback: (value: unknown) => void) => {
+            const forKey = configListeners.get(key) ?? new Set();
+            forKey.add(callback);
+            configListeners.set(key, forKey);
+            return () => forKey.delete(callback);
+          },
+        },
+      } as unknown as PluginHostApi;
+
+      const factory = createOutOfProcessPluginFactory({
+        manifest: {
+          id: "meeting",
+          name: "LVIS Meeting",
+          version: "0.5.42",
+          entry: "plugin.mjs",
+          description: "the recorder, confined",
+          configSchema: {
+            type: "object",
+            properties: {
+              customSummaryFinalPrompt: { type: "string" },
+              customSummaryIntermediatePrompt: { type: "string" },
+            },
+          },
+          tools: [
+            "meeting_credentials_probe",
+            "meeting_transcription_probe",
+            "meeting_prompts_probe",
+            "meeting_ffmpeg_probe",
+            "meeting_legacy_session_probe",
+          ].map((name) => ({
+            name,
+            description: name,
+            inputSchema: { type: "object", properties: {} },
+          })),
+        } as PluginManifest,
+        entryPath,
+        childEntryPath,
+      });
+      const instance = await factory({
+        pluginId: "meeting",
+        pluginRoot: plugin.pluginRoot,
+        // The app root, as production passes it — a directory the child has no
+        // write grant for, which is what makes the legacy-migration case below
+        // an assertion rather than a coincidence.
+        hostRoot: fx.hostRoot,
+        pluginDataDir: plugin.pluginDataDir,
+        config: Object.fromEntries(configValues),
+        log: () => undefined,
+        hostApi,
+      } as PluginRuntimeContext);
+
+      try {
+        // ── the gate's two arms, and the door it replaced ──────────────────
+        const credentials = (await instance.handlers.meeting_credentials_probe!()) as {
+          granted: string | null;
+          denied: string | null;
+          directRead: { ok: boolean; value?: string };
+        };
+        expect(credentials.granted).toBe(SECRET_TEXT);
+        // Refused is `null` — not a throw, and not a stale value from a key the
+        // gate did grant.
+        expect(credentials.denied).toBeNull();
+        // …and the file the plugin used to be able to read instead.
+        expect(credentials.directRead.ok).toBe(false);
+        expect(credentials.directRead.value).toBeUndefined();
+
+        // ── resolveApiKey / hostFetch / callLlm ────────────────────────────
+        const transcription = (await instance.handlers.meeting_transcription_probe!()) as {
+          vendor: string;
+          bearer: string;
+          afterRelease: { ok: boolean; message: string };
+          status: number;
+          transcript: number[];
+          summary: string;
+        };
+        expect(transcription.vendor).toBe("openai");
+        expect(transcription.bearer).toBe("sk-stt-lease");
+        expect(transcription.afterRelease.ok).toBe(false);
+        expect(transcription.afterRelease.message).toMatch(/lease already released/);
+        expect(release).toHaveBeenCalledTimes(1);
+        expect(transcription.status).toBe(200);
+        // A NUL, a lone continuation byte and a 0xFF: audio bytes no text codec
+        // survives, which is what the transcription upload actually carries.
+        expect(transcription.transcript).toEqual([0x00, 0x80, 0xff, 0x41]);
+        expect(transcription.summary).toBe("three action items");
+
+        // ── config.onChange, on the two keys meeting really watches ────────
+        // Nothing has changed yet, so the plugin has seen no notification.
+        await expect(instance.handlers.meeting_prompts_probe!()).resolves.toEqual({});
+        changeConfig("customSummaryFinalPrompt", "the edited final prompt");
+        changeConfig("customSummaryIntermediatePrompt", undefined);
+        await expect(instance.handlers.meeting_prompts_probe!()).resolves.toEqual({
+          final: ["string", "the edited final prompt"],
+          // A cleared key reaches the plugin as `undefined` — the plugin tagged
+          // the type before anything could normalise it. That is the whole
+          // reason the wire wraps the value in a property instead of sending it
+          // bare: an absent property reads back as `undefined`, and this is the
+          // assertion that would go red if it started reading back as `null`.
+          intermediate: ["undefined", null],
+        });
+
+        // ── the FFmpeg runtime the plugin stages and runs itself ───────────
+        const ffmpeg = (await instance.handlers.meeting_ffmpeg_probe!()) as {
+          started: boolean;
+          status: number;
+          stdout: string[];
+        };
+        expect(ffmpeg.started).toBe(true);
+        expect(ffmpeg.status).toBe(0);
+        // It runs — and it inherits the jail in both directions, so the
+        // transcoder can neither read what the plugin that started it cannot
+        // nor write where the plugin cannot. A confinement that ended at the
+        // first `spawn()` would produce "LEAKED" and "wrote" here.
+        expect(ffmpeg.stdout).toEqual(["staged-runtime-ran", "denied", "denied"]);
+        expect(existsSync(fx.outsideFile)).toBe(false);
+
+        // ── the legacy session move, which this boundary CHANGES ───────────
+        const legacy = (await instance.handlers.meeting_legacy_session_probe!()) as {
+          legacyDir: string;
+          migrate: { ok: boolean; code?: string };
+        };
+        // The plugin still builds the path off `hostRoot`, and it arrives in
+        // the child unchanged…
+        expect(legacy.legacyDir).toBe(join(fx.hostRoot, ".meeting-sessions"));
+        // …but the move out of it now fails closed rather than silently
+        // succeeding, which is the consequence the routing SOT names.
+        expect(legacy.migrate.ok, JSON.stringify(legacy.migrate)).toBe(false);
+        expect(existsSync(legacy.legacyDir)).toBe(false);
       } finally {
         await instance.stop?.();
         rmSync(childOutDir, { recursive: true, force: true });
