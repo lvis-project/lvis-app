@@ -290,31 +290,22 @@ there breaks the build. Concretely, and measured over `web/`:
 - No *file* outside a test directory is named for being a double. All four
   `real-`/`mock-`/`fake-`/`stub-`-prefixed filenames in the tree live under
   `__tests__/` or `test/`.
-- Three *identifiers* spelled `Mock*` do live in production paths, and they are
-  the whole of it — 44 lines across six files, reproduced by the `Test doubles`
-  query in `How the counts were taken`. Two of the three are legitimate and one
-  is not:
-  - `MockMarketplaceFetcher` (`src/plugins/marketplace.ts`, 8 lines) is a
-    backend kind, the same axis as `CloudMarketplaceFetcher`: it serves the
-    catalog from a local file for development, and its constructor throws in a
-    packaged build (`assertMockMarketplaceAllowed`). The word names what the
-    fetcher reads, not a test seam.
-  - `MockShell` (`web/components/landing/workday.tsx`, 33 lines) is a
-    mock-*up* frame on the marketing page — an `aria-hidden` card the section
-    draws its illustrations in. It is the same mock-*up* vocabulary as
+- One *identifier* spelled `Mock*` lives in a production path, and it is the
+  whole of it, reproduced by the `Test doubles` query in `How the counts were
+  taken`:
+  - `MockShell` (`web/components/landing/workday.tsx`) is a mock-*up* frame on
+    the marketing page — an `aria-hidden` card the section draws its
+    illustrations in. It is the same mock-*up* vocabulary as
     `web/components/docs/mockup-frame.tsx`, in a different directory, not a
     file beside it. A different word that shares four letters.
-  - `MockCloudIndexAdapter` (`src/main/cloud-index-adapter.ts`, 3 lines) is the
-    one that really is named for what it is not: it is the only implementation
-    of `CloudIndexAdapter`, it returns no hits, and it reports itself
-    unavailable. It has exactly one construction site in a production path —
-    `src/boot/tools.ts`, inside the branch that runs only when a plugin
-    declaring the `worker-client` capability is installed *and* exposes
-    `getWorkerClient()`, so on an install with no such plugin it is never
-    constructed at all. Its tests construct it thirteen more times. It is
-    listed under `Known naming divergences` to be renamed for the behavior it
-    has.
-- The gate carries those three names as a closed allow-list so their lines stay
+
+  Two others were here and are gone. A dev-only catalog fetcher and a
+  placeholder cloud adapter have both been renamed for the behavior they have,
+  so neither the divergence entry nor the allow-list line that excused them
+  survives. The self-test is what forced that: it asserts every allow-listed
+  name still exists, so an exception cannot outlive the name it excused.
+
+- The gate carries that name as a closed allow-list so its lines stay
   editable, and blocks every other `Mock*`/`Fake*` identifier — including a new
   name that merely starts with an allowed one, and a new name sharing a line
   with an allowed one. Adding a fourth entry is a review decision, not a way
@@ -524,15 +515,6 @@ precedent.
   both.
 - `docs/architecture/session-model-v2.md` carries a `-v2` suffix with no
   earlier sibling in `docs/architecture/`.
-- `MockCloudIndexAdapter` (`src/main/cloud-index-adapter.ts`) is the sole
-  implementation of `CloudIndexAdapter`, so the name promises a double that
-  does not exist — there is no other one for it to stand in for. Rename it for
-  what it does: it reports unavailable and returns no hits. `src/boot/tools.ts`
-  constructs it only inside the branch guarded on a `worker-client`-capability
-  plugin being present and exposing `getWorkerClient()`, so the rename touches
-  one production call site and the two test files that exercise it. The gate
-  allow-lists the name meanwhile so the rename is not blocked by its own edits,
-  and that entry comes out with the rename.
 
 ### How the counts were taken
 
