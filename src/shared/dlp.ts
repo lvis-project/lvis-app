@@ -5,12 +5,6 @@ export interface DlpResult {
   detections: string[];
 }
 
-interface DlpPattern {
-  nameKey: string;
-  pattern: RegExp;
-  replace: (...args: string[]) => string;
-}
-
 /**
  * Short, scrubbed form for an error surface — a log line, a status string, a
  * message handed to the model. Credential-scrubbed by {@link scrubSecretsForLLM}
@@ -83,35 +77,125 @@ export function scrubSecretsForLLM(text: string): string {
     .replace(/\b(?:sk|pk|rk|proj|test|live)-[A-Za-z0-9_-]{8,}\b/gi, "[REDACTED:TOKEN]");
 }
 
-const DLP_PATTERNS: DlpPattern[] = [
+/**
+ * Luhn checksum gate for credit-card candidates. This is part of DETECTION, not
+ * replacement: a digit run that fails Luhn is not treated as a card by either
+ * consumer, so a 16-digit order or ticket number is left intact rather than
+ * masked. Lives here in the leaf module so the display masker and the
+ * LLM-egress redactor apply the identical card test rather than diverging.
+ */
+function luhnValid(num: string): boolean {
+  const digits = num.replace(/[^\d]/g, "");
+  if (digits.length < 13 || digits.length > 19) return false;
+  let sum = 0;
+  let alt = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = Number(digits[i]);
+    if (alt) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    alt = !alt;
+  }
+  return sum % 10 === 0;
+}
+
+type PiiKind = "SSN_KR" | "EMAIL" | "PHONE_KR" | "PHONE_US" | "CREDIT_CARD";
+
+/**
+ * One shared PII detector. DETECTION (the pattern plus an optional validity
+ * gate) is the single converged set that both entry points consume; REPLACEMENT
+ * is deliberately per-consumer: {@link PiiPattern.maskShape} preserves the
+ * display silhouette (prefix, length, separators) for audit/display surfaces,
+ * while {@link PiiPattern.redactToken} fully removes the span for text bound to
+ * a model. Neither consumer re-implements detection.
+ */
+export interface PiiPattern {
+  kind: PiiKind;
+  /** i18n key for the human-facing detection label used by {@link maskSensitiveData}. */
+  nameKey: string;
+  /** Shared, global detection pattern. */
+  pattern: RegExp;
+  /**
+   * Extra detection gate (Luhn for cards). A span the gate rejects is left
+   * intact by BOTH consumers — it is decided not to be PII, not merely styled
+   * differently.
+   */
+  valid?: (match: string) => boolean;
+  /** Display-shape-preserving replacement (audit / display / agent-egress masking). */
+  maskShape: (match: string, ...groups: string[]) => string;
+  /** Full-redaction token (text handed to a model). */
+  redactToken: string;
+}
+
+/**
+ * The single converged detection set — the union of what each former copy
+ * caught correctly, not a whole-file pick:
+ *  - IDs are anchored on word boundaries, so a six-then-seven digit run sitting
+ *    inside a longer digit string is not misread as a resident-registration
+ *    number;
+ *  - both the dashed and the dashless mobile form are matched, across the wider
+ *    carrier-prefix range, plus the US phone shape;
+ *  - card candidates span the wider digit-length range and are gated by Luhn, so
+ *    a non-card digit run of card length is left intact.
+ *
+ * Order is significant and identical for both consumers: an address-shaped span
+ * is claimed as an email before the phone or card patterns can see its digits,
+ * and an ID is claimed before the card candidate can absorb its digits.
+ */
+export const PII_PATTERNS: PiiPattern[] = [
   {
+    kind: "SSN_KR",
     nameKey: "be_dlp.patternResidentId",
-    pattern: /\d{6}-[1-4]\d{6}/g,
-    replace: () => "******-*******",
+    pattern: /\b\d{6}-[1-4]\d{6}\b/g,
+    maskShape: (m) => m.replace(/\d/g, "*"),
+    redactToken: "[REDACTED:SSN]",
   },
   {
-    nameKey: "be_dlp.patternCreditCard",
-    pattern: /\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}/g,
-    replace: (match) => {
-      const digits = match.replace(/[-\s]/g, "");
-      const last4 = digits.slice(-4);
-      return `****-****-****-${last4}`;
-    },
-  },
-  {
-    nameKey: "be_dlp.patternPhoneNumber",
-    pattern: /010-\d{4}-\d{4}/g,
-    replace: () => "010-****-****",
-  },
-  {
+    kind: "EMAIL",
     nameKey: "be_dlp.patternEmail",
-    pattern: /[a-zA-Z0-9._%+-]+@([a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g,
-    replace: (_match: string, domain: string) => `***@${domain}`,
+    pattern: /[a-zA-Z0-9._%+-]+@([\w.-]+\.\w+)/g,
+    maskShape: (_m, domain) => `***@${domain}`,
+    redactToken: "[REDACTED:EMAIL]",
+  },
+  {
+    kind: "PHONE_KR",
+    nameKey: "be_dlp.patternPhoneNumber",
+    pattern: /01[016789]-?\d{3,4}-?\d{4}/g,
+    // Keep the carrier prefix visible, mask every remaining digit, and keep any
+    // separators so the silhouette (e.g. 010-****-****, or a dashless run) survives.
+    maskShape: (m) => m.slice(0, 3) + m.slice(3).replace(/\d/g, "*"),
+    redactToken: "[REDACTED:PHONE]",
+  },
+  {
+    kind: "PHONE_US",
+    nameKey: "be_dlp.patternPhoneNumber",
+    pattern: /(?:\(\d{3}\)\s?|\b\d{3}[-.])\d{3}[-.\s]\d{4}\b/g,
+    maskShape: (m) => m.replace(/\d/g, "*"),
+    redactToken: "[REDACTED:PHONE]",
+  },
+  {
+    kind: "CREDIT_CARD",
+    nameKey: "be_dlp.patternCreditCard",
+    pattern: /\b(?:\d[ -]?){12,18}\d\b/g,
+    valid: luhnValid,
+    // Reveal the last four digits, mask the rest, and keep the original
+    // separators so a 15- or 16-digit card keeps its grouping.
+    maskShape: (m) => {
+      const total = (m.match(/\d/g) ?? []).length;
+      let seen = 0;
+      return m.replace(/\d/g, (d) => (++seen > total - 4 ? d : "*"));
+    },
+    redactToken: "[REDACTED:CC]",
   },
 ];
 
 /**
- * 텍스트에서 민감 데이터 패턴을 검사하고 마스킹한다.
+ * 텍스트에서 민감 데이터 패턴을 검사하고 마스킹한다. Detection is the shared
+ * {@link PII_PATTERNS} set; this entry point applies the display-shape-preserving
+ * replacement. The credential scrubber runs first, then each PII pattern in the
+ * shared order.
  *
  * @param text 검사할 원본 텍스트
  * @returns masked: 마스킹된 텍스트, detections: 탐지된 패턴명 목록
@@ -123,12 +207,20 @@ export function maskSensitiveData(text: string): DlpResult {
     detections.push(t("be_dlp.patternCredential"));
   }
 
-  for (const { nameKey, pattern, replace } of DLP_PATTERNS) {
-    pattern.lastIndex = 0;
+  for (const spec of PII_PATTERNS) {
+    spec.pattern.lastIndex = 0;
     const before = masked;
-    masked = masked.replace(pattern, replace);
+    masked = masked.replace(spec.pattern, (match: string, ...rest: unknown[]): string => {
+      if (spec.valid && !spec.valid(match)) return match;
+      // In a replace callback the capture groups precede the numeric offset;
+      // slice them off so maskShape receives only the string groups it declares.
+      const offsetIdx = rest.findIndex((a) => typeof a === "number");
+      const groups = (offsetIdx === -1 ? [] : rest.slice(0, offsetIdx)) as string[];
+      return spec.maskShape(match, ...groups);
+    });
     if (masked !== before) {
-      detections.push(t(nameKey));
+      const label = t(spec.nameKey);
+      if (!detections.includes(label)) detections.push(label);
     }
   }
 
