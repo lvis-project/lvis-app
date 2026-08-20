@@ -33,14 +33,6 @@ jobs:
         with:
           persist-credentials: false
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-      # Images land under web/public, so this workflow's path filter is the one
-      # that fires when a new screenshot is added. It runs before install
-      # because it needs no dependencies and should fail fast. It reads the
-      # provenance declarations, not the pixels — the limits are spelled out in
-      # docs/development/screenshot-reshoot.md.
-      - name: Screenshot provenance gate
-        working-directory: .
-        run: node scripts/check-screenshot-provenance-self-test.mjs && node scripts/check-screenshot-provenance.mjs
       - name: Install (retry on transient registry flakes)
         run: |
           for attempt in 1 2 3; do
@@ -61,3 +53,38 @@ jobs:
           path: web/out
           if-no-files-found: error
           retention-days: 3
+
+  # The images and the manifest that declares them (`web/screenshot-provenance
+  # .json`) both live under `web/`, so this workflow's path filter fires
+  # whenever either changes. ci.yml reads the same manifest, but its
+  # `pull_request` trigger is `branches: [main]` while this workflow filters on
+  # paths only — so on a pull request targeting `dev` this job is the only
+  # reading of that manifest, and on one targeting `main` it is the second.
+  #
+  # A separate job rather than the first step of `build`, and here that costs no
+  # enforcement: `Build (static export)` is not a required status check on
+  # `main`. Read the current list with
+  #   gh api repos/lvis-project/lvis-app/branches/main/protection \
+  #     --jq .required_status_checks.contexts
+  # Moving the gate out of `build` therefore took no merge requirement with it.
+  # ci.yml's copy stays inside `build-and-test` for the opposite reason, which
+  # the comment beside it gives. Here the gate used to run before the install,
+  # justified as fail-fast, and a stale manifest therefore skipped `next build`
+  # entirely — no type check, no lint, no export, and a red check that meant
+  # nothing had been built. Fail-fast on bookkeeping is exactly the argument
+  # that produced the outage; a parallel job is fast without being in the way.
+  #
+  # It reads the provenance declarations, not the pixels — the limits are
+  # spelled out in docs/development/screenshot-reshoot.md. `working-directory`
+  # is set per step because this workflow defaults every `run` to `web/`.
+  screenshot-provenance:
+    name: Screenshot provenance
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Screenshot provenance gate
+        working-directory: .
+        run: node scripts/check-screenshot-provenance-self-test.mjs && node scripts/check-screenshot-provenance.mjs
