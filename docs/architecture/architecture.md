@@ -39,6 +39,7 @@ primary-product contract.
 | User and desktop shell | Electron windows, tray, titlebar, settings, dialogs | Present the app, collect consent, and keep foreground/background behavior predictable. |
 | Renderer app | Chat, Insights, Projects, Work Board, plugin slots | Render state from host APIs, never bypass host policy, and keep app workflows ergonomic. |
 | Preload and IPC contracts | `src/preload`, `src/ipc`, shared channel constants | Expose narrow typed APIs from the main process to renderer code. |
+| Relay and ingress | Loopback local API and app contract (`src/api`), CLI (`src/cli`), MCP loopback (`src/mcp`), and the main-process transport owners that accept non-renderer requests (`local-api-server.ts`, `conversation-command-port.ts`, the platform and tailnet bridges) | Accept external-origin requests, bind each to a trusted transport actor, and reach host services only through host-owned command entrypoints and the same permission and consent chokepoints as the renderer. These transports are transport-agnostic and hold no Electron runtime import, so the same host services can run under a windowless host process. |
 | Host services | conversation loop, memory manager, session store, work board, plugin runtime | Own durable state, project identity, LLM orchestration, plugin lifecycle, and execution policy. |
 | Tool execution and governance | Tool registry, executor, permissions, audit, sandbox helpers | Enforce one route for builtin/plugin/MCP tool calls and record decisions. |
 | External integrations | LLM providers, MCP servers, marketplace, web auth, local indexers | Connect to outside systems through host-owned adapters and explicit credentials. |
@@ -57,6 +58,20 @@ operations only through declared capabilities and HostApi methods.
 MCP servers are treated as external tool providers. Their tools are normalized
 into the same registry and are subject to the same permission and audit
 requirements as other tools.
+
+The relay and ingress layer serves surfaces other than the renderer: the
+loopback local API, the CLI over that API, the MCP loopback, and the paired
+platform and tailnet bridges. Each surface binds to a trusted transport actor
+and reaches host services only through host-owned command entrypoints; it does
+not carry its own project resolution, policy path, or consent surface. These
+transports are transport-agnostic and free of Electron runtime imports, which is
+what lets the same host services run under a windowless host process rather than
+only inside the Electron boot. Consent for an external-origin mutating request
+is still resolved at the single `ApprovalGate` chokepoint; when no consent
+surface can present the request, the gate denies it for that call. The layer's
+separation plan and the consent-surface security analysis live in
+[docs/blueprints/headless-relay-separation.md](../blueprints/headless-relay-separation.md);
+this section records only the boundary the rest of the host depends on.
 
 ## Project Identity
 
