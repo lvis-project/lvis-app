@@ -63,9 +63,30 @@
  * MEASURED and ASSERTED are not the same thing, and which is which is marked
  * per axis. A measurement is a fact about the machine it ran on; an assertion
  * is a case that goes red when the fact stops holding. Axes 2, 3, 5 and 6 are
- * ASSERTED by `confined-plugin-child.test.ts`. Axes 1 and 4 are measured and
+ * asserted by `confined-plugin-child.test.ts`. Axes 1 and 4 are measured and
  * asserted NOWHERE, for the reasons given with each — reading them as pinned
  * would be a smaller version of the mistake this comment is about.
+ *
+ * WHERE THOSE ASSERTIONS RUN, because an assertion is only an assertion where
+ * it executes. All four sandbox cases stand behind a live-sandbox gate and
+ * return early where the backend cannot initialize, so they assert nothing
+ * there. Where that is:
+ *   - macOS: the backend needs no install, so the cases run on any macOS
+ *     machine — including the `macos-permission-tests` job in `ci.yml`, which
+ *     runs `confined-plugin-child.test.ts` with `LVIS_REQUIRE_SANDBOX_CASES=1`
+ *     so a machine that CANNOT initialize fails there instead of passing
+ *     quietly.
+ *   - Linux: the backend is bubblewrap, and the job that runs the whole suite
+ *     on every pull request does not install it — `grep -rn bwrap .github/
+ *     scripts/` returns nothing and ASRT vendors only seccomp and srt-win — so
+ *     on that runner these cases return without measuring. Installing
+ *     bubblewrap there is what would change it, and it would also un-gate the
+ *     two other suites that call the same helper (`asrt-sandbox.test.ts` and
+ *     `worker-spawn-uds.smoke.test.ts`), which is why it is named here as an
+ *     open item rather than done in passing.
+ *   - Windows: the cases do not run at all; they are `runIf(darwin || linux)`.
+ * So "asserted" below means asserted on macOS, in CI and on a developer's
+ * machine, and NOT on the Linux runner.
  *
  * 1. DIRECT NETWORK EGRESS — the global `fetch`, `node:http`/`https`/`net`/
  *    `tls`/`dgram`, an HTTP client library, a websocket, or any dependency
@@ -185,25 +206,73 @@
  *    asymmetry backwards in either direction is a wrong admission: read it as a
  *    total jail and every plugin looks refused, read it as no jail and a plugin
  *    whose feature is writing somewhere the user chose looks admitted.
- *      WRITE is a real jail, and it is exactly two paths: `pluginDataDir` and
- *    the throwaway sandbox HOME (`out-of-process-plugin.ts`,
- *    `spawnConfinedPluginChild`). NOT `pluginRoot` — a plugin that could
- *    rewrite its own runtime root could rewrite the bytes its manifest hash was
- *    taken over; measured, the child READS `pluginRoot` and is refused `EPERM`
- *    writing into it. Everything outside those two is refused with `EPERM`,
- *    INCLUDING paths the plugin built out of values the HOST handed it:
- *    measured, a child given `context.hostRoot` receives it unchanged, and a
- *    `renameSync` out of a directory under it fails `EPERM` with nothing moved.
- *      The SECOND of those two grants is the trap, and it does not look like
+ *      WRITE is a real jail, but it is NOT the two paths this spawn names. It
+ *    is those two — `pluginDataDir` and the throwaway sandbox HOME
+ *    (`out-of-process-plugin.ts`, `spawnConfinedPluginChild`) — PLUS the
+ *    default write paths ASRT merges into every wrap it builds. The merge is
+ *    unconditional: `sandbox-manager.js` composes the allow-list as
+ *    `[...getDefaultWritePaths(), ...userAllowWrite]`, so an ALLOW grant cannot
+ *    subtract from it. A DENY grant can, which is the lever named at the end of
+ *    this outcome list. READ OUT OF ASRT 0.0.73's `getDefaultWritePaths()`, the
+ *    merged list is `/dev/stdout`, `/dev/stderr`, `/dev/null`, `/dev/tty`,
+ *    `/dev/dtracehelper`, `/dev/autofs_nowait`, `/tmp/claude`,
+ *    `/private/tmp/claude`, `<real home>/.npm/_logs` and
+ *    `<real home>/.claude/debug` — and those last two are under the USER'S OWN
+ *    home, not the substituted one. Measured through this spawn on macOS/arm64
+ *    with the sandbox active: writes to `/tmp/claude`, `/private/tmp/claude`,
+ *    `<real home>/.npm/_logs` and `<real home>/.claude/debug` all SUCCEEDED and
+ *    the host read the bytes back afterwards, while a write to the real home
+ *    itself — one level up from `.npm/_logs`, and not on that list — was
+ *    refused `EPERM`.
+ *      NOT `pluginRoot` — a plugin that could rewrite its own runtime root
+ *    could rewrite the bytes its manifest hash was taken over; measured, the
+ *    child READS `pluginRoot` and is refused `EPERM` writing into it. A path
+ *    that is outside the two grants AND off ASRT's default list is refused
+ *    `EPERM`, INCLUDING paths the plugin built out of values the HOST handed
+ *    it: measured, a child given `context.hostRoot` receives it unchanged, and
+ *    a `renameSync` out of a directory under it fails `EPERM` with nothing
+ *    moved.
+ *      The SECOND of the two named grants is a trap, and it does not look like
  *    one. The sandbox SUBSTITUTES `HOME`/`USERPROFILE` with that throwaway
  *    (`sandbox-process-home.ts`), so a plugin rooting its state at `homedir()`
  *    is neither denied nor durable: measured, the write returns SUCCESS, into a
  *    directory that is neither the user's home nor any durable path of the
- *    plugin's — and the same module `rmSync`s it when the child exits. So the
- *    write half has THREE outcomes, not two: durable under `pluginDataDir`,
- *    refused with `EPERM` outside, and SUCCEEDING-then-vanishing under
- *    `homedir()`. The third is the one a source census reads as fine, and it
- *    costs the user their state on every restart rather than at admission.
+ *    plugin's — and the same module `rmSync`s it when the child exits.
+ *      So the write half has FOUR outcomes, not two and not three:
+ *      (a) durable under `pluginDataDir` — where plugin state belongs;
+ *      (b) refused with `EPERM` outside the grants and off ASRT's default list;
+ *      (c) succeeding-then-vanishing under `homedir()`, which a source census
+ *          reads as fine and which costs the user their state on every restart;
+ *      (d) succeeding AND DURABLE outside both named grants, on one of ASRT's
+ *          default write paths. (d) is the outcome this file previously said
+ *          did not exist, and it is now asserted rather than described: a case
+ *          writes into the substituted temp root — which is on that list — and
+ *          the host reads the bytes back.
+ *      (d) IS A HOLE, AND IT IS WORTH CLOSING. Two things follow from it that
+ *    no manifest declares. First, those paths are SHARED: the jail this spawn
+ *    builds is per-plugin, ASRT's defaults are per-machine, so two confined
+ *    plugins reach the same directory. Measured and now asserted — one confined
+ *    child wrote bytes under the substituted temp root and a second confined
+ *    child, spawned with a different `pluginRoot` and `pluginDataDir`, read
+ *    them back. That is a write channel between two plugins the boundary is
+ *    supposed to keep apart, and it is also a channel out of a confined plugin
+ *    into two paths under the user's real home that belong to other tools.
+ *    Second,
+ *    it means the check below cannot be "is this path one of the two grants".
+ *      What closing it would take, and what it would cost, both measured here
+ *    on macOS/arm64 rather than reasoned about: the lever exists —
+ *    `confined-child.ts` already restates a write DENY floor on every wrap, and
+ *    ASRT applies it as `denyWithinAllow`, which takes precedence. Adding
+ *    `/tmp/claude`, `/private/tmp/claude`, `<real home>/.npm/_logs` and
+ *    `<real home>/.claude/debug` to that floor turned all four writes above
+ *    into `EPERM` while `pluginDataDir` kept working. The cost is the reason it
+ *    is not done in this change: measured in the same child, `tmpdir()` was
+ *    `/tmp/claude`, so the same edit also made
+ *    `writeFileSync(join(tmpdir(), …))` fail `EPERM`.
+ *    Closing (d) therefore needs a per-child temp root first — one inside the
+ *    plugin's own grant — and that is a change to what a plugin child is
+ *    handed, not a line in a deny list. Recorded here as an open defect with
+ *    its lever and its blocker named, NOT fixed.
  *      READ is NOT a jail, and calling it one would be the same error facing
  *    the other way. ASRT's read model is deny-only (`asrt-sandbox.ts`,
  *    `getDefaultSensitiveReadDenyPaths`, which says so in its own header): a
@@ -233,21 +302,36 @@
  *      HOW TO CHECK A PLUGIN FOR IT: over its own sources AND its dependencies,
  *    find every filesystem WRITE — `writeFile`, `mkdir`, `rename`, `copyFile`,
  *    `rm`, a stream opened for writing, a library given an output path — and
- *    read what its path is rooted at. Anything not rooted at `pluginDataDir` is
- *    not durable: `context.hostRoot`, `process.cwd()`, an absolute literal, a
- *    path out of the plugin's own config and a picker's return value are all
- *    REFUSED, and `homedir()` is the one that succeeds into the throwaway
- *    above — check for it by name, because it is the case that passes. Then
- *    drive the ones you find in a real confined child, because a refusal
- *    arrives as a runtime `EPERM` the
- *    plugin's own error handling may swallow — a one-time migration that used
- *    to succeed silently now throws, and a census of sources cannot tell you
- *    which. Reads need the reverse question, and only for the floor: does it
- *    read a secret store, another plugin's data, or the userData directory.
- *    ASSERTED: yes, in both directions, by `confined-plugin-child.test.ts` —
- *    the secret read refused beside `pluginDataDir` read AND written, a write
- *    outside the jail refused, and the legacy session move listed-then-refused
- *    with nothing moved and the original still in place.
+ *    read what its path is rooted at. Then sort each root into the FOUR
+ *    outcomes above, because three of them are not `EPERM`:
+ *      · rooted at `pluginDataDir` → durable, and the only one that is;
+ *      · rooted at `homedir()` → succeeds and vanishes at exit. Check for this
+ *        one BY NAME; it is the case that passes;
+ *      · on ASRT's default write list — `/tmp/claude`, `/private/tmp/claude`,
+ *        `<real home>/.npm/_logs`, `<real home>/.claude/debug`, the `/dev`
+ *        entries, and anything derived from `tmpdir()`, which the sandbox
+ *        points AT that list → succeeds and is durable, in a directory shared
+ *        with every other confined plugin. Check this one by name too: it is
+ *        the second case that passes, and the one that makes "an absolute
+ *        literal is refused" a WRONG rule to check by;
+ *      · anything else — `context.hostRoot`, `process.cwd()`, an absolute
+ *        literal off that list, a path out of the plugin's own config, a
+ *        picker's return value → refused `EPERM`.
+ *    So the question is not "is this path absolute" and not "is it one of the
+ *    two grants". It is which of the four roots it has, and two of the four
+ *    are silent. Then drive the ones you find in a real confined child, because
+ *    a refusal arrives as a runtime `EPERM` the plugin's own error handling may
+ *    swallow — a one-time migration that used to succeed silently now throws,
+ *    and a census of sources cannot tell you which. Reads need the reverse
+ *    question, and only for the floor: does it read a secret store, another
+ *    plugin's data, or the userData directory.
+ *    ASSERTED: in both directions, by `confined-plugin-child.test.ts`, and on
+ *    the machines the header names rather than everywhere — the secret read
+ *    refused beside `pluginDataDir` read AND written, a fixture path outside
+ *    the allow set refused, the legacy session move listed-then-refused with
+ *    nothing moved and the original still in place, the `homedir()` write
+ *    succeeding into the throwaway, and the durable write into the shared
+ *    default path with a second confined plugin's child reading it back.
  *
  * A plugin passes when every axis it touches has a mediated form AND the
  * plugin already uses that form. "Could be changed to use it" is a backlog
@@ -351,8 +435,8 @@
  *   here, and in both directions: it writes its index state under a path
  *   rooted at `homedir()` rather than `pluginDataDir`, it carries its own
  *   `hostRoot`-rooted workspace migration, and its whole PURPOSE is reading
- *   folders the user chose. Those three land on three DIFFERENT outcomes,
- *   which is why the axis is written with all three: the scanned folders keep
+ *   folders the user chose. Those three land on three DIFFERENT outcomes of
+ *   the four the axis names: the scanned folders keep
  *   working, because a folder the user picked is not on the deny floor and
  *   reading is not jailed; the `hostRoot` migration is refused `EPERM`, and it
  *   sits inside a `catch` that logs and continues, so it fails quietly; and

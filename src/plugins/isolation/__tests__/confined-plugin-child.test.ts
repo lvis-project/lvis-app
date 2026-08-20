@@ -10,13 +10,22 @@
  *
  *  - The child cannot READ `~/.lvis/secrets/`. That is the first assertion §7
  *    asks for, and it is real because the ASRT deny floor covers that path.
- *  - The child cannot WRITE outside its allow set. Write in ASRT IS an
- *    allow-jail, so this one is a jail assertion rather than a deny assertion.
- *    "Its allow set" is larger than the two paths `spawnConfinedPluginChild`
- *    names: ASRT adds its own default write paths, which include the temp root
- *    it also points the child's `TMPDIR` at. So this proves the child cannot
- *    reach the fixture paths outside the jail; it does not prove the jail is
- *    those two directories and nothing else.
+ *  - The child cannot WRITE the fixture paths outside its allow set. Write in
+ *    ASRT IS an allow-jail, so this one is a jail assertion rather than a deny
+ *    assertion. "Its allow set" is larger than the two paths
+ *    `spawnConfinedPluginChild` names: ASRT merges its OWN default write paths
+ *    into every wrap, which include the temp root it also points the child's
+ *    `TMPDIR` at. So this proves the child cannot reach the fixture paths; it
+ *    does NOT prove the jail is those two directories and nothing else, and the
+ *    next bullet is the case that says so out loud.
+ *  - The child CAN write, durably, to a path in NEITHER named grant: the temp
+ *    root ASRT substitutes, which is one of the default write paths it merges.
+ *    Asserted here — with the host reading the bytes back — because the routing
+ *    SOT and the blueprint both said the write jail was exactly two paths, and
+ *    a sentence with no case behind it is how a false one survives review.
+ *    Measured on macOS/arm64 with the sandbox active; the assertion
+ *    is written against `tmpdir()` rather than a literal so it asks the same
+ *    question on whichever backend is underneath.
  *  - The child CAN read and write its own `pluginDataDir`. A confinement that
  *    also broke the plugin would be indistinguishable from one that worked, so
  *    the positive case is part of the proof.
@@ -48,11 +57,26 @@
  *    rather than a namespace, so a localhost probe would prove something
  *    different on each platform and an internet probe would pass on an offline
  *    machine for the wrong reason.
+ *  - Anything at all, on a machine where the sandbox backend cannot
+ *    initialize. The four cases below need a live sandbox, and where
+ *    `asrtCanInitialize()` answers false they return before measuring. That is
+ *    not a hypothetical machine: the Linux runner that runs the whole suite on
+ *    every pull request has no bubblewrap — nothing in `.github/` or `scripts/`
+ *    installs it and ASRT vendors only seccomp and srt-win — so on that runner
+ *    the four sandbox cases return without spawning anything. To see what that
+ *    looks like, make `asrtCanInitialize()` return false and run this file: all
+ *    five cases pass, in milliseconds, with no skip mark and no warning.
+ *    `sandboxCasesRun()` below is what stops that from being invisible: an
+ *    environment that is SUPPOSED to run them sets
+ *    `LVIS_REQUIRE_SANDBOX_CASES=1` and gets a failure instead of a silent
+ *    pass. The macOS job in `ci.yml` sets it, because the macOS backend needs
+ *    no install; the Linux job does not, and there these cases still return
+ *    without measuring.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 // The child entry is bundled by the shared module rather than here: its
 // externals, banner and target are the shipped build's, and a second copy of
 // them is a second chance for one case to prove something about a child that
@@ -74,6 +98,37 @@ const SECRET_TEXT = "the-host-secret-the-child-must-not-read";
 const LEGACY_SESSION_BYTES = "the session that predates pluginDataDir";
 /** Stands in for the plugin's own code: readable out of `pluginRoot`, never writable back into it. */
 const PLUGIN_CODE_BYTES = "the plugin's own code, which it may read and may not rewrite";
+/** What one child leaves in the shared temp root, so a second child reading it is a channel and not a coincidence. */
+const SHARED_TEMP_BYTES = "bytes one confined child left where another confined child can read them";
+
+/**
+ * Whether the cases that need a live sandbox may run here — and whether being
+ * unable to run them is allowed to be silent.
+ *
+ * Returning false lets the file be developed on a machine without the backend.
+ * It is ALSO how these cases pass without measuring anything, which is not a
+ * theoretical concern: the Linux runner that runs the whole suite on every pull
+ * request has no bubblewrap, so `asrtCanInitialize()` is false there and four of
+ * this file's five cases return immediately — no skip mark, no warning, green.
+ *
+ * `LVIS_REQUIRE_SANDBOX_CASES` is how an environment that is supposed to run
+ * them says so. With it set, a machine that cannot initialize the sandbox fails
+ * HERE, loudly, instead of reporting a measurement it never took. It only ever
+ * turns a silent pass into a failure; nothing about the cases themselves reads
+ * it.
+ */
+async function sandboxCasesRun(): Promise<boolean> {
+  if (await asrtCanInitialize()) return true;
+  if (process.env.LVIS_REQUIRE_SANDBOX_CASES === "1") {
+    throw new Error(
+      "LVIS_REQUIRE_SANDBOX_CASES=1 but the ASRT sandbox cannot initialize on this "
+        + "machine, so the confinement cases would pass without measuring anything. "
+        + "Install the platform backend (macOS needs none; Linux needs bubblewrap) or "
+        + "unset the variable and accept that these cases do not run here.",
+    );
+  }
+  return false;
+}
 
 interface Fixture {
   readonly root: string;
@@ -89,6 +144,15 @@ interface Fixture {
    * against a directory the developer's own machine happens to own.
    */
   readonly hostRoot: string;
+  /**
+   * The basename a child writes into the temp root ASRT substitutes.
+   *
+   * Unique per fixture because that root is SHARED — it is one of ASRT's own
+   * default write paths, so every confined child on the machine reaches the
+   * same directory and a fixed name would let two runs, or two plugins, collide
+   * in it. Which is the finding the case using this asserts.
+   */
+  readonly sharedTempName: string;
 }
 
 let fixture: Fixture | undefined;
@@ -123,6 +187,7 @@ function makeFixture(): Fixture {
     pluginDataDir,
     outsideFile: join(root, "outside-the-jail.txt"),
     hostRoot,
+    sharedTempName: `${basename(root)}.txt`,
   };
 }
 
@@ -188,8 +253,8 @@ function writeProbeModule(fx: Fixture): string {
   );
   writeFileSync(
     probePath,
-    `import { readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
+    `import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
@@ -217,6 +282,13 @@ const report = {
   // returns \`written\` and the bytes are gone by the next start.
   childHome: homedir(),
   writeChildHome: attempt(() => { writeFileSync(join(homedir(), "state.json"), "state"); return "written"; }),
+  // The FOURTH answer, and the one that falsifies "the jail is those two
+  // paths". ASRT merges its own default write paths into every wrap, and the
+  // temp root it substitutes is one of them — so this write is outside
+  // \`pluginDataDir\`, outside the substituted HOME, and DURABLE. The host reads
+  // the bytes back to show the last part.
+  childTmpdir: tmpdir(),
+  writeChildTmpdir: attempt(() => { mkdirSync(tmpdir(), { recursive: true }); writeFileSync(join(tmpdir(), ${JSON.stringify(fx.sharedTempName)}), ${JSON.stringify(SHARED_TEMP_BYTES)}); return "written"; }),
   electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,
   // The process IS Electron — this is the binary the host runs as — and the
   // next two lines are what it can do with that.
@@ -282,6 +354,8 @@ interface ProbeReport {
   readonly writeOwnCode: ProbeAttempt;
   readonly childHome: string;
   readonly writeChildHome: ProbeAttempt;
+  readonly childTmpdir: string;
+  readonly writeChildTmpdir: ProbeAttempt;
   readonly electronRunAsNode: string | null;
   readonly electronVersion: string | null;
   readonly requireElectron: ProbeModuleAttempt;
@@ -309,6 +383,52 @@ async function runProbe(fx: Fixture): Promise<ProbeReport> {
         return;
       }
       resolve(JSON.parse(line.slice("PROBE:".length)) as ProbeReport);
+    });
+    child.link.input.on("error", reject);
+  });
+}
+
+/**
+ * A SECOND confined child, from a second plugin, reading one absolute path.
+ *
+ * Spawned through the same production spawn with a different `pluginRoot` and
+ * `pluginDataDir`, so the only thing the two children share is what ASRT gives
+ * every wrap. That is the whole question: the routing SOT's write jail is
+ * per-plugin, but the default write paths ASRT merges are not, so a path on
+ * that list is reachable by both. This returns what the second child got.
+ */
+async function runCrossPluginReadProbe(
+  fx: Fixture,
+  reader: InstalledPlugin,
+  absolutePath: string,
+): Promise<ProbeAttempt> {
+  const probePath = join(fx.root, "cross-plugin-probe.mjs");
+  writeFileSync(
+    probePath,
+    `import { readFileSync } from "node:fs";
+const attempt = (fn) => { try { return { ok: true, value: fn() }; } catch (error) { return { ok: false, code: error.code ?? error.name }; } };
+process.stdout.write("PROBE:" + JSON.stringify(attempt(() => readFileSync(${JSON.stringify(absolutePath)}, "utf-8"))) + "\\n");
+`,
+    "utf-8",
+  );
+  const child = await spawnConfinedPluginChild({
+    pluginId: reader.pluginId,
+    pluginRoot: reader.pluginRoot,
+    pluginDataDir: reader.pluginDataDir,
+    childEntryPath: probePath,
+  });
+  return await new Promise<ProbeAttempt>((resolve, reject) => {
+    let stdout = "";
+    child.link.input.on("data", (chunk: Buffer) => {
+      stdout += chunk.toString("utf-8");
+    });
+    child.link.input.on("end", () => {
+      const line = stdout.split("\n").find((entry) => entry.startsWith("PROBE:"));
+      if (!line) {
+        reject(new Error(`the cross-plugin probe produced no report; stdout was: ${stdout}`));
+        return;
+      }
+      resolve(JSON.parse(line.slice("PROBE:".length)) as ProbeAttempt);
     });
     child.link.input.on("error", reject);
   });
@@ -353,7 +473,7 @@ describe("the confined child, against the real sandbox", () => {
   it.runIf(process.platform === "darwin" || process.platform === "linux")(
     "is denied the host's secrets and the paths outside its write jail, and keeps its own",
     async () => {
-      if (!(await asrtCanInitialize())) return;
+      if (!(await sandboxCasesRun())) return;
       const fx = fixture!;
       await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
 
@@ -389,6 +509,46 @@ describe("the confined child, against the real sandbox", () => {
       expect(report.childHome.startsWith(fx.pluginRoot)).toBe(false);
       expect(report.childHome.startsWith(fx.pluginDataDir)).toBe(false);
       expect(report.writeChildHome.ok, JSON.stringify(report.writeChildHome)).toBe(true);
+
+      // ── the FOURTH answer: outside both grants, and DURABLE ────────────
+      //
+      // The write jail is NOT the two paths the spawn names. ASRT merges its
+      // own default write paths into every wrap it builds, and the temp root
+      // it substitutes is one of them — so this is a path in neither grant
+      // that the child writes and the HOST then reads back. Asserted rather
+      // than described because "exactly two paths" survived two revisions of
+      // the routing SOT and the blueprint with no case able to contradict it.
+      // Written against `tmpdir()` rather than a literal so it asks the same
+      // question whichever backend is underneath.
+      const sharedTemp = join(report.childTmpdir, fx.sharedTempName);
+      expect(report.childTmpdir).not.toBe(report.childHome);
+      expect(report.childTmpdir.startsWith(fx.pluginDataDir)).toBe(false);
+      expect(report.childTmpdir.startsWith(report.childHome)).toBe(false);
+      expect(report.writeChildTmpdir.ok, JSON.stringify(report.writeChildTmpdir)).toBe(true);
+      // Durable, which is what separates this outcome from the `homedir()`
+      // one: the bytes are still there, read from the unconfined host.
+      expect(readFileSync(sharedTemp, "utf-8")).toBe(SHARED_TEMP_BYTES);
+
+      // …and that path is SHARED. A second confined child, from a second
+      // plugin with its own `pluginRoot` and `pluginDataDir`, reads the first
+      // one's bytes. The per-plugin jail is per-plugin; the default paths ASRT
+      // merges are not, so two confined plugins have a write channel between
+      // them that neither manifest declares. Recorded as a defect rather than
+      // closed here — the SOT's axis 6 says what closing it would take and
+      // what it would cost.
+      const crossPluginRead = await runCrossPluginReadProbe(
+        fx,
+        installPlugin(fx, "a-second-confined-plugin"),
+        sharedTemp,
+      );
+      try {
+        expect(crossPluginRead.ok, JSON.stringify(crossPluginRead)).toBe(true);
+        expect(crossPluginRead.value).toBe(SHARED_TEMP_BYTES);
+      } finally {
+        // The shared root outlives the fixture, so this is the one artefact
+        // the fixture teardown cannot reclaim.
+        rmSync(sharedTemp, { force: true });
+      }
 
       // …and the plugin still works, which is the other half of the claim.
       expect(report.readOwnData.ok, JSON.stringify(report.readOwnData)).toBe(true);
@@ -468,7 +628,7 @@ describe("the pilot's tools, out of process and confined", () => {
   it.runIf(process.platform === "darwin" || process.platform === "linux")(
     "invokes a declared tool in a sandboxed child and returns the plugin's own value",
     async () => {
-      if (!(await asrtCanInitialize())) return;
+      if (!(await sandboxCasesRun())) return;
       const fx = fixture!;
       const repoRoot = repositoryRoot();
       const childOutDir = childBundleDir(CHILD_BUNDLE_CACHE);
@@ -559,7 +719,7 @@ describe("the lossy and stateful members, across a real confined boundary", () =
   it.runIf(process.platform === "darwin" || process.platform === "linux")(
     "hands over what the gate grants, refuses what it does not, and cannot be reached around",
     async () => {
-      if (!(await asrtCanInitialize())) return;
+      if (!(await sandboxCasesRun())) return;
       const fx = fixture!;
       const repoRoot = repositoryRoot();
       const childOutDir = childBundleDir(CHILD_BUNDLE_CACHE);
@@ -865,7 +1025,7 @@ describe("a refused candidate's members, out of process and confined", () => {
   it.runIf(process.platform === "darwin" || process.platform === "linux")(
     "carries the gate's verdict both ways, and refuses the window its primary tool opens",
     async () => {
-      if (!(await asrtCanInitialize())) return;
+      if (!(await sandboxCasesRun())) return;
       const fx = fixture!;
       const plugin = installPlugin(fx, "meeting");
       const repoRoot = repositoryRoot();
