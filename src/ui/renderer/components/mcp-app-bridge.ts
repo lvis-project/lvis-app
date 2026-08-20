@@ -14,9 +14,9 @@
  * (no react / lucide / i18n imports) is what lets the e2e page bundle import the real
  * thing.
  *
- * The individual handler BODIES live one-per-file under `mcp-app-bridge/handlers/`;
- * this module is the single wiring surface that computes host capabilities from the
- * active handler set and registers every handler before `connect()`.
+ * The individual handler BODIES live in `mcp-app-bridge/handlers.ts`; this module is
+ * the single wiring surface that computes host capabilities from the active handler set
+ * and registers every handler before `connect()`.
  */
 import { AppBridge } from "@modelcontextprotocol/ext-apps/app-bridge";
 // `McpUiHostContext` comes from the local standard-type twin, not the package —
@@ -27,15 +27,17 @@ import type { McpUiHostContext } from "./mcp-app-host-context.js";
 import type { McpUiPayload, McpUiToolCallOutcome } from "../../../mcp/types.js";
 import { MCP_APP_HOST_INFO } from "../../../shared/mcp-app-bridge-contract.js";
 import { WebviewIpcTransport, type BridgeWebviewElement } from "./webview-ipc-transport.js";
-import { createOnSandboxReady } from "./mcp-app-bridge/handlers/on-sandbox-ready.js";
-import { createOnReadResource } from "./mcp-app-bridge/handlers/on-read-resource.js";
-import { createOnOpenLink } from "./mcp-app-bridge/handlers/on-open-link.js";
-import { createOnSizeChange } from "./mcp-app-bridge/handlers/on-size-change.js";
-import { createOnCallTool } from "./mcp-app-bridge/handlers/on-call-tool.js";
-import { createOnMessage } from "./mcp-app-bridge/handlers/on-message.js";
-import { createOnRequestDisplayMode } from "./mcp-app-bridge/handlers/on-request-display-mode.js";
-import { createOnDownloadFile } from "./mcp-app-bridge/handlers/on-download-file.js";
-import { createOnUpdateModelContext } from "./mcp-app-bridge/handlers/on-update-model-context.js";
+import {
+  createOnSandboxReady,
+  createOnReadResource,
+  createOnOpenLink,
+  createOnSizeChange,
+  createOnCallTool,
+  createOnMessage,
+  createOnRequestDisplayMode,
+  createOnDownloadFile,
+  createOnUpdateModelContext,
+} from "./mcp-app-bridge/handlers.js";
 import type { McpUiMessageOutcome } from "../../../mcp/mcp-ui-message.js";
 import type { McpUiDownloadOutcome } from "../../../mcp/mcp-app-download.js";
 import type { McpUiModelContextOutcome } from "../../../mcp/mcp-app-model-context.js";
