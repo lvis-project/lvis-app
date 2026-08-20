@@ -30,7 +30,7 @@ const features = [
 
 const tour = [
   { step: "01", time: "5분", title: "설치 → 로그인", desc: "OS 빌드 설치 후 첫 실행. Marketplace SSO + ApiKey sha256." },
-  { step: "02", time: "10분", title: "플러그인 권한 허용", desc: "capabilities 12종 + tools[] + pluginAccess 통합 다이얼로그." },
+  { step: "02", time: "10분", title: "플러그인 권한 허용", desc: "capabilities + tools[] + pluginAccess 통합 다이얼로그." },
   { step: "03", time: "15분", title: "루틴 + 첫 카드", desc: "schedule 트리거 등록, work-assistant proactive 카드 받아보기." },
 ];
 

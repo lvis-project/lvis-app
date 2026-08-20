@@ -21,7 +21,7 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Host Features", href: "/en/docs/host/skills", title: "Skills — Ability Packs", snippet: "Invoke frequent tasks with one line. Trigger keywords + tool mapping + risk level", keywords: ["skill", "skills", "keyword", "keywords"] },
   { group: "Host Features", href: "/en/docs/host/agents", title: "Agents — Small Units of Work", snippet: "An autonomous unit that does one task well. Agents spawn sub-agents and resume them", keywords: ["agent", "agents", "subagent"] },
   { group: "Host Features", href: "/en/docs/host/memory", title: "MEMORY — Remembering What You Told It", snippet: "Role · preferences · constraints. Automatic capture is off by default; project AGENTS.md is read too", keywords: ["memory", "AGENTS.md"] },
-  { group: "Host Features", href: "/en/docs/host/mcp", title: "MCP — Bringing In External Tools", snippet: "A server's tools, resources, prompts and instructions. External tools ask every time", keywords: ["mcp", "external tools", "resource", "prompt"] },
+  { group: "Host Features", href: "/en/docs/host/mcp", title: "MCP — Bringing In External Tools", snippet: "A server's tools, resources, prompts and instructions. External tools are filtered out of risk-band auto-allow into a confirmation card", keywords: ["mcp", "external tools", "resource", "prompt"] },
   { group: "Host Features", href: "/en/docs/host/onboarding", title: "Onboarding — First-Run Guide", snippet: "Short tour on first launch + memory seed input + can be revisited anytime", keywords: ["onboarding", "tour", "start"] },
   { group: "Host Features", href: "/en/docs/host/trust-security", title: "Trust & Security", snippet: "Source verification · version withdrawal · load-failure cards · secrets · audit log · no-fallback", keywords: ["trust", "security", "audit"] },
   { group: "Host Features", href: "/en/docs/host/integration-recipes", title: "Integration Recipes — Combined Scenarios", snippet: "Meeting → action → schedule → reply · research → presentation · meeting room + video call · video call → minutes → team board", keywords: ["recipe", "integration", "scenario"] },
@@ -32,7 +32,7 @@ export const searchEntriesEn: SearchEntry[] = [
 
   // Plugins
   { group: "Plugins", href: "/en/docs/plugins", title: "Plugins — Overview", snippet: "static manifest · tools declared in the manifest · tool list fixed per server generation" },
-  { group: "Plugins", href: "/en/docs/plugins/permission-grant", title: "Permission Grant Flow", snippet: "12 capabilities · tools[] · pluginAccess · agentApprovalScopes" },
+  { group: "Plugins", href: "/en/docs/plugins/permission-grant", title: "Permission Grant Flow", snippet: "capabilities · tools[] · pluginAccess · agentApprovalScopes" },
   { group: "Plugins", href: "/en/docs/plugins/local-indexer", title: "Local Indexer", snippet: "kiwipiepy Pattern B · pymupdf4llm · FTS5 + LanceDB · chokidar · RRF (K=60)", keywords: ["RAG", "rrf", "fts5", "kiwi"] },
   { group: "Plugins", href: "/en/docs/plugins/ms-graph", title: "Microsoft 365 (Outlook)", snippet: "MSAL OAuth · safeStorage · 31 tools · scopes: User.Read Mail.* Calendars.*", keywords: ["outlook", "calendar", "mail", "ms-graph"] },
   { group: "Plugins", href: "/en/docs/plugins/meeting", title: "Meeting (Recording)", snippet: "OpenAI Whisper · PCM16LE 16kHz/3sec · 18 tools · meeting.ended", keywords: ["stt", "whisper", "audio"] },

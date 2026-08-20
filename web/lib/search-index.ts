@@ -29,7 +29,7 @@ export const searchIndex: SearchEntry[] = [
   { group: "호스트 기능", href: "/docs/host/skills", title: "Skills — 능력 꾸러미", snippet: "자주 쓰는 작업을 한 줄로 부르기. 트리거 키워드 + 도구 매핑 + 위험도", keywords: ["skill", "skills", "키워드"] },
   { group: "호스트 기능", href: "/docs/host/agents", title: "Agents — 작은 작업 단위", snippet: "하나의 작업을 잘 해내는 자율 단위. 에이전트가 하위 에이전트를 띄우고 이어받기", keywords: ["agent", "agents", "에이전트", "하위 에이전트", "subagent"] },
   { group: "호스트 기능", href: "/docs/host/memory", title: "MEMORY — 알려준 사실 기억", snippet: "역할 · 선호 · 제한 사항. 자동 추출은 기본 꺼짐 · 프로젝트 AGENTS.md 도 참고", keywords: ["memory", "메모리", "기억", "AGENTS.md"] },
-  { group: "호스트 기능", href: "/docs/host/mcp", title: "MCP — 외부 도구 가져오기", snippet: "외부 서버의 도구 · 리소스 · 프롬프트 · 안내문. 외부 도구는 매번 확인", keywords: ["mcp", "외부 도구", "리소스", "프롬프트", "resource", "prompt"] },
+  { group: "호스트 기능", href: "/docs/host/mcp", title: "MCP — 외부 도구 가져오기", snippet: "외부 서버의 도구 · 리소스 · 프롬프트 · 안내문. 외부 도구는 위험도 자동 허용에서 걸러져 확인 카드로", keywords: ["mcp", "외부 도구", "리소스", "프롬프트", "resource", "prompt"] },
   { group: "호스트 기능", href: "/docs/host/onboarding", title: "온보딩 — 처음 시작 안내", snippet: "첫 실행 시 짧은 투어 + 메모리 시드 입력 + 다시 보기 가능", keywords: ["onboarding", "투어", "시작"] },
   { group: "호스트 기능", href: "/docs/host/trust-security", title: "Trust & Security", snippet: "출처 검증 · 버전 회수 · 로드 실패 카드 · 비밀값 보호 · 감사 기록 · No-fallback", keywords: ["trust", "security", "보안", "신뢰", "감사"] },
   { group: "호스트 기능", href: "/docs/host/integration-recipes", title: "Integration Recipes — 결합 시나리오", snippet: "회의→액션→일정→답장 · 자료검색→발표용 · 회의실+화상회의 · 화상회의→회의록→팀보드", keywords: ["recipe", "integration", "결합", "시나리오"] },
@@ -40,7 +40,7 @@ export const searchIndex: SearchEntry[] = [
 
   // Plugins
   { group: "플러그인", href: "/docs/plugins", title: "플러그인 — 개요", snippet: "정적 manifest · 호스트가 매니페스트만 읽음 · 도구 목록은 서버 세대 단위 고정" },
-  { group: "플러그인", href: "/docs/plugins/permission-grant", title: "권한 허용 흐름", snippet: "capabilities 12종 · tools[] · pluginAccess · agentApprovalScopes" },
+  { group: "플러그인", href: "/docs/plugins/permission-grant", title: "권한 허용 흐름", snippet: "capabilities · tools[] · pluginAccess · agentApprovalScopes" },
   { group: "플러그인", href: "/docs/plugins/local-indexer", title: "Local Indexer", snippet: "kiwipiepy Pattern B · pymupdf4llm · FTS5 + LanceDB · chokidar · RRF (K=60)", keywords: ["RAG", "rrf", "fts5", "kiwi"] },
   { group: "플러그인", href: "/docs/plugins/ms-graph", title: "Microsoft 365 (Outlook)", snippet: "MSAL OAuth · safeStorage · 31개 도구 · scopes: User.Read Mail.* Calendars.*", keywords: ["outlook", "calendar", "mail"] },
   { group: "플러그인", href: "/docs/plugins/meeting", title: "Meeting (회의 녹음)", snippet: "OpenAI Whisper · PCM16LE 16kHz/3sec · 18개 도구 · meeting.ended", keywords: ["stt", "whisper", "audio"] },
