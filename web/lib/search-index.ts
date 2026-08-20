@@ -18,7 +18,7 @@ export const searchIndex: SearchEntry[] = [
   // Host · Chat
   { group: "채팅", href: "/docs/chat/layout", title: "채팅 화면 구성", snippet: "App.tsx · MainToolbar · ChatView · MessageQueuePanel · SessionTodoPanel" },
   { group: "채팅", href: "/docs/chat/message-queue", title: "메시지 큐 & TODO", snippet: "MessageQueuePanel + SessionTodoPanel · emitEvent → host UI 렌더" },
-  { group: "채팅", href: "/docs/chat/tool-thinking", title: "Tool & Thinking 표시", snippet: "Tool Registry · ToolSource builtin/plugin/mcp · Category 5종" },
+  { group: "채팅", href: "/docs/chat/tool-thinking", title: "Tool & Thinking 표시", snippet: "Tool Registry · 출처 3종 · 백그라운드 셸 · 이미지 보기 · 도구 검색" },
   { group: "채팅", href: "/docs/chat/question-cards", title: "질문 카드", snippet: "AskUserQuestionItem · choice-only · choice/choices · recommendedIndex · altIndices" },
   { group: "채팅", href: "/docs/chat/plugin-panel", title: "플러그인 패널", snippet: "manifest ui[] 슬롯 · 번들 Skill · 순수 Tool · 정규식 ^[a-zA-Z_][a-zA-Z0-9_]*$" },
   { group: "채팅", href: "/docs/chat/permissions/directory", title: "권한 — 디렉토리", snippet: "storage sandbox + 호스트 grant · ~/.lvis/permissions.json (0o600)" },
@@ -27,15 +27,15 @@ export const searchIndex: SearchEntry[] = [
 
   // Host Features
   { group: "호스트 기능", href: "/docs/host/skills", title: "Skills — 능력 꾸러미", snippet: "자주 쓰는 작업을 한 줄로 부르기. 트리거 키워드 + 도구 매핑 + 위험도", keywords: ["skill", "skills", "키워드"] },
-  { group: "호스트 기능", href: "/docs/host/agents", title: "Agents — 작은 작업 단위", snippet: "하나의 작업을 잘 해내는 자율 단위. 단축키 / Hub 메시지 / 자동화로 시작", keywords: ["agent", "agents", "에이전트"] },
-  { group: "호스트 기능", href: "/docs/host/memory", title: "MEMORY — 알려준 사실 기억", snippet: "역할 · 선호 · 자주 만나는 사람 · 안 했으면 하는 것. 내 PC 안에만 보관", keywords: ["memory", "메모리", "기억"] },
-  { group: "호스트 기능", href: "/docs/host/mcp", title: "MCP — 외부 도구 가져오기", snippet: "Model Context Protocol 외부 서버 등록. 사용자 동의 후 도구 목록 합류", keywords: ["mcp", "외부 도구"] },
+  { group: "호스트 기능", href: "/docs/host/agents", title: "Agents — 작은 작업 단위", snippet: "하나의 작업을 잘 해내는 자율 단위. 에이전트가 하위 에이전트를 띄우고 이어받기", keywords: ["agent", "agents", "에이전트", "하위 에이전트", "subagent"] },
+  { group: "호스트 기능", href: "/docs/host/memory", title: "MEMORY — 알려준 사실 기억", snippet: "역할 · 선호 · 제한 사항. 자동 추출은 기본 꺼짐 · 프로젝트 AGENTS.md 도 참고", keywords: ["memory", "메모리", "기억", "AGENTS.md"] },
+  { group: "호스트 기능", href: "/docs/host/mcp", title: "MCP — 외부 도구 가져오기", snippet: "외부 서버의 도구 · 리소스 · 프롬프트 · 안내문. 외부 도구는 매번 확인", keywords: ["mcp", "외부 도구", "리소스", "프롬프트", "resource", "prompt"] },
   { group: "호스트 기능", href: "/docs/host/onboarding", title: "온보딩 — 처음 시작 안내", snippet: "첫 실행 시 짧은 투어 + 메모리 시드 입력 + 다시 보기 가능", keywords: ["onboarding", "투어", "시작"] },
-  { group: "호스트 기능", href: "/docs/host/trust-security", title: "Trust & Security", snippet: "출처 검증 · 비밀값 보호 · 동의 chain · 내 PC 안에만 · 감사 기록 · No-fallback", keywords: ["trust", "security", "보안", "신뢰", "감사"] },
+  { group: "호스트 기능", href: "/docs/host/trust-security", title: "Trust & Security", snippet: "출처 검증 · 버전 회수 · 로드 실패 카드 · 비밀값 보호 · 감사 기록 · No-fallback", keywords: ["trust", "security", "보안", "신뢰", "감사"] },
   { group: "호스트 기능", href: "/docs/host/integration-recipes", title: "Integration Recipes — 결합 시나리오", snippet: "회의→액션→일정→답장 · 자료검색→발표용 · 회의실+화상회의 · 화상회의→회의록→팀보드", keywords: ["recipe", "integration", "결합", "시나리오"] },
 
   // Routines
-  { group: "루틴", href: "/docs/routines/overview", title: "루틴 등록과 트리거 흐름", snippet: "RoutineEngineV2 · 트리거 shutdown | schedule · per-fire fresh loop" },
+  { group: "루틴", href: "/docs/routines/overview", title: "루틴 등록과 트리거 흐름", snippet: "RoutineEngine · 트리거 shutdown | schedule · per-fire fresh loop" },
   { group: "루틴", href: "/docs/routines/meeting-end", title: "미팅 종료 → 자동 작업", snippet: "meeting.summary.created → work-assistant meeting-summary detector" },
 
   // Plugins
@@ -64,9 +64,9 @@ export const searchIndex: SearchEntry[] = [
   // Architecture
   { group: "아키텍처", href: "/docs/architecture/overview", title: "시스템 한 눈에 보기", snippet: "4 layers · 6 active plugins · ~/.lvis · servers" },
   { group: "아키텍처", href: "/docs/architecture/diagrams", title: "다이어그램 (스택 · 흐름 · 의사결정)", snippet: "Stack · data flow · permission decision tree · plugin lifecycle SVG", keywords: ["diagram", "visual", "topology"] },
-  { group: "아키텍처", href: "/docs/architecture/host-api", title: "HostApi 컨트랙트", snippet: "PluginHostApi 표면 · storage / config / callTool / agentApproval / triggerConversation" },
+  { group: "아키텍처", href: "/docs/architecture/host-api", title: "HostApi 컨트랙트", snippet: "PluginHostApi 표면 · 자식 프로세스 경계 · 비동기 비밀값 조회", keywords: ["hostapi", "격리", "프로세스", "isolation"] },
   { group: "아키텍처", href: "/docs/architecture/storage", title: "스토리지 — ~/.lvis", snippet: "도메인 namespace · 0o700 dir · 0o600 file · audit/<YYYY-MM-DD>.jsonl" },
-  { group: "아키텍처", href: "/docs/architecture/permissions", title: "권한 모델", snippet: "RiskLevel × Category × Reviewer 4 모드 격자" },
+  { group: "아키텍처", href: "/docs/architecture/permissions", title: "권한 모델", snippet: "위험도 × 카테고리 × 검토 4모드 · 하위 에이전트는 부모가 먼저 판단", keywords: ["권한", "하위 에이전트", "adjudication"] },
 
   // Roadmap
   { group: "로드맵", href: "/docs/roadmap", title: "비전과 진화 흐름 (v1~v4)", snippet: "Connector · Sub-agent · Idle 활용 · Capability Pack · 자동화 트리거 · Hooks", keywords: ["roadmap", "future", "vision", "hook", "sub-agent"] },

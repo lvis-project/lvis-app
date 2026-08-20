@@ -13,9 +13,9 @@ export default function Page() {
     <article>
       <PageHero
         eyebrow="Routines"
-        title="RoutineEngineV2 — Two Triggers"
-        description="LVIS's routine engine is a single implementation at src/routines/v2/routine-engine-v2.ts (v2-only). Only two triggers exist: 'shutdown' and 'schedule.' Each routine fire creates a brand-new dedicated ConversationLoop instance, isolated from the interactive main loop."
-        tags={["src/routines/v2/routine-engine-v2.ts", "trigger: shutdown | schedule", "per-fire fresh loop"]}
+        title="RoutineEngine — Two Triggers"
+        description="LVIS's routine engine is a single implementation at src/core/routine-engine.ts. Only two triggers exist: 'shutdown' and 'schedule.' Each routine fire creates a brand-new dedicated ConversationLoop instance, isolated from the interactive main loop."
+        tags={["src/core/routine-engine.ts", "trigger: shutdown | schedule", "per-fire fresh loop"]}
       />
 
       <FeatureGrid
@@ -64,7 +64,7 @@ export default function Page() {
       />
 
       <Callout tone="warn" title="The 'Q9 isolation lock' name doesn't exist in code">
-        The concept older docs / CLAUDE.md refer to as "Q9 isolation lock" is implemented in code as the "per-fire fresh ConversationLoop" pattern (comment at <code>routine-engine-v2.ts:5-7</code>).
+        The concept older docs / CLAUDE.md refer to as "Q9 isolation lock" is implemented in code as the "per-fire fresh ConversationLoop" pattern (comment at <code>src/core/routine-engine.ts</code>).
         The literal identifier <code>Q9</code> does not appear anywhere in the source.
       </Callout>
 

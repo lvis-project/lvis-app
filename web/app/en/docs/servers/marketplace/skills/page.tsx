@@ -28,7 +28,7 @@ export default function Page() {
       </ul>
 
       <Callout tone="info" title="Where Skills are stored">
-        The host stores a registered Skill at <code>~/.lvis/skills/&lt;name&gt;/SKILL.md</code> (<code>skill-load.ts:57</code>).
+        The host stores a registered Skill at <code>~/.lvis/skills/&lt;name&gt;/SKILL.md</code> (<code>src/main/skill-store.ts</code>).
         Skill approval metadata lives at <code>~/.lvis/skill-approvals.json</code>.
       </Callout>
 

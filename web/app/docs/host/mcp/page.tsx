@@ -1,5 +1,6 @@
 import { PageHero } from "@/components/docs/page-hero";
 import { Callout } from "@/components/docs/callout";
+import { FeatureGrid } from "@/components/docs/feature-grid";
 import { StepList } from "@/components/docs/step-list";
 import { PageNav } from "@/components/docs/page-nav";
 
@@ -11,8 +12,8 @@ export default function Page() {
       <PageHero
         eyebrow="Host · MCP"
         title="MCP 서버 — 외부 도구 셋을 LVIS 안으로"
-        description="외부에서 제공하는 도구 모음을 LVIS 채팅 안에서 쓸 수 있게 연결하는 표준 프로토콜이 MCP 입니다. 한번 등록하면 그 서버가 제공하는 도구들이 LVIS 의 도구 목록에 들어와 LLM 이 자연스럽게 사용할 수 있습니다."
-        tags={["외부 도구 연결 표준", "Marketplace 에서 발견", "사용자 동의 후 등록"]}
+        description="외부에서 제공하는 도구 모음을 LVIS 채팅 안에서 쓸 수 있게 연결하는 표준 프로토콜이 MCP 입니다. 등록한 서버는 도구만 주는 것이 아니라 리소스(읽을 자료) 와 프롬프트(미리 짜둔 질문) 도 함께 제공할 수 있고, LVIS 는 그 셋을 각각 다른 자리에서 보여줍니다."
+        tags={["외부 도구 연결 표준", "도구 · 리소스 · 프롬프트", "사용자 동의 후 등록"]}
       />
 
       <h2 id="why">언제 쓰나요?</h2>
@@ -45,9 +46,44 @@ export default function Page() {
         ]}
       />
 
-      <Callout tone="security" title="처음에는 보수적으로 분류">
-        외부 MCP 서버의 도구는 기본적으로 ‘중간 위험도’ 로 분류됩니다. 자동 실행 (낮은 위험도) 로 강등되려면 운영자의 추가 검토가 필요합니다.
-        사용자 입장에서는 처음에 매번 확인 카드가 뜨고, 익숙해진 도구만 점차 자동 실행됩니다.
+      <h2 id="beyond-tools">도구 말고 또 무엇이 들어오나</h2>
+      <p>
+        MCP 서버는 도구 외에 두 가지를 더 내놓을 수 있습니다. LVIS 는 셋을 섞지 않고, 각각 다른 자리에서 다르게 다룹니다.
+      </p>
+      <FeatureGrid
+        columns={2}
+        items={[
+          {
+            title: "리소스 — 서버가 가진 자료",
+            body: <>문서 · 로그 · 레코드처럼 서버가 “읽어갈 수 있다” 고 내놓는 자료입니다. 두 갈래로 들어옵니다 — 사용자가 입력창에서 <code>@</code> 를 눌러 직접 고르거나, 모델이 <code>mcp_resource_list</code> / <code>mcp_resource_read</code> 로 직접 찾아 읽습니다.</>,
+            tone: "teal",
+          },
+          {
+            title: "리소스 템플릿 — 빈칸이 있는 자료",
+            body: <>“이슈 번호를 넣으면 그 이슈를 준다” 처럼 빈칸이 있는 형태입니다. <code>@</code> 목록에서 고르면 호스트가 빈칸을 채우는 창을 띄우고, 채워진 주소를 <strong>호스트가</strong> 만들어 읽습니다.</>,
+          },
+          {
+            title: "프롬프트 — 서버가 미리 짜둔 질문",
+            body: <>서버가 “이런 걸 물어보면 잘 답한다” 고 미리 준비해 둔 질문 묶음입니다. 입력창에서 <code>/</code> 를 눌러 고르고, 인자가 필요하면 입력 창이 먼저 뜹니다.</>,
+            tone: "citron",
+          },
+          {
+            title: "서버 안내문",
+            body: <>연결된 서버가 “나를 이렇게 쓰라” 고 붙여 보내는 설명입니다. 모델에게 참고 자료로 전달되지만 <strong>지시로 취급되지 않습니다</strong>.</>,
+          },
+        ]}
+      />
+
+      <Callout tone="security" title="서버가 쓴 글은 사용자가 쓴 글이 아닙니다">
+        리소스 본문과 프롬프트 본문은 <strong>서버가 쓴 글</strong> 입니다. 사용자가 그것을 가져오기로 선택했을 뿐, 내용을 쓴 것은 사용자가 아닙니다.
+        그래서 LVIS 는 이 내용을 사용자의 말과 같은 자리에 그냥 붙이지 않고, 출처가 표시된 별도 블록으로 감싸 모델에게 전달합니다.
+        서버가 그 블록을 스스로 닫거나 새로 열어 사용자의 말인 척할 수 없도록 경계 문자를 호스트가 무력화하고, 길이에도 상한을 둡니다.
+      </Callout>
+
+      <Callout tone="security" title="외부 서버 도구는 매번 물어봅니다">
+        외부 MCP 서버의 도구는 호스트가 가장 낮은 신뢰 등급으로 다룹니다. 그래서 <strong>기본 모드에서는 위험도나 카테고리와 무관하게 매번 사용자에게 확인을 받습니다</strong> —
+        읽기만 하는 도구도 예외가 아닙니다. 쓰다 보면 익숙해진 도구가 자동 실행으로 승격되는 구조는 <strong>지금 없습니다</strong>.
+        이 확인을 건너뛰는 유일한 길은 사용자가 권한 모드 자체를 ‘전부 허용’ 으로 바꾸는 것입니다.
       </Callout>
 
       <PageNav />

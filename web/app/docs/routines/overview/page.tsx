@@ -13,9 +13,9 @@ export default function Page() {
     <article>
       <PageHero
         eyebrow="Routines"
-        title="RoutineEngineV2 — 두 가지 트리거"
-        description="LVIS의 routine 엔진은 src/routines/v2/routine-engine-v2.ts 의 단일 구현 (v2-only). 트리거는 'shutdown' 과 'schedule' 두 가지만 존재. 각 루틴 발사는 dedicated ConversationLoop 인스턴스를 새로 만들어 interactive 메인 루프와 isolation."
-        tags={["src/routines/v2/routine-engine-v2.ts", "trigger: shutdown | schedule", "per-fire fresh loop"]}
+        title="RoutineEngine — 두 가지 트리거"
+        description="LVIS의 routine 엔진은 src/core/routine-engine.ts 의 단일 구현. 트리거는 'shutdown' 과 'schedule' 두 가지만 존재. 각 루틴 발사는 dedicated ConversationLoop 인스턴스를 새로 만들어 interactive 메인 루프와 isolation."
+        tags={["src/core/routine-engine.ts", "trigger: shutdown | schedule", "per-fire fresh loop"]}
       />
 
       <FeatureGrid
@@ -64,7 +64,7 @@ export default function Page() {
       />
 
       <Callout tone="warn" title="‘Q9 isolation lock’ 이름은 코드에 없다">
-        과거 문서 / CLAUDE.md 가 “Q9 isolation lock” 이라고 부르는 개념은 코드의 “per-fire fresh ConversationLoop” 패턴 (<code>routine-engine-v2.ts:5-7</code> 주석) 으로 구현되어 있습니다.
+        과거 문서 / CLAUDE.md 가 “Q9 isolation lock” 이라고 부르는 개념은 코드의 “per-fire fresh ConversationLoop” 패턴 (<code>src/core/routine-engine.ts</code> 주석) 으로 구현되어 있습니다.
         리터럴 <code>Q9</code> 라는 식별자는 소스에 등장하지 않습니다.
       </Callout>
 

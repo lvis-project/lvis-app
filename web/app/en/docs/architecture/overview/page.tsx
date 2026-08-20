@@ -17,7 +17,7 @@ const layers = [
       "MessageQueuePanel · SessionTodoPanel",
       "Reviewer (risk-classifier)",
       "Tool Registry · ConversationLoop",
-      "RoutineEngineV2 (shutdown · schedule)",
+      "RoutineEngine (shutdown · schedule)",
     ],
   },
   {
