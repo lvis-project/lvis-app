@@ -1052,14 +1052,14 @@ describe("ApprovalGate", () => {
     const gate = new ApprovalGate(wc as never);
     const req = makeRequest({
       id: "req-dlp-ssn",
-      args: { memo: "주민번호 900101-1234567 카드 4111-1111-1111-1234" },
+      args: { memo: "주민번호 900101-1234567 카드 4111-1111-1111-1111" },
     });
 
     gate.requestAndWait(req);
     const [, payload] = wc.send.mock.calls[0] as [string, ApprovalRequest];
     const memo = (payload.args as { memo: string }).memo;
     expect(memo).toContain("******-*******");
-    expect(memo).toContain("****-****-****-1234");
+    expect(memo).toContain("****-****-****-1111");
     expect(memo).not.toContain("900101-1234567");
 
     gate.resolve(req.id, { requestId: req.id, choice: "deny-once" });

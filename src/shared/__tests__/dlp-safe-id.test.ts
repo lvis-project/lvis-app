@@ -6,8 +6,13 @@ import { createDlpSafeUuid } from "../dlp-safe-id.js";
 const UUID_V4_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SAFE_UUID = "abcdefab-cdef-4abc-8def-abcdefabcdef";
-const UNSAFE_UUID = "12345678-1234-4234-8234-123456789abc";
-const PREFIX_BOUNDARY_UUID = "56784123-8128-4abc-8def-abcdefabcdef";
+// A valid v4 UUID whose serialized form carries a Luhn-valid 16-digit window
+// (first two groups + version group), so the converged detector flags it.
+const UNSAFE_UUID = "00000023-0161-4299-a234-abcdefabcdef";
+// Safe on its own — its longest digit run is 8 — but a Luhn-valid 16-digit
+// window straddles the join once BOUNDARY_PREFIX is concatenated in front.
+const PREFIX_BOUNDARY_UUID = "20000004-ab12-4abc-8def-abcdefabcdef";
+const BOUNDARY_PREFIX = "sub-10000000";
 
 describe("createDlpSafeUuid", () => {
   it("creates unique UUIDv4 values whose complete bare and prefixed forms pass DLP", () => {
@@ -37,14 +42,15 @@ describe("createDlpSafeUuid", () => {
 
   it("retries when only the final prefix boundary creates a DLP match", () => {
     expect(maskSensitiveData(PREFIX_BOUNDARY_UUID).detections).toEqual([]);
-    expect(maskSensitiveData(`sub-abcd1234-${PREFIX_BOUNDARY_UUID}`).detections)
+    expect(maskSensitiveData(BOUNDARY_PREFIX).detections).toEqual([]);
+    expect(maskSensitiveData(`${BOUNDARY_PREFIX}-${PREFIX_BOUNDARY_UUID}`).detections)
       .not.toEqual([]);
     const makeUuid = vi.fn()
       .mockReturnValueOnce(PREFIX_BOUNDARY_UUID)
       .mockReturnValueOnce(SAFE_UUID);
 
-    expect(createDlpSafeUuid("sub-abcd1234", makeUuid))
-      .toBe(`sub-abcd1234-${SAFE_UUID}`);
+    expect(createDlpSafeUuid(BOUNDARY_PREFIX, makeUuid))
+      .toBe(`${BOUNDARY_PREFIX}-${SAFE_UUID}`);
     expect(makeUuid).toHaveBeenCalledTimes(2);
   });
 
@@ -57,7 +63,7 @@ describe("createDlpSafeUuid", () => {
 
   it("rejects a sensitive prefix before generating an identifier", () => {
     const makeUuid = vi.fn(() => SAFE_UUID);
-    expect(() => createDlpSafeUuid("12345678-1234-4234", makeUuid))
+    expect(() => createDlpSafeUuid("010-1234-5678", makeUuid))
       .toThrow("[dlp-safe-uuid-prefix-rejected]");
     expect(makeUuid).not.toHaveBeenCalled();
   });
