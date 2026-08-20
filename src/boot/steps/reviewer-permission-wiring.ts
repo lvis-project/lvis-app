@@ -45,7 +45,7 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
   } = ctx;
 
   // §6.3: PermissionManager — instance was constructed before
-  // initPluginRuntime (cluster M1) so the resolveApiKey host wiring could
+  // initPluginRuntime so the resolveApiKey host wiring could
   // see it. Now that toolRegistry is built, push the visibility deny
   // rules across.
   toolRegistry.setDenyRules(permissionManager.getVisibilityDenyRules());
@@ -215,13 +215,13 @@ export function wireReviewerAndPermissions(ctx: BootContext): void {
   };
   rewireReviewerAgent();
 
-  // CRITICAL 4.1: wire memory-hit auto-approve IPC broadcast once at boot.
+  // Wire the memory-hit auto-approve IPC broadcast once at boot.
   // The broadcast fn is stable across rewires (always sends to the current mainWindow).
   permissionManager.setBroadcastUserApprovalHit((payload) => {
     sendToWindow(getMainWindow(), PERMISSIONS.userApprovalHit, payload, log);
   });
 
-  // Round-4 fix: PermissionManager is the architectural choke point for
+  // PermissionManager is the architectural choke point for
   // every persisted rule mutation (addAlwaysAllowedPersist /
   // addAlwaysDeniedPersist / removeRule). Wiring the broadcast here means
   // executor-side dialog approvals (always allow / always deny), slash

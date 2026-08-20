@@ -1,6 +1,6 @@
 /**
  * Diagnostics bundle writer — the SINGLE chokepoint that serializes redacted
- * host state into a support ZIP (#1499 E2).
+ * host state into a support ZIP.
  *
  * A production build has no console, so a support engineer needs a one-click
  * bundle of: what version/OS is running, a REDACTED settings snapshot, the
@@ -348,8 +348,8 @@ export async function buildDiagnosticsBundle(
   // Async (thread-pool) deflate — adm-zip's toBufferPromise() compresses each
   // entry via zlib's async path (getCompressedDataAsync), so the main process is
   // NOT blocked while a large log tree is deflated up to MAX_BUNDLE_BYTES (50 MB).
-  // The synchronous zip.toBuffer() would stall the UI for the whole compression
-  // (#1499 E2 cluster-review architect MINOR).
+  // The synchronous zip.toBuffer() would stall the UI for the whole
+  // compression.
   return zip.toBufferPromise();
 }
 
@@ -372,7 +372,7 @@ function redactAuditEntry(entry: AuditEntry): Record<string, unknown> {
  * via {@link scrubSecretsForLLM} (bearer/vendor-prefixed tokens/JWT/auth-header/token-param).
  * {@link redactForLLM} alone misses secrets, so both must run over every log
  * line and audit input/output — this is the single chokepoint where both DLP
- * classes are enforced (#1499 E2 cluster-review security MAJOR M1).
+ * classes are enforced.
  */
 function redactBundleText(text: string): string {
   return scrubSecretsForLLM(redactForLLM(text).redacted);

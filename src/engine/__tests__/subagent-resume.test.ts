@@ -49,7 +49,7 @@ import {
   type A2AAgentMailboxEntry,
 } from "../a2a-agent-message-mailbox.js";
 import { A2A_AGENT_MAX_TRACKED_TREES } from "../a2a-agent-message-envelope.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 let loopAuditLoggers: AuditLogger[] = [];

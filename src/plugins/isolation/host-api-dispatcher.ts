@@ -28,7 +28,7 @@
  */
 import { describeNonJson } from "../../shared/json-representable.js";
 import { EffectBoundaryDeniedError } from "../../permissions/effect-enforcement.js";
-import { ManifestIntegrityViolation } from "../../permissions/manifest-integrity.js";
+import { ManifestIntegrityError } from "../../permissions/manifest-integrity.js";
 import { PluginRuntimeDetachedOperationError } from "../runtime/detached-operation.js";
 import {
   PluginStorageEncryptionUnavailableError,
@@ -297,7 +297,7 @@ export function classifyHostApiError(error: unknown): HostApiWireError {
       },
     };
   }
-  if (error instanceof ManifestIntegrityViolation) {
+  if (error instanceof ManifestIntegrityError) {
     return {
       code: "manifest-integrity-violation",
       name: error.name,

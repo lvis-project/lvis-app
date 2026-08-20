@@ -1,12 +1,11 @@
 /**
- * Shared work-board primitives.
+ * The `board.json` file: its on-disk shape, its schema version, and the
+ * read-time projection applied to every item loaded from it.
  *
- * This module is NOT a store — it holds the pure, side-effect-free pieces the
- * board CRUD store ({@link WorkBoardStore}) depends on: the on-disk board shape,
- * the schema version, and the `overdue` projection rule. The single CRUD
- * implementation lives in `src/main/work-board-store.ts`; keeping these
- * primitives here (rather than re-deriving them per consumer) means the
- * `status_resolved` rule has exactly one definition.
+ * Pure and side-effect-free — the CRUD implementation that reads and writes
+ * the file lives in `src/main/work-board-store.ts`. Keeping the shape and the
+ * projection rule here (rather than re-deriving them per consumer) means
+ * `status_resolved` has exactly one definition.
  *
  * `status_resolved` (the `overdue` projection) is computed on every read so
  * consumers never re-derive it: an item is `overdue` when its stored status is
@@ -32,7 +31,7 @@ export const BOARD_VERSION = 1;
  * Compute the resolved status for a single item against a reference instant.
  * `overdue` applies only to not-yet-completed items with a past `due_at`.
  */
-export function resolveStatus(
+export function resolveWorkItemStatus(
   item: WorkItem,
   nowMs: number,
 ): WorkItemStatusResolved {

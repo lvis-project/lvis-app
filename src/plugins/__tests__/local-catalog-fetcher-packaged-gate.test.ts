@@ -1,9 +1,9 @@
 /**
- * Track A pre-Phase-2 — `MockMarketplaceFetcher` packaged-build gate.
+ * `LocalCatalogMarketplaceFetcher` packaged-build gate.
  *
- * Locks in security-reviewer H-1: the local `plugins/marketplace.json` is
- * user-writable and cannot serve as a trust anchor. Packaged builds must
- * fail closed when any code path tries to instantiate the mock fetcher.
+ * The local `plugins/marketplace.json` is user-writable and cannot serve as a
+ * trust anchor. Packaged builds must fail closed when any code path tries to
+ * instantiate the local-catalog fetcher.
  */
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { writeFile, rm } from "node:fs/promises";
@@ -11,9 +11,9 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
-import { DisabledMarketplaceFetcher, MockMarketplaceFetcher } from "../marketplace.js";
+import { DisabledMarketplaceFetcher, LocalCatalogMarketplaceFetcher } from "../marketplace.js";
 
-describe("MockMarketplaceFetcher — packaged-build gate", () => {
+describe("LocalCatalogMarketplaceFetcher — packaged-build gate", () => {
   beforeEach(() => {
     _resetForTest();
   });
@@ -23,29 +23,29 @@ describe("MockMarketplaceFetcher — packaged-build gate", () => {
 
   it("constructor throws when boot has marked the build as packaged", () => {
     setIsPackaged(true);
-    expect(() => new MockMarketplaceFetcher("/tmp/marketplace.json")).toThrow(
-      /MockMarketplaceFetcher is dev-only/,
+    expect(() => new LocalCatalogMarketplaceFetcher("/tmp/marketplace.json")).toThrow(
+      /LocalCatalogMarketplaceFetcher is dev-only/,
     );
   });
 
   it("constructor throws by default before boot configures the gate", () => {
     // Default state is fail-closed (isPackagedCached = true). Any module that
     // instantiates the mock before boot wiring also fails — by design.
-    expect(() => new MockMarketplaceFetcher("/tmp/marketplace.json")).toThrow(
-      /MockMarketplaceFetcher is dev-only/,
+    expect(() => new LocalCatalogMarketplaceFetcher("/tmp/marketplace.json")).toThrow(
+      /LocalCatalogMarketplaceFetcher is dev-only/,
     );
   });
 
   it("constructor succeeds in unpackaged dev/test builds", () => {
     setIsPackaged(false);
-    expect(() => new MockMarketplaceFetcher("/tmp/marketplace.json")).not.toThrow();
+    expect(() => new LocalCatalogMarketplaceFetcher("/tmp/marketplace.json")).not.toThrow();
   });
 
   it("error message does not leak the marketplace path or other secrets", () => {
     setIsPackaged(true);
     let caught: Error | null = null;
     try {
-      new MockMarketplaceFetcher("/secret/path/marketplace.json");
+      new LocalCatalogMarketplaceFetcher("/secret/path/marketplace.json");
     } catch (e) {
       caught = e as Error;
     }
@@ -54,7 +54,7 @@ describe("MockMarketplaceFetcher — packaged-build gate", () => {
   });
 });
 
-describe("MockMarketplaceFetcher — announcement fixture contract", () => {
+describe("LocalCatalogMarketplaceFetcher — announcement fixture contract", () => {
   let testDir: string;
   let marketplacePath: string;
 
@@ -94,7 +94,7 @@ describe("MockMarketplaceFetcher — announcement fixture contract", () => {
       },
     ]);
 
-    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
 
     await expect(fetcher.listAnnouncements()).resolves.toEqual([
       {
@@ -112,7 +112,7 @@ describe("MockMarketplaceFetcher — announcement fixture contract", () => {
   it("rejects non-array announcement fixtures", async () => {
     await writeCatalog({ id: 7 });
 
-    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
 
     await expect(fetcher.listAnnouncements()).rejects.toThrow(
       /Invalid marketplace catalog announcements/,
@@ -132,7 +132,7 @@ describe("MockMarketplaceFetcher — announcement fixture contract", () => {
       },
     ]);
 
-    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
 
     await expect(fetcher.listAnnouncements()).rejects.toThrow(
       /Invalid marketplace catalog announcement at index 0/,

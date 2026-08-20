@@ -23,8 +23,8 @@ import { generateKeyPairSync, type KeyObject } from "node:crypto";
 import { admissionRegistry } from "../admission-registry.js";
 import type { AdmissionEntry } from "../admission-schema.js";
 import { SignedDocumentCache } from "../../signed-doc-cache.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
-import { signEnvelopeFixture } from "../../../testing/sign-envelope-fixture.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
+import { signEnvelopeFixture } from "../../../__tests__/support/sign-envelope-fixture.js";
 
 const ANCHOR_KEY_ID = "admission-v1";
 const SHA_MEETING = "1".repeat(64);

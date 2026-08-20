@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { RoutinesStore } from "../routines-store.js";
 import { RoutinesScheduler } from "../routines-scheduler.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 function tempStore() {
   const dir = mkdtempSync(join(tmpdir(), "lvis-sched-"));

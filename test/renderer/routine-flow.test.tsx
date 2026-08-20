@@ -1,9 +1,9 @@
 /**
- * Phase 3.3 safety net — routine result card lifecycle.
+ * Routine result card lifecycle.
  *
- * onRoutineFiredV2 delivery + dismiss IPC. Snooze IPC was removed in PR
- * #626 (Routine v2) — see OverlayCard.tsx comment. Also covers result-view
- * action wiring for routine results with session ids.
+ * onRoutineFired delivery + dismiss IPC, and the result-view action wiring
+ * for routine results that carry a session id. Routines deliberately have no
+ * snooze action — see the rationale in OverlayCard.tsx / OverlayContext.tsx.
  */
 import "./setup.js";
 import { describe, it, expect, vi, afterEach } from "vitest";
@@ -23,10 +23,10 @@ function makeRoutineResult() {
 
 
 describe("Routine flow (Phase 3.3 regression net)", () => {
-  it("onRoutineFiredV2 renders the OverlayCard", async () => {
-    const { container, emitRoutineFiredV2 } = await renderApp();
+  it("onRoutineFired renders the OverlayCard", async () => {
+    const { container, emitRoutineFired } = await renderApp();
     await act(async () => {
-      emitRoutineFiredV2(makeRoutineResult());
+      emitRoutineFired(makeRoutineResult());
     });
     await waitFor(() => {
       expect(container.querySelector('[data-testid="routine-card"]')).toBeTruthy();
@@ -59,7 +59,7 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
       fireEvent.click(primary);
     });
     await waitFor(() => {
-      expect(api.acknowledgeRoutineResultV2).toHaveBeenCalledWith(routineResult.id, routineResult.firedAt);
+      expect(api.acknowledgeRoutineResult).toHaveBeenCalledWith(routineResult.id, routineResult.firedAt);
     });
   });
 
@@ -67,14 +67,14 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
     let resolveLatest: ((value: unknown) => void) | null = null;
     const stale = { ...makeRoutineResult(), firedAt: new Date(Date.now() - 10_000).toISOString(), summary: "stale summary" };
     const fresh = { ...makeRoutineResult(), summary: "fresh summary" };
-    const { container, emitRoutineFiredV2 } = await renderApp({
+    const { container, emitRoutineFired } = await renderApp({
       latestRoutineResult: new Promise((resolve) => {
         resolveLatest = resolve;
       }),
     });
 
     await act(async () => {
-      emitRoutineFiredV2(fresh);
+      emitRoutineFired(fresh);
     });
     await act(async () => {
       resolveLatest?.(stale);
@@ -87,9 +87,9 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
   });
 
   it("clicking dismiss removes the card", async () => {
-    const { container, emitRoutineFiredV2 } = await renderApp();
+    const { container, emitRoutineFired } = await renderApp();
     await act(async () => {
-      emitRoutineFiredV2(makeRoutineResult());
+      emitRoutineFired(makeRoutineResult());
     });
     const card = await waitFor(() => {
       const el = container.querySelector('[data-testid="routine-card"]');
@@ -110,15 +110,13 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
     });
   });
 
-  // Snooze was removed from RoutineV2 in PR #626 ("production smoke test:
-  // UX risk" — see comment in OverlayContext.tsx and OverlayCard.tsx). The
-  // previous "snooze trigger button is rendered with the new label" test
-  // pointed at a `routine-card-snooze-trigger` data-testid that no longer
-  // exists; deleting the orphan rather than leaving it to fail every run.
+  // Asserts the negative too: no `routine-card-snooze-trigger` is rendered.
+  // Snooze was dropped on UX grounds (OverlayContext.tsx / OverlayCard.tsx),
+  // so its reappearance is a regression, not a feature.
   it("renders the result-view action for routines with a session id", async () => {
-    const { container, api, emitRoutineFiredV2 } = await renderApp();
+    const { container, api, emitRoutineFired } = await renderApp();
     await act(async () => {
-      emitRoutineFiredV2({
+      emitRoutineFired({
         ...makeRoutineResult(),
         routineSessionId: "routine-session-1",
       });
@@ -142,14 +140,14 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
       expect(api.chatSessionHistory).toHaveBeenCalledWith("routine-session-1");
     });
     await waitFor(() => {
-      expect(api.acknowledgeRoutineResultV2).toHaveBeenCalledWith("schedule-daily", expect.any(String));
+      expect(api.acknowledgeRoutineResult).toHaveBeenCalledWith("schedule-daily", expect.any(String));
       expect(container.querySelector('[data-testid="routine-card"]')).toBeFalsy();
     });
-    expect(api.listRoutineSessionsV2).not.toHaveBeenCalled();
+    expect(api.listRoutineSessions).not.toHaveBeenCalled();
   });
 
   it("does not acknowledge or dismiss a routine result when opening its session fails", async () => {
-    const { container, api, emitRoutineFiredV2 } = await renderApp();
+    const { container, api, emitRoutineFired } = await renderApp();
     api.chatSessionResume.mockResolvedValueOnce({
       ok: false,
       compacted: false,
@@ -157,7 +155,7 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
       removedMessageCount: 0,
     });
     await act(async () => {
-      emitRoutineFiredV2({
+      emitRoutineFired({
         ...makeRoutineResult(),
         routineSessionId: "missing-routine-session",
       });
@@ -175,12 +173,12 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
 
     expect(api.chatSessionResume).toHaveBeenCalledWith("missing-routine-session");
     expect(api.chatSessionHistory).not.toHaveBeenCalledWith("missing-routine-session");
-    expect(api.acknowledgeRoutineResultV2).not.toHaveBeenCalled();
+    expect(api.acknowledgeRoutineResult).not.toHaveBeenCalled();
     expect(container.querySelector('[data-testid="routine-card"]')).toBeTruthy();
   });
 
   it("does not open or acknowledge a routine session while the active chat is streaming", async () => {
-    const { container, api, emitRoutineFiredV2 } = await renderApp();
+    const { container, api, emitRoutineFired } = await renderApp();
     const pendingSend = deferred<{ ok: true }>();
     api.chatSend.mockImplementationOnce(async () => pendingSend.promise);
 
@@ -188,7 +186,7 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
     await waitFor(() => expect(api.chatSend).toHaveBeenCalled());
 
     await act(async () => {
-      emitRoutineFiredV2({
+      emitRoutineFired({
         ...makeRoutineResult(),
         routineSessionId: "routine-session-1",
       });
@@ -206,7 +204,7 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
 
     expect(api.chatSessionResume).not.toHaveBeenCalledWith("routine-session-1");
     expect(api.chatSessionHistory).not.toHaveBeenCalledWith("routine-session-1");
-    expect(api.acknowledgeRoutineResultV2).not.toHaveBeenCalled();
+    expect(api.acknowledgeRoutineResult).not.toHaveBeenCalled();
 
     await act(async () => {
       pendingSend.resolve({ ok: true });
@@ -215,12 +213,12 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
   });
 
   it("stacks results with distinct routineIds and shows the index indicator", async () => {
-    const { container, emitRoutineFiredV2 } = await renderApp();
+    const { container, emitRoutineFired } = await renderApp();
     await act(async () => {
-      emitRoutineFiredV2({ ...makeRoutineResult(), id: "wakeup", summary: "morning" });
+      emitRoutineFired({ ...makeRoutineResult(), id: "wakeup", summary: "morning" });
     });
     await act(async () => {
-      emitRoutineFiredV2({ ...makeRoutineResult(), id: "schedule-1", trigger: "schedule", summary: "midday" });
+      emitRoutineFired({ ...makeRoutineResult(), id: "schedule-1", trigger: "schedule", summary: "midday" });
     });
 
     await waitFor(() => {
@@ -231,13 +229,13 @@ describe("Routine flow (Phase 3.3 regression net)", () => {
   });
 
   it("in-place updates a card when the same routineId arrives again", async () => {
-    const { container, emitRoutineFiredV2 } = await renderApp();
+    const { container, emitRoutineFired } = await renderApp();
     await act(async () => {
-      emitRoutineFiredV2({ ...makeRoutineResult(), summary: "v1" });
+      emitRoutineFired({ ...makeRoutineResult(), summary: "v1" });
     });
     await waitFor(() => expect(container.textContent).toContain("v1"));
     await act(async () => {
-      emitRoutineFiredV2({ ...makeRoutineResult(), summary: "v2" });
+      emitRoutineFired({ ...makeRoutineResult(), summary: "v2" });
     });
     await waitFor(() => {
       expect(container.textContent).toContain("v2");

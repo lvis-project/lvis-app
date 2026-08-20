@@ -20,11 +20,11 @@ import {
   setActiveSandboxCapability,
   setSandboxRequestedAtBoot,
 } from "../../permissions/sandbox-capability.js";
-import { setProcessPlatform } from "../../testing/process-platform.js";
+import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
 import {
   partialWindowsAsrt,
   requestedSandboxUnavailable,
-} from "../../testing/host-shell-sandbox-fixtures.js";
+} from "../../__tests__/support/host-shell-sandbox-fixtures.js";
 import type { AuditEntry, AuditLogger } from "../../audit/audit-logger.js";
 import type { PermissionAuditEntryInput } from "../../audit/audit-schema.js";
 import { getHostShellExecutionPlanAuditProjection } from "../../permissions/host-shell-execution-plan.js";

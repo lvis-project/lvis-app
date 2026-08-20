@@ -7,7 +7,7 @@ import {
   createTailnetPairingShareStore,
   type TailnetShareActorId,
 } from "../tailnet-pairing-share-store.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const ACTOR = ("tailnet:" + "a".repeat(64)) as TailnetShareActorId;
 const OTHER_ACTOR = ("tailnet:" + "b".repeat(64)) as TailnetShareActorId;

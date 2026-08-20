@@ -1,7 +1,8 @@
 /**
  * Plugins domain IPC handlers.
- * Covers: lvis:plugins:*, lvis:bootstrap:*, lvis:runtime:*, lvis:marketplace:*,
- *         lvis:mcp:*, lvis:plugin:* (webview bridge), lvis:file:*,
+ * Covers: lvis:plugins:*, lvis:plugin:* (webview bridge), lvis:mcp:*,
+ *         lvis:runtime:*, lvis:agents:*, lvis:skills:*, lvis:bootstrap:retry,
+ *         lvis:marketplace:ping, lvis:host:plugin-theme-notify,
  *         lvis:notification:clicked
  */
 import { dialog, ipcMain, webContents } from "electron";
@@ -32,7 +33,7 @@ import { CHANNELS } from "../../contract/app-contract.js";
 import type { IpcDeps } from "../types.js";
 import { sendToWindow } from "../safe-send.js";
 import { createLogger } from "../../lib/logger.js";
-import { plog, PluginPhase } from "../../plugins/lifecycle-log.js";
+import { logPluginLifecycle, PluginPhase } from "../../plugins/lifecycle-log.js";
 import { redactFsPath, redactAuditPayload } from "../../audit/dlp-filter.js";
 import {
   cloneThemePayload,
@@ -262,10 +263,9 @@ export function __resetLastThemePayloadForTests(): void {
  * deadline expires, in which case the original "not-registered" sentinel is
  * returned so a truly absent registration is still surfaced).
  *
- * Restored in 2026-05-04 after PR #447 removed it on the assumption that
- * register-before-attach was airtight; the assumption broke in the plugin
- * update lifecycle (plugin webview re-attach with a fresh wcId), where the
- * shell's first paint raced ahead of the host's register IPC.
+ * The wait queue is required, not belt-and-braces: register-before-attach is
+ * NOT airtight. In the plugin update lifecycle (webview re-attach with a fresh
+ * wcId) the shell's first paint races ahead of the host's register IPC.
  */
 const PENDING_ENTRY_URL_DEADLINE_MS = 5_000;
 type PendingEntryUrlResolver = (
@@ -2229,26 +2229,26 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       return UNAUTHORIZED_FRAME;
     }
     const { webContentsId, pluginId, entryUrl } = payload ?? {};
-    plog("debug", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REGISTER, webContentsId, entryUrl: typeof entryUrl === "string" ? redactFsPath(entryUrl) : entryUrl }, "webview register requested");
+    logPluginLifecycle("debug", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REGISTER, webContentsId, entryUrl: typeof entryUrl === "string" ? redactFsPath(entryUrl) : entryUrl }, "webview register requested");
     if (typeof webContentsId !== "number" || !Number.isFinite(webContentsId)) {
       logRegisterReject("invalid-webcontents-id", payload);
-      plog("warn", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-webcontents-id" }, "webview register rejected");
+      logPluginLifecycle("warn", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-webcontents-id" }, "webview register rejected");
       return { ok: false, error: "invalid-webcontents-id" };
     }
     if (typeof pluginId !== "string" || !pluginRuntime.getPluginManifest(pluginId)) {
       logRegisterReject("unknown-plugin-id", { webContentsId, pluginId });
-      plog("warn", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "unknown-plugin-id" }, "webview register rejected");
+      logPluginLifecycle("warn", { pluginId: pluginId ?? "<unknown>", phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "unknown-plugin-id" }, "webview register rejected");
       return { ok: false, error: "unknown-plugin-id" };
     }
     if (typeof entryUrl !== "string" || !entryUrl.startsWith("file://") || entryUrl.length <= "file://".length) {
       logRegisterReject("invalid-entry-url", { webContentsId, pluginId, entryUrl });
-      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-entry-url" }, "webview register rejected");
+      logPluginLifecycle("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-entry-url" }, "webview register rejected");
       return { ok: false, error: "invalid-entry-url" };
     }
     const rawInstallRoot = pluginRuntime.getPluginRoot(pluginId);
     if (!rawInstallRoot) {
       logRegisterReject("plugin-not-loaded", { webContentsId, pluginId });
-      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "plugin-not-loaded" }, "webview register rejected");
+      logPluginLifecycle("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "plugin-not-loaded" }, "webview register rejected");
       return { ok: false, error: "plugin-not-loaded" };
     }
     let entryFsPath: string;
@@ -2256,7 +2256,7 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       entryFsPath = fileURLToPath(entryUrl);
     } catch {
       logRegisterReject("invalid-entry-url", { webContentsId, pluginId, entryUrl });
-      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-entry-url" }, "webview register rejected");
+      logPluginLifecycle("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "invalid-entry-url" }, "webview register rejected");
       return { ok: false, error: "invalid-entry-url" };
     }
     let resolvedRoot: string;
@@ -2280,23 +2280,23 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         // (removePlugin is map-level idempotent + JS event-loop serialized);
         // log on failure for forensics rather than swallowing silently.
         void pluginRuntime.removePlugin(pluginId).catch((purgeErr) => {
-          plog(
+          logPluginLifecycle(
             "warn",
             { pluginId, phase: PluginPhase.WEBVIEW_REJECT, reason: "auto-purge-failed", error: (purgeErr as Error).message },
             "register-webview auto-purge after ENOENT failed",
           );
         });
         logRegisterReject("plugin-not-loaded", { webContentsId, pluginId, reason: "install-dir-missing" });
-        plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "plugin-not-loaded" }, "webview register rejected (install dir missing)");
+        logPluginLifecycle("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "plugin-not-loaded" }, "webview register rejected (install dir missing)");
         return { ok: false, error: "plugin-not-loaded" };
       }
       logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, entryFsPath, rawInstallRoot });
-      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
+      logPluginLifecycle("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
     if (!isPathWithin(resolvedRoot, resolvedEntry)) {
       logRegisterReject("entry-url-outside-install-root", { webContentsId, pluginId, resolvedEntry, resolvedRoot });
-      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
+      logPluginLifecycle("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "entry-url-outside-install-root" }, "webview register rejected");
       return { ok: false, error: "entry-url-outside-install-root" };
     }
     const assetEntryUrl = pluginAssetUrlFromRealPath(resolvedRoot, resolvedEntry);
@@ -2325,12 +2325,12 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
         || targetWebview.getType() !== "webview"
       ) {
         logRegisterReject("webview-not-live", { webContentsId, pluginId });
-        plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "webview-not-live" }, "webview register rejected");
+        logPluginLifecycle("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "webview-not-live" }, "webview register rejected");
         return { ok: false, error: "webview-not-live" };
       }
     } catch {
       logRegisterReject("webview-not-live", { webContentsId, pluginId });
-      plog("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "webview-not-live" }, "webview register rejected");
+      logPluginLifecycle("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "webview-not-live" }, "webview register rejected");
       return { ok: false, error: "webview-not-live" };
     }
     const binding = {
@@ -2347,11 +2347,11 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
     }
     pluginWebviewRegistry.set(webContentsId, binding);
     flushPendingEntryUrl(webContentsId, binding);
-    plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
+    logPluginLifecycle("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "webview attached");
     const replayedTheme = replayThemeToWebview(webContentsId);
     if (replayedTheme) {
       publishHostThemeChanged(replayedTheme);
-      plog("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "theme replay sent");
+      logPluginLifecycle("debug", { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId }, "theme replay sent");
     }
     return { ok: true };
   });

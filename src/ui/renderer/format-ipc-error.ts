@@ -6,7 +6,7 @@
 import { t } from "../../i18n/runtime.js";
 
 export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
-  // ── Trust / intent gate (PR #826 cross-cutting code group) ──
+  // ── Trust / intent gate ──
   "user-keyboard-required": "formatIpcError.userKeyboardRequired",
   "unauthorized": "formatIpcError.unauthorized",
   // "unauthorized-frame" lives below in the frame-trust gate section with a
@@ -310,11 +310,11 @@ export const COMMON_IPC_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   "session-mismatch": "formatIpcError.sessionMismatch",
   "preference-refresh-service-unavailable": "formatIpcError.preferenceRefreshServiceUnavailable",
   "production-disabled": "formatIpcError.productionDisabled",
-  // ── Diagnostics bundle + log tail + crash list (#1499 E2) ──
+  // ── Diagnostics bundle + log tail + crash list ──
   "export-failed": "formatIpcError.exportFailed",
   "crash-list-failed": "formatIpcError.crashListFailed",
   "logs-tail-failed": "formatIpcError.logsTailFailed",
-  // ── Conversation import (lvis:chat:import — #1500 / E3) ──
+  // ── Conversation import (lvis:chat:import) ──
   "file-not-found": "formatIpcError.importFileNotFound",
   "file-too-large": "formatIpcError.importFileTooLarge",
   "invalid-json": "formatIpcError.importInvalidJson",

@@ -868,7 +868,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
         <Textarea
           ref={taRef}
           data-testid="composer-textarea"
-          // Tutorial-C SpotlightTour anchor (PR #983 follow-up). The
+          // SpotlightTour anchor. The
           // first-boot tour pins step 1 + step 4 to this textarea, so the
           // attribute MUST remain stable. If it moves, update
           // `default-tour-scenarios.ts` in the same commit.

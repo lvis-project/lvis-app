@@ -1,5 +1,5 @@
 /**
- * broadcast-helpers tests — fan-out semantics on top of safe-send.
+ * window-fanout tests — fan-out semantics on top of safe-send.
  *
  * Covers:
  *   - delivers the payload to every live window and returns the count.
@@ -12,7 +12,7 @@
  *   - audit-logger throw never breaks the broadcast.
  */
 import { describe, expect, it, vi } from "vitest";
-import { fanOutToAllWindows } from "../broadcast-helpers.js";
+import { fanOutToAllWindows } from "../window-fanout.js";
 import { liveWindow, type FakeBrowserWindow } from "../../__tests__/test-helpers.js";
 
 

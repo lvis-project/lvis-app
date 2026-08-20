@@ -310,9 +310,9 @@ export interface ReviewerDispatchInput {
   allowedDirectories: string[];
   sensitivePathsAdjacent: string[];
   /**
-   * Permission policy architect round-4 finding: cache identity must include the
-   * caller's trust origin. A high-trust verdict cached for `user-keyboard`
-   * is unsafe to serve to an `llm-tool-arg` invocation of the same shape — the
+   * Cache identity must include the caller's trust origin. A high-trust
+   * verdict cached for `user-keyboard` is unsafe to serve to an
+   * `llm-tool-arg` invocation of the same shape — the
    * underlying intent differs even when arguments match. Required so the
    * verdict-cache lookupKey hash always includes origin.
    */
@@ -360,8 +360,8 @@ export interface ReviewerDispatchResult {
   outcome: ReviewerDispatchOutcome;
   /**
    * "hit" / "miss-stale" / "miss-expired" / "miss-not-found" — surfaces
-   * the audit-trail "from cache" hint (m1 architect MAJOR-5 cache
-   * deliverable + design v2.1 §11 selective invalidation).
+   * the audit-trail "from cache" hint (design v2.1 §11 selective
+   * invalidation).
    */
   cacheReason: "hit" | "miss-stale" | "miss-expired" | "miss-not-found";
   /**
@@ -407,7 +407,7 @@ export class PermissionManager {
   private rules: PermissionRule[] = [];
   private mode: ExecutionMode = "default";
   /**
-   * P2 — "Allow always" grants keyed by pattern → highest granted {@link
+   * "Allow always" grants keyed by pattern → highest granted {@link
    * GrantTier}. Was a flat `Set<string>` (category-blind). The Map structurally
    * enforces the "1 grant, highest tier" invariant so a re-grant can only widen
    * coverage (monotone), never desynchronize.
@@ -439,7 +439,7 @@ export class PermissionManager {
    */
   private interactiveAutoApprove: ReviewerInteractiveAutoApprove = "off";
   private policyGeneration = 0;
-  /** CRITICAL 4.1: optional broadcast for memory-hit auto-approve disclosure */
+  /** Optional broadcast for memory-hit auto-approve disclosure. */
   private broadcastUserApprovalHit: ((payload: UserApprovalHitPayload) => void) | null = null;
   /**
    * Architectural choke point for permission config fan-out — every
@@ -451,7 +451,7 @@ export class PermissionManager {
    */
   private broadcastConfigChanged: (() => void) | null = null;
   /**
-   * Cluster review M1 — per-plugin AbortControllers used to abort outstanding
+   * Per-plugin AbortControllers used to abort outstanding
    * `hostApi.resolveApiKey` bearers when permissions are revoked. The
    * persisted-mutation entry points (`addAlwaysAllowedPersist`,
    * `addAlwaysDeniedPersist`, `removeRule`) call {@link revokeAllPluginAccess}
@@ -643,14 +643,18 @@ export class PermissionManager {
   }
 
   /**
-   * CRITICAL 4.1 — wire renderer broadcast for memory-hit auto-approve disclosure.
-   * Called once at boot. When set, every user-approval memory hit emits
-   * `lvis:permissions:user-approval-hit` to the renderer and a console.info log.
+   * Wire the permission-config fan-out. Called once at boot; see
+   * {@link broadcastConfigChanged} for what fires it.
    */
   setBroadcastConfigChanged(fn: () => void): void {
     this.broadcastConfigChanged = fn;
   }
 
+  /**
+   * Wire the renderer broadcast for memory-hit auto-approve disclosure.
+   * Called once at boot. When set, every user-approval memory hit emits
+   * `lvis:permissions:user-approval-hit` to the renderer and a console.info log.
+   */
   setBroadcastUserApprovalHit(fn: (payload: UserApprovalHitPayload) => void): void {
     this.broadcastUserApprovalHit = fn;
   }
@@ -680,7 +684,7 @@ export class PermissionManager {
   }
 
   /**
-   * Cluster review M1 — return the AbortSignal that will fire when this
+   * Return the AbortSignal that will fire when this
    * plugin's outstanding bearer leases must be aborted (i.e. on any
    * permission rule change). Lazily creates the controller on first call.
    *
@@ -700,7 +704,7 @@ export class PermissionManager {
   }
 
   /**
-   * Cluster review M1 — abort the named plugin's outstanding bearer leases
+   * Abort the named plugin's outstanding bearer leases
    * and recreate a fresh controller so the next `getPluginRevokeSignal` call
    * returns an un-aborted signal. The abort reason is wrapped in
    * `Error('permission-revoked: <reason>')` so downstream listeners that
@@ -722,7 +726,7 @@ export class PermissionManager {
   }
 
   /**
-   * Cluster review M1 — abort every known plugin's outstanding bearer leases.
+   * Abort every known plugin's outstanding bearer leases.
    * Called from the persisted-mutation entry points (addAlwaysAllowedPersist,
    * addAlwaysDeniedPersist, removeRule) so any rule change invalidates
    * outstanding bearers across all plugins (coarse but safe — the alternative
@@ -820,7 +824,7 @@ export class PermissionManager {
    * Add a tool-name pattern as a persistent allow rule.
    * Update the in-memory allow cache only after permissions.json is persisted.
    *
-   * P2 — `tier` records how broadly the grant applies. It defaults to `"write"`
+   * `tier` records how broadly the grant applies. It defaults to `"write"`
    * so the non-executor callers (slash `/allow`, the PermissionsTab addRule IPC)
    * keep their category-blind grant (grandfather). The executor passes
    * {@link requiredTier}(invocationCategory) so a grant made on a read tool is
@@ -848,7 +852,7 @@ export class PermissionManager {
     this.alwaysAllowed.set(pattern, maxTier(this.alwaysAllowed.get(pattern), tier));
     this.policyGeneration += 1;
     this.broadcastConfigChanged?.();
-    // Cluster review M1 — rule change aborts outstanding bearers so plugins
+    // A rule change aborts outstanding bearers so plugins
     // re-resolve their keys under the new policy. An allow rule going wider
     // is benign but still needs the next bearer to reflect the new state.
     this.revokeAllPluginAccess(`allow-rule-added:${pattern}`);
@@ -877,7 +881,7 @@ export class PermissionManager {
     });
     this.policyGeneration += 1;
     this.broadcastConfigChanged?.();
-    // Cluster review M1 — deny added → outstanding bearers MUST be aborted
+    // Deny added → outstanding bearers MUST be aborted
     // so a plugin that held a bearer captured in a closure can't continue
     // calling the upstream provider after the user revoked access.
     this.revokeAllPluginAccess(`deny-rule-added:${pattern}`);
@@ -900,7 +904,7 @@ export class PermissionManager {
       );
     });
     this.broadcastConfigChanged?.();
-    // Cluster review M1 — rule removal is also a permission change. An
+    // Rule removal is also a permission change. An
     // allow removal narrows the policy (revoke); a deny removal widens it.
     // In both cases outstanding bearers should re-resolve under the new
     // policy rather than keep operating under the now-stale snapshot.
@@ -1054,7 +1058,7 @@ export class PermissionManager {
           this.rules.unshift(rule); // deny has highest priority.
         } else {
           this.rules.push(rule);
-          // Reflect allow rules in the alwaysAllowed Map as well (P2: preserve tier).
+          // Reflect allow rules in the alwaysAllowed Map as well, preserving tier.
           // normalizeTier grandfathers a legacy/absent tier to write; maxTier
           // keeps the highest tier if the pattern is hydrated more than once.
           if (!rule.source) {
@@ -1065,7 +1069,7 @@ export class PermissionManager {
           }
         }
       } else if (rule.action === "allow" && !rule.source) {
-        // Dup-hit tier reconciliation — MINOR-2 insurance. The surviving rule
+        // Dup-hit tier reconciliation. The surviving rule
         // may be a boot default with no explicit tier (e.g. conversation.ts
         // setRules pre-seeds web_search/web_fetch). setRules does NOT populate
         // alwaysAllowed, so the Map has no entry for that pattern. A persisted
@@ -1533,7 +1537,7 @@ export class PermissionManager {
     // provenance is lost.
     if (userApproval && userApproval.verdictAtApproval == null) {
       // Structured marker as 2nd arg keeps tests stable across i18n /
-      // wording changes (cluster review S-Med-1 + C-Med-4). The
+      // wording changes. The
       // human-readable first arg stays for existing log readers.
       console.warn(
         `[permission] legacy entry without verdictAtApproval — rejecting memory hit, forcing fresh approval (tool=${toolName}, scope=${userApproval.scope})`,
@@ -1562,7 +1566,7 @@ export class PermissionManager {
         verdictAtApproval: userApproval.verdictAtApproval,
       };
       outcome = "approval-memory";
-      // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log.
+      // Disclose the memory-hit auto-approve to the renderer + log.
       // verdictAtApproval is non-null inside this branch — the outer gate
       // `userApproval.verdictAtApproval != null` rejects legacy entries above,
       // so the concrete literal passes straight through to
@@ -1580,7 +1584,7 @@ export class PermissionManager {
     } else {
       const ctx = buildReviewerContext();
       try {
-        // MAJOR-1: pass abortSignal to LlmRiskClassifier.classify so user
+        // Pass abortSignal to LlmRiskClassifier.classify so user
         // cancellation aborts an in-flight LLM call. The RiskClassifier
         // interface is signal-agnostic; LlmRiskClassifier accepts the optional
         // second argument — other classifiers safely ignore extra arguments.
@@ -1643,7 +1647,7 @@ export class PermissionManager {
     // is the only field any decision reads, is untouched.
     verdict = redactVerdictReason(verdict);
 
-    // ── S2 audit emit ─────────────────────────────────────────────────────
+    // ── Reviewer-dispatch audit emit ──────────────────────────────────────
     // Emit a sandbox audit entry for every dispatchReviewer call so the
     // audit log captures reviewer composition signals + user-approval provenance.
     // Failures are swallowed so audit never blocks tool execution.
@@ -1676,7 +1680,7 @@ export class PermissionManager {
         // A host-determined verdict deliberately skipped the LLM layer; record
         // it here so an auditor can tell "review skipped by host policy" apart
         // from "cache hit" and "non-LLM classifier", which also leave
-        // llmVerdict null (architect review MINOR-3).
+        // llmVerdict null.
         compositionRulesTriggered: outcome === "host-determined"
           ? [{
               rule: "host-determined",
@@ -1875,7 +1879,7 @@ export class PermissionManager {
       default: {
         // Issue #690 — foreground reviewer auto-approve gating.
         //
-        // Round-1 critic MAJOR-2: `interactive.autoApprove` is the SOT
+        // `interactive.autoApprove` is the SOT
         // for foreground-auto opt-in. The legacy `auto` exec mode is no
         // longer a standalone opt-in — it must be paired with an
         // explicit `interactive` setting. The PermissionsTab UI couples
@@ -1975,7 +1979,7 @@ export function isStrictPathDescendant(parent: string, child: string): boolean {
   return foldedChild.startsWith(base);
 }
 
-// ── P2 graduated grant tier helpers ──────────────────
+// ── Graduated grant tier helpers ──────────────────
 const TIER_RANK: Record<GrantTier, number> = { read: 0, write: 1 };
 
 /** Ordinal rank of a grant tier (read=0 < write=1). */
@@ -2011,7 +2015,7 @@ export function grantCovers(granted: GrantTier, category: ToolCategory): boolean
  * untiered grant, which grandfathers to write-tier (most permissive — preserves
  * the user's saved "Allow always"). Normalizing to read-tier instead would
  * silently break saved grants (weakening) and is forbidden. This is the only
- * sanctioned fallback in P2 — it lives at the file boundary, not between
+ * sanctioned fallback in this module — it lives at the file boundary, not between
  * internal callers.
  */
 export function normalizeTier(tier: unknown): GrantTier {

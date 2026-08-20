@@ -9,7 +9,7 @@ import {
   writePermissionSettings,
 } from "../permission-settings-store.js";
 import { reconcileWorkspaceRoots } from "../workspace-root-reconciler.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const cleanupDirs: string[] = [];
 

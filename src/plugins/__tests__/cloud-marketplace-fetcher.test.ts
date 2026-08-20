@@ -24,7 +24,7 @@ vi.mock("../../core/network-guard.js", () => ({
 import { fetchPublicHttpResponse, NetworkGuardError } from "../../core/network-guard.js";
 import { CloudMarketplaceFetcher } from "../cloud-marketplace-fetcher.js";
 import { installFromMarketplace } from "../marketplace-installer.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const mockedFetchPublic = fetchPublicHttpResponse as unknown as ReturnType<typeof vi.fn>;
 

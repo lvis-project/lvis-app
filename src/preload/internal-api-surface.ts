@@ -5,7 +5,7 @@ import {
   MARKETPLACE,
   OVERLAY_V1,
   PERMISSIONS,
-  ROUTINES_V2,
+  ROUTINES,
   SETTINGS,
   WORK_BOARD,
   type AgentInstallResultPayload,
@@ -438,11 +438,11 @@ export function buildInternalApiSurface() {
       protocol?: string;
       message?: string;
     }>,
-  // #FU259 — MCP marketplace catalog + install
+  // MCP marketplace catalog + install
   listMcpCatalog: async () => ipcRenderer.invoke(CHANNELS.mcp.catalogList),
   installMcpFromMarketplace: async (slug: string) =>
     ipcRenderer.invoke(CHANNELS.mcp.installFromMarketplace, slug),
-  // #FU262 — Claude Desktop config import (two-phase: preview → apply).
+  // Claude Desktop config import (two-phase: preview → apply).
   previewClaudeDesktopMcpImport: async (raw: string) =>
     ipcRenderer.invoke(CHANNELS.mcp.importClaudeDesktopPreview, raw),
   applyClaudeDesktopMcpImport: async (payload: { raw: string; conflictPolicy?: "skip" | "overwrite" }) =>
@@ -630,7 +630,7 @@ export function buildInternalApiSurface() {
       error?: string;
     }>,
 
-  // ─── Marketplace update notifications (S8) ───────
+  // ─── Marketplace update notifications ────────────
   onMarketplaceUpdatesAvailable: (handler: (updates: Array<{
     pluginId: string;
     pluginName?: string;
@@ -991,7 +991,7 @@ export function buildInternalApiSurface() {
       return () =>
         ipcRenderer.removeListener(PERMISSIONS.deferredPending, listener);
     },
-    /** CRITICAL 4.1: memory-hit auto-approve disclosure — main→renderer event. */
+    /** Memory-hit auto-approve disclosure — main→renderer event. */
     onUserApprovalHit: (cb: (payload: UserApprovalHitPayload) => void) => {
       const listener = (_event: unknown, payload: UserApprovalHitPayload) =>
         cb(payload);
@@ -1009,7 +1009,7 @@ export function buildInternalApiSurface() {
     /** Permission policy — `/permission reviewer ...` slash dispatch via IPC. */
     reviewerDispatch: async (rawArgs: string) =>
       ipcRenderer.invoke(PERMISSIONS.reviewerDispatch, { rawArgs, intent: ipcUserKeyboardIntent() }),
-    /** C3 — check whether a reviewer provider has its required API key stored. */
+    /** Check whether a reviewer provider has its required API key stored. */
     reviewerProviderHasKey: async (provider: string) =>
       ipcRenderer.invoke(PERMISSIONS.reviewerProviderHasKey, provider),
     /** Permission policy — `/permission audit show` — fetch recent permission audit entries. */
@@ -1112,7 +1112,7 @@ export function buildInternalApiSurface() {
     getStats: async (lastDays: number) => ipcRenderer.invoke(CHANNELS.audit.stats, lastDays),
   },
 
-  // ─── Diagnostics bundle + crash list (#1499 E2) ──
+  // ─── Diagnostics bundle + crash list ──
   diagnostics: {
     /** Build a redacted diagnostics ZIP and save via native dialog. */
     export: async (opts?: { dateFrom?: string; dateTo?: string; includeCrashDumps?: boolean }) =>
@@ -1121,7 +1121,7 @@ export function buildInternalApiSurface() {
     crashList: async () => ipcRenderer.invoke(CHANNELS.diagnostics.crashList),
   },
 
-  // ─── Production log tail viewer (#1499 E2) ──
+  // ─── Production log tail viewer ──
   logs: {
     /** Recent N redacted log lines, optional level filter. */
     tail: async (args?: { lines?: number; level?: string }) =>
@@ -1140,7 +1140,7 @@ export function buildInternalApiSurface() {
     return () => ipcRenderer.removeListener(CHANNELS.view.activate, listener);
   },
 
-  // ─── Workflow tools (S1+S2) ──────────────────────
+  // ─── Workflow tools ──────────────────────────────
   // ask_user_question — main process pushes FIFO question requests to the
   // renderer's non-modal composer dock; the card resolves via this channel.
   onAskUserQuestion: (
@@ -1177,52 +1177,52 @@ export function buildInternalApiSurface() {
     return () => ipcRenderer.removeListener(CHANNELS.askUserQuestion.timeout, listener);
   },
 
-  // routine_schedule v2 — persistent routine list + lifecycle
-  listRoutinesV2: async () => ipcRenderer.invoke(ROUTINES_V2.list),
-  dismissRoutineV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.dismiss, id),
-  removeRoutineV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.remove, id),
-  triggerRoutineNowV2: async (id: string) => ipcRenderer.invoke(ROUTINES_V2.triggerNow, id),
-  listPendingRoutineResultsV2: async () =>
-    ipcRenderer.invoke(ROUTINES_V2.pendingResults) as Promise<
+  // routine_schedule — persistent routine list + lifecycle
+  listRoutines: async () => ipcRenderer.invoke(ROUTINES.list),
+  dismissRoutine: async (id: string) => ipcRenderer.invoke(ROUTINES.dismiss, id),
+  removeRoutine: async (id: string) => ipcRenderer.invoke(ROUTINES.remove, id),
+  triggerRoutineNow: async (id: string) => ipcRenderer.invoke(ROUTINES.triggerNow, id),
+  listPendingRoutineResults: async () =>
+    ipcRenderer.invoke(ROUTINES.pendingResults) as Promise<
       import("../shared/routines-types.js").RoutineFiredPayload[]
     >,
-  acknowledgeRoutineResultV2: async (routineId: string, firedAt: string) =>
-    ipcRenderer.invoke(ROUTINES_V2.acknowledgeResult, routineId, firedAt) as Promise<{ ok: boolean; error?: string }>,
-  addRoutineV2: async (input: import("../shared/routines-types.js").AddRoutineInput) =>
-    ipcRenderer.invoke(ROUTINES_V2.add, input) as Promise<
+  acknowledgeRoutineResult: async (routineId: string, firedAt: string) =>
+    ipcRenderer.invoke(ROUTINES.acknowledgeResult, routineId, firedAt) as Promise<{ ok: boolean; error?: string }>,
+  addRoutine: async (input: import("../shared/routines-types.js").AddRoutineInput) =>
+    ipcRenderer.invoke(ROUTINES.add, input) as Promise<
       { ok: true; routine: import("../shared/routines-types.js").RoutineRecord } | { ok: false; error: string }
     >,
-  onRoutineFiredV2: (
+  onRoutineFired: (
     handler: (event: import("../shared/routines-types.js").RoutineFiredPayload) => void,
   ) => {
     const listener = (_e: unknown, r: Parameters<typeof handler>[0]) => handler(r);
-    ipcRenderer.on(ROUTINES_V2.fired, listener);
-    return () => ipcRenderer.removeListener(ROUTINES_V2.fired, listener);
+    ipcRenderer.on(ROUTINES.fired, listener);
+    return () => ipcRenderer.removeListener(ROUTINES.fired, listener);
   },
   // Routine running indicator: emitted when a routine LLM session starts/finishes
-  // C1: runningStarted payload enriched to { routineId, firedAt, title } so the
+  // runningStarted payload enriched to { routineId, firedAt, title } so the
   // renderer can push a proper OverlayItem immediately without waiting for fired.
   onRoutineRunningStarted: (handler: (payload: { routineId: string; firedAt: string; title: string }) => void) => {
     const listener = (_e: unknown, payload: Parameters<typeof handler>[0]) => handler(payload);
-    ipcRenderer.on(ROUTINES_V2.runningStarted, listener);
-    return () => ipcRenderer.removeListener(ROUTINES_V2.runningStarted, listener);
+    ipcRenderer.on(ROUTINES.runningStarted, listener);
+    return () => ipcRenderer.removeListener(ROUTINES.runningStarted, listener);
   },
   onRoutineRunningFinished: (handler: (routineId: string) => void) => {
     const listener = (_e: unknown, id: string) => handler(id);
-    ipcRenderer.on(ROUTINES_V2.runningFinished, listener);
-    return () => ipcRenderer.removeListener(ROUTINES_V2.runningFinished, listener);
+    ipcRenderer.on(ROUTINES.runningFinished, listener);
+    return () => ipcRenderer.removeListener(ROUTINES.runningFinished, listener);
   },
   // failed: emitted when the routine LLM session throws (e.g. provider error).
   // Without this bridge the renderer never learns the session failed and the
   // running OverlayItem stays stuck with running:true indefinitely.
-  onRoutineFailedV2: (handler: (event: { routineId: string; error: string }) => void) => {
+  onRoutineFailed: (handler: (event: { routineId: string; error: string }) => void) => {
     const listener = (_e: unknown, payload: { routineId: string; error: string }) => handler(payload);
-    ipcRenderer.on(ROUTINES_V2.failed, listener);
-    return () => ipcRenderer.removeListener(ROUTINES_V2.failed, listener);
+    ipcRenderer.on(ROUTINES.failed, listener);
+    return () => ipcRenderer.removeListener(ROUTINES.failed, listener);
   },
   // Routine session history — unified conversation sessions scoped by routineId
-  listRoutineSessionsV2: async (routineId: string, limit?: number) =>
-    ipcRenderer.invoke(ROUTINES_V2.listSessions, routineId, limit) as Promise<
+  listRoutineSessions: async (routineId: string, limit?: number) =>
+    ipcRenderer.invoke(ROUTINES.listSessions, routineId, limit) as Promise<
       Array<{ routineId: string; firedAt: string; sessionId: string; title: string; preview: string }>
     >,
 

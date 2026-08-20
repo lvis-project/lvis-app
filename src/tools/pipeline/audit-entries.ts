@@ -112,7 +112,7 @@ function hookFailureReason(
 
 /**
  * Map a runtime {@link HookDispatchResult} (pre / post / perm) into the audit
- * {@link HookResult}[] surface (#811 cluster-review follow-up). Each per-script
+ * {@link HookResult}[] surface. Each per-script
  * invocation result becomes one forensic row carrying its `decision`/`reason`,
  * the `source` discriminant (`.sh` vs config), the `commandIdentity` anchor, and
  * a `failureReason` when the hook failed closed. Returns `undefined` when the

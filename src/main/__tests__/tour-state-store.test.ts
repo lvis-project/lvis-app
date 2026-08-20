@@ -9,7 +9,7 @@ import {
   markScenarioComplete,
   dismissScenario,
 } from "../tour-state-store.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 /**
  * Tutorial-C — `~/.lvis/onboarding/tour-state.json` storage tests.

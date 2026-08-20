@@ -233,8 +233,7 @@ export interface McpClientCapabilities {
  * of a hung approval). The exact deriving signals (turn consent state,
  * headless/routine mode, #811 policy) are wired by the host; omitted ⇒ a fixed
  * sound default. This is the client-side half of per-request governance; the
- * per-request server-capability GATING half lands with the cluster-reviewed
- * governance change.
+ * per-request server-capability GATING half lands with the governance change.
  */
 export type McpClientCapabilityProvider = () => McpClientCapabilities;
 
@@ -1419,7 +1418,7 @@ export class McpClient {
    * The scheme is ENFORCED here, and this is the gate that was missing. `resources/read`
    * is one wire method serving two host paths: {@link readDeclaredResource}, gated on the
    * listed set, and this one, which serves the MCP-Apps extension. The renderer chooses
-   * the URI on this path, and until a cluster review found it, nothing in MAIN checked it
+   * the URI on this path, and nothing in MAIN checked it
    * — the `ui://` restriction lived only in the renderer's bridge handler, which is the
    * side the threat model assumes can be compromised. Governance could not close it
    * either: it sees one method and cannot tell the two callers apart, so a non-`ui:` URI

@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { writeUtf8FileAtomicSync } from "../../lib/atomic-file.js";
 import { FileLockReleaseError } from "../../lib/with-file-lock.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 import {
   SecretDocumentStore,
   SecretDocumentDecryptionError,

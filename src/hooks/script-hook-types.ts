@@ -5,7 +5,7 @@
  *
  * v1 individual shell-script hooks live under `~/.config/lvis/hooks/`
  * (deliberately outside `~/.lvis/` so a compromised LVIS process cannot
- * trivially mutate them — security review M3+M4). Hook types use a file
+ * trivially mutate them). Hook types use a file
  * naming prefix:
  *
  *   - `pre-*.sh`  → PreToolUse  (intercept before execution)
@@ -24,7 +24,7 @@
  *   }
  *
  * Failure semantics:
- *   - exit code !=0 → deny  (fail-safe; security M3 critic finding)
+ *   - exit code !=0 → deny  (fail-safe)
  *   - timeout >5s    → deny  (configurable via setting)
  *   - stdout JSON parse failure → deny
  *
@@ -242,8 +242,8 @@ export interface ScriptHookInvocationResult {
   /**
    * Origin discriminant — a legacy `.sh` hook vs a declarative `hooks.json`
    * `command` entry. Surfaced by the runner from the {@link RunnableHook} so the
-   * audit layer can distinguish config-hook vs `.sh`-hook denials forensically
-   * (#811 cluster-review follow-up). The runner ALWAYS populates this.
+   * audit layer can distinguish config-hook vs `.sh`-hook denials forensically.
+   * The runner ALWAYS populates this.
    */
   source: "sh" | "config";
   /**

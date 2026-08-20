@@ -24,7 +24,7 @@ import { MAX_MCP_MANIFEST_BYTES } from "../safe-names.js";
 import type { McpRuntimeSpec, PluginMarketplaceItem } from "../../plugins/types.js";
 import { PluginArtifactStore } from "../../plugins/plugin-artifact-store.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace-fetcher.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 vi.mock("../../shared/app-version.js", () => ({
   getLvisAppVersion: () => "0.5.9",

@@ -153,7 +153,7 @@ import {
   buildPipSyncFallbackArgs,
   PythonRuntimeBootstrapper,
 } from "../python-runtime.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 // ─── BrowserWindow stub ───────────────────────────────────────────────────────
 function makeBrowserWindow() {

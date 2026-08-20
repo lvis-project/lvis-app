@@ -94,7 +94,7 @@ export const GCP_PLAYGROUND_API_KEY_SECRET = secretKeyFor("gemini");
  * The API key is passed as the `Authorization: Bearer <key>` header
  * (Foundry serverless deployments; dedicated deployments use the same scheme).
  *
- * MAJOR-1: apiKey and endpoint are resolved lazily on each `complete()` call via
+ * apiKey and endpoint are resolved lazily on each `complete()` call via
  * accessor functions — not snapshotted at construction time. This ensures that
  * when the user rotates their Azure AI Foundry API key or changes the endpoint
  * via chat settings, the reviewer picks up the new value on the next call
@@ -292,7 +292,7 @@ interface FoundryCompletionResponse {
  * URL query parameter — query params appear in server access logs and
  * HTTP referrer headers, creating an unnecessary key-leak surface).
  *
- * MAJOR-1: apiKey is resolved lazily on each `complete()` call via an accessor
+ * apiKey is resolved lazily on each `complete()` call via an accessor
  * function — not snapshotted at construction time. This ensures that when the
  * user rotates their Gemini API key via chat settings, the reviewer picks up
  * the new value on the next call without requiring a manual rewire.
@@ -388,7 +388,7 @@ interface GcpGenerateContentResponse {
 /**
  * Construct a {@link FoundryReviewerProvider} from the chat LLM config.
  *
- * MAJOR-1: Performs a pre-flight check at creation time (both key and endpoint
+ * Performs a pre-flight check at creation time (both key and endpoint
  * must be present and valid), but stores the *accessors* — not the resolved
  * values — on the adapter. This means subsequent `complete()` calls always
  * read the current key/endpoint, so chat-key rotation propagates automatically.
@@ -427,7 +427,7 @@ export function createFoundryProvider(
 /**
  * Construct a {@link GcpPlaygroundReviewerProvider} from the chat LLM config.
  *
- * MAJOR-1: Performs a pre-flight key check at creation time, but stores the
+ * Performs a pre-flight key check at creation time, but stores the
  * accessor — not the resolved value — on the adapter. Key rotation propagates
  * automatically on the next `complete()` call.
  *
@@ -476,7 +476,7 @@ export function reviewerProviderKeyPresent(
   // openai / anthropic / google — resolve UI name → canonical vendor, then check secret.
   // MEDIUM: use hasOwnProperty-safe lookup to avoid prototype-chain traversal on the
   // null-prototype REVIEWER_VENDOR_MAP (Object.create(null) has no .hasOwnProperty method).
-  // MAJOR-3: unknown provider name → fail-closed (return false) rather than
+  // Unknown provider name → fail-closed (return false) rather than
   // falling through to `?? provider` which would silently check an arbitrary secret key.
   if (!Object.prototype.hasOwnProperty.call(REVIEWER_VENDOR_MAP, provider)) {
     return false;

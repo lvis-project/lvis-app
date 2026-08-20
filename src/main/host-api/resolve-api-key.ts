@@ -1,13 +1,14 @@
 /**
  * #893 Stage 2 — Host implementation of `hostApi.resolveApiKey()`.
  *
- * Wraps the four-tier secret gate (`plugin-runtime.ts:getSecret`) and
- * returns the SDK's discriminated union (`@lvis/plugin-sdk` → `ResolveApiKeyResult`).
+ * Wraps the four-tier secret gate (`runSecretGate`) and returns the SDK's
+ * discriminated union (`@lvis/plugin-sdk` → `ResolveApiKeyResult`).
  * On `ok=true` the host yields a one-shot bearer thunk + `release()`; plugins
  * should call `release()` in a `finally` block so the in-memory copy of the
  * key has a deterministic lifetime.
  *
- * Decision tree (Ralph cycle 1 — aligned with `plugin-runtime.ts:getSecret`):
+ * Decision tree — the same four tiers `hostApi.getSecret` runs, because both
+ * call `runSecretGate`:
  *   - tier-1 own-namespace          → ok=true (vendor = requested vendor or active)
  *   - tier-2 manifest allowlist     → check
  *   - tier-3 whitelist registry     → check (BEFORE Tier-4 — see ORDER below)
@@ -15,7 +16,7 @@
  *   - whitelist no-cache + offline  → reason "not-whitelisted" (closest SDK enum)
  *   - missing key in settings       → reason "no-host-vendor"
  *
- * Tier-3 / Tier-4 ORDER (Ralph cycle 1 MEDIUM fix):
+ * Tier-3 / Tier-4 ORDER:
  *   Both `getSecret` and `resolveApiKey` now evaluate Tier-3 (whitelist
  *   registry) BEFORE Tier-4 (active-vendor cross-check). The whitelist is
  *   a coarse ACL — it is the static, signed declaration of which plugin
@@ -24,7 +25,7 @@
  *   prevents an unwhitelisted plugin from leaking the dynamic vendor
  *   state via the deny-reason channel.
  *
- * Vendor alias normalization (Ralph cycle 1 CRITICAL fix):
+ * Vendor alias normalization:
  *   The SDK enum (`@lvis/plugin-sdk`) uses
  *   `"openai" | "azure-openai" | "vertex" | "anthropic"`; the host's
  *   internal vendor union (`src/shared/llm-vendor-defaults.ts`) uses
@@ -92,7 +93,7 @@ export interface ResolveApiKeyDeps {
   settingsService: Pick<SettingsService, "get" | "getSecret">;
   auditLogger: Pick<AuditLogger, "log">;
   /**
-   * Cluster review M1 — optional accessor for the PermissionManager's
+   * Optional accessor for the PermissionManager's
    * per-plugin revoke signal. When provided, the returned bearer is wired
    * to release on EITHER the caller's signal OR this signal — so a
    * permission rule change aborts the outstanding bearer mid-flight even
@@ -101,9 +102,9 @@ export interface ResolveApiKeyDeps {
    */
   getPluginRevokeSignal?: (pluginId: string) => AbortSignal;
   /**
-   * #958 round-1 security MEDIUM — install-source from the on-disk plugin
-   * registry (`PluginRegistryEntry.installSource`). This is the only value
-   * that can activate the Tier-3 admin-bypass gate:
+   * Install-source from the on-disk plugin registry
+   * (`PluginRegistryEntry.installSource`). This is the only value that can
+   * activate the Tier-3 admin-bypass gate:
    *   - `registry.installSource` is written by the host at install time
    *     under a verified actor; the file lives at
    *     `~/.lvis/plugins/registry.json` and is not part of the plugin's
@@ -124,8 +125,7 @@ export interface ResolveApiKeyDeps {
 }
 
 /**
- * Ralph cycle 1 CRITICAL fix — Map SDK-enum vendor names to host
- * internal vendor names. The SDK ships
+ * Map SDK-enum vendor names to host internal vendor names. The SDK ships
  * `"openai" | "azure-openai" | "vertex" | "anthropic"`; the host's
  * `LLM_VENDORS` union is
  * `"openai" | "azure-foundry" | "vertex-ai" | "claude" | "gemini" | "copilot"`.
@@ -159,18 +159,17 @@ function audit(deps: ResolveApiKeyDeps, level: "info" | "warn", message: string)
 }
 
 /**
- * Ralph cycle 1 HIGH fix — one-shot bearer thunk wired to the request's
- * `AbortSignal`. The captured string is dropped after `release()` so
- * subsequent `bearer()` calls throw `Error("released")` per SDK contract
+ * One-shot bearer thunk wired to the request's `AbortSignal`. The captured
+ * string is dropped after `release()` so subsequent `bearer()` calls throw
+ * `Error("released")` per SDK contract
  * (see `sdk/src/index.ts` `bearer()` docs). Strings in JS are immutable
  * so we cannot literally zero the buffer; the "zeroize" here is a
  * best-effort signal: the reference is dropped, and tests can assert
  * the post-release state.
  *
- * Before the fix `release()` ignored the signal and the bearer stayed
- * captured after the caller aborted. Now an aborted signal at construction
- * time releases immediately, and a mid-flight abort fires a one-shot
- * listener that drops the reference automatically.
+ * The signal is load-bearing, not advisory: an already-aborted signal at
+ * construction time releases immediately, and a mid-flight abort fires a
+ * one-shot listener that drops the reference without the caller acting.
  */
 function makeSuccess(
   vendor: string,
@@ -210,15 +209,15 @@ function makeSuccess(
 }
 
 /**
- * Resolve an API key for a plugin. Mirrors the 4-tier gate in
- * `plugin-runtime.ts:getSecret`, returning the SDK's discriminated union so
- * plugins can branch on each refusal cause.
+ * Resolve an API key for a plugin. Runs the same 4-tier `runSecretGate` as
+ * `hostApi.getSecret`, returning the SDK's discriminated union so plugins can
+ * branch on each refusal cause.
  */
 export async function resolveApiKey(
   request: ResolveApiKeyRequest,
   deps: ResolveApiKeyDeps,
 ): Promise<ResolveApiKeyResult> {
-  // Cluster review M1 — merge the caller's per-request signal with the
+  // Merge the caller's per-request signal with the
   // PermissionManager's per-plugin revoke signal so a permission rule
   // change aborts an in-flight bearer even when the plugin's own signal
   // never fires. The merged signal flows into `makeSuccess` and short-
@@ -237,9 +236,9 @@ export async function resolveApiKey(
   };
   const defaultActiveProvider =
     typeof llmSettings.provider === "string" ? llmSettings.provider : "";
-  // Ralph cycle 1 CRITICAL — map SDK vendor enum to host vendor name so
-  // a Claude-default user + `vendor:"anthropic"` request lands on
-  // `llm.apiKey.claude` not a non-existent `llm.apiKey.anthropic`.
+  // Map the SDK vendor enum to the host vendor name so a Claude-default user
+  // + `vendor:"anthropic"` request lands on `llm.apiKey.claude`, not a
+  // non-existent `llm.apiKey.anthropic`.
   const requestedVendor = request.vendor ?? defaultActiveProvider;
   const normalizedVendor =
     typeof requestedVendor === "string" ? normalizeVendor(requestedVendor) : requestedVendor;
@@ -334,8 +333,8 @@ export async function resolveApiKey(
     // `not-whitelisted` slot. The precise reason lives in the audit log.
     return { ok: false, reason: "not-whitelisted" };
   }
-  // #958 round-1 security MEDIUM — admin-bypass audit + counter. Emit an
-  // explicit audit line BEFORE the host-secret read so operators can pivot on
+  // Admin-bypass audit + counter. Emit an explicit audit line BEFORE the
+  // host-secret read so operators can pivot on
   // `policy=admin manifest-allowlist-bypassed` in the audit log even if the
   // subsequent settings lookup fails for an unrelated reason. The dedicated
   // `hostSecret_admin_bypass` counter is on top of the regular
@@ -412,7 +411,7 @@ function grantAuditSource(
 }
 
 /**
- * Cluster review M1 — combine the caller's per-request signal with the
+ * Combine the caller's per-request signal with the
  * PermissionManager's per-plugin revoke signal into a single AbortSignal.
  * Returns `undefined` when both inputs are absent so the bearer thunk skips
  * the listener wiring entirely. Falls back gracefully when `AbortSignal.any`

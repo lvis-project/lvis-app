@@ -9,7 +9,7 @@ import {
   resolveAuthorizedWorkspaceProject,
 } from "../project-root-authorization.js";
 import { projectRootEquals } from "../../shared/project-identity.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 let oldHome: string | undefined;
 let oldCwd: string;

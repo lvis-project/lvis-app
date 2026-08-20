@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync } from "node:fs";
 import { mkdir, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
+import { LocalCatalogMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import {
   makeTestPluginPaths,
@@ -84,7 +84,7 @@ describe("PluginMarketplaceService.installLocal", () => {
       pluginsRoot: pluginsDir,
       cacheRoot,
     });
-    const fetcher = new MockMarketplaceFetcher(join(testDir, "marketplace.json"));
+    const fetcher = new LocalCatalogMarketplaceFetcher(join(testDir, "marketplace.json"));
     return new TestPluginMarketplaceService(paths, fetcher);
   }
 

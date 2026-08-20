@@ -11,7 +11,7 @@ import {
 } from "./committed-generation-publication-error.js";
 import type { MarketplaceFetcher } from "./marketplace-fetcher.js";
 import { toRegistryRelativeManifestPath, type PluginPaths } from "./plugin-paths.js";
-import { assertMockMarketplaceAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
+import { assertLocalCatalogFetcherAllowed, isDevModeUnlocked } from "../boot/dev-flags.js";
 import type { PluginAccessSpec, PluginManifest, PluginMarketplaceItem, PluginRegistryEntryInstallSource } from "./types.js";
 import { MissingDependenciesError, MissingPluginDependenciesError } from "./types.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
@@ -485,7 +485,8 @@ export class DisabledMarketplaceFetcher implements MarketplaceFetcher {
 }
 
 /**
- * @internal Dev/test-only fetcher. Reads a local JSON catalog file.
+ * @internal Dev-only fetcher. Serves the catalog from a local JSON file
+ * (`plugins/marketplace.json`) instead of the marketplace server.
  *
  * Production / packaged builds MUST use {@link CloudMarketplaceFetcher}
  * — the constructor throws when invoked in a packaged build via the shared
@@ -493,13 +494,13 @@ export class DisabledMarketplaceFetcher implements MarketplaceFetcher {
  * cannot serve as a trust anchor; any packaged binary that fell back to this
  * fetcher would let local users advertise their own plugins as
  * `installPolicy:"admin"` and get them auto-installed by the managed
- * bootstrap (security review: mock fetcher must not run in packaged builds).
+ * bootstrap.
  *
  * Note: downloadVersion() is not supported regardless of build mode.
  */
-export class MockMarketplaceFetcher implements MarketplaceFetcher {
+export class LocalCatalogMarketplaceFetcher implements MarketplaceFetcher {
   constructor(private readonly marketplacePath: string) {
-    assertMockMarketplaceAllowed();
+    assertLocalCatalogFetcherAllowed();
   }
 
   async listPlugins(): Promise<PluginMarketplaceItem[]> {
@@ -517,7 +518,7 @@ export class MockMarketplaceFetcher implements MarketplaceFetcher {
     _version: string,
   ): Promise<{ zipBuffer: Buffer; sha256: string }> {
     throw new Error(
-      "MockMarketplaceFetcher does not support downloadVersion(); use CloudMarketplaceFetcher",
+      "LocalCatalogMarketplaceFetcher does not support downloadVersion(); use CloudMarketplaceFetcher",
     );
   }
 
@@ -564,9 +565,11 @@ export class PluginMarketplaceService {
    */
   private readonly artifactStore: PluginArtifactStore;
   /**
-   * S9: base directory for the catalog cache. `null` disables catalog caching
-   * (test mock fetcher). Defaults to `paths.cacheRoot/marketplace-catalog`
-   * so the SoT stays inside the plugin tree (`~/.lvis/plugins/.cache/`).
+   * Base directory for the catalog cache. `null` disables catalog caching,
+   * which is what the local-catalog fetcher gets — its catalog is already a
+   * local file, so a second on-disk copy would only go stale. Otherwise
+   * defaults to `paths.cacheRoot/marketplace-catalog` so the SoT stays inside
+   * the plugin tree (`~/.lvis/plugins/.cache/`).
    */
   private readonly catalogCacheBase: string | null;
   /**
@@ -602,10 +605,10 @@ export class PluginMarketplaceService {
     this.deploymentGuard = deploymentGuard;
     this.fetcher = fetcher;
     this.auditLogger = auditLogger;
-    // Catalog cache is off for the test mock fetcher; production fetchers
+    // Catalog cache is off for the local-catalog fetcher; production fetchers
     // get a sibling under `paths.cacheRoot` (closed #266 — was homedir()).
     this.catalogCacheBase =
-      fetcher instanceof MockMarketplaceFetcher
+      fetcher instanceof LocalCatalogMarketplaceFetcher
         ? null
         : resolve(paths.cacheRoot, "marketplace-catalog");
     // Artifact store owns the same `pluginsRoot` (extract target) +
@@ -616,12 +619,12 @@ export class PluginMarketplaceService {
       cacheRoot: paths.cacheRoot,
       fetcher,
       publicKeys: getBundledPublicKeys(),
-      tarballCacheBase: fetcher instanceof MockMarketplaceFetcher ? null : undefined,
+      tarballCacheBase: fetcher instanceof LocalCatalogMarketplaceFetcher ? null : undefined,
     });
   }
 
   /**
-   * #FU259 accessor — the MCP install IPC needs the same fetcher to
+   * The MCP install IPC needs the same fetcher to
    * resolve catalog detail by slug before driving the artifact store.
    * Read-only escape hatch; callers must not mutate fetcher state.
    */
@@ -667,8 +670,8 @@ export class PluginMarketplaceService {
   }
 
   async list(): Promise<MarketplaceListItem[]> {
-    // Catalog cache is null when using the test mock fetcher; production
-    // always has a cache base under `~/.lvis/plugins/.cache/` (set in
+    // Catalog cache is null for the local-catalog fetcher; every other
+    // fetcher has a cache base under `~/.lvis/plugins/.cache/` (set in
     // constructor).
     const cacheKey = this.fetcher.getCatalogCacheKey?.();
     const cacheBase = this.catalogCacheBase === null
@@ -1063,7 +1066,7 @@ export class PluginMarketplaceService {
       }
     }
 
-    // S14 — capability preflight. `requires.capabilities[]` is a separate
+    // Capability preflight. `requires.capabilities[]` is a separate
     // contract from plugin-id `dependencies[]`: any installed plugin that
     // advertises a matching `capabilities[]` tag satisfies the requirement.
     const requiredCapabilities = plugin.requires?.capabilities ?? [];
@@ -1211,7 +1214,7 @@ export class PluginMarketplaceService {
       return result;
     }
     const managed = plugins.filter((p) => normalizeInstallPolicy(p) === "admin");
-    // Round-3 §6: registry read errors must propagate. ENOENT is already
+    // Registry read errors must propagate. ENOENT is already
     // handled inside readPluginRegistry (returns empty default for first
     // boot); a corrupt registry must NOT silently force-reinstall every
     // managed plugin on top of an unknown prior state.
@@ -1817,7 +1820,7 @@ export class PluginMarketplaceService {
    * does not own.
    */
   private async snapshotCurrentInstall(pluginId: string): Promise<void> {
-    // Round-3 §6: do NOT swallow registry read errors here. `readPluginRegistry`
+    // Do NOT swallow registry read errors here. `readPluginRegistry`
     // already returns the empty default on ENOENT (first-boot); any other
     // error (corrupt JSON, IO failure) must propagate so we don't silently
     // skip the rollback snapshot and then overwrite the install with an
@@ -1995,7 +1998,7 @@ export class PluginMarketplaceService {
 
   /** Returns the version string from the currently-installed manifest, or null. */
   async getInstalledVersion(pluginId: string): Promise<string | null> {
-    // Round-3 §6: registry read errors propagate; only the manifest-missing
+    // Registry read errors propagate; only the manifest-missing
     // path returns null (stale registry entry).
     const registry = await readPluginRegistry(this.registryPath);
     return this.readInstalledVersionFromRegistry(registry, pluginId);
@@ -2215,14 +2218,14 @@ export class PluginMarketplaceService {
   }
 
   /**
-   * S14: load manifests for all currently-installed plugins so the dependency
+   * Load manifests for all currently-installed plugins so the dependency
    * resolver can inspect their `capabilities[]`.  Skips entries whose manifest
    * is missing (ENOENT — stale registry entry, fail-open per §S14: a single
    * stray manifest must not block unrelated installs). Other manifest IO /
    * parse errors propagate so corruption is surfaced rather than silently
    * dropping a real plugin from dependency resolution.
    *
-   * Round-3 §6: registry read errors propagate (ENOENT is already returned
+   * Registry read errors propagate (ENOENT is already returned
    * as the empty default inside readPluginRegistry).
    */
   private async loadInstalledManifests(): Promise<PluginManifest[]> {

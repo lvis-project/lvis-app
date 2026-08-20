@@ -1,27 +1,50 @@
 /**
  * IPC registration orchestrator.
  *
- * Replaces the monolithic `src/ipc-bridge.ts::registerIpcHandlers` with
- * per-domain registrars. Each domain file owns its own slice of channels;
- * `ipc-bridge.ts` delegates here and re-exports the public API so external
- * callers don't need to update their imports.
+ * Handler registration is split per domain: each domain file owns its own
+ * slice of channels, and `ipc-bridge.ts` delegates here while re-exporting the
+ * public API, so an external caller imports from either without knowing which.
  *
- * Domain → channel prefix mapping:
- *   settings     lvis:settings:*, lvis:shell:*, lvis:telemetry:consent-answer
- *   tour         lvis:tour:*        — Tutorial-C SpotlightTour state + broadcast
- *   chat         lvis:chat:*, lvis:llm:*, lvis:routines:*, lvis:routine:*, lvis:trigger:*,
- *                lvis:memory:*, lvis:starred:*, lvis:feedback:*, lvis:ask-user-question:*
- *   plugins      lvis:plugins:*, lvis:bootstrap:*, lvis:runtime:*, lvis:marketplace:*,
- *                lvis:mcp:*, lvis:plugin:*, lvis:file:*, lvis:notification:clicked
- *   prompts      lvis:prompts:*
- *   usage        lvis:usage:*
- *   audit        lvis:audit:*, lvis:dlp:*
- *   permissions  lvis:permission:*, lvis:approval:*, lvis:policy:*
- *   window       window:*
- *   misc         lvis:routines:v2:*, lvis:session-todo:*
- *   work-board   lvis:work-board:* (board CRUD + lifecycle; run/report deferred)
- *   ui           lvis:ui:*
- *   dev          lvis:dev:*  (only registered when !app.isPackaged)
+ * Domain → channel prefix mapping. One line per registrar called below, so a
+ * reader can answer "which file owns this channel" without opening all of them:
+ *   settings      lvis:settings:*, lvis:shell:open-external,
+ *                 lvis:telemetry:consent-answer
+ *   tour          lvis:tour:*        — SpotlightTour state + broadcast
+ *   chat          lvis:chat:*, lvis:llm:*, lvis:memory:*, lvis:starred:*,
+ *                 lvis:feedback:*, lvis:ask-user-question:*
+ *   sidechat      lvis:sidechat:*
+ *   plugins       lvis:plugins:*, lvis:plugin:*, lvis:mcp:*, lvis:runtime:*,
+ *                 lvis:agents:*, lvis:skills:*, lvis:bootstrap:retry,
+ *                 lvis:marketplace:ping, lvis:host:plugin-theme-notify,
+ *                 lvis:notification:clicked
+ *   prompts       lvis:prompts:*
+ *   usage         lvis:usage:*
+ *   audit         lvis:audit:*, lvis:dlp:*
+ *   diagnostics   lvis:diagnostics:*, lvis:logs:tail
+ *   permissions   lvis:permission:*, lvis:permissions:*, lvis:approval:respond,
+ *                 lvis:policy:*
+ *   window        window:*, lvis:window:open-html-preview
+ *   routines      lvis:routines:*
+ *   session-todo  lvis:session-todo:*
+ *   app           lvis:app:*
+ *   work-board    lvis:work-board:* (CRUD, lifecycle, run, run-transcript,
+ *                 generate-report)
+ *   attach        lvis:attach:*
+ *   preview       lvis:preview:read-file
+ *   workspace     lvis:workspace:*
+ *   ui            lvis:ui:*
+ *   terminal      lvis:terminal:*
+ *   remote-a2a    lvis:a2a-remote:*
+ *   tailnet-sharing     lvis:tailnet-sharing:*
+ *   telegram-connection lvis:telegram-connection:*
+ *   away-authority      lvis:away-authority:*
+ *   dev           lvis:dev:*  (registered only when `getIsPackaged()` is false)
+ *
+ * `lvis:trigger:*` is absent on purpose. The constants exist in
+ * `contract/app-contract.ts` and the preload invokes `trigger.dismiss` and
+ * `trigger.import`, but no `ipcMain.handle` for any `lvis:trigger:` channel
+ * exists in `src/` — those two invokes have no receiver. Recorded rather than
+ * fixed here: giving them one is a behaviour change, not a rename.
  */
 import { initDlpAudit } from "../audit/dlp-filter.js";
 import { getIsPackaged } from "../boot/dev-flags.js";
@@ -36,7 +59,9 @@ import { registerAuditHandlers } from "./domains/audit.js";
 import { registerDiagnosticsHandlers } from "./domains/diagnostics.js";
 import { registerPermissionsHandlers } from "./domains/permissions.js";
 import { registerWindowHandlers } from "./domains/window.js";
-import { registerMiscHandlers } from "./domains/misc.js";
+import { registerRoutineHandlers } from "./domains/routines.js";
+import { registerSessionTodoHandlers } from "./domains/session-todo.js";
+import { registerAppHandlers } from "./domains/app.js";
 import { registerWorkBoardHandlers } from "./domains/work-board.js";
 import { registerAttachHandlers } from "./domains/attach.js";
 import { registerPreviewHandlers } from "./domains/preview.js";
@@ -100,7 +125,9 @@ export function registerIpcHandlers(
   registerDiagnosticsHandlers(deps);
   registerPermissionsHandlers(deps);
   registerWindowHandlers(deps);
-  registerMiscHandlers(deps);
+  registerRoutineHandlers(deps);
+  registerSessionTodoHandlers(deps);
+  registerAppHandlers(deps);
   registerWorkBoardHandlers(deps);
   registerAttachHandlers(deps);
   registerPreviewHandlers(deps);

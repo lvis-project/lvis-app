@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 // Sentinel to detect "not passed" vs "passed undefined/null"
 const NOT_SET = Symbol("NOT_SET");

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { MockMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
+import { LocalCatalogMarketplaceFetcher, PluginMarketplaceService } from "../marketplace.js";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import {
@@ -28,7 +28,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
   let installedDir: string;
 
   beforeEach(async () => {
-    // Track A pre-Phase-2: MockMarketplaceFetcher refuses to construct in
+    // LocalCatalogMarketplaceFetcher refuses to construct in
     // packaged builds. dev-flags defaults to packaged-mode for safety, so
     // tests must explicitly opt into the unpackaged gate.
     setIsPackaged(false);
@@ -89,7 +89,7 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
       registryPath: paths.registryPath,
       pluginsRoot: paths.pluginsRoot,
     });
-    const fetcher = new MockMarketplaceFetcher(marketplacePath);
+    const fetcher = new LocalCatalogMarketplaceFetcher(marketplacePath);
     return new TestPluginMarketplaceService(paths, fetcher, guard);
   }
 

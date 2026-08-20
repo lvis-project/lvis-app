@@ -11,11 +11,12 @@
  * P3 — Claude signature capture:
  *   Anthropic extended-thinking emits reasoning-start/delta/end per block.
  *   The signature arrives on reasoning-end's providerMetadata.anthropic.signature
- *   (per Vercel AI SDK v6 — PR #11688 merged 2026-01-13, pinned ai@~6.0.168).
+ *   (upstream vercel/ai#11688, landed in v6; we pin ai@~6.0.168).
  *
  *   CRITICAL (per design doc §5.2 P3): signatures MUST be consumed from
  *   fullStream events, NEVER from onFinish() callbacks or result.response.messages
- *   aggregation — those paths have been observed to drop signatures (#12433).
+ *   aggregation — those paths have been observed to drop signatures
+ *   (upstream vercel/ai#12433).
  *
  *   Per-block accumulation: key = reasoning block id; attach signature on
  *   reasoning-end; emit thinkingBlocks[] on final `message_complete`. Blocks

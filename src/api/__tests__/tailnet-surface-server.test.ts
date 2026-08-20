@@ -18,7 +18,7 @@ import { createPlatformConversationTimeline } from "../../engine/conversation-pl
 import { createSharedConversationProjectionStore } from "../../engine/shared-conversation-projection.js";
 import type { ConversationCommandPort } from "../../main/conversation-command-port.js";
 import type { TailnetPairedShareAuthorizer } from "../../main/tailnet-paired-share-authorizer.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const CAPABILITY = "lvis.example.com/cap/conversation-observer";
 const CONVERSATION_ID = "owner-session-do-not-expose";

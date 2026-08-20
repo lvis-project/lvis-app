@@ -13,7 +13,7 @@
  * Electron is intentionally NOT imported here so this module remains
  * unit-testable in node (vitest) without an electron stub.
  *
- * Round-3 cleanup (single direction):
+ * Removed flags (single direction):
  *  - `LVIS_ALLOW_LINKED_PLUGIN_ENTRY` removed — `LVIS_DEV=1` is the master
  *    dev unlock and already subsumed every use site.
  *  - `LVIS_ALLOW_TEST_MARKETPLACE_KEYS` removed — same rationale.
@@ -39,7 +39,7 @@ let isPackagedCached = true;
 let configured = false;
 
 /**
- * Round-4 tamper-detect snapshot.
+ * Tamper-detect snapshot.
  *
  * `main.ts` scrubs dev/test-only env vars from `process.env` before the
  * renderer / preload / plugin runtime boots in packaged mode. That scrub runs
@@ -139,7 +139,7 @@ export function devPluginReloadEnabled(packaged: boolean = isPackagedCached): bo
  * every other dev flag — a packaged binary that inherits this env var must
  * not silently weaken Chromium sandboxing.
  *
- * Round-3: renamed from `LVIS_DEV_NO_SANDBOX` to `LVIS_WIN_NO_SANDBOX` to
+ * Named `LVIS_WIN_NO_SANDBOX` rather than `LVIS_DEV_NO_SANDBOX` to
  * make the Windows-only intent explicit and decouple it from the dev-mode
  * mask (this flag is needed for `bun run start` on corp Windows even
  * outside a dev session).
@@ -208,24 +208,24 @@ export function getIsPackaged(): boolean {
 }
 
 /**
- * Mock fetcher gate — packaged builds must never instantiate
- * `MockMarketplaceFetcher`, which serves catalog from a user-writable
- * `plugins/marketplace.json`. In production the only sanctioned source is
- * `CloudMarketplaceFetcher` talking to the marketplace server (envelope
- * signatures are the trust anchor). Security review showed that allowing
- * the mock in packaged builds would let any user
+ * Local-catalog fetcher gate — packaged builds must never instantiate
+ * `LocalCatalogMarketplaceFetcher`, which serves the catalog from a
+ * user-writable `plugins/marketplace.json`. In production the only sanctioned
+ * source is `CloudMarketplaceFetcher` talking to the marketplace server
+ * (envelope signatures are the trust anchor). A user-writable catalog is not a
+ * trust anchor: a packaged build reading one would let any local user
  * advertise their own plugin as `installPolicy:"admin"` and get it
  * auto-installed by the managed bootstrap.
  *
  * Throws if called in a packaged build. The call site is the
- * `MockMarketplaceFetcher` constructor; the throw is preferred over a quiet
- * return so test fixtures and dev workflows fail loudly when accidentally
- * shipped packaged.
+ * `LocalCatalogMarketplaceFetcher` constructor; the throw is preferred over a
+ * quiet return so dev workflows fail loudly when accidentally shipped
+ * packaged.
  */
-export function assertMockMarketplaceAllowed(packaged: boolean = isPackagedCached): void {
+export function assertLocalCatalogFetcherAllowed(packaged: boolean = isPackagedCached): void {
   if (packaged) {
     throw new Error(
-      "[security] MockMarketplaceFetcher is dev-only — packaged builds must use CloudMarketplaceFetcher",
+      "[security] LocalCatalogMarketplaceFetcher is dev-only — packaged builds must use CloudMarketplaceFetcher",
     );
   }
 }

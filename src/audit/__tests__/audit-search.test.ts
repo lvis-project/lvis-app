@@ -7,7 +7,7 @@ import { once } from "node:events";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { finished } from "node:stream/promises";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 // Patch homedir so AuditLogger writes to a temp dir during tests.
 import { vi } from "vitest";

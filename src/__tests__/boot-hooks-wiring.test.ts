@@ -17,7 +17,7 @@ import { wireHookSystem } from "../boot/steps/hook-system-wiring.js";
 import { acceptHookTrust } from "../hooks/hook-trust-commands.js";
 import { HOOKS_CONFIG_FILENAME } from "../hooks/hook-config-trust.js";
 import { writeJsonConfig } from "../hooks/__tests__/test-helpers.js";
-import { cleanupTmpDir } from "../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../__tests__/support/tmp-dir-teardown.js";
 
 describe("boot hook runner wiring", () => {
   it("creates an in-process HookRunner with no external hook surface", async () => {

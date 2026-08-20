@@ -6,7 +6,7 @@ import { MemorySecretStore } from "../../audit/hmac-chain.js";
 import type { FeatureNamespaceHandle } from "../storage/feature-namespace.js";
 import { createTailnetPairedSharingRuntime } from "../tailnet-paired-sharing-runtime.js";
 import { createTailnetSharingOwnerService } from "../tailnet-sharing-owner-service.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 let directories: string[] = [];
 

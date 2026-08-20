@@ -8,11 +8,11 @@ import {
   getHostShellExecutionPlan,
 } from "../../permissions/sandbox-capability.js";
 import { buildHostShellExecutionPlan } from "../../permissions/host-shell-execution-plan.js";
-import { setProcessPlatform } from "../../testing/process-platform.js";
+import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
 import {
   partialWindowsAsrt,
   requestedSandboxUnavailable,
-} from "../../testing/host-shell-sandbox-fixtures.js";
+} from "../../__tests__/support/host-shell-sandbox-fixtures.js";
 
 const ORIGINAL_PLATFORM = process.platform;
 

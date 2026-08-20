@@ -1,7 +1,7 @@
 import { createRoot } from "react-dom/client";
 import { App } from "./ui/renderer/App.js";
 import { primeHostMarketplaceApi } from "./ui/renderer/host-marketplace-api.js";
-import { I18nSettingsProvider } from "./ui/renderer/contexts/i18n-settings-provider.js";
+import { I18nSettingsProvider } from "./ui/renderer/context/I18nSettingsProvider.js";
 
 export { App } from "./ui/renderer/App.js";
 

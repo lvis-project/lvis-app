@@ -62,7 +62,7 @@ import { A2A_ROLE_AGENT, A2ATaskState, type A2AMessage,
 } from "../../shared/a2a.js";
 import { A2ASubAgentMessageBus } from "../a2a-subagent-message-bus.js";
 import { SubAgentMessageMailbox } from "../subagent-message-mailbox.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 // ─── Test scaffolding ─────────────────────────────────
 

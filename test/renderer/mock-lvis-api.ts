@@ -129,7 +129,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   emitAgentSpawnEvent: (event: AgentSpawnEvent) => void;
   emitOverlayShow: (item: unknown) => void;
   emitOverlayDismiss: (id: string) => void;
-  emitRoutineFiredV2: (r: unknown) => void;
+  emitRoutineFired: (r: unknown) => void;
   emitPluginEvent: (eventType: string, payload: unknown) => void;
   emitWorkBoardItemChanged: (p: unknown) => void;
   /** `settingsTab` mirrors the main process's `lvis:view:activate` payload for settings opens. */
@@ -183,7 +183,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   const agentSpawnEventHandlers = new Set<(event: AgentSpawnEvent) => void>();
   const overlayShowHandlers = new Set<(item: unknown) => void>();
   const overlayDismissHandlers = new Set<(id: string) => void>();
-  const routineFiredV2Handlers = new Set<(r: unknown) => void>();
+  const routineFiredHandlers = new Set<(r: unknown) => void>();
   const pluginEventHandlers = new Map<string, Set<(p: unknown) => void>>();
   const workBoardItemChangedHandlers = new Set<(p: unknown) => void>();
   const viewHandlers = new Set<(v: string, settingsTab?: string) => void>();
@@ -508,28 +508,28 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     getUsageSummary: vi.fn(async () => usage),
     getUsageDailySummary: vi.fn(async () => ({ ok: false, error: "mock-unavailable" })),
     getAppInfo: vi.fn(async () => appInfo),
-    // Routine v2 API
-    listRoutinesV2: vi.fn(async () => []),
-    dismissRoutineV2: vi.fn(async () => ({ ok: true })),
-    removeRoutineV2: vi.fn(async () => ({ ok: true })),
-    triggerRoutineNowV2: vi.fn(async () => ({ ok: true })),
-    listPendingRoutineResultsV2: vi.fn(async () => pendingRoutineResults),
-    acknowledgeRoutineResultV2: vi.fn(async () => ({ ok: true })),
-    addRoutineV2: vi.fn(async () => ({ ok: true, routine: {} })),
-    onRoutineFiredV2: vi.fn((h: (r: unknown) => void) => {
-      routineFiredV2Handlers.add(h);
+    // Routine API
+    listRoutines: vi.fn(async () => []),
+    dismissRoutine: vi.fn(async () => ({ ok: true })),
+    removeRoutine: vi.fn(async () => ({ ok: true })),
+    triggerRoutineNow: vi.fn(async () => ({ ok: true })),
+    listPendingRoutineResults: vi.fn(async () => pendingRoutineResults),
+    acknowledgeRoutineResult: vi.fn(async () => ({ ok: true })),
+    addRoutine: vi.fn(async () => ({ ok: true, routine: {} })),
+    onRoutineFired: vi.fn((h: (r: unknown) => void) => {
+      routineFiredHandlers.add(h);
       // Replay latestRoutineResult on subscription (simulates mount-time catchup).
       if (latestRoutineResult !== null) {
         Promise.resolve(latestRoutineResult).then((r) => {
           if (r !== null && r !== undefined) h(r);
         });
       }
-      return () => routineFiredV2Handlers.delete(h);
+      return () => routineFiredHandlers.delete(h);
     }),
     onRoutineRunningStarted: vi.fn((_h: (p: unknown) => void) => () => {}),
     onRoutineRunningFinished: vi.fn((_h: (id: string) => void) => () => {}),
-    onRoutineFailedV2: vi.fn((_handler: (event: { routineId: string; error: string }) => void) => () => {}),
-    listRoutineSessionsV2: vi.fn(async (routineId: string) => routineSessionsByRoutine[routineId] ?? []),
+    onRoutineFailed: vi.fn((_handler: (event: { routineId: string; error: string }) => void) => () => {}),
+    listRoutineSessions: vi.fn(async (routineId: string) => routineSessionsByRoutine[routineId] ?? []),
     // Work Board API — board panel subscribes to onWorkBoardItemChanged at
     // mount, so the smoke test mock must define these even when the suite
     // doesn't exercise the board. CRUD mocks return the store's discriminated
@@ -632,7 +632,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     emitAgentSpawnEvent: (event) => agentSpawnEventHandlers.forEach((h) => h(event)),
     emitOverlayShow: (item) => overlayShowHandlers.forEach((h) => h(item)),
     emitOverlayDismiss: (id) => overlayDismissHandlers.forEach((h) => h(id)),
-    emitRoutineFiredV2: (r) => routineFiredV2Handlers.forEach((h) => h(r)),
+    emitRoutineFired: (r) => routineFiredHandlers.forEach((h) => h(r)),
     emitPluginEvent: (eventType, payload) =>
       pluginEventHandlers.get(eventType)?.forEach((h) => h(payload)),
     emitWorkBoardItemChanged: (p) => workBoardItemChangedHandlers.forEach((h) => h(p)),

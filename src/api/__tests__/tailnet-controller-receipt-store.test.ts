@@ -7,7 +7,7 @@ import {
   TailnetControllerReceiptStore,
   type TailnetControllerReceiptReservation,
 } from "../tailnet-controller-receipt-store.js";
-import { cleanupTmpDir } from "../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const OWNER_ONE = "00000000-0000-4000-8000-000000000001";
 const OWNER_TWO = "00000000-0000-4000-8000-000000000002";

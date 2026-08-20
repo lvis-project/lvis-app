@@ -33,7 +33,7 @@ import type {
   StreamTurnParams,
 } from "../../llm/types.js";
 import { RATIONALE_SIBLING_CANCELLED_RESULT } from "../rationale-conversation-orchestration.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 const RAW_ANCHOR_SECRET = "alice@example.com";
 

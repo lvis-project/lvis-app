@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { PluginTelemetryClient } from "../telemetry/client.js";
 import { scrubPii } from "../telemetry/client.js";
 import type { TelemetrySettings } from "../data/settings-store.js";
-import { cleanupTmpDir } from "../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../__tests__/support/tmp-dir-teardown.js";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { mkdtempSync } from "node:fs";

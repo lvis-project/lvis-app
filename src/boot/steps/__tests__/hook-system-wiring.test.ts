@@ -14,7 +14,7 @@ import { join } from "node:path";
 import { wireHookSystem } from "../hook-system-wiring.js";
 import type { HookDiff } from "../../../hooks/hook-discovery.js";
 import { writeExecutableHook } from "../../../hooks/__tests__/test-helpers.js";
-import { cleanupTmpDir } from "../../../testing/tmp-dir-teardown.js";
+import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 let tmpDir: string;
 let hooksDir: string;

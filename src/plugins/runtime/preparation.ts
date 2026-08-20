@@ -27,7 +27,7 @@ import type {
   PluginPreparationStatus,
   PluginStartPreparationContext,
 } from "./index.js";
-import { plog, PluginPhase } from "../lifecycle-log.js";
+import { logPluginLifecycle, PluginPhase } from "../lifecycle-log.js";
 import { t } from "../../i18n/index.js";
 
 interface PendingPreparedStart {
@@ -195,7 +195,7 @@ export class PreparationTracker {
       description: `Plugin dependencies failed: ${message}`,
     });
     this.deps.onDisable?.(manifest.id);
-    plog("error", { pluginId: manifest.id, phase: PluginPhase.START_FAIL, reason: message }, "plugin dependency preparation failed");
+    logPluginLifecycle("error", { pluginId: manifest.id, phase: PluginPhase.START_FAIL, reason: message }, "plugin dependency preparation failed");
   }
 
   /** Cancel and forget a single plugin's preparation state (uninstall path). */

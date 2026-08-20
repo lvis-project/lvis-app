@@ -245,16 +245,15 @@ export async function bootstrap(
   ctx.toolRegistry = toolRegistry;
   ctx.routeEngine = routeEngine;
 
-  // Issue #837 — one-shot idempotent migration: re-canonicalize user-approval
-  // user-approval keys after PR #828 upgraded canonicalStringify to RFC 8785
-  // JCS deep recursion. Runs after bootstrapCoreServices so any failure is
+  // One-shot idempotent migration: re-canonicalize user-approval keys for the
+  // RFC 8785 JCS deep-recursion canonicalStringify. Runs after bootstrapCoreServices so any failure is
   // caught internally and logged without aborting boot. Noop if marker present.
   await migrateCanonicalization();
 
   // Shared AuditLogger + NotificationService + plugin auth-partition seeding.
   await setupAuditAndNotification(ctx);
 
-  // B1 + §F7: ApprovalGate with audit. Constructed BEFORE initPluginRuntime so
+  // §F7: ApprovalGate with audit. Constructed BEFORE initPluginRuntime so
   // the per-plugin HostApi factory can wire `agentApproval` namespace to the
   // live gate — without this ordering, plugins receive a hostApi missing the
   // namespace and §8 main-process approval routing silently no-ops.
@@ -514,7 +513,7 @@ export async function bootstrap(
   // first install of a session a cold fetch.
   await wireAdmissionRegistry({ bootAuditLogger: ctx.bootAuditLogger });
 
-  // Cluster review M1 — PermissionManager is built BEFORE initPluginRuntime
+  // PermissionManager is built BEFORE initPluginRuntime
   // so its per-plugin revoke signal can be wired into the resolveApiKey host
   // factory at plugin construction time. The reviewer + broadcast hookups
   // below still happen after pluginRuntime exists (they depend on the
@@ -612,7 +611,7 @@ export async function bootstrap(
     clearAuthPartitionService,
     shellOpenExternal: (url: string) => shell.openExternal(url),
     approvalGate,
-    // Cluster review M1 — wire PermissionManager so the per-plugin
+    // Wire PermissionManager so the per-plugin
     // resolveApiKey host implementation can abort outstanding bearers when
     // permission rules change.
     permissionManager,
@@ -632,7 +631,7 @@ export async function bootstrap(
   ctx.pluginPaths = pluginPaths;
   ctx.pluginLoopbackManager = loopbackManager;
 
-  // Workflow system tools (S1+S2) — services constructed up-front so the
+  // Workflow system tools — services constructed up-front so the
   // tool registry can register them in one pass below. Late bindings
   // (subAgentRunner, askUserQuestionGate) hop through closures so the
   // ConversationLoop / BrowserWindow are available before the tool fires.

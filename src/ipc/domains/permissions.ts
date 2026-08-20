@@ -350,7 +350,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       }
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
       // No explicit broadcast — PermissionManager.addAlwaysAllowed/DeniedPersist
-      // fire broadcastConfigChanged via the boot-wired setter (round-4 SOT).
+      // fire broadcastConfigChanged via the boot-wired setter.
       return { ok: true, rule: { pattern: parsed.pattern, action: parsed.action } };
     } catch (err) {
       return { ok: false, error: "add-failed", message: (err as Error).message };
@@ -378,7 +378,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       await pm.removeRule(parsed.pattern, parsed.action);
       deps.toolRegistry.setDenyRules(pm.getVisibilityDenyRules());
       // No explicit broadcast — PermissionManager.removeRule fires
-      // broadcastConfigChanged via the boot-wired setter (round-4 SOT).
+      // broadcastConfigChanged via the boot-wired setter.
       return { ok: true };
     } catch (err) {
       return { ok: false, error: "remove-failed", message: (err as Error).message };
@@ -596,7 +596,7 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
   // are activatable (key-driven dynamic activation). Read-only, but gated
   // to prevent a foreign frame from probing which LLM API keys are present.
   //
-  // MAJOR-4: returns UNAUTHORIZED_FRAME (sibling handler parity) instead of
+  // Returns UNAUTHORIZED_FRAME (sibling handler parity) instead of
   // bare `false` on validateSender failure. Bare `false` is indistinguishable
   // from "key not present", masking the security rejection from the caller.
   //
