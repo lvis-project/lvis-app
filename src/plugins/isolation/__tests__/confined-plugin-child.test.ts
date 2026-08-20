@@ -24,9 +24,10 @@
  *    exists. There is no unconfined child to fall back to.
  *  - `electron` is UNREACHABLE in the child. §4 lists that as a gain of the
  *    boundary; it is also the reason a plugin that owns a window cannot be
- *    admitted, so it is asserted here rather than described. Both the bare
- *    require and the shipped package are covered, because the second is what an
- *    author reaches for after the first.
+ *    admitted, so it is asserted here rather than described. The bare require,
+ *    the shipped package and BOTH ESM forms are covered separately, because
+ *    they do not fail in the same place and an author who hits one reaches for
+ *    the next.
  *
  * WHAT IS NOT PROVEN HERE, stated rather than implied:
  *
@@ -173,6 +174,15 @@ function writeProbeModule(fx: Fixture): string {
     "module.exports = '/path/to/an/Electron/binary';\n",
     "utf-8",
   );
+  // A module whose only content is the form an ESM plugin writes. Planted as a
+  // FILE rather than evaluated inline because a named import is resolved when
+  // the module is LINKED, and linking is the step whose failure is the answer.
+  const namedImportPath = join(fx.pluginRoot, "named-electron-import.mjs");
+  writeFileSync(
+    namedImportPath,
+    "import { BrowserWindow } from \"electron\";\nexport const browserWindow = typeof BrowserWindow;\n",
+    "utf-8",
+  );
   writeFileSync(
     probePath,
     `import { readFileSync, writeFileSync } from "node:fs";
@@ -197,6 +207,17 @@ const report = {
   // The package, resolved by absolute path so the answer is about what the
   // ENTRY exports rather than about where resolution happened to look.
   requirePackagedElectron: (() => { const r = attempt(() => require(${JSON.stringify(join(fx.pluginRoot, "vendored-electron", "index.js"))})); return r.ok ? { ok: true, module: describeModule(r.value) } : r; })(),
+  // The two ESM forms. \`require\` is not the whole answer: the CJS registry and
+  // the ESM resolver disagree about \`electron\` in this child, so a plugin's
+  // module system decides WHERE it breaks.
+  //
+  // The namespace's OWN \`BrowserWindow\` is not the whole answer either. A CJS
+  // module reached through the ESM resolver hangs its exports off \`default\`, so
+  // the question "did the API come back" has to be asked of \`default\` — an
+  // assertion that only read the namespace would stay green if \`default\` were
+  // the real \`electron\`.
+  importElectron: await (async () => { try { const ns = await import("electron"); const d = ns.default; return { ok: true, module: describeModule(ns), defaultKeys: (d && typeof d === "object") ? Object.keys(d) : null, defaultBrowserWindow: d ? typeof d.BrowserWindow : "no-default" }; } catch (error) { return { ok: false, code: error.code ?? error.name }; } })(),
+  namedImportElectron: await (async () => { try { const m = await import(${JSON.stringify(namedImportPath)}); return { ok: true, module: { kind: "namespace", browserWindow: String(m.browserWindow) } }; } catch (error) { return { ok: false, code: error.code ?? error.name }; } })(),
 };
 process.stdout.write("PROBE:" + JSON.stringify(report) + "\\n");
 `,
@@ -223,6 +244,16 @@ interface ProbeModuleAttempt {
   readonly code?: string;
 }
 
+/**
+ * A namespace produced by the ESM resolver, which is not the same object shape
+ * a `require` returns: a CJS module reached this way carries its exports on
+ * `default`, so the namespace and its `default` are reported separately.
+ */
+interface ProbeNamespaceAttempt extends ProbeModuleAttempt {
+  readonly defaultKeys?: readonly string[] | null;
+  readonly defaultBrowserWindow?: string;
+}
+
 interface ProbeReport {
   readonly readSecret: ProbeAttempt;
   readonly readOwnData: ProbeAttempt;
@@ -233,6 +264,8 @@ interface ProbeReport {
   readonly electronVersion: string | null;
   readonly requireElectron: ProbeModuleAttempt;
   readonly requirePackagedElectron: ProbeModuleAttempt;
+  readonly importElectron: ProbeNamespaceAttempt;
+  readonly namedImportElectron: ProbeModuleAttempt;
 }
 
 async function runProbe(fx: Fixture): Promise<ProbeReport> {
@@ -348,6 +381,27 @@ describe("the confined child, against the real sandbox", () => {
         report.requirePackagedElectron,
         JSON.stringify(report.requirePackagedElectron),
       ).toMatchObject({ ok: true, module: { kind: "string", browserWindow: "undefined" } });
+      // And the two ESM forms, which do NOT answer the way `require` does.
+      // Asserted separately rather than left to the require case, because the
+      // three differ in WHERE the plugin breaks and a note claiming one denial
+      // for all three would be describing something untrue: `import()`
+      // RESOLVES, to a namespace whose `BrowserWindow` is `undefined`, so an
+      // ESM plugin reading it off the namespace fails only when it calls…
+      expect(report.importElectron, JSON.stringify(report.importElectron)).toMatchObject({
+        ok: true,
+        module: { kind: "object", browserWindow: "undefined" },
+        // …and the namespace's `default`, which is where a CJS module reached
+        // through the ESM resolver would carry the API, is an EMPTY object. This
+        // is the arm that would go red if the ESM path ever started handing back
+        // the real `electron`, which the namespace's own keys would not show.
+        defaultKeys: [],
+        defaultBrowserWindow: "undefined",
+      });
+      // …while a NAMED import of the same specifier never links at all.
+      expect(
+        report.namedImportElectron,
+        JSON.stringify(report.namedImportElectron),
+      ).toMatchObject({ ok: false, code: "SyntaxError" });
     },
     60_000,
   );
