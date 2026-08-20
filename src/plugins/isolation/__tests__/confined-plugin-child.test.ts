@@ -51,7 +51,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 // The child entry is bundled by the shared module rather than here: its
 // externals, banner and target are the shipped build's, and a second copy of
@@ -72,6 +72,8 @@ const PLUGIN_ID = "work-assistant";
 const SECRET_TEXT = "the-host-secret-the-child-must-not-read";
 /** The bytes an un-migrated session file holds, so "nothing moved" is checkable. */
 const LEGACY_SESSION_BYTES = "the session that predates pluginDataDir";
+/** Stands in for the plugin's own code: readable out of `pluginRoot`, never writable back into it. */
+const PLUGIN_CODE_BYTES = "the plugin's own code, which it may read and may not rewrite";
 
 interface Fixture {
   readonly root: string;
@@ -110,6 +112,7 @@ function makeFixture(): Fixture {
   const secretFile = join(secretsDir, "api-key.txt");
   writeFileSync(secretFile, SECRET_TEXT, "utf-8");
   writeFileSync(join(pluginDataDir, "own-data.txt"), "the plugin's own bytes", "utf-8");
+  writeFileSync(join(pluginRoot, "own-code.js"), PLUGIN_CODE_BYTES, "utf-8");
   const hostRoot = join(root, "app-root");
   mkdirSync(hostRoot, { recursive: true });
   return {
@@ -186,6 +189,8 @@ function writeProbeModule(fx: Fixture): string {
   writeFileSync(
     probePath,
     `import { readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createRequire } from "node:module";
 const require = createRequire(import.meta.url);
 const attempt = (fn) => { try { return { ok: true, value: fn() }; } catch (error) { return { ok: false, code: error.code ?? error.name }; } };
@@ -199,6 +204,19 @@ const report = {
   writeOwnData: attempt(() => { writeFileSync(${JSON.stringify(join(fx.pluginDataDir, "written-by-child.txt"))}, "hello"); return "written"; }),
   writeOutside: attempt(() => { writeFileSync(${JSON.stringify(fx.outsideFile)}, "escaped"); return "written"; }),
   writeSecrets: attempt(() => { writeFileSync(${JSON.stringify(join(fx.lvisHome, "secrets", "planted.txt"))}, "escaped"); return "written"; }),
+  // \`pluginRoot\` is the asymmetric one: the child READS it — that is where
+  // its own code lives — and cannot WRITE it, because those are the bytes the
+  // integrity check hashed. Read and write are separate grants and only one of
+  // them names this path.
+  readOwnCode: attempt(() => readFileSync(${JSON.stringify(join(fx.pluginRoot, "own-code.js"))}, "utf-8")),
+  writeOwnCode: attempt(() => { writeFileSync(${JSON.stringify(join(fx.pluginRoot, "smuggled.js"))}, "escaped"); return "written"; }),
+  // The third answer this axis gives, and the only one that looks like
+  // success. HOME is SUBSTITUTED with a throwaway the spawn grants and
+  // \`createSandboxProcessHome\` removes when the child exits, so a plugin that
+  // roots its state at \`homedir()\` is neither denied nor durable: the write
+  // returns \`written\` and the bytes are gone by the next start.
+  childHome: homedir(),
+  writeChildHome: attempt(() => { writeFileSync(join(homedir(), "state.json"), "state"); return "written"; }),
   electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE ?? null,
   // The process IS Electron — this is the binary the host runs as — and the
   // next two lines are what it can do with that.
@@ -260,6 +278,10 @@ interface ProbeReport {
   readonly writeOwnData: ProbeAttempt;
   readonly writeOutside: ProbeAttempt;
   readonly writeSecrets: ProbeAttempt;
+  readonly readOwnCode: ProbeAttempt;
+  readonly writeOwnCode: ProbeAttempt;
+  readonly childHome: string;
+  readonly writeChildHome: ProbeAttempt;
   readonly electronRunAsNode: string | null;
   readonly electronVersion: string | null;
   readonly requireElectron: ProbeModuleAttempt;
@@ -346,6 +368,27 @@ describe("the confined child, against the real sandbox", () => {
       // The write jail, in both directions.
       expect(report.writeOutside.ok, JSON.stringify(report.writeOutside)).toBe(false);
       expect(report.writeSecrets.ok, JSON.stringify(report.writeSecrets)).toBe(false);
+      // …and it stops at `pluginDataDir` rather than covering everything the
+      // child can reach: `pluginRoot` is READABLE, because the child loads its
+      // own code out of it, and NOT writable, because a plugin that could
+      // rewrite its runtime root could rewrite the bytes its own manifest hash
+      // was taken over. Read and write are separate grants; asserting only the
+      // paths that are denied to both would not show that.
+      expect(report.readOwnCode.ok, JSON.stringify(report.readOwnCode)).toBe(true);
+      expect(report.readOwnCode.value).toBe(PLUGIN_CODE_BYTES);
+      expect(report.writeOwnCode.ok, JSON.stringify(report.writeOwnCode)).toBe(false);
+      expect(existsSync(join(fx.pluginRoot, "smuggled.js"))).toBe(false);
+      // The third answer, and the one a source census reads as success: HOME
+      // is SUBSTITUTED, so a plugin that roots its state at `homedir()` is
+      // neither denied nor durable. The write SUCCEEDS — and it lands in a
+      // throwaway that is neither the user's home nor any granted path of this
+      // plugin's, which `createSandboxProcessHome` removes when the child
+      // exits. Asserted because "it worked" is the reading that admits a
+      // plugin whose state silently resets on every start.
+      expect(report.childHome).not.toBe(homedir());
+      expect(report.childHome.startsWith(fx.pluginRoot)).toBe(false);
+      expect(report.childHome.startsWith(fx.pluginDataDir)).toBe(false);
+      expect(report.writeChildHome.ok, JSON.stringify(report.writeChildHome)).toBe(true);
 
       // …and the plugin still works, which is the other half of the claim.
       expect(report.readOwnData.ok, JSON.stringify(report.readOwnData)).toBe(true);
@@ -766,10 +809,17 @@ export const createPlugin = async (context) => {
  *    plugin's own pre-flight guard and is denied. There is no wire form for
  *    `BrowserWindow`, `screen`, `session` or `ipcMain`, so this is not a
  *    marshalling gap but the boundary working as designed.
- *  - Its `createPlugin` sweeps `os.tmpdir()` unguarded before anything else, and
- *    the substituted temp root does not exist on an ordinary machine — so the
+ *  - Its `createPlugin` sweeps `os.tmpdir()` unguarded — not behind a `try`,
+ *    not deferred to a tool call, so it runs on every load — and the
+ *    substituted temp root does not exist on an ordinary machine, so the
  *    plugin would not load at all, which is a different and worse failure than
  *    a degraded one.
+ *  - The same activation body moves a session directory it once kept under
+ *    `context.hostRoot` into `pluginDataDir`, per file and equally unguarded.
+ *    `hostRoot` is outside the child's write jail, so on an install that still
+ *    holds un-migrated files there the move throws where it used to succeed
+ *    and takes activation down with it — the user's existing recordings
+ *    stranded behind a plugin that will not start.
  *
  * THE POINT OF THE REST OF IT IS THE GATE. In one heap `hostApi.getSecret` was a
  * function `meeting` could simply not call: the secret gate lives in the same
@@ -787,14 +837,21 @@ export const createPlugin = async (context) => {
  * `spawn()` would leave every assertion above true and worthless.
  *
  * The last two handlers drive the two of `meeting`'s CHANGED paths a test can
- * reach without a live egress fence, and each is asserted here so the routing
- * SOT's note about it is a measurement rather than a prediction:
+ * reach without a live egress fence. Each is asserted here rather than
+ * described anywhere, because a boundary that CHANGES a plugin's behaviour is
+ * the part most easily written down as a prediction and never checked:
  *
- *  - The legacy session move out of `<hostRoot>`. An un-migrated file is
- *    PLANTED from the host side first, so the handler runs the plugin's own
- *    `renameSync` out of that directory rather than a stand-in `mkdir` — the
- *    two land outside the same jail but they are different syscalls, and only
- *    one of them is the operation the plugin performs.
+ *  - The legacy session move out of `<hostRoot>` — filesystem reach, which is
+ *    the axis that takes the most away and the one whose two halves disagree.
+ *    An un-migrated file is PLANTED from the host side first, so the handler
+ *    runs the plugin's own `renameSync` out of that directory rather than a
+ *    stand-in `mkdir` — the two land outside the same jail but they are
+ *    different syscalls, and only one of them is the operation the plugin
+ *    performs. The listing that precedes the move is load-bearing rather than
+ *    setup: it is what makes the refusal a WRITE verdict instead of a child
+ *    that found an empty directory, and it is the READ half of the same axis
+ *    measured in the same call — a path outside the plugin's own directories
+ *    and off the sandbox's deny floor stays readable.
  *  - The temp root the sandbox substitutes. `CLAUDE_CODE_TMPDIR` is pointed at
  *    a path that does NOT exist, which is the state an ordinary machine is in:
  *    ASRT rewrites the child's `TMPDIR` to `/tmp/claude` when nothing names
@@ -928,8 +985,9 @@ export const createPlugin = async (context) => {
         };
       },
       // The temp root the plugin stages under. \`readdirSync(tmpdir())\` is the
-      // first statement of the sweep its own \`createPlugin\` runs unguarded,
-      // and \`mkdtempSync(join(tmpdir(), ...))\` is how it stages an upload.
+      // first filesystem call in the sweep its own \`createPlugin\` runs
+      // unguarded — nothing precedes it that could throw first — and
+      // \`mkdtempSync(join(tmpdir(), ...))\` is how it stages an upload.
       meeting_tmpdir_probe: async () => ({
         tmpdir: tmpdir(),
         sweep: await attempt(() => readdirSync(tmpdir()).length),
@@ -1153,8 +1211,11 @@ export const createPlugin = async (context) => {
         expect(legacy.listed.value).toEqual(["session-1.json"]);
         // …its destination inside the jail is created without complaint…
         expect(legacy.prepared.ok, JSON.stringify(legacy.prepared)).toBe(true);
-        // …but the move itself now fails closed rather than silently
-        // succeeding, which is the consequence the routing SOT names.
+        // …but the move itself fails closed. `hostRoot` is outside the
+        // child's write jail, and this is the same unguarded `renameSync` the
+        // plugin runs in its activation body — so on an install that still
+        // holds un-migrated files there, this denial is not a lost migration,
+        // it is a plugin that does not start.
         expect(legacy.migrate.ok, JSON.stringify(legacy.migrate)).toBe(false);
         // And nothing moved: the file is where it was, and none landed. A
         // partially-completed migration would be worse than a refused one.
