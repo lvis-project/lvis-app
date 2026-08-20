@@ -34,7 +34,7 @@ broadcast + sticky replay + `getTheme()` pull) 자체는 견고하지만, **플�
 
 1. **Pre-mount prime 보일러플레이트 중복** — agent-hub 의 `lvisPlugin.getTheme()` + `applyThemeFromHostEvent` 글루가 React 플러그인마다 거의 그대로 복사 (50+ LOC × N 레포).
 2. **`useTheme` rigid → 이중 subscribe** — agent-hub 가 `useTheme` 외에 같은 채널을 한 번 더 `bridge.onEvent` 로 잡아 sidebar custom 토큰 매핑 (`work-board-panel.tsx:661`). 같은 이벤트를 두 번 구독은 비정상.
-3. **`_FALLBACK_CSS` 다크 1색 하드코딩** — host first-boot 시점에 light/HC/LG-accent 이면 첫 프레임 검은 깜빡임. SDK `inject.ts:23-41` 의 `_FALLBACK_CSS`.
+3. **`_FALLBACK_CSS` 다크 1색 하드코딩** — host first-boot 시점에 light/HC/brand-accent 이면 첫 프레임 검은 깜빡임. SDK `inject.ts:23-41` 의 `_FALLBACK_CSS`.
 4. **3-place lockstep 부담** — `lvis-app/src/ui/renderer/theme/plugin-token-map.ts` (`_DARK_BASE`) ↔ `lvis-plugin-sdk/src/ui/tokens/lvis-tokens.css` (`:root`) ↔ `lvis-plugin-sdk/src/ui/tokens/inject.ts` (`_FALLBACK_CSS`) 셋이 손-lockstep. 디자인 팔레트 1번 바뀔 때마다 3 파일 동시 수정.
 5. **React / vanilla-JS entry 분기** — `useTheme`(React) 와 `applyThemeFromHostEvent`(vanilla) 둘 다 `document.documentElement` 만 target. detached BrowserWindow (meeting recorder, corp-portal detached) 와 scoped sidebar (local-indexer) 는 SDK API 가 못 가리켜서 각 플러그인이 자체 helper 작성.
 

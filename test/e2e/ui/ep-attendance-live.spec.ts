@@ -36,6 +36,13 @@ const ADMIN_KEY = process.env.MARKETPLACE_ADMIN_KEY ?? "";
 const EP_BUNDLE_PATH = process.env.EP_API_BUNDLE_PATH ?? "";
 const EVIDENCE_PATH = process.env.BUNDLE_E2E_EVIDENCE_PATH ?? "";
 const EP_PLUGIN_ID = "ep-api";
+// Seeded-session fixtures standing in for a completed portal SSO login. The
+// attendance provider this test drives is the loopback fake started below
+// (LVIS_EP_ATTENDANCE_E2E_ORIGIN), so these values only have to satisfy the
+// snapshot shape the plugin reads back.
+const PORTAL_SSO_COOKIE_NAME = "portal-sso";
+const PORTAL_SSO_COOKIE_DOMAIN = ".portal.example.com";
+const PORTAL_LOGIN_FINAL_URL = "https://portal.example.com/";
 const ATTENDANCE_SKILL_ID = "attendance";
 const TEST_DATE = "2026-07-24";
 const TEST_START_TIME = "09:15";
@@ -319,14 +326,18 @@ async function activateEpWebview(ctx: SeededElectronContext): Promise<number> {
         }>>;
       };
     }).lvisApi.listPluginUiExtensions();
-    const ep = views.find((view) =>
+    // The sidebar extension id is owned by the plugin bundle, not by the host.
+    // Select on (pluginId, slot) and require exactly one match, so this assertion
+    // stays true across plugin-side renames while still failing if the plugin
+    // contributes zero or more than one sidebar surface.
+    const sidebar = views.filter((view) =>
       view.pluginId === pluginId &&
-      view.extension.id === "ep-control" &&
       view.extension.slot === "sidebar"
     );
-    return ep ? `plugin:${ep.pluginId}:${ep.extension.id}` : null;
+    if (sidebar.length !== 1) return null;
+    return `plugin:${sidebar[0].pluginId}:${sidebar[0].extension.id}`;
   }, EP_PLUGIN_ID);
-  expect(viewKey).toBe("plugin:ep-api:ep-control");
+  expect(viewKey).toMatch(new RegExp(`^plugin:${EP_PLUGIN_ID}:[A-Za-z0-9._-]+$`));
   await ctx.app.evaluate(({ BrowserWindow }, key) => {
     const win = BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed());
     win?.webContents.send("lvis:view:activate", { viewKey: key });
@@ -612,8 +623,18 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
 
     const dialog = marketplace.getByRole("dialog");
     await expect(dialog.getByTestId("plugin-install-consent")).toBeVisible();
-    await expect(dialog.getByTestId("plugin-install-network-access"))
-      .toContainText("attendance.portal.example.com");
+    // The consent dialog must surface every egress host the bundle declares.
+    // Read them from the bundle manifest rather than pinning literals here, so
+    // the check covers the whole allow-list instead of one hand-copied entry.
+    const declaredEgressHosts = (bundle.manifest.networkAccess as
+      { allowedDomains?: unknown } | undefined)?.allowedDomains;
+    if (!Array.isArray(declaredEgressHosts) || declaredEgressHosts.length === 0) {
+      throw new Error("exact EP bundle manifest declares no networkAccess.allowedDomains");
+    }
+    for (const host of declaredEgressHosts) {
+      await expect(dialog.getByTestId("plugin-install-network-access"))
+        .toContainText(String(host));
+    }
     const consent = dialog.getByRole("checkbox", {
       name: "I understand this grants administrator privileges.",
     });
@@ -645,16 +666,17 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
     const pluginDataDir = join(ctx.lvisHome, "plugins", EP_PLUGIN_ID, "data");
     mkdirSync(pluginDataDir, { recursive: true, mode: 0o700 });
     const snapshotPath = join(pluginDataDir, "session-snapshot.json");
+    // Fixture values (see the PORTAL_* constants at the top of this file).
     writeFileSync(snapshotPath, `${JSON.stringify({
       v: 1,
       cookies: [{
-        name: "portal-sso",
+        name: PORTAL_SSO_COOKIE_NAME,
         value: "id=e2e.attendance&empno=100000",
-        domain: ".portal.example.com",
+        domain: PORTAL_SSO_COOKIE_DOMAIN,
         path: "/",
       }],
       lastLoginAt: new Date().toISOString(),
-      lastLoginFinalUrl: "https://portal.example.com/",
+      lastLoginFinalUrl: PORTAL_LOGIN_FINAL_URL,
       attendanceCookies: [],
       attendanceLastLoginAt: new Date().toISOString(),
       parkingCookies: [],

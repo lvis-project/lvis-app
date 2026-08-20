@@ -20,7 +20,7 @@ export default function Page() {
       <ul>
         <li><strong>Marketplace</strong> — plugin catalog reads + package downloads (the <code>lvis://install/&lt;slug&gt;</code> deeplink routes to the host).</li>
         <li><strong>Agent Hub</strong> — Work Board / Inbox sync (HTTPBearer token, <code>agent-hub.lvisai.xyz</code>).</li>
-        <li><strong>ms-graph, ep-api</strong> — each plugin's own OAuth (MSAL · EP SSO). Tokens are isolated to the plugin namespace.</li>
+        <li><strong>ms-graph, the internal portal plugin</strong> — each plugin's own OAuth (MSAL · portal SSO). Tokens are isolated to the plugin namespace.</li>
       </ul>
 
       <h2 id="flow">Login flow</h2>
@@ -29,7 +29,7 @@ export default function Page() {
           { title: "Main host → Marketplace SSO", body: <p>Enter the Marketplace LoginPage in a web browser. The Marketplace server (<code>marketplace.lvisai.xyz</code>) responds via <code>/api/v1/auth/*</code>.</p> },
           { title: "API key issuance", body: <p>On successful login an ApiKey (publisher/admin role) is issued, and the client verifies that the key's sha256 hash matches <code>api_keys.key_hash</code> in the server DB.</p>, badge: "one-time" },
           { title: "Agent Hub token", body: <p>Using the Work Board requires a separate Agent Hub <code>/auth/exchange/issue</code> + <code>/auth/exchange/redeem</code> flow (<code>lvis-agent-hub/src/.../api/auth_exchange.py</code>). PKCE-like.</p> },
-          { title: "Plugin OAuth — when needed", body: <p>ms-graph (MSAL) / ep-api (EP SSO) are handled separately via <code>hostApi.openAuthWindow</code> on first use after plugin install.</p> },
+          { title: "Plugin OAuth — when needed", body: <p>ms-graph (MSAL) / the internal portal plugin (portal SSO) are handled separately via <code>hostApi.openAuthWindow</code> on first use after plugin install.</p> },
         ]}
       />
 
