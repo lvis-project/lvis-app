@@ -316,14 +316,26 @@ function collectRollingWindowCandidates({
     // `updated_at >= merged_at` — an update is at least as recent as the merge
     // that caused it — so on a list sorted by `updated_at` descending, a page
     // whose OLDEST `updated_at` predates the window is followed only by pulls
-    // that also merged before it. Keyed on the page's oldest entry rather than
-    // its last: those coincide only while the ordering holds, and a last-entry
-    // stop would end the scan with in-window pulls still unread.
+    // that also merged before it.
     //
-    // Completeness under a sort key that MOVES is not claimed here: a pull
-    // touched mid-scan travels toward page one and can cross a boundary this
-    // scan has already passed. The repeated scan in
-    // `evaluateSensitiveRollingWindow` is what covers that.
+    // Keyed on the page's minimum rather than its last entry. Those coincide
+    // while the ordering holds, and the minimum is `<=` the last entry always,
+    // so this stop fires whenever a last-entry stop would and sometimes a page
+    // sooner: it reads a SUBSET of the pages a last-entry stop reads, never a
+    // superset. That makes it the cheaper scan, NOT the more complete one. When
+    // the order breaks WITHIN a page it can end the scan with an in-window pull
+    // unread on the next page, and no later pass recovers it — a rescan
+    // re-requests the same pages and re-derives the same truncated list. The
+    // suite's `stops on the page's OLDEST entry` fixture is that exact shape:
+    // it holds an in-window sensitive pull on page two that no scan fetches.
+    //
+    // Left as it is rather than widened here: this key is long-standing
+    // behaviour, and reading further costs requests on every run of the gate.
+    //
+    // A pull whose sort key MOVES is a different hole from the one above, and
+    // the one the repeated scan in `evaluateSensitiveRollingWindow` does cover:
+    // it travels toward page one and can cross a boundary this scan already
+    // passed, and a later pass, once it settles, delivers it.
     if (pulls.length < pageSize || oldestUpdatedInPage < sinceTime) return candidates;
   }
 
@@ -372,11 +384,21 @@ export function evaluateSensitiveRollingWindow({
   const sinceTime = timestamp(since, "window-since-invalid");
   positiveInteger(threshold, "cluster-threshold-invalid");
   positiveInteger(maxPullPages, "window-page-limit-invalid");
-  // Two scans is the floor, not one. Settling is only observable by comparing a
-  // scan against the one after it, so a budget of a single scan can never be
-  // satisfied — it can only fail. Rejected as input rather than accepted and
-  // then quietly spending a second scan the caller did not budget for, which is
-  // what a plain positive-integer check did.
+  // Two scans is the floor, not one. This bounds SETTLING, and settling is
+  // observable only by comparing a scan against the one after it: a run that
+  // does not exit early on the threshold must make a second scan before it can
+  // conclude the window is quiet.
+  //
+  // A plain positive-integer check accepted `1` and then did not hold it. On a
+  // settled window it spent the second scan anyway and RETURNED a verdict — the
+  // budget overspent rather than refused; only a window that kept moving
+  // failed. (A run that reaches the threshold during the first scan does return
+  // within one scan, but by the `sensitive >= threshold` exit in the loop
+  // below, taken before settling is ever in question.) So `1` never meant one
+  // scan: the parameter carried its stated meaning only from two upward.
+  //
+  // Rejected as invalid input instead, so it means what it says at every value
+  // it accepts. Not reachable from `evaluateClusterScope` or the CLI.
   if (!Number.isInteger(maxWindowPasses) || maxWindowPasses < 2) {
     fail("window-pass-limit-invalid");
   }
