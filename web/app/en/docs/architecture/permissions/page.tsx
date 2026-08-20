@@ -12,7 +12,7 @@ export default function Page() {
         eyebrow="Architecture"
         title="Permission model — 3 risk levels × 4 review modes"
         description="LVIS's permission decisions run along two axes: a tool's risk level (low/medium/high) and the automatic review mode (disabled / rule / LLM-assisted / strict). Users can directly control how much automation they want."
-        tags={["3 risk levels", "4 review modes", "5 tool categories"]}
+        tags={["3 risk levels", "4 review modes", "5 tool categories", "parent-decided sub-agent asks"]}
       />
 
       <h2 id="risk">Risk level — low, medium, high</h2>
@@ -39,6 +39,24 @@ export default function Page() {
         <li><strong>Network</strong> — communicates externally.</li>
         <li><strong>Internal</strong> — LVIS's own meta operations (e.g. changing settings).</li>
       </ul>
+
+      <h2 id="subagent">When a sub-agent asks — the parent answers first</h2>
+      <p>
+        An agent can spawn sub-agents. When a sub-agent asks to use a tool, the question does not go straight to the user:
+        <strong> the parent agent that spawned it answers first</strong>. Only what the parent cannot answer is escalated to the user. This ships on by default.
+      </p>
+      <ul>
+        <li><strong>There is a ceiling on what a parent may decide.</strong> It defaults to medium, and the only two values the field accepts are low and medium — so <strong>high risk cannot pass through this lane and goes to the user</strong>. The ceiling is applied <em>before</em> the parent is asked, not by trimming its answer afterwards.</li>
+        <li><strong>The evidence the parent sees is host-composed.</strong> There is no field in it for a sentence a sub-agent wrote to argue its own case. The one exception is <em>the tool arguments being judged</em> — they are the call, so they cannot be withheld; they are passed masked and labelled as the sub-agent&apos;s own words rather than as neutral fact.</li>
+        <li><strong>There are limits on time and count.</strong> One adjudication has a time bound, and one sub-agent run has a budget of adjudications. Past either, the ask escalates to the user.</li>
+        <li><strong>Conversation content does not leave by default.</strong> There is a setting that quotes the parent conversation's recent turns into the evidence, but <strong>its default is zero turns</strong>. Raising it sends the user's own words to the reviewing model, so it only works if it is deliberately turned on.</li>
+        <li>These values are visible under Settings → Permissions. <strong>The risk ceiling is the one that moves in the narrowing direction only</strong> — the time bound, the count budget, and the number of quoted turns can each be raised above their defaults, and each is clamped to a maximum fixed in code.</li>
+      </ul>
+
+      <Callout tone="security" title="This lane sits after the host's hard checks">
+        The question only reaches the parent once the host's hard checks have already cleared the call. A parent answer cannot re-open something already refused, and it applies to that one call only —
+        it is not remembered as "allow from now on". The outcome is written to the audit log with an <code>answeredBy</code> field naming who answered it.
+      </Callout>
 
       <h2 id="no-fallback">No bypass</h2>
       <Callout tone="security" title="Revoking a permission stops it immediately">

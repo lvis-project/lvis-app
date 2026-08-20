@@ -27,15 +27,15 @@ export default function Page() {
 
       <h2 id="register">Registration Flow</h2>
       <ol>
-        <li>Fire the <code>lvis://mcp-login/&lt;slug&gt;</code> deeplink from the Storefront (PluginDetailPage:178), or enter the endpoint directly.</li>
+        <li>Fire the <code>lvis://mcp-login/&lt;slug&gt;</code> deeplink from the Storefront, or enter the endpoint directly. (The Storefront is the marketplace web app, which lives in a separate repository.)</li>
         <li>The host performs an MCP handshake to fetch server metadata / tool list, then stores metadata under <code>~/.lvis/mcp/&lt;slug&gt;/</code>.</li>
-        <li>Registers into <code>~/.lvis/mcp/servers.json</code> (boot.ts:1012-1016).</li>
-        <li>Registered in the Tool Registry as source='mcp'. The reviewer classifies it as <code>medium</code> RiskLevel by default.</li>
+        <li>Registers into <code>~/.lvis/mcp/servers.json</code> (host path: <code>src/mcp/mcp-manager.ts</code>).</li>
+        <li>Registered in the Tool Registry as source=&apos;mcp&apos;. The host places that origin at the lowest of its three trust levels (<code>src/tools/types.ts</code>).</li>
       </ol>
 
-      <Callout tone="security" title="RiskLevel for MCP tools">
-        Tools from external MCP servers default to <strong>medium</strong>. Even if the publisher supplies risk metadata, it gets reclassified at the admin stage.
-        Exposure as auto-executable (low) requires explicit admin approval.
+      <Callout tone="security" title="Registering one does not make it auto-run">
+        The host treats tools from an external MCP server at the lowest of its three trust levels, and <strong>filters them out of the risk-band auto-allow path into a confirmation card</strong> — read-only tools included.
+        Which cases skip that prompt, and how far each one reaches, is set out on the <a href="/en/docs/host/mcp#beyond-tools">MCP servers page</a>.
       </Callout>
 
       <PageNav />

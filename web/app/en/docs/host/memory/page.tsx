@@ -33,6 +33,31 @@ export default function Page() {
         <li>Even when a plugin discovers a new fact, it is never saved automatically — it always goes through a user confirmation card.</li>
       </ul>
 
+      <h2 id="auto">Letting the host extract memories itself — off by default</h2>
+      <p>
+        The host can read the conversation and pick out facts worth remembering. There are three settings.
+      </p>
+      <FeatureGrid
+        columns={3}
+        items={[
+          { title: "Off", body: <><strong>This is the default.</strong> The host does not extract memories from the conversation.</>, tone: "teal" },
+          { title: "Review", body: <>Candidates are extracted but not saved — they are shown as a card first, and only stay if the user confirms.</>, tone: "citron" },
+          { title: "Auto", body: <>Saved straight away with no confirmation card. Read the rest of this page before turning it on.</>, tone: "coral" },
+        ]}
+      />
+      <p>
+        This <em>automatic</em> extraction, in any of the three modes above, considers <strong>only turns the user typed at the keyboard</strong>. Attachment bodies, messages from other agents,
+        and turns that arrived through an external surface are filtered out at the candidate stage — otherwise a sentence someone else wrote could harden into a permanent fact about the user.
+        (A user explicitly saying "remember this" is a separate path from this automatic extraction.)
+      </p>
+
+      <h2 id="project">It also reads instructions the project carries</h2>
+      <p>
+        If the project folder you are working in has a team-shared <code>AGENTS.md</code>, the host reads that too and takes it into account.
+        It is treated as a <strong>separate layer</strong> from the user's personal instructions, and it sits <em>below</em> the personal one.
+        It is read-only — the place in the host where an <code>AGENTS.md</code> is <em>written</em> is the user's own area (<code>~/.lvis</code>); the project folder is only read.
+      </p>
+
       <h2 id="where">Where is it stored?</h2>
       <p>
         All memory is kept only inside the LVIS area on the user's PC. It is never sent to an external server, the Marketplace, or the Agent Hub.

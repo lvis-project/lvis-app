@@ -13,10 +13,10 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="Chat Screen Layout"
-        description="The main screen mounted by App.tsx is CustomTitleBar + MainToolbar + ChatView. MessageQueuePanel · SessionTodoPanel always float beside the ChatView body, and useChatContext() manages session/queue/TODO state together."
+        description="AppShell wraps the main screen in CustomTitleBar + MainToolbar, floats a collapsible Sidebar, and the MainContent inside it mounts ChatView. SessionTodoPanel · MessageQueuePanel stack directly above the composer, and ChatView reads session/queue/TODO state together through useChatContext()."
         tags={[
-          "App.tsx:1249-1290",
-          "ChatView.tsx:222",
+          "AppShell + Sidebar + MainContent",
+          "ChatView",
           "MessageQueuePanel + SessionTodoPanel",
         ]}
       />
@@ -24,9 +24,9 @@ export default function Page() {
       <FeatureGrid
         columns={3}
         items={[
-          { title: "① CustomTitleBar + MainToolbar", body: <>Window controls + session/plugin/permission toolbar. Imported in <code>App.tsx:33</code>.</>, tone: "teal" },
-          { title: "② ChatView body", body: <>Conversation + tool cards + thinking + question cards. <code>ChatView.tsx:222</code>.</> },
-          { title: "③ Queue + TODO panels", body: <>External signal queue + session TODOs. <code>ChatView.tsx:1416-1417</code>.</>, tone: "citron" },
+          { title: "① CustomTitleBar + MainToolbar", body: <>Window controls + session/plugin/permission toolbar. Mounted by <code>src/ui/renderer/AppShell.tsx</code>.</>, tone: "teal" },
+          { title: "② ChatView body", body: <>Conversation + tool cards + thinking + question cards. <code>src/ui/renderer/ChatView.tsx</code>.</> },
+          { title: "③ Queue + TODO panels", body: <>External signal queue + session TODOs. They sit directly above the composer (<code>src/ui/renderer/components/ChatComposerDock.tsx</code>) and draw nothing when they have no items.</>, tone: "citron" },
         ]}
       />
 
@@ -39,13 +39,14 @@ export default function Page() {
       <h2 id="panels">Side panels</h2>
       <ul>
         <li><code>PluginGridButton.tsx</code> — grid of plugin entry buttons (the host UI plugin manifest's ui[] slots attach here).</li>
-        <li><code>RoutinePanel.tsx</code> — RoutineEngineV2's list of registered routines + on/off toggles.</li>
+        <li><code>RoutinePanel.tsx</code> — RoutineEngine's list of registered routines + on/off toggles.</li>
         <li><code>PermissionReviewStatusCard.tsx</code> — reviewer mode/status card.</li>
       </ul>
 
-      <Callout tone="info" title="Settings screen — a separate sidebar">
-        The SettingsContent screen has its own Sidebar column (<code>SettingsContent.tsx:214</code>).
-        The main chat is a single-column + toolbar + panels layout, so there is no separate sidebar there.
+      <Callout tone="info" title="There are two separate sidebars">
+        The main chat screen has a <strong>collapsible floating Sidebar</strong> — session, project, and plugin views live in it, and it can be collapsed and resized.
+        <code>src/ui/renderer/AppShell.tsx</code> renders it.
+        The settings screen has its own <strong>nav column</strong>, separate from that one (<code>src/ui/renderer/SettingsContent.tsx</code>).
       </Callout>
 
       <PageNav />

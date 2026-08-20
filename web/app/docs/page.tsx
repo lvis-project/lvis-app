@@ -22,7 +22,7 @@ const layers = [
 const features = [
   { eyebrow: "Host · Chat", title: "데스크톱 채팅 가이드", desc: "메시지 큐, Tool/Thinking, 질문 카드, 권한 흐름까지 호스트 앱 핵심 화면 8가지를 한 흐름으로.", href: "/docs/chat/layout", icon: MessagesSquare, span: "lg:col-span-4" },
   { eyebrow: "Routines", title: "루틴 등록 & 트리거", desc: "shutdown / schedule 두 트리거 + per-fire fresh ConversationLoop 격리 패턴.", href: "/docs/routines/overview", icon: Workflow, span: "lg:col-span-2" },
-  { eyebrow: "Plugins", title: "6개 active 플러그인", desc: "Local Indexer · MS-Graph · Meeting · Work Assistant · Agent Hub · 사내 포털 플러그인.", href: "/docs/plugins", icon: Plug, span: "lg:col-span-3" },
+  { eyebrow: "Plugins", title: "플러그인", desc: "도메인 기능은 플러그인으로 분리됩니다. 각 플러그인은 정적 manifest 에 도구를 선언하고, 호스트는 그 선언으로 도구 목록을 만듭니다.", href: "/docs/plugins", icon: Plug, span: "lg:col-span-3" },
   { eyebrow: "Architecture", title: "시스템 구조도", desc: "HostApi 컨트랙트 · ~/.lvis 스토리지 트리 · RiskLevel × Category 격자.", href: "/docs/architecture/overview", icon: Bot, span: "lg:col-span-3" },
   { eyebrow: "Trust", title: "권한 & 위험 관리", desc: "디렉토리 grant · LLM 자율 검토 4모드 · agentApproval cryptographic chain.", href: "/docs/chat/permissions/directory", icon: ShieldCheck, span: "lg:col-span-2" },
   { eyebrow: "Servers", title: "Marketplace & Agent Hub", desc: "FastAPI + SQLAlchemy 2.0 카탈로그 · 보드 · 워크로그 · Ed25519 패키지 서명.", href: "/docs/servers/marketplace", icon: Server, span: "lg:col-span-4" },
@@ -30,7 +30,7 @@ const features = [
 
 const tour = [
   { step: "01", time: "5분", title: "설치 → 로그인", desc: "OS 빌드 설치 후 첫 실행. Marketplace SSO + ApiKey sha256." },
-  { step: "02", time: "10분", title: "플러그인 권한 허용", desc: "capabilities 12종 + tools[] + pluginAccess 통합 다이얼로그." },
+  { step: "02", time: "10분", title: "플러그인 권한 허용", desc: "capabilities + tools[] + pluginAccess 통합 다이얼로그." },
   { step: "03", time: "15분", title: "루틴 + 첫 카드", desc: "schedule 트리거 등록, work-assistant proactive 카드 받아보기." },
 ];
 
