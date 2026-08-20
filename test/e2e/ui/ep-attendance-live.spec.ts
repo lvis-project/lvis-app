@@ -36,8 +36,10 @@ const ADMIN_KEY = process.env.MARKETPLACE_ADMIN_KEY ?? "";
 const EP_BUNDLE_PATH = process.env.EP_API_BUNDLE_PATH ?? "";
 const EVIDENCE_PATH = process.env.BUNDLE_E2E_EVIDENCE_PATH ?? "";
 const EP_PLUGIN_ID = "ep-api";
-// Seeded-session fixtures. Nothing here is resolved over DNS: the plugin is
-// redirected at the loopback provider via LVIS_EP_ATTENDANCE_E2E_ORIGIN.
+// Seeded-session fixtures standing in for a completed portal SSO login. The
+// attendance provider this test drives is the loopback fake started below
+// (LVIS_EP_ATTENDANCE_E2E_ORIGIN), so these values only have to satisfy the
+// snapshot shape the plugin reads back.
 const PORTAL_SSO_COOKIE_NAME = "portal-sso";
 const PORTAL_SSO_COOKIE_DOMAIN = ".portal.example.com";
 const PORTAL_LOGIN_FINAL_URL = "https://portal.example.com/";
@@ -664,9 +666,7 @@ test("exact EP attendance bundle reads, confirms one write, verifies readback, a
     const pluginDataDir = join(ctx.lvisHome, "plugins", EP_PLUGIN_ID, "data");
     mkdirSync(pluginDataDir, { recursive: true, mode: 0o700 });
     const snapshotPath = join(pluginDataDir, "session-snapshot.json");
-    // Fixture stand-in for a completed portal SSO login. The plugin is pointed at
-    // the loopback provider started above via LVIS_EP_ATTENDANCE_E2E_ORIGIN, so
-    // these values only have to satisfy the snapshot shape.
+    // Fixture values (see the PORTAL_* constants at the top of this file).
     writeFileSync(snapshotPath, `${JSON.stringify({
       v: 1,
       cookies: [{
