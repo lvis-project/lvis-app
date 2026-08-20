@@ -53,6 +53,7 @@ vi.mock("../../tools/registry.js", () => ({
 
 import { McpManager } from "../mcp-manager.js";
 import type { McpServerConfig } from "../types.js";
+import { observeFileHandleSyncs } from "../../__tests__/support/fsync-observer.js";
 
 const testDir = join(tmpdir(), `lvis-mcp-test-${process.pid}`);
 const testConfigPath = join(testDir, "mcp-servers.json");
@@ -295,82 +296,42 @@ describe("McpManager — addConfig()", () => {
     expect(mgr.listServers()).toEqual([]);
   });
 
-  it("does not create a new .bak when Windows rename hits EEXIST during save", async () => {
+  it("saveConfigs persists through the shared atomic-write authority — fsynced, no .tmp/.bak/.old debris", async () => {
+    // Convergence: saveConfigs routes through writeFileAtomicAtPath instead of a
+    // bespoke writeFile+rename carrying a Windows EEXIST backup-and-restore
+    // dance. Two removed tests here injected EEXIST via the `node:fs/promises`
+    // mock; the authority renames through `node:fs`'s promises, and EEXIST is
+    // unreachable for a file-onto-file rename anyway (Win32 `rename` replaces
+    // the target), so that dance guarded nothing. What the removed tests
+    // legitimately cared about — a durable write with correct contents and no
+    // stray staging/backup sibling that could retain secrets — is asserted here
+    // against the converged path. The fsync count goes red if the authority's
+    // durability is reverted; the debris check goes red if a backup file returns.
     const existingServers: McpServerConfig[] = [
       { id: "existing-srv", transport: "stdio", command: "cmd" },
     ];
     await writeFile(testConfigPath, JSON.stringify({ servers: existingServers }), "utf-8");
 
-    let firstRename = true;
-    let firstTmpPath: string | undefined;
-    const actualFsPromises =
-      await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
-    vi.mocked(rename).mockImplementation(async (oldPath, newPath) => {
-      if (
-        firstRename &&
-        oldPath.startsWith(`${testConfigPath}.`) &&
-        oldPath.endsWith(".tmp") &&
-        newPath === testConfigPath
-      ) {
-        firstRename = false;
-        firstTmpPath = oldPath;
-        const err = new Error("dest exists") as NodeJS.ErrnoException;
-        err.code = "EEXIST";
-        throw err;
-      }
-      return actualFsPromises.rename(oldPath, newPath);
-    });
-
     const mgr = await makeManager();
-    await expect(
-      mgr.addConfig({ id: "new-srv", transport: "stdio", command: "npx tool" }),
-    ).resolves.toEqual({ connected: true });
+    const observer = observeFileHandleSyncs();
+    try {
+      await expect(
+        mgr.addConfig({ id: "new-srv", transport: "stdio", command: "npx tool" }),
+      ).resolves.toEqual({ connected: true });
+    } finally {
+      observer.restore();
+    }
 
     const raw = JSON.parse(await readFile(testConfigPath, "utf-8")) as { servers: McpServerConfig[] };
     expect(raw.servers.map((server) => server.id)).toEqual(["existing-srv", "new-srv"]);
+    expect(observer.calls()).toBeGreaterThanOrEqual(1);
     expect(existsSync(`${testConfigPath}.bak`)).toBe(false);
-    expect(firstTmpPath).toBeDefined();
-    expect(firstTmpPath).not.toBe(`${testConfigPath}.tmp`);
     const dirEntries = await readdir(testDir);
-    expect(dirEntries.filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
-  });
-
-  it("cleans up tmp file and propagates error when EEXIST rm+rename retry also fails", async () => {
-    // With the rm+rename pattern the original config is removed before the retry rename.
-    // If the retry also fails the error propagates and the tmp file is cleaned up.
-    const existingServers: McpServerConfig[] = [
-      { id: "existing-srv", transport: "stdio", command: "cmd" },
-    ];
-    await writeFile(testConfigPath, JSON.stringify({ servers: existingServers }), "utf-8");
-
-    let tmpToConfigAttempts = 0;
-    const actualFsPromises =
-      await vi.importActual<typeof import("node:fs/promises")>("node:fs/promises");
-    vi.mocked(rename).mockImplementation(async (oldPath, newPath) => {
-      if (oldPath.startsWith(`${testConfigPath}.`) && oldPath.endsWith(".tmp") && newPath === testConfigPath) {
-        tmpToConfigAttempts += 1;
-        if (tmpToConfigAttempts === 1) {
-          const err = new Error("dest exists") as NodeJS.ErrnoException;
-          err.code = "EEXIST";
-          throw err;
-        }
-        if (tmpToConfigAttempts === 2) {
-          const err = new Error("access denied") as NodeJS.ErrnoException;
-          err.code = "EACCES";
-          throw err;
-        }
-      }
-      return actualFsPromises.rename(oldPath, newPath);
-    });
-
-    const mgr = await makeManager();
-    await expect(
-      mgr.addConfig({ id: "new-srv", transport: "stdio", command: "npx tool" }),
-    ).rejects.toThrow("access denied");
-
-    const dirEntries = await readdir(testDir);
-    expect(dirEntries.filter((entry) => entry.endsWith(".tmp"))).toEqual([]);
-    expect(dirEntries.filter((entry) => entry.endsWith(".old"))).toEqual([]);
+    expect(
+      dirEntries.filter(
+        (entry) => entry.endsWith(".tmp") || entry.endsWith(".old"),
+      ),
+    ).toEqual([]);
   });
 
   it("rejects governance-invalid config before save", async () => {

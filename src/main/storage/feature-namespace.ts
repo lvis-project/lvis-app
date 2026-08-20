@@ -26,6 +26,11 @@ import { constants, promises as fs } from "node:fs";
 import { join, dirname } from "node:path";
 import { platform } from "node:process";
 import { lvisHome } from "../../shared/lvis-home.js";
+import {
+  RENAME_FILE_LOCK_CODES,
+  BACKGROUND_ATTEMPTS,
+  transientFsLockDelayMs,
+} from "../../lib/transient-fs-lock-retry.js";
 
 const DIR_MODE = 0o700;
 const FILE_MODE = 0o600;
@@ -83,6 +88,45 @@ async function syncDirectoryEntry(dir: string): Promise<void> {
 }
 
 /**
+ * `rename` the staged file onto its target, retrying only the Windows
+ * transient-lock codes ({@link RENAME_FILE_LOCK_CODES}: EPERM/EACCES/EBUSY —
+ * another process, a scanner or a plugin webview, holding the target open) on
+ * the same delay curve and code set the synchronous sibling
+ * {@link ../../lib/atomic-file}.replaceStagedFile uses. Both draw that policy
+ * from {@link ../../lib/transient-fs-lock-retry} so the async and sync rename
+ * ladders cannot drift. The async budget ({@link BACKGROUND_ATTEMPTS}) is the
+ * larger one: nothing blocks the caller while these sleeps run.
+ *
+ * EEXIST is deliberately NOT retried and NOT recovered here. For a
+ * file-onto-file rename it is unreachable — Node maps `rename` to
+ * `MoveFileExW(…, MOVEFILE_REPLACE_EXISTING)` on Win32, which replaces an
+ * existing regular-file target rather than failing — which is exactly why
+ * {@link RENAME_FILE_LOCK_CODES} omits it (see the note in
+ * transient-fs-lock-retry). The bespoke config/tarball writers that this helper
+ * replaced carried an `EEXIST` rm-then-rename dance for that unreachable case;
+ * it is dropped rather than ported, and the reachable case those writers missed
+ * — a scanner-held lock — is what this retry actually covers. On macOS/Linux
+ * these codes never surface for this path, so the loop renames once and returns.
+ */
+async function renameStagedFile(from: string, to: string): Promise<void> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      await fs.rename(from, to);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      const retryable =
+        platform === "win32" &&
+        code !== undefined &&
+        RENAME_FILE_LOCK_CODES.has(code) &&
+        attempt < BACKGROUND_ATTEMPTS;
+      if (!retryable) throw err;
+      await new Promise<void>((resolve) => setTimeout(resolve, transientFsLockDelayMs(attempt)));
+    }
+  }
+}
+
+/**
  * Atomically write arbitrary `body` to `filePath`, enforcing 0o700 on the
  * parent directory and 0o600 on the file.
  *
@@ -100,7 +144,10 @@ async function syncDirectoryEntry(dir: string): Promise<void> {
  *
  * The staged bytes are fsynced before the rename and the parent directory after
  * it, so the durability the callers' own comments claim is the durability they
- * get. An uncommitted staging file is removed on every failure path.
+ * get. An uncommitted staging file is removed on every failure path. The rename
+ * itself is retried on the Windows transient-lock codes (see
+ * {@link renameStagedFile}) so a scanner briefly holding the target open does
+ * not turn a routine overwrite into a hard failure.
  *
  * No `chmod` after the rename: `O_EXCL` guarantees the staging file is newly
  * created, so the 0o600 passed to `open` is the mode that lands, and `rename`
@@ -130,7 +177,7 @@ export async function writeFileAtomicAtPath(
     } finally {
       await handle.close();
     }
-    await fs.rename(tmp, filePath);
+    await renameStagedFile(tmp, filePath);
   } catch (err) {
     await fs.rm(tmp, { force: true }).catch(() => undefined);
     throw err;

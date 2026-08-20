@@ -10,6 +10,7 @@
  */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { mkdtempSync } from "node:fs";
+import { observeFileHandleSyncs } from "../../__tests__/support/fsync-observer.js";
 import { rm, writeFile, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -263,5 +264,27 @@ describe("cleanupStaleTmpFiles", () => {
     // The real auth file must be untouched.
     const result = await readPersistedPluginAuthPartitions();
     expect(result!["com.example.plugin"]).toEqual(["persist:plugin-auth:com.example.plugin"]);
+  });
+});
+
+describe("plugin-auth-partition-store — atomic-write convergence (feature-namespace authority)", () => {
+  it("fsyncs the staged bytes before commit (the 'atomic write' the store's comment claims)", async () => {
+    // Pre-convergence, doActualWrite used `writeFile`+`rename` with no fsync, so
+    // the file survived a process crash but not a power cut — the durability the
+    // module header advertised was not the durability it delivered. The shared
+    // authority opens the staging file and fsyncs it (and the parent dir on
+    // POSIX) before the rename. Count those sync() calls: 0 with the old code,
+    // >=1 after convergence.
+    const observer = observeFileHandleSyncs();
+    try {
+      await writePersistedPluginAuthPartitions(
+        new Map([["pluginA", new Set(["persist:plugin-auth:pluginA"])]]),
+      );
+    } finally {
+      observer.restore();
+    }
+    const restored = await readPersistedPluginAuthPartitions();
+    expect(restored).toEqual({ pluginA: ["persist:plugin-auth:pluginA"] });
+    expect(observer.calls()).toBeGreaterThanOrEqual(1);
   });
 });
