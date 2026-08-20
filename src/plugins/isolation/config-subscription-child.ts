@@ -130,10 +130,19 @@ function asEventRecord(payload: unknown, label: string): Record<string, unknown>
  * instance of a general hazard — a function, a bigint or a second symbol
  * vanishes the same way — and the boundary's own rule for arguments and results
  * is that a value which would not round-trip is rejected rather than silently
- * changed. The throw lands inside the host's `config.onChange` callback, which
- * the change bus already catches and logs per listener, so a host that emits an
- * uncarryable value produces a logged failure instead of a plugin that quietly
- * reads it as "cleared".
+ * changed.
+ *
+ * WHERE THE THROW LANDS, precisely. It is raised inside the callback the host
+ * registered with `config.onChange`, and that member
+ * (`boot/steps/plugin-runtime/host-api-factory.ts`) wraps the callback in
+ * `HostApiGenerationScope.wrapListener`, which catches it and logs. NOT the
+ * change bus's per-listener try/catch: what the bus holds is the WRAPPER, and
+ * the wrapper returns normally while the callback runs asynchronously behind
+ * it, so the bus's catch is not on this path at all. (It is on the path only
+ * for a host with no generation scope, which is a partial hostApi assembled in
+ * a test — every host the app builds has one.) Either way the delivery is
+ * dropped and reported, and the plugin receives nothing rather than a payload
+ * it would read as "cleared".
  */
 export function encodeConfigChange(key: string, value: unknown): Record<string, unknown> {
   if (value === SECRET_REDACTED_SENTINEL) {

@@ -13,14 +13,22 @@
  *  - `getAppPreference` had no child half at all, because a snapshot with no
  *    re-push answers with the value a preference held at plugin start.
  *
- * A third claim needs a real child for a different reason — the child has to be
- * a separate PROCESS with its own lifecycle, not an object the host already
+ * Two more claims need a real child for a different reason — the child has to
+ * be a separate PROCESS with its own lifecycle, not an object the host already
  * finished building:
  *
  *  - A preference that moves while the child is still CONSTRUCTING. The child
  *    has no runtime to route a notification through until its plugin module has
  *    imported and its factory has run, so the push that announcement triggers
  *    is dropped — and nothing announces the same value a second time.
+ *  - A bring-up step that throws AFTER `construct` returned. What it leaks is a
+ *    live OS process, so only a real child can show whether it was given up or
+ *    orphaned; an in-memory double has nothing to leak.
+ *
+ * WHAT lands, not WHEN. Delivery ORDERING is not this file's to prove: the
+ * harness below calls its `config.onChange` listener synchronously, while the
+ * shipped host routes that member through a generation lease. Each ordering
+ * comment marks which of the two it belongs to.
  *
  * The inherited-key assertions below are NOT in that class:
  * `config-subscription-paths.test.ts` pins the same member in memory. They are
@@ -64,6 +72,7 @@ import {
 import {
   buildAppPreferenceReader,
   publishAppPreferenceChange,
+  HOST_PUBLIC_PREFERENCE_KEYS,
   _resetAppPreferencePublisher,
 } from "../../../boot/steps/plugin-runtime/app-preference.js";
 import type { SettingsService, WebViewPreferredFlow } from "../../../data/settings-store.js";
@@ -238,16 +247,45 @@ function fakeSettingsService(initial: WebViewPreferredFlow): {
  * up the other thirty would prove nothing about these two and would hide which
  * ones the path actually touches.
  */
-function hostApiFor(settingsService: SettingsService): {
+function hostApiFor(
+  settingsService: SettingsService,
+  options: {
+    /**
+     * Make the Nth preference SNAPSHOT read throw, counting from one.
+     *
+     * Counted on the allowlist's first key rather than on every call, so the
+     * ordinal keeps naming the same snapshot when the allowlist grows a second
+     * key.
+     *
+     * The production `hostApi` a plugin incarnation holds is the
+     * generation-scoped proxy, and every member on it throws outright once that
+     * generation is superseded, discarded or retired
+     * (`plugin-host-effect-scope.ts`). So "a read that worked while the child
+     * was constructing and throws right after" is a shape the host really
+     * produces, not one invented for this case.
+     */
+    readonly throwOnPreferenceSnapshot?: number;
+  } = {},
+): {
   hostApi: PluginHostApi;
   subscribedKeys: Set<string>;
+  /** Config-bus disposers the boundary asked for, and whether it ran them. */
+  configWatchers: Array<{ key: string; released: boolean }>;
 } {
   const subscribedKeys = new Set<string>();
+  const configWatchers: Array<{ key: string; released: boolean }> = [];
   const readPreference = buildAppPreferenceReader(settingsService, { warn: () => undefined });
+  let snapshotReads = 0;
   const hostApi = {
     getInstalledPluginIds: () => [PLUGIN_ID],
     onPluginsChanged: () => () => undefined,
-    getAppPreference: (key: string) => readPreference(PLUGIN_ID, key),
+    getAppPreference: (key: string) => {
+      if (key === HOST_PUBLIC_PREFERENCE_KEYS[0]) snapshotReads += 1;
+      if (options.throwOnPreferenceSnapshot === snapshotReads) {
+        throw new Error("hostApi.getAppPreference belongs to a retired generation");
+      }
+      return readPreference(PLUGIN_ID, key);
+    },
     config: {
       // Secrets never live in the cleartext record the host resolves, which is
       // why a secret change carries the sentinel instead of a value.
@@ -255,13 +293,19 @@ function hostApiFor(settingsService: SettingsService): {
       set: async () => undefined,
       onChange: (key: string, callback: (value: unknown) => void) => {
         subscribedKeys.add(key);
-        return subscribePluginConfigChange(PLUGIN_ID, key, (_changedKey, value) => {
+        const unsubscribe = subscribePluginConfigChange(PLUGIN_ID, key, (_changedKey, value) => {
           callback(value);
         });
+        const watcher = { key, released: false };
+        configWatchers.push(watcher);
+        return () => {
+          watcher.released = true;
+          unsubscribe();
+        };
       },
     },
   } as unknown as PluginHostApi;
-  return { hostApi, subscribedKeys };
+  return { hostApi, subscribedKeys, configWatchers };
 }
 
 async function waitFor(predicate: () => boolean, what: string): Promise<void> {
@@ -329,6 +373,16 @@ describe("the config values a plugin reads, across a real child process", () => 
         // reads the result are written to the SAME pipe in that order, so a
         // reply that had not applied the delivery is a protocol ordering
         // failure and must fail here rather than be waited out.
+        //
+        // THAT ORDER IS THIS HARNESS'S, not the shipped host's. `hostApiFor`
+        // hands `config.onChange` a listener the bus calls synchronously; the
+        // real member routes it through `HostApiGenerationScope.wrapListener`,
+        // which awaits a generation lease before the callback runs — so in
+        // production the notification is written on a later turn than the emit
+        // and nothing here pins WHEN it lands. What this case does pin is WHAT
+        // lands, which is the defect it exists for. The preference case below
+        // makes the same claim about ordering and it holds in production, for
+        // the reason stated there.
         emitPluginConfigChange(PLUGIN_ID, "apiKey", SECRET_REDACTED_SENTINEL);
         const afterSecret = await readChanges(instance);
         expect(afterSecret).toHaveLength(1);
@@ -408,6 +462,13 @@ describe("the config values a plugin reads, across a real child process", () => 
         // the SAME pipe in that order, so a reply that had not applied the push
         // would be a protocol ordering failure and should fail this assertion
         // rather than be waited out.
+        //
+        // Unlike the config case above, this order IS the shipped host's:
+        // `emitAppPreferenceChange` calls its listeners synchronously inside
+        // `publishAppPreferenceChange`, and the host's preference watcher is
+        // registered on that bus directly rather than through the plugin's
+        // generation-scoped `hostApi`, so no lease sits between the announcement
+        // and the write.
         const afterChange = (await instance.handlers.probe_preference!()) as PreferenceProbe;
         expect(afterChange.preferredFlow).toBe("system-browser");
 
@@ -467,6 +528,54 @@ describe("the config values a plugin reads, across a real child process", () => 
       } finally {
         await instance.stop?.();
       }
+    },
+    180_000,
+  );
+
+  it(
+    "kills the child and releases the host watchers when a step after construct throws",
+    async () => {
+      const root = temporaryRoot!;
+      const pluginDataDir = join(root, "data");
+      mkdirSync(pluginDataDir, { recursive: true });
+      const { service } = fakeSettingsService("in-app");
+      // Snapshot 1 is the construction seed and snapshot 2 is the push sent once
+      // `construct` resolves — so this fails the step that runs AFTER the child
+      // is alive and its module has been imported.
+      const { hostApi, configWatchers } = hostApiFor(service, { throwOnPreferenceSnapshot: 2 });
+      const factory = createOutOfProcessPluginFactory({
+        manifest: MANIFEST,
+        entryPath: writePluginEntry(root),
+        childEntryPath: await buildChildEntry(CHILD_BUNDLE_CACHE),
+        connect: connectPlainChild,
+      });
+      const before = new Set(spawnedChildren);
+
+      await expect(
+        factory({
+          pluginId: PLUGIN_ID,
+          pluginRoot: root,
+          hostRoot: repositoryRoot(),
+          pluginDataDir,
+          config: {},
+          log: () => undefined,
+          hostApi,
+        } as PluginRuntimeContext),
+      ).rejects.toThrow(/retired generation/);
+
+      const spawned = [...spawnedChildren].filter((child) => !before.has(child));
+      expect(spawned).toHaveLength(1);
+      // THE DEFECT. The push ran outside the block that owned the teardown, so
+      // a throw from it rejected the factory with the child still spawned and
+      // reading stdin, the transport still open, and every bus subscription
+      // still registered — an orphan with no ledger entry and no owner left to
+      // stop it.
+      await waitFor(() => spawned[0]!.exitCode !== null || spawned[0]!.signalCode !== null,
+        "the abandoned child to exit");
+      // Both halves: the host's own `"*"` snapshot watcher, and the one the
+      // plugin opened through the dispatcher while it was constructing.
+      expect(configWatchers.map((watcher) => watcher.key).sort()).toEqual(["*", "apiKey"]);
+      expect(configWatchers.every((watcher) => watcher.released)).toBe(true);
     },
     180_000,
   );
