@@ -345,7 +345,18 @@ way to ship a boundary that reassures without protecting.
   audit logger. This is the largest gain, it is total, and nothing else in the stack
   provides it.
 - **No Electron.** `require("electron")` in the child yields nothing. `BrowserWindow`,
-  `session`, and `app` become unreachable.
+  `session`, and `app` become unreachable. Measured, not assumed:
+  `confined-plugin-child.test.ts` drives a real confined child and gets
+  `MODULE_NOT_FOUND` — while `process.versions.electron` in that same child still
+  reports a version, so a plugin gating on the version reaches the call anyway.
+  The denial is not uniform across module systems, and each form is asserted
+  separately: `import("electron")` resolves to an inert namespace — empty on its
+  `default`, where a CJS module reached that way would carry the API — and a
+  named import fails to link.
+  Shipping the `electron` package does not restore it either: the package's entry
+  exports the binary's **path as a string**, so `BrowserWindow` is `undefined`.
+  This is a gain **and** an admission constraint — a plugin that owns a window of
+  its own is not a migration candidate. See Stage 8.
 - **A structural chokepoint.** Every hostApi call becomes a message the host
   services. `instrumentEffectsByPath` stops being "a wrapper we hope is total,
   guarded by a completeness test" and becomes "the only way in".
@@ -700,11 +711,133 @@ test suite must assert that residual explicitly rather than skipping the platfor
 
 *Scope.* One PR per plugin, adding its id to the routing SOT.
 
-*What proves it.* Per-plugin e2e, same shape as Stage 6.
+*What proves it.* Per-plugin e2e, same shape as Stage 6, **plus the admission
+criterion below**. The e2e alone is not enough and that is not hypothetical: two
+plugins were judged migratable on a per-plugin census of their `hostApi` surface and
+both judgements were wrong, in the same direction, for the same reason.
+
+#### The admission criterion, and why the obvious one fails
+
+The criterion cannot be "does every hostApi member it calls have a wire form",
+because §2.2's wire is complete — that question can only answer "ready". A plugin's
+capabilities arrive from two places, and the wire preserves only one of them:
+
+- **Mediated** — what the host hands it as `hostApi`. The wire preserves this.
+- **Ambient** — what the runtime hands it merely by being loaded in main: the global
+  scope, the built-in modules, the identity of the process. Nothing mediates this,
+  which is exactly what §4 says the boundary takes away.
+
+So the question that decides admission is *which ambient capabilities does this
+plugin use, and does a mediated form of each exist*. Measured over both sets, over
+the plugin's **dependencies** as well as its own sources, and against a real confined
+child. The axes, with what a child measurably gets — each was driven through the
+production spawn rather than reasoned about. **Measured** and **asserted** are not
+the same thing, so the last column says which: an assertion is a case that goes red
+when the fact stops holding, and two of these six have none.
+
+An assertion is also only an assertion **where it executes**, so the last column
+says that too. Every case behind these axes needs a live sandbox and returns early
+where the backend cannot initialize. That means they run on
+**macOS**, including the `macos-permission-tests` job in `ci.yml`, which runs
+`confined-plugin-child.test.ts` with `LVIS_REQUIRE_SANDBOX_CASES=1` so a machine
+that cannot initialize fails there rather than passing quietly; they **do not run**
+on the Linux job that runs the whole suite on every pull request, because that
+runner has no bubblewrap — nothing in `.github/` or `scripts/` installs it and ASRT
+vendors only seccomp and srt-win; and they do not run on Windows at all, being
+`runIf(darwin || linux)`. Installing bubblewrap on the Linux runner is what would
+change that, and it would also un-gate two other live-sandbox suites, which is why
+it is named as an open item rather than done in passing.
+
+| Ambient axis | What a confined child gets | Mediated form | Pinned by a case, and where it runs |
+|---|---|---|---|
+| Direct network egress (global `fetch`, `node:http`/`https`/`net`/`tls`/`dgram`, an HTTP client library, a dependency with its own socket) | None. Against an **allow-listed** host: `fetch` fails, DNS fails `ENOTFOUND`, and a raw connect to a literal IP fails `EPERM` at the syscall. The child's env names the loopback listener that enforces the allow-list; `NODE_USE_ENV_PROXY` is absent, so Node's own clients ignore it. What distinguishes this from an offline machine is **per platform**: on macOS the fence is a proxy and denial arrives as `EPERM`, where an unreachable network answers `ENETUNREACH`/`EHOSTUNREACH`/timeout, so the code alone separates them; on Linux the fence is a namespace and a connect inside one returns `ENETUNREACH` itself, the same code an offline machine gives, so the code separates nothing there. What separates them on either platform is that the same connect from the **unconfined** host succeeds. A companion "does an HTTPS request answer" check is not the discriminator: on a TLS-intercepting network the host's own request fails too. | `hostApi.hostFetch`. Declaring the host does **not** help — the request never reaches the allow-list. | **No.** macOS fences through a proxy and Linux through a namespace, so one probe means different things per platform, and an internet probe passes on an offline machine for the wrong reason. Resolved by a per-platform case against a host-controlled listener. |
+| Electron main-process APIs — the `electron` specifier by **any** resolution path (static import, bare `require`, a `require` held in a variable, `createRequire`, dynamic `import()`, a dependency's re-export). A literal grep for `require("electron")` misses both first-party plugins that are on this axis. | None — `require` throws `MODULE_NOT_FOUND`, while `process.versions.electron` still answers. Not uniform across module systems: `import("electron")` **resolves** to an inert namespace (`BrowserWindow` `undefined` on it and its `default` an empty object) and a named import fails to link with a `SyntaxError`, so the same absent capability breaks a plugin at resolution, at link, or at the call. Vendoring the package yields the binary path as a string. | Only `openExternalUrl`, `openAuthWindow`, `openAuthPartitionViewer`, `clearAuthPartition`. **No** form of `BrowserWindow`, `screen`, `session`, `ipcMain`. | Yes — asserted by `confined-plugin-child.test.ts`, which runs on macOS (CI's macOS job included) and returns without measuring on the Linux CI runner, which has no bubblewrap. Each module form is asserted separately. |
+| Process spawning | A grandchild inherits the child's fence (asserted in both directions). On Windows the sandbox does not confine process creation at all — §4's residual. | `hostApi.spawnWorker`, inside the same confinement envelope. | Yes, in both directions — asserted by `confined-plugin-child.test.ts`, which runs on macOS (CI's macOS job included) and returns without measuring on the Linux CI runner, which has no bubblewrap. |
+| Native modules (`.node`, or a dependency that loads one) | They **load**. `process.dlopen` of a prebuilt addon inside the read carve-out succeeds. It is compiled against the child binary's ABI, which is Electron's and not plain Node's, so a plain-Node prebuild breaks — and an addon is ambient code the wire cannot see, so the sandbox is the only thing between it and the OS. | None, and none is wanted. This axis is an argument for the sandbox being mandatory, not for a wire. | **No.** The measurement loaded a prebuilt addon already in this repository's dependency tree for one platform; a case pinned to that path would assert a fixture. Resolved by an addon the suite builds for the platform it runs on. |
+| The process's own identity — the values a plugin reads OFF the process to decide where to put things (`os.tmpdir()`, cwd, home). About those values *differing*, not about what may then be done with them; that is the next row, and a plugin can be broken by either alone. | The sandbox **substitutes** the temp root and creates nothing, so `os.tmpdir()` routinely does not exist: `readdirSync`/`mkdtempSync` fail `ENOENT` while a recursive `mkdir` on the same path succeeds. Home is substituted with a granted throwaway; cwd is inherited from the host and is not writable — the next row's answer, not this one's. | None needed — `pluginDataDir` is granted and exists before the child starts. | Yes — asserted by `confined-plugin-child.test.ts`, which runs on macOS (CI's macOS job included) and returns without measuring on the Linux CI runner, which has no bubblewrap. |
+| **Filesystem reach** — every path the plugin touches that is not its own: a folder the user picked, an export written somewhere else, a file beside the app, a directory inherited from a version of itself that predates `pluginDataDir`. The **largest** capability the boundary removes. | Removed **asymmetrically**, so both halves have to be measured. **Write** is a real jail, but it is **not** the two paths the spawn names. It is those two — `pluginDataDir` and the throwaway sandbox HOME — **plus the default write paths ASRT merges into every wrap**, which no grant this repository passes can remove (`sandbox-manager.js` composes the allow-list as `[...getDefaultWritePaths(), ...userAllowWrite]`). At ASRT 0.0.73 those are the `/dev` entries, `/tmp/claude`, `/private/tmp/claude`, `<real home>/.npm/_logs` and `<real home>/.claude/debug` — the last two under the user's **own** home, not the substituted one. Not `pluginRoot` either, whose bytes the manifest hash was taken over (the child reads it and is refused `EPERM` writing into it). A path outside the two grants **and** off that default list fails `EPERM`, including paths the plugin built out of values the **host** handed it: a `renameSync` out of a directory under `context.hostRoot` fails with nothing moved. The second named grant is a trap that does not look like one: the sandbox **substitutes** `HOME`, so a plugin rooting its state at `homedir()` is neither denied nor durable — the write **succeeds**, into a directory the same module deletes when the child exits. **Four** outcomes, not two and not three: durable under `pluginDataDir`; `EPERM` outside the grants and off the default list; succeeding-then-vanishing under `homedir()`; and **succeeding and durable outside both grants**, on one of ASRT's default paths — measured on macOS/arm64 with the sandbox active, and now asserted with the host reading the bytes back. That fourth outcome is a **hole worth closing**: those paths are per-machine rather than per-plugin, so two confined plugins share them — one confined child wrote bytes under the substituted temp root and a second, spawned with a different `pluginRoot` and `pluginDataDir`, read them back. The lever and its cost are in the routing SOT's axis 6; it is recorded here, not fixed here. **Read** is **not** a jail — ASRT's read model is deny-only, so a covering floor denies the known-sensitive subpaths (the secret store, the credential stores, the Electron userData directory holding every installed plugin) and `allowRead` only re-allows regions inside it. A path not on the floor stays readable. Both halves in one child: the secret file `EPERM`, while a directory under `hostRoot` **lists successfully** — the child sees the file it is then refused permission to move. | `hostApi.storage.*` for the plugin's own state — the wire **does** write on a plugin's behalf and deliberately cannot write anywhere else: its members take relative segments joined under `pluginDataDir`, and the containment guard refuses an absolute path outright and any join that escapes the root, so the write member is this jail expressed as an API rather than a hole through it. For a path the **user** chose there is **none**: no `hostApi` member opens a picker, and none accepts an absolute destination. "Put a file where the user asked" is the same shape as the windowing question below — a host capability with its own consent story, not a marshalling gap. | Yes, in both directions, and all four write outcomes — asserted by `confined-plugin-child.test.ts`, which runs on macOS (CI's macOS job included) and returns without measuring on the Linux CI runner, which has no bubblewrap. |
+
+A plugin passes when every axis it touches has a mediated form **and already uses
+it**. "Could be changed to use it" is a backlog item, not an admission. Per-plugin
+status, with assumptions marked as assumptions, lives beside the set in
+`src/plugins/isolation/out-of-process-plugins.ts` — that file is the SOT for
+*whether*, this section is the SOT for *how it is decided*.
+
+**How to check a plugin for each axis**, since the axes are only useful if a second
+person reaches the same verdict from the same sources. For axes 1–4, find the
+reaching construct in the plugin's sources **and its dependencies** — the socket, the
+`electron` specifier by any resolution path (a `require` held in a variable, a
+`createRequire`, a dynamic import, a dependency's re-export — a literal grep for
+`require("electron")` misses the plugins that are actually on this axis), the spawn,
+the `.node` load — then drive it in a real confined child. Count **call sites**, not
+mentions: a member's name also appears in comments, in a type declaration, in the
+guard that refuses to start without it and in a bind, so a count taken off a grep can
+read a single call as heavy dependence — and the verdict then rests on a number
+nobody took from a call. For axis 5, find every
+path derived from `tmpdir()`, `homedir()` or `process.cwd()` and ask what happens
+when the answer names something absent; an unguarded one in an activation body stops
+the plugin from loading rather than degrading a feature. For axis 6, enumerate every
+filesystem **write** — `writeFile`, `mkdir`, `rename`, `copyFile`, `rm`, a write
+stream, a library handed an output path — and read what each path is *rooted* at.
+Then sort each root into the four write outcomes, because three of them are not
+`EPERM`: rooted at `pluginDataDir` is durable and the only one that is; rooted at
+`homedir()` succeeds and vanishes at exit; on ASRT's default write list —
+`/tmp/claude`, `/private/tmp/claude`, `<real home>/.npm/_logs`,
+`<real home>/.claude/debug`, the `/dev` entries, and anything derived from
+`tmpdir()`, which the sandbox points at that list — succeeds and is **durable**,
+into a directory shared with every other confined plugin; and anything else
+(`context.hostRoot`, `process.cwd()`, an absolute literal off that list, a path
+from the plugin's config, a picker's return value) is **refused** `EPERM`. Check the
+middle two by name: they are the cases that pass, and they are why "an absolute
+literal is refused" is a **wrong** rule to check by — `/tmp/claude/x` is an absolute
+literal and it is not refused. Reads need only the floor question: does it read
+a secret store, another plugin's data, or the userData directory. Axis 6 is the one a
+source census most often gets wrong in the plugin's favour, because a refusal arrives
+as a runtime `EPERM` a `catch` may discard and the `homedir()` case never fails at
+all — which is why the last step is always a real child and not a grep.
+
+#### The windowing question, answered rather than deferred
+
+One first-party plugin is refused on the Electron axis: its primary tool opens a
+floating recorder window. The obvious next move is "build a windowing wire". That
+move is **not worth making**, and the reason is that "the plugin needs a window" is
+three requests wearing one coat:
+
+1. **Window lifecycle and geometry** — create, position from the primary display's
+   work area, always-on-top, frameless, fixed size, close. This part marshals
+   cleanly: a declarative window spec crosses, the host owns `screen` and
+   `BrowserWindow`, an opaque handle comes back. Nothing here is hard.
+2. **The window's contents** — plugin-authored markup and script, with a
+   plugin-authored preload, in a renderer. This part is where a windowing wire
+   would undo the stage. Shipping plugin code into a renderer is a **second
+   evaluation of plugin JavaScript in a process the child does not control and the
+   sandbox does not wrap**, and its preload holds an `ipcRenderer` channel to main.
+   The boundary exists because plugin JS should not run beside host authority;
+   re-admitting it through a window is the same defect at a different address.
+   The host already has the safe version of this: `ui[]` `embedded-module` slots,
+   loaded by the renderer out of the plugin root, which is why the recorder's
+   sidebar entry is unaffected by the move at all.
+3. **System-audio capture** — a partition-bound session whose display-media request
+   handler the plugin installs, plus the platform flag for the OS audio tap. This is
+   not windowing in any sense. The display-media handler decides *what the user's
+   machine records*; letting a confined plugin install one would hand it a
+   capability strictly more dangerous than `getSecret`, through a hole opened for
+   window frames.
+
+So the answer is not a windowing wire. It is that a recorder surface has to become a
+**host capability**: the host owns the window, the partition and the display-media
+handler behind its own declared permission and its own consent, and the plugin
+contributes a UI module through the mechanism that already exists plus ordinary tool
+calls. That is a host feature with a user-facing consent story, not a plugin
+migration — and until it exists, the plugin **stays in-process** and its id stays out
+of the routing SOT. Recording something the boundary cannot express is a better
+outcome than a migration that silently ends it.
 
 *Risk: low per PR, and it declines with each one.* If a plugin needs a marshalling
 decision §3 did not anticipate, that decision lands here — visibly, one plugin at a
-time, rather than as a surprise in a big-bang cutover.
+time, rather than as a surprise in a big-bang cutover. What raises the risk is not
+marshalling but the ambient axes above, and those are why the criterion is a gate
+rather than a checklist.
 
 ### Stage 9 — Admit third-party plugins
 
