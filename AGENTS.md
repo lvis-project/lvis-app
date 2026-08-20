@@ -98,8 +98,18 @@ name records rather than how a name is spelled. `web/` has its own conventions
 and its own clause below; `scripts/`, `test/`, and `docs/` are unmeasured here
 and follow the nearest applicable clause without a count behind it.
 
+**What a count is, and is not.** Every number in this section is the output of
+a query in `How the counts were taken` below, run over the file set below at
+the commit that last edited the clause. It is a measurement, not an invariant,
+and it drifts as the tree changes. A number that no longer reproduces is a
+signal to re-measure and update the clause — not evidence that the clause is
+wrong, and not licence to leave it stale. A clause with no query behind it has
+no number in it: the rule is stated, and the reader is told it is unmeasured.
+
 The file set the counts are taken over, so a clause can be rechecked rather
-than trusted:
+than trusted. Every query below that says `<file set>` means this pipeline, and
+every one of them needs a PCRE-capable `grep` — GNU grep, not the BSD grep
+macOS ships:
 
     git ls-files 'src/**' | grep -E '\.(ts|tsx)$' \
       | grep -Ev '(__tests__/|__mocks__/|\.test\.|\.spec\.)' \
@@ -107,42 +117,50 @@ than trusted:
 
 ### Casing by kind
 
-- Types, interfaces, and classes are `PascalCase`, with no exceptions. Over
-  the file set above, 3018 top-level `type`/`interface` declarations and 259
-  `class` declarations, and zero of them begin with a lowercase letter:
-
-      <file set> | xargs grep -hoE \
-        '^(export )?(declare )?(abstract )?(class|interface|type) [A-Za-z_$][A-Za-z0-9_$]*'
-
+- Types, interfaces, and classes are `PascalCase`, with no exceptions: 3018
+  top-level `type`/`interface` declarations and 259 `class` declarations, and
+  zero of them begin with a lowercase letter.
 - Functions, methods, parameters, locals, and object fields are `camelCase`.
 - A module-level `const` bound to a fixed literal or frozen table is
-  `SCREAMING_SNAKE_CASE` (588). A module-level `const` bound to a constructed
-  instance, singleton, or function stays `camelCase` (55: `logger`,
+  `SCREAMING_SNAKE_CASE`. A module-level `const` bound to a constructed
+  instance, singleton, or function stays `camelCase` (`logger`,
   `admissionRegistry`, `backgroundShellManager`, `projectRoot`). The casing
-  says which of the two it is; it is not an emphasis marker.
+  says which of the two it is; it is not an emphasis marker. Of 2443
+  module-level `const` declarations: 1993 screaming, 351 camelCase (184
+  distinct names), 82 `PascalCase`, and 17 with a leading underscore.
 - A module-level `const` is `PascalCase` only when the binding *is* a type-like
-  or component-like thing: a React component, a schema object
-  (`ReadFileInputSchema`), or a frozen map standing in for an enum
-  (`A2ATaskState`, `PluginPhase`). All 25 today are one of those three.
+  or component-like thing. All 82 are one of five: a React component or a lazy
+  wrapper around one (56, mostly the vendored primitives in
+  `src/components/ui/`), a schema object (13, `ReadFileInputSchema`), a
+  `createContext` result (5, `ChatContext`), a frozen table standing in for an
+  enum or a code registry (7, `A2ATaskState`, `PluginPhase`,
+  `StandardJsonRpcErrorDefinition`), and one constructor binding
+  (`SonicBoomCtor`). A binding that is none of those is `camelCase` or
+  `SCREAMING_SNAKE_CASE` by the clause above.
 - A leading underscore marks an export that exists but is not part of the
   module's API — a test seam or an internals bag (`_internal`, `__internals`,
   `__test`). It is a visibility marker, not a casing rule; the rest of the name
   still follows the clauses above.
-- `enum` is not the pattern here — one declaration exists in the whole tree.
-  Model a closed set as a string-literal union, adding a frozen companion
-  object only when the values must be enumerated at runtime.
-- Directories are lowercase kebab-case (70), except the dunder test
-  directories `__tests__`, `__fixtures__`, `__probes__`.
+- `enum` is not the pattern here — one declaration exists in the whole tree
+  (`CompressionStatus`, `src/shared/compact-status.ts`). Model a closed set as
+  a string-literal union, adding a frozen companion object only when the values
+  must be enumerated at runtime.
+- Directories are lowercase kebab-case (70 path segments under `src/`), except
+  the dunder test directories `__tests__`, `__fixtures__`, `__probes__`.
 
 ### Files
 
 - A `.ts` module in `src/` is kebab-case: 945 of 945 hand-written files. The
-  192 camelCase and `be_`-prefixed `.ts` files all sit under
-  `src/i18n/messages/generated/` and belong to their generator, not to this
-  rule; do not hand-edit them and do not cite them as precedent.
+  192 generated `.ts` files — 121 camelCase, 61 `be_`-prefixed, 10 single-word
+  — all sit under `src/i18n/messages/generated/` and belong to their generator,
+  not to this rule; do not hand-edit them and do not cite them as precedent.
 - A `.tsx` file in `src/` whose reason to exist is one React component is
-  `PascalCase` and carries that component's exact name (135 files; 134 hold a
-  same-named export). This clause is `src/`-only — see `The web workspace`.
+  `PascalCase` and carries that component's exact name: 135 files, 132 of which
+  export a binding of exactly that name. The three that do not are
+  `ChatContext.tsx` and `OverlayContext.tsx`, which name the context object
+  they build and export it only as a `*Provider` and hooks, and
+  `PermissionDecisionCard.tsx`; all three are under `Known naming divergences`.
+  This clause is `src/`-only — see `The web workspace`.
 - A `.tsx` file that exports several components or helpers, or no component at
   all, is kebab-case: `chat-side-panel-layout.tsx`, `preview-renderers.tsx`.
   `src/components/ui/*` is vendored primitive code and keeps its upstream
@@ -172,22 +190,25 @@ there breaks the build. Concretely, and measured over `web/`:
 - `export default` is the norm, not a divergence: 102 files declare one. The
   App Router resolves a route from `page.tsx` / `layout.tsx` and a sitemap from
   `sitemap.ts` by default export; removing it removes the route.
-- Everything in `Casing by kind`, `Booleans and predicates`, `Async`, and
-  `Domain labels versus process labels` does apply — those are about
-  identifiers, which the framework does not constrain.
+- The identifier clauses in `Casing by kind` do apply, as do `Booleans and
+  predicates`, `Async`, and `Domain labels versus process labels` — those are
+  about identifiers, which the framework does not constrain. The directory
+  clause in `Casing by kind` carries a `src/` count and is not measured here.
 
 ### Booleans and predicates
 
 - A boolean-valued field is a state adjective or past participle: `enabled`,
-  `open`, `truncated`, `active`, `collapsed`, `connected`, `cancelled` — 1169
-  of 1483 boolean fields. Do not prefix stored state with `is` to make it look
-  boolean.
+  `open`, `truncated`, `active`, `collapsed`, `connected`, `cancelled`. Do not
+  prefix stored state with `is` to make it look boolean. Of the 1483
+  `boolean`-typed names in the file set, 1310 carry no `is`/`has`/`can`/`should`
+  prefix.
 - `is`/`has`/`can`/`should` belong on *derived* answers rather than stored
-  state (174 fields, and the majority of boolean-returning functions).
+  state — 173 of those 1483, plus the majority of boolean-returning functions.
 - A function returning `boolean` is named as a proposition the caller reads as
   a question — `isSensitivePath`, `hasApiKey`, `grantCovers`,
   `pathEntryExists`, `vendorSupportsLengthContinuation`. Subject-first is fine;
-  imperative is not. 375 functions declare a `boolean` return.
+  imperative is not. 415 `function` declarations return `boolean` (366 distinct
+  names), and 292 of them open with `is`/`has`/`can`/`should`/`are`/`does`.
 - A boolean-returning function named as a command leaves the caller unable to
   tell whether `true` means "it is so" or "I did it". Name it for the question
   or return a result object.
@@ -199,27 +220,39 @@ there breaks the build. Concretely, and measured over `web/`:
 
 - Async functions carry no suffix — 502 `async function` declarations, none
   named `*Async`. The return type already says it. The suffix is earned only by
-  a binding that disambiguates a same-named synchronous API: of the eight
-  `*Async` names in `src/`, `statAsync` (`stat as statAsync`) and
-  `execFileAsync` (`promisify(execFile)`) do that and the other six are listed
-  under `Known naming divergences`.
+  a binding that disambiguates a same-named synchronous API. All eight `*Async`
+  spellings in `src/` are accounted for and none is a divergence: `statAsync`
+  (`stat as statAsync`), `execFileAsync` (`promisify(execFile)`) and
+  `attemptAsync` (declared beside a synchronous `attempt` in the same function,
+  `src/boot/assemble-services.ts`) each disambiguate a real pair; four —
+  `installWindowsSandboxAsync`, `checkWindowsSandboxStatusAsync`,
+  `checkDependenciesAsync`, `checkWindowsDependenciesAsync` — are the
+  `@anthropic-ai/sandbox-runtime` package's own API names, which this
+  repository must spell as that package spells them; and
+  `getCompressedDataAsync` appears only inside a comment naming a third-party
+  function, never as a declaration here. An external API's spelling is not this
+  standard's to fix.
 - `*Sync` is reserved for the synchronous sibling of an operation that is
   otherwise async, matching the `node:fs` convention (`ensureDir` /
   `ensureDirSync`). A `*Sync` name with no async sibling carries no
-  information — drop the suffix.
+  information — drop the suffix. Eleven such names are in `src/`, listed under
+  `Known naming divergences`; `node:fs` and other third-party `*Sync` names are
+  out of scope for the same reason the `*Async` clause gives.
 
 ### Events and handlers
 
 - A callback slot — a prop, an option field, a subscription argument — is
   `on<Event>`: `onError`, `onProgress`, `onToolStart`. It names the event, not
   the reaction: `onPluginsChanged`, never `onRefreshList`.
-- The local function supplied to that slot is `handle<Event>` (161
-  declarations). The pair is what makes direction readable at the call site.
-- Bus event ids are `<pluginId>.<noun>.<pastTenseVerb>`, lowercase and
-  dot-separated: `calendar.event.created`, `host.theme.changed`,
-  `email.invite.detected`.
-- IPC channels are `lvis:<domain>:<action>` with kebab-case segments (259 of
-  266).
+- The local function supplied to that slot is `handle<Event>` — 182
+  declarations under 161 distinct names. The pair is what makes direction
+  readable at the call site.
+- Bus event ids are `<namespace>.<noun>.<pastTenseVerb>`, lowercase and
+  dot-separated, where the namespace is a plugin id or a host domain:
+  `calendar.event.created`, `host.theme.changed`, `assistant.round.completed`.
+- IPC channels are `lvis:<domain>:<action>` with kebab-case segments: 331 of
+  the 338 distinct `"lvis:…"` channel literals in the file set are kebab in
+  every segment. The seven that are not are under `Known naming divergences`.
 - A React component is named for the role it plays in the window tree. Name
   app shells `*Window`, reusable bodies `*Content`, and modals `*Dialog`.
 - The three plugin namespaces each have their own shape: manifest plugin id
@@ -232,13 +265,14 @@ there breaks the build. Concretely, and measured over `web/`:
 
 - An error class is `<Domain><Condition>Error` and ends in `Error`:
   `PluginStartupTimeoutError`, `SecretDocumentDecryptionError` — 69 of the 70
-  classes extending `Error`. The suffix is what lets a `catch` read as a
-  sentence.
+  classes extending an `Error` type. The suffix is what lets a `catch` read as
+  a sentence.
 - Stable IPC error codes are kebab-case. What the renderer must then do with
   a code is an invariant, not a naming rule — see `Architecture and security
   invariants`.
 - Audit `type` keys are `snake_case`: `tool_call`, `mcp_apikey_set`,
-  `kill_switch`, `sandbox_gate` — 11 of 12.
+  `kill_switch`, `sandbox_gate` — 11 of the 12 values the two audit-entry
+  interfaces in `src/audit/audit-logger.ts` admit.
 - An audit key is a persisted value, not just an identifier. Changing one is a
   log migration that strands historical rows, so treat shipped keys as frozen
   and add rather than rename.
@@ -248,20 +282,27 @@ there breaks the build. Concretely, and measured over `web/`:
 - No *file* outside a test directory is named for being a double. All four
   double-prefixed filenames in the tree live under `__tests__/` or `test/`.
 - Three *identifiers* spelled `Mock*` do live in production paths, and they are
-  the whole of it — 44 lines across six files, all reachable by the queries
-  below. Two of the three are legitimate and one is not:
-  - `MockMarketplaceFetcher` (`src/plugins/marketplace.ts`) is a backend kind,
-    the same axis as `CloudMarketplaceFetcher`: it serves the catalog from a
-    local file for development, and a packaged build throws rather than
-    construct it. The word names what the fetcher reads, not a test seam.
+  the whole of it — 44 lines across six files, reproduced by the first query in
+  `How the counts were taken`. Two of the three are legitimate and one is not:
+  - `MockMarketplaceFetcher` (`src/plugins/marketplace.ts`, 8 lines) is a
+    backend kind, the same axis as `CloudMarketplaceFetcher`: it serves the
+    catalog from a local file for development, and its constructor throws in a
+    packaged build (`assertMockMarketplaceAllowed`). The word names what the
+    fetcher reads, not a test seam.
   - `MockShell` (`web/components/landing/workday.tsx`, 33 lines) is a
-    mock-*up* frame on the marketing page, sibling of `mockup-frame.tsx`. A
-    different word that shares four letters.
-  - `MockCloudIndexAdapter` (`src/main/cloud-index-adapter.ts`) is the one
-    that really is named for what it is not: it is the only implementation of
-    `CloudIndexAdapter`, constructed unconditionally at boot, and it returns
-    no hits. It is listed under `Known naming divergences` to be renamed for
-    the behavior it has.
+    mock-*up* frame on the marketing page — an `aria-hidden` card the section
+    draws its illustrations in. It is the same mock-*up* vocabulary as
+    `web/components/docs/mockup-frame.tsx`, in a different directory, not a
+    file beside it. A different word that shares four letters.
+  - `MockCloudIndexAdapter` (`src/main/cloud-index-adapter.ts`, 3 lines) is the
+    one that really is named for what it is not: it is the only implementation
+    of `CloudIndexAdapter`, it returns no hits, and it reports itself
+    unavailable. It is constructed in exactly one place — `src/boot/tools.ts`,
+    inside the branch that runs only when a plugin declaring the
+    `worker-client` capability is installed *and* exposes `getWorkerClient()`,
+    so on an install with no such plugin it is never constructed at all. It is
+    listed under `Known naming divergences` to be renamed for the behavior it
+    has.
 - The gate carries those three names as a closed allow-list so their lines stay
   editable, and blocks every other `Mock*`/`Fake*` identifier — including a new
   name that merely starts with an allowed one, and a new name sharing a line
@@ -299,19 +340,7 @@ there breaks the build. Concretely, and measured over `web/`:
   the way `tool-result-stub.ts` does. The hatch for a simulation the product
   deliberately ships is a `Why <prefix>:` header in the first 30 lines; no file
   in this tree carries one.
-- Both checks are reproducible (with a PCRE-capable grep — GNU grep, not the
-  BSD grep macOS ships):
-
-      # the 44 production-path lines the identifier rule is about
-      git ls-files | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' \
-        | grep -Ev '^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.)' \
-        | xargs grep -nP '\b[Mm]ock[A-Z]|\b[Ff]ake[A-Z]'
-
-      # the domain vocabulary the identifier rule deliberately spares
-      git ls-files 'src/**' | grep -E '\.(ts|tsx)$' \
-        | grep -Ev '(__tests__/|__mocks__/|\.test\.|\.spec\.)' \
-        | xargs grep -hoE '\breal[A-Z][A-Za-z0-9]*|\bstub[A-Z][A-Za-z0-9]*' \
-        | sort | uniq -c | sort -rn
+- Both checks are reproducible; the queries are in `How the counts were taken`.
 
 ### Domain labels versus process labels
 
@@ -319,25 +348,30 @@ Applied to any numbered or lettered label, the question is: **can a reader
 resolve this label from a document the repository ships?**
 
 - Yes — it is a domain label and it stays. `Layer 0`–`Layer 8` (permission
-  policy design, 189 uses), `Tier A`–`Tier D` and `Tier 1`–`Tier 4` (plugin
-  permission tiers), `§4.5` architecture anchors (632), `#811` issue anchors
-  (855).
+  policy design, 191 uses), `Tier A`–`Tier D` and `Tier 1`–`Tier 4` (plugin
+  permission tiers), `§4.5` architecture anchors (633), `#811` issue anchors
+  (834). Those three counts are over the files the gate scans, not the `src/`
+  file set — this clause is the one that applies everywhere.
 - No — it resolves only against a work plan, a review round, or PR history, so
   it is a process label and does not enter an identifier, filename, comment,
   audit key, or shipped document: `H2`, `Phase 2b`, `PR-A4`, `Wave F`,
   `Sprint 3-C`, `R-2`, `§M9`, `round3`, `pr1114`. Measured over every file the
   gate scans, exactly one such line survives outside this document — a
   review-round list in `.omc/plans/open-questions.md`, a planning artifact
-  rather than shipped code. Source and shipped docs are clean.
+  rather than shipped code. That measurement is over the gate's scope, which
+  is narrower than "shipped document": `docs/blueprints/` and `docs/ko/` are
+  shipped and excluded, and 24 of those 69 files carry a `Phase N` label. The
+  rule still binds there; only the enforcement stops at the gate's edge.
 - A `-v2` suffix is a process label unless the earlier version is a live
   sibling in the same directory. If `foo-v2.ts` exists and `foo.ts` does not,
   the suffix records when the file was written, not what it is.
 - Commit messages, PR bodies, and issues are outside this rule and are the
   right place for schedule coordinates.
-- The gate is `.github/scripts/naming-gate.sh`, run on every PR by
-  `.github/workflows/naming-gate.yml`. It blocks new process labels in the PR
-  diff, and it is narrower than the prose above in four ways that are the
-  gate's design, not gaps to be relied on:
+- The gate is `.github/scripts/naming-gate.sh`, run by
+  `.github/workflows/naming-gate.yml` on pull requests targeting `main` or
+  `dev`. It blocks new process labels in the PR diff, and it is narrower than
+  the prose above in six ways that are the gate's design, not gaps to be relied
+  on:
   - It checks file *names* only on added and renamed paths, so a grandfathered
     name never becomes a standing ban on editing that file. A rename *into* a
     prohibited name is still caught.
@@ -352,9 +386,48 @@ resolve this label from a document the repository ships?**
     blocked; paraphrase the quote or move it to the PR body.
   - `Mock*`/`Fake*` identifiers are matched against a closed allow-list of the
     three domain names in `Test doubles`; everything else is blocked.
+  - It reads only `.ts`, `.tsx`, `.py`, `.js`, `.mjs`, `.cjs` and `.md`, and it
+    skips `docs/blueprints/`, `docs/ko/`, `.github/`, every `__tests__/` and
+    `__mocks__/` directory, `test/`, `tests/`, `*.test.*`, `*.spec.*`,
+    lockfiles and `CHANGELOG`. A label in any of those is out of the gate's
+    reach but not out of the rule's.
+  - Its trigger is `pull_request` against `main` or `dev`. A PR stacked on
+    another feature branch is never checked by it; run
+    `.github/scripts/naming-gate.sh <base-sha> HEAD` locally instead.
   Prose and gate are kept honest by `.github/scripts/naming-gate-selftest.sh`,
   which runs in the same workflow and pins each of those behaviors to a
   synthetic diff. Change one, change the other.
+
+### Organizational identifiers
+
+`lvis-project/lvis-app` is a public repository. Every plugin repository it
+describes is private, so "internal implementation stays private" is already the
+boundary — a name committed here crosses it, permanently, in a clone anyone can
+take.
+
+- The employer's name and brand, its internal system and product names, its
+  internal hostnames and network coordinates, and colleagues' names do not
+  belong in any tracked file: source, comment, test, fixture, documentation,
+  commit message, or image. A screenshot leaks more than a sentence does and is
+  harder to notice.
+- Refer to a specific plugin by the generic noun — "plugin", "an internal
+  portal plugin", "the intranet search plugin" — not by the organization it
+  integrates with. The plugin id in a manifest, a catalog record, or a routing
+  table is a literal the runtime needs and stays; the prose around it does not
+  need to say whose intranet it is.
+- This is the same test as `External product names`, applied to the
+  organization rather than to a vendor: a name that identifies something the
+  code talks to stays, a name that decorates an explanation goes. The
+  difference is the consequence — a vendor name is an attribution problem, this
+  one is a disclosure.
+- Enforcement belongs in CI, and the pattern list belongs with the enforcement,
+  not in this document. Writing the literals here in order to ban them would
+  republish exactly what the rule removes, and a second copy of a pattern list
+  is the split this file exists to prevent. This clause owns the rule; the job
+  owns the patterns.
+- Deriving an assertion from a manifest or a bundle beats copying a literal
+  into a test. A test that hard-codes the identifier both leaks it and pins one
+  value; reading it from the artifact under test does neither.
 
 ### Known naming divergences
 
@@ -367,11 +440,17 @@ precedent.
 - `src/ui/renderer/components/permissions/PermissionDecisionCard.tsx` is
   `PascalCase` but exports a set of helpers with no `PermissionDecisionCard` in
   it. Three modules import it for those helpers.
+- `src/ui/renderer/context/ChatContext.tsx` and `OverlayContext.tsx` are
+  `PascalCase` files named for the context object each builds, which each keeps
+  module-private; what they export is `*ContextValue`, `*ContextProvider` and
+  the hooks. The name is truthful about the file's subject but is not a
+  same-named export, so it is the minority side of the `.tsx` clause.
 - Two remaining `export default` sites: `SlashPickerPanel.tsx`,
   `CommandPopoverPanel.tsx`.
-- Three spellings of the test-seam suffix: `ForTest` (36), `ForTests` (28),
-  `ForTesting` (19).
-- Seven camelCase IPC channel leaves against 259 kebab: `lvis:attach:openFile`,
+- Three spellings of the test-seam suffix, by distinct name over the file set:
+  `ForTest` (26), `ForTests` (16), `ForTesting` (5). `ForTest` is the standard;
+  the other two are the backlog.
+- Seven camelCase IPC channel leaves against 331 kebab: `lvis:attach:openFile`,
   `openExternal`, `readImage`, `saveClipboardImage`, `discardClipboardImage`,
   and `lvis:dev:getPreflightStatus`, `setPreflightOverride`. These strings
   cross the preload boundary, so renaming is a coordinated change.
@@ -380,23 +459,26 @@ precedent.
 - The audit `type` value `diagnostics-export` is kebab among eleven
   `snake_case` siblings. It is a persisted key, so this is a log migration
   rather than a rename.
-- Nine `*Sync` functions have no async sibling, so the suffix carries nothing:
+- Eleven `*Sync` names this repository declares itself have no async sibling,
+  so the suffix carries nothing. Nine have no sibling of any kind:
   `copyOpenFileSync`, `findLastCompleteJsonlBoundarySync`,
-  `publishOpenFileArchiveSync`, `readFrontmatterSync`,
-  `readLastCompleteLineSync`, `readLastNonEmptyLineSync`,
-  `writeUtf8FileAtomicSync`, `fsyncDirectorySync` (`src/audit/audit-logger.ts`),
-  and `readPersistedAppModeSync` (`src/main/persisted-app-mode.ts`). The last
-  two are the sharpest cases: each has a same-named sibling that is itself
+  `publishOpenFileArchiveSync`, `readLastCompleteLineSync`,
+  `readLastNonEmptyLineSync` (all `src/audit/audit-logger.ts`),
+  `readFrontmatterSync`, `listCatalogSync`, `scanCatalogDirSync` (all
+  `src/main/skill-store.ts`) and `writeUtf8FileAtomicSync`
+  (`src/lib/atomic-file.ts`). The other two are the sharpest cases:
+  `fsyncDirectorySync` (`src/audit/audit-logger.ts`, sibling `fsyncDirectory`
+  in `src/audit/hmac-chain.ts`) and `readPersistedAppModeSync`
+  (`src/main/persisted-app-mode.ts`, sibling `readPersistedAppMode` in
+  `src/main/main-window.ts`) each have a same-named sibling that is itself
   synchronous, so the suffix distinguishes nothing at all.
-- Six `*Async` names have no synchronous counterpart to disambiguate from:
-  `installWindowsSandboxAsync`, `checkDependenciesAsync`,
-  `checkWindowsSandboxStatusAsync`, `checkWindowsDependenciesAsync`,
-  `getCompressedDataAsync`, and `attemptAsync`
-  (`src/boot/assemble-services.ts`). Of the eight `*Async` names in `src/`,
-  only `statAsync` and `execFileAsync` earn the suffix.
-- `managedPreStartSync` (`src/boot.ts`) is a local `const` holding a promise
-  that the next line awaits — the suffix says the opposite of what the binding
-  is.
+- `managedPreStartSync` (`src/boot.ts`) is a local `const` holding a promise;
+  boot awaits it further down in a `Promise.all`, not on the following line, so
+  the suffix reads as the `node:fs` synchronous-sibling marker on a binding
+  that is asynchronous. `Sync` here is the domain noun from the
+  `mode: "pre-start-sync"` argument it passes — *synchronization*, not
+  *synchronous* — which is how it survived review. Spell the domain word out
+  rather than abbreviating it into the reserved suffix.
 - Boolean-returning functions named as commands: `loadSession`,
   `verifyEntryHmac`, `repairSecretFileMode`, `migrateLegacyDisabledMode`,
   `focusPendingQuestion`.
@@ -407,11 +489,108 @@ precedent.
 - `docs/architecture/session-model-v2.md` carries a `-v2` suffix with no
   earlier sibling in `docs/architecture/`.
 - `MockCloudIndexAdapter` (`src/main/cloud-index-adapter.ts`) is the sole
-  implementation of `CloudIndexAdapter` and is constructed unconditionally at
-  boot, so the name promises a double that does not exist. Rename it for what
-  it does — it reports unavailable and returns no hits — rather than for what
-  it is not. The gate allow-lists it meanwhile so the rename is not blocked by
-  its own edits, and that entry comes out with the rename.
+  implementation of `CloudIndexAdapter`, so the name promises a double that
+  does not exist — there is no other one for it to stand in for. Rename it for
+  what it does: it reports unavailable and returns no hits. `src/boot/tools.ts`
+  constructs it only inside the branch guarded on a `worker-client`-capability
+  plugin being present and exposing `getWorkerClient()`, so the rename touches
+  that one call site. The gate allow-lists the name meanwhile so the rename is
+  not blocked by its own edits, and that entry comes out with the rename.
+
+### How the counts were taken
+
+Every number in `Naming` is the output of one of these, run with GNU grep from
+the repository root. `<file set>` is the pipeline in `Scope`; `<gate scan>` is
+the second pipeline below, which is the set the gate itself reads. Re-run the
+query before disputing a number, and update the clause when it has drifted.
+
+    # <gate scan> — every file the naming gate reads (1640)
+    git ls-files | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' \
+      | grep -Ev '^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)'
+
+    # Casing: 3018 type/interface + 259 class, 0 lowercase-initial
+    <file set> | xargs grep -hoE \
+      '^(export )?(declare )?(abstract )?(class|interface|type) [A-Za-z_$][A-Za-z0-9_$]*'
+
+    # Casing: 2443 module-level const declarations, split 1993 / 351 / 82 / 17
+    <file set> | xargs grep -hoE '^(export )?const [A-Za-z_$][A-Za-z0-9_$]*' \
+      | sed -E 's/^(export )?const //'
+      #   screaming   grep -cE '^[A-Z][A-Z0-9_]*$'
+      #   camelCase   grep -cE '^[a-z]'
+      #   PascalCase  grep -E '^[A-Z]' | grep -vcE '^[A-Z][A-Z0-9_]*$'
+      #   underscore  grep -vcE '^[A-Z]|^[a-z]'
+
+    # Files: 945 of 945 .ts kebab; 166 .tsx of which 135 PascalCase
+    <file set> | grep '\.ts$'  | xargs -n1 basename | grep -cE '^[a-z0-9]+(-[a-z0-9]+)*\.ts$'
+    <file set> | grep '\.tsx$' | xargs -n1 basename | grep -cE '^[A-Z]'
+
+    # Files: of the 135 PascalCase .tsx, 132 export a binding of the same name
+    for f in $(<file set> | grep -E '/[A-Z][^/]*\.tsx$'); do
+      n=$(basename "$f" .tsx)
+      grep -qE "export (const|function|class) $n\b|export \{[^}]*\b$n\b|export default $n\b" "$f" \
+        || echo "no same-named export: $f"
+    done
+
+    # Files: 192 generated .ts — 121 camelCase, 61 be_-prefixed, 10 single-word
+    git ls-files 'src/i18n/messages/generated/**' | grep '\.ts$' | xargs -n1 basename
+
+    # Files: export default — 0 in .ts, 2 in .tsx
+    <file set> | xargs grep -lE '^export default'
+
+    # web/: 241 tracked, 134 .tsx none PascalCase, 102 files with a default export
+    git ls-files 'web/**' | wc -l
+    git ls-files 'web/**' | grep '\.tsx$' | xargs -n1 basename | grep -cE '^[A-Z]'
+    git ls-files 'web/**' | grep -E '\.(ts|tsx)$' | xargs grep -lE '^export default' | wc -l
+
+    # Booleans: 1483 boolean-typed names, 173 is/has/can/should-prefixed
+    <file set> | xargs grep -hoE '\b[a-zA-Z_$][A-Za-z0-9_$]*\??: boolean' \
+      | sed -E 's/\??: boolean//'
+
+    # Booleans: 415 boolean-returning function declarations, 366 distinct
+    <file set> | xargs grep -hoE 'function [a-zA-Z_$][A-Za-z0-9_$]*\([^)]*\): boolean'
+
+    # Async: 502 async function declarations, 0 named *Async; 8 *Async spellings
+    <file set> | xargs grep -hoE 'async function [a-zA-Z_$][A-Za-z0-9_$]*'
+    <file set> | xargs grep -hoE '\b[a-z][A-Za-z0-9_$]*Async\b' | sort | uniq -c
+
+    # Handlers: 182 handle* declarations, 161 distinct names
+    <file set> | xargs grep -hoE '\b(const|function|async function) handle[A-Z][A-Za-z0-9_$]*'
+
+    # IPC: 338 distinct lvis: channel literals, 331 kebab in every segment
+    <file set> | xargs grep -hoE '"lvis:[a-zA-Z0-9:_-]+"' | sort -u
+
+    # Errors: 70 classes extending an Error type, 69 ending in Error
+    <file set> | xargs grep -hoE 'class [A-Za-z0-9_$]+ extends [A-Za-z0-9_$.]*Error\b'
+
+    # Audit: the 12 admitted type keys, 11 snake_case and 1 kebab
+    sed -n '/export interface \(AuditEntry\|SandboxGateAuditEntry\)/,/^}/p' \
+      src/audit/audit-logger.ts | grep -E '^  type: ' | grep -oE '"[a-z0-9_-]+"' | sort -u
+
+    # Test doubles: the 44 production-path Mock*/Fake* lines in six files.
+    # AGENTS.md and CLAUDE.md are excluded for the same reason the gate strips
+    # their code spans — a rule document has to name what it bans.
+    git ls-files | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' \
+      | grep -Ev '^(docs/blueprints/|docs/ko/|\.github/|AGENTS\.md$|CLAUDE\.md$|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.)' \
+      | xargs grep -nP '\b[Mm]ock[A-Z]|\b[Ff]ake[A-Z]'
+
+    # Test doubles: the domain vocabulary the identifier rule deliberately spares
+    <file set> | xargs grep -hoE '\breal[A-Z][A-Za-z0-9]*|\bstub[A-Z][A-Za-z0-9]*' \
+      | sort | uniq -c | sort -rn
+
+    # Test-seam suffix spellings: 26 / 16 / 5 distinct names
+    <file set> | xargs grep -hoE '\b[A-Za-z0-9_$]*ForTest(s|ing)?\b' | sort -u
+
+    # Directories: 73 path segments under src/, 70 kebab + 3 dunder
+    git ls-files 'src/**' | xargs -n1 dirname | tr '/' '\n' | sort -u
+
+    # Domain labels: 191 Layer N, 633 section anchors, 834 issue anchors
+    <gate scan> | xargs grep -hoE '\bLayer [0-9]'
+    <gate scan> | xargs grep -hoE '§[0-9]+(\.[0-9]+)*'
+    <gate scan> | xargs grep -hoE '#[0-9]+\b'
+
+    # Process labels surviving anywhere the gate reads: one line, in
+    # .omc/plans/open-questions.md. Run each pattern from the gate's own list:
+    <gate scan> | xargs grep -nP '\bR-[1-9][0-9]?\b'
 
 ## Architecture and security invariants
 
