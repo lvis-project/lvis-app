@@ -55,7 +55,7 @@ export default function Page() {
       <p>
         작업 중인 프로젝트 폴더에 팀이 함께 쓰는 <code>AGENTS.md</code> 가 있으면 호스트가 그것도 읽어 참고합니다.
         이것은 사용자 개인 지침과 <strong>다른 층</strong> 으로, 개인 쪽 <em>아래</em> 에 놓입니다.
-        이 프로젝트 파일을 고쳐 쓰는 경로는 없습니다 — 호스트가 <code>AGENTS.md</code> 를 쓰는 자리는 사용자 개인 영역 (<code>~/.lvis</code>) 하나뿐입니다.
+        읽기 전용입니다 — 호스트 코드에서 <code>AGENTS.md</code> 를 <em>쓰는</em> 자리를 찾아보면 사용자 개인 영역 (<code>~/.lvis</code>) 한 곳이고, 프로젝트 폴더 쪽은 읽기만 합니다.
       </p>
 
       <h2 id="where">어디에 저장되나요?</h2>

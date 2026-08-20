@@ -55,7 +55,7 @@ export default function Page() {
       <p>
         If the project folder you are working in has a team-shared <code>AGENTS.md</code>, the host reads that too and takes it into account.
         It is treated as a <strong>separate layer</strong> from the user's personal instructions, and it sits <em>below</em> the personal one.
-        There is no path that rewrites that project file — the one place the host writes an <code>AGENTS.md</code> is in the user's own area (<code>~/.lvis</code>).
+        It is read-only — the place in the host where an <code>AGENTS.md</code> is <em>written</em> is the user's own area (<code>~/.lvis</code>); the project folder is only read.
       </p>
 
       <h2 id="where">Where is it stored?</h2>

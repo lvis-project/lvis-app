@@ -31,7 +31,7 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Routines", href: "/en/docs/routines/meeting-end", title: "Meeting End → Automatic Task", snippet: "meeting.summary.created → work-assistant meeting-summary detector" },
 
   // Plugins
-  { group: "Plugins", href: "/en/docs/plugins", title: "Plugins — Overview", snippet: "static manifest · the host reads only the manifest · tool list fixed per server generation" },
+  { group: "Plugins", href: "/en/docs/plugins", title: "Plugins — Overview", snippet: "static manifest · tools declared in the manifest · tool list fixed per server generation" },
   { group: "Plugins", href: "/en/docs/plugins/permission-grant", title: "Permission Grant Flow", snippet: "12 capabilities · tools[] · pluginAccess · agentApprovalScopes" },
   { group: "Plugins", href: "/en/docs/plugins/local-indexer", title: "Local Indexer", snippet: "kiwipiepy Pattern B · pymupdf4llm · FTS5 + LanceDB · chokidar · RRF (K=60)", keywords: ["RAG", "rrf", "fts5", "kiwi"] },
   { group: "Plugins", href: "/en/docs/plugins/ms-graph", title: "Microsoft 365 (Outlook)", snippet: "MSAL OAuth · safeStorage · 31 tools · scopes: User.Read Mail.* Calendars.*", keywords: ["outlook", "calendar", "mail", "ms-graph"] },

@@ -22,7 +22,7 @@ export default function Page() {
 
       <h2 id="what">manifest 로부터 검토되는 항목</h2>
       <ul>
-        <li><strong>capabilities</strong>: 형식 검증된 기능 태그. 호스트가 <strong>게이트로 강제하는 것은 두 개</strong> 뿐이고, 나머지 문자열은 그것만으로 권한이 되지 않습니다. 다만 “권한이 아니다” 가 “아무 효과도 없다” 는 뜻은 아닙니다 — 호스트가 <em>어느 플러그인이 어떤 역할을 맡는지 찾을 때</em> 이 문자열을 조회 키로 쓰는 자리가 있어서, 선언 하나로 그 역할의 도구 표면 전체가 그 플러그인에 배선될 수 있습니다.</li>
+        <li><strong>capabilities</strong>: 형식 검증된 기능 태그. 호스트가 런타임에 강제하는 집합에는 <strong>두 개</strong> 가 들어 있고, 그 집합 밖의 문자열은 그 두 게이트를 열지 못합니다. 다만 “게이트가 아니다” 가 “아무 효과도 없다” 는 뜻은 아닙니다 — 호스트가 <em>어느 플러그인이 어떤 역할을 맡는지 찾을 때</em> 이 문자열을 조회 키로 쓰는 자리가 있어서, 선언 하나로 그 역할의 도구 표면 전체가 그 플러그인에 배선될 수 있습니다.</li>
         <li><strong>tools[]</strong>: 순수 MCP <code>Tool</code> 객체 목록. 호스트가 입력 스키마와 실행 경로로 위험도를 분류하며, 서명된 <code>tool._meta[&quot;lvisai/operationPolicy&quot;]</code>는 operation별 최소 위험도와 read-before-write 요구를 강화할 수만 있음.</li>
         <li><strong>pluginAccess</strong>: 다른 plugin 의 어떤 도구/이벤트를 사용할지 (예: work-assistant 가 ms-graph 의 <code>msgraph_calendar_today</code> 호출).</li>
         <li><strong>agentApprovalScopes</strong>: cross-plugin 위험 액션의 표준 라벨 (예: <code>agent_file_share</code>, <code>agent_task_delegate</code>, <code>agent_external_api_call</code>).</li>
