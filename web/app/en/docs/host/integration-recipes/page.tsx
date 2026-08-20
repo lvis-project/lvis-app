@@ -14,7 +14,7 @@ export default function Page() {
         eyebrow="Host · Integration Recipes"
         title="A Collection of Plugin Combination Scenarios"
         description="What matters more than using a single plugin is the 'chain' where several plugins work together. This page lays out four commonly used combination scenarios as short flows. Every chain goes through a user consent card, and any step that runs automatically is marked explicitly."
-        tags={["Meeting + Work Assistant + MS-Graph", "Local Indexer + Meeting + Agent Hub", "MS-Graph + LGE EP", "Agent Hub + Meeting + EP"]}
+        tags={["Meeting + Work Assistant + MS-Graph", "Local Indexer + Meeting + Agent Hub", "MS-Graph + Internal Portal", "Agent Hub + Meeting + Internal Portal"]}
       />
 
       <h2 id="recipe-1">Recipe 1 — Meeting → Action → Schedule → Reply</h2>
@@ -50,7 +50,7 @@ export default function Page() {
         steps={[
           { title: "Meeting request mail arrives", body: <p><strong>Microsoft 365</strong> detects a new meeting request. Candidate times are extracted from the body.</p>, badge: "MS-Graph" },
           { title: "Available room suggested", body: <p><strong>Work Assistant</strong> checks the user's calendar together with room availability from the internal system, then surfaces a candidate card.</p>, badge: "Work Assistant" },
-          { title: "Room booked + video call added", body: <p>The chosen room is confirmed with <strong>LGE EP</strong>'s room booking tool. If there are external attendees, a video call link is generated automatically and attached to the event body.</p>, badge: "LGE EP" },
+          { title: "Room booked + video call added", body: <p>The chosen room is confirmed with the <strong>internal portal plugin</strong>'s room booking tool. If there are external attendees, a video call link is generated automatically and attached to the event body.</p>, badge: "Internal Portal" },
           { title: "Reply sent", body: <p>A card showing "booking complete + room + video call link" is shown to the meeting requester in chat → it is only actually sent the moment the user presses "Reply."</p>, badge: "Sent after confirmation" },
         ]}
       />
@@ -59,7 +59,7 @@ export default function Page() {
       <p>Wrapping up a meeting with external attendees. Notes, action items, and team sharing, all in one pass.</p>
       <StepList
         steps={[
-          { title: "Join the video call", body: <p>Start the video call from the link attached to the event — <strong>LGE EP</strong>'s video call flow.</p>, badge: "LGE EP" },
+          { title: "Join the video call", body: <p>Start the video call from the link attached to the event — the <strong>internal portal plugin</strong>'s video call flow.</p>, badge: "Internal Portal" },
           { title: "Automatic meeting notes", body: <p>During the meeting, the <strong>Meeting</strong> plugin runs live transcription. On end, it automatically generates notes, a summary, and action items.</p>, badge: "Meeting" },
           { title: "Distributed to the team board", body: <p>Action item cards are registered automatically on the <strong>Agent Hub</strong> work board. Candidate assignees are filled in automatically, and cards nearing their deadline are sent as notifications.</p>, badge: "Agent Hub" },
           { title: "Notes stay in their own area", body: <p>The original meeting notes are kept only inside the Meeting plugin's own area. They are not automatically sent to an external server.</p>, badge: "Only on your PC" },
