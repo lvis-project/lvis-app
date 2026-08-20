@@ -22,16 +22,18 @@ import { MOCK_DEFAULT_SETTINGS } from "../../../../test/renderer/mock-lvis-api.j
 const path = (container: HTMLElement) =>
   container.querySelector('[data-testid="view-path-breadcrumb"]')?.textContent?.trim() ?? "";
 
+/** Click a control the way the user reaches it — by its test id, through the
+ *  real handler — and let the resulting commit land before returning. */
+async function click(container: HTMLElement, testid: string) {
+  const el = container.querySelector(`[data-testid="${testid}"]`) as HTMLButtonElement | null;
+  expect(el, `missing [data-testid="${testid}"]`).not.toBeNull();
+  await act(async () => {
+    fireEvent.click(el!);
+  });
+}
+
 describe("App view history", () => {
   afterEach(() => vi.restoreAllMocks());
-
-  async function click(container: HTMLElement, testid: string) {
-    const el = container.querySelector(`[data-testid="${testid}"]`) as HTMLButtonElement | null;
-    expect(el, `missing [data-testid="${testid}"]`).not.toBeNull();
-    await act(async () => {
-      fireEvent.click(el!);
-    });
-  }
 
   async function ready(container: HTMLElement) {
     await waitFor(() =>
@@ -284,7 +286,10 @@ describe("App view history after a restored launch location", () => {
     expect(backButton(container).disabled).toBe(true);
   });
 
-  it("leaves a step the user took before the restore undoable after it lands", async () => {
+  /** Let every pending restore land before concluding that none moved anything. */
+  const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 100)); });
+
+  it("does not move the user off a step they took before the restore landed", async () => {
     const { gate, getSettings } = restoreGate();
     const { container } = await renderApp({ hasApiKey: true, getSettings });
     await waitFor(() => expect(container.querySelector('[data-testid="view-path-nav"]')).not.toBeNull());
@@ -294,18 +299,136 @@ describe("App view history after a restored launch location", () => {
     });
     await waitFor(() => expect(path(container)).toContain("루틴"));
 
-    // The restore now moves the window off the page the user chose. Whatever
-    // else that is, it is not the launch location claiming an empty history —
-    // back has to return the user to where they put themselves.
+    // The stored location arrives after the user has already chosen one. Being
+    // able to press back afterwards is not the same as not being moved: this
+    // used to land, and the step out of the user's page was undoable rather
+    // than absent.
     await act(async () => {
       gate.resolve(settingsWithActiveView("work-board"));
     });
-    await waitFor(() => expect(path(container)).toContain("업무 보드"));
+    await settle();
+    expect(path(container)).toContain("루틴");
 
+    // What is behind them is their own step off the seed, not a launch
+    // location that never took effect.
     await act(async () => {
       fireEvent.click(backButton(container));
     });
+    await waitFor(() => expect(path(container)).toContain("홈"));
+  });
+
+  /**
+   * The settings PAGE restores from its own read and is NOT discarded by a
+   * navigation here — choosing a view says nothing about which settings page
+   * you want. It raises the same restore count this history reads, though, and
+   * that count is shared between both halves: an increase means "one of them
+   * moved", never "the window moved".
+   *
+   * So the half nobody is looking at can raise the count while the location
+   * stays exactly where it was. That increase has to be SPENT where it lands.
+   * Surviving, it would be waiting for the next location change — the user's
+   * own step, taken while the history is still the untouched seed — and would
+   * be read as the launch location arriving, REPLACING the root rather than
+   * stacking on it and leaving a step from home with a dead back button.
+   *
+   * That the page half lands at all is asserted next door and by the
+   * reverse-order pair below. It is not re-asserted here, because the user
+   * never enters Settings in this test — and every UI route in names a page,
+   * `onOpenSettings` supplying its own `llm` default when the caller does not,
+   * so the restored page is replaced on the way in. What this pins is the
+   * other side of that wire: what the raised count must NOT do.
+   */
+  it("does not let the settings-page half turn the user's next step into the launch location", async () => {
+    // Held open so the whole exchange happens inside the restore window, which
+    // is the only place either half can land late.
+    let released = false;
+    const gates: Array<ReturnType<typeof deferred<unknown>>> = [];
+    const stored = settingsWithActiveView("work-board", "permissions");
+    const { container } = await renderApp({
+      hasApiKey: true,
+      getSettings: () => {
+        if (released) return Promise.resolve(stored);
+        const gate = deferred<unknown>();
+        gates.push(gate);
+        return gate.promise;
+      },
+    });
+    await waitFor(() => expect(container.querySelector('[data-testid="view-path-nav"]')).not.toBeNull());
+
+    // Re-selecting Home discards the VIEW half — a navigation, and the one
+    // navigation that leaves the history untouched, so the seed is still the
+    // only entry when the surviving half lands.
+    await click(container, "sidebar-home");
+    expect(path(container)).toContain("홈");
+
+    // Released one commit at a time — over IPC these are separate round trips,
+    // and batching them never observes the page half on its own.
+    released = true;
+    for (const gate of [...gates]) {
+      await act(async () => {
+        gate.resolve(stored);
+      });
+    }
+    await settle();
+
+    // Nothing moved: the view half was discarded, and a settings page is not a
+    // place while the user is not in Settings.
+    expect(path(container)).toContain("홈");
+
+    // NOW the user takes their first real step, with the history still the
+    // untouched seed. It is a step, not an arrival — the count went up for a
+    // page they are not looking at.
+    await click(container, "sidebar-routines");
     await waitFor(() => expect(path(container)).toContain("루틴"));
+    expect(backButton(container).disabled).toBe(false);
+    await click(container, "view-path-back");
+    await waitFor(() => expect(path(container)).toContain("홈"));
+  });
+
+  /**
+   * The mirror of the test above: a restore that lands after the user has
+   * already been somewhere is a MOVE, not an arrival, and the root belongs to
+   * where they started. Only an untouched seed may be replaced.
+   *
+   * The page half is the only half that still lands here, because it has no
+   * discard of its own — choosing a settings page inside the restore window is
+   * overridden, a gap `useSettingsTab` owns. This does not assert that
+   * override is right; it asserts that while it happens, the step it makes is
+   * one the user can undo.
+   */
+  it("stacks a settings-page restore that lands after the user has been somewhere", async () => {
+    let released = false;
+    const gates: Array<ReturnType<typeof deferred<unknown>>> = [];
+    const stored = settingsWithActiveView("work-board", "permissions");
+    const { container } = await renderApp({
+      hasApiKey: true,
+      getSettings: () => {
+        if (released) return Promise.resolve(stored);
+        const gate = deferred<unknown>();
+        gates.push(gate);
+        return gate.promise;
+      },
+    });
+    await waitFor(() => expect(container.querySelector('[data-testid="view-path-nav"]')).not.toBeNull());
+
+    // A real step first, so the history is no longer the seed. This also
+    // discards the VIEW half, leaving the page half as the only late arrival.
+    await click(container, "sidebar-settings");
+    await waitFor(() => expect(path(container)).toContain("모델"));
+
+    released = true;
+    for (const gate of [...gates]) {
+      await act(async () => {
+        gate.resolve(stored);
+      });
+    }
+    await waitFor(() => expect(path(container)).toContain("권한"));
+
+    // Moved off the page they opened, so back has to lead there — not be
+    // disabled because the restore claimed the root.
+    expect(backButton(container).disabled).toBe(false);
+    await click(container, "view-path-back");
+    await waitFor(() => expect(path(container)).toContain("모델"));
   });
 
   // The view and the settings page are restored by two SEPARATE reads. Over
