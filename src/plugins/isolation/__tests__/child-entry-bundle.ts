@@ -5,9 +5,9 @@
  * two chances for one suite to prove something about a child that does not
  * ship: the externals, the banner and the target here are the shipped build's,
  * and a suite that drifted from them would read like it exercises this bundle
- * while exercising a different one. `confined-plugin-child.test.ts` says
- * exactly that about its own two cases; this module is the same argument
- * carried across files.
+ * while exercising a different one. This argument was already written against
+ * the two cases inside `confined-plugin-child.test.ts`; it holds across files
+ * for the same reason, which is why the function it guarded now lives here.
  *
  * A module rather than an export from one of the suites: importing a `.test.ts`
  * would register that file's cases a second time under the importer.
