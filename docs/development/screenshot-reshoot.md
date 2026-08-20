@@ -108,10 +108,12 @@ yet have is coverage.
 
 ### What it covers, and what it does not
 
-Of the 38 host-app keys in `test/screenshots/matrix.ts`, **4 docs keys capture
-end-to-end today**: `chat-app-update`, `chat-plugin-panel`,
-`plugin-permission-grant`, `meeting-upcoming`. The other 33 carry an explicit
-`skip` with a stated blocker. Those blockers are real, not missing effort:
+`test/screenshots/matrix.ts` holds 37 entries, one of which (`_smoke-settings-llm`)
+is not a docs-site key. Of the remaining 36, **4 capture end-to-end today**:
+`chat-app-update`, `chat-plugin-panel`, `plugin-permission-grant`,
+`meeting-upcoming`. The other 32 carry an explicit `skip` with a stated blocker,
+and those 32 are what the group counts in the table below add up to. Those
+blockers are real, not missing effort:
 
 | Blocked group | Blocker |
 | --- | --- |
