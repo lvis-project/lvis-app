@@ -11,7 +11,7 @@ import { Textarea } from "../../../components/ui/textarea.js";
 import type { McpServerConfig, McpServerConfigDto, McpServerState } from "../types.js";
 import { LONG_TOAST_TTL_MS } from "../constants.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { SettingsPageHeader } from "../components/PageShell.js";
 import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 

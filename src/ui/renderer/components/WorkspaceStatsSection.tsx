@@ -10,7 +10,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import type { LvisApi } from "../types.js";
-import { SettingsSection } from "./SettingsSection.js";
+import { SettingsSection } from "./PageShell.js";
 import { useWorkspaceStats } from "../hooks/use-workspace-stats.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { SettingsTab } from "../../../shared/settings-tabs.js";

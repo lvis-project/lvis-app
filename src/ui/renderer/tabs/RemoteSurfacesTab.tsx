@@ -1,5 +1,5 @@
 import { useTranslation } from "../../../i18n/react.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
+import { SettingsPageHeader } from "../components/PageShell.js";
 import { TailnetAccessContent } from "./TailnetAccessContent.js";
 import { TelegramConnectionContent } from "./TelegramConnectionContent.js";
 import type { LvisApi } from "../types.js";

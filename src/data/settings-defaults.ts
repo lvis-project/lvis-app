@@ -1,4 +1,4 @@
-import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-rounds.js";
+import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-policy.js";
 import {
   SIDE_PANEL_DEFAULT_WIDTH,
   SIDE_PANEL_SPLIT_DEFAULT_PERCENT,

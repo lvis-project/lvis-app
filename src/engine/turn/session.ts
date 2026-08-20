@@ -17,7 +17,7 @@ import { latestPersistedContextTokens } from "./context-carrier.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { createLogger } from "../../lib/logger.js";
 import { projectBasename, projectRootEquals } from "../../shared/project-identity.js";
-import { createWorkspaceRootRevocationFilter } from "../../permissions/workspace-root-revocation.js";
+import { createWorkspaceRootRevocationFilter } from "../../permissions/workspace-root-lifecycle.js";
 import { createDlpSafeUuid } from "../../shared/dlp-safe-id.js";
 
 const log = createLogger("lvis");
@@ -108,7 +108,7 @@ export function revokeWorkspaceRoot(
   const previousProjectWasDefault = self.sessionProjectIsDefault;
   const staticDirectories = self.deps.additionalDirectories ?? [];
   // ONE revocation predicate, shared with every other live-scope owner the
-  // workspace-root removal sweep drives (see permissions/workspace-root-revocation.ts).
+  // workspace-root removal sweep drives (see permissions/workspace-root-lifecycle.ts).
   const isRevoked = createWorkspaceRootRevocationFilter(
     normalizedRoot,
     options.preserveRoots ?? [],

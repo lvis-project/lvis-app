@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from "../../../components/ui/select.js";
 import { useTranslation } from "../../../i18n/react.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsSection } from "../components/PageShell.js";
 import {
   DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES,
   type SubscriptionConnectionState,

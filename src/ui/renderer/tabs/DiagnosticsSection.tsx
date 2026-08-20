@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "../../../components/ui/button.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { formatIpcError } from "../format-ipc-error.js";
 
