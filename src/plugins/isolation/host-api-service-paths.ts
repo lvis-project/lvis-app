@@ -96,7 +96,13 @@ export type ServiceHostApi = Pick<
 export interface DelegatedWorkerConfinement {
   /** The plugin's immutable runtime root. Readable by the child, never writable. */
   readonly pluginRoot: string;
-  /** `~/.lvis/plugins/<id>/data`. The only path the child may write. */
+  /**
+   * `~/.lvis/plugins/<id>/data`. The only path this pair GRANTS for writing —
+   * not the only path the child can reach, since ASRT merges its own default
+   * write paths into every wrap (`out-of-process-plugins.ts`, axis 6). What
+   * matters for a delegated worker is that this is the boundary it is checked
+   * against, and it is the same pair the plugin child's own wrap carries.
+   */
   readonly pluginDataDir: string;
 }
 
