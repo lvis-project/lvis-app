@@ -178,6 +178,9 @@ const HOST_ONLY_CHANNELS: ReadonlyArray<readonly [string, string, unknown[]]> = 
   // Routines and the session todo list.
   ["routines", ROUTINES.list, []],
   ["session-todo", CHANNELS.sessionTodo.list, []],
+  // Host identity + runtime versions. Read-only, but the response carries
+  // `userDataPath` and is returned unprojected.
+  ["app", CHANNELS.app.info, []],
   // Work board items drive agent runs.
   ["work-board", WORK_BOARD.list, [{}]],
   ["work-board", WORK_BOARD.run, [{}]],
@@ -217,6 +220,7 @@ beforeEach(async () => {
     { registerSideChatHandlers },
     { registerRoutineHandlers },
     { registerSessionTodoHandlers },
+    { registerAppHandlers },
     { registerWorkBoardHandlers },
     { registerPromptHandlers },
     { registerTourHandlers },
@@ -233,6 +237,7 @@ beforeEach(async () => {
     import("../domains/sidechat.js"),
     import("../domains/routines.js"),
     import("../domains/session-todo.js"),
+    import("../domains/app.js"),
     import("../domains/work-board.js"),
     import("../domains/prompts.js"),
     import("../domains/tour.js"),
@@ -249,6 +254,7 @@ beforeEach(async () => {
   registerSideChatHandlers(deps);
   registerRoutineHandlers(deps);
   registerSessionTodoHandlers(deps);
+  registerAppHandlers(deps);
   registerWorkBoardHandlers(deps);
   registerPromptHandlers(deps);
   registerTourHandlers(deps);
