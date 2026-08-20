@@ -29,7 +29,7 @@ const layers = [
       "meeting (Whisper STT)",
       "work-assistant (proactive · detectors)",
       "agent-hub (sidebar · 43 tools)",
-      "lge-api (EP · 24 tools)",
+      "사내 포털 플러그인 (24 tools)",
     ],
   },
   {
@@ -53,7 +53,7 @@ const layers = [
       "Marketplace (FastAPI · plugin/agent/mcp/skill 카탈로그)",
       "Agent Hub (FastAPI + asyncpg + alembic)",
       "MCP servers (외부)",
-      "ms-graph · LGE EP · LGenie (외부 API)",
+      "ms-graph · 사내 포털 · 사내 검색 (외부 API)",
     ],
   },
 ];
@@ -114,7 +114,7 @@ export default function Page() {
 
       <Callout tone="info" title="6개 active 플러그인 (2026-05-20)">
         ms-graph (v0.3.28) · local-indexer (v0.4.11) · meeting (v0.4.18) · work-assistant (v0.7.0) ·
-        agent-hub (v0.8.1) · lge-api (v0.12.9). archived: lvis-plugin-email (2026-04-28), lvis-plugin-calendar (2026-04-30) — 둘 다 ms-graph 로 통합됨.
+        agent-hub (v0.8.1) · 사내 포털 플러그인 (v0.12.9). archived: lvis-plugin-email (2026-04-28), lvis-plugin-calendar (2026-04-30) — 둘 다 ms-graph 로 통합됨.
       </Callout>
 
       <Callout tone="security" title="아키텍처 문서 정합성">

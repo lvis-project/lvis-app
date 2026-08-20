@@ -14,7 +14,7 @@ const stats = [
 
 const layers = [
   { tag: "Desktop Host", label: "LVIS App", note: "ChatView · MainToolbar · MessageQueuePanel · SessionTodoPanel" },
-  { tag: "Plugin Runtime", label: "6 plugins", note: "ms-graph · local-indexer · meeting · work-assistant · agent-hub · lge-api" },
+  { tag: "Plugin Runtime", label: "6 plugins", note: "ms-graph · local-indexer · meeting · work-assistant · agent-hub · internal portal" },
   { tag: "Storage", label: "~/.lvis", note: "0o700 dir · 0o600 file · audit/<YYYY-MM-DD>.jsonl" },
   { tag: "Servers", label: "Marketplace · Agent Hub", note: "FastAPI · React 19 · Ed25519 · HTTPBearer + ApiKey sha256" },
 ];
@@ -22,7 +22,7 @@ const layers = [
 const features = [
   { eyebrow: "Host · Chat", title: "Desktop chat guide", desc: "Eight core host-app screens in one flow — message queue, Tool/Thinking, question cards, and permission flows.", href: "/en/docs/chat/layout", icon: MessagesSquare, span: "lg:col-span-4" },
   { eyebrow: "Routines", title: "Routine registration & triggers", desc: "Two triggers — shutdown / schedule — plus the per-fire fresh ConversationLoop isolation pattern.", href: "/en/docs/routines/overview", icon: Workflow, span: "lg:col-span-2" },
-  { eyebrow: "Plugins", title: "6 active plugins", desc: "Local Indexer · MS-Graph · Meeting · Work Assistant · Agent Hub · LGE EP.", href: "/en/docs/plugins", icon: Plug, span: "lg:col-span-3" },
+  { eyebrow: "Plugins", title: "6 active plugins", desc: "Local Indexer · MS-Graph · Meeting · Work Assistant · Agent Hub · internal portal plugin.", href: "/en/docs/plugins", icon: Plug, span: "lg:col-span-3" },
   { eyebrow: "Architecture", title: "System architecture", desc: "HostApi contract · ~/.lvis storage tree · RiskLevel × Category grid.", href: "/en/docs/architecture/overview", icon: Bot, span: "lg:col-span-3" },
   { eyebrow: "Trust", title: "Permissions & risk management", desc: "Directory grants · 4 LLM autonomous review modes · agentApproval cryptographic chain.", href: "/en/docs/chat/permissions/directory", icon: ShieldCheck, span: "lg:col-span-2" },
   { eyebrow: "Servers", title: "Marketplace & Agent Hub", desc: "FastAPI + SQLAlchemy 2.0 catalog · board · worklog · Ed25519 package signing.", href: "/en/docs/servers/marketplace", icon: Server, span: "lg:col-span-4" },

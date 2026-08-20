@@ -105,7 +105,7 @@ function fakeHostApi(): PluginHostApi & {
   // bus publishes. The host's own snapshot watcher subscribes to `"*"`, so a
   // fake whose `onChange` ignored its callback would make that watcher
   // untestable — and a watcher nothing drives is a watcher nothing proves.
-  const configValues = new Map<string, unknown>([["domains", ["lge.com"]]]);
+  const configValues = new Map<string, unknown>([["domains", ["portal.example.com"]]]);
   const configListeners = new Map<string, Set<(value: unknown) => void>>();
   const hostApi = {
     emitted,
@@ -212,7 +212,7 @@ function hostContext(
     pluginRoot: "/plugins/work-assistant",
     hostRoot: "/app",
     pluginDataDir: "/plugins/work-assistant/data",
-    config: { domains: ["lge.com"] },
+    config: { domains: ["portal.example.com"] },
     log: () => undefined,
     hostApi,
     ...overrides,
@@ -275,7 +275,7 @@ describe("the pilot, out of process", () => {
         payloadWasAbsent: false,
         installed: ["work-assistant", "meeting"],
         pluginDataDir: "/plugins/work-assistant/data",
-        configuredDomains: ["lge.com"],
+        configuredDomains: ["portal.example.com"],
       });
       // An absent payload stays absent across the boundary. MCP carries an
       // object, so `{}` would arrive where the plugin expects nothing — and
@@ -506,7 +506,7 @@ describe("the host keeps the child's config snapshot current", () => {
       const before = (await instance.handlers.pilot_echo!()) as {
         configuredDomains: unknown;
       };
-      expect(before.configuredDomains).toEqual(["lge.com"]);
+      expect(before.configuredDomains).toEqual(["portal.example.com"]);
 
       hostApi.setHostConfig("domains", ["lvisai.xyz"]);
 

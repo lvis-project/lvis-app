@@ -14,7 +14,7 @@ export default function Page() {
         eyebrow="Host · Integration Recipes"
         title="플러그인 결합 시나리오 모음"
         description="단일 플러그인 사용법보다 더 중요한 건 ‘여러 플러그인이 함께 일하는 사슬’ 입니다. 본 페이지는 자주 쓰이는 결합 시나리오 네 가지를 짧은 흐름으로 정리했습니다. 모든 사슬은 사용자 동의 카드를 거치며, 자동 실행되는 단계는 명시적으로 표시합니다."
-        tags={["Meeting + Work Assistant + MS-Graph", "Local Indexer + Meeting + Agent Hub", "MS-Graph + LGE EP", "Agent Hub + Meeting + EP"]}
+        tags={["Meeting + Work Assistant + MS-Graph", "Local Indexer + Meeting + Agent Hub", "MS-Graph + 사내 포털", "Agent Hub + Meeting + 사내 포털"]}
       />
 
       <h2 id="recipe-1">레시피 1 — 회의 → 액션 → 일정 → 답장</h2>
@@ -50,7 +50,7 @@ export default function Page() {
         steps={[
           { title: "회의 요청 메일 도착", body: <p><strong>Microsoft 365</strong> 가 새 회의 요청을 감지. 본문에서 시간 후보 추출.</p>, badge: "MS-Graph" },
           { title: "빈 회의실 추천", body: <p><strong>Work Assistant</strong> 가 사용자의 캘린더 + 사내 시스템의 회의실 가용 시간을 함께 보고 후보 카드를 띄움.</p>, badge: "Work Assistant" },
-          { title: "회의실 예약 + 화상회의 추가", body: <p>선택한 회의실은 <strong>LGE EP</strong> 의 회의실 예약 도구로 확정. 외부 참가자가 있으면 화상회의 링크가 자동 생성되어 일정 본문에 첨부.</p>, badge: "LGE EP" },
+          { title: "회의실 예약 + 화상회의 추가", body: <p>선택한 회의실은 <strong>사내 포털 플러그인</strong> 의 회의실 예약 도구로 확정. 외부 참가자가 있으면 화상회의 링크가 자동 생성되어 일정 본문에 첨부.</p>, badge: "사내 포털" },
           { title: "답장 발송", body: <p>회의 요청자에게 ‘예약 완료 + 회의실 + 화상회의 링크’ 가 채팅 카드로 표시 → 사용자가 ‘답장’ 을 누르는 순간에만 실제 발송.</p>, badge: "확인 후 발송" },
         ]}
       />
@@ -59,7 +59,7 @@ export default function Page() {
       <p>외부 참가자 회의의 일과 정리. 회의록 + 액션 아이템 + 팀 공유까지 한 번에.</p>
       <StepList
         steps={[
-          { title: "화상회의 진입", body: <p>일정에 첨부된 링크로 화상회의 시작 — <strong>LGE EP</strong> 의 화상회의 흐름.</p>, badge: "LGE EP" },
+          { title: "화상회의 진입", body: <p>일정에 첨부된 링크로 화상회의 시작 — <strong>사내 포털 플러그인</strong> 의 화상회의 흐름.</p>, badge: "사내 포털" },
           { title: "자동 회의록", body: <p>회의 중 <strong>Meeting</strong> 플러그인이 받아쓰기를 실시간으로 진행. 종료 시 회의록 + 요약 + 액션 아이템 자동 생성.</p>, badge: "Meeting" },
           { title: "팀 보드로 분배", body: <p><strong>Agent Hub</strong> 업무 보드에 액션 아이템 카드 자동 등록. 담당자 후보가 자동 채워지고, 마감 임박 카드는 알림으로 전달.</p>, badge: "Agent Hub" },
           { title: "회의록은 자기 영역에", body: <p>회의록 원본은 Meeting 플러그인 자기 영역 안에만 보관. 외부 서버로 자동 전송되지 않습니다.</p>, badge: "내 PC 안에만" },
