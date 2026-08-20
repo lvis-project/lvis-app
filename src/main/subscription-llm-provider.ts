@@ -28,6 +28,7 @@ import {
 } from "../shared/subscription-runtime.js";
 import { estimateMultimodalTokenOverhead } from "../shared/multimodal-token-estimate.js";
 import { estimateTokens } from "../shared/token-estimate.js";
+import { isRecord } from "../shared/is-record.js";
 import { MAX_ACP_SUBSCRIPTION_TEXT_WITH_IMAGES_BYTES } from "./acp-subscription-session-client.js";
 import {
   getSubscriptionRuntimeService,
@@ -101,10 +102,6 @@ function immutableSelection(
     provider: selection.provider,
     ...(selection.model === undefined ? {} : { model: selection.model }),
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
 
 function isErrorStreamEvent(value: unknown): value is ErrorStreamEvent {
