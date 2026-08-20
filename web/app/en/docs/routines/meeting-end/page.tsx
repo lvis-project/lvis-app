@@ -13,7 +13,7 @@ export default function Page() {
       <PageHero
         eyebrow="Event-driven flow"
         title="Meeting End → Action Item Extraction (Not a Routine)"
-        description="This flow is handled by work-assistant's meeting-summary detector, not RoutineEngineV2 — when the meeting plugin emits meeting.summary.created, the detector decides whether to surface it and shows the user a card."
+        description="This flow is handled by work-assistant's meeting-summary detector, not RoutineEngine — when the meeting plugin emits meeting.summary.created, the detector decides whether to surface it and shows the user a card."
         tags={["event-driven", "meeting.summary.created", "meeting-summary-detector"]}
       />
 

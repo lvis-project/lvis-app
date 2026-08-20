@@ -22,7 +22,7 @@ export default function Page() {
         eyebrow="Plugins"
         title="Plugins — the unit for adding what the host doesn't know about"
         description="Every domain feature in LVIS (mail, calendar, meetings, documents, corporate APIs) is split out into plugins. The host core never imports plugin-specific code (SDK type-only + CI enforced)."
-        tags={["6 active plugins", "static manifest", "lvis-plugin-sdk"]}
+        tags={["static manifest", "lvis-plugin-sdk"]}
       />
 
       <Callout tone="info" title="Plugin registration model — static manifest">

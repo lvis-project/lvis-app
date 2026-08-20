@@ -22,7 +22,7 @@ export default function Page() {
         eyebrow="Plugins"
         title="플러그인 — 호스트가 모르는 기능을 붙이는 단위"
         description="LVIS의 모든 도메인 기능 (메일·캘린더·회의·문서·사내 API)은 플러그인으로 분리됩니다. 호스트 코어는 플러그인 specific 코드를 import하지 않습니다 (SDK type-only + CI 차단)."
-        tags={["6 active plugins", "static manifest", "lvis-plugin-sdk"]}
+        tags={["static manifest", "lvis-plugin-sdk"]}
       />
 
       <Callout tone="info" title="플러그인 등록 모델 — 정적 manifest">

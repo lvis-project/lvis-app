@@ -33,7 +33,7 @@ export default function Page() {
             <p>macOS: if a first-run security warning appears, go to <strong>System Settings → Privacy & Security</strong> and choose "Open Anyway."</p>
             <p>Linux: run <code>chmod +x lvis-ai-*.AppImage</code>, then double-click or run it from a terminal.</p>
           </> },
-          { title: "Splash screen → main host (App.tsx)", body: <p>Once the LVIS splash screen disappears, the main host opens with an empty chat body (<code>src/ui/renderer/App.tsx:1249-1290</code>). At this point no plugins are registered yet.</p> },
+          { title: "Splash screen → main host (App.tsx)", body: <p>Once the LVIS splash screen disappears, the main host opens with an empty chat body (<code>src/ui/renderer/App.tsx</code>). At this point no plugins are registered yet.</p> },
           { title: "Deeplink registration", body: <p>The OS maps the <code>lvis://</code> protocol handler to the host app (<code>src/main/lvis-protocol.ts</code>). After this, clicking "Install" in the Marketplace routes to the host.</p>, badge: "lvis://" },
           { title: "Move on to Marketplace login", body: <p>The next step to get plugins is Marketplace login — via "Log in" at the bottom left or the account icon at the top right.</p> },
         ]}

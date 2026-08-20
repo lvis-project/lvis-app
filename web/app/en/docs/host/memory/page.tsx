@@ -33,6 +33,30 @@ export default function Page() {
         <li>Even when a plugin discovers a new fact, it is never saved automatically — it always goes through a user confirmation card.</li>
       </ul>
 
+      <h2 id="auto">Letting the host extract memories itself — off by default</h2>
+      <p>
+        The host can read the conversation and pick out facts worth remembering. There are three settings.
+      </p>
+      <FeatureGrid
+        columns={3}
+        items={[
+          { title: "Off", body: <><strong>This is the default.</strong> The host does not extract memories from the conversation.</>, tone: "teal" },
+          { title: "Review", body: <>Candidates are extracted but not saved — they are shown as a card first, and only stay if the user confirms.</>, tone: "citron" },
+          { title: "Auto", body: <>Saved straight away with no confirmation card. Read the rest of this page before turning it on.</>, tone: "coral" },
+        ]}
+      />
+      <p>
+        In every mode, <strong>only what the user typed themselves</strong> is eligible as a memory candidate. Attachment bodies, messages from other agents,
+        and turns that arrived through an external surface are excluded — otherwise a sentence someone else wrote could harden into a permanent fact about the user.
+      </p>
+
+      <h2 id="project">It also reads instructions the project carries</h2>
+      <p>
+        If the project folder you are working in has a team-shared <code>AGENTS.md</code>, the host reads that too and takes it into account.
+        It is treated as a <strong>separate layer</strong> from the user's personal memory, and personal memory wins where they conflict.
+        LVIS does not rewrite the project file — it only reads it.
+      </p>
+
       <h2 id="where">Where is it stored?</h2>
       <p>
         All memory is kept only inside the LVIS area on the user's PC. It is never sent to an external server, the Marketplace, or the Agent Hub.

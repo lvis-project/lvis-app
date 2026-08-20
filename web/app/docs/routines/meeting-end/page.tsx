@@ -13,7 +13,7 @@ export default function Page() {
       <PageHero
         eyebrow="Event-driven flow"
         title="미팅 종료 → 액션 아이템 추출 (Routine 아님)"
-        description="이 흐름은 RoutineEngineV2 가 아닌 work-assistant 의 meeting-summary detector 가 담당합니다 — meeting plugin이 meeting.summary.created 를 emit 하면 detector가 surface 결정 후 사용자 카드로 노출합니다."
+        description="이 흐름은 RoutineEngine 가 아닌 work-assistant 의 meeting-summary detector 가 담당합니다 — meeting plugin이 meeting.summary.created 를 emit 하면 detector가 surface 결정 후 사용자 카드로 노출합니다."
         tags={["event-driven", "meeting.summary.created", "meeting-summary-detector"]}
       />
 
