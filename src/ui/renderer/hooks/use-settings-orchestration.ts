@@ -1,7 +1,7 @@
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_MIN,
-} from "../../../shared/subagent-rounds.js";
+} from "../../../shared/subagent-policy.js";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   isIpcErrorResult,

@@ -45,9 +45,7 @@ import {
   type MarketplaceProviderModelDiscoveryPolicy,
 } from "../../../shared/marketplace-package-assets.js";
 import { isIpcErrorResult, type LvisApi } from "../types.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
-import { SettingsSection } from "../components/SettingsSection.js";
-import { SettingsHelpPopover } from "../components/SettingsHelpPopover.js";
+import { SettingsHelpPopover, SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { SubscriptionProvidersController } from "./SubscriptionProvidersController.js";
 

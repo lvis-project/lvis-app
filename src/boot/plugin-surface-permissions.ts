@@ -1,6 +1,6 @@
 import type { PluginToolInvocationContext } from "../plugins/runtime/index.js";
 import type { ToolPermissionContext } from "../tools/executor.js";
-import { createWorkspaceRootRevocationFilter } from "../permissions/workspace-root-revocation.js";
+import { createWorkspaceRootRevocationFilter } from "../permissions/workspace-root-lifecycle.js";
 
 export type PluginSurfacePermissionBase = Omit<
   ToolPermissionContext,

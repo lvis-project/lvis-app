@@ -16,7 +16,7 @@ import {
   type TailnetSharingMutationResult,
   type TailnetSharingSnapshot,
 } from "../../../shared/tailnet-sharing.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsSection } from "../components/PageShell.js";
 import type { LvisApi } from "../types.js";
 
 export interface TailnetAccessContentProps {

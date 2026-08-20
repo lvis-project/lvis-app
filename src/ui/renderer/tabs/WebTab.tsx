@@ -7,8 +7,7 @@ import { WEB_PROVIDERS } from "../constants.js";
 import type { LvisApi } from "../types.js";
 import { getApi } from "../api-client.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 
 /* ─── webView preferredFlow options (relocated from AppearanceTab — it is

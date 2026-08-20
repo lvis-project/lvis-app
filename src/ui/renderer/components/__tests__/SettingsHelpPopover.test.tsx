@@ -2,8 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { SettingsPageHeader } from "../SettingsPageHeader.js";
-import { SettingsSection } from "../SettingsSection.js";
+import { SettingsPageHeader, SettingsSection } from "../PageShell.js";
 
 afterEach(cleanup);
 
