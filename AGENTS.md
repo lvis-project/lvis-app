@@ -91,7 +91,7 @@ with itself, the majority side is the standard and the minority is listed under
 
 **Scope.** Every clause and count below is measured over the Electron app —
 `src/` — excluding tests, `__mocks__`, and `src/i18n/messages/generated/`. That
-is 1111 files. Read it as the standard for `src/`, not as a repository-wide
+is 1107 files. Read it as the standard for `src/`, not as a repository-wide
 absolute. The one exception is `Domain labels versus process labels`, which
 applies everywhere, including `web/` and `docs/`, because it is about what a
 name records rather than how a name is spelled. `web/` has its own conventions
@@ -116,7 +116,7 @@ than trusted. Every query below that says `<file set>` means this pipeline;
 
 ### Casing by kind
 
-- Types, interfaces, and classes are `PascalCase`, with no exceptions: 3019
+- Types, interfaces, and classes are `PascalCase`, with no exceptions: 3018
   top-level `type`/`interface` declarations and 259 `class` declarations, and
   zero of them begin with a lowercase letter.
 - Functions, methods, parameters, locals, and object fields are `camelCase`.
@@ -124,8 +124,8 @@ than trusted. Every query below that says `<file set>` means this pipeline;
   `SCREAMING_SNAKE_CASE`. A module-level `const` bound to a constructed
   instance, singleton, or function stays `camelCase` (`logger`,
   `admissionRegistry`, `backgroundShellManager`, `projectRoot`). The casing
-  says which of the two it is; it is not an emphasis marker. Of 2446
-  module-level `const` declarations: 1994 screaming, 353 camelCase (185
+  says which of the two it is; it is not an emphasis marker. Of 2441
+  module-level `const` declarations: 1993 screaming, 349 camelCase (185
   distinct names), 82 `PascalCase`, and 17 with a leading underscore.
 - A module-level `const` is `PascalCase` only when the binding *is* a type-like
   or component-like thing. All 82 are one of five: a React component or a lazy
@@ -149,12 +149,17 @@ than trusted. Every query below that says `<file set>` means this pipeline;
 
 ### Files
 
-- A `.ts` module in `src/` is kebab-case: 945 of 945 hand-written files. The
-  192 generated `.ts` files — 121 camelCase, 61 `be_`-prefixed, 10 single-word
-  — all sit under `src/i18n/messages/generated/` and belong to their generator,
-  not to this rule; do not hand-edit them and do not cite them as precedent.
+- A `.ts` module in `src/` is kebab-case: 944 of 944 in the file set. 938 of
+  those are hand-written. The other six are generated and sit inside the
+  measured set because the scope pipeline excludes only
+  `src/i18n/messages/generated/` — `src/i18n/messages/generated-locales/` holds
+  one file per locale (`de.ts`, `ko.ts`), written by
+  `scripts/i18n-generate-extra-locales.ts`. They satisfy the rule; they are not
+  evidence for it. The 192 files the pipeline does exclude — 121 camelCase, 61
+  `be_`-prefixed, 10 single-word — belong to their generator too. Do not
+  hand-edit either set and do not cite either as precedent.
 - A `.tsx` file in `src/` whose reason to exist is one React component is
-  `PascalCase` and carries that component's exact name: 135 files, 132 of which
+  `PascalCase` and carries that component's exact name: 132 files, 129 of which
   export a binding of exactly that name. The three that do not are
   `ChatContext.tsx` and `OverlayContext.tsx`, which name the context object
   they build and export it only as a `*Provider` and hooks, and
@@ -164,8 +169,8 @@ than trusted. Every query below that says `<file set>` means this pipeline;
   all, is kebab-case: `chat-side-panel-layout.tsx`, `preview-renderers.tsx`.
   `src/components/ui/*` is vendored primitive code and keeps its upstream
   kebab names.
-- `export default` is not used in `src/`: 0 declarations in 945 hand-written
-  `.ts`, 2 in 166 non-test `.tsx`. So "the file name matches the default
+- `export default` is not used in `src/`: 0 declarations in the file set's 944
+  `.ts`, 2 in its 163 `.tsx`. So "the file name matches the default
   export" does not arise there: the file name matches the single component the
   file exists to hold. When such a file grows a second exported component,
   either rename the file to kebab-case or move the second component out; never
@@ -178,15 +183,15 @@ than trusted. Every query below that says `<file set>` means this pipeline;
 
 ### The web workspace
 
-`web/` is the marketing and documentation site: 241 tracked files, Next.js App
+`web/` is the marketing and documentation site: 222 tracked files, Next.js App
 Router, built and deployed by its own workflows. Its file and export
 conventions are the framework's, not `src/`'s, and applying the `src/` clauses
 there breaks the build. Concretely, and measured over `web/`:
 
-- Every `.tsx` and `.ts` file is kebab-case or lowercase — 134 `.tsx`, zero
+- Every `.tsx` and `.ts` file is kebab-case or lowercase — 132 `.tsx`, zero
   `PascalCase`. A single-component file is `hero.tsx`, not `Hero.tsx`. Do not
   rename toward the `src/` clause.
-- `export default` is the norm, not a divergence: 102 files declare one. The
+- `export default` is the norm, not a divergence: 100 files declare one. The
   App Router resolves a route from `page.tsx` / `layout.tsx` and a sitemap from
   `sitemap.ts` by default export; removing it removes the route.
 - The identifier clauses in `Casing by kind` do apply, as do `Booleans and
@@ -206,8 +211,8 @@ there breaks the build. Concretely, and measured over `web/`:
 - A function returning `boolean` is named as a proposition the caller reads as
   a question — `isSensitivePath`, `hasApiKey`, `grantCovers`,
   `pathEntryExists`, `vendorSupportsLengthContinuation`. Subject-first is fine;
-  imperative is not. 415 `function` declarations return `boolean` (366 distinct
-  names), and 292 of them open with `is`/`has`/`can`/`should`/`are`/`does`.
+  imperative is not. 408 `function` declarations return `boolean` (367 distinct
+  names), and 290 of them open with `is`/`has`/`can`/`should`/`are`/`does`.
 - A boolean-returning function named as a command leaves the caller unable to
   tell whether `true` means "it is so" or "I did it". Name it for the question
   or return a result object.
@@ -217,7 +222,7 @@ there breaks the build. Concretely, and measured over `web/`:
 
 ### Async
 
-- Async functions carry no suffix — 502 `async function` declarations, none
+- Async functions carry no suffix — 498 `async function` declarations, none
   named `*Async`. The return type already says it. The suffix is earned only by
   a binding that disambiguates a same-named synchronous API. All eight `*Async`
   spellings in `src/` are accounted for and none is a divergence: `statAsync`
@@ -434,23 +439,28 @@ it from the pattern of the ones around it.
   code talks to stays, a name that decorates an explanation goes. The
   difference is the consequence — a vendor name is an attribution problem, this
   one is a disclosure.
-- **No CI job enforces this clause today.** As of this commit
-  `.github/workflows/naming-gate.yml` defines exactly one job, `naming-gate`,
-  and what that job matches is process labels, test-double words, and file
-  names. No pattern in it looks for an organizational identifier, and no other
-  workflow does. So this clause binds as a reviewer rule and nothing else. That
-  is stated here rather than left to be discovered, because a clause about
-  permanent public disclosure is the last one that may read as machine-checked
-  while it is not — an author who believes a gate is watching stops looking,
-  which is the failure mode this rule cannot afford.
-- A diff-scanning job is the right home for it, beside the process-label job,
-  because both answer the same question about a token in a diff. When one is
-  written the pattern list belongs with it and deliberately not here: writing
-  the literals into this file in order to ban them would republish exactly what
-  the rule removes, and a second copy of a pattern list is the split this file
-  exists to prevent. This clause owns the rule; a job would own the patterns.
-  Check the workflow to see whether that job has landed — do not infer it from
-  this sentence.
+- Enforcement is the `deidentification-gate` job in
+  `.github/workflows/naming-gate.yml`, beside the process-label job that
+  `Domain labels versus process labels` describes, because both answer the same
+  question about a token in a diff. The pattern list lives with that job and
+  deliberately not here: writing the literals into this file in order to ban
+  them would republish exactly what the rule removes, and a second copy of a
+  pattern list is the split this file exists to prevent. This clause owns the
+  rule; the job owns the patterns.
+- What that job reaches is narrower than what this clause says, and the gap is
+  reviewer work rather than coverage. It matches added lines in changed text
+  files under `src/`, `test/`, `docs/`, `web/` and `.github/`, and separately
+  matches the *names* of every changed path in those directories — which is how
+  a screenshot is caught, a name being the only part of a binary a grep can
+  read. It excludes the workflow that carries it, because a gate cannot avoid
+  containing the literals it greps for. Everything else is rule without gate:
+  the repository root, `scripts/`, `resources/`, `build/`, `fixtures/`,
+  `schemas/` and `.omc/`; commit messages and PR descriptions; the contents of
+  a binary; and colleagues' names, which no pattern generalizes. This file is
+  itself in that unwatched set. Read the job to see what it matches — a clause
+  about permanent public disclosure is the last one that may be assumed
+  machine-checked, because an author who believes a gate is watching stops
+  looking.
 - Deriving an assertion from a manifest or a bundle beats copying a literal
   into a test. A test that hard-codes the identifier both leaks it and pins one
   value; reading it from the artifact under test does neither.
@@ -545,15 +555,15 @@ matches none, and both results look like measurements. State a number only for
 the scope you ran it over; a query that cannot run is not a query that returned
 zero.
 
-    # <gate scan> — every file the naming gate reads (1640)
+    # <gate scan> — every file the naming gate reads (1634)
     git ls-files | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' \
       | grep -Ev '^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)'
 
-    # Casing: 3019 type/interface + 259 class, 0 lowercase-initial
+    # Casing: 3018 type/interface + 259 class, 0 lowercase-initial
     <file set> | xargs grep -hoE \
       '^(export )?(declare )?(abstract )?(class|interface|type) [A-Za-z_$][A-Za-z0-9_$]*'
 
-    # Casing: 2446 module-level const declarations, split 1994 / 353 / 82 / 17
+    # Casing: 2441 module-level const declarations, split 1993 / 349 / 82 / 17
     <file set> | xargs grep -hoE '^(export )?const [A-Za-z_$][A-Za-z0-9_$]*' \
       | sed -E 's/^(export )?const //'
       #   screaming   grep -cE '^[A-Z][A-Z0-9_]*$'
@@ -561,11 +571,11 @@ zero.
       #   PascalCase  grep -E '^[A-Z]' | grep -vcE '^[A-Z][A-Z0-9_]*$'
       #   underscore  grep -vcE '^[A-Z]|^[a-z]'
 
-    # Files: 945 of 945 .ts kebab; 166 .tsx of which 135 PascalCase
+    # Files: 944 of 944 .ts kebab; 163 .tsx of which 132 PascalCase
     <file set> | grep '\.ts$'  | xargs -n1 basename | grep -cE '^[a-z0-9]+(-[a-z0-9]+)*\.ts$'
     <file set> | grep '\.tsx$' | xargs -n1 basename | grep -cE '^[A-Z]'
 
-    # Files: of the 135 PascalCase .tsx, 132 export a binding of the same name
+    # Files: of the 132 PascalCase .tsx, 129 export a binding of the same name
     for f in $(<file set> | grep -E '/[A-Z][^/]*\.tsx$'); do
       n=$(basename "$f" .tsx)
       grep -qE "export (const|function|class) $n\b|export \{[^}]*\b$n\b|export default $n\b" "$f" \
@@ -575,10 +585,14 @@ zero.
     # Files: 192 generated .ts — 121 camelCase, 61 be_-prefixed, 10 single-word
     git ls-files 'src/i18n/messages/generated/**' | grep '\.ts$' | xargs -n1 basename
 
+    # Files: the 6 generated .ts the file set does NOT exclude, so 944 - 6 = 938
+    # hand-written. The scope pipeline drops `generated/`, not `generated-locales/`.
+    <file set> | grep '^src/i18n/messages/generated-locales/'
+
     # Files: export default — 0 in .ts, 2 in .tsx
     <file set> | xargs grep -lE '^export default'
 
-    # web/: 241 tracked, 134 .tsx none PascalCase, 102 files with a default export
+    # web/: 222 tracked, 132 .tsx none PascalCase, 100 files with a default export
     git ls-files 'web/**' | wc -l
     git ls-files 'web/**' | grep '\.tsx$' | xargs -n1 basename | grep -cE '^[A-Z]'
     git ls-files 'web/**' | grep -E '\.(ts|tsx)$' | xargs grep -lE '^export default' | wc -l
@@ -588,13 +602,13 @@ zero.
       | sed -E 's/\??: boolean//'
       #   prefixed   grep -cE '^(is|has|can|should)[A-Z]'
 
-    # Booleans: 415 boolean-returning function declarations, 366 distinct,
-    # 292 of the declarations opening with a question word
+    # Booleans: 408 boolean-returning function declarations, 367 distinct,
+    # 290 of the declarations opening with a question word
     <file set> | xargs grep -hoE 'function [a-zA-Z_$][A-Za-z0-9_$]*\([^)]*\): boolean' \
       | sed -E 's/^function ([A-Za-z0-9_$]*).*/\1/'
       #   question-opening   grep -cE '^(is|has|can|should|are|does)[A-Z]'
 
-    # Async: 502 async function declarations, 0 named *Async; 8 *Async spellings
+    # Async: 498 async function declarations, 0 named *Async; 8 *Async spellings
     <file set> | xargs grep -hoE 'async function [a-zA-Z_$][A-Za-z0-9_$]*'
     <file set> | xargs grep -hoE '\b[a-z][A-Za-z0-9_$]*Async\b' | sort | uniq -c
 
