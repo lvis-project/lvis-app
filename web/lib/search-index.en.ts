@@ -38,7 +38,6 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Plugins", href: "/en/docs/plugins/meeting", title: "Meeting (Recording)", snippet: "OpenAI Whisper · PCM16LE 16kHz/3sec · 18 tools · meeting.ended", keywords: ["stt", "whisper", "audio"] },
   { group: "Plugins", href: "/en/docs/plugins/work-assistant", title: "Work Assistant", snippet: "10 detectors · proactive triggerConversation · daily briefing" },
   { group: "Plugins", href: "/en/docs/plugins/agent-hub", title: "Agent Hub Sidebar", snippet: "ui[] slot=sidebar · 43 tools · 5-min polling · agent-hub.lvisai.xyz" },
-  { group: "Plugins", href: "/en/docs/plugins/lge-api", title: "LGE EP", snippet: "24 tools · 6 domains · openAuthWindow session · corporate DNS gateway", keywords: ["lge", "ep", "lgenie"] },
 
   // Servers
   { group: "Servers", href: "/en/docs/servers/marketplace", title: "Marketplace Overview", snippet: "FastAPI + SQLAlchemy 2.0 · single Plugin model + plugin_type · Ed25519" },

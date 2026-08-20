@@ -60,7 +60,6 @@ export const navigation: NavGroup[] = [
       { title: "Meeting (회의 녹음)", href: "/docs/plugins/meeting" },
       { title: "Work Assistant (업무도우미)", href: "/docs/plugins/work-assistant" },
       { title: "Agent Hub", href: "/docs/plugins/agent-hub" },
-      { title: "LGE EP", href: "/docs/plugins/lge-api", badge: "사내" },
     ],
   },
   {

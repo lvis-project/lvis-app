@@ -46,7 +46,6 @@ export const searchIndex: SearchEntry[] = [
   { group: "플러그인", href: "/docs/plugins/meeting", title: "Meeting (회의 녹음)", snippet: "OpenAI Whisper · PCM16LE 16kHz/3sec · 18개 도구 · meeting.ended", keywords: ["stt", "whisper", "audio"] },
   { group: "플러그인", href: "/docs/plugins/work-assistant", title: "Work Assistant (업무도우미)", snippet: "10 detectors · proactive triggerConversation · daily briefing" },
   { group: "플러그인", href: "/docs/plugins/agent-hub", title: "Agent Hub Sidebar", snippet: "ui[] slot=sidebar · 43 tools · 5분 polling · agent-hub.lvisai.xyz" },
-  { group: "플러그인", href: "/docs/plugins/lge-api", title: "LGE EP (이피)", snippet: "24 tools · 6 domain · openAuthWindow 세션 · 사내망 DNS 게이트", keywords: ["lge", "ep", "lgenie"] },
 
   // Servers
   { group: "서버", href: "/docs/servers/marketplace", title: "Marketplace 개요", snippet: "FastAPI + SQLAlchemy 2.0 · 단일 Plugin 모델 + plugin_type · Ed25519" },

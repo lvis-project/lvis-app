@@ -80,7 +80,7 @@ describe("plugin webview attach", () => {
   });
 
   it("enforces for every plugin id, not a fixed list", () => {
-    for (const pluginId of ["meeting", "ms-graph", "lge-api", "work-assistant", "unknown-future"]) {
+    for (const pluginId of ["meeting", "ms-graph", "ep-api", "work-assistant", "unknown-future"]) {
       const webPreferences = weakRequest();
       const result = configurePluginWebviewAttach({
         webPreferences,
