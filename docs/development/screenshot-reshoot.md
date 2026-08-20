@@ -22,10 +22,19 @@ exercise.
 
 | Verdict | Count | Meaning |
 | --- | --- | --- |
-| `reshoot` | 24 | Must be re-captured. Redaction cannot fix it, or would destroy what the image is there to show. |
+| `reshoot` | 23 | Must be re-captured. Redaction cannot fix it, or would destroy what the image is there to show. |
 | `redact` | 3 | One contiguous region carries the problem and is not the subject of the shot. |
-| `keep` | 27 | Nothing on screen identifies a third party or exposes a credential. |
+| `keep` | 21 | Nothing on screen identifies a third party or exposes a credential. |
 | `superseded` | 17 | The internal-portal plugin page and its images are removed by the in-flight de-identification change. No capture work here. |
+| `replaced` | 7 | Re-captured from seeded data by the harness. |
+
+Seven images have been replaced with seeded captures so far. Only one of them —
+`plugin-permission-grant` — was in the third-party backlog, so the ratchet moved
+26 → 25 and has not moved since; the other six were `keep` rows, and replacing a
+`keep` row leaves the backlog count alone by construction (the ratchet counts
+`third-party` entries only). Those six are still worth replacing: two of them
+printed the publisher's own home directory across several fields, and all six now
+come from the harness rather than from a working session.
 
 `web/screenshot-provenance.json` is the machine-readable form of the same table,
 and the gate described at the end of this document reads it.
@@ -49,8 +58,9 @@ exactly three: `outlook-login-trigger.png`, `outlook-login-window.png` and
 `outlook-login-after.png`. A first, coarser pass also suspected it on
 `plugin-permission-grant.png` and `meeting-minutes.png`; a tighter check against
 flat regions of those two showed the texture was gradient banding and desktop
-wallpaper, not a stamp. Both are recorded here as clean of the overlay — they
-are on the re-shoot list for their content, not for this.
+wallpaper, not a stamp. Both are recorded here as clean of the overlay — each
+was listed for its content, not for this. `plugin-permission-grant.png` has
+since been replaced by a harness capture.
 
 Two properties matter for the verdicts:
 
@@ -109,20 +119,27 @@ yet have is coverage.
 ### What it covers, and what it does not
 
 `test/screenshots/matrix.ts` holds 37 entries, one of which (`_smoke-settings-llm`)
-is not a docs-site key. Of the remaining 36, **4 capture end-to-end today**:
-`chat-app-update`, `chat-plugin-panel`, `plugin-permission-grant`,
-`meeting-upcoming`. The other 32 carry an explicit `skip` with a stated blocker,
-and those 32 are what the group counts in the table below add up to. Those
-blockers are real, not missing effort:
+is not a docs-site key. Of the remaining 36, **9 capture end-to-end today**:
+`chat-app-update`, `chat-question-card`, `chat-todo-queue`, `chat-tool-thinking`,
+`chat-permission-directory`, `chat-permission-risk`, `chat-permission-llm-review`,
+`plugin-permission-grant`, `meeting-upcoming`. The six conversational ones among
+those are new — they are what the scripted provider below unblocked. The rest
+carry an explicit `skip` with a stated blocker. Those blockers are real, not
+missing effort:
 
 | Blocked group | Blocker |
 | --- | --- |
-| `chat-*` conversational states | Need an in-flight model turn — tool calls, reviewer deferrals, streamed thinking, ask-user cards. No deterministic scripted provider exists in this repo. |
+| `chat-plugin-panel` | The plugin whose panel this key shows does not load in the isolated profile: its bundle's factory spawns a confined child before the ASRT sandbox is active there, so the runtime tears the plugin down. Recorded as reproducing on an unmodified checkout, so it is not caused by this change. |
 | `local-indexer-*` (7) | The bundle's `start()` throws without a provisioned Python interpreter, so the runtime tears the plugin down and no UI provider registers. |
 | `meeting-*` minutes / recorder (7) | Live inside the plugin `<webview>`, which Playwright cannot click through, and need a completed transcription or mail authorisation to populate. |
 | `outlook-*` (4) | The manifest declares a login tool, so selecting the panel goes straight to a live authorisation window. |
 | `work-assistant-*` (6) | Host notification cards emitted when a detector fires. Firing one needs a real external signal; the plugin ships no synthetic trigger. |
 | `agent-hub-*` (2) | No such plugin bundle exists in the workspace. |
+
+`meeting-upcoming` captures, but only in its empty state, with the plugin's
+first-tool-call approval dock over the lower half of the frame. Its caption
+promises a populated agenda, so that capture is **not** a usable replacement and
+the image stays in the backlog.
 
 The `mp-*`, `ah-*` and internal-portal keys are web/server screens from a
 separate app and are out of the harness's scope by construction — but note that
@@ -134,11 +151,9 @@ identities, which is the standard the rest should meet.
 Nothing here should be invented in this change. Stated plainly, in the order
 that buys the most coverage per unit of work:
 
-1. **A scripted provider fixture for the harness.** A provider stub that replays
-   a fixed transcript — tool calls, thinking tokens, an ask-user card, a
-   permission deferral — unblocks the six `chat-*` keys and is the prerequisite
-   for any conversational screenshot ever being reproducible. This is the single
-   highest-value item and it is host-side only.
+1. **A scripted provider fixture for the harness — done.** See "The scripted
+   provider" below. It unblocked all six of the conversational `chat-*` keys —
+   the ones listed under `replaced`.
 2. **A synthetic detector trigger in the work-assistant plugin.** A dev-only tool
    that emits a fabricated schedule-conflict / reminder / meeting-end event
    unblocks all six `work-assistant-*` keys. These are the images carrying the
@@ -148,14 +163,14 @@ that buys the most coverage per unit of work:
    `local-indexer-*` keys.
 
 Items 2 and 3 are plugin-repo changes and belong in their own changes, in their
-own repositories. Until they land, the affected images have to be captured by
+own repositories. Nothing in this repository unblocks them. Until they land, the affected images have to be captured by
 hand — in which case they must be captured **on a machine that does not apply
 the identity overlay, signed into a demo identity, with a fabricated corpus**,
 and then amplification-checked before they are committed.
 
 ## Worklist
 
-### `reshoot` — 24
+### `reshoot` — 23
 
 Shared preconditions for every row here: capture on a machine that does not
 apply the identity overlay; sign in with a demo identity, never a working
@@ -164,7 +179,6 @@ the result before committing.
 
 | File | `screenshots.ts` key | Docs page(s) | Retake as |
 | --- | --- | --- | --- |
-| `plugin-permission-grant.png` | `plugin-permission-grant` | `/docs/plugins/permission-grant` | The dialog is the subject, but the window behind it is a live internal booking form showing a site code and a building code. Retake with the approval dock raised over a neutral plugin panel. The harness already captures this key — use it. |
 | `local-indexer-indexing.png` | `local-indexer-indexing` | `/docs/plugins/local-indexer` | Progress state over an internal work-document tree; the path and a deck filename appear in four places, so masking would leave the shot unreadable. Index a fabricated sample corpus under a neutral folder name. |
 | `local-indexer-add-folder.png` | `local-indexer-add-folder` | `/docs/plugins/local-indexer` | Same internal path in the folder row. Also note the caption promises an add-folder dialog with include/exclude patterns and the current image does not show one — retake against what the caption claims. |
 | `local-indexer-search.webp` | `local-indexer-search` | `/docs/plugins/local-indexer` | Answer cites internal deck filenames and internal project subject matter. Re-run the same question shape against the fabricated corpus. |
@@ -205,15 +219,42 @@ screenshot exists to show.
 | `agent-hub-team-board.png` | `agent-hub-team-board` | `/docs/plugins/agent-hub` | Same shape: seeded team rows, real right-hand schedule column. Mask the right column only. Same decommissioning question applies. |
 | `mp-admin-4.png` | `mp-admin-4` | `/docs/servers/marketplace/admin` | Mask the `Prefix` column of the key table. The screenshot exists to show that an admin can inventory and revoke keys, which the labels, roles, statuses and dates carry on their own. *Disagreement with the earlier pass: this is not clean. These are project-owned development keys on a server that rotates them, so exploitability is low and this is not an incident — but publishing a truncated prefix narrows a guess, and an admin key inventory should not be public regardless.* |
 
-### `keep` — 27
+### `replaced` — 7
+
+Captured by the harness from seeded data, amplification-checked, and recorded in
+the manifest as `seeded` under the `host-capture-seed` account. Re-capture one
+with `node scripts/capture-screenshots.mjs --skip-build --grep <key>`; the six
+`chat-*` rows need nothing else; `plugin-permission-grant` needs one more thing,
+noted under the table. The two approval-dock crops differ between runs by one
+row — the tool-call id — and are otherwise byte-identical.
+
+| File | `screenshots.ts` key | What the replacement shows |
+| --- | --- | --- |
+| `plugin-permission-grant.png` | `plugin-permission-grant` | The approval dock raised by a plugin's own first tool call, over that plugin's panel. This is the one that came off the third-party backlog. |
+| `chat-question-card.png` | `chat-question-card` | An ask-user card with invented choices, from a scripted `ask_user_question` call. |
+| `chat-todo-queue.png` | `chat-todo-queue` | A four-item session checklist and two queued messages, while a scripted answer streams. |
+| `chat-tool-thinking.png` | `chat-tool-thinking` | A finished file read and a thinking body still arriving, captured inside the second turn. |
+| `chat-permission-directory.png` | `chat-permission-directory` | The directory-level read grant, over an invented path outside the profile's allowed scope. Replaces a frame that printed the publisher's home directory in six places. |
+| `chat-permission-risk.png` | `chat-permission-risk` | A HIGH-risk shell approval with its impact detail expanded. The verdict comes from the scripted reviewer — see the tamper check under "The scripted provider". |
+| `chat-permission-llm-review.png` | `chat-permission-llm-review` | The in-flight review card for a shell call, captured while the scripted reviewer's answer is still streaming. |
+
+`plugin-permission-grant` is the one row here that needs more than this
+repository: its panel comes from a sibling plugin repo, whose `dist/` is not
+committed, so that clone has to be present and built (`bun install && bun run
+build`) before the harness can seed it. Without it the harness reports the
+bundle missing and the key captures nothing. The six `chat-*` rows need no
+sibling clone.
+
+### `keep` — 21
 
 Inspected and clear: nothing identifies a third party, and no credential is in
 frame. Two notes worth recording rather than acting on:
 
-- `chat-permission-directory.png` and `chat-permission-risk.png` show the
-  publisher's own home directory path, repeated across several fields. That is
-  the publisher's own identifier, not a third party's, and it appears throughout
-  the repository already. Recorded as `owner` in the manifest, not masked.
+- `chat-permission-directory.png` and `chat-permission-risk.png` used to show the
+  publisher's own home directory path across several fields. That is the
+  publisher's own identifier, not a third party's, so it was recorded as `owner`
+  and not masked — but both have since been re-captured from seeded data and are
+  on the `replaced` list above, which removes the path anyway.
 - `mp-plugin.png` shows a catalog card describing the internal-portal plugin.
   That names the internal system the in-flight de-identification change is
   generalising away from elsewhere in the docs. It is a policy question for that
@@ -221,13 +262,7 @@ frame. Two notes worth recording rather than acting on:
 
 | File | `screenshots.ts` key | Docs page(s) |
 | --- | --- | --- |
-| `chat-todo-queue.png` | `chat-todo-queue` | `/docs/chat/layout`<br>`/docs/chat/message-queue` |
-| `chat-tool-thinking.png` | `chat-tool-thinking` | `/docs/chat/layout`<br>`/docs/chat/tool-thinking` |
-| `chat-permission-llm-review.png` | `chat-permission-llm-review` | `/docs/chat/permissions/llm-review` |
-| `chat-permission-directory.png` | `chat-permission-directory` | `/docs/chat/permissions/directory` |
-| `chat-permission-risk.png` | `chat-permission-risk` | `/docs/chat/permissions/risk` |
 | `chat-app-update.png` | `chat-app-update` | `/docs/getting-started/updates` |
-| `chat-question-card.png` | `chat-question-card` | `/docs/chat/question-cards`<br>`/docs/getting-started/login` |
 | `chat-plugin-panel.png` | `chat-plugin-panel` | `/docs/chat/plugin-panel`<br>`/docs/getting-started/login` |
 | `local-indexer-home.png` | `local-indexer-home` | `/docs/plugins/local-indexer` |
 | `outlook-logout.png` | `outlook-logout` | `/docs/plugins/ms-graph` |
@@ -265,16 +300,19 @@ merges.
 ## Order of work
 
 1. Land the guard (done — see below) so nothing new arrives while the backlog drains.
-2. Apply the three `redact` masks. Cheap, and removes real exposure immediately.
-3. Re-shoot the six `work-assistant-*` images. Highest concentration of
+2. Build the scripted provider (done — see "The scripted provider") and capture
+   what it unblocks. That is where `plugin-permission-grant` and the six `chat-*`
+   replacements came from.
+3. Apply the three `redact` masks. Cheap, and removes real exposure immediately.
+4. Re-shoot the six `work-assistant-*` images. Highest concentration of
    third-party content, and item 2 in the enabling-change list unblocks all six
    at once.
-4. Re-shoot the `meeting-*` and `outlook-*` clusters against a demo mailbox and a
+5. Re-shoot the `meeting-*` and `outlook-*` clusters against a demo mailbox and a
    fabricated recording.
-5. Re-shoot the seven `local-indexer-*` images against a fabricated corpus.
-6. Lower `pendingReplacementBaseline` with each batch. The gate fails if the
+6. Re-shoot the seven `local-indexer-*` images against a fabricated corpus.
+7. Lower `pendingReplacementBaseline` with each batch. The gate fails if the
    backlog shrinks and the baseline does not follow.
-7. Only once replacements are in place, remove anything left over.
+8. Only once replacements are in place, remove anything left over.
 
 ## What is not addressed here
 
@@ -348,13 +386,87 @@ OK — 7/7 expectations held.
 ```
 
 And exercised against this repository by staging one extra image and declaring
-it three different ways. Summarised, with the exit code the gate returned:
+it three ways, plus one run with the baseline left where it was after a
+replacement. Numbers below are what the gate printed at the current HEAD:
 
 | Declaration | Gate says | Exit |
 | --- | --- | --- |
-| none — image staged, no manifest entry | `undeclared image: … has no entry in web/screenshot-provenance.json` | 1 |
-| `data: "third-party"` | `ratchet: 44 entries carry third-party content but the baseline is 43` | 1 |
-| `data: "seeded"`, allow-listed account, overlay-checked | `OK — 74 tracked images, all declared; 43 awaiting replacement` | 0 |
+| none — image staged, no manifest entry | `undeclared image: web/public/screenshots/tamper-probe.png has no entry in web/screenshot-provenance.json` | 1 |
+| `data: "third-party"` | `ratchet: 26 entries carry third-party content but the baseline is 25` | 1 |
+| `data: "seeded"`, allow-listed account, overlay-checked | `OK — 57 tracked images, all declared; 25 awaiting replacement (baseline 25)` | 0 |
+| image removed again, baseline left at 26 | `ratchet: 25 entries carry third-party content but the baseline still says 26` | 1 |
 
-Reproduce it by copying any existing screenshot to a new name under
-`web/public/screenshots/`, `git add`-ing it, and running the gate.
+Reproduce the first three by copying any existing screenshot to a new name under
+`web/public/screenshots/`, `git add`-ing it, and running the gate; the fourth by
+raising `pendingReplacementBaseline` by one on a clean tree. The counts move with
+the tree, so re-derive them rather than quoting these if the backlog has changed.
+
+## The scripted provider
+
+The conversational keys need a model turn in flight. The harness gets one without
+any test-only branch in the host: it starts a local OpenAI-compatible endpoint on
+loopback and points the isolated profile's LLM settings at it. `openai-compatible`
+is an API-key-optional vendor whose `baseUrl` is an ordinary user setting, and
+`selectProviderRuntimeFetch` already grants a configured self-hosted base URL
+loopback access locked to that one origin. Nothing under `src/` knows the
+endpoint is a fixture; it takes the same path a self-hosted endpoint takes.
+
+A scenario declares `scriptedScript.turns` — one entry per model call it causes —
+and each entry lists reasoning text, answer text, and tool calls to stream, with
+an optional per-chunk delay so a capture can land mid-turn. Two things keep it
+honest:
+
+- **It fails closed.** A `POST /chat/completions` can leave the handler three
+  ways: the fixed connectivity-probe reply, a turn the script named, or an
+  error. There is no fourth branch, and none of the three improvises an answer
+  to what was asked. A request the script does not anticipate gets the error and
+  is recorded on the handle; `capture.spec.ts` asserts that list is empty after
+  the capture, so a drifted script fails the run instead of quietly producing a
+  frame of the error state.
+  Trailing turns left unconsumed are not a failure and are not checked — a
+  mid-turn capture stops before the tail of its script on purpose.
+- **It routes by the prompt the host actually sends.** `pingProvider`'s
+  connectivity probe is answered before the turn queue is consulted; the
+  permission reviewer's classification call is matched against
+  `PERMISSION_REVIEWER_SYSTEM_PROMPT`, which `LlmRiskClassifier` sends verbatim;
+  anything else is a conversation turn, whose system prompt is composed per
+  session rather than being a constant, so there is nothing to compare it
+  against. A turn may declare which of the two callers it answers. Both markers
+  are imported from the modules that define them rather than copied, so an edit
+  to either prompt moves the check with it.
+
+### What "the reviewer path works" rests on
+
+The claim that the reviewer verdict in `chat-permission-risk` comes from the
+script — rather than from the rule classifier the LLM verdict composes with —
+was checked by changing it. Replacing the scripted `"level": "high"` with
+`"level": "low"` and re-running the key on macOS at this commit: no approval
+dock appears at all, the shell call is auto-approved under the threshold, the
+turn continues, and the capture fails because the host then asks for turns the
+script does not have. Restoring `high` restores the dock. That is the whole
+evidence for the claim, and it is worth more than the frame looking right.
+
+The routing itself was checked the same way: relabelling that turn
+`expect: 'assistant'` makes the run fail with `scripted provider expected a
+assistant request, got reviewer`, so the endpoint is genuinely classifying the
+reviewer's call rather than defaulting everything to one lane.
+
+Two settings have to be in place for that call to happen, and both are named on
+the scenario: `reviewerMode: 'llm'` wires the reviewer to the scripted endpoint,
+and `executionMode: 'auto'` is what routes a foreground shell call through it —
+`PermissionManager.shouldRouteForegroundReviewer` requires `mode === "auto"`, so
+under the default mode such a call reaches the dock straight from the category
+rule with no classification call in between. A scenario that declares an
+`expect: 'reviewer'`
+turn without both of them will not fail: the turn simply goes unrequested, which
+is the direction `violations` deliberately does not check.
+
+### It does not run in CI
+
+The harness has its own Playwright config (`test/screenshots/playwright.config.ts`);
+the repo-root config is scoped to `./test/e2e` and does not pick it up, and
+nothing under `.github/workflows` invokes the harness config. What CI does run
+for screenshots is the provenance gate (`check:screenshot-provenance`) and its
+self-test, which read the manifest and the tracked file list — neither can see a
+capture that stopped working. So a green CI run is not evidence about this lane
+in either direction; the evidence is a local capture run.
