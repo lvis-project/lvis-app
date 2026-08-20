@@ -82,6 +82,17 @@ function matchField(fieldValue: string, current: number, spec: CronFieldSpec): b
   return fieldValue.split(",").some((token) => matchCronToken(token, current, spec));
 }
 
+/**
+ * Whether a day field is a "star" for the Vixie day-combination rule: its first
+ * character is "*". This is true for a bare "*" and for a stepped "*\/N" (and, as
+ * in Vixie, for a first list token that begins with "*"). It is false for a
+ * plain restriction like "1-5", "15", or "1,15". Vixie inspects only the first
+ * character, so this deliberately does not scan the whole field.
+ */
+function isStarField(fieldValue: string): boolean {
+  return fieldValue.trim().startsWith("*");
+}
+
 function validateCronField(fieldValue: string, spec: CronFieldSpec): boolean {
   const tokens = fieldValue.split(",");
   if (tokens.length === 0) return false;
@@ -151,15 +162,20 @@ function _matchesCronFields(fields: CronFields, now: Date): boolean {
       : matchField(fields.dayOfWeek, dayOfWeek, dayOfWeekSpec);
 
   const dayOfMonthMatches = matchField(fields.dayOfMonth, dayOfMonth, CRON_SPECS.dayOfMonth);
-  // Standard cron day-field rule: when BOTH day-of-month and day-of-week are
-  // restricted (neither is "*"), the schedule fires if EITHER matches (OR) —
-  // e.g. "0 0 1 * 1" means "1st of the month OR every Monday". When at least
-  // one side is "*", combine with AND (the "*" side always matches, so AND
-  // reduces to the restricted side).
-  const bothDaysRestricted = fields.dayOfMonth !== "*" && fields.dayOfWeek !== "*";
-  const dayMatches = bothDaysRestricted
-    ? dayOfMonthMatches || dayOfWeekMatches
-    : dayOfMonthMatches && dayOfWeekMatches;
+  // Vixie cron day-field rule (crontab(5); vixie/cron cron.c): the day-of-month
+  // and day-of-week fields combine with OR only when NEITHER is a "star" field;
+  // if EITHER is a star field they combine with AND. A field is a "star" here
+  // when its first character is "*" — which covers both a bare "*" AND a stepped
+  // "*/N" (Vixie inspects only the first character). So "0 0 1 * 1" (neither day
+  // starred) means "1st of month OR every Monday", while "0 9 */2 * 1-5" (dom is
+  // "*/2", a star) means "every other day AND any weekday" — NOT the near-daily
+  // OR that a literal-"*"-only test would produce for the stepped field.
+  const domStar = isStarField(fields.dayOfMonth);
+  const dowStar = isStarField(fields.dayOfWeek);
+  const dayMatches =
+    domStar || dowStar
+      ? dayOfMonthMatches && dayOfWeekMatches
+      : dayOfMonthMatches || dayOfWeekMatches;
 
   return (
     matchField(fields.minute, minute, CRON_SPECS.minute) &&
