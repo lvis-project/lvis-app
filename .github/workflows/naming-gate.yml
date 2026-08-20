@@ -1,19 +1,25 @@
 name: Naming Gate (process-metadata + de-identification)
 
-# 두 개의 독립 job:
+# 두 개의 독립 job. 둘 다 diff-based — PR 의 변경분만 검사한다. 기존 위반은
+# grandfather; sweep PR 으로 별도 제거. 이 workflow 의 목적은 *새 callsite 차단*.
 #
-# 1. naming-gate — 식별자/파일명에 process-derived 메타데이터(H1/H2, Phase-N,
-#    real-/fake- prefix, Tier-as-process audit key, version-suffix, PR-number
-#    fixture path)가 새로 추가되지 못하도록 차단한다.
-#    SOT: `feedback_naming_process_metadata.md`.
+# 1. naming-gate — process-derived 메타데이터(H1/H2, Phase-N, test-double
+#    prefix, Tier-as-process audit key, version suffix, PR-number fixture path)
+#    가 식별자/파일명/주석/shipped document 에 새로 들어오는 것을 차단한다.
+#    규칙 원문(positive form)은 `AGENTS.md` > `Naming`. 이 gate 가 검사하지
+#    *않는* 것도 그 문서가 reviewer 규칙으로 명시한다 — grep 이 도메인 의미와
+#    process 의미를 구분할 수 없는 단어는 패턴에서 빼고 규칙 문서에 남긴다.
+#    검사 본체는 `.github/scripts/naming-gate.sh` 한 벌로만 존재하며 CI 밖에서도
+#    실행할 수 있다. `naming-gate-selftest.sh` 가 synthetic diff 로 그 동작을
+#    고정하고 같은 job 에서 함께 돌기 때문에, grep 프로그램의 회귀는 그것을
+#    유발한 PR 에서 바로 실패한다.
 #
 # 2. deidentification-gate — 이 저장소는 PUBLIC 이다. 고용사 브랜드명, 사내
 #    시스템명, 사내 호스트명이 새로 추가되지 못하도록 차단한다. 사내 구현은
 #    private 플러그인 저장소에 남는다는 경계가 이미 설계로 존재하며, 공개
-#    호스트 저장소에 사내 식별자가 들어오면 그 경계가 무의미해진다.
-#
-# 두 job 모두 diff-based: PR 의 변경분만 검사한다. 기존 위반은 grandfather;
-# sweep PR 으로 별도 제거. 이 gate 는 *새 callsite 차단* 이 목적.
+#    호스트 저장소에 사내 식별자가 들어오면 그 경계가 무의미해진다. 패턴
+#    목록은 이 job 안에만 산다 — `AGENTS.md` 가 그 literal 을 되풀이하면
+#    규칙이 지우려는 것을 바로 그 문서가 다시 게시하게 된다.
 
 on:
   pull_request:
@@ -30,97 +36,13 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Compute diff vs base
-        id: diff
+      - name: Self-test the gate
+        run: .github/scripts/naming-gate-selftest.sh
+
+      - name: Check this PR's diff
         run: |
           base_sha=$(git merge-base origin/${{ github.base_ref }} HEAD)
-          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
-          # Exclude DELETED files (--diff-filter=d): a deletion cannot introduce a
-          # prohibited identifier or a new prefixed file, and checking a deleted
-          # path makes the `head -30 "$file"` prefix-justification check fail
-          # spuriously (the file is gone) — e.g. removing a legacy `fake-*.ts`.
-          git diff --name-only --diff-filter=d "$base_sha"...HEAD \
-            | grep -Ev '^(docs/blueprints/|docs/ko/|\.github/|.*/__tests__/|.*/__mocks__/|test/|tests/|.*\.test\.|.*\.spec\.|.*\.lock|.*lock\.json|CHANGELOG)' \
-            | grep -E '\.(ts|tsx|py|js|mjs|cjs|md)$' > /tmp/changed.txt || true
-          echo "changed files:"
-          cat /tmp/changed.txt
-
-      - name: Grep diff for prohibited identifiers
-        run: |
-          base_sha="${{ steps.diff.outputs.base_sha }}"
-          violations=0
-
-          if [ ! -s /tmp/changed.txt ]; then
-            echo "no production-path file changes — skipping."
-            exit 0
-          fi
-
-          # NOTE: review-round R is matched only with a hyphen (`R-2`) to avoid
-          # flagging domain risk-register ids (`R1`..`R8` in threat tables).
-          # NOTE: review-round R matched hyphen-only (`R-2`) so domain
-          # risk-register ids (`R1`..`R8`) are spared. D-decision matched
-          # with a colon (`D5:`) so bare `D1` identifiers/hex are spared.
-          # Permanent anchors (`#NNN` issue refs, `§9.6` arch section refs)
-          # are intentionally NOT flagged.
-          patterns=(
-            '\bH[1-9][0-9]?\b'
-            '\bR-[1-9][0-9]?\b'
-            '\bD[0-9]+:'
-            '\bF-round\b'
-            '\bPR-[A-Z][0-9]+\b'
-            '\bPR#[0-9]+'
-            '§M[1-9][0-9]?\b'
-            '\b(MEDIUM|HIGH|CRITICAL|LOW)-[1-9][0-9]?\b'
-            '\b[pP]hase[ -]?[0-9]+[a-z]?\b'
-            '\bSprint [0-9A-Z]'
-            '\bWave [0-9A-Z]'
-            '\bW[0-9]\.[0-9]\b'
-            '\b[rR]ound[0-9]+\b'
-            '\b[tT]ier[0-9]+-(bypass|skip|excluded|ignored)'
-            '\bpr[0-9]{3,}\b'
-            '^\+.*\b(real|mock|fake|stub)[A-Z][a-zA-Z]+\b'
-          )
-
-          for pattern in "${patterns[@]}"; do
-            while IFS= read -r file; do
-              [ -z "$file" ] && continue
-              [ ! -f "$file" ] && continue
-              if git diff "$base_sha"...HEAD -- "$file" | grep -E "^\+" | grep -Pn "$pattern" > /tmp/hits.txt; then
-                if [ -s /tmp/hits.txt ]; then
-                  echo "::error file=$file::process-metadata pattern '$pattern' added"
-                  cat /tmp/hits.txt
-                  violations=$((violations + $(wc -l < /tmp/hits.txt)))
-                fi
-              fi
-            done < /tmp/changed.txt
-          done
-
-          # filename-level checks (new files only)
-          while IFS= read -r file; do
-            base=$(basename "$file")
-            if echo "$base" | grep -qE '^(real|mock|fake|stub)-'; then
-              # Skip domain-exception files: `fake-sandbox.ts` is OK (see feedback memory).
-              # New `real-/mock-/fake-/stub-` prefixed files in production paths require
-              # a "Why <prefix>:" header comment justifying the domain semantics.
-              if ! head -30 "$file" 2>/dev/null | grep -qE 'Why (real|mock|fake|stub):'; then
-                echo "::error file=$file::new $base prefix in production path without 'Why <prefix>:' header justification"
-                violations=$((violations + 1))
-              fi
-            fi
-            if echo "$base" | grep -qE '\-v[0-9]+\.(ts|tsx|py|md)$'; then
-              echo "::error file=$file::version-suffix filename in production path — use behavior-based suffix"
-              violations=$((violations + 1))
-            fi
-          done < /tmp/changed.txt
-
-          if [ "$violations" -gt 0 ]; then
-            echo ""
-            echo "::error::naming-gate found $violations process-metadata violation(s)."
-            echo "See feedback_naming_process_metadata.md for the rule + conversion guide."
-            exit 1
-          fi
-
-          echo "naming-gate: clean."
+          .github/scripts/naming-gate.sh "$base_sha" HEAD
 
   deidentification-gate:
     runs-on: ubuntu-latest
