@@ -60,8 +60,13 @@ const PLUGIN_DATA_DIR = "/plugins/service/data";
 /**
  * A host-widened root, standing in for the kind of grant
  * `PLUGIN_ENVELOPE_GRANTS` produces (a host-owned directory under `~/.lvis`).
- * It is READ-only here, so the same fixture proves both that a widened read is
- * admitted and that widening READ does not widen WRITE.
+ *
+ * READ-only, which is the shape `derivePluginChildEnvelope` produces for a
+ * `hostDirectory` row: it pushes the directory into `read` alone, and a
+ * `userChosenDirectory` value cannot put it into `write` because the ceiling
+ * subtracts `lvisHome()`, where every such row resolves. This fixture is
+ * therefore the derivation's own output shape rather than a convenient one, and
+ * what it exercises is the boundary that consumes it.
  */
 const WIDENED_READ_ROOT = "/host/runtime";
 
@@ -1029,10 +1034,17 @@ describe("a delegated worker cannot reach further than the plugin process itself
     });
   });
 
-  it("does not let a widened READ root become writable", async () => {
-    // The two lists are separate for exactly this: a host decision that the
-    // child may READ the provisioned runtime must not hand it the ability to
-    // rewrite that runtime through a delegated worker.
+  it("does not let a widened READ root become writable through a worker", async () => {
+    // The delegated half of the same rule the derivation enforces. A
+    // `hostDirectory` grant resolves under `lvisHome()` and
+    // `derivePluginChildEnvelope` subtracts that whole root from the ceiling a
+    // `userChosenDirectory` value is bounded by, so such a root cannot be in
+    // `write` in the first place — `confined-plugin-child.test.ts` drives the
+    // production derivation for that half. What THIS pins is the boundary that
+    // CONSUMES the two lists: a host decision that the child may READ the
+    // provisioned runtime must not hand it the ability to rewrite that runtime
+    // by asking the host to spawn a worker that can. The fixture's `write`
+    // omits the widened root because the derivation would too.
     const spawnWorker = vi.fn(async () => makeFakeWorker());
     const harness = await createServiceHarness({ spawnWorker });
     await expect(
