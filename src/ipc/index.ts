@@ -106,7 +106,7 @@ export function registerIpcHandlers(
   registerWindowHandlers(deps);
   registerRoutineHandlers(deps);
   registerSessionTodoHandlers(deps);
-  registerAppHandlers();
+  registerAppHandlers(deps);
   registerWorkBoardHandlers(deps);
   registerAttachHandlers(deps);
   registerPreviewHandlers(deps);
