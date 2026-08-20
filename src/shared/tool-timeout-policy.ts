@@ -50,7 +50,7 @@
  *  - `agent_spawn` carries its own sub-agent execution loop and is capped by
  *    `resolveSubAgentCeilingMs(configured round budget)` instead of
  *    `globalCeilingMs`. The round budget is user-configurable and has no
- *    maximum (see shared/subagent-rounds.ts), so a fixed wall clock would
+ *    maximum (see shared/subagent-policy.ts), so a fixed wall clock would
  *    silently re-impose the cap the round setting exists to remove: at 600s
  *    and a 600-round budget the agent dies of the clock long before its
  *    rounds. The ceiling therefore scales with the budget.
@@ -63,7 +63,7 @@
  * `shellDefaultMs`; a model that times out escalates by retrying with a
  * larger `timeoutSeconds`.
  */
-import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "./subagent-rounds.js";
+import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "./subagent-policy.js";
 
 /**
  * Largest delay a Node `setTimeout` can actually hold.

@@ -180,7 +180,7 @@ Rules:
   into `<Button>`, `<Input>`, etc.).
 - **Page chrome:** top-level renderer pages, plugin pages, and settings-style
   surfaces use `PageShell`; section grouping inside those pages uses
-  `PageSection`, not nested `<Card>` wrappers.
+  `SettingsSection`, not nested `<Card>` wrappers.
 
 Anti-patterns:
 
@@ -206,7 +206,7 @@ When in doubt, copy from `<Button>` or `<Card>`.
 | Input | `src/components/ui/input.tsx` | semantic |
 | Dialog | `src/components/ui/dialog.tsx` | semantic |
 | Card / Popover / Tabs / Tooltip / Dropdown / ScrollArea / Separator | `src/components/ui/*` | all semantic — these are the shadcn primitives every other surface composes from |
-| PageShell / PageSection | `src/ui/renderer/components/PageShell.tsx` | canonical top-level page chrome and unframed section grouping |
+| PageShell / SettingsSection / SettingsPageHeader / SettingsHelpPopover | `src/ui/renderer/components/PageShell.tsx` | canonical page chrome: page frame, unframed section grouping, settings page header, and the `?` help popover |
 | Settings dialog | `src/ui/renderer/SettingsDialog.tsx` | composed from semantic primitives |
 | Settings tabs (Privacy, Audit, Roles, …) | `src/ui/renderer/tabs/*.tsx` | already semantic |
 

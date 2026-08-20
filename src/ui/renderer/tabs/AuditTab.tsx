@@ -5,8 +5,7 @@ import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import type { AuditEntry } from "../../../audit/audit-logger.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { DiagnosticsSection } from "./DiagnosticsSection.js";
 

@@ -10,7 +10,7 @@ import {
   readPermissionSettings,
   type PendingWorkspaceRootRemoval,
 } from "./permission-settings-store.js";
-import { withWorkspaceRootLifecycleLock } from "./workspace-root-lifecycle-lock.js";
+import { withWorkspaceRootLifecycleLock } from "./workspace-root-lifecycle.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
 
 const DEFAULT_TIMEOUT_MS = 1_500;

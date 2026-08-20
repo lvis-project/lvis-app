@@ -5,7 +5,7 @@ import { Input } from "../../../components/ui/input.js";
 import { formatCost, formatTokens } from "../../../lib/cost-format.js";
 import type { LvisApi, UsageSummaryShape, UsageTrendPt } from "../types.js";
 import { Sparkline } from "./Sparkline.js";
-import { SettingsPageHeader } from "./SettingsPageHeader.js";
+import { SettingsPageHeader } from "./PageShell.js";
 import { WorkspaceStatsSection } from "./WorkspaceStatsSection.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { t } from "../../../i18n/runtime.js";

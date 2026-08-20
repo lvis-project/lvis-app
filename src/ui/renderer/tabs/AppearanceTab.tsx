@@ -25,8 +25,7 @@ import type { ThemeBundle } from "../theme/index.js";
 import type { CSSProperties } from "react";
 import { getApi } from "../api-client.js";
 import { useNotifySaved } from "../contexts/saved-toast.js";
-import { SettingsPageHeader } from "../components/SettingsPageHeader.js";
-import { SettingsSection } from "../components/SettingsSection.js";
+import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import {
   LOCALE_INFO,
   recommendedMarketplaceLocaleForSystem,

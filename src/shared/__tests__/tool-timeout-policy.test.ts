@@ -3,7 +3,7 @@ import { TOOL_TIMEOUT_POLICY, resolveSubAgentCeilingMs } from "../tool-timeout-p
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_MIN,
-} from "../subagent-rounds.js";
+} from "../subagent-policy.js";
 
 describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
   it("no shell max exists — a timed-out call must be able to retry with a larger budget", () => {

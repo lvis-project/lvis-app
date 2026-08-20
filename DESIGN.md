@@ -100,7 +100,7 @@
   - ActionPanel: floating operational activity surface.
   - Command picker: search and 1st/2nd-depth command navigation.
   - Settings and plugin pages: dense product configuration surfaces using the same `PageShell` chrome.
-  - PageSection: unframed settings/page bands for section grouping; do not wrap these bands in Card chrome.
+  - SettingsSection: unframed settings/page bands for section grouping; do not wrap these bands in Card chrome.
 - Variants and states:
   - Hover: subtle semantic surface tint, never layout shift.
   - Active/selected: primary or route-specific accent with accessible foreground.
@@ -144,7 +144,7 @@ Plugin UIs are **free**: the SDK ships no UI components, tokens, or style checks
   - Moving every spacing utility to CSS variables before a repeated semantic need exists.
 - Future migration target:
   - Replace remaining raw `shadow-xl`/`shadow-2xl` in floating panels with `lvis-surface-*` utilities.
-  - Continue replacing route-local page chrome with `PageShell`/`PageSection` when new top-level surfaces are added.
+  - Continue replacing route-local page chrome with `PageShell`/`SettingsSection` when new top-level surfaces are added.
 
 ## Accessibility
 - Target standard: keyboard and screen-reader accessible desktop UI with WCAG AA contrast for text and meaningful controls.
