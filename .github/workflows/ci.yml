@@ -58,6 +58,16 @@ jobs:
       - name: Run deterministic Knip gate
         working-directory: lvis-app
         run: bun run check:knip && bun run test:knip-gate
+      # The docs-site images are published publicly, and the batch that is there
+      # now was captured by hand from a live session — see
+      # docs/development/screenshot-reshoot.md. This gate cannot read pixels; it
+      # refuses an image that arrives without a written provenance claim, and
+      # ratchets the backlog of images still awaiting replacement. The self-test
+      # runs beside it because a gate nothing exercises reports green after it
+      # has stopped comparing.
+      - name: Screenshot provenance gate
+        working-directory: lvis-app
+        run: bun run check:screenshot-provenance:self-test && bun run check:screenshot-provenance
       - name: Typecheck
         working-directory: lvis-app
         run: bun run typecheck
