@@ -64,4 +64,16 @@ describe("provider error diagnostics", () => {
       },
     });
   });
+
+  it("does not classify a nested array 'error' as a provider-origin error", () => {
+    // Arrays are common in LLM/provider bodies. An array under `error` is not a
+    // keyed provider-error record; if the record guard admitted it, the array
+    // would be reported as the nested provider error and origin would flip to
+    // "provider" for a value that carries no provider fields. With no apiCall
+    // keys present and no record-shaped nested error, origin stays "unknown".
+    const diagnostics = extractProviderErrorDiagnostics({ error: ["rate limited"] });
+    expect(diagnostics.origin).toBe("unknown");
+    expect(diagnostics.providerType).toBeUndefined();
+    expect(diagnostics.providerCode).toBeUndefined();
+  });
 });
