@@ -183,6 +183,19 @@ interface Fixture {
    * case that decides what "the declared path is not there" means.
    */
   readonly pendingWorkspace: string;
+  /**
+   * `<LVIS_HOME>/runtime` — where the `hostDirectory` row of the widened
+   * plugin's grant resolves. Host-owned, granted READ, and NOT on the deny
+   * floor, so nothing else in the derivation refuses a value naming it.
+   */
+  readonly hostRuntimeDir: string;
+  /**
+   * A SECOND plugin's bundle directory, under the same install root as the
+   * first. It is the neighbour's equivalent of `<pluginRoot>/dist`: the module
+   * the next load imports into the main process on that plugin's behalf, and
+   * the bytes its own install receipt is taken over.
+   */
+  readonly neighbourBundleDir: string;
 }
 
 let fixture: Fixture | undefined;
@@ -206,11 +219,15 @@ function makeFixture(): Fixture {
   const userRootSibling = `${userRoot}-elsewhere`;
   // Deliberately NOT created: the spawn is what materialises a granted root.
   const pendingWorkspace = join(userRoot, "pending-workspace");
+  const hostRuntimeDir = join(lvisHome, "runtime");
+  const neighbourBundleDir = join(lvisHome, "plugins", "another-plugin", "dist");
   mkdirSync(secretsDir, { recursive: true, mode: 0o700 });
   mkdirSync(certsDir, { recursive: true, mode: 0o700 });
   mkdirSync(pluginDataDir, { recursive: true, mode: 0o700 });
   mkdirSync(userRoot, { recursive: true, mode: 0o700 });
   mkdirSync(userRootSibling, { recursive: true, mode: 0o700 });
+  mkdirSync(hostRuntimeDir, { recursive: true, mode: 0o700 });
+  mkdirSync(neighbourBundleDir, { recursive: true, mode: 0o700 });
   const secretFile = join(secretsDir, "api-key.txt");
   const caFile = join(certsDir, "corp-ca.pem");
   writeFileSync(secretFile, SECRET_TEXT, "utf-8");
@@ -241,6 +258,8 @@ function makeFixture(): Fixture {
     userRoot,
     userRootSibling,
     pendingWorkspace,
+    hostRuntimeDir,
+    neighbourBundleDir,
   };
 }
 
@@ -266,6 +285,22 @@ function installPlugin(fx: Fixture, pluginId: string): InstalledPlugin {
   const pluginDataDir = join(pluginRoot, "data");
   mkdirSync(pluginDataDir, { recursive: true, mode: 0o700 });
   return { pluginId, pluginRoot, pluginDataDir };
+}
+
+/**
+ * Approve one directory as a workspace root, replacing whatever
+ * {@link makeFixture} wrote.
+ *
+ * The ceiling's approval half reads this file through
+ * `readPermissionSettings()`, so a case that needs a BROADER approval than the
+ * default has to move the real file rather than stub the reader.
+ */
+function approveWorkspaceRoot(fx: Fixture, directory: string): void {
+  writeFileSync(
+    join(fx.lvisHome, "settings.json"),
+    JSON.stringify({ permissions: { additionalDirectories: [directory] } }, null, 2),
+    "utf-8",
+  );
 }
 
 /**
@@ -573,9 +608,10 @@ describe("the host decides how far a plugin child reaches", () => {
       join(fx.lvisHome, "runtime"),
       join(fx.lvisHome, "certs"),
     ]);
-    // The row is READ, and nothing turns it into a write. A child that could
-    // rewrite `~/.lvis/runtime` would be rewriting the interpreter its own
-    // worker is about to execute.
+    // The row itself contributes to READ only. That is all this case shows —
+    // its config keys are unset, so it cannot also show that no OTHER grant
+    // puts the same directory into `write`. The case that does is `refuses a
+    // chosen directory naming a host root the row grants READ`.
     expect(envelope.write).toEqual([fx.pluginDataDir]);
   });
 
@@ -624,11 +660,7 @@ describe("the host decides how far a plugin child reaches", () => {
     // that `allowRead` re-opens. Without this refusal the config key would be a
     // way to hand the floor's own contents to a plugin child.
     const fx = fixture!;
-    writeFileSync(
-      join(fx.lvisHome, "settings.json"),
-      JSON.stringify({ permissions: { additionalDirectories: [fx.lvisHome] } }, null, 2),
-      "utf-8",
-    );
+    approveWorkspaceRoot(fx, fx.lvisHome);
     expect(() =>
       derivePluginChildEnvelope({
         pluginId: WIDENED_PLUGIN_ID,
@@ -660,7 +692,10 @@ describe("the host decides how far a plugin child reaches", () => {
     // over, so admitting a value under it would hand the child a kernel-level
     // write over its own code — the primitive the jail exists to remove rather
     // than detect. The plugin reaches this with one `config.set` call: the
-    // runtime root is a member of the context it is handed.
+    // runtime root is a member of the context it is handed. The refusal names
+    // the install root because that is the granularity the subtraction has:
+    // every plugin's bundle is excluded on the same argument, not just this
+    // plugin's own.
     const fx = fixture!;
     expect(() =>
       derivePluginChildEnvelope({
@@ -669,7 +704,7 @@ describe("the host decides how far a plugin child reaches", () => {
         pluginDataDir: fx.pluginDataDir,
         configValue: (key) => (key === "workspace" ? join(fx.pluginRoot, "dist") : undefined),
       }),
-    ).toThrow(/resolves inside the plugin's own immutable runtime root/);
+    ).toThrow(/resolves inside the directory that holds every installed plugin's bundle/);
   });
 
   it("refuses that runtime root even when an approved workspace root covers it", () => {
@@ -682,11 +717,7 @@ describe("the host decides how far a plugin child reaches", () => {
     // lives only on the own-root half is then not an exclusion at all. The
     // ceiling has two halves and the bundle has to be out of both.
     const fx = fixture!;
-    writeFileSync(
-      join(fx.lvisHome, "settings.json"),
-      JSON.stringify({ permissions: { additionalDirectories: [fx.root] } }, null, 2),
-      "utf-8",
-    );
+    approveWorkspaceRoot(fx, fx.root);
     expect(() =>
       derivePluginChildEnvelope({
         pluginId: WIDENED_PLUGIN_ID,
@@ -694,7 +725,65 @@ describe("the host decides how far a plugin child reaches", () => {
         pluginDataDir: fx.pluginDataDir,
         configValue: (key) => (key === "workspace" ? join(fx.pluginRoot, "dist") : undefined),
       }),
-    ).toThrow(/resolves inside the plugin's own immutable runtime root/);
+    ).toThrow(/resolves inside the directory that holds every installed plugin's bundle/);
+  });
+
+  it("refuses a chosen directory naming a host root the row grants READ", () => {
+    // THE HALF THE OWN-ROOT SUBTRACTION DOES NOT REACH. A `hostDirectory` row
+    // resolves under `~/.lvis` and carries READ; a `userChosenDirectory` value
+    // carries WRITE. Both land in the SAME envelope, so a value naming the
+    // host root the row already granted turns the host's own READ decision
+    // into a write grant — and `~/.lvis/runtime` is not on the deny floor, so
+    // nothing earlier in the derivation refuses it. What is under it is the
+    // interpreter this plugin's own worker is about to execute.
+    const fx = fixture!;
+    approveWorkspaceRoot(fx, fx.root);
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: (key) =>
+          key === "workspace" ? join(fx.hostRuntimeDir, "python-envs") : undefined,
+      }),
+    ).toThrow(/resolves inside the host's own storage namespace/);
+  });
+
+  it("refuses a chosen directory inside ANOTHER plugin's bundle", () => {
+    // The same argument the own-root subtraction rests on, applied to the
+    // party it was never applied to: a neighbour's `dist/` is the module the
+    // next load imports into the main process on that plugin's behalf, and the
+    // bytes its install receipt is taken over. One approval broad enough to
+    // cover this plugin's own data directory covers every sibling under the
+    // same install root, so the approval half admits it unless the install
+    // root is subtracted as a whole.
+    const fx = fixture!;
+    approveWorkspaceRoot(fx, fx.root);
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: (key) => (key === "workspace" ? fx.neighbourBundleDir : undefined),
+      }),
+    ).toThrow(/resolves inside the directory that holds every installed plugin's bundle/);
+  });
+
+  it("still admits the plugin's own data dir when an approved root covers the host's home", () => {
+    // The over-refusal pin for the two subtractions above. `pluginDataDir` is
+    // under BOTH of them — under the install root and under `~/.lvis` — so a
+    // subtraction asked before the data directory is admitted would refuse the
+    // plugin's own default index location and present that as containment.
+    const fx = fixture!;
+    approveWorkspaceRoot(fx, fx.lvisHome);
+    const inside = join(fx.pluginDataDir, "index");
+    const envelope = derivePluginChildEnvelope({
+      pluginId: WIDENED_PLUGIN_ID,
+      pluginRoot: fx.pluginRoot,
+      pluginDataDir: fx.pluginDataDir,
+      configValue: (key) => (key === "indexStorageRoot" ? inside : undefined),
+    });
+    expect(envelope.write).toEqual([fx.pluginDataDir, inside]);
   });
 
   it("still admits the plugin's own data dir when an approved root covers the runtime root", () => {
@@ -702,11 +791,7 @@ describe("the host decides how far a plugin child reaches", () => {
     // under `pluginRoot`. If it did, the fix would be a plugin that cannot
     // write anywhere dressed as a containment result.
     const fx = fixture!;
-    writeFileSync(
-      join(fx.lvisHome, "settings.json"),
-      JSON.stringify({ permissions: { additionalDirectories: [fx.root] } }, null, 2),
-      "utf-8",
-    );
+    approveWorkspaceRoot(fx, fx.root);
     const inside = join(fx.pluginDataDir, "index");
     const envelope = derivePluginChildEnvelope({
       pluginId: WIDENED_PLUGIN_ID,

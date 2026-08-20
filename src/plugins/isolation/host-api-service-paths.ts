@@ -104,7 +104,17 @@ export type ServiceHostApi = Pick<
  * derivation.
  */
 export interface DelegatedWorkerConfinement {
-  /** Every root the child may read. Always a superset of {@link write}. */
+  /**
+   * Every root the child may read.
+   *
+   * `derivePluginChildEnvelope` maintains it as a superset of {@link write} —
+   * it pushes each admitted `userChosenDirectory` into both lists — and NOTHING
+   * ENFORCES THAT, here or at runtime. It is relied on where a read grant is
+   * argued from a write grant, and deliberately NOT relied on where the
+   * consequence of it failing would be silent: `spawnConfinedPluginChild`
+   * materialises both lists rather than `read` alone, precisely so a write-only
+   * root that slipped past the invariant is still created before the wrap.
+   */
   readonly read: readonly string[];
   /**
    * Every root the child may write.
