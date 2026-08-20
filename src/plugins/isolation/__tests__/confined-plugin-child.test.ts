@@ -74,7 +74,15 @@
  *    without measuring.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 // The child entry is bundled by the shared module rather than here: its
@@ -646,6 +654,62 @@ describe("the host decides how far a plugin child reaches", () => {
     expect(envelope.write).toEqual([fx.pluginDataDir, inside]);
   });
 
+  it("refuses a chosen directory under the plugin's own immutable runtime root", () => {
+    // A `userChosenDirectory` grant carries WRITE. `pluginRoot` holds the
+    // bundle the next load imports and the bytes the install receipt is taken
+    // over, so admitting a value under it would hand the child a kernel-level
+    // write over its own code — the primitive the jail exists to remove rather
+    // than detect. The plugin reaches this with one `config.set` call: the
+    // runtime root is a member of the context it is handed.
+    const fx = fixture!;
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: (key) => (key === "workspace" ? join(fx.pluginRoot, "dist") : undefined),
+      }),
+    ).toThrow(/no workspace root the user approved covers it/);
+  });
+
+  it("refuses a chosen directory that reaches out of the data dir through a symlink", () => {
+    // THE OTHER HALF OF THE SAME ESCALATION. The plugin writes its own data
+    // directory, so a containment test on spellings alone is one it can satisfy
+    // by planting the link and then naming it: the value reads as inside the
+    // ceiling and denotes a directory the user never approved. The comparison
+    // is canonical, so the link resolves before containment is asked.
+    const fx = fixture!;
+    const link = join(fx.pluginDataDir, "reaches-elsewhere");
+    symlinkSync(fx.userRootSibling, link);
+    expect(() =>
+      derivePluginChildEnvelope({
+        pluginId: WIDENED_PLUGIN_ID,
+        pluginRoot: fx.pluginRoot,
+        pluginDataDir: fx.pluginDataDir,
+        configValue: (key) => (key === "indexStorageRoot" ? link : undefined),
+      }),
+    ).toThrow(/no workspace root the user approved covers it/);
+  });
+
+  it("still admits a symlink that stays inside the plugin's own data dir", () => {
+    // The canonical comparison must not refuse the legitimate case, or the
+    // fix would be a narrowing dressed as a containment result. The GRANTED
+    // path stays the caller's spelling — the delegated-worker check compares
+    // against these entries and the plugin asks with the value it holds.
+    const fx = fixture!;
+    const real = join(fx.pluginDataDir, "index-store");
+    const link = join(fx.pluginDataDir, "index-link");
+    mkdirSync(real, { recursive: true, mode: 0o700 });
+    symlinkSync(real, link);
+    const envelope = derivePluginChildEnvelope({
+      pluginId: WIDENED_PLUGIN_ID,
+      pluginRoot: fx.pluginRoot,
+      pluginDataDir: fx.pluginDataDir,
+      configValue: (key) => (key === "indexStorageRoot" ? link : undefined),
+    });
+    expect(envelope.write).toEqual([fx.pluginDataDir, link]);
+  });
+
   it("refuses a relative value rather than resolving it against the host's cwd", () => {
     const fx = fixture!;
     expect(() =>
@@ -695,6 +759,27 @@ describe("a plugin that cannot be confined is not spawned", () => {
         childEntryPath: writeProbeModule(fx),
       }),
     ).rejects.toThrow(/sandbox is not active/i);
+  });
+
+  it("throws rather than granting a root that is a dangling symlink", async () => {
+    // The containment answer for a path that does not resolve is the nearest
+    // existing ancestor plus the missing tail, which for a link planted inside
+    // the data dir is a path INSIDE the ceiling — correct, because that is
+    // where a write through it would land today. Where the link would point
+    // once its target exists is unknowable, so the grant must not be handed to
+    // a kernel: materialisation refuses it and the plugin does not load. Note
+    // what fails here is the spawn, ahead of the wrap — an ASRT-inactive
+    // harness reaches this first.
+    const fx = fixture!;
+    const dangling = join(fx.pluginDataDir, "dangling");
+    symlinkSync(join(fx.root, "target-that-does-not-exist"), dangling);
+    await expect(
+      spawnConfinedPluginChild({
+        pluginId: PLUGIN_ID,
+        envelope: { read: [fx.pluginRoot, fx.pluginDataDir, dangling], write: [dangling] },
+        childEntryPath: writeProbeModule(fx),
+      }),
+    ).rejects.toThrow(/ENOENT/);
   });
 });
 

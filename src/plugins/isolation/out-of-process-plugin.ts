@@ -51,7 +51,6 @@ import {
   isSensitivePath,
 } from "../../permissions/sensitive-paths.js";
 import { lvisHome } from "../../shared/lvis-home.js";
-import { isPathWithin } from "../plugin-storage-containment.js";
 import type {
   PluginHostApi,
   PluginManifest,
@@ -250,6 +249,14 @@ type PluginEnvelopeGrant =
  * directory it turns out to be is the user's, bounded by their own approvals,
  * and the plugin cannot widen the bound by writing its own config.
  *
+ * Said precisely, because the value and the bound are different questions:
+ * `config.get` merges the plugin's own `manifest.config` and `configSchema`
+ * defaults under the user's saved setting, and `config.set` is a member the
+ * plugin holds — so the plugin CAN put the value there. What it cannot do is
+ * move the ceiling that value is checked against, which is why
+ * {@link resolveUserChosenDirectory} owns the whole safety argument and why its
+ * ceiling is compared in canonical form.
+ *
  * An entry is INERT until the plugin is actually routed out-of-process: nothing
  * reads this table for an in-process plugin, which still loads in main with no
  * confinement of its own.
@@ -339,13 +346,40 @@ function rejectEnvelopeGrant(pluginId: string, configKey: string, detail: string
  * there is no widening to perform. That is the set being empty, not a rescue
  * branch: a key that IS set and cannot be honoured throws.
  *
- * The ceiling is the plugin's own envelope UNIONED WITH the directories the
- * user approved through the host's workspace-root flow — the same
- * `permissions.additionalDirectories` list that already widens a plugin-owned
- * tool's write jail (`sandbox-write-jail.ts`). The comparison goes through
- * `isPathAllowed` against `sanitizeAllowedDirectories`, which is the host's own
- * predicate for "did the user authorise this", so there is no second notion of
- * approval here to drift from the first.
+ * THE CEILING IS THE PLUGIN'S OWN WRITABLE ROOT — `pluginDataDir` — UNIONED
+ * WITH the directories the user approved through the host's workspace-root
+ * flow, the same `permissions.additionalDirectories` list that already widens a
+ * plugin-owned tool's write jail (`sandbox-write-jail.ts`). Both halves go
+ * through `isPathAllowed`, the host's own segment-aligned predicate for "did
+ * the user authorise this", so there is no second notion of approval here to
+ * drift from the first.
+ *
+ * `pluginRoot` is NOT part of that ceiling, and leaving it out is the point.
+ * What this resolves is a WRITE grant, while `pluginRoot` is the immutable
+ * runtime root the install receipt is taken over: a value under it would put
+ * the bundle the next load imports into the child's kernel-level write jail,
+ * which is the primitive {@link spawnConfinedPluginChild} removes rather than
+ * merely detects. A root the child may only READ cannot bound a grant that
+ * carries write.
+ *
+ * BOTH HALVES COMPARE THE CANONICAL FORM, never the lexical one. `config.set`
+ * is a member the plugin holds and `pluginDataDir` is a directory the plugin
+ * writes, so a lexical containment test is one the plugin can satisfy with a
+ * symlink it planted itself. A link at `<pluginDataDir>/x` pointing at a
+ * directory the user never approved reads as inside the ceiling while naming a
+ * directory outside it, and the grant that follows is what reaches the kernel.
+ * `canonicalizePathForMatch` resolves the link; where the path does not exist
+ * yet it resolves the nearest existing ancestor and re-joins the missing tail,
+ * so "the directory is not there yet" is answered without weakening the check.
+ * It is also already in hand — the sensitive-path layer above computes the same
+ * string.
+ *
+ * WHAT IS RETURNED IS THE CALLER'S OWN SPELLING, not the canonical one. The
+ * delegated-worker check compares a worker's requested paths against these
+ * entries and the plugin asks with the value it holds, so returning a
+ * re-spelled path would refuse the very grants this widening exists to admit.
+ * Containment was decided on the canonical form, so both spellings name a
+ * directory inside the ceiling.
  *
  * The host DEFAULTS that scope normally carries — the process cwd and
  * `~/.lvis` — are deliberately left out. They are where the app happens to be
@@ -356,7 +390,6 @@ function rejectEnvelopeGrant(pluginId: string, configKey: string, detail: string
 function resolveUserChosenDirectory(
   inputs: PluginChildEnvelopeInputs,
   grant: Extract<PluginEnvelopeGrant, { kind: "userChosenDirectory" }>,
-  ownRoots: readonly string[],
 ): string | undefined {
   const raw = inputs.configValue(grant.configKey);
   // `""` is the default several plugin config schemas ship for an unset string
@@ -388,7 +421,8 @@ function resolveUserChosenDirectory(
       `'${target}' matches the sensitive-path rule '${sensitive}'`,
     );
   }
-  if (ownRoots.some((root) => isPathWithin(root, target))) return target;
+  const ownWritableRoot = caseFoldForMatch(canonicalizePathForMatch(inputs.pluginDataDir));
+  if (isPathAllowed(folded, { directories: [ownWritableRoot] })) return target;
   const approved = sanitizeAllowedDirectories(
     readPermissionSettings().permissions.additionalDirectories,
   );
@@ -396,8 +430,8 @@ function resolveUserChosenDirectory(
     rejectEnvelopeGrant(
       inputs.pluginId,
       grant.configKey,
-      `'${target}' is outside the plugin's own directories and no workspace root the user `
-        + `approved covers it — approve the directory in the host first`,
+      `'${target}' resolves outside the plugin's own data directory and no workspace root `
+        + `the user approved covers it — approve the directory in the host first`,
     );
   }
   return target;
@@ -420,14 +454,20 @@ function resolveUserChosenDirectory(
  * this same snapshot rather than a fresh derivation, or the boundary would
  * admit a grant the child's own kernel-level jail denies.
  *
- * WHAT THIS DOES NOT DO IS TOUCH THE DISK for the roots it names. A declared
- * directory that does not exist yet is still in the envelope, because
- * containment is a lexical question and the answer must not depend on what
- * happens to be mounted. Materialising the roots belongs to the ONE caller that
- * hands them to the kernel — {@link spawnConfinedPluginChild} — and it is done
- * there rather than skipped, for a reason that is not cosmetic: Linux ASRT
- * grants by `--bind`, whose source must exist, so a missing directory fails the
- * spawn there while macOS's lexical seatbelt rule tolerates it.
+ * WHAT THIS DOES NOT DO IS MATERIALISE the roots it names. A declared directory
+ * that does not exist yet is still in the envelope; creating it belongs to the
+ * ONE caller that hands the lists to the kernel —
+ * {@link spawnConfinedPluginChild} — and it is done there rather than skipped,
+ * for a reason that is not cosmetic: Linux ASRT grants by `--bind`, whose
+ * source must exist, so a missing directory fails the spawn there while macOS's
+ * lexical seatbelt rule tolerates it.
+ *
+ * It does READ the disk, and it has to. A `userChosenDirectory` grant is
+ * bounded by the user's approvals in `~/.lvis/settings.json` and compared in
+ * canonical form, which means resolving symlinks. Containment decided on
+ * spellings alone would be a question about strings, and the plugin writes one
+ * of the strings — see {@link resolveUserChosenDirectory}. A `hostDirectory`
+ * grant needs none of that: its path is written out in this file.
  */
 export function derivePluginChildEnvelope(
   inputs: PluginChildEnvelopeInputs,
@@ -445,10 +485,7 @@ export function derivePluginChildEnvelope(
       log.info(`[${inputs.pluginId}] envelope widened: read ${directory} — ${grant.why}`);
       continue;
     }
-    const chosen = resolveUserChosenDirectory(inputs, grant, [
-      inputs.pluginRoot,
-      inputs.pluginDataDir,
-    ]);
+    const chosen = resolveUserChosenDirectory(inputs, grant);
     if (chosen === undefined) continue;
     // Read as well as write: the plugin has to list and re-open what it wrote,
     // and the invariant this type publishes is read ⊇ write.
@@ -498,7 +535,9 @@ export interface ConfinedPluginChild {
  * Filesystem grants, and why each is the size it is:
  *
  *  - WRITE is a real jail, and what THIS SPAWN puts into it is `envelope.write`
- *    plus the throwaway sandbox HOME. `pluginRoot` is never in it: that is the
+ *    plus the throwaway sandbox HOME. `pluginRoot` is never in it — not as the
+ *    root and not as anything under it, which is why the ceiling on a
+ *    `userChosenDirectory` grant is `pluginDataDir` alone: that root is the
  *    immutable runtime root the integrity check covers, and a plugin that could
  *    rewrite it could rewrite the bytes its own manifest hash was taken over.
  *    THE CHILD'S ALLOW SET IS LARGER THAN WHAT THIS SPAWN GRANTS, and not by
