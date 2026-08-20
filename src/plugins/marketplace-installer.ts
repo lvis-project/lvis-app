@@ -15,8 +15,8 @@
  * marketplace URLs into the npm install branch.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { mkdir, rename, rm, writeFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
+import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
 import { verifyEnvelope, type PublicKeyInput } from "./envelope-verifier.js";
 import type { SignatureEnvelope, VerifyResult } from "./types.js";
 import { getCachedTarball, isOfflineCacheEnabled, setCachedTarball } from "./offline-cache.js";
@@ -359,33 +359,19 @@ export async function installFromMarketplace(
     await setCachedTarball(slug, version, body, cacheBase);
   }
 
-  // 6. Persist tarball atomically: write to a temp file in the same directory
-  //    then rename() into place so a crash/kill mid-write cannot leave a
-  //    partial/corrupt verified tarball that looks "installed".
+  // 6. Persist tarball atomically through the shared atomic-write authority
+  //    ({@link writeFileAtomicAtPath}): a random staging file beside the target
+  //    created with `O_CREAT|O_EXCL`, fsync of the staged bytes and the parent
+  //    directory, and a Windows transient-lock retry on the rename. That retry
+  //    supersedes the bespoke `EEXIST` rm-then-rename this used to carry —
+  //    `EEXIST` is unreachable for a file-onto-file rename (Win32 `rename`
+  //    replaces the target), so an upgrade over an installed version still
+  //    succeeds, and a crash/kill mid-write still cannot leave a partial tarball.
   opts.onProgress?.({ phase: "registering" });
-  const { pluginDir, tarballPath, tmpPath } = buildVerifiedTarballPaths(
-    downloadRoot,
-    slug,
-    version,
-  );
-  await mkdir(pluginDir, { recursive: true });
+  const { tarballPath } = buildVerifiedTarballPaths(downloadRoot, slug, version);
   try {
-    await writeFile(tmpPath, body);
-    try {
-      await rename(tmpPath, tarballPath);
-    } catch (renameErr) {
-      // Windows rename() throws EEXIST when the destination already exists
-      // (POSIX rename() silently overwrites). Fall back to rm-then-rename so
-      // upgrading an already-installed version still succeeds.
-      if ((renameErr as NodeJS.ErrnoException).code === "EEXIST") {
-        await rm(tarballPath, { force: true });
-        await rename(tmpPath, tarballPath);
-      } else {
-        throw renameErr;
-      }
-    }
+    await writeFileAtomicAtPath(tarballPath, body);
   } catch (err) {
-    await rm(tmpPath, { force: true }).catch(() => undefined);
     throw new MarketplaceInstallerError(
       "WRITE_FAILED",
       `failed to persist tarball to ${tarballPath}: ${(err as Error).message}`,
