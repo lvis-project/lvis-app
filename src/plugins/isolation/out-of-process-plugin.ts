@@ -506,6 +506,11 @@ export function createOutOfProcessPluginFactory(
      * is optional on `PluginHostApi`, and a child seeded with an empty snapshot
      * could not tell "unset" from "unavailable". Not seeding at all keeps those
      * apart, because the child's member throws when nothing was seeded.
+     *
+     * NO HOST THE APP BUILDS TAKES THAT BRANCH — `host-api-factory.ts` always
+     * defines the member — so it is the shape of a partial hostApi assembled in
+     * a test, kept because the optional member and this reader are two objects
+     * that nothing forces to agree.
      */
     const readAppPreferences = ():
       | { keys: readonly string[]; values: Record<string, unknown> }
@@ -523,6 +528,28 @@ export function createOutOfProcessPluginFactory(
     };
 
     /**
+     * Send the child the preferences as they read RIGHT NOW.
+     *
+     * One function for the watcher below and for the post-construct push, so
+     * the two cannot disagree about what a snapshot contains.
+     */
+    const pushPreferenceSnapshot = (): void => {
+      const snapshot = readAppPreferences();
+      // A host with no reader never seeded the child, so there is nothing this
+      // push could correct. Unreachable for the same reason the branch above
+      // is; it is here so the two stay one decision rather than two.
+      if (!snapshot) return;
+      transport.sendToChild({
+        wire: HOST_API_WIRE_VERSION,
+        pluginId,
+        generationId,
+        kind: "preference-snapshot",
+        keys: snapshot.keys,
+        values: snapshot.values,
+      });
+    };
+
+    /**
      * The host re-pushes the preference snapshot the child answers
      * `getAppPreference` from — the third host-owned watcher, and the one that
      * makes the member answerable out of process at all.
@@ -535,20 +562,7 @@ export function createOutOfProcessPluginFactory(
      * key (`publishAppPreferenceChange` diffs before emitting), so an unrelated
      * settings save costs nothing here.
      */
-    const stopWatchingPreferences = subscribeAppPreferenceChange(() => {
-      const snapshot = readAppPreferences();
-      // A host with no reader never seeded the child, so there is nothing this
-      // push could correct.
-      if (!snapshot) return;
-      transport.sendToChild({
-        wire: HOST_API_WIRE_VERSION,
-        pluginId,
-        generationId,
-        kind: "preference-snapshot",
-        keys: snapshot.keys,
-        values: snapshot.values,
-      });
-    });
+    const stopWatchingPreferences = subscribeAppPreferenceChange(pushPreferenceSnapshot);
     /** Every host-owned watcher, ended together wherever the incarnation ends. */
     const stopHostWatchers = (): void => {
       stopWatchingPluginSet();
@@ -595,6 +609,27 @@ export function createOutOfProcessPluginFactory(
       transport.close(`[out-of-process-plugin] ${pluginId}: construction failed`);
       throw error;
     }
+
+    /**
+     * The seed above was read BEFORE the child could receive anything, so this
+     * re-push closes the window between the two.
+     *
+     * A `preference-snapshot` sent while the child is still constructing is
+     * DROPPED: the child routes notifications through a runtime it assigns only
+     * after the plugin module has imported and its factory has run
+     * (`plugin-child-main.ts`). The two watchers above survive that: neither
+     * compares anything, so the next event either of them receives re-pushes
+     * its whole snapshot and repairs the drop. Preferences do not work that
+     * way — the bus announces only a MOVE, and the value that moved is already
+     * the current one — so the child would answer `getAppPreference` with its
+     * construction value until the preference moved AGAIN, which is exactly the
+     * staleness this member was wired to end.
+     *
+     * Sending it here cannot be dropped in turn: the child assigns its runtime
+     * before it writes the construct reply, this runs after that reply arrived,
+     * and one pipe delivers both in order.
+     */
+    pushPreferenceSnapshot();
 
     const handlers: Record<string, PluginToolHandler> = {};
     for (const toolName of construction.implementedToolNames) {
