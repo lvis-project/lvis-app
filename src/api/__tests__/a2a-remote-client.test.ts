@@ -187,6 +187,60 @@ describe("A2A remote exact initial replay", () => {
     expect(resolve.mock.calls.map(([request]) => request.intendedCredentialRevisionId)).toEqual([11, 12, 13]);
   });
 
+  it("surfaces retention-expired at the second replay bind, not a flattened unknown-manual outcome", async () => {
+    // Both replay-bind callsites now consume one bindReplaySource helper. The
+    // second bind used to hardcode `unknown-manual-reconciliation-required`,
+    // silently dropping the retention-expired classification the first bind
+    // could report. Here the first bind passes (resolved predecessor present)
+    // and the predecessor then ages out before the second bind — a TOCTOU the
+    // second bind must classify from the latest operation stage, exactly like
+    // the first.
+    const authorization = { ownerId: "owner", projectRoot: "/project", profileId: "profile", origin: "user", depth: 0, targetAgentId: 1, interfaceUrl: lineage.interfaceUrl };
+    const replaySource = {
+      prepared: {
+        attemptId: "src-attempt",
+        payloadRecordId: "rec-1",
+        payloadBodySha256: "b".repeat(64),
+        messageId: "message-1",
+        lineage,
+        semanticRequestHash: "c".repeat(64),
+        createdAt: "2026-07-16T00:00:00.000Z",
+        attemptDeadline: "2099-01-01T00:00:00.000Z",
+      },
+    };
+    let resolvedCalls = 0;
+    const latestResolvedAttempt = vi.fn(async () => {
+      resolvedCalls += 1;
+      // First bind sees a resolved predecessor; by the second bind it has aged out.
+      return resolvedCalls === 1 ? { resolved: { credentialRevisionId: 11 } } : null;
+    });
+    const latestOperation = vi.fn(async () => ({ stage: "RETENTION_EXPIRED" }));
+    const findReplaySource = vi.fn(async () => replaySource);
+    const store = { findReplaySource, latestResolvedAttempt, latestOperation } as unknown as A2ARemoteDurableStore;
+    const client = new A2ARemoteClient({
+      enabled: true,
+      authorizer: { authorize: () => true },
+      approver: { approve: vi.fn() },
+      store,
+      secretResolver: { prepare: vi.fn() },
+      controlPlane: { resolve: vi.fn() },
+      transport: { invoke: vi.fn() },
+    });
+    const result = await client.execute({
+      operationId: "op", attemptId: "replay", operation: "replay",
+      authorization, lineage, intendedCredentialRevisionId: 12, predecessorCredentialRevisionId: 11,
+      request: { id: 999, method: A2AJsonRpcMethod.SEND_MESSAGE, params: { message: { messageId: "message-1", role: "ROLE_USER", parts: [{ text: "x" }] } } },
+      messageId: "message-1",
+    });
+    // The stronger classification (retention-expired + record) reaches the caller.
+    expect(result).toMatchObject({ ok: false, outcome: "retention-expired", record: { stage: "RETENTION_EXPIRED" } });
+    // Proof the failure was detected at the SECOND bind: the first bind consumed
+    // the resolved predecessor, and only the failing (second) bind consults the
+    // latest operation stage.
+    expect(latestResolvedAttempt).toHaveBeenCalledTimes(2);
+    expect(latestOperation).toHaveBeenCalledTimes(1);
+  });
+
   it.each([
     ["authentication", { status: 401, headers: {}, body: Buffer.alloc(0) }, "authentication-failed"],
     ["terminal extension", { status: 200, headers: { "a2a-extensions": A2A_EXACT_SEND_REPLAY_URI }, body: Buffer.from(JSON.stringify({ jsonrpc: "2.0", id: 41, error: { code: -32090, message: "Exact send replay conflict", data: [{ "@type": "type.googleapis.com/google.rpc.ErrorInfo", reason: "EXACT_SEND_REPLAY_CONFLICT", domain: A2A_EXACT_SEND_REPLAY_URI }] } })) }, "conflict"],
