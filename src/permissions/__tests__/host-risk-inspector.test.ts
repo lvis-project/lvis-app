@@ -240,6 +240,19 @@ describe("M2 — git write-subcommand forms now classify shell", () => {
     expect(isReadOnlyCommand("git config user.email me@example.com")).toBe(false);
   });
 
+  it("git config -e / --edit → shell (spawns editor, permits config mutation)", () => {
+    // `-e`/`--edit` open the config in $GIT_EDITOR/$EDITOR (arbitrary process)
+    // and leave the file writable (alias / core.pager install). Neither is a
+    // read, so both must escalate rather than pass on the flag name alone.
+    expect(isReadOnlyCommand("git config -e")).toBe(false);
+    expect(isReadOnlyCommand("git config --edit")).toBe(false);
+    expect(isReadOnlyCommand("git config --global -e")).toBe(false);
+    expect(isReadOnlyCommand("git config --global --edit")).toBe(false);
+    // And through the full host-risk path: category is "shell", not "read".
+    expect(signals({ finalInput: { command: "git config -e" } })).toBe("shell");
+    expect(signals({ finalInput: { command: "git config --global --edit" } })).toBe("shell");
+  });
+
   it("git tag bare / --list → read", () => {
     expect(isReadOnlyCommand("git tag")).toBe(true);
     expect(isReadOnlyCommand("git tag -l")).toBe(true);
