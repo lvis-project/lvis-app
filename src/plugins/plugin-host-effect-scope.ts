@@ -4,6 +4,9 @@ import {
   pathEffectClass,
 } from "../permissions/effect-kind.js";
 import type { PluginRuntimeGenerationAccess } from "./plugin-host-generation.js";
+import { createLogger } from "../lib/logger.js";
+
+const log = createLogger("plugin-host-effect-scope");
 
 type ScopeState =
   | "preparing" | "published" | "superseded" | "discarded" | "retired";
@@ -174,6 +177,42 @@ export class HostApiGenerationScope {
       } finally {
         lease.release();
       }
+    };
+  }
+
+  /**
+   * Wrap a callback whose result NOBODY awaits, and contain what it throws.
+   *
+   * {@link wrapCallback} returns a promise; a bus listener has no caller to
+   * hand one to. Discarding it with `void` does not discard the FAILURE —
+   * `runWithLease` propagates what the callback threw, so the discarded
+   * promise rejects with nothing attached. Node's default since v15 turns an
+   * unhandled rejection into an uncaught exception, and the Electron main
+   * process registers a handler for NEITHER — the only `uncaughtException`
+   * handler in this repo is in `scripts/run-electron-dev.mjs`, which is the
+   * launcher process and not this one. So one plugin's listener was enough to
+   * end the host. The event buses whose listeners get wrapped already contain
+   * their SYNCHRONOUS ones with a per-listener try/catch and a log line
+   * (`plugins/config-change-bus.ts`, `boot/types.ts`); this is that same
+   * containment for the wrapped ones, so both halves of one bus fail alike.
+   *
+   * DELIBERATELY NOT FOLDED INTO {@link wrapCallback}. `onShutdown` hands its
+   * wrapped callback to a runner that AWAITS it and needs the rejection —
+   * swallowing it there would report a plugin's failed shutdown as a clean
+   * one. The difference is whether a caller is waiting, and that is known at
+   * the wrap site, not inside the wrapper.
+   */
+  wrapListener<TArgs extends readonly unknown[]>(
+    callback: (...args: TArgs) => unknown,
+  ): (...args: TArgs) => void {
+    const wrapped = this.wrapCallback(callback);
+    return (...args: TArgs): void => {
+      void wrapped(...args).catch((error: unknown) => {
+        log.warn(
+          `[plugin:${this.pluginId}] host listener failed: %s`,
+          error instanceof Error ? error.message : String(error),
+        );
+      });
     };
   }
 
