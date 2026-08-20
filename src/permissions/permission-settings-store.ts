@@ -533,9 +533,25 @@ export function normalizePermissionSettings(
       journal.malformed.length,
     );
   }
-  // A damaged entry can still NAME a root. Every path it names is honoured as
-  // a pending removal even though the entry as a whole cannot be acted on, so
-  // corrupting the journal can never be the way a removed root comes back.
+  // A damaged entry can still NAME a root, and every path it names is honoured
+  // as a pending removal even though the entry as a whole cannot be acted on.
+  //
+  // What this masking is FOR. `beginWorkspaceRootRemovalPersist` drops the path
+  // from `additionalDirectories` in the SAME atomic write that appends the
+  // intent, so a root with a removal in flight is already absent from the list.
+  // The masking therefore only decides the case where the path is in the list
+  // anyway — a hand edit or an interrupted legacy write — and there the journal
+  // wins over the list.
+  //
+  // What it is NOT. An entry that names nothing (`null`, `7`, an object with no
+  // readable path) masks nothing, so a path a hand edit put back stays active.
+  // That residual is deliberate, and it is not a hole in a defence because
+  // there is no defence here to hole: the same writer could have written
+  // `pendingWorkspaceRootRemovals: []`, a VALID journal that reactivates every
+  // queued root and raises no fault at all. This journal is crash recovery, not
+  // tamper-evidence. Emptying the list on an unattributable entry would trade
+  // every readable grant for one unreadable non-grant and buy nothing, so the
+  // entry is reported as a fault the UI must show instead.
   const pendingPaths = [
     ...pendingWorkspaceRootRemovals.map((intent) => intent.runtimePath),
     ...journal.malformed.flatMap((entry) => {
