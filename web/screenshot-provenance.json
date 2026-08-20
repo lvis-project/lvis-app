@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pendingReplacementBaseline": 26,
+  "pendingReplacementBaseline": 25,
   "seededAccounts": [
     "work-board-seed",
     "marketplace-dev",
@@ -76,8 +76,10 @@
     },
     "screenshots/chat-permission-directory.png": {
       "surface": "host chat surface",
-      "data": "owner",
-      "action": "none"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true
     },
     "screenshots/chat-permission-llm-review.png": {
       "surface": "host chat surface",
@@ -86,8 +88,10 @@
     },
     "screenshots/chat-permission-risk.png": {
       "surface": "host chat surface",
-      "data": "owner",
-      "action": "none"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true
     },
     "screenshots/chat-plugin-panel.png": {
       "surface": "host chat surface",
@@ -96,18 +100,24 @@
     },
     "screenshots/chat-question-card.png": {
       "surface": "host chat surface",
-      "data": "owner",
-      "action": "none"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true
     },
     "screenshots/chat-todo-queue.png": {
       "surface": "host chat surface",
-      "data": "owner",
-      "action": "none"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true
     },
     "screenshots/chat-tool-thinking.png": {
       "surface": "host chat surface",
-      "data": "owner",
-      "action": "none"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true
     },
     "screenshots/local-indexer-add-folder.png": {
       "surface": "local-indexer plugin panel",
@@ -267,8 +277,10 @@
     },
     "screenshots/plugin-permission-grant.png": {
       "surface": "host plugin dialog",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true
     },
     "screenshots/work-assistant-conflict-2.png": {
       "surface": "work-assistant host notification card",

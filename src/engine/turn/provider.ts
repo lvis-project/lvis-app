@@ -31,6 +31,16 @@ import { normalizeOutputTokenLimit } from "../llm/output-token-limit.js";
 
 export const AI_PROVIDER_PING_TIMEOUT_MS = 8_000;
 
+/**
+ * System prompt {@link pingProvider} sends for its connectivity probe.
+ *
+ * Exported so a test double can recognise the probe turn by the exact prompt
+ * the host actually sends, instead of a copied literal that would silently
+ * drift if this text were ever edited.
+ */
+export const PROVIDER_PING_SYSTEM_PROMPT =
+  "You are a connectivity probe. Reply with PONG only.";
+
 /** Optional host-owned constraints for a background one-shot generation. */
 export interface GenerateTextOptions {
   /**
@@ -347,7 +357,7 @@ export async function pingProvider(
     const timer = setTimeout(() => ctrl.abort(), timeoutMs);
     try {
       for await (const ev of provider.streamTurn({
-        systemPrompt: "You are a connectivity probe. Reply with PONG only.",
+        systemPrompt: PROVIDER_PING_SYSTEM_PROMPT,
         messages: [{ role: "user", content: "ping" }],
         tools: [],
         model,
