@@ -30,6 +30,20 @@ function fixture(): { root: string; settings: string } {
   return { root, settings: join(root, "settings.json") };
 }
 
+/**
+ * The journal exactly as it sits on disk.
+ *
+ * Deliberately NOT typed as an array: a damaged file can leave any JSON value
+ * under the key, and the point of most of these assertions is which shape
+ * survived a write.
+ */
+function journalOnDisk(settings: string): unknown {
+  const parsed = JSON.parse(readFileSync(settings, "utf-8")) as {
+    permissions: { pendingWorkspaceRootRemovals: unknown };
+  };
+  return parsed.permissions.pendingWorkspaceRootRemovals;
+}
+
 afterEach(async () => {
   vi.restoreAllMocks();
   for (const root of tempRoots.splice(0)) {
@@ -267,13 +281,129 @@ describe("workspace-root settings mutations", () => {
       }));
 
       // This used to answer with an empty list, which the sidebar drew as "you
-      // have no projects". An entry that names no root cannot be protecting
-      // one, so the honest answer is the user's list plus the fault.
+      // have no projects". An entry that names no root may well BE protecting
+      // one — nothing here can tell — but emptying the list would trade every
+      // readable grant for one unreadable non-grant while defending nothing:
+      // the same hand edit that left the path in the list could have put `[]`
+      // here instead, a valid journal that raises no fault and leaves that path
+      // just as active. (Only for THAT edit are the two equivalent — an empty
+      // journal on its own reactivates nothing, which the sibling test
+      // "an emptied journal does not bring a root back" pins.) The fault is how
+      // the user is told.
       const read = readPermissionSettings(settings);
       expect(read.permissions.additionalDirectories).toEqual([project]);
       expect(read.fault).toMatchObject({ kind: "pending-removals-malformed", entries: 1 });
     },
   );
+
+  // Pins the scope of the argument above. Emptying the journal is only an
+  // equally-easy substitute for an unattributable entry when the path is back
+  // in the active list too; on its own it reactivates nothing, because the
+  // write that queued the intent dropped the path from `additionalDirectories`
+  // at the same time. Stated as a claim next to the code, so it is tested here.
+  it("an emptied journal does not bring a root back", async () => {
+    const { root, settings } = fixture();
+    const project = join(root, "project");
+    mkdirSync(project);
+    await addAllowedDirectoryPersist(project, settings);
+    expect(readPermissionSettings(settings).permissions.additionalDirectories).toHaveLength(1);
+
+    const begun = await beginWorkspaceRootRemovalPersist(
+      project,
+      "workspace-remove-root",
+      settings,
+    );
+    expect(begun?.created).toBe(true);
+    // The same write that queued the intent already took the path out.
+    expect(readPermissionSettings(settings).permissions.additionalDirectories).toEqual([]);
+    expect(journalOnDisk(settings)).toHaveLength(1);
+
+    // Hand-clear the journal, the substitute the comment calls equally easy.
+    const onDisk = JSON.parse(readFileSync(settings, "utf-8")) as {
+      permissions: Record<string, unknown>;
+    };
+    onDisk.permissions.pendingWorkspaceRootRemovals = [];
+    writeFileSync(settings, JSON.stringify(onDisk, null, 2));
+
+    // The root stays gone and nothing is reported: clearing the journal is not
+    // a general reactivation.
+    const read = readPermissionSettings(settings);
+    expect(read.permissions.additionalDirectories).toEqual([]);
+    expect(read.fault).toBeNull();
+  });
+
+  // The one shape where a surviving entry is recognisably a removal INTENT —
+  // valid operation id, timestamp, source — and still cannot name its root: the
+  // paths are gone, and the active list has the path anyway. Nothing here can
+  // name the root that intent was protecting, so the list entry stands. Not the
+  // only shape that leaves such a path active — a journal that is not a list at
+  // all does too, and names nothing either (see the test below) — only the one
+  // where the evidence of an intent survives its subject.
+  // Pinned as a test because the alternative to stating the limit is a comment
+  // claiming a guarantee this store does not make.
+  it("cannot mask a root when a damaged intent lost its paths and the list still has it", () => {
+    const { root, settings } = fixture();
+    const project = join(root, "project");
+    mkdirSync(project);
+    writeFileSync(settings, JSON.stringify({
+      permissions: {
+        additionalDirectories: [project],
+        pendingWorkspaceRootRemovals: [{
+          operationId: "3f7d0c1a-2b4e-4d8f-9a1c-5e6f70819234",
+          storedPath: null,
+          runtimePath: null,
+          requestedAt: "2026-08-18T00:00:00.000Z",
+          source: "workspace-remove-root",
+        }],
+      },
+    }));
+
+    const read = readPermissionSettings(settings);
+    expect(read.permissions.additionalDirectories).toEqual([project]);
+    expect(read.permissions.pendingWorkspaceRootRemovals).toEqual([]);
+    expect(read.fault).toMatchObject({ kind: "pending-removals-malformed", entries: 1 });
+  });
+
+  it("keeps a journal that is not a list at all, and still answers with the roots", async () => {
+    const { root, settings } = fixture();
+    const project = join(root, "project");
+    const second = join(root, "second");
+    mkdirSync(project);
+    mkdirSync(second);
+    writeFileSync(settings, JSON.stringify({
+      permissions: {
+        additionalDirectories: [project],
+        // Not a list, so there is no entry to keep apart and the value itself is
+        // the thing a write has to put back.
+        pendingWorkspaceRootRemovals: "replaced-by-something-outside-the-app",
+      },
+    }));
+
+    const read = readPermissionSettings(settings);
+    expect(read.permissions.additionalDirectories).toEqual([project]);
+    expect(read.fault).toMatchObject({ kind: "pending-removals-malformed", entries: 1 });
+
+    // An add still succeeds, and it does not touch the key it could not read:
+    // that write never names the journal, so the value survives byte for byte
+    // in whatever shape it was found.
+    const added = await addAllowedDirectoryPersist(second, settings);
+    expect(journalOnDisk(settings)).toEqual("replaced-by-something-outside-the-app");
+
+    // A write that DOES rewrite the journal cannot leave a non-array where an
+    // array belongs, so it re-seats the unreadable value as one element of the
+    // array — after the intent this write decided on — rather than dropping the
+    // key. Still preserved, now well-shaped.
+    const begun = await beginWorkspaceRootRemovalPersist(
+      added[added.length - 1]!,
+      "workspace-remove-root",
+      settings,
+    );
+    expect(begun?.created).toBe(true);
+    expect(journalOnDisk(settings)).toEqual([
+      begun!.intent,
+      "replaced-by-something-outside-the-app",
+    ]);
+  });
 
   it("keeps pending fail-closed when a hand edit reintroduces the active path", async () => {
     const { root, settings } = fixture();
@@ -339,13 +469,6 @@ describe("a settings file the store cannot fully interpret", () => {
     return { settings, project, second, queued };
   }
 
-  function journalOnDisk(settings: string): unknown[] {
-    const parsed = JSON.parse(readFileSync(settings, "utf-8")) as {
-      permissions: { pendingWorkspaceRootRemovals: unknown[] };
-    };
-    return parsed.permissions.pendingWorkspaceRootRemovals;
-  }
-
   it("keeps accepting directories while one cleanup entry stays unreadable", async () => {
     const { settings, project, second } = corruptedJournalFixture();
 
@@ -401,6 +524,54 @@ describe("a settings file the store cannot fully interpret", () => {
     });
     expect(readPermissionSettings(settings).permissions.pendingWorkspaceRootRemovals)
       .toEqual([{ ...VALID_INTENT, storedPath: queued, runtimePath: queued }]);
+  });
+
+  // The mirror of the test above, and the limit of that guard: it is handed
+  // `journal.intents`, so an entry it could not read names nothing to it while
+  // still naming its root to the reader's masking. The add is accepted, and the
+  // next read takes the path back out. Written down because the alternative is
+  // the comment beside the masking claiming an in-app add cannot reach this
+  // state — it can.
+  it("accepts an add for a root only the unreadable entry names, then drops it on the next read", async () => {
+    const { root, settings } = fixture();
+    const project = canonicalizePathForMatch(join(root, "project"));
+    mkdirSync(join(root, "project"));
+    writeFileSync(settings, JSON.stringify({
+      permissions: {
+        additionalDirectories: [],
+        // An interrupted legacy write: the paths are readable, so the masking
+        // honours them, but `source` never landed, so the entry is not
+        // actionable as an intent and the add guard never sees it.
+        pendingWorkspaceRootRemovals: [{
+          operationId: VALID_INTENT.operationId,
+          storedPath: project,
+          runtimePath: project,
+          requestedAt: VALID_INTENT.requestedAt,
+        }],
+      },
+    }, null, 2));
+
+    // Not refused, unlike the readable entry above, and it reaches the file.
+    expect(await addAllowedDirectoryPersist(project, settings)).toEqual([project]);
+    const onDisk = JSON.parse(readFileSync(settings, "utf-8")) as {
+      permissions: { additionalDirectories: string[]; pendingWorkspaceRootRemovals: unknown };
+    };
+    expect(onDisk.permissions.additionalDirectories).toEqual([project]);
+
+    // The same read that reports the fault drops the path the add returned.
+    const read = readPermissionSettings(settings);
+    expect(read.permissions.additionalDirectories).toEqual([]);
+    expect(read.fault).toMatchObject({ kind: "pending-removals-malformed", entries: 1 });
+
+    // The grant was persisted, so repairing the journal makes it live. That is
+    // the other half of the comment's claim, and it is why this is a store that
+    // answers yes and then no rather than one that refused. Repair the bytes the
+    // add actually left behind, not a fresh file.
+    onDisk.permissions.pendingWorkspaceRootRemovals = [];
+    writeFileSync(settings, JSON.stringify(onDisk, null, 2));
+    const repaired = readPermissionSettings(settings);
+    expect(repaired.permissions.additionalDirectories).toEqual([project]);
+    expect(repaired.fault).toBeNull();
   });
 });
 
