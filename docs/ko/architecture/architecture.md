@@ -545,7 +545,7 @@ Layer B — 지능형 인덱싱 (local-indexer)
 | **SQLite + FTS5** | SQLite FTS5 `unicode61` + `kiwipiepy` 사전 토큰화 (`content_ko`) | 한국어 BM25 (패턴 B): 형태소 추출 → 공백 결합 → FTS5 MATCH |
 | **Vector Store** | OpenAI `text-embedding-3-small` (1536 dim) + `lancedb` 로컬 ANN | 100 chunks / batch, 400 RPM throttle, 지수 백오프 |
 | **Hybrid Ranker** | `HybridRetriever` (TypeScript) — RRF `k=60`, `{bm25:0.5, vec:0.5, cloud:0.0}` | BM25 + vector + cloud adapter 결과를 가중 융합 |
-| **Cloud Adapter** | `MockCloudIndexAdapter` | Phase 1은 빈 결과 반환, Phase 2에서 enterprise Elasticsearch + Milvus/Qdrant 실연결 |
+| **Cloud Adapter** | `DisabledCloudIndexAdapter` | Phase 1은 빈 결과 반환, Phase 2에서 enterprise Elasticsearch + Milvus/Qdrant 실연결 |
 | **Query Cache** | LRU Cache (in-memory, structure/content) | 재인덱싱 시 자동 무효화 |
 
 **PageIndex 활용 시 고려사항 (Phase 1):**
@@ -620,7 +620,7 @@ Phase 1에서 §4.4 Layer A·B 명세를 production 수준으로 끌어올리는
 
 #### 4.4.3 HybridRetriever — RRF `k=60`
 
-TypeScript 구현은 `lvis-app/src/main/hybrid-retriever.ts`에 있다. Python worker의 `/search/bm25`, `/search/vector`와 `MockCloudIndexAdapter` 결과를 Reciprocal Rank Fusion으로 통합한다.
+TypeScript 구현은 `lvis-app/src/main/hybrid-retriever.ts`에 있다. Python worker의 `/search/bm25`, `/search/vector`와 `DisabledCloudIndexAdapter` 결과를 Reciprocal Rank Fusion으로 통합한다.
 
 **RRF 공식:**
 
@@ -1779,7 +1779,7 @@ metadata 를 선언한다 (per-tool category / workerId 는 manifest 필드가 �
 #885 Phase R 에서 제거; host 가 파생/분류). Host 는 이 pathFields 를 filesystem
 path 판정 SOT 로 사용하고, effective category 는 host-side
 `inspectHostRisk`/executor policy 에서 invocation 별로 산출한다.
-Host→plugin fs boundary 에서 `ManifestIntegrityViolation` 이 발생하면
+Host→plugin fs boundary 에서 `ManifestIntegrityError` 이 발생하면
 fail-closed 로 처리한다:
 
 1. plugin id → process-wide `manifestIntegrityState.disabledPluginIds`.

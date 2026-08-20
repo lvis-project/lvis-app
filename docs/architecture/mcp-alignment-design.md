@@ -193,7 +193,7 @@ Built + tested (one module each, all green under `bun run test:vitest -- run src
   `source:"plugin"`; runs the #1182 provider-strict lint at registration.
 - `plugin-runtime-delegate.ts` — `pluginRuntimeToolDelegate`, reproducing
   `buildPluginTool`'s fail-closed execute gates (inactive / integrity-disabled /
-  `ManifestIntegrityViolation` record) at the MCP boundary, with the raw return
+  `ManifestIntegrityError` record) at the MCP boundary, with the raw return
   value carried via `_meta["lvisai/rawResult"]`.
 - `plugin-loopback-manager.ts` — `PluginLoopbackManager`, the boot seam owning
   host lifecycle (`start`/`stop`/`stopAll`, idempotent reload).
