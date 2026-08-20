@@ -67,7 +67,8 @@ const REJECT_PATTERNS: ReadonlyArray<RegExp> = [
   /(^|\s)stop(\s|[.!?]|$)/iu,
   /(^|\s)abort(\s|[.!?]|$)/iu,
   /(^|\s)don['’]?t(\s|$)/iu,
-  // Lonely-token negatives — single-letter "n" removed (round-1 review).
+  // Lonely-token negatives — whole-input matches only, and a bare
+  // single-letter "n" is deliberately not among them.
   /^(no|nope|아니|아니요)$/iu,
 ];
 

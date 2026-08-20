@@ -991,7 +991,7 @@ export function buildInternalApiSurface() {
       return () =>
         ipcRenderer.removeListener(PERMISSIONS.deferredPending, listener);
     },
-    /** CRITICAL 4.1: memory-hit auto-approve disclosure — main→renderer event. */
+    /** Memory-hit auto-approve disclosure — main→renderer event. */
     onUserApprovalHit: (cb: (payload: UserApprovalHitPayload) => void) => {
       const listener = (_event: unknown, payload: UserApprovalHitPayload) =>
         cb(payload);
