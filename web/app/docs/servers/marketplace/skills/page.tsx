@@ -28,7 +28,7 @@ export default function Page() {
       </ul>
 
       <Callout tone="info" title="Skill 저장 위치">
-        호스트는 등록된 Skill을 <code>~/.lvis/skills/&lt;name&gt;/SKILL.md</code> 에 저장합니다 (<code>skill-load.ts:57</code>).
+        호스트는 등록된 Skill을 <code>~/.lvis/skills/&lt;name&gt;/SKILL.md</code> 에 저장합니다 (<code>src/main/skill-store.ts</code>).
         Skill 승인 메타는 <code>~/.lvis/skill-approvals.json</code>.
       </Callout>
 

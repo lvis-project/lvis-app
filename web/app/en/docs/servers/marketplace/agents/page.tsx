@@ -21,7 +21,7 @@ export default function Page() {
 
       <h2 id="how">Data Model</h2>
       <p>
-        The Marketplace DB has exactly one <code>Plugin</code> model (<code>server/src/lvis_marketplace/models.py:31</code>). The <code>plugin_type</code> column distinguishes plugin / agent / mcp / skill.
+        The Marketplace DB has exactly one <code>Plugin</code> model (<code>server/src/lvis_marketplace/models.py</code>). The <code>plugin_type</code> column distinguishes plugin / agent / mcp / skill.
         Cards on the Agents page render the <code>GET /api/v1/catalog?plugin_type=agent</code> response as-is.
       </p>
 

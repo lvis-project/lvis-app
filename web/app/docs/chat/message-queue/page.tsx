@@ -12,10 +12,11 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="메시지 큐 & TODO 패널"
-        description="ChatView 본문 옆에 항상 표시되는 두 개의 패널 — MessageQueuePanel (대기 외부 신호) + SessionTodoPanel (세션 TODO). 둘 다 React 컴포넌트로 ChatView.tsx 에서 렌더되고, 데이터는 workflowApi 가 관리합니다."
+        description="컴포저 바로 위에 쌓이는 두 개의 패널 — SessionTodoPanel (세션 TODO) 과 MessageQueuePanel (대기 중인 외부 신호). 둘 다 ChatComposerDock 이 렌더하고, 담을 항목이 없으면 아무것도 그리지 않습니다."
         tags={[
-          "ChatView.tsx:1417 MessageQueuePanel",
-          "ChatView.tsx:1416 SessionTodoPanel",
+          "ChatComposerDock 이 렌더",
+          "MessageQueuePanel + SessionTodoPanel",
+          "비어 있으면 표시 안 함",
         ]}
       />
 

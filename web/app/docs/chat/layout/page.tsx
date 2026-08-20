@@ -13,10 +13,10 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="채팅 화면 구성"
-        description="App.tsx 가 마운트하는 메인 화면은 CustomTitleBar + MainToolbar + ChatView. ChatView 본문 옆에 MessageQueuePanel · SessionTodoPanel 이 항상 떠 있고, useChatContext() 가 세션/큐/TODO state를 함께 관리합니다."
+        description="메인 화면은 AppShell 이 CustomTitleBar + MainToolbar 를 두르고, 접이식 Sidebar 를 띄우고, 그 안의 MainContent 가 ChatView 를 마운트하는 구조입니다. SessionTodoPanel · MessageQueuePanel 은 컴포저 바로 위에 쌓이고, ChatView 는 useChatContext() 로 세션/큐/TODO state 를 함께 읽습니다."
         tags={[
-          "App.tsx:1249-1290",
-          "ChatView.tsx:222",
+          "AppShell + Sidebar + MainContent",
+          "ChatView",
           "MessageQueuePanel + SessionTodoPanel",
         ]}
       />
@@ -24,9 +24,9 @@ export default function Page() {
       <FeatureGrid
         columns={3}
         items={[
-          { title: "① CustomTitleBar + MainToolbar", body: <>창 컨트롤 + 세션/플러그인/권한 toolbar. <code>App.tsx:33</code>에서 import.</>, tone: "teal" },
-          { title: "② ChatView 본문", body: <>대화 + 도구 카드 + thinking + 질문 카드. <code>ChatView.tsx:222</code>.</> },
-          { title: "③ Queue + TODO 패널", body: <>외부 신호 큐 + 세션 TODO. <code>ChatView.tsx:1416-1417</code>.</>, tone: "citron" },
+          { title: "① CustomTitleBar + MainToolbar", body: <>창 컨트롤 + 세션/플러그인/권한 toolbar. <code>src/ui/renderer/AppShell.tsx</code> 가 마운트.</>, tone: "teal" },
+          { title: "② ChatView 본문", body: <>대화 + 도구 카드 + thinking + 질문 카드. <code>src/ui/renderer/ChatView.tsx</code>.</> },
+          { title: "③ Queue + TODO 패널", body: <>외부 신호 큐 + 세션 TODO. 컴포저 바로 위 (<code>src/ui/renderer/components/ChatComposerDock.tsx</code>) 에 놓이고, 항목이 없으면 그려지지 않습니다.</>, tone: "citron" },
         ]}
       />
 
@@ -39,13 +39,14 @@ export default function Page() {
       <h2 id="panels">사이드 패널들</h2>
       <ul>
         <li><code>PluginGridButton.tsx</code> — 플러그인 진입 버튼 그리드 (host UI plugin manifest의 ui[] 슬롯이 여기에 결합).</li>
-        <li><code>RoutinePanel.tsx</code> — RoutineEngineV2 의 등록 루틴 목록 + on/off.</li>
+        <li><code>RoutinePanel.tsx</code> — RoutineEngine 의 등록 루틴 목록 + on/off.</li>
         <li><code>PermissionReviewStatusCard.tsx</code> — Reviewer 모드/상태 카드.</li>
       </ul>
 
-      <Callout tone="info" title="설정 화면 — 별도 sidebar">
-        SettingsContent 화면은 자체 Sidebar 컬럼이 있습니다 (<code>SettingsContent.tsx:214</code>).
-        채팅 메인은 single-column + toolbar + panels 구성이라 사이드바가 별도 존재하지 않습니다.
+      <Callout tone="info" title="사이드바는 두 개가 따로 있습니다">
+        채팅 메인에는 <strong>접이식 플로팅 Sidebar</strong> 가 있습니다 — 세션 · 프로젝트 · 플러그인 뷰가 여기에 들어가고, 접기와 폭 조절이 가능합니다.
+        <code>src/ui/renderer/AppShell.tsx</code> 가 이것을 그립니다.
+        설정 화면은 그것과 별개로 <strong>자체 nav 컬럼</strong> 을 가집니다 (<code>src/ui/renderer/SettingsContent.tsx</code>).
       </Callout>
 
       <PageNav />

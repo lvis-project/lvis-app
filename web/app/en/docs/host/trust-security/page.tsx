@@ -25,6 +25,11 @@ export default function Page() {
             tone: "teal",
           },
           {
+            title: "A withdrawn version does not come back",
+            body: <>When the distributor marks a specific version "do not use," that version will not install, and will not load on the next launch even if it is already on disk. That withdrawal list is signed, and the host refuses <strong>an older list replayed to undo a withdrawal</strong> — a list issued earlier than the newest one already accepted is discarded. Conversely, while <em>no</em> signed list has ever been received, this path blocks nothing.</>,
+            tone: "ink",
+          },
+          {
             title: "Secrets live in the OS secure store",
             body: <>Secrets like API keys, tokens, and internal session cookies are encrypted and kept in the operating system's secure storage. They are never stored in plaintext on the LVIS disk.</>,
             tone: "ink",
@@ -49,6 +54,12 @@ export default function Page() {
           },
         ]}
       />
+
+      <h2 id="plugin-boundary">When a plugin fails</h2>
+      <ul>
+        <li><strong>It leaves a reason instead of disappearing.</strong> An installed plugin that fails to load does not silently vanish — it stays in the sidebar's plugin list as <strong>an entry naming why it failed</strong>. A manifest that does not match the schema, an app version that is too old, a version the distributor withdrew, and installed files that no longer match their install record each show as a distinct reason, and the ones a reinstall can repair are distinguished from the ones it cannot.</li>
+        <li><strong>Some of them run in a separate process.</strong> There is a path that confines a plugin to a child process separate from the host, and plugins are being moved onto it one at a time. The details — and <strong>how many take that path today</strong> — are in the <a href="/en/docs/architecture/host-api#boundary">HostApi document</a>.</li>
+      </ul>
 
       <h2 id="audit">Audit log — every action, one line at a time</h2>
       <p>

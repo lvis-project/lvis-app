@@ -13,7 +13,7 @@ export default function Page() {
         eyebrow="Host · Agents"
         title="Agents — Small Task Units, Handled Autonomously"
         description="If a plugin is an entire domain, an Agent is a single task. It's a small autonomous unit built to do one thing well — like 'create a weekly retro' or 'summarize today's action items.' The host calls these Agents through shortcuts, Hub messages, or automation triggers."
-        tags={["One task = one Agent", "The host calls it", "Delegation scope is set by the user"]}
+        tags={["One task = one Agent", "The host calls it", "Agents call agents", "Delegation scope is set by the user"]}
       />
 
       <h2 id="diff">How is this different from a plugin?</h2>
@@ -42,6 +42,24 @@ export default function Page() {
           },
         ]}
       />
+
+      <h2 id="subagents">Agents call agents</h2>
+      <p>
+        There is a fourth way beyond the three above — <strong>a running agent spawning its own sub-agent</strong>.
+        It splits a large job into pieces, handles each piece in its own context, and brings back only the result.
+      </p>
+      <ul>
+        <li><strong>It starts on a clean context.</strong> A sub-agent does not inherit the parent's conversation history. The tool list it may use is resolved and recorded at spawn, and a run that stops partway is re-scoped to <em>that recorded list</em> when it resumes — resuming does not re-grant permission.</li>
+        <li><strong>Usually nobody waits.</strong> <strong>On a surface that can deliver their results back to the parent</strong>, sub-agents run in the background — the parent gets a run handle immediately and the result arrives later as a message. The surface decides this, not the model: a model asking to run one in the foreground is ignored. On a surface with no delivery path, the run is foreground and the parent waits for it.</li>
+        <li><strong>A run that stops partway can be continued.</strong> A sub-agent that exhausts its budget before finishing is marked <em>incomplete</em> and returns a ticket to resume. That ticket continues <strong>the same sub-agent</strong> from where it stopped — it does not start a new one.</li>
+        <li><strong>It can be steered while it runs.</strong> A parent can push one more directive into a sub-agent that is still running.</li>
+        <li><strong>Its thinking is visible.</strong> What a sub-agent is doing streams into a panel while it works. The result does not just appear out of nowhere.</li>
+      </ul>
+
+      <Callout tone="security" title="A sub-agent's permission questions go to the parent first">
+        When a sub-agent asks to use a tool, that question goes to the parent agent before it reaches the user.
+        There is a ceiling on what the parent may decide, and the only values that ceiling accepts are low and medium — so <strong>high risk cannot pass through and goes to the user</strong> — see the <a href="/en/docs/architecture/permissions#subagent">permission model</a>.
+      </Callout>
 
       <h2 id="where">Where is it stored?</h2>
       <p>

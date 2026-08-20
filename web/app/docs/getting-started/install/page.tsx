@@ -33,7 +33,7 @@ export default function Page() {
             <p>macOS: 첫 실행 보안 경고 시 <strong>설정 → 개인정보 및 보안</strong>에서 「확인 없이 열기」.</p>
             <p>Linux: <code>chmod +x lvis-ai-*.AppImage</code> 후 더블클릭 또는 터미널에서 실행.</p>
           </> },
-          { title: "스플래시 → 메인 호스트 (App.tsx)", body: <p>LVIS 스플래시가 사라지면 채팅 본문이 비어 있는 메인 호스트가 열립니다 (<code>src/ui/renderer/App.tsx:1249-1290</code>). 이 시점에는 아직 어떤 플러그인도 등록되지 않은 상태.</p> },
+          { title: "스플래시 → 메인 호스트 (App.tsx)", body: <p>LVIS 스플래시가 사라지면 채팅 본문이 비어 있는 메인 호스트가 열립니다 (<code>src/ui/renderer/App.tsx</code>). 이 시점에는 아직 어떤 플러그인도 등록되지 않은 상태.</p> },
           { title: "deeplink 등록", body: <p>OS 가 <code>lvis://</code> protocol handler 를 호스트 앱에 매핑 (<code>src/main/lvis-protocol.ts</code>). 이후 Marketplace 에서 “설치” 클릭 시 호스트로 routing.</p>, badge: "lvis://" },
           { title: "Marketplace 로그인으로 이동", body: <p>플러그인을 받기 위해서는 다음 단계인 Marketplace 로그인. 좌측 하단 “로그인” 또는 우측 상단 계정 아이콘.</p> },
         ]}
