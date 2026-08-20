@@ -46,21 +46,41 @@ function manifestFor(pluginId: string): PluginManifest {
   } as PluginManifest;
 }
 
+/**
+ * The in-process counter-example: a real plugin id the routing SOT does not
+ * carry.
+ *
+ * Named literally, and its absence from the SOT is asserted by the first case
+ * below. Without that assertion the day this id is admitted is the day this
+ * file quietly tests the isolated arm twice and the in-process arm not at all —
+ * a suite that grows greener as it stops checking the thing it is named after.
+ */
+const IN_PROCESS_PLUGIN_ID = "local-indexer";
+
 describe("importPluginFactoryForLifecycle chooses one arm per plugin", () => {
-  it("does not import the pilot into main — it returns a child-spawning factory", async () => {
-    const [pilot] = [...OUT_OF_PROCESS_PLUGIN_IDS];
-    expect(pilot).toBeTypeOf("string");
-    // A path that CANNOT be imported. In-process the import is the first thing
-    // that happens and this would reject; out-of-process nothing is imported in
-    // main at all, so a factory comes back and the path is the child's problem.
-    const unimportable = join(tmpdir(), "no-such-plugin-entry.mjs");
-    const factory = await routing().importPluginFactoryForLifecycle(
-      pilot!,
-      unimportable,
-      manifestFor(pilot!),
-    );
-    expect(typeof factory).toBe("function");
+  it("has an in-process plugin left to be the counter-example", () => {
+    expect(OUT_OF_PROCESS_PLUGIN_IDS.has(IN_PROCESS_PLUGIN_ID)).toBe(false);
   });
+
+  // EVERY id in the SOT, not just the first. A per-plugin routing decision that
+  // only ever checked `[0]` would let every addition after the pilot ship with
+  // no evidence that the lifecycle actually routes it.
+  it.each([...OUT_OF_PROCESS_PLUGIN_IDS])(
+    "does not import %s into main — it returns a child-spawning factory",
+    async (isolatedId) => {
+      // A path that CANNOT be imported. In-process the import is the first
+      // thing that happens and this would reject; out-of-process nothing is
+      // imported in main at all, so a factory comes back and the path is the
+      // child's problem.
+      const unimportable = join(tmpdir(), "no-such-plugin-entry.mjs");
+      const factory = await routing().importPluginFactoryForLifecycle(
+        isolatedId,
+        unimportable,
+        manifestFor(isolatedId),
+      );
+      expect(typeof factory).toBe("function");
+    },
+  );
 
   it("still imports every other plugin into main, unchanged", async () => {
     const dir = mkdtempSync(join(tmpdir(), "in-process-plugin-"));
@@ -75,9 +95,9 @@ describe("importPluginFactoryForLifecycle chooses one arm per plugin", () => {
     );
     try {
       const factory = await routing().importPluginFactoryForLifecycle(
-        "meeting",
+        IN_PROCESS_PLUGIN_ID,
         entryPath,
-        manifestFor("meeting"),
+        manifestFor(IN_PROCESS_PLUGIN_ID),
       );
       expect(typeof factory).toBe("function");
       // The module's OWN export, which only an in-main dynamic import produces.
@@ -91,9 +111,9 @@ describe("importPluginFactoryForLifecycle chooses one arm per plugin", () => {
   it("fails an in-process plugin whose entry cannot be imported, as it always has", async () => {
     await expect(
       routing().importPluginFactoryForLifecycle(
-        "meeting",
+        IN_PROCESS_PLUGIN_ID,
         join(tmpdir(), "no-such-plugin-entry.mjs"),
-        manifestFor("meeting"),
+        manifestFor(IN_PROCESS_PLUGIN_ID),
       ),
     ).rejects.toThrow();
   });
