@@ -171,6 +171,34 @@ export type HostApiNotification =
       readonly kind: "config-snapshot";
       readonly keys: readonly string[];
       readonly values: Record<string, unknown>;
+    })
+  /**
+   * host → child: an allow-listed HOST preference now reads differently.
+   *
+   * The sibling of `config-snapshot`, for the other config value a plugin
+   * reads. `getAppPreference` is synchronous too, so §3.1 answers it from a
+   * host-pushed snapshot as well — and until this notification existed there
+   * was nothing to re-push FROM, which is why the child left that one member
+   * unwired rather than answering with a value frozen at plugin start.
+   * `ms-graph` reads `webView.preferredFlow` at CALL time, so a construction
+   * snapshot with no re-push would answer it wrong by construction.
+   *
+   * TWO FIELDS, NOT ONE OBJECT, for the same reason `config-snapshot` splits
+   * them: the reader answers `undefined` for an unset preference, and
+   * `undefined` is not a JSON value. A plain record would simply lose the
+   * property and the child would keep the value it was supposed to drop. So
+   * `keys` carries the full allowlist and `values` only the keys that have one
+   * — a key in `keys` and absent from `values` is unset, and the child deletes
+   * it.
+   *
+   * The key set is the HOST's allowlist
+   * (`boot/steps/plugin-runtime/app-preference.ts`); nothing a plugin sends can
+   * widen what it is told.
+   */
+  | (HostApiEnvelope & {
+      readonly kind: "preference-snapshot";
+      readonly keys: readonly string[];
+      readonly values: Record<string, unknown>;
     });
 
 // ───────────────────────────────────────────────────────────────────────────

@@ -82,6 +82,22 @@ export interface PluginChildContext {
    * `installed-plugins` notifications.
    */
   readonly installedPluginIds: readonly string[];
+  /**
+   * The allow-listed host preferences as of construction, split into `keys` and
+   * `values` exactly as the `preference-snapshot` notification splits them.
+   *
+   * OPTIONAL, and the absence carries meaning rather than being a convenience:
+   * `getAppPreference` is itself an OPTIONAL member of `PluginHostApi`, so "this
+   * host publishes no preferences" and "this preference is unset" are two
+   * different states that would both read as `undefined` at a plugin's call
+   * site. Absent here means the first, and the child's member THROWS rather
+   * than answering — merging the two would hand a plugin a wrong answer it has
+   * no way to detect.
+   */
+  readonly appPreferences?: {
+    readonly keys: readonly string[];
+    readonly values: Record<string, unknown>;
+  };
 }
 
 /** How the child obtains the plugin's factory export. */
@@ -425,6 +441,16 @@ export async function startPluginChildRuntime(
    */
   let installedPluginIds: readonly string[] = [...context.installedPluginIds];
   /**
+   * The child's copy of the allow-listed host preferences, or `undefined` when
+   * this host publishes none.
+   *
+   * MUTATED IN PLACE by `preference-snapshot`, never rebound, for the same
+   * reason `config` is: the member below closes over it.
+   */
+  const appPreferences: Record<string, unknown> | undefined = context.appPreferences
+    ? { ...context.appPreferences.values }
+    : undefined;
+  /**
    * The wired members, composed group by group. One spread per group keeps four
    * parallel authors out of each other's lines; a member no group claims still
    * throws rather than resolving `undefined`.
@@ -448,22 +474,54 @@ export async function startPluginChildRuntime(
     }),
     ...createStorageChildMembers(caller, context),
     getInstalledPluginIds: () => [...installedPluginIds],
+    /**
+     * `getAppPreference`, answered from the host-pushed preference snapshot.
+     *
+     * It used to be the one member with no child half, and the reason was
+     * sound: §3.1 answers a synchronous member from a snapshot, a snapshot is
+     * only correct while something re-pushes it, and `hostApi` had no
+     * preference-change signal to re-push from — so the member would have
+     * answered with the value the preference held when the plugin started,
+     * forever. `ms-graph` reads `webView.preferredFlow` at CALL time, so that
+     * is precisely the wrong answer it would have received.
+     *
+     * The missing half is now `subscribeAppPreferenceChange`
+     * (`plugins/config-change-bus.ts`), which the host end of every child
+     * subscribes to; each announcement re-pushes this snapshot, and the host
+     * pushes once more as soon as the construct reply lands so the value read
+     * for the construct params cannot be left behind by a change that raced it
+     * (`out-of-process-plugin.ts`).
+     *
+     * A key OFF the host allowlist answers `undefined`, which is what the
+     * in-process reader answers for it too — the allowlist is `keys`, and a
+     * denied key is simply not in the snapshot. The one thing the child cannot
+     * reproduce is the host reader's warn-once-per-denied-key line, which is
+     * host-side observability and not part of the answer.
+     *
+     * NOT AN ANSWER THE HOST CAN MAKE: this member throwing when nothing was
+     * seeded. `host-api-factory.ts` always defines `getAppPreference`, so every
+     * child the app builds is seeded; the throw exists because the member is
+     * OPTIONAL on `PluginHostApi` and a partial hostApi can therefore omit it.
+     */
+    getAppPreference: (...args) => {
+      if (!appPreferences) {
+        throw new Error(
+          `[plugin-child:${pluginId}] hostApi.getAppPreference: this host published no `
+            + `preference snapshot, so 'unset' and 'unavailable' cannot be told apart`,
+        );
+      }
+      const key = args[0];
+      // `Object.hasOwn`, not a bare index. The snapshot is a plain object, so
+      // `appPreferences["toString"]` would answer with `Object.prototype`'s
+      // member — a FUNCTION where the host reader, which tests the key against
+      // the allowlist, answers `undefined`. Non-string keys answer `undefined`
+      // for the same reason: no allow-listed key can be reached by one, so the
+      // two ends agree on the value.
+      return typeof key === "string" && Object.hasOwn(appPreferences, key)
+        ? appPreferences[key]
+        : undefined;
+    },
   };
-  /**
-   * `getAppPreference` is deliberately NOT here, and its absence is a decision
-   * rather than an omission.
-   *
-   * §3.1 answers it with a host-pushed snapshot, and a snapshot is only correct
-   * while something re-pushes it. The in-process member reads
-   * `settingsService` LIVE on every call, and `hostApi` exposes no
-   * preference-change signal for the host end of a child to subscribe to — so a
-   * snapshot would silently answer with the value the preference had when the
-   * plugin started. That is the shape of wrong answer this boundary exists to
-   * make impossible, so the member keeps its throwing stub: a plugin that reads
-   * a preference cannot be routed out-of-process until that signal exists. The
-   * pilot does not read one (verified against its sources); `ms-graph` does,
-   * which makes this the first thing to build before it moves.
-   */
   const hostApi = createChildHostApiStub(
     pluginId,
     (path) => members[path] ?? unimplementedChildMember(pluginId, path),
@@ -556,6 +614,35 @@ export async function startPluginChildRuntime(
             // answers `undefined` for. Deleted rather than assigned
             // `undefined` so `Object.keys(config)` stays the truth.
             delete config[key];
+          }
+        }
+        return "delivered";
+      }
+      if (notification.kind === "preference-snapshot") {
+        // Reported as a DROP through the outcome the union already has for
+        // "this named something I do not hold". A host that pushes preferences
+        // to a child it never seeded would otherwise leave `getAppPreference`
+        // throwing while the pushes looked like they landed: the member reads
+        // the seeded object, and there is no seeded object to move.
+        //
+        // The production host cannot reach it — `out-of-process-plugin.ts`
+        // pushes only when it seeded, and it always seeds because
+        // `host-api-factory.ts` always implements the reader. It is the same
+        // defensive pair as the member's throw above, kept because the two
+        // halves are wired by separate objects in tests.
+        if (!appPreferences) return "unknown-subscription";
+        // MUTATED IN PLACE for the same reason `config-snapshot` is: the member
+        // above captured this object.
+        for (const key of notification.keys) {
+          if (Object.hasOwn(notification.values, key)) {
+            appPreferences[key] = notification.values[key];
+          } else {
+            // Absent from `values` means unset, which is what the reader
+            // answers `undefined` for. `delete` rather than assigning
+            // `undefined` mirrors the `config-snapshot` handler above; through
+            // this member the two are indistinguishable, so this is hygiene
+            // rather than a behaviour anything can observe.
+            delete appPreferences[key];
           }
         }
         return "delivered";
