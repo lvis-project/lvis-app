@@ -1,4 +1,5 @@
 import type { ErrorCategory } from "./error-classifier.js";
+import { isRecord } from "../../shared/is-record.js";
 
 export interface ProviderRateLimitDiagnostics {
   kind: "tokens-per-minute" | "requests-per-minute" | "unknown";
@@ -216,8 +217,4 @@ function numberValue(value: unknown): number | undefined {
 
 function recordValue(value: unknown): Record<string, unknown> | undefined {
   return isRecord(value) ? value : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
 }
