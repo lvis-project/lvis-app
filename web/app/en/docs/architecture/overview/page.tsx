@@ -29,7 +29,7 @@ const layers = [
       "meeting (Whisper STT)",
       "work-assistant (proactive · detectors)",
       "agent-hub (sidebar · 43 tools)",
-      "lge-api (EP · 24 tools)",
+      "internal portal plugin (24 tools)",
     ],
   },
   {
@@ -53,7 +53,7 @@ const layers = [
       "Marketplace (FastAPI · plugin/agent/mcp/skill catalog)",
       "Agent Hub (FastAPI + asyncpg + alembic)",
       "MCP servers (external)",
-      "ms-graph · LGE EP · LGenie (external APIs)",
+      "ms-graph · internal portal · internal search (external APIs)",
     ],
   },
 ];
@@ -114,7 +114,7 @@ export default function Page() {
 
       <Callout tone="info" title="6 active plugins (2026-05-20)">
         ms-graph (v0.3.28) · local-indexer (v0.4.11) · meeting (v0.4.18) · work-assistant (v0.7.0) ·
-        agent-hub (v0.8.1) · lge-api (v0.12.9). Archived: lvis-plugin-email (2026-04-28), lvis-plugin-calendar (2026-04-30) — both consolidated into ms-graph.
+        agent-hub (v0.8.1) · internal portal plugin (v0.12.9). Archived: lvis-plugin-email (2026-04-28), lvis-plugin-calendar (2026-04-30) — both consolidated into ms-graph.
       </Callout>
 
       <Callout tone="security" title="Architecture doc consistency">

@@ -649,7 +649,7 @@ per-artifact proof at all; authorisation lives only in a document with a 24-hour
 life.
 
 This matters most where it is least visible. `project_marketplace_internal_visibility`
-established that `lge-api` and `ms-graph` are internal-network-only. Those installs
+established that `ep-api` and `ms-graph` are internal-network-only. Those installs
 must now reach GitHub Pages (or the Release fallback) from inside that network, in
 addition to the marketplace host. An air-gapped or strictly-egress-controlled
 deployment that works today because the artifact carries its own proof will not

@@ -1,11 +1,19 @@
-name: Naming Gate (process-metadata leak)
+name: Naming Gate (process-metadata + de-identification)
 
-# 식별자/파일명에 process-derived 메타데이터(H1/H2, Phase-N, real-/fake- prefix,
-# Tier-as-process audit key, version-suffix, PR-number fixture path)가 새로
-# 추가되지 못하도록 차단한다. SOT: `feedback_naming_process_metadata.md`.
+# 두 개의 독립 job:
 #
-# Diff-based: PR 의 변경분만 검사한다. 기존 위반은 grandfather; sweep PR 으로
-# 별도 제거. 이 gate 는 *새 callsite 차단* 이 목적.
+# 1. naming-gate — 식별자/파일명에 process-derived 메타데이터(H1/H2, Phase-N,
+#    real-/fake- prefix, Tier-as-process audit key, version-suffix, PR-number
+#    fixture path)가 새로 추가되지 못하도록 차단한다.
+#    SOT: `feedback_naming_process_metadata.md`.
+#
+# 2. deidentification-gate — 이 저장소는 PUBLIC 이다. 고용사 브랜드명, 사내
+#    시스템명, 사내 호스트명이 새로 추가되지 못하도록 차단한다. 사내 구현은
+#    private 플러그인 저장소에 남는다는 경계가 이미 설계로 존재하며, 공개
+#    호스트 저장소에 사내 식별자가 들어오면 그 경계가 무의미해진다.
+#
+# 두 job 모두 diff-based: PR 의 변경분만 검사한다. 기존 위반은 grandfather;
+# sweep PR 으로 별도 제거. 이 gate 는 *새 callsite 차단* 이 목적.
 
 on:
   pull_request:
@@ -113,3 +121,154 @@ jobs:
           fi
 
           echo "naming-gate: clean."
+
+  deidentification-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Compute diff vs base
+        id: diff
+        run: |
+          base_sha=$(git merge-base origin/${{ github.base_ref }} HEAD)
+          echo "base_sha=$base_sha" >> "$GITHUB_OUTPUT"
+          # Scope: every path that ships publicly. Unlike naming-gate this job
+          # does NOT exclude tests, docs, or .github — every leak this gate was
+          # written for lived in exactly those paths.
+          #
+          # The one exclusion is this workflow itself: a gate that greps for a
+          # literal cannot avoid containing that literal, so scanning its own
+          # added lines would fail every PR that edits the gate.
+          #
+          # Each stage is status-checked separately. `|| true` on this pipeline
+          # would make a broken filter look identical to "nothing in scope", and
+          # the gate would then wave every PR through while still reporting green.
+          if git diff --name-only --diff-filter=d "$base_sha"...HEAD > /tmp/deident-all.txt
+          then :; else
+            echo "::error::git diff failed — gate cannot verify this PR"; exit 1
+          fi
+
+          if grep -E '^(src/|test/|docs/|web/|\.github/)' /tmp/deident-all.txt > /tmp/deident-scoped.txt
+          then :; else
+            status=$?
+            [ "$status" -ge 2 ] && { echo "::error::scope filter failed (exit $status)"; exit 1; }
+            : > /tmp/deident-scoped.txt
+          fi
+
+          if grep -Fxv '.github/workflows/naming-gate.yml' /tmp/deident-scoped.txt > /tmp/deident-changed.txt
+          then :; else
+            status=$?
+            [ "$status" -ge 2 ] && { echo "::error::self-exclusion filter failed (exit $status)"; exit 1; }
+            : > /tmp/deident-changed.txt
+          fi
+          echo "changed files in scope:"
+          cat /tmp/deident-changed.txt
+
+      - name: Grep diff for employer-identifying content
+        run: |
+          base_sha="${{ steps.diff.outputs.base_sha }}"
+          violations=0
+
+          if [ ! -s /tmp/deident-changed.txt ]; then
+            echo "no in-scope file changes — skipping."
+            exit 0
+          fi
+
+          # Every pattern matches a WHOLE identifier or a real hostname, never a
+          # bare substring. `lg` alone is deliberately absent: Tailwind emits it
+          # constantly (`rounded-lg`, `text-lg`, `lg:col-span-3`) and it also sits
+          # inside ordinary words (`bulge`, `divulge`). The brand pattern requires
+          # the full three-letter token delimited by non-alphanumerics, and the
+          # bare-`LG` pattern is upper-case only, so no lower-case Tailwind class
+          # can reach either of them.
+          #
+          # POSIX ERE only — no `-P`. PCRE is not available in every grep build,
+          # and a grep that rejects its own flag exits non-zero, which an
+          # `if grep ...` would read as "no match" and let the PR through.
+          # Word edges are spelled out as `[^A-Za-z0-9]` rather than `\b` for the
+          # same reason.
+          #
+          # Text patterns are applied to ADDED lines only, on text files only.
+          # Binary additions (screenshots) are covered by the filename pass below.
+          patterns=(
+            '(^|[^A-Za-z0-9])[Ll][Gg][Ee]([^A-Za-z0-9]|$)'
+            '(^|[^A-Za-z0-9])LG([^A-Za-z0-9]|$)'
+            'LG *전자'
+            '[Ll][Gg][ -]?[Ee]lectronics'
+            '[Ll][Gg]enie'
+            '(^|[^A-Za-z0-9])NHRS([^A-Za-z0-9]|$)'
+            'ssolgenet'
+            '이피'
+          )
+
+          if grep -E '\.(ts|tsx|js|mjs|cjs|py|md|json|ya?ml|sh|txt|html|css)$|Dockerfile$' \
+            /tmp/deident-changed.txt > /tmp/deident-text.txt
+          then :; else
+            status=$?
+            [ "$status" -ge 2 ] && { echo "::error::text-file filter failed (exit $status)"; exit 1; }
+            : > /tmp/deident-text.txt
+          fi
+
+          for pattern in "${patterns[@]}"; do
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+              [ ! -f "$file" ] && continue
+              # `if ...; then` keeps errexit from aborting the step on the
+              # expected exit 1 (no match), while still exposing the status.
+              if git diff "$base_sha"...HEAD -- "$file" | grep -E "^\+" \
+                | grep -nE "$pattern" > /tmp/deident-hits.txt
+              then
+                status=0
+              else
+                status=$?
+              fi
+              # 0 = matched, 1 = no match, >=2 = grep itself failed. Treating a
+              # failure as "clean" is how a gate silently stops gating, so stop.
+              if [ "$status" -ge 2 ]; then
+                echo "::error::grep failed (exit $status) on $file for pattern '$pattern' — gate cannot verify this diff"
+                exit 1
+              fi
+              if [ "$status" -eq 0 ] && [ -s /tmp/deident-hits.txt ]; then
+                echo "::error file=$file::employer-identifying pattern '$pattern' added"
+                cat /tmp/deident-hits.txt
+                violations=$((violations + $(wc -l < /tmp/deident-hits.txt)))
+              fi
+            done < /tmp/deident-text.txt
+          done
+
+          # Filename pass — a screenshot leaks more than prose, and its name is
+          # the only part of a binary this gate can read.
+          while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            base=$(basename "$file")
+            if echo "$base" | grep -qE '(^|[^A-Za-z0-9])[Ll][Gg][Ee]([^A-Za-z0-9]|$)|[Ll][Gg]enie|이피'
+            then
+              echo "::error file=$file::employer-identifying filename"
+              violations=$((violations + 1))
+            else
+              status=$?
+              [ "$status" -ge 2 ] && { echo "::error::grep failed (exit $status) on filename $file"; exit 1; }
+            fi
+            case "$file" in
+              web/public/screenshots/ep-*)
+                echo "::error file=$file::internal-portal screenshot capture — these are not published"
+                violations=$((violations + 1))
+                ;;
+            esac
+          done < /tmp/deident-changed.txt
+
+          if [ "$violations" -gt 0 ]; then
+            echo ""
+            echo "::error::deidentification-gate found $violations employer-identifying addition(s)."
+            echo "This repository is public. Use the generic vocabulary instead:"
+            echo "  employer / brand name        -> drop entirely, or 'the organization'"
+            echo "  the internal portal product  -> '사내 포털 플러그인' / 'an internal portal plugin'"
+            echo "  the internal search product  -> '사내 검색' / 'internal search'"
+            echo "  internal hostnames           -> fixture domains (portal.example.com)"
+            echo "  a specific plugin in prose   -> the generic noun '플러그인' / 'plugin'"
+            exit 1
+          fi
+
+          echo "deidentification-gate: clean."
