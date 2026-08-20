@@ -8,6 +8,229 @@ function readRepoFile(path: string): string {
   return readFileSync(resolve(root, path), "utf8");
 }
 
+/** The `jobs:` block of a workflow, split into `job id -> raw job body`. Inside
+ *  `jobs:` the job ids are the only keys at two-space indentation; everything
+ *  belonging to a job is indented further. Throws when a file has no `jobs:`
+ *  block, so a renamed key fails loudly instead of yielding an empty map that
+ *  every assertion below would then pass vacuously.
+ *
+ *  A run of comment and blank lines immediately above a job id belongs to that
+ *  job, not to the one that ends above it. Reading them the other way puts the
+ *  prose that explains a job — including the sentences that name what the job
+ *  must not contain — inside its neighbour's body. */
+function workflowJobs(source: string): Map<string, string> {
+  const marker = "\njobs:\n";
+  const start = source.indexOf(marker);
+  if (start < 0) {
+    throw new Error("workflow has no top-level `jobs:` block");
+  }
+  const jobs = new Map<string, string>();
+  let id: string | null = null;
+  let body: string[] = [];
+  for (const line of source.slice(start + marker.length).split("\n")) {
+    const header = /^ {2}([A-Za-z0-9][A-Za-z0-9_-]*):\s*$/u.exec(line);
+    if (header) {
+      const preamble: string[] = [];
+      while (
+        body.length > 0 &&
+        /^\s*(#.*)?$/u.test(body[body.length - 1] as string)
+      ) {
+        preamble.unshift(body.pop() as string);
+      }
+      if (id !== null) jobs.set(id, body.join("\n"));
+      id = header[1];
+      body = preamble;
+      continue;
+    }
+    body.push(line);
+  }
+  if (id !== null) jobs.set(id, body.join("\n"));
+  return jobs;
+}
+
+/** Every shell command a job runs, in order, with block scalars (`run: |`)
+ *  folded into one string.
+ *
+ *  Comments are excluded deliberately. The ordering invariant below forbids
+ *  certain scripts from sharing a job with the compile and test steps, and both
+ *  workflows explain that rule in comments that name those very scripts — a
+ *  substring scan over the raw job body would read those sentences as steps and
+ *  fail on the explanation. This is not a general YAML parser; it covers the
+ *  shapes `.github/workflows/` actually uses. */
+function jobRunCommands(jobBody: string): string[] {
+  const commands: string[] = [];
+  const lines = jobBody.split("\n");
+  for (let index = 0; index < lines.length; index += 1) {
+    const match = /^( *)(- )?run:(.*)$/u.exec(lines[index]);
+    if (!match) continue;
+    const [, spaces, dash, rest] = match;
+    const indent = spaces.length + (dash ? dash.length : 0);
+    const inline = rest.trim();
+    if (inline !== "" && !/^[|>][-+]?\d*$/u.test(inline)) {
+      commands.push(inline);
+      continue;
+    }
+    const block: string[] = [];
+    for (let next = index + 1; next < lines.length; next += 1) {
+      const line = lines[next];
+      if (line.trim() !== "" && line.length - line.trimStart().length <= indent) {
+        break;
+      }
+      block.push(line.trim());
+      index = next;
+    }
+    commands.push(block.join("\n"));
+  }
+  return commands;
+}
+
+/** True when `marker` appears in `command` as a whole name rather than as the
+ *  prefix or suffix of a longer one. `bun run test` runs the suite;
+ *  `bun run test:knip-gate` is a hygiene gate, and `String.includes` reads the
+ *  first inside the second. A name ends where a character outside the class
+ *  below begins. `.` is outside it deliberately: the file spellings are written
+ *  without an extension, so `check-knip-baseline` has to match inside
+ *  `scripts/check-knip-baseline.mjs`. */
+const NAME_CHARACTER = /[A-Za-z0-9_:-]/u;
+
+function mentions(command: string, marker: string): boolean {
+  for (let from = 0; ; from += 1) {
+    const at = command.indexOf(marker, from);
+    if (at < 0) return false;
+    const before = at === 0 ? "" : (command[at - 1] as string);
+    const after = command[at + marker.length] ?? "";
+    if (!NAME_CHARACTER.test(before) && !NAME_CHARACTER.test(after)) return true;
+    from = at;
+  }
+}
+
+/** Every gate that inspects the repository's own bookkeeping — a manifest, a
+ *  baseline ledger, the self-test of a gate that reads one. A failure says a
+ *  file is stale, never that the product is broken.
+ *
+ *  Both spellings for every gate: the package.json script name, and the base
+ *  name of the script file that name resolves to. The asymmetry is the failure
+ *  mode. A list holding `check:knip` but not `check-knip-baseline` waves
+ *  through `node scripts/check-knip-baseline.mjs`, which is the same gate under
+ *  a name package.json already contains — so "the list cannot see a name nobody
+ *  has written yet" would understate it. "keeps each gate's two spellings in
+ *  step with package.json" below fails when a rename leaves a pair stale.
+ *
+ *  A gate genuinely new to the repository still has to be added here by hand. */
+const HYGIENE_GATES: ReadonlyArray<{ script: string; file: string }> = [
+  { script: "check:knip", file: "check-knip-baseline" },
+  { script: "check:knip:self-test", file: "check-knip-gate-self-test" },
+  { script: "test:knip-gate", file: "knip-baseline.test" },
+  { script: "check:screenshot-provenance", file: "check-screenshot-provenance" },
+  {
+    script: "check:screenshot-provenance:self-test",
+    file: "check-screenshot-provenance-self-test",
+  },
+  { script: "check:test-duplicates", file: "check-test-duplicates" },
+  { script: "check:sunset-inventory", file: "check-sunset-inventory" },
+];
+
+const REPOSITORY_HYGIENE = HYGIENE_GATES.flatMap(({ script, file }) => [
+  script,
+  file,
+]);
+
+const HYGIENE_SCRIPTS = new Set(HYGIENE_GATES.map(({ script }) => script));
+
+const packageScripts = (
+  JSON.parse(readRepoFile("package.json")) as {
+    scripts: Record<string, string>;
+  }
+).scripts;
+
+/** The shape of a package.json script that compiles, builds, or runs the
+ *  product: `typecheck`, `build`, `test`, and anything under `build:` or
+ *  `test:`. */
+const VERIFICATION_SCRIPT_SHAPE = /^(?:typecheck|build|test)(?::|$)/u;
+
+/** Scripts that verify but whose names do not carry that shape, each with the
+ *  file its body resolves to. Both spellings, for the same reason
+ *  HYGIENE_GATES keeps both, and "keeps the verification list in step with
+ *  package.json" below checks the pair against package.json. */
+const VERIFICATION_CHECKS: ReadonlyArray<{ script: string; file: string }> = [
+  { script: "check:typecheck-tests", file: "check-test-typecheck-baseline" },
+  {
+    script: "check:typecheck-tests:self-test",
+    file: "check-test-typecheck-gate-self-test",
+  },
+  { script: "check:test-coverage", file: "run-test-coverage-gate" },
+];
+
+/** Compile and test invocations that reach the tool without going through
+ *  package.json. Unlike the two lists above this one is written by hand and
+ *  has a gap that no test closes: a workflow that compiles by calling some
+ *  other tool directly, under a spelling nobody has written here, is not
+ *  recognised, and the ordering invariant would let a hygiene gate precede it.
+ *  These two are what `.github/workflows/` calls today — `bunx playwright test`
+ *  in e2e.yml and marketplace-e2e.yml, and `tsc --noEmit`, which is
+ *  `bun run typecheck`'s body and is listed so a workflow inlining it is still
+ *  seen. */
+const DIRECT_TOOL_INVOCATIONS = ["tsc --noEmit", "playwright test"];
+
+/** Names that appear only in a step which compiles, builds, or executes the
+ *  product. The ordering invariant below is "no hygiene gate before one of
+ *  these", so a step this list cannot see is a step a hygiene gate may legally
+ *  precede.
+ *
+ *  Exhaustive over package.json, not over every possible spelling. The first
+ *  half is derived — every script matching VERIFICATION_SCRIPT_SHAPE that
+ *  HYGIENE_GATES does not claim — so a new `build:*` or `test:*` script joins
+ *  it with no edit here. That derivation replaced a hand list that package.json
+ *  had already outgrown: the hand list held thirteen names, and of the
+ *  twenty-six package.json scripts carrying this shape it left twenty
+ *  unrecognised — `build:main` and `test:coverage` among them — so a workflow
+ *  step calling one of those was a step a hygiene gate could legally precede.
+ *  The remaining halves are hand-written; DIRECT_TOOL_INVOCATIONS states the
+ *  gap that leaves. */
+const VERIFIES_THE_CODE = [
+  ...Object.keys(packageScripts)
+    .filter(
+      (name) =>
+        VERIFICATION_SCRIPT_SHAPE.test(name) && !HYGIENE_SCRIPTS.has(name),
+    )
+    .map((name) => `bun run ${name}`),
+  ...VERIFICATION_CHECKS.flatMap(({ script, file }) => [script, file]),
+  ...DIRECT_TOOL_INVOCATIONS,
+].sort();
+
+/** Whether a job declares a `needs:` dependency. A key, not a substring: the
+ *  comments that explain why a job has no `needs:` edge contain the word
+ *  themselves. */
+function declaresNeeds(jobBody: string): boolean {
+  return jobBody.split("\n").some((line) => /^ +needs:/u.test(line));
+}
+
+function matched(commands: string[], markers: string[]): string[] {
+  return markers.filter((marker) =>
+    commands.some((command) => mentions(command, marker))
+  );
+}
+
+function firstCommandIndex(commands: string[], markers: string[]): number {
+  return commands.findIndex((command) =>
+    markers.some((marker) => mentions(command, marker))
+  );
+}
+
+function lastCommandIndex(commands: string[], markers: string[]): number {
+  for (let index = commands.length - 1; index >= 0; index -= 1) {
+    const command = commands[index] as string;
+    if (markers.some((marker) => mentions(command, marker))) return index;
+  }
+  return -1;
+}
+
+function workflowFileNames(): string[] {
+  return readdirSync(resolve(root, ".github/workflows"))
+    .filter((entry) => /\.ya?ml$/u.test(entry))
+    .sort();
+}
+
 describe("installer smoke and packaging discipline", () => {
   it("smoke-launches the packaged app before uploading installer artifacts", () => {
     const workflow = readRepoFile(".github/workflows/build-installers.yml");
@@ -171,6 +394,296 @@ describe("installer smoke and packaging discipline", () => {
     }
   });
 
+
+  it("runs no repository-hygiene gate ahead of a compile or test step", () => {
+    const names = workflowFileNames();
+    expect(names.length).toBeGreaterThan(0);
+
+    let jobsCarryingGates = 0;
+    for (const name of names) {
+      const jobs = workflowJobs(readRepoFile(`.github/workflows/${name}`));
+      expect(jobs.size, `${name}: no jobs parsed`).toBeGreaterThan(0);
+      for (const [id, body] of jobs) {
+        // Guard on the split itself. `workflowJobs` recognises a job by a
+        // two-space-indented key, which a shell line inside a `run: |` block
+        // could in principle imitate; the resulting fragment would carry no
+        // steps and the scan below would quietly find nothing in it. Every real
+        // job in this directory declares `steps:` or `uses:` at four spaces.
+        expect(
+          / {4}(steps|uses):/u.test(body),
+          `${name}: "${id}" was parsed as a job but declares no steps — ` +
+            "the job splitter mis-read this file",
+        ).toBe(true);
+        const commands = jobRunCommands(body);
+        const firstHygiene = firstCommandIndex(commands, REPOSITORY_HYGIENE);
+        if (firstHygiene < 0) continue;
+        jobsCarryingGates += 1;
+        const lastVerification = lastCommandIndex(commands, VERIFIES_THE_CODE);
+        if (lastVerification < 0) continue;
+        expect(
+          firstHygiene,
+          `${name}: job "${id}" runs the hygiene gate(s) ` +
+            `${matched(commands, REPOSITORY_HYGIENE).join(", ")} before the ` +
+            `step \`${commands[lastVerification] as string}\`. A job stops at ` +
+            "its first failed step, so a stale manifest there skips the steps " +
+            "that verify the code and leaves a red check meaning \"nothing " +
+            "was verified\", which is indistinguishable from \"something was " +
+            "verified and failed\". Put every hygiene gate after the last " +
+            "compile or test step in its job, or in a job of its own — and if " +
+            "it moves to a job of its own, read the note on the " +
+            "build-and-test test below first.",
+        ).toBeGreaterThan(lastVerification);
+      }
+    }
+    // Two today: ci.yml's build-and-test and web-ci.yml's
+    // screenshot-provenance. A scan that stopped recognising the gates would
+    // otherwise pass by finding nothing to check.
+    expect(jobsCarryingGates).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps ci.yml's hygiene gates inside the required build-and-test check", () => {
+    const jobs = workflowJobs(readRepoFile(".github/workflows/ci.yml"));
+    const verification = jobs.get("build-and-test");
+    expect(verification, "ci.yml lost its build-and-test job").toBeDefined();
+    const commands = jobRunCommands(verification as string);
+
+    // `build-and-test` is one of the two required status checks on `main`; the
+    // other is `naming-gate`. Read the current list with
+    //   gh api repos/lvis-project/lvis-app/branches/main/protection \
+    //     --jq .required_status_checks.contexts
+    // A gate moved into a job of its own reports under a check name that list
+    // does not contain, and an unlisted check cannot block a merge. That was
+    // measured, not feared: with these three in a separate `repo-hygiene` job,
+    // a commit carrying a deliberately stale manifest entry had both required
+    // contexts reporting success, and the checks that did go red on it reported
+    // under names the required list does not contain.
+    // Splitting them out is the better shape — it takes a change that adds the
+    // new job's check name to that list at the same time.
+    expect(
+      matched(commands, REPOSITORY_HYGIENE),
+      "ci.yml's build-and-test must run every core hygiene gate: it carries a " +
+        "required check name, and a gate outside it stops blocking merges",
+    ).toEqual([
+      "check:knip",
+      "test:knip-gate",
+      "check:screenshot-provenance",
+      "check:screenshot-provenance:self-test",
+      "check:test-duplicates",
+      "check:sunset-inventory",
+    ]);
+
+    // `test:a2a-p4-5:evidence` is on the verification side on purpose. It
+    // asserts over the release-signing workflow's source, but it also exercises
+    // the release-tooling libraries, so its failure means code is wrong.
+    // Sorted, because VERIFIES_THE_CODE is sorted and `matched` returns marker
+    // order — this pins the set, not the step order. The step order is pinned
+    // by the ordering scan above and by "keeps the release-tooling suite last
+    // among the verification steps" below.
+    expect(matched(commands, VERIFIES_THE_CODE)).toEqual([
+      "bun run build",
+      "bun run test:a2a-p4-5:evidence",
+      "bun run typecheck",
+      "check:test-coverage",
+      "check:typecheck-tests",
+      "check:typecheck-tests:self-test",
+    ]);
+  });
+
+  it("keeps the release-tooling suite last among the verification steps", () => {
+    // ci.yml says so beside the step: a narrow `node --test` suite placed
+    // ahead of the vitest suite would skip it. `matched` returns marker order,
+    // not step order, so the assertion above cannot see this; the index does.
+    const jobs = workflowJobs(readRepoFile(".github/workflows/ci.yml"));
+    const commands = jobRunCommands(jobs.get("build-and-test") as string);
+    const last = lastCommandIndex(commands, VERIFIES_THE_CODE);
+    expect(last).toBeGreaterThanOrEqual(0);
+    expect(
+      commands[last],
+      "ci.yml: build-and-test now ends its verification with a step other " +
+        "than the release-tooling suite. That suite is narrow and fast; " +
+        "anything it precedes is a step it can skip.",
+    ).toContain("test:a2a-p4-5:evidence");
+  });
+
+  it("keeps the web screenshot gate out of the static-export build job", () => {
+    const jobs = workflowJobs(readRepoFile(".github/workflows/web-ci.yml"));
+
+    const build = jobs.get("build");
+    const gate = jobs.get("screenshot-provenance");
+    expect(build, "web-ci.yml lost its build job").toBeDefined();
+    expect(gate, "web-ci.yml lost its screenshot-provenance job").toBeDefined();
+
+    // Splitting costs no enforcement here, unlike in ci.yml: the check name
+    // this job's `build` reports under is not in the required list either.
+    expect(matched(jobRunCommands(build as string), REPOSITORY_HYGIENE)).toEqual(
+      [],
+    );
+    expect(matched(jobRunCommands(build as string), VERIFIES_THE_CODE))
+      .toContain("bun run build");
+    expect(matched(jobRunCommands(gate as string), REPOSITORY_HYGIENE)).toEqual([
+      "check-screenshot-provenance",
+      "check-screenshot-provenance-self-test",
+    ]);
+    expect(matched(jobRunCommands(gate as string), VERIFIES_THE_CODE)).toEqual(
+      [],
+    );
+    // A `needs:` edge would restore the skipping the split removed: a failed
+    // gate would take `build` with it and report it as skipped.
+    expect(declaresNeeds(gate as string)).toBe(false);
+  });
+
+  it("keeps each hygiene gate's two spellings in step with package.json", () => {
+    for (const { script, file } of HYGIENE_GATES) {
+      const body = packageScripts[script];
+      expect(body, `package.json has no "${script}" script`).toBeDefined();
+      expect(
+        mentions(body as string, file),
+        `"${script}" no longer runs ${file}; the workflow scan would stop ` +
+          "recognising this gate under its file-name spelling",
+      ).toBe(true);
+    }
+  });
+
+  it("keeps the verification list in step with package.json", () => {
+    // The same cross-check the hygiene list gets, on the other side of the
+    // ordering invariant. Both sides are load-bearing: a gate the scan cannot
+    // see is a gate it will not police, and a verification step the scan
+    // cannot see is a step a gate may legally precede.
+    for (const { script, file } of VERIFICATION_CHECKS) {
+      const body = packageScripts[script];
+      expect(body, `package.json has no "${script}" script`).toBeDefined();
+      expect(
+        mentions(body as string, file),
+        `"${script}" no longer runs ${file}; the workflow scan would stop ` +
+          "recognising this step under its file-name spelling",
+      ).toBe(true);
+    }
+
+    // Totality over package.json for the derived half. This is what a hand
+    // list could not give: before the derivation, thirteen names stood against
+    // twenty-six scripts of this shape and left twenty of them unseen.
+    // The floor guards the derivation itself — a shape regex that stopped
+    // matching would otherwise make the loop below pass vacuously.
+    const shaped = Object.keys(packageScripts).filter((name) =>
+      VERIFICATION_SCRIPT_SHAPE.test(name)
+    );
+    expect(shaped.length).toBeGreaterThan(20);
+    for (const name of shaped) {
+      if (HYGIENE_SCRIPTS.has(name)) continue;
+      expect(
+        matched([`bun run ${name}`], VERIFIES_THE_CODE),
+        `package.json defines "${name}", which compiles or tests, and the ` +
+          "workflow scan does not recognise it",
+      ).not.toEqual([]);
+    }
+
+    // The two spellings a certification run used to walk a verification step
+    // past a hygiene gate while this file still reported 23 passing tests.
+    // Subsumed by the loop above; kept because they are the reproduction.
+    for (const command of ["bun run test:coverage", "bun run build:main"]) {
+      expect(matched([command], VERIFIES_THE_CODE), command).not.toEqual([]);
+    }
+  });
+
+  it("keeps every core hygiene gate out of the `build` composite", () => {
+    // `bun run build` is one workflow step and fifteen commands, so the
+    // workflow scan above — which reads steps — cannot see inside it. A gate
+    // placed there fails ci.yml's build step and skips every step after it,
+    // the whole suite included: the defect this file exists to keep out of
+    // workflows, one layer down. `check:sunset-inventory` was the first
+    // command of this composite until the change that added this assertion.
+    const build = packageScripts["build"];
+    expect(build, "package.json has no build script").toBeDefined();
+    const commands = (build as string).split("&&").map((part) => part.trim());
+    const inside = HYGIENE_GATES.filter(({ script, file }) =>
+      commands.some(
+        (command) => mentions(command, script) || mentions(command, file),
+      )
+    ).map(({ script }) => script);
+    expect(
+      inside,
+      "package.json's `build` script runs a hygiene gate. A job's build step " +
+        "stops at that gate, so a stale ledger skips the steps that verify " +
+        "the code. Run it as its own step, after the last compile or test " +
+        "step in the job.",
+    ).toEqual([]);
+  });
+
+  it("pins the checks that remain inside the `build` composite", () => {
+    // The residual, recorded rather than claimed away. These are not hygiene
+    // gates by the list above, but each can still fail ci.yml's build step and
+    // skip the suite behind it. They stay because each reads either the
+    // sources being compiled or the bytes the build itself just wrote, and a
+    // local `bun run build` is where that drift has to surface. Pinned as an
+    // exact list so a check added to `build` fails here and has to be argued
+    // for, and so the count in ci.yml's comment beside the trailing gates
+    // cannot drift away from the composite it describes.
+    const commands = (packageScripts["build"] as string)
+      .split("&&")
+      .map((part) => part.trim());
+    const assertions = commands.filter((command) =>
+      /(?:^|[\s/])check[-:]/u.test(command)
+    );
+    expect(assertions).toEqual([
+      "bun run check:import-cycles",
+      "node scripts/check-generated-assets.mjs",
+      "bun run check:i18n-catalog",
+      "bun run check:i18n-barrels",
+      "node scripts/check-no-tls-bypass.mjs",
+      "node scripts/check-opacity-tokens.mjs",
+      "node scripts/check-color-tokens.mjs",
+      "node scripts/check-no-inline-channels.mjs",
+      "bun run check:source-text-safe",
+    ]);
+
+    // Of those nine, the four that a later command in the same composite
+    // compiles behind. ci.yml's comment states this number; this is where it
+    // comes from.
+    const lastCompile = commands.reduce(
+      (found, command, index) =>
+        /bun run build:/u.test(command) ? index : found,
+      -1,
+    );
+    expect(lastCompile).toBeGreaterThan(0);
+    expect(
+      assertions.filter((command) => commands.indexOf(command) < lastCompile),
+    ).toEqual([
+      "bun run check:import-cycles",
+      "node scripts/check-generated-assets.mjs",
+      "bun run check:i18n-catalog",
+      "bun run check:i18n-barrels",
+    ]);
+  });
+
+  it("keeps the composite that orders a hygiene scan first out of CI", () => {
+    // `check:test-quality` runs `check:test-duplicates` before
+    // `check:test-coverage`, so a duplicated helper ends the step before a test
+    // executes — the same masking defect one layer down, in an npm script
+    // instead of a workflow. The workflow scan above reads workflow step order
+    // and cannot see inside a script, so the composite is named here directly.
+    const composite = packageScripts["check:test-quality"];
+    expect(composite, "package.json has no check:test-quality").toBeDefined();
+    expect(composite as string).toContain("check:test-duplicates");
+    expect(composite as string).toContain("check:test-coverage");
+    // The order is the reason, not the membership: a composite that ran the
+    // suite first and scanned afterwards would be safe to call from a job.
+    expect(
+      (composite as string).indexOf("check:test-duplicates"),
+    ).toBeLessThan((composite as string).indexOf("check:test-coverage"));
+    for (const name of workflowFileNames()) {
+      for (const [id, body] of workflowJobs(
+        readRepoFile(`.github/workflows/${name}`),
+      )) {
+        expect(
+          jobRunCommands(body).some((command) =>
+            mentions(command, "check:test-quality")
+          ),
+          `${name}: job "${id}" calls the check:test-quality composite, which ` +
+            "runs the duplicate scan before the suite. Call its halves.",
+        ).toBe(false);
+      }
+    }
+  });
 
   it("runs the NSIS smoke before win-unpacked and owner-cleans HKCU afterward", () => {
     const smoke = readRepoFile("scripts/smoke-packaged-app.mjs");
