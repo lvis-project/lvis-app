@@ -39,6 +39,12 @@
  *   telegram-connection lvis:telegram-connection:*
  *   away-authority      lvis:away-authority:*
  *   dev           lvis:dev:*  (registered only when `getIsPackaged()` is false)
+ *
+ * `lvis:trigger:*` is absent on purpose. The constants exist in
+ * `contract/app-contract.ts` and the preload invokes `trigger.dismiss` and
+ * `trigger.import`, but no `ipcMain.handle` for any `lvis:trigger:` channel
+ * exists in `src/` — those two invokes have no receiver. Recorded rather than
+ * fixed here: giving them one is a behaviour change, not a rename.
  */
 import { initDlpAudit } from "../audit/dlp-filter.js";
 import { getIsPackaged } from "../boot/dev-flags.js";
