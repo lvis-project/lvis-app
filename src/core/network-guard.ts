@@ -169,7 +169,10 @@ export async function fetchPublicHttpResponse(
   } = init;
   let currentUrl = rawUrl;
 
-  for (let hop = 0; hop <= maxRedirects; hop++) {
+  // Unbounded loop: the redirect cap is enforced by the single `hop >= maxRedirects`
+  // check below. The last permitted hop (hop === maxRedirects) always returns a final
+  // response or throws, so control never falls through past the loop.
+  for (let hop = 0; ; hop++) {
     await ensurePublicHttpUrl(currentUrl, { allowPrivateNetworks, allowLoopback });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -210,7 +213,6 @@ export async function fetchPublicHttpResponse(
       }
     }
   }
-  throw new NetworkGuardError("request failed before receiving a response");
 }
 
 // ─── Internals ──────────────────────────────────────────────────────
