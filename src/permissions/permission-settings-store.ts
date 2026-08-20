@@ -533,9 +533,52 @@ export function normalizePermissionSettings(
       journal.malformed.length,
     );
   }
-  // A damaged entry can still NAME a root. Every path it names is honoured as
-  // a pending removal even though the entry as a whole cannot be acted on, so
-  // corrupting the journal can never be the way a removed root comes back.
+  // A damaged entry can still NAME a root, and every path it names is honoured
+  // as a pending removal even though the entry as a whole cannot be acted on.
+  //
+  // What this masking is FOR. `beginWorkspaceRootRemovalPersist` drops the path
+  // from `additionalDirectories` in the SAME atomic write that appends the
+  // intent, so a root with a removal in flight is already absent from the list.
+  // The masking therefore only decides the case where the path is in the list
+  // anyway, and there the journal wins over the list.
+  //
+  // Three things can leave it there, not two. A hand edit and an interrupted
+  // legacy write are the outside ones. The third is an in-app add, and only
+  // while the entry naming that root is MALFORMED: the add guard in
+  // `addAllowedDirectoryPersist` is handed `journal.intents`, so it refuses an
+  // add that keys onto a READABLE intent and never sees one that only a damaged
+  // entry names, while the salvage below reads paths out of both. That add is
+  // therefore accepted and persisted, and this read then takes back out the
+  // path the add just returned. As answered here the direction is a grant
+  // vanishing rather than appearing, and the same read raises the fault below —
+  // but the store does say yes and then no, and the fault names the file, not
+  // the root, so nothing tells the user which add it was. Repairing the journal
+  // makes the persisted add live. Pinned by "accepts an add for a root only the
+  // unreadable entry names, then drops it on the next read".
+  //
+  // Read that as the routes that exist today, not as a closed set: the masking
+  // does not ask which one put the path there, and a new writer could add a
+  // fourth without this line noticing.
+  //
+  // What it is NOT. An entry that names nothing (`null`, `7`, an object with no
+  // readable path) masks nothing, so a path a hand edit put back stays active.
+  // That residual is deliberate, and it is not a hole in a defence because
+  // there is no defence here to hole: the same hand edit that put the path back
+  // could have written `pendingWorkspaceRootRemovals: []` instead — a valid
+  // journal that raises no fault and leaves that path exactly as active.
+  //
+  // Mind the scope of that argument, because its general form is FALSE: an
+  // empty journal reactivates nothing by itself. After a normal
+  // `beginWorkspaceRootRemovalPersist` the path is already gone from
+  // `additionalDirectories`, so clearing the journal leaves the read answering
+  // with the root still absent and no fault. `[]` is an equally easy substitute
+  // for the unattributable entry only in the case this paragraph is about,
+  // where the path is back in the list as well.
+  //
+  // This journal is crash recovery, not tamper-evidence. Emptying the list on an
+  // unattributable entry would trade every readable grant for one unreadable
+  // non-grant and buy nothing, so the entry is reported as a fault the UI must
+  // show instead.
   const pendingPaths = [
     ...pendingWorkspaceRootRemovals.map((intent) => intent.runtimePath),
     ...journal.malformed.flatMap((entry) => {
@@ -558,7 +601,7 @@ export function normalizePermissionSettings(
     dirs = additional.filter((s): s is string => {
       if (typeof s !== "string" || s.length === 0) return false;
       const key = allowedDirectoryKey(s);
-      // Pending wins over a conflicting hand edit or interrupted legacy write.
+      // Pending wins over a conflicting list entry, however it got there.
       return key === null || !pendingKeys.has(key);
     });
   }
@@ -603,8 +646,10 @@ function partitionPendingWorkspaceRootRemovals(
 ): PendingWorkspaceRootRemovalJournal {
   if (parsed === undefined) return { intents: [], malformed: [] };
   // A non-array value carries no entry to keep apart, so the value itself is
-  // the thing preserved — a later write returns it to the journal as its sole
-  // element rather than deleting a key it cannot read.
+  // the thing preserved — a later write returns it to the journal as one
+  // element of the array, after whatever intents that write decided on, rather
+  // than deleting a key it cannot read. It is the sole element only when the
+  // write leaves no intents behind.
   if (!Array.isArray(parsed)) return { intents: [], malformed: [parsed] };
   const seenOperations = new Set<string>();
   const intents: PendingWorkspaceRootRemoval[] = [];
