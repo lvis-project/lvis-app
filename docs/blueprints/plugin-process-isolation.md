@@ -756,7 +756,11 @@ reaching construct in the plugin's sources **and its dependencies** — the sock
 `electron` specifier by any resolution path (a `require` held in a variable, a
 `createRequire`, a dynamic import, a dependency's re-export — a literal grep for
 `require("electron")` misses the plugins that are actually on this axis), the spawn,
-the `.node` load — then drive it in a real confined child. For axis 5, find every
+the `.node` load — then drive it in a real confined child. Count **call sites**, not
+mentions: a member's name also appears in comments, in a type declaration, in the
+guard that refuses to start without it and in a bind, so a count taken off a grep can
+read a single call as heavy dependence — and the verdict then rests on a number
+nobody took from a call. For axis 5, find every
 path derived from `tmpdir()`, `homedir()` or `process.cwd()` and ask what happens
 when the answer names something absent; an unguarded one in an activation body stops
 the plugin from loading rather than degrading a feature. For axis 6, enumerate every

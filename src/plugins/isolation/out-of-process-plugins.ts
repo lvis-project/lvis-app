@@ -279,8 +279,11 @@
  * `meeting` — REFUSED, and this is the measured answer rather than an
  *   oversight. KNOWN: its primary tool opens a floating recorder window and
  *   reaches `BrowserWindow`, `screen`, `session.fromPartition` and `ipcMain`
- *   through `require("electron")`. In a confined child that require is
- *   `MODULE_NOT_FOUND`, so the tool's own pre-flight guard throws before it
+ *   through one lazily-resolved `require` of the `electron` specifier held in
+ *   a VARIABLE — not the literal, which occurs in its sources only inside
+ *   comments and in a renderer preload that is not on this axis at all. In a
+ *   confined child that require is `MODULE_NOT_FOUND`, so the tool's own
+ *   pre-flight guard throws before it
  *   side-effects — measured, both bare and with the package vendored beside
  *   the plugin. Axis 2 has no mediated form for any of those members, so
  *   admitting it would not degrade recording, it would END it. KNOWN also, and
@@ -330,14 +333,21 @@
  *
  * `local-indexer` — REFUSED. KNOWN FROM ITS SOURCES: it operates its own loopback HTTP listener
  *   and its own upstream TLS client as a broker, holds a control channel over
- *   a unix socket, calls `execFile`, and delegates the indexing work to a
- *   separate interpreter process through `hostApi.spawnWorker` at a dozen call
- *   sites. The broker's upstream leg is exactly the direct egress axis 1
+ *   a unix socket, and calls `execFile` on a shell interpreter to resolve a
+ *   drive mapping. The indexing work itself is the one part of axis 3 that is
+ *   already mediated: it reaches `hostApi.spawnWorker` at a SINGLE call site,
+ *   and THROWS rather than starting when that member is absent — so what is
+ *   unmediated on this axis is the `execFile`, not the worker. The name occurs
+ *   many more times than that in its sources, in comments, a type, a guard and
+ *   a bind; counting those as reach is the grep-for-a-census error this
+ *   comment is about, which is why a check counts CALL SITES and not mentions.
+ *   The broker's upstream leg is exactly the direct egress axis 1
  *   measures a child as not having, so the broker would stop at its first
  *   request. It is also on axis 2, which no `hostApi` census would have
- *   surfaced: its folder picker reaches `dialog` through the same runtime
- *   `require("electron")` the windowed plugin uses, and `dialog` has no
- *   mediated form either. It is on axis 6 more heavily than any other plugin
+ *   surfaced: its folder picker reaches `dialog` through a `require` of the
+ *   `electron` specifier held in a VARIABLE — the construct axis 2 says a
+ *   literal grep misses, and the same one the windowed plugin reaches it by —
+ *   and `dialog` has no mediated form either. It is on axis 6 more heavily than any other plugin
  *   here, and in both directions: it writes its index state under a path
  *   rooted at `homedir()` rather than `pluginDataDir`, it carries its own
  *   `hostRoot`-rooted workspace migration, and its whole PURPOSE is reading
