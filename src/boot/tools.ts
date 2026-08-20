@@ -214,7 +214,7 @@ export function registerBuiltinTools(
     createRenderHtmlTool(),
   ];
 
-  // Workflow system tools (S1+S2). Each is gated on its dependency being
+  // Workflow system tools. Each is gated on its dependency being
   // wired so unit tests that boot a minimal registry stay green.
   if (workflowDeps?.getAskUserQuestionGate) {
     builtins.push(

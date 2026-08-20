@@ -831,9 +831,9 @@ export function FileBrowserWorkspace({
   // A concrete filesystem file opened from the project-roots browser. Takes
   // precedence over the session-artifact selection in the detail pane.
   const [fsPath, setFsPath] = useState<string | null>(null);
-  // Which source the TOP pane shows (R3): the project directory tree or this
-  // chat's session artifacts. A segment toggle replaces the old vertical
-  // stacking that squeezed the session list into a sliver. This is a SOURCE
+  // Which source the TOP pane shows: the project directory tree or this
+  // chat's session artifacts. A segment toggle, not vertical stacking, so the
+  // session list is not squeezed into a sliver. This is a SOURCE
   // switch on the horizontal axis — orthogonal to the top/bottom split axis
   // above, so the two never fight.
   const [fileSource, setFileSource] = useState<"directory" | "session">("directory");
@@ -1149,7 +1149,7 @@ export function BrowserWorkspace({
                   variant="ghost"
                   // Radix sets data-state=open on the trigger while the search
                   // Popover is open; reflect that with an active tint so the
-                  // toggled state is visible (R2).
+                  // toggled state is visible.
                   className="h-8 w-8 shrink-0 data-[state=open]:bg-primary/(--opacity-subtle) data-[state=open]:text-primary"
                   aria-label={t("chatPreviewRail.browserSearch")}
                   data-testid="chat-side-panel-browser-search-trigger"
