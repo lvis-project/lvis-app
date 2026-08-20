@@ -277,7 +277,7 @@ export interface ApprovalRequest {
    */
   trustOrigin?: string;
   /**
-   * Issue #691 round-1 user request — OS-level execution sandbox SOT,
+   * Issue #691 — OS-level execution sandbox SOT,
    * surfaced to the approval dock so the user can see whether the
    * tool will run under the ASRT OS sandbox (macOS Seatbelt / Linux bwrap)
    * or with no isolation. Captured at request build time by the executor

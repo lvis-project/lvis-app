@@ -772,8 +772,8 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // this request's exact LLM snapshot before another renderer can supersede it.
     const appliedLlm = settingsService.get("llm");
     const result = await persistSettings;
-    // E4 (security M1 drift) — reconcile the OS-level global shortcut + login
-    // item when the shortcut/startup fields actually changed. Defined as a
+    // Reconcile the OS-level global shortcut + login item when the
+    // shortcut/startup fields actually changed. Defined as a
     // closure and invoked on BOTH the success path AND the reviewer-rewire
     // failure early-return: the shortcuts/system fields are already persisted by
     // the `patch` above, so a subsequent rewire failure must NOT skip syncing
@@ -794,9 +794,9 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
         launchAtStartup: newSystem.launchAtStartup ?? false,
         launchMinimized: newSystem.launchMinimized ?? false,
       };
-      // security M2 / critic M2 — a login-item registration that the OS did not
-      // apply is surfaced to the user, mirroring the shortcut-conflict path,
-      // instead of the `applied:false` result being silently dropped.
+      // A login-item registration the OS did not apply is surfaced to the user,
+      // mirroring the shortcut-conflict path, instead of the `applied:false`
+      // result being silently dropped.
       const launchState = reconcileStartupLaunch(launchInput);
       notifyStartupLaunchFailureIfNeeded(launchInput, launchState);
     };
@@ -843,7 +843,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
         }
         refreshChatRuntimeProviders(deps);
         deps.refreshActiveLlmWildcard?.();
-        // security M1 drift — the shortcuts/system fields were already persisted
+        // The shortcuts/system fields were already persisted
         // by `patch`; reconcile the OS state to disk even though the reviewer
         // rewire failed, so a combined patch doesn't leave the accelerator /
         // login item out of sync with what the user just saved.

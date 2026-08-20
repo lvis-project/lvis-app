@@ -17,7 +17,7 @@
  *     heuristic (4 categories × 3 dir-relations × 3 confidence levels).
  *   - `llm`      → LlmRiskClassifier — multi-vendor LLM call. Always
  *     runs RuleBased first; takes `max(ruleVerdict, llmVerdict)`
- *     (LLM cannot downgrade — security M1).
+ *     (LLM cannot downgrade).
  *   - `strict`   → StrictRiskClassifier — always HIGH + defer-all. Use this for
  *     hardened deployments where every headless mutation must be manually
  *     approved. Equivalent to the pre-#664 "disabled" semantic.
@@ -1024,7 +1024,7 @@ export class LlmRiskClassifier implements RiskClassifier {
     input: ToolInvocationContext,
     opts?: { abortSignal?: AbortSignal },
   ): Promise<LlmRiskClassificationTrace> {
-    // Composition baseline (security M1) — rule first, LLM cannot downgrade.
+    // Composition baseline — rule first, LLM cannot downgrade.
     const ruleVerdict = this.rule.classify(input);
 
     // Host-determined tools never consult the LLM: their risk is settled by

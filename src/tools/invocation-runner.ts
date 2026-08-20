@@ -59,7 +59,7 @@ import {
 } from "../permissions/host-shell-execution-permit.js";
 import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
-// ── C7 pipeline decomposition — behavior-preserving extracted units.
+// ── Pipeline units — behavior-preserving extractions.
 // This runner owns preparation/path policy and composes the extracted
 // LOW/MEDIUM-risk helpers. Authorization and execution/finalization are
 // delegated to their named stages below.
@@ -76,11 +76,11 @@ import {
   auditSafeToolInput,
   AuditWriter,
 } from "./pipeline/audit-writer.js";
-// ── C8 pipeline decomposition — the per-invocation mutable-state contract +
-// initial-state factory + the self-contained user-abort helper. The two
-// SECURITY-CRITICAL sandbox filesystem-containment relaxation blocks stay
-// together in invocation-authorization.ts. The shared initial state and abort
-// terminal remain in invocation-context.ts.
+// ── Per-invocation mutable-state contract + initial-state factory + the
+// self-contained user-abort helper. The two SECURITY-CRITICAL sandbox
+// filesystem-containment relaxation blocks stay together in
+// invocation-authorization.ts. The shared initial state and abort terminal
+// live in invocation-context.ts.
 import { createInvocationContext, returnUserAbort } from "./pipeline/invocation-context.js";
 import type { RationaleHostRuntime } from "./pipeline/rationale-orchestrator.js";
 import type { RationaleExecutorControlOutcome } from "./pipeline/rationale-pr1-contract.js";
@@ -402,10 +402,10 @@ export async function runToolInvocation(
       }
     }
 
-    // ── C8: user-abort terminal helper moved to ./pipeline/invocation-context.ts.
+    // ── User-abort terminal helper — lives in ./pipeline/invocation-context.ts.
     // Its wide capture surface (source/trust/invocationCategory/meta/callbacks/…)
     // is threaded via a named-field deps object; `services.auditWriter` is passed
-    // directly (executeOne's private auditToolCall was a pure pass-through).
+    // directly.
     const abortDeps = (input: Record<string, unknown>): Parameters<typeof returnUserAbort>[0] => ({
       input,
       toolUse,
@@ -665,10 +665,10 @@ export async function runToolInvocation(
     if (abortSignal?.aborted) {
       return withHostShellExecutionPlan(await returnUserAbort(abortDeps(finalInput)));
     }
-    // ── C8: initial per-invocation state (see ./pipeline/invocation-context.ts).
+    // ── Initial per-invocation state (see ./pipeline/invocation-context.ts).
     // The factory builds the Layer-1 allowed scope + runtime allowed dirs + the
-    // parent/own effect ledgers exactly as the former inline initializers did,
-    // including the within-round freshness read of additionalDirectories.
+    // parent/own effect ledgers, including the within-round freshness read of
+    // additionalDirectories.
     // `invocationAllowedScope` / `invocationRuntimeAllowedDirectories` stay `let`
     // LOCALS here (not context fields): applyApprovedDirectory reassigns them and
     // the sandbox-relaxation blocks below read them inline — boxing them would

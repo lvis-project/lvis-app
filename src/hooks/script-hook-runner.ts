@@ -26,7 +26,7 @@
  *     shell for Windows interpreter resolution (Git-Bash / WSL), unchanged.
  *   - **Fail-closed**: timeout / nonzero exit / bad JSON / spawn-error → deny.
  *
- * Composition rule (v1, §3 Layer 6 critic M3):
+ * Composition rule (v1, §3 Layer 6):
  *   - hook *can* deny what upstream allowed (deny precedence)
  *   - hook *cannot* allow what upstream denied — enforced at the caller.
  *

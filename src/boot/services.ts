@@ -169,7 +169,7 @@ export async function bootstrapCoreServices(mainWindow: BrowserWindow,
 
   const inputClassifier = new InputClassifier();
   const toolRegistry = new ToolRegistry();
-  // Tier A1: BashTool registers directly — it implements the canonical
+  // BashTool registers directly — it implements the canonical
   // Tool contract via ZodTool and is tagged source="builtin" + category
   // "shell" so the §6.3 permission stack handles approval correctly
   // (Layer 3 + Bash AST validation gate at executor Step 2.5).

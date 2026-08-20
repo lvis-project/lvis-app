@@ -655,7 +655,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         </div>
       )}
       {/* User-approval memory-hit disclosure toast (#793) — auto-dismisses after 4 s.
-          Verdict-tier tint surfaces the trust gradient (CRITICAL 4.1 disclosure):
+          Verdict-tier tint surfaces the trust gradient:
           - low    → --success (informational, safe re-approval)
           - medium → --warning (moderate risk)
           - high   → --destructive + role="alert" (urgent — user is re-using a high-risk approval)

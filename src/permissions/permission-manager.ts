@@ -310,8 +310,7 @@ export interface ReviewerDispatchInput {
   allowedDirectories: string[];
   sensitivePathsAdjacent: string[];
   /**
-   * Permission policy architect round-4 finding: cache identity must include the
-   * caller's trust origin. A high-trust verdict cached for `user-keyboard`
+   * Cache identity must include the caller's trust origin. A high-trust verdict cached for `user-keyboard`
    * is unsafe to serve to an `llm-tool-arg` invocation of the same shape — the
    * underlying intent differs even when arguments match. Required so the
    * verdict-cache lookupKey hash always includes origin.
@@ -439,7 +438,7 @@ export class PermissionManager {
    */
   private interactiveAutoApprove: ReviewerInteractiveAutoApprove = "off";
   private policyGeneration = 0;
-  /** CRITICAL 4.1: optional broadcast for memory-hit auto-approve disclosure */
+  /** Optional broadcast for memory-hit auto-approve disclosure. */
   private broadcastUserApprovalHit: ((payload: UserApprovalHitPayload) => void) | null = null;
   /**
    * Architectural choke point for permission config fan-out — every
@@ -643,14 +642,18 @@ export class PermissionManager {
   }
 
   /**
-   * CRITICAL 4.1 — wire renderer broadcast for memory-hit auto-approve disclosure.
-   * Called once at boot. When set, every user-approval memory hit emits
-   * `lvis:permissions:user-approval-hit` to the renderer and a console.info log.
+   * Wire the permission-config fan-out. Called once at boot; see
+   * {@link broadcastConfigChanged} for what fires it.
    */
   setBroadcastConfigChanged(fn: () => void): void {
     this.broadcastConfigChanged = fn;
   }
 
+  /**
+   * Wire the renderer broadcast for memory-hit auto-approve disclosure.
+   * Called once at boot. When set, every user-approval memory hit emits
+   * `lvis:permissions:user-approval-hit` to the renderer and a console.info log.
+   */
   setBroadcastUserApprovalHit(fn: (payload: UserApprovalHitPayload) => void): void {
     this.broadcastUserApprovalHit = fn;
   }
@@ -1562,7 +1565,7 @@ export class PermissionManager {
         verdictAtApproval: userApproval.verdictAtApproval,
       };
       outcome = "approval-memory";
-      // CRITICAL 4.1: disclose memory-hit auto-approve to renderer + log.
+      // Disclose the memory-hit auto-approve to the renderer + log.
       // verdictAtApproval is non-null inside this branch — the outer gate
       // `userApproval.verdictAtApproval != null` rejects legacy entries above,
       // so the concrete literal passes straight through to
@@ -1643,7 +1646,7 @@ export class PermissionManager {
     // is the only field any decision reads, is untouched.
     verdict = redactVerdictReason(verdict);
 
-    // ── S2 audit emit ─────────────────────────────────────────────────────
+    // ── Reviewer-dispatch audit emit ──────────────────────────────────────
     // Emit a sandbox audit entry for every dispatchReviewer call so the
     // audit log captures reviewer composition signals + user-approval provenance.
     // Failures are swallowed so audit never blocks tool execution.
@@ -1975,7 +1978,7 @@ export function isStrictPathDescendant(parent: string, child: string): boolean {
   return foldedChild.startsWith(base);
 }
 
-// ── P2 graduated grant tier helpers ──────────────────
+// ── Graduated grant tier helpers ──────────────────
 const TIER_RANK: Record<GrantTier, number> = { read: 0, write: 1 };
 
 /** Ordinal rank of a grant tier (read=0 < write=1). */
@@ -2011,7 +2014,7 @@ export function grantCovers(granted: GrantTier, category: ToolCategory): boolean
  * untiered grant, which grandfathers to write-tier (most permissive — preserves
  * the user's saved "Allow always"). Normalizing to read-tier instead would
  * silently break saved grants (weakening) and is forbidden. This is the only
- * sanctioned fallback in P2 — it lives at the file boundary, not between
+ * sanctioned fallback in this module — it lives at the file boundary, not between
  * internal callers.
  */
 export function normalizeTier(tier: unknown): GrantTier {
