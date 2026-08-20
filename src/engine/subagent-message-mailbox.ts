@@ -1,6 +1,7 @@
 import type { FeatureNamespaceHandle } from "../main/storage/feature-namespace.js";
 import type { A2AMessage } from "../shared/a2a.js";
 import { maskSensitiveData } from "../shared/dlp.js";
+import { hasControlChars, hasNonWhitespaceControlChars } from "../shared/display-safe-text.js";
 import {
   canonicalizeAgentMessage,
   isSafeA2AMessageId,
@@ -90,14 +91,14 @@ function isSafeString(value: unknown, maxLength = GUIDE_MAX_CHARS): value is str
   return typeof value === "string"
     && value.length > 0
     && value.length <= maxLength
-    && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(value);
+    && !hasNonWhitespaceControlChars(value);
 }
 
 function isSafeDiagnosticStructuralId(value: unknown): value is string {
   return typeof value === "string"
     && value.length > 0
     && value.length <= 256
-    && !/[\u0000-\u001f\u007f]/.test(value)
+    && !hasControlChars(value)
     && maskSensitiveData(value).detections.length === 0;
 }
 

@@ -30,12 +30,15 @@
  * cannot use scope "persistent". Exact deny decisions are configured in
  * Settings and may persist regardless of the risk that triggered the review.
  *
- * Atomicity: writes use a random-suffix .tmp file + rename() so a crash
- * during write does not corrupt the store (same pattern as SkillApprovalsStore).
+ * Atomicity: writes go through the feature-namespace writer -- random-suffix
+ * staging file, O_CREAT|O_EXCL, fsync of file and parent directory, then
+ * rename. That sequence used to be spelled out in this file alone, which is why
+ * the rest of `~/.lvis` did not have it.
  */
-import { mkdir, readFile, rename, access, constants, open, stat, chmod } from "node:fs/promises";
+import { mkdir, readFile, access, constants, stat, chmod } from "node:fs/promises";
 import { resolve, dirname } from "node:path";
-import { createHash, randomBytes } from "node:crypto";
+import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
+import { createHash } from "node:crypto";
 import { lvisHome } from "../shared/lvis-home.js";
 import { canonicalStringify } from "../shared/canonical-json.js";
 import { createLogger } from "../lib/logger.js";
@@ -176,44 +179,21 @@ async function atomicWrite(data: ApprovalsFile): Promise<void> {
   const dir = dirname(path);
   await mkdir(dir, { recursive: true, mode: 0o700 });
 
-  // Verify directory permissions haven't drifted.
+  // Verify directory permissions haven't drifted. Kept here rather than pushed
+  // into the shared writer: this store holds granted approvals, so a widened
+  // directory is a finding in its own right, and the shared writer's `chmod`
+  // back to 0o700 is best-effort and silent by design.
   const dirStat = await stat(dir);
   if ((dirStat.mode & 0o777) !== 0o700) {
     await chmod(dir, 0o700);
   }
 
-  // MAJOR-3: use O_CREAT|O_EXCL so a pre-existing symlink at the tmp path
-  // cannot redirect the write to an attacker-controlled target.
-  const tmp = `${path}.${randomBytes(16).toString("hex")}.tmp`;
-  const fd = await open(tmp, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-  try {
-    const content = `${JSON.stringify(data, null, 2)}\n`;
-    await fd.writeFile(content);
-    // MEDIUM: fsync the file data before rename to survive power loss.
-    await fd.sync();
-  } finally {
-    await fd.close();
-  }
-
-  await rename(tmp, path);
-
-  // MEDIUM: fsync the directory so the rename is durable.
-  await syncDirectoryBestEffort(dir);
-}
-
-async function syncDirectoryBestEffort(dir: string): Promise<void> {
-  const dirFd = await open(dir, constants.O_RDONLY);
-  try {
-    await dirFd.sync();
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (process.platform === "win32" && (code === "EPERM" || code === "EINVAL" || code === "ENOTSUP")) {
-      return;
-    }
-    throw err;
-  } finally {
-    await dirFd.close();
-  }
+  // The random-tmp + O_CREAT|O_EXCL + fsync + directory-fsync sequence this
+  // function used to spell out now lives in the feature-namespace writer, which
+  // is where the rest of `~/.lvis` already went and which did not have any of
+  // it. The symlink-redirect this guarded against was live for every other
+  // store in the tree for as long as the guard sat only here.
+  await writeFileAtomicAtPath(path, `${JSON.stringify(data, null, 2)}\n`);
 }
 
 async function mutatePersistentApprovals(
@@ -615,22 +595,11 @@ export async function migrateCanonicalization(): Promise<void> {
       }
     }
 
-    // Write idempotency marker (atomic: O_CREAT|O_EXCL temp + rename).
-    const markerDir = dirname(markerPath);
-    await mkdir(markerDir, { recursive: true, mode: 0o700 });
-    const markerTmp = `${markerPath}.${randomBytes(16).toString("hex")}.tmp`;
-    const markerFd = await open(markerTmp, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600);
-    try {
-      const markerContent = `${JSON.stringify({ migratedAt: new Date().toISOString(), migrated, total })}\n`;
-      await markerFd.writeFile(markerContent);
-      await markerFd.sync();
-    } finally {
-      await markerFd.close();
-    }
-    await rename(markerTmp, markerPath);
-
-    // MEDIUM: fsync marker directory so rename is durable.
-    await syncDirectoryBestEffort(markerDir);
+    // Idempotency marker, through the same writer as the store itself.
+    await writeFileAtomicAtPath(
+      markerPath,
+      `${JSON.stringify({ migratedAt: new Date().toISOString(), migrated, total })}\n`,
+    );
 
     // MEDIUM: route through structured logger (bootAuditLogger not yet
     // available at this call site; createLogger routes to the same sink).

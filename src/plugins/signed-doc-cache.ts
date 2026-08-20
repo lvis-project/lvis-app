@@ -22,10 +22,10 @@
  * back to "no cache" — silent fallback would let a partial-disk-write
  * scenario downgrade a fresh-allow decision to a no-cache one.
  */
-import { readFile, writeFile, mkdir, rename, unlink } from "node:fs/promises";
-import { dirname, join } from "node:path";
-import { randomBytes } from "node:crypto";
+import { readFile, mkdir, unlink } from "node:fs/promises";
+import { join } from "node:path";
 import { createLogger } from "../lib/logger.js";
+import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
 
 const log = createLogger("signed-doc-cache");
 
@@ -64,17 +64,15 @@ async function safeReadTextFile(path: string): Promise<string | null> {
   }
 }
 
+/**
+ * This cache lives under `<userData>/` rather than `~/.lvis/`, but the write
+ * contract is the one thing about it that is not location-specific: the copy
+ * here staged to a random name and then neither locked the name with `O_EXCL`
+ * nor fsynced anything, so a cached revocation document could be lost to a
+ * power cut after the caller had been told it was written.
+ */
 async function atomicWrite(path: string, content: string): Promise<void> {
-  const tmp = `${path}.tmp.${randomBytes(6).toString("hex")}`;
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(tmp, content, { encoding: "utf-8" });
-  try {
-    await rename(tmp, path);
-  } catch (err) {
-    // Best-effort tmp cleanup; surface the underlying error.
-    await unlink(tmp).catch(() => {});
-    throw err;
-  }
+  await writeFileAtomicAtPath(path, content);
 }
 
 /**
