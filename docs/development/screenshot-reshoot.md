@@ -294,7 +294,7 @@ merges.
 `ep-login`, `ep-attendance`, `ep-attendance-2`, `ep-attendance-3`, `ep-approval`,
 `ep-parking`, `ep-meeting-room`, `ep-meeting-room-2`, `ep-meeting-room-3`,
 `ep-meeting-room-4`, `ep-meeting-room-5`, `ep-video-call`, `ep-video-call-2`,
-`ep-video-call-3`, `ep-video-call-4`, `ep-internal-search`, `ep-internal-search-2` — all on
+`ep-video-call-3`, `ep-video-call-4`, `ep-assistant`, `ep-assistant-2` — all on
 `/docs/plugins/ep-api`.
 
 ## Order of work
