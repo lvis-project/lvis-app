@@ -252,8 +252,9 @@ export async function resolvePersonaRolePrompt(
 /**
  * Validate the multimodal content-parts payload that arrives over IPC. The
  * renderer is trusted but the preload bridge is a `unknown[]` boundary, so
- * we type-narrow each entry here to protect downstream message-mapper code
- * from malformed payloads (missing fields, wrong tags, non-string data).
+ * we type-narrow each entry here to protect the downstream
+ * genericToModelMessages mapper (engine/llm/vercel/adapter.ts) from
+ * malformed payloads (missing fields, wrong tags, non-string data).
  *
  * Returns the validated array when at least one entry survived narrowing,
  * or `undefined` when nothing valid is present. The `undefined` form lets
