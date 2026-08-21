@@ -12,7 +12,7 @@ import { renderApp } from "../../../../test/renderer/render-app.js";
  * Driven through the real producer (`emitViewActivate`) rather than by calling
  * the guard directly: the point of this change is that a bad key stops BEFORE
  * it becomes `activeView`, and that is only observable end to end. Previously
- * any unrecognized string fell past every branch in MainContent and rendered
+ * any unrecognized string fell past every branch in the main content region and rendered
  * as a plugin view that does not exist, so the user saw "plugin view not
  * found" for what was really a typo.
  */

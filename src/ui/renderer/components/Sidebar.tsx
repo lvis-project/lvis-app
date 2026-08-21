@@ -60,7 +60,7 @@ export interface SidebarProps {
    *  also accepts the `plugin-doctor:<id>` pseudo-key that is intercepted
    *  before it can become a location. Hence `string`, not `ViewKey`. */
   onSelect: (viewKey: string) => void;
-  /** Plugin views from usePluginMarketplace — same list passed to MainContent. */
+  /** Plugin views from usePluginMarketplace — same list passed to the main content region. */
   pluginViews: PluginUiExtension[];
   /** Installed plugins that failed to load and therefore need Settings → Plugin Doctor. */
   failedPluginCards?: PluginCardSummary[];
@@ -1457,7 +1457,7 @@ export function Sidebar({
           {/* 메모리 panel intentionally removed from the sidebar surface
               (2026-07 shell refinement). MEMORY.md remains viewable + editable
               in Settings → 역할/메모리 (RolesTab memory section); the "memory"
-              view itself stays routable (MainContent + UnifiedSearch deep-link)
+              view itself stays routable (main content region + UnifiedSearch deep-link)
               so no navigation breaks. */}
           <NavItem
             viewKey="insights"

@@ -86,7 +86,7 @@ import {
   isCommittedPluginGenerationPublicationError,
   type CommittedPluginGenerationPublicationError,
 } from "./committed-generation-publication-error.js";
-export { assertSafeArtifactSlug, SAFE_ARTIFACT_SLUG_RE } from "./plugin-id.js";
+export { assertSafeArtifactSlug } from "./plugin-id.js";
 
 /** Shared last-line defense for every marketplace artifact consumer. */
 export function assertMarketplaceAppUpgradeNotRequired(

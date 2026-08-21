@@ -125,7 +125,7 @@ describe("McpAppFullscreenPanel — the fullscreen slot's surface", () => {
 describe("McpAppFullscreenPanel — driven by the app, through the real request handler", () => {
   it("an app requesting `fullscreen` is answered `fullscreen` and takes over IN THIS RENDERER", async () => {
     // Production topology: a transcript HOME mount plus the two away surfaces, exactly
-    // as MainContent mounts them.
+    // as the main content region mounts them.
     const home = render(<McpAppView payload={payload("github")} />, { wrapper: ThemeWrapper });
     await waitFor(() => expect(webviewNodes(home.container)).toHaveLength(1));
     const panels = render(
