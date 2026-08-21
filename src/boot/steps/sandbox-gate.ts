@@ -3,16 +3,18 @@
 
 
 
-export type SandboxGateAction = "skip" | "activate" | "degrade" | "abort";
+// Defined in the shared module because the renderer now receives the decision
+// this file makes: one vocabulary for the gate and for the surface reporting it,
+// so a new branch here cannot describe itself to the user as something else.
+export type {
+  SandboxGateAction,
+  SandboxGateReason,
+} from "../../shared/sandbox-capability-info.js";
 
-export type SandboxGateReason =
-  | "gate-off"
-  | "deps-present"
-  | "degrade-windows-not-installed"
-  | "degrade-default-cannot-activate"
-  | "abort-explicit-cannot-activate"
-  | "degrade-linux-runtime-probe-failed"
-  | "abort-linux-runtime-probe-failed";
+import type {
+  SandboxGateAction,
+  SandboxGateReason,
+} from "../../shared/sandbox-capability-info.js";
 
 export interface SandboxGateInputs {
   /** `features.osToolSandbox` — staged default value or Settings toggle. */
