@@ -55,6 +55,50 @@ describe("env-surface scan", () => {
 
     expect(scanEnvReads(dir).size).toBe(0);
   });
+
+  it("finds the names a table-driven resolver looks up through a key map", () => {
+    // The shape that made the tailnet group invisible to the first version of
+    // this gate: no variable name ever appears at the lookup site.
+    write("table.ts", `
+      const ENV_KEY = { enabled: "LVIS_TABLE_ONE", port: "LVIS_TABLE_TWO" };
+      export function layer(env: NodeJS.ProcessEnv, key: "enabled" | "port") {
+        return env[ENV_KEY[key]];
+      }
+    `);
+
+    expect([...scanEnvReads(dir).keys()].sort()).toEqual([
+      "LVIS_TABLE_ONE",
+      "LVIS_TABLE_TWO",
+    ]);
+  });
+
+  it("does not mistake a quoted prefix for a variable of that name", () => {
+    // `LVIS_DEMO_` names a family the packaged-env scrub matches by prefix.
+    // Demanding a control for it would be demanding one for nothing.
+    write("scrub.ts", `
+      const PREFIXES = ["LVIS_DEMO_"];
+      export function scrub(env: NodeJS.ProcessEnv, name: string) {
+        if (PREFIXES.some((p) => name.startsWith(p))) delete env[name];
+      }
+    `);
+
+    expect(scanEnvReads(dir).size).toBe(0);
+  });
+
+  it("does not widen a test file, where a quoted name is a fixture it sets", () => {
+    mkdirSync(join(dir, "__tests__"));
+    writeFileSync(
+      join(dir, "__tests__", "d.test.ts"),
+      `
+        const NAMES = { fixture: "LVIS_FIXTURE" };
+        const env: NodeJS.ProcessEnv = {};
+        const v = env[NAMES.fixture];
+      `,
+      "utf-8",
+    );
+
+    expect(scanEnvReads(dir).size).toBe(0);
+  });
 });
 
 describe("env-surface policy", () => {
