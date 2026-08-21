@@ -237,4 +237,4 @@ bun run start
 ## 관련 커밋 / 문서
 
 - 코드 진입점: [`scripts/run-electron.mjs`](../../../scripts/run-electron.mjs)
-- 관련 환경변수 정의: [`src/main/corp-ca-loader.ts`](../../../src/main/corp-ca-loader.ts)
+- 관련 환경변수 정의: [`src/main/corp-ca-runtime.ts`](../../../src/main/corp-ca-runtime.ts)
