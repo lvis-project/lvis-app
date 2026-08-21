@@ -32,6 +32,9 @@ const requestedLocales = new Set(
 
 const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
   zh: {
+    "permissionsTab.osSandboxBootDegradedHeading": "操作系统工具沙箱已开启，但本次会话未启动。",
+    "permissionsTab.osSandboxBootDegradedBody": "在问题解决并重启应用之前，工具将在没有操作系统隔离的情况下运行。",
+    "permissionsTab.osSandboxBootDegradedReason": "启动结果：{reason}",
     "be_conversationLoop.cmdHelp": "LVIS 命令：\n/new — 开始新对话\n/sessions — 已保存会话列表\n/load <ID> — 恢复会话\n/compact — 压缩对话历史\n/remember <content> — 保存记忆\n/memory — 用户记忆列表\n/vendor — 当前供应商/令牌信息\n/tools — 已注册工具列表\n/permission — 当前权限模式\n/permission mode <strict|default|auto|allow> --durable — 更改权限模式\n/permission dir <list|allow|deny> [path] — 管理允许目录\n/permission reviewer <show|mode|fallback|interactive> [value] — 审核器设置\n/permission audit <show|verify> — 权限审计查询/验证\n/permission hooks <list|accept|disable|reject> [name] — 脚本钩子信任管理\n/help — 此帮助",
     "formatIpcError.tailnetSharingDisabled": "此应用程序配置中已关闭 Tailnet 共享。",
     "formatIpcError.tailnetSharingInputInvalid": "Tailnet 共享请求无效。",
@@ -41,6 +44,9 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "formatIpcError.tailnetObserverWriteFailed": "无法保存 Tailnet 观察器配置。",
   },
   es: {
+    "permissionsTab.osSandboxBootDegradedHeading": "El sandbox de herramientas del SO está ACTIVADO pero no se inició en esta sesión.",
+    "permissionsTab.osSandboxBootDegradedBody": "Las herramientas se ejecutan sin aislamiento del SO hasta que se resuelva y se reinicie la aplicación.",
+    "permissionsTab.osSandboxBootDegradedReason": "Resultado del inicio: {reason}",
     "auditPanel.integrityChainBroken": "Cadena de auditoría rota: {file}{lineHint}",
     "be_conversationLoop.permissionDirError": "Error de permiso de directorio: {error}{warnings}{ack}",
     "be_conversationLoop.permissionModeChanged": "Modo de permisos cambiado: {previous} -> {mode}{durability}",
@@ -57,6 +63,9 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "formatIpcError.tailnetObserverWriteFailed": "No se pudo guardar la configuración del observador de Tailnet.",
   },
   fr: {
+    "permissionsTab.osSandboxBootDegradedHeading": "Le bac à sable d’outils du SE est ACTIVÉ mais n’a pas démarré lors de cette session.",
+    "permissionsTab.osSandboxBootDegradedBody": "Les outils s’exécutent sans isolation du SE jusqu’à ce que cela soit résolu et l’application redémarrée.",
+    "permissionsTab.osSandboxBootDegradedReason": "Résultat du démarrage : {reason}",
     "auditPanel.integrityChainBroken": "Chaine d'audit rompue : {file}{lineHint}",
     "be_conversationLoop.permissionDirError": "Erreur de permission de repertoire : {error}{warnings}{ack}",
     "be_conversationLoop.permissionModeChanged": "Mode d'autorisation modifie : {previous} -> {mode}{durability}",
@@ -73,6 +82,9 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "formatIpcError.tailnetObserverWriteFailed": "La configuration de l'observateur Tailnet n'a pas pu être enregistrée.",
   },
   de: {
+    "permissionsTab.osSandboxBootDegradedHeading": "Die OS-Tool-Sandbox ist AKTIV, wurde in dieser Sitzung aber nicht gestartet.",
+    "permissionsTab.osSandboxBootDegradedBody": "Werkzeuge laufen ohne OS-Isolierung, bis dies behoben und die App neu gestartet wurde.",
+    "permissionsTab.osSandboxBootDegradedReason": "Startergebnis: {reason}",
     "auditPanel.integrityChainBroken": "Audit-Kette unterbrochen: {file}{lineHint}",
     "be_conversationLoop.permissionDirError": "Verzeichnisberechtigungsfehler: {error}{warnings}{ack}",
     "be_conversationLoop.permissionModeChanged": "Berechtigungsmodus geandert: {previous} -> {mode}{durability}",
@@ -89,6 +101,9 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "formatIpcError.tailnetObserverWriteFailed": "Die Tailnet-Beobachterkonfiguration konnte nicht gespeichert werden.",
   },
   ja: {
+    "permissionsTab.osSandboxBootDegradedHeading": "OS ツールサンドボックスは有効ですが、このセッションでは起動しませんでした。",
+    "permissionsTab.osSandboxBootDegradedBody": "問題が解決されアプリが再起動されるまで、ツールは OS 分離なしで実行されます。",
+    "permissionsTab.osSandboxBootDegradedReason": "起動結果: {reason}",
     "formatIpcError.tailnetSharingDisabled": "このアプリ構成では Tailnet 共有がオフになっています。",
     "formatIpcError.tailnetSharingInputInvalid": "Tailnet 共有リクエストが無効です。",
     "formatIpcError.tailnetSharingOperationRejected": "Tailnet 共有操作を完了できませんでした。",

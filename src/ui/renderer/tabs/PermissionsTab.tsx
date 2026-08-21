@@ -722,6 +722,13 @@ export function PermissionsTab({
 
   const sandboxPotentialReason = sandboxCapability?.potentialReason ?? sandboxCapability?.reason ?? "";
   const sandboxRuntimeReason = sandboxCapability?.runtime?.reason ?? "";
+  // The setting is on and the gate did not activate it this session. Distinct
+  // from the toggle being off — the user chose this and it did not take — and
+  // distinct from "restart to apply", which is what an unchanged gate would
+  // mean. A gate that never ran (`null`) is NOT reported as either.
+  const sandboxBoot = sandboxCapability?.boot ?? null;
+  const sandboxDegraded =
+    sandboxBoot !== null && (sandboxBoot.action === "degrade" || sandboxBoot.action === "abort");
 
   return (
     <div className="pr-1">
@@ -1057,6 +1064,26 @@ export function PermissionsTab({
                   {t("permissionsTab.osSandboxRuntimeReason", { reason: sandboxRuntimeReason })}
                 </p>
               ) : null}
+            </div>
+          ) : null}
+          {sandboxDegraded && sandboxBoot ? (
+            <div
+              data-testid="os-sandbox-boot-degraded"
+              className="space-y-1 rounded-md border border-warning/(--opacity-medium) bg-warning/(--opacity-soft) px-3 py-2 text-[11px] text-warning"
+            >
+              <p className="font-medium">{t("permissionsTab.osSandboxBootDegradedHeading")}</p>
+              <p>{t("permissionsTab.osSandboxBootDegradedBody")}</p>
+              {sandboxBoot.dependencyErrors.length > 0 ? (
+                <p
+                  data-testid="os-sandbox-boot-degraded-detail"
+                  className="whitespace-pre-line font-mono text-foreground"
+                >
+                  {sandboxBoot.dependencyErrors.join("\n")}
+                </p>
+              ) : null}
+              <p className="italic">
+                {t("permissionsTab.osSandboxBootDegradedReason", { reason: sandboxBoot.reason })}
+              </p>
             </div>
           ) : null}
           {/* ── Windows srt-win consent flow ── */}

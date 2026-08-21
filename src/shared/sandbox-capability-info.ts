@@ -76,6 +76,43 @@ export interface SandboxWindowsInstallResult {
   ready?: boolean;
 }
 
+/** Which branch the boot-time sandbox gate took. */
+export type SandboxGateAction = "skip" | "activate" | "degrade" | "abort";
+
+/** Stable machine reason for the branch the boot gate took. */
+export type SandboxGateReason =
+  | "gate-off"
+  | "deps-present"
+  | "degrade-windows-not-installed"
+  | "degrade-default-cannot-activate"
+  | "abort-explicit-cannot-activate"
+  | "degrade-linux-runtime-probe-failed"
+  | "abort-linux-runtime-probe-failed";
+
+/**
+ * What the sandbox gate actually decided for THIS process, sealed at boot.
+ *
+ * The runtime snapshot cannot answer this. When the gate degrades, no capability
+ * is ever registered, so the runtime SOT falls back to its "no OS sandbox
+ * configured" default — the same answer it gives when the user never turned the
+ * sandbox on. Those two states are not the same thing to the person using the
+ * app: one is a setting they chose, the other is a setting they chose that did
+ * not take effect. Without this, the reason the gate degraded lived only in the
+ * boot log, which a packaged app's user has no way to read.
+ */
+export interface SandboxBootOutcome {
+  readonly action: SandboxGateAction;
+  readonly reason: SandboxGateReason;
+  /** Which on-signal drove the gate: the env override, the setting, or neither. */
+  readonly onSignal: "explicit-env" | "default-settings" | "off";
+  /**
+   * Why the sandbox could not activate, verbatim from the dependency check —
+   * these carry the install command the user has to run. Empty when the gate
+   * did not fail on dependencies.
+   */
+  readonly dependencyErrors: readonly string[];
+}
+
 /** Runtime snapshot returned to the renderer for startup/runtime honesty. */
 export interface SandboxRuntimeCapabilityInfo {
   /** Whether the current process has an active sandbox runner registered. */
@@ -104,6 +141,12 @@ export interface SandboxCapabilityInfo {
   potentialReason?: string;
   /** Last runtime SOT snapshot for the current process. */
   runtime?: SandboxRuntimeCapabilityInfo;
+  /**
+   * What the boot gate decided for this process. `null` when boot has not run
+   * the gate (tests, or a host that never called sandbox init) — absence is not
+   * "off", so the renderer must not render it as such.
+   */
+  boot?: SandboxBootOutcome | null;
   /** What the sandbox actually confines on this platform when active. */
   confines: SandboxConfinement;
 }
