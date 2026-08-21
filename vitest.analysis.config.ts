@@ -43,7 +43,7 @@ export default defineConfig({
     testTimeout: 45000,
     hookTimeout: 45000,
     // Cap concurrent workers. Default = CPU count, which on 8-10 core macs
-    // multiplied by per-test subprocess fanout (bash.test.ts /
+    // multiplied by per-test subprocess fanout (shell-tools.test.ts /
     // executor.test.ts / script-hook-runner.test.ts each spawn shell
     // children) saturates the CPU and causes timing flakes:
     //   - shell stdout chunks arrive late → assertion sees partial output
