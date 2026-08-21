@@ -7,15 +7,16 @@
  * environment-abort policy without exposing wrapper diagnostics.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BootContext } from "../context.js";
 import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
+import {
+  createSandboxBootHarness,
+  type SandboxBootHarness,
+} from "../../__tests__/support/sandbox-boot-context.js";
 
 const h = vi.hoisted(() => ({
   initialize: vi.fn(),
   checkDeps: vi.fn(),
   isProbeError: vi.fn(),
-  logGate: vi.fn(),
-  flush: vi.fn(async () => undefined),
   logger: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -48,33 +49,16 @@ import {
 
 const ORIGINAL_PLATFORM = process.platform;
 
-function makeContext(settingOn: boolean): BootContext {
-  return {
-    settingsService: {
-      get: vi.fn((key: string) =>
-        key === "features"
-          ? { osToolSandbox: settingOn, hostClassifiesRisk: false }
-          : undefined,
-      ),
-    },
-    bootAuditLogger: { logSandboxGate: h.logGate, flush: h.flush },
-    pluginRuntime: {
-      listPluginIds: vi.fn(() => []),
-      getPluginManifest: vi.fn(() => undefined),
-    },
-    buildSandboxUnionDomains: vi.fn(async () => []),
-  } as unknown as BootContext;
-}
+let harness: SandboxBootHarness;
 
 beforeEach(() => {
+  harness = createSandboxBootHarness();
   setProcessPlatform("linux");
   __resetActiveSandboxCapabilityForTest();
   __resetSandboxRequestedAtBootForTest();
   h.initialize.mockReset();
   h.checkDeps.mockReset();
   h.isProbeError.mockReset();
-  h.logGate.mockReset();
-  h.flush.mockClear();
   h.checkDeps.mockResolvedValue({ errors: [], warnings: [] });
   vi.stubEnv("LVIS_SANDBOX_ENABLED", "");
 });
@@ -93,9 +77,9 @@ describe("initSandboxGate — Linux ASRT runtime probe failures", () => {
     h.initialize.mockRejectedValue(probeError);
     h.isProbeError.mockImplementation((error: unknown) => error === probeError);
 
-    await expect(initSandboxGate(makeContext(true))).resolves.toBeUndefined();
+    await expect(initSandboxGate(harness.context(true))).resolves.toBeUndefined();
 
-    expect(h.logGate).toHaveBeenCalledWith({
+    expect(harness.logSandboxGate).toHaveBeenCalledWith({
       platform: "linux",
       onSignal: "default-settings",
       outcome: "degrade",
@@ -118,17 +102,17 @@ describe("initSandboxGate — Linux ASRT runtime probe failures", () => {
     h.isProbeError.mockImplementation((error: unknown) => error === probeError);
     vi.stubEnv("LVIS_SANDBOX_ENABLED", "1");
 
-    await expect(initSandboxGate(makeContext(false))).rejects.toBe(probeError);
+    await expect(initSandboxGate(harness.context(false))).rejects.toBe(probeError);
 
-    expect(h.logGate).toHaveBeenCalledWith({
+    expect(harness.logSandboxGate).toHaveBeenCalledWith({
       platform: "linux",
       onSignal: "explicit-env",
       outcome: "abort",
       reason: "abort-linux-runtime-probe-failed",
     });
-    expect(h.flush).toHaveBeenCalledOnce();
-    expect(h.logGate.mock.invocationCallOrder[0]).toBeLessThan(
-      h.flush.mock.invocationCallOrder[0],
+    expect(harness.flush).toHaveBeenCalledOnce();
+    expect(harness.logSandboxGate.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.flush.mock.invocationCallOrder[0],
     );
     expect(detectSandboxCapability()).toMatchObject({ kind: "none", platform: "linux" });
     expect(isSandboxRequestedAtBoot()).toBe(true);
@@ -138,19 +122,19 @@ describe("initSandboxGate — Linux ASRT runtime probe failures", () => {
     h.checkDeps.mockResolvedValue({ errors: ["missing bwrap"], warnings: [] });
     vi.stubEnv("LVIS_SANDBOX_ENABLED", "1");
 
-    await expect(initSandboxGate(makeContext(false))).rejects.toThrow(
+    await expect(initSandboxGate(harness.context(false))).rejects.toThrow(
       /dependencies are missing/,
     );
 
-    expect(h.logGate).toHaveBeenCalledWith({
+    expect(harness.logSandboxGate).toHaveBeenCalledWith({
       platform: "linux",
       onSignal: "explicit-env",
       outcome: "abort",
       reason: expect.stringContaining("abort"),
     });
-    expect(h.flush).toHaveBeenCalledOnce();
-    expect(h.logGate.mock.invocationCallOrder[0]).toBeLessThan(
-      h.flush.mock.invocationCallOrder[0],
+    expect(harness.flush).toHaveBeenCalledOnce();
+    expect(harness.logSandboxGate.mock.invocationCallOrder[0]).toBeLessThan(
+      harness.flush.mock.invocationCallOrder[0],
     );
   });
 });
