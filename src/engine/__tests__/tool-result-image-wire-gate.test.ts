@@ -12,7 +12,7 @@ import { describe, expect, it } from "vitest";
 
 import type { GenericMessage, LLMVendor, ToolSchema } from "../llm/types.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
-import { genericToModelMessages } from "../llm/vercel/message-mapper.js";
+import { genericToModelMessages } from "../llm/vercel/adapter.js";
 import { estimateRequestInputProjection } from "../request-input-projection.js";
 import { vendorCarriesToolResultImage } from "../../shared/multimodal-token-estimate.js";
 
