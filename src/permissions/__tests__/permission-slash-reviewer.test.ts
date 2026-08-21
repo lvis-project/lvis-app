@@ -477,7 +477,7 @@ describe("settings file persistence — reviewer block format", () => {
     const path = tmpSettingsPath();
     await writePermissionSettings(
       {
-        additionalDirectories: ["/Users/ken/work"],
+        additionalDirectories: ["/Users/example/work"],
         reviewer: {
           mode: "llm",
           provider: "openai",
@@ -489,7 +489,7 @@ describe("settings file persistence — reviewer block format", () => {
     );
     const raw = readFileSync(path, "utf-8");
     const parsed = JSON.parse(raw);
-    expect(parsed.permissions.additionalDirectories).toEqual(["/Users/ken/work"]);
+    expect(parsed.permissions.additionalDirectories).toEqual(["/Users/example/work"]);
     expect(parsed.permissions.reviewer.mode).toBe("llm");
     expect(parsed.permissions.reviewer.provider).toBe("openai");
   });

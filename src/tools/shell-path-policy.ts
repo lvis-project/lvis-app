@@ -371,9 +371,9 @@ export function validateShellCommandPathPolicy(
  * The block message threads this hint through so the LLM agent (or human
  * operator reading the error) can retry with a sandbox-aware alternative
  * instead of re-narrowing into an unrelated subdirectory — the failure mode
- * observed when a model fell back from `find /Users/ken/Documents` to
- * `list_files /Users/ken/Documents/journals` (a guessed sub-path) rather
- * than `list_files /Users/ken/Documents` (the original target).
+ * observed when a model fell back from `find /Users/example/Documents` to
+ * `list_files /Users/example/Documents/journals` (a guessed sub-path) rather
+ * than `list_files /Users/example/Documents` (the original target).
  *
  * Entries that map to "(no direct LVIS equivalent)" still receive the
  * "preserve the original target path" instruction so the LLM doesn't

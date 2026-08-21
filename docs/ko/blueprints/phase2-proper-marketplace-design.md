@@ -3,7 +3,7 @@
 **Status**: 📘 DESIGN ONLY (coding Phase 2 proper 다음 세션)
 **Author**: Claude Opus 4.6 (LVIS 오토파일럿)
 **Decision date**: 2026-04-15 KST
-**Decision by**: user (ken) — 경로 β 선택 rationale: 비개발자 publisher 요구
+**Decision by**: user (maintainer) — 경로 β 선택 rationale: 비개발자 publisher 요구
 
 ---
 

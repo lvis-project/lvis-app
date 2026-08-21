@@ -161,7 +161,7 @@ describe("RuleBasedRiskClassifier", () => {
   it("an empty allowed-directory entry does not make every path contained", () => {
     const v = rb.classify(ctx({
       category: "write",
-      allowedDirectories: ["", "/Users/ken/work"],
+      allowedDirectories: ["", "/Users/example/work"],
       finalInput: { path: "//attacker-share/loot/exfil.txt" },
     }));
     expect(v.level).toBe("high");
@@ -179,7 +179,7 @@ describe("RuleBasedRiskClassifier", () => {
       category: "write",
       pathFields: ["sourcePath", "destinationPath"],
       finalInput: {
-        sourcePath: "/Users/ken/work/a.md",
+        sourcePath: "/Users/example/work/a.md",
         destinationPath: "/etc/a.md",
       },
     }));
@@ -187,12 +187,12 @@ describe("RuleBasedRiskClassifier", () => {
   });
 
   it("write at allowed-dir leaf → LOW", () => {
-    const v = rb.classify(ctx({ category: "write", finalInput: { path: "/Users/ken/work/note.md" } }));
+    const v = rb.classify(ctx({ category: "write", finalInput: { path: "/Users/example/work/note.md" } }));
     expect(v.level).toBe("low");
   });
 
   it("write deep inside allowed dir → MEDIUM", () => {
-    const v = rb.classify(ctx({ category: "write", finalInput: { path: "/Users/ken/work/a/b/c/d.md" } }));
+    const v = rb.classify(ctx({ category: "write", finalInput: { path: "/Users/example/work/a/b/c/d.md" } }));
     expect(v.level).toBe("medium");
   });
 
@@ -208,7 +208,7 @@ describe("RuleBasedRiskClassifier", () => {
 
   // ── read ─────────────────────────────────
   it("read inside allowed dirs → LOW", () => {
-    const v = rb.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/a.md" } }));
+    const v = rb.classify(ctx({ category: "read", finalInput: { path: "/Users/example/work/a.md" } }));
     expect(v.level).toBe("low");
   });
 
@@ -267,7 +267,7 @@ describe("LlmRiskClassifier — composition rule (security M1)", () => {
     const provider = makeProvider(`{"level":"high","reason":"llm says so"}`);
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
     const v = await c.classify(
-      ctx({ category: "write", finalInput: { path: "/Users/ken/work/x.md" } }),
+      ctx({ category: "write", finalInput: { path: "/Users/example/work/x.md" } }),
     );
     expect(v.level).toBe("high");
     expect(v.reason).toBe("llm says so");
@@ -316,7 +316,7 @@ describe("LlmRiskClassifier — sandbox capability surface (issue #691)", () => 
     await c.classify(
       ctx({
         category: "write",
-        finalInput: { path: "/Users/ken/work/x" },
+        finalInput: { path: "/Users/example/work/x" },
         sandboxCapability: {
           kind: "none",
           confidence: "verified",
@@ -356,7 +356,7 @@ describe("LlmRiskClassifier — DLP filter on input (security threat-gap #3)", (
     await c.classify(
       ctx({
         category: "write",
-        finalInput: { apiKey: "sk-abc123def456ghi789jkl012mno", path: "/Users/ken/work/x" },
+        finalInput: { apiKey: "sk-abc123def456ghi789jkl012mno", path: "/Users/example/work/x" },
       }),
     );
     expect(completeSpy).toHaveBeenCalledOnce();
@@ -378,7 +378,7 @@ describe("LlmRiskClassifier — DLP filter on input (security threat-gap #3)", (
     await c.classify(
       ctx({
         category: "write",
-        finalInput: { card: "4111-1111-1111-1111", path: "/Users/ken/work/x" },
+        finalInput: { card: "4111-1111-1111-1111", path: "/Users/example/work/x" },
       }),
     );
     const arg = completeSpy.mock.calls[0][0];
@@ -416,7 +416,7 @@ describe("LlmRiskClassifier — fallbackOnError", () => {
       })),
     };
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "deny");
-    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/a" } }));
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/example/work/a" } }));
     expect(v.level).toBe("high");
     expect(v.reason).toMatch(/parse failure/);
   });
@@ -428,7 +428,7 @@ describe("LlmRiskClassifier — fallbackOnError", () => {
       }),
     };
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "rule");
-    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/a" } }));
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/example/work/a" } }));
     expect(v.level).toBe("low");
   });
   it.each([
@@ -465,7 +465,7 @@ describe("LlmRiskClassifier — fallbackOnError", () => {
       const input = level === "low"
         ? ctx({
             category: "read",
-            finalInput: { path: "/Users/ken/work/a" },
+            finalInput: { path: "/Users/example/work/a" },
           })
         : ctx({
             category: "shell",
@@ -488,7 +488,7 @@ describe("LlmRiskClassifier — fallbackOnError", () => {
       }),
     };
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "deny");
-    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/a" } }));
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/example/work/a" } }));
     expect(v.level).toBe("high");
     expect(v.reason).toMatch(/network down/);
   });
@@ -506,7 +506,7 @@ describe("LlmRiskClassifier — telemetry", () => {
       })),
     };
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "rule", { onCall });
-    await c.classify(ctx({ category: "write", finalInput: { path: "/Users/ken/work/x" } }));
+    await c.classify(ctx({ category: "write", finalInput: { path: "/Users/example/work/x" } }));
     expect(onCall).toHaveBeenCalledWith({
       tokensIn: 42,
       tokensOut: 7,
@@ -703,7 +703,7 @@ describe("LlmRiskClassifier — kind='fs-only' (D6) — not weak, maxVerdict app
     const v = await c.classify(
       ctx({
         category: "write",
-        finalInput: { path: "/Users/ken/work/note.md" },
+        finalInput: { path: "/Users/example/work/note.md" },
         sandboxCapability: {
           kind: "fs-only",
           confidence: "verified",
@@ -728,7 +728,7 @@ describe("LlmRiskClassifier — kind='fs-only' (D6) — not weak, maxVerdict app
     const v = await c.classify(
       ctx({
         category: "write",
-        finalInput: { path: "/Users/ken/work/note.md" },
+        finalInput: { path: "/Users/example/work/note.md" },
         sandboxCapability: {
           kind: "fs-only",
           confidence: "verified",
@@ -804,7 +804,7 @@ describe("LlmRiskClassifier — R-1 weak context no-downgrade", () => {
     const v = await c.classify(
       ctx({
         category: "write",
-        finalInput: { path: "/Users/ken/work/note.md" },
+        finalInput: { path: "/Users/example/work/note.md" },
         sandboxCapability: {
           kind: "asrt",
           confidence: "verified",
@@ -892,7 +892,7 @@ describe("LlmRiskClassifier — retry policy (#865)", () => {
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "deny", { onCall }, {
       maxAttempts: 3, baseDelayMs: 1, jitterPct: 0,
     });
-    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }));
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/example/work/x.md" } }));
     expect(v.level).toBe("low");
     expect(provider.complete).toHaveBeenCalledTimes(3);
     expect(onCall).toHaveBeenCalledWith(expect.objectContaining({ attempts: 3 }));
@@ -903,7 +903,7 @@ describe("LlmRiskClassifier — retry policy (#865)", () => {
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "deny", {}, {
       maxAttempts: 5, baseDelayMs: 1, jitterPct: 0,
     });
-    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }));
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/example/work/x.md" } }));
     // Terminal error → fallbackOnError=deny → high
     expect(v.level).toBe("high");
     expect(provider.complete).toHaveBeenCalledTimes(1);
@@ -914,7 +914,7 @@ describe("LlmRiskClassifier — retry policy (#865)", () => {
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "deny", {}, {
       maxAttempts: 3, baseDelayMs: 1, jitterPct: 0,
     });
-    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }));
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/example/work/x.md" } }));
     expect(v.level).toBe("high");
     expect(provider.complete).toHaveBeenCalledTimes(3);
   });
@@ -930,7 +930,7 @@ describe("LlmRiskClassifier — retry policy (#865)", () => {
     // Abort mid-flight (after first failure, during retry sleep).
     setTimeout(() => ctrl.abort(), 30);
     const v = await c.classify(
-      ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }),
+      ctx({ category: "read", finalInput: { path: "/Users/example/work/x.md" } }),
       { abortSignal: ctrl.signal },
     );
     expect(v.level).toBe("high"); // aborted → fallback path
@@ -946,7 +946,7 @@ describe("LlmRiskClassifier — retry policy (#865)", () => {
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini", "rule", {}, {
       maxAttempts: 2, baseDelayMs: 1, jitterPct: 0,
     });
-    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/ken/work/x.md" } }));
+    const v = await c.classify(ctx({ category: "read", finalInput: { path: "/Users/example/work/x.md" } }));
     // Rule verdict for a read on allowed path → low (rule classifier default).
     expect(v.level).toBe("low");
     expect(provider.complete).toHaveBeenCalledTimes(2);

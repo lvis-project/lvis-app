@@ -66,8 +66,8 @@ describe("detectMentionQuery", () => {
     // The reason the rule is shared with the slash detector rather than re-written: the
     // "must start a token" clause is what keeps `foo@example.com` from opening a picker,
     // exactly as it keeps `https://` from opening the command menu.
-    expect(detectMentionQuery("mail ken@example.com", 20)).toBeNull();
-    expect(detectMentionQuery("ken@ex", 6)).toBeNull();
+    expect(detectMentionQuery("mail user@example.com", 21)).toBeNull();
+    expect(detectMentionQuery("user@ex", 7)).toBeNull();
   });
 
   it("closes once the token ends", () => {

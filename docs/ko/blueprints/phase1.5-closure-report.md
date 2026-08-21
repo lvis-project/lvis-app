@@ -126,7 +126,7 @@
 
 ### 5.4 E2E Gap (Phase 2 prerequisite)
 - **S1 Cold boot**: `__dirname` ESM 버그는 수정됐으나 실제 uv provisioning이 네트워크 + 바이너리 실행을 요구 (이번 세션 범위 밖)
-- **S3 / S4**: `/Users/ken/.lvis/runtime/venv/bin/python` 실 binary 부재 — `.ready` sentinel만 있고 venv 콘텐츠가 없음 (Phase 1 mock 테스트의 잔재)
+- **S3 / S4**: `/Users/example/.lvis/runtime/venv/bin/python` 실 binary 부재 — `.ready` sentinel만 있고 venv 콘텐츠가 없음 (Phase 1 mock 테스트의 잔재)
 
 ---
 
@@ -163,7 +163,7 @@ IPC 핸들러에서 actor 파라미터가 누락되더라도 최소 권한(user)
 ## 8. Systemic TODO
 
 ### 8.1 root TODO.md 추적 gap
-`/Users/ken/workspace/GIT/github/lvis-project/TODO.md` 는 어느 git repo에도 포함되지 않음. 이번 세션의 §15.3 / §16.3 / §16.4 / §16.5 갱신은 working state로만 존재. Phase 2 시작 전에 다음 중 하나:
+`/Users/example/workspace/GIT/github/lvis-project/TODO.md` 는 어느 git repo에도 포함되지 않음. 이번 세션의 §15.3 / §16.3 / §16.4 / §16.5 갱신은 working state로만 존재. Phase 2 시작 전에 다음 중 하나:
 - (a) TODO.md를 lvis-app/TODO.md로 이관 + CLAUDE.md의 `../TODO.md` 참조 업데이트
 - (b) 각 phase 종료 시 snapshot을 blueprint(본 문서 위치)로 committing — 현재 채택
 - (c) root를 meta git repo로 승격

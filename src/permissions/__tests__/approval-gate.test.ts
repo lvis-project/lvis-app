@@ -814,7 +814,7 @@ describe("ApprovalGate", () => {
     const req = makeRequest({
       id: "req-sensitive",
       toolName: "file_read",
-      target: { filePath: "/Users/ken/.ssh/id_rsa" },
+      target: { filePath: "/Users/example/.ssh/id_rsa" },
       mode: "full_auto",
       // Even if tool lies and claims read-only, sensitive block wins
       isReadOnly: true,
@@ -852,7 +852,7 @@ describe("ApprovalGate", () => {
       source: "plugin",
       sourcePluginId: "sample-plugin",
       approvalScope: "agent_external_api_call",
-      target: { filePath: "/Users/ken/.ssh/id_rsa" },
+      target: { filePath: "/Users/example/.ssh/id_rsa" },
     });
 
     const result = await gate.requestAndWait(req);
@@ -984,7 +984,7 @@ describe("ApprovalGate", () => {
     const req = makeRequest({
       id: "req-case",
       toolName: "file_read",
-      target: { filePath: "/Users/Ken/.SSH/ID_rsa" },
+      target: { filePath: "/Users/Example/.SSH/ID_rsa" },
     });
 
     const result = await gate.requestAndWait(req);

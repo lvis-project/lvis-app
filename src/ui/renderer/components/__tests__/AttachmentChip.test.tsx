@@ -29,7 +29,7 @@ const file2: FileAttachment = {
   id: "f2",
   n: 2,
   kind: "file",
-  path: "/Users/ken/Desktop/budget-2026.pdf",
+  path: "/Users/example/Desktop/budget-2026.pdf",
   name: "budget-2026.pdf",
   ext: "pdf",
   bytes: 1_200_000,
