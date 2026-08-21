@@ -2,7 +2,7 @@
 import "../../../../../test/renderer/setup.js";
 import { describe, expect, it } from "vitest";
 import { render } from "@testing-library/react";
-import { SummaryToast } from "../SummaryToast.js";
+import { SummaryToast } from "../TranscriptRenderer.js";
 
 describe("SummaryToast", () => {
   it("renders compact summaries collapsed by default", () => {
