@@ -49,9 +49,14 @@ ALLOWED_ACCOUNTS=(
   'secret.txt'
 )
 
-# Files whose bytes this gate reads. A binary cannot be grepped for a path, and
-# its name is covered by the sibling job's filename pass.
-TEXT_FILE_RE='\.(ts|tsx|js|jsx|mjs|cjs|py|md|json|ya?ml|sh|bash|txt|html|css|toml|env|snap)$'
+# Which files this gate reads, expressed as what it SKIPS rather than what it
+# accepts. An allow-list of extensions is the wrong shape here: a home path can
+# be pasted into a Dockerfile, a lockfile, a .env, a plist or a Makefile, and
+# every one of those is either extension-less or an extension nobody thought to
+# list. Listing the binary formats instead is a closed set — a new source or
+# config format is scanned by default, and only a genuinely unreadable one has
+# to be added. A binary's *name* is covered by the sibling job's filename pass.
+BINARY_FILE_RE='\.(png|jpe?g|gif|webp|avif|bmp|ico|icns|svgz|pdf|zip|gz|tgz|bz2|xz|7z|rar|woff2?|ttf|otf|eot|mp[34]|wav|ogg|webm|mov|avi|node|dmg|exe|dll|so|dylib|class|jar|bin|wasm|db|sqlite3?|pyc|keystore|jks|p12|pfx)$'
 
 # A home path, in every spelling this repository has actually carried:
 #   /Users/<name>            macOS
@@ -79,60 +84,65 @@ scan() {
   local root="$1"
   cd "$root" || { echo "::error::cannot enter $root"; return 2; }
 
-  local files
-  if ! files=$(git ls-files); then
+  local considered
+  if ! considered=$(git ls-files | wc -l | tr -d ' '); then
     echo "::error::git ls-files failed — gate cannot verify this tree"
     return 2
   fi
 
-  local violations=0 file line name rest status pattern strip
-  while IFS= read -r file; do
-    [ -z "$file" ] && continue
-    [ -f "$file" ] || continue
-    printf '%s\n' "$file" | grep -qE "$TEXT_FILE_RE" || continue
+  local hits status violations=0 file line rest name pattern strip
+  # The two spellings are scanned separately because they end at different
+  # separators. Folding them into one alternation and stripping at "any
+  # separator" truncates a hyphenated placeholder — `sensitive-project` reads
+  # as `project`, `outside-home` as `home` — and the gate then fails on names
+  # its own allow-list contains.
+  for pattern in "$SLASH_RE" "$DASH_RE"; do
+    if [ "$pattern" = "$DASH_RE" ]; then strip='s|.*-||'; else strip='s|.*[\\/]||'; fi
 
-    # The two spellings are scanned separately because they end at different
-    # separators. Folding them into one alternation and stripping at "any
-    # separator" truncates a hyphenated placeholder — `sensitive-project`
-    # reads as `project`, `outside-home` as `home` — and the gate then fails
-    # on names its own allow-list contains.
+    # One `git grep` over the whole index rather than a `grep` per file: the
+    # per-file loop spawned two processes for every tracked file and took a
+    # minute on this repository, which is long enough that someone eventually
+    # moves the gate off the default path.
     #
-    # `-a` forces text handling: a fixture holding a control byte makes grep
-    # print "Binary file ... matches" instead of the match, which is a hit the
-    # extraction cannot read and would silently mis-report.
-    for pattern in "$SLASH_RE" "$DASH_RE"; do
-      if [ "$pattern" = "$DASH_RE" ]; then strip='s|.*-||'; else strip='s|.*[\\/]||'; fi
+    # `-a` forces text handling — a fixture holding a control byte otherwise
+    # makes grep print "Binary file … matches" instead of the match, and that
+    # is a hit the extraction cannot read.
+    #
+    # `-e` is mandatory, not stylistic: DASH_RE begins with `-`, and without
+    # `-e` it is parsed as a bundle of flags whose tail becomes an entirely
+    # different pattern. That misparse does not error — it silently matches
+    # ordinary hyphenated words like `prefers-reduced-motion`, so the gate
+    # would fail on a clean tree while still looking like it was working.
+    if hits=$(git grep --no-color -a -n -o -E -e "$pattern" -- .); then
+      status=0
+    else
+      status=$?
+    fi
+    if [ "$status" -ge 2 ]; then
+      echo "::error::git grep failed (exit $status) — gate cannot verify this tree"
+      return 2
+    fi
+    [ "$status" -eq 0 ] || continue
 
-      # `-e` is mandatory, not stylistic: DASH_RE starts with `-`, and without
-      # `-e` grep parses it as a bundle of flags whose tail becomes an entirely
-      # different pattern. That misparse does not error — it silently matches
-      # ordinary hyphenated words like `prefers-reduced-motion`, so the gate
-      # would fail on a clean tree while still looking like it was working.
-      if grep -anoE -e "$pattern" "$file" > /tmp/home-path-hits.txt; then
-        status=0
-      else
-        status=$?
+    while IFS= read -r hit; do
+      [ -z "$hit" ] && continue
+      file="${hit%%:*}"
+      rest="${hit#*:}"
+      line="${rest%%:*}"
+      rest="${rest#*:}"
+      # A binary's bytes are not searched; its *name* is what the sibling job
+      # reads. Filtering here rather than in the pathspec keeps the skip rule
+      # in one regex instead of splitting it across two syntaxes.
+      printf '%s\n' "$file" | grep -qE -e "$BINARY_FILE_RE" && continue
+      name=$(printf '%s' "$rest" | sed -E "$strip")
+      [ -z "$name" ] && continue
+      if ! is_allowed "$name"; then
+        echo "::error file=$file,line=$line::personal account name in an absolute home path"
+        echo "  $file:$line"
+        violations=$((violations + 1))
       fi
-      if [ "$status" -ge 2 ]; then
-        echo "::error::grep failed (exit $status) on $file — gate cannot verify this tree"
-        return 2
-      fi
-      [ "$status" -eq 0 ] || continue
-
-      while IFS= read -r hit; do
-        [ -z "$hit" ] && continue
-        line="${hit%%:*}"
-        rest="${hit#*:}"
-        name=$(printf '%s' "$rest" | sed -E "$strip")
-        [ -z "$name" ] && continue
-        if ! is_allowed "$name"; then
-          echo "::error file=$file,line=$line::personal account name in an absolute home path"
-          echo "  $file:$line"
-          violations=$((violations + 1))
-        fi
-      done < /tmp/home-path-hits.txt
-    done
-  done <<< "$files"
+    done <<< "$hits"
+  done
 
   if [ "$violations" -gt 0 ]; then
     echo ""
@@ -146,7 +156,7 @@ scan() {
     return 1
   fi
 
-  echo "home-path-gate: clean ($(printf '%s\n' "$files" | wc -l | tr -d ' ') tracked files considered)."
+  echo "home-path-gate: clean ($considered tracked files considered)."
   return 0
 }
 
@@ -249,10 +259,18 @@ selftest() {
   }
   w_binary_violation() {
     w_clean_placeholder
-    # A `.png` is out of the text-file scope on purpose: its name is what the
-    # sibling job reads. This case pins that boundary so a future widening of
-    # TEXT_FILE_RE is a deliberate change rather than an accident.
+    # A `.png` is out of scope on purpose: its name is what the sibling job
+    # reads. This case pins that boundary so a future change to
+    # BINARY_FILE_RE is deliberate rather than accidental.
     printf 'const mine = "/Users/%s/work";\n' "$VIOLATING_ACCOUNT" > shot.png
+  }
+  w_extensionless_violation() {
+    w_clean_placeholder
+    # A Dockerfile has no extension, and neither do Makefile, .env or a
+    # lockfile with an unfamiliar name. An extension allow-list would skip all
+    # of them silently; this case is what makes the skip-list shape load-bearing
+    # rather than a preference.
+    printf 'WORKDIR /home/%s/app\n' "$VIOLATING_ACCOUNT" > Dockerfile
   }
   w_hyphenated_placeholder() {
     w_clean_placeholder
@@ -280,6 +298,7 @@ selftest() {
   run_case comment-violation-blocks  BLOCK w_comment_violation
   run_case untracked-file-ignored    PASS  w_untracked_violation
   run_case binary-out-of-scope       PASS  w_binary_violation
+  run_case extensionless-blocks      BLOCK w_extensionless_violation
   run_case hyphenated-placeholder    PASS  w_hyphenated_placeholder
   run_case tilde-home-not-flagged    PASS  w_tilde_lookalike
 
