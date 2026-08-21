@@ -4,7 +4,7 @@ vi.mock("../../main/uv-runtime.js", () => ({
   resolveBundledUvBinaryPath: vi.fn(() => "/resources/uv/darwin-arm64/uv"),
 }));
 
-import { resolveStdioSpawnCommand } from "../uvx-command.js";
+import { resolveStdioSpawnCommand } from "../mcp-client.js";
 
 describe("resolveStdioSpawnCommand", () => {
   it("routes bare uvx through the bundled uv tool runner", () => {
