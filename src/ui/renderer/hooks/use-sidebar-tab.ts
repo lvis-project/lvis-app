@@ -14,7 +14,7 @@ export interface UseSidebarTabResult {
 /**
  * Persists the sidebar's active tab the same way other UI preferences persist
  * (SystemSettings round-trip via getSettings/updateSettings) — mirrors
- * `useSidebarWidth`'s mount-seed + guarded-write shape. Unlike a drag value,
+ * `usePanelWidth`'s mount-seed + guarded-write shape. Unlike a drag value,
  * a tab switch has no meaningful "live" (uncommitted) intermediate state, so
  * there is a single setter that both updates local state and persists.
  */

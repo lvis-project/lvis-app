@@ -49,7 +49,7 @@ import {
 import { buildQuickActions } from "./components/command-actions.js";
 import { useAppUpdate } from "./hooks/use-app-update.js";
 import { useAppMode } from "./hooks/use-app-mode.js";
-import { useSidebarWidth } from "./hooks/use-sidebar-width.js";
+import { SIDEBAR_WIDTH_PREF, usePanelWidth } from "./hooks/use-panel-width.js";
 import { useSidebarTab } from "./hooks/use-sidebar-tab.js";
 import { useActiveView } from "./hooks/use-active-view.js";
 import { useSettingsTab } from "./hooks/use-settings-tab.js";
@@ -212,7 +212,11 @@ export function App() {
   // Durable expanded-width of the primary navigation sidebar (drag-to-resize on
   // its inner edge). Persists via SystemSettings.sidebarWidth; drives both the
   // sidebar card width and the <main> left-padding reserve in the shell layout.
-  const { sidebarWidth, setSidebarWidth, commitSidebarWidth } = useSidebarWidth(api);
+  const {
+    width: sidebarWidth,
+    setWidth: setSidebarWidth,
+    commitWidth: commitSidebarWidth,
+  } = usePanelWidth(api, SIDEBAR_WIDTH_PREF);
   // Sidebar Chats/Projects tab — persisted the same way as sidebarWidth.
   const { activeTab: sidebarActiveTab, setActiveTab: setSidebarActiveTab } = useSidebarTab(api);
   // Pinned-project preference — pinned projects sort to the top of the
