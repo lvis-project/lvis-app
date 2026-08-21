@@ -1443,6 +1443,8 @@ export const zhMessages: Record<string, string> = {
   "formatIpcError.tailnetSharingInputInvalid": "Tailnet 共享请求无效。",
   "formatIpcError.tailnetSharingOperationRejected": "无法完成 Tailnet 共享操作。",
   "formatIpcError.tailnetSharingUnavailable": "Tailnet 共享当前不可用。",
+  "formatIpcError.tailnetObserverUnavailable": "Tailnet 观察器设置当前不可用。",
+  "formatIpcError.tailnetObserverWriteFailed": "无法保存 Tailnet 观察器配置。",
   "formatIpcError.unknownError": "未知错误",
   "formatIpcError.unknownPluginId": "未知的插件 ID。",
   "formatIpcError.unknownProvider": "未知的法学硕士提供者。",

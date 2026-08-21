@@ -1429,6 +1429,8 @@ export const frMessages: Record<string, string> = {
   "formatIpcError.tailnetSharingInputInvalid": "La demande de partage Tailnet n’est pas valide.",
   "formatIpcError.tailnetSharingOperationRejected": "L’opération de partage Tailnet n’a pas pu être effectuée.",
   "formatIpcError.tailnetSharingUnavailable": "Le partage Tailnet est actuellement indisponible.",
+  "formatIpcError.tailnetObserverUnavailable": "Les paramètres de l'observateur Tailnet sont actuellement indisponibles.",
+  "formatIpcError.tailnetObserverWriteFailed": "La configuration de l'observateur Tailnet n'a pas pu être enregistrée.",
   "formatIpcError.unknownError": "Erreur inconnue",
   "formatIpcError.unknownPluginId": "ID de plugin inconnu.",
   "formatIpcError.userKeyboardRequired": "Cette modification d'autorisation ne peut être effectuée qu'à partir d'une entrée utilisateur active.",
