@@ -6,7 +6,7 @@ import {
   startTelegramPollingIngress,
   type TelegramPollingIngress,
   type TelegramPollingIngressOptions,
-} from "../telegram-polling-ingress.js";
+} from "../telegram-bridge-server.js";
 import { callbackUpdate } from "./telegram-bridge-fixtures.js";
 
 const OWNER_ID = 123456789;

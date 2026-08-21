@@ -112,7 +112,7 @@ describe("Away Authority share-lifecycle retirement", () => {
     await store.recordPollOffset(4242);
 
     // Non-vacuous, and this assertion is the whole reason the test exists: the
-    // store DID notify. `telegram-polling-ingress` calls `recordPollOffset`
+    // store DID notify. `telegram-bridge-server` calls `recordPollOffset`
     // once per handled update, so a subscriber that retired on the raw signal
     // would retire the grant on every inbound message — and since
     // `handleWebhook` returns once the turn is admitted rather than awaiting
