@@ -594,7 +594,7 @@ describe("NIT — fd-dup redirects: shell classification preserved, no spurious 
   // adding NO entry to redirectTargets (no spurious "1"/"2" file target).
   it("ls 2>&1 stays shell (hasOutputRedirect) and has no spurious redirect target", async () => {
     expect(isReadOnlyCommand("ls 2>&1")).toBe(false);
-    const { tokenizeShell } = await import("../../main/shell-tokenizer.js");
+    const { tokenizeShell } = await import("../../shared/shell-tokenizer.js");
     const { leaves } = tokenizeShell("ls 2>&1");
     expect(leaves).toHaveLength(1);
     expect(leaves[0]!.hasOutputRedirect).toBe(true);
@@ -603,7 +603,7 @@ describe("NIT — fd-dup redirects: shell classification preserved, no spurious 
 
   it("ls >&2 stays shell and has no spurious redirect target", async () => {
     expect(isReadOnlyCommand("ls >&2")).toBe(false);
-    const { tokenizeShell } = await import("../../main/shell-tokenizer.js");
+    const { tokenizeShell } = await import("../../shared/shell-tokenizer.js");
     const { leaves } = tokenizeShell("ls >&2");
     expect(leaves).toHaveLength(1);
     expect(leaves[0]!.hasOutputRedirect).toBe(true);
