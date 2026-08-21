@@ -25,7 +25,7 @@ describe("StrictRiskClassifier — issue #664 defer-all", () => {
     const v = c.classify(
       ctx({
         category: "write",
-        finalInput: { path: "/Users/ken/work/file.txt" }, // inside allowed
+        finalInput: { path: "/Users/example/work/file.txt" }, // inside allowed
       }),
     );
     expect(v.level).toBe("high");
@@ -59,7 +59,7 @@ describe("StrictRiskClassifier — issue #664 defer-all", () => {
     const v = c.classify(
       ctx({
         category: "read",
-        finalInput: { path: "/Users/ken/.lvis/sessions/recent.md" },
+        finalInput: { path: "/Users/example/.lvis/sessions/recent.md" },
       }),
     );
     expect(v.level).toBe("high");

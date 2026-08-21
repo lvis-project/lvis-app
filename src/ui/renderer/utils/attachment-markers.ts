@@ -49,7 +49,7 @@ export function parseMarkers(text: string): number[] {
  * verbatim — paths without an extension fall back to whole-string collapse.
  *
  * Whole-path (not basename-only) collapse is deliberate: in the overlay we
- * want long absolute paths like `/Users/ken/Desktop/budget-2026.pdf` to
+ * want long absolute paths like `/Users/example/Desktop/budget-2026.pdf` to
  * remain recognizable on both ends rather than dropping all directory
  * context, which would yield a bare `budget-2026.pdf` and lose the user's
  * mental anchor for *where* the file sits on disk.

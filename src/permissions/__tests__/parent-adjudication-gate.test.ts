@@ -224,7 +224,7 @@ describe("parent adjudication — the answer", () => {
       makeChildRequest({
         childProvenance: {
           childSessionId: CHILD_SESSION,
-          childTitle: "report writer jo.dreame@gmail.com \u202Ednammoc",
+          childTitle: "report writer person@example.com \u202Ednammoc",
           originSessionId: PARENT_SESSION,
           spawnTaskSummary: "write the weekly report",
         },
@@ -234,7 +234,7 @@ describe("parent adjudication — the answer", () => {
 
     const title = sentRequest(wc).parentEscalation?.childTitle ?? "";
     expect(title).toContain("report writer");
-    expect(title).not.toContain("jo.dreame@gmail.com");
+    expect(title).not.toContain("person@example.com");
     expect(title).not.toContain("\u202E");
   });
 

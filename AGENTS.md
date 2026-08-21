@@ -447,11 +447,24 @@ it from the pattern of the ones around it.
   containing the literals it greps for. Everything else is rule without gate:
   the repository root, `scripts/`, `resources/`, `build/`, `fixtures/`,
   `schemas/` and `.omc/`; commit messages and PR descriptions; the contents of
-  a binary; and colleagues' names, which no pattern generalizes. This file is
-  itself in that unwatched set. Read the job to see what it matches — a clause
-  about permanent public disclosure is the last one that may be assumed
+  a binary; and a person's name in prose, which no pattern generalizes. This
+  file is itself in that unwatched set. Read the job to see what it matches — a
+  clause about permanent public disclosure is the last one that may be assumed
   machine-checked, because an author who believes a gate is watching stops
   looking.
+- An account name inside an absolute home path is the one form of a person's
+  name that does generalize, because the path around it is the pattern. A
+  fixture, comment or doc example that writes `/Users/…`, `/home/…`,
+  `C:\Users\…`, or the dash-encoded per-project form must use a synthetic
+  account; `example` is the default, and a site that exists to exercise case
+  folding keeps a mixed-case spelling of it. Where the test can build the path
+  from `os.homedir()` or `os.tmpdir()` instead, that is better still — it
+  neither names anyone nor pins one machine's directory layout. The
+  `home-path-gate` job enforces this, and unlike its two neighbours it scans
+  the **whole tree** rather than the diff: a home path is mechanical to
+  replace, so there is no backlog to grandfather, and a diff scan can only
+  report that this PR added none, never that the tree is clean. The list of
+  permitted synthetic accounts lives in that job's script.
 - Deriving an assertion from a manifest or a bundle beats copying a literal
   into a test. A test that hard-codes the identifier both leaks it and pins one
   value; reading it from the artifact under test does neither.

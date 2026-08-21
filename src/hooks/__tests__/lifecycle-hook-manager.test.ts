@@ -128,11 +128,11 @@ describe("#811 m2 — lifecycle event dispatch", () => {
     m.setTrustedRegistry([], [lifecycleEntry("PostToolUseFailure", ["node", ECHO])]);
     const out = await m.runLifecycleEvent("PostToolUseFailure", "s1", "unknown", {
       toolName: "fs_read",
-      errorMessage: "failed to email ken@lvis.example.com",
+      errorMessage: "failed to email owner@lvis.example.com",
     });
     // The email is redacted before the hook ever sees it.
     expect(out.results[0].reason).toContain("[REDACTED:EMAIL]");
-    expect(out.results[0].reason).not.toContain("ken@lvis.example.com");
+    expect(out.results[0].reason).not.toContain("owner@lvis.example.com");
   });
 });
 

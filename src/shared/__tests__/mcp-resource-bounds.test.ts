@@ -128,7 +128,7 @@ describe("isUsableResourceUri", () => {
     // The counterweight that keeps the rule surgical. A filesystem server publishing a
     // Hangul or CJK path is honest and common; refusing it to stop a spoof would break
     // real servers, so the class must not become "anything unfamiliar".
-    expect(isUsableResourceUri("file:///Users/ken/문서/정상.md")).toBe(true);
+    expect(isUsableResourceUri("file:///Users/example/문서/정상.md")).toBe(true);
     expect(isUsableResourceUri("file:///docs/年度報告.pdf")).toBe(true);
     expect(isUsableResourceUri("file:///docs/café-résumé.txt")).toBe(true);
   });

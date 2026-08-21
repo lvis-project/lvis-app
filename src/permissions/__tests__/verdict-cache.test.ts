@@ -36,7 +36,7 @@ afterEach(async () => {
 });
 
 const CTX: VerdictCacheContext = {
-  allowedDirectories: ["/Users/ken/work", "/Users/ken/.lvis"],
+  allowedDirectories: ["/Users/example/work", "/Users/example/.lvis"],
   scope: { mode: "deny-all" },
 };
 
@@ -45,7 +45,7 @@ const LOOKUP: VerdictCacheLookupKey = {
   source: "builtin",
   category: "write",
   trustOrigin: "user-keyboard",
-  finalInput: { path: "/Users/ken/work/a.md", count: 5 },
+  finalInput: { path: "/Users/example/work/a.md", count: 5 },
 };
 
 function expiredCacheLine(lookup: VerdictCacheLookupKey = LOOKUP): string {
@@ -89,7 +89,7 @@ describe("computeCacheKey", () => {
       ...LOOKUP,
       toolName: "ask_user_question",
       category: "meta",
-      finalInput: { path: "/Users/ken/work/x.md", count: 1 },
+      finalInput: { path: "/Users/example/work/x.md", count: 1 },
     });
     const k2 = computeCacheKey({
       ...LOOKUP,
@@ -136,7 +136,7 @@ describe("computeCacheKey", () => {
     const allowedLeaf = computeCacheKey({
       ...LOOKUP,
       category: "write",
-      finalInput: { path: "/Users/ken/work/file.md" },
+      finalInput: { path: "/Users/example/work/file.md" },
     });
     const outside = computeCacheKey({
       ...LOOKUP,
@@ -280,7 +280,7 @@ describe("VerdictCache lookup states", () => {
     const secondLookup: VerdictCacheLookupKey = {
       ...LOOKUP,
       toolName: "fs_delete",
-      finalInput: { path: "/Users/ken/work/b.md" },
+      finalInput: { path: "/Users/example/work/b.md" },
     };
     writeFileSync(
       path,

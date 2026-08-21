@@ -450,13 +450,13 @@ describe("Permission policy P4 reviewer-wiring", () => {
     source: "plugin",
     category: "write",
     trustOrigin: "llm-tool-arg",
-    finalInput: { path: "/Users/ken/work/note.md" },
+    finalInput: { path: "/Users/example/work/note.md" },
   };
   function ctxWithReviewerScope(
     reviewerScope: Record<string, unknown>,
   ): VerdictCacheContext {
     return {
-      allowedDirectories: ["/Users/ken/work"],
+      allowedDirectories: ["/Users/example/work"],
       scope: { reviewer: reviewerScope },
     };
   }

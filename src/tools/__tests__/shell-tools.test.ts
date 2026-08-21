@@ -279,7 +279,7 @@ describe("bash tool", () => {
 
     it("rejects unsupported ~user operands instead of validating a fake cwd-relative path", async () => {
       const result = await new BashTool().execute(
-        { command: "cat ~ken/Documents/not-in-sandbox.txt", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
+        { command: "cat ~example/Documents/not-in-sandbox.txt", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
         ctx(),
       );
       expect(result.isError).toBe(true);
@@ -288,7 +288,7 @@ describe("bash tool", () => {
 
     it("rejects bare ~user operands before shell expansion", async () => {
       const result = await new BashTool().execute(
-        { command: "ls ~ken", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
+        { command: "ls ~example", timeoutSeconds: SHELL_TIMEOUT_SECONDS },
         ctx(),
       );
       expect(result.isError).toBe(true);
@@ -622,7 +622,7 @@ describe("powershell tool", () => {
 
     it("rejects unsupported ~user operands before PowerShell AST parsing", async () => {
       const result = await new PowerShellTool().execute(
-        { command: "Get-Content ~ken/Documents/not-in-sandbox.txt", timeoutSeconds: 5 },
+        { command: "Get-Content ~example/Documents/not-in-sandbox.txt", timeoutSeconds: 5 },
         ctx(),
       );
 
@@ -632,7 +632,7 @@ describe("powershell tool", () => {
 
     it("rejects bare ~user operands before PowerShell AST parsing", async () => {
       const result = await new PowerShellTool().execute(
-        { command: "Get-ChildItem ~ken", timeoutSeconds: 5 },
+        { command: "Get-ChildItem ~example", timeoutSeconds: 5 },
         ctx(),
       );
 
