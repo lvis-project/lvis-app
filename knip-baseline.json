@@ -2409,16 +2409,6 @@
     },
     {
       "type": "types",
-      "file": "src/plugins/whitelist/whitelist-fetcher.ts",
-      "name": "WhitelistFetchResult"
-    },
-    {
-      "type": "types",
-      "file": "src/plugins/whitelist/whitelist-fetcher.ts",
-      "name": "WhitelistNotModified"
-    },
-    {
-      "type": "types",
       "file": "src/plugins/whitelist/whitelist-registry.ts",
       "name": "WhitelistDecision"
     },

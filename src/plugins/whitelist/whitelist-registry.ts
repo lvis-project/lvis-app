@@ -34,10 +34,74 @@ import {
   parseWhitelistDocument,
   type WhitelistDocument,
 } from "./whitelist-schema.js";
-import { WhitelistCache, type WhitelistCacheSnapshot } from "./whitelist-cache.js";
-import { fetchWhitelist } from "./whitelist-fetcher.js";
+import {
+  SignedDocumentCache,
+  type SignedDocCacheSnapshot,
+} from "../signed-doc-cache.js";
+import {
+  fetchSignedDocument,
+  type FetchSignedDocumentOptions,
+  type SignedDocSource,
+  type SignedDocumentFetchOutcome,
+} from "../signed-doc-fetcher.js";
 
 const log = createLogger("whitelist-registry");
+
+// ---------------------------------------------------------------------
+// Transport + disk cache
+//
+// Both are declared here rather than in one-export wrapper modules of
+// their own, matching `admission-registry.ts`: each wrapper was a file
+// that named a handful of constants and forwarded a single call to the
+// shared signed-document machinery, so it added a second place for the
+// transport contract to drift without adding a definition. The
+// subdirectory, filenames and URLs keep their historical values, so an
+// on-disk cache written by an earlier build still resolves.
+// ---------------------------------------------------------------------
+
+/**
+ * Disk cache, pinned to `<userData>/marketplace-whitelist/`:
+ *   whitelist.json       — last good document body (utf-8 JSON)
+ *   whitelist.json.sig   — sidecar signature envelope (utf-8 JSON)
+ *   meta.json            — { etag?, highestSeenIssuedAt?, lastFetchAt? }
+ */
+export class WhitelistCache extends SignedDocumentCache {
+  constructor(userDataDir: string) {
+    super(userDataDir, "marketplace-whitelist", "whitelist.json", "whitelist.json.sig");
+  }
+}
+
+/**
+ * The `{etag?, highestSeenIssuedAt?, lastFetchAt?}` meta shape has no
+ * consumer here; import `SignedDocCacheMeta` from `../signed-doc-cache.js`
+ * directly if one is ever needed.
+ */
+type WhitelistCacheSnapshot = SignedDocCacheSnapshot;
+
+/**
+ * Primary URL is GitHub Pages; the fallback is a GitHub Release asset,
+ * used on 5xx / network errors against the primary. An ETag is sent on
+ * subsequent requests so the CDN can short-circuit with 304 Not Modified
+ * (no body transfer cost).
+ */
+const WHITELIST_SOURCE: SignedDocSource = {
+  primaryBase: "https://lvis-project.github.io/marketplace-whitelist/v1",
+  fallbackBase:
+    "https://github.com/lvis-project/marketplace-whitelist/releases/download/v1-latest",
+  docFilename: "whitelist.json",
+  sigFilename: "whitelist.json.sig",
+};
+
+/**
+ * Fetch the whitelist document + signature. Throws when both endpoints
+ * fail — `init()` catches and routes the error into the audit log +
+ * telemetry counter.
+ */
+async function fetchWhitelist(
+  opts: FetchSignedDocumentOptions = {},
+): Promise<SignedDocumentFetchOutcome> {
+  return fetchSignedDocument(WHITELIST_SOURCE, opts, "lvis-app/whitelist-fetcher");
+}
 
 /** Caller-facing decision shape — discriminated union for exhaustive narrowing. */
 export type WhitelistDecision =
@@ -81,7 +145,7 @@ export interface WhitelistInitOptions {
    * App-shutdown AbortSignal threaded from
    * boot so a slow CDN response doesn't keep the registry's fetch alive
    * after the user quit (up to the 10s HTTP timeout). The signal flows
-   * directly into `whitelist-fetcher.ts` and aborts the underlying
+   * directly into `fetchWhitelist` below and aborts the underlying
    * `fetch()` immediately.
    */
   signal?: AbortSignal;

@@ -3,9 +3,10 @@
  * a detached `.sig` sibling), with primary→fallback failover and conditional
  * GET via ETag.
  *
- * Extracted from the original `whitelist/whitelist-fetcher.ts` (#893 Stage 2)
- * so the plugin revocation registry can reuse the exact same
- * fetch/fallback/ETag contract instead of re-implementing it. Callers supply
+ * Extracted from the marketplace whitelist registry's original private
+ * fetcher so the plugin revocation and admission registries can reuse the
+ * exact same fetch/fallback/ETag contract instead of re-implementing it.
+ * Callers supply
  * their own base URLs and filenames; this module stays a thin,
  * schema-agnostic HTTP client — no signature verification, no cache, no
  * monotonicity logic (those stay in each domain's registry, same as before).
@@ -25,7 +26,10 @@ export interface SignedDocSource {
   sigFilename: string;
 }
 
-export interface SignedDocumentFetchResult {
+// The two arms below are reachable through the exported
+// `SignedDocumentFetchOutcome` union and narrowed structurally by callers
+// (`"notModified" in outcome`), so neither needs an export of its own.
+interface SignedDocumentFetchResult {
   /** Raw JSON body (utf-8 decoded). */
   body: string;
   /** Raw signature envelope JSON (utf-8 decoded). */
@@ -37,7 +41,7 @@ export interface SignedDocumentFetchResult {
 }
 
 /** 304 case — caller should keep its cached copy. */
-export interface SignedDocumentNotModified {
+interface SignedDocumentNotModified {
   notModified: true;
   source: "primary" | "fallback";
 }

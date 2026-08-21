@@ -1092,11 +1092,8 @@ describe("initPluginRuntime HostApi factory", () => {
     // #893 Stage 2 — seed the whitelist registry with a grant for plugin-b6
     // so tier-3 lets the call through; B6 specifically exercises tier-4
     // active-vendor cross-check inside getSecret.
-    const { whitelistRegistry } = await import(
+    const { whitelistRegistry, WhitelistCache } = await import(
       "../../../plugins/whitelist/whitelist-registry.js"
-    );
-    const { WhitelistCache } = await import(
-      "../../../plugins/whitelist/whitelist-cache.js"
     );
     const { WHITELIST_PRIMARY_KEY_ID } = await import(
       "../../../plugins/marketplace-keys.js"
