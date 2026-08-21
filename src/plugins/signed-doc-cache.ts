@@ -44,6 +44,59 @@ export interface SignedDocCacheSnapshot {
   meta: SignedDocCacheMeta;
 }
 
+/**
+ * How far into the future a document's own `issuedAt` may sit before the
+ * document is discarded.
+ *
+ * Sized to the issuer's re-issue cadence rather than to the document TTL: an
+ * accepted document advances `highestSeenIssuedAt`, which is on disk, so this
+ * allowance is also the worst-case duration for which a single implausible
+ * document can hold the mark above every genuine document that follows it.
+ * Six hours tolerates ordinary device clock skew while keeping that
+ * self-healing window to one issuance cycle.
+ *
+ * Module-private on purpose: the allowance is only ever consumed through
+ * `checkIssuedAt`, and exporting it would invite a caller to re-derive the
+ * comparison rather than use the one place that states it.
+ */
+const MAX_FUTURE_ISSUED_AT_MS = 6 * 60 * 60 * 1000;
+
+/** Why `checkIssuedAt` refused a candidate document. */
+export type IssuedAtRejection = "issued-in-future" | "monotonicity";
+
+/**
+ * Gate one candidate document's `issuedAt` against the two rules that govern
+ * `highestSeenIssuedAt`. Returns the rejection reason, or `null` when the
+ * document may be accepted and the mark advanced to it.
+ *
+ * Lives beside `SignedDocCacheMeta` because both rules are statements about
+ * that record's `highestSeenIssuedAt` field, and all three signed-document
+ * registries persist it. Keeping the rules next to the field's definition is
+ * what stops one registry's notion of an acceptable `issuedAt` from drifting
+ * away from another's.
+ *
+ * Order is deliberate. The future bound runs first so an implausibly-dated
+ * document is discarded *before* anything can advance the mark to it; running
+ * monotonicity first would let such a document through (it is not a rollback)
+ * and leave the mark above every genuine document that follows.
+ *
+ * `issuedAt` is required to be a valid ISO-8601 timestamp by each document
+ * schema's parser, which every caller runs before reaching here, so neither
+ * comparison has to defend against `NaN`.
+ */
+export function checkIssuedAt(
+  issuedAt: string,
+  highestSeenIssuedAt: string | undefined,
+  now: number,
+): IssuedAtRejection | null {
+  const issuedAtMs = Date.parse(issuedAt);
+  if (issuedAtMs - now > MAX_FUTURE_ISSUED_AT_MS) return "issued-in-future";
+  if (highestSeenIssuedAt && issuedAtMs < Date.parse(highestSeenIssuedAt)) {
+    return "monotonicity";
+  }
+  return null;
+}
+
 async function safeReadJsonFile<T>(path: string): Promise<T | null> {
   try {
     const raw = await readFile(path, "utf-8");
