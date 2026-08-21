@@ -1,7 +1,7 @@
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import { ConversationHistory } from "../conversation-history.js";
 import type { GenericMessage } from "../llm/types.js";
-import { genericToModelMessages } from "../llm/vercel/message-mapper.js";
+import { genericToModelMessages } from "../llm/vercel/adapter.js";
 import { MAX_LOCAL_USER_CONTENT_PARTS } from "../../main/subscription-attachment-input.js";
 
 describe("ConversationHistory createdAt stamping", () => {

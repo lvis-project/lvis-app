@@ -394,7 +394,8 @@ export function useChatState(api: LvisApi) {
         // consumes this entry to render <TurnSummaryFooter> next to the final
         // assistant card. tokensIn / tokensOut are routed from the LLM
         // provider's usage report (Vercel AI SDK forwards prompt_tokens +
-        // completion_tokens through stream-mapper.ts; see the engine-side
+        // completion_tokens through fullStreamToStreamEvent in
+        // engine/llm/vercel/adapter.ts; see the engine-side
         // `onTurnSummary` wiring in conversation-loop.ts runTurn).
         const summary = parseTurnSummaryEvent(ev);
         if (!summary) {
