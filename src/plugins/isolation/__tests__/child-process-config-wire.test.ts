@@ -63,7 +63,7 @@ import {
   type ConfinedPluginChild,
   type ConfinedPluginChildSpec,
 } from "../out-of-process-plugin.js";
-import { SECRET_REDACTED_SENTINEL } from "../config-subscription-child.js";
+import { SECRET_REDACTED_SENTINEL } from "../host-api-wire.js";
 import {
   emitPluginConfigChange,
   subscribePluginConfigChange,
