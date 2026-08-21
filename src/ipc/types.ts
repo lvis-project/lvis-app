@@ -7,6 +7,7 @@ import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-
 import type { ConversationCommandPort } from "../main/conversation-command-port.js";
 import type { TailnetSharingOwnerService } from "../main/tailnet-sharing-owner-service.js";
 import type { TelegramConnectionService } from "../main/telegram-connection-service.js";
+import type { TailnetObserverConfigService } from "../main/tailnet-observer-config-service.js";
 
 export type IpcDeps = AppServices & {
   getMainWindow: () => BrowserWindow | null;
@@ -33,4 +34,10 @@ export type IpcDeps = AppServices & {
    * `telegram-connection-disabled`.
    */
   telegramConnectionService?: TelegramConnectionService;
+  /**
+   * Main-only owner facade for the Tailnet observer configuration. Absent
+   * unless main composition built it, in which case every channel answers
+   * `tailnet-observer-unavailable`.
+   */
+  tailnetObserverConfigService?: TailnetObserverConfigService;
 };

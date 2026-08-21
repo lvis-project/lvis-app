@@ -43,7 +43,7 @@ export interface TailnetObserverServer {
 }
 
 /** Every key the observer configuration is made of, in both of its sources. */
-export type TailnetObserverConfigKey =
+type TailnetObserverConfigKey =
   | "enabled"
   | "expectedAppCapability"
   | "port"
@@ -59,9 +59,9 @@ export type TailnetObserverConfigKey =
  * masquerade as the approved host-owned configuration, so every surface that
  * shows the effective config shows this beside it.
  */
-export type TailnetObserverConfigSource = "file" | "env-override" | "unset";
+type TailnetObserverConfigSource = "file" | "env-override" | "unset";
 
-export type TailnetObserverConfigProvenance =
+type TailnetObserverConfigProvenance =
   Readonly<Record<TailnetObserverConfigKey, TailnetObserverConfigSource>>;
 
 export interface TailnetObserverResolution {
@@ -89,8 +89,8 @@ export interface TailnetObserverConfigFile {
   readonly webOrigin?: string;
 }
 
-export const TAILNET_FEATURE_NAMESPACE = "tailnet";
-export const TAILNET_OBSERVER_CONFIG_FILE = "observer.json";
+const TAILNET_FEATURE_NAMESPACE = "tailnet";
+const TAILNET_OBSERVER_CONFIG_FILE = "observer.json";
 
 const CONFIG_KEYS: readonly TailnetObserverConfigKey[] = [
   "enabled",
@@ -337,6 +337,23 @@ export async function readTailnetObserverConfigFile(
 }
 
 /**
+ * Persist the host-owned configuration, after proving it resolves.
+ *
+ * The dry run is the point: a configuration that would make the next boot throw
+ * must be refused at the moment it is proposed, while there is still a person
+ * to tell. It runs with no environment layer, because the file has to stand on
+ * its own — an override that happens to be set in this shell is not a reason to
+ * persist a file that would fail without it.
+ */
+export async function writeTailnetObserverConfigFile(
+  file: TailnetObserverConfigFile,
+  namespace: FeatureNamespaceHandle = openFeatureNamespace(TAILNET_FEATURE_NAMESPACE),
+): Promise<void> {
+  resolveFromLayers(fileLayer(parseTailnetObserverConfigFile(file)), {});
+  await namespace.writeJson(TAILNET_OBSERVER_CONFIG_FILE, file);
+}
+
+/**
  * Resolve the observer configuration the way production boots it: the
  * host-owned file first, the environment as an override layer on top.
  */
@@ -362,9 +379,35 @@ let stopPromise: Promise<void> | null = null;
 let lifecycleGeneration = 0;
 let stopped = false;
 
+let activeConfig: TailnetObserverConfig | null = null;
+let lastStartError: string | null = null;
+
 /** The main-owned P2 runtime is intentionally never exposed to a remote surface. */
 export function getTailnetPairedSharingRuntime(): TailnetPairedSharingRuntime | null {
   return activePairedSharingRuntime;
+}
+
+export interface TailnetObserverRuntimeState {
+  /** The port the listener actually bound, or null when nothing is listening. */
+  readonly listeningPort: number | null;
+  /** The configuration the running listener booted with. */
+  readonly activeConfig: TailnetObserverConfig | null;
+  /**
+   * The kebab-case code of the last failed start.
+   *
+   * Boot logs this and continues, which is why "the observer is not up and I
+   * cannot tell why" used to require reading the main-process log. It is kept
+   * here so a diagnostics surface can answer the question in the app.
+   */
+  readonly lastStartError: string | null;
+}
+
+export function getTailnetObserverRuntimeState(): TailnetObserverRuntimeState {
+  return Object.freeze({
+    listeningPort: activeServer?.port ?? null,
+    activeConfig,
+    lastStartError,
+  });
 }
 function dependencies(
   overrides: Partial<TailnetObserverServerDependencies> | undefined,
@@ -436,6 +479,7 @@ async function startForBoot(
   }
 
   activeServer = server;
+  activeConfig = config;
   activePairedSharingRuntime = pairedSharingRuntime ?? null;
   options.log?.(
     "[tailnet-observer] listener ready on 127.0.0.1:" + server.port + "; configure Serve separately",
@@ -457,7 +501,19 @@ export async function maybeStartTailnetObserverServer(
 
   const attempt = ++startAttemptSequence;
   activeStartAttempt = attempt;
-  const pending = startForBoot(options, lifecycleGeneration);
+  // Record why a start failed. Boot logs the throw and carries on, so without
+  // this the only account of a misconfigured observer is a main-process log
+  // line the user of a packaged app never sees.
+  const pending = startForBoot(options, lifecycleGeneration).then(
+    (started) => {
+      lastStartError = null;
+      return started;
+    },
+    (err: unknown) => {
+      lastStartError = err instanceof Error ? err.message : "tailnet-observer-start-failed";
+      throw err;
+    },
+  );
   startPromise = pending;
   try {
     return await pending;
@@ -472,6 +528,7 @@ export async function maybeStartTailnetObserverServer(
 async function stopForShutdown(): Promise<void> {
   stopped = true;
   lifecycleGeneration += 1;
+  activeConfig = null;
   activePairedSharingRuntime = null;
   const pending = startPromise;
   const current = takeActiveServer();
@@ -510,6 +567,8 @@ export function resetTailnetObserverServerForTests(): void {
   }
   lifecycleGeneration += 1;
   stopped = false;
+  activeConfig = null;
+  lastStartError = null;
   activePairedSharingRuntime = null;
 }
 

@@ -42,6 +42,7 @@ import type {
 } from "../../shared/subscription-runtime.js";
 import type { ChatSendInputOrigin } from "../../shared/chat-origin.js";
 import type { TailnetSharingOwnerApi } from "../../shared/tailnet-sharing.js";
+import type { TailnetObserverConfigApi } from "../../shared/tailnet-observer-config.js";
 import type { TelegramConnectionOwnerApi } from "../../shared/telegram-connection.js";
 import type { AwayAuthorityOwnerApi } from "../../shared/away-authority-arm.js";
 import type { RolePreset } from "../../data/role-presets.js";
@@ -607,6 +608,7 @@ export type LvisApi = {
     action: RemoteA2AActionCall;
   };
   tailnetSharing: TailnetSharingOwnerApi;
+  tailnetObserver: TailnetObserverConfigApi;
   telegramConnection: TelegramConnectionOwnerApi;
   awayAuthority: AwayAuthorityOwnerApi;
   /**
