@@ -11,7 +11,7 @@
 import "./setup.js";
 import { describe, it, expect } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
-import { ReasoningCard } from "../../src/ui/renderer/components/ReasoningCard.js";
+import { ReasoningCard } from "../../src/ui/renderer/components/TranscriptRenderer.js";
 
 function card(streaming: boolean, text = "thinking content here") {
   return (

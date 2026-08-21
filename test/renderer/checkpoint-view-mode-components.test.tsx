@@ -9,7 +9,7 @@ import "./setup.js";
 import { describe, it, expect, vi } from "vitest";
 import { render, fireEvent } from "@testing-library/react";
 import { ViewModeBanner } from "../../src/ui/renderer/components/ViewModeBanner.js";
-import { CheckpointDivider } from "../../src/ui/renderer/components/CheckpointDivider.js";
+import { CheckpointDivider } from "../../src/ui/renderer/components/TranscriptRenderer.js";
 
 /* ────────────────────────────────────────────────────────────────────────
  * ViewModeBanner
