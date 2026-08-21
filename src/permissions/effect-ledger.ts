@@ -34,10 +34,6 @@ import {
   type StaticChokepointKind,
 } from "./effect-kind.js";
 
-// Re-export the chokepoint vocabulary so existing importers of `Effect` from
-// this module keep working; the SOT for the kind→effect mapping is effect-kind.ts.
-export type { Effect, ChokepointKind } from "./effect-kind.js";
-
 /**
  * One host-mediated effect observed during an invocation. `kind` is a
  * {@link ChokepointKind} naming the host chokepoint (e.g. `"config.set"`,
