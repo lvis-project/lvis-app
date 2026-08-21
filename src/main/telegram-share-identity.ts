@@ -15,7 +15,7 @@
  * every mutation through one `emitChange` — is right about the chokepoint and
  * wrong about the signal. "The document changed" is not "the share changed". The
  * store's document also holds the poll offset, which advances after **every
- * inbound message**: `telegram-polling-ingress` calls `recordPollOffset` once
+ * inbound message**: `telegram-bridge-server` calls `recordPollOffset` once
  * per handled update, that goes through `mutate`, and `mutate` emits whenever
  * the document changed. Retiring on the raw signal therefore retires the grant
  * on the very traffic the feature exists to answer — and because
