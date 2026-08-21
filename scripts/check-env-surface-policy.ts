@@ -24,7 +24,7 @@
  *
  * Usage: node --import tsx scripts/check-env-surface-policy.ts
  */
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ENV_BACKED_SETTINGS } from "../src/shared/env-backed-settings.js";
@@ -147,12 +147,16 @@ const DYNAMIC_LOOKUP_RE = /(?:process\.)?env\s*\[\s*(?!["'`])/;
  *     packaged-env scrub), which is a family of variables and not one of them.
  */
 const TABLE_ENTRY_RE = /["'`](LVIS_[A-Z0-9_]*[A-Z0-9])["'`]/g;
-const TEST_FILE_RE = /(^|[\\/])__tests__[\\/]|\.test\.[cm]?tsx?$/;
+const TEST_FILE_RE = /(?:(?:^|[\\/])__tests__[\\/])|(?:\.test\.[cm]?tsx?$)/;
 
 function scan(dir: string, found: Map<string, string>): void {
-  for (const name of readdirSync(dir)) {
+  // `withFileTypes` rather than a `statSync` beside the read: one syscall
+  // answers directory-or-file, so there is no window between the check and
+  // the open in which the entry could become something else.
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const name = entry.name;
     const path = join(dir, name);
-    if (statSync(path).isDirectory()) {
+    if (entry.isDirectory()) {
       scan(path, found);
       continue;
     }
