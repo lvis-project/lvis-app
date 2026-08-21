@@ -49,7 +49,7 @@ function makeRevocableProjectLoop(defaultRoot: string, authorizedRoots: Set<stri
 
 describe("ConversationLoop project identity", () => {
   it("treats the app-managed workspace root as the default project without persisting a scope flag", () => {
-    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const { loop, setProjectContext } = makeProjectLoop(defaultRoot);
 
     loop.newConversation("main", {
@@ -80,7 +80,7 @@ describe("ConversationLoop project identity", () => {
   });
 
   it("does not include legacy unscoped memory for explicit non-default projects", () => {
-    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const { loop, setProjectContext } = makeProjectLoop(defaultRoot);
 
     loop.newConversation("main", {
@@ -101,7 +101,7 @@ describe("ConversationLoop project identity", () => {
   });
 
   it("rebinds a resumed session without project metadata to the default workspace", () => {
-    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const memoryManager = makeConversationLoopMemoryManager([
       { role: "user", content: "hello" },
     ], "unscoped-session");
@@ -124,7 +124,7 @@ describe("ConversationLoop project identity", () => {
   });
 
   it("re-authorizes stored project roots on session resume before granting tool directories", () => {
-    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const deniedRoot = "C:\\private\\denied";
     const setProjectContext = vi.fn();
     const systemPromptBuilder = {
@@ -173,7 +173,7 @@ describe("ConversationLoop project identity", () => {
   });
 
   it("revokes removed-root directories and rebinds the active project to default", () => {
-    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const removedRoot = "C:\\workspace\\alpha";
     const authorizedRoots = new Set([removedRoot]);
     const { loop, broadcastPermissionConfigChanged } = makeRevocableProjectLoop(
@@ -200,7 +200,7 @@ describe("ConversationLoop project identity", () => {
   });
 
   it("keeps an independently authorized child project when its former parent is removed", () => {
-    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const parentRoot = "C:\\workspace";
     const childRoot = `${parentRoot}\\child`;
     const { loop } = makeRevocableProjectLoop(defaultRoot, new Set([childRoot]));
@@ -221,7 +221,7 @@ describe("ConversationLoop project identity", () => {
   });
 
   it("does not revoke a segment-prefix sibling", () => {
-    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const removedRoot = "C:\\workspace\\app";
     const siblingRoot = "C:\\workspace\\app-old";
     const { loop } = makeRevocableProjectLoop(defaultRoot, new Set([siblingRoot]));
@@ -238,7 +238,7 @@ describe("ConversationLoop project identity", () => {
   });
 
   it("aborts an affected active turn with the workspace-removal reason", () => {
-    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const removedRoot = "C:\\workspace\\alpha";
     const authorizedRoots = new Set([removedRoot]);
     const { loop } = makeRevocableProjectLoop(defaultRoot, authorizedRoots);
@@ -255,7 +255,7 @@ describe("ConversationLoop project identity", () => {
   });
 
   it("does not abort an unrelated active turn", () => {
-    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const removedRoot = "C:\\workspace\\alpha";
     const unrelatedRoot = "D:\\workspace\\beta";
     const { loop } = makeRevocableProjectLoop(defaultRoot, new Set([unrelatedRoot]));
@@ -269,7 +269,7 @@ describe("ConversationLoop project identity", () => {
   });
 
   it("aborts an unrelated project turn when the removed root was in global scope", () => {
-    const defaultRoot = "C:\\Users\\ikcha\\.lvis\\workspace";
+    const defaultRoot = "C:\\Users\\example\\.lvis\\workspace";
     const removedRoot = "C:\\workspace\\alpha";
     const unrelatedRoot = "D:\\workspace\\beta";
     const { loop } = makeRevocableProjectLoop(defaultRoot, new Set([unrelatedRoot]));

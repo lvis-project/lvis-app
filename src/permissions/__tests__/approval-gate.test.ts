@@ -984,7 +984,7 @@ describe("ApprovalGate", () => {
     const req = makeRequest({
       id: "req-case",
       toolName: "file_read",
-      target: { filePath: "/Users/Ken/.SSH/ID_rsa" },
+      target: { filePath: "/Users/Example/.SSH/ID_rsa" },
     });
 
     const result = await gate.requestAndWait(req);

@@ -82,30 +82,30 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
 
 describe("policyMatchPaths", () => {
   it("returns [path, path + '/'] for a non-slash-terminated path", () => {
-    const result = policyMatchPaths("/home/ken/.aws");
-    expect(result).toEqual(["/home/ken/.aws", "/home/ken/.aws/"]);
+    const result = policyMatchPaths("/home/example/.aws");
+    expect(result).toEqual(["/home/example/.aws", "/home/example/.aws/"]);
   });
 
   it("returns [path without slash, path with slash] when already slash-terminated", () => {
-    const result = policyMatchPaths("/home/ken/.aws/");
-    expect(result).toEqual(["/home/ken/.aws", "/home/ken/.aws/"]);
+    const result = policyMatchPaths("/home/example/.aws/");
+    expect(result).toEqual(["/home/example/.aws", "/home/example/.aws/"]);
   });
 
   it("normalizes Windows backslashes to forward slashes", () => {
-    const result = policyMatchPaths("C:\\Users\\ken\\.ssh");
+    const result = policyMatchPaths("C:\\Users\\example\\.ssh");
     expect(result[0]).toBe("C:/Users/example/.ssh");
     expect(result[1]).toBe("C:/Users/example/.ssh/");
   });
 });
 
 describe("isSensitivePath — positive matches", () => {
-  it("matches /home/ken/.ssh/id_rsa against **/.ssh/**", () => {
-    const result = isSensitivePath("/home/ken/.ssh/id_rsa");
+  it("matches /home/example/.ssh/id_rsa against **/.ssh/**", () => {
+    const result = isSensitivePath("/home/example/.ssh/id_rsa");
     expect(result).toBe("**/.ssh/**");
   });
 
   it("matches nested files under .ssh", () => {
-    expect(isSensitivePath("/home/ken/.ssh/private/id_rsa")).toBe("**/.ssh/**");
+    expect(isSensitivePath("/home/example/.ssh/private/id_rsa")).toBe("**/.ssh/**");
   });
 
   it("matches /Users/example/.aws/credentials", () => {
@@ -127,8 +127,8 @@ describe("isSensitivePath — positive matches", () => {
     expect(isSensitivePath("/Users/example/.gnupg/pubring.kbx")).toBe("**/.gnupg/**");
   });
 
-  it("matches /home/ken/.kube/config", () => {
-    expect(isSensitivePath("/home/ken/.kube/config")).toBe("**/.kube/config");
+  it("matches /home/example/.kube/config", () => {
+    expect(isSensitivePath("/home/example/.kube/config")).toBe("**/.kube/config");
   });
 
   it("matches /Users/example/.lvis/certs/corp-ca.pem (LVIS addition)", () => {
@@ -169,8 +169,8 @@ describe("isSensitivePath — positive matches", () => {
 });
 
 describe("isSensitivePath — directory (trailing-slash) form §S2", () => {
-  it("matches bare directory /home/ken/.gnupg via trailing-slash helper", () => {
-    const result = isSensitivePath("/home/ken/.gnupg");
+  it("matches bare directory /home/example/.gnupg via trailing-slash helper", () => {
+    const result = isSensitivePath("/home/example/.gnupg");
     expect(result).toBe("**/.gnupg/**");
   });
 
@@ -180,12 +180,12 @@ describe("isSensitivePath — directory (trailing-slash) form §S2", () => {
 });
 
 describe("isSensitivePath — negative cases", () => {
-  it("returns null for /home/ken/code/ssh-utils.ts", () => {
-    expect(isSensitivePath("/home/ken/code/ssh-utils.ts")).toBeNull();
+  it("returns null for /home/example/code/ssh-utils.ts", () => {
+    expect(isSensitivePath("/home/example/code/ssh-utils.ts")).toBeNull();
   });
 
-  it("returns null for /home/ken/ssh_config_template.txt", () => {
-    expect(isSensitivePath("/home/ken/ssh_config_template.txt")).toBeNull();
+  it("returns null for /home/example/ssh_config_template.txt", () => {
+    expect(isSensitivePath("/home/example/ssh_config_template.txt")).toBeNull();
   });
 
   it("returns null for /tmp/safe.txt", () => {
@@ -220,11 +220,11 @@ describe("isSensitivePath — Permission policy P2.5 OS sensitive paths", () => 
   });
 
   it("matches ~/.bash_history", () => {
-    expect(isSensitivePath("/home/ken/.bash_history")).toBe("**/.bash_history");
+    expect(isSensitivePath("/home/example/.bash_history")).toBe("**/.bash_history");
   });
 
   it("matches ~/.psql_history", () => {
-    expect(isSensitivePath("/home/ken/.psql_history")).toBe("**/.psql_history");
+    expect(isSensitivePath("/home/example/.psql_history")).toBe("**/.psql_history");
   });
 
   it("matches ~/Library/Cookies/* on macOS", () => {
@@ -371,11 +371,11 @@ describe("canonicalizePathForMatch", () => {
 
 describe("caseFoldForMatch", () => {
   it("lowercases on darwin/win32, preserves on linux", () => {
-    const result = caseFoldForMatch("/Users/Ken/Documents");
+    const result = caseFoldForMatch("/Users/Example/Documents");
     if (process.platform === "darwin" || process.platform === "win32") {
-      expect(result).toBe("/users/ken/documents");
+      expect(result).toBe("/users/example/documents");
     } else {
-      expect(result).toBe("/Users/Ken/Documents");
+      expect(result).toBe("/Users/Example/Documents");
     }
   });
 });

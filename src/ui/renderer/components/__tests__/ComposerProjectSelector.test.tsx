@@ -11,7 +11,7 @@ import type { ProjectIdentity } from "../../../../shared/project-identity.js";
 // labeling"). Only PROJECTS[1] ("alpha", a real user-added project) counts
 // as an explicit selection.
 const PROJECTS: ProjectIdentity[] = [
-  { projectRoot: "C:\\Users\\ikcha\\.lvis\\workspace", projectName: "default", isDefault: true },
+  { projectRoot: "C:\\Users\\example\\.lvis\\workspace", projectName: "default", isDefault: true },
   { projectRoot: "C:\\work\\alpha", projectName: "alpha" },
 ];
 
@@ -143,7 +143,7 @@ describe("ComposerProjectSelector", () => {
       ok: true,
       added: "C:\\work\\beta",
       roots: [
-        { path: "C:\\Users\\ikcha\\.lvis\\workspace", isDefault: true },
+        { path: "C:\\Users\\example\\.lvis\\workspace", isDefault: true },
         { path: "C:\\work\\alpha", isDefault: false },
         { path: "C:\\work\\beta", isDefault: false },
       ],

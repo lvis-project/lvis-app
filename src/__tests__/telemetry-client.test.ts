@@ -129,7 +129,7 @@ describe("PluginTelemetryClient", () => {
   // 5. PII scrubber — paths and emails are stripped
   it("scrubPii strips absolute paths and email addresses", () => {
     expect(scrubPii("/home/user/documents/secret.txt")).toContain("[path]");
-    expect(scrubPii("C:\\Users\\ken\\AppData\\Local\\lvis")).toContain("[path]");
+    expect(scrubPii("C:\\Users\\example\\AppData\\Local\\lvis")).toContain("[path]");
     expect(scrubPii("contact user@example.com for support")).toContain("[email]");
     expect(scrubPii("com.example.meeting-recorder")).toBe("com.example.meeting-recorder");
     expect(scrubPii("1.2.3")).toBe("1.2.3");

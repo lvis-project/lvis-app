@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { LvisApi } from "../../types.js";
 import { usePinnedProjects } from "../use-pinned-projects.js";
 
-const ROOT_A = "C:\\Users\\ikcha\\workspace\\lvis-project\\alpha";
-const ROOT_B = "C:\\Users\\ikcha\\workspace\\lvis-project\\beta";
+const ROOT_A = "C:\\Users\\example\\workspace\\lvis-project\\alpha";
+const ROOT_B = "C:\\Users\\example\\workspace\\lvis-project\\beta";
 
 function makeApi(seed?: string[]): { api: LvisApi; update: ReturnType<typeof vi.fn> } {
   const update = vi.fn(async () => ({ ok: true }) as never);
