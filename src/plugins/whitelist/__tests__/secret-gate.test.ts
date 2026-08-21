@@ -15,7 +15,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runSecretGate } from "../secret-gate.js";
 import type { SecretGateInput } from "../secret-gate.js";
-import { whitelistRegistry } from "../whitelist-registry.js";
+import { WhitelistCache, whitelistRegistry } from "../whitelist-registry.js";
 import { cleanupTmpDir } from "../../../__tests__/support/tmp-dir-teardown.js";
 
 const tempCacheRoots: string[] = [];
@@ -142,7 +142,6 @@ describe("runSecretGate — admin-install bypass (#955)", () => {
     const { mkdtempSync } = await import("node:fs");
     const { tmpdir } = await import("node:os");
     const { join } = await import("node:path");
-    const { WhitelistCache } = await import("../whitelist-cache.js");
     const { WHITELIST_PRIMARY_KEY_ID } = await import("../../marketplace-keys.js");
 
     const { publicKey, privateKey } = generateKeyPairSync("ed25519");

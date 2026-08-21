@@ -460,7 +460,7 @@ withdrawal mechanism's enforcement.
 The rules:
 
 1. `highestSeenIssuedAt` persists in the cache meta, exactly as
-   `revocation-cache.ts` does. A fetched document with
+   `revocation-registry.ts` does. A fetched document with
    `issuedAt < highestSeenIssuedAt` is discarded; the previous snapshot is
    retained; the event is audited and counted.
 2. A fetched document with `issuedAt` more than the clock-skew allowance in the
