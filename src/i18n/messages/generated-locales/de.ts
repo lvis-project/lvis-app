@@ -1426,6 +1426,8 @@ export const deMessages: Record<string, string> = {
   "formatIpcError.tailnetSharingInputInvalid": "Die Tailnet-Freigabeanfrage ist ungültig.",
   "formatIpcError.tailnetSharingOperationRejected": "Der Tailnet-Freigabevorgang konnte nicht abgeschlossen werden.",
   "formatIpcError.tailnetSharingUnavailable": "Die Tailnet-Freigabe ist derzeit nicht verfügbar.",
+  "formatIpcError.tailnetObserverUnavailable": "Die Tailnet-Beobachtereinstellungen sind derzeit nicht verfügbar.",
+  "formatIpcError.tailnetObserverWriteFailed": "Die Tailnet-Beobachterkonfiguration konnte nicht gespeichert werden.",
   "formatIpcError.unknownError": "Unbekannter Fehler",
   "formatIpcError.unknownPluginId": "Unbekannte Plugin-ID.",
   "formatIpcError.userKeyboardRequired": "Diese Berechtigungsänderung kann nur über aktive Benutzereingaben durchgeführt werden.",

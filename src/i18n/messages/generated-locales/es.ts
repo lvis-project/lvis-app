@@ -1440,6 +1440,8 @@ export const esMessages: Record<string, string> = {
   "formatIpcError.tailnetSharingInputInvalid": "La solicitud de compartición de Tailnet no es válida.",
   "formatIpcError.tailnetSharingOperationRejected": "No se pudo completar la operación de compartición de Tailnet.",
   "formatIpcError.tailnetSharingUnavailable": "La compartición de Tailnet no está disponible actualmente.",
+  "formatIpcError.tailnetObserverUnavailable": "La configuración del observador de Tailnet no está disponible actualmente.",
+  "formatIpcError.tailnetObserverWriteFailed": "No se pudo guardar la configuración del observador de Tailnet.",
   "formatIpcError.unknownError": "Error desconocido",
   "formatIpcError.unknownPluginId": "ID de complemento desconocido.",
   "formatIpcError.userKeyboardRequired": "Este cambio de permiso solo se puede realizar a partir de la entrada del usuario activo.",

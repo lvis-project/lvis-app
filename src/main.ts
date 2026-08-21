@@ -45,8 +45,9 @@ import { createA2ALoopbackRuntime } from "./main/a2a-loopback-runtime.js";
 import { maybeStartRemoteA2AReceiverServer } from "./main/a2a-remote-receiver-server.js";
 import {
   maybeStartTailnetObserverServer,
-  resolveTailnetObserverConfig,
+  loadTailnetObserverConfig,
 } from "./main/tailnet-surface-server.js";
+import { createTailnetObserverConfigService } from "./main/tailnet-observer-config-service.js";
 import { createTailnetPairedSharingRuntime } from "./main/tailnet-paired-sharing-runtime.js";
 import { stopTelegramBridgeServer } from "./main/telegram-bridge-server.js";
 import { createTelegramConnectionStore } from "./main/telegram-connection-store.js";
@@ -191,7 +192,7 @@ async function main() {
     | ReturnType<typeof createTailnetSharingOwnerService>
     | undefined;
   try {
-    const tailnetConfig = resolveTailnetObserverConfig();
+    const { config: tailnetConfig } = await loadTailnetObserverConfig();
     if (tailnetConfig?.pairedSharingEnabled) {
       tailnetPairedSharingRuntime = await createTailnetPairedSharingRuntime({
         getCurrentConversationId,
@@ -292,6 +293,9 @@ async function main() {
     conversationCommandPort,
     tailnetSharingOwnerService,
     telegramConnectionService,
+    createTailnetObserverConfigService({
+      pairedSharingBootstrapFailed: () => tailnetPairedSharingBootstrapUnavailable,
+    }),
   );
 
   // #1436: start the OPT-IN loopback local API server (OFF by default; enabled
