@@ -13,7 +13,6 @@ import type { WorkspaceRootRevocationOptions } from "./types.js";
 import { normalizeToolPairInvariant } from "../conversation-history.js";
 import { backgroundShellManager } from "../../tools/background-shell-manager.js";
 import { createTracer } from "../../observability/conversation-trace.js";
-import { latestPersistedContextTokens } from "./context-carrier.js";
 import { estimateMessagesTokens } from "../auto-compact.js";
 import { createLogger } from "../../lib/logger.js";
 import { projectBasename, projectRootEquals } from "../../shared/project-identity.js";
@@ -411,3 +410,39 @@ export async function branchFromCheckpoint(self: ConversationLoop, compactNum: n
     log.info(`branchFromCheckpoint: new session ${newSessionId} from ${self.sessionId} @ compact #${compactNum}`);
     return { newSessionId, lastMessageRole, shouldAutoContinue };
   }
+
+/**
+ * Recover the latest persisted context-token count from a message array.
+ * Extracted verbatim from `conversation-loop.ts` — no `this` dependency.
+ */
+function latestPersistedContextTokens(messages: GenericMessage[]): number {
+  let latestTurnSummaryTokens = 0;
+  let latestTurnSummaryCreatedAt = 0;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const contextTokensAfter = messages[i]?.meta?.checkpointMeta?.contextTokensAfter;
+    if (
+      typeof contextTokensAfter === "number" &&
+      Number.isFinite(contextTokensAfter) &&
+      contextTokensAfter > 0
+    ) {
+      const compactedAt = messages[i]?.meta?.createdAt;
+      if (
+        latestTurnSummaryTokens > 0 &&
+        typeof compactedAt === "number" &&
+        Number.isFinite(compactedAt) &&
+        latestTurnSummaryCreatedAt > compactedAt
+      ) {
+        return latestTurnSummaryTokens;
+      }
+      return Math.floor(contextTokensAfter);
+    }
+    const tokensIn = messages[i]?.meta?.turnSummary?.tokensIn;
+    if (typeof tokensIn === "number" && Number.isFinite(tokensIn) && tokensIn > 0) {
+      latestTurnSummaryTokens = Math.floor(tokensIn);
+      const createdAt = messages[i]?.meta?.createdAt;
+      latestTurnSummaryCreatedAt =
+        typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : 0;
+    }
+  }
+  return latestTurnSummaryTokens;
+}
