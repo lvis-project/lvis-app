@@ -63,6 +63,7 @@ import { createLogger } from "../../lib/logger.js";
 import { verifyEnvelope, type PublicKeyInput } from "../envelope-verifier.js";
 import { ADMISSION_PUBLIC_KEYS } from "../marketplace-keys.js";
 import {
+  checkIssuedAt,
   SignedDocumentCache,
   type SignedDocCacheMeta,
   type SignedDocCacheSnapshot,
@@ -96,17 +97,6 @@ const ADMISSION_SOURCE: SignedDocSource = {
 
 /** `<userData>/` subdirectory holding the cached body, sidecar, and meta. */
 const ADMISSION_CACHE_SUBDIR = "marketplace-admission";
-
-/**
- * How far into the future an `issuedAt` may be before the document is
- * discarded. Sized to the issuer's re-issue cadence rather than to the
- * document TTL: a document accepted with a future `issuedAt` advances the
- * on-disk high-water mark, so the allowance is also the worst-case duration
- * for which a single bad document can refuse genuine ones. Six hours
- * tolerates ordinary device clock skew while keeping that self-healing window
- * to one issuance cycle.
- */
-const MAX_FUTURE_ISSUED_AT_MS = 6 * 60 * 60 * 1000;
 
 /**
  * Whether a non-`admitted` decision refuses the install.
@@ -484,9 +474,12 @@ class AdmissionRegistry {
       return null;
     }
 
+    // Rules 5 and 6, both stated once in `checkIssuedAt` because the
+    // whitelist and revocation registries enforce the same two rules over the
+    // same on-disk mark. A rejection here never advances the mark.
     const issuedAtMs = Date.parse(doc.issuedAt);
-    if (issuedAtMs - this.now() > MAX_FUTURE_ISSUED_AT_MS) {
-      // Discarded WITHOUT advancing the high-water mark — see rule 6.
+    const issuedAtRejection = checkIssuedAt(doc.issuedAt, this.highestSeenIssuedAt, this.now());
+    if (issuedAtRejection === "issued-in-future") {
       this.telemetry("admission_rejected", { source, reason: "issued-in-future" });
       this.audit(
         `admission_rejected source=${source} reason=issued-in-future issuedAt=${doc.issuedAt}`
@@ -494,7 +487,7 @@ class AdmissionRegistry {
       );
       return null;
     }
-    if (this.highestSeenIssuedAt && issuedAtMs < Date.parse(this.highestSeenIssuedAt)) {
+    if (issuedAtRejection === "monotonicity") {
       this.telemetry("admission_rejected", { source, reason: "monotonicity" });
       this.audit(
         `admission_rejected source=${source} reason=monotonicity received=${doc.issuedAt}`

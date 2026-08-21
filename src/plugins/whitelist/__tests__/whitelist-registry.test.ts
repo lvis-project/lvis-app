@@ -6,7 +6,7 @@
  * with the test-only `online: false` flag so the suite never touches the
  * public CDN.
  */
-import { describe, it, expect, beforeEach, afterAll } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from "vitest";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -262,11 +262,15 @@ describe("WhitelistRegistry — manifest-sha mismatch", () => {
   });
 });
 
-describe("WhitelistRegistry — monotonicity guard", () => {
-  it("rejects a cached doc with an issuedAt older than the highest seen", async () => {
+describe("WhitelistRegistry — issuedAt guard on the cached document", () => {
+  it("refuses a cached doc whose issuedAt is below the high-water mark, and deletes it", async () => {
     const userDataDir = freshUserData();
     const cache = new WhitelistCache(userDataDir);
-    // Cache holds an older doc, but meta.highestSeenIssuedAt is FUTURE.
+    // A correctly signed, structurally valid, unexpired document — and a
+    // `highestSeenIssuedAt` recorded beside it that is NEWER than the body.
+    // Parse and signature both pass, so only the `issuedAt` rule can catch
+    // this; before that rule ran over the cached path, the registry served
+    // the rolled-back body as its active snapshot.
     const signed = makeSigned({
       issuedAt: "2026-01-01T00:00:00.000Z",
       expiresAt: "2030-01-01T00:00:00.000Z",
@@ -274,19 +278,95 @@ describe("WhitelistRegistry — monotonicity guard", () => {
     await cache.store({
       body: signed.body,
       signature: signed.signature,
-      // Highest-seen is in the future relative to issuedAt → caller already
-      // saw a newer doc; reject this older one even if it round-trips.
       meta: { highestSeenIssuedAt: "2027-01-01T00:00:00.000Z" },
     });
+    expect((await cache.loadMeta()).highestSeenIssuedAt).toBe("2027-01-01T00:00:00.000Z");
 
-    // Registry uses online=false so it only consults the cache. The cache
-    // signature still verifies — but the registry's monotonicity logic
-    // lives on the remote-fetch path. The cache here demonstrates the
-    // monotonicity meta key is persisted; rejection logic is exercised by
-    // the remote path in production. The smoke test below confirms the
-    // meta survives a round-trip without corruption.
-    const meta = await cache.loadMeta();
-    expect(meta.highestSeenIssuedAt).toBe("2027-01-01T00:00:00.000Z");
+    const audits: string[] = [];
+    await whitelistRegistry.init({
+      userDataDir,
+      online: false,
+      now: () => Date.parse("2026-05-18T00:00:00.000Z"),
+      audit: (line) => audits.push(line),
+    });
+
+    // Refused → routed into the registry's existing "no cache" state, which
+    // for this DENY-by-default registry means `whitelist-unreachable`. The
+    // polarity is unchanged; only the set of documents that reach it is.
+    expect(whitelistRegistry.status().state).toBe("no-cache");
+    expect(whitelistRegistry.isAllowed("meeting", "llm.apiKey.openai")).toEqual({
+      kind: "deny",
+      reason: "whitelist-unreachable",
+    });
+    expect(audits.some((line) => line.includes("whitelist_cache_rejected reason=monotonicity"))).toBe(
+      true,
+    );
+    // Deleted rather than left to be re-read and re-refused next boot, and so
+    // the mark does not outlive the only document that justified it.
+    expect(await cache.load()).toBeNull();
+    expect(await cache.loadMeta()).toEqual({});
+  });
+
+  it("refuses a cached doc dated implausibly far ahead of the device clock", async () => {
+    const userDataDir = freshUserData();
+    const cache = new WhitelistCache(userDataDir);
+    // Signed, unexpired, and NOT a rollback — no mark exists at all. Only the
+    // plausibility bound can refuse it, and refusing it is what keeps its
+    // `issuedAt` from becoming a mark that outranks every genuine document.
+    const signed = makeSigned({
+      issuedAt: "2027-01-01T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    });
+    await cache.store({ body: signed.body, signature: signed.signature, meta: {} });
+
+    const audits: string[] = [];
+    await whitelistRegistry.init({
+      userDataDir,
+      online: false,
+      now: () => Date.parse("2026-05-18T00:00:00.000Z"),
+      audit: (line) => audits.push(line),
+    });
+
+    expect(whitelistRegistry.status().state).toBe("no-cache");
+    expect(
+      audits.some((line) => line.includes("whitelist_cache_rejected reason=issued-in-future")),
+    ).toBe(true);
+    expect(await cache.loadMeta()).toEqual({});
+  });
+
+  it("accepts a cached doc inside the clock-skew allowance", async () => {
+    // The boundary the bound above is drawn against: a document a few hours
+    // ahead of a skewed device clock is ordinary, not implausible, and must
+    // still load. Without this, "reject the future" would be a denial of
+    // service against every device whose clock runs slow.
+    const now = Date.parse("2026-05-18T00:00:00.000Z");
+    const userDataDir = freshUserData();
+    const cache = new WhitelistCache(userDataDir);
+    const signed = makeSigned({
+      issuedAt: new Date(now + 5 * 60 * 60 * 1000).toISOString(),
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    });
+    await cache.store({ body: signed.body, signature: signed.signature, meta: {} });
+
+    await whitelistRegistry.init({ userDataDir, online: false, now: () => now });
+
+    expect(whitelistRegistry.status().state).toBe("fresh");
+    expect(await cache.load()).not.toBeNull();
+  });
+
+  it("deletes a cached doc whose signature no longer verifies", async () => {
+    const userDataDir = freshUserData();
+    const cache = new WhitelistCache(userDataDir);
+    const signed = makeSigned({
+      issuedAt: "2026-05-01T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    });
+    // Body tampered after signing → the sidecar no longer covers these bytes.
+    await cache.store({
+      body: signed.body.replace("lvis-community", "someone-else"),
+      signature: signed.signature,
+      meta: { highestSeenIssuedAt: "2026-05-01T00:00:00.000Z" },
+    });
 
     await whitelistRegistry.init({
       userDataDir,
@@ -294,12 +374,11 @@ describe("WhitelistRegistry — monotonicity guard", () => {
       now: () => Date.parse("2026-05-18T00:00:00.000Z"),
     });
 
-    // The cached snapshot itself is structurally valid; the registry takes
-    // it as the active snapshot but records the higher floor in
-    // `highestSeenIssuedAt`. Any subsequent remote fetch with a smaller
-    // issuedAt would be rejected (covered by the integration path).
-    const status = whitelistRegistry.status();
-    expect(status.state).toBe("fresh");
+    expect(whitelistRegistry.status().state).toBe("no-cache");
+    // Previously this entry survived on disk and was re-read and re-refused on
+    // every boot, with its meta still claiming a mark it could not justify.
+    expect(await cache.load()).toBeNull();
+    expect(await cache.loadMeta()).toEqual({});
   });
 });
 
@@ -368,5 +447,82 @@ describe("WhitelistRegistry — uninitialized fail-closed", () => {
     if (decision.kind === "deny") {
       expect(decision.reason).toBe("whitelist-unreachable");
     }
+  });
+});
+
+describe("WhitelistRegistry — issuedAt guard on the fetched document", () => {
+  /**
+   * The registry's source URLs are module constants, so the seam for the
+   * online path is the global `fetch` the shared fetcher calls. Only the two
+   * document paths are served; anything else 404s, which is what an
+   * unmatched request should look like.
+   */
+  function serveSignedDocument(body: string, signature: string): void {
+    vi.stubGlobal("fetch", async (input: string | URL) => {
+      const path = new URL(String(input)).pathname;
+      const payload =
+        path.endsWith("/whitelist.json")
+          ? body
+          : path.endsWith("/whitelist.json.sig")
+            ? signature
+            : null;
+      if (payload === null) {
+        return {
+          ok: false,
+          status: 404,
+          headers: { get: () => null },
+          text: async () => "not found",
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () => payload,
+      };
+    });
+  }
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("discards a fetched doc dated implausibly far ahead without advancing the mark", async () => {
+    const now = Date.parse("2026-05-18T00:00:00.000Z");
+    const userDataDir = freshUserData();
+    const cache = new WhitelistCache(userDataDir);
+    const future = makeSigned({
+      issuedAt: "2027-01-01T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    });
+    serveSignedDocument(future.body, future.signature);
+
+    const audits: string[] = [];
+    await whitelistRegistry.init({
+      userDataDir,
+      online: true,
+      now: () => now,
+      audit: (line) => audits.push(line),
+    });
+
+    expect(whitelistRegistry.status().state).toBe("no-cache");
+    expect(
+      audits.some((line) => line.includes("whitelist_fetch_failed reason=issued-in-future")),
+    ).toBe(true);
+    // The point of refusing before accepting: the mark on disk is what a
+    // future-dated document would poison, and it survives restarts.
+    expect((await cache.loadMeta()).highestSeenIssuedAt).toBeUndefined();
+
+    // A genuine document issued after the refusal still loads — which is only
+    // true because the mark was never raised above it.
+    const genuine = makeSigned({
+      issuedAt: "2026-05-17T00:00:00.000Z",
+      expiresAt: "2030-01-01T00:00:00.000Z",
+    });
+    serveSignedDocument(genuine.body, genuine.signature);
+    await whitelistRegistry.init({ userDataDir, online: true, now: () => now });
+
+    expect(whitelistRegistry.status()).toMatchObject({ state: "fresh", source: "remote" });
+    expect((await cache.loadMeta()).highestSeenIssuedAt).toBe("2026-05-17T00:00:00.000Z");
   });
 });
