@@ -35,9 +35,6 @@ import { resolvePluginContributionDeclarations } from "../plugin-contributions.j
 
 // Re-exported here so manifest/plugin-loading consumers can import the
 // minAppVersion gate error + IPC code alongside the other manifest contracts.
-export { IncompatibleAppVersionError, INCOMPATIBLE_APP_VERSION_CODE,
-} from "../types.js";
-
 /**
  * Stable SemVer pattern (MAJOR.MINOR.PATCH, no leading zeros, no pre-release,
  * no build metadata). This TS const mirrors the `version` / `minAppVersion`

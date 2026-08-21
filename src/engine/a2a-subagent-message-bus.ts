@@ -16,10 +16,7 @@ import {
   wrapChildReportForParentJudgment,
 } from "./a2a-subagent-message-codec.js";
 
-export {
-  formatAgentMessage,
-  maskA2AMessage,
-} from "./a2a-subagent-message-codec.js";
+export { formatAgentMessage } from "./a2a-subagent-message-codec.js";
 export interface ResolvedSubAgentAddress {
   parentSessionId: string;
   childSessionId: string;
