@@ -1,5 +1,5 @@
 /**
- * corp-ca-loader unit tests — §17 C1
+ * corp-ca-runtime unit tests — §17 C1
  *
  * Mocks child_process.execFile and node:fs so every path can be tested without
  * touching the real keychain or filesystem.
@@ -104,7 +104,7 @@ describe("ensureCorporateCa", () => {
   it("execFile returns empty string → { pem: null, source: 'none' }", async () => {
     mockExecFileStdout("");
 
-    const { ensureCorporateCa } = await import("../corp-ca-loader.js");
+    const { ensureCorporateCa } = await import("../corp-ca-runtime.js");
     const result = await ensureCorporateCa();
 
     expect(result.pem).toBeNull();
@@ -122,7 +122,7 @@ describe("ensureCorporateCa", () => {
     };
     mockedOpen.mockResolvedValue(mockFd as never);
 
-    const { ensureCorporateCa } = await import("../corp-ca-loader.js");
+    const { ensureCorporateCa } = await import("../corp-ca-runtime.js");
     const result = await ensureCorporateCa();
 
     expect(result.pem).toBe(SAMPLE_PEM);
@@ -143,7 +143,7 @@ describe("ensureCorporateCa", () => {
     mockedFstatSync.mockReturnValue(makeFreshStat());
     mockedReadFileSync.mockReturnValue(SAMPLE_PEM as never);
 
-    const { ensureCorporateCa } = await import("../corp-ca-loader.js");
+    const { ensureCorporateCa } = await import("../corp-ca-runtime.js");
     const result = await ensureCorporateCa();
 
     expect(result.source).toBe("cache");
@@ -165,7 +165,7 @@ describe("ensureCorporateCa", () => {
     };
     mockedOpen.mockResolvedValue(mockFd as never);
 
-    const { ensureCorporateCa } = await import("../corp-ca-loader.js");
+    const { ensureCorporateCa } = await import("../corp-ca-runtime.js");
     const result = await ensureCorporateCa();
 
     expect(mockedExecFile).toHaveBeenCalledTimes(1);
@@ -181,7 +181,7 @@ describe("ensureCorporateCa", () => {
     };
     mockedOpen.mockResolvedValue(mockFd as never);
 
-    const { ensureCorporateCa } = await import("../corp-ca-loader.js");
+    const { ensureCorporateCa } = await import("../corp-ca-runtime.js");
     const result = await ensureCorporateCa();
 
     expect(result.certCount).toBe(2);
@@ -190,7 +190,7 @@ describe("ensureCorporateCa", () => {
   it("execFile returns an error (keychain access error) → { pem: null, source: 'none' } without throwing", async () => {
     mockExecFileError(new Error("security: No matching certificate found"));
 
-    const { ensureCorporateCa } = await import("../corp-ca-loader.js");
+    const { ensureCorporateCa } = await import("../corp-ca-runtime.js");
     // must NOT throw
     const result = await ensureCorporateCa();
 
