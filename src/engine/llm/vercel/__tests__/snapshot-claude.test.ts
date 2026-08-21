@@ -21,10 +21,10 @@ import type { StreamEvent } from "../../types.js";
 import {
   mapBudgetToEffort,
   supportsAdaptiveThinking,
+  genericToModelMessages,
+  fullStreamToStreamEvent,
 } from "../adapter.js";
 import { extractSignatureSafely } from "../signature-shim.js";
-import { genericToModelMessages } from "../message-mapper.js";
-import { fullStreamToStreamEvent } from "../stream-mapper.js";
 
 
 

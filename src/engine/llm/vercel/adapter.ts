@@ -1,8 +1,22 @@
 /**
  * Vercel AI SDK unified adapter. Single LLM provider since P4 migration
  * (2026-04-xx) — replaces per-vendor claude/openai/gemini implementations.
+ *
+ * Bundles the GenericMessage↔ModelMessage mapper, fullStream→StreamEvent
+ * mapper, and AI-SDK-error→ClassifiedError mapper in this module: all three
+ * exist solely to serve VercelUnifiedProvider below and have no other
+ * consumer — splitting them into separate files was a filing label, not a
+ * machinery boundary.
  */
-import { streamText, jsonSchema, smoothStream, tool, type ModelMessage } from "ai";
+import {
+  streamText,
+  jsonSchema,
+  smoothStream,
+  tool,
+  AISDKError,
+  APICallError,
+  type ModelMessage,
+} from "ai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createVertex } from "@ai-sdk/google-vertex";
@@ -15,15 +29,27 @@ import type {
   LLMVendor,
   StreamEvent,
   StreamTurnParams,
+  ThinkingBlock,
   ToolSchema,
 } from "../types.js";
 import {
   isOpenAICompatibleVendor,
   isSelfHostedVllmVendor,
 } from "../../../shared/llm-vendor-defaults.js";
-import { genericToModelMessages } from "./message-mapper.js";
-import { fullStreamToStreamEvent } from "./stream-mapper.js";
-import { mapAiSdkErrorToLvis } from "./error-mapper.js";
+import { createLogger } from "../../../lib/logger.js";
+import { vendorCarriesToolResultImage } from "../../../shared/multimodal-token-estimate.js";
+import { normalizeLocalUserContentParts } from "../../../main/subscription-attachment-input.js";
+import { extractSignatureSafely } from "./signature-shim.js";
+import {
+  classifyProviderError,
+  type ClassifiedError,
+} from "../error-classifier.js";
+import {
+  extractProviderErrorDiagnostics,
+  providerErrorMessage,
+  withProviderErrorClassification,
+  type ProviderErrorDiagnostics,
+} from "../provider-error-diagnostics.js";
 import { lookupPricing } from "../../../shared/pricing-data.js";
 import {
   normalizeProviderToolAliasText,
@@ -584,6 +610,427 @@ export class VercelUnifiedProvider implements LLMProvider {
 
     throw new Error(`VercelUnifiedProvider: unknown vendor slot "${slot}"`);
   }
+}
+
+// -----------------------------------------------------------------------
+// Message mapping: GenericMessage → Vercel AI SDK ModelMessage
+//
+// P1 — Gemini-safe path:
+//   - user → { role: "user", content: [{ type: "text", text }] }
+//   - assistant text → { role: "assistant", content: [{ type: "text", text }] }
+//   - assistant tool call → { role: "assistant", content: [{ type: "tool-call", ... }] }
+//   - tool_result → { role: "tool", content: [{ type: "tool-result", ... }] }
+//
+// P3 — Claude thinkingBlocks round-trip:
+//   - assistant.thinkingBlocks[] → prepended as { type: "reasoning", text,
+//     providerOptions: { anthropic: { signature } } } parts when vendor="claude".
+//     Outbound reasoning parts carry `providerOptions.anthropic.signature`;
+//     inbound stream events arrive via `providerMetadata.anthropic.signature`.
+//     Order matters: reasoning parts must precede text and tool-call parts so
+//     Anthropic's signature-verified thinking chain is echoed verbatim.
+//   - Blocks with missing/empty signatures are skipped (log-and-skip via
+//     extractSignatureSafely below) — Anthropic rejects tampered echoes.
+//   - [HIGH PRIVACY] thinkingBlocks MUST NOT be serialised when outgoing vendor
+//     is NOT "claude". Pass `vendor` to genericToModelMessages() to enforce this.
+// -----------------------------------------------------------------------
+const messageMapperLog = createLogger("message-mapper");
+
+type AssistantPart =
+  | { type: "text"; text: string }
+  | {
+      type: "reasoning";
+      text: string;
+      providerOptions?: { anthropic?: { signature: string } };
+    }
+  | {
+      type: "tool-call";
+      toolCallId: string;
+      toolName: string;
+      input: unknown;
+    };
+
+export function genericToModelMessages(
+  messages: GenericMessage[],
+  vendor: LLMVendor = "claude",
+): ModelMessage[] {
+  const out: ModelMessage[] = [];
+
+  for (const msg of messages) {
+    if (msg.role === "user") {
+      if (typeof msg.content === "string") {
+        out.push({
+          role: "user",
+          content: [{ type: "text", text: msg.content }],
+        });
+      } else {
+        const content = normalizeLocalUserContentParts(msg.content);
+        if (!content) continue;
+        out.push({
+          role: "user",
+          content: content.map((p) => {
+            if (p.type === "text") return { type: "text" as const, text: p.text };
+            if (p.type === "image") {
+              // mimeType is optional on UserContentPart for image (the SDK
+              // can sometimes infer from the data URL header). Only forward
+              // mediaType when we actually have one — passing `undefined`
+              // confuses some vendor adapters that probe the field.
+              const part: { type: "image"; image: string; mediaType?: string } = {
+                type: "image",
+                image: p.image,
+              };
+              if (p.mimeType) part.mediaType = p.mimeType;
+              return part;
+            }
+            return {
+              type: "file" as const,
+              data: p.data,
+              mediaType: p.mimeType,
+            };
+          }),
+        } as ModelMessage);
+      }
+      continue;
+    }
+
+    if (msg.role === "assistant") {
+      const parts: AssistantPart[] = [];
+
+      // Reasoning FIRST — Anthropic requires thinking blocks to precede text
+      // and tool_use in the content array, with signatures verbatim from the
+      // prior turn.
+      // [HIGH PRIVACY] thinkingBlocks are Claude-specific signed thoughts.
+      // They MUST NOT be forwarded to non-Claude vendors (Gemini/OpenAI do not
+      // understand them and the signed content must not leave the Claude path).
+      if (vendor === "claude" && msg.thinkingBlocks) {
+        for (const tb of msg.thinkingBlocks) {
+          if (typeof tb.signature !== "string" || tb.signature.length === 0) {
+            // Defense-in-depth: thinkingBlocks may be deserialized from persisted
+            // history where signatures were trimmed. Guard here ensures we never
+            // echo a signature-less block to Anthropic (400).
+            // eslint-disable-next-line no-console
+            messageMapperLog.warn(
+              "thinkingBlock missing signature — skipping",
+            );
+            continue;
+          }
+          parts.push({
+            type: "reasoning",
+            text: tb.thinking,
+            providerOptions: { anthropic: { signature: tb.signature } },
+          });
+        }
+      }
+
+      if (msg.content) {
+        parts.push({ type: "text", text: msg.content });
+      }
+
+      if (msg.toolCalls) {
+        for (const tc of msg.toolCalls) {
+          parts.push({
+            type: "tool-call",
+            toolCallId: tc.id,
+            toolName: tc.name,
+            input: tc.input,
+          });
+        }
+      }
+
+      // Omit the message entirely when there is neither visible text nor any
+      // tool calls — SDK providers reject empty assistant turns with 400.
+      if (parts.length === 0) {
+        continue;
+      }
+
+      out.push({
+        role: "assistant",
+        content: parts,
+      } as ModelMessage);
+      continue;
+    }
+
+    if (msg.role === "tool_result") {
+      // Image tool results (e.g. view_image) are only representable inside a
+      // tool result on Claude, via the AI SDK `content` output variant carrying
+      // a `file` part. Every other vendor's tool role is text-only, so they fall
+      // back to the text placeholder in `msg.content` — the image is dropped
+      // rather than sent as something the provider would reject.
+      const output =
+        vendorCarriesToolResultImage(vendor) && msg.image
+          ? {
+              type: "content" as const,
+              value: [
+                { type: "text" as const, text: msg.content },
+                {
+                  type: "file" as const,
+                  data: { type: "data" as const, data: msg.image.data },
+                  mediaType: msg.image.mimeType,
+                },
+              ],
+            }
+          : msg.isError === true
+            ? { type: "error-text" as const, value: msg.content }
+            : { type: "text" as const, value: msg.content };
+      out.push({
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: msg.toolUseId,
+            toolName: msg.toolName ?? "tool",
+            output,
+          },
+        ],
+      } as ModelMessage);
+    }
+  }
+
+  return out;
+}
+
+// -----------------------------------------------------------------------
+// Stream mapping: Vercel AI SDK fullStream → LVIS StreamEvent
+//
+// P1 — Gemini path:
+//   - 'text-delta'      → { type: 'text_delta', text }
+//   - 'reasoning-delta' → { type: 'reasoning_delta', text } (Gemini doesn't emit)
+//   - 'tool-call'       → { type: 'tool_call', id, name, input }
+//   - 'finish'          → { type: 'message_complete', stopReason, usage }
+//   - 'error'           → { type: 'error', error }
+//
+// P3 — Claude signature capture:
+//   Anthropic extended-thinking emits reasoning-start/delta/end per block.
+//   The signature arrives on reasoning-end's providerMetadata.anthropic.signature
+//   (upstream vercel/ai#11688, landed in v6; we pin ai@~6.0.168).
+//
+//   CRITICAL (per design doc §5.2 P3): signatures MUST be consumed from
+//   fullStream events, NEVER from onFinish() callbacks or result.response.messages
+//   aggregation — those paths have been observed to drop signatures
+//   (upstream vercel/ai#12433).
+//
+//   Per-block accumulation: key = reasoning block id; attach signature on
+//   reasoning-end; emit thinkingBlocks[] on final `message_complete`. Blocks
+//   whose signature is missing/empty are dropped by extractSignatureSafely
+//   (log-and-skip — Anthropic rejects tampered thinking-block echoes).
+// -----------------------------------------------------------------------
+const streamMapperLog = createLogger("stream-mapper");
+
+type AnyStreamPart = Record<string, unknown> & { type: string };
+
+type StreamUsageRaw = {
+  inputTokens?: number;
+  outputTokens?: number;
+  promptTokens?: number;
+  completionTokens?: number;
+  cachedInputTokens?: number;
+  inputTokenDetails?: {
+    noCacheTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+};
+
+export async function* fullStreamToStreamEvent(
+  stream: AsyncIterable<AnyStreamPart>,
+): AsyncIterable<StreamEvent> {
+  let hasToolCalls = false;
+
+  // Per-reasoning-block accumulator. Key = block id. Value = accumulated text.
+  const reasoningBuffers = new Map<string, string>();
+  // Completed thinking blocks (signature verified) across the whole turn.
+  const thinkingBlocks: ThinkingBlock[] = [];
+
+  for await (const part of stream) {
+    switch (part.type) {
+      case "start": {
+        // Generator is single-use per turn; reset sticky state defensively in
+        // case an SDK wrapper restarts the stream within the same instance.
+        hasToolCalls = false;
+        break;
+      }
+      case "text-delta": {
+        const text = (part as { text?: string }).text ?? "";
+        if (text) yield { type: "text_delta", text };
+        break;
+      }
+      case "reasoning-start": {
+        const id = (part as { id?: string }).id ?? "";
+        if (id && reasoningBuffers.has(id)) {
+          // eslint-disable-next-line no-console
+          streamMapperLog.warn(
+            `duplicate reasoning-start id ${id} — deltas will merge`,
+          );
+        } else if (id) {
+          reasoningBuffers.set(id, "");
+        }
+        break;
+      }
+      case "reasoning-delta": {
+        const text = (part as { text?: string }).text ?? "";
+        const id = (part as { id?: string }).id ?? "";
+        if (text) yield { type: "reasoning_delta", text };
+        if (id) {
+          reasoningBuffers.set(id, (reasoningBuffers.get(id) ?? "") + text);
+        }
+        break;
+      }
+      case "reasoning-end": {
+        const id = (part as { id?: string }).id ?? "";
+        if (!reasoningBuffers.has(id)) {
+          // eslint-disable-next-line no-console
+          streamMapperLog.warn(
+            `reasoning-end for unknown id ${id}`,
+          );
+          break;
+        }
+        const thinking = reasoningBuffers.get(id) ?? "";
+        reasoningBuffers.delete(id);
+        const signature = extractSignatureSafely(part);
+        if (signature !== null) {
+          thinkingBlocks.push({ thinking, signature });
+        }
+        // Missing-signature case: log-and-skip (already logged inside shim).
+        break;
+      }
+      case "tool-call": {
+        const p = part as unknown as {
+          toolCallId: string;
+          toolName: string;
+          input: unknown;
+        };
+        hasToolCalls = true;
+        yield {
+          type: "tool_call",
+          id: p.toolCallId,
+          name: p.toolName,
+          input: (p.input ?? {}) as Record<string, unknown>,
+        };
+        break;
+      }
+      case "finish": {
+        const p = part as {
+          finishReason?: string;
+          totalUsage?: StreamUsageRaw;
+          usage?: StreamUsageRaw;
+          providerMetadata?: {
+            anthropic?: {
+              cacheCreationInputTokens?: number;
+              cacheReadInputTokens?: number;
+            };
+          };
+        };
+        // Honor finishReason explicitly when present; fallback to sticky
+        // hasToolCalls only when finishReason is missing.
+        let stopReason: "tool_use" | "end_turn" | "max_tokens";
+        if (p.finishReason === "tool-calls") {
+          stopReason = "tool_use";
+        } else if (p.finishReason === "length") {
+          // AI SDK emits finishReason "length" when the model hit its
+          // output-token cap mid-generation. Surface it as a DISTINCT
+          // truncation signal. This branch MUST precede the generic
+          // `else if (p.finishReason)` below — otherwise "length" is collapsed
+          // into a clean "end_turn" and the truncation is hidden from the loop.
+          stopReason = "max_tokens";
+        } else if (p.finishReason) {
+          stopReason = "end_turn";
+        } else {
+          stopReason = hasToolCalls ? "tool_use" : "end_turn";
+        }
+        // v5 exposes totalUsage; v4 exposed usage. Accept either and tolerate
+        // both inputTokens/outputTokens (v5) and promptTokens/completionTokens (v4).
+        const usageRaw = p.totalUsage ?? p.usage;
+        const cacheReadTokens =
+          p.providerMetadata?.anthropic?.cacheReadInputTokens ??
+          usageRaw?.inputTokenDetails?.cacheReadTokens ??
+          usageRaw?.cachedInputTokens;
+        const cacheWriteTokens =
+          p.providerMetadata?.anthropic?.cacheCreationInputTokens ??
+          usageRaw?.inputTokenDetails?.cacheWriteTokens;
+        const usage = usageRaw
+          ? {
+              inputTokens:
+                usageRaw.inputTokens ?? usageRaw.promptTokens ?? 0,
+              outputTokens:
+                usageRaw.outputTokens ?? usageRaw.completionTokens ?? 0,
+              ...(cacheReadTokens !== undefined ? { cacheReadTokens } : {}),
+              ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}),
+            }
+          : undefined;
+        yield {
+          type: "message_complete",
+          stopReason,
+          ...(thinkingBlocks.length > 0 ? { thinkingBlocks } : {}),
+          usage,
+        };
+        break;
+      }
+      case "error": {
+        const err = (part as { error?: unknown }).error;
+        const providerError = extractProviderErrorDiagnostics(err);
+        yield {
+          type: "error",
+          error: providerErrorMessage(err),
+          providerError,
+        };
+        break;
+      }
+      default:
+        // Ignore non-essential parts (start, start-step, finish-step,
+        // text-start/end, tool-input-*, raw, etc.)
+        break;
+    }
+  }
+}
+
+// -----------------------------------------------------------------------
+// Error mapping: Vercel AI SDK error → LVIS ClassifiedError
+//
+// Recognises AISDKError / APICallError subclasses from the `ai` package and
+// routes them through the existing `classifyProviderError()` so the
+// user-visible Korean messages stay consistent with legacy vendor providers.
+//
+// TODO(P3): tighter structured mapping (APICallError.statusCode → category
+//           without re-running the regex on .message).
+// -----------------------------------------------------------------------
+export interface MappedError {
+  classification: ClassifiedError["category"];
+  userMessage: string;
+  rawError: string;
+  providerError: ProviderErrorDiagnostics;
+}
+
+export function mapAiSdkErrorToLvis(err: unknown): MappedError {
+  const diagnostics = extractProviderErrorDiagnostics(err);
+  let raw: string;
+
+  if (APICallError.isInstance(err)) {
+    // Combine status + message so the regex in classifyProviderError sees the
+    // HTTP code (401/403/413/429/404/...) without us having to duplicate the
+    // category table here.
+    const status = err.statusCode ?? "";
+    raw = `${status} ${providerErrorMessage(err)}`;
+  } else if (AISDKError.isInstance(err)) {
+    raw = providerErrorMessage(err);
+  } else if (err instanceof Error) {
+    raw = providerErrorMessage(err);
+  } else if (typeof err === "string") {
+    raw = err;
+  } else {
+    // JSON.stringify can throw on circular refs / BigInt; fall back to String().
+    try {
+      raw = JSON.stringify(err);
+    } catch {
+      raw = String(err);
+    }
+  }
+
+  const classified = classifyProviderError(raw);
+  return {
+    classification: classified.category,
+    userMessage: classified.userMessage,
+    rawError: raw,
+    providerError: withProviderErrorClassification(diagnostics, classified.category),
+  };
 }
 
 function usesOpenAIResponsesWire(slot: VercelVendor, modelId: string): boolean {

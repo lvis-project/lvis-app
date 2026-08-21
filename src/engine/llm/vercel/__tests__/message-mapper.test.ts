@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { genericToModelMessages } from "../message-mapper.js";
+import { genericToModelMessages } from "../adapter.js";
 import type { GenericMessage } from "../../types.js";
 import { MAX_LOCAL_USER_CONTENT_PARTS } from "../../../../main/subscription-attachment-input.js";
 

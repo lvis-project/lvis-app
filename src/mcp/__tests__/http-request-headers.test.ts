@@ -4,7 +4,7 @@ import {
   deriveStandardHeaders,
   encodeMcpHeaderValue,
   extractParamHeaders,
-} from "../http-request-headers.js";
+} from "../mcp-client.js";
 
 describe("encodeMcpHeaderValue — spec Value Encoding table", () => {
   it("passes plain ASCII through", () => {
