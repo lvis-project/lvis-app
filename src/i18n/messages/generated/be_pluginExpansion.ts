@@ -1,4 +1,4 @@
-// AUTO-GENERATED — i18n migration. Source: src/engine/turn/plugin-expansion.ts. Do not edit by hand.
+// AUTO-GENERATED — i18n migration. Source: src/engine/turn/query-loop.ts. Do not edit by hand.
 export const en = {
   "be_pluginExpansion.missingPluginId":
     "request_plugin error: pluginId (string) required. Available: {available}",
