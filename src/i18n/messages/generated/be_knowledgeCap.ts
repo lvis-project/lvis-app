@@ -1,4 +1,4 @@
-// AUTO-GENERATED — i18n migration. Source: src/engine/turn/knowledge-cap.ts. Do not edit by hand.
+// AUTO-GENERATED — i18n migration. Source: src/engine/turn/query-loop.ts. Do not edit by hand.
 export const en = {
   "be_knowledgeCap.depthCapBlocked":
     "[depth cap] {name} may be called at most {cap} times per turn.",

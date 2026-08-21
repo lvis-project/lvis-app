@@ -13,9 +13,9 @@ export default function Page() {
       <PageHero
         eyebrow="Host · Chat"
         title="Chat Screen Layout"
-        description="AppShell wraps the main screen in CustomTitleBar + MainToolbar, floats a collapsible Sidebar, and the MainContent inside it mounts ChatView. SessionTodoPanel · MessageQueuePanel stack directly above the composer, and ChatView reads session/queue/TODO state together through useChatContext()."
+        description="App.tsx wraps the main screen in CustomTitleBar + MainToolbar, floats a collapsible Sidebar, and the main content region inside it mounts ChatView. SessionTodoPanel · MessageQueuePanel stack directly above the composer, and ChatView reads session/queue/TODO state together through useChatContext()."
         tags={[
-          "AppShell + Sidebar + MainContent",
+          "App + Sidebar + main content region",
           "ChatView",
           "MessageQueuePanel + SessionTodoPanel",
         ]}
@@ -24,7 +24,7 @@ export default function Page() {
       <FeatureGrid
         columns={3}
         items={[
-          { title: "① CustomTitleBar + MainToolbar", body: <>Window controls + session/plugin/permission toolbar. Mounted by <code>src/ui/renderer/AppShell.tsx</code>.</>, tone: "teal" },
+          { title: "① CustomTitleBar + MainToolbar", body: <>Window controls + session/plugin/permission toolbar. Mounted by <code>src/ui/renderer/App.tsx</code>.</>, tone: "teal" },
           { title: "② ChatView body", body: <>Conversation + tool cards + thinking + question cards. <code>src/ui/renderer/ChatView.tsx</code>.</> },
           { title: "③ Queue + TODO panels", body: <>External signal queue + session TODOs. They sit directly above the composer (<code>src/ui/renderer/components/ChatComposerDock.tsx</code>) and draw nothing when they have no items.</>, tone: "citron" },
         ]}
@@ -45,7 +45,7 @@ export default function Page() {
 
       <Callout tone="info" title="There are two separate sidebars">
         The main chat screen has a <strong>collapsible floating Sidebar</strong> — session, project, and plugin views live in it, and it can be collapsed and resized.
-        <code>src/ui/renderer/AppShell.tsx</code> renders it.
+        <code>src/ui/renderer/App.tsx</code> renders it.
         The settings screen has its own <strong>nav column</strong>, separate from that one (<code>src/ui/renderer/SettingsContent.tsx</code>).
       </Callout>
 

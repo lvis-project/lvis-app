@@ -211,7 +211,7 @@ export function App() {
   } = useAppMode(api);
   // Durable expanded-width of the primary navigation sidebar (drag-to-resize on
   // its inner edge). Persists via SystemSettings.sidebarWidth; drives both the
-  // sidebar card width and the <main> left-padding reserve in AppShell.
+  // sidebar card width and the <main> left-padding reserve in the shell layout.
   const { sidebarWidth, setSidebarWidth, commitSidebarWidth } = useSidebarWidth(api);
   // Sidebar Chats/Projects tab — persisted the same way as sidebarWidth.
   const { activeTab: sidebarActiveTab, setActiveTab: setSidebarActiveTab } = useSidebarTab(api);
@@ -835,7 +835,7 @@ export function App() {
   // mode switch must not eject the user from it.
 
   // Settings joins the inline view pattern (업무보드/루틴/메모리/별표 + plugin
-  // views) in EVERY mode. `setActiveView("settings")` + MainContent renders
+  // views) in EVERY mode. `setActiveView("settings")` + the main content region renders
   // SettingsContent inline; there is no BrowserWindow path. Re-selecting
   // Settings while already inline only refreshes the tab, so the view never
   // re-mounts and loses its place.

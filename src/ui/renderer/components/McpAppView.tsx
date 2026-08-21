@@ -269,7 +269,7 @@ export function McpAppView({
   // The home mount is a transcript child, so switching/starting a conversation
   // UNMOUNTS it. If its card had been moved AWAY, the store entry
   // would otherwise OUTLIVE this mount: the session-independent `McpAppPipPanel`
-  // (mounted in MainContent) keeps a live <webview>+bridge for a card from the
+  // (mounted in the main content region) keeps a live <webview>+bridge for a card from the
   // conversation the user just left — still able to call tools and post
   // `ui/update-model-context` against the now-stale `originSessionId` — and that entry
   // is never reclaimed (a remounted home mints a FRESH `locationId`, so it can never

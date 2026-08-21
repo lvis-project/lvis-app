@@ -1047,7 +1047,7 @@ function asEventRecord(payload: unknown, label: string): Record<string, unknown>
   if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
     throw new HostApiBoundaryError(
       "argument-marshalling-rejected",
-      `[config-subscription-child] ${label}: event payload is not an object`,
+      `[host-api-wire] ${label}: event payload is not an object`,
     );
   }
   return payload as Record<string, unknown>;
@@ -1095,7 +1095,7 @@ export function encodeConfigChange(key: string, value: unknown): Record<string, 
   if (nonJson) {
     throw new HostApiBoundaryError(
       "argument-marshalling-rejected",
-      `[config-subscription-child] config.onChange: value cannot cross the boundary — ${nonJson}`,
+      `[host-api-wire] config.onChange: value cannot cross the boundary — ${nonJson}`,
       { key },
     );
   }
@@ -1109,7 +1109,7 @@ export function decodeConfigChange(payload: unknown): ConfigChangeEvent {
   if (typeof key !== "string") {
     throw new HostApiBoundaryError(
       "argument-marshalling-rejected",
-      `[config-subscription-child] config.onChange: event names no key`,
+      `[host-api-wire] config.onChange: event names no key`,
     );
   }
   if (Object.hasOwn(record, SECRET_REDACTED_WIRE_FIELD)) {
@@ -1120,7 +1120,7 @@ export function decodeConfigChange(payload: unknown): ConfigChangeEvent {
     if (record[SECRET_REDACTED_WIRE_FIELD] !== true || Object.hasOwn(record, "value")) {
       throw new HostApiBoundaryError(
         "argument-marshalling-rejected",
-        `[config-subscription-child] config.onChange: malformed secret marker for key '${key}'`,
+        `[host-api-wire] config.onChange: malformed secret marker for key '${key}'`,
       );
     }
     return { key, value: SECRET_REDACTED_SENTINEL };
@@ -1144,7 +1144,7 @@ export function decodePluginLifecycle(payload: unknown): PluginLifecycleDelivery
   ) {
     throw new HostApiBoundaryError(
       "argument-marshalling-rejected",
-      `[config-subscription-child] onPluginsChanged: event carries no discriminant`,
+      `[host-api-wire] onPluginsChanged: event carries no discriminant`,
     );
   }
   return { event };

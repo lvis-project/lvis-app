@@ -27,12 +27,9 @@ export {
   MAX_LLM_SESSION_ROUTINES,
   MAX_ROUTINE_SOURCE_LENGTH,
   type RoutineExecution,
-  type RepeatKind,
   type RoutineRepeat,
   type RoutineSchedule,
   type RoutineRecord,
-  type RoutineScope,
-  type RoutinePluginScope,
   type AddRoutineInput,
 } from "../shared/routines-types.js";
 

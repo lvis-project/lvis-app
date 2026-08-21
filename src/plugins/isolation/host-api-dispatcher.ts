@@ -1204,7 +1204,7 @@ const STORAGE_ENCODINGS: Record<StorageEncoding, true> = {
 function reject(call: HostApiCall, index: number, expected: string): never {
   throw new HostApiBoundaryError(
     "argument-marshalling-rejected",
-    `[host-api-storage] '${call.path}' argument ${index} must be ${expected}`,
+    `[host-api-dispatcher] '${call.path}' argument ${index} must be ${expected}`,
     { path: call.path, index },
   );
 }
@@ -1425,7 +1425,7 @@ function stringArgument(call: HostApiCall, index: number, name: string): string 
   if (typeof value !== "string") {
     throw new HostApiBoundaryError(
       "argument-marshalling-rejected",
-      `[config-subscription-host] '${call.path}': ${name} must be a string`,
+      `[host-api-dispatcher] '${call.path}': ${name} must be a string`,
       { path: call.path, index },
     );
   }
@@ -1437,7 +1437,7 @@ function requireArity(call: HostApiCall, arity: number): void {
   if (call.args.length !== arity) {
     throw new HostApiBoundaryError(
       "argument-marshalling-rejected",
-      `[config-subscription-host] '${call.path}': expected ${arity} arguments, received ${call.args.length}`,
+      `[host-api-dispatcher] '${call.path}': expected ${arity} arguments, received ${call.args.length}`,
       { path: call.path, arity, received: call.args.length },
     );
   }

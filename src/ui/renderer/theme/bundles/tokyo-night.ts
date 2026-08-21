@@ -1,6 +1,14 @@
 import type { ThemeBundle } from "./types.js";
 import { t } from "../../../../i18n/runtime.js";
 
+/**
+ * Tokyo Night — dark navy shell with a vivid blue accent.
+ *
+ * Source: https://github.com/enkia/tokyo-night-vscode-theme (name and accent
+ * character). The credit is for the scheme's identity, not its hex values —
+ * the tokens below are this app's own dark surface ladder, so the bundle
+ * borrows the name rather than porting the upstream palette.
+ */
 export const tokyoNightBundle: ThemeBundle = {
   id: "tokyo-night",
   name: "Tokyo Night",
