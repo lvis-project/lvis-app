@@ -1,7 +1,4 @@
-import type { ChildProcess, SpawnOptions } from "node:child_process";
-import { existsSync, lstatSync } from "node:fs";
-import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, resolve, sep } from "node:path";
+import type { ChildProcess } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import {
   type CodexSubscriptionConnectionState,
@@ -13,24 +10,23 @@ import {
 } from "../shared/codex-subscription.js";
 import { getLvisAppVersion } from "../shared/app-version.js";
 import { MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH } from "../shared/subscription-runtime.js";
-import { sanitizedCodexConversationEnvironment } from "./codex-conversation-runtime.js";
-import { spawnManaged } from "./managed-child-processes.js";
+import {
+  CODEX_MAX_RPC_LINE_BYTES,
+  CODEX_RPC_REQUEST_TIMEOUT_MS,
+  isCodexAppServerRequestId,
+  isCodexJsonRecord,
+  resolveBundledCodexExecutable,
+  sanitizedCodexConversationEnvironment,
+  spawnPackagedCodex,
+  validateCodexRuntimeDirectory,
+  type CodexAppServerRequestId,
+  type CodexJsonRecord,
+  type CodexSpawnAppServer,
+} from "./codex-conversation-runtime.js";
 
-const require = createRequire(import.meta.url);
-
-const RPC_REQUEST_TIMEOUT_MS = 15_000;
-const MAX_RPC_LINE_BYTES = 1_000_000;
 const MAX_MODEL_COUNT = 100;
 const MAX_PLAN_TYPE_LENGTH = 80;
 const MAX_DEVICE_CODE_LENGTH = 128;
-
-type JsonRecord = Record<string, unknown>;
-
-type SpawnAppServer = (
-  command: string,
-  args: ReadonlyArray<string>,
-  options: SpawnOptions,
-) => ChildProcess;
 
 export type CodexAppServerErrorCode = CodexSubscriptionErrorCode;
 
@@ -56,7 +52,7 @@ export interface CodexAppServerClientOptions {
   /** Test seam for the packaged Codex executable resolver. */
   resolveExecutable?: () => string;
   /** Test seam; production always uses managed-child-processes. */
-  spawn?: SpawnAppServer;
+  spawn?: CodexSpawnAppServer;
   clientVersion?: string;
 }
 
@@ -72,124 +68,11 @@ interface PendingRequest {
   timer: NodeJS.Timeout;
 }
 
-const PLATFORM_TARGETS: Partial<Record<NodeJS.Platform, Partial<Record<NodeJS.Architecture, {
-  packageName: string;
-  targetTriple: string;
-  executableName: string;
-}>>>> = {
-  darwin: {
-    x64: {
-      packageName: "@openai/codex-darwin-x64",
-      targetTriple: "x86_64-apple-darwin",
-      executableName: "codex",
-    },
-    arm64: {
-      packageName: "@openai/codex-darwin-arm64",
-      targetTriple: "aarch64-apple-darwin",
-      executableName: "codex",
-    },
-  },
-  linux: {
-    x64: {
-      packageName: "@openai/codex-linux-x64",
-      targetTriple: "x86_64-unknown-linux-musl",
-      executableName: "codex",
-    },
-    arm64: {
-      packageName: "@openai/codex-linux-arm64",
-      targetTriple: "aarch64-unknown-linux-musl",
-      executableName: "codex",
-    },
-  },
-  win32: {
-    x64: {
-      packageName: "@openai/codex-win32-x64",
-      targetTriple: "x86_64-pc-windows-msvc",
-      executableName: "codex.exe",
-    },
-    arm64: {
-      packageName: "@openai/codex-win32-arm64",
-      targetTriple: "aarch64-pc-windows-msvc",
-      executableName: "codex.exe",
-    },
-  },
-};
-
-/**
- * Resolve the official package's native binary directly. We deliberately do
- * not execute a PATH-resolved `codex` shim or a shell command: the runtime is
- * pinned in package.json and every argv value below is host-owned.
- */
-function resolveBundledCodexExecutable(): string {
-  const target = PLATFORM_TARGETS[process.platform]?.[process.arch];
-  if (!target) {
-    throw new CodexAppServerError("codex-runtime-unavailable");
-  }
-
-  let packageJson: string;
-  try {
-    packageJson = require.resolve(`${target.packageName}/package.json`);
-  } catch {
-    throw new CodexAppServerError("codex-runtime-unavailable");
-  }
-
-  const packagedPath = join(
-    dirname(packageJson),
-    "vendor",
-    target.targetTriple,
-    "bin",
-    target.executableName,
-  );
-  const executable = preferAsarUnpackedPath(packagedPath);
-  if (!existsSync(executable)) {
-    throw new CodexAppServerError("codex-runtime-unavailable");
-  }
-  return executable;
-}
-
-function preferAsarUnpackedPath(candidate: string): string {
-  const asarSegment = `${sep}app.asar${sep}`;
-  if (!candidate.includes(asarSegment)) return candidate;
-  const unpacked = candidate.replace(asarSegment, `${sep}app.asar.unpacked${sep}`);
-  return existsSync(unpacked) ? unpacked : candidate;
-}
-
-function spawnPackagedCodex(
-  command: string,
-  args: ReadonlyArray<string>,
-  options: SpawnOptions,
-): ChildProcess {
-  return spawnManaged(command, args, options, { label: "codex-app-server" });
-}
-
-
 function validateRuntimeDirectory(runtimeHome: string): string {
-  const trimmed = runtimeHome.trim();
-  if (!trimmed || !isAbsolute(trimmed)) {
-    throw new CodexAppServerError("codex-runtime-start-failed");
-  }
-  const directory = resolve(trimmed);
-  try {
-    const stat = lstatSync(directory);
-    if (!stat.isDirectory() || stat.isSymbolicLink()) {
-      throw new Error("Codex runtime directory is not a real directory");
-    }
-  } catch {
-    throw new CodexAppServerError("codex-runtime-start-failed");
-  }
-  return directory;
-}
-
-function sanitizedCodexEnvironment(
-  runtimeHome: string,
-  sqliteHome: string,
-  runtimeTempDir: string,
-): NodeJS.ProcessEnv {
-  return sanitizedCodexConversationEnvironment(runtimeHome, sqliteHome, runtimeTempDir);
-}
-
-function isRecord(value: unknown): value is JsonRecord {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
+  return validateCodexRuntimeDirectory(
+    runtimeHome,
+    () => new CodexAppServerError("codex-runtime-start-failed"),
+  );
 }
 
 function boundedString(value: unknown, maxLength: number): string | null {
@@ -218,13 +101,6 @@ function trustedOpenAiAuthUrl(value: unknown): string | null {
   return trusted ? url.toString() : null;
 }
 
-type AppServerRequestId = string | number;
-
-function isAppServerRequestId(value: unknown): value is AppServerRequestId {
-  return (typeof value === "number" && Number.isInteger(value))
-    || (typeof value === "string" && value.length <= 512);
-}
-
 function blankStatus(runtime: CodexSubscriptionStatus["runtime"]): CodexSubscriptionStatus {
   return { ...CODEX_SUBSCRIPTION_SIGNED_OUT_STATUS, runtime };
 }
@@ -238,7 +114,7 @@ function blankStatus(runtime: CodexSubscriptionStatus["runtime"]): CodexSubscrip
 export class CodexAppServerClient {
   private readonly openExternal: (url: string) => Promise<void> | void;
   private readonly resolveExecutable: () => string;
-  private readonly spawn: SpawnAppServer;
+  private readonly spawn: CodexSpawnAppServer;
   private readonly clientVersion: string;
   private readonly runtimeHome: string;
   private readonly sqliteHome: string;
@@ -257,8 +133,12 @@ export class CodexAppServerClient {
   private loginLock: Promise<void> = Promise.resolve();
   constructor(options: CodexAppServerClientOptions) {
     this.openExternal = options.openExternal;
-    this.resolveExecutable = options.resolveExecutable ?? resolveBundledCodexExecutable;
-    this.spawn = options.spawn ?? spawnPackagedCodex;
+    this.resolveExecutable = options.resolveExecutable
+      ?? (() => resolveBundledCodexExecutable(
+        () => new CodexAppServerError("codex-runtime-unavailable"),
+      ));
+    this.spawn = options.spawn
+      ?? ((command, args, options_) => spawnPackagedCodex(command, args, options_, "codex-app-server"));
     this.clientVersion = options.clientVersion ?? getLvisAppVersion();
     this.runtimeHome = options.runtimeHome;
     this.sqliteHome = options.sqliteHome;
@@ -297,7 +177,7 @@ export class CodexAppServerClient {
         useHostedLoginSuccessPage: true,
         appBrand: "codex",
       });
-      const response = isRecord(result) ? result : null;
+      const response = isCodexJsonRecord(result) ? result : null;
       const loginId = boundedString(response?.loginId, 128);
       const authUrl = trustedOpenAiAuthUrl(response?.authUrl);
       if (response?.type !== "chatgpt" || !loginId || !authUrl) {
@@ -322,7 +202,7 @@ export class CodexAppServerClient {
       const result = await this.request("account/login/start", {
         type: "chatgptDeviceCode",
       });
-      const response = isRecord(result) ? result : null;
+      const response = isCodexJsonRecord(result) ? result : null;
       const loginId = boundedString(response?.loginId, 128);
       const verificationUrl = trustedOpenAiAuthUrl(response?.verificationUrl);
       const userCode = boundedString(response?.userCode, MAX_DEVICE_CODE_LENGTH);
@@ -377,11 +257,11 @@ export class CodexAppServerClient {
       limit: MAX_MODEL_COUNT,
       includeHidden: false,
     });
-    const rows = isRecord(result) && Array.isArray(result.data) ? result.data : [];
+    const rows = isCodexJsonRecord(result) && Array.isArray(result.data) ? result.data : [];
     const seen = new Set<string>();
     const models: CodexSubscriptionModel[] = [];
     for (const row of rows) {
-      if (!isRecord(row)) continue;
+      if (!isCodexJsonRecord(row)) continue;
       const id = boundedString(row.id ?? row.model, MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH);
       if (!id || seen.has(id)) continue;
       seen.add(id);
@@ -427,8 +307,8 @@ export class CodexAppServerClient {
   }
 
   private projectAccountStatus(result: unknown): CodexSubscriptionStatus {
-    const root = isRecord(result) ? result : null;
-    const account = root && isRecord(root.account) ? root.account : null;
+    const root = isCodexJsonRecord(result) ? result : null;
+    const account = root && isCodexJsonRecord(root.account) ? root.account : null;
     if (account?.type === "chatgpt") {
       return {
         runtime: "ready",
@@ -495,7 +375,7 @@ export class CodexAppServerClient {
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
           shell: false,
-          env: sanitizedCodexEnvironment(runtimeHome, sqliteHome, runtimeTempDir),
+          env: sanitizedCodexConversationEnvironment(runtimeHome, sqliteHome, runtimeTempDir),
         },
       );
     } catch {
@@ -577,7 +457,7 @@ export class CodexAppServerClient {
     }
   }
 
-  private request(method: string, params?: JsonRecord): Promise<unknown> {
+  private request(method: string, params?: CodexJsonRecord): Promise<unknown> {
     const child = this.child;
     if (!child?.stdin || !child.stdin.writable) {
       return Promise.reject(new CodexAppServerError("codex-operation-failed"));
@@ -589,14 +469,14 @@ export class CodexAppServerClient {
       method,
       ...(params === undefined ? {} : { params }),
     });
-    if (Buffer.byteLength(payload, "utf8") > MAX_RPC_LINE_BYTES) {
+    if (Buffer.byteLength(payload, "utf8") > CODEX_MAX_RPC_LINE_BYTES) {
       return Promise.reject(new CodexAppServerError("codex-operation-failed"));
     }
     return new Promise<unknown>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (!this.pendingRequests.has(id)) return;
         this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
-      }, RPC_REQUEST_TIMEOUT_MS);
+      }, CODEX_RPC_REQUEST_TIMEOUT_MS);
       this.pendingRequests.set(id, { resolve, reject, timer });
       try {
         stdin.write(`${payload}\n`);
@@ -606,14 +486,14 @@ export class CodexAppServerClient {
     });
   }
 
-  private notify(method: string, params?: JsonRecord): void {
+  private notify(method: string, params?: CodexJsonRecord): void {
     const child = this.child;
     if (!child?.stdin || !child.stdin.writable) return;
     const payload = JSON.stringify({
       method,
       ...(params === undefined ? {} : { params }),
     });
-    if (Buffer.byteLength(payload, "utf8") > MAX_RPC_LINE_BYTES) return;
+    if (Buffer.byteLength(payload, "utf8") > CODEX_MAX_RPC_LINE_BYTES) return;
     try {
       child.stdin.write(`${payload}\n`);
     } catch {
@@ -626,7 +506,7 @@ export class CodexAppServerClient {
       ? chunk
       : this.stdoutDecoder.write(chunk);
     this.stdoutBuffer += text;
-    if (Buffer.byteLength(this.stdoutBuffer, "utf8") > MAX_RPC_LINE_BYTES) {
+    if (Buffer.byteLength(this.stdoutBuffer, "utf8") > CODEX_MAX_RPC_LINE_BYTES) {
       this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
       return;
     }
@@ -648,11 +528,11 @@ export class CodexAppServerClient {
   }
 
   private handleMessage(message: unknown, child: ChildProcess): void {
-    if (!isRecord(message)) {
+    if (!isCodexJsonRecord(message)) {
       this.abortTransport(new CodexAppServerError("codex-operation-failed"), child);
       return;
     }
-    if (isAppServerRequestId(message.id) && typeof message.method === "string") {
+    if (isCodexAppServerRequestId(message.id) && typeof message.method === "string") {
       // This integration never enables external-token auth or experimental host
       // tools. Decline unexpected server requests rather than inventing a
       // privileged fallback path.
@@ -675,7 +555,7 @@ export class CodexAppServerClient {
     this.handleNotification(message.method, message.params);
   }
 
-  private notifyServerRequestError(id: AppServerRequestId, child: ChildProcess): void {
+  private notifyServerRequestError(id: CodexAppServerRequestId, child: ChildProcess): void {
     if (this.child !== child || !child.stdin || !child.stdin.writable) return;
     try {
       child.stdin.write(`${JSON.stringify({
@@ -687,7 +567,7 @@ export class CodexAppServerClient {
     }
   }
   private handleNotification(method: string, params: unknown): void {
-    const payload = isRecord(params) ? params : null;
+    const payload = isCodexJsonRecord(params) ? params : null;
     if (method === "account/updated" && payload) {
       if (payload.authMode === "chatgpt") {
         this.pendingLogin = null;

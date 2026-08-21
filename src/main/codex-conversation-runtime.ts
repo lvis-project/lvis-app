@@ -20,8 +20,8 @@ import {
 
 const require = createRequire(import.meta.url);
 
-const RPC_REQUEST_TIMEOUT_MS = 15_000;
-const MAX_RPC_LINE_BYTES = 1_000_000;
+export const CODEX_RPC_REQUEST_TIMEOUT_MS = 15_000;
+export const CODEX_MAX_RPC_LINE_BYTES = 1_000_000;
 const MAX_INPUT_TEXT_BYTES = 750_000;
 const MAX_STREAM_DELTA_BYTES = 256_000;
 const MAX_IDENTIFIER_LENGTH = 512;
@@ -54,13 +54,13 @@ const RESERVED_DYNAMIC_TOOL_NAMESPACES = new Set([
   "submodel_delegator",
 ]);
 
-type JsonRecord = Record<string, unknown>;
-type SpawnAppServer = (
+export type CodexJsonRecord = Record<string, unknown>;
+export type CodexSpawnAppServer = (
   command: string,
   args: ReadonlyArray<string>,
   options: SpawnOptions,
 ) => ChildProcess;
-type AppServerRequestId = string | number;
+export type CodexAppServerRequestId = string | number;
 
 export type CodexConversationRuntimeErrorCode =
   | "codex-runtime-unavailable"
@@ -145,7 +145,7 @@ export interface CodexConversationRuntimeOptions {
   /** Test seam for the packaged Codex executable resolver. */
   resolveExecutable?: () => string;
   /** Test seam; production uses managed-child-processes. */
-  spawn?: SpawnAppServer;
+  spawn?: CodexSpawnAppServer;
   clientVersion?: string;
   /** Optional, LVIS-governed tools advertised once when the thread starts. */
   dynamicTools?: ReadonlyArray<CodexConversationDynamicToolDefinition>;
@@ -217,7 +217,7 @@ type CodexConversationServerRequestKind =
 export interface CodexConversationServerRequest {
   kind: CodexConversationServerRequestKind;
   method: string;
-  requestId: AppServerRequestId;
+  requestId: CodexAppServerRequestId;
   threadId: string | null;
   turnId: string | null;
   itemId: string | null;
@@ -318,15 +318,23 @@ const SAFE_NATIVE_STREAM_ITEM_TYPES = new Set([
   "reasoning",
 ]);
 
-function resolveBundledCodexExecutable(): string {
+/**
+ * Resolve the official package's native binary directly. We deliberately do
+ * not execute a PATH-resolved `codex` shim or a shell command: the runtime is
+ * pinned in package.json and every argv value below is host-owned.
+ *
+ * `unavailable` builds the caller's domain error so each Codex transport keeps
+ * its own error union while sharing one resolution path.
+ */
+export function resolveBundledCodexExecutable(unavailable: () => Error): string {
   const target = PLATFORM_TARGETS[process.platform]?.[process.arch];
-  if (!target) throw new CodexConversationRuntimeError("codex-runtime-unavailable");
+  if (!target) throw unavailable();
 
   let packageJson: string;
   try {
     packageJson = require.resolve(`${target.packageName}/package.json`);
   } catch {
-    throw new CodexConversationRuntimeError("codex-runtime-unavailable");
+    throw unavailable();
   }
   const packagedPath = join(
     dirname(packageJson),
@@ -336,7 +344,7 @@ function resolveBundledCodexExecutable(): string {
     target.executableName,
   );
   const executable = preferAsarUnpackedPath(packagedPath);
-  if (!existsSync(executable)) throw new CodexConversationRuntimeError("codex-runtime-unavailable");
+  if (!existsSync(executable)) throw unavailable();
   return executable;
 }
 
@@ -347,12 +355,13 @@ function preferAsarUnpackedPath(candidate: string): string {
   return existsSync(unpacked) ? unpacked : candidate;
 }
 
-function spawnPackagedCodex(
+export function spawnPackagedCodex(
   command: string,
   args: ReadonlyArray<string>,
   options: SpawnOptions,
+  label: string,
 ): ChildProcess {
-  return spawnManaged(command, args, options, { label: "codex-conversation-runtime" });
+  return spawnManaged(command, args, options, { label });
 }
 
 function blocksInheritedEnvironment(key: string): boolean {
@@ -447,30 +456,32 @@ export function sanitizedCodexConversationEnvironment(
   };
 }
 
-function sanitizedCodexEnvironment(
-  runtimeHome: string,
-  sqliteHome: string,
-  runtimeTempDir: string,
-): NodeJS.ProcessEnv {
-  return sanitizedCodexConversationEnvironment(runtimeHome, sqliteHome, runtimeTempDir);
-}
-
-function validateRuntimeDirectory(candidate: string): string {
+/**
+ * Reject anything that is not an existing, absolute, non-symlink directory.
+ * `invalid` builds the caller's domain error; the rejection rules are shared so
+ * both Codex transports admit exactly the same set of runtime directories.
+ */
+export function validateCodexRuntimeDirectory(candidate: string, invalid: () => Error): string {
   const trimmed = candidate.trim();
-  if (!trimmed || !isAbsolute(trimmed)) {
-    throw new CodexConversationRuntimeError("codex-runtime-start-failed");
-  }
+  if (!trimmed || !isAbsolute(trimmed)) throw invalid();
   const directory = resolve(trimmed);
   try {
     const stat = lstatSync(directory);
     if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("unsafe runtime directory");
   } catch {
-    throw new CodexConversationRuntimeError("codex-runtime-start-failed");
+    throw invalid();
   }
   return directory;
 }
 
-function isRecord(value: unknown): value is JsonRecord {
+function validateRuntimeDirectory(candidate: string): string {
+  return validateCodexRuntimeDirectory(
+    candidate,
+    () => new CodexConversationRuntimeError("codex-runtime-start-failed"),
+  );
+}
+
+export function isCodexJsonRecord(value: unknown): value is CodexJsonRecord {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
@@ -534,7 +545,7 @@ function projectJsonValue(value: unknown, depth = 0): CodexConversationJsonValue
     }
     return projected;
   }
-  if (!isRecord(value)) return null;
+  if (!isCodexJsonRecord(value)) return null;
   const projected: Record<string, CodexConversationJsonValue> = Object.create(null) as Record<string, CodexConversationJsonValue>;
   for (const [key, item] of Object.entries(value)) {
     const result = projectJsonValue(item, depth + 1);
@@ -552,7 +563,7 @@ function normalizeDynamicToolFunction(
   candidate: unknown,
   allowsDeferredLoading: boolean,
 ): CodexConversationDynamicToolFunction | null {
-  if (!isRecord(candidate) || (candidate.type !== undefined && candidate.type !== "function")) return null;
+  if (!isCodexJsonRecord(candidate) || (candidate.type !== undefined && candidate.type !== "function")) return null;
   const name = boundedDynamicToolName(candidate.name, MAX_DYNAMIC_TOOL_NAME_LENGTH);
   const description = boundedDynamicToolDescription(candidate.description);
   const inputSchema = projectJsonValue(candidate.inputSchema);
@@ -583,7 +594,7 @@ function normalizeDynamicTools(candidate: unknown): NormalizedDynamicTools {
   const keys = new Set<string>();
   const namespaces = new Set<string>();
   for (const definition of candidate) {
-    if (!isRecord(definition)) throw new CodexConversationRuntimeError("codex-operation-failed");
+    if (!isCodexJsonRecord(definition)) throw new CodexConversationRuntimeError("codex-operation-failed");
     if (definition.type === undefined || definition.type === "function") {
       const functionDefinition = normalizeDynamicToolFunction(definition, false);
       const key = functionDefinition && dynamicToolKey(null, functionDefinition.name);
@@ -629,7 +640,7 @@ function sameDynamicTools(left: NormalizedDynamicTools, right: NormalizedDynamic
   return JSON.stringify(left.definitions) === JSON.stringify(right.definitions);
 }
 
-function isAppServerRequestId(value: unknown): value is AppServerRequestId {
+export function isCodexAppServerRequestId(value: unknown): value is CodexAppServerRequestId {
   return (typeof value === "number" && Number.isInteger(value))
     || (typeof value === "string" && value.length <= MAX_IDENTIFIER_LENGTH && !/[\u0000-\u001f\u007f]/.test(value));
 }
@@ -652,13 +663,13 @@ function isPositiveSafeInteger(value: unknown): value is number {
  * and must never become a per-turn audit or renderer value.
  */
 function projectTurnTokenUsage(
-  payload: JsonRecord,
+  payload: CodexJsonRecord,
 ): { threadId: string; turnId: string; tokenUsage: CodexConversationTokenUsage } | null {
   const threadId = boundedIdentifier(payload.threadId);
   const turnId = boundedIdentifier(payload.turnId);
-  const usage = isRecord(payload.tokenUsage) ? payload.tokenUsage : null;
+  const usage = isCodexJsonRecord(payload.tokenUsage) ? payload.tokenUsage : null;
   if (!usage) return null;
-  const last = isRecord(usage.last) ? usage.last : null;
+  const last = isCodexJsonRecord(usage.last) ? usage.last : null;
   if (
     !threadId
     || !turnId
@@ -700,7 +711,7 @@ function projectTurnTokenUsage(
  */
 export class CodexConversationRuntime {
   private readonly resolveExecutable: () => string;
-  private readonly spawn: SpawnAppServer;
+  private readonly spawn: CodexSpawnAppServer;
   private readonly clientVersion: string;
   private readonly runtimeHome: string;
   private readonly sqliteHome: string;
@@ -720,8 +731,12 @@ export class CodexConversationRuntime {
   private stdoutBuffer = "";
 
   constructor(options: CodexConversationRuntimeOptions) {
-    this.resolveExecutable = options.resolveExecutable ?? resolveBundledCodexExecutable;
-    this.spawn = options.spawn ?? spawnPackagedCodex;
+    this.resolveExecutable = options.resolveExecutable
+      ?? (() => resolveBundledCodexExecutable(
+        () => new CodexConversationRuntimeError("codex-runtime-unavailable"),
+      ));
+    this.spawn = options.spawn
+      ?? ((command, args, options_) => spawnPackagedCodex(command, args, options_, "codex-conversation-runtime"));
     this.clientVersion = options.clientVersion ?? getLvisAppVersion();
     this.runtimeHome = options.runtimeHome;
     this.sqliteHome = options.sqliteHome;
@@ -748,7 +763,7 @@ export class CodexConversationRuntime {
     await this.ensureStarted();
     try {
       const result = await this.request("account/read", { refreshToken: false });
-      const account = isRecord(result) && isRecord(result.account) ? result.account : null;
+      const account = isCodexJsonRecord(result) && isCodexJsonRecord(result.account) ? result.account : null;
       if (account?.type !== "chatgpt") {
         throw new CodexConversationRuntimeError("codex-operation-failed");
       }
@@ -1041,7 +1056,7 @@ export class CodexConversationRuntime {
           stdio: ["pipe", "pipe", "pipe"],
           windowsHide: true,
           shell: false,
-          env: sanitizedCodexEnvironment(runtimeHome, sqliteHome, runtimeTempDir),
+          env: sanitizedCodexConversationEnvironment(runtimeHome, sqliteHome, runtimeTempDir),
         },
       );
     } catch {
@@ -1084,7 +1099,7 @@ export class CodexConversationRuntime {
       await initialized;
       if (process.platform === "win32") {
         const readiness = await this.request("windowsSandbox/readiness");
-        if (!isRecord(readiness) || readiness.status !== "ready") {
+        if (!isCodexJsonRecord(readiness) || readiness.status !== "ready") {
           throw new CodexConversationRuntimeError("codex-runtime-start-failed");
         }
       }
@@ -1122,8 +1137,8 @@ export class CodexConversationRuntime {
         sandbox: "workspace-write",
         ephemeral: true,
       }).then((result) => {
-        const root = isRecord(result) ? result : null;
-        const thread = root && isRecord(root.thread) ? root.thread : null;
+        const root = isCodexJsonRecord(result) ? result : null;
+        const thread = root && isCodexJsonRecord(root.thread) ? root.thread : null;
         const threadId = boundedIdentifier(thread?.id);
         if (!threadId) throw new CodexConversationRuntimeError("codex-operation-failed");
         this.threadId = threadId;
@@ -1147,8 +1162,8 @@ export class CodexConversationRuntime {
   }
 
   private projectTurnId(result: unknown): string | null {
-    const root = isRecord(result) ? result : null;
-    const turn = root && isRecord(root.turn) ? root.turn : null;
+    const root = isCodexJsonRecord(result) ? result : null;
+    const turn = root && isCodexJsonRecord(root.turn) ? root.turn : null;
     return boundedIdentifier(turn?.id);
   }
 
@@ -1190,7 +1205,7 @@ export class CodexConversationRuntime {
     await this.request("turn/interrupt", { threadId: active.threadId, turnId });
   }
 
-  private request(method: string, params?: JsonRecord): Promise<unknown> {
+  private request(method: string, params?: CodexJsonRecord): Promise<unknown> {
     const child = this.child;
     if (!child?.stdin || !child.stdin.writable) {
       return Promise.reject(new CodexConversationRuntimeError("codex-operation-failed"));
@@ -1204,20 +1219,20 @@ export class CodexConversationRuntime {
       const timer = setTimeout(() => {
         if (!this.pendingRequests.has(id)) return;
         this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"), child);
-      }, RPC_REQUEST_TIMEOUT_MS);
+      }, CODEX_RPC_REQUEST_TIMEOUT_MS);
       timer.unref?.();
       this.pendingRequests.set(id, { method, resolve: resolveRequest, reject: rejectRequest, timer });
       this.writeMessage(payload, child);
     });
   }
 
-  private notify(method: string, params?: JsonRecord): void {
+  private notify(method: string, params?: CodexJsonRecord): void {
     const child = this.child;
     if (!child) return;
     this.writeMessage({ method, ...(params === undefined ? {} : { params }) }, child);
   }
 
-  private writeMessage(message: JsonRecord, child: ChildProcess): void {
+  private writeMessage(message: CodexJsonRecord, child: ChildProcess): void {
     if (this.child !== child || !child.stdin || !child.stdin.writable || !this.isWithinRpcLimit(message)) {
       if (this.child === child) {
         this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"), child);
@@ -1231,9 +1246,9 @@ export class CodexConversationRuntime {
     }
   }
 
-  private isWithinRpcLimit(message: JsonRecord): boolean {
+  private isWithinRpcLimit(message: CodexJsonRecord): boolean {
     try {
-      return Buffer.byteLength(JSON.stringify(message), "utf8") <= MAX_RPC_LINE_BYTES;
+      return Buffer.byteLength(JSON.stringify(message), "utf8") <= CODEX_MAX_RPC_LINE_BYTES;
     } catch {
       return false;
     }
@@ -1242,7 +1257,7 @@ export class CodexConversationRuntime {
   private consumeStdout(chunk: Buffer | string, child: ChildProcess): void {
     const text = typeof chunk === "string" ? chunk : this.stdoutDecoder.write(chunk);
     this.stdoutBuffer += text;
-    if (Buffer.byteLength(this.stdoutBuffer, "utf8") > MAX_RPC_LINE_BYTES) {
+    if (Buffer.byteLength(this.stdoutBuffer, "utf8") > CODEX_MAX_RPC_LINE_BYTES) {
       this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"), child);
       return;
     }
@@ -1264,11 +1279,11 @@ export class CodexConversationRuntime {
   }
 
   private handleMessage(message: unknown, child: ChildProcess): void {
-    if (!isRecord(message)) {
+    if (!isCodexJsonRecord(message)) {
       this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"), child);
       return;
     }
-    if (isAppServerRequestId(message.id) && typeof message.method === "string") {
+    if (isCodexAppServerRequestId(message.id) && typeof message.method === "string") {
       this.handleServerRequest(message.id, message.method, message.params, child);
       return;
     }
@@ -1291,7 +1306,7 @@ export class CodexConversationRuntime {
   }
 
   private handleServerRequest(
-    id: AppServerRequestId,
+    id: CodexAppServerRequestId,
     method: string,
     params: unknown,
     child: ChildProcess,
@@ -1324,7 +1339,7 @@ export class CodexConversationRuntime {
   }
 
   private async handleDynamicToolCall(
-    id: AppServerRequestId,
+    id: CodexAppServerRequestId,
     params: unknown,
     child: ChildProcess,
   ): Promise<void> {
@@ -1391,7 +1406,7 @@ export class CodexConversationRuntime {
   }
 
   private projectDynamicToolCall(params: unknown): CodexConversationDynamicToolCall | null {
-    const payload = isRecord(params) ? params : null;
+    const payload = isCodexJsonRecord(params) ? params : null;
     if (!payload || payload.namespace === undefined) return null;
     const threadId = boundedIdentifier(payload.threadId);
     const turnId = boundedIdentifier(payload.turnId);
@@ -1438,7 +1453,7 @@ export class CodexConversationRuntime {
   }
 
   private writeServerRequestError(
-    id: AppServerRequestId,
+    id: CodexAppServerRequestId,
     code: -32601 | -32602,
     message: string,
     child: ChildProcess,
@@ -1447,11 +1462,11 @@ export class CodexConversationRuntime {
   }
 
   private projectServerRequest(
-    requestId: AppServerRequestId,
+    requestId: CodexAppServerRequestId,
     method: string,
     params: unknown,
   ): CodexConversationServerRequest {
-    const payload = isRecord(params) ? params : null;
+    const payload = isCodexJsonRecord(params) ? params : null;
     const kind: CodexConversationServerRequestKind = method === "item/commandExecution/requestApproval"
       || method === "execCommandApproval"
       ? "command-approval"
@@ -1475,7 +1490,7 @@ export class CodexConversationRuntime {
   }
 
   private handleNotification(method: string, params: unknown): void {
-    const payload = isRecord(params) ? params : null;
+    const payload = isCodexJsonRecord(params) ? params : null;
     if (!payload) return;
     if (method === "item/started") {
       this.rejectUnsafeNativeItemStart(payload);
@@ -1498,8 +1513,8 @@ export class CodexConversationRuntime {
     if (method === "turn/completed") this.completeTurnFromNotification(payload);
   }
 
-  private rejectUnsafeNativeItemStart(payload: JsonRecord): void {
-    const item = isRecord(payload.item) ? payload.item : null;
+  private rejectUnsafeNativeItemStart(payload: CodexJsonRecord): void {
+    const item = isCodexJsonRecord(payload.item) ? payload.item : null;
     const itemType = boundedIdentifier(item?.type, 80);
     if (itemType && SAFE_NATIVE_STREAM_ITEM_TYPES.has(itemType)) return;
     if (itemType === "dynamicToolCall" && item && this.acceptsKnownDynamicToolItemStart(payload, item)) {
@@ -1517,7 +1532,7 @@ export class CodexConversationRuntime {
     this.abortTransport(new CodexConversationRuntimeError("codex-operation-failed"));
   }
 
-  private acceptsKnownDynamicToolItemStart(payload: JsonRecord, item: JsonRecord): boolean {
+  private acceptsKnownDynamicToolItemStart(payload: CodexJsonRecord, item: CodexJsonRecord): boolean {
     const active = this.activeTurn;
     const threadId = boundedIdentifier(payload.threadId);
     const turnId = boundedIdentifier(payload.turnId);
@@ -1552,7 +1567,7 @@ export class CodexConversationRuntime {
     }, child);
   }
 
-  private projectTextDelta(payload: JsonRecord): CodexConversationTextDelta | null {
+  private projectTextDelta(payload: CodexJsonRecord): CodexConversationTextDelta | null {
     const threadId = boundedIdentifier(payload.threadId);
     const turnId = boundedIdentifier(payload.turnId);
     const itemId = boundedIdentifier(payload.itemId);
@@ -1564,7 +1579,7 @@ export class CodexConversationRuntime {
     return { threadId, turnId, itemId, delta };
   }
 
-  private projectReasoningDelta(payload: JsonRecord): CodexConversationReasoningDelta | null {
+  private projectReasoningDelta(payload: CodexJsonRecord): CodexConversationReasoningDelta | null {
     const event = this.projectTextDelta(payload);
     const summaryIndex = payload.summaryIndex;
     if (!event || typeof summaryIndex !== "number" || !Number.isSafeInteger(summaryIndex) || summaryIndex < 0) {
@@ -1573,7 +1588,7 @@ export class CodexConversationRuntime {
     return { ...event, summaryIndex };
   }
 
-  private recordTokenUsageNotification(payload: JsonRecord): void {
+  private recordTokenUsageNotification(payload: CodexJsonRecord): void {
     const event = projectTurnTokenUsage(payload);
     const active = this.activeTurn;
     if (
@@ -1604,10 +1619,10 @@ export class CodexConversationRuntime {
     active.pendingTokenUsageByTurnId.set(event.turnId, event.tokenUsage);
   }
 
-  private completeTurnFromNotification(payload: JsonRecord): void {
+  private completeTurnFromNotification(payload: CodexJsonRecord): void {
     const active = this.activeTurn;
     const threadId = boundedIdentifier(payload.threadId);
-    const turn = isRecord(payload.turn) ? payload.turn : null;
+    const turn = isCodexJsonRecord(payload.turn) ? payload.turn : null;
     const turnId = boundedIdentifier(turn?.id);
     if (!active || active.settled || !threadId || !turnId || active.threadId !== threadId) return;
 
