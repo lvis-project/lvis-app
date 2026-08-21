@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { makeRecordedSpawn } from "../../__tests__/test-helpers.js";
 import {
   CodexConversationRuntime,
+  isCodexAppServerRequestId,
   sanitizedCodexConversationEnvironment,
   type CodexConversationRuntimeOptions,
 } from "../codex-conversation-runtime.js";
@@ -113,6 +114,35 @@ afterEach(async () => {
     await cleanupTmpDir(harness.runtimeRoot);
   }
   vi.restoreAllMocks();
+});
+
+describe("isCodexAppServerRequestId", () => {
+  // Both Codex transports share this predicate. It is the only gate between a
+  // subprocess-supplied reverse-RPC id and code that echoes or forwards that id,
+  // so the accepted set is pinned here rather than left to either call site.
+  it("accepts integers and plain bounded strings", () => {
+    expect(isCodexAppServerRequestId(0)).toBe(true);
+    expect(isCodexAppServerRequestId(-7)).toBe(true);
+    expect(isCodexAppServerRequestId("req-1")).toBe(true);
+    expect(isCodexAppServerRequestId("a".repeat(512))).toBe(true);
+  });
+
+  it("rejects C0 control characters and DEL inside a string id", () => {
+    expect(isCodexAppServerRequestId("req\u0000end")).toBe(false);
+    expect(isCodexAppServerRequestId("req\u0007end")).toBe(false);
+    expect(isCodexAppServerRequestId("req\u001bend")).toBe(false);
+    expect(isCodexAppServerRequestId("req\nend")).toBe(false);
+    expect(isCodexAppServerRequestId("req\u007fend")).toBe(false);
+  });
+
+  it("rejects over-long strings and non-integer or non-string values", () => {
+    expect(isCodexAppServerRequestId("a".repeat(513))).toBe(false);
+    expect(isCodexAppServerRequestId(1.5)).toBe(false);
+    expect(isCodexAppServerRequestId(Number.NaN)).toBe(false);
+    expect(isCodexAppServerRequestId(null)).toBe(false);
+    expect(isCodexAppServerRequestId(undefined)).toBe(false);
+    expect(isCodexAppServerRequestId({ id: "req-1" })).toBe(false);
+  });
 });
 
 describe("CodexConversationRuntime", () => {
