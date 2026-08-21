@@ -3,8 +3,11 @@ import { statSync } from "node:fs";
 import type { Tool } from "./base.js";
 import type { HookRunner } from "../hooks/hook-runner.js";
 import { isModelExposedTool } from "./base.js";
-import { isCanonicalBashTool } from "./bash.js";
-import { isCanonicalPowerShellTool, validatePowerShellCommand } from "./powershell.js";
+import {
+  isCanonicalBashTool,
+  isCanonicalPowerShellTool,
+  validatePowerShellCommand,
+} from "./shell-tools.js";
 // Effective invocation-origin SoT (AsyncLocalStorage). The plugin-surface executor
 // enters a `runWithInvocationOrigin` frame for every card/panel/plugin call, so this
 // is defined ("mcp-app" | "ui" | "plugin") ONLY on that path; the model's main-loop
