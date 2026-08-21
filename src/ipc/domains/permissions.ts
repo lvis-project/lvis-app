@@ -50,6 +50,7 @@ import type {
 } from "../../shared/sandbox-capability-info.js";
 import {
   detectSandboxCapability,
+  getSandboxBootOutcome,
   type SandboxCapability,
 } from "../../permissions/sandbox-capability.js";
 import {
@@ -275,6 +276,11 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       reason: potentialReason,
       potentialReason,
       runtime,
+      // What the gate decided THIS boot. The runtime snapshot cannot stand in
+      // for it: a degraded gate never publishes a capability, so `runtime`
+      // reports the same "no OS sandbox configured" it reports when the user
+      // never turned the sandbox on.
+      boot: getSandboxBootOutcome(),
       confines: sandboxConfinementForPlatform(platform, kind),
     };
   });

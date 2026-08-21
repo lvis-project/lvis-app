@@ -33,7 +33,10 @@
 
 import { t } from "../i18n/index.js";
 import type { ToolCategory, ToolSource } from "../tools/types.js";
-import type { SandboxConfinement } from "../shared/sandbox-capability-info.js";
+import type {
+  SandboxBootOutcome,
+  SandboxConfinement,
+} from "../shared/sandbox-capability-info.js";
 import {
   buildHostShellExecutionPlan,
   getHostShellExecutionPlanAuditProjection,
@@ -105,6 +108,7 @@ export interface SandboxCapability {
 let _activeCapability: SandboxCapability | undefined;
 let _sandboxGeneration = 0;
 let _sandboxRequestedAtBoot = false;
+let _bootOutcome: SandboxBootOutcome | null = null;
 const _issuedHostShellExecutionPlans = new WeakSet<HostShellExecutionPlan>();
 
 /** Monotonic identity for capability and wrapped-worker membership changes. */
@@ -138,6 +142,35 @@ export function setSandboxRequestedAtBoot(requested: boolean): void {
 /** True only when the sandbox was requested for this process at boot. */
 export function isSandboxRequestedAtBoot(): boolean {
   return _sandboxRequestedAtBoot;
+}
+
+/**
+ * Record what the boot gate decided. Written once per boot, at the same points
+ * that emit the gate's audit event, so the two cannot describe different
+ * outcomes.
+ *
+ * @internal — only the boot-time sandbox init path and tests should call this.
+ */
+export function setSandboxBootOutcome(outcome: SandboxBootOutcome): void {
+  _bootOutcome = Object.freeze({
+    ...outcome,
+    dependencyErrors: Object.freeze([...outcome.dependencyErrors]),
+  });
+}
+
+/**
+ * What the boot gate decided, or `null` if it never ran.
+ *
+ * `null` is NOT "off": a caller that renders absence as a disabled sandbox
+ * would be asserting something this process never established.
+ */
+export function getSandboxBootOutcome(): SandboxBootOutcome | null {
+  return _bootOutcome;
+}
+
+/** @internal — test teardown only. */
+export function __resetSandboxBootOutcomeForTest(): void {
+  _bootOutcome = null;
 }
 
 /** @internal — test teardown only. */

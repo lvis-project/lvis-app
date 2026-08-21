@@ -5,7 +5,7 @@
 import { app } from "electron";
 import { createLogger } from "../../lib/logger.js";
 import type { BootContext } from "../context.js";
-import type { SandboxGateReason } from "./sandbox-gate.js";
+import type { SandboxGateAction, SandboxGateReason } from "./sandbox-gate.js";
 
 const log = createLogger("lvis");
 
@@ -37,9 +37,8 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
       checkAsrtDependencies,
       isAsrtLinuxRuntimeProbeError,
     } = await import("../../permissions/asrt-sandbox.js");
-    const { setActiveSandboxCapability, setSandboxRequestedAtBoot } = await import(
-      "../../permissions/sandbox-capability.js"
-    );
+    const { setActiveSandboxCapability, setSandboxRequestedAtBoot, setSandboxBootOutcome } =
+      await import("../../permissions/sandbox-capability.js");
     const { sandboxConfinementForPlatform } = await import(
       "../../shared/sandbox-capability-info.js"
     );
@@ -66,6 +65,36 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
     // (it is the fail-closed signal); else the default/settings flag; else off.
     const sandboxGateOnSignal: "explicit-env" | "default-settings" | "off" =
       explicitEnv ? "explicit-env" : settingOn ? "default-settings" : "off";
+
+    /**
+     * The gate's one terminal report, to the audit log and to the renderer at
+     * the same time.
+     *
+     * They are written together because they are the same claim: the audit
+     * event is how the outcome is monitored, and the boot outcome is how the
+     * person using the app is told what happened to a setting they turned on.
+     * Two separate calls at six branches is two lists to keep in step, and a
+     * branch that told the log one thing and the surface another would be worse
+     * than a branch that told the surface nothing.
+     */
+    const recordGate = (
+      outcome: SandboxGateAction,
+      reason: SandboxGateReason,
+      dependencyErrors: readonly string[] = [],
+    ): void => {
+      bootAuditLogger.logSandboxGate({
+        platform: process.platform,
+        onSignal: sandboxGateOnSignal,
+        outcome,
+        reason,
+      });
+      setSandboxBootOutcome({
+        action: outcome,
+        reason,
+        onSignal: sandboxGateOnSignal,
+        dependencyErrors,
+      });
+    };
 
     // Tracks whether ASRT genuinely activated this boot. The interlock warning
     // below keys on THIS (not on `sandboxOptIn`), so the degraded path (gate ON,
@@ -95,12 +124,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
           "Install the sandbox dependencies (Linux: bwrap, socat, ripgrep) or unset LVIS_SANDBOX_ENABLED. " +
           `Missing: ${deps.errors.join("; ")}`;
         log.error(message);
-        bootAuditLogger.logSandboxGate({
-          platform: process.platform,
-          onSignal: sandboxGateOnSignal,
-          outcome: "abort",
-          reason: decision.reason,
-        });
+        recordGate("abort", decision.reason, deps.errors);
         await bootAuditLogger.flush();
         throw new Error(message);
       } else if (decision.action === "degrade") {
@@ -132,12 +156,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
               `Missing: ${detail}`,
           );
         }
-        bootAuditLogger.logSandboxGate({
-          platform: process.platform,
-          onSignal: sandboxGateOnSignal,
-          outcome: "degrade",
-          reason: decision.reason,
-        });
+        recordGate("degrade", decision.reason, deps.errors);
       } else {
         // decision.action === "activate" — deps present, initialize ASRT. Wrapped
         // so a runtime init FAILURE degrades-or-aborts by the SAME explicit-vs-
@@ -244,12 +263,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
             manifestAllowLists.length,
           );
           sandboxActive = true;
-          bootAuditLogger.logSandboxGate({
-            platform: process.platform,
-            onSignal: sandboxGateOnSignal,
-            outcome: "activate",
-            reason: decision.reason,
-          });
+          recordGate("activate", decision.reason);
         } catch (initErr) {
           // Init FAILURE (initializeAsrtSandbox threw despite deps present) is the
           // SAME "cannot activate" condition as deps-missing — re-decide with
@@ -276,12 +290,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
               "boot: OS tool sandbox is ON via LVIS_SANDBOX_ENABLED=1 but ASRT initialization failed — refusing to start. " +
                 `Cause: ${cause}`,
             );
-            bootAuditLogger.logSandboxGate({
-              platform: process.platform,
-              onSignal: sandboxGateOnSignal,
-              outcome: "abort",
-              reason: failureReason,
-            });
+            recordGate("abort", failureReason, [cause]);
             await bootAuditLogger.flush();
             throw initErr;
           }
@@ -292,12 +301,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
               "(Set LVIS_SANDBOX_ENABLED=1 to make this fail-closed instead.) " +
               `Cause: ${cause}`,
           );
-          bootAuditLogger.logSandboxGate({
-            platform: process.platform,
-            onSignal: sandboxGateOnSignal,
-            outcome: "degrade",
-            reason: failureReason,
-          });
+          recordGate("degrade", failureReason, [cause]);
           // sandboxActive stays false: a Linux runtime-probe failure never
           // publishes a verified capability, so UI/reviewer remain kind="none".
         }
@@ -312,12 +316,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
     "boot: OS tool sandbox gated off (enable via Settings → Permissions 'OS tool sandbox' or LVIS_SANDBOX_ENABLED=1)",
         );
       }
-      bootAuditLogger.logSandboxGate({
-        platform: process.platform,
-        onSignal: sandboxGateOnSignal,
-        outcome: "skip",
-        reason: "gate-off",
-      });
+      recordGate("skip", "gate-off");
     }
 
     // Flag-interlock warning (no hard interlock — the flags stay independent).
