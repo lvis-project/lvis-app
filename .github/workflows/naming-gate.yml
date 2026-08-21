@@ -1,7 +1,13 @@
 name: Naming Gate (process-metadata + de-identification)
 
-# 두 개의 독립 job. 둘 다 diff-based — PR 의 변경분만 검사한다. 기존 위반은
-# grandfather; sweep PR 으로 별도 제거. 이 workflow 의 목적은 *새 callsite 차단*.
+# 세 개의 독립 job. 앞의 두 개는 diff-based — PR 의 변경분만 검사한다. 기존
+# 위반은 grandfather; sweep PR 으로 별도 제거. 세 번째(home-path-gate)만
+# whole-tree 이며, 그 이유는 해당 job 설명에 있다.
+#
+# 세 job 은 서로 독립이다 — 한 job 의 실패가 다른 job 의 판정을 가리지 않는다.
+# 같은 job 안의 step 으로 이어 붙이면 앞 step 실패가 뒤 step 을 skip 시키고,
+# 리뷰어는 빨간 체크 하나를 보고 "검사 하나가 걸렸다" 로 읽지만 실제로는
+# 나머지 검사가 아예 돌지 않은 상태다.
 #
 # 1. naming-gate — process-derived 메타데이터(H1/H2, Phase-N, test-double
 #    prefix, Tier-as-process audit key, version suffix, PR-number fixture path)
@@ -20,6 +26,20 @@ name: Naming Gate (process-metadata + de-identification)
 #    호스트 저장소에 사내 식별자가 들어오면 그 경계가 무의미해진다. 패턴
 #    목록은 이 job 안에만 산다 — `AGENTS.md` 가 그 literal 을 되풀이하면
 #    규칙이 지우려는 것을 바로 그 문서가 다시 게시하게 된다.
+#
+# 3. home-path-gate — 역시 PUBLIC 저장소 이슈지만 대상이 다르다. 절대 홈
+#    경로(`/Users/<계정>`, `/home/<계정>`, `C:\Users\<계정>`, 그리고 agent
+#    도구가 쓰는 dash-encoded 형태)에 박힌 *개인 계정명* 을 막는다. 2 번 job
+#    과 달리 **whole-tree** 이다: 홈 경로는 브랜드명과 달리 기계적으로 치환
+#    가능해서 grandfather 할 이유가 없고, diff-only 는 "이 PR 이 안 늘렸다"
+#    만 말할 뿐 "트리가 깨끗하다" 는 말하지 못한다. 실제로 2 번 job 이
+#    diff-based 라는 이유로 트리에 남아 있던 53 파일이 그대로 통과해 있었다.
+#    판정은 deny-list 가 아니라 allow-list — 아직 기여하지 않은 사람의 계정명
+#    을 미리 알 수 없으므로, fixture 가 쓸 수 있는 synthetic 계정만 열거하고
+#    나머지는 전부 실패시킨다. 검사 본체와 self-test 는
+#    `.github/scripts/home-path-gate.sh` 한 파일에 함께 있다 (self-test 가
+#    위반 계정명을 런타임에 조립하므로 스크립트 자신이 첫 위반이 되지 않고,
+#    따라서 gate 를 자기 스캔에서 제외하는 구멍도 필요 없다).
 
 on:
   pull_request:
@@ -194,3 +214,14 @@ jobs:
           fi
 
           echo "deidentification-gate: clean."
+
+  home-path-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Self-test the gate
+        run: .github/scripts/home-path-gate.sh --selftest
+
+      - name: Scan the whole tree for personal home paths
+        run: .github/scripts/home-path-gate.sh
