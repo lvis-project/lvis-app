@@ -1,9 +1,12 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type React from "react";
 import { useTranslation } from "../../../i18n/react.js";
+import ReactMarkdown from "react-markdown";
+import { MARKDOWN_REMARK_PLUGINS } from "../utils/markdown-plugins.js";
+import { parseStagedEnvelope } from "../../../shared/staged-origins.js";
 import { Button } from "../../../components/ui/button.js";
-import { Bot, GitBranch, Pencil, Pin } from "lucide-react";
-import type { ChatEntry } from "../../../lib/chat-stream-state.js";
+import { Bot, Brain, ChevronDown, ChevronRight, GitBranch, Loader2, Pencil, Pin } from "lucide-react";
+import type { ChatEntry, CheckpointTrigger } from "../../../lib/chat-stream-state.js";
 import type { LLMVendor } from "../../../shared/llm-vendor-defaults.js";
 import { debugLog } from "../../../lib/debug-stream.js";
 import { detectFromStream } from "../../../lib/stream-markers.js";
@@ -14,17 +17,11 @@ import { classifyTurnEntries, isTurnStartEntry } from "../utils/classify-turn-en
 import { entryRenderRevision } from "../utils/chat-entry-revision.js";
 import { AssistantCard } from "./AssistantCard.js";
 import { UserMessageEditor } from "./UserMessageEditor.js";
-import { ReasoningCard } from "./ReasoningCard.js";
 import { ToolGroupCard } from "./ToolGroupCard.js";
-import { CheckpointDivider } from "./CheckpointDivider.js";
-import { SummaryToast } from "./SummaryToast.js";
 import type { ViewModeState } from "./ViewModeBanner.js";
-import { SessionResumeDivider } from "./SessionResumeDivider.js";
 import { WorkGroup } from "./WorkGroup.js";
 import { PermissionReviewStatusCard } from "./PermissionReviewStatusCard.js";
 import { TurnActionBar } from "./TurnActionBar.js";
-import { ImportedTriggerCard } from "./ImportedTriggerCard.js";
-import { AskUserAnswerBubble } from "./AskUserAnswerBubble.js";
 import {
   useNativeContextMenu,
   type NativeContextMenuHandlers,
@@ -763,4 +760,315 @@ export function TranscriptRenderer({
   ]);
 
   return <>{rendered}</>;
+}
+
+
+// ─── Transcript leaf fragments ────────────────────────────────────────────
+// Small render-only pieces of the transcript. They live here rather than in
+// their own modules because TranscriptRenderer is their only consumer.
+
+function SessionResumeDivider({ preambleChars }: { preambleChars: number }) {
+  const { t } = useTranslation();
+  return (
+    <div
+      data-testid="session-resume-divider"
+      className="flex items-center gap-2 py-2 my-2"
+    >
+      <span className="h-px flex-1 bg-success/(--opacity-muted)" />
+      <span className="text-[10px] text-success/(--opacity-emphatic) font-medium">
+        {t("sessionResumeDivider.resumeLabel", { preambleChars })}
+      </span>
+      <span className="h-px flex-1 bg-success/(--opacity-muted)" />
+    </div>
+  );
+}
+
+export function SummaryToast({ summary }: { summary: string }) {
+  const { t } = useTranslation();
+  return (
+    <details
+      data-testid="summary-toast"
+      className="group w-full min-w-0 max-w-full border-l-2 border-action-compact/(--opacity-medium) bg-action-compact/(--opacity-faint) px-4 py-2.5 mb-3 rounded-r"
+    >
+      <summary className="cursor-pointer list-none text-[10px] uppercase tracking-wider text-action-compact/(--opacity-intense) font-medium marker:hidden">
+        <span className="mr-1 inline-block transition-transform group-open:rotate-90">▸</span>
+        {t("summaryToast.previousSummary")}
+      </summary>
+      <div
+        className="prose prose-sm lvis-prose mt-2 max-w-none break-words text-sm text-muted-foreground [overflow-wrap:anywhere]"
+        data-testid="summary-toast-body"
+      >
+        <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+          {summary}
+        </ReactMarkdown>
+      </div>
+    </details>
+  );
+}
+
+type ImportedTriggerEntry = Extract<ChatEntry, { kind: "imported_trigger" }>;
+
+function ImportedTriggerCard({ entry }: { entry: ImportedTriggerEntry }) {
+  // Parse the envelope source tag to confirm STAGED provenance — `overlay:…` for a
+  // plugin trigger, `app:…` for an MCP App's `ui/message`, `mcp-prompt:…` for a
+  // server-declared prompt. Resolved through the staged-origin table, so a newly
+  // registered origin is labeled here without touching this card. Read from the
+  // envelope in the prompt itself, so what the user sees is what the engine
+  // classified. title + summary fields are already clean (set at insert time).
+  const envelopeSource = parseStagedEnvelope(entry.prompt)?.source;
+  return (
+    <div
+      className="mx-3 my-1 rounded border border-action-view/(--opacity-light) bg-action-view/(--opacity-faint) px-3 py-2 text-xs"
+    >
+      <div className="flex min-w-0 items-center gap-1 text-action-view font-medium">
+        <span className="shrink-0">●</span>
+        <span className="min-w-0 break-words [overflow-wrap:anywhere]">{envelopeSource ?? entry.summary.slice(0, 60)}</span>
+      </div>
+      {entry.summary && (
+        <div className="mt-1 text-muted-foreground prose prose-sm lvis-prose max-w-none break-words [overflow-wrap:anywhere]">
+          <ReactMarkdown remarkPlugins={MARKDOWN_REMARK_PLUGINS}>
+            {entry.summary}
+          </ReactMarkdown>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AskUserAnswerBubble({
+  entry,
+}: {
+  entry: Extract<ChatEntry, { kind: "ask_user_answer" }>;
+}) {
+  const { t } = useTranslation();
+  if (entry.dismissed) {
+    return (
+      <div
+        className="ml-auto w-fit min-w-0 max-w-[75%] rounded-lg border border-border/(--opacity-strong) border-l-2 border-l-muted-foreground/(--opacity-strong) bg-card/(--opacity-intense) px-3 py-2 text-xs text-muted-foreground shadow-sm"
+        data-testid="ask-user-answer-bubble"
+      >
+        <div className="text-[10.5px] text-muted-foreground/(--opacity-intense)">{t("chatView.askAnswerSkippedLabel")}</div>
+        <div className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{t("chatView.askAnswerSkippedProceed")}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="ml-auto w-fit min-w-0 max-w-[75%] rounded-lg border border-border/(--opacity-strong) border-l-2 border-l-message-user bg-card/(--opacity-near) px-3 py-2.5 text-xs text-card-foreground shadow-sm"
+      data-testid="ask-user-answer-bubble"
+    >
+      <div className="mb-1 text-[10.5px] text-muted-foreground">
+        {entry.rows.length > 1 ? t("chatView.askAnswerMyAnswerMultiple", { count: entry.rows.length }) : t("chatView.askAnswerMyAnswerSingle")}
+      </div>
+      <div className="space-y-0.5">
+        {entry.rows.map((row, idx) => (
+          <div key={`${idx}:${row.label}`} className="flex min-w-0 items-baseline gap-2">
+            <span className="w-[4.5rem] shrink-0 truncate text-[10.5px] text-muted-foreground">{row.label}</span>
+            <span className="min-w-0 flex-1 whitespace-pre-wrap break-words text-[12px] [overflow-wrap:anywhere]">{row.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Thinking card. Always starts COLLAPSED — including while the model is still
+ * streaming reasoning. The folded state shows just the header (a spinner +
+ * "thinking…" title while streaming, a brain + "thought" title once done); the
+ * reasoning body is revealed ONLY when the user clicks the header. This keeps
+ * live reasoning from auto-expanding and cluttering the conversation; the user
+ * opts in to read it. (Previously it auto-expanded during streaming and
+ * auto-collapsed on completion.)
+ */
+export function ReasoningCard({
+  entry,
+}: {
+  entry: Extract<ChatEntry, { kind: "reasoning" }>;
+}) {
+  const { t } = useTranslation();
+  const streaming = entry.streaming === true;
+  // Always collapsed by default — even while streaming. Expands only on click.
+  const [open, setOpen] = useState(false);
+
+  const title = streaming ? t("reasoningCard.thinkingTitle") : t("reasoningCard.thoughtCompleteTitle");
+  const hasBody = entry.text.trim().length > 0;
+  const bodyVisible = open && hasBody;
+
+  return (
+    <div className="min-w-0 w-full max-w-full rounded-md text-sm text-muted-foreground lvis-anim-message-in">
+      <button
+        type="button"
+        className="flex w-full min-w-0 items-center gap-2 px-3 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/(--opacity-muted)"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={bodyVisible}
+      >
+        {streaming
+          ? <Loader2 className="h-3 w-3 flex-shrink-0 animate-spin" />
+          : <Brain className="h-3 w-3 flex-shrink-0" />}
+        <span className="min-w-0 font-medium">{title}</span>
+        {/* Chevron always shown (even while streaming) so the folded block reads
+            as expandable. */}
+        <span className="shrink-0">
+          {bodyVisible
+            ? <ChevronDown className="h-3 w-3 flex-shrink-0" />
+            : <ChevronRight className="h-3 w-3 flex-shrink-0" />}
+        </span>
+      </button>
+      {bodyVisible && (
+        <div className="ml-3 min-w-0 whitespace-pre-wrap break-words border-l-2 border-muted py-1 pl-3 text-[11px] italic leading-5 text-muted-foreground/(--opacity-intense) [overflow-wrap:anywhere] lvis-anim-fade-in">
+          {entry.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
+type CompactStatus =
+  | "summarized"
+  | "content_truncated"
+  | "noop"
+  | "reduced_insufficient_forced";
+
+interface Variant {
+  label: string;
+  icon: string;
+  lineCls: string;
+  textCls: string;
+}
+
+const STATUS_VARIANTS: Record<CompactStatus, Variant> = {
+  summarized: {
+    label: "checkpointDivider.statusSummarized",
+    icon: "📦",
+    lineCls: "bg-action-compact/(--opacity-muted)",
+    textCls: "text-action-compact/(--opacity-intense)",
+  },
+  content_truncated: {
+    label: "checkpointDivider.statusContentTruncated",
+    icon: "✂️",
+    lineCls: "bg-warning/(--opacity-medium)",
+    textCls: "text-warning/(--opacity-near)",
+  },
+  noop: {
+    label: "checkpointDivider.statusNoop",
+    icon: "✓",
+    lineCls: "bg-muted-foreground/25",
+    textCls: "text-muted-foreground/(--opacity-stronger)",
+  },
+  reduced_insufficient_forced: {
+    label: "checkpointDivider.statusReducedInsufficient",
+    icon: "⚠️",
+    lineCls: "bg-destructive/(--opacity-medium)",
+    textCls: "text-destructive/(--opacity-near)",
+  },
+};
+
+const TRIGGER_VARIANTS: Record<CheckpointTrigger | "default", Variant> = {
+  "auto-compact": {
+    label: "checkpointDivider.triggerAutoCompact",
+    icon: "📌",
+    lineCls: "bg-action-compact/(--opacity-muted)",
+    textCls: "text-action-compact/(--opacity-intense)",
+  },
+  "manual": {
+    label: "checkpointDivider.triggerManual",
+    icon: "✋",
+    lineCls: "bg-muted-foreground/35",
+    textCls: "text-muted-foreground/(--opacity-intense)",
+  },
+  default: {
+    label: "checkpointDivider.triggerAutoCompact",
+    icon: "📌",
+    lineCls: "bg-action-compact/(--opacity-muted)",
+    textCls: "text-action-compact/(--opacity-intense)",
+  },
+};
+
+export function CheckpointDivider({
+  trigger,
+  messageCount,
+  compactNum,
+  compactStatus,
+  truncatedDir,
+  onEnterView,
+  onBranchFrom,
+}: {
+  trigger?: CheckpointTrigger;
+  messageCount: number;
+  /** Compact sequence number — enables view/branch action buttons. */
+  compactNum?: number;
+
+  compactStatus?: CompactStatus;
+
+  truncatedDir?: string;
+  /** Enter view-mode for this checkpoint. */
+  onEnterView?: (compactNum: number) => void | Promise<void>;
+  /** Fork a new session from this checkpoint. */
+  onBranchFrom?: (compactNum: number) => void | Promise<void>;
+}) {
+  const { t } = useTranslation();
+
+  const variant: Variant = compactStatus !== undefined
+    ? STATUS_VARIANTS[compactStatus]
+    : TRIGGER_VARIANTS[trigger ?? "default"];
+
+
+  const hasBoundary = compactStatus === undefined
+    || compactStatus === "summarized"
+    || compactStatus === "reduced_insufficient_forced";
+  const hasActions =
+    hasBoundary && compactNum !== undefined && (onEnterView !== undefined || onBranchFrom !== undefined);
+  return (
+    <div
+      data-testid="checkpoint-divider"
+      data-trigger={trigger ?? "default"}
+      data-compact-status={compactStatus ?? "summarized"}
+      data-compact-num={compactNum}
+      className="my-2 flex flex-col gap-1.5 py-2"
+    >
+      <div className="flex items-center gap-2">
+        <span className={`h-px flex-1 ${variant.lineCls}`} />
+        <span className={`text-[10px] ${variant.textCls} font-medium`}>
+          {"───"} {variant.icon} {t("checkpointDivider.checkpoint")}{compactNum !== undefined ? ` #${compactNum}` : ""} · {t(variant.label)} ({t("checkpointDivider.messageCount", { count: messageCount })}) {"───"}
+        </span>
+        <span className={`h-px flex-1 ${variant.lineCls}`} />
+      </div>
+      {truncatedDir !== undefined && (
+        <div className="px-4 text-center text-[9.5px] text-muted-foreground/(--opacity-stronger)">
+          {t("checkpointDivider.originalPreserved", { dir: truncatedDir })}
+        </div>
+      )}
+      {hasActions && (
+        <div
+          data-testid="checkpoint-actions"
+          className="flex items-center justify-center gap-2 px-4"
+        >
+          {onEnterView !== undefined && compactNum !== undefined && (
+            <button
+              type="button"
+              data-testid="ck-btn-view"
+              onClick={() => { void onEnterView(compactNum); }}
+              className="rounded-md border border-[hsl(var(--action-view)/0.35)] bg-[hsl(var(--action-view)/0.08)] px-3 py-1 text-[10.5px] font-medium text-[hsl(var(--action-view))] transition-colors hover:bg-[hsl(var(--action-view)/0.18)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--action-view)/0.4)]"
+              aria-label={t("checkpointDivider.viewAriaLabel", { num: compactNum })}
+            >
+              📖 {t("checkpointDivider.viewButton")}
+            </button>
+          )}
+          {onBranchFrom !== undefined && compactNum !== undefined && (
+            <button
+              type="button"
+              data-testid="ck-btn-fork"
+              onClick={() => { void onBranchFrom(compactNum); }}
+              className="rounded-md border border-[hsl(var(--action-branch)/0.35)] bg-[hsl(var(--action-branch)/0.08)] px-3 py-1 text-[10.5px] font-medium text-[hsl(var(--action-branch))] transition-colors hover:bg-[hsl(var(--action-branch)/0.18)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[hsl(var(--action-branch)/0.4)]"
+              aria-label={t("checkpointDivider.branchAriaLabel", { num: compactNum })}
+            >
+              ↩ {t("checkpointDivider.branchButton")}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }

@@ -11,6 +11,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "../../../i18n/react.js";
+import type { ReactElement } from "react";
 import { Textarea } from "../../../components/ui/textarea.js";
 import {
   AttachmentChip,
@@ -34,8 +35,6 @@ import type { PluginEntry } from "./PluginGridButton.js";
 import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
 import type { SubscriptionImageAttachmentLimits } from "../../../shared/subscription-runtime.js";
 import { subscriptionImageAttachmentLimitViolation } from "../utils/subscription-runtime-ui-policy.js";
-import { SuggestedRepliesGhost } from "./SuggestedRepliesGhost.js";
-import { SuggestedRepliesChipRow } from "./SuggestedRepliesChipRow.js";
 import {
   acceptSuggestedReply,
   clearDismissedReplies,
@@ -951,3 +950,133 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     </div>
   );
 });
+
+// Ghost-text overlay rendered on top of the Composer textarea when (a) the
+// textarea body is empty, (b) a `best` suggested reply is available, and
+// (c) the user has not dismissed the current snapshot.
+//
+// The parent (Composer) owns positioning context: this component renders an
+// absolute-positioned layer that visually aligns with the textarea text.
+// `pointer-events-none` keeps clicks falling through to the textarea so
+// focus / caret behavior is unchanged.
+//
+// Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.1.
+//
+// PR-D animation: `motion-safe:animate-in fade-in` eases the ghost in when
+// a new turn's suggestion arrives. The `transition-opacity` keeps the fade
+// smooth when CSS class state flips (e.g. typing → empty). `prefers-
+// reduced-motion` opt-outs are honored by Tailwind's `motion-safe:` variant.
+
+interface SuggestedRepliesGhostProps {
+  text: string | null;
+  visible: boolean;
+}
+
+function SuggestedRepliesGhost({ text, visible }: SuggestedRepliesGhostProps): ReactElement | null {
+  const { t } = useTranslation();
+  if (!visible || !text) return null;
+  return (
+    <div
+      data-testid="suggested-replies-ghost"
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 flex items-start px-4 py-2 text-body-sm text-input-bar-placeholder transition-opacity duration-(--motion-fast) ease-(--motion-ease-out) motion-safe:animate-in motion-safe:fade-in motion-reduce:transition-none"
+    >
+      <span className="truncate">{text}</span>
+      <span className="ml-auto whitespace-nowrap pl-2 text-micro opacity-70">
+        {t("suggestedRepliesGhost.tabToFill")}
+      </span>
+    </div>
+  );
+}
+
+// iOS QuickType-style chip row rendered immediately above the Composer when
+// 2+ suggested replies are available. The `best` reply is shown as ghost
+// text inside the textarea; this row carries the remaining alternates so
+// the user can pick one with a click (PR-B) or cycle with ↑/↓ (PR-D).
+//
+// Spec: `docs/architecture/proposals/suggested-replies-ghost-text.md` §6.1.
+//
+// PR-D additions:
+//   • `focusedIdx` + `onFocusChange` — Composer drives focus via ArrowUp /
+//     ArrowDown so the user can cycle without leaving the textarea. Each
+//     chip is a real <button>, so the focused chip also accepts native
+//     Enter / Space via its own onClick (no extra wiring needed).
+//   • Fade-slide animation — `transition-*` classes on row + chips so a new
+//     turn's chips ease in instead of popping. `key={text}` on chips means
+//     React mounts a fresh node per suggestion, which lets the
+//     `motion-safe:animate-in` class re-fire on every push.
+
+interface SuggestedRepliesChipRowProps {
+  alternates: string[];
+  /** Index of the currently keyboard-focused chip. `null` = no chip focused
+   *  (focus lives in the textarea). Composer owns this state so ArrowUp /
+   *  ArrowDown can also rotate focus back out of the row. */
+  focusedIdx: number | null;
+  onAccept: (text: string) => void;
+  onFocusChange: (idx: number | null) => void;
+}
+
+function SuggestedRepliesChipRow({
+  alternates,
+  focusedIdx,
+  onAccept,
+  onFocusChange,
+}: SuggestedRepliesChipRowProps): ReactElement | null {
+  const { t } = useTranslation();
+  // Imperatively move DOM focus when `focusedIdx` changes. Composer drives
+  // the index from keyboard events; the chip refs receive `.focus()` here so
+  // assistive tech + focus rings stay in sync with the keyboard cursor.
+  const chipRefs = useRef<Array<HTMLButtonElement | null>>([]);
+  useEffect(() => {
+    if (focusedIdx === null) return;
+    const el = chipRefs.current[focusedIdx];
+    if (el) el.focus();
+  }, [focusedIdx]);
+
+  if (alternates.length === 0) return null;
+  return (
+    <div
+      data-testid="suggested-replies-chip-row"
+      role="toolbar"
+      aria-label={t("suggestedRepliesChipRow.toolbarAriaLabel")}
+      className="mx-3 mt-3 mb-1 flex gap-2 overflow-x-auto transition-[opacity,transform] duration-(--motion-fast) ease-(--motion-ease-out) motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-1 motion-reduce:transition-none"
+    >
+      {alternates.map((text, idx) => {
+        const isFocused = focusedIdx === idx;
+        return (
+          <button
+            key={`${idx}-${text}`}
+            ref={(el) => {
+              chipRefs.current[idx] = el;
+            }}
+            type="button"
+            data-testid="suggested-replies-chip"
+            data-focused={isFocused ? "true" : undefined}
+            tabIndex={isFocused ? 0 : -1}
+            // Focus ring + background highlight when the keyboard cursor lands
+            // on this chip. Hover-on-pointer + focus-on-keyboard are visually
+            // distinct (hover = bg-accent, focus = ring + bg-accent) so users
+            // can tell where input is going.
+            className={
+              "shrink-0 rounded-full bg-input-bar-subtle px-3 py-1 text-caption text-input-bar-action transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:bg-input-bar-action/(--opacity-subtle) focus:outline-none focus-visible:ring-2 focus-visible:ring-input-bar-focus motion-reduce:transition-none" +
+              (isFocused ? " bg-input-bar-action/(--opacity-subtle) ring-2 ring-input-bar-focus" : "")
+            }
+            onClick={() => onAccept(text)}
+            onFocus={() => onFocusChange(idx)}
+            onBlur={(e) => {
+              // Only clear focus if focus moved *outside* the row. Tabbing
+              // between chips inside the row would otherwise drop the index
+              // mid-transition.
+              const next = e.relatedTarget as HTMLElement | null;
+              if (!next || !next.closest("[data-testid='suggested-replies-chip-row']")) {
+                onFocusChange(null);
+              }
+            }}
+          >
+            {text}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
