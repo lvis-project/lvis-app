@@ -22,7 +22,7 @@ const PLUGIN_REVOKED_CODE = "plugin-revoked";
  * this exact `slug@version` (explicit blocklist) or the version is below
  * the plugin's pinned minimum. Thrown by `assertMarketplaceNotRevoked`
  * (`plugins/plugin-artifact-store.ts`), the install-time twin of the
- * `markRevoked` LOAD-boundary gate in `plugins/runtime/runtime-state.ts`.
+ * `markRevoked` LOAD-boundary gate in `plugins/runtime/index.ts`.
  *
  * A class (not an inline `new Error(...)`) for the same reason
  * {@link MarketplaceBackendDisabledError} is one: `buildInstallFailureResult`

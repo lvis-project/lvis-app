@@ -99,7 +99,7 @@ export function assertMarketplaceAppUpgradeNotRequired(
  * Shared last-line defense: refuse to install a `slug@version` the
  * marketplace revocation registry blocks (explicit blocklist) or that falls
  * below the plugin's pinned minimum version. The install-time twin of the
- * `markRevoked` LOAD-boundary gate (`plugins/runtime/runtime-state.ts`) — a
+ * `markRevoked` LOAD-boundary gate (`plugins/runtime/index.ts`) — a
  * version that would be rejected on the next boot must never be installed
  * in the first place.
  *
