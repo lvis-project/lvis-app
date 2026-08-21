@@ -593,13 +593,18 @@ describe("bootstrap() integration lock", () => {
   let services: AppServices;
   let savedSandboxEnv: string | undefined;
 
+  // A whole-app boot, not an ordinary fixture. The suite-wide 45s hook budget is
+  // sized for the latter, and this hook lands within a few seconds of it on
+  // Windows once the runner transforms the full service graph on demand — so a
+  // loaded full-suite run times the hook out and skips all nine assertions. The
+  // headroom is for the runner's import cost, not for the product's boot.
   beforeAll(async () => {
     // Hold the OS-sandbox gate OFF for a deterministic skip path (no ASRT init).
     savedSandboxEnv = process.env["LVIS_SANDBOX_ENABLED"];
     delete process.env["LVIS_SANDBOX_ENABLED"];
     const win = fakeWindow();
     services = await bootstrap("/tmp/lvis-boot-test/project", win, () => win);
-  });
+  }, 180_000);
 
   afterAll(() => {
     if (savedSandboxEnv === undefined)

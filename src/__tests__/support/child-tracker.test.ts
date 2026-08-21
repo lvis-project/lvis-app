@@ -63,14 +63,35 @@ describe("createChildTracker", () => {
     expect(isAlive(pid as number)).toBe(false);
   }, 20_000);
 
-  it("escalates to SIGKILL when the child ignores SIGTERM", async () => {
+  // Win32 has no signal delivery to emulate an ignored SIGTERM with: `kill`
+  // terminates the target outright whatever handler it installed, so the polite
+  // step is already the forceful one and there is no escalation to observe. The
+  // property that survives the platform — the reaper leaves nothing running —
+  // is the test below; this one asserts the mechanism it uses on POSIX.
+  it.runIf(process.platform !== "win32")(
+    "escalates to SIGKILL when the child ignores SIGTERM",
+    async () => {
+      const tracker = createChildTracker();
+      const child = tracker.track(spawnUnkillableByTerm());
+      await whenArmed(child);
+      await tracker.reap();
+      // SIGTERM was handled and discarded by the child, so the only signal that
+      // could have ended it is the escalation.
+      expect(child.signalCode).toBe("SIGKILL");
+    },
+    20_000,
+  );
+
+  it("ends a child that installed a SIGTERM handler, on every platform", async () => {
     const tracker = createChildTracker();
     const child = tracker.track(spawnUnkillableByTerm());
+    const { pid } = child;
     await whenArmed(child);
+
     await tracker.reap();
-    // SIGTERM was handled and discarded by the child, so the only signal that
-    // could have ended it is the escalation.
-    expect(child.signalCode).toBe("SIGKILL");
+
+    expect(isAlive(pid as number)).toBe(false);
+    expect(child.signalCode).not.toBeNull();
   }, 20_000);
 
   it("is safe to reap twice and reaps nothing the second time", async () => {

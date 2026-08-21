@@ -44,6 +44,31 @@ const DEFAULT_PRIVACY_RUNTIME: LvisHomePrivacyRuntime = {
 };
 
 /**
+ * Resolve a Windows system executable by absolute path rather than letting
+ * `PATH` decide which binary answers to the name.
+ *
+ * Both reasons are load-bearing for a security control. A PATH that puts a
+ * POSIX toolchain (Git Bash, MSYS2, Cygwin) ahead of `System32` — the ordinary
+ * state of a developer machine, and reachable on an end-user one — resolves
+ * `whoami` to a coreutils binary that rejects `/user` as an operand. The DACL
+ * call below then never runs, `ensureLvisHomePrivate` reports `"none"`, and
+ * `~/.lvis` keeps whatever ACL it inherited while the app carries on. And a
+ * control that decides who may read `secrets/` must not execute whichever
+ * `whoami.exe` an earlier PATH entry happens to name.
+ *
+ * `SystemRoot` is set by the Windows session itself. If it is somehow absent
+ * the bare name is still tried, which is exactly today's behaviour rather than
+ * a new failure mode.
+ */
+export function win32SystemBinary(
+  name: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string {
+  const root = env.SystemRoot ?? env.windir;
+  return root ? join(root, "System32", `${name}.exe`) : name;
+}
+
+/**
  * Parse the current account's SID out of `whoami /user /fo csv /nh`, whose one
  * line is `"DOMAIN\\user","S-1-5-21-…"`. The SID is used rather than the name
  * because account names are localized and domain-qualified, and `icacls`
@@ -85,8 +110,16 @@ export function ensureLvisHomePrivate(
   mkdirSync(home, { recursive: true, mode: 0o700 });
   if (runtime.platform !== "win32") return { enforcement: "posix-mode", home };
   try {
-    const sid = parseCurrentUserSid(runtime.run("whoami", ["/user", "/fo", "csv", "/nh"]));
-    runtime.run("icacls", [home, "/inheritance:r", "/grant:r", `*${sid}:(OI)(CI)F`, "/q"]);
+    const sid = parseCurrentUserSid(
+      runtime.run(win32SystemBinary("whoami"), ["/user", "/fo", "csv", "/nh"]),
+    );
+    runtime.run(win32SystemBinary("icacls"), [
+      home,
+      "/inheritance:r",
+      "/grant:r",
+      `*${sid}:(OI)(CI)F`,
+      "/q",
+    ]);
     return { enforcement: "win32-dacl", home, sid };
   } catch (err) {
     return { enforcement: "none", home, reason: (err as Error).message };
