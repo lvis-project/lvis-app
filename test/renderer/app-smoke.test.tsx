@@ -84,7 +84,7 @@ describe("App smoke (Phase 1 infra)", () => {
     });
 
     // Default appMode is "work" — Settings renders inline in the main area
-    // through the same setActiveView + MainContent path as the other views.
+    // through the same setActiveView + main-content-region path as the other views.
     await waitFor(() =>
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
     );
@@ -331,7 +331,7 @@ describe("Settings inline (all modes)", () => {
       fireEvent.click(sidebarSettings!);
     });
 
-    // Inline render via setActiveView + MainContent.
+    // Inline render via setActiveView + the main content region.
     await waitFor(() =>
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
     );

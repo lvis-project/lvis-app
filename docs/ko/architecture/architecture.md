@@ -676,7 +676,7 @@ RESUME_DELAY ──── 90s elapsed ──→ RUNNING
 
 #### 4.4.5 LLM Agentic 검색 — function calling (depth ≤ 3)
 
-`pageindex==0.2.8`에 `search()` 메서드가 없으므로 LVIS는 4개 builtin 도구를 노출해 LLM이 트리를 직접 탐색하도록 한다. 현재 구현 도구 정의는 `lvis-app/src/tools/knowledge-search.ts`, depth cap enforcement는 `lvis-app/src/engine/turn/knowledge-cap.ts`이며 `query-loop.ts`가 라운드별로 적용한다.
+`pageindex==0.2.8`에 `search()` 메서드가 없으므로 LVIS는 4개 builtin 도구를 노출해 LLM이 트리를 직접 탐색하도록 한다. 현재 구현 도구 정의는 `lvis-app/src/tools/knowledge-search.ts`, depth cap enforcement는 `lvis-app/src/engine/turn/query-loop.ts`가 라운드별로 적용한다.
 
 | Tool | 동작 |
 | ------------------------------------- | ------------------------------------------------------------ |
@@ -1192,9 +1192,8 @@ lvis-app/src/
 │
 ├── renderer.tsx   # minimal entry — mounts ui/renderer/App.tsx
 ├── ui/renderer/   # Renderer composition root (App/ChatView decomposed into roots + hooks)
-│   ├── App.tsx                  # composition root — wires domain hooks + renders
-│   │                            #  AppProviders > AppShell(children) + AppDialogs (C16)
-│   ├── AppProviders.tsx, AppShell.tsx, AppDialogs.tsx   # App presentational split
+│   ├── App.tsx                  # composition root — wires domain hooks and renders
+│   │                            #  providers > shell(children) + dialogs inline
 │   ├── ChatView.tsx             # composition root — calls ChatView hooks + renders
 │   │                            #  ChatTranscript + ChatComposerDock (C15)
 │   ├── SettingsDialog.tsx, MainToolbar.tsx
@@ -1285,11 +1284,10 @@ lvis-app/src/
 │
 ├── plugins/       # 플러그인 런타임
 │   ├── runtime.ts               # re-export shim (verbatim surface)
-│   ├── runtime/  # PluginRuntime layers: index (invocation/query facade),
-│   │            #  runtime-lifecycle (mutations), runtime-state (single state owner),
-│   │            #  perf-stats, config-overrides, preparation, lifecycle-timeout,
-│   │            #  access-control, cards, plugin-loader, manifest-validation,
-│   │            #  origin-chain, sandbox, snapshots, types
+│   ├── runtime/  # PluginRuntime layers: index (state owner + lifecycle mutations
+│   │            #  + invocation/query facade), runtime-admission, detached-operation,
+│   │            #  tool-visibility, plugin-loader, manifest-validation,
+│   │            #  origin-chain, sandbox, types
 │   └── registry.ts, marketplace.ts, deployment-guard.ts, types.ts
 │
 ├── contract/      # #1409 public wire contract SOT

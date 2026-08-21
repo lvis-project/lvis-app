@@ -30,7 +30,7 @@ import { TranscriptRenderer, type TurnSummary } from "../components/TranscriptRe
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 
 // Radix Tooltip (used by WorkGroup / TurnActionBar primitives) requires a
-// provider in the tree — the real app supplies it via AppProviders. Wrap the
+// provider in the tree — the real app mounts it in App.tsx. Wrap the
 // isolated core the same way so these unit renders mirror production context.
 const renderCore = (ui: React.ReactElement) =>
   render(<TooltipProvider>{ui}</TooltipProvider>);
