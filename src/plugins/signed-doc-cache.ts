@@ -2,13 +2,13 @@
  * Generic atomic disk cache for a signed remote policy document (body +
  * detached signature + fetch metadata).
  *
- * Extracted from the original `whitelist/whitelist-cache.ts` (#893 Stage 2) so
- * the plugin revocation registry can reuse the exact same on-disk contract —
- * atomic tmp-then-rename writes, tolerant-of-missing-file reads,
- * throw-on-malformed-JSON reads — instead of re-implementing it. The two
- * callers differ only in which subdirectory of `userData` they live under
- * and what schema the body JSON encodes; neither of those is this module's
- * concern.
+ * Extracted from the marketplace whitelist registry's original private
+ * cache so the plugin revocation and admission registries can reuse the
+ * exact same on-disk contract — atomic tmp-then-rename writes,
+ * tolerant-of-missing-file reads, throw-on-malformed-JSON reads — instead
+ * of re-implementing it. The callers differ only in which subdirectory of
+ * `userData` they live under and what schema the body JSON encodes;
+ * neither of those is this module's concern.
  *
  * Layout under `<userData>/<subDir>/`:
  *   document.json      — last good document body (utf-8 JSON)
