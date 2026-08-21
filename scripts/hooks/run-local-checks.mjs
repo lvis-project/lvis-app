@@ -638,40 +638,37 @@ function getPackageManager(dir) {
   throw new Error(`bun or npm is required for ${dir}`);
 }
 
-function getJsRuntime() {
-  const runtime = available(commands.node, commands.bun);
-  if (!runtime) {
-    throw new Error("node or bun is required for JavaScript-based LVIS checks");
+/**
+ * Run the named package scripts, or fail if any of them is absent.
+ *
+ * A check whose target does not exist must never read as a passing check.
+ * This runner used to `continue` past a missing script name, so a stale or
+ * misspelled name became a permanently green no-op that left no trace in the
+ * log. The runner is scoped to lvis-app (the dispatch below rejects any other
+ * repo), so "this repo happens not to define that script" is not a legitimate
+ * state — it is a broken reference, and the push gate must say so.
+ */
+function runPackageScripts(dir, scriptNames, checkLabel) {
+  if (!hasFile(join(dir, "package.json"))) {
+    throw new Error(`${checkLabel} requires a package.json in ${dir}`);
   }
-  return runtime;
-}
-
-function runPackageScripts(dir, scriptNames) {
-  if (!hasFile(join(dir, "package.json"))) return;
-  const packageManager = getPackageManager(dir);
-  for (const scriptName of scriptNames) {
-    if (!hasPackageScript(dir, scriptName)) continue;
-    run(packageManager, ["run", scriptName], dir);
-  }
-}
-
-function runJavaScriptFile(dir, relativePath) {
-  const filePath = join(dir, relativePath);
-  if (!hasFile(filePath)) return;
-  run(getJsRuntime(), [filePath], dir);
-}
-
-function runAppTypecheckGate(dir, checkLabel) {
   const missingScripts = getMissingPackageScripts(
-    APP_TYPECHECK_GATE_SCRIPTS,
+    scriptNames,
     (scriptName) => hasPackageScript(dir, scriptName)
   );
   if (missingScripts.length > 0) {
     throw new Error(
-      `lvis-app ${checkLabel} requires package script(s): ${missingScripts.join(", ")}`
+      `${checkLabel} requires package script(s): ${missingScripts.join(", ")}`
     );
   }
-  runPackageScripts(dir, APP_TYPECHECK_GATE_SCRIPTS);
+  const packageManager = getPackageManager(dir);
+  for (const scriptName of scriptNames) {
+    run(packageManager, ["run", scriptName], dir);
+  }
+}
+
+function runAppTypecheckGate(dir, checkLabel) {
+  runPackageScripts(dir, APP_TYPECHECK_GATE_SCRIPTS, `lvis-app ${checkLabel}`);
 }
 
 function runAppChecks(dir) {
@@ -679,20 +676,32 @@ function runAppChecks(dir) {
   if (!bun) {
     throw new Error("bun is required for lvis-app checks");
   }
+  // The SDK lives outside this repo and is only present in a linked local
+  // layout, so its absence is a real state rather than a broken reference.
   if (hasFile(join(dir, "packages", "plugin-sdk", "package.json"))) {
-    runPackageScripts(join(dir, "packages", "plugin-sdk"), ["check:drift", "build"]);
+    runPackageScripts(
+      join(dir, "packages", "plugin-sdk"),
+      ["check:drift", "build"],
+      "linked plugin-sdk checks"
+    );
   }
   ensureAppTestRuntimeAbi(dir);
-  runPackageScripts(dir, ["lint", "check:knip"]);
+  runPackageScripts(dir, ["check:knip"], "lvis-app full checks");
   runAppTypecheckGate(dir, "full checks");
-  runPackageScripts(dir, ["test", "build"]);
+  runPackageScripts(dir, ["test", "build"], "lvis-app full checks");
   // After the suite and the build, not before them and not inside `build`.
   // This gate reads a hand-written ledger of source paths, so an unrelated
   // deletion makes it fail; ahead of the suite that failure would end the push
   // gate without a test having run. It used to be the first command of the
   // `build` script, which is where CI hit exactly that.
-  runPackageScripts(dir, ["check:sunset-inventory"]);
-  runJavaScriptFile(dir, "scripts/check-tool-namespace.mjs");
+  runPackageScripts(dir, ["check:sunset-inventory"], "lvis-app full checks");
+  // Plugin tool names are validated where the names actually enter the host:
+  // `validatePluginManifest` rejects any name outside ^[a-zA-Z_][a-zA-Z0-9_]*$
+  // and any duplicate within a manifest, and `ToolRegistry` rejects a name
+  // already owned by a different owner. A repo-side scanner would need bundled
+  // plugin manifests to read, and the host no longer vendors any — the
+  // marketplace is the single source. A second scanner could only drift from
+  // the two runtime authorities, so there is deliberately none here.
 }
 
 function runAppTargetedVitestChecks(dir, testFiles, supportTestFiles = []) {
