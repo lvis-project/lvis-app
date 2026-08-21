@@ -138,7 +138,7 @@ describe("Tailnet observer configuration IPC boundary", () => {
   it("never lets a non-code error message out as an error code", async () => {
     await setup({
       apply: async () => {
-        throw new Error("EACCES: permission denied, open 'C:\\Users\\someone\\.lvis\\tailnet\\observer.json'");
+        throw new Error("EACCES: permission denied, open 'C:\\Users\\example\\.lvis\\tailnet\\observer.json'");
       },
     });
 
