@@ -7,7 +7,10 @@
  * instance (via `self`), so turn_summary.tokensIn is computed exactly as before.
  */
 import { randomUUID } from "node:crypto";
-import type { LoopContext } from "./loop-context.js";
+// LoopContext — the turn-local mutable carrier these free functions operate
+// on. It IS the ConversationLoop instance: the class owns all turn state and
+// the extracted free functions read/write it through this alias.
+import type { ConversationLoop as LoopContext } from "../conversation-loop.js";
 import type { TurnCallbacks, TurnResult, TurnStopReason } from "./types.js";
 import type { ChatInputOrigin, RemoteControllerAuthority } from "../../shared/chat-origin.js";
 import type { ActiveRolePrompt } from "../../data/role-presets.js";
