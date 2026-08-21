@@ -35,12 +35,16 @@ const SRC = join(ROOT, "src");
 /** Only meaningful outside a packaged build. */
 const DEVELOPMENT: readonly string[] = [
   "LVIS_ADMISSION_OFFLINE",
+  "LVIS_ALLOW_LINKED_PLUGIN_ENTRY",
+  "LVIS_ALLOW_TEST_MARKETPLACE_KEYS",
   "LVIS_ASRT_TEST_HOME",
   "LVIS_DEBUG_STREAM",
   "LVIS_DEV",
   "LVIS_DEV_CONSOLE",
+  "LVIS_DEV_NO_SANDBOX",
   "LVIS_DEV_PREFLIGHT_OVERRIDE",
   "LVIS_DEV_PROMPT_SOURCE_DUMP",
+  "LVIS_DEV_RELOAD",
   "LVIS_E2E",
   "LVIS_E2E_WHITELIST_PUBLIC_KEY",
   "LVIS_LOG_FILE",
@@ -121,6 +125,30 @@ const PENDING_CEILING = 14;
 const READ_RE =
   /(?:process\.)?env\s*(?:\.\s*(LVIS_[A-Z0-9_]+)|\[\s*["'`](LVIS_[A-Z0-9_]+)["'`]\s*\])/g;
 
+/**
+ * An env lookup whose key is an expression rather than a literal — `env[KEY[k]]`,
+ * `env[name]`. The resolvers that carry the most configuration are written this
+ * way (one table of key→variable, one loop), and {@link READ_RE} cannot see a
+ * single one of their variables: the names live in the table, not at the lookup.
+ * The tailnet group went invisible to this gate the moment its server adopted
+ * that shape, which is exactly the direction a policy gate must not fail in.
+ */
+const DYNAMIC_LOOKUP_RE = /(?:process\.)?env\s*\[\s*(?!["'`])/;
+
+/**
+ * In a file that does a dynamic lookup, a quoted variable name IS the read —
+ * it is the table entry the lookup resolves through.
+ *
+ * Two deliberate narrowings, because outside that context a quoted `LVIS_*` is
+ * usually not a variable at all:
+ *   - tests are excluded; a name quoted in a test is a fixture it sets, and the
+ *     production read that gives it meaning is already counted where it lives.
+ *   - a trailing underscore marks a PREFIX (`LVIS_DEMO_`, matched by the
+ *     packaged-env scrub), which is a family of variables and not one of them.
+ */
+const TABLE_ENTRY_RE = /["'`](LVIS_[A-Z0-9_]*[A-Z0-9])["'`]/g;
+const TEST_FILE_RE = /(^|[\\/])__tests__[\\/]|\.test\.[cm]?tsx?$/;
+
 function scan(dir: string, found: Map<string, string>): void {
   for (const name of readdirSync(dir)) {
     const path = join(dir, name);
@@ -130,10 +158,15 @@ function scan(dir: string, found: Map<string, string>): void {
     }
     if (!/\.(ts|tsx|mts|cts)$/.test(name)) continue;
     const text = readFileSync(path, "utf-8");
-    for (const match of text.matchAll(READ_RE)) {
-      const variable = match[1] ?? match[2]!;
-      if (!found.has(variable)) {
-        found.set(variable, relative(ROOT, path).replaceAll("\\", "/"));
+    const where = relative(ROOT, path).replaceAll("\\", "/");
+    const patterns = [READ_RE];
+    if (!TEST_FILE_RE.test(where) && DYNAMIC_LOOKUP_RE.test(text)) {
+      patterns.push(TABLE_ENTRY_RE);
+    }
+    for (const pattern of patterns) {
+      for (const match of text.matchAll(pattern)) {
+        const variable = match[1] ?? match[2]!;
+        if (!found.has(variable)) found.set(variable, where);
       }
     }
   }
