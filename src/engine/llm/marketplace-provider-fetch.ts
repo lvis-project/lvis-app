@@ -5,6 +5,16 @@ import {
   type LLMVendor,
 } from "../../shared/llm-vendor-defaults.js";
 
+/**
+ * The three NetworkGuard axes a provider fetch may open, each already narrowed
+ * to the configured origin (or closed outright).
+ */
+export type ModelProviderNetworkAccess = {
+  allowPrivateNetworks: false | ((url: URL) => boolean);
+  allowLoopback: false | ((url: URL) => boolean);
+  allowCarrierGradeNat: false | ((url: URL) => boolean);
+};
+
 type GuardedProviderFetchPolicy = {
   origin: string;
   allowInsecureCredentialedHttp: boolean;
@@ -31,29 +41,30 @@ function originFor(value: string): string | null {
 
 /**
  * A configured model-provider base URL is an explicit user trust decision,
- * unlike a URL supplied by tool/model content. Keep private/loopback access
- * constrained to that exact origin so an SDK request cannot pivot to another
- * host or follow a redirect into the local network.
+ * unlike a URL supplied by tool/model content. Keep private/loopback/tailnet
+ * access constrained to that exact origin so an SDK request cannot pivot to
+ * another host or follow a redirect into the local network.
+ *
+ * The CGNAT axis is here for the same reason the RFC1918 one is: a self-hosted
+ * endpoint the user typed in reaches its host over whatever network that host
+ * lives on, and an authenticated overlay (tailnet) hands its peers 100.64/10
+ * addresses. Nothing but this saved-endpoint decision opens that range.
  */
-export function configuredModelProviderNetworkAccess(baseUrl: string): {
-  allowPrivateNetworks: false | ((url: URL) => boolean);
-  allowLoopback: false | ((url: URL) => boolean);
-} {
+export function configuredModelProviderNetworkAccess(baseUrl: string): ModelProviderNetworkAccess {
   const sameOrigin = sameOriginScopeFor(baseUrl);
   return {
     allowPrivateNetworks: sameOrigin,
     allowLoopback: sameOrigin,
+    allowCarrierGradeNat: sameOrigin,
   };
 }
 
 /** Loopback-only access for an explicitly keyless marketplace preset. */
-export function configuredModelProviderLoopbackAccess(baseUrl: string): {
-  allowPrivateNetworks: false;
-  allowLoopback: false | ((url: URL) => boolean);
-} {
+export function configuredModelProviderLoopbackAccess(baseUrl: string): ModelProviderNetworkAccess {
   return {
     allowPrivateNetworks: false,
     allowLoopback: sameOriginScopeFor(baseUrl),
+    allowCarrierGradeNat: false,
   };
 }
 
@@ -99,10 +110,7 @@ export function createGuardedModelProviderFetch(
 
 function createOriginLockedProviderFetch(
   baseUrl: string,
-  networkAccess: {
-    allowPrivateNetworks: false | ((url: URL) => boolean);
-    allowLoopback: false | ((url: URL) => boolean);
-  },
+  networkAccess: ModelProviderNetworkAccess,
   allowInsecureCredentialedHttp: boolean,
   fetchImpl: typeof fetch,
 ): typeof fetch {
@@ -153,7 +161,8 @@ export function isGuardedInsecureCredentialedModelProviderFetch(
 
 /**
  * Marketplace presets retain their original network policy: only explicit
- * keyless presets may reach loopback, and no preset may reach private networks.
+ * keyless presets may reach loopback, and no preset may reach private networks
+ * or tailnet peers.
  * Every request is nevertheless origin-locked before it reaches NetworkGuard.
  */
 export function createGuardedMarketplaceProviderFetch(
@@ -165,7 +174,7 @@ export function createGuardedMarketplaceProviderFetch(
     baseUrl,
     preset.requiresApiKey === false
       ? configuredModelProviderLoopbackAccess(baseUrl)
-      : { allowPrivateNetworks: false, allowLoopback: false },
+      : { allowPrivateNetworks: false, allowLoopback: false, allowCarrierGradeNat: false },
     false,
     fetchImpl,
   );
