@@ -13,15 +13,16 @@
  * indistinguishable, and that the boot outcome distinguishes it anyway.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { BootContext } from "../context.js";
 import { setProcessPlatform } from "../../__tests__/support/process-platform.js";
+import {
+  createSandboxBootHarness,
+  type SandboxBootHarness,
+} from "../../__tests__/support/sandbox-boot-context.js";
 
 const h = vi.hoisted(() => ({
   initialize: vi.fn(),
   checkDeps: vi.fn(),
   isProbeError: vi.fn(),
-  logGate: vi.fn(),
-  flush: vi.fn(async () => undefined),
   logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
@@ -50,23 +51,10 @@ import {
 
 const ORIGINAL_PLATFORM = process.platform;
 
-function makeContext(settingOn: boolean): BootContext {
-  return {
-    settingsService: {
-      get: vi.fn((key: string) =>
-        key === "features" ? { osToolSandbox: settingOn, hostClassifiesRisk: false } : undefined,
-      ),
-    },
-    bootAuditLogger: { logSandboxGate: h.logGate, flush: h.flush },
-    pluginRuntime: {
-      listPluginIds: vi.fn(() => []),
-      getPluginManifest: vi.fn(() => undefined),
-    },
-    buildSandboxUnionDomains: vi.fn(async () => []),
-  } as unknown as BootContext;
-}
+let harness: SandboxBootHarness;
 
 beforeEach(() => {
+  harness = createSandboxBootHarness();
   setProcessPlatform("linux");
   __resetActiveSandboxCapabilityForTest();
   __resetSandboxRequestedAtBootForTest();
@@ -74,8 +62,6 @@ beforeEach(() => {
   h.initialize.mockReset();
   h.checkDeps.mockReset();
   h.isProbeError.mockReset();
-  h.logGate.mockReset();
-  h.flush.mockClear();
   h.checkDeps.mockResolvedValue({ errors: [], warnings: [] });
   h.isProbeError.mockReturnValue(false);
   vi.stubEnv("LVIS_SANDBOX_ENABLED", "");
@@ -101,7 +87,7 @@ describe("boot sandbox outcome", () => {
       "Sandbox user is not provisioned (user=true, cred=false). Windows sandbox needs a one-time install";
     h.checkDeps.mockResolvedValue({ errors: [depError], warnings: [] });
 
-    await expect(initSandboxGate(makeContext(true))).resolves.toBeUndefined();
+    await expect(initSandboxGate(harness.context(true))).resolves.toBeUndefined();
 
     // The half the runtime SOT gets wrong: identical to a sandbox never enabled.
     expect(detectSandboxCapability()).toMatchObject({ kind: "none" });
@@ -115,7 +101,7 @@ describe("boot sandbox outcome", () => {
   });
 
   it("records the gate-off skip distinctly from a failed activation", async () => {
-    await expect(initSandboxGate(makeContext(false))).resolves.toBeUndefined();
+    await expect(initSandboxGate(harness.context(false))).resolves.toBeUndefined();
 
     expect(getSandboxBootOutcome()).toEqual({
       action: "skip",
@@ -129,7 +115,7 @@ describe("boot sandbox outcome", () => {
     h.checkDeps.mockResolvedValue({ errors: ["missing bwrap"], warnings: [] });
     vi.stubEnv("LVIS_SANDBOX_ENABLED", "1");
 
-    await expect(initSandboxGate(makeContext(false))).rejects.toThrow(/dependencies are missing/);
+    await expect(initSandboxGate(harness.context(false))).rejects.toThrow(/dependencies are missing/);
 
     expect(getSandboxBootOutcome()).toMatchObject({
       action: "abort",
@@ -141,7 +127,7 @@ describe("boot sandbox outcome", () => {
   it("carries the init-failure cause through the degrade so the surface can show it", async () => {
     h.initialize.mockRejectedValue(new Error("wrapper refused to start"));
 
-    await expect(initSandboxGate(makeContext(true))).resolves.toBeUndefined();
+    await expect(initSandboxGate(harness.context(true))).resolves.toBeUndefined();
 
     expect(getSandboxBootOutcome()).toMatchObject({
       action: "degrade",
@@ -153,11 +139,11 @@ describe("boot sandbox outcome", () => {
     setProcessPlatform("win32");
     h.checkDeps.mockResolvedValue({ errors: ["not installed"], warnings: [] });
 
-    await initSandboxGate(makeContext(true));
+    await initSandboxGate(harness.context(true));
 
     // One report, two consumers. A branch that told the log one thing and the
     // user another would be worse than one that told the user nothing.
-    const calls = h.logGate.mock.calls;
+    const calls = harness.logSandboxGate.mock.calls;
     const audited = calls[calls.length - 1]?.[0] as {
       outcome: string;
       reason: string;
@@ -171,7 +157,7 @@ describe("boot sandbox outcome", () => {
   });
 
   it("does not let a caller mutate the sealed outcome", async () => {
-    await initSandboxGate(makeContext(false));
+    await initSandboxGate(harness.context(false));
 
     const outcome = getSandboxBootOutcome();
     expect(outcome).not.toBeNull();
