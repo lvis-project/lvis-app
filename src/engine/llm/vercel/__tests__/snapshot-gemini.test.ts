@@ -10,8 +10,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { collectStreamEvents as collect, streamFromArray as fromArray } from "./test-helpers.js";
 import type { StreamEvent } from "../../types.js";
-import { fullStreamToStreamEvent } from "../stream-mapper.js";
-import { genericToModelMessages } from "../message-mapper.js";
+import { fullStreamToStreamEvent, genericToModelMessages } from "../adapter.js";
 
 
 
