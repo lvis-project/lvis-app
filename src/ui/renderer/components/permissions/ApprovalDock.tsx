@@ -33,7 +33,7 @@ function focusPendingQuestion(): boolean {
  * Route-independent, bottom-floating foreground approval surface.
  *
  * The dock is deliberately an absolutely positioned sibling of routed content
- * inside AppShell's padded route canvas. It never changes the route's measured
+ * inside App's padded route canvas. It never changes the route's measured
  * height and it does not portal over the viewport, so the user can keep reading
  * and navigating the route that raised the request around the card. All
  * ApprovalRequest variants share this one queue head and no approval surface

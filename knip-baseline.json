@@ -314,11 +314,6 @@
     },
     {
       "type": "exports",
-      "file": "src/engine/a2a-subagent-message-bus.ts",
-      "name": "maskA2AMessage"
-    },
-    {
-      "type": "exports",
       "file": "src/engine/auto-compact.ts",
       "name": "getModelContextWindow"
     },
@@ -659,11 +654,6 @@
     },
     {
       "type": "exports",
-      "file": "src/plugins/plugin-artifact-store.ts",
-      "name": "SAFE_ARTIFACT_SLUG_RE"
-    },
-    {
-      "type": "exports",
       "file": "src/plugins/plugin-id.ts",
       "name": "SAFE_ARTIFACT_SLUG_RE"
     },
@@ -671,16 +661,6 @@
       "type": "exports",
       "file": "src/plugins/plugin-removal-transaction.ts",
       "name": "readRemovalTransactionJournal"
-    },
-    {
-      "type": "exports",
-      "file": "src/plugins/runtime/manifest-validation.ts",
-      "name": "INCOMPATIBLE_APP_VERSION_CODE"
-    },
-    {
-      "type": "exports",
-      "file": "src/plugins/runtime/manifest-validation.ts",
-      "name": "IncompatibleAppVersionError"
     },
     {
       "type": "exports",
@@ -1464,11 +1444,6 @@
     },
     {
       "type": "types",
-      "file": "src/audit/dlp-filter.ts",
-      "name": "DlpResult"
-    },
-    {
-      "type": "types",
       "file": "src/audit/sandbox-audit.ts",
       "name": "SandboxEvent"
     },
@@ -1731,21 +1706,6 @@
       "type": "types",
       "file": "src/engine/subagent-message-mailbox.ts",
       "name": "ParentMailboxLoadDiagnosticReason"
-    },
-    {
-      "type": "types",
-      "file": "src/engine/subagent-runner.ts",
-      "name": "SubAgentRunStatus"
-    },
-    {
-      "type": "types",
-      "file": "src/engine/subagent-runner.ts",
-      "name": "SubAgentSuspension"
-    },
-    {
-      "type": "types",
-      "file": "src/engine/subagent-runner.ts",
-      "name": "SubAgentSuspensionReason"
     },
     {
       "type": "types",
@@ -2050,21 +2010,6 @@
     {
       "type": "types",
       "file": "src/main/routines-store.ts",
-      "name": "RepeatKind"
-    },
-    {
-      "type": "types",
-      "file": "src/main/routines-store.ts",
-      "name": "RoutinePluginScope"
-    },
-    {
-      "type": "types",
-      "file": "src/main/routines-store.ts",
-      "name": "RoutineScope"
-    },
-    {
-      "type": "types",
-      "file": "src/main/routines-store.ts",
       "name": "RoutinesFile"
     },
     {
@@ -2086,21 +2031,6 @@
       "type": "types",
       "file": "src/main/tailnet-pairing-share-store.ts",
       "name": "TailnetOwnerShareSummary"
-    },
-    {
-      "type": "types",
-      "file": "src/main/work-board-store.ts",
-      "name": "WorkItem"
-    },
-    {
-      "type": "types",
-      "file": "src/main/work-board-store.ts",
-      "name": "WorkItemPriority"
-    },
-    {
-      "type": "types",
-      "file": "src/main/work-board-store.ts",
-      "name": "WorkItemStatusResolved"
     },
     {
       "type": "types",
@@ -2186,16 +2116,6 @@
       "type": "types",
       "file": "src/permissions/category-registry.ts",
       "name": "CategoryDecisionInput"
-    },
-    {
-      "type": "types",
-      "file": "src/permissions/effect-ledger.ts",
-      "name": "ChokepointKind"
-    },
-    {
-      "type": "types",
-      "file": "src/permissions/effect-ledger.ts",
-      "name": "Effect"
     },
     {
       "type": "types",

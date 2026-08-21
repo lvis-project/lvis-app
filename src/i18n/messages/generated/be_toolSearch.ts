@@ -1,4 +1,4 @@
-// AUTO-GENERATED — i18n migration. Source: src/engine/turn/tool-search.ts. Do not edit by hand.
+// AUTO-GENERATED — i18n migration. Source: src/engine/turn/query-loop.ts. Do not edit by hand.
 export const en = {
   "be_toolSearch.queryRequired": "tool_search error: query (string) is required.",
   "be_toolSearch.queryTokenTooShort": "tool_search error: query must contain at least one search token of {minLen} or more characters.",

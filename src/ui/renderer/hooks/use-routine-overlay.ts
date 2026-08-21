@@ -36,7 +36,7 @@ export interface UseRoutineOverlayResult {
   /**
    * Populated by OverlayContextProvider DURING its render so the routine/overlay
    * IPC subscriptions here can call addFire() from outside the React tree. App
-   * threads this straight into AppProviders → OverlayContextProvider.
+   * threads this straight into OverlayContextProvider.
    */
   addFireRef: MutableRefObject<OverlayContextValue["addFire"] | null>;
   /** In-flight LLM routine sessions; OverlayContextProvider derives running flags. */

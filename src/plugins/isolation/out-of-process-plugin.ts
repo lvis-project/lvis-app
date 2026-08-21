@@ -309,7 +309,7 @@ const PLUGIN_ENVELOPE_GRANTS: ReadonlyMap<string, readonly PluginEnvelopeGrant[]
         kind: "hostDirectory",
         segments: ["certs"],
         why:
-          "the corporate CA bundle `corp-ca-loader` caches at `~/.lvis/certs/corp-ca.pem`. The "
+          "the corporate CA bundle `corp-ca-runtime` caches at `~/.lvis/certs/corp-ca.pem`. The "
           + "worker points `SSL_CERT_FILE` at it so internal TLS verifies rather than being "
           + "disabled. This path IS on the sensitive deny floor and the grant pierces it for "
           + "this plugin alone; a root CA certificate is a trust anchor rather than a "

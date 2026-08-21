@@ -130,12 +130,6 @@ import type {
   SubAgentRunStatus,
   SubAgentSuspension,
 } from "../shared/subagent-events.js";
-export type {
-  SubAgentRunStatus,
-  SubAgentSuspension,
-  SubAgentSuspensionReason,
-} from "../shared/subagent-events.js";
-
 const log = createLogger("lvis");
 
 function maskSubAgentText(text: string): string {

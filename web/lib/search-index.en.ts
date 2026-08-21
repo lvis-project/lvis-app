@@ -8,7 +8,7 @@ export const searchEntriesEn: SearchEntry[] = [
   { group: "Getting Started", href: "/en/docs/getting-started/updates", title: "App Updates", snippet: "electron-updater · autoDownload=false · 4h interval · channel=latest" },
 
   // Host · Chat
-  { group: "Chat", href: "/en/docs/chat/layout", title: "Chat Screen Layout", snippet: "AppShell · Sidebar · MainToolbar · MainContent · ChatView" },
+  { group: "Chat", href: "/en/docs/chat/layout", title: "Chat Screen Layout", snippet: "App · Sidebar · MainToolbar · main content region · ChatView" },
   { group: "Chat", href: "/en/docs/chat/message-queue", title: "Message Queue & TODO", snippet: "MessageQueuePanel + SessionTodoPanel · above the composer · hidden when empty" },
   { group: "Chat", href: "/en/docs/chat/tool-thinking", title: "Tool & Thinking Display", snippet: "Tool Registry · three sources · background shell · view image · tool search" },
   { group: "Chat", href: "/en/docs/chat/question-cards", title: "Question Cards", snippet: "AskUserQuestionItem · choice-only · choice/choices · recommendedIndex · altIndices" },
