@@ -16,7 +16,7 @@ export const searchIndex: SearchEntry[] = [
   { group: "시작하기", href: "/docs/getting-started/updates", title: "앱 업데이트", snippet: "electron-updater · autoDownload=false · 4h interval · channel=latest" },
 
   // Host · Chat
-  { group: "채팅", href: "/docs/chat/layout", title: "채팅 화면 구성", snippet: "AppShell · Sidebar · MainToolbar · MainContent · ChatView" },
+  { group: "채팅", href: "/docs/chat/layout", title: "채팅 화면 구성", snippet: "App · Sidebar · MainToolbar · 메인 콘텐츠 영역 · ChatView" },
   { group: "채팅", href: "/docs/chat/message-queue", title: "메시지 큐 & TODO", snippet: "MessageQueuePanel + SessionTodoPanel · 컴포저 위 · 비어 있으면 표시 안 함" },
   { group: "채팅", href: "/docs/chat/tool-thinking", title: "Tool & Thinking 표시", snippet: "Tool Registry · 출처 3종 · 백그라운드 셸 · 이미지 보기 · 도구 검색" },
   { group: "채팅", href: "/docs/chat/question-cards", title: "질문 카드", snippet: "AskUserQuestionItem · choice-only · choice/choices · recommendedIndex · altIndices" },
