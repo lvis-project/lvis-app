@@ -8,7 +8,7 @@
   - External index: `https://github.com/voltagent/awesome-design-md`
   - Downloaded reference docs via `getdesign`: Linear, Raycast, Vercel, VoltAgent
   - Local token system: `src/styles.css`, `src/shared/theme-bundles.ts`, `src/ui/renderer/theme/`
-  - Local component surfaces: `src/ui/renderer/components/ActionPanel.tsx`, `Sidebar.tsx`, `MainContent.tsx`, `InputActionBar.tsx`, plugin host pages
+  - Local component surfaces: `src/ui/renderer/components/ActionPanel.tsx`, `Sidebar.tsx`, `InputActionBar.tsx`, plugin host pages
   - Local docs: `docs/development/theme-system.md`
 
 ## Brand
