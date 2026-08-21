@@ -15,6 +15,8 @@ import type { PluginHostApi, PluginLifecycleEvent } from "../../types.js";
 import {
   HOSTAPI_DISPATCH_TABLE,
   HostApiDispatcher,
+  createConfigSubscriptionHostApiPaths,
+  type ConfigSubscriptionHostApi,
   type HostApiPathHandler,
 } from "../host-api-dispatcher.js";
 import { HOSTAPI_PATH_CONTRACTS, type HostApiPath } from "../host-api-wire.js";
@@ -31,16 +33,12 @@ import {
   type PluginFactoryLoader,
 } from "../plugin-child-runtime.js";
 import {
-  createConfigSubscriptionHostApiPaths,
-  type ConfigSubscriptionHostApi,
-} from "../config-subscription-host.js";
-import {
   decodeConfigChange,
   decodeHostEvent,
   decodePluginLifecycle,
   encodeConfigChange,
   SECRET_REDACTED_SENTINEL,
-} from "../config-subscription-child.js";
+} from "../host-api-wire.js";
 import type { PluginManifest } from "../../types.js";
 
 const PLUGIN_ID = "com.example.subscriber";
