@@ -48,10 +48,72 @@ import {
   parseRevocationDocument,
   type RevocationDocument,
 } from "./revocation-schema.js";
-import { RevocationCache, type RevocationCacheSnapshot } from "./revocation-cache.js";
-import { fetchRevocationDocument } from "./revocation-fetcher.js";
+import {
+  SignedDocumentCache,
+  type SignedDocCacheSnapshot,
+} from "../signed-doc-cache.js";
+import {
+  fetchSignedDocument,
+  type FetchSignedDocumentOptions,
+  type SignedDocSource,
+  type SignedDocumentFetchOutcome,
+} from "../signed-doc-fetcher.js";
 
 const log = createLogger("revocation-registry");
+
+// ---------------------------------------------------------------------
+// Transport + disk cache
+//
+// Both are declared here rather than in one-export wrapper modules of
+// their own, matching `admission-registry.ts`: each wrapper was a file
+// that named a handful of constants and forwarded a single call to the
+// shared signed-document machinery, so it added a second place for the
+// transport contract to drift without adding a definition. The
+// subdirectory, filenames and URLs keep their historical values, so an
+// on-disk cache written by an earlier build still resolves.
+// ---------------------------------------------------------------------
+
+/**
+ * Disk cache, pinned to `<userData>/marketplace-revocation/`:
+ *   revocation.json       — last good document body (utf-8 JSON)
+ *   revocation.json.sig   — sidecar signature envelope (utf-8 JSON)
+ *   meta.json             — { etag?, highestSeenIssuedAt?, lastFetchAt? }
+ */
+export class RevocationCache extends SignedDocumentCache {
+  constructor(userDataDir: string) {
+    super(userDataDir, "marketplace-revocation", "revocation.json", "revocation.json.sig");
+  }
+}
+
+type RevocationCacheSnapshot = SignedDocCacheSnapshot;
+
+/**
+ * Hosted alongside `whitelist.json` on the same issuance repo (see the
+ * comment on `WHITELIST_PUBLIC_KEYS` in `marketplace-keys.ts` for why the
+ * trust anchor is shared too) rather than standing up another
+ * repo/domain for one more small JSON file. Primary URL is GitHub Pages;
+ * the fallback is a GitHub Release asset, used on 5xx / network errors
+ * against the primary.
+ */
+const REVOCATION_SOURCE: SignedDocSource = {
+  primaryBase: "https://lvis-project.github.io/marketplace-whitelist/v1",
+  fallbackBase:
+    "https://github.com/lvis-project/marketplace-whitelist/releases/download/v1-latest",
+  docFilename: "revocation.json",
+  sigFilename: "revocation.json.sig",
+};
+
+/**
+ * Fetch the revocation document + signature. Throws when both endpoints
+ * fail — `init()` catches it and treats it exactly like any other fetch
+ * failure: keep the cached snapshot (if any), fail-open only when there
+ * has never been one.
+ */
+async function fetchRevocationDocument(
+  opts: FetchSignedDocumentOptions = {},
+): Promise<SignedDocumentFetchOutcome> {
+  return fetchSignedDocument(REVOCATION_SOURCE, opts, "lvis-app/revocation-fetcher");
+}
 
 /** Caller-facing decision shape — discriminated union for exhaustive narrowing. */
 export type RevocationDecision =

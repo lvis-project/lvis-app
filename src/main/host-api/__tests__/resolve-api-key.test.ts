@@ -18,8 +18,10 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { resolveApiKey } from "../resolve-api-key.js";
-import { whitelistRegistry } from "../../../plugins/whitelist/whitelist-registry.js";
-import { WhitelistCache } from "../../../plugins/whitelist/whitelist-cache.js";
+import {
+  WhitelistCache,
+  whitelistRegistry,
+} from "../../../plugins/whitelist/whitelist-registry.js";
 import { canonicalJSON } from "../../../plugins/whitelist/canonical-json.js";
 import { WHITELIST_PRIMARY_KEY_ID } from "../../../plugins/marketplace-keys.js";
 import { resetHostSecretCountersForTesting } from "../../../telemetry/host-secret-counters.js";
