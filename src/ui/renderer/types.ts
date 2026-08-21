@@ -344,6 +344,12 @@ export type AppSettings = {
     launchAtStartup?: boolean;
     /** When launching at startup, start hidden in the tray. SOT: `SystemSettings`. Default false. */
     launchMinimized?: boolean;
+    /**
+     * Opt-in loopback HTTP API server. Mirrors the main-process SOT in
+     * `src/data/settings-store.ts` `SystemSettings.localApiServer`. Default
+     * false; the host resolves it as `setting || LVIS_LOCAL_API=1` once at boot.
+     */
+    localApiServer?: boolean;
   };
   /** Global keyboard shortcuts. SOT: `ShortcutSettings` in settings-store. */
   shortcuts?: {
@@ -388,6 +394,15 @@ export type AppSettings = {
      * off the approval gate takes the pre-existing path unchanged.
      */
     subAgentParentAdjudication?: boolean;
+    /**
+     * The three independently opt-in A2A route families. Each mirrors the
+     * main-process SOT in `src/data/settings-store.ts` `FeatureFlags`, and each
+     * is resolved once at boot as `setting || <its env var>`: `LVIS_A2A`,
+     * `LVIS_A2A_REMOTE`, `LVIS_A2A_REMOTE_RECEIVER`. All default false.
+     */
+    a2aLoopbackServer?: boolean;
+    a2aRemoteRouting?: boolean;
+    a2aRemoteReceiver?: boolean;
   };
 };
 
@@ -622,6 +637,8 @@ export type LvisApi = {
   }) => Promise<{ ok: boolean; error?: string }>;
   getSettings: () => Promise<AppSettings>;
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
+  /** Settings paths the boot environment is forcing ON; presence only, never values. */
+  envForcedSettings: () => Promise<readonly string[]>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
   onSubscriptionRuntimeStatusUpdated: (
     handler: (event: SubscriptionRuntimeStatusUpdatedEvent) => void,

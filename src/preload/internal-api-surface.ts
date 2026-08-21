@@ -13,6 +13,7 @@ import {
   type SkillInstallResultPayload,
 } from "../contract/app-contract.js";
 import { t } from "../i18n/index.js";
+import { parseEnvForcedSettingsPaths } from "../shared/env-backed-settings.js";
 import { ipcUserKeyboardIntent } from "./gesture-intent.js";
 import { mcpApiSurface } from "./mcp-api-surface.js";
 import { buildTelegramConnectionApiSurface } from "./telegram-connection-api-surface.js";
@@ -196,6 +197,10 @@ export function buildInternalApiSurface() {
   // ─── Settings ────────────────────────────────────
   getSettings: async () => ipcRenderer.invoke(CHANNELS.settings.get),
   updateSettings: async (partial: unknown) => ipcRenderer.invoke(CHANNELS.settings.update, partial),
+  // Parsed here rather than in the renderer: an unrecognized path is drift in
+  // this build's own registry, not something to render.
+  envForcedSettings: async () =>
+    parseEnvForcedSettingsPaths(await ipcRenderer.invoke(CHANNELS.settings.envForcedSettings)) ?? [],
   remoteA2a: {
     targets: async () => ipcRenderer.invoke(CHANNELS.remoteA2a.targets),
     status: async () => ipcRenderer.invoke(CHANNELS.remoteA2a.status),
