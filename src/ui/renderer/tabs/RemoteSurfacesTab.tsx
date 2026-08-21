@@ -1,5 +1,6 @@
 import { useTranslation } from "../../../i18n/react.js";
 import { SettingsPageHeader } from "../components/PageShell.js";
+import { LocalApiSurfacesSection } from "./LocalApiSurfacesSection.js";
 import { TailnetAccessContent } from "./TailnetAccessContent.js";
 import { TelegramConnectionContent } from "./TelegramConnectionContent.js";
 import type { LvisApi } from "../types.js";
@@ -24,6 +25,7 @@ export function RemoteSurfacesTab({ api }: RemoteSurfacesTabProps) {
       />
       <TailnetAccessContent api={api} />
       <TelegramConnectionContent api={api} />
+      <LocalApiSurfacesSection />
     </div>
   );
 }

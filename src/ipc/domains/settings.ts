@@ -6,6 +6,7 @@ import { dialog, ipcMain, shell, type IpcMainInvokeEvent } from "electron";
 import { validateExternalUrl } from "../../shared/external-url.js";
 import { canonicalStringify } from "../../shared/canonical-json.js";
 import { SETTINGS } from "../../shared/ipc-channels.js";
+import { envForcedSettingsPaths } from "../../shared/env-backed-settings.js";
 import { validateHostRendererSender, UNAUTHORIZED_FRAME, auditUnauthorized } from "../gated.js";
 import { CHANNELS } from "../../contract/app-contract.js";
 import { sendToWindow } from "../safe-send.js";
@@ -711,6 +712,12 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
 
   // read-only — no sender guard needed
   ipcMain.handle(CHANNELS.settings.get, () => rendererSettingsSnapshot(settingsService.getAll()));
+
+  // Read-only, and presence only: the answer is a list of settings paths the
+  // environment is forcing ON, never the value of any variable. A control that
+  // showed the saved value alone would be describing a state the running app is
+  // not in, since every one of these gates resolves as `settings || env`.
+  ipcMain.handle(CHANNELS.settings.envForcedSettings, () => envForcedSettingsPaths());
 
   ipcMain.handle(CHANNELS.settings.update, async (e, partial) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.settings.update, e); return UNAUTHORIZED_FRAME; }
