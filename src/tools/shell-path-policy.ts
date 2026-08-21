@@ -587,7 +587,16 @@ function splitCandidateParts(token: string): string[] {
   // Splitting off the value after the leading letter-cluster gives the policy
   // the path the command will actually open. It goes FIRST so the violation the
   // caller reports names the real target rather than the pseudo-relative one.
-  const glued = /^-[A-Za-z]+([/~.].*)$/.exec(token);
+  //
+  // The value alternatives are what makes this work on both platforms. A POSIX
+  // target starts the value at `/`, `~`, or `.`; a Windows one starts it at a
+  // drive letter (`-oC:\\Users\\…`) or a root-relative separator. Without the
+  // drive alternative the cluster swallowed the drive letter, the colon matched
+  // nothing, and the token fell through to the pseudo-relative resolution this
+  // split exists to prevent — so on Windows the glued form was never checked at
+  // all. The cluster is lazy so the value alternatives decide where it ends;
+  // for a POSIX token that lands on exactly the same split as the greedy form.
+  const glued = /^-[A-Za-z]+?([/~.\\].*|[A-Za-z]:[\\/].*)$/.exec(token);
   if (glued && !token.startsWith("--")) {
     parts.push(glued[1]!);
   }
