@@ -11,7 +11,7 @@ vi.mock("../../permissions/asrt-sandbox.js", () => ({
   getDefaultSensitiveWriteDenyPaths: () => [],
 }));
 
-import { spawnWithSandbox } from "../bash.js";
+import { spawnWithSandbox } from "../shell-tools.js";
 
 function singleQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`;

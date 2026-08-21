@@ -1905,7 +1905,7 @@ Layer 0–8 의 permission policy 는 _어떤 도구 호출을 허용/거부_ �
 - **백엔드**: macOS 는 Seatbelt 프로파일, Linux 는 bwrap+seccomp — 둘 다
   capability SOT 에서 단일 `kind: "asrt"` 로 보고된다.
 - **Spawn 모델**: ASRT 는 워크로드를 직접 spawn 하지 않는다. `wrapToolCommand`
-  가 OS-confined wrapper 의 `{ argv, env }` 를 반환하고 host(`tools/bash.ts`)
+  가 OS-confined wrapper 의 `{ argv, env }` 를 반환하고 host(`tools/shell-tools.ts`)
   가 `shell: false` 로 직접 spawn 한다.
 - **Filesystem jail (per-wrap)**: write-jail 은 owner plugin sandbox root ∪
   허용 디렉토리로 canonicalize 한 union (bare cwd 아님). read-jail 은
@@ -2059,7 +2059,7 @@ MODEL 헤더), `src/permissions/sandbox-capability.ts` (capability SOT +
 `setActiveSandboxCapability` / `isWeakSandbox` / `resolveReviewerSandboxCapability`),
 `src/permissions/permission-manager.ts` (dispatchReviewer 가 substrate-aware
 capability 를 reviewer/cache/audit 에 공급), `src/permissions/sandbox-write-jail.ts`,
-`src/tools/bash.ts` (ASRT-wrapped spawn 경로), `src/boot.ts` (gate 결정 + capability 발행).
+`src/tools/shell-tools.ts` (ASRT-wrapped spawn 경로), `src/boot.ts` (gate 결정 + capability 발행).
 
 
 ### 6.4 Tool Registry & Taxonomy — 빌트인 도구 카탈로그

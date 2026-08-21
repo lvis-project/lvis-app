@@ -8,8 +8,8 @@
  */
 import { isAbsolute, resolve as pathResolve } from "node:path";
 import { canonicalizePathForMatch, caseFoldForMatch } from "./sensitive-paths.js";
-import { parseHostShellExecutionInput } from "./host-shell-execution-input.js";
 import {
+  parseHostShellExecutionInput,
   requiresExplicitHostShellFallbackApproval,
   type HostShellExecutionPlan,
 } from "./host-shell-execution-plan.js";
@@ -53,8 +53,8 @@ const permits = new WeakMap<HostShellExecutionPermit, PermitRecord>();
 
 // Preserve the permit module's public API while moving the runtime parser to a
 // neutral dependency shared with ApprovalGate.
-export { parseHostShellExecutionInput } from "./host-shell-execution-input.js";
-export type { ParsedHostShellExecutionInput } from "./host-shell-execution-input.js";
+export { parseHostShellExecutionInput } from "./host-shell-execution-plan.js";
+export type { ParsedHostShellExecutionInput } from "./host-shell-execution-plan.js";
 
 /** Matches the exact cwd resolution used by BashTool and PowerShellTool. */
 export function resolveHostShellWorkingDirectory(

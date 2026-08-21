@@ -63,7 +63,7 @@ import {
 } from "../asrt-sandbox.js";
 import { asrtCanInitialize } from "./test-helpers.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
-import { spawnWithSandbox } from "../../tools/bash.js";
+import { spawnWithSandbox } from "../../tools/shell-tools.js";
 // ASRT-contract guards: the real vendored matcher + parent-proxy resolver, so
 // the host-side fixes are proven against ASRT's ACTUAL semantics (not a
 // re-implementation that could drift from the package).

@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { BashTool } from "../bash.js";
-import { PowerShellTool } from "../powershell.js";
+import { BashTool, PowerShellTool } from "../shell-tools.js";
 import type { ToolExecutionContext } from "../types.js";
 import {
   __resetActiveSandboxCapabilityForTest,

@@ -9,6 +9,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { SandboxCapability } from "./sandbox-capability.js";
 import type { SandboxConfinement } from "../shared/sandbox-capability-info.js";
 
@@ -308,4 +309,47 @@ export function requiresExplicitHostShellFallbackApproval(plan: HostShellExecuti
     plan.requestedSandbox === true &&
     plan.capability.kind === "none" &&
     plan.requiresExplicitUserApproval === true;
+}
+
+/**
+ * Schema-relevant input normalization shared by the host approval surface and
+ * the final native shell permit. It lives in this leaf module (which imports
+ * neither approval-gate nor the permit module) so the two host boundaries
+ * never form a runtime cycle through their shared parser.
+ */
+export interface ParsedHostShellExecutionInput {
+  readonly command: string;
+  readonly cwd: string | undefined;
+  readonly timeoutSeconds: number;
+}
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === "object" && input !== null && !Array.isArray(input);
+}
+
+/**
+ * Normalize exactly the execution-relevant subset shared by BashTool and
+ * PowerShellTool. Undefined means the value cannot represent a native spawn.
+ */
+export function parseHostShellExecutionInput(
+  input: unknown,
+): ParsedHostShellExecutionInput | undefined {
+  if (!isRecord(input) || typeof input.command !== "string" || input.command.length === 0) {
+    return undefined;
+  }
+  const cwd = input.cwd;
+  if (cwd !== undefined && typeof cwd !== "string") return undefined;
+  const timeoutSeconds = input.timeoutSeconds ??
+    TOOL_TIMEOUT_POLICY.shellDefaultMs / 1000;
+  // Type sanity only: a deadline must exist and be a positive integer, but it
+  // has no upper bound — a retry after a timeout escalates the budget, and the
+  // permit must not refuse the spawn that retry asks for.
+  if (
+    typeof timeoutSeconds !== "number" ||
+    !Number.isInteger(timeoutSeconds) ||
+    timeoutSeconds < 1
+  ) {
+    return undefined;
+  }
+  return Object.freeze({ command: input.command, cwd, timeoutSeconds });
 }
