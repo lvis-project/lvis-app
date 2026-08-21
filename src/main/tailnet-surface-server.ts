@@ -6,6 +6,8 @@
  * or retain a Tailscale admin credential: those are deployment-admin actions
  * whose lifecycle must be coupled to the host application outside this process.
  */
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import {
   createTailnetControllerReceiptStore,
   type TailnetControllerReceiptStore,
@@ -17,6 +19,10 @@ import {
 } from "../api/tailnet-surface-server.js";
 import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-runtime.js";
 import type { ConversationCommandPort } from "./conversation-command-port.js";
+import {
+  openFeatureNamespace,
+  type FeatureNamespaceHandle,
+} from "./storage/feature-namespace.js";
 import {
   createTailnetPairedSharingRuntime,
   type TailnetPairedSharingRuntime,
@@ -36,8 +42,98 @@ export interface TailnetObserverServer {
   readonly port: number;
 }
 
+/** Every key the observer configuration is made of, in both of its sources. */
+export type TailnetObserverConfigKey =
+  | "enabled"
+  | "expectedAppCapability"
+  | "port"
+  | "controllerEnabled"
+  | "pairedSharingEnabled"
+  | "webEnabled"
+  | "webOrigin";
+
+/**
+ * Where a key's effective value came from.
+ *
+ * Provenance is not decoration. A stale shell profile must not be able to
+ * masquerade as the approved host-owned configuration, so every surface that
+ * shows the effective config shows this beside it.
+ */
+export type TailnetObserverConfigSource = "file" | "env-override" | "unset";
+
+export type TailnetObserverConfigProvenance =
+  Readonly<Record<TailnetObserverConfigKey, TailnetObserverConfigSource>>;
+
+export interface TailnetObserverResolution {
+  readonly config: TailnetObserverConfig | null;
+  readonly provenance: TailnetObserverConfigProvenance;
+  /** Whether a host-owned configuration file contributed anything at all. */
+  readonly fileConfigured: boolean;
+}
+
+/**
+ * The host-owned observer configuration, `~/.lvis/tailnet/observer.json`.
+ *
+ * Deliberately NOT part of the settings store. That pipeline is renderer-
+ * writable by design, and the capability key is precisely the value a webpage
+ * must never be able to set — the property the env-only resolver was
+ * protecting, kept intact by moving to a host-owned file instead of settings.
+ */
+export interface TailnetObserverConfigFile {
+  readonly enabled?: boolean;
+  readonly expectedAppCapability?: string;
+  readonly port?: number;
+  readonly controllerEnabled?: boolean;
+  readonly pairedSharingEnabled?: boolean;
+  readonly webEnabled?: boolean;
+  readonly webOrigin?: string;
+}
+
+export const TAILNET_FEATURE_NAMESPACE = "tailnet";
+export const TAILNET_OBSERVER_CONFIG_FILE = "observer.json";
+
+const CONFIG_KEYS: readonly TailnetObserverConfigKey[] = [
+  "enabled",
+  "expectedAppCapability",
+  "port",
+  "controllerEnabled",
+  "pairedSharingEnabled",
+  "webEnabled",
+  "webOrigin",
+];
+
+const ENV_KEY: Readonly<Record<TailnetObserverConfigKey, string>> = {
+  enabled: "LVIS_TAILNET_OBSERVER",
+  expectedAppCapability: "LVIS_TAILNET_OBSERVER_CAP",
+  port: "LVIS_TAILNET_OBSERVER_PORT",
+  controllerEnabled: "LVIS_TAILNET_CONTROLLER",
+  pairedSharingEnabled: "LVIS_TAILNET_PAIRED_SHARING",
+  webEnabled: "LVIS_TAILNET_WEB",
+  webOrigin: "LVIS_TAILNET_WEB_ORIGIN",
+};
+
+const BOOLEAN_FILE_KEYS = [
+  "enabled",
+  "controllerEnabled",
+  "pairedSharingEnabled",
+  "webEnabled",
+] as const;
+
+/**
+ * One layer of raw strings — the single vocabulary both sources are validated
+ * in. The file is projected onto it rather than validated separately, so the
+ * two sources cannot drift into two different notions of a valid port.
+ */
+type RawLayer = Partial<Record<TailnetObserverConfigKey, string>>;
+
 interface TailnetObserverServerDependencies {
   startServer: typeof startTailnetSurfaceServer;
+  /**
+   * How the host-owned configuration file is read. Injected by the lifecycle
+   * tests so their matrix stays an environment question and does not depend on
+   * whether the developer running them happens to have an observer configured.
+   */
+  readConfigFile: () => Promise<TailnetObserverConfigFile | null>;
 }
 
 export interface StartTailnetObserverServerOptions {
@@ -59,32 +155,112 @@ export interface StartTailnetObserverServerOptions {
   readonly dependencies?: Partial<TailnetObserverServerDependencies>;
 }
 
+function envLayer(env: NodeJS.ProcessEnv): RawLayer {
+  const layer: RawLayer = {};
+  for (const key of CONFIG_KEYS) {
+    const value = env[ENV_KEY[key]];
+    if (value !== undefined) layer[key] = value;
+  }
+  return layer;
+}
+
 /**
- * Resolve the main-owned observer configuration.
+ * Project the file onto the raw vocabulary. `false` becomes an ABSENT key
+ * rather than `"0"`: every boolean below accepts `"1"` or absence and rejects
+ * anything else, and a file saying "controller off" has to mean the same thing
+ * as a file that never mentioned the controller.
+ */
+function fileLayer(file: TailnetObserverConfigFile): RawLayer {
+  const layer: RawLayer = {};
+  for (const key of BOOLEAN_FILE_KEYS) {
+    if (file[key] === true) layer[key] = "1";
+  }
+  if (file.expectedAppCapability !== undefined) {
+    layer.expectedAppCapability = file.expectedAppCapability;
+  }
+  if (file.port !== undefined) layer.port = String(file.port);
+  if (file.webOrigin !== undefined) layer.webOrigin = file.webOrigin;
+  return layer;
+}
+
+/**
+ * Validate the file's shape before it reaches {@link fileLayer}.
+ *
+ * Fail-closed: a malformed file is an error the caller surfaces, never a
+ * silently-ignored file that boots the observer on a half-applied config.
+ */
+export function parseTailnetObserverConfigFile(raw: unknown): TailnetObserverConfigFile {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+    throw new Error("tailnet-observer-config-file-invalid");
+  }
+  const source = raw as Record<string, unknown>;
+  for (const key of Object.keys(source)) {
+    if (!(CONFIG_KEYS as readonly string[]).includes(key)) {
+      throw new Error("tailnet-observer-config-file-invalid");
+    }
+  }
+  const file: Record<string, unknown> = {};
+  for (const key of BOOLEAN_FILE_KEYS) {
+    const value = source[key];
+    if (value === undefined) continue;
+    if (typeof value !== "boolean") throw new Error("tailnet-observer-config-file-invalid");
+    file[key] = value;
+  }
+  for (const key of ["expectedAppCapability", "webOrigin"] as const) {
+    const value = source[key];
+    if (value === undefined) continue;
+    if (typeof value !== "string") throw new Error("tailnet-observer-config-file-invalid");
+    file[key] = value;
+  }
+  if (source.port !== undefined) {
+    if (typeof source.port !== "number") throw new Error("tailnet-observer-config-file-invalid");
+    file.port = source.port;
+  }
+  return Object.freeze(file) as TailnetObserverConfigFile;
+}
+
+function provenanceOf(file: RawLayer, env: RawLayer): TailnetObserverConfigProvenance {
+  const provenance = {} as Record<TailnetObserverConfigKey, TailnetObserverConfigSource>;
+  for (const key of CONFIG_KEYS) {
+    provenance[key] = env[key] !== undefined
+      ? "env-override"
+      : file[key] !== undefined ? "file" : "unset";
+  }
+  return Object.freeze(provenance);
+}
+
+/**
+ * Resolve the merged layers.
+ *
+ * Env wins per key over the host-owned file. A principal that can set the
+ * environment already owns the process, so refusing the override would only
+ * pretend otherwise; what it must not do is win *silently*, which is what the
+ * returned provenance is for.
  *
  * OFF is side-effect free. ON requires an explicit owned app-capability key;
  * the renderer never supplies this value, so a webpage cannot widen Tailnet
  * policy by editing ordinary settings.
  */
-export function resolveTailnetObserverConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): TailnetObserverConfig | null {
-  if (env.LVIS_TAILNET_OBSERVER !== "1") return null;
+function resolveFromLayers(file: RawLayer, env: RawLayer): TailnetObserverResolution {
+  const merged: RawLayer = { ...file, ...env };
+  const provenance = provenanceOf(file, env);
+  const fileConfigured = Object.keys(file).length > 0;
+  if (merged.enabled !== "1") return { config: null, provenance, fileConfigured };
 
-  const expectedAppCapability = env.LVIS_TAILNET_OBSERVER_CAP;
+  const expectedAppCapability = merged.expectedAppCapability;
   if (!isCapabilityKey(expectedAppCapability)) {
     throw new Error("tailnet-observer-capability-missing-or-invalid");
   }
 
-  const rawPort = env.LVIS_TAILNET_OBSERVER_PORT;
+  const rawPort = merged.port;
   const port = rawPort === undefined
     ? DEFAULT_TAILNET_OBSERVER_PORT
     : parseFixedPort(rawPort);
-  const rawController = env.LVIS_TAILNET_CONTROLLER;
+  const rawController = merged.controllerEnabled;
   if (rawController !== undefined && rawController !== "1") {
     throw new Error("tailnet-controller-enable-invalid");
   }
-  const rawPairedSharing = env.LVIS_TAILNET_PAIRED_SHARING;
+  const rawPairedSharing = merged.pairedSharingEnabled;
   if (rawPairedSharing !== undefined && rawPairedSharing !== "1") {
     throw new Error("tailnet-paired-sharing-enable-invalid");
   }
@@ -95,7 +271,7 @@ export function resolveTailnetObserverConfig(
   if (rawController === "1" && rawPairedSharing !== "1") {
     throw new Error("tailnet-controller-requires-paired-sharing");
   }
-  const rawWeb = env.LVIS_TAILNET_WEB;
+  const rawWeb = merged.webEnabled;
   if (rawWeb !== undefined && rawWeb !== "1") {
     throw new Error("tailnet-web-enable-invalid");
   }
@@ -104,20 +280,77 @@ export function resolveTailnetObserverConfig(
     if (rawPairedSharing !== "1") {
       throw new Error("tailnet-web-requires-paired-sharing");
     }
-    const configuredOrigin = env.LVIS_TAILNET_WEB_ORIGIN;
+    const configuredOrigin = merged.webOrigin;
     if (!isTailnetWebOrigin(configuredOrigin)) {
       throw new Error("tailnet-web-origin-missing-or-invalid");
     }
     webOrigin = configuredOrigin;
   }
 
-  return Object.freeze({
-    port,
-    expectedAppCapability,
-    controllerEnabled: rawController === "1",
-    pairedSharingEnabled: rawPairedSharing === "1",
-    ...(webOrigin === undefined ? {} : { webOrigin }),
-  });
+  return {
+    config: Object.freeze({
+      port,
+      expectedAppCapability,
+      controllerEnabled: rawController === "1",
+      pairedSharingEnabled: rawPairedSharing === "1",
+      ...(webOrigin === undefined ? {} : { webOrigin }),
+    }),
+    provenance,
+    fileConfigured,
+  };
+}
+
+/**
+ * The environment layer on its own.
+ *
+ * {@link loadTailnetObserverConfig} is what production boots through; this is
+ * the same resolution with no file underneath, for callers that hold only an
+ * environment and for the contract tests that pin the env vocabulary.
+ */
+export function resolveTailnetObserverConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): TailnetObserverConfig | null {
+  return resolveFromLayers({}, envLayer(env)).config;
+}
+
+/** Read the host-owned file, distinguishing "absent" from "unreadable". */
+export async function readTailnetObserverConfigFile(
+  namespace: FeatureNamespaceHandle = openFeatureNamespace(TAILNET_FEATURE_NAMESPACE),
+): Promise<TailnetObserverConfigFile | null> {
+  let text: string;
+  try {
+    text = await readFile(join(namespace.dir, TAILNET_OBSERVER_CONFIG_FILE), "utf8");
+  } catch (err) {
+    // Absent is the default-OFF state and must stay side-effect free. Anything
+    // else is a configuration the host cannot read, which is not the same thing
+    // and must not resolve to "the user never enabled this".
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new Error("tailnet-observer-config-file-unreadable");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error("tailnet-observer-config-file-invalid");
+  }
+  return parseTailnetObserverConfigFile(parsed);
+}
+
+/**
+ * Resolve the observer configuration the way production boots it: the
+ * host-owned file first, the environment as an override layer on top.
+ */
+export async function loadTailnetObserverConfig(options: {
+  readonly env?: NodeJS.ProcessEnv;
+  /** @internal deterministic injection; production reads the host-owned file. */
+  readonly readConfigFile?: () => Promise<TailnetObserverConfigFile | null>;
+} = {}): Promise<TailnetObserverResolution> {
+  const read = options.readConfigFile ?? (() => readTailnetObserverConfigFile());
+  const file = await read();
+  return resolveFromLayers(
+    file === null ? {} : fileLayer(file),
+    envLayer(options.env ?? process.env),
+  );
 }
 
 let activePairedSharingRuntime: TailnetPairedSharingRuntime | null = null;
@@ -138,6 +371,7 @@ function dependencies(
 ): TailnetObserverServerDependencies {
   return {
     startServer: startTailnetSurfaceServer,
+    readConfigFile: () => readTailnetObserverConfigFile(),
     ...overrides,
   };
 }
@@ -148,7 +382,11 @@ async function startForBoot(
 ): Promise<TailnetObserverServer | null> {
   // This must run before listener construction. A disabled observer opens no
   // port and starts no Tailnet-specific transport side effect.
-  const config = resolveTailnetObserverConfig(options.env);
+  const resolved = dependencies(options.dependencies);
+  const { config } = await loadTailnetObserverConfig({
+    ...(options.env === undefined ? {} : { env: options.env }),
+    readConfigFile: resolved.readConfigFile,
+  });
   if (!config) return null;
   if (config.controllerEnabled && options.conversationCommandPort === undefined) {
     throw new Error("tailnet-controller-command-port-unavailable");
@@ -166,7 +404,7 @@ async function startForBoot(
       })
     : undefined;
 
-  const server = await dependencies(options.dependencies).startServer({
+  const server = await resolved.startServer({
     host: "127.0.0.1",
     port: config.port,
     expectedAppCapability: config.expectedAppCapability,
