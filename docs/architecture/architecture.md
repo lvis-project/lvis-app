@@ -298,7 +298,7 @@ implementation units:
 
 | Stable surface | Focused owners |
 |------------------------------------------ |------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `engine/turn/query-loop.ts` | `intercepted-meta-gate.ts` owns cross-agent meta-tool approval; `tool-scope.ts`, `knowledge-cap.ts`, and `compaction.ts` own their respective policies |
+| `engine/turn/query-loop.ts` | owns the round loop plus the meta-tool intercepts (`request_plugin`, `tool_search`) and their cross-agent approval gate — none has a consumer outside it; `tool-scope.ts` and `compaction.ts` own their respective policies |
 | `plugins/runtime/index.ts` | invocation/query facade over `runtime-lifecycle.ts` and the single shared state owner in `runtime-state.ts` |
 | `preload/internal-surface.ts` | stable world builders and first-frame primes; `internal-api-surface.ts` owns the internal renderer API object |
 | `data/settings-store.ts` | persistence/service facade over `settings-defaults.ts` and pure normalization in `settings-normalization.ts` |

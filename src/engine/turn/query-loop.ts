@@ -5,11 +5,18 @@
  * guidance queue) stays on the ConversationLoop instance, accessed via `self`.
  */
 import { randomUUID } from "node:crypto";
-import type { LoopContext } from "./loop-context.js";
+/**
+ * LoopContext — the turn-local mutable carrier that the run-turn
+ * and query-loop free functions operate on. It is the ConversationLoop instance
+ * itself: the class owns all turn state (history, provider, the lastRound and
+ * lastContext token-projection fields, the guidance queue, compaction flags),
+ * and the extracted free functions read/write it through this alias so the
+ * implicit cross-method contracts stay on one object.
+ */
+import type { ConversationLoop as LoopContext } from "../conversation-loop.js";
 import type { GuidanceInjectionSource, TurnCallbacks, TurnInputRequired, TurnStopReason, ToolScope } from "./types.js";
-import { notifyGuidanceInjected, subAgentHistoryMeta, subAgentSourceForBatch, truncateGuidanceBatch } from "./guidance-batch.js";
-import type { GenericMessage, LLMVendor, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
-import type { ChatInputOrigin } from "../../shared/chat-origin.js";
+import type { GenericMessage, LLMProvider, LLMVendor, MessageMeta, TokenUsage, TokenUsageByModel, ToolSchema } from "../llm/types.js";
+import type { ChatInputOrigin, RemoteControllerAuthority } from "../../shared/chat-origin.js";
 import type { PermissionReviewEvent } from "../../shared/permission-review-status.js";
 import type { ToolTrustOrigin } from "../../tools/types.js";
 import type { RequestAnchor } from "../../tools/pipeline/rationale-control.js";
@@ -32,18 +39,16 @@ import type {
   ToolResult,
   ToolUseBlock,
 } from "../../tools/executor.js";
+import { TOOL_SEARCH_TOOL_NAME } from "../../tools/registry.js";
 import { collectActiveRuntimeRoundStream } from "./stream-collector.js";
 import { FallbackProvider } from "../llm/vercel/fallback-chain.js";
 import { vendorSupportsLengthContinuation } from "../llm/vendor-capabilities.js";
 import { rejectedToolNameFromError, withoutDroppedTools } from "../llm/rejected-tool-schema.js";
-import { handleRequestPlugin, REQUEST_PLUGIN_TOOL } from "./plugin-expansion.js";
-import { handleToolSearch, TOOL_SEARCH_TOOL } from "./tool-search.js";
-import { applyKnowledgeDepthCap } from "./knowledge-cap.js";
 import { nextToolTrustOrigin, rationaleProvenanceFor } from "./trust-origin.js";
 import { contextBudgetForCurrentRuntime } from "./compaction.js";
 import { markStaleToolResults, evictAgedToolResultImages, isContextLengthError } from "../auto-compact.js";
 import { stripSuggestedReplies } from "../suggested-replies.js";
-import { mergeGuidanceApprovalReasonPrefixes } from "./guidance-limits.js";
+import { GUIDE_JOINED_MAX_CHARS, mergeGuidanceApprovalReasonPrefixes } from "./guidance-limits.js";
 import { parseStagedEnvelope } from "../../shared/staged-origins.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
@@ -55,11 +60,7 @@ import {
   mergeA2AAgentCausalContexts,
   type A2AAgentCausalContext,
 } from "../a2a-agent-message-envelope.js";
-import { gateCrossAgentInterceptedMetaTools } from "./intercepted-meta-gate.js";
 import { createSubscriptionUsageCollector, recordSubscriptionRoundTelemetry } from "./subscription-usage-telemetry.js";
-import { appendUsageForServingModel } from "./usage-by-model.js";
-import { finalizeAfterRoundCap, mergeFinalizeUsage, resolveRoundCapText } from "./round-cap-finalize.js";
-import { toolResultMeta } from "./tool-result-meta.js";
 
 const log = createLogger("lvis");
 // No caller-assigned `maxRounds` = PARENT session: unbounded — a turn ends
@@ -1597,3 +1598,840 @@ export async function queryLoop(
       rollbackPendingGuidance();
     }
   }
+
+// ---------------------------------------------------------------------------
+// Guidance batching — how a mid-turn guidance batch is formed, bounded, and
+// attributed.
+//
+// Guidance reaches the receiver as a user-role message, which is how the model
+// must see it — but a sub-agent's report is not something the user wrote, and
+// the transcript has to say so. Forming the batch and attributing it live
+// together here: the live renderer frame and the persisted history meta are two
+// halves of one decision, and splitting them would let a reloaded session render
+// a different bubble than the live turn had shown.
+// ---------------------------------------------------------------------------
+
+/**
+ * Drain the queue into one bounded message, oldest entries first.
+ *
+ * Truncation is from the HEAD so the most recent guides survive (older ones may
+ * already be superseded), and the drop is surfaced by a leading marker so the
+ * model is not left reasoning over silently missing context. Callers must still
+ * fire `onDropped` for every returned `dropped` entry.
+ */
+function truncateGuidanceBatch<T extends { text: string }>(
+  queue: readonly T[],
+): { kept: T[]; dropped: T[]; joined: string } {
+  const kept = [...queue];
+  const dropped: T[] = [];
+  let joined = kept.map((entry) => entry.text).join("\n\n");
+  let truncatedCount = 0;
+  while (joined.length > GUIDE_JOINED_MAX_CHARS && kept.length > 1) {
+    const removed = kept.shift();
+    if (removed) dropped.push(removed);
+    truncatedCount += 1;
+    joined = kept.map((entry) => entry.text).join("\n\n");
+  }
+  return {
+    kept,
+    dropped,
+    joined: truncatedCount > 0
+      ? t("be_conversationLoop.guidanceTruncationMarker", { count: truncatedCount, joined })
+      : joined,
+  };
+}
+
+/**
+ * Attribute a batch to a sub-agent only when EVERY entry came from one.
+ *
+ * A batch that also carried the user's own mid-turn guide is still the user's
+ * message; labelling it a child report would credit the wrong author for text
+ * the user typed.
+ */
+function subAgentSourceForBatch(
+  entries: readonly { subAgentTitle?: string }[],
+): GuidanceInjectionSource | undefined {
+  if (entries.length === 0) return undefined;
+  const titles = [...new Set(entries.map((entry) => entry.subAgentTitle))];
+  if (titles.includes(undefined)) return undefined;
+  return {
+    kind: "sub-agent",
+    // Several children in one batch: report it as a child report, unnamed,
+    // rather than crediting one child for another's work.
+    ...(titles.length === 1 ? { title: titles[0]! } : {}),
+  };
+}
+
+/** Persisted counterpart of {@link subAgentSourceForBatch}, for reload replay. */
+function subAgentHistoryMeta(
+  source: GuidanceInjectionSource | undefined,
+): { meta: MessageMeta } | Record<string, never> {
+  if (!source) return {};
+  return {
+    meta: {
+      subAgentReport: source.title === undefined ? {} : { title: source.title },
+    },
+  };
+}
+
+/** Notify the renderer, keeping the one-argument shape for user-authored guides. */
+function notifyGuidanceInjected(
+  callback: TurnCallbacks["onGuidanceInjected"],
+  text: string,
+  source: GuidanceInjectionSource | undefined,
+): void {
+  if (source) callback?.(text, source);
+  else callback?.(text);
+}
+
+// ---------------------------------------------------------------------------
+// Knowledge-tool depth cap.
+// ---------------------------------------------------------------------------
+
+const KNOWLEDGE_DEPTH_CAP = 3;
+const KNOWLEDGE_TOOL_NAMES = new Set<string>([
+  "knowledge_search",
+  "document_list",
+  "document_structure",
+  "document_page_content",
+]);
+
+interface KnowledgeCapResult {
+
+  allowed: ToolUseBlock[];
+
+  blocked: Array<{ tool_use_id: string; content: string; is_error: boolean }>;
+
+  nextCount: number;
+}
+
+function applyKnowledgeDepthCap(
+  toolUses: ToolUseBlock[],
+  currentCount: number,
+  cap: number = KNOWLEDGE_DEPTH_CAP,
+): KnowledgeCapResult {
+  const allowed: ToolUseBlock[] = [];
+  const blocked: KnowledgeCapResult["blocked"] = [];
+  let count = currentCount;
+  for (const tu of toolUses) {
+    if (KNOWLEDGE_TOOL_NAMES.has(tu.name)) {
+      if (count >= cap) {
+        blocked.push({
+          tool_use_id: tu.id,
+          content: t("be_knowledgeCap.depthCapBlocked", { name: tu.name, cap: String(cap) }),
+          is_error: true,
+        });
+        continue;
+      }
+      count += 1;
+    }
+    allowed.push(tu);
+  }
+  return { allowed, blocked, nextCount: count };
+}
+
+// ---------------------------------------------------------------------------
+// Persisted tool_result renderer metadata.
+// ---------------------------------------------------------------------------
+
+/** A knowledge-cap blocked result — no execution, so no timing or verdict. */
+type BlockedToolResult = { tool_use_id: string; content: string; is_error: boolean };
+
+/**
+ * Renderer metadata for one persisted tool_result: display fields for the tool
+ * row plus the permission verdict for that call. Both are what a reloaded
+ * transcript rebuilds the row from, so they are assembled in one place.
+ */
+function toolResultMeta(
+  result: ToolResult | BlockedToolResult,
+  callMeta: ToolCallMeta | undefined,
+  review: PermissionReviewEvent | undefined,
+): MessageMeta | undefined {
+  const toolDisplay = "durationMs" in result
+    ? {
+        durationMs: result.durationMs,
+        ...(callMeta?.source ? { source: callMeta.source } : {}),
+        ...(callMeta?.category ? { category: callMeta.category } : {}),
+        ...(callMeta?.pluginId ? { pluginId: callMeta.pluginId } : {}),
+        ...(callMeta?.mcpServerId ? { mcpServerId: callMeta.mcpServerId } : {}),
+        ...(callMeta?.cancelled ? { cancelled: true } : {}),
+        ...("uiPayload" in result && result.uiPayload ? { uiPayload: result.uiPayload } : {}),
+      }
+    : undefined;
+  const permissionReview = review
+    ? {
+        status: review.status,
+        ...(review.verdictLevel ? { verdictLevel: review.verdictLevel } : {}),
+        ...(review.reason ? { reason: review.reason } : {}),
+      }
+    : undefined;
+  if (!toolDisplay && !permissionReview) return undefined;
+  return {
+    ...(toolDisplay ? { toolDisplay } : {}),
+    ...(permissionReview ? { permissionReview } : {}),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// API-key usage segments.
+// ---------------------------------------------------------------------------
+
+/** Appends an API-key usage segment only when the serving identity is known. */
+function appendUsageForServingModel(
+  usageByModel: TokenUsageByModel[],
+  vendorProvider: LLMVendor | undefined,
+  vendorModel: string | undefined,
+  usage: TokenUsage,
+): void {
+  if (vendorProvider === undefined || vendorModel === undefined) {
+    return;
+  }
+  usageByModel.push({
+    vendorProvider,
+    vendorModel,
+    tokenUsage: {
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      ...(usage.cacheReadTokens !== undefined ? { cacheReadTokens: usage.cacheReadTokens } : {}),
+      ...(usage.cacheWriteTokens !== undefined ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Round-cap finalization — one bounded, tool-free model call issued when a turn
+// exhausts its round budget.
+//
+// Without it, `round-cap` returns the last assistant message verbatim. When the
+// final round was a pure tool-call round that text is empty or a mid-thought
+// fragment, so a sub-agent that ran out of budget mid-investigation returns
+// nothing its parent can act on — the "agent stopped without reporting" symptom.
+// The budget is spent either way; what is missing is a readable hand-off.
+//
+// Deliberately NOT a normal round: no tools are offered, so it cannot extend the
+// work it is summarizing, and `outputTokenLimit` bounds it. It reports; it does
+// not continue.
+// ---------------------------------------------------------------------------
+
+/** Enough for a dense hand-off, small enough that the call cannot run away. */
+const FINALIZE_OUTPUT_TOKEN_LIMIT = 1024;
+
+export interface RoundCapFinalizeParams {
+  provider: LLMProvider;
+  model: string;
+  systemPrompt: string;
+  /** Turn history as it stood when the budget ran out. */
+  messages: GenericMessage[];
+  abortSignal?: AbortSignal;
+}
+
+export interface RoundCapFinalizeResult {
+  text: string;
+  usage?: TokenUsage;
+}
+
+/**
+ * Ask the model to state what it established and what remains.
+ *
+ * Returns `null` when the call cannot produce text — provider error, abort, or
+ * an empty completion. The caller keeps whatever partial text it already had;
+ * a failed hand-off must never be worse than no hand-off.
+ */
+export async function finalizeAfterRoundCap(
+  params: RoundCapFinalizeParams,
+): Promise<RoundCapFinalizeResult | null> {
+  if (params.abortSignal?.aborted) return null;
+
+  const messages: GenericMessage[] = [
+    ...params.messages,
+    { role: "user", content: t("be_conversationLoop.roundCapFinalizePrompt") },
+  ];
+
+  let text = "";
+  let usage: TokenUsage | undefined;
+  try {
+    for await (const event of params.provider.streamTurn({
+      model: params.model,
+      systemPrompt: params.systemPrompt,
+      messages,
+      // No `tools`: the call must summarize the work, never extend it.
+      outputTokenLimit: FINALIZE_OUTPUT_TOKEN_LIMIT,
+      ...(params.abortSignal ? { abortSignal: params.abortSignal } : {}),
+    })) {
+      if (event.type === "text_delta") text += event.text;
+      else if (event.type === "message_complete") usage = event.usage;
+      else if (event.type === "error") {
+        log.warn({ error: event.error }, "round-cap finalize: provider error");
+        return null;
+      }
+    }
+  } catch (err) {
+    log.warn(
+      { err: err instanceof Error ? err.message : String(err) },
+      "round-cap finalize: call failed",
+    );
+    return null;
+  }
+
+  const trimmed = text.trim();
+  if (trimmed.length === 0) return null;
+  return usage ? { text: trimmed, usage } : { text: trimmed };
+}
+
+/**
+ * What a round-capped turn returns, in order of preference:
+ *
+ *  1. the finalize hand-off — written knowing the work stopped, so it states
+ *     findings and remaining steps rather than trailing off mid-thought;
+ *  2. the last assistant message verbatim — the pre-existing behavior, kept as
+ *     the fallback because a real partial answer beats a synthetic notice;
+ *  3. the round-cap notice — only when there is no assistant text at all, which
+ *     is exactly the tool-only-final-round case that read as silent failure.
+ */
+export function resolveRoundCapText(
+  finalized: RoundCapFinalizeResult | null,
+  messages: readonly GenericMessage[],
+  roundCapNotice: string,
+): string {
+  if (finalized?.text) return finalized.text;
+  const lastAssistant = messages
+    .filter((m) => m.role === "assistant")
+    .slice(-1)[0]?.content ?? "";
+  return lastAssistant.length > 0 ? lastAssistant : roundCapNotice;
+}
+
+/** Fold the finalize call's usage into the turn total. Identity when absent. */
+export function mergeFinalizeUsage(
+  turnUsage: TokenUsage | undefined,
+  finalized: RoundCapFinalizeResult | null,
+): TokenUsage | undefined {
+  const extra = finalized?.usage;
+  if (!extra) return turnUsage;
+  return {
+    inputTokens: (turnUsage?.inputTokens ?? 0) + extra.inputTokens,
+    outputTokens: (turnUsage?.outputTokens ?? 0) + extra.outputTokens,
+    cacheReadTokens: (turnUsage?.cacheReadTokens ?? 0) + (extra.cacheReadTokens ?? 0),
+    cacheWriteTokens: (turnUsage?.cacheWriteTokens ?? 0) + (extra.cacheWriteTokens ?? 0),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// `request_plugin` meta-tool — promotes a whole plugin into scope.
+// ---------------------------------------------------------------------------
+
+const REQUEST_PLUGIN_TOOL = "request_plugin";
+
+const MAX_PLUGIN_EXPANSION = 2;
+
+const MAX_SESSION_PLUGIN_EXPANSION = 6;
+
+interface PluginExpansionState {
+
+  turnExpansions: number;
+
+  sessionExpansions: number;
+
+  activePluginIds: Set<string>;
+
+  availablePluginIds: string[];
+  /**
+   * Session-scoped on-demand activation sink. When a registry-DISABLED plugin
+   * (per {@link isPluginEnabled}) is activated, its id is recorded here so the
+   * caller's scope resolver skips the disabled-drop for THIS session only —
+   * never persisting enabled state (setPluginEnabled is NOT called). A
+   * disabled id can only reach the activation branch if it already passed the
+   * caller's allow-list gate (it would not be in {@link availablePluginIds}
+   * otherwise). Omitted for main chat.
+   */
+  sessionActivatedPluginIds?: Set<string>;
+  /** Registry active-state predicate; `false` ⇒ the plugin is disabled. */
+  isPluginEnabled?: (pluginId: string) => boolean;
+}
+
+interface PluginExpansionOutcome {
+
+  results: Array<{ tool_use_id: string; content: string; is_error: boolean }>;
+
+  remaining: ToolUseBlock[];
+
+  activatedPluginIds: string[];
+
+  nextTurnExpansions: number;
+
+  nextSessionExpansions: number;
+}
+
+function handleRequestPlugin(
+  toolUses: ToolUseBlock[],
+  state: PluginExpansionState,
+): PluginExpansionOutcome {
+  const results: PluginExpansionOutcome["results"] = [];
+  const remaining: ToolUseBlock[] = [];
+  const activatedPluginIds: string[] = [];
+  let turnExpansions = state.turnExpansions;
+  let sessionExpansions = state.sessionExpansions;
+
+  for (const tu of toolUses) {
+    if (tu.name !== REQUEST_PLUGIN_TOOL) {
+      remaining.push(tu);
+      continue;
+    }
+    const pluginId = (tu.input as { pluginId?: unknown })?.pluginId;
+    const availableIds = state.availablePluginIds;
+    if (typeof pluginId !== "string" || pluginId.length === 0) {
+      results.push({
+        tool_use_id: tu.id,
+        content: t("be_pluginExpansion.missingPluginId", { available: availableIds.join(", ") || t("be_pluginExpansion.noneAvailable") }),
+        is_error: true,
+      });
+    } else if (!availableIds.includes(pluginId)) {
+      results.push({
+        tool_use_id: tu.id,
+        content: t("be_pluginExpansion.unknownPluginId", { pluginId, available: availableIds.join(", ") || t("be_pluginExpansion.noneAvailable") }),
+        is_error: true,
+      });
+    } else if (turnExpansions >= MAX_PLUGIN_EXPANSION) {
+      results.push({
+        tool_use_id: tu.id,
+        content: t("be_pluginExpansion.turnLimitExceeded", { max: String(MAX_PLUGIN_EXPANSION), pluginId }),
+        is_error: true,
+      });
+    } else if (sessionExpansions >= MAX_SESSION_PLUGIN_EXPANSION) {
+      log.warn(
+        `request_plugin session cap reached (${MAX_SESSION_PLUGIN_EXPANSION}). ` +
+        `Rejecting '${pluginId}'.`,
+      );
+      results.push({
+        tool_use_id: tu.id,
+        content: t("be_pluginExpansion.sessionLimitExceeded", { max: String(MAX_SESSION_PLUGIN_EXPANSION), pluginId }),
+        is_error: true,
+      });
+    } else {
+      state.activePluginIds.add(pluginId);
+      // Session-scoped on-demand activation — a registry-disabled plugin that
+      // cleared the caller's allow-list gate (else it would not be in
+      // availablePluginIds) is activated for THIS session only. Record it so
+      // the scope resolver keeps its tools WITHOUT persisting enabled=true.
+      if (state.isPluginEnabled?.(pluginId) === false) {
+        state.sessionActivatedPluginIds?.add(pluginId);
+      }
+      turnExpansions += 1;
+      sessionExpansions += 1;
+      activatedPluginIds.push(pluginId);
+      results.push({
+        tool_use_id: tu.id,
+        // 실제 추가된 도구 수는 호출자가 rebuild 후 보강 가능하지만
+        // 초기 메시지는 activation 사실만 보고한다 — 호출자가 replace 하기도 한다.
+        content: t("be_pluginExpansion.activated", { pluginId }),
+        is_error: false,
+      });
+    }
+  }
+
+  return {
+    results,
+    remaining,
+    activatedPluginIds,
+    nextTurnExpansions: turnExpansions,
+    nextSessionExpansions: sessionExpansions,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool-Level Deferral — `tool_search` meta-tool handler.
+//
+// Mirror of `request_plugin` one layer down: where `request_plugin` promotes a
+// whole *plugin* into scope, `tool_search` promotes individual *tools* from the
+// per-turn catalog into the live `tools[]` for the next round.
+//
+// When the LLM emits `tool_search({ query })` the loop does not pass it to the
+// tool executor; instead this section ranks catalog tools by `query`, promotes a
+// small top-N result set into `activeToolNames`, and synthesizes a `tool_result`
+// per intercepted `tool_use` (tool-pair invariant). The caller rebuilds tool
+// schemas and refunds the round, exactly like the plugin path.
+//
+// Pure logic — the caller owns side effects (history append, schema rebuild).
+// ---------------------------------------------------------------------------
+
+/** Name of the meta-tool. SOT is the registry; re-exported here for the loop. */
+export const TOOL_SEARCH_TOOL = TOOL_SEARCH_TOOL_NAME;
+
+export const MAX_TOOL_SEARCH_PER_TURN = 4;
+
+export const MAX_TOOL_SEARCH_PER_SESSION = 20;
+
+export const MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH = 5;
+
+export const MIN_CATALOG_MATCH_TOKEN_LENGTH = 2;
+
+/** Catalog entry the loop supplies (from `getToolCatalogForScope`). */
+interface ToolSearchCatalogEntry {
+  name: string;
+  description: string;
+}
+
+export interface ToolSearchState {
+
+  turnSearches: number;
+
+  sessionSearches: number;
+
+  activeToolNames: Set<string>;
+
+  loadedToolNames?: Set<string>;
+
+  loadedTools?: ToolSearchCatalogEntry[];
+
+  catalog: ToolSearchCatalogEntry[];
+}
+
+interface ToolSearchOutcome {
+
+  results: Array<{ tool_use_id: string; content: string; is_error: boolean }>;
+
+  remaining: ToolUseBlock[];
+
+  promotedToolNames: string[];
+
+  nextTurnSearches: number;
+
+  nextSessionSearches: number;
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function tokenizeQuery(query: string): string[] {
+  const normalized = query.toLowerCase().trim();
+  if (normalized.length === 0) return [];
+  return uniqueStrings([
+    normalized,
+    ...normalized.split(/[\s,.;:()[\]{}"'`/\\|]+/),
+    ...normalized.split(/[\s,.;:()[\]{}"'`/\\|_-]+/),
+  ].map((token) => token.trim()).filter((token) => token.length >= MIN_CATALOG_MATCH_TOKEN_LENGTH));
+}
+
+function tokenizeName(name: string): string[] {
+  return name.toLowerCase().split(/[_\-\s.]+/).filter((token) => token.length > 0);
+}
+
+function entrySearchText(entry: ToolSearchCatalogEntry): string {
+  return `${entry.name} ${entry.description}`.toLowerCase();
+}
+
+/**
+ * IDF weight per query token over the current catalog corpus: a rare token
+ * weighs ~1.0, a token that appears in most entries (get/list/file) is damped
+ * toward a 0.2 floor (kept above 0 so a common-token match still counts).
+ * Normalized by log(1+N) so the range is stable regardless of catalog size and
+ * clamped to [0.2, 1]. This is the discriminative core of the ranking upgrade:
+ * a match on a distinctive token now outranks a match on boilerplate.
+ */
+function computeIdfWeights(
+  catalog: ToolSearchCatalogEntry[],
+  queryTokens: string[],
+): Map<string, number> {
+  const weights = new Map<string, number>();
+  const total = catalog.length;
+  if (total === 0) return weights;
+  const texts = catalog.map(entrySearchText);
+  const denom = Math.log(1 + total) || 1;
+  for (const token of queryTokens) {
+    if (weights.has(token)) continue;
+    let documentFrequency = 0;
+    for (const text of texts) {
+      if (text.includes(token)) documentFrequency += 1;
+    }
+    const idf = documentFrequency > 0 ? Math.log(1 + total / documentFrequency) : Math.log(1 + total);
+    weights.set(token, Math.min(1, Math.max(0.2, idf / denom)));
+  }
+  return weights;
+}
+
+function scoreCatalogEntry(
+  query: string,
+  tokens: string[],
+  entry: ToolSearchCatalogEntry,
+  idfWeights?: Map<string, number>,
+): number {
+  const name = entry.name.toLowerCase();
+  const description = entry.description.toLowerCase();
+  const nameTokens = tokenizeName(entry.name);
+  // Exact whole-query name match is an un-weighted strong signal (still requires
+  // the query to clear the minimum token length so a 1-char query cannot promote
+  // a 1-char tool name).
+  let score = name === query && query.length >= MIN_CATALOG_MATCH_TOKEN_LENGTH ? 1_000 : 0;
+
+  for (const token of tokens) {
+    // Defense at the scoring boundary: sub-minimum tokens never contribute,
+    // even if a future caller bypasses tokenizeQuery's length filter.
+    if (token.length < MIN_CATALOG_MATCH_TOKEN_LENGTH) continue;
+    let tokenScore = 0;
+    if (name === token) {
+      tokenScore = 700;
+    } else if (name.startsWith(token)) {
+      tokenScore = 350;
+    } else if (nameTokens.includes(token)) {
+      tokenScore = 300;
+    } else if (name.includes(token)) {
+      tokenScore = 120;
+    }
+
+    if (description.includes(token)) {
+      tokenScore += 30;
+    }
+
+    // IDF weighting: dampen contributions from tokens common across the catalog.
+    // Absent weights (default 1) preserve the pre-IDF behavior.
+    score += tokenScore * (idfWeights?.get(token) ?? 1);
+  }
+
+  return score;
+}
+
+/**
+ * Test-only export — allows unit tests to drive `scoreCatalogEntry` directly
+ * so the scoring-side MIN_CATALOG_MATCH_TOKEN_LENGTH guards (lines above) are
+ * covered independently of the tokenizeQuery pre-filter. The function is pure
+ * and has no side effects; exporting it does not affect production behaviour.
+ *
+ * @internal Do not import outside of `__tests__/`.
+ */
+export { scoreCatalogEntry as _scoreCatalogEntryForTest };
+/** @internal Test-only — IDF weighting is pure; do not import outside `__tests__/`. */
+export { computeIdfWeights as _computeIdfWeightsForTest };
+
+function matchCatalog(
+  query: string,
+  catalog: ToolSearchCatalogEntry[],
+): ToolSearchCatalogEntry[] {
+  const normalizedQuery = query.toLowerCase().trim();
+  const tokens = tokenizeQuery(query);
+  if (tokens.length === 0) return [];
+  const idfWeights = computeIdfWeights(catalog, tokens);
+  return catalog
+    .map((entry) => ({ entry, score: scoreCatalogEntry(normalizedQuery, tokens, entry, idfWeights) }))
+    .filter((candidate) => candidate.score > 0)
+    .sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name))
+    .slice(0, MAX_TOOL_SEARCH_PROMOTIONS_PER_SEARCH)
+    .map((candidate) => candidate.entry);
+}
+
+export function handleToolSearch(
+  toolUses: ToolUseBlock[],
+  state: ToolSearchState,
+): ToolSearchOutcome {
+  const results: ToolSearchOutcome["results"] = [];
+  const remaining: ToolUseBlock[] = [];
+  const promotedToolNames: string[] = [];
+  let turnSearches = state.turnSearches;
+  let sessionSearches = state.sessionSearches;
+
+  for (const tu of toolUses) {
+    if (tu.name !== TOOL_SEARCH_TOOL) {
+      remaining.push(tu);
+      continue;
+    }
+    const query = (tu.input as { query?: unknown })?.query;
+    if (typeof query !== "string" || query.trim().length === 0) {
+      results.push({
+        tool_use_id: tu.id,
+        content: t("be_toolSearch.queryRequired"),
+        is_error: true,
+      });
+    } else if (tokenizeQuery(query).length === 0) {
+      results.push({
+        tool_use_id: tu.id,
+        content: t("be_toolSearch.queryTokenTooShort", { minLen: String(MIN_CATALOG_MATCH_TOKEN_LENGTH) }),
+        is_error: true,
+      });
+    } else if (turnSearches >= MAX_TOOL_SEARCH_PER_TURN) {
+      results.push({
+        tool_use_id: tu.id,
+        content: t("be_toolSearch.turnLimitExceeded", { max: String(MAX_TOOL_SEARCH_PER_TURN), query }),
+        is_error: true,
+      });
+    } else if (sessionSearches >= MAX_TOOL_SEARCH_PER_SESSION) {
+      log.warn(
+        `tool_search session cap reached (${MAX_TOOL_SEARCH_PER_SESSION}). ` +
+        `Rejecting query '${query}'.`,
+      );
+      results.push({
+        tool_use_id: tu.id,
+        content: t("be_toolSearch.sessionLimitExceeded", { max: String(MAX_TOOL_SEARCH_PER_SESSION), query }),
+        is_error: true,
+      });
+    } else {
+      const normalizedQuery = query.trim().toLowerCase();
+      const loadedCatalog = state.loadedTools ?? [...(state.loadedToolNames ?? state.activeToolNames)]
+        .map((name) => ({ name, description: "" }));
+      const exactLoaded = loadedCatalog.find(
+        (tool) => tool.name.toLowerCase() === normalizedQuery,
+      );
+      if (exactLoaded) {
+        results.push({
+          tool_use_id: tu.id,
+          content: t("be_toolSearch.alreadyLoaded", { name: exactLoaded.name }),
+          is_error: false,
+        });
+      } else {
+        const matches = matchCatalog(query, state.catalog).filter(
+          (m) => !state.activeToolNames.has(m.name),
+        );
+        if (matches.length === 0) {
+          const loadedMatches = matchCatalog(query, loadedCatalog);
+          if (loadedMatches.length > 0) {
+            results.push({
+              tool_use_id: tu.id,
+              content: t("be_toolSearch.alreadyLoadedMultiple", { names: loadedMatches.map((m) => m.name).join(", ") }),
+              is_error: false,
+            });
+          } else {
+            results.push({
+              tool_use_id: tu.id,
+              content: t("be_toolSearch.noMatchFound", {
+                query,
+                catalog: state.catalog.map((c) => c.name).join(", ") || t("be_toolSearch.catalogEmpty"),
+              }),
+              is_error: true,
+            });
+          }
+        } else {
+          for (const m of matches) {
+            state.activeToolNames.add(m.name);
+            promotedToolNames.push(m.name);
+          }
+          turnSearches += 1;
+          sessionSearches += 1;
+          results.push({
+            tool_use_id: tu.id,
+            content: t("be_toolSearch.toolsPromoted", { count: String(matches.length), names: matches.map((m) => m.name).join(", ") }),
+            is_error: false,
+          });
+        }
+      }
+    }
+  }
+
+  return {
+    results,
+    remaining,
+    promotedToolNames,
+    nextTurnSearches: turnSearches,
+    nextSessionSearches: sessionSearches,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Cross-agent gate for the intercepted meta tools (`request_plugin`,
+// `tool_search`). Both mutate the active tool/session surface while bypassing
+// the ordinary ToolExecutor, so a message that did not come from the local user
+// has to clear an approval before either can run.
+// ---------------------------------------------------------------------------
+
+interface InterceptedMetaGateResult {
+  approved: ToolUseBlock[];
+  denied: Array<{
+    toolUseId: string;
+    toolName: string;
+    content: string;
+  }>;
+}
+
+function isApprovalChoiceAllowed(choice: string): boolean {
+  return choice === "allow-once" || choice === "allow-session" || choice === "allow-always";
+}
+
+export async function gateCrossAgentInterceptedMetaTools(
+  self: LoopContext,
+  toolUses: ToolUseBlock[],
+  approvalReasonPrefix: string | undefined,
+  trustOrigin: ToolTrustOrigin,
+  sessionId: string,
+  remoteControllerAuthority?: RemoteControllerAuthority,
+): Promise<InterceptedMetaGateResult> {
+  if (!approvalReasonPrefix && !remoteControllerAuthority) {
+    return { approved: toolUses, denied: [] };
+  }
+
+  const approved: ToolUseBlock[] = [];
+  const denied: InterceptedMetaGateResult["denied"] = [];
+  for (const toolUse of toolUses) {
+    if (toolUse.name !== REQUEST_PLUGIN_TOOL && toolUse.name !== TOOL_SEARCH_TOOL) {
+      approved.push(toolUse);
+      continue;
+    }
+
+    // These meta commands mutate the active tool/session surface while
+    // bypassing the ordinary ToolExecutor. A P1 Tailnet controller cannot
+    // create a cross-turn capability; retain a narrow send/read/write model
+    // until an actor-scoped continuation protocol exists.
+    if (remoteControllerAuthority !== undefined) {
+      denied.push({
+        toolUseId: toolUse.id,
+        toolName: toolUse.name,
+        content: `remote-controller-meta-disabled: ${toolUse.name}`,
+      });
+      continue;
+    }
+
+    const gate = self.deps.approvalGate;
+    let allowed = false;
+    if (!gate) {
+      self.auditLogger.log({
+        timestamp: new Date().toISOString(),
+        sessionId,
+        type: "error",
+        input: `cross-agent-meta-approval-unavailable:${toolUse.name}`,
+      });
+    } else {
+      try {
+        const decision = await gate.requestAndWait({
+          id: randomUUID(),
+          category: "tool",
+          kind: "tool",
+          toolName: toolUse.name,
+          toolCategory: "meta",
+          // Same conversation this gate already audits under.
+          sessionId,
+          args: toolUse.input,
+          reason: `${approvalReasonPrefix} cross-agent message requested ${toolUse.name}`,
+          source: "builtin",
+          createdAt: Date.now(),
+          isReadOnly: false,
+          mode: "ask_all",
+          trustOrigin,
+          // This ask parks the turn like any other, so the turn's Stop has to
+          // be able to end it rather than leave it on the gate's own timer.
+          // Read from the loop rather than threaded in: this is the same
+          // controller `runTurn` installed and the same signal it handed the
+          // executor, and the caller has no third one to offer.
+          ...(self.currentAbortController === null
+            ? {}
+            : { abortSignal: self.currentAbortController.signal }),
+        });
+        allowed = isApprovalChoiceAllowed(decision.choice);
+      } catch {
+        self.auditLogger.log({
+          timestamp: new Date().toISOString(),
+          sessionId,
+          type: "error",
+          input: `cross-agent-meta-approval-failed:${toolUse.name}`,
+        });
+      }
+    }
+
+    if (allowed) {
+      approved.push(toolUse);
+    } else {
+      denied.push({
+        toolUseId: toolUse.id,
+        toolName: toolUse.name,
+        content: `cross-agent-approval-denied: ${toolUse.name}`,
+      });
+    }
+  }
+
+  return { approved, denied };
+}

@@ -3,7 +3,7 @@ import {
   finalizeAfterRoundCap,
   mergeFinalizeUsage,
   resolveRoundCapText,
-} from "../round-cap-finalize.js";
+} from "../query-loop.js";
 import type { GenericMessage, StreamEvent, TokenUsage } from "../../llm/types.js";
 
 function provider(events: StreamEvent[]) {
