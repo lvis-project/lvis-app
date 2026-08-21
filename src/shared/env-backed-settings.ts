@@ -38,6 +38,11 @@ export const ENV_BACKED_SETTINGS: readonly EnvBackedSetting[] = Object.freeze([
   // Already has a control (Permissions → OS tool sandbox); it is here because
   // the same environment trap applies to it.
   { settingsPath: "features.osToolSandbox", envVar: "LVIS_SANDBOX_ENABLED", onValue: "1" },
+  // Chromium's GPU process. Read once, before `app.whenReady()`, so neither
+  // side of this pair can change the running app — the control says "next
+  // launch" for the same reason the resolver has to read the settings file
+  // directly instead of asking SettingsService, which does not exist yet.
+  { settingsPath: "system.hardwareAcceleration", envVar: "LVIS_KEEP_GPU", onValue: "1" },
 ].map((entry) => Object.freeze(entry)));
 
 const KNOWN_PATHS: ReadonlySet<string> = Object.freeze(

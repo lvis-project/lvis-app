@@ -60,6 +60,16 @@ export const ko: Record<SeedMessageKey, string> = {
   "startupTab.shortcutRegisterFailedTitle": "단축키 등록 실패",
   "startupTab.shortcutRegisterFailedBody":
     "{accelerator} 은(는) 다른 앱이 사용 중입니다. 다른 조합을 선택하세요.",
+  "startupTab.renderingSectionTitle":
+    "화면 렌더링",
+  "startupTab.renderingSectionDesc":
+    "LVIS 가 화면을 그릴 때 그래픽 카드를 사용할지 설정합니다.",
+  "startupTab.hardwareAccelerationLabel":
+    "하드웨어 가속 사용",
+  "startupTab.hardwareAccelerationHelp":
+    "다음 실행부터 적용됩니다. 창이 검게 나오거나 깜빡이거나 화면을 그리다 앱이 죽는다면 끄세요 — 일부 사내 관리 PC 와 가상 데스크톱의 그래픽 드라이버는 이 기능을 감당하지 못합니다. 그래서 Windows 와 Linux 에서는 기본값이 꺼짐입니다.",
+  "startupTab.hardwareAccelerationEnvForced":
+    "환경 변수 {envVar} 가 여기에 저장된 값과 관계없이 이 항목을 켜고 있습니다.",
   "startupTab.launchSectionTitle": "시작 시 자동 실행",
   "startupTab.launchSectionDesc":
     "컴퓨터에 로그인할 때 LVIS 를 자동으로 시작할지 설정합니다.",

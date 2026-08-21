@@ -52,6 +52,16 @@ export const es: Record<SeedMessageKey, string> = {
   "startupTab.shortcutRegisterFailedTitle": "Error al registrar el atajo",
   "startupTab.shortcutRegisterFailedBody":
     "{accelerator} ya está en uso por otra aplicación. Elige otra combinación.",
+  "startupTab.renderingSectionTitle":
+    "Representación",
+  "startupTab.renderingSectionDesc":
+    "Controla si LVIS usa la tarjeta gráfica para dibujar la interfaz.",
+  "startupTab.hardwareAccelerationLabel":
+    "Usar aceleración por hardware",
+  "startupTab.hardwareAccelerationHelp":
+    "Se aplica la próxima vez que se inicie LVIS. Desactívala si la ventana se queda en negro, parpadea o la aplicación se cierra al dibujar: en algunos equipos gestionados y escritorios virtuales los controladores gráficos no pueden con ella. Por eso viene desactivada de forma predeterminada en Windows y Linux.",
+  "startupTab.hardwareAccelerationEnvForced":
+    "La variable de entorno {envVar} está activando esto ahora mismo, independientemente de lo que se guarde aquí.",
   "startupTab.launchSectionTitle": "Iniciar al arrancar",
   "startupTab.launchSectionDesc":
     "Controla si LVIS se inicia automáticamente cuando inicias sesión en tu equipo.",
