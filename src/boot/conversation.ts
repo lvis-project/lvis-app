@@ -14,7 +14,7 @@ import type { SkillCatalogEntry } from "../main/skill-store.js";
 import type { InputClassifier } from "../core/input-classifier.js";
 import type { RouteEngine } from "../core/route-engine.js";
 import type { ToolRegistry } from "../tools/registry.js";
-import type { RoutineEngine } from "../core/routine-engine.js";
+import type { RoutineEngine } from "../routines/routine-engine.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
 import type { BashAstValidator } from "../main/bash-ast-validator.js";
 import type { PluginRuntime } from "../plugins/runtime.js";

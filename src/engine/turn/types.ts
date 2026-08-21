@@ -34,7 +34,7 @@ import type { ToolRegistry } from "../../tools/registry.js";
 import type { MemoryManager } from "../../memory/memory-manager.js";
 import type { MemoryCaptureService } from "../../memory/memory-capture-service.js";
 import type { MemoryReviewerService } from "../../memory/memory-reviewer-service.js";
-import type { RoutineEngine } from "../../core/routine-engine.js";
+import type { RoutineEngine } from "../../routines/routine-engine.js";
 import type { IdleSchedulerService } from "../../main/idle-scheduler.js";
 import type { PostTurnHookChain } from "../../hooks/post-turn-hook-chain.js";
 import type { HookRunner } from "../../hooks/hook-runner.js";
