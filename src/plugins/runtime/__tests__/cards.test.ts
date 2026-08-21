@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { makeTestManifest } from "../../__tests__/test-helpers.js";
-import { buildPluginCard } from "../cards.js";
+import { buildPluginCard } from "../index.js";
 
 describe("buildPluginCard onboarding projection", () => {
   it("copies declarative onboarding metadata unchanged", () => {

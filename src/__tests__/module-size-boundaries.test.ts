@@ -18,13 +18,17 @@ const MODULE_CEILINGS: Readonly<Record<string, number>> = {
   // intercepts (`request_plugin`, `tool_search`) and their cross-agent gate,
   // which have no consumer outside this module.
   "src/engine/turn/query-loop.ts": 20_000,
+  // Owns the plugin runtime end to end: `PluginRuntime` and the abstract bases
+  // it extends (`PluginRuntimeState` -> `PluginRuntimePublicationState` ->
+  // `PluginRuntimeCapabilityLifecycle` -> `PluginRuntimeLifecycle`) are a single
+  // inheritance chain over one `this`, together with the helpers only that chain
+  // uses. Splitting them again would divide one object, not two axes.
+  "src/plugins/runtime/index.ts": 20_000,
 };
 
 const scopedModules = [
   "src/engine/turn/query-loop.ts",
   "src/plugins/runtime/index.ts",
-  "src/plugins/runtime/runtime-state.ts",
-  "src/plugins/runtime/runtime-lifecycle.ts",
   "src/preload/internal-surface.ts",
   "src/preload/internal-api-surface.ts",
   "src/data/settings-store.ts",
