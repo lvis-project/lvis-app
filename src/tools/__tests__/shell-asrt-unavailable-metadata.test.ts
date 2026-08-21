@@ -45,12 +45,12 @@ function expectPreSpawnFailuresToBeUnavailable(
 describe("ASRT unavailable metadata", () => {
   it("does not claim isolation before Bash or PowerShell wrapper workloads start", () => {
     expectPreSpawnFailuresToBeUnavailable(
-      source("src/tools/bash.ts"),
+      source("src/tools/shell-tools.ts"),
       "export async function spawnWithSandbox(",
       "async function spawnWithTimeout(",
     );
     expectPreSpawnFailuresToBeUnavailable(
-      source("src/tools/powershell.ts"),
+      source("src/tools/shell-tools.ts"),
       "async function spawnPowerShellWithSandbox(",
       "async function spawnPowerShell(",
     );

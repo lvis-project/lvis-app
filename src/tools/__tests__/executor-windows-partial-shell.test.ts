@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createDynamicTool, type Tool } from "../base.js";
-import { BashTool } from "../bash.js";
+import { BashTool } from "../shell-tools.js";
 import { ToolExecutor, type ToolCallMeta, type ToolPermissionContext } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
