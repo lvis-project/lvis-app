@@ -6,7 +6,7 @@
  *     is below the plugin's pinned `minVersion`, must fail with a clear
  *     reason (`marketplace.ts`, before the artifact is even downloaded);
  *   - a version already on disk that a FRESH document now blocks must not
- *     load on the next boot (`runtime/runtime-state.ts`'s `markRevoked`,
+ *     load on the next boot (`runtime/index.ts`'s `markRevoked`,
  *     mirroring the existing `markIncompatibleAppVersion` LOAD-boundary gate).
  *
  * FAIL-OPEN / FAIL-CLOSED ASYMMETRY (the central design decision here, and
@@ -300,7 +300,7 @@ class RevocationRegistry {
   /**
    * Synchronous decision for one `(pluginId, version)` pair. Called from
    * both the install path (`marketplace.ts`) and the load path
-   * (`runtime/runtime-state.ts`'s `markRevoked`).
+   * (`runtime/index.ts`'s `markRevoked`).
    */
   evaluate(pluginId: string, version: string): RevocationDecision {
     if (!this.snapshot) {

@@ -6,7 +6,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { readEnabledManifestSnapshots, resolveManifestLoadPlan } from "../snapshots.js";
+import { readEnabledManifestSnapshots, resolveManifestLoadPlan } from "../index.js";
 import { buildManifestValidator } from "../manifest-validation.js";
 
 let validator: Awaited<ReturnType<typeof buildManifestValidator>>;

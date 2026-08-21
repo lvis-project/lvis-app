@@ -416,7 +416,7 @@ export function resolveManifestPathsFromRegistry(
   // not instantiate them or assign an active generation pointer.
   //
   // Trust-root containment is the SAME check the sibling
-  // `resolveManifestLoadPlan` (runtime/snapshots.ts) applies to this field,
+  // `resolveManifestLoadPlan` (runtime/index.ts) applies to this field,
   // and it is applied here for the same reason: `validateRegistryEntry` only
   // checks that `manifestPath` is a non-empty string, so a crafted
   // `"../../etc/passwd"` reaches this function intact. Untrusted rows are

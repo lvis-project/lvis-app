@@ -674,16 +674,6 @@
     },
     {
       "type": "exports",
-      "file": "src/plugins/runtime/index.ts",
-      "name": "readEnabledManifestSnapshots"
-    },
-    {
-      "type": "exports",
-      "file": "src/plugins/runtime/index.ts",
-      "name": "resolveManifestLoadPlan"
-    },
-    {
-      "type": "exports",
       "file": "src/plugins/runtime/manifest-validation.ts",
       "name": "INCOMPATIBLE_APP_VERSION_CODE"
     },
@@ -691,11 +681,6 @@
       "type": "exports",
       "file": "src/plugins/runtime/manifest-validation.ts",
       "name": "IncompatibleAppVersionError"
-    },
-    {
-      "type": "exports",
-      "file": "src/plugins/runtime/snapshots.ts",
-      "name": "isTrustedRegistryManifestPath"
     },
     {
       "type": "exports",
@@ -2396,6 +2381,11 @@
       "type": "types",
       "file": "src/plugins/runtime/index.ts",
       "name": "InstallPolicy"
+    },
+    {
+      "type": "types",
+      "file": "src/plugins/runtime/index.ts",
+      "name": "PluginPreparationProgressInput"
     },
     {
       "type": "types",
