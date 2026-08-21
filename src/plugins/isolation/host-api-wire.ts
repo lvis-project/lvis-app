@@ -32,7 +32,11 @@
  * or `ManifestIntegrityError` means importing modules that reach Electron
  * through the approval gate.
  */
-import { base64DecodedLength } from "../../shared/json-representable.js";
+import {
+  base64DecodedLength,
+  describeNonJson,
+} from "../../shared/json-representable.js";
+import type { PluginLifecycleEvent } from "../public-contract.js";
 
 /**
  * Wire format revision. A child built against a different revision is rejected
@@ -958,6 +962,193 @@ export type DispatchedStorageHostApiPath = Exclude<
   StorageHostApiPath,
   "storage.resolve"
 >;
+
+// ─────────────────────────────────────────────────────────────────────────
+// The config and subscription members' shared vocabulary
+// ─────────────────────────────────────────────────────────────────────────
+
+/** The members the config-and-subscription handler group carries. */
+export type ConfigSubscriptionPath =
+  | "config.get"
+  | "config.set"
+  | "config.onChange"
+  | "onEvent"
+  | "onPluginsChanged"
+  | "onShutdown";
+
+/**
+ * The five that reach the host. `config.get` is excluded by NAME here and by
+ * its `child-local` contract at the dispatcher; servicing it would make the
+ * round-trip-free decision untrue in a way nothing would report.
+ */
+export type DispatchedConfigSubscriptionPath = Exclude<
+  ConfigSubscriptionPath,
+  "config.get"
+>;
+
+/**
+ * The value `config.onChange` delivers when a `format: "secret"` field changed.
+ *
+ * DECLARED HERE, and the location is the decision. It used to live in
+ * `plugins/config-change-bus.ts`, which builds a pino logger at module load —
+ * pino writes to fd 1 directly, and fd 1 in a plugin child is the framed
+ * protocol, so importing that module into a child would put a stdout writer
+ * beside the wire. This module is the one both halves already reach: it is
+ * Electron-free, the child imports it to decode, the host handler imports it to
+ * encode, and the bus re-exports it so the emit site keeps the import it has.
+ *
+ * A unique Symbol makes `value === SECRET_REDACTED_SENTINEL` an identity check
+ * that cannot be produced by a cleartext value, the way the `"[REDACTED]"`
+ * string it replaced could. `Symbol.for` rather than `Symbol` so the identity is
+ * a process-wide registry entry: a plugin bundled apart from the host — and,
+ * since the boundary, one running in a DIFFERENT process — resolves the same
+ * symbol from the same key.
+ */
+export const SECRET_REDACTED_SENTINEL: unique symbol = Symbol.for(
+  "lvis.config.secret.redacted",
+);
+
+/** The wire field that says "this change was a secret's". */
+const SECRET_REDACTED_WIRE_FIELD = "secretRedacted";
+
+/**
+ * What `config.onChange` puts on the wire.
+ *
+ * The value is WRAPPED rather than sent bare because the callback's declared
+ * type is `T | undefined` and "the key was cleared" has to stay distinguishable
+ * from "the notification carried no payload". As a property, `undefined`
+ * survives the round trip as an absent field and reads back as `undefined`; as
+ * the whole payload it would be indistinguishable from a malformed message.
+ */
+export interface ConfigChangeEvent {
+  readonly key: string;
+  readonly value?: unknown;
+}
+
+/** What `onEvent` puts on the wire. Wrapped for the same reason. */
+export interface HostEventDelivery {
+  readonly data?: unknown;
+}
+
+/** What `onPluginsChanged` puts on the wire. */
+export interface PluginLifecycleDelivery {
+  readonly event: PluginLifecycleEvent;
+}
+
+/**
+ * Read one event payload as a record, or refuse.
+ *
+ * The host is the trust root for this direction, so this is not a security
+ * check — it is the check that turns "the two sides disagree about a payload
+ * shape" into a named failure instead of the plugin's callback silently
+ * receiving `undefined` and treating it as data.
+ */
+function asEventRecord(payload: unknown, label: string): Record<string, unknown> {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) {
+    throw new HostApiBoundaryError(
+      "argument-marshalling-rejected",
+      `[config-subscription-child] ${label}: event payload is not an object`,
+    );
+  }
+  return payload as Record<string, unknown>;
+}
+
+/**
+ * Put a `config.onChange` event ON the wire.
+ *
+ * THE SENTINEL NEEDS A WIRE FORM OF ITS OWN. `SECRET_REDACTED_SENTINEL` is a
+ * Symbol, and `JSON.stringify` drops a symbol-valued property entirely — so a
+ * plain `{ key, value }` would reach an isolated plugin as `{ key }`, its
+ * callback would receive `undefined`, and `undefined` on this member means "the
+ * key was cleared". The documented `value === SECRET_REDACTED_SENTINEL` check
+ * would then never match and the plugin would never reload its secret, with
+ * nothing failing anywhere. So the sentinel crosses as a FLAG beside the key,
+ * and the decoder turns the flag back into the symbol.
+ *
+ * The flag is a sibling of `key` rather than the value itself: a plugin whose
+ * cleartext value happens to be `{ secretRedacted: true }` sends that under
+ * `value`, where it cannot be mistaken for this.
+ *
+ * Every other value is REFUSED unless it survives JSON. The sentinel is one
+ * instance of a general hazard — a function, a bigint or a second symbol
+ * vanishes the same way — and the boundary's own rule for arguments and results
+ * is that a value which would not round-trip is rejected rather than silently
+ * changed.
+ *
+ * WHERE THE THROW LANDS, precisely. It is raised inside the callback the host
+ * registered with `config.onChange`, and that member
+ * (`boot/steps/plugin-runtime/host-api-factory.ts`) wraps the callback in
+ * `HostApiGenerationScope.wrapListener`, which catches it and logs. NOT the
+ * change bus's per-listener try/catch: what the bus holds is the WRAPPER, and
+ * the wrapper returns normally while the callback runs asynchronously behind
+ * it, so the bus's catch is not on this path at all. (It is on the path only
+ * for a host with no generation scope, which is a partial hostApi assembled in
+ * a test — every host the app builds has one.) Either way the delivery is
+ * dropped and reported, and the plugin receives nothing rather than a payload
+ * it would read as "cleared".
+ */
+export function encodeConfigChange(key: string, value: unknown): Record<string, unknown> {
+  if (value === SECRET_REDACTED_SENTINEL) {
+    return { key, [SECRET_REDACTED_WIRE_FIELD]: true };
+  }
+  const nonJson = describeNonJson(value, "config.onChange(value)");
+  if (nonJson) {
+    throw new HostApiBoundaryError(
+      "argument-marshalling-rejected",
+      `[config-subscription-child] config.onChange: value cannot cross the boundary — ${nonJson}`,
+      { key },
+    );
+  }
+  return { key, value };
+}
+
+/** Take a `config.onChange` event off the wire. */
+export function decodeConfigChange(payload: unknown): ConfigChangeEvent {
+  const record = asEventRecord(payload, "config.onChange");
+  const { key } = record;
+  if (typeof key !== "string") {
+    throw new HostApiBoundaryError(
+      "argument-marshalling-rejected",
+      `[config-subscription-child] config.onChange: event names no key`,
+    );
+  }
+  if (Object.hasOwn(record, SECRET_REDACTED_WIRE_FIELD)) {
+    // Strict on BOTH halves. A flag that is not exactly `true`, or one arriving
+    // together with a value, means the two sides disagree about this payload —
+    // and the wrong reading of either is "the key was cleared", the one answer
+    // this member must never invent.
+    if (record[SECRET_REDACTED_WIRE_FIELD] !== true || Object.hasOwn(record, "value")) {
+      throw new HostApiBoundaryError(
+        "argument-marshalling-rejected",
+        `[config-subscription-child] config.onChange: malformed secret marker for key '${key}'`,
+      );
+    }
+    return { key, value: SECRET_REDACTED_SENTINEL };
+  }
+  return { key, value: record.value };
+}
+
+/** Take an `onEvent` event off the wire. */
+export function decodeHostEvent(payload: unknown): HostEventDelivery {
+  return { data: asEventRecord(payload, "onEvent").data };
+}
+
+/** Take an `onPluginsChanged` event off the wire. */
+export function decodePluginLifecycle(payload: unknown): PluginLifecycleDelivery {
+  const record = asEventRecord(payload, "onPluginsChanged");
+  const event = record.event as PluginLifecycleEvent | undefined;
+  if (
+    event === undefined
+    || typeof event !== "object"
+    || typeof (event as { type?: unknown }).type !== "string"
+  ) {
+    throw new HostApiBoundaryError(
+      "argument-marshalling-rejected",
+      `[config-subscription-child] onPluginsChanged: event carries no discriminant`,
+    );
+  }
+  return { event };
+}
 
 // ─────────────────────────────────────────────────────────────────────────
 // Service-member payloads: the shapes that replace values JSON cannot carry

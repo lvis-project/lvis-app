@@ -38,14 +38,14 @@ const log = createLogger("plugin-config-change");
  * });
  * ```
  *
- * The sentinel itself is DECLARED in `isolation/config-subscription-child.ts`
+ * The sentinel itself is DECLARED in `isolation/host-api-wire.ts`
  * and re-exported here. This module builds a pino logger at import, pino writes
  * to fd 1, and fd 1 in a plugin child is the framed protocol — so the one value
  * both processes need could not be declared next to a stdout writer. See that
  * file for the full reasoning; the re-export keeps this module the doorway the
  * emit site and this documentation already point at.
  */
-export { SECRET_REDACTED_SENTINEL } from "./isolation/config-subscription-child.js";
+export { SECRET_REDACTED_SENTINEL } from "./isolation/host-api-wire.js";
 
 type ConfigChangeListener = (key: string, value: unknown) => void;
 

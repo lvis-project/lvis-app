@@ -59,9 +59,9 @@ import type {
   RuntimePlugin,
   RuntimePluginFactory,
 } from "../types.js";
-import { createConfigSubscriptionHostApiPaths } from "./config-subscription-host.js";
 import {
   HOSTAPI_DISPATCH_TABLE,
+  createConfigSubscriptionHostApiPaths,
   createInteractionHostApiPaths,
   createServiceHostApiPaths,
   createStorageHostApiPaths,
