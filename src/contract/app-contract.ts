@@ -364,6 +364,9 @@ export const CHANNELS = {
     update: "lvis:settings:update",
     setApiKey: "lvis:settings:set-api-key",
     hasApiKey: "lvis:settings:has-api-key",
+    // Which settings the boot environment is currently forcing ON. A read of
+    // presence only — never the value of any variable.
+    envForcedSettings: "lvis:settings:env-forced",
     deleteApiKey: "lvis:settings:delete-api-key",
     listLlmModels: "lvis:settings:list-llm-models",
     codexSubscriptionStatus: "lvis:settings:codex-subscription:status",
