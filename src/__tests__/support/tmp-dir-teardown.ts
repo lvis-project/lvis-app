@@ -1,5 +1,10 @@
 /**
- * Throwaway-directory teardown for tests, retried against Windows file locks.
+ * Teardown for the OS resources a test leaves behind — scratch directories and
+ * the child processes it spawned. Both leak for the same reason: the cleanup was
+ * written on the happy path, and the happy path is the one a loaded machine does
+ * not take.
+ *
+ * Directory teardown, retried against Windows file locks:
  *
  * A bare `rmSync(tmp, { recursive: true, force: true })` in an `afterEach` is
  * not safe on Windows. Another process — an antivirus scanner, the shell
@@ -29,6 +34,8 @@
  * and a divergent copy here is exactly the duplicate authority
  * `src/lib/transient-fs-lock-retry.ts` exists to prevent.
  */
+import type { ChildProcess } from "node:child_process";
+import { once } from "node:events";
 import { rm } from "node:fs/promises";
 
 import { retryOnTransientFsLock } from "../../plugins/plugin-artifact-store.js";
@@ -37,3 +44,64 @@ import { retryOnTransientFsLock } from "../../plugins/plugin-artifact-store.js";
 export async function cleanupTmpDir(dir: string): Promise<void> {
   await retryOnTransientFsLock(() => rm(dir, { recursive: true, force: true }));
 }
+
+/**
+ * Reap the child processes a test spawned.
+ *
+ * The kills these tests were written with sit inline, after the awaits they
+ * follow. That is correct on the happy path and wrong on every other one: a
+ * rejected wait or a failed `expect` jumps straight past the kill, and the child
+ * outlives the test that owns it.
+ *
+ * Under full-suite load that is not hypothetical, it is the common case. A test's
+ * inner liveness timeout — "the child did not report in within N seconds" — is
+ * the first thing to fire on a saturated machine, so the leak opens exactly when
+ * the machine can least afford another process. Worse, the children these
+ * fixtures spawn are not idle: they hold file locks. One leaked lock owner makes
+ * the next test wait out its own timeout, which leaks in turn. That feedback is
+ * what turns a slow run into a runaway rather than merely a late one.
+ *
+ * Tracking is per-tracker rather than module-global so two suites in one worker
+ * can never reap each other's children.
+ */
+export function createChildTracker(): ChildTracker {
+  const tracked: ChildProcess[] = [];
+  return {
+    track(child) {
+      tracked.push(child);
+      return child;
+    },
+    async reap() {
+      const pending = tracked.splice(0);
+      await Promise.all(pending.map(stopChild));
+    },
+  };
+}
+
+export interface ChildTracker {
+  /** Register a spawned child; returns it so a spawn call can be wrapped in place. */
+  track: <T extends ChildProcess>(child: T) => T;
+  /** Stop every registered child and wait for it to be gone. Safe to call twice. */
+  reap: () => Promise<void>;
+}
+
+/**
+ * SIGTERM, then SIGKILL if the child does not go.
+ *
+ * The escalation is not politeness. A child blocked in a lock acquisition may be
+ * inside a syscall when the signal arrives, and waiting forever for it to exit
+ * would move the hang from the test into the teardown, where it is harder to see.
+ */
+async function stopChild(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null || child.signalCode !== null) return;
+  const exited = once(child, "exit");
+  child.kill("SIGTERM");
+  const escalation = setTimeout(() => child.kill("SIGKILL"), CHILD_TERM_GRACE_MS);
+  try {
+    await exited;
+  } finally {
+    clearTimeout(escalation);
+  }
+}
+
+const CHILD_TERM_GRACE_MS = 2_000;
