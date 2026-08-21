@@ -1,4 +1,4 @@
-import type { Routine, RoutineResult } from "../core/routine-engine.js";
+import type { Routine, RoutineResult } from "../routines/routine-engine.js";
 import { createLogger } from "../lib/logger.js";
 import { t } from "../i18n/index.js";
 import type { FireOptions } from "./notification-service.js";
