@@ -4,10 +4,13 @@ import type { TailnetPairedSharingRuntime } from "../tailnet-paired-sharing-runt
 import {
   DEFAULT_TAILNET_OBSERVER_PORT,
   getTailnetPairedSharingRuntime,
+  loadTailnetObserverConfig,
   maybeStartTailnetObserverServer,
+  parseTailnetObserverConfigFile,
   resetTailnetObserverServerForTests,
   resolveTailnetObserverConfig,
   stopTailnetObserverServer,
+  type TailnetObserverConfigFile,
 } from "../tailnet-surface-server.js";
 
 const CAPABILITY = "lvis.example.com/cap/conversation-observer";
@@ -34,7 +37,13 @@ function options(
       getCurrentConversationId: () => "main-session",
       isConversationBusy: () => false,
       env,
-      dependencies: { startServer: startServer as never },
+      dependencies: {
+        startServer: startServer as never,
+        // This matrix asks an environment question. Reading the real
+        // host-owned file would make the answer depend on whether the
+        // developer running it happens to have an observer configured.
+        readConfigFile: async () => null,
+      },
     },
   };
 }
@@ -260,6 +269,11 @@ describe("Tailnet observer lifecycle", () => {
     }, startServer as never);
 
     const starting = maybeStartTailnetObserverServer(f.input);
+    // Resolving the configuration reads the host-owned file, so listener
+    // construction is no longer reached within the caller's own tick. Wait for
+    // it rather than assuming: this case is about the shutdown race, and a
+    // `resolveServer` that is still undefined would hang instead of failing.
+    await vi.waitFor(() => expect(startServer).toHaveBeenCalled());
     const stopping = stopTailnetObserverServer();
     resolveServer?.({
       host: "127.0.0.1",
@@ -270,5 +284,141 @@ describe("Tailnet observer lifecycle", () => {
     await expect(starting).resolves.toBeNull();
     await stopping;
     expect(close).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Tailnet observer configuration surface", () => {
+  const file = (config: TailnetObserverConfigFile) => async () => config;
+
+  it("boots from the host-owned file with no environment at all", async () => {
+    const resolution = await loadTailnetObserverConfig({
+      env: {},
+      readConfigFile: file({
+        enabled: true,
+        expectedAppCapability: CAPABILITY,
+        pairedSharingEnabled: true,
+      }),
+    });
+
+    expect(resolution.config).toEqual({
+      port: DEFAULT_TAILNET_OBSERVER_PORT,
+      expectedAppCapability: CAPABILITY,
+      controllerEnabled: false,
+      pairedSharingEnabled: true,
+    });
+    expect(resolution.fileConfigured).toBe(true);
+    expect(resolution.provenance.enabled).toBe("file");
+    // Defaulted, not configured: the surface must not claim the file chose it.
+    expect(resolution.provenance.port).toBe("unset");
+  });
+
+  it("stays OFF and side-effect free when neither source enables it", async () => {
+    const resolution = await loadTailnetObserverConfig({
+      env: {},
+      readConfigFile: async () => null,
+    });
+
+    expect(resolution.config).toBeNull();
+    expect(resolution.fileConfigured).toBe(false);
+    expect(new Set(Object.values(resolution.provenance))).toEqual(new Set(["unset"]));
+  });
+
+  it("lets an env var override the file per key, and says which key it took", async () => {
+    const resolution = await loadTailnetObserverConfig({
+      env: { LVIS_TAILNET_OBSERVER_PORT: "47000" },
+      readConfigFile: file({
+        enabled: true,
+        expectedAppCapability: CAPABILITY,
+        port: 46_500,
+      }),
+    });
+
+    expect(resolution.config?.port).toBe(47_000);
+    expect(resolution.provenance.port).toBe("env-override");
+    expect(resolution.provenance.expectedAppCapability).toBe("file");
+  });
+
+  it("lets the environment turn a file-enabled observer back off", async () => {
+    const resolution = await loadTailnetObserverConfig({
+      env: { LVIS_TAILNET_OBSERVER: "0" },
+      readConfigFile: file({ enabled: true, expectedAppCapability: CAPABILITY }),
+    });
+
+    expect(resolution.config).toBeNull();
+    expect(resolution.provenance.enabled).toBe("env-override");
+  });
+
+  it("puts the file through the same gates the environment goes through", async () => {
+    // One vocabulary, one validator: the file cannot admit a port, a capability
+    // key, or a scope combination the env form would have rejected.
+    await expect(loadTailnetObserverConfig({
+      env: {},
+      readConfigFile: file({ enabled: true, expectedAppCapability: CAPABILITY, port: 65_536 }),
+    })).rejects.toThrow("tailnet-observer-port-invalid");
+
+    await expect(loadTailnetObserverConfig({
+      env: {},
+      readConfigFile: file({ enabled: true, expectedAppCapability: "__proto__" }),
+    })).rejects.toThrow("tailnet-observer-capability-missing-or-invalid");
+
+    await expect(loadTailnetObserverConfig({
+      env: {},
+      readConfigFile: file({
+        enabled: true,
+        expectedAppCapability: CAPABILITY,
+        controllerEnabled: true,
+      }),
+    })).rejects.toThrow("tailnet-controller-requires-paired-sharing");
+
+    await expect(loadTailnetObserverConfig({
+      env: {},
+      readConfigFile: file({
+        enabled: true,
+        expectedAppCapability: CAPABILITY,
+        pairedSharingEnabled: true,
+        webEnabled: true,
+      }),
+    })).rejects.toThrow("tailnet-web-origin-missing-or-invalid");
+  });
+
+  it("rejects a malformed file rather than booting a half-applied config", () => {
+    for (const raw of [
+      [],
+      "enabled",
+      { enabled: "1" },
+      { enabled: true, port: "46173" },
+      { enabled: true, unknownKey: true },
+    ]) {
+      expect(() => parseTailnetObserverConfigFile(raw))
+        .toThrow("tailnet-observer-config-file-invalid");
+    }
+  });
+
+  it("keeps the env-only resolver on the answers it has always given", async () => {
+    const env = {
+      LVIS_TAILNET_OBSERVER: "1",
+      LVIS_TAILNET_OBSERVER_CAP: CAPABILITY,
+      LVIS_TAILNET_PAIRED_SHARING: "1",
+    };
+
+    expect(resolveTailnetObserverConfig(env)).toEqual(
+      (await loadTailnetObserverConfig({ env, readConfigFile: async () => null })).config,
+    );
+  });
+
+  it("starts the listener from a file-only configuration", async () => {
+    const f = options({});
+    const started = await maybeStartTailnetObserverServer({
+      ...f.input,
+      dependencies: {
+        startServer: f.startServer as never,
+        readConfigFile: file({ enabled: true, expectedAppCapability: CAPABILITY }),
+      },
+    });
+
+    expect(started?.port).toBe(DEFAULT_TAILNET_OBSERVER_PORT);
+    expect(f.startServer).toHaveBeenCalledWith(
+      expect.objectContaining({ host: "127.0.0.1", expectedAppCapability: CAPABILITY }),
+    );
   });
 });

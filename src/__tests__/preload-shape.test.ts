@@ -494,6 +494,10 @@ describe("preload contextBridge world shape lock", () => {
           "subscriptionUseApiForChat": "function",
           "subscriptionUseForChat": "function",
           "subscriptionVerifyRuntime": "function",
+          "tailnetObserver": [
+            "apply",
+            "snapshot",
+          ],
           "tailnetSharing": [
             "activatePairing",
             "createCurrentConversationShare",

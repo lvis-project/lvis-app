@@ -37,6 +37,8 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "formatIpcError.tailnetSharingInputInvalid": "Tailnet 共享请求无效。",
     "formatIpcError.tailnetSharingOperationRejected": "无法完成 Tailnet 共享操作。",
     "formatIpcError.tailnetSharingUnavailable": "Tailnet 共享当前不可用。",
+    "formatIpcError.tailnetObserverUnavailable": "Tailnet 观察器设置当前不可用。",
+    "formatIpcError.tailnetObserverWriteFailed": "无法保存 Tailnet 观察器配置。",
   },
   es: {
     "auditPanel.integrityChainBroken": "Cadena de auditoría rota: {file}{lineHint}",
@@ -51,6 +53,8 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "formatIpcError.tailnetSharingInputInvalid": "La solicitud de compartición de Tailnet no es válida.",
     "formatIpcError.tailnetSharingOperationRejected": "No se pudo completar la operación de compartición de Tailnet.",
     "formatIpcError.tailnetSharingUnavailable": "La compartición de Tailnet no está disponible actualmente.",
+    "formatIpcError.tailnetObserverUnavailable": "La configuración del observador de Tailnet no está disponible actualmente.",
+    "formatIpcError.tailnetObserverWriteFailed": "No se pudo guardar la configuración del observador de Tailnet.",
   },
   fr: {
     "auditPanel.integrityChainBroken": "Chaine d'audit rompue : {file}{lineHint}",
@@ -65,6 +69,8 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "formatIpcError.tailnetSharingInputInvalid": "La demande de partage Tailnet n’est pas valide.",
     "formatIpcError.tailnetSharingOperationRejected": "L’opération de partage Tailnet n’a pas pu être effectuée.",
     "formatIpcError.tailnetSharingUnavailable": "Le partage Tailnet est actuellement indisponible.",
+    "formatIpcError.tailnetObserverUnavailable": "Les paramètres de l'observateur Tailnet sont actuellement indisponibles.",
+    "formatIpcError.tailnetObserverWriteFailed": "La configuration de l'observateur Tailnet n'a pas pu être enregistrée.",
   },
   de: {
     "auditPanel.integrityChainBroken": "Audit-Kette unterbrochen: {file}{lineHint}",
@@ -79,12 +85,16 @@ const MANUAL_OVERRIDES: Record<string, Record<string, string>> = {
     "formatIpcError.tailnetSharingInputInvalid": "Die Tailnet-Freigabeanfrage ist ungültig.",
     "formatIpcError.tailnetSharingOperationRejected": "Der Tailnet-Freigabevorgang konnte nicht abgeschlossen werden.",
     "formatIpcError.tailnetSharingUnavailable": "Die Tailnet-Freigabe ist derzeit nicht verfügbar.",
+    "formatIpcError.tailnetObserverUnavailable": "Die Tailnet-Beobachtereinstellungen sind derzeit nicht verfügbar.",
+    "formatIpcError.tailnetObserverWriteFailed": "Die Tailnet-Beobachterkonfiguration konnte nicht gespeichert werden.",
   },
   ja: {
     "formatIpcError.tailnetSharingDisabled": "このアプリ構成では Tailnet 共有がオフになっています。",
     "formatIpcError.tailnetSharingInputInvalid": "Tailnet 共有リクエストが無効です。",
     "formatIpcError.tailnetSharingOperationRejected": "Tailnet 共有操作を完了できませんでした。",
     "formatIpcError.tailnetSharingUnavailable": "Tailnet 共有は現在利用できません。",
+    "formatIpcError.tailnetObserverUnavailable": "Tailnet オブザーバーの設定は現在利用できません。",
+    "formatIpcError.tailnetObserverWriteFailed": "Tailnet オブザーバーの設定を保存できませんでした。",
   },
 };
 

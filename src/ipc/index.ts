@@ -70,6 +70,7 @@ import { registerUiHandlers } from "./domains/ui.js";
 import { registerTerminalHandlers } from "./domains/terminal.js";
 import { registerDevHandlers } from "./domains/dev.js";
 import { registerRemoteA2AHandlers } from "./domains/remote-a2a.js";
+import { registerTailnetObserverHandlers } from "./domains/tailnet-observer.js";
 import { registerTailnetSharingHandlers } from "./domains/tailnet-sharing.js";
 import { registerTelegramConnectionHandlers } from "./domains/telegram-connection.js";
 import { registerAwayAuthorityHandlers } from "./domains/away-authority.js";
@@ -80,6 +81,7 @@ import type { ConversationSurfaceRuntime } from "../engine/conversation-surface-
 import type { ConversationCommandPort } from "../main/conversation-command-port.js";
 import type { TailnetSharingOwnerService } from "../main/tailnet-sharing-owner-service.js";
 import type { TelegramConnectionService } from "../main/telegram-connection-service.js";
+import type { TailnetObserverConfigService } from "../main/tailnet-observer-config-service.js";
 
 export type { IpcDeps } from "./types.js";
 export { registerWindowEventListeners } from "./domains/window.js";
@@ -99,6 +101,7 @@ export function registerIpcHandlers(
   conversationCommandPort?: ConversationCommandPort,
   tailnetSharingOwnerService?: TailnetSharingOwnerService,
   telegramConnectionService?: TelegramConnectionService,
+  tailnetObserverConfigService?: TailnetObserverConfigService,
 ): void {
   const deps: IpcDeps = {
     ...services,
@@ -108,6 +111,7 @@ export function registerIpcHandlers(
     ...(conversationCommandPort ? { conversationCommandPort } : {}),
     ...(tailnetSharingOwnerService ? { tailnetSharingOwnerService } : {}),
     ...(telegramConnectionService ? { telegramConnectionService } : {}),
+    ...(tailnetObserverConfigService ? { tailnetObserverConfigService } : {}),
   };
 
   // Resolve the session at each DLP hit: chat new/resume/fork can change the
@@ -136,6 +140,7 @@ export function registerIpcHandlers(
   registerTerminalHandlers(deps);
   registerRemoteA2AHandlers(deps);
   registerTailnetSharingHandlers(deps);
+  registerTailnetObserverHandlers(deps);
   registerTelegramConnectionHandlers(deps);
   registerAwayAuthorityHandlers(deps);
   // Dev IPC is *not* registered in packaged builds — the channels never

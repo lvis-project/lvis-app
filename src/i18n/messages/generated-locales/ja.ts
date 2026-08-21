@@ -1443,6 +1443,8 @@ export const jaMessages: Record<string, string> = {
   "formatIpcError.tailnetSharingInputInvalid": "Tailnet 共有リクエストが無効です。",
   "formatIpcError.tailnetSharingOperationRejected": "Tailnet 共有操作を完了できませんでした。",
   "formatIpcError.tailnetSharingUnavailable": "Tailnet 共有は現在利用できません。",
+  "formatIpcError.tailnetObserverUnavailable": "Tailnet オブザーバーの設定は現在利用できません。",
+  "formatIpcError.tailnetObserverWriteFailed": "Tailnet オブザーバーの設定を保存できませんでした。",
   "formatIpcError.unknownError": "不明なエラー",
   "formatIpcError.unknownPluginId": "不明なプラグイン ID。",
   "formatIpcError.unknownProvider": "不明な LLM プロバイダーです。",
