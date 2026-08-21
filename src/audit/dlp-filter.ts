@@ -7,7 +7,6 @@ import { pathToFileURL } from "node:url";
 
 import { PII_PATTERNS } from "../shared/dlp.js";
 
-export type { DlpResult } from "../shared/dlp.js";
 export { maskSensitiveData, scrubSecretsForLLM } from "../shared/dlp.js";
 
 
