@@ -60,18 +60,15 @@ import type {
   RuntimePluginFactory,
 } from "../types.js";
 import { createConfigSubscriptionHostApiPaths } from "./config-subscription-host.js";
-import { createInteractionHostApiPaths } from "./host-api-interaction-paths.js";
-import {
-  createServiceHostApiPaths,
-  type DelegatedWorkerConfinement,
-} from "./host-api-service-paths.js";
-import { createStorageHostApiPaths } from "./host-api-storage-paths.js";
 import {
   HOSTAPI_DISPATCH_TABLE,
+  createInteractionHostApiPaths,
+  createServiceHostApiPaths,
+  createStorageHostApiPaths,
+  type DelegatedWorkerConfinement,
   type HostApiPathHandler,
 } from "./host-api-dispatcher.js";
-import type { HostApiPath } from "./host-api-path-contracts.js";
-import { HOST_API_WIRE_VERSION } from "./host-api-wire.js";
+import { HOST_API_WIRE_VERSION, type HostApiPath } from "./host-api-wire.js";
 import {
   PLUGIN_INSTANCE_METHODS,
   PLUGIN_INSTANCE_WIRE_VERSION,
@@ -715,7 +712,7 @@ export interface ConfinedPluginChildSpec {
    * Every root the child may reach, as {@link derivePluginChildEnvelope}
    * produced it. Carried as ONE value rather than as the two directories it
    * used to be spelled out as, so the ASRT wrap below and the delegated-worker
-   * check in `host-api-service-paths.ts` are looking at the same object rather
+   * check in `host-api-dispatcher.ts` are looking at the same object rather
    * than at two derivations of it.
    *
    * `envelope.write` is what this spawn GRANTS for writing, not the whole set

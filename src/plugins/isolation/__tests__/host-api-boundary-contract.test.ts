@@ -26,7 +26,7 @@ import {
   HOSTAPI_PATH_CONTRACTS,
   isHostApiPath,
   type HostApiPath,
-} from "../host-api-path-contracts.js";
+} from "../host-api-wire.js";
 import {
   HOSTAPI_DISPATCH_TABLE,
   HostApiDispatcher,

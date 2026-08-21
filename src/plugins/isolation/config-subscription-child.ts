@@ -30,8 +30,7 @@
  */
 import { describeNonJson } from "../../shared/json-representable.js";
 import type { PluginLifecycleEvent } from "../types.js";
-import { HostApiBoundaryError } from "./host-api-wire.js";
-import type { HostApiPath } from "./host-api-path-contracts.js";
+import { HostApiBoundaryError, type HostApiPath } from "./host-api-wire.js";
 import type { HostApiCaller } from "./plugin-child-runtime.js";
 
 /**
