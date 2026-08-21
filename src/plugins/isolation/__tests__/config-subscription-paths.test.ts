@@ -17,7 +17,7 @@ import {
   HostApiDispatcher,
   type HostApiPathHandler,
 } from "../host-api-dispatcher.js";
-import { HOSTAPI_PATH_CONTRACTS, type HostApiPath } from "../host-api-path-contracts.js";
+import { HOSTAPI_PATH_CONTRACTS, type HostApiPath } from "../host-api-wire.js";
 import {
   HOST_API_WIRE_VERSION,
   type HostApiChannel,

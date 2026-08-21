@@ -1,61 +1,135 @@
 /**
- * The child stubs for the hostApi members that reach a host SERVICE
- * (`docs/blueprints/plugin-process-isolation.md` §3.1, §3.2).
+ * The CHILD half of every hostApi member the boundary carries
+ * (`docs/blueprints/plugin-process-isolation.md` §3.1, §3.2, §3.4).
  *
- * The mirror of `host-api-service-paths.ts`: where the host decodes, this
- * encodes, and where the host encodes, this reconstructs. A plugin holding one
- * of these stubs sees the signature `public-contract.ts` publishes — a real
- * `Response`, a real `SpawnedPluginWorker` handle, a `bearer()` it can call —
- * built out of the JSON that actually crossed.
+ * One module because it is one stub table. `plugin-child-runtime.ts` builds a
+ * single `Record<HostApiPath, ChildHostApiMember>` and the three groups here are
+ * spread into it at one site; none of them is reachable from anywhere else, and
+ * splitting them by category only bought three copies of the same relay guard.
+ * The mirror of `host-api-dispatcher.ts`: where the host decodes, this encodes,
+ * and where the host encodes, this reconstructs. A plugin holding one of these
+ * stubs sees the signature `public-contract.ts` publishes — a real `Response`, a
+ * real `SpawnedPluginWorker` handle, a `bearer()` it can call — built out of the
+ * JSON that actually crossed.
  *
- * ELECTRON-FREE, and it must be: this runs inside the child. It reaches
- * `capabilities.ts` and `manifest-validation.ts` for the emit check, both of
- * which are pure and Electron-free (verified by import walk), and nothing else
- * host-side.
+ * THREE STUBS DO SOMETHING; THE REST RELAY. `storage.read` decodes a tagged byte
+ * payload, `storage.write` encodes one, `storage.resolve` never leaves — and
+ * every other storage or interaction member sends its arguments as they are and
+ * hands back what the host answered. That split is DERIVED from the contract SOT
+ * rather than assumed: {@link assertRelayable} refuses to build a relaying stub
+ * for a path whose contract says something else, so a member that later grows an
+ * `encoded` axis cannot silently keep crossing through a relay that does no
+ * encoding.
+ *
+ * WHY THE HOST'S ANSWERS ARE NOT RE-CHECKED. The threat model runs one way —
+ * the host does not trust the child — and a plugin that cannot trust its own
+ * host has already lost. So a member whose contract says `plain-json` takes the
+ * reply as the type the contract declares, and a host-side argument rule is
+ * never mirrored here: a child-side copy would be a second, weaker copy of a
+ * security rule sitting in the least-trusted process, which is a place a plugin
+ * can edit.
  *
  * TWO PLACES A CHECK IS DELIBERATELY DUPLICATED, both named where they happen:
  * `emitEvent`'s capability test (to preserve a synchronous throw the wire cannot
  * carry) and `bearer()`-after-`release()` (because the key is a child-local
  * copy). Neither is a substitute for the host's decision; both are re-decided
  * host-side.
+ *
+ * TRAILING OPTIONALS ARE OMITTED, NOT SENT AS `undefined`. `describeNonJson`
+ * refuses `undefined` INSIDE an array — there it does not mean absent, it
+ * becomes `null` — and `args` is an array. A stub that forwarded its own
+ * unsupplied parameter would turn `readText(path)` into a rejected call.
+ *
+ * ELECTRON-FREE, and it must be: this runs inside the child, which is a plain
+ * Node process. It reaches `capabilities.ts`, `manifest-validation.ts` and
+ * `plugin-storage-containment.ts`, all of which are pure and Electron-free
+ * (verified by import walk), and nothing else host-side.
  */
 import { canEmitEvent } from "../capabilities.js";
 import { getDeclaredEmittedEvents } from "../runtime/manifest-validation.js";
+import { resolvePluginStoragePath } from "../plugin-storage-containment.js";
 import type {
   PluginManifest,
   PluginWorkerSpec,
   SpawnedPluginWorker,
 } from "../public-contract.js";
-import type { HostApiPath } from "./host-api-path-contracts.js";
-import { HostApiBoundaryError, type HostApiHandle } from "./host-api-wire.js";
+import type { HostApiCaller, PluginChildContext } from "./plugin-child-runtime.js";
 import {
+  HOSTAPI_PATH_CONTRACTS,
+  HostApiBoundaryError,
+  INTERACTION_HOSTAPI_PATHS,
+  STORAGE_HOSTAPI_PATHS,
   asWireWorkerEvent,
+  decodeWireBinary,
   decodeWireHttpResponse,
+  encodeWireBytes,
   encodeWireRequestInit,
+  type HostApiHandle,
+  type HostApiPath,
+  type InteractionHostApiPath,
+  type ServiceHostApiPath,
+  type StorageHostApiPath,
   type WireApiKeyLease,
   type WireCallLlmOptions,
   type WireResolveApiKeyOptions,
   type WireWorkerHandle,
-} from "./host-api-service-payloads.js";
-
-/** The members this group carries. */
-export const SERVICE_HOSTAPI_PATHS = [
-  "getSecret",
-  "hasRoutineBySource",
-  "probePrivateHost",
-  "resolveApiKey",
-  "emitEvent",
-  "logEvent",
-  "callLlm",
-  "hostFetch",
-  "spawnWorker",
-] as const satisfies readonly HostApiPath[];
-
-/** One of the nine. */
-export type ServiceHostApiPath = (typeof SERVICE_HOSTAPI_PATHS)[number];
+} from "./host-api-wire.js";
 
 /** One hostApi member as the child's stub table holds it. */
 export type ChildHostApiMember = (...args: unknown[]) => unknown;
+
+/**
+ * Refuse to relay a member whose contract does not say "send it as it is".
+ *
+ * Fail-closed at stub construction rather than at the call: a path that gains
+ * an `encoded` axis would otherwise keep crossing through a relay that does no
+ * encoding, and the symptom would be a wrong value rather than a failure.
+ */
+function assertRelayable(path: HostApiPath): void {
+  const contract = HOSTAPI_PATH_CONTRACTS[path];
+  if (
+    contract.arguments !== "plain-json"
+    || (contract.result !== "plain-json" && contract.result !== "void")
+    || contract.lifetime !== "none"
+  ) {
+    throw new Error(
+      `[host-api-child] '${path}' no longer crosses as plain JSON `
+        + `(arguments=${contract.arguments} result=${contract.result} `
+        + `lifetime=${contract.lifetime}) — it needs a stub of its own`,
+    );
+  }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// Interaction members: what puts something in front of the user (§3.4)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Build this group's child-side stubs.
+ *
+ * Every stub goes through {@link HostApiCaller}, which is the one place the
+ * envelope is stamped and the one place a reply's error identity is rebuilt.
+ * A stub that assembled its own request would be a second place the generation
+ * is claimed, and the generation is what the host checks the call against.
+ */
+export function createInteractionChildMembers(
+  call: HostApiCaller,
+): Record<InteractionHostApiPath, (...args: unknown[]) => Promise<unknown>> {
+  const members = {} as Record<
+    InteractionHostApiPath,
+    (...args: unknown[]) => Promise<unknown>
+  >;
+  for (const path of INTERACTION_HOSTAPI_PATHS) {
+    assertRelayable(path);
+    members[path] = (...args: unknown[]) => call(path, args);
+  }
+  return members;
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Service members: what reaches a host service (§3.1, §3.2)
+// ─────────────────────────────────────────────────────────────────────────
 
 /**
  * What these stubs need from the child runtime.
@@ -126,7 +200,7 @@ function requireHandle(value: unknown, path: HostApiPath): HostApiHandle {
   if (handle === null || typeof handle !== "object" || typeof handle.handleId !== "string") {
     throw new HostApiBoundaryError(
       "result-marshalling-rejected",
-      `[host-api-service-child] '${path}': reply is not a handle`,
+      `[host-api-child] '${path}': reply is not a handle`,
       { path },
     );
   }
@@ -234,7 +308,7 @@ export function createServiceChildMembers(
             if (channelId === undefined) {
               throw new HostApiBoundaryError(
                 "argument-marshalling-rejected",
-                "[host-api-service-child] 'hostFetch': init.signal has no abort channel",
+                "[host-api-child] 'hostFetch': init.signal has no abort channel",
               );
             }
             return channelId;
@@ -357,5 +431,120 @@ export function createServiceChildMembers(
       };
       return worker;
     },
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Storage members: `hostApi.storage.*` (§3.1, §3.2)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * The three members whose stub is not a plain relay: two carry an `encoded`
+ * axis and one never crosses at all.
+ */
+const NON_RELAYED_STORAGE_PATHS: readonly StorageHostApiPath[] = [
+  "storage.resolve",
+  "storage.read",
+  "storage.write",
+];
+
+/**
+ * Drop trailing `undefined`s so an unsupplied optional argument crosses as
+ * absent rather than as a rejected array element. Interior `undefined`s are
+ * left alone: a caller that skipped a middle argument means `null`, and
+ * silently shortening the list would shift every argument after it.
+ */
+function withoutTrailingAbsent(args: readonly unknown[]): unknown[] {
+  const wire = [...args];
+  while (wire.length > 0 && wire[wire.length - 1] === undefined) wire.pop();
+  return wire;
+}
+
+/**
+ * `data` for `storage.write`. Refused here, at the plugin's own call site, so
+ * the failure carries the plugin's stack rather than arriving as a dispatcher
+ * rejection whose stack points at the transport.
+ */
+function requireBytesOrText(pluginId: string, value: unknown): string | Uint8Array {
+  if (typeof value === "string" || value instanceof Uint8Array) return value;
+  throw new HostApiBoundaryError(
+    "argument-marshalling-rejected",
+    `[plugin-child:${pluginId}] hostApi.storage.write: data must be a string or Uint8Array`,
+  );
+}
+
+/**
+ * Build this group's child-side stubs.
+ *
+ * Every stub that crosses goes through {@link HostApiCaller}, which is the one
+ * place the envelope is stamped and the one place a reply's error identity is
+ * rebuilt. A stub that assembled its own request would be a second place the
+ * generation is claimed, and the generation is what the host checks the call
+ * against.
+ */
+export function createStorageChildMembers(
+  call: HostApiCaller,
+  context: Pick<PluginChildContext, "pluginId" | "pluginDataDir">,
+): Record<StorageHostApiPath, ChildHostApiMember> {
+  const { pluginId, pluginDataDir } = context;
+  for (const path of STORAGE_HOSTAPI_PATHS) {
+    if (NON_RELAYED_STORAGE_PATHS.includes(path)) continue;
+    assertRelayable(path);
+  }
+  return {
+    "storage.resolve": (...segments) =>
+      resolvePluginStoragePath(pluginId, pluginDataDir, segments),
+
+    // The one reply that is not JSON. `decodeWireBinary` also refuses a
+    // utf8-tagged payload, so a host that answered with text instead of bytes
+    // is a loud failure rather than a `Uint8Array`-shaped string.
+    "storage.read": async (relPath) =>
+      decodeWireBinary(await call("storage.read", [relPath]), "storage.read(result)"),
+
+    "storage.readText": async (relPath, encoding) =>
+      (await call(
+        "storage.readText",
+        withoutTrailingAbsent([relPath, encoding]),
+      )) as string,
+
+    "storage.readJson": (relPath) => call("storage.readJson", [relPath]),
+
+    "storage.list": async (relPath) =>
+      (await call("storage.list", withoutTrailingAbsent([relPath]))) as string[],
+
+    "storage.exists": async (relPath) =>
+      (await call("storage.exists", [relPath])) as boolean,
+
+    // The one argument list that is not JSON. The tag is what stops a base64
+    // string the plugin meant verbatim from being written decoded.
+    "storage.write": async (relPath, data, encoding) => {
+      const bytes = encodeWireBytes(
+        requireBytesOrText(pluginId, data),
+        "storage.write(data)",
+      );
+      await call("storage.write", withoutTrailingAbsent([relPath, bytes, encoding]));
+    },
+
+    "storage.writeJson": async (relPath, value, indent) => {
+      await call(
+        "storage.writeJson",
+        withoutTrailingAbsent([relPath, value, indent]),
+      );
+    },
+
+    "storage.rm": async (relPath, removeOptions) => {
+      await call("storage.rm", withoutTrailingAbsent([relPath, removeOptions]));
+    },
+
+    "storage.mkdir": async (relPath) => {
+      await call("storage.mkdir", [relPath]);
+    },
+
+    "storage.writeEncrypted": async (relPath, plaintext) => {
+      await call("storage.writeEncrypted", [relPath, plaintext]);
+    },
+
+    "storage.readEncrypted": async (relPath) =>
+      (await call("storage.readEncrypted", [relPath])) as string,
   };
 }

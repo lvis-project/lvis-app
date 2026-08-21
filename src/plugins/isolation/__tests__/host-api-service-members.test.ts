@@ -29,29 +29,28 @@ import type {
   PluginManifest,
   SpawnedPluginWorker,
 } from "../../types.js";
-import { HOSTAPI_DISPATCH_TABLE, HostApiDispatcher } from "../host-api-dispatcher.js";
-import { HOSTAPI_PATH_CONTRACTS } from "../host-api-path-contracts.js";
 import {
+  HOSTAPI_DISPATCH_TABLE,
+  HostApiDispatcher,
+  createServiceHostApiPaths,
+  type DelegatedWorkerConfinement,
+} from "../host-api-dispatcher.js";
+import {
+  HOSTAPI_PATH_CONTRACTS,
   PluginHostApiError,
+  SERVICE_HOSTAPI_PATHS,
   WIRE_BYTES_MAX,
   type HostApiChannel,
   type HostApiNotification,
   type HostApiReply,
   type HostApiRequest,
+  type WireHttpResponse,
+  type WireRequestInit,
 } from "../host-api-wire.js";
 import {
   startPluginChildRuntime,
   type PluginChildRuntime,
 } from "../plugin-child-runtime.js";
-import { SERVICE_HOSTAPI_PATHS } from "../host-api-service-child.js";
-import {
-  createServiceHostApiPaths,
-  type DelegatedWorkerConfinement,
-} from "../host-api-service-paths.js";
-import type {
-  WireHttpResponse,
-  WireRequestInit,
-} from "../host-api-service-payloads.js";
 
 const PLUGIN_ID = "com.example.service";
 const GENERATION = "gen-3";

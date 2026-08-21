@@ -50,25 +50,23 @@ import type { PluginHostApi, PluginStorage } from "../../types.js";
 import {
   HOSTAPI_DISPATCH_TABLE,
   HostApiDispatcher,
+  createStorageHostApiPaths,
   type HostApiPathHandler,
 } from "../host-api-dispatcher.js";
 import {
-  STORAGE_HOSTAPI_PATHS,
   createStorageChildMembers,
   type ChildHostApiMember,
-  type DispatchedStorageHostApiPath,
-} from "../host-api-storage-child.js";
-import { createStorageHostApiPaths } from "../host-api-storage-paths.js";
+} from "../host-api-child.js";
 import {
   HOSTAPI_PATH_CONTRACTS,
-  type HostApiPath,
-} from "../host-api-path-contracts.js";
-import {
   HOST_API_WIRE_VERSION,
   PluginHostApiError,
+  STORAGE_HOSTAPI_PATHS,
   WIRE_BYTES_MAX,
   type ChildNotificationSink,
+  type DispatchedStorageHostApiPath,
   type HostApiChannel,
+  type HostApiPath,
   type HostApiRequest,
   type WireBytes,
 } from "../host-api-wire.js";
