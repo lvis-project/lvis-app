@@ -41,8 +41,8 @@ import type {
   RuntimePlugin,
   RuntimePluginFactory,
 } from "../types.js";
-import { createConfigSubscriptionChildMembers } from "./config-subscription-child.js";
 import {
+  createConfigSubscriptionChildMembers,
   createInteractionChildMembers,
   createServiceChildMembers,
   createStorageChildMembers,
