@@ -390,6 +390,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:settings:codex-subscription:status",
         "lvis:settings:delete-api-key",
         "lvis:settings:delete-web-api-key",
+        "lvis:settings:env-forced",
         "lvis:settings:get",
         "lvis:settings:has-api-key",
         "lvis:settings:has-web-api-key",
