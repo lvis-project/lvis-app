@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { createChildTracker } from "../../__tests__/support/tmp-dir-teardown.js";
 import lockfile from "proper-lockfile";
 import { readPluginRegistry, updatePluginRegistry } from "../registry.js";
 
@@ -12,13 +14,18 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const childFixture = resolve(dirname(fileURLToPath(import.meta.url)), "fixtures/registry-process-child.ts");
 const nodeCommand = process.env.LVIS_TEST_NODE_EXEC_PATH ?? process.execPath;
 
+const children = createChildTracker();
+
+// Registered on the way out of the spawn so no call site can forget. The inline
+// kills below still run on the happy path; this is what covers the paths where a
+// rejected wait or a failed expect skips them.
 function spawnNode(args: string[], ipc = false): ChildProcess {
-  return spawn(nodeCommand, ["--import=tsx", ...args], {
+  return children.track(spawn(nodeCommand, ["--import=tsx", ...args], {
     cwd: repoRoot,
     env: process.env,
     stdio: ipc ? ["ignore", "inherit", "inherit", "ipc"] : ["ignore", "inherit", "inherit"],
     windowsHide: true,
-  });
+  }));
 }
 
 function waitForMessage(child: ChildProcess, expected: string): Promise<void> {
@@ -49,6 +56,8 @@ describe("plugin registry transaction atomicity", () => {
 
   afterEach(async () => {
     vi.restoreAllMocks();
+    // Before the directory: a surviving child holds a lock inside it.
+    await children.reap();
     await rm(root, { recursive: true, force: true });
   });
 

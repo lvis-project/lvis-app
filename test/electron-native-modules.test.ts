@@ -13,6 +13,8 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { createChildTracker } from "../src/__tests__/support/tmp-dir-teardown.js";
+
 import {
   __internalForTests,
   ensureElectronNativeModules,
@@ -26,8 +28,14 @@ const failedAbiProbe = {
   stderr: "NODE_MODULE_VERSION 127 does not match 148",
 };
 const tempDirs: string[] = [];
+const spawnedChildren = createChildTracker();
 
-afterEach(() => {
+afterEach(async () => {
+  // The lock-contention cases guard child liveness with an inner timeout that is
+  // shorter than vitest's. On a saturated machine that timeout is what fires
+  // first, and it rejects before the test reaches its own cleanup — so the child,
+  // still blocked acquiring the lock, outlives the directory it is polling.
+  await spawnedChildren.reap();
   for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -92,10 +100,10 @@ describe("ensureElectronNativeModules", () => {
       process.stdout.write("acquired");
       release();
     `;
-    const child = spawn("node", ["--input-type=module", "-e", script], {
+    const child = spawnedChildren.track(spawn("node", ["--input-type=module", "-e", script], {
       cwd: process.cwd(),
       stdio: ["ignore", "pipe", "pipe"],
-    });
+    }));
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -154,11 +162,11 @@ describe("ensureElectronNativeModules", () => {
       appendFileSync(${JSON.stringify(eventsPath)}, "end:" + id + "\\n");
       release();
     `;
-    const children = ["one", "two"].map((id) => spawn(
+    const children = ["one", "two"].map((id) => spawnedChildren.track(spawn(
       "node",
       ["--input-type=module", "-e", childScript, id],
       { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
-    ));
+    )));
 
     const results = await Promise.all(children.map((child) => new Promise<{
       status: number | null;
@@ -462,12 +470,12 @@ describe("ensureElectronNativeModules", () => {
       "utf8",
     );
     const reaperDir = `${lockDir}.reaper`;
-    const interrupted = spawn("node", ["--input-type=module", "-e", `
+    const interrupted = spawnedChildren.track(spawn("node", ["--input-type=module", "-e", `
       import { mkdirSync } from "node:fs";
       mkdirSync(${JSON.stringify(reaperDir)});
       process.stdout.write("created");
       setInterval(() => {}, 1000);
-    `], { stdio: ["ignore", "pipe", "pipe"] });
+    `], { stdio: ["ignore", "pipe", "pipe"] }));
     await new Promise<void>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error("reaper was not created")), 3_000);
       interrupted.stdout.once("data", () => {
@@ -501,12 +509,12 @@ describe("ensureElectronNativeModules", () => {
       "scripts",
       "recover-electron-native-reaper.mjs",
     );
-    const recoveryChild = spawn("bun", [
+    const recoveryChild = spawnedChildren.track(spawn("bun", [
       recoveryScript,
       "--expected-generation",
       recovery.reaperGeneration,
       "--confirm-quiesced",
-    ], { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] });
+    ], { cwd: repoRoot, stdio: ["ignore", "pipe", "pipe"] }));
     const recoveryResult = await new Promise<{
       status: number | null;
       stdout: string;
@@ -545,11 +553,11 @@ describe("ensureElectronNativeModules", () => {
       appendFileSync(${JSON.stringify(eventsPath)}, "end:" + id + "\\n");
       release();
     `;
-    const contenders = ["one", "two"].map((id) => spawn(
+    const contenders = ["one", "two"].map((id) => spawnedChildren.track(spawn(
       "node",
       ["--input-type=module", "-e", contenderScript, id],
       { stdio: ["ignore", "ignore", "pipe"] },
-    ));
+    )));
     const contenderResults = await Promise.all(contenders.map((child) => new Promise<{
       status: number | null;
       stderr: string;
@@ -607,11 +615,11 @@ describe("ensureElectronNativeModules", () => {
         }));
       }
     `;
-    const children = [0, 1].map(() => spawn(
+    const children = [0, 1].map(() => spawnedChildren.track(spawn(
       "node",
       ["--input-type=module", "-e", childScript],
       { cwd: process.cwd(), stdio: ["ignore", "pipe", "pipe"] },
-    ));
+    )));
     const results = await Promise.all(children.map((child) => new Promise<{
       status: number | null;
       stdout: string;
