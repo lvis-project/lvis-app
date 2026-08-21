@@ -526,6 +526,17 @@ export interface SystemSettings {
    */
   localApiServer?: boolean;
   /**
+   * Whether Chromium's GPU process may start. Applied ONLY at launch —
+   * `app.disableHardwareAcceleration()` has no effect after `app.whenReady()`,
+   * so the Settings toggle states plainly that it takes effect next launch.
+   *
+   * Default is platform-derived (`settings-defaults.ts`): OFF on Windows/Linux,
+   * where restricted corp/VDI drivers crash the GPU process and take the
+   * renderer with it; ON on macOS. `LVIS_KEEP_GPU=1` overrides both — see
+   * `resolveHardwareAcceleration`.
+   */
+  hardwareAcceleration?: boolean;
+  /**
    * Persisted width (px) of the docked ChatSidePanel workspace rail, set by the
    * left-edge drag handle. Durable shell-layout preference; clamped to
    * [SIDE_PANEL_MIN_WIDTH, viewport) at drag time in the renderer. Default 448.
@@ -972,6 +983,15 @@ export class SettingsService {
         log.warn(
           `system.localApiServer patch ignored (received ${JSON.stringify(rawLocalApi)}), keeping %s`,
           this.settings.system.localApiServer,
+        );
+      }
+      const rawHardwareAcceleration = partial.system.hardwareAcceleration;
+      if (typeof rawHardwareAcceleration === "boolean") {
+        next.hardwareAcceleration = rawHardwareAcceleration;
+      } else if (rawHardwareAcceleration !== undefined) {
+        log.warn(
+          `system.hardwareAcceleration patch ignored (received ${JSON.stringify(rawHardwareAcceleration)}), keeping %s`,
+          this.settings.system.hardwareAcceleration,
         );
       }
       // Launch-at-startup + launch-minimized booleans (same validate-at-

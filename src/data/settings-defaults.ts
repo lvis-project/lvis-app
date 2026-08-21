@@ -101,6 +101,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // Opt-in loopback API server — OFF by default (also enabled by env
     // LVIS_LOCAL_API=1). #1409/#1436.
     localApiServer: false,
+    // Staged by platform, matching the pre-setting behaviour exactly: the GPU
+    // process is what crashes on restricted Windows/Linux corp+VDI drivers, and
+    // macOS has never shown that failure. The setting exists so a user whose
+    // machine is fine is not stuck with the safe default forever.
+    hardwareAcceleration: process.platform !== "win32" && process.platform !== "linux",
     sidePanelWidth: SIDE_PANEL_DEFAULT_WIDTH,
     sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
     sidePanelSplitFilePercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,

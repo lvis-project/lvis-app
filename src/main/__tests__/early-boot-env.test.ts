@@ -104,6 +104,53 @@ describe("runEarlyBootEnv", () => {
     expect(mockedElectron.app.setAppUserModelId).toHaveBeenCalledWith("xyz.lvisai.app");
   });
 
+  it("honors a persisted hardware-acceleration ON over the Windows/Linux default", () => {
+    // The beforeEach seed has no `system.hardwareAcceleration`, so the Linux
+    // default (OFF) applies and the GPU process is suppressed.
+    runEarlyBootEnv();
+    expect(mockedElectron.app.disableHardwareAcceleration).toHaveBeenCalledOnce();
+
+    vi.clearAllMocks();
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ system: { hardwareAcceleration: true } }),
+      "utf-8",
+    );
+
+    runEarlyBootEnv();
+    expect(mockedElectron.app.disableHardwareAcceleration).not.toHaveBeenCalled();
+  });
+
+  it("reads the profile only after setName, so it finds the real settings file", () => {
+    // `getPath("userData")` resolves off the app name. Reading it before
+    // `setName("LVIS")` would point at the package-name directory, where the
+    // user's choice does not exist — the toggle would silently do nothing.
+    const order: string[] = [];
+    mockedElectron.app.setName.mockImplementation(() => { order.push("setName"); });
+    mockedElectron.app.getPath.mockImplementation(() => {
+      order.push("getPath");
+      return userDataPath;
+    });
+
+    runEarlyBootEnv();
+
+    expect(order.indexOf("setName")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("getPath")).toBeGreaterThan(order.indexOf("setName"));
+  });
+
+  it("lets LVIS_KEEP_GPU=1 override a persisted off", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({ system: { hardwareAcceleration: false } }),
+      "utf-8",
+    );
+    vi.stubEnv("LVIS_KEEP_GPU", "1");
+
+    runEarlyBootEnv();
+
+    expect(mockedElectron.app.disableHardwareAcceleration).not.toHaveBeenCalled();
+  });
+
   it("appends no host-resolver-rules switch even when a legacy map is persisted", () => {
     runEarlyBootEnv();
 

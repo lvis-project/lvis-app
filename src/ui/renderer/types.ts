@@ -351,6 +351,13 @@ export type AppSettings = {
      * false; the host resolves it as `setting || LVIS_LOCAL_API=1` once at boot.
      */
     localApiServer?: boolean;
+    /**
+     * Whether Chromium's GPU process may start. Mirrors the main-process SOT in
+     * `src/data/settings-store.ts` `SystemSettings.hardwareAcceleration`.
+     * Platform-derived default (Windows/Linux OFF, macOS ON); applied at launch
+     * only, so the Settings toggle says so.
+     */
+    hardwareAcceleration?: boolean;
   };
   /** Global keyboard shortcuts. SOT: `ShortcutSettings` in settings-store. */
   shortcuts?: {
