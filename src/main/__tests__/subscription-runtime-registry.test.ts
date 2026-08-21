@@ -8,7 +8,7 @@ import {
   AcpSubscriptionRuntimeRegistry,
   type AcpSubscriptionSessionClientFactory,
   type AcpSubscriptionSessionTransport,
-} from "../acp-subscription-runtime-registry.js";
+} from "../subscription-runtime-service.js";
 import type { AcpSubscriptionPromptHandle } from "../acp-subscription-session-client.js";
 import type { AcpSubscriptionProviderId } from "../../shared/acp-subscription.js";
 import type { AcpSubscriptionMcpServerConfig } from "../acp-subscription-runtime-config.js";
