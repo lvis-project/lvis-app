@@ -545,4 +545,34 @@ describe("CodexAppServerClient", () => {
       params: { limit: 100, includeHidden: false },
     }));
   });
+
+  it("declines a reverse request with a clean id but never echoes one carrying a control character", async () => {
+    const harness = createHarness((request) => {
+      if (request.method === "initialize") return standardInitialize(request);
+      if (request.method === "account/logout") return {};
+      throw new Error(`Unexpected App Server request: ${String(request.method)}`);
+    });
+
+    await harness.client.logout();
+    harness.server.stdout.write(`${JSON.stringify({
+      id: "clean-reverse-id",
+      method: "item/tool/requestUserInput",
+    })}\n`);
+    harness.server.stdout.write(`${JSON.stringify({
+      id: "tainted\u0007reverse\u0000id",
+      method: "item/tool/requestUserInput",
+    })}\n`);
+    // Round-trips after both reverse requests, so anything the client wrote in
+    // response to them has already been consumed by the fake App Server.
+    await harness.client.logout();
+
+    const echoed = harness.server.requests
+      .filter((request) => typeof request.id === "string")
+      .map((request) => request.id);
+    expect(echoed).toEqual(["clean-reverse-id"]);
+    expect(harness.server.requests).toContainEqual(expect.objectContaining({
+      id: "clean-reverse-id",
+      error: { code: -32601, message: "Unsupported request" },
+    }));
+  });
 });
