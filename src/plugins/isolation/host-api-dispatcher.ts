@@ -36,7 +36,7 @@
  * Electron through the approval gate, which is exactly why the child imports
  * `host-api-wire.ts` instead of this file.
  */
-import { isAbsolute, resolve as resolvePath } from "node:path";
+import { isAbsolute } from "node:path";
 import { describeNonJson } from "../../shared/json-representable.js";
 import { EffectBoundaryDeniedError } from "../../permissions/effect-enforcement.js";
 import { ManifestIntegrityError } from "../../permissions/manifest-integrity.js";
@@ -50,7 +50,7 @@ import {
   type PluginWorkerSpec,
   type StorageEncoding,
 } from "../public-contract.js";
-import { isPathWithin } from "../plugin-storage-containment.js";
+import { isResolvedPathWithin } from "../plugin-storage-containment.js";
 import {
   HOSTAPI_PATH_CONTRACTS,
   HOST_API_WIRE_VERSION,
@@ -863,8 +863,12 @@ function optionalStringList(
 /**
  * Check one delegated grant list against the child's own envelope.
  *
- * `resolvePath` first, so `<dataDir>/../../etc` is compared as what it means
- * rather than as what it says. What is deliberately NOT done here is a
+ * Both sides are resolved first, so `<dataDir>/../../etc` is compared as what
+ * it means rather than as what it says — and so an envelope root the host wrote
+ * in one form is compared against a grant written in another. Resolving only
+ * the grant left that asymmetry: on Win32 a POSIX-shaped root never prefixes a
+ * drive-anchored target, so every delegable grant read as an escape. What is
+ * deliberately NOT done here is a
  * `realpath` walk: the grant may name a directory the worker is about to
  * create, so the path need not exist. A symlink planted inside the data dir
  * therefore still points wherever it points — the residual is the worker
@@ -881,8 +885,7 @@ function assertGrantsWithinEnvelope(
     if (!isAbsolute(path)) {
       rejectArgument(call.path, `spec.${field} entry '${path}' must be an absolute path`);
     }
-    const target = resolvePath(path);
-    if (envelope.some((root) => isPathWithin(root, target))) continue;
+    if (envelope.some((root) => isResolvedPathWithin(root, path))) continue;
     throw new HostApiBoundaryError(
       "effect-boundary-denied",
       `[host-api-dispatcher] '${call.path}': spec.${field} entry '${path}' `

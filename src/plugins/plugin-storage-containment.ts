@@ -92,6 +92,20 @@ export function isResolvedPathWithin(root: string, target: string): boolean {
  * the realpath walk — see the module header for why the split is deliberate
  * rather than an omission.
  */
+/**
+ * The path a plugin asked for, in the plugin's own vocabulary.
+ *
+ * `join` normalises to the HOST separator, so one `read("../escape.bin")`
+ * reports `../escape.bin` on POSIX and `..\\escape.bin` on Win32. Storage paths are
+ * relative, `/`-separated segments in the public contract, and `attemptedPath`
+ * is a diagnostic a plugin may branch on — it must not tell the plugin which
+ * host it happened to land on. Only the reported string is folded back; the
+ * containment decision above is made on the joined host path.
+ */
+function reportedPath(rel: string): string {
+  return rel.split(sep).join("/");
+}
+
 export function resolvePluginStoragePath(
   pluginId: string,
   storageRoot: string,
@@ -109,12 +123,12 @@ export function resolvePluginStoragePath(
   const rel = segments.length === 0 ? "." : join(...(segments as string[]));
   // Refuse absolute paths outright — plugins should think in relative terms.
   if (isAbsolute(rel)) {
-    throw new PluginStorageError("absolute paths are not allowed", pluginId, rel);
+    throw new PluginStorageError("absolute paths are not allowed", pluginId, reportedPath(rel));
   }
   const target = resolve(storageRoot, rel);
   if (!isPathWithin(storageRoot, target)) {
     log?.(`storage: rejected escape attempt`, { rel, resolved: target });
-    throw new PluginStorageError("path escapes plugin storage root", pluginId, rel);
+    throw new PluginStorageError("path escapes plugin storage root", pluginId, reportedPath(rel));
   }
   return target;
 }
