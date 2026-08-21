@@ -67,6 +67,7 @@
     "test:a2a-p4-5:packaged-live": "node scripts/run-a2a-p4-5-packaged-live.mjs",
     "test:knip-gate": "node --test test/scripts/knip-baseline.test.mjs && node scripts/check-knip-gate-self-test.mjs",
     "check:no-inline-channels": "node scripts/check-no-inline-channels.mjs",
+    "check:env-surface": "node --import tsx scripts/check-env-surface-policy.ts",
     "check:source-text-safe": "node --test test/scripts/source-text-safe.test.mjs && node scripts/check-source-text-safe.mjs",
     "check:screenshot-provenance": "node scripts/check-screenshot-provenance.mjs",
     "check:screenshot-provenance:self-test": "node scripts/check-screenshot-provenance-self-test.mjs",
