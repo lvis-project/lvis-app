@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   assertEventEmitAccess,
   assertEventSubscribeAccess,
-} from "../access-control.js";
+} from "../index.js";
 
 describe("plugin event access control", () => {
   it("rejects private subscriptions before owner/grant resolution", () => {
