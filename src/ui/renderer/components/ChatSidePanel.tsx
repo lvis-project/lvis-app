@@ -607,7 +607,7 @@ export interface ChatSidePanelProps {
    * re-subscribed here so there is one spawn source of truth.
    */
   subAgentSpawns: SubAgentSpawn[];
-  /** Docked panel width (px), owned by ChatView (useSidePanelWidth). */
+  /** Docked panel width (px), owned by ChatView (usePanelWidth). */
   width: number;
   /** Drag-live width update — state only, no persist. */
   onWidthChange: (px: number) => void;

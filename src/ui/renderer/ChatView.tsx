@@ -31,7 +31,7 @@ import type { ProjectIdentity } from "../../shared/project-identity.js";
 import { isTurnStartEntry } from "./utils/classify-turn-entries.js";
 import { collectChatPreviewModel } from "./preview/preview-targets.js";
 import { useWorkspaceTabs } from "./preview/workspace-tabs.js";
-import { useSidePanelWidth } from "./hooks/use-side-panel-width.js";
+import { SIDE_PANEL_WIDTH_PREF, usePanelWidth } from "./hooks/use-panel-width.js";
 import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
 import { ActionPanel } from "./components/ActionPanel.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
@@ -236,7 +236,11 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
   const seenSubAgentSpawnKeysRef = useRef<Set<string>>(new Set());
   // Docked side-panel width — durable shell preference (settings round-trip),
   // owned next to the tab store so it survives ChatSidePanel unmount.
-  const { sidePanelWidth, setSidePanelWidth, commitSidePanelWidth } = useSidePanelWidth(api);
+  const {
+    width: sidePanelWidth,
+    setWidth: setSidePanelWidth,
+    commitWidth: commitSidePanelWidth,
+  } = usePanelWidth(api, SIDE_PANEL_WIDTH_PREF);
   const previewRailVisible = sidePanelOpen;
   // Narrow-screen fallback: when the ChatView container is too narrow to dock
   // the rail beside the transcript, render it as a modal drawer instead

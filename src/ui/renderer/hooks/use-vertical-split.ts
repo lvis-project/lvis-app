@@ -27,7 +27,7 @@ export interface UseVerticalSplitResult {
 /**
  * Owns one workspace-rail vertical (list↕viewer) split ratio, persisted to
  * `SystemSettings.<storageKey>`. Deliberately a round-trip clone of
- * `useSidePanelWidth` (mount seed + drag-end persist) — durability comes from
+ * `usePanelWidth` (mount seed + drag-end persist) — durability comes from
  * the settings round-trip, NOT the mount location, so the ratio survives the
  * ChatSidePanel conditional unmount just like the docked width. It is NOT an
  * extension of the width hook: the two persist independent fields and must not
