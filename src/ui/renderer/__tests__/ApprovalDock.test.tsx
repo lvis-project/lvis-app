@@ -656,8 +656,8 @@ describe("ApprovalDock", () => {
           args: { command: "Get-ChildItem", cwd: "stale-from-args" },
           reviewerVerdict: { level: "medium", reason: "shell unclassified" },
           evaluationContext: makeEvaluationContext({
-            executionCwd: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app",
-            allowedDirectories: ["C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app"],
+            executionCwd: "C:\\Users\\example\\workspace\\lvis-project\\lvis-app",
+            allowedDirectories: ["C:\\Users\\example\\workspace\\lvis-project\\lvis-app"],
             targetFilePaths: [],
           }),
         })]}
@@ -669,7 +669,7 @@ describe("ApprovalDock", () => {
       expect(document.body.textContent).toContain("검증 환경 / 샌드박스 평가");
       expect(document.body.textContent).toContain("permission-evaluation-context/v1");
       expect(document.body.textContent).toContain("permission-reviewer-framework/v1");
-      expect(document.body.textContent).toContain("C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app");
+      expect(document.body.textContent).toContain("C:\\Users\\example\\workspace\\lvis-project\\lvis-app");
     });
   });
 
@@ -688,9 +688,9 @@ describe("ApprovalDock", () => {
             reason: "out-of-allowed-dir",
             requireExplicit: true,
             outOfAllowedDir: {
-              candidatePath: "/Users/ken/Documents/project/notes.md",
-              suggestedParent: "/Users/ken/Documents/project",
-              currentAllowed: ["/Users/ken/workspace/GIT/github/lvis-project"],
+              candidatePath: "/Users/example/Documents/project/notes.md",
+              suggestedParent: "/Users/example/Documents/project",
+              currentAllowed: ["/Users/example/workspace/GIT/github/lvis-project"],
               adjacencyWarnings: [],
             },
           }),
@@ -707,7 +707,7 @@ describe("ApprovalDock", () => {
     expect(container.querySelector('[data-testid="approve-button"]')).toBeTruthy();
     expect(container.querySelector('[data-testid="approval-review-details"]')).toBeTruthy();
     expect(container.querySelector('[role="dialog"]')).toBeNull();
-    expect(document.body.textContent).toContain("/Users/ken/Documents/project/notes.md");
+    expect(document.body.textContent).toContain("/Users/example/Documents/project/notes.md");
     fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="open-permanent-deny-settings"]')!);
     expect(onOpenPermanentDeny).toHaveBeenCalledWith(
       expect.objectContaining({ kind: "out-of-allowed-dir", toolName: "read_file" }),
@@ -727,9 +727,9 @@ describe("ApprovalDock", () => {
           reason: "out-of-allowed-dir",
           requireExplicit: true,
           outOfAllowedDir: {
-            candidatePath: "/Users/ken/Documents/project/output.txt",
-            suggestedParent: "/Users/ken/Documents/project",
-            currentAllowed: ["/Users/ken/workspace/GIT/github/lvis-project"],
+            candidatePath: "/Users/example/Documents/project/output.txt",
+            suggestedParent: "/Users/example/Documents/project",
+            currentAllowed: ["/Users/example/workspace/GIT/github/lvis-project"],
             adjacencyWarnings: [],
           },
         })]}

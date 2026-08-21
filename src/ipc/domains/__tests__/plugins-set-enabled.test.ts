@@ -288,7 +288,7 @@ describe("lvis:plugins:set-enabled", () => {
 
   it("maps runtime I/O failures to generic toggle-failed without broadcasting", async () => {
     const { setPluginEnabled, appWindows } = await setup();
-    setPluginEnabled.mockRejectedValueOnce(new Error("EACCES: permission denied, open /Users/ken/.lvis/plugins/registry.json"));
+    setPluginEnabled.mockRejectedValueOnce(new Error("EACCES: permission denied, open /Users/example/.lvis/plugins/registry.json"));
     const res = await invoke("lvis:plugins:set-enabled", "com.example.meeting", false);
     expect(res).toEqual({
       ok: false,

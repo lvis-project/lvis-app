@@ -920,7 +920,7 @@ export async function runToolInvocation(
         return { allowed: false, result: withHostShellExecutionPlan({ tool_use_id: toolUse.id, content: msg, is_error: true, durationMs }) };
       }
       // Detect whether the request path itself is a directory (e.g.
-      // `list_files /Users/ken`) so the auto-suggest goes to the path
+      // `list_files /Users/example`) so the auto-suggest goes to the path
       // itself rather than its parent. `statSync` is used here only to
       // hint the UI suggestion — the actual permission check downstream
       // is prefix-based and unaffected by TOCTOU, and the user must

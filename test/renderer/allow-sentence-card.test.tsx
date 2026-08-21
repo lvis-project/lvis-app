@@ -18,8 +18,8 @@ import { act, waitFor } from "@testing-library/react";
 import { renderApp } from "./render-app.js";
 import { submitChatMessage } from "./helpers.js";
 
-const TARGET = "/home/ken/reports/q3.md";
-const PARENT = "/home/ken/reports";
+const TARGET = "/home/example/reports/q3.md";
+const PARENT = "/home/example/reports";
 
 function approvalRequest(overrides: Record<string, unknown> = {}) {
   return {
@@ -34,7 +34,7 @@ function approvalRequest(overrides: Record<string, unknown> = {}) {
     outOfAllowedDir: {
       candidatePath: TARGET,
       suggestedParent: PARENT,
-      currentAllowed: ["/home/ken/work"],
+      currentAllowed: ["/home/example/work"],
       adjacencyWarnings: [],
     },
     ...overrides,
@@ -283,9 +283,9 @@ describe("/allow — every failure is plain, and none of it is a grant", () => {
       app.emitApproval(approvalRequest({
         id: "req-allow-2",
         outOfAllowedDir: {
-          candidatePath: "/home/ken/reports/q4.md",
-          suggestedParent: "/home/ken/reports",
-          currentAllowed: ["/home/ken/work"],
+          candidatePath: "/home/example/reports/q4.md",
+          suggestedParent: "/home/example/reports",
+          currentAllowed: ["/home/example/work"],
           adjacencyWarnings: [],
         },
       }));
@@ -313,7 +313,7 @@ describe("/allow — every failure is plain, and none of it is a grant", () => {
     expect(choice(app.container, "allow-always")?.tabIndex).toBe(-1);
     expect(
       app.container.querySelector('[data-testid="approval-review-details"]')?.textContent,
-    ).toContain("/home/ken/reports/q4.md");
+    ).toContain("/home/example/reports/q4.md");
     expect(ns.approval.respond).toHaveBeenCalledTimes(1);
   });
 });

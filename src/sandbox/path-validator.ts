@@ -95,8 +95,8 @@ function canonicalize(path: string): string {
  *
  * The containment question itself is {@link isPathWithin}. What stays here is
  * the case policy, which is this layer's and not the storage layer's: macOS and
- * Windows are case-insensitive by default, so a tool asking for `/Users/ken/PROJ`
- * inside a sandbox rooted at `/Users/ken/proj` is asking for a path the
+ * Windows are case-insensitive by default, so a tool asking for `/Users/example/PROJ`
+ * inside a sandbox rooted at `/Users/example/proj` is asking for a path the
  * filesystem will hand it either way. {@link canonicalize} has usually already
  * settled the casing via `realpathSync.native`; this covers the paths that do
  * not exist yet and so cannot be canonicalised.

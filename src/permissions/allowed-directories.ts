@@ -192,9 +192,9 @@ export function isPathAllowed(
  *     directory (`~/Documents/`). Granting the file itself is too narrow
  *     because the next file in the same dir would re-prompt.
  *   - **`isDirectory: true`** (the request path IS a directory, e.g.
- *     `list_files /Users/ken`): suggest the *requested path itself*.
+ *     `list_files /Users/example`): suggest the *requested path itself*.
  *     The previous "always parent" heuristic over-granted to one level
- *     above (e.g. suggesting `/Users` for a `/Users/ken` request gave
+ *     above (e.g. suggesting `/Users` for a `/Users/example` request gave
  *     access to every user's home — visible bug in prod approval cards).
  *
  * Returns `null` if the chosen scope is already covered by `currentAllowed`,

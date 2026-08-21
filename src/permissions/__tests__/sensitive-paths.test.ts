@@ -82,123 +82,123 @@ describe("SENSITIVE_PATH_PATTERNS", () => {
 
 describe("policyMatchPaths", () => {
   it("returns [path, path + '/'] for a non-slash-terminated path", () => {
-    const result = policyMatchPaths("/home/ken/.aws");
-    expect(result).toEqual(["/home/ken/.aws", "/home/ken/.aws/"]);
+    const result = policyMatchPaths("/home/example/.aws");
+    expect(result).toEqual(["/home/example/.aws", "/home/example/.aws/"]);
   });
 
   it("returns [path without slash, path with slash] when already slash-terminated", () => {
-    const result = policyMatchPaths("/home/ken/.aws/");
-    expect(result).toEqual(["/home/ken/.aws", "/home/ken/.aws/"]);
+    const result = policyMatchPaths("/home/example/.aws/");
+    expect(result).toEqual(["/home/example/.aws", "/home/example/.aws/"]);
   });
 
   it("normalizes Windows backslashes to forward slashes", () => {
-    const result = policyMatchPaths("C:\\Users\\ken\\.ssh");
-    expect(result[0]).toBe("C:/Users/ken/.ssh");
-    expect(result[1]).toBe("C:/Users/ken/.ssh/");
+    const result = policyMatchPaths("C:\\Users\\example\\.ssh");
+    expect(result[0]).toBe("C:/Users/example/.ssh");
+    expect(result[1]).toBe("C:/Users/example/.ssh/");
   });
 });
 
 describe("isSensitivePath — positive matches", () => {
-  it("matches /home/ken/.ssh/id_rsa against **/.ssh/**", () => {
-    const result = isSensitivePath("/home/ken/.ssh/id_rsa");
+  it("matches /home/example/.ssh/id_rsa against **/.ssh/**", () => {
+    const result = isSensitivePath("/home/example/.ssh/id_rsa");
     expect(result).toBe("**/.ssh/**");
   });
 
   it("matches nested files under .ssh", () => {
-    expect(isSensitivePath("/home/ken/.ssh/private/id_rsa")).toBe("**/.ssh/**");
+    expect(isSensitivePath("/home/example/.ssh/private/id_rsa")).toBe("**/.ssh/**");
   });
 
-  it("matches /Users/ken/.aws/credentials", () => {
-    const result = isSensitivePath("/Users/ken/.aws/credentials");
+  it("matches /Users/example/.aws/credentials", () => {
+    const result = isSensitivePath("/Users/example/.aws/credentials");
     expect(result).toBe("**/.aws/**");
   });
 
-  it("matches /Users/ken/.aws/config", () => {
-    expect(isSensitivePath("/Users/ken/.aws/config")).toBe("**/.aws/**");
+  it("matches /Users/example/.aws/config", () => {
+    expect(isSensitivePath("/Users/example/.aws/config")).toBe("**/.aws/**");
   });
 
   it("matches the AWS SSO token cache, which the file-only patterns missed", () => {
     expect(
-      isSensitivePath("/Users/ken/.aws/sso/cache/abc123.json"),
+      isSensitivePath("/Users/example/.aws/sso/cache/abc123.json"),
     ).toBe("**/.aws/**");
   });
 
-  it("matches /Users/ken/.gnupg/pubring.kbx via **/.gnupg/**", () => {
-    expect(isSensitivePath("/Users/ken/.gnupg/pubring.kbx")).toBe("**/.gnupg/**");
+  it("matches /Users/example/.gnupg/pubring.kbx via **/.gnupg/**", () => {
+    expect(isSensitivePath("/Users/example/.gnupg/pubring.kbx")).toBe("**/.gnupg/**");
   });
 
-  it("matches /home/ken/.kube/config", () => {
-    expect(isSensitivePath("/home/ken/.kube/config")).toBe("**/.kube/config");
+  it("matches /home/example/.kube/config", () => {
+    expect(isSensitivePath("/home/example/.kube/config")).toBe("**/.kube/config");
   });
 
-  it("matches /Users/ken/.lvis/certs/corp-ca.pem (LVIS addition)", () => {
-    const result = isSensitivePath("/Users/ken/.lvis/certs/corp-ca.pem");
+  it("matches /Users/example/.lvis/certs/corp-ca.pem (LVIS addition)", () => {
+    const result = isSensitivePath("/Users/example/.lvis/certs/corp-ca.pem");
     expect(result).toBe("**/.lvis/certs/**");
   });
 
-  it("matches /Users/ken/.lvis/secrets/openai.key (LVIS addition)", () => {
-    expect(isSensitivePath("/Users/ken/.lvis/secrets/openai.key")).toBe(
+  it("matches /Users/example/.lvis/secrets/openai.key (LVIS addition)", () => {
+    expect(isSensitivePath("/Users/example/.lvis/secrets/openai.key")).toBe(
       "**/.lvis/secrets/**",
     );
   });
 
   it("matches LVIS permission control-plane files", () => {
-    expect(isSensitivePath("/Users/ken/.lvis/settings.json")).toBe("**/.lvis/settings.json");
-    expect(isSensitivePath("/Users/ken/.lvis/permissions.json")).toBe("**/.lvis/permissions.json");
-    expect(isSensitivePath("/Users/ken/.lvis/policy.json")).toBe("**/.lvis/policy.json");
-    expect(isSensitivePath("/Users/ken/.lvis/permissions/reviewer-cache.jsonl")).toBe("**/.lvis/permissions/**");
+    expect(isSensitivePath("/Users/example/.lvis/settings.json")).toBe("**/.lvis/settings.json");
+    expect(isSensitivePath("/Users/example/.lvis/permissions.json")).toBe("**/.lvis/permissions.json");
+    expect(isSensitivePath("/Users/example/.lvis/policy.json")).toBe("**/.lvis/policy.json");
+    expect(isSensitivePath("/Users/example/.lvis/permissions/reviewer-cache.jsonl")).toBe("**/.lvis/permissions/**");
   });
 
-  it("matches /Users/ken/.lvis/lvis-secrets.json (LVIS addition)", () => {
-    expect(isSensitivePath("/Users/ken/.lvis/lvis-secrets.json")).toBe(
+  it("matches /Users/example/.lvis/lvis-secrets.json (LVIS addition)", () => {
+    expect(isSensitivePath("/Users/example/.lvis/lvis-secrets.json")).toBe(
       "**/.lvis/lvis-secrets.json",
     );
   });
 
-  it("matches shallow /Users/ken/lvis-secrets.json sibling form", () => {
-    expect(isSensitivePath("/Users/ken/lvis-secrets.json")).toBe(
+  it("matches shallow /Users/example/lvis-secrets.json sibling form", () => {
+    expect(isSensitivePath("/Users/example/lvis-secrets.json")).toBe(
       "**/lvis-secrets.json",
     );
   });
 
-  it("matches /Users/ken/.config/gcloud/credentials.db via **/.config/gcloud/**", () => {
-    expect(isSensitivePath("/Users/ken/.config/gcloud/credentials.db")).toBe(
+  it("matches /Users/example/.config/gcloud/credentials.db via **/.config/gcloud/**", () => {
+    expect(isSensitivePath("/Users/example/.config/gcloud/credentials.db")).toBe(
       "**/.config/gcloud/**",
     );
   });
 });
 
 describe("isSensitivePath — directory (trailing-slash) form §S2", () => {
-  it("matches bare directory /home/ken/.gnupg via trailing-slash helper", () => {
-    const result = isSensitivePath("/home/ken/.gnupg");
+  it("matches bare directory /home/example/.gnupg via trailing-slash helper", () => {
+    const result = isSensitivePath("/home/example/.gnupg");
     expect(result).toBe("**/.gnupg/**");
   });
 
-  it("matches /Users/ken/.lvis/certs (directory form) via **/.lvis/certs/**", () => {
-    expect(isSensitivePath("/Users/ken/.lvis/certs")).toBe("**/.lvis/certs/**");
+  it("matches /Users/example/.lvis/certs (directory form) via **/.lvis/certs/**", () => {
+    expect(isSensitivePath("/Users/example/.lvis/certs")).toBe("**/.lvis/certs/**");
   });
 });
 
 describe("isSensitivePath — negative cases", () => {
-  it("returns null for /home/ken/code/ssh-utils.ts", () => {
-    expect(isSensitivePath("/home/ken/code/ssh-utils.ts")).toBeNull();
+  it("returns null for /home/example/code/ssh-utils.ts", () => {
+    expect(isSensitivePath("/home/example/code/ssh-utils.ts")).toBeNull();
   });
 
-  it("returns null for /home/ken/ssh_config_template.txt", () => {
-    expect(isSensitivePath("/home/ken/ssh_config_template.txt")).toBeNull();
+  it("returns null for /home/example/ssh_config_template.txt", () => {
+    expect(isSensitivePath("/home/example/ssh_config_template.txt")).toBeNull();
   });
 
   it("returns null for /tmp/safe.txt", () => {
     expect(isSensitivePath("/tmp/safe.txt")).toBeNull();
   });
 
-  it("returns null for /Users/ken/Documents/aws-notes.md", () => {
-    expect(isSensitivePath("/Users/ken/Documents/aws-notes.md")).toBeNull();
+  it("returns null for /Users/example/Documents/aws-notes.md", () => {
+    expect(isSensitivePath("/Users/example/Documents/aws-notes.md")).toBeNull();
   });
 
-  it("returns null for /Users/ken/.lvis/plugins/meeting/notes/2026-05.md (non-sensitive plugin subdir of .lvis)", () => {
+  it("returns null for /Users/example/.lvis/plugins/meeting/notes/2026-05.md (non-sensitive plugin subdir of .lvis)", () => {
     expect(
-      isSensitivePath("/Users/ken/.lvis/plugins/meeting/notes/2026-05.md"),
+      isSensitivePath("/Users/example/.lvis/plugins/meeting/notes/2026-05.md"),
     ).toBeNull();
   });
 
@@ -216,35 +216,35 @@ describe("isSensitivePath — Permission policy P2.5 OS sensitive paths", () => 
   });
 
   it("matches ~/.netrc anywhere", () => {
-    expect(isSensitivePath("/Users/ken/.netrc")).toBe("**/.netrc");
+    expect(isSensitivePath("/Users/example/.netrc")).toBe("**/.netrc");
   });
 
   it("matches ~/.bash_history", () => {
-    expect(isSensitivePath("/home/ken/.bash_history")).toBe("**/.bash_history");
+    expect(isSensitivePath("/home/example/.bash_history")).toBe("**/.bash_history");
   });
 
   it("matches ~/.psql_history", () => {
-    expect(isSensitivePath("/home/ken/.psql_history")).toBe("**/.psql_history");
+    expect(isSensitivePath("/home/example/.psql_history")).toBe("**/.psql_history");
   });
 
   it("matches ~/Library/Cookies/* on macOS", () => {
     expect(
-      isSensitivePath("/Users/ken/Library/Cookies/Cookies.binarycookies"),
+      isSensitivePath("/Users/example/Library/Cookies/Cookies.binarycookies"),
     ).toBe("**/Library/Cookies/**");
   });
 
   it("matches ~/Library/Keychains/* on macOS", () => {
-    expect(isSensitivePath("/Users/ken/Library/Keychains/login.keychain-db")).toBe(
+    expect(isSensitivePath("/Users/example/Library/Keychains/login.keychain-db")).toBe(
       "**/Library/Keychains/**",
     );
   });
 
   it("matches **/.env at the project root", () => {
-    expect(isSensitivePath("/Users/ken/code/myapp/.env")).toBe("**/.env");
+    expect(isSensitivePath("/Users/example/code/myapp/.env")).toBe("**/.env");
   });
 
   it("matches **/.env.production", () => {
-    expect(isSensitivePath("/Users/ken/code/myapp/.env.production")).toBe(
+    expect(isSensitivePath("/Users/example/code/myapp/.env.production")).toBe(
       "**/.env.*",
     );
   });
@@ -254,7 +254,7 @@ describe("isSensitivePath — Permission policy P2.5 OS sensitive paths", () => 
   });
 
   it("matches generic id_ed25519 even outside .ssh/", () => {
-    expect(isSensitivePath("/Users/ken/Downloads/id_ed25519")).toBe(
+    expect(isSensitivePath("/Users/example/Downloads/id_ed25519")).toBe(
       "**/id_ed25519",
     );
   });
@@ -262,32 +262,32 @@ describe("isSensitivePath — Permission policy P2.5 OS sensitive paths", () => 
 
 describe("isSensitivePath — Permission policy P2.5 LVIS-internal", () => {
   it("matches ~/.lvis/audit/today.jsonl", () => {
-    expect(isSensitivePath("/Users/ken/.lvis/audit/today.jsonl")).toBe(
+    expect(isSensitivePath("/Users/example/.lvis/audit/today.jsonl")).toBe(
       "**/.lvis/audit/**",
     );
   });
 
   it("matches ~/.lvis/audit.log", () => {
-    expect(isSensitivePath("/Users/ken/.lvis/audit.log")).toBe(
+    expect(isSensitivePath("/Users/example/.lvis/audit.log")).toBe(
       "**/.lvis/audit.log",
     );
   });
 
   it("matches ~/.lvis/permissions/deferred-queue.jsonl", () => {
     expect(
-      isSensitivePath("/Users/ken/.lvis/permissions/deferred-queue.jsonl"),
+      isSensitivePath("/Users/example/.lvis/permissions/deferred-queue.jsonl"),
     ).toBe("**/.lvis/permissions/**");
   });
 
   it("matches ~/.lvis/sessions/<sessionId>.jsonl", () => {
-    expect(isSensitivePath("/Users/ken/.lvis/sessions/abc-123.jsonl")).toBe(
+    expect(isSensitivePath("/Users/example/.lvis/sessions/abc-123.jsonl")).toBe(
       "**/.lvis/sessions/**",
     );
   });
 
   it("matches ~/.config/lvis/hooks/* (post-relocation)", () => {
     expect(
-      isSensitivePath("/Users/ken/.config/lvis/hooks/pre-bash.sh"),
+      isSensitivePath("/Users/example/.config/lvis/hooks/pre-bash.sh"),
     ).toBe("**/.config/lvis/hooks/**");
   });
 });
@@ -361,7 +361,7 @@ describe("canonicalizePathForMatch", () => {
   it("sensitive-path detection still fires on relative .. inputs", () => {
     // Build a path that resolves via .. into a sensitive directory.
     const result = canonicalizePathForMatch(
-      "/Users/ken/work/../.lvis/secrets/openai.key",
+      "/Users/example/work/../.lvis/secrets/openai.key",
     );
     expect(isSensitivePath(caseFoldForMatch(result))).toBe(
       "**/.lvis/secrets/**",
@@ -371,11 +371,11 @@ describe("canonicalizePathForMatch", () => {
 
 describe("caseFoldForMatch", () => {
   it("lowercases on darwin/win32, preserves on linux", () => {
-    const result = caseFoldForMatch("/Users/Ken/Documents");
+    const result = caseFoldForMatch("/Users/Example/Documents");
     if (process.platform === "darwin" || process.platform === "win32") {
-      expect(result).toBe("/users/ken/documents");
+      expect(result).toBe("/users/example/documents");
     } else {
-      expect(result).toBe("/Users/Ken/Documents");
+      expect(result).toBe("/Users/Example/Documents");
     }
   });
 });

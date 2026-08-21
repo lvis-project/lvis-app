@@ -1229,8 +1229,8 @@ describe("PermissionManager.prunePathGrantsUnderRoot (#1493)", () => {
 
 describe("path-grant prune helpers (#1493)", () => {
   it("extractGrantPath returns the path tail after the marker (Windows drive-safe)", () => {
-    expect(extractGrantPath("write_file:path:/home/ken/a.md")).toBe("/home/ken/a.md");
-    expect(extractGrantPath("write_file:path:C:\\Users\\ken\\a.md")).toBe("C:\\Users\\ken\\a.md");
+    expect(extractGrantPath("write_file:path:/home/example/a.md")).toBe("/home/example/a.md");
+    expect(extractGrantPath("write_file:path:C:\\Users\\example\\a.md")).toBe("C:\\Users\\example\\a.md");
     expect(extractGrantPath("web_fetch")).toBeNull();
     expect(extractGrantPath("write_file:path:")).toBeNull();
   });

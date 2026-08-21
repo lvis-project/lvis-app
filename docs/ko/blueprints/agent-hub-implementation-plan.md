@@ -843,9 +843,9 @@ _lvis-app 측:_
 > CLAUDE.md (lvis-project root) 의 "Parallel Agent Isolation (CRITICAL)" 룰을 모든 worker prompt 에 그대로 박아 넣는다.
 
 **금지.**
-- `/Users/ken/workspace/GIT/github/lvis-project/lvis-plugin-agent-hub/` 직접 쓰기
-- `/Users/ken/workspace/GIT/github/lvis-project/lvis-app/` 직접 쓰기
-- `/Users/ken/workspace/GIT/github/lvis-project/lvis-marketplace/` 직접 쓰기
+- `/Users/example/workspace/GIT/github/lvis-project/lvis-plugin-agent-hub/` 직접 쓰기
+- `/Users/example/workspace/GIT/github/lvis-project/lvis-app/` 직접 쓰기
+- `/Users/example/workspace/GIT/github/lvis-project/lvis-marketplace/` 직접 쓰기
 
 **허용.**
 - 위 디렉터리에서의 _read-only_ explore (file read, grep, ls).
@@ -876,9 +876,9 @@ gh repo clone lvis-project/lvis-marketplace /tmp/agent-hub/L<N>/lvis-marketplace
 
 ```
 [CRITICAL 1] DO NOT touch canonical checkout at
-  /Users/ken/workspace/GIT/github/lvis-project/lvis-plugin-agent-hub/
-  /Users/ken/workspace/GIT/github/lvis-project/lvis-app/
-  /Users/ken/workspace/GIT/github/lvis-project/lvis-marketplace/
+  /Users/example/workspace/GIT/github/lvis-project/lvis-plugin-agent-hub/
+  /Users/example/workspace/GIT/github/lvis-project/lvis-app/
+  /Users/example/workspace/GIT/github/lvis-project/lvis-marketplace/
   Other autopilot/executor agents may be running concurrently and writing
   to canonical paths corrupts shared state.
 
@@ -955,9 +955,9 @@ gh repo clone lvis-project/lvis-marketplace /tmp/agent-hub/L<N>/lvis-marketplace
 
 ```
 [CRITICAL 1] DO NOT touch canonical checkouts:
-  /Users/ken/workspace/GIT/github/lvis-project/lvis-plugin-agent-hub/
-  /Users/ken/workspace/GIT/github/lvis-project/lvis-app/
-  /Users/ken/workspace/GIT/github/lvis-project/lvis-marketplace/
+  /Users/example/workspace/GIT/github/lvis-project/lvis-plugin-agent-hub/
+  /Users/example/workspace/GIT/github/lvis-project/lvis-app/
+  /Users/example/workspace/GIT/github/lvis-project/lvis-marketplace/
   Other autopilot/executor agents may be running concurrently. Writing to
   canonical paths corrupts shared state across active sessions.
 

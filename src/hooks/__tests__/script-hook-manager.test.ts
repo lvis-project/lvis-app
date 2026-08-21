@@ -126,7 +126,7 @@ describe("Permission policy P4 ScriptHookManager", () => {
 describe("Permission policy P4 dlpRedactInput", () => {
   it("masks email + phone in string fields", () => {
     const out = dlpRedactInput({
-      to: "ken@lvis.example.com",
+      to: "owner@lvis.example.com",
       phone: "010-1234-5678",
       count: 3,
     });

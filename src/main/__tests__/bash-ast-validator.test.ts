@@ -45,7 +45,7 @@ describe("BashAstValidator — deny 모드 (기본)", () => {
   });
 
   it("rm -f /Users/... single file → allow (not rm-rf-root)", () => {
-    const r = validator.validate("bash", makeInput("rm -f /Users/ken/documents/안녕하세요.txt"));
+    const r = validator.validate("bash", makeInput("rm -f /Users/example/documents/안녕하세요.txt"));
     assert.equal(r.decision, "allow");
   });
 
@@ -147,7 +147,7 @@ describe("BashAstValidator — deny 모드 (기본)", () => {
   });
 
   it("echo hi && rm -f /Users/... single file → allow (not rm-rf-compound)", () => {
-    const r = validator.validate("bash", makeInput("echo hi && rm -f /Users/ken/documents/안녕하세요.txt"));
+    const r = validator.validate("bash", makeInput("echo hi && rm -f /Users/example/documents/안녕하세요.txt"));
     assert.equal(r.decision, "allow");
   });
 

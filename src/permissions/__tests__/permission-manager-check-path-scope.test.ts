@@ -30,17 +30,17 @@ function target(raw: string): { filePath: string; canonicalPath: string } {
 }
 
 describe("PermissionManager.checkPathScope", () => {
-  const allowed = [fold("/Users/ken/work/proj")];
+  const allowed = [fold("/Users/example/work/proj")];
 
   describe("Layer 0 — sensitive-path hit", () => {
     it("flags a ~/.ssh key as sensitiveHit with its pattern", () => {
-      const t = target("/Users/ken/.ssh/id_rsa");
+      const t = target("/Users/example/.ssh/id_rsa");
       const res = PermissionManager.checkPathScope({
         canonicalTargets: [t],
         allowedDirectories: allowed,
       });
       expect(res.sensitiveHit).toEqual({
-        filePath: "/Users/ken/.ssh/id_rsa",
+        filePath: "/Users/example/.ssh/id_rsa",
         pattern: "**/.ssh/**",
       });
     });
@@ -48,13 +48,13 @@ describe("PermissionManager.checkPathScope", () => {
     it("returns the FIRST sensitive target when several match", () => {
       const res = PermissionManager.checkPathScope({
         canonicalTargets: [
-          target("/Users/ken/work/proj/src/index.ts"),
-          target("/Users/ken/.aws/credentials"),
-          target("/Users/ken/.ssh/id_rsa"),
+          target("/Users/example/work/proj/src/index.ts"),
+          target("/Users/example/.aws/credentials"),
+          target("/Users/example/.ssh/id_rsa"),
         ],
         allowedDirectories: allowed,
       });
-      expect(res.sensitiveHit?.filePath).toBe("/Users/ken/.aws/credentials");
+      expect(res.sensitiveHit?.filePath).toBe("/Users/example/.aws/credentials");
     });
   });
 
@@ -75,7 +75,7 @@ describe("PermissionManager.checkPathScope", () => {
     it("returns the FIRST out-of-allowed target when several are outside", () => {
       const res = PermissionManager.checkPathScope({
         canonicalTargets: [
-          target("/Users/ken/work/proj/a.ts"),
+          target("/Users/example/work/proj/a.ts"),
           target("/etc/hosts"),
           target("/opt/other/b.ts"),
         ],
@@ -85,19 +85,19 @@ describe("PermissionManager.checkPathScope", () => {
     });
 
     it("treats an empty allow-list as deny-by-default (first target out)", () => {
-      const t = target("/Users/ken/work/proj/a.ts");
+      const t = target("/Users/example/work/proj/a.ts");
       const res = PermissionManager.checkPathScope({
         canonicalTargets: [t],
         allowedDirectories: [],
       });
-      expect(res.outOfAllowed?.filePath).toBe("/Users/ken/work/proj/a.ts");
+      expect(res.outOfAllowed?.filePath).toBe("/Users/example/work/proj/a.ts");
     });
   });
 
   describe("clean — inside allowed, not sensitive", () => {
     it("returns both null for a child of an allowed dir", () => {
       const res = PermissionManager.checkPathScope({
-        canonicalTargets: [target("/Users/ken/work/proj/src/index.ts")],
+        canonicalTargets: [target("/Users/example/work/proj/src/index.ts")],
         allowedDirectories: allowed,
       });
       expect(res.sensitiveHit).toBeNull();
@@ -119,13 +119,13 @@ describe("PermissionManager.checkPathScope", () => {
       // A ~/.ssh key that is also outside the allowed dirs: Layer 0 and Layer 1
       // both fire in the predicate; the executor's layer-0 deny returns before
       // it ever consults outOfAllowed, but the predicate stays honest.
-      const t = target("/Users/ken/.ssh/id_rsa");
+      const t = target("/Users/example/.ssh/id_rsa");
       const res = PermissionManager.checkPathScope({
         canonicalTargets: [t],
         allowedDirectories: allowed,
       });
       expect(res.sensitiveHit?.pattern).toBe("**/.ssh/**");
-      expect(res.outOfAllowed?.filePath).toBe("/Users/ken/.ssh/id_rsa");
+      expect(res.outOfAllowed?.filePath).toBe("/Users/example/.ssh/id_rsa");
     });
   });
 });

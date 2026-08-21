@@ -13,7 +13,7 @@ import {
 import { detectSandboxCapability } from "../sandbox-capability.js";
 import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
 
-const DEFAULT_ALLOWED_DIRECTORIES = ["/Users/ken/work", "/Users/ken/.lvis"].map((dir) =>
+const DEFAULT_ALLOWED_DIRECTORIES = ["/Users/example/work", "/Users/example/.lvis"].map((dir) =>
   caseFoldForMatch(canonicalizePathForMatch(dir)),
 );
 

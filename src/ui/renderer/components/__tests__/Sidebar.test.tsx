@@ -55,7 +55,7 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   const removeRoot = vi.fn(async (root: string) => ({
     ok: true as const, removed: root, roots: [],
   }));
-  const ADDED_ROOT = "C:\\Users\\ikcha\\workspace\\lvis-project\\gamma";
+  const ADDED_ROOT = "C:\\Users\\example\\workspace\\lvis-project\\gamma";
   const pickRoot = vi.fn(async (_options?: { ackToken?: string }) => ({
     ok: true as const,
     roots: [{ path: ADDED_ROOT, isDefault: false }],
@@ -71,10 +71,10 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
   }));
   const listRoots = vi.fn(async () => ({
     ok: true as const,
-    defaultRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app",
+    defaultRoot: "C:\\Users\\example\\workspace\\lvis-project\\lvis-app",
     roots: [
-      { path: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app", isDefault: true },
-      { path: "C:\\Users\\ikcha\\workspace\\lvis-project\\other-app", isDefault: false },
+      { path: "C:\\Users\\example\\workspace\\lvis-project\\lvis-app", isDefault: true },
+      { path: "C:\\Users\\example\\workspace\\lvis-project\\other-app", isDefault: false },
     ],
   }));
   const sessions: SessionSummary[] = overrides.sessions ?? [
@@ -95,7 +95,7 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
       title: "다른 프로젝트 대화",
       modifiedAt: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
       sessionKind: "main",
-      projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\other-app",
+      projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\other-app",
       projectName: "other-app",
     },
   ];
@@ -118,12 +118,12 @@ function renderSidebar(overrides: Partial<Parameters<typeof Sidebar>[0]> = {}) {
     sessions,
     projects: overrides.projects ?? [
       {
-        projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app",
+        projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\lvis-app",
         projectName: "lvis-app",
         isDefault: true,
       },
       {
-        projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\other-app",
+        projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\other-app",
         projectName: "other-app",
       },
     ],
@@ -210,7 +210,7 @@ describe("Sidebar project sessions", () => {
       // group.
       activateTab(getByTestId("sidebar-tab-projects"));
       await waitFor(() => {
-        expect(getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-other-app").textContent).toContain("other-app");
+        expect(getByTestId("sidebar-project-C-Users-example-workspace-lvis-project-other-app").textContent).toContain("other-app");
       });
       expect(getByText("다른 프로젝트 대화")).toBeTruthy();
     } finally {
@@ -220,10 +220,10 @@ describe("Sidebar project sessions", () => {
 
 
   it("keeps a stale project conversation as a general chat without resurrecting its project", async () => {
-    const staleRoot = "C:\\Users\\ikcha\\workspace\\deleted-project";
+    const staleRoot = "C:\\Users\\example\\workspace\\deleted-project";
     const { getByTestId, queryByTestId, restore } = renderSidebar({
       projects: [{
-        projectRoot: "C:\\Users\\ikcha\\workspace\\default",
+        projectRoot: "C:\\Users\\example\\workspace\\default",
         projectName: "default",
         isDefault: true,
       }],
@@ -241,7 +241,7 @@ describe("Sidebar project sessions", () => {
 
       activateTab(getByTestId("sidebar-tab-projects"));
       await waitFor(() => {
-        expect(queryByTestId("sidebar-project-C-Users-ikcha-workspace-deleted-project")).toBeNull();
+        expect(queryByTestId("sidebar-project-C-Users-example-workspace-deleted-project")).toBeNull();
       });
     } finally {
       restore();
@@ -262,11 +262,11 @@ describe("Sidebar project sessions", () => {
     try {
       activateTab(getByTestId("sidebar-tab-projects"));
       await waitFor(() => {
-        expect(getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-other-app").textContent).toContain("other-app");
+        expect(getByTestId("sidebar-project-C-Users-example-workspace-lvis-project-other-app").textContent).toContain("other-app");
       });
-      fireEvent.click(getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-other-app"));
+      fireEvent.click(getByTestId("sidebar-project-C-Users-example-workspace-lvis-project-other-app"));
       expect(onNewChatForProject).toHaveBeenCalledWith({
-        projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\other-app",
+        projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\other-app",
         projectName: "other-app",
       });
     } finally {
@@ -296,7 +296,7 @@ describe("Sidebar legacy default-root session handling", () => {
     // reports below (isDefault: true) — the exact "legacy default-tagged"
     // shape pre-PR persistence produced (projectRoot=defaultRoot,
     // projectName="workspace").
-    const DEFAULT_ROOT = "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app";
+    const DEFAULT_ROOT = "C:\\Users\\example\\workspace\\lvis-project\\lvis-app";
     const legacySession: SessionSummary = {
       id: "legacy-session",
       title: "레거시 기본 프로젝트 대화",
@@ -322,11 +322,11 @@ describe("Sidebar legacy default-root session handling", () => {
       // the Projects tab — only the unrelated "other-app" real project from
       // renderSidebar's stub. (Can't grep broadly for "workspace" in the
       // testid: the default root's OWN path legitimately contains that
-      // substring — "C:\Users\ikcha\workspace\..." — so the precise
+      // substring — "C:\Users\example\workspace\..." — so the precise
       // ghost-group testid is asserted directly instead.)
       activateTab(getByTestId("sidebar-tab-projects"));
-      await waitFor(() => expect(getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-other-app")).toBeTruthy());
-      expect(queryByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-lvis-app")).toBeNull();
+      await waitFor(() => expect(getByTestId("sidebar-project-C-Users-example-workspace-lvis-project-other-app")).toBeTruthy());
+      expect(queryByTestId("sidebar-project-C-Users-example-workspace-lvis-project-lvis-app")).toBeNull();
     } finally {
       restore();
     }
@@ -465,8 +465,8 @@ describe("Sidebar conversation pinning", () => {
 
 describe("Sidebar project pinning", () => {
   const projects: ProjectIdentity[] = [
-    { projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\alpha", projectName: "alpha", isDefault: false },
-    { projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\beta", projectName: "beta", isDefault: false },
+    { projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\alpha", projectName: "alpha", isDefault: false },
+    { projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\beta", projectName: "beta", isDefault: false },
   ];
 
   it("shows a pin/unpin context menu item and calls onToggleProjectPin with the project root", async () => {
@@ -484,7 +484,7 @@ describe("Sidebar project pinning", () => {
       onToggleProjectPin,
     });
     try {
-      const projectRow = await waitFor(() => getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha"));
+      const projectRow = await waitFor(() => getByTestId("sidebar-project-C-Users-example-workspace-lvis-project-alpha"));
       fireEvent.contextMenu(projectRow);
       expect(showNativeContextMenu).toHaveBeenCalledWith(expect.objectContaining({
         kind: "project",
@@ -496,7 +496,7 @@ describe("Sidebar project pinning", () => {
         ]),
       }));
       emitNativeContextCommand("project.pin");
-      expect(onToggleProjectPin).toHaveBeenCalledWith("C:\\Users\\ikcha\\workspace\\lvis-project\\alpha");
+      expect(onToggleProjectPin).toHaveBeenCalledWith("C:\\Users\\example\\workspace\\lvis-project\\alpha");
     } finally {
       restore();
     }
@@ -518,13 +518,13 @@ describe("Sidebar project pinning", () => {
     });
     try {
       const projectRow = await waitFor(() =>
-        getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha"));
+        getByTestId("sidebar-project-C-Users-example-workspace-lvis-project-alpha"));
       fireEvent.contextMenu(projectRow);
       emitNativeContextCommand("project.remove");
 
       await waitFor(() => {
         expect(removeRoot).toHaveBeenCalledWith(
-          "C:\\Users\\ikcha\\workspace\\lvis-project\\alpha",
+          "C:\\Users\\example\\workspace\\lvis-project\\alpha",
         );
         expect(onRefreshProjects).toHaveBeenCalledTimes(1);
       });
@@ -555,7 +555,7 @@ describe("Sidebar project pinning", () => {
     } as never);
     try {
       const projectRow = await waitFor(() =>
-        getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha"));
+        getByTestId("sidebar-project-C-Users-example-workspace-lvis-project-alpha"));
       fireEvent.contextMenu(projectRow);
       emitNativeContextCommand("project.remove");
 
@@ -567,7 +567,7 @@ describe("Sidebar project pinning", () => {
         );
       });
       expect(onRefreshProjects).not.toHaveBeenCalled();
-      expect(getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha")).toBeTruthy();
+      expect(getByTestId("sidebar-project-C-Users-example-workspace-lvis-project-alpha")).toBeTruthy();
     } finally {
       restore();
     }
@@ -577,7 +577,7 @@ describe("Sidebar project pinning", () => {
       sessions: [],
       projects,
       activeSidebarTab: "projects",
-      isProjectPinned: (root) => root === "C:\\Users\\ikcha\\workspace\\lvis-project\\beta",
+      isProjectPinned: (root) => root === "C:\\Users\\example\\workspace\\lvis-project\\beta",
       onToggleProjectPin: vi.fn(),
     });
     try {
@@ -588,8 +588,8 @@ describe("Sidebar project pinning", () => {
       // (e.g. "sidebar-project-menu-pin"), so match on the root-path suffix.
       const rows = Array.from(projectsPanel.querySelectorAll('[data-testid^="sidebar-project-C-Users"]'));
       expect(rows.map((el) => el.getAttribute("data-testid"))).toEqual([
-        "sidebar-project-C-Users-ikcha-workspace-lvis-project-beta",
-        "sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha",
+        "sidebar-project-C-Users-example-workspace-lvis-project-beta",
+        "sidebar-project-C-Users-example-workspace-lvis-project-alpha",
       ]);
     } finally {
       restore();
@@ -599,7 +599,7 @@ describe("Sidebar project pinning", () => {
 
 describe("Sidebar projects tab add-project context menu", () => {
   const projects: ProjectIdentity[] = [
-    { projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\alpha", projectName: "alpha", isDefault: false },
+    { projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\alpha", projectName: "alpha", isDefault: false },
   ];
 
   it("offers add-project when the Projects tab's empty area is right-clicked, and adds through workspace.pickRoot", async () => {
@@ -681,7 +681,7 @@ describe("Sidebar projects tab add-project context menu", () => {
       renderSidebar({ sessions: [], projects, activeSidebarTab: "projects", onRefreshProjects });
     try {
       const row = await waitFor(() =>
-        getByTestId("sidebar-project-C-Users-ikcha-workspace-lvis-project-alpha"));
+        getByTestId("sidebar-project-C-Users-example-workspace-lvis-project-alpha"));
       fireEvent.contextMenu(row);
 
       // The tab body's own handler must NOT also fire and replace the row's
@@ -697,7 +697,7 @@ describe("Sidebar projects tab add-project context menu", () => {
       // The row's own primary action still resolves against the row's handlers.
       emitNativeContextCommand("project.new-chat");
       expect(onNewChatForProject).toHaveBeenCalledWith({
-        projectRoot: "C:\\Users\\ikcha\\workspace\\lvis-project\\alpha",
+        projectRoot: "C:\\Users\\example\\workspace\\lvis-project\\alpha",
         projectName: "alpha",
       });
     } finally {
