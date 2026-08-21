@@ -194,6 +194,65 @@ describe("ensurePublicHttpUrl — explicit private network access", () => {
     expect(url.hostname).toBe("127.0.0.1");
   });
 
+  it("keeps CGNAT blocked when only private network access is enabled", async () => {
+    await expect(
+      ensurePublicHttpUrl("http://100.75.34.2:30000/v1", {
+        allowPrivateNetworks: true,
+      }),
+    ).rejects.toThrowError(/non-public/);
+  });
+
+  it("allows CGNAT only when the separate tailnet gate is enabled", async () => {
+    const url = await ensurePublicHttpUrl("http://100.75.34.2:30000/v1", {
+      allowCarrierGradeNat: true,
+    });
+    expect(url.hostname).toBe("100.75.34.2");
+  });
+
+  it("allows DNS hosts that resolve into CGNAT when the tailnet gate is enabled", async () => {
+    lookupMock.mockResolvedValueOnce([{ address: "100.75.34.2", family: 4 }]);
+    const url = await ensurePublicHttpUrl("http://host.example.ts.net/v1", {
+      allowCarrierGradeNat: true,
+    });
+    expect(url.hostname).toBe("host.example.ts.net");
+  });
+
+  it("allows the IPv4-mapped IPv6 form of a CGNAT address when the tailnet gate is enabled", async () => {
+    lookupMock.mockResolvedValueOnce([{ address: "::ffff:100.75.34.2", family: 6 }]);
+    const url = await ensurePublicHttpUrl("http://mapped.example.ts.net/v1", {
+      allowCarrierGradeNat: true,
+    });
+    expect(url.hostname).toBe("mapped.example.ts.net");
+  });
+
+  it("keeps RFC1918 blocked when only the tailnet gate is enabled", async () => {
+    await expect(
+      ensurePublicHttpUrl("http://10.185.177.209/", { allowCarrierGradeNat: true }),
+    ).rejects.toThrowError(/non-public/);
+  });
+
+  it("keeps loopback and metadata blocked when the tailnet gate is enabled", async () => {
+    await expect(
+      ensurePublicHttpUrl("http://127.0.0.1/", { allowCarrierGradeNat: true }),
+    ).rejects.toThrowError(/non-public/);
+    await expect(
+      ensurePublicHttpUrl("http://169.254.169.254/latest/meta-data/", {
+        allowCarrierGradeNat: true,
+      }),
+    ).rejects.toThrowError(/non-public/);
+  });
+
+  it("honours a predicate that scopes the tailnet gate to one origin", async () => {
+    const scoped = (url: URL) => url.origin === "http://100.75.34.2:30000";
+    const url = await ensurePublicHttpUrl("http://100.75.34.2:30000/v1", {
+      allowCarrierGradeNat: scoped,
+    });
+    expect(url.port).toBe("30000");
+    await expect(
+      ensurePublicHttpUrl("http://100.75.34.2:8080/v1", { allowCarrierGradeNat: scoped }),
+    ).rejects.toThrowError(/non-public/);
+  });
+
   it("keeps link-local metadata blocked even when private network access is enabled", async () => {
     await expect(
       ensurePublicHttpUrl("http://169.254.169.254/latest/meta-data/", {

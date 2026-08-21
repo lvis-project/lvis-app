@@ -25,6 +25,7 @@ import {
 import {
   configuredModelProviderLoopbackAccess,
   configuredModelProviderNetworkAccess,
+  type ModelProviderNetworkAccess,
 } from "./marketplace-provider-fetch.js";
 import { secretKeyFor } from "./provider-factory.js";
 
@@ -237,12 +238,9 @@ function keylessMarketplaceModelListNetworkAccess(
   resolved: ResolvedModelListBaseUrl,
   apiKey: string,
   credentialScope?: string,
-): {
-  allowPrivateNetworks: false | ((url: URL) => boolean);
-  allowLoopback: false | ((url: URL) => boolean);
-} {
+): ModelProviderNetworkAccess {
   if (apiKey || vendor !== "openai-compatible" || !resolved.baseUrl) {
-    return { allowPrivateNetworks: false, allowLoopback: false };
+    return { allowPrivateNetworks: false, allowLoopback: false, allowCarrierGradeNat: false };
   }
   const llm = settingsService.get("llm");
   const presetId = isMarketplaceProviderPresetId(credentialScope)
@@ -250,14 +248,14 @@ function keylessMarketplaceModelListNetworkAccess(
     : llm.provider === "openai-compatible"
       ? llm.marketplaceProviderPresetId
       : undefined;
-  if (!presetId) return { allowPrivateNetworks: false, allowLoopback: false };
+  if (!presetId) return { allowPrivateNetworks: false, allowLoopback: false, allowCarrierGradeNat: false };
   const preset = installedProviderPresetForScope(settingsService, presetId);
   if (
     !preset ||
     preset.requiresApiKey !== false ||
     !sameModelListEndpoint(resolved.baseUrl, preset.baseUrl)
   ) {
-    return { allowPrivateNetworks: false, allowLoopback: false };
+    return { allowPrivateNetworks: false, allowLoopback: false, allowCarrierGradeNat: false };
   }
   return configuredModelProviderLoopbackAccess(resolved.baseUrl);
 }

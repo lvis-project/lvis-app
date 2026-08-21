@@ -36,8 +36,8 @@ export interface NetworkGuardOptions {
   /**
    * Allows RFC1918 IPv4 and IPv6 ULA addresses after an upstream approval
    * gate has authorized the request. A predicate scopes that approval to
-   * the current redirect hop URL. Loopback, link-local, metadata, CGNAT, and
-   * 0.0.0.0/8 remain blocked.
+   * the current redirect hop URL. Loopback, link-local, metadata, CGNAT
+   * (see {@link allowCarrierGradeNat}), and 0.0.0.0/8 remain blocked.
    */
   allowPrivateNetworks?: boolean | ((url: URL) => boolean);
   /**
@@ -47,6 +47,20 @@ export interface NetworkGuardOptions {
    * remain blocked.
    */
   allowLoopback?: boolean | ((url: URL) => boolean);
+  /**
+   * Allows CGNAT addresses (100.64.0.0/10) after an explicit endpoint trust
+   * decision has authorized the request. A predicate scopes that approval to
+   * the current redirect hop URL. Loopback, link-local, metadata, RFC1918, and
+   * 0.0.0.0/8 remain blocked.
+   *
+   * Its own axis rather than a widening of {@link allowPrivateNetworks}: this
+   * is the range an authenticated overlay network (tailnet) draws peer
+   * addresses from, and it is also what a carrier hands out ahead of a NAT the
+   * host does not control. A caller that trusts its own LAN must not silently
+   * inherit the overlay, and a caller that trusts one named overlay peer must
+   * not silently inherit the LAN.
+   */
+  allowCarrierGradeNat?: boolean | ((url: URL) => boolean);
 }
 
 type NetworkGuardFetchInit = RequestInit & NetworkGuardOptions & {
@@ -65,14 +79,19 @@ const RFC1918_IPV4_RANGES: Array<[bigint, bigint]> = [
   [ipv4ToBigInt("192.168.0.0"), ipv4ToBigInt("192.168.255.255")],
 ];
 
+// 100.64.0.0/10 (CGNAT) — also the tailnet peer range.
+const CGNAT_IPV4_RANGE: [bigint, bigint] = [
+  ipv4ToBigInt("100.64.0.0"),
+  ipv4ToBigInt("100.127.255.255"),
+];
+
 const PRIVATE_IPV4_RANGES: Array<[bigint, bigint]> = [
   ...RFC1918_IPV4_RANGES,
   // 127.0.0.0/8 (loopback)
   [ipv4ToBigInt("127.0.0.0"), ipv4ToBigInt("127.255.255.255")],
   // 169.254.0.0/16 (link-local, AWS metadata 169.254.169.254)
   [ipv4ToBigInt("169.254.0.0"), ipv4ToBigInt("169.254.255.255")],
-  // 100.64.0.0/10 (CGNAT)
-  [ipv4ToBigInt("100.64.0.0"), ipv4ToBigInt("100.127.255.255")],
+  CGNAT_IPV4_RANGE,
   // 0.0.0.0/8 (this network)
   [ipv4ToBigInt("0.0.0.0"), ipv4ToBigInt("0.255.255.255")],
 ];
@@ -123,15 +142,12 @@ export async function ensurePublicHttpUrl(
   if (addresses.length === 0) {
     throw new NetworkGuardError(`target host did not resolve: ${parsed.hostname}`);
   }
-  const allowPrivateNetworks =
-    options.allowPrivateNetworks === true ||
-    (typeof options.allowPrivateNetworks === "function" &&
-      options.allowPrivateNetworks(parsed));
-  const allowLoopback =
-    options.allowLoopback === true ||
-    (typeof options.allowLoopback === "function" &&
-      options.allowLoopback(parsed));
-  const blocked = addresses.filter((addr) => !isAllowedAddress(addr, allowPrivateNetworks, allowLoopback));
+  const scope: AllowedAddressScope = {
+    allowPrivateNetworks: resolveScope(options.allowPrivateNetworks, parsed),
+    allowLoopback: resolveScope(options.allowLoopback, parsed),
+    allowCarrierGradeNat: resolveScope(options.allowCarrierGradeNat, parsed),
+  };
+  const blocked = addresses.filter((addr) => !isAllowedAddress(addr, scope));
   if (blocked.length > 0) {
     const rendered =
       blocked.slice(0, 3).join(", ") + (blocked.length > 3 ? ", ..." : "");
@@ -161,6 +177,7 @@ export async function fetchPublicHttpResponse(
   const {
     allowPrivateNetworks = false,
     allowLoopback = false,
+    allowCarrierGradeNat = false,
     fetchImpl = fetch,
     maxRedirects = 5,
     timeoutMs = TOOL_TIMEOUT_POLICY.networkFetchDefaultMs,
@@ -173,7 +190,11 @@ export async function fetchPublicHttpResponse(
   // check below. The last permitted hop (hop === maxRedirects) always returns a final
   // response or throws, so control never falls through past the loop.
   for (let hop = 0; ; hop++) {
-    await ensurePublicHttpUrl(currentUrl, { allowPrivateNetworks, allowLoopback });
+    await ensurePublicHttpUrl(currentUrl, {
+      allowPrivateNetworks,
+      allowLoopback,
+      allowCarrierGradeNat,
+    });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     // Forward aborts from the caller-supplied signal so callers can cancel
@@ -279,11 +300,39 @@ function isPublicAddress(address: string): boolean {
   return false;
 }
 
-function isAllowedAddress(address: string, allowPrivateNetworks: boolean, allowLoopback: boolean): boolean {
+/** Each axis already resolved against the current hop URL. */
+interface AllowedAddressScope {
+  allowPrivateNetworks: boolean;
+  allowLoopback: boolean;
+  allowCarrierGradeNat: boolean;
+}
+
+function resolveScope(
+  option: boolean | ((url: URL) => boolean) | undefined,
+  url: URL,
+): boolean {
+  if (option === true) return true;
+  return typeof option === "function" && option(url);
+}
+
+function isAllowedAddress(address: string, scope: AllowedAddressScope): boolean {
   if (isPublicAddress(address)) return true;
-  if (allowLoopback && isLoopbackAddress(address)) return true;
-  if (!allowPrivateNetworks) return false;
+  if (scope.allowLoopback && isLoopbackAddress(address)) return true;
+  if (scope.allowCarrierGradeNat && isCarrierGradeNatAddress(address)) return true;
+  if (!scope.allowPrivateNetworks) return false;
   return isPrivateNetworkAddress(address);
+}
+
+function isCarrierGradeNatAddress(address: string): boolean {
+  if (isIPv4(address)) {
+    const num = ipv4ToBigInt(address);
+    return num >= CGNAT_IPV4_RANGE[0] && num <= CGNAT_IPV4_RANGE[1];
+  }
+  if (isIPv6(address) && address.toLowerCase().startsWith("::ffff:")) {
+    const ipv4 = ipv4FromMappedIpv6(address.toLowerCase());
+    return ipv4 !== null && isCarrierGradeNatAddress(ipv4);
+  }
+  return false;
 }
 
 function isLoopbackAddress(address: string): boolean {
