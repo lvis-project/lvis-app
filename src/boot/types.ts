@@ -17,7 +17,7 @@ import type { ToolRegistry } from "../tools/registry.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { McpAppModelContextStore } from "../mcp/mcp-app-model-context.js";
 import type { ConversationLoop } from "../engine/conversation-loop.js";
-import type { RoutineEngine } from "../core/routine-engine.js";
+import type { RoutineEngine } from "../routines/routine-engine.js";
 import type { McpManager } from "../mcp/mcp-manager.js";
 import type { PluginLoopbackManager } from "../mcp/plugin-loopback-manager.js";
 import type { IdleSchedulerService } from "../main/idle-scheduler.js";
