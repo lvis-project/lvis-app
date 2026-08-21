@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { ensureLvisHomePrivate, lvisHome } from "../lvis-home.js";
+import { ensureLvisHomePrivate, lvisHome, win32SystemBinary } from "../lvis-home.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
 
 const originalLvisHome = process.env.LVIS_HOME;
@@ -22,6 +22,21 @@ describe("lvisHome", () => {
   it("normalizes an absolute LVIS_HOME override", () => {
     process.env.LVIS_HOME = join(tmpdir(), "lvis-parent", "..", "lvis-state");
     expect(lvisHome()).toBe(resolve(tmpdir(), "lvis-state"));
+  });
+});
+
+describe("win32SystemBinary", () => {
+  it("resolves under SystemRoot so PATH cannot decide which binary answers", () => {
+    expect(win32SystemBinary("whoami", { SystemRoot: "C:\\Windows" })).toBe(
+      join("C:\\Windows", "System32", "whoami.exe"),
+    );
+  });
+
+  it("falls back to windir, then to the bare name when the session sets neither", () => {
+    expect(win32SystemBinary("icacls", { windir: "D:\\Win" })).toBe(
+      join("D:\\Win", "System32", "icacls.exe"),
+    );
+    expect(win32SystemBinary("icacls", {})).toBe("icacls");
   });
 });
 
@@ -58,7 +73,7 @@ describe("ensureLvisHomePrivate", () => {
       platform: "win32",
       run: (file, args) => {
         calls.push({ file, args });
-        return file === "whoami" ? '"CORP\\\\example","S-1-5-21-1004336348-11-77-1417"\r\n' : "";
+        return file === win32SystemBinary("whoami") ? '"CORP\\\\example","S-1-5-21-1004336348-11-77-1417"\r\n' : "";
       },
     });
 
@@ -68,7 +83,7 @@ describe("ensureLvisHomePrivate", () => {
       sid: "S-1-5-21-1004336348-11-77-1417",
     });
     expect(calls[1]).toEqual({
-      file: "icacls",
+      file: win32SystemBinary("icacls"),
       args: [
         dir,
         // Inherited ACEs go first: outside %USERPROFILE% they are what would
@@ -103,15 +118,20 @@ describe("ensureLvisHomePrivate", () => {
       const applied = ensureLvisHomePrivate(dir);
       expect(applied.enforcement).toBe("win32-dacl");
 
-      const acl = execFileSync("icacls", [dir], { encoding: "utf-8" });
+      const acl = execFileSync(win32SystemBinary("icacls"), [dir], { encoding: "utf-8" });
+      // icacls echoes the path and prints the FIRST ACE on that same line, the
+      // rest indented beneath it. Dropping line 0 wholesale discarded the only
+      // ACE an enforced directory has — the one this test exists to read — so
+      // strip the echoed path rather than the line carrying it.
       const aces = acl
         .split(/\r?\n/)
-        .slice(1)
-        .map((line) => line.trim())
+        .map((line) => (line.startsWith(dir) ? line.slice(dir.length) : line).trim())
         .filter((line) => line.includes(":("));
       expect(aces.length).toBeGreaterThan(0);
       const sid = (applied as { sid: string }).sid;
-      const owner = execFileSync("whoami", [], { encoding: "utf-8" }).trim();
+      const owner = execFileSync(win32SystemBinary("whoami"), [], {
+        encoding: "utf-8",
+      }).trim();
       // Whether icacls prints the SID or resolves it to an account name is not
       // the property under test. These two are: nothing is inherited any more,
       // and no ACE opens the directory to a group the whole machine is in.
