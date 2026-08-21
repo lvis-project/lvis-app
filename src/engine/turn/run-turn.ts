@@ -732,9 +732,9 @@ export async function runTurn(
     // Turn aggregate footer — see TurnCallbacks.onTurnSummary doc above.
     // Tokens come from the LLM provider's usage report (Vercel AI SDK
     // exposes prompt_tokens + completion_tokens via the provider's
-    // streamText/onFinish equivalent — see `engine/llm/vercel/adapter.ts`
-    // and `engine/llm/vercel/stream-mapper.ts` which forward the values
-    // into the round stream's `usage` field). Suppressed for interrupted
+    // streamText/onFinish equivalent — see `fullStreamToStreamEvent` in
+    // `engine/llm/vercel/adapter.ts` which forwards the values into the
+    // round stream's `usage` field). Suppressed for interrupted
     // turns and turns without a real assistant response (mirrors the
     // turn-end notification gate so dropped turns don't render footers).
     // Production diagnostic — turn_summary 가 사용자 UI (TokenCostBadge 배지
