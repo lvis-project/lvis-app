@@ -42,23 +42,23 @@ import type {
   RuntimePluginFactory,
 } from "../types.js";
 import { createConfigSubscriptionChildMembers } from "./config-subscription-child.js";
-import { createInteractionChildMembers } from "./host-api-interaction-child.js";
-import { createStorageChildMembers } from "./host-api-storage-child.js";
+import {
+  createInteractionChildMembers,
+  createServiceChildMembers,
+  createStorageChildMembers,
+} from "./host-api-child.js";
 import {
   HOSTAPI_PATH_CONTRACTS,
-  type HostApiPath,
-} from "./host-api-path-contracts.js";
-import {
   HOST_API_WIRE_VERSION,
   reconstructWireError,
   type HostApiChannel,
   type HostApiNotification,
+  type HostApiPath,
 } from "./host-api-wire.js";
 import {
   SubscriptionLedger,
   type SubscriptionRelease,
 } from "./subscription-ledger.js";
-import { createServiceChildMembers } from "./host-api-service-child.js";
 
 /**
  * The construction payload, which is `PluginRuntimeContext` minus the two
