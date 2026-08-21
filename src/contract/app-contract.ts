@@ -171,6 +171,15 @@ export const CHANNELS = {
     // Main → renderer only. Carries no data; consumers pull a fresh safe snapshot.
     changed: "lvis:tailnet-sharing:changed",
   },
+  // Local-owner-only Tailnet observer configuration. INTERNAL for the same
+  // reasons as tailnetSharing: `apply` decides whether a listener comes up at
+  // all, which capability key authorizes it, and whether remote control and the
+  // web surface are in scope. The renderer proposes and the host persists —
+  // never to the settings store, which a webpage can reach.
+  tailnetObserver: {
+    snapshot: "lvis:tailnet-observer:snapshot",
+    apply: "lvis:tailnet-observer:apply",
+  },
   // Local-owner-only Telegram private-DM connection administration. These are
   // INTERNAL for the same reasons as tailnetSharing, and additionally because
   // Telegram is an external cloud recipient: connecting is an egress decision
@@ -642,6 +651,9 @@ export const CHANNEL_GESTURE: Record<string, "required" | "none"> = {
   [CHANNELS.tailnetSharing.createCurrentConversationShare]: "required",
   [CHANNELS.tailnetSharing.revokeShare]: "required",
   [CHANNELS.tailnetSharing.revokePairing]: "required",
+  // Enabling the observer, moving its port, or widening its scope is an owner
+  // decision made at this keyboard, exactly like a share.
+  [CHANNELS.tailnetObserver.apply]: "required",
   // Local-owner Telegram connection: same rule. Saving a bot token, starting
   // the outbound connection, minting a pairing code, and sharing the open
   // conversation are each an owner decision made at this keyboard.

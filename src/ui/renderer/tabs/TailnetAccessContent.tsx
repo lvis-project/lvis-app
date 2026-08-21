@@ -17,6 +17,7 @@ import {
   type TailnetSharingSnapshot,
 } from "../../../shared/tailnet-sharing.js";
 import { SettingsSection } from "../components/PageShell.js";
+import { TailnetObserverSection } from "./TailnetObserverSection.js";
 import type { LvisApi } from "../types.js";
 
 export interface TailnetAccessContentProps {
@@ -169,6 +170,11 @@ export function TailnetAccessContent({ api }: TailnetAccessContentProps) {
   return (
     <div className="space-y-6" data-testid="tailnet-access-content">
       <p className="text-sm text-muted-foreground">{t("tailnetAccessTab.pageDescription")}</p>
+
+      {/* Outside the loading and disabled gates below on purpose: this is the
+          control that makes sharing available, so hiding it whenever sharing
+          is unavailable is exactly the dead end it exists to remove. */}
+      <TailnetObserverSection api={api} />
 
       {feedback ? (
         <p
