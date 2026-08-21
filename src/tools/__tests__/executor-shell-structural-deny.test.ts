@@ -19,8 +19,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { ToolExecutor } from "../executor.js";
 import { ToolRegistry } from "../registry.js";
-import { BashTool } from "../bash.js";
-import { PowerShellTool } from "../powershell.js";
+import { BashTool, PowerShellTool } from "../shell-tools.js";
 import { PermissionManager } from "../../permissions/permission-manager.js";
 import { ApprovalGate } from "../../permissions/approval-gate.js";
 import { BashAstValidator } from "../../main/bash-ast-validator.js";

@@ -85,7 +85,7 @@
     "src/main/__tests__/startup-launch.test.ts": 1,
     "src/main/__tests__/telemetry-endpoint-validation.test.ts": 4,
     "src/mcp/__tests__/mcp-governance.test.ts": 12,
-    "src/mcp/__tests__/mcp-manager-config.test.ts": 8,
+    "src/mcp/__tests__/mcp-manager-config.test.ts": 3,
     "src/mcp/__tests__/mcp-manager-disconnect.test.ts": 1,
     "src/mcp/__tests__/mcp-marketplace-install.test.ts": 9,
     "src/mcp/__tests__/mcp-ui-tool-call.test.ts": 1,

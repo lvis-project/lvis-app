@@ -16,13 +16,15 @@ import { getDefaultWorkspaceRoot } from "../main/default-workspace-root.js";
 import { InputClassifier } from "../core/input-classifier.js";
 import { RouteEngine } from "../core/route-engine.js";
 import { ToolRegistry } from "../tools/registry.js";
-import { BashTool } from "../tools/bash.js";
 import { createFileTools } from "../tools/file-tools.js";
-import { PowerShellTool } from "../tools/powershell.js";
 import { createReadToolResultChunkTool } from "../tools/tool-result-chunk.js";
 import { createMemoryWriteTool } from "../tools/memory-write.js";
-import { createBashOutputTool, createBashKillTool,
-} from "../tools/background-shell-tools.js";
+import {
+  BashTool,
+  PowerShellTool,
+  createBashOutputTool,
+  createBashKillTool,
+} from "../tools/shell-tools.js";
 import { BashAstValidator } from "../main/bash-ast-validator.js";
 import { AuditService } from "../main/audit-service.js";
 import { PythonRuntimeBootstrapper } from "../main/python-runtime.js";
