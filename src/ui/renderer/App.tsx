@@ -2,9 +2,36 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
 import { composeOutgoing as composeOutgoingUtil, type ComposedOutgoing } from "./utils/compose.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
-import { AppProviders } from "./AppProviders.js";
-import { AppDialogs } from "./AppDialogs.js";
-import { AppShell } from "./AppShell.js";
+import { TooltipProvider } from "../../components/ui/tooltip.js";
+import { ThemeProvider } from "./theme/index.js";
+import { OverlayContextProvider } from "./context/OverlayContext.js";
+import { CustomTitleBar } from "./components/CustomTitleBar.js";
+import { MainToolbar } from "./MainToolbar.js";
+import { Sidebar } from "./components/Sidebar.js";
+import { BootstrapStatusBanner } from "./components/BootstrapStatusBanner.js";
+import { MarketplaceUpdateBanner } from "./components/MarketplaceUpdateBanner.js";
+import { MarketplaceAnnouncementBanner } from "./components/MarketplaceAnnouncementBanner.js";
+import { DevToolsPanel } from "./components/DevToolsPanel.js";
+import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
+import { PluginUiHostView } from "../../plugin-ui-host.js";
+import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
+import { ChatView } from "./ChatView.js";
+// The away surfaces for an MCP-app card that left its home mount — one singleton
+// each (each renders nothing while no card occupies its slot).
+import { McpAppPipPanel } from "./components/McpAppPipPanel.js";
+import { McpAppFullscreenPanel } from "./components/McpAppFullscreenPanel.js";
+import { MemorySearchPanel } from "./components/MemorySearchPanel.js";
+import { RoutinePanel } from "./components/RoutinePanel.js";
+import { WorkBoardPanel } from "./components/WorkBoardPanel.js";
+import { StarredView } from "./components/StarredView.js";
+import { SettingsInlineView } from "./SettingsInlineView.js";
+import { PageShell } from "./components/PageShell.js";
+import type { PluginViewKey } from "../../shared/view-key.js";
+import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
+import { McpPromptArgsDialog } from "./dialogs/McpPromptArgsDialog.js";
+import { SpotlightTour } from "./components/SpotlightTour.js";
+import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
+import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
 import { ApprovalDock } from "./components/permissions/ApprovalDock.js";
 import type { ApprovalRequest } from "./types.js";
 import type { UserApprovalVerdict } from "../../shared/permissions-events.js";
@@ -33,7 +60,6 @@ import { usePluginViewRouting } from "./hooks/use-plugin-view-routing.js";
 import { useOnboardingTourController } from "./hooks/use-onboarding-tour-controller.js";
 import { usePluginLifecycleRefresh } from "./hooks/use-plugin-lifecycle-refresh.js";
 import { useChatStatusIndicators } from "./hooks/use-chat-status-indicators.js";
-import { MainContent } from "./MainContent.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
 import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
@@ -55,8 +81,6 @@ import type { Attachment } from "./types/attachments.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useWindowFileDropGuard } from "./hooks/use-window-file-drop-guard.js";
-import { useChatActions } from "./hooks/use-chat-actions.js";
-import { useChatContextValue } from "./hooks/use-chat-context-value.js";
 import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
@@ -486,15 +510,77 @@ export function App() {
   }, [refreshSessions, refreshStarred, searchOpen]);
 
   // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
-  const {
-    handleLoadSession, isEntryStarred, handleFork, handleToggleStar,
-    handleAbort, handleGuide, handleFeedback, handleExport, handleImport,
-  } = useChatActions({
-    api, streaming, currentSessionId, entries, entryIndexToHistoryIndex,
-    markLastAssistantInterrupted,
-    applyLoadedSession, truncateToEntry, sessionLoad, sessionFork,
-    starredIsEntry, starredToggle,
-  });
+  // Purely wiring — no new state.
+  const handleLoadSession = useCallback(
+    (sessionId: string) => sessionLoad(sessionId, streaming, applyLoadedSession),
+    [sessionLoad, streaming, applyLoadedSession],
+  );
+
+  const isEntryStarred = useCallback(
+    (entryIdx: number): string | null => starredIsEntry(entryIdx, currentSessionId, entryIndexToHistoryIndex),
+    [starredIsEntry, currentSessionId, entryIndexToHistoryIndex],
+  );
+
+  const handleFork = useCallback(async (entryIdx: number) => {
+    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
+    if (histIdx === undefined) return;
+    await sessionFork(histIdx, entryIdx, truncateToEntry);
+  }, [entryIndexToHistoryIndex, sessionFork, truncateToEntry]);
+
+  const handleToggleStar = useCallback(
+    (entryIdx: number) => starredToggle(entryIdx, entries, currentSessionId, entryIndexToHistoryIndex),
+    [starredToggle, entries, currentSessionId, entryIndexToHistoryIndex],
+  );
+
+  const handleAbort = useCallback(async () => {
+    // chatAbort resolves only after the turn settles as interrupted, so the
+    // badge lands exactly when the stream stops — the initiator marks it, not
+    // a "[중단됨]" literal pushed through the delta stream by the engine.
+    try { await api.chatAbort(); } catch { /* no-op */ }
+    markLastAssistantInterrupted();
+  }, [api, markLastAssistantInterrupted]);
+
+  const handleGuide = useCallback(async (
+    text: string,
+  ): Promise<{ ok: true } | { ok: false; error: string }> => {
+    if (text.trim().length === 0) return { ok: false, error: "empty-text" };
+    try {
+      const result = await api.chatGuide(text);
+      // Main-process handler returns `{ ok: boolean, error?: string }`.
+      // Type-narrow defensively since the IPC boundary is `Promise<unknown>`.
+      if (result && typeof result === "object" && "ok" in result) {
+        const r = result as { ok: boolean; error?: string };
+        if (r.ok) return { ok: true };
+        return { ok: false, error: r.error ?? "unknown-error" };
+      }
+      return { ok: false, error: "invalid-response" };
+    } catch (err) {
+      return { ok: false, error: (err as Error)?.message ?? "ipc-error" };
+    }
+  }, [api]);
+
+  const handleFeedback = useCallback(async (messageIdx: number, rating: "up" | "down", reason?: string) => {
+    if (!api.submitFeedback) return;
+    try { await api.submitFeedback({ sessionId: currentSessionId, messageIndex: messageIdx, rating, reason }); } catch { /* no-op */ }
+  }, [api, currentSessionId]);
+
+  const handleExport = useCallback(async (format: "markdown" | "json") => {
+    try { await api.chatExport(format); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
+  }, [api]);
+
+  // #1500 (E3) — reverse of handleExport. Returns the new sessionId on
+  // success so the caller can load it and refresh the sidebar, matching the
+  // export/import symmetry — import always yields a brand-new session, never
+  // overwrites the current one.
+  const handleImport = useCallback(async (): Promise<string | null> => {
+    try {
+      const result = await api.chatImport();
+      return result.ok ? result.sessionId : null;
+    } catch (err) {
+      console.warn("[lvis] import failed:", (err as Error).message);
+      return null;
+    }
+  }, [api]);
 
   const handleLoadSessionAndRefresh = useCallback(async (sessionId: string) => {
     const loaded = await handleLoadSession(sessionId);
@@ -986,7 +1072,12 @@ export function App() {
   // `effectiveLlmReady` combines the provider-key probe with explicit
   // keyless-compatible provider readiness and a subscription runtime that has
   // explicitly verified chat support.
-  const chatContextValue = useChatContextValue({
+  // Until the persisted runtime selection has loaded, API-vendor defaults are
+  // not a safe authority for a setting that a selected subscription runtime
+  // does not expose. Keep this control fail-closed with send/attachment UX.
+  const chatReasoningAvailable = settingsLoaded && activeSubscriptionRuntime === null;
+  const chatActiveVendor = apiUsageProjectionAvailable ? llmVendor : undefined;
+  const chatContextValue = useMemo<ChatContextValue>(() => ({
     entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
     question, setQuestion, chatEndRef, currentSessionId, hasApiKey: effectiveLlmReady, settingsLoaded, onOpenSettings,
     searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
@@ -1001,14 +1092,27 @@ export function App() {
     subscriptionUnavailableProvider,
     subscriptionPendingProvider,
     attachments, setAttachments, attachmentNCounter,
-    // Until the persisted runtime selection has loaded, API-vendor defaults are
-    // not a safe authority for a setting that a selected subscription runtime
-    // does not expose. Keep this control fail-closed with send/attachment UX.
-    enableThinkingChat, reasoningAvailable: settingsLoaded && activeSubscriptionRuntime === null,
+    enableThinkingChat, reasoningAvailable: chatReasoningAvailable,
     toggleThinking, costEstimate, costBadgeClass,
     activePricing,
-    activeVendor: apiUsageProjectionAvailable ? llmVendor : undefined,
-  });
+    activeVendor: chatActiveVendor,
+  }), [
+    entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
+    question, setQuestion, chatEndRef, currentSessionId,
+    effectiveLlmReady, settingsLoaded, onOpenSettings,
+    searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet,
+    searchIdx, searchHighlight, searchChangeQuery, searchToggleCase,
+    searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
+    contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
+    tpmLimit, tpmPct, isTpmOverflow,
+    rolePresets, activePreset, activePresetId, setActivePresetId,
+    attachments, setAttachments, attachmentNCounter,
+    enableThinkingChat, chatReasoningAvailable, toggleThinking, apiUsageProjectionAvailable,
+    subscriptionRuntimePolicy, subscriptionImageAttachmentProvider,
+    subscriptionFileAttachmentProvider, subscriptionUnavailableProvider,
+    subscriptionPendingProvider,
+    costEstimate, costBadgeClass, activePricing, chatActiveVendor,
+  ]);
 
   // Issue #260 — when a notification toast is clicked, dispatch the click via
   // notifyClick IPC (which restores+focuses the window) and dismiss the
@@ -1040,202 +1144,465 @@ export function App() {
 
   // ─── Render ───────────────────────────────────
   return (
-    <AppProviders
-      api={api}
-      onOpenSession={handleOpenRoutineSession}
-      addFireRef={addFireRef}
-      runningRoutines={runningRoutines}
-    >
-      <AppShell
-        api={api}
-        viewNav={viewNav}
-        appMode={appMode}
-        sidebarCollapsed={sidebarCollapsed}
-        onToggleSidebarCollapse={() => setSidebarCollapsed((v) => !v)}
-        sidebarWidth={sidebarWidth}
-        onSidebarWidthChange={setSidebarWidth}
-        onSidebarWidthCommit={commitSidebarWidth}
-        activeView={activeView}
-        streaming={streaming}
-        hasApiKey={effectiveLlmReady}
-        subscriptionUnavailable={subscriptionUnavailableProvider !== undefined}
-        subscriptionPending={subscriptionPendingProvider !== undefined}
-        subscriptionRuntimePolicy={subscriptionRuntimePolicy}
-        onToggleAppMode={setAppMode}
-        onOpenDevTools={() => setDevToolsOpen((v) => !v)}
-        appUpdate={appUpdate}
-        onSelectView={handleViewSelectWithDoctor}
-        pluginViews={pluginViews}
-        failedPluginCards={failedPluginCards}
-        inactivePluginCards={inactivePluginCards}
-        pluginAuthStatuses={pluginAuthStatuses}
-        onOpenSettings={onOpenSettings}
-        onNewChat={onNewChat}
-        onNewChatForProject={onNewChatForProject}
-        onRefreshProjects={refreshWorkspaceProjects}
-        onProjectError={handleProjectError}
-        workspaceProjects={workspaceProjects}
-        activeProject={activeProject ?? defaultWorkspaceProject}
-        onOpenMarketplace={onOpenMarketplace}
-        marketplaceUrlReady={marketplaceUrlReady}
-        onOpenUnifiedSearch={() => { searchOpenOverlay(); }}
-        currentSessionId={currentSessionId}
-        isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
-        onToggleCurrentSessionStar={() => currentSessionId
-          ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
-          : Promise.resolve()}
-        activeSidebarTab={sidebarActiveTab}
-        onActiveSidebarTabChange={setSidebarActiveTab}
-        isSessionStarred={isSessionStarred}
-        onToggleSessionStar={handleToggleSessionStar}
-        isProjectPinned={isProjectPinned}
-        onToggleProjectPin={toggleProjectPin}
-        onExport={handleExport}
-        onImport={handleImportAndLoad}
-        bootstrapStatus={bootstrapStatus}
-        onDismissBootstrapStatus={dismissBootstrapStatus}
-        onRetryBootstrap={() => void retryBootstrap()}
-        marketplaceUpdates={marketplaceUpdates}
-        onDismissMarketplaceUpdates={dismissMarketplaceUpdates}
-        onSkipMarketplaceUpdates={skipMarketplaceUpdates}
-        onResolveMarketplaceUpdates={resolveMarketplaceUpdates}
-        onUpdatePlugin={installPlugin}
-        marketplaceAnnouncements={marketplaceAnnouncements}
-        onDismissMarketplaceAnnouncement={handleMarketplaceAnnouncementDismiss}
-        fallbackToast={fallbackToast}
-        devToolsOpen={devToolsOpen}
-        onCloseDevTools={() => setDevToolsOpen(false)}
-        searchOpen={searchOpen}
-        searchQuery={searchQuery}
-        searchCase={searchCase}
-        entries={entries}
-        searchMatches={searchMatches}
-        searchIdx={searchIdx}
-        sessions={sessions}
-        starred={starred}
-        onSearchChangeQuery={searchChangeQuery}
-        onSearchToggleCase={searchToggleCase}
-        onSearchNext={searchNext}
-        onSearchPrev={searchPrev}
-        onSearchJumpToMatch={searchJumpToMatch}
-        onSearchOpen={searchOpenOverlay}
-        onSearchClose={searchCloseOverlay}
-        onSearchLoadSession={handleLoadSessionAndRefresh}
-        setActiveView={setActiveView}
-        sidePanelOpen={sidePanelOpen}
-        onToggleSidePanel={handleToggleSidePanel}
-      >
-        {/* Inner ErrorBoundary scoped to MainContent so a single failing
-              plugin (e.g. stale manifest schema mismatch — issue #736) does
-              NOT bring down MainToolbar / Settings page / Marketplace tab.
-              The user must remain able to update / uninstall the broken
-              plugin via Settings, otherwise they are locked out and the only
-              recovery is manually rm-ing ~/.lvis/plugins/<id>/.
-              onReset: refresh plugin state then re-render — for transient
-              throws this avoids the deterministic reload-into-same-crash
-              loop where the bad data is reloaded with the page. */}
-          <ErrorBoundary
-            boundaryName="main-content"
-            fallback={t("app.mainContentErrorFallback")}
-            onReset={() => {
-              // Refresh plugin views/cards in case the failure was caused by
-              // a transient state mismatch. activeView reset to "home" gives
-              // the user a clean baseline to navigate from.
-              void refreshViews();
-              void refreshCards();
-              setActiveView("home");
-            }}
+    /* The composition root's provider stack, outer → inner:
+       ErrorBoundary → ThemeProvider → TooltipProvider → OverlayContextProvider. */
+    <ErrorBoundary fallback={t("app.appErrorFallback")}>
+      <ThemeProvider api={api}>
+        <TooltipProvider>
+          {/* IMPORTANT (render-order coupling): OverlayContextProvider MUST stay
+              INSIDE this stack. It populates `addFireRef.current` DURING ITS
+              RENDER (a synchronous assignment, before any effects fire), so the
+              routine/overlay IPC subscriptions that App owns can call addFire()
+              from outside the React tree. Hoisting it out — or mounting it below
+              its consumers — would leave that ref null when the first IPC event
+              lands. See src/ui/renderer/context/OverlayContext.tsx. */}
+          <OverlayContextProvider
+            onOpenSession={handleOpenRoutineSession}
+            addFireRef={addFireRef}
+            runningRoutines={runningRoutines}
           >
-          <MainContent
-            activeView={activeView}
-            api={api}
-            appMode={appMode}
-            settingsTab={settingsTab}
-            onSettingsTabChange={setSettingsTab}
-            onSettingsSaved={handleInlineSettingsSaved}
-            exactDenyDraft={exactDenyDraft}
-            onExactDenySaved={handleExactDenySaved}
-            onDiscardExactDeny={() => setExactDenyDraft(null)}
-            starred={starred}
-            currentSessionId={currentSessionId}
-            currentSessionKind={currentSessionKind}
-            currentSessionTitle={currentSessionTitle}
-            sessions={sessions}
-            activeProject={activeProject ?? defaultWorkspaceProject}
-            workspaceProjects={workspaceProjects}
-            onNewChatForProject={onNewChatForProject}
-            onRefreshProjects={refreshWorkspaceProjects}
-            onProjectError={handleProjectError}
-            onRunMcpPrompt={handleRunMcpPrompt}
-            refreshStarred={refreshStarred}
-            onActivateHome={handleActivateHome}
-            onJumpToSession={handleLoadSessionAndRefresh}
-            chatContextValue={chatContextValue}
-            onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
-            /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째
-               인자로 전달 — queue-auto inject path 활성. */
-            onEditSave={handleEditSave}
-            onFork={handleFork}
-            onToggleStar={handleToggleStar}
-            onRetryEffort={handleRetryEffort}
-            onContinueFromLastUser={handleContinueFromLastUser}
-            isEntryStarred={isEntryStarred}
-            onAbort={handleAbort}
-            onGuide={handleGuide}
-            onGuideError={(msg) => appendSystemEntry(t("app.guideErrorMessage", { msg }))}
-            onFeedback={handleFeedback}
-            subAgentSpawns={subAgentSpawns}
-            loadedSkills={loadedSkills}
-            hasAskQuestions={askQuestions.length > 0}
-            askQuestions={askQuestions}
-            approvalSentenceInterceptSubmit={interceptApprovalSentence}
-            onResolveAskQuestion={dismissAskQuestion}
-            plugins={pluginEntries}
-            onSelectPlugin={handleViewSelectWithDoctor}
-            onOpenApprovalQueue={() => setDeferredQueueOpen(true)}
-            commandActions={commandActions}
-            commandPopoverOpen={commandPopoverOpen}
-            onCommandPopoverOpenChange={setCommandPopoverOpen}
-            activePluginView={activePluginView ?? null}
-            pluginAuthError={activePluginAuthError}
-            onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
-            onRoutineAcknowledge={handleRoutineAcknowledge}
-            statusBar={{
-              persistent: statusPersistent,
-              visibleToast: statusVisibleToast,
-              pendingCount: statusPendingCount,
-              onToastClick: handleStatusToastClick,
-              onToastDismiss: (toast) => statusRemoveToast(toast.id),
-            }}
-            actionPanelOpen={actionPanelOpen}
-            onAttachmentWarning={handleAttachmentWarning}
-            onActionPanelOpenChange={setActionPanelOpen}
-            sidePanelOpen={sidePanelOpen}
-            onSidePanelOpenChange={setSidePanelOpen}
-          />
-          </ErrorBoundary>
-          <ApprovalDock
-            queue={approvalQueue}
-            proposedChoice={approvalProposedChoice}
-            onDecide={handleApprovalDecide}
-            onOpenPermanentDeny={handleOpenPermanentDeny}
-            interactionLocked={exactDenyDraft !== null}
-          />
-      </AppShell>
+            {/* `relative` makes THIS full-height shell column the positioning
+                context for the floating-card Sidebar, so the card's `top-0` reaches
+                the window top — extending UP into the traffic-light band and
+                reclaiming that vertical space on the left. */}
+            <div className="relative flex h-screen flex-col overflow-hidden">
+              {/* Single top band — window controls + the app toolbar cluster live
+                  together here. The toolbar content is passed as children so it
+                  renders IN the band (no separate toolbar row below it). */}
+              <CustomTitleBar>
+                <MainToolbar
+                  viewNav={viewNav}
+                  // The floating sidebar card extends UP into this band, so the
+                  // toolbar's own leading edge is behind it. Reserve exactly what
+                  // <main> reserves below, from the same two values, so the path
+                  // starts where the card ends instead of rendering underneath it.
+                  leadClearance={sidebarCollapsed ? 64 : sidebarWidth + 8}
+                  streaming={streaming}
+                  hasApiKey={effectiveLlmReady}
+                  appMode={appMode}
+                  onToggleAppMode={setAppMode}
+                  sidePanelOpen={sidePanelOpen}
+                  onToggleSidePanel={handleToggleSidePanel}
+                  onOpenDevTools={() => setDevToolsOpen((v) => !v)}
+                  appUpdateState={appUpdate.state}
+                  appUpdateInFlight={appUpdate.inFlight}
+                  onDownloadAppUpdate={appUpdate.download}
+                  onInstallAppUpdate={appUpdate.install}
+                  onSkipAppUpdate={appUpdate.skip}
+                />
+              </CustomTitleBar>
+              {/* The floating-card Sidebar is anchored against the full-height shell
+                  column above (NOT this content row) so its `top-0` spans up into the
+                  band. The content `<main>` carries left padding equal to the card
+                  width + insets so the rail never occludes the canvas. */}
+              <Sidebar
+                activeView={activeView}
+                onSelect={handleViewSelectWithDoctor}
+                pluginViews={pluginViews}
+                failedPluginCards={failedPluginCards}
+                inactivePluginCards={inactivePluginCards}
+                pluginAuthStatuses={pluginAuthStatuses}
+                sessions={sessions}
+                currentSessionId={currentSessionId}
+                onLoadSession={async (sessionId) => {
+                  const loaded = await handleLoadSessionAndRefresh(sessionId);
+                  if (loaded !== false) setActiveView("home");
+                  return loaded;
+                }}
+                hasApiKey={effectiveLlmReady}
+                subscriptionUnavailable={subscriptionUnavailableProvider !== undefined}
+                subscriptionPending={subscriptionPendingProvider !== undefined}
+                subscriptionRuntimePolicy={subscriptionRuntimePolicy}
+                onOpenSettings={() => onOpenSettings()}
+                onNewChat={onNewChat}
+                onNewChatForProject={onNewChatForProject}
+                onRefreshProjects={refreshWorkspaceProjects}
+                onProjectError={handleProjectError}
+                projects={workspaceProjects}
+                streaming={streaming}
+                onOpenMarketplace={onOpenMarketplace}
+                marketplaceUrlReady={marketplaceUrlReady}
+                collapsed={sidebarCollapsed}
+                onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+                width={sidebarWidth}
+                onWidthChange={setSidebarWidth}
+                onWidthCommit={commitSidebarWidth}
+                onOpenUnifiedSearch={() => { searchOpenOverlay(); }}
+                isCurrentSessionStarred={Boolean(currentSessionId && isSessionStarred(currentSessionId))}
+                onToggleCurrentSessionStar={() => currentSessionId
+                  ? handleToggleSessionStar(currentSessionId, sessions.find((s) => s.id === currentSessionId)?.title)
+                  : Promise.resolve()}
+                activeSidebarTab={sidebarActiveTab}
+                onActiveSidebarTabChange={setSidebarActiveTab}
+                isSessionStarred={isSessionStarred}
+                onToggleSessionStar={handleToggleSessionStar}
+                isProjectPinned={isProjectPinned}
+                onToggleProjectPin={toggleProjectPin}
+                onExport={handleExport}
+                onImport={handleImportAndLoad}
+              />
+              <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">
+                <main
+                  className={`relative flex min-h-0 min-w-0 flex-1 flex-col bg-background transition-[padding] duration-200 ease-out motion-reduce:transition-none ${
+                    sidebarCollapsed ? "pl-[4rem]" : ""
+                  }`}
+                  // Expanded: reserve the sidebar card width + the ~8px right gap so the
+                  // floating rail never occludes the canvas. Collapsed uses the fixed
+                  // pl-[4rem] class above. Inline style so the durable, user-resized
+                  // width (SystemSettings.sidebarWidth) drives the reserve directly —
+                  // during a drag this tracks the live width for a seamless resize.
+                  style={sidebarCollapsed ? undefined : { paddingLeft: `${sidebarWidth + 8}px` }}
+                >
+                  {/* Floating notification stack — update/announcement banners are an
+                      OVERLAY, not in-flow content. They float over the canvas anchored
+                      top-RIGHT so they never push the routed content or the composer
+                      down. The wrapper is pointer-events-none (clicks pass through the
+                      gaps); each banner card re-enables pointer-events so
+                      Update/dismiss still work. The left edge is inset by the sidebar
+                      width (`left-[4.5rem]` / `left-[15rem]`, tracking <main>'s
+                      collapsed/expanded padding) so a wide banner (max-w-md) in a
+                      narrow window can never slide UNDER the floating sidebar card —
+                      absolute positioning resolves against main's padding box, which
+                      starts at the window edge beneath the rail. Multiple DISTINCT
+                      banners (bootstrap / update / announcement) stack vertically; each
+                      component collapses its own N items into a single counted card, so
+                      the stack height stays bounded. */}
+                  <div
+                    className={`pointer-events-none absolute right-2 top-2 z-50 ml-auto flex max-w-md flex-col gap-2 transition-[left] duration-200 ease-out motion-reduce:transition-none [&>*]:pointer-events-auto [&>*]:m-0 ${
+                      sidebarCollapsed ? "left-[4.5rem]" : ""
+                    }`}
+                    // Expanded: inset the banner stack past the resized sidebar card so a
+                    // wide banner can never slide under the floating rail. Tracks
+                    // sidebarWidth (+~16px gap) to stay just right of the card edge.
+                    style={sidebarCollapsed ? undefined : { left: `${sidebarWidth + 16}px` }}
+                  >
+                    <BootstrapStatusBanner status={bootstrapStatus} onDismiss={dismissBootstrapStatus} onRetry={() => void retryBootstrap()} />
+                    <MarketplaceUpdateBanner
+                      updates={marketplaceUpdates}
+                      onDismiss={dismissMarketplaceUpdates}
+                      onSkip={skipMarketplaceUpdates}
+                      onResolved={resolveMarketplaceUpdates}
+                      onUpdate={installPlugin}
+                    />
+                    <MarketplaceAnnouncementBanner
+                      announcements={marketplaceAnnouncements}
+                      onDismiss={handleMarketplaceAnnouncementDismiss}
+                    />
+                  </div>
+                  {fallbackToast && (
+                    <div className="bg-warning text-warning-foreground text-xs px-4 py-2 border-b border-warning">
+                      {fallbackToast}
+                    </div>
+                  )}
+                  <DevToolsPanel
+                    api={api}
+                    open={devToolsOpen}
+                    onClose={() => setDevToolsOpen(false)}
+                  />
+                  {searchOpen && (
+                    <UnifiedSearchPanel
+                      api={api}
+                      open={searchOpen}
+                      query={searchQuery}
+                      caseSensitive={searchCase}
+                      entries={entries}
+                      conversationMatches={searchMatches}
+                      currentConversationMatch={searchIdx}
+                      sessions={sessions}
+                      project={activeProject ?? defaultWorkspaceProject}
+                      starred={starred}
+                      onChangeQuery={searchChangeQuery}
+                      onToggleCase={searchToggleCase}
+                      onNextConversationMatch={searchNext}
+                      onPrevConversationMatch={searchPrev}
+                      onJumpToConversationMatch={(matchIndex) => {
+                        setActiveView("home");
+                        searchJumpToMatch(matchIndex);
+                      }}
+                      onOpen={searchOpenOverlay}
+                      onClose={searchCloseOverlay}
+                      onLoadSession={async (sessionId) => {
+                        const loaded = await handleLoadSessionAndRefresh(sessionId);
+                        if (loaded !== false) setActiveView("home");
+                        return loaded;
+                      }}
+                      onOpenMemoryView={() => {
+                        setActiveView("memory");
+                        searchCloseOverlay();
+                      }}
+                      onOpenRoutinesView={() => {
+                        setActiveView("routines");
+                        searchCloseOverlay();
+                      }}
+                    />
+                  )}
 
-      <AppDialogs
-        api={api}
-        deferredQueueOpen={deferredQueueOpen}
-        onDeferredQueueOpenChange={setDeferredQueueOpen}
-        tourCompleted={tourCompleted}
-        onTourComplete={onTourComplete}
-        onTourDismiss={onTourDismiss}
-        pluginCards={pluginCards}
-        onComposerSeedText={setQuestion}
-        mcpPromptAwaitingArgs={mcpPromptAwaitingArgs}
-        onMcpPromptArgsCancel={() => setMcpPromptAwaitingArgs(null)}
-        onMcpPromptArgsSubmit={handleMcpPromptArgsSubmit}
-      />
-    </AppProviders>
+                  {/* Routed content and route-independent foreground surfaces share a
+                      content-box positioning context. Floating surfaces can anchor to
+                      this canvas without ignoring <main>'s sidebar padding or taking
+                      flex space away from the active route. */}
+                  <div
+                    className="relative isolate flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+                    data-testid="route-canvas"
+                  >
+                    {/* Inner ErrorBoundary scoped to the routed main content so a
+                        single failing plugin (e.g. stale manifest schema mismatch —
+                        issue #736) does NOT bring down MainToolbar / Settings page /
+                        Marketplace tab. The user must remain able to update /
+                        uninstall the broken plugin via Settings, otherwise they are
+                        locked out and the only recovery is manually rm-ing
+                        ~/.lvis/plugins/<id>/.
+                        onReset: refresh plugin state then re-render — for transient
+                        throws this avoids the deterministic reload-into-same-crash
+                        loop where the bad data is reloaded with the page. */}
+                    <ErrorBoundary
+                      boundaryName="main-content"
+                      fallback={t("app.mainContentErrorFallback")}
+                      onReset={() => {
+                        // Refresh plugin views/cards in case the failure was caused by
+                        // a transient state mismatch. activeView reset to "home" gives
+                        // the user a clean baseline to navigate from.
+                        void refreshViews();
+                        void refreshCards();
+                        setActiveView("home");
+                      }}
+                    >
+                      {/* Renders the active main-pane content. One branch per view
+                          keeps the router readable; every branch wraps its panel in
+                          the same PageShell (`main-pane-shell`). */}
+                      {(() => {
+                        if (activeView === "memory") {
+                          return (
+                            <PageShell
+                              padded
+                              maxWidth="6xl"
+                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
+                              data-testid="main-pane-shell"
+                            >
+                              <MemorySearchPanel
+                                api={api}
+                                project={activeProject ?? defaultWorkspaceProject}
+                                onOpenSession={async (sessionId) => {
+                                  const loaded = await handleLoadSessionAndRefresh(sessionId);
+                                  if (loaded !== false) handleActivateHome();
+                                  return loaded;
+                                }}
+                              />
+                            </PageShell>
+                          );
+                        }
+
+                        if (activeView === "insights" || activeView === "starred") {
+                          return (
+                            <PageShell
+                              padded
+                              maxWidth="6xl"
+                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
+                              data-testid="main-pane-shell"
+                            >
+                              <StarredView
+                                api={api}
+                                starred={starred}
+                                sessions={sessions}
+                                workspaceProjects={workspaceProjects}
+                                currentSessionId={currentSessionId}
+                                refreshStarred={refreshStarred}
+                                onJumpToSession={handleLoadSessionAndRefresh}
+                                onActivateHome={handleActivateHome}
+                              />
+                            </PageShell>
+                          );
+                        }
+
+                        if (activeView === "routines") {
+                          return (
+                            <PageShell
+                              padded
+                              maxWidth="6xl"
+                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
+                              data-testid="main-pane-shell"
+                            >
+                              <RoutinePanel
+                                api={api}
+                                onOpenSession={(sessionId) => {
+                                  void (async () => {
+                                    const loaded = await handleLoadSessionAndRefresh(sessionId);
+                                    if (loaded !== false) handleActivateHome();
+                                  })();
+                                }}
+                              />
+                            </PageShell>
+                          );
+                        }
+
+                        if (activeView === "settings") {
+                          return (
+                            <PageShell
+                              padded={false}
+                              maxWidth="none"
+                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
+                              data-testid="main-pane-shell"
+                            >
+                              {/* Settings renders inline in EVERY appMode; there is no
+                                  detached settings window on this path. */}
+                              <SettingsInlineView
+                                api={api}
+                                initialTab={settingsTab}
+                                onSaved={handleInlineSettingsSaved}
+                                onTabChange={setSettingsTab}
+                                exactDenyDraft={exactDenyDraft ?? null}
+                                onExactDenySaved={handleExactDenySaved ?? (() => undefined)}
+                                onDiscardExactDeny={() => setExactDenyDraft(null)}
+                              />
+                            </PageShell>
+                          );
+                        }
+
+                        if (activeView === "work-board") {
+                          return (
+                            <PageShell
+                              padded
+                              maxWidth="6xl"
+                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
+                              data-testid="main-pane-shell"
+                            >
+                              <WorkBoardPanel api={api} project={activeProject ?? defaultWorkspaceProject} />
+                            </PageShell>
+                          );
+                        }
+
+                        if (activeView === "home") {
+                          return (
+                            <PageShell
+                              padded={false}
+                              maxWidth="none"
+                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
+                              data-testid="main-pane-shell"
+                            >
+                              <ChatContextProvider value={chatContextValue}>
+                                {/* The away surfaces for an MCP-app card that left its home
+                                    mount — one singleton each (each renders nothing while no
+                                    card occupies its slot). Mounted once here rather than
+                                    per-transcript-card, matching the slots' own
+                                    single-occupant design. */}
+                                <McpAppPipPanel />
+                                <McpAppFullscreenPanel />
+                                {/* ChatView is the single chat renderer (issue #547). */}
+                                <ChatView
+                                  api={api}
+                                  onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
+                                  /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째
+                                     인자로 전달 — queue-auto inject path 활성. */
+                                  onRunMcpPrompt={handleRunMcpPrompt}
+                                  onEditSave={handleEditSave}
+                                  onFork={handleFork}
+                                  onToggleStar={handleToggleStar}
+                                  onRetryEffort={handleRetryEffort}
+                                  onContinueFromLastUser={handleContinueFromLastUser}
+                                  isEntryStarred={isEntryStarred}
+                                  onAbort={handleAbort}
+                                  onGuide={handleGuide}
+                                  onGuideError={(msg) => appendSystemEntry(t("app.guideErrorMessage", { msg }))}
+                                  onFeedback={handleFeedback}
+                                  subAgentSpawns={subAgentSpawns}
+                                  loadedSkills={loadedSkills}
+                                  hasAskQuestions={askQuestions.length > 0}
+                                  askQuestions={askQuestions}
+                                  onResolveAskQuestion={dismissAskQuestion}
+                                  approvalSentenceInterceptSubmit={interceptApprovalSentence}
+                                  plugins={pluginEntries}
+                                  onSelectPlugin={handleViewSelectWithDoctor}
+                                  appMode={appMode}
+                                  onOpenApprovalQueue={() => setDeferredQueueOpen(true)}
+                                  currentSessionKind={currentSessionKind}
+                                  currentSessionTitle={currentSessionTitle}
+                                  onLoadSession={handleLoadSessionAndRefresh}
+                                  commandActions={commandActions}
+                                  commandPopoverOpen={commandPopoverOpen}
+                                  onCommandPopoverOpenChange={setCommandPopoverOpen}
+                                  onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
+                                  onRoutineAcknowledge={handleRoutineAcknowledge}
+                                  statusBar={{
+                                    persistent: statusPersistent,
+                                    visibleToast: statusVisibleToast,
+                                    pendingCount: statusPendingCount,
+                                    onToastClick: handleStatusToastClick,
+                                    onToastDismiss: (toast) => statusRemoveToast(toast.id),
+                                  }}
+                                  onAttachmentWarning={handleAttachmentWarning}
+                                  actionPanelOpen={actionPanelOpen}
+                                  onActionPanelOpenChange={setActionPanelOpen}
+                                  sidePanelOpen={sidePanelOpen}
+                                  onSidePanelOpenChange={setSidePanelOpen}
+                                  blogLayout={appMode === "work"}
+                                  activeProject={activeProject ?? defaultWorkspaceProject}
+                                  workspaceProjects={workspaceProjects}
+                                  onNewChatForProject={onNewChatForProject}
+                                  onRefreshProjects={refreshWorkspaceProjects}
+                                  onProjectError={handleProjectError}
+                                />
+                              </ChatContextProvider>
+                            </PageShell>
+                          );
+                        }
+
+                        // Everything above narrowed away an inline BUILT-IN key, so what is
+                        // left is a plugin view — proven, not assumed. The annotation is the
+                        // proof: add a built-in to `BUILTIN_VIEWS` with `inline: true` and
+                        // forget a branch here, and this line stops compiling. That is what
+                        // replaced the old bare fallback, which rendered ANY unrecognized
+                        // string as a plugin view and so reported a misspelled destination
+                        // as a missing plugin.
+                        const pluginKey: PluginViewKey = activeView;
+                        void pluginKey;
+                        return (
+                          <PluginUiHostView
+                            view={activePluginView ?? null}
+                            authError={activePluginAuthError ?? null}
+                          />
+                        );
+                      })()}
+                    </ErrorBoundary>
+                    <ApprovalDock
+                      queue={approvalQueue}
+                      proposedChoice={approvalProposedChoice}
+                      onDecide={handleApprovalDecide}
+                      onOpenPermanentDeny={handleOpenPermanentDeny}
+                      interactionLocked={exactDenyDraft !== null}
+                    />
+                  </div>
+                  {/* StatusBar notifications render inside ChatView, directly above
+                      the composer. The composer's own status sub-row keeps showing
+                      the ring / permission / model cells. The 도구 활동 (Tool Activity)
+                      panel is now constructed inside ChatView (controlled via
+                      `actionPanelOpen` / `onActionPanelOpenChange`, work-mode only) so
+                      its open-actions reach the workspace store, anchored to the chat
+                      column so it coexists with the right-docked ChatSidePanel. */}
+                </main>
+              </div>
+            </div>
+
+            {/* App-level dialogs that remain available after removing setup flows. */}
+            <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
+            <McpPromptArgsDialog
+              onCancel={() => setMcpPromptAwaitingArgs(null)}
+              onSubmit={handleMcpPromptArgsSubmit}
+              prompt={mcpPromptAwaitingArgs}
+            />
+            <SpotlightTour
+              api={api}
+              onComplete={onTourComplete}
+              onDismiss={onTourDismiss}
+            />
+            <PostTourFirstTask
+              onPrefillComposer={setQuestion}
+              pluginCards={pluginCards}
+              tourCompleted={tourCompleted}
+            />
+            <DevConsoleToggle />
+          </OverlayContextProvider>
+        </TooltipProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
   );
 }
