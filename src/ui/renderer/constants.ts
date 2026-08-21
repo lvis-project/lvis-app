@@ -83,7 +83,7 @@ const CORE_VENDOR_UI: Record<Exclude<LLMVendor, OpenAICompatiblePresetVendor>, V
     get label() { return t("constants.vendorOpenAiCompatibleLabel"); },
     get placeholder() { return t("constants.vendorOpenAiCompatiblePlaceholder"); },
     needsBaseUrl: true,
-    baseUrlPlaceholder: "http://10.231.108.187:8001/v1",
+    baseUrlPlaceholder: "http://<host>:8001/v1",
   },
 };
 

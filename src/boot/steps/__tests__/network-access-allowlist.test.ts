@@ -25,7 +25,7 @@ describe("networkAccess deny-by-default egress allow-list", () => {
   it("allows a declared Azure OpenAI resource via dot-boundary suffix match", () => {
     const allow = ["openai.azure.com", "api.openai.com"];
     expect(
-      egressAllowed(allow, "https://aif-swc-axpg-hq-hckt19.openai.azure.com/openai/deployments/gpt-4o-transcribe/audio/transcriptions"),
+      egressAllowed(allow, "https://aif-example.openai.azure.com/openai/deployments/gpt-4o-transcribe/audio/transcriptions"),
     ).toBe(true);
     expect(egressAllowed(allow, "https://api.openai.com/v1/audio/transcriptions")).toBe(true);
   });

@@ -24,8 +24,10 @@ name: Naming Gate (process-metadata + de-identification)
 #    시스템명, 사내 호스트명이 새로 추가되지 못하도록 차단한다. 사내 구현은
 #    private 플러그인 저장소에 남는다는 경계가 이미 설계로 존재하며, 공개
 #    호스트 저장소에 사내 식별자가 들어오면 그 경계가 무의미해진다. 패턴
-#    목록은 이 job 안에만 산다 — `AGENTS.md` 가 그 literal 을 되풀이하면
-#    규칙이 지우려는 것을 바로 그 문서가 다시 게시하게 된다.
+#    목록은 `DEIDENT_PATTERNS` / `DEIDENT_FILENAME_PATTERN` secret 에 있다 —
+#    `AGENTS.md` 가 그 literal 을 되풀이하면 규칙이 지우려는 것을 바로 그
+#    문서가 다시 게시하게 되고, 이 워크플로 파일 자체도 PUBLIC 이므로 여기에
+#    적어두는 것도 같은 게시다. 목록이 비어 오면 통과가 아니라 실패다.
 #
 # 3. home-path-gate — 역시 PUBLIC 저장소 이슈지만 대상이 다르다. 절대 홈
 #    경로(`/Users/<계정>`, `/home/<계정>`, `C:\Users\<계정>`, 그리고 agent
@@ -109,6 +111,9 @@ jobs:
           cat /tmp/deident-changed.txt
 
       - name: Grep diff for employer-identifying content
+        env:
+          DEIDENT_PATTERNS: ${{ secrets.DEIDENT_PATTERNS }}
+          DEIDENT_FILENAME_PATTERN: ${{ secrets.DEIDENT_FILENAME_PATTERN }}
         run: |
           base_sha="${{ steps.diff.outputs.base_sha }}"
           violations=0
@@ -118,32 +123,31 @@ jobs:
             exit 0
           fi
 
-          # Every pattern matches a WHOLE identifier or a real hostname, never a
-          # bare substring. `lg` alone is deliberately absent: Tailwind emits it
-          # constantly (`rounded-lg`, `text-lg`, `lg:col-span-3`) and it also sits
-          # inside ordinary words (`bulge`, `divulge`). The brand pattern requires
-          # the full three-letter token delimited by non-alphanumerics, and the
-          # bare-`LG` pattern is upper-case only, so no lower-case Tailwind class
-          # can reach either of them.
+          # The pattern list is the one thing this gate cannot carry in the open:
+          # spelling out what must never be published publishes it. It lives in
+          # the DEIDENT_PATTERNS secret, one POSIX ERE per line, and the file
+          # pass below reads DEIDENT_FILENAME_PATTERN from the same place.
           #
+          # Secrets are not handed to workflows triggered from a fork, so the
+          # list can legitimately arrive empty — and an empty list matches
+          # nothing, which is indistinguishable from a clean diff. That is the
+          # failure this gate exists to prevent, so an empty list is an error,
+          # never a pass.
+          if [ -z "${DEIDENT_PATTERNS:-}" ] || [ -z "${DEIDENT_FILENAME_PATTERN:-}" ]; then
+            echo "::error::pattern list unavailable (fork PR, or the secret is unset) — gate cannot verify this diff"
+            exit 1
+          fi
+          mapfile -t patterns <<< "$DEIDENT_PATTERNS"
+
           # POSIX ERE only — no `-P`. PCRE is not available in every grep build,
           # and a grep that rejects its own flag exits non-zero, which an
           # `if grep ...` would read as "no match" and let the PR through.
-          # Word edges are spelled out as `[^A-Za-z0-9]` rather than `\b` for the
-          # same reason.
+          # Word edges must be spelled out as `[^A-Za-z0-9]` rather than `\b` for
+          # the same reason, and every pattern must match a WHOLE identifier or a
+          # real hostname rather than a bare substring.
           #
           # Text patterns are applied to ADDED lines only, on text files only.
           # Binary additions (screenshots) are covered by the filename pass below.
-          patterns=(
-            '(^|[^A-Za-z0-9])[Ll][Gg][Ee]([^A-Za-z0-9]|$)'
-            '(^|[^A-Za-z0-9])LG([^A-Za-z0-9]|$)'
-            'LG *전자'
-            '[Ll][Gg][ -]?[Ee]lectronics'
-            '[Ll][Gg]enie'
-            '(^|[^A-Za-z0-9])the HR system([^A-Za-z0-9]|$)'
-            'portal-sso'
-            '포털'
-          )
 
           if grep -E '\.(ts|tsx|js|mjs|cjs|py|md|json|ya?ml|sh|txt|html|css)$|Dockerfile$' \
             /tmp/deident-changed.txt > /tmp/deident-text.txt
@@ -185,7 +189,7 @@ jobs:
           while IFS= read -r file; do
             [ -z "$file" ] && continue
             base=$(basename "$file")
-            if echo "$base" | grep -qE '(^|[^A-Za-z0-9])[Ll][Gg][Ee]([^A-Za-z0-9]|$)|[Ll][Gg]enie|포털'
+            if echo "$base" | grep -qE "$DEIDENT_FILENAME_PATTERN"
             then
               echo "::error file=$file::employer-identifying filename"
               violations=$((violations + 1))
