@@ -20,8 +20,8 @@ import {
   installReceiptPath,
   writeInstallReceipt,
 } from "../plugin-install-receipt.js";
-import { preflightPluginLoadPlan } from "../runtime/runtime-preflight.js";
-import { verifyPluginIntegrity } from "../runtime/runtime-integrity.js";
+import { preflightPluginLoadPlan } from "../runtime/index.js";
+import { verifyPluginIntegrity } from "../runtime/index.js";
 import type { PluginManifest } from "../types.js";
 
 const PLUGIN_ID = "lvis-plugin-integrity-fixture";

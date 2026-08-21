@@ -3,7 +3,7 @@
  *
  * Mirrors `whitelist-bootstrap.ts` structurally. Must run BEFORE plugins are
  * loaded (`startPlugins()`/`pluginRuntime.startAll()`) so the LOAD-boundary
- * gate (`markRevoked` in `plugins/runtime/runtime-state.ts`) observes a
+ * gate (`markRevoked` in `plugins/runtime/index.ts`) observes a
  * populated registry on the very first boot pass — same ordering
  * requirement as the whitelist, for the same reason.
  *
