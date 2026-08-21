@@ -22,8 +22,8 @@ describe("insights project group-by", () => {
     // now a persisted projectName). Both of its conversations must land in one
     // named group — never the "프로젝트 없음" fallback bucket.
     const sessions: SessionSummary[] = [
-      session({ id: "a", projectRoot: "C:\\Users\\ikcha\\.lvis\\workspace", projectName: "default", modifiedAt: "2026-07-04T02:00:00.000Z" }),
-      session({ id: "b", projectRoot: "C:\\Users\\ikcha\\.lvis\\workspace", projectName: "default", modifiedAt: "2026-07-04T01:00:00.000Z" }),
+      session({ id: "a", projectRoot: "C:\\Users\\example\\.lvis\\workspace", projectName: "default", modifiedAt: "2026-07-04T02:00:00.000Z" }),
+      session({ id: "b", projectRoot: "C:\\Users\\example\\.lvis\\workspace", projectName: "default", modifiedAt: "2026-07-04T01:00:00.000Z" }),
     ];
 
     const groups = groupSessionsByProject(sessions, "프로젝트 없음");

@@ -145,10 +145,10 @@ describe("#811 m2 — UserPromptSubmit (BLOCKING) dispatch", () => {
     const m = new ScriptHookManager();
     m.setTrustedRegistry([], [upsEntry(["node", ECHO])]);
     const out = await m.runUserPromptSubmit("s1", "user-keyboard", {
-      inputText: "email me at ken@lvis.example.com please",
+      inputText: "email me at owner@lvis.example.com please",
     });
     expect(out.results[0].reason).toContain("[REDACTED:EMAIL]");
-    expect(out.results[0].reason).not.toContain("ken@lvis.example.com");
+    expect(out.results[0].reason).not.toContain("owner@lvis.example.com");
   });
 
   it.skipIf(!HAS_NODE)("the observe-only runLifecycleEvent REFUSES the blocking event (misroute guard, fail-closed)", async () => {

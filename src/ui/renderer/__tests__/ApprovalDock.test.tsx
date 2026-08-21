@@ -656,8 +656,8 @@ describe("ApprovalDock", () => {
           args: { command: "Get-ChildItem", cwd: "stale-from-args" },
           reviewerVerdict: { level: "medium", reason: "shell unclassified" },
           evaluationContext: makeEvaluationContext({
-            executionCwd: "C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app",
-            allowedDirectories: ["C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app"],
+            executionCwd: "C:\\Users\\example\\workspace\\lvis-project\\lvis-app",
+            allowedDirectories: ["C:\\Users\\example\\workspace\\lvis-project\\lvis-app"],
             targetFilePaths: [],
           }),
         })]}
@@ -669,7 +669,7 @@ describe("ApprovalDock", () => {
       expect(document.body.textContent).toContain("검증 환경 / 샌드박스 평가");
       expect(document.body.textContent).toContain("permission-evaluation-context/v1");
       expect(document.body.textContent).toContain("permission-reviewer-framework/v1");
-      expect(document.body.textContent).toContain("C:\\Users\\ikcha\\workspace\\lvis-project\\lvis-app");
+      expect(document.body.textContent).toContain("C:\\Users\\example\\workspace\\lvis-project\\lvis-app");
     });
   });
 

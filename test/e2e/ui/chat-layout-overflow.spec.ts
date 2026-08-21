@@ -11,9 +11,9 @@ const REPO_ROOT = resolve(HERE, "../../..");
 const MAIN_ENTRY = resolve(REPO_ROOT, "dist/src/main/main.js");
 
 const LONG_ASSISTANT =
-  '먼저 ken님의 “오늘(2026-05-06 KST)” 기준 할 일/마감 항목을 찾기 위해 ' +
+  '먼저 mia님의 “오늘(2026-05-06 KST)” 기준 할 일/마감 항목을 찾기 위해 ' +
   '`{"id":"todo_session_write","arguments":{"steps":[{"title":"개인 작업 스냅샷 확인","status":"pending"},{"title":"승인 상태 확인","status":"in_progress"}]}}` ' +
-  "이제 ken님의 개인 작업 스냅샷을 맞춰 다시 시도하겠습니다. " +
+  "이제 mia님의 개인 작업 스냅샷을 맞춰 다시 시도하겠습니다. " +
   '`tool {"tool":"agent_hub_my_work_snapshot","arguments":{"includeDone":false,"long_unbroken_key":"agent_hub_list_approval_requests_agent_hub_list_inbox_agent_hub_my_work_snapshot"}}` ' +
   "승인 요청하신 도구 결과가 반환되지 않아도 레이아웃은 오른쪽으로 밀려나면 안 됩니다.";
 
@@ -66,7 +66,7 @@ test.describe("chat layout overflow", () => {
       [
         JSON.stringify({
           role: "user",
-          content: "사용자 ken의 오늘 할 일과 agent_hub_list_approval_requests 상태를 확인해줘.",
+          content: "사용자 mia의 오늘 할 일과 agent_hub_list_approval_requests 상태를 확인해줘.",
         }),
         JSON.stringify({
           role: "assistant",
@@ -77,7 +77,7 @@ test.describe("chat layout overflow", () => {
               id: "t1",
               name: "agent_hub_list_approval_requests",
               input: {
-                query: "사용자 ken의 오늘 승인 요청 상태",
+                query: "사용자 mia의 오늘 승인 요청 상태",
                 long_unbroken_key: LONG_IDENTIFIER,
               },
             },

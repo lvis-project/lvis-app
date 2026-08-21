@@ -12,7 +12,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { App } from "../App.js";
 import { makeMockLvisApi, makeMockLvisNamespace } from "../../../../test/renderer/mock-lvis-api.js";
 
-const DEFAULT_ROOT = "C:\\Users\\ikcha\\.lvis\\workspace";
+const DEFAULT_ROOT = "C:\\Users\\example\\.lvis\\workspace";
 const ADDED_ROOT = "C:\\work\\beta";
 const ROOTS_AFTER_ADD = [
   { path: DEFAULT_ROOT, isDefault: true },

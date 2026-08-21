@@ -381,11 +381,11 @@ describe("sanitizeAllowedDirectories", () => {
   });
 
   it.runIf(process.platform === "win32")("warns for Windows backslash adjacency segments", () => {
-    const git = validateDirectoryAddition("C:\\Users\\ken\\work\\proj\\.git");
+    const git = validateDirectoryAddition("C:\\Users\\example\\work\\proj\\.git");
     expect(git.ok).toBe(true);
     if (git.ok) expect(git.adjacencyWarnings.some((w) => w.includes(".git"))).toBe(true);
 
-    const cache = validateDirectoryAddition("C:\\Users\\ken\\work\\proj\\node_modules\\.cache");
+    const cache = validateDirectoryAddition("C:\\Users\\example\\work\\proj\\node_modules\\.cache");
     expect(cache.ok).toBe(true);
     if (cache.ok) expect(cache.adjacencyWarnings.some((w) => w.includes("node_modules"))).toBe(true);
   });

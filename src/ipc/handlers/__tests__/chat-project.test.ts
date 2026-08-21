@@ -22,16 +22,16 @@ describe("chat project payloads", () => {
   });
 
   it("defaults unscoped new chats to the default project", () => {
-    expect(resolveChatNewProjectPayload(undefined, "C:\\Users\\ikcha\\workspace")).toEqual({
-      projectRoot: "C:\\Users\\ikcha\\workspace",
+    expect(resolveChatNewProjectPayload(undefined, "C:\\Users\\example\\workspace")).toEqual({
+      projectRoot: "C:\\Users\\example\\workspace",
       projectName: "default",
     });
-    expect(resolveChatNewProjectPayload({ projectRoot: "  " }, "C:\\Users\\ikcha\\workspace")).toEqual({
-      projectRoot: "C:\\Users\\ikcha\\workspace",
+    expect(resolveChatNewProjectPayload({ projectRoot: "  " }, "C:\\Users\\example\\workspace")).toEqual({
+      projectRoot: "C:\\Users\\example\\workspace",
       projectName: "default",
     });
-    expect(resolveChatNewProjectPayload({ projectName: "loose-name" }, "C:\\Users\\ikcha\\workspace")).toEqual({
-      projectRoot: "C:\\Users\\ikcha\\workspace",
+    expect(resolveChatNewProjectPayload({ projectName: "loose-name" }, "C:\\Users\\example\\workspace")).toEqual({
+      projectRoot: "C:\\Users\\example\\workspace",
       projectName: "default",
     });
   });
@@ -40,7 +40,7 @@ describe("chat project payloads", () => {
     expect(resolveChatNewProjectPayload({
       projectRoot: "C:\\workspace\\beta",
       projectName: "beta",
-    }, "C:\\Users\\ikcha\\workspace")).toEqual({
+    }, "C:\\Users\\example\\workspace")).toEqual({
       projectRoot: "C:\\workspace\\beta",
       projectName: "beta",
     });
@@ -103,7 +103,7 @@ describe("markMainActiveAfterTurn project metadata", () => {
         getSessionId: () => "session-1",
         getSessionProjectIsDefault: () => true,
         getSessionProjectContext: () => ({
-          projectRoot: "C:\\Users\\ikcha\\.lvis\\workspace",
+          projectRoot: "C:\\Users\\example\\.lvis\\workspace",
           projectName: "default",
         }),
       },
@@ -201,7 +201,7 @@ describe("handleChatSessions legacy default-root metadata scrub", () => {
   // in both the sidebar and Insights (both read through this handler). The
   // fix scrubs at this one read chokepoint rather than patching every
   // reader — heals both consumers from a single source.
-  const DEFAULT_ROOT = "C:\\Users\\ikcha\\.lvis\\workspace";
+  const DEFAULT_ROOT = "C:\\Users\\example\\.lvis\\workspace";
 
   it("strips projectRoot/projectName from a legacy session tagged with the default workspace root", () => {
     const cwdSpy = vi.spyOn(process, "cwd").mockReturnValue(DEFAULT_ROOT);

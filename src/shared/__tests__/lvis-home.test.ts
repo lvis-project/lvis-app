@@ -58,7 +58,7 @@ describe("ensureLvisHomePrivate", () => {
       platform: "win32",
       run: (file, args) => {
         calls.push({ file, args });
-        return file === "whoami" ? '"CORP\\\\ikcha","S-1-5-21-1004336348-11-77-1417"\r\n' : "";
+        return file === "whoami" ? '"CORP\\\\example","S-1-5-21-1004336348-11-77-1417"\r\n' : "";
       },
     });
 

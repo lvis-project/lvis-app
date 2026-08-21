@@ -392,8 +392,8 @@ export function caseFoldForMatch(canonical: string): string {
  * to run custom pattern lists against the same normalization.
  *
  * Example:
- *   policyMatchPaths("/home/ken/.aws")
- *     → ["/home/ken/.aws", "/home/ken/.aws/"]
+ *   policyMatchPaths("/home/example/.aws")
+ *     → ["/home/example/.aws", "/home/example/.aws/"]
  */
 export function policyMatchPaths(filePath: string): readonly string[] {
   const normalized = normalizePath(filePath);
