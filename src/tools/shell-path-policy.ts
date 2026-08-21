@@ -2,7 +2,7 @@ import { homedir } from "node:os";
 import { isAbsolute, resolve as pathResolve } from "node:path";
 
 import { t } from "../i18n/index.js";
-import { stripCommandPath, tokenizeShell } from "../main/shell-tokenizer.js";
+import { stripCommandPath, tokenizeShell } from "../shared/shell-tokenizer.js";
 import { validateSandboxPath } from "../sandbox/path-validator.js";
 import {
   canonicalizePathForMatch,
