@@ -54,7 +54,7 @@ import type { MarketplaceFetcher, PluginMarketplaceService,
 import type { PluginArtifactStore } from "../plugins/plugin-artifact-store.js";
 import type { SystemPromptBuilder } from "../prompts/system-prompt-builder.js";
 import type { McpAppModelContextStore } from "../mcp/mcp-app-model-context.js";
-import type { RoutineEngine } from "../core/routine-engine.js";
+import type { RoutineEngine } from "../routines/routine-engine.js";
 import type { PostTurnHookChain } from "../hooks/post-turn-hook-chain.js";
 import type { ConversationLoop } from "../engine/conversation-loop.js";
 import type { PreferenceRefreshService } from "../memory/preference-refresh-service.js";
