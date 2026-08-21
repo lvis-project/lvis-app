@@ -1228,11 +1228,11 @@ lvis-app/src/
 ├── engine/        # 에이전트 루프 + LLM 프로바이더 (UI-free core)
 │   ├── conversation-loop.ts     # thin class shell + assembler + re-export facade
 │   ├── conversation-history.ts, auto-compact.ts
-│   ├── turn/     # §4.5 turn units (C9): types, trust-origin, context-carrier,
+│   ├── turn/     # §4.5 turn units (C9): types, trust-origin, guidance-limits,
 │   │            #  tool-exposure, tool-scope, provider, lifecycle-hooks,
-│   │            #  compaction, session, commands, loop-context, run-turn, query-loop,
-│   │            #  intercepted-meta-gate, stream-collector, plugin-expansion,
-│   │            #  tool-search, knowledge-cap
+│   │            #  compaction, session, commands, run-turn, query-loop,
+│   │            #  stream-collector, subscription-usage-telemetry,
+│   │            #  rationale-round, rationale-conversation-orchestration
 │   └── llm/      # provider abstraction + factory (vendor-agnostic)
 │
 ├── tools/         # 1-file-per-tool

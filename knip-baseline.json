@@ -329,26 +329,6 @@
     },
     {
       "type": "exports",
-      "file": "src/engine/turn/knowledge-cap.ts",
-      "name": "KNOWLEDGE_DEPTH_CAP"
-    },
-    {
-      "type": "exports",
-      "file": "src/engine/turn/knowledge-cap.ts",
-      "name": "KNOWLEDGE_TOOL_NAMES"
-    },
-    {
-      "type": "exports",
-      "file": "src/engine/turn/plugin-expansion.ts",
-      "name": "MAX_PLUGIN_EXPANSION"
-    },
-    {
-      "type": "exports",
-      "file": "src/engine/turn/plugin-expansion.ts",
-      "name": "MAX_SESSION_PLUGIN_EXPANSION"
-    },
-    {
-      "type": "exports",
       "file": "src/engine/turn/rationale-conversation-orchestration.ts",
       "name": "RATIONALE_TRIGGER_CANCELLED_RESULT"
     },
@@ -1796,11 +1776,6 @@
       "type": "types",
       "file": "src/engine/turn/rationale-round.ts",
       "name": "RationaleOnlyRoundInterrupted"
-    },
-    {
-      "type": "types",
-      "file": "src/engine/turn/tool-search.ts",
-      "name": "ToolSearchCatalogEntry"
     },
     {
       "type": "types",
