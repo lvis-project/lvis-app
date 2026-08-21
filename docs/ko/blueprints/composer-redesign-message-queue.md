@@ -1,7 +1,7 @@
 # Composer Redesign + Message Queue System
 
 **Status**: Approved spec, implementation in progress
-**Owner**: ken
+**Owner**: maintainer
 **Last updated**: 2026-05-14
 
 ## Goal

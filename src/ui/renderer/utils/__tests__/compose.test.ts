@@ -31,7 +31,7 @@ const file2: FileAttachment = {
   id: "f2",
   n: 2,
   kind: "file",
-  path: "/Users/ken/Desktop/budget-2026.pdf",
+  path: "/Users/example/Desktop/budget-2026.pdf",
   name: "budget-2026.pdf",
   ext: "pdf",
   bytes: 1_200_000,
@@ -83,7 +83,7 @@ describe("composeOutgoing", () => {
       activePreset: null,
       attachments: list,
     });
-    expect(r.text).toContain("/Users/ken/Desktop/budget-2026.pdf");
+    expect(r.text).toContain("/Users/example/Desktop/budget-2026.pdf");
     expect(r.attachments).toEqual([]);
   });
 
@@ -108,7 +108,7 @@ describe("composeOutgoing", () => {
       attachments: list,
     });
     expect(r.text).toContain("[Image #1]");
-    expect(r.text).toContain("/Users/ken/Desktop/budget-2026.pdf");
+    expect(r.text).toContain("/Users/example/Desktop/budget-2026.pdf");
     expect(r.text).toContain("line1\nline2\nline3");
     expect(r.attachments).toHaveLength(1);
     expect(r.attachments[0].type).toBe("image");

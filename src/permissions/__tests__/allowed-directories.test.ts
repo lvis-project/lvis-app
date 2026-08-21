@@ -79,40 +79,40 @@ function findFreeWindowsDriveLetter(): string | null {
 
 describe("isPathAllowed — prefix match", () => {
   it("returns true for exact match", () => {
-    const dir = fold("/Users/ken/work/proj");
+    const dir = fold("/Users/example/work/proj");
     expect(isPathAllowed(dir, { directories: [dir] })).toBe(true);
   });
 
   it("returns true for child path", () => {
-    const dir = fold("/Users/ken/work/proj");
-    const child = fold("/Users/ken/work/proj/src/index.ts");
+    const dir = fold("/Users/example/work/proj");
+    const child = fold("/Users/example/work/proj/src/index.ts");
     expect(isPathAllowed(child, { directories: [dir] })).toBe(true);
   });
 
   it("returns false for sibling that shares a prefix-substring", () => {
-    const dir = fold("/Users/ken/work/proj");
-    const sibling = fold("/Users/ken/work/proj-sneaky/data.txt");
+    const dir = fold("/Users/example/work/proj");
+    const sibling = fold("/Users/example/work/proj-sneaky/data.txt");
     expect(isPathAllowed(sibling, { directories: [dir] })).toBe(false);
   });
 
   it("returns false for parent of allowed dir", () => {
-    const dir = fold("/Users/ken/work/proj");
-    const parent = fold("/Users/ken/work");
+    const dir = fold("/Users/example/work/proj");
+    const parent = fold("/Users/example/work");
     expect(isPathAllowed(parent, { directories: [dir] })).toBe(false);
   });
 
   it("returns false for empty input", () => {
-    expect(isPathAllowed("", { directories: [fold("/Users/ken")] })).toBe(false);
+    expect(isPathAllowed("", { directories: [fold("/Users/example")] })).toBe(false);
   });
 
   it("returns false for empty directories list (deny-by-default)", () => {
-    expect(isPathAllowed(fold("/Users/ken/work"), { directories: [] })).toBe(false);
+    expect(isPathAllowed(fold("/Users/example/work"), { directories: [] })).toBe(false);
   });
 
   it("matches against multiple allowed dirs", () => {
-    const a = fold("/Users/ken/work/a");
-    const b = fold("/Users/ken/work/b");
-    const childOfB = fold("/Users/ken/work/b/file.ts");
+    const a = fold("/Users/example/work/a");
+    const b = fold("/Users/example/work/b");
+    const childOfB = fold("/Users/example/work/b/file.ts");
     expect(isPathAllowed(childOfB, { directories: [a, b] })).toBe(true);
   });
 });
@@ -138,61 +138,61 @@ describe("isPathAllowed — Layer 0 deny still wins", () => {
 
 describe("pickClosestParent — leaf-parent UX rule", () => {
   it("returns the immediate parent of the leaf", () => {
-    const leaf = fold("/Users/ken/Documents/old-project/notes/today/foo.md");
-    const expected = fold("/Users/ken/Documents/old-project/notes/today");
+    const leaf = fold("/Users/example/Documents/old-project/notes/today/foo.md");
+    const expected = fold("/Users/example/Documents/old-project/notes/today");
     expect(pickClosestParent(leaf, [])).toBe(expected);
   });
 
   it("returns null when leaf is already inside a current allowed dir", () => {
-    const dir = fold("/Users/ken/work");
-    const leaf = fold("/Users/ken/work/proj/src/index.ts");
+    const dir = fold("/Users/example/work");
+    const leaf = fold("/Users/example/work/proj/src/index.ts");
     expect(pickClosestParent(leaf, [dir])).toBeNull();
   });
 
   it("returns null when the parent is itself a Layer 0 sensitive directory", () => {
     // Generic id_rsa under any folder is Layer 0; the parent folder may
     // not be sensitive but a deeper one inside .ssh is.
-    const leaf = fold("/Users/ken/.ssh/id_rsa");
+    const leaf = fold("/Users/example/.ssh/id_rsa");
     // The leaf-parent is `~/.ssh` which is NOT itself a sensitive
     // *directory pattern* in the list (only `**/.ssh/**` entries are).
     // The parent's parent (`~`) is fine. So the immediate parent is the
-    // .ssh dir — and isSensitivePath('/Users/ken/.ssh') matches
+    // .ssh dir — and isSensitivePath('/Users/example/.ssh') matches
     // `**/.ssh/**` via the directory-form trailing-slash trick.
     expect(pickClosestParent(leaf, [])).toBeNull();
   });
 
   it("never suggests the broadest common-prefix parent (only leaf-parent)", () => {
     // Confirm we don't accidentally walk multiple levels up.
-    const leaf = fold("/Users/ken/Documents/a/b/c/file.txt");
+    const leaf = fold("/Users/example/Documents/a/b/c/file.txt");
     const result = pickClosestParent(leaf, []);
-    expect(result).toBe(fold("/Users/ken/Documents/a/b/c"));
+    expect(result).toBe(fold("/Users/example/Documents/a/b/c"));
     // Definitely NOT the user's Documents root.
-    expect(result).not.toBe(fold("/Users/ken/Documents"));
+    expect(result).not.toBe(fold("/Users/example/Documents"));
   });
 
-  it("isDirectory=true: returns the request path itself, not its parent (e.g. list_files /Users/ken)", () => {
-    const target = fold("/Users/ken");
+  it("isDirectory=true: returns the request path itself, not its parent (e.g. list_files /Users/example)", () => {
+    const target = fold("/Users/example");
     // Previous "always parent" behavior would over-grant to /users (root-adjacent).
     expect(pickClosestParent(target, [], true)).toBe(target);
     expect(pickClosestParent(target, [], true)).not.toBe(fold("/Users"));
   });
 
   it("isDirectory=true: nested directory request stays at the directory itself", () => {
-    const target = fold("/Users/ken/Documents");
-    // Previous bug suggested /Users/ken (whole home) — must now be the requested dir.
+    const target = fold("/Users/example/Documents");
+    // Previous bug suggested /Users/example (whole home) — must now be the requested dir.
     expect(pickClosestParent(target, [], true)).toBe(target);
-    expect(pickClosestParent(target, [], true)).not.toBe(fold("/Users/ken"));
+    expect(pickClosestParent(target, [], true)).not.toBe(fold("/Users/example"));
   });
 
   it("isDirectory=true: returns null when the directory is already in the allowed scope", () => {
-    const dir = fold("/Users/ken/work");
+    const dir = fold("/Users/example/work");
     expect(pickClosestParent(dir, [dir], true)).toBeNull();
   });
 
   it("isDirectory=true: returns null for Layer 0 sensitive directories (e.g. .ssh)", () => {
-    // .ssh matches **/.ssh/** via directory-form, so a list_files /Users/ken/.ssh
+    // .ssh matches **/.ssh/** via directory-form, so a list_files /Users/example/.ssh
     // request must NOT auto-suggest .ssh itself.
-    const target = fold("/Users/ken/.ssh");
+    const target = fold("/Users/example/.ssh");
     expect(pickClosestParent(target, [], true)).toBeNull();
   });
 
@@ -228,27 +228,27 @@ describe("validateDirectoryAddition", () => {
   });
 
   it("accepts a normal project directory", () => {
-    const r = validateDirectoryAddition("/Users/ken/work/proj");
+    const r = validateDirectoryAddition("/Users/example/work/proj");
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.adjacencyWarnings).toEqual([]);
   });
 
   it("warns when path contains '.env' segment", () => {
-    const r = validateDirectoryAddition("/Users/ken/work/proj/.env");
+    const r = validateDirectoryAddition("/Users/example/work/proj/.env");
     // .env file is itself sensitive (Layer 0), so this is rejected;
     // adjacency warning is for a directory that *contains* such a child.
     expect(r.ok).toBe(false); // Layer 0 wins
   });
 
   it("warns when path contains '.git' adjacency", () => {
-    const r = validateDirectoryAddition("/Users/ken/work/proj/.git");
+    const r = validateDirectoryAddition("/Users/example/work/proj/.git");
     expect(r.ok).toBe(true);
     if (r.ok)
       expect(r.adjacencyWarnings.some((w) => w.includes(".git"))).toBe(true);
   });
 
   it("warns when path contains 'credentials' segment", () => {
-    const r = validateDirectoryAddition("/Users/ken/work/credentials");
+    const r = validateDirectoryAddition("/Users/example/work/credentials");
     expect(r.ok).toBe(true);
     if (r.ok)
       expect(
@@ -257,7 +257,7 @@ describe("validateDirectoryAddition", () => {
   });
 
   it("warns when path contains 'node_modules/.cache'", () => {
-    const r = validateDirectoryAddition("/Users/ken/work/proj/node_modules/.cache");
+    const r = validateDirectoryAddition("/Users/example/work/proj/node_modules/.cache");
     expect(r.ok).toBe(true);
     if (r.ok)
       expect(
@@ -283,19 +283,19 @@ describe("sanitizeAllowedDirectories", () => {
 
   it("drops sensitive entries silently", () => {
     const result = sanitizeAllowedDirectories([
-      "/Users/ken/work",
+      "/Users/example/work",
       pathResolve(homedir(), ".lvis/secrets"),
-      "/Users/ken/Documents",
+      "/Users/example/Documents",
     ]);
-    expect(result).toContain(fold("/Users/ken/work"));
-    expect(result).toContain(fold("/Users/ken/Documents"));
+    expect(result).toContain(fold("/Users/example/work"));
+    expect(result).toContain(fold("/Users/example/Documents"));
     expect(result).not.toContain(fold(pathResolve(homedir(), ".lvis/secrets")));
   });
 
   it("de-duplicates equivalent entries (different case on darwin)", () => {
     const result = sanitizeAllowedDirectories([
-      "/Users/ken/Work",
-      "/Users/ken/work",
+      "/Users/example/Work",
+      "/Users/example/work",
     ]);
     if (process.platform === "darwin" || process.platform === "win32") {
       expect(result.length).toBe(1);
@@ -381,11 +381,11 @@ describe("sanitizeAllowedDirectories", () => {
   });
 
   it.runIf(process.platform === "win32")("warns for Windows backslash adjacency segments", () => {
-    const git = validateDirectoryAddition("C:\\Users\\ken\\work\\proj\\.git");
+    const git = validateDirectoryAddition("C:\\Users\\example\\work\\proj\\.git");
     expect(git.ok).toBe(true);
     if (git.ok) expect(git.adjacencyWarnings.some((w) => w.includes(".git"))).toBe(true);
 
-    const cache = validateDirectoryAddition("C:\\Users\\ken\\work\\proj\\node_modules\\.cache");
+    const cache = validateDirectoryAddition("C:\\Users\\example\\work\\proj\\node_modules\\.cache");
     expect(cache.ok).toBe(true);
     if (cache.ok) expect(cache.adjacencyWarnings.some((w) => w.includes("node_modules"))).toBe(true);
   });
@@ -462,9 +462,9 @@ describe("computeDefaultAllowedDirectories", () => {
 
 describe("buildAllowedScope", () => {
   it("merges defaults with user additions", () => {
-    const scope = buildAllowedScope(["/Users/ken/Documents"]);
+    const scope = buildAllowedScope(["/Users/example/Documents"]);
     expect(scope.directories.length).toBeGreaterThanOrEqual(2);
-    expect(scope.directories).toContain(fold("/Users/ken/Documents"));
+    expect(scope.directories).toContain(fold("/Users/example/Documents"));
   });
 
   it("handles undefined user additions (default-only scope)", () => {

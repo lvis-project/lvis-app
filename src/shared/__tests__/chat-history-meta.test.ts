@@ -161,14 +161,14 @@ describe("serializeHistoryMessage createdAt + turnSummary projection", () => {
         permissionReview: {
           status: "needs_approval",
           verdictLevel: "high",
-          reason: "sends jo.dreame@gmail.com outward",
+          reason: "sends person@example.com outward",
         },
       },
     };
     const s = serializeHistoryMessage(tool, 8);
     expect(s.permissionReview?.status).toBe("needs_approval");
     expect(s.permissionReview?.verdictLevel).toBe("high");
-    expect(s.permissionReview?.reason).not.toContain("jo.dreame@gmail.com");
+    expect(s.permissionReview?.reason).not.toContain("person@example.com");
   });
 
   it("keeps a parent-answered outcome on the reloaded tool result row", () => {

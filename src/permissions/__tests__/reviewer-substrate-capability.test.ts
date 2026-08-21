@@ -244,7 +244,7 @@ describe("synthetic network-only asrt — per-category relaxation gating", () =>
         category: "write",
         pathFields: ["path"],
         // Deep inside an allowed dir → rule → MEDIUM ("write deep inside allowed").
-        finalInput: { path: "/Users/ken/work/nested/dir/output.txt" },
+        finalInput: { path: "/Users/example/work/nested/dir/output.txt" },
         sandboxCapability: networkOnlyAsrt(),
         conversationContext: { recentUserMessage: "please write the output file for me" },
       }),
@@ -282,7 +282,7 @@ describe("synthetic network-only asrt — per-category relaxation gating", () =>
         source: "builtin",
         category: "write",
         pathFields: ["path"],
-        finalInput: { path: "/Users/ken/work/nested/dir/output.txt" }, // rule → MEDIUM
+        finalInput: { path: "/Users/example/work/nested/dir/output.txt" }, // rule → MEDIUM
         sandboxCapability: networkOnlyAsrt(),
         conversationContext: { recentUserMessage: "please write the output file for me" },
       }),

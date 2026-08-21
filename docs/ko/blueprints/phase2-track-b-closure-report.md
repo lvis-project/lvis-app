@@ -240,7 +240,7 @@ Until that lands, the F1 fix's `existsSync` guard is the best we have — it cat
 
 ### 8.2 Voice input feedback memory
 
-`/Users/ken/.claude/projects/-Users-ken-workspace-GIT-github-lvis-project/memory/feedback_no_voice_input_host.md` saved 2026-04-14. Future sessions will not re-propose voice STT for chat input. Meeting plugin STT (transcription) remains in scope and is explicitly excepted.
+`/Users/example/.claude/projects/-Users-example-workspace-GIT-github-lvis-project/memory/feedback_no_voice_input_host.md` saved 2026-04-14. Future sessions will not re-propose voice STT for chat input. Meeting plugin STT (transcription) remains in scope and is explicitly excepted.
 
 ### 8.3 OpenAI API key rotation (carried from Phase 1.5 §8.2)
 

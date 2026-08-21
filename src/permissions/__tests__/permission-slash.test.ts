@@ -32,28 +32,28 @@ afterEach(async () => {
 
 describe("parsePermissionDirCommand", () => {
   it("parses 'allow <path>'", () => {
-    const r = parsePermissionDirCommand("allow /Users/ken/work");
-    expect(r).toEqual({ verb: "allow", path: "/Users/ken/work", session: false, acknowledgeWarnings: false });
+    const r = parsePermissionDirCommand("allow /Users/example/work");
+    expect(r).toEqual({ verb: "allow", path: "/Users/example/work", session: false, acknowledgeWarnings: false });
   });
 
   it("parses quoted paths with spaces", () => {
-    const r = parsePermissionDirCommand('allow "/Users/ken/My Project"');
-    expect(r).toEqual({ verb: "allow", path: "/Users/ken/My Project", session: false, acknowledgeWarnings: false });
+    const r = parsePermissionDirCommand('allow "/Users/example/My Project"');
+    expect(r).toEqual({ verb: "allow", path: "/Users/example/My Project", session: false, acknowledgeWarnings: false });
   });
 
   it("parses 'allow <path> --session'", () => {
-    const r = parsePermissionDirCommand("allow /Users/ken/work --session");
-    expect(r).toEqual({ verb: "allow", path: "/Users/ken/work", session: true, acknowledgeWarnings: false });
+    const r = parsePermissionDirCommand("allow /Users/example/work --session");
+    expect(r).toEqual({ verb: "allow", path: "/Users/example/work", session: true, acknowledgeWarnings: false });
   });
 
   it("parses 'allow --session <path>' (flag before path)", () => {
-    const r = parsePermissionDirCommand("allow --session /Users/ken/work");
-    expect(r).toEqual({ verb: "allow", path: "/Users/ken/work", session: true, acknowledgeWarnings: false });
+    const r = parsePermissionDirCommand("allow --session /Users/example/work");
+    expect(r).toEqual({ verb: "allow", path: "/Users/example/work", session: true, acknowledgeWarnings: false });
   });
 
   it("parses 'allow --ack-warnings <path>'", () => {
-    const r = parsePermissionDirCommand("allow --ack-warnings /Users/ken/work");
-    expect(r).toEqual({ verb: "allow", path: "/Users/ken/work", session: false, acknowledgeWarnings: true });
+    const r = parsePermissionDirCommand("allow --ack-warnings /Users/example/work");
+    expect(r).toEqual({ verb: "allow", path: "/Users/example/work", session: false, acknowledgeWarnings: true });
   });
 
   it("parses 'deny <path>'", () => {
@@ -110,10 +110,10 @@ describe("parsePermissionDirCommand", () => {
 describe("dispatchPermissionDirCommand — allow", () => {
   it("persists a valid directory to settings.json", async () => {
     const path = tmpSettingsPath();
-    const validation = validateDirectoryAddition("/Users/ken/work");
+    const validation = validateDirectoryAddition("/Users/example/work");
     expect(validation.ok).toBe(true);
     const r = await dispatchPermissionDirCommand(
-      { verb: "allow", path: "/Users/ken/work", session: false, acknowledgeWarnings: false },
+      { verb: "allow", path: "/Users/example/work", session: false, acknowledgeWarnings: false },
       path,
     );
     expect(r).toMatchObject({ ok: true, verb: "allow", sessionOnly: false });
@@ -134,10 +134,10 @@ describe("dispatchPermissionDirCommand — allow", () => {
 
   it("--session does NOT persist to disk", async () => {
     const path = tmpSettingsPath();
-    const validation = validateDirectoryAddition("/Users/ken/work");
+    const validation = validateDirectoryAddition("/Users/example/work");
     expect(validation.ok).toBe(true);
     const r = await dispatchPermissionDirCommand(
-      { verb: "allow", path: "/Users/ken/work", session: true, acknowledgeWarnings: false },
+      { verb: "allow", path: "/Users/example/work", session: true, acknowledgeWarnings: false },
       path,
     );
     expect(r).toMatchObject({
@@ -152,7 +152,7 @@ describe("dispatchPermissionDirCommand — allow", () => {
   it("requires explicit acknowledgement before persisting adjacency warnings (.git)", async () => {
     const path = tmpSettingsPath();
     const r = await dispatchPermissionDirCommand(
-      { verb: "allow", path: "/Users/ken/work/proj/.git", session: false, acknowledgeWarnings: false },
+      { verb: "allow", path: "/Users/example/work/proj/.git", session: false, acknowledgeWarnings: false },
       path,
     );
     expect(r).toMatchObject({ ok: false, requiresAcknowledgement: true });
@@ -165,10 +165,10 @@ describe("dispatchPermissionDirCommand — allow", () => {
 
   it("persists adjacency-warning paths only after acknowledgement", async () => {
     const path = tmpSettingsPath();
-    const validation = validateDirectoryAddition("/Users/ken/work/proj/.git");
+    const validation = validateDirectoryAddition("/Users/example/work/proj/.git");
     expect(validation.ok).toBe(true);
     const r = await dispatchPermissionDirCommand(
-      { verb: "allow", path: "/Users/ken/work/proj/.git", session: false, acknowledgeWarnings: true },
+      { verb: "allow", path: "/Users/example/work/proj/.git", session: false, acknowledgeWarnings: true },
       path,
     );
     expect(r).toMatchObject({ ok: true, verb: "allow" });
@@ -182,17 +182,17 @@ describe("dispatchPermissionDirCommand — allow", () => {
 describe("dispatchPermissionDirCommand — deny", () => {
   it("removes a directory from settings.json", async () => {
     const path = tmpSettingsPath();
-    await addAllowedDirectoryPersist("/Users/ken/work", path);
-    await addAllowedDirectoryPersist("/Users/ken/Documents", path);
+    await addAllowedDirectoryPersist("/Users/example/work", path);
+    await addAllowedDirectoryPersist("/Users/example/Documents", path);
 
     const r = await dispatchPermissionDirCommand(
-      { verb: "deny", path: "/Users/ken/work", session: false, acknowledgeWarnings: false },
+      { verb: "deny", path: "/Users/example/work", session: false, acknowledgeWarnings: false },
       path,
     );
     expect(r).toMatchObject({ ok: true, verb: "deny" });
     const onDisk = readPermissionSettings(path);
-    expect(onDisk.permissions.additionalDirectories).not.toContain("/Users/ken/work");
-    expect(onDisk.permissions.additionalDirectories).toContain("/Users/ken/Documents");
+    expect(onDisk.permissions.additionalDirectories).not.toContain("/Users/example/work");
+    expect(onDisk.permissions.additionalDirectories).toContain("/Users/example/Documents");
   });
 });
 
@@ -307,14 +307,14 @@ describe("dispatchPermissionDirCommand — injected workspace lifecycle", () => 
 describe("dispatchPermissionDirCommand — list", () => {
   it("returns defaults + user additions + effective scope", async () => {
     const path = tmpSettingsPath();
-    await addAllowedDirectoryPersist("/Users/ken/Documents", path);
+    await addAllowedDirectoryPersist("/Users/example/Documents", path);
     const r = await dispatchPermissionDirCommand(
       { verb: "list", path: "", session: false, acknowledgeWarnings: false },
       path,
     );
     expect(r).toMatchObject({ ok: true, verb: "list" });
     if (r.ok && r.verb === "list") {
-      expect(r.userAdditions).toContain("/Users/ken/Documents");
+      expect(r.userAdditions).toContain("/Users/example/Documents");
       // effective = defaults ∪ user-additions
       expect(r.effective.length).toBeGreaterThanOrEqual(r.defaults.length);
     }
@@ -331,13 +331,13 @@ describe("readPermissionSettings — settings persistence", () => {
   it("round-trips additionalDirectories", async () => {
     const path = tmpSettingsPath();
     await writePermissionSettings(
-      { additionalDirectories: ["/Users/ken/a", "/Users/ken/b"] },
+      { additionalDirectories: ["/Users/example/a", "/Users/example/b"] },
       path,
     );
     const r = readPermissionSettings(path);
     expect(r.permissions.additionalDirectories).toEqual([
-      "/Users/ken/a",
-      "/Users/ken/b",
+      "/Users/example/a",
+      "/Users/example/b",
     ]);
   });
 

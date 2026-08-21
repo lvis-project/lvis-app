@@ -3,9 +3,9 @@ import { parseCliWords, splitCommandLine, validateAuthApiKey } from "../McpTab.j
 
 describe("McpTab command parsing", () => {
   it("preserves Windows-style backslashes in argv values", () => {
-    expect(parseCliWords(String.raw`--config C:\Users\ken\AppData\Local\lvis\mcp.json`)).toEqual([
+    expect(parseCliWords(String.raw`--config C:\Users\example\AppData\Local\lvis\mcp.json`)).toEqual([
       "--config",
-      String.raw`C:\Users\ken\AppData\Local\lvis\mcp.json`,
+      String.raw`C:\Users\example\AppData\Local\lvis\mcp.json`,
     ]);
   });
 

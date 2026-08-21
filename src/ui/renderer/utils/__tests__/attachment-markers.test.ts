@@ -45,7 +45,7 @@ describe("collapsePath", () => {
   });
 
   it("collapses long absolute paths", () => {
-    expect(collapsePath("/Users/ken/Desktop/budget-2026.pdf")).toBe(
+    expect(collapsePath("/Users/example/Desktop/budget-2026.pdf")).toBe(
       "/User…-2026.pdf",
     );
   });

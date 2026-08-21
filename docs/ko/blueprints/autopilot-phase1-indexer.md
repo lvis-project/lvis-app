@@ -115,7 +115,7 @@
 
 ## 4. 통합 requirements.lock (Phase 1)
 
-`/Users/ken/workspace/GIT/github/lvis-project/lvis-plugin-pageindex/python-requirements.lock`
+`/Users/example/workspace/GIT/github/lvis-project/lvis-plugin-pageindex/python-requirements.lock`
 
 플러그인이 lockfile 을 동봉하고, 앱은 플러그인 start 준비 시점에 packaged uv 로
 lockfile-keyed shared env 를 준비한다. 앱 첫 부팅의 전역 venv sync 단계는 없다.

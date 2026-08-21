@@ -38,8 +38,8 @@ const { registerPermissionsHandlers } = await import("../permissions.js");
 
 const CHANNEL = PERMISSIONS.approvalSentenceSelect;
 const USER_INTENT = { inputOrigin: "user-keyboard" as const, userActivation: true };
-const TARGET = "/home/ken/reports/q3.md";
-const PARENT = "/home/ken/reports";
+const TARGET = "/home/example/reports/q3.md";
+const PARENT = "/home/example/reports";
 
 /** A provider that answers with whatever text the test hands it. */
 function providerReturning(text: string) {
@@ -84,7 +84,7 @@ async function harness(
     outOfAllowedDir: {
       candidatePath: TARGET,
       suggestedParent: PARENT,
-      currentAllowed: ["/home/ken/work"],
+      currentAllowed: ["/home/example/work"],
       adjacencyWarnings: [],
     },
     ...opts.requestOverrides,
@@ -335,14 +335,14 @@ describe("approval-sentence-select — the table is the host's, not the renderer
         outOfAllowedDir: {
           candidatePath: TARGET,
           suggestedParent: null,
-          currentAllowed: ["/home/ken/work"],
+          currentAllowed: ["/home/example/work"],
           adjacencyWarnings: [],
         },
       },
     });
     const result = await invoke({
       requestId: "req-allow-1",
-      input: "/allow always allow the whole /home/ken/reports folder from now on",
+      input: "/allow always allow the whole /home/example/reports folder from now on",
       intent: USER_INTENT,
     });
 

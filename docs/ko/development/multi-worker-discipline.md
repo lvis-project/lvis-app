@@ -122,11 +122,11 @@ is not a function` / loose vs strict regex 분기 등 silent regression 이 누�
 - 작업 시작 시 sweep 명령 (search-first, code-second):
   ```bash
   grep -rn "<deprecated-symbol>" \
-    /Users/megankim/Documents/lvis-project/lvis-app/src \
-    /Users/megankim/Documents/lvis-project/lvis-plugin-sdk/{src,schemas} \
-    /Users/megankim/Documents/lvis-project/lvis-plugin-*/{src,.github} \
-    /Users/megankim/Documents/lvis-project/lvis-plugin-template \
-    /Users/megankim/Documents/lvis-project/lvis-marketplace
+    /Users/example/Documents/lvis-project/lvis-app/src \
+    /Users/example/Documents/lvis-project/lvis-plugin-sdk/{src,schemas} \
+    /Users/example/Documents/lvis-project/lvis-plugin-*/{src,.github} \
+    /Users/example/Documents/lvis-project/lvis-plugin-template \
+    /Users/example/Documents/lvis-project/lvis-marketplace
   ```
 - 발견된 모든 사용처에 대해 같은 세션 안에 PR 펼침. PR description 에
   "Companion PRs" 섹션으로 묶어 머지 순서 의존성 명시 (예: SDK → host → template).
