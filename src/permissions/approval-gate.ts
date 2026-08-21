@@ -52,13 +52,13 @@ import {
 } from "../shared/rationale-approval-display.js";
 import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import type { ApprovalPurposeSuggestion } from "../shared/permission-review-status.js";
-import { parseHostShellExecutionInput } from "./host-shell-execution-input.js";
 import {
   type HostShellExecutionPermitBinding,
 } from "./host-shell-execution-permit.js";
 import {
   getHostShellExecutionPlanAuditProjection,
   isIssuedHostShellExecutionPlanAuditProjection,
+  parseHostShellExecutionInput,
   type HostShellExecutionPlanAuditProjection,
 } from "./host-shell-execution-plan.js";
 

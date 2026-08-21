@@ -2809,11 +2809,6 @@
     },
     {
       "type": "types",
-      "file": "src/tools/background-shell-manager.ts",
-      "name": "BackgroundShellStatus"
-    },
-    {
-      "type": "types",
       "file": "src/tools/executor-ceiling.ts",
       "name": "ToolCeilingTerminationReason"
     },
@@ -2851,11 +2846,6 @@
       "type": "types",
       "file": "src/tools/pipeline/rationale-ticket-lifecycle.ts",
       "name": "InvocationAuditState"
-    },
-    {
-      "type": "types",
-      "file": "src/tools/powershell.ts",
-      "name": "PowerShellAstCommand"
     },
     {
       "type": "types",

@@ -16,8 +16,7 @@ vi.mock("node:child_process", async (importOriginal) => {
   };
 });
 
-import { BashTool } from "../bash.js";
-import { PowerShellTool } from "../powershell.js";
+import { BashTool, PowerShellTool } from "../shell-tools.js";
 import type { ToolExecutionContext } from "../types.js";
 import {
   ApprovalGate,

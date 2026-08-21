@@ -11,7 +11,7 @@ import type { SessionKind } from "../../memory/memory-manager.js";
 import type { GenericMessage } from "../llm/types.js";
 import type { WorkspaceRootRevocationOptions } from "./types.js";
 import { normalizeToolPairInvariant } from "../conversation-history.js";
-import { backgroundShellManager } from "../../tools/background-shell-manager.js";
+import { backgroundShellManager } from "../../tools/shell-tools.js";
 import { createTracer } from "../../observability/conversation-trace.js";
 import { latestPersistedContextTokens } from "./context-carrier.js";
 import { estimateMessagesTokens } from "../auto-compact.js";

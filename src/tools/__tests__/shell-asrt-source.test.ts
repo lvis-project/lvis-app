@@ -8,32 +8,33 @@ function source(path: string): string {
   return readFileSync(resolve(repoRoot, path), "utf8");
 }
 
-describe("shell ASRT source contracts", () => {
-  it("bash verifies an issued plan and consumes a generic one-shot fallback permit", () => {
-    const bash = source("src/tools/bash.ts");
+// Both shell dialects live in shell-tools.ts; assert each dialect's own
+// section carries the full plan-sealing + permit-consumption preamble, so a
+// regression in one dialect cannot hide behind the other's copy.
+const shellTools = source("src/tools/shell-tools.ts");
+const powershellSectionStart = shellTools.indexOf(" * Native PowerShell tool.");
+const bashSection = shellTools.slice(0, powershellSectionStart);
+const powershellSection = shellTools.slice(powershellSectionStart);
 
-    expect(bash).toContain("const suppliedHostShellPlan = ctx.hostShellExecutionPlan");
-    expect(bash).toContain("isIssuedHostShellExecutionPlan(suppliedHostShellPlan)");
-    expect(bash).toContain("consumeHostShellExecutionPermit");
-    expect(bash).toContain("requiresExplicitHostShellFallbackApproval(hostShellPlan)");
-    expect(bash).toContain('hostShellPlan.mode === "blocked"');
-    expect(bash).toContain('hostShellPlan.mode === "asrt"');
-    expect(bash).toContain("shell: false");
-    expect(bash).toContain("...getDefaultSensitiveReadDenyPaths()");
-    expect(bash).toContain("denyWrite: getDefaultSensitiveWriteDenyPaths()");
+function expectShellDialectContracts(section: string): void {
+  expect(section).toContain("const suppliedHostShellPlan = ctx.hostShellExecutionPlan");
+  expect(section).toContain("isIssuedHostShellExecutionPlan(suppliedHostShellPlan)");
+  expect(section).toContain("consumeHostShellExecutionPermit");
+  expect(section).toContain("requiresExplicitHostShellFallbackApproval(hostShellPlan)");
+  expect(section).toContain('hostShellPlan.mode === "blocked"');
+  expect(section).toContain('hostShellPlan.mode === "asrt"');
+  expect(section).toContain("shell: false");
+  expect(section).toContain("...getDefaultSensitiveReadDenyPaths()");
+  expect(section).toContain("denyWrite: getDefaultSensitiveWriteDenyPaths()");
+}
+
+describe("shell ASRT source contracts", () => {
+  it("the bash sections verify an issued plan and consume a generic one-shot fallback permit", () => {
+    expect(powershellSectionStart).toBeGreaterThan(0);
+    expectShellDialectContracts(bashSection);
   });
 
-  it("powershell verifies an issued plan and consumes a generic one-shot fallback permit", () => {
-    const powershell = source("src/tools/powershell.ts");
-
-    expect(powershell).toContain("const suppliedHostShellPlan = ctx.hostShellExecutionPlan");
-    expect(powershell).toContain("isIssuedHostShellExecutionPlan(suppliedHostShellPlan)");
-    expect(powershell).toContain("consumeHostShellExecutionPermit");
-    expect(powershell).toContain("requiresExplicitHostShellFallbackApproval(hostShellPlan)");
-    expect(powershell).toContain('hostShellPlan.mode === "blocked"');
-    expect(powershell).toContain('hostShellPlan.mode === "asrt"');
-    expect(powershell).toContain("shell: false");
-    expect(powershell).toContain("...getDefaultSensitiveReadDenyPaths()");
-    expect(powershell).toContain("denyWrite: getDefaultSensitiveWriteDenyPaths()");
+  it("the powershell sections verify an issued plan and consume a generic one-shot fallback permit", () => {
+    expectShellDialectContracts(powershellSection);
   });
 });
