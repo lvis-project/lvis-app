@@ -4,7 +4,7 @@
 
 import { ConversationHistory } from "./conversation-history.js";
 import { ToolExecutor } from "../tools/executor.js";
-import { backgroundShellManager } from "../tools/background-shell-manager.js";
+import { backgroundShellManager } from "../tools/shell-tools.js";
 import { isActiveSandboxFilesystemContainedForPluginEffects } from "../permissions/sandbox-capability.js";
 import { baseAllowedDirectories } from "../permissions/base-allowed-directories.js";
 import { getWorkspaceRootLifecycle } from "../permissions/workspace-root-lifecycle.js";

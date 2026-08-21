@@ -19,7 +19,7 @@ import {
   type ToolInvocationContext,
   type RiskVerdict,
 } from "../reviewer/risk-classifier.js";
-import { BashTool } from "../../tools/bash.js";
+import { BashTool } from "../../tools/shell-tools.js";
 import { buildHostShellExecutionPlan } from "../host-shell-execution-plan.js";
 import {
   __resetActiveSandboxCapabilityForTest,
