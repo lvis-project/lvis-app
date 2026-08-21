@@ -10,7 +10,7 @@ import type {
   CodexConversationRuntime,
   CodexConversationRuntimeOptions,
 } from "../codex-conversation-runtime.js";
-import type { AcpSubscriptionRuntimeRegistry } from "../acp-subscription-runtime-registry.js";
+import type { AcpSubscriptionRuntimeRegistry } from "../subscription-runtime-service.js";
 import { AcpSubscriptionSessionError } from "../acp-subscription-session-client.js";
 import { MAX_ACP_SUBSCRIPTION_IMAGE_BYTES } from "../acp-subscription-session-client.js";
 import { DEFAULT_SUBSCRIPTION_IMAGE_ATTACHMENT_LIMITS } from "../subscription-attachment-input.js";
