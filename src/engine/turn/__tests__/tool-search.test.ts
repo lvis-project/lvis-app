@@ -20,7 +20,7 @@ import {
   _scoreCatalogEntryForTest,
   _computeIdfWeightsForTest,
   type ToolSearchState,
-} from "../tool-search.js";
+} from "../query-loop.js";
 import type { ToolUseBlock } from "../../../tools/executor.js";
 
 function search(id: string, query: unknown): ToolUseBlock {

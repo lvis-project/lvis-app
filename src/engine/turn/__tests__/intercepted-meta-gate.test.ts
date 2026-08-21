@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import type { LoopContext } from "../loop-context.js";
-import { gateCrossAgentInterceptedMetaTools } from "../intercepted-meta-gate.js";
+import type { ConversationLoop as LoopContext } from "../../conversation-loop.js";
+import { gateCrossAgentInterceptedMetaTools } from "../query-loop.js";
 import type { ToolUseBlock } from "../../../tools/executor.js";
 
 const tailnetAuthority = Object.freeze({

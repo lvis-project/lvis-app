@@ -7,6 +7,7 @@
  * this-shaped param — all mutable compaction state stays on the instance.
  */
 import type { ConversationLoop } from "../conversation-loop.js";
+import type { GenericMessage, MessageMeta } from "../llm/types.js";
 import type {
   CompactTriggerSource,
   PreflightGuardOptions,
@@ -22,7 +23,6 @@ import {
   getModelUsableContext,
   type PreflightThresholdSource,
 } from "../auto-compact.js";
-import { compactedHistoryWithContextCarrier, contentTruncatedHistoryWithContextCarrier } from "./context-carrier.js";
 import { t } from "../../i18n/index.js";
 import { createLogger } from "../../lib/logger.js";
 import { getLlmVendorSettings } from "../../shared/llm-vendor-defaults.js";
@@ -673,3 +673,70 @@ export async function runPreflightGuard(
       }
     }
   }
+
+/**
+ * Context-fill carrier helpers.
+ *
+ * Attach a `checkpointMeta.contextTokensAfter` carrier to compacted /
+ * content-truncated histories. Extracted verbatim from `conversation-loop.ts` —
+ * no `this` dependency.
+ */
+function compactedHistoryWithContextCarrier(
+  messages: GenericMessage[],
+  contextTokensAfter: number,
+): GenericMessage[] {
+  let contextCarrierAttached = false;
+  return messages.map((message) => {
+    const meta = message.meta;
+    if (!meta) return message;
+    const nextMeta: MessageMeta = { ...meta };
+    delete nextMeta.turnSummary;
+    if (!contextCarrierAttached && nextMeta.checkpointMeta) {
+      nextMeta.checkpointMeta = {
+        ...nextMeta.checkpointMeta,
+        contextTokensAfter,
+      };
+      contextCarrierAttached = true;
+    }
+    return { ...message, meta: nextMeta };
+  });
+}
+
+function contentTruncatedHistoryWithContextCarrier(params: {
+  messages: GenericMessage[];
+  compactNum: number;
+  trigger: "auto-compact" | "manual";
+  removedCount: number;
+  freedTokens: number;
+  estimatedAfter: number;
+  truncatedDir?: string;
+}): { history: GenericMessage[]; contextTokensAfter: number; createdAt: string } {
+  const createdAt = new Date().toISOString();
+  const checkpointContent = `[compact #${params.compactNum}: content truncated]`;
+  const checkpoint: GenericMessage = {
+    role: "user",
+    content: checkpointContent,
+    meta: {
+      compactBoundary: true,
+      compactNum: params.compactNum,
+      removedCount: params.removedCount,
+      compactedAt: createdAt,
+      createdAt: new Date(createdAt).getTime(),
+      checkpointMeta: {
+        removedMessages: params.removedCount,
+        freedTokens: params.freedTokens,
+        compactNum: params.compactNum,
+        trigger: params.trigger,
+        compactStatus: CompressionStatus.CONTENT_TRUNCATED,
+        summary: t("be_conversationLoop.contentTruncatedSummary", { count: params.removedCount }),
+        ...(params.truncatedDir !== undefined ? { truncatedDir: params.truncatedDir } : {}),
+      },
+    },
+  };
+  const contextTokensAfter = params.estimatedAfter + estimateMessagesTokens([checkpoint]);
+  return {
+    history: compactedHistoryWithContextCarrier([checkpoint, ...params.messages], contextTokensAfter),
+    contextTokensAfter,
+    createdAt,
+  };
+}
