@@ -104,7 +104,7 @@ import { basename, join } from "node:path";
 // does not ship.
 import { buildChildEntry, childBundleDir, repositoryRoot } from "./child-entry-bundle.js";
 import type { PluginHostApi, PluginManifest, PluginRuntimeContext } from "../../types.js";
-import type { DelegatedWorkerConfinement } from "../host-api-service-paths.js";
+import type { DelegatedWorkerConfinement } from "../host-api-dispatcher.js";
 import {
   createOutOfProcessPluginFactory,
   derivePluginChildEnvelope,
@@ -1350,7 +1350,7 @@ export const createPlugin = async (context) => ({
 /**
  * The members §3.2 calls lossy or stateful, exercised by a REAL confined child.
  *
- * `host-api-service-paths.test.ts` drives the same members across a real
+ * `host-api-service-members.test.ts` drives the same members across a real
  * dispatcher and a real child runtime over an in-memory channel, which proves
  * the marshalling and proves nothing about the jail. This proves both at once,
  * and it is the only place that can: the question "can the plugin reach the

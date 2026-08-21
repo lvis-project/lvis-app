@@ -30,25 +30,19 @@ import type {
 import {
   HOSTAPI_DISPATCH_TABLE,
   HostApiDispatcher,
+  createInteractionHostApiPaths,
+  type InteractionHostApi,
 } from "../host-api-dispatcher.js";
 import {
   HOSTAPI_PATH_CONTRACTS,
-  isHostApiPath,
-} from "../host-api-path-contracts.js";
-import {
+  INTERACTION_HOSTAPI_PATHS,
   PluginHostApiError,
+  isHostApiPath,
   type HostApiChannel,
   type HostApiWireErrorCode,
-} from "../host-api-wire.js";
-import {
-  INTERACTION_HOSTAPI_PATHS,
-  createInteractionChildMembers,
   type InteractionHostApiPath,
-} from "../host-api-interaction-child.js";
-import {
-  createInteractionHostApiPaths,
-  type InteractionHostApi,
-} from "../host-api-interaction-paths.js";
+} from "../host-api-wire.js";
+import { createInteractionChildMembers } from "../host-api-child.js";
 import {
   startPluginChildRuntime,
   type PluginChildRuntime,

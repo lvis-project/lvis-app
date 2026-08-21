@@ -27,7 +27,7 @@ import {
   type ConfinedPluginChild,
 } from "../out-of-process-plugin.js";
 import type { ChildLink } from "../plugin-child-transport.js";
-import { HOSTAPI_PATH_CONTRACTS, type HostApiPath } from "../host-api-path-contracts.js";
+import { HOSTAPI_PATH_CONTRACTS, type HostApiPath } from "../host-api-wire.js";
 
 const PLUGIN_ID = "work-assistant";
 const EMPTY_SCHEMA = { type: "object", properties: {} } as const;

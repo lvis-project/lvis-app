@@ -33,7 +33,7 @@ import {
   type PluginChildRuntime,
   type PluginFactoryLoader,
 } from "../plugin-child-runtime.js";
-import { HOSTAPI_PATH_CONTRACTS } from "../host-api-path-contracts.js";
+import { HOSTAPI_PATH_CONTRACTS } from "../host-api-wire.js";
 
 const PLUGIN_ID = "com.example.child";
 const GENERATION = "gen-7";
