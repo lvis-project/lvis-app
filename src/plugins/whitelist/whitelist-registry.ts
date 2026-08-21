@@ -9,7 +9,13 @@
  *
  * Load order:
  *   `init()` → load disk cache → fetch remote (when online) →
- *   verify signature envelope → check `issuedAt` monotonicity → swap.
+ *   verify signature envelope → check `issuedAt` (`checkIssuedAt`) → swap.
+ *
+ * The `issuedAt` check is the same one on both paths, cached and fetched:
+ * refuse a rollback below the on-disk high-water mark, and refuse a document
+ * dated implausibly far ahead of this device's clock without advancing that
+ * mark. A refused cached document is deleted rather than left to be re-read
+ * and re-refused on the next boot.
  *
  * `isAllowed(pluginId, key, manifestSha256?)` is synchronous and never
  * touches I/O — it is called from the per-plugin `hostApi.getSecret` hot
@@ -35,6 +41,7 @@ import {
   type WhitelistDocument,
 } from "./whitelist-schema.js";
 import {
+  checkIssuedAt,
   SignedDocumentCache,
   type SignedDocCacheSnapshot,
 } from "../signed-doc-cache.js";
@@ -226,15 +233,38 @@ class WhitelistRegistry {
 
     if (cached) {
       const verified = this.verifyCachedSnapshot(cached);
-      if (verified) {
+      // The cached body goes through the same `issuedAt` rules as a fetched
+      // one. The on-disk mark gating only the remote document would leave the
+      // shorter path — read a body off disk, check parse and signature, serve
+      // it — as the one that never meets the mark those very bytes are stored
+      // beside.
+      const issuedAtRejection = verified
+        ? checkIssuedAt(verified.issuedAt, highestSeenIssuedAt, this.now())
+        : null;
+      if (verified && !issuedAtRejection) {
         this.snapshot = { doc: verified, source: "cache" };
         if (!highestSeenIssuedAt || Date.parse(verified.issuedAt) > Date.parse(highestSeenIssuedAt)) {
           highestSeenIssuedAt = verified.issuedAt;
         }
         telemetry("whitelist_cache_hit");
       } else {
-        // Cache corrupted/unverifiable — treat as absent.
-        telemetry("whitelist_cache_miss_offline", { reason: "corrupt" });
+        // Corrupt, unverifiable, or refused on `issuedAt` — treated as absent
+        // either way, and discarded rather than left on disk. Keeping it means
+        // re-reading and re-refusing the same bytes on every boot, and means
+        // its `highestSeenIssuedAt` outlives the only document that ever
+        // justified it. The mark stays in memory for the rest of this `init()`,
+        // so the remote fetch below is still gated by it.
+        telemetry("whitelist_cache_miss_offline", { reason: issuedAtRejection ?? "corrupt" });
+        if (issuedAtRejection) {
+          audit(
+            `whitelist_cache_rejected reason=${issuedAtRejection}`
+              + ` received=${verified?.issuedAt ?? "unknown"}`
+              + ` highest=${highestSeenIssuedAt ?? "none"}`,
+          );
+        }
+        await cache.clear().catch((err) => {
+          log.warn(`cache clear failed: ${(err as Error).message}`);
+        });
       }
     }
 
@@ -278,14 +308,18 @@ class WhitelistRegistry {
         audit(`whitelist_fetch_failed reason=signature_invalid detail=${verify.reason ?? "unknown"}`);
         return;
       }
-      // Monotonicity rollback guard.
-      if (
-        highestSeenIssuedAt &&
-        Date.parse(doc.issuedAt) < Date.parse(highestSeenIssuedAt)
-      ) {
-        telemetry("whitelist_fetch_failed", { reason: "monotonicity" });
+      // Rollback guard plus the plausibility bound that protects the mark
+      // itself: a document dated implausibly far ahead is discarded WITHOUT
+      // advancing `highestSeenIssuedAt`, because the mark is written to disk
+      // and would otherwise sit above every genuine document that follows,
+      // across restarts.
+      const issuedAtRejection = checkIssuedAt(doc.issuedAt, highestSeenIssuedAt, this.now());
+      if (issuedAtRejection) {
+        telemetry("whitelist_fetch_failed", { reason: issuedAtRejection });
         audit(
-          `whitelist_fetch_failed reason=monotonicity received=${doc.issuedAt} highest=${highestSeenIssuedAt}`,
+          `whitelist_fetch_failed reason=${issuedAtRejection} received=${doc.issuedAt}`
+            + ` highest=${highestSeenIssuedAt ?? "none"}`
+            + ` deviceClock=${new Date(this.now()).toISOString()}`,
         );
         return;
       }
@@ -414,13 +448,17 @@ class WhitelistRegistry {
         log.warn(`cached whitelist signature invalid: ${verify.reason}`);
         return null;
       }
-      // Tier-3 signature key id pin — refuse to honor a cached doc signed
-      // by the marketplace primary key (different trust domain).
+      // Rotation visibility, not a second gate. `verifyEnvelope` above only
+      // accepts key ids present in `WHITELIST_PUBLIC_KEYS`, so a signer that
+      // reaches this line is already a trusted Tier-3 anchor and a signer from
+      // another trust domain never gets here at all. What is left to say is
+      // that the document was signed by a trusted anchor other than the
+      // current primary — a rotation in progress, or one that stalled — so the
+      // branch logs and accepts. Retiring an anchor is done by removing it
+      // from `WHITELIST_PUBLIC_KEYS`, which turns this into a signature
+      // failure above rather than a warning here.
       if (verify.key_id && verify.key_id !== WHITELIST_PRIMARY_KEY_ID) {
-        log.warn(`cached whitelist signed by unexpected key_id=${verify.key_id}`);
-        // Still allow non-primary signers that appear in WHITELIST_PUBLIC_KEYS
-        // (rotation path), but never the marketplace key — `verifyEnvelope`
-        // already excluded unknown keys, so reaching here means trusted.
+        log.warn(`cached whitelist signed by non-primary trusted key_id=${verify.key_id}`);
       }
       return doc;
     } catch (err) {
