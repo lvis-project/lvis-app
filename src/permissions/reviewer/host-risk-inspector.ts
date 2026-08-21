@@ -34,7 +34,7 @@
  * exactly where the declared category was consumed before.
  */
 import type { ToolCategory } from "../../tools/types.js";
-import { stripCommandPath, tokenizeShell, type ShellLeaf } from "../../main/shell-tokenizer.js";
+import { stripCommandPath, tokenizeShell, type ShellLeaf } from "../../shared/shell-tokenizer.js";
 import { extractShellCommands } from "../../shared/shell-command-fields.js";
 import { hasNetworkTarget } from "./network-target.js";
 
