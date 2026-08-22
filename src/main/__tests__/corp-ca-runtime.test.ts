@@ -5,6 +5,10 @@
  * touching the real keychain or filesystem.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  CORP_CA_G2_PEM,
+  CORP_CA_PEM,
+} from "../../__tests__/support/corp-ca-fixtures.js";
 
 // ─── Mock node:child_process ──────────────────────────────────────────────────
 vi.mock("node:child_process", () => ({
@@ -41,11 +45,11 @@ const mockedMkdirSync = vi.mocked(fsMock.mkdirSync);
 const mockedOpen = vi.mocked(fspMock.open);
 
 // ─── Sample PEM fixture ───────────────────────────────────────────────────────
-const SAMPLE_PEM = [
-  "-----BEGIN CERTIFICATE-----",
-  "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA" + "A".repeat(60),
-  "-----END CERTIFICATE-----",
-].join("\n") + "\n";
+// Real (throwaway) certificates, shared with the extraction tests. They have to
+// be real here too: acquisition parses every candidate and verifies its subject,
+// so a merely PEM-shaped string is discarded exactly like a corrupt one — that
+// is the behaviour under test, not a harness detail.
+const SAMPLE_PEM = CORP_CA_PEM;
 
 // ─── Fresh mtime helper ───────────────────────────────────────────────────────
 function makeFreshStat(): ReturnType<typeof fsMock.fstatSync> {
@@ -81,8 +85,9 @@ const REAL_PLATFORM = process.platform;
 describe("ensureCorporateCa", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Mock process.platform to 'darwin' so extractByPlatform() calls extractMacos()
-    // which invokes execSync — required for extraction tests to pass on Linux CI.
+    // Pin the platform to 'darwin' so extractCorporateCa() dispatches to the
+    // macOS trust-store reader, whose child process is the one mocked here —
+    // otherwise these tests would read the CI host's own trust store.
     Object.defineProperty(process, "platform", { value: "darwin", configurable: true, writable: true });
     // default: openSync throws ENOENT (no cache)
     mockedOpenSync.mockImplementation(() => {
@@ -175,8 +180,11 @@ describe("ensureCorporateCa", () => {
     expect(result.source).toBe("extracted");
   });
 
-  it("certCount reflects number of BEGIN CERTIFICATE blocks", async () => {
-    const twoCerts = SAMPLE_PEM + SAMPLE_PEM;
+  it("counts every distinct certificate that matched", async () => {
+    // An organization mid-rollover has two roots under one name. Repeating the
+    // SAME certificate would count once — selection deduplicates by
+    // fingerprint — so this uses the second, genuinely different one.
+    const twoCerts = SAMPLE_PEM + CORP_CA_G2_PEM;
     mockExecFileStdout(twoCerts);
     const mockFd = {
       writeFile: vi.fn(async () => undefined),

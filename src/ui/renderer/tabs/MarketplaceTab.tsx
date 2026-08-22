@@ -20,6 +20,7 @@ import {
   type MarketplacePackageFilter,
 } from "../../../shared/marketplace-package-sections.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
+import { EnvForcedNotice, useEnvForcedSettings } from "../components/EnvForcedNotice.js";
 import { PluginInstallDialog } from "../dialogs/PluginInstallDialog.js";
 import { mergeMarketplaceCandidates } from "../marketplace-candidates.js";
 import { useTranslation } from "../../../i18n/react.js";
@@ -31,7 +32,6 @@ import {
   marketplaceProviderPresetFromAsset,
 } from "../../../shared/marketplace-package-assets.js";
 import { isMarketplaceEligibleLLMVendor } from "../../../shared/llm-vendor-defaults.js";
-import { envVarForSettingsPath } from "../../../shared/env-backed-settings.js";
 
 type MarketplaceAssetInstallState = Pick<
   MarketplaceSettings,
@@ -158,9 +158,9 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   // packaged app's user has no way to set. They are ordinary settings now; the
   // environment still decides when a deployment sets it, and the notice below
   // says so rather than showing a switch that does nothing.
+  const envForcedPaths = useEnvForcedSettings(api);
   const [updateCheckEnabled, setUpdateCheckEnabled] = useState(true);
   const [offlineCacheEnabled, setOfflineCacheEnabled] = useState(true);
-  const [envForcedPaths, setEnvForcedPaths] = useState<readonly string[]>([]);
   const [marketplaceFlagsLoaded, setMarketplaceFlagsLoaded] = useState(false);
   useEffect(() => {
     let alive = true;
@@ -171,9 +171,6 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
       setOfflineCacheEnabled(settings.marketplace?.offlineCacheEnabled ?? true);
       setMarketplaceFlagsLoaded(true);
     })();
-    void api.envForcedSettings().then((paths) => {
-      if (alive) setEnvForcedPaths(paths);
-    });
     return () => { alive = false; };
   }, [api]);
   const persistMarketplaceFlag = useCallback(async (
@@ -672,16 +669,13 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         <p className="mt-2 text-xs text-muted-foreground" data-testid="marketplace:update-check:help">
           {t("marketplaceTab.updateCheckHelp")}
         </p>
-        {envForcedPaths.includes("marketplace.updateCheckEnabled") ? (
-          <p
-            className="mt-2 text-xs text-muted-foreground"
-            data-testid="marketplace:update-check:forced"
-          >
-            {t("marketplaceTab.updateCheckEnvForced", {
-              envVar: envVarForSettingsPath("marketplace.updateCheckEnabled") ?? "",
-            })}
-          </p>
-        ) : null}
+        <EnvForcedNotice
+          settingsPath="marketplace.updateCheckEnabled"
+          forcedPaths={envForcedPaths}
+          messageKey="marketplaceTab.updateCheckEnvForced"
+          testId="marketplace:update-check:forced"
+          className="mt-2"
+        />
 
         <div className="mt-4 flex items-center justify-between gap-4">
           <span className="min-w-0 text-sm font-medium">
@@ -701,16 +695,13 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
         <p className="mt-2 text-xs text-muted-foreground" data-testid="marketplace:offline-cache:help">
           {t("marketplaceTab.offlineCacheHelp")}
         </p>
-        {envForcedPaths.includes("marketplace.offlineCacheEnabled") ? (
-          <p
-            className="mt-2 text-xs text-muted-foreground"
-            data-testid="marketplace:offline-cache:forced"
-          >
-            {t("marketplaceTab.offlineCacheEnvForced", {
-              envVar: envVarForSettingsPath("marketplace.offlineCacheEnabled") ?? "",
-            })}
-          </p>
-        ) : null}
+        <EnvForcedNotice
+          settingsPath="marketplace.offlineCacheEnabled"
+          forcedPaths={envForcedPaths}
+          messageKey="marketplaceTab.offlineCacheEnvForced"
+          testId="marketplace:offline-cache:forced"
+          className="mt-2"
+        />
       </SettingsSection>
 
       {/* ── Advanced options ───────────────────────────────────

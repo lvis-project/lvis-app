@@ -14,6 +14,7 @@
  * until a restart would be worse than no toggle.
  */
 import { readPersistedSystemBooleanSync } from "./persisted-settings-sync.js";
+import { resolveEnvBackedBoolean } from "../shared/env-backed-settings.js";
 
 /**
  * Read `system.hardwareAcceleration` from the persisted settings file.
@@ -33,8 +34,12 @@ export function readPersistedHardwareAccelerationSync(
 export interface HardwareAccelerationInputs {
   /** Persisted `system.hardwareAcceleration`, or undefined when unset. */
   readonly setting: boolean | undefined;
-  /** `LVIS_KEEP_GPU` — "1" forces the GPU on regardless of the setting. */
-  readonly keepGpuEnv: string | undefined;
+  /**
+   * The process environment. Which variable can force this on, and at which
+   * value, is ENV_BACKED_SETTINGS' business — the same registry the Settings
+   * UI reads to tell the user the environment is deciding.
+   */
+  readonly env: NodeJS.ProcessEnv;
   readonly platform: NodeJS.Platform;
 }
 
@@ -56,7 +61,10 @@ export interface HardwareAccelerationInputs {
  * bad persisted value could veto would be no lever.
  */
 export function resolveHardwareAcceleration(inputs: HardwareAccelerationInputs): boolean {
-  if (inputs.keepGpuEnv === "1") return true;
-  if (inputs.setting !== undefined) return inputs.setting;
-  return inputs.platform !== "win32" && inputs.platform !== "linux";
+  return resolveEnvBackedBoolean(
+    "system.hardwareAcceleration",
+    inputs.setting,
+    inputs.env,
+    inputs.platform !== "win32" && inputs.platform !== "linux",
+  );
 }

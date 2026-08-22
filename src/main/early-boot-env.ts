@@ -75,7 +75,7 @@ export function runEarlyBootEnv(): void {
   if (
     !resolveHardwareAcceleration({
       setting: readPersistedHardwareAccelerationSync(app.getPath("userData")),
-      keepGpuEnv: process.env.LVIS_KEEP_GPU,
+      env: process.env,
       platform: process.platform,
     })
   ) {

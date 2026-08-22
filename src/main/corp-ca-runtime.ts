@@ -1,28 +1,25 @@
 /**
- * Corporate Root CA acquisition and process-wide TLS injection.
+ * Corporate Root CA caching and process-wide TLS injection.
  *
  * Acquisition (cache read -> platform extraction -> 0o600 cache write) and
  * injection (undici global dispatcher + `https.globalAgent`) are one pipeline
- * with one caller, so they live in one module.
+ * with one caller, so they live in one module. Which certificate counts as a
+ * match, and how each operating system is asked for it, is NOT here: that is
+ * `corp-ca-extract.ts`, and this module deliberately knows nothing about
+ * platforms or PEM parsing beyond counting what it was handed.
  */
-import { execFile } from "node:child_process";
 import { closeSync, fstatSync, mkdirSync, openSync, readFileSync } from "node:fs";
 import { open } from "node:fs/promises";
 import * as https from "node:https";
 import { join } from "node:path";
 import * as tls from "node:tls";
-import { promisify } from "node:util";
 import { Agent, setGlobalDispatcher } from "undici";
 import { createHash } from "node:crypto";
 import { createLogger } from "../lib/logger.js";
 import { lvisHome } from "../shared/lvis-home.js";
-import {
-  extractLinuxCorporateCa,
-  extractWindowsCorporateCa,
-} from "./corp-ca-extract.js";
+import { countCertificates, extractCorporateCa } from "./corp-ca-extract.js";
 import { resolveCorpCaConfig, type CorpCaConfig } from "../shared/corp-ca-config.js";
 const caLog = createLogger("corp-ca");
-const execFileAsync = promisify(execFile);
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -67,7 +64,10 @@ function readCacheIfFresh(cachePath: string): string | null {
     const ageMs = Date.now() - st.mtimeMs;
     if (ageMs < CACHE_TTL_MS) {
       const content = readFileSync(fd, "utf-8");
-      if (content.includes("-----BEGIN CERTIFICATE-----")) {
+      // Counted, not string-matched: a cache truncated by a power cut has the
+      // opening marker and nothing that parses, and re-extracting beats
+      // injecting it.
+      if (countCertificates(content) > 0) {
         return content;
       }
     }
@@ -78,48 +78,6 @@ function readCacheIfFresh(cachePath: string): string | null {
     }
   }
   return null;
-}
-
-// ─── Platform-specific extraction ────────────────────────────────────────────
-
-async function extractMacos(commonName: string): Promise<string | null> {
-  try {
-    const output = await execFileAsync(
-      "security",
-      ["find-certificate", "-a", "-c", commonName, "-p", "/Library/Keychains/System.keychain"],
-      { encoding: "utf8", timeout: 10_000, maxBuffer: 2 * 1024 * 1024 },
-    ) as unknown;
-    const stdout =
-      typeof output === "object" && output !== null && "stdout" in output
-        ? (output as { stdout?: string | Buffer }).stdout
-        : output;
-    const pem = Buffer.isBuffer(stdout) ? stdout.toString("utf8") : String(stdout ?? "");
-    if (!pem.includes("-----BEGIN CERTIFICATE-----")) {
-      caLog.warn(
-        "macOS: corporate root CA not found in System.keychain "
-        + "(set the certificate name in Settings to match the CN of your CA)",
-      );
-      return null;
-    }
-    return pem;
-  } catch (err) {
-    caLog.warn("macOS extraction failed: %s", (err as Error).message);
-    return null;
-  }
-}
-
-async function extractByPlatform(config: CorpCaConfig): Promise<string | null> {
-  switch (process.platform) {
-    case "darwin":
-      return await extractMacos(config.commonName);
-    case "win32":
-      return await extractWindowsCorporateCa(config.commonName, config.debugLog);
-    case "linux":
-      return await extractLinuxCorporateCa(config.commonName, config.debugLog);
-    default:
-      caLog.warn(`Unsupported platform: ${process.platform} — skipping CA extraction`);
-      return null;
-  }
 }
 
 // ─── Cache write ─────────────────────────────────────────────────────────────
@@ -135,21 +93,16 @@ async function writeCacheSecure(pem: string, cachePath: string): Promise<void> {
   }
 }
 
-// ─── PEM cert count ───────────────────────────────────────────────────────────
-
-function countCerts(pem: string): number {
-  return (pem.match(/-----BEGIN CERTIFICATE-----/g) ?? []).length;
-}
-
 // ─── CA acquisition ───────────────────────────────────────────────────────────
 
 /**
  * Returns the configured corporate Root CA PEM.
  *
- * 1. Return the fresh cache (~/.lvis/certs/corp-ca.pem) when available.
- * 2. Extract by platform when the cache is stale or missing, then write a
- *    0o600 cache.
- * 3. Return { pem: null, source: "none" } when extraction is unavailable.
+ * 1. Return the fresh cache (~/.lvis/certs/corp-ca-<name digest>.pem) when
+ *    available.
+ * 2. Extract from the OS trust store when the cache is stale or missing, then
+ *    write a 0o600 cache.
+ * 3. Return { pem: null, source: "none" } when there is nothing to find.
  *
  * This does not throw on extraction failure; callers decide how to proceed.
  */
@@ -172,12 +125,12 @@ export async function ensureCorporateCa(
   // 1. cache hit
   const cached = readCacheIfFresh(cachePath);
   if (cached) {
-    caLog.info(`cache hit: ${cachePath} (${countCerts(cached)} cert(s))`);
-    return { pem: cached, path: cachePath, source: "cache", certCount: countCerts(cached) };
+    caLog.info(`cache hit: ${cachePath} (${countCertificates(cached)} cert(s))`);
+    return { pem: cached, path: cachePath, source: "cache", certCount: countCertificates(cached) };
   }
 
   // 2. extraction
-  const pem = await extractByPlatform(config);
+  const pem = await extractCorporateCa(config);
   if (!pem) {
     return { pem: null, path: cachePath, source: "none", certCount: 0 };
   }
@@ -185,12 +138,12 @@ export async function ensureCorporateCa(
   // 3. write cache (async, non-blocking for caller flow)
   try {
     await writeCacheSecure(pem, cachePath);
-    caLog.info(`extracted + cached: ${cachePath} (${countCerts(pem)} cert(s))`);
+    caLog.info(`extracted + cached: ${cachePath} (${countCertificates(pem)} cert(s))`);
   } catch (writeErr) {
     caLog.warn("cache write failed (non-fatal): %s", (writeErr as Error).message);
   }
 
-  return { pem, path: cachePath, source: "extracted", certCount: countCerts(pem) };
+  return { pem, path: cachePath, source: "extracted", certCount: countCertificates(pem) };
 }
 
 // ─── Process-wide TLS injection ───────────────────────────────────────────────
@@ -205,7 +158,14 @@ async function injectCorporateCa(config: CorpCaConfig) {
   try {
     const result = await ensureCorporateCa(config);
     if (!result.pem) {
-    log.warn("corporate CA not found — external network or MDM not deployed. Keeping default TLS verification.");
+      // The one line for "nothing was injected", whatever the reason — the
+      // setting is off, the platform has no reader, or no certificate in the
+      // trust store carries the configured name.
+      log.warn(
+        "corporate CA not found — keeping default TLS verification. "
+        + "If model calls fail with a certificate error on this network, set the "
+        + "certificate name in Settings to the CN of your organization's root CA.",
+      );
       return;
     }
     const ca = [...tls.rootCertificates, result.pem];

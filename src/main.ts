@@ -23,6 +23,10 @@ import {
 } from "./main/app-update-install-intent.js";
 import { distRoot, projectRoot } from "./main/main-paths.js";
 import { applyRuntimeAppIcon, runEarlyBootEnv } from "./main/early-boot-env.js";
+import {
+  readPersistedHardwareAccelerationSync,
+  resolveHardwareAcceleration,
+} from "./main/persisted-hardware-acceleration.js";
 import { ensureCorporateCaInjected } from "./main/corp-ca-runtime.js";
 import { readPersistedCorpCaConfigSync } from "./main/persisted-corp-ca.js";
 import { loadMainStartupDependencies } from "./main/startup-dependencies.js";
@@ -478,7 +482,15 @@ if (
           argv1: process.argv[1],
           userDataDir: app.getPath("userData") || undefined,
           platform: process.platform,
-          disableGpu: process.env.LVIS_KEEP_GPU !== "1",
+          // The same decision the app itself makes at boot, not a second
+          // reading of the environment: a developer who turned the GPU back
+          // on in Settings would otherwise get a registered launcher that
+          // disagrees with the app it launches.
+          disableGpu: !resolveHardwareAcceleration({
+            setting: readPersistedHardwareAccelerationSync(app.getPath("userData")),
+            env: process.env,
+            platform: process.platform,
+          }),
           disableSandbox: devNoSandboxAllowed(),
         }),
       );

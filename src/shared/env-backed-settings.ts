@@ -92,8 +92,9 @@ export const ENV_BACKED_SETTINGS: readonly EnvBackedSetting[] = Object.freeze([
   //   pinned it keeps that pin rather than having a profile quietly override
   //   it.
   //
-  // `isUpdateCheckEnabled` and `isOfflineCacheEnabled` call these functions, so
-  // the rule the UI reports is the rule the host applies.
+  // `resolveUpdateCheckEnabled` and `resolveOfflineCacheEnabled` resolve
+  // through these functions, so the rule the UI reports is the rule the host
+  // applies.
   {
     settingsPath: "marketplace.updateCheckEnabled",
     envVar: "LVIS_MARKETPLACE_UPDATE_CHECK",
@@ -167,13 +168,35 @@ export function envForcedValueForSettingsPath(
  * non-boolean answer means the caller asked a text gate for a boolean, which
  * is a wiring mistake rather than a forced value — so it reads as "not forced"
  * instead of coercing something the resolver would then act on.
+ *
+ * Module-private: {@link resolveEnvBackedBoolean} is the whole public use of
+ * it, and exporting a second entry point would invite a caller to read the
+ * forced value without applying the precedence rule that goes with it.
  */
-export function envForcedBooleanForSettingsPath(
+function envForcedBooleanForSettingsPath(
   settingsPath: string,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean | undefined {
   const value = envForcedValueForSettingsPath(settingsPath, env);
   return typeof value === "boolean" ? value : undefined;
+}
+
+/**
+ * The whole rule for a boolean setting the environment can also decide:
+ * what the environment forces, else what the user saved, else the default.
+ *
+ * Every such setting resolves this way, so it resolves here — the per-feature
+ * entry points are named wrappers around this call, not their own copies of the
+ * precedence. Which values force, and in which direction, stays in the registry
+ * entry above, where the settings UI reads it to tell the user.
+ */
+export function resolveEnvBackedBoolean(
+  settingsPath: string,
+  settingValue: boolean | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+  fallback = true,
+): boolean {
+  return envForcedBooleanForSettingsPath(settingsPath, env) ?? settingValue ?? fallback;
 }
 
 /** {@link envForcedValueForSettingsPath} narrowed to a text setting. */

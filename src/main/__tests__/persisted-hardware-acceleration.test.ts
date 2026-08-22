@@ -93,7 +93,7 @@ describe("readPersistedHardwareAccelerationSync", () => {
 describe("resolveHardwareAcceleration", () => {
   it("defaults OFF on Windows and Linux, ON elsewhere", () => {
     const forPlatform = (platform: NodeJS.Platform) =>
-      resolveHardwareAcceleration({ setting: undefined, keepGpuEnv: undefined, platform });
+      resolveHardwareAcceleration({ setting: undefined, env: {}, platform });
 
     expect(forPlatform("win32")).toBe(false);
     expect(forPlatform("linux")).toBe(false);
@@ -102,16 +102,16 @@ describe("resolveHardwareAcceleration", () => {
 
   it("lets the saved setting override the platform default in both directions", () => {
     expect(
-      resolveHardwareAcceleration({ setting: true, keepGpuEnv: undefined, platform: "win32" }),
+      resolveHardwareAcceleration({ setting: true, env: {}, platform: "win32" }),
     ).toBe(true);
     expect(
-      resolveHardwareAcceleration({ setting: false, keepGpuEnv: undefined, platform: "darwin" }),
+      resolveHardwareAcceleration({ setting: false, env: {}, platform: "darwin" }),
     ).toBe(false);
   });
 
   it("lets LVIS_KEEP_GPU=1 win over a saved off", () => {
     expect(
-      resolveHardwareAcceleration({ setting: false, keepGpuEnv: "1", platform: "win32" }),
+      resolveHardwareAcceleration({ setting: false, env: { LVIS_KEEP_GPU: "1" }, platform: "win32" }),
     ).toBe(true);
   });
 
@@ -120,10 +120,10 @@ describe("resolveHardwareAcceleration", () => {
     // forcing the GPU on, and a user who saved ON would otherwise find it
     // silently disabled by a stale shell export.
     expect(
-      resolveHardwareAcceleration({ setting: true, keepGpuEnv: "0", platform: "win32" }),
+      resolveHardwareAcceleration({ setting: true, env: { LVIS_KEEP_GPU: "0" }, platform: "win32" }),
     ).toBe(true);
     expect(
-      resolveHardwareAcceleration({ setting: undefined, keepGpuEnv: "true", platform: "darwin" }),
+      resolveHardwareAcceleration({ setting: undefined, env: { LVIS_KEEP_GPU: "true" }, platform: "darwin" }),
     ).toBe(true);
   });
 });

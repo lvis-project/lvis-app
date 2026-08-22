@@ -8,8 +8,8 @@
  * just to learn what "enabled" means.
  */
 import {
-  envForcedBooleanForSettingsPath,
   envForcedStringForSettingsPath,
+  resolveEnvBackedBoolean,
 } from "./env-backed-settings.js";
 import {
   DEFAULT_CORP_CA_COMMON_NAME,
@@ -46,16 +46,16 @@ export function resolveCorpCaConfig(
   settings: CorpCaSettings = {},
   env: NodeJS.ProcessEnv = process.env,
 ): CorpCaConfig {
-  const forcedEnabled = envForcedBooleanForSettingsPath("system.corpCaEnabled", env);
-  const forcedDebug = envForcedBooleanForSettingsPath("system.corpCaDebugLog", env);
   const forcedName = envForcedStringForSettingsPath("system.corpCaCommonName", env);
-  const commonName =
-    normalizeCorpCaCommonName(forcedName)
-    ?? normalizeCorpCaCommonName(settings.commonName)
-    ?? DEFAULT_CORP_CA_COMMON_NAME;
   return {
-    enabled: forcedEnabled ?? settings.enabled ?? true,
-    commonName,
-    debugLog: forcedDebug ?? settings.debugLog ?? false,
+    enabled: resolveEnvBackedBoolean("system.corpCaEnabled", settings.enabled, env, true),
+    // The text setting is the one that cannot use the shared boolean rule, and
+    // it needs one step the booleans do not: a name that is not usable falls
+    // through to the next source rather than becoming a search for nothing.
+    commonName:
+      normalizeCorpCaCommonName(forcedName)
+      ?? normalizeCorpCaCommonName(settings.commonName)
+      ?? DEFAULT_CORP_CA_COMMON_NAME,
+    debugLog: resolveEnvBackedBoolean("system.corpCaDebugLog", settings.debugLog, env, false),
   };
 }
