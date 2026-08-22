@@ -19,6 +19,8 @@
  *                 Packaged builds ignore or scrub these (see `dev-flags.ts`).
  *   internal    — part of a host↔child protocol or the packaging layout. The
  *                 app writes it; nobody configures it.
+ *   pre-launch  — real user configuration, decided before the app exists to
+ *                 ask: at install time, or on the command that starts it.
  *   settings    — has a control the user can reach. Cross-checked below.
  *   pending     — SHOULD have a control and does not yet. Shrink-only.
  *
@@ -80,6 +82,26 @@ const INTERNAL: readonly string[] = [
 ];
 
 /**
+ * Configuration the user really does choose — but not from inside the running
+ * app, because the app cannot ask.
+ *
+ * `LVIS_HOME` names the directory every store, log, cache and sandbox rule is
+ * resolved against, and `lvisHome()` re-reads it on every call precisely so a
+ * relocated home is honored everywhere. A Settings control over it would be a
+ * control over where the settings it was just read from live: choosing a new
+ * value would strand every open handle, every path already handed to a plugin
+ * child, and the profile the control itself writes to. The honest surfaces are
+ * the installer (PR #1062 adds exactly that for Windows) and the launch
+ * command — both of which run before there is anything to strand.
+ *
+ * This is not an escape hatch for "we did not build it yet". An entry belongs
+ * here only when a control INSIDE the app would be wrong, not merely missing.
+ */
+const PRE_LAUNCH: readonly string[] = [
+  "LVIS_HOME",
+];
+
+/**
  * Reachable from Settings today.
  *
  * The tailnet group is listed by name rather than through
@@ -107,13 +129,12 @@ const SETTINGS_BACKED: readonly string[] = [
  * variable — building the control is.
  */
 const PENDING: readonly string[] = [
-  "LVIS_HOME",
   "LVIS_PRICING_OVERRIDE",
   "LVIS_SENTRY_DSN",
   "LVIS_TELEMETRY_ALLOWLIST",
 ];
 
-const PENDING_CEILING = 4;
+const PENDING_CEILING = 3;
 
 /**
  * `process.env.NAME`, `process.env["NAME"]`, and the same two through a passed
@@ -188,6 +209,7 @@ export function scanEnvReads(root: string = SRC): Map<string, string> {
 export const BUCKETS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["development", DEVELOPMENT],
   ["internal", INTERNAL],
+  ["pre-launch", PRE_LAUNCH],
   ["settings", SETTINGS_BACKED],
   ["pending", PENDING],
 ];
@@ -258,6 +280,7 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
   console.log(
     `[env-surface] OK — ${found.size} variable(s) read: `
     + `${SETTINGS_BACKED.length} with a control, ${PENDING.length} pending (ceiling ${PENDING_CEILING}), `
-    + `${DEVELOPMENT.length} development, ${INTERNAL.length} internal`,
+    + `${DEVELOPMENT.length} development, ${INTERNAL.length} internal, `
+    + `${PRE_LAUNCH.length} pre-launch`,
   );
 }
