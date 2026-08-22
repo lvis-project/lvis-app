@@ -2034,6 +2034,7 @@ export const zhMessages: Record<string, string> = {
   "permissionsTab.osSandboxEnabled": "启用",
   "permissionsTab.osSandboxPotentialReason": "平台潜力：{reason}",
   "permissionsTab.osSandboxRestartNote": "更改在重新启动应用程序后生效 - ASRT 沙箱在启动时初始化。",
+  "permissionsTab.osSandboxEnvForced": "环境变量 {envVar} 正在为本次运行开启沙箱，与这里保存的值无关。",
   "permissionsTab.osSandboxRuntimeReason": "当前运行时间：{reason}",
   "permissionsTab.osSandboxBootDegradedHeading": "操作系统工具沙箱已开启，但本次会话未启动。",
   "permissionsTab.osSandboxBootDegradedBody": "在问题解决并重启应用之前，工具将在没有操作系统隔离的情况下运行。",

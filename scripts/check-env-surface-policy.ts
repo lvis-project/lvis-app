@@ -21,7 +21,10 @@
  *                 app writes it; nobody configures it.
  *   pre-launch  — real user configuration, decided before the app exists to
  *                 ask: at install time, or on the command that starts it.
- *   settings    — has a control the user can reach. Cross-checked below.
+ *   settings    — has a control the user can reach. Cross-checked below: every
+ *                 registry path must be named by a renderer surface, because
+ *                 "listed in ENV_BACKED_SETTINGS" is a claim about the UI and
+ *                 the registry alone cannot make it true.
  *   pending     — SHOULD have a control and does not yet. Shrink-only.
  *
  * Usage: node --import tsx scripts/check-env-surface-policy.ts
@@ -33,6 +36,7 @@ import { ENV_BACKED_SETTINGS } from "../src/shared/env-backed-settings.js";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const SRC = join(ROOT, "src");
+const RENDERER = join(SRC, "ui", "renderer");
 
 /** Only meaningful outside a packaged build. */
 const DEVELOPMENT: readonly string[] = [
@@ -223,6 +227,41 @@ export function scanEnvReads(root: string = SRC): Map<string, string> {
   return found;
 }
 
+/**
+ * Every settings path a renderer file mentions by name.
+ *
+ * A quoted literal is the evidence, because that is how the surfaces name a
+ * path: most tabs write `settingsPath="system.corpCaEnabled"` on the notice,
+ * and the one table-driven tab writes `path: "system.localApiServer"` in its
+ * row list and passes `settingsPath={row.path}`. Both spellings are a quoted
+ * literal in a renderer file, and a path named nowhere in the renderer cannot
+ * have a control regardless of what the registry says about it.
+ *
+ * Tests are excluded on purpose: a path quoted in a test is a fixture, and
+ * accepting it would let the gate be satisfied by a test for a control that
+ * does not exist.
+ */
+export function scanRendererSettingsPaths(root: string = RENDERER): Set<string> {
+  const paths = new Set<string>();
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) { walk(path); continue; }
+      if (!/\.tsx?$/.test(entry.name)) continue;
+      const where = relative(ROOT, path).replaceAll("\\", "/");
+      if (TEST_FILE_RE.test(where)) continue;
+      for (const match of readFileSync(path, "utf-8").matchAll(SETTINGS_PATH_LITERAL_RE)) {
+        paths.add(match[1]!);
+      }
+    }
+  };
+  walk(root);
+  return paths;
+}
+
+/** A dotted settings path in quotes — `"system.corpCaEnabled"`. */
+const SETTINGS_PATH_LITERAL_RE = /["'`]([a-z][a-zA-Z0-9]*(?:\.[a-zA-Z0-9]+)+)["'`]/g;
+
 export const BUCKETS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["development", DEVELOPMENT],
   ["internal", INTERNAL],
@@ -242,8 +281,24 @@ export function evaluate(
   buckets: ReadonlyArray<readonly [string, readonly string[]]> = BUCKETS,
   pending: readonly string[] = PENDING,
   pendingCeiling: number = PENDING_CEILING,
+  rendererPaths: ReadonlySet<string> = scanRendererSettingsPaths(),
 ): readonly string[] {
   const failures: string[] = [];
+
+  // A registry entry is a claim that the setting is reachable, and the registry
+  // is what puts its variable in the "settings" bucket above. If no renderer
+  // file so much as names the path, the claim is false and the gate is
+  // certifying a surface that was never built — the exact shape of the problem
+  // this file exists to catch.
+  for (const entry of ENV_BACKED_SETTINGS) {
+    if (!rendererPaths.has(entry.settingsPath)) {
+      failures.push(
+        `${entry.settingsPath} (${entry.envVar}): in ENV_BACKED_SETTINGS but no renderer `
+        + `file names it, so the "settings" classification claims a control that does not `
+        + `exist. Build the control, or move the variable to another bucket.`,
+      );
+    }
+  }
 
   // Classified in more than one bucket: the two claims contradict each other,
   // and whichever the reader believes is a coin flip.

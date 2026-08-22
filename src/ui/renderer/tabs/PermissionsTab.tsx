@@ -42,6 +42,7 @@ import {
 } from "../../../shared/parent-adjudication-bounds.js";
 import { PERMISSION_REVIEWER_FRAMEWORK } from "../../../shared/permission-reviewer-framework.js";
 import { AuditPanel } from "../components/permissions/AuditPanel.js";
+import { EnvForcedNotice, useEnvForcedSettings } from "../components/EnvForcedNotice.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { getApi } from "../api-client.js";
 import { isIpcErrorResult } from "../types.js";
@@ -169,6 +170,11 @@ export function PermissionsTab({
   // ── OS Tool Sandbox ───────────────────────────────
   const [sandboxCapability, setSandboxCapability] = useState<SandboxCapabilityInfo | null>(null);
   const [sandboxEnabled, setSandboxEnabled] = useState(false);
+  // `LVIS_SANDBOX_ENABLED=1` is OR-ed with this setting at boot, so with the
+  // variable set the toggle cannot turn the sandbox off for this run. The
+  // stored value still decides the next run without it, so the control stays
+  // usable — what was missing was saying so.
+  const envForcedPaths = useEnvForcedSettings();
   const [sandboxBusy, setSandboxBusy] = useState(false);
   // Windows srt-win repair flow (the OS sandbox is normally provisioned at
   // app-install time; this panel is the re-provision/repair fallback).
@@ -1033,6 +1039,13 @@ export function PermissionsTab({
               {sandboxEnabled ? t("permissionsTab.osSandboxEnabled") : t("permissionsTab.osSandboxDisabled")}
             </span>
           </div>
+          <EnvForcedNotice
+            settingsPath="features.osToolSandbox"
+            forcedPaths={envForcedPaths}
+            messageKey="permissionsTab.osSandboxEnvForced"
+            testId="os-sandbox-forced"
+            className="mt-2"
+          />
           {sandboxCapability && !sandboxCapability.available ? (
             <p
               data-testid="os-sandbox-unavailable"

@@ -2034,6 +2034,7 @@ export const jaMessages: Record<string, string> = {
   "permissionsTab.osSandboxEnabled": "有効",
   "permissionsTab.osSandboxPotentialReason": "プラットフォームの可能性: {reason}",
   "permissionsTab.osSandboxRestartNote": "変更はアプリの再起動後に有効になります。ASRT サンドボックスは起動時に初期化されます。",
+  "permissionsTab.osSandboxEnvForced": "環境変数 {envVar} が、ここに保存された値に関係なく今回の実行でサンドボックスをオンにしています。",
   "permissionsTab.osSandboxRuntimeReason": "現在のランタイム: {reason}",
   "permissionsTab.osSandboxBootDegradedHeading": "OS ツールサンドボックスは有効ですが、このセッションでは起動しませんでした。",
   "permissionsTab.osSandboxBootDegradedBody": "問題が解決されアプリが再起動されるまで、ツールは OS 分離なしで実行されます。",

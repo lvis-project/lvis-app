@@ -2014,6 +2014,7 @@ export const deMessages: Record<string, string> = {
   "permissionsTab.osSandboxEnabled": "Ermöglicht",
   "permissionsTab.osSandboxPotentialReason": "Plattformpotenzial: {reason}",
   "permissionsTab.osSandboxRestartNote": "Änderungen werden nach dem Neustart der App wirksam – die ASRT-Sandbox wird beim Start initialisiert.",
+  "permissionsTab.osSandboxEnvForced": "Die Umgebungsvariable {envVar} schaltet die Sandbox für diesen Lauf ein, unabhängig vom hier gespeicherten Wert.",
   "permissionsTab.osSandboxRuntimeReason": "Aktuelle Laufzeit: {reason}",
   "permissionsTab.osSandboxBootDegradedHeading": "Die OS-Tool-Sandbox ist AKTIV, wurde in dieser Sitzung aber nicht gestartet.",
   "permissionsTab.osSandboxBootDegradedBody": "Werkzeuge laufen ohne OS-Isolierung, bis dies behoben und die App neu gestartet wurde.",

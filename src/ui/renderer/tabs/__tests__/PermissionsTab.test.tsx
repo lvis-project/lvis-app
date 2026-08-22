@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import "../../../../../test/renderer/setup.js";
-import { MOCK_REVIEWER_PARENT_ADJUDICATION } from "../../../../../test/renderer/mock-lvis-api.js";
+import { MOCK_REVIEWER_PARENT_ADJUDICATION, installMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState, type ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,7 +33,10 @@ function policyGetPayload(loaded: {
 }
 
 
-function installApi(disabledBatches: HookTrustRow[][]) {
+function installApi(
+  disabledBatches: HookTrustRow[][],
+  envForcedSettings: readonly string[] = [],
+) {
   const hookTrustList = vi.fn(async () => {
     const disabled = disabledBatches.shift() ?? [];
     return { ok: true as const, active: [], disabled, totalDisabled: disabled.length };
@@ -190,10 +193,10 @@ function installApi(disabledBatches: HookTrustRow[][]) {
     },
   };
   (globalThis as unknown as { window: typeof window }).window.lvis = lvis as never;
-  (globalThis as unknown as { window: typeof window }).window.lvisApi = {
-    getSettings: vi.fn(async () => ({ features: { osToolSandbox: false } })),
-    updateSettings: vi.fn(async () => ({})),
-  } as never;
+  installMockLvisApi({
+    settings: { features: { osToolSandbox: false } },
+    envForcedSettings,
+  });
   return lvis;
 }
 
@@ -1004,6 +1007,34 @@ describe("PermissionsTab — OS sandbox toggle and capability rendering", () => 
     expect(screen.getByText(/변경 사항은 앱을 재시작한 후 적용됩니다/)).toBeTruthy();
   });
 
+  it("says the environment is deciding the sandbox when the variable is set", async () => {
+    // `LVIS_SANDBOX_ENABLED=1` is OR-ed with the setting at boot, so without
+    // this line the toggle reads "off" while the sandbox is on, and turning it
+    // off again does nothing — a control that lies about the running app.
+    installApi([[]], ["features.osToolSandbox"]);
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("os-sandbox-forced")).toHaveTextContent("LVIS_SANDBOX_ENABLED");
+    });
+    // The control stays usable: the stored value still decides the next run
+    // launched without the variable.
+    expect(screen.getByTestId("os-sandbox-toggle")).not.toBeDisabled();
+  });
+
+  it("stays silent about the environment when no variable is forcing it", async () => {
+    installApi([[]]);
+
+    await act(async () => {
+      render(<PermissionsTab />);
+    });
+
+    expect(screen.queryByTestId("os-sandbox-forced")).toBeNull();
+  });
+
   it("renders the unavailable branch and disables the toggle for unsupported platforms", async () => {
     const api = installApi([[]]);
     api.permission.sandboxCapability.mockResolvedValueOnce({
@@ -1109,13 +1140,9 @@ describe("PermissionsTab — handleWindowsInstall error-shape robustness", () =>
       },
     };
     (globalThis as unknown as { window: typeof window }).window.lvis = lvis as never;
-    const updateSettings = vi.fn(async () => ({}));
-    (globalThis as unknown as { window: typeof window }).window.lvisApi = {
-      // osToolSandbox=true so the component loads into the Windows consent state
-      getSettings: vi.fn(async () => ({ features: { osToolSandbox: true } })),
-      updateSettings,
-    } as never;
-    return { lvis, updateSettings };
+    // osToolSandbox=true so the component loads into the Windows consent state
+    const api = installMockLvisApi({ settings: { features: { osToolSandbox: true } } });
+    return { lvis, updateSettings: api.updateSettings! };
   }
 
   it("keeps opt-in enabled and shows error banner on ok:false error shape", async () => {
