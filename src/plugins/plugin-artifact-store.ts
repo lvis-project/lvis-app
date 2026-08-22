@@ -342,6 +342,12 @@ export interface ArtifactStoreOptions {
    * inside the same `~/.lvis/<topic>/.cache/` tree as the SoT.
    */
   tarballCacheBase?: string | null;
+  /**
+   * Live read of the offline-cache preference. Read per install rather than
+   * captured at construction so the Settings toggle takes effect without a
+   * restart; the store is built once at boot.
+   */
+  offlineCacheEnabled?: () => boolean;
   /** Resource ceilings shared by download, cache, and zip extraction. */
   artifactLimits?: Partial<MarketplaceArtifactLimits>;
 }
@@ -395,6 +401,7 @@ export class PluginArtifactStore {
   private readonly fetcher: MarketplaceFetcher;
   private readonly publicKeys: Record<string, PublicKeyInput>;
   private readonly tarballCacheBase: string | null;
+  private readonly offlineCacheEnabled: () => boolean;
   private readonly artifactLimits: Readonly<MarketplaceArtifactLimits>;
   private readonly deferredCommitCleanups = new Set<Promise<void>>();
 
@@ -424,6 +431,7 @@ export class PluginArtifactStore {
       options.tarballCacheBase === null
         ? null
         : options.tarballCacheBase ?? resolve(options.cacheRoot, ".tarballs");
+    this.offlineCacheEnabled = options.offlineCacheEnabled ?? (() => true);
   }
 
   /** `{installRoot}/{slug}` — exposed for callers that need to know the path before download. */
@@ -566,7 +574,10 @@ export class PluginArtifactStore {
       http: this.fetcher,
       publicKeys: this.publicKeys,
       downloadRoot: resolve(this.cacheRoot, "verified-downloads"),
-      cacheBase: this.tarballCacheBase,
+      // A disabled cache is expressed as "no cache base", which is the same
+      // shape the test fetcher already uses — so the download path has one
+      // meaning for "no cache" rather than two.
+      cacheBase: this.offlineCacheEnabled() ? this.tarballCacheBase : null,
       // Under enforcement this is the signed admission row's hash, present for
       // EVERY version including pinned and rollback installs. Until then it is
       // the marketplace catalog's own hash, which is only available when the

@@ -21,7 +21,7 @@ import {
   resolvePluginUpdateCondition,
   type PluginUpdateCondition,
 } from "./update-condition.js";
-import { getCachedCatalog, isOfflineCacheEnabled, setCachedCatalog } from "./offline-cache.js";
+import { getCachedCatalog, setCachedCatalog } from "./offline-cache.js";
 import type { InstallerProgressEvent } from "./marketplace-installer.js";
 import { getBundledPublicKeys } from "./publisher-keys.js";
 import {
@@ -572,6 +572,7 @@ export class PluginMarketplaceService {
    * the plugin tree (`~/.lvis/plugins/.cache/`).
    */
   private readonly catalogCacheBase: string | null;
+  private readonly offlineCacheEnabled: () => boolean;
   /**
    * Per-plugin in-process mutex. Concurrent install/rollback
    * calls for the same pluginId are serialized to protect the cache
@@ -597,6 +598,13 @@ export class PluginMarketplaceService {
     fetcher: MarketplaceFetcher,
     deploymentGuard?: PluginDeploymentGuard,
     auditLogger?: AuditLogger,
+    /**
+     * Live read of `marketplace.offlineCacheEnabled` resolved against the
+     * environment. Injected as a function, not a value, because the service is
+     * constructed once at boot and the Settings toggle must not need a restart.
+     * Defaults to "on", matching the env-only resolver's unset behaviour.
+     */
+    offlineCacheEnabled: () => boolean = () => true,
   ) {
     this.paths = paths;
     this.registryPath = paths.registryPath;
@@ -614,12 +622,14 @@ export class PluginMarketplaceService {
     // Artifact store owns the same `pluginsRoot` (extract target) +
     // `cacheRoot` (history + version snapshots). Tarball offline cache
     // also lives under `cacheRoot`, not homedir().
+    this.offlineCacheEnabled = offlineCacheEnabled;
     this.artifactStore = new PluginArtifactStore({
       installRoot: paths.pluginsRoot,
       cacheRoot: paths.cacheRoot,
       fetcher,
       publicKeys: getBundledPublicKeys(),
       tarballCacheBase: fetcher instanceof LocalCatalogMarketplaceFetcher ? null : undefined,
+      offlineCacheEnabled,
     });
   }
 
@@ -681,7 +691,7 @@ export class PluginMarketplaceService {
         : cacheKey === null
           ? null
           : resolve(this.catalogCacheBase, "by-app-version", cacheKey);
-    const useCache = cacheBase !== null && isOfflineCacheEnabled();
+    const useCache = cacheBase !== null && this.offlineCacheEnabled();
     let catalogPlugins: PluginMarketplaceItem[] | null = null;
 
     if (useCache) {

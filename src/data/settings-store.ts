@@ -671,6 +671,14 @@ export interface MarketplaceSettings {
    */
   updateCheckEnabled?: boolean;
   /**
+   * Use the on-disk marketplace catalog + tarball cache. Default true.
+   *
+   * `LVIS_MARKETPLACE_USE_CACHE`, when set, overrides this either way — it is
+   * the deployment-side kill switch and predates the setting. See
+   * `resolveOfflineCacheEnabled`.
+   */
+  offlineCacheEnabled?: boolean;
+  /**
    * Update-check interval in milliseconds. Default 10 minutes (600_000 ms).
    * Set to 0 to disable periodic checks (manual / on-open only).
    */

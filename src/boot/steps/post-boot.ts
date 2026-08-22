@@ -24,7 +24,7 @@ import {
   readSkippedPluginUpdates,
 } from "../../shared/skipped-plugin-updates.js";
 import type { PluginPaths } from "../../plugins/plugin-paths.js";
-import { PluginUpdateDetector, isUpdateCheckEnabled } from "../../plugins/update-detector.js";
+import { PluginUpdateDetector, resolveUpdateCheckEnabled } from "../../plugins/update-detector.js";
 import { createUpdateCheckRunner } from "./update-check-runner.js";
 import { createAutoUpdater } from "../../main/auto-updater.js";
 import { startCrashReporter } from "../../main/crash-reporter.js";
@@ -185,8 +185,9 @@ export interface UpdateCheckInput {
 export function wireUpdateCheck(input: UpdateCheckInput): void {
   const { mainWindow, settingsService, marketplaceFetcher, pluginPaths } = input;
   const marketplaceSettings = settingsService.get("marketplace");
-  const updateCheckFeatureEnabled =
-    (marketplaceSettings?.updateCheckEnabled ?? true) && isUpdateCheckEnabled();
+  const updateCheckFeatureEnabled = resolveUpdateCheckEnabled(
+    marketplaceSettings?.updateCheckEnabled,
+  );
   if (!updateCheckFeatureEnabled) return;
 
   const registryPath = pluginPaths.registryPath;
@@ -256,8 +257,9 @@ export function wireAnnouncementCheck(input: AnnouncementCheckInput): void {
   const { getMainWindow, settingsService, marketplaceFetcher } = input;
   const DEFAULT_ANNOUNCEMENT_INTERVAL_MS = 10 * 60 * 1000; // default 10m
   const marketplaceSettings = settingsService.get("marketplace");
-  const announcementCheckEnabled =
-    (marketplaceSettings?.updateCheckEnabled ?? true) && isUpdateCheckEnabled();
+  const announcementCheckEnabled = resolveUpdateCheckEnabled(
+    marketplaceSettings?.updateCheckEnabled,
+  );
   if (!announcementCheckEnabled) return;
 
   let lastBroadcastKey = "";

@@ -13,6 +13,7 @@ import { app } from "electron";
 import { DisabledMarketplaceFetcher, PluginMarketplaceService } from "../../plugins/marketplace.js";
 import type { MarketplaceFetcher } from "../../plugins/marketplace.js";
 import { CloudMarketplaceFetcher } from "../../plugins/cloud-marketplace-fetcher.js";
+import { resolveOfflineCacheEnabled } from "../../plugins/offline-cache.js";
 import { getLvisAppVersion } from "../../shared/app-version.js";
 import { activeHostApiVendor, createRefreshActiveLlmWildcard } from "./refresh-active-llm-wildcard.js";
 import { createLogger } from "../../lib/logger.js";
@@ -56,6 +57,10 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
     marketplaceFetcher,
     deploymentGuard,
     bootAuditLogger,
+    // Re-read on every catalog list / install so the Settings toggle applies
+    // without a restart. `marketplaceSettings` above is a boot-time snapshot
+    // and would go stale the moment the user changed it.
+    () => resolveOfflineCacheEnabled(settingsService.get("marketplace").offlineCacheEnabled),
   );
 
   // Closure invoked by the settings IPC handler when MarketplaceTab fields

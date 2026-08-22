@@ -1608,6 +1608,22 @@ export const zhMessages: Record<string, string> = {
   "marketplaceTab.advancedCollapse": "折叠高级选项",
   "marketplaceTab.advancedDescription": "服务器 URL · 身份验证 · 信任策略。默认部署无需更改。",
   "marketplaceTab.advancedExpand": "展开高级选项",
+  "marketplaceTab.maintenanceTitle":
+    "更新与离线副本",
+  "marketplaceTab.maintenanceDescription":
+    "设置应用商店何时查找新版本，以及在磁盘上保留哪些内容。",
+  "marketplaceTab.updateCheckLabel":
+    "检查插件更新",
+  "marketplaceTab.updateCheckHelp":
+    "下次启动 LVIS 时生效。开启后，LVIS 大约每 10 分钟向应用商店查询一次已安装插件是否有新版本以及是否有公告。",
+  "marketplaceTab.updateCheckEnvForced":
+    "环境变量 {envVar} 正在关闭此项，与这里保存的值无关。",
+  "marketplaceTab.offlineCacheLabel":
+    "保留目录与下载内容的离线副本",
+  "marketplaceTab.offlineCacheHelp":
+    "立即生效。有离线副本时，网络不可用也能显示此前见过的软件包，并且不会重复下载已获取的插件。关闭后将不再把这些文件写入磁盘。",
+  "marketplaceTab.offlineCacheEnvForced":
+    "环境变量 {envVar} 正在代替这里保存的值决定此项。",
   "marketplaceTab.advancedTitle": "高级选项",
   "marketplaceTab.apiKeyHelp": "仅当服务器需要身份验证时才输入密钥。密钥被加密并存储在操作系统钥匙串中。",
   "marketplaceTab.apiKeyLabel": "API 密钥（可选）",

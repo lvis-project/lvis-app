@@ -1608,6 +1608,22 @@ export const jaMessages: Record<string, string> = {
   "marketplaceTab.advancedCollapse": "詳細オプションを折りたたむ",
   "marketplaceTab.advancedDescription": "サーバー URL · 認証 · 信頼ポリシー。デフォルトの展開では変更は必要ありません。",
   "marketplaceTab.advancedExpand": "詳細オプションを展開します",
+  "marketplaceTab.maintenanceTitle":
+    "更新とオフラインコピー",
+  "marketplaceTab.maintenanceDescription":
+    "マーケットプレイスが新しいバージョンをいつ確認し、何をディスクに残すかを設定します。",
+  "marketplaceTab.updateCheckLabel":
+    "プラグインの更新を確認する",
+  "marketplaceTab.updateCheckHelp":
+    "次回 LVIS を起動したときから適用されます。オンにすると、インストール済みプラグインの新しいバージョンとお知らせがあるかを約 10 分おきにマーケットプレイスへ確認します。",
+  "marketplaceTab.updateCheckEnvForced":
+    "環境変数 {envVar} が、ここに保存された値に関係なくこの項目をオフにしています。",
+  "marketplaceTab.offlineCacheLabel":
+    "カタログとダウンロードのオフラインコピーを保持する",
+  "marketplaceTab.offlineCacheHelp":
+    "すぐに適用されます。オフラインコピーがあると、ネットワークが使えないときも以前に見たパッケージを表示でき、取得済みのプラグインを再ダウンロードしません。オフにすると、これらのファイルをディスクに書き込まなくなります。",
+  "marketplaceTab.offlineCacheEnvForced":
+    "環境変数 {envVar} が、ここに保存された値の代わりにこの項目を決めています。",
   "marketplaceTab.advancedTitle": "詳細オプション",
   "marketplaceTab.apiKeyHelp": "サーバーが認証を必要とする場合にのみキーを入力します。キーは暗号化され、OS キーチェーンに保存されます。",
   "marketplaceTab.apiKeyLabel": "API キー (オプション)",

@@ -9,6 +9,7 @@
  */
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
+import { envForcedValueForSettingsPath } from "../shared/env-backed-settings.js";
 import type { PluginMarketplaceItem } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
@@ -22,14 +23,42 @@ const log = createLogger("offline-cache");
 // Feature flag
 // ---------------------------------------------------------------------------
 
+/** Registry key for the `LVIS_MARKETPLACE_USE_CACHE` / setting pair. */
+const OFFLINE_CACHE_SETTINGS_PATH = "marketplace.offlineCacheEnabled";
+
 /**
- * Returns `true` when the offline cache is enabled.
- * Defaults to `true`; set `LVIS_MARKETPLACE_USE_CACHE=false` to disable.
+ * Returns `true` when the offline cache is enabled by the environment alone,
+ * ignoring the setting. Defaults to `true`; set `LVIS_MARKETPLACE_USE_CACHE`
+ * to `false` (or `0`/`no`/`off`) to disable.
+ *
+ * Prefer {@link resolveOfflineCacheEnabled}, which also honours the setting the
+ * user can actually reach. This one remains for callers that have no settings
+ * service to ask.
  */
 export function isOfflineCacheEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const v = env.LVIS_MARKETPLACE_USE_CACHE;
-  if (v === undefined) return true;
-  return /^(1|true|yes|on)$/i.test(v.trim());
+  return envForcedValueForSettingsPath(OFFLINE_CACHE_SETTINGS_PATH, env) ?? true;
+}
+
+/**
+ * Combine the `marketplace.offlineCacheEnabled` setting with the environment.
+ *
+ * The environment wins WHEN SET, in both directions — it was the only control
+ * before the setting existed, and a deployment that pinned it is entitled to
+ * keep that pin rather than have a profile quietly override it. When it is
+ * unset, which is every packaged install, the setting decides; and when the
+ * setting is absent too, the answer is the same `true` the env-only resolver
+ * gave.
+ *
+ * The "when set, which way" half is not decided here: it is the registry entry
+ * the settings UI reads to tell the user the environment is deciding this.
+ */
+export function resolveOfflineCacheEnabled(
+  settingEnabled: boolean | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return envForcedValueForSettingsPath(OFFLINE_CACHE_SETTINGS_PATH, env)
+    ?? settingEnabled
+    ?? true;
 }
 
 // ---------------------------------------------------------------------------

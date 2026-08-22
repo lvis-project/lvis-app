@@ -19,7 +19,7 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
 import { verifyEnvelope, type PublicKeyInput } from "./envelope-verifier.js";
 import type { SignatureEnvelope, VerifyResult } from "./types.js";
-import { getCachedTarball, isOfflineCacheEnabled, setCachedTarball } from "./offline-cache.js";
+import { getCachedTarball, setCachedTarball } from "./offline-cache.js";
 import {
   assertCompressedArtifactSize,
   MarketplaceArtifactLimitError,
@@ -216,12 +216,18 @@ export async function installFromMarketplace(
   }
 
   // 1. Check offline tarball cache; fall back to network download.
-  // Tarball cache is only active when opts.cacheBase is provided as a non-null
-  // string AND the feature flag is enabled. Callers that don't set cacheBase
-  // (including all pre-existing tests) bypass the cache entirely, preventing
-  // stale-cache interference with signature verification tests.
+  // `opts.cacheBase` is the ONLY gate: a non-null string turns the cache on,
+  // null/absent turns it off. Callers that don't set it (including all
+  // pre-existing tests) bypass the cache entirely, preventing stale-cache
+  // interference with signature verification tests.
+  //
+  // This deliberately does NOT re-read the env flag. The caller
+  // (PluginArtifactStore) already resolves setting-vs-env through
+  // `resolveOfflineCacheEnabled` and passes null when the answer is off; a
+  // second, env-only predicate here would ignore the user's setting and
+  // silently disagree with the catalog half of the same feature.
   const cacheBase = typeof opts.cacheBase === "string" ? opts.cacheBase : null;
-  const useCache = cacheBase !== null && isOfflineCacheEnabled();
+  const useCache = cacheBase !== null;
   let body: Buffer = Buffer.alloc(0);
   let sha256Header: string | null = null;
   let fromCache = false;
