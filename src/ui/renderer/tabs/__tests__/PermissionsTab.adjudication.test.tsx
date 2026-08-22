@@ -9,7 +9,7 @@
  * range the store would refuse is the failure this file exists to catch.
  */
 import "../../../../../test/renderer/setup.js";
-import { MOCK_REVIEWER_PARENT_ADJUDICATION } from "../../../../../test/renderer/mock-lvis-api.js";
+import { MOCK_REVIEWER_PARENT_ADJUDICATION, installMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -103,17 +103,14 @@ function installApi(opts: { featureEnabled?: boolean } = {}) {
     },
   };
   (globalThis as unknown as { window: typeof window }).window.lvis = lvis as never;
-  const lvisApi = {
-    onSettingsUpdated: vi.fn(() => () => undefined),
-    getSettings: vi.fn(async () => ({
+  const lvisApi = installMockLvisApi({
+    settings: {
       features: {
         osToolSandbox: false,
         subAgentParentAdjudication: opts.featureEnabled ?? true,
       },
-    })),
-    updateSettings: vi.fn(async () => ({})),
-  };
-  (globalThis as unknown as { window: { lvisApi?: unknown } }).window.lvisApi = lvisApi;
+    },
+  });
   return { lvis, lvisApi };
 }
 

@@ -5,7 +5,7 @@
  * exposes the read-only prompt panel only; reviewer config stays slash/internal.
  */
 import "../../../../../test/renderer/setup.js";
-import { MOCK_REVIEWER_PARENT_ADJUDICATION } from "../../../../../test/renderer/mock-lvis-api.js";
+import { MOCK_REVIEWER_PARENT_ADJUDICATION, installMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -130,14 +130,9 @@ function installApi(providerKeys: Partial<Record<string, boolean>> = {}) {
   };
 
   (globalThis as unknown as { window: typeof window }).window.lvis = lvis as never;
-  // C3 Round 2 — stub lvisApi.onSettingsUpdated so the PermissionsTab
-  // useEffect that subscribes to settings changes doesn't throw.
-  const lvisApi = {
-    onSettingsUpdated: vi.fn(() => () => undefined),
-    getSettings: vi.fn(async () => ({ features: { osToolSandbox: false } })),
-    updateSettings: vi.fn(async () => ({})),
-  };
-  (globalThis as unknown as { window: { lvisApi?: unknown } }).window.lvisApi = lvisApi;
+  // The tab subscribes to settings changes and reads the env-forced set on
+  // mount, so it needs a real api double rather than a bare object.
+  installMockLvisApi({ settings: { features: { osToolSandbox: false } } });
   return lvis;
 }
 

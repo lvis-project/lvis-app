@@ -10,14 +10,17 @@ import { handleUsageSummary, handleUsageRange, handleUsageDailySummary, type Usa
 
 export function registerUsageHandlers(deps: IpcDeps): void {
   const { auditLogger } = deps;
+  // Read per call, not captured: a price correction saved in Settings has to
+  // change the next Usage query, not the next app launch.
+  const pricingOverrides = () => deps.settingsService.get("llm")?.pricingOverrides;
 
   // read-only, sender guard optional
-  ipcMain.handle(CHANNELS.usage.summary, async (_e, days?: number) => handleUsageSummary(days, auditLogger));
+  ipcMain.handle(CHANNELS.usage.summary, async (_e, days?: number) => handleUsageSummary(days, auditLogger, pricingOverrides()));
 
   // read-only; sender guard optional but added for cross-window consistency
   ipcMain.handle(CHANNELS.usage.range, async (e, opts: { dateFrom: string; dateTo: string }) => {
     if (!validateHostRendererSender(e)) { auditUnauthorized(auditLogger, CHANNELS.usage.range, e); return UNAUTHORIZED_FRAME; }
-    return handleUsageRange(opts, auditLogger);
+    return handleUsageRange(opts, auditLogger, pricingOverrides());
   });
 
   ipcMain.handle(CHANNELS.usage.dailySummary, async (e, input: UsageDailySummaryInput) => {

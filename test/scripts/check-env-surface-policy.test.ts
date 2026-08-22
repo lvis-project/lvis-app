@@ -6,7 +6,9 @@ import {
   BUCKETS,
   evaluate,
   scanEnvReads,
+  scanRendererSettingsPaths,
 } from "../../scripts/check-env-surface-policy.js";
+import { ENV_BACKED_SETTINGS } from "../../src/shared/env-backed-settings.js";
 
 let dir: string;
 
@@ -101,6 +103,37 @@ describe("env-surface scan", () => {
   });
 });
 
+describe("renderer settings-path scan", () => {
+  it("finds both spellings a surface uses to name a path", () => {
+    // The notice prop, and the row list of the one table-driven tab whose
+    // notice is passed `settingsPath={row.path}`.
+    write("Tab.tsx", `
+      const ROWS = [{ path: "system.localApiServer", label: "x" }];
+      export function Tab() {
+        return <EnvForcedNotice settingsPath="system.corpCaEnabled" testId="t" />;
+      }
+    `);
+
+    const paths = scanRendererSettingsPaths(dir);
+    expect(paths.has("system.localApiServer")).toBe(true);
+    expect(paths.has("system.corpCaEnabled")).toBe(true);
+  });
+
+  it("does not count a path quoted in a test", () => {
+    // Otherwise a test for a control that was never built would satisfy the
+    // gate — which is the one way this check could certify the thing it exists
+    // to catch.
+    mkdirSync(join(dir, "__tests__"));
+    writeFileSync(
+      join(dir, "__tests__", "Tab.test.tsx"),
+      'const forced = ["features.osToolSandbox"];\n',
+      "utf-8",
+    );
+
+    expect(scanRendererSettingsPaths(dir).size).toBe(0);
+  });
+});
+
 describe("env-surface policy", () => {
   const buckets = (over: Record<string, readonly string[]> = {}) =>
     ([
@@ -146,6 +179,19 @@ describe("env-surface policy", () => {
     const failures = evaluate(new Map(), buckets({ pending: ["LVIS_GONE"] }), ["LVIS_GONE"], 5);
 
     expect(failures).toEqual([expect.stringContaining("nothing reads it any more")]);
+  });
+
+  it("fails on a registry entry no renderer surface names", () => {
+    // The registry is what puts a variable in the "settings" bucket, so an
+    // entry with no control would otherwise be a variable the gate certifies
+    // as reachable while nobody can reach it.
+    const entry = ENV_BACKED_SETTINGS[0]!;
+    const failures = evaluate(new Map(), buckets(), [], 0, new Set());
+
+    expect(failures.length).toBe(ENV_BACKED_SETTINGS.length);
+    expect(failures[0]).toContain(entry.settingsPath);
+    expect(failures[0]).toContain(entry.envVar);
+    expect(failures[0]).toContain("Build the control");
   });
 
   it("passes the repository as it stands", () => {

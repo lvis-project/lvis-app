@@ -30,16 +30,14 @@
  * Context window source: vendor model docs. Last verified 2026-05.
  */
 
-export type PricingVendor =
-  | "claude"
-  | "openai"
-  | "gemini"
-  | "copilot"
-  | "azure-foundry"
-  | "vertex-ai"
-  | "openai-compatible";
-
-const PRICING_VENDORS = new Set<string>([
+/**
+ * The vendors this table prices, in the order a picker should offer them.
+ *
+ * One list: the type is derived from it and the membership test reads it, so a
+ * vendor cannot be addable in the UI but unrecognised by `toPricingVendor`, or
+ * vice versa. It used to be a union and a matching `Set` written out twice.
+ */
+export const PRICING_VENDORS = [
   "claude",
   "openai",
   "gemini",
@@ -47,10 +45,14 @@ const PRICING_VENDORS = new Set<string>([
   "azure-foundry",
   "vertex-ai",
   "openai-compatible",
-]);
+] as const;
+
+export type PricingVendor = (typeof PRICING_VENDORS)[number];
+
+const PRICING_VENDOR_SET = new Set<string>(PRICING_VENDORS);
 
 export function toPricingVendor(vendor: string): PricingVendor {
-  return PRICING_VENDORS.has(vendor)
+  return PRICING_VENDOR_SET.has(vendor)
     ? vendor as PricingVendor
     : "openai-compatible";
 }
