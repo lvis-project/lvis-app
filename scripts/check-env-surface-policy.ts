@@ -64,7 +64,14 @@ const DEVELOPMENT: readonly string[] = [
 const INTERNAL: readonly string[] = [
   "LVIS_HOOK_EVENT",
   "LVIS_HOOK_SESSION",
+  // Both halves of the subscription tool bridge. The host binds an ephemeral
+  // loopback port and mints a token, then hands the pair to the MCP child it
+  // just spawned; neither is something a person configures. The URL sat in
+  // PENDING, which asked for a control over a port number this process chose
+  // for itself — and a pending entry is a promise to build a surface, so the
+  // list has to mean it.
   "LVIS_SUBSCRIPTION_TOOL_BRIDGE_TOKEN",
+  "LVIS_SUBSCRIPTION_TOOL_BRIDGE_URL",
 ];
 
 /**
@@ -100,11 +107,10 @@ const PENDING: readonly string[] = [
   "LVIS_PRICING_OVERRIDE",
   "LVIS_SENTRY_DSN",
   "LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS",
-  "LVIS_SUBSCRIPTION_TOOL_BRIDGE_URL",
   "LVIS_TELEMETRY_ALLOWLIST",
 ];
 
-const PENDING_CEILING = 7;
+const PENDING_CEILING = 6;
 
 /**
  * `process.env.NAME`, `process.env["NAME"]`, and the same two through a passed
