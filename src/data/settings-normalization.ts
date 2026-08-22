@@ -910,7 +910,7 @@ export function normalizeWebView(input: unknown): WebViewSettings {
   return { ...DEFAULT_SETTINGS.webView };
 }
 
-export const VALID_CLOSE_BEHAVIORS: readonly SystemCloseBehavior[] = ["hide-to-tray", "quit"];
+const VALID_CLOSE_BEHAVIORS: readonly SystemCloseBehavior[] = ["hide-to-tray", "quit"];
 
 /** The active-view shape test, asked by both settings paths. */
 export function isActiveViewKey(value: unknown): boolean {
