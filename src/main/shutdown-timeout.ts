@@ -3,7 +3,6 @@ import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("lvis");
 let invalidEnvWarnedOnce = false;
-let deprecatedEnvWarnedOnce = false;
 
 /**
  * Default cleanup window for the Electron `before-quit` chain.
@@ -22,28 +21,18 @@ export type ShutdownCleanupResult =
 
 /**
  * Resolve the cleanup timeout from environment, falling back to the SOT
- * default. `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS` is the canonical knob; the
- * legacy `LVIS_SHUTDOWN_TIMEOUT_MS` alias is retained for backwards
- * compatibility and scheduled for removal on 2026-08-01 (callers using
- * the legacy alias get a one-shot deprecation warn).
+ * default. `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS` is the only knob — the legacy
+ * `LVIS_SHUTDOWN_TIMEOUT_MS` alias reached its published removal date
+ * (2026-08-01) and is gone. A host still exporting it now gets the default,
+ * which is what the deprecation warning had been telling it to expect.
  *
  * Invalid env values (non-numeric, ≤ 0, NaN) emit a one-shot warn so
  * operator misconfiguration is visible in production logs rather than
  * being silently swallowed.
  */
 export function resolveShutdownCleanupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const canonical = env.LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS;
-  const legacy = env.LVIS_SHUTDOWN_TIMEOUT_MS;
-  const raw = canonical ?? legacy;
+  const raw = env.LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS;
   if (!raw) return DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS;
-
-  if (canonical === undefined && legacy !== undefined && !deprecatedEnvWarnedOnce) {
-    deprecatedEnvWarnedOnce = true;
-    log.warn(
-      "shutdown-timeout: LVIS_SHUTDOWN_TIMEOUT_MS is deprecated (scheduled for removal 2026-08-01). " +
-        "Use LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS instead.",
-    );
-  }
 
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -60,13 +49,12 @@ export function resolveShutdownCleanupTimeoutMs(env: NodeJS.ProcessEnv = process
 }
 
 /**
- * Test-only: reset the one-shot warn latches so each test gets a clean
+ * Test-only: reset the one-shot warn latch so each test gets a clean
  * surface for env-validation assertions. Not exported from the module
  * barrel — direct import only inside `__tests__`.
  */
 export function __resetShutdownTimeoutWarnLatchesForTest(): void {
   invalidEnvWarnedOnce = false;
-  deprecatedEnvWarnedOnce = false;
 }
 
 /**
