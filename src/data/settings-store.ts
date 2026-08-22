@@ -38,7 +38,7 @@ import {
 } from "../i18n/index.js";
 import { normalizeAppMode, type InitialAppMode } from "../shared/initial-app-mode.js";
 import { isSidebarTab, type SidebarTab } from "../shared/sidebar-tab.js";
-import { isInlineViewKey, type InlineViewKey } from "../shared/view-key.js";
+import { type InlineViewKey } from "../shared/view-key.js";
 import { normalizeSettingsTab, type SettingsTab } from "../shared/settings-tabs.js";
 import {
   type LlmModelListCache,
@@ -78,8 +78,14 @@ import {
   normalizeWebView,
   preserveInstalledProviderPresetMetadata,
   sanitizeStoredPluginConfigs,
-  VALID_CLOSE_BEHAVIORS,
+  isActiveViewKey,
+  isCloseBehavior,
 } from "./settings-normalization.js";
+import {
+  PATCHED_FIELD,
+  acceptField,
+  isBooleanValue,
+} from "./settings-field-accept.js";
 const log = createLogger("settings");
 
 /**
@@ -921,22 +927,8 @@ export class SettingsService {
       nextAppearance.schemaVersion = 2;
       // Same value set as the load path — `isBundleId` in shared/theme-bundles
       // is the single source of truth for both.
-      if (isBundleId(bundleIdPatch)) {
-        nextAppearance.bundleId = bundleIdPatch;
-      } else if (bundleIdPatch !== undefined) {
-        log.warn(
-          `appearance.bundleId patch ignored (received ${JSON.stringify(bundleIdPatch)}), keeping %s`,
-          this.settings.appearance.bundleId,
-        );
-      }
-      if (typeof followSystemPatch === "boolean") {
-        nextAppearance.followSystem = followSystemPatch;
-      } else if (followSystemPatch !== undefined) {
-        log.warn(
-          `appearance.followSystem patch ignored (received ${JSON.stringify(followSystemPatch)}), keeping %s`,
-          this.settings.appearance.followSystem,
-        );
-      }
+      acceptField(nextAppearance, "bundleId", bundleIdPatch, isBundleId, "appearance", PATCHED_FIELD);
+      acceptField(nextAppearance, "followSystem", followSystemPatch, isBooleanValue, "appearance", PATCHED_FIELD);
       // Validate the language patch — coerce to a supported locale so a
       // malformed renderer/IPC payload can never persist an unknown language
       // (mirrors the font validation below; No-Fallback-Code: validate at the
@@ -973,14 +965,7 @@ export class SettingsService {
       // path can never drift apart.
       const nextWebView: WebViewSettings = { ...this.settings.webView };
       const rawFlow = partial.webView.preferredFlow;
-      if (isWebViewPreferredFlow(rawFlow)) {
-        nextWebView.preferredFlow = rawFlow;
-      } else if (rawFlow !== undefined) {
-        log.warn(
-          `webView.preferredFlow patch ignored (received ${JSON.stringify(rawFlow)}), keeping %s`,
-          this.settings.webView.preferredFlow,
-        );
-      }
+      acceptField(nextWebView, "preferredFlow", rawFlow, isWebViewPreferredFlow, "webView", PATCHED_FIELD);
       this.settings.webView = nextWebView;
     }
     if (partial.system) {
@@ -990,15 +975,7 @@ export class SettingsService {
       // disk-load path's `normalizeSystem` still backfills missing fields
       // with defaults.
       const next: SystemSettings = { ...this.settings.system };
-      const rawBehavior = partial.system.closeBehavior;
-      if (typeof rawBehavior === "string" && (VALID_CLOSE_BEHAVIORS as readonly string[]).includes(rawBehavior)) {
-        next.closeBehavior = rawBehavior as SystemCloseBehavior;
-      } else if (rawBehavior !== undefined) {
-        log.warn(
-          `system.closeBehavior patch ignored (received ${JSON.stringify(rawBehavior)}), keeping %s`,
-          this.settings.system.closeBehavior,
-        );
-      }
+      acceptField(next, "closeBehavior", partial.system.closeBehavior, isCloseBehavior, "system", PATCHED_FIELD);
       const rawAppMode = partial.system.appMode;
       const normalizedAppMode = normalizeAppMode(rawAppMode);
       if (normalizedAppMode !== null) {
@@ -1010,46 +987,18 @@ export class SettingsService {
         );
       }
       const rawLocalApi = partial.system.localApiServer;
-      if (typeof rawLocalApi === "boolean") {
-        next.localApiServer = rawLocalApi;
-      } else if (rawLocalApi !== undefined) {
-        log.warn(
-          `system.localApiServer patch ignored (received ${JSON.stringify(rawLocalApi)}), keeping %s`,
-          this.settings.system.localApiServer,
-        );
-      }
+      acceptField(next, "localApiServer", rawLocalApi, isBooleanValue, "system", PATCHED_FIELD);
       const rawHardwareAcceleration = partial.system.hardwareAcceleration;
-      if (typeof rawHardwareAcceleration === "boolean") {
-        next.hardwareAcceleration = rawHardwareAcceleration;
-      } else if (rawHardwareAcceleration !== undefined) {
-        log.warn(
-          `system.hardwareAcceleration patch ignored (received ${JSON.stringify(rawHardwareAcceleration)}), keeping %s`,
-          this.settings.system.hardwareAcceleration,
-        );
-      }
+      acceptField(next, "hardwareAcceleration", rawHardwareAcceleration, isBooleanValue, "system", PATCHED_FIELD);
       // Corporate CA group — same validate-at-the-boundary shape. The common
       // name is the only one that is not a boolean, and it is the only value
       // here that reaches a child process (`security` on macOS, PowerShell on
       // Windows), so a value that is not a name is dropped at this boundary
       // rather than carried to the process that searches for it.
       const rawCorpCaEnabled = partial.system.corpCaEnabled;
-      if (typeof rawCorpCaEnabled === "boolean") {
-        next.corpCaEnabled = rawCorpCaEnabled;
-      } else if (rawCorpCaEnabled !== undefined) {
-        log.warn(
-          `system.corpCaEnabled patch ignored (received ${JSON.stringify(rawCorpCaEnabled)}), keeping %s`,
-          this.settings.system.corpCaEnabled,
-        );
-      }
+      acceptField(next, "corpCaEnabled", rawCorpCaEnabled, isBooleanValue, "system", PATCHED_FIELD);
       const rawCorpCaDebugLog = partial.system.corpCaDebugLog;
-      if (typeof rawCorpCaDebugLog === "boolean") {
-        next.corpCaDebugLog = rawCorpCaDebugLog;
-      } else if (rawCorpCaDebugLog !== undefined) {
-        log.warn(
-          `system.corpCaDebugLog patch ignored (received ${JSON.stringify(rawCorpCaDebugLog)}), keeping %s`,
-          this.settings.system.corpCaDebugLog,
-        );
-      }
+      acceptField(next, "corpCaDebugLog", rawCorpCaDebugLog, isBooleanValue, "system", PATCHED_FIELD);
       const rawCorpCaCommonName = partial.system.corpCaCommonName;
       if (rawCorpCaCommonName !== undefined) {
         const normalized = normalizeCorpCaCommonName(rawCorpCaCommonName);
@@ -1065,23 +1014,9 @@ export class SettingsService {
       // Launch-at-startup + launch-minimized booleans (same validate-at-
       // boundary pattern as localApiServer: invalid → keep prior value).
       const rawLaunchAtStartup = partial.system.launchAtStartup;
-      if (typeof rawLaunchAtStartup === "boolean") {
-        next.launchAtStartup = rawLaunchAtStartup;
-      } else if (rawLaunchAtStartup !== undefined) {
-        log.warn(
-          `system.launchAtStartup patch ignored (received ${JSON.stringify(rawLaunchAtStartup)}), keeping %s`,
-          this.settings.system.launchAtStartup,
-        );
-      }
+      acceptField(next, "launchAtStartup", rawLaunchAtStartup, isBooleanValue, "system", PATCHED_FIELD);
       const rawLaunchMinimized = partial.system.launchMinimized;
-      if (typeof rawLaunchMinimized === "boolean") {
-        next.launchMinimized = rawLaunchMinimized;
-      } else if (rawLaunchMinimized !== undefined) {
-        log.warn(
-          `system.launchMinimized patch ignored (received ${JSON.stringify(rawLaunchMinimized)}), keeping %s`,
-          this.settings.system.launchMinimized,
-        );
-      }
+      acceptField(next, "launchMinimized", rawLaunchMinimized, isBooleanValue, "system", PATCHED_FIELD);
       const rawSidePanelWidth = partial.system.sidePanelWidth;
       if (typeof rawSidePanelWidth === "number" && Number.isFinite(rawSidePanelWidth)) {
         next.sidePanelWidth = Math.max(SIDE_PANEL_MIN_WIDTH, Math.round(rawSidePanelWidth));
@@ -1114,24 +1049,8 @@ export class SettingsService {
           );
         }
       }
-      const rawSidebarActiveTab = partial.system.sidebarActiveTab;
-      if (isSidebarTab(rawSidebarActiveTab)) {
-        next.sidebarActiveTab = rawSidebarActiveTab;
-      } else if (rawSidebarActiveTab !== undefined) {
-        log.warn(
-          `system.sidebarActiveTab patch ignored (received ${JSON.stringify(rawSidebarActiveTab)}), keeping %s`,
-          this.settings.system.sidebarActiveTab,
-        );
-      }
-      const rawActiveView = partial.system.activeView;
-      if (typeof rawActiveView === "string" && isInlineViewKey(rawActiveView)) {
-        next.activeView = rawActiveView;
-      } else if (rawActiveView !== undefined) {
-        log.warn(
-          `system.activeView patch ignored (received ${JSON.stringify(rawActiveView)}), keeping %s`,
-          this.settings.system.activeView,
-        );
-      }
+      acceptField(next, "sidebarActiveTab", partial.system.sidebarActiveTab, isSidebarTab, "system", PATCHED_FIELD);
+      acceptField(next, "activeView", partial.system.activeView, isActiveViewKey, "system", PATCHED_FIELD);
       const rawSettingsTab = partial.system.settingsTab;
       if (rawSettingsTab !== undefined) {
         // `normalizeSettingsTab` folds retired ids onto their replacements and
@@ -1170,14 +1089,7 @@ export class SettingsService {
         }
       }
       const rawEnabled = partial.shortcuts.enabled;
-      if (typeof rawEnabled === "boolean") {
-        nextShortcuts.enabled = rawEnabled;
-      } else if (rawEnabled !== undefined) {
-        log.warn(
-          `shortcuts.enabled patch ignored (received ${JSON.stringify(rawEnabled)}), keeping %s`,
-          this.settings.shortcuts.enabled,
-        );
-      }
+      acceptField(nextShortcuts, "enabled", rawEnabled, isBooleanValue, "shortcuts", PATCHED_FIELD);
       this.settings.shortcuts = nextShortcuts;
     }
     if (partial.pluginConfigs) {
