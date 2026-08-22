@@ -100,6 +100,14 @@ export const ko: Record<SeedMessageKey, string> = {
   "startupTab.launchMinimizedLabel": "트레이에 숨겨서 시작",
   "startupTab.launchMinimizedHint": "자동 실행 시 창을 열지 않고 트레이에 최소화된 상태로 시작합니다.",
   "startupTab.launchRegisterFailedTitle": "시작 시 자동 실행을 적용하지 못했습니다",
+  "startupTab.shutdownTimeoutLabel":
+    "종료 시 정리에 허용할 시간",
+  "startupTab.shutdownTimeoutHelp":
+    "종료하면 LVIS 는 루틴, 플러그인, 백그라운드 프로세스를 정지하고 창 배치를 저장한 뒤 닫힙니다. 이 시간 안에 끝나지 않으면 그대로 닫히며, 아직 기록 중이던 내용은 버려집니다. 종료가 오래 걸리는 플러그인이 있으면 늘리고, 종료가 느리게 느껴지면 줄이세요.",
+  "startupTab.shutdownTimeoutEnvForced":
+    "지금은 환경 변수 {envVar} 가 이 값을 지정하고 있어, 여기에 저장된 값 대신 사용됩니다.",
+  "startupTab.shutdownTimeoutSeconds": "{seconds}초",
+  "startupTab.shutdownTimeoutSecondsDefault": "{seconds}초 (기본)",
   "startupTab.launchRegisterFailedBody":
     "이 시스템에서 로그인 시 자동 실행을 등록하지 못했습니다. 설정에서 다시 시도하세요.",
 };

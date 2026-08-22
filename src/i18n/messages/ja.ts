@@ -98,6 +98,14 @@ export const ja: Record<SeedMessageKey, string> = {
   "startupTab.launchMinimizedLabel": "トレイに隠して起動",
   "startupTab.launchMinimizedHint": "ログイン時の起動でウィンドウを開かず、トレイに最小化した状態で起動します。",
   "startupTab.launchRegisterFailedTitle": "起動時の自動実行を適用できませんでした",
+  "startupTab.shutdownTimeoutLabel":
+    "終了時のクリーンアップに許可する時間",
+  "startupTab.shutdownTimeoutHelp":
+    "終了すると LVIS はルーチン、プラグイン、バックグラウンドプロセスを停止し、ウィンドウ配置を保存してから閉じます。この時間内に終わらない場合はそのまま閉じ、書き込み中だった内容は破棄されます。停止に時間がかかるプラグインがある場合は長く、終了が遅く感じる場合は短くしてください。",
+  "startupTab.shutdownTimeoutEnvForced":
+    "現在は環境変数 {envVar} がこの値を指定しており、ここに保存された値の代わりに使用されます。",
+  "startupTab.shutdownTimeoutSeconds": "{seconds} 秒",
+  "startupTab.shutdownTimeoutSecondsDefault": "{seconds} 秒 (既定)",
   "startupTab.launchRegisterFailedBody":
     "このシステムでログイン時の自動起動を登録できませんでした。設定から再試行してください。",
 };

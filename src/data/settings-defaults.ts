@@ -2,6 +2,7 @@ import {
   DEFAULT_CORP_CA_COMMON_NAME,
 } from "../shared/corp-ca-common-name.js";
 import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-policy.js";
+import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
 import {
   SIDE_PANEL_DEFAULT_WIDTH,
   SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
@@ -121,6 +122,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     corpCaEnabled: true,
     corpCaCommonName: DEFAULT_CORP_CA_COMMON_NAME,
     corpCaDebugLog: false,
+    // The quit-time cleanup window, from the timeout policy that already owns
+    // the number. Stated here so the control has something concrete to render
+    // and to persist when the user picks the default back.
+    shutdownCleanupTimeoutMs: TOOL_TIMEOUT_POLICY.shutdownCleanupMs,
     sidePanelWidth: SIDE_PANEL_DEFAULT_WIDTH,
     sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
     sidePanelSplitFilePercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,

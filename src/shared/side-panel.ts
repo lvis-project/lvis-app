@@ -61,3 +61,31 @@ export function clampSidePanelSplitPercent(value: number): number {
   );
   return Math.round(clamped);
 }
+
+/**
+ * The three persisted-geometry fields as the settings paths want them: a raw
+ * value of unknown shape in, the value to store out, or `undefined` for
+ * "reject and keep what stands".
+ *
+ * The clamps above answer a different question — they take a number the
+ * renderer just measured and pull it into range, so a non-finite measurement
+ * becomes the default rather than nothing. Reading a profile is not measuring:
+ * a field that is not a finite number was never a width, and substituting the
+ * default silently would hide a corrupt profile instead of reporting it. These
+ * wrappers draw that line once, for both the on-disk read and the update patch,
+ * which had been writing it out per field in two files.
+ */
+export function normalizeSidePanelWidth(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return Math.max(SIDE_PANEL_MIN_WIDTH, Math.round(value));
+}
+
+export function normalizeSidebarWidth(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return clampSidebarWidth(value);
+}
+
+export function normalizeSidePanelSplitPercent(value: unknown): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  return clampSidePanelSplitPercent(value);
+}

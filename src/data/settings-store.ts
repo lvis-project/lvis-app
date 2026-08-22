@@ -7,10 +7,11 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { withFileLock } from "../lib/with-file-lock.js";
 import {
-  SIDE_PANEL_MIN_WIDTH,
-  clampSidePanelSplitPercent,
-  clampSidebarWidth,
+  normalizeSidePanelSplitPercent,
+  normalizeSidePanelWidth,
+  normalizeSidebarWidth,
 } from "../shared/side-panel.js";
+import { normalizeShutdownCleanupTimeoutMs } from "../shared/tool-timeout-policy.js";
 import {
   sanitizePluginConfig,
   sanitizePluginConfigKey,
@@ -84,6 +85,7 @@ import {
 import {
   PATCHED_FIELD,
   acceptField,
+  acceptNormalizedField,
   isBooleanValue,
 } from "./settings-field-accept.js";
 const log = createLogger("settings");
@@ -568,6 +570,18 @@ export interface SystemSettings {
    */
   corpCaDebugLog?: boolean;
   /**
+   * How long the app may spend on its quit-time cleanup chain (stopping
+   * routines, plugins, and child processes, then flushing window state) before
+   * it stops waiting and exits anyway. Milliseconds; default 15_000, from
+   * `TOOL_TIMEOUT_POLICY.shutdownCleanupMs`.
+   *
+   * Raising it buys a slow plugin or a large unsaved workspace more time to
+   * finish writing; lowering it makes quitting feel immediate at the cost of
+   * abandoning work still in flight. `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS`
+   * overrides it — see `resolveShutdownCleanupTimeoutMs`.
+   */
+  shutdownCleanupTimeoutMs?: number;
+  /**
    * Persisted width (px) of the docked ChatSidePanel workspace rail, set by the
    * left-edge drag handle. Durable shell-layout preference; clamped to
    * [SIDE_PANEL_MIN_WIDTH, viewport) at drag time in the renderer. Default 448.
@@ -1017,37 +1031,30 @@ export class SettingsService {
       acceptField(next, "launchAtStartup", rawLaunchAtStartup, isBooleanValue, "system", PATCHED_FIELD);
       const rawLaunchMinimized = partial.system.launchMinimized;
       acceptField(next, "launchMinimized", rawLaunchMinimized, isBooleanValue, "system", PATCHED_FIELD);
-      const rawSidePanelWidth = partial.system.sidePanelWidth;
-      if (typeof rawSidePanelWidth === "number" && Number.isFinite(rawSidePanelWidth)) {
-        next.sidePanelWidth = Math.max(SIDE_PANEL_MIN_WIDTH, Math.round(rawSidePanelWidth));
-      } else if (rawSidePanelWidth !== undefined) {
-        log.warn(
-          `system.sidePanelWidth patch ignored (received ${JSON.stringify(rawSidePanelWidth)}), keeping %s`,
-          this.settings.system.sidePanelWidth,
-        );
-      }
-      const rawSidebarWidth = partial.system.sidebarWidth;
-      if (typeof rawSidebarWidth === "number" && Number.isFinite(rawSidebarWidth)) {
-        next.sidebarWidth = clampSidebarWidth(rawSidebarWidth);
-      } else if (rawSidebarWidth !== undefined) {
-        log.warn(
-          `system.sidebarWidth patch ignored (received ${JSON.stringify(rawSidebarWidth)}), keeping %s`,
-          this.settings.system.sidebarWidth,
-        );
-      }
+      acceptNormalizedField(
+        next,
+        "shutdownCleanupTimeoutMs",
+        partial.system.shutdownCleanupTimeoutMs,
+        normalizeShutdownCleanupTimeoutMs,
+        "system",
+        PATCHED_FIELD,
+      );
+      acceptNormalizedField(
+        next, "sidePanelWidth", partial.system.sidePanelWidth,
+        normalizeSidePanelWidth, "system", PATCHED_FIELD,
+      );
+      acceptNormalizedField(
+        next, "sidebarWidth", partial.system.sidebarWidth,
+        normalizeSidebarWidth, "system", PATCHED_FIELD,
+      );
       // Per-tab vertical split percents — each normalized independently through
       // the shared clamp so an out-of-range or non-finite value is ignored while
       // a valid sibling is preserved (mirrors the width path above).
       for (const key of SIDE_PANEL_SPLIT_KEYS) {
-        const raw = partial.system[key];
-        if (typeof raw === "number" && Number.isFinite(raw)) {
-          next[key] = clampSidePanelSplitPercent(raw);
-        } else if (raw !== undefined) {
-          log.warn(
-            `system.${key} patch ignored (received ${JSON.stringify(raw)}), keeping %s`,
-            this.settings.system[key],
-          );
-        }
+        acceptNormalizedField(
+          next, key, partial.system[key],
+          normalizeSidePanelSplitPercent, "system", PATCHED_FIELD,
+        );
       }
       acceptField(next, "sidebarActiveTab", partial.system.sidebarActiveTab, isSidebarTab, "system", PATCHED_FIELD);
       acceptField(next, "activeView", partial.system.activeView, isActiveViewKey, "system", PATCHED_FIELD);

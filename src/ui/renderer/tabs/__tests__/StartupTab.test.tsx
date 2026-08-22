@@ -11,6 +11,7 @@ import { describe, it, expect, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { StartupTab } from "../StartupTab.js";
 import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { TOOL_TIMEOUT_POLICY } from "../../../../shared/tool-timeout-policy.js";
 
 const STARTUP_SETTINGS = {
   llm: { provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
@@ -173,6 +174,48 @@ describe("StartupTab", () => {
     const { findByTestId, queryByTestId } = render(<StartupTab />);
     await findByTestId("startup-hardware-acceleration");
     expect(queryByTestId("startup-hardware-acceleration-forced")).toBeNull();
+  });
+
+  it("renders the saved cleanup window and persists a new choice", async () => {
+    const api = installApi({
+      ...STARTUP_SETTINGS,
+      system: { ...STARTUP_SETTINGS.system, shutdownCleanupTimeoutMs: 30_000 },
+    });
+    const { findByTestId } = render(<StartupTab />);
+    const select = (await findByTestId("startup-shutdown-timeout")) as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe("30000"));
+    fireEvent.change(select, { target: { value: "60000" } });
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        system: { shutdownCleanupTimeoutMs: 60_000 },
+      });
+    });
+  });
+
+  it("falls back to the policy default when nothing is saved", async () => {
+    installApi();
+    const { findByTestId } = render(<StartupTab />);
+    const select = (await findByTestId("startup-shutdown-timeout")) as HTMLSelectElement;
+    // The default has to be one of the offered options or the control would
+    // render a selection the user could never choose again.
+    await waitFor(() =>
+      expect(select.value).toBe(String(TOOL_TIMEOUT_POLICY.shutdownCleanupMs)),
+    );
+  });
+
+  it("names LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS and locks the control when the environment decides", async () => {
+    const { api } = makeMockLvisApi({
+      settings: STARTUP_SETTINGS,
+      envForcedSettings: ["system.shutdownCleanupTimeoutMs"],
+    });
+    (globalThis as unknown as { window: typeof window }).window.lvisApi = api as never;
+    const { findByTestId } = render(<StartupTab />);
+    const forced = await findByTestId("startup-shutdown-timeout-forced");
+    expect(forced.textContent).toContain("LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS");
+    // Saying the environment decides while still accepting a choice would be
+    // offering a control that does nothing.
+    const select = (await findByTestId("startup-shutdown-timeout")) as HTMLSelectElement;
+    await waitFor(() => expect(select.disabled).toBe(true));
   });
 
   it("clearing the accelerator persists null", async () => {
