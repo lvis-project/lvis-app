@@ -1,9 +1,9 @@
 /**
  * Shared pricing-data tests — ensure engine (pricing.ts) and the shared
- * module expose the same prices, and that the env-override path lives on
- * the engine side only.
+ * module expose the same prices, and that a price correction changes the
+ * engine's answer without changing the shared table it is layered over.
  */
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 import {
   computeCost,
   DEFAULT_PRICING,
@@ -22,30 +22,25 @@ describe("shared pricing-data", () => {
     expect(PRICING_TABLE).toBe(DEFAULT_PRICING);
   });
 
-  it("shared + engine return the same prices for known models (no override)", () => {
-    const prevOverride = process.env.LVIS_PRICING_OVERRIDE;
-    delete process.env.LVIS_PRICING_OVERRIDE;
-    try {
-      const samples: Array<[string, string]> = [
-        ["claude", "claude-sonnet-4-6"],
-        ["claude", "claude-opus-4-6"],
-        ["claude", "claude-opus-4-5"],
-        ["claude", "claude-haiku-4-5"],
-        ["openai", "gpt-5.4"],
-        ["openai", "gpt-5.4-mini"],
-        ["azure-foundry", "gpt-5.4-mini"],
-        ["openai", "gpt-4.1"],
-        ["gemini", "gemini-2.5-flash"],
-        ["copilot", "gpt-4.1"],
-      ];
-      for (const [vendor, model] of samples) {
-        const fromShared = lookupPricing(vendor, model);
-        const fromEngine = getModelPricing(vendor as any, model);
-        expect(fromEngine).toEqual(fromShared);
-      }
-    } finally {
-      if (prevOverride === undefined) delete process.env.LVIS_PRICING_OVERRIDE;
-      else process.env.LVIS_PRICING_OVERRIDE = prevOverride;
+  it("shared + engine return the same prices for known models (no correction)", () => {
+    // No environment dance: `getModelPricing` takes its corrections as an
+    // argument now, so an uncorrected call is uncorrected whatever is exported.
+    const samples: Array<[string, string]> = [
+      ["claude", "claude-sonnet-4-6"],
+      ["claude", "claude-opus-4-6"],
+      ["claude", "claude-opus-4-5"],
+      ["claude", "claude-haiku-4-5"],
+      ["openai", "gpt-5.4"],
+      ["openai", "gpt-5.4-mini"],
+      ["azure-foundry", "gpt-5.4-mini"],
+      ["openai", "gpt-4.1"],
+      ["gemini", "gemini-2.5-flash"],
+      ["copilot", "gpt-4.1"],
+    ];
+    for (const [vendor, model] of samples) {
+      const fromShared = lookupPricing(vendor, model);
+      const fromEngine = getModelPricing(vendor as any, model);
+      expect(fromEngine).toEqual(fromShared);
     }
   });
 
@@ -104,41 +99,30 @@ describe("shared pricing-data", () => {
   });
 });
 
-describe("engine pricing env-override (Node-only layer)", () => {
-  const prev = process.env.LVIS_PRICING_OVERRIDE;
-  beforeEach(() => { delete process.env.LVIS_PRICING_OVERRIDE; });
-  afterEach(() => {
-    if (prev === undefined) delete process.env.LVIS_PRICING_OVERRIDE;
-    else process.env.LVIS_PRICING_OVERRIDE = prev;
-  });
+describe("engine pricing with a price correction", () => {
+  // Where corrections come from (the setting, the env blob, the precedence
+  // between them) belongs to `pricing-overrides.test.ts`. What belongs here is
+  // the seam: the engine applies a correction it is handed, and the shared
+  // table stays the uncorrected list price it always was.
+  const CORRECTION = [
+    { vendor: "claude", model: "claude-sonnet-4-6", inputPer1M: 99, outputPer1M: 199 },
+  ];
 
-  it("LVIS_PRICING_OVERRIDE replaces the matched entry", () => {
-    process.env.LVIS_PRICING_OVERRIDE = JSON.stringify({
-      claude: {
-        "claude-sonnet-4-6": { inputPer1M: 99, outputPer1M: 199, contextWindow: 123 },
-      },
-    });
-    const p = getModelPricing("claude", "claude-sonnet-4-6");
+  it("getModelPricing applies the correction it is given", () => {
+    const p = getModelPricing("claude", "claude-sonnet-4-6", CORRECTION);
     expect(p.inputPer1M).toBe(99);
     expect(p.outputPer1M).toBe(199);
-    expect(p.contextWindow).toBe(123);
   });
 
-  it("shared lookupPricing ignores env overrides (stays pure)", () => {
-    process.env.LVIS_PRICING_OVERRIDE = JSON.stringify({
-      claude: {
-        "claude-sonnet-4-6": { inputPer1M: 99, outputPer1M: 199, contextWindow: 123 },
-      },
-    });
+  it("shared lookupPricing stays the uncorrected list price", () => {
     const p = lookupPricing("claude", "claude-sonnet-4-6");
     expect(p.inputPer1M).toBe(3);
     expect(p.outputPer1M).toBe(15);
   });
 
-  it("malformed override JSON is ignored — default table wins", () => {
-    process.env.LVIS_PRICING_OVERRIDE = "{not valid json";
-    const p = getModelPricing("claude", "claude-sonnet-4-6");
-    expect(p.inputPer1M).toBe(3);
+  it("no correction means the default table, not zero cost", () => {
+    expect(getModelPricing("claude", "claude-sonnet-4-6").inputPer1M).toBe(3);
+    expect(getModelPricing("claude", "claude-sonnet-4-6", []).inputPer1M).toBe(3);
   });
 
   it("lookupPricingOptional returns undefined on miss (strict variant)", () => {

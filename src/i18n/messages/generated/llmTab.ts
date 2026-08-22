@@ -54,6 +54,20 @@ export const en = {
   "llmTab.fallbackTitle": "Failover (Fallback Chain)",
   "llmTab.fallbackSummary": "Ordered list of vendors and models to switch to if no response arrives within 1 second or a 5xx/429/network error occurs",
   "llmTab.fallbackDesc": "If no response arrives within 1 second or a 5xx/429/network error occurs, the same model is retried 5 times before switching to each entry in order.",
+  // per-model price corrections (LVIS_PRICING_OVERRIDE surfaced)
+  "llmTab.pricingOverridesTitle": "Price corrections",
+  "llmTab.pricingOverridesDesc": "Report spend at your negotiated rates instead of published list prices.",
+  "llmTab.pricingOverridesHelp": "Rates are US dollars per million tokens. A model listed here is priced at these rates in the Usage tab and its CSV export; everything else keeps the built-in list price.",
+  "llmTab.pricingOverridesEnvForced":
+    "The environment variable {envVar} is supplying these rates right now, instead of the table saved here.",
+  "llmTab.pricingOverridesEmpty": "No corrections. Every model is reported at its published list price.",
+  "llmTab.pricingOverridesColVendor": "Provider",
+  "llmTab.pricingOverridesColModel": "Model",
+  "llmTab.pricingOverridesColInput": "Input $/1M",
+  "llmTab.pricingOverridesColOutput": "Output $/1M",
+  "llmTab.pricingOverridesModelPlaceholder": "exact model id",
+  "llmTab.pricingOverridesAdd": "+ Add correction",
+  "llmTab.pricingOverridesIncomplete": "Every row needs a model id and both rates before it can be saved.",
   "llmTab.addEntry": "+ Add",
   // Login-mode disabled field labels
 } as const;
@@ -112,6 +126,20 @@ export const ko: Record<keyof typeof en, string> = {
   "llmTab.fallbackTitle": "장애 복구 (Fallback Chain)",
   "llmTab.fallbackSummary": "첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류 시 순서대로 전환할 벤더·모델 목록",
   "llmTab.fallbackDesc": "첫 응답이 1초 안에 오지 않거나 5xx/429/네트워크 오류가 나면 같은 모델을 5회 시도한 뒤 순서대로 전환할 벤더·모델 목록입니다.",
+  // 모델별 단가 보정 (LVIS_PRICING_OVERRIDE 표면화)
+  "llmTab.pricingOverridesTitle": "단가 보정",
+  "llmTab.pricingOverridesDesc": "공시 단가 대신 계약된 단가로 비용을 집계합니다.",
+  "llmTab.pricingOverridesHelp": "단위는 100만 토큰당 미국 달러입니다. 여기 적힌 모델은 사용량 탭과 CSV 내보내기에서 이 단가로 계산되고, 나머지는 내장 공시 단가를 그대로 쓴다다.",
+  "llmTab.pricingOverridesEnvForced":
+    "환경 변수 {envVar} 가 여기 저장된 표 대신 이 단가를 지정하고 있습니다.",
+  "llmTab.pricingOverridesEmpty": "보정이 없습니다. 모든 모델이 공시 단가로 집계됩니다.",
+  "llmTab.pricingOverridesColVendor": "공급사",
+  "llmTab.pricingOverridesColModel": "모델",
+  "llmTab.pricingOverridesColInput": "입력 $/100만",
+  "llmTab.pricingOverridesColOutput": "출력 $/100만",
+  "llmTab.pricingOverridesModelPlaceholder": "정확한 모델 ID",
+  "llmTab.pricingOverridesAdd": "+ 보정 추가",
+  "llmTab.pricingOverridesIncomplete": "모델 ID와 두 단가를 모두 채워야 저장할 수 있습니다.",
   "llmTab.addEntry": "+ 추가",
   // Login-mode disabled field labels
 };

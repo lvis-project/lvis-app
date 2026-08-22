@@ -17,6 +17,7 @@ import {
 } from "../shared/subscription-runtime.js";
 import { isLLMVendor, type LLMVendor } from "./llm/types.js";
 import { getBillableModelPricing, computeCost, normalizeAiSdkUsageForCost } from "./llm/pricing.js";
+import { pricingOverridesSignature, type PricingOverride } from "../shared/pricing-overrides.js";
 
 export interface AuditTurnEntry {
   timestamp: string;
@@ -423,10 +424,16 @@ export async function readAuditEntries(
 
 /**
  * Compute aggregated usage summary from audit turn entries.
+ *
+ * `pricingOverrides` is the resolved list (Settings, or the deployment's
+ * `LVIS_PRICING_OVERRIDE`) — passed in rather than read here, because the
+ * cache above keys on it and a value this function fetched for itself could
+ * differ from the one the key was built from.
  */
 export function computeUsageSummary(
   entries: AuditTurnEntry[],
   now: Date = new Date(),
+  pricingOverrides: readonly PricingOverride[] = [],
 ): UsageSummary {
   const todayKey = kstDateKey(now);
   const weekKey = kstWeekStartKey(now);
@@ -507,7 +514,9 @@ export function computeUsageSummary(
         cacheReadTokens = 0,
         cacheWriteTokens = 0,
       } = tokenUsage;
-      const pricing = vendor !== "unknown" ? getBillableModelPricing(vendor, model) : undefined;
+      const pricing = vendor !== "unknown"
+        ? getBillableModelPricing(vendor, model, pricingOverrides)
+        : undefined;
       const costKnown = !!pricing;
       const cost = pricing && vendor !== "unknown"
         ? computeCost(
@@ -678,6 +687,7 @@ function createUsageSummaryCacheKey(params: {
   auditDir: string;
   query: UsageSummaryCacheQuery;
   now: Date;
+  pricingOverrides: readonly PricingOverride[];
   manifest: readonly UsageAuditFileManifest[];
 }): string {
   return JSON.stringify({
@@ -685,7 +695,7 @@ function createUsageSummaryCacheKey(params: {
     auditDir: params.auditDir,
     query: params.query,
     kstDate: kstDateKey(params.now),
-    pricingOverride: process.env.LVIS_PRICING_OVERRIDE ?? null,
+    pricingOverride: pricingOverridesSignature(params.pricingOverrides),
     manifest: params.manifest,
   });
 }
@@ -711,6 +721,7 @@ interface CachedUsageSummaryRequest {
   now: Date;
   matchesFile: (file: UsageAuditFile) => boolean;
   matchesEntry: (entry: AuditTurnEntry) => boolean;
+  pricingOverrides: readonly PricingOverride[];
 }
 
 async function loadUsageSummaryFromSnapshot(
@@ -732,7 +743,7 @@ async function loadUsageSummaryFromSnapshot(
     && manifestsMatch(before.manifest, after.manifest)
   );
   return {
-    summary: computeUsageSummary(read.entries, request.now),
+    summary: computeUsageSummary(read.entries, request.now, request.pricingOverrides),
     cacheable: manifestStable && read.complete,
     // A stable corrupt or unreadable file must stay uncached, but retrying it
     // immediately only repeats the same failed stream work.
@@ -767,6 +778,7 @@ async function getCachedUsageSummary(
           auditDir: request.auditDir,
           query: request.query,
           now: request.now,
+          pricingOverrides: request.pricingOverrides,
           manifest: before.manifest,
         });
         const cached = usageSummaryCache.get(key, request.now);
@@ -820,6 +832,7 @@ export interface UsageRangeOptions {
 export async function getUsageRange(
   opts: UsageRangeOptions,
   now: Date = new Date(),
+  pricingOverrides: readonly PricingOverride[] = [],
 ): Promise<UsageSummary> {
   const auditDir = join(lvisHome(), "audit");
   const fileDateFrom = shiftKstDateKey(opts.dateFrom, -1);
@@ -842,6 +855,7 @@ export async function getUsageRange(
       const date = kstDateKey(timestamp);
       return date >= opts.dateFrom && date <= opts.dateTo;
     },
+    pricingOverrides,
   });
 }
 
@@ -860,6 +874,7 @@ export function computeMonthlyProjection(trend: UsageTrendPoint[]): number {
 export async function getUsageSummary(
   days: number = 60,
   now: Date = new Date(),
+  pricingOverrides: readonly PricingOverride[] = [],
 ): Promise<UsageSummary> {
   const auditDir = join(lvisHome(), "audit");
   const cutoffDateKey = shiftKstDateKey(kstDateKey(now), -days);
@@ -874,5 +889,6 @@ export async function getUsageSummary(
       const timestamp = new Date(entry.timestamp);
       return !Number.isNaN(timestamp.getTime()) && kstDateKey(timestamp) >= cutoffDateKey;
     },
+    pricingOverrides,
   });
 }

@@ -42,6 +42,12 @@ vi.mock("../../engine/usage-stats.js", () => ({
   getUsageRange: vi.fn(async (opts: unknown) => ({ range: opts, rows: [] })),
 }));
 
+// The aggregation prices with the corrections the domain reads per call, so
+// every engine call carries a clock and a correction list. The tests care
+// about the days/opts argument, not the other two.
+const ANY_CLOCK = expect.any(Date);
+const NO_OVERRIDES: readonly never[] = [];
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function invoke(channel: string, event: unknown, ...args: unknown[]): unknown {
@@ -56,12 +62,16 @@ function untrustedEvent(): IpcMainInvokeEvent {
 
 const mockAuditLogger = { log: vi.fn(), search: vi.fn(), getStats: vi.fn(), flush: vi.fn(async (): Promise<void> => {}) };
 const mockGenerateText = vi.fn(async () => "AI daily summary");
+const noCorrections = (key: string) => (key === "llm" ? {} : undefined);
+const mockSettingsGet = vi.fn(noCorrections);
 
 function makeMinimalDeps() {
   return {
     auditLogger: mockAuditLogger,
     conversationLoop: { generateText: mockGenerateText },
     getMainWindow: () => null,
+    // The domain reads `llm.pricingOverrides` on every usage call.
+    settingsService: { get: mockSettingsGet },
     // rest unused by usage domain
   } as unknown as import("../types.js").IpcDeps;
 }
@@ -69,6 +79,9 @@ function makeMinimalDeps() {
 beforeEach(async () => {
   handlers.clear();
   vi.clearAllMocks();
+  // clearAllMocks drops calls, not implementations — restore the default so a
+  // correction installed by one test does not price the next one.
+  mockSettingsGet.mockImplementation(noCorrections);
   const { registerUsageHandlers } = await import("../domains/usage.js");
   registerUsageHandlers(makeMinimalDeps());
 });
@@ -83,7 +96,7 @@ describe("lvis:usage:summary", () => {
   it("calls getUsageSummary with provided days", async () => {
     const { getUsageSummary } = await import("../../engine/usage-stats.js");
     const result = await invoke("lvis:usage:summary", hostFrameEvent(), 30) as { days: number };
-    expect(getUsageSummary).toHaveBeenCalledWith(30);
+    expect(getUsageSummary).toHaveBeenCalledWith(30, ANY_CLOCK, NO_OVERRIDES);
     expect(result.days).toBe(30);
   });
 
@@ -101,13 +114,28 @@ describe("lvis:usage:summary", () => {
     await pending;
 
     expect(mockAuditLogger.flush).toHaveBeenCalledTimes(1);
-    expect(getUsageSummary).toHaveBeenCalledWith(30);
+    expect(getUsageSummary).toHaveBeenCalledWith(30, ANY_CLOCK, NO_OVERRIDES);
   });
 
   it("defaults to 60 days when no argument", async () => {
     const { getUsageSummary } = await import("../../engine/usage-stats.js");
     await invoke("lvis:usage:summary", hostFrameEvent());
-    expect(getUsageSummary).toHaveBeenCalledWith(60);
+    expect(getUsageSummary).toHaveBeenCalledWith(60, ANY_CLOCK, NO_OVERRIDES);
+  });
+
+  it("carries the price corrections stored right now, not the ones at boot", async () => {
+    const { getUsageSummary } = await import("../../engine/usage-stats.js");
+    const correction = [
+      { vendor: "claude", model: "claude-sonnet-4-6", inputPer1M: 2, outputPer1M: 9 },
+    ];
+    mockSettingsGet.mockImplementation((key: string) =>
+      key === "llm" ? { pricingOverrides: correction } : undefined);
+
+    await invoke("lvis:usage:summary", hostFrameEvent(), 30);
+
+    // Registration happened in beforeEach, before this correction existed: a
+    // captured value would still be reporting list price here.
+    expect(getUsageSummary).toHaveBeenCalledWith(30, ANY_CLOCK, correction);
   });
 });
 
@@ -127,7 +155,7 @@ describe("lvis:usage:range", () => {
     const opts = { dateFrom: "2026-01-01", dateTo: "2026-01-31" };
     await invoke("lvis:usage:range", hostFrameEvent(), opts);
     expect(mockAuditLogger.flush).toHaveBeenCalledTimes(1);
-    expect(getUsageRange).toHaveBeenCalledWith(opts);
+    expect(getUsageRange).toHaveBeenCalledWith(opts, ANY_CLOCK, NO_OVERRIDES);
   });
 });
 
