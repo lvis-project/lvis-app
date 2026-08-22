@@ -12,6 +12,7 @@ import {
   DEFAULT_TELEMETRY_ALLOWLIST,
   TelemetryService,
   sanitizeUrlForAudit,
+  telemetryAllowedHosts,
   validateTelemetryEndpoint,
 } from "../telemetry.js";
 import type { TelemetrySettings } from "../../data/settings-store.js";
@@ -254,5 +255,44 @@ describe("TelemetryService — isActive() + audit on invalid endpoint", () => {
       allowlistEnv: "custom.corp.example",
     });
     expect(svc.isActive()).toBe(true);
+  });
+});
+
+/**
+ * The settings surface shows this list so the endpoint field is usable. It has
+ * to be the list actually enforced — a second, drifting parse would tell the
+ * user a host is allowed and then reject it.
+ */
+describe("telemetryAllowedHosts", () => {
+  it("falls back to the default allowlist when the variable is unset", () => {
+    expect(telemetryAllowedHosts({})).toEqual([...DEFAULT_TELEMETRY_ALLOWLIST]);
+  });
+
+  it("agrees with validateTelemetryEndpoint on every host it lists", () => {
+    const env = { LVIS_TELEMETRY_ALLOWLIST: " Metrics.Corp.Example , events.corp.example " };
+    const hosts = telemetryAllowedHosts(env);
+    expect(hosts).toEqual(["metrics.corp.example", "events.corp.example"]);
+    for (const host of hosts) {
+      expect(
+        validateTelemetryEndpoint(`https://${host}/v1`, {
+          isPackaged: true,
+          allowlistEnv: env.LVIS_TELEMETRY_ALLOWLIST,
+        }).valid,
+      ).toBe(true);
+    }
+  });
+
+  it("rejects a host it does not list", () => {
+    const allowlistEnv = "metrics.corp.example";
+    expect(telemetryAllowedHosts({ LVIS_TELEMETRY_ALLOWLIST: allowlistEnv }))
+      .not.toContain("elsewhere.example");
+    expect(
+      validateTelemetryEndpoint("https://elsewhere.example/v1", { isPackaged: true, allowlistEnv })
+        .valid,
+    ).toBe(false);
+  });
+
+  it("is frozen — the surface reads the bound, it does not edit it", () => {
+    expect(Object.isFrozen(telemetryAllowedHosts({}))).toBe(true);
   });
 });

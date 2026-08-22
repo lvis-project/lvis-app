@@ -3,7 +3,6 @@ import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { Label } from "../../../components/ui/label.js";
-import { Input } from "../../../components/ui/input.js";
 import {
   RadioGroup,
   RadioGroupItem,
@@ -11,6 +10,7 @@ import {
 import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { EnvForcedNotice, useEnvForcedSettings } from "../components/EnvForcedNotice.js";
+import { SettingsTextField } from "../components/SettingsTextField.js";
 import { getApi } from "../api-client.js";
 import { DEFAULT_CORP_CA_COMMON_NAME } from "../../../shared/corp-ca-common-name.js";
 import { TOOL_TIMEOUT_POLICY } from "../../../shared/tool-timeout-policy.js";
@@ -80,16 +80,11 @@ export function StartupTab() {
   );
   const [corpCaEnabled, setCorpCaEnabled] = useState(true);
   const [corpCaDebugLog, setCorpCaDebugLog] = useState(false);
+  // The name the host last reported. `SettingsTextField` owns the draft — it
+  // reseeds only when this value actually moves, so the re-render caused by
+  // flipping a switch in this same section cannot wipe a name the user is
+  // halfway through typing.
   const [corpCaCommonName, setCorpCaCommonName] = useState(DEFAULT_CORP_CA_COMMON_NAME);
-  // Draft state: the name is a text field, so persisting per keystroke would
-  // write a partial name to the profile the next launch reads.
-  const [corpCaNameDraft, setCorpCaNameDraft] = useState(DEFAULT_CORP_CA_COMMON_NAME);
-  // The last name the host reported. `applySnapshot` runs again on EVERY
-  // settings update, including ones this tab caused (flipping a switch in this
-  // same section) and ones from elsewhere entirely — so it reseeds the draft
-  // only when the draft still matches what was stored, or it would wipe a name
-  // the user is halfway through typing.
-  const storedCorpCaNameRef = useRef(DEFAULT_CORP_CA_COMMON_NAME);
   const [capturing, setCapturing] = useState(false);
   const captureInputRef = useRef<HTMLDivElement | null>(null);
 
@@ -105,11 +100,7 @@ export function StartupTab() {
     );
     setCorpCaEnabled(s.system?.corpCaEnabled ?? true);
     setCorpCaDebugLog(s.system?.corpCaDebugLog ?? false);
-    const name = s.system?.corpCaCommonName ?? DEFAULT_CORP_CA_COMMON_NAME;
-    const previousName = storedCorpCaNameRef.current;
-    storedCorpCaNameRef.current = name;
-    setCorpCaCommonName(name);
-    setCorpCaNameDraft((draft) => (draft === previousName ? name : draft));
+    setCorpCaCommonName(s.system?.corpCaCommonName ?? DEFAULT_CORP_CA_COMMON_NAME);
     setLoaded(true);
   }, []);
 
@@ -205,15 +196,20 @@ export function StartupTab() {
     [persistSystem],
   );
 
-  const commitCorpCaCommonName = useCallback(() => {
-    const next = corpCaNameDraft.trim();
-    // An emptied field means "use the default" rather than "search for
-    // nothing"; the host applies the same rule, so show what will be saved.
-    const applied = next === "" ? DEFAULT_CORP_CA_COMMON_NAME : next;
-    setCorpCaCommonName(applied);
-    setCorpCaNameDraft(applied);
-    persistSystem({ corpCaCommonName: applied });
-  }, [corpCaNameDraft, persistSystem]);
+  // An emptied field means "use the default" rather than "search for nothing";
+  // the host applies the same rule, so the field shows what will be saved.
+  const normalizeCorpCaCommonName = useCallback(
+    (raw: string) => raw.trim() || DEFAULT_CORP_CA_COMMON_NAME,
+    [],
+  );
+
+  const commitCorpCaCommonName = useCallback(
+    (applied: string) => {
+      setCorpCaCommonName(applied);
+      persistSystem({ corpCaCommonName: applied });
+    },
+    [persistSystem],
+  );
 
   const handleShutdownTimeoutChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
@@ -454,43 +450,23 @@ export function StartupTab() {
           className="mt-2"
         />
 
-        <div className="mt-4 space-y-2">
-          <Label className="text-sm font-medium" htmlFor="startup-corp-ca-common-name">
-            {t("startupTab.corpCaCommonNameLabel")}
-          </Label>
-          <div className="flex items-center gap-2">
-            <Input
-              id="startup-corp-ca-common-name"
-              value={corpCaNameDraft}
-              onChange={(e) => setCorpCaNameDraft(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") commitCorpCaCommonName(); }}
-              disabled={!loaded || !corpCaEnabled}
-              className="flex-1"
-              data-testid="startup-corp-ca-common-name"
-            />
-            <Button
-              type="button"
-              size="sm"
-              onClick={commitCorpCaCommonName}
-              disabled={!loaded || corpCaNameDraft.trim() === corpCaCommonName}
-              data-testid="startup-corp-ca-common-name-save"
-            >
-              {t("common.save")}
-            </Button>
-          </div>
-          <p
-            className="text-xs text-muted-foreground"
-            data-testid="startup-corp-ca-common-name-help"
-          >
-            {t("startupTab.corpCaCommonNameHelp")}
-          </p>
+        <SettingsTextField
+          id="startup-corp-ca-common-name"
+          label={t("startupTab.corpCaCommonNameLabel")}
+          help={t("startupTab.corpCaCommonNameHelp")}
+          value={corpCaCommonName}
+          onCommit={commitCorpCaCommonName}
+          normalize={normalizeCorpCaCommonName}
+          disabled={!loaded || !corpCaEnabled}
+          className="mt-4"
+        >
           <EnvForcedNotice
             settingsPath="system.corpCaCommonName"
             forcedPaths={envForcedPaths}
             messageKey="startupTab.corpCaCommonNameEnvForced"
             testId="startup-corp-ca-common-name-forced"
           />
-        </div>
+        </SettingsTextField>
 
         <div className="mt-4 flex items-center justify-between gap-4">
           <span className="min-w-0 text-sm font-medium">
