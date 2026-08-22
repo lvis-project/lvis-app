@@ -68,6 +68,28 @@ export const zh: Record<SeedMessageKey, string> = {
     "下次启动 LVIS 时生效。如果窗口变黑、闪烁，或应用在绘制时崩溃，请关闭此项 — 部分受管电脑和虚拟桌面的显卡驱动无法支持它。因此在 Windows 和 Linux 上默认关闭。",
   "startupTab.hardwareAccelerationEnvForced":
     "环境变量 {envVar} 正在开启此项，与这里保存的值无关。",
+  "startupTab.corpCaSectionTitle":
+    "企业网络证书",
+  "startupTab.corpCaSectionDesc":
+    "适用于使用公司颁发的根证书检查 TLS 流量的网络。",
+  "startupTab.corpCaEnabledLabel":
+    "信任企业根证书",
+  "startupTab.corpCaEnabledHelp":
+    "下次启动 LVIS 时生效。浏览网页时 LVIS 沿用操作系统信任的证书，但模型调用、应用商店请求和更新检查会单独验证，并不沿用。在检查 TLS 流量的网络中，正是这些请求会因证书错误而失败，而普通网页却能正常打开；此设置就是用来解决该问题的。不确定时请保持开启 — 在没有这类证书的电脑上，它什么也找不到，也不会改变任何东西。",
+  "startupTab.corpCaEnabledEnvForced":
+    "环境变量 {envVar} 正在关闭此项，与这里保存的值无关。",
+  "startupTab.corpCaCommonNameLabel":
+    "证书名称",
+  "startupTab.corpCaCommonNameHelp":
+    "公司根证书在系统信任存储中的通用名称 (CN)。下面的默认值只是占位示例 — 如果证书错误仍然存在，请向公司 IT 部门确认真实名称。填写名称的一部分即可匹配。",
+  "startupTab.corpCaCommonNameEnvForced":
+    "环境变量 {envVar} 正在代替这里保存的值提供该名称。",
+  "startupTab.corpCaDebugLabel":
+    "记录证书查找详情",
+  "startupTab.corpCaDebugHelp":
+    "把查找了什么、找到了什么写入应用日志。仅在排查证书问题时开启。",
+  "startupTab.corpCaDebugEnvForced":
+    "环境变量 {envVar} 正在开启此项，与这里保存的值无关。",
   "startupTab.launchSectionTitle": "开机自动启动",
   "startupTab.launchSectionDesc":
     "控制在登录到计算机时是否自动启动 LVIS。",

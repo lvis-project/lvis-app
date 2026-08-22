@@ -68,6 +68,28 @@ export const ja: Record<SeedMessageKey, string> = {
     "次回 LVIS を起動したときから適用されます。ウィンドウが真っ黒になる、ちらつく、描画中にアプリが落ちる場合はオフにしてください — 管理された PC や仮想デスクトップのグラフィックドライバーでは動作しないことがあります。そのため Windows と Linux では既定でオフです。",
   "startupTab.hardwareAccelerationEnvForced":
     "環境変数 {envVar} が、ここに保存された値に関係なくこの項目をオンにしています。",
+  "startupTab.corpCaSectionTitle":
+    "社内ネットワーク証明書",
+  "startupTab.corpCaSectionDesc":
+    "会社が発行したルート証明書で TLS 通信を検査するネットワーク向けの設定です。",
+  "startupTab.corpCaEnabledLabel":
+    "社内ルート証明書を信頼する",
+  "startupTab.corpCaEnabledHelp":
+    "次回 LVIS を起動したときから適用されます。ウェブページの表示では OS が信頼する証明書をそのまま使いますが、モデル呼び出し・マーケットプレイスへの要求・更新確認は別に検証するため使いません。TLS 通信を検査するネットワークでは、ページは開けるのにこれらだけが証明書エラーで失敗します。この設定がその問題を解消します。迷う場合はオンのままで構いません — そうした証明書がない PC では何も見つからず、何も変わりません。",
+  "startupTab.corpCaEnabledEnvForced":
+    "環境変数 {envVar} が、ここに保存された値に関係なくこの項目をオフにしています。",
+  "startupTab.corpCaCommonNameLabel":
+    "証明書の名前",
+  "startupTab.corpCaCommonNameHelp":
+    "システムの証明書ストアに登録されている社内ルート証明書のコモンネーム (CN) です。下の既定値は仮の名前なので、証明書エラーが続く場合は社内の IT 担当者に実際の名前を確認してください。名前の一部でも一致します。",
+  "startupTab.corpCaCommonNameEnvForced":
+    "環境変数 {envVar} が、ここに保存された値の代わりにこの名前を指定しています。",
+  "startupTab.corpCaDebugLabel":
+    "証明書の検索内容をログに残す",
+  "startupTab.corpCaDebugHelp":
+    "何を検索し何が見つかったかをアプリケーションログに書き出します。証明書の問題を調べるときだけオンにしてください。",
+  "startupTab.corpCaDebugEnvForced":
+    "環境変数 {envVar} が、ここに保存された値に関係なくこの項目をオンにしています。",
   "startupTab.launchSectionTitle": "起動時に自動実行",
   "startupTab.launchSectionDesc":
     "コンピューターにサインインしたときに LVIS を自動的に起動するかを設定します。",

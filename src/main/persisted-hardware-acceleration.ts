@@ -13,8 +13,7 @@
  * can be applied to the running process. A toggle that silently did nothing
  * until a restart would be worse than no toggle.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { settingsFilePath } from "../data/settings-store.js";
+import { readPersistedSystemBooleanSync } from "./persisted-settings-sync.js";
 
 /**
  * Read `system.hardwareAcceleration` from the persisted settings file.
@@ -28,18 +27,7 @@ import { settingsFilePath } from "../data/settings-store.js";
 export function readPersistedHardwareAccelerationSync(
   userDataPath: string,
 ): boolean | undefined {
-  const settingsPath = settingsFilePath(userDataPath);
-  if (!existsSync(settingsPath)) return undefined;
-  try {
-    const parsed = JSON.parse(readFileSync(settingsPath, "utf-8")) as Record<string, unknown>;
-    const system = parsed.system as Record<string, unknown> | undefined;
-    const value = system?.hardwareAcceleration;
-    return typeof value === "boolean" ? value : undefined;
-  } catch {
-    // Corrupt settings file — the async settings-service path surfaces the
-    // parse error later; here we just fall back to the platform default.
-    return undefined;
-  }
+  return readPersistedSystemBooleanSync(userDataPath, "hardwareAcceleration");
 }
 
 export interface HardwareAccelerationInputs {

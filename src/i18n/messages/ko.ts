@@ -70,6 +70,28 @@ export const ko: Record<SeedMessageKey, string> = {
     "다음 실행부터 적용됩니다. 창이 검게 나오거나 깜빡이거나 화면을 그리다 앱이 죽는다면 끄세요 — 일부 사내 관리 PC 와 가상 데스크톱의 그래픽 드라이버는 이 기능을 감당하지 못합니다. 그래서 Windows 와 Linux 에서는 기본값이 꺼짐입니다.",
   "startupTab.hardwareAccelerationEnvForced":
     "환경 변수 {envVar} 가 여기에 저장된 값과 관계없이 이 항목을 켜고 있습니다.",
+  "startupTab.corpCaSectionTitle":
+    "회사 네트워크 인증서",
+  "startupTab.corpCaSectionDesc":
+    "회사에서 발급한 루트 인증서로 TLS 트래픽을 검사하는 네트워크를 위한 설정입니다.",
+  "startupTab.corpCaEnabledLabel":
+    "회사 루트 인증서 신뢰",
+  "startupTab.corpCaEnabledHelp":
+    "다음 실행부터 적용됩니다. 웹 페이지는 운영체제가 신뢰하는 인증서를 그대로 따르지만, 모델 호출·마켓플레이스 요청·업데이트 확인은 별도로 검증하기 때문에 따르지 않습니다. TLS 트래픽을 검사하는 네트워크에서는 페이지는 잘 열리는데 이쪽만 인증서 오류로 실패하며, 이 설정이 그 문제를 해결합니다. 잘 모르겠으면 켜 두세요 — 해당 인증서가 없는 PC 에서는 아무것도 찾지 못하고 아무것도 바뀌지 않습니다.",
+  "startupTab.corpCaEnabledEnvForced":
+    "환경 변수 {envVar} 가 여기에 저장된 값과 관계없이 이 항목을 끄고 있습니다.",
+  "startupTab.corpCaCommonNameLabel":
+    "인증서 이름",
+  "startupTab.corpCaCommonNameHelp":
+    "시스템 인증서 저장소에 등록된 회사 루트 인증서의 일반 이름(CN)입니다. 아래 기본값은 예시일 뿐이니, 인증서 오류가 계속되면 사내 IT 담당자에게 실제 이름을 확인하세요. 이름의 일부만 적어도 찾습니다.",
+  "startupTab.corpCaCommonNameEnvForced":
+    "환경 변수 {envVar} 가 여기에 저장된 값 대신 이 이름을 지정하고 있습니다.",
+  "startupTab.corpCaDebugLabel":
+    "인증서 조회 과정 기록",
+  "startupTab.corpCaDebugHelp":
+    "무엇을 찾았고 무엇이 나왔는지 애플리케이션 로그에 남깁니다. 인증서 문제를 진단할 때만 켜세요.",
+  "startupTab.corpCaDebugEnvForced":
+    "환경 변수 {envVar} 가 여기에 저장된 값과 관계없이 이 항목을 켜고 있습니다.",
   "startupTab.launchSectionTitle": "시작 시 자동 실행",
   "startupTab.launchSectionDesc":
     "컴퓨터에 로그인할 때 LVIS 를 자동으로 시작할지 설정합니다.",

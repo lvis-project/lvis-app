@@ -75,6 +75,28 @@ export const en = {
     "Takes effect the next time LVIS starts. Turn this off if the window goes blank, flickers, or the app crashes while drawing — some managed and virtual-desktop machines ship graphics drivers that cannot run it. It is off by default on Windows and Linux for that reason.",
   "startupTab.hardwareAccelerationEnvForced":
     "The environment variable {envVar} is currently turning this on, whatever is saved here.",
+  "startupTab.corpCaSectionTitle":
+    "Corporate network certificate",
+  "startupTab.corpCaSectionDesc":
+    "For networks that inspect TLS traffic with a company-issued root certificate.",
+  "startupTab.corpCaEnabledLabel":
+    "Trust the corporate root certificate",
+  "startupTab.corpCaEnabledHelp":
+    "Takes effect the next time LVIS starts. LVIS trusts the certificates your operating system trusts for browsing, but model calls, marketplace requests, and update checks verify separately and do not. On a network that inspects TLS traffic, those fail with a certificate error while ordinary pages load fine; this is what fixes that. Leave it on if you are unsure -- on a machine with no such certificate it finds nothing and changes nothing.",
+  "startupTab.corpCaEnabledEnvForced":
+    "The environment variable {envVar} is currently turning this off, whatever is saved here.",
+  "startupTab.corpCaCommonNameLabel":
+    "Certificate name",
+  "startupTab.corpCaCommonNameHelp":
+    "The common name (CN) of your company's root certificate, as it appears in the system trust store. The default below is a placeholder -- ask your IT department for the real name if certificate errors persist. A partial name matches.",
+  "startupTab.corpCaCommonNameEnvForced":
+    "The environment variable {envVar} is supplying this name right now, instead of the value saved here.",
+  "startupTab.corpCaDebugLabel":
+    "Log certificate lookup details",
+  "startupTab.corpCaDebugHelp":
+    "Writes what was searched and what was found to the application log. Turn it on only while diagnosing a certificate problem.",
+  "startupTab.corpCaDebugEnvForced":
+    "The environment variable {envVar} is currently turning this on, whatever is saved here.",
   "startupTab.launchSectionTitle": "Launch at startup",
   "startupTab.launchSectionDesc":
     "Control whether LVIS starts automatically when you sign in to your computer.",

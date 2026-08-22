@@ -1,3 +1,6 @@
+import {
+  DEFAULT_CORP_CA_COMMON_NAME,
+} from "../shared/corp-ca-common-name.js";
 import { SUBAGENT_MAX_ROUNDS_DEFAULT } from "../shared/subagent-policy.js";
 import {
   SIDE_PANEL_DEFAULT_WIDTH,
@@ -110,6 +113,14 @@ export const DEFAULT_SETTINGS: AppSettings = {
     // macOS has never shown that failure. The setting exists so a user whose
     // machine is fine is not stuck with the safe default forever.
     hardwareAcceleration: process.platform !== "win32" && process.platform !== "linux",
+    // The corporate CA pipeline stays on by default -- it was on before it had
+    // a setting, and on a machine with no such CA it costs one keychain query
+    // that finds nothing. The name is a placeholder that an organization is
+    // expected to replace: on a machine whose CA is named anything else the
+    // lookup finds nothing, which costs one query and changes nothing.
+    corpCaEnabled: true,
+    corpCaCommonName: DEFAULT_CORP_CA_COMMON_NAME,
+    corpCaDebugLog: false,
     sidePanelWidth: SIDE_PANEL_DEFAULT_WIDTH,
     sidebarWidth: SIDEBAR_DEFAULT_WIDTH,
     sidePanelSplitFilePercent: SIDE_PANEL_SPLIT_DEFAULT_PERCENT,

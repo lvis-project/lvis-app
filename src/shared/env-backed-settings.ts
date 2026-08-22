@@ -26,8 +26,13 @@ export interface EnvBackedSetting {
    * value — or `undefined` when the environment leaves the decision to the
    * setting. `undefined` covers both "unset" and "set to something this gate
    * does not act on".
+   *
+   * The return type follows the SETTING's type: a boolean gate answers with a
+   * boolean, a text setting answers with the string the environment supplies.
+   * Read it through {@link envForcedBooleanForSettingsPath} or
+   * {@link envForcedStringForSettingsPath}, which narrow it back.
    */
-  readonly forcedValue: (envValue: string | undefined) => boolean | undefined;
+  readonly forcedValue: (envValue: string | undefined) => boolean | string | undefined;
 }
 
 /**
@@ -37,6 +42,16 @@ export interface EnvBackedSetting {
 function forcesOnAt(onValue: string) {
   return (envValue: string | undefined): boolean | undefined =>
     envValue === onValue ? true : undefined;
+}
+
+/**
+ * The mirror image: one exact value turns the setting OFF. Used by the
+ * variables whose NAME is the negative — `LVIS_SKIP_CORP_CA=1` means "do not
+ * do this", so it forces `corpCaEnabled` false rather than true.
+ */
+function forcesOffAt(offValue: string) {
+  return (envValue: string | undefined): boolean | undefined =>
+    envValue === offValue ? false : undefined;
 }
 
 /** Values of `LVIS_MARKETPLACE_UPDATE_CHECK` that turn the update check off. */
@@ -85,6 +100,23 @@ export const ENV_BACKED_SETTINGS: readonly EnvBackedSetting[] = Object.freeze([
     forcedValue: (envValue: string | undefined) =>
       envValue !== undefined && UPDATE_CHECK_OFF_RE.test(envValue) ? false : undefined,
   },
+  // The corporate root CA group. Injection happens before `bootstrap()`, so
+  // these are read straight off the settings file (see persisted-corp-ca.ts)
+  // and the controls say "next launch" for the same reason the GPU one does.
+  //
+  // `LVIS_CORP_CA_CN` is the first TEXT setting here: it does not force a
+  // boolean, it supplies the name to look for. The registry reports it the
+  // same way regardless, so the control can say the environment is deciding.
+  { settingsPath: "system.corpCaEnabled", envVar: "LVIS_SKIP_CORP_CA", forcedValue: forcesOffAt("1") },
+  { settingsPath: "system.corpCaDebugLog", envVar: "LVIS_CORP_CA_DEBUG", forcedValue: forcesOnAt("1") },
+  {
+    settingsPath: "system.corpCaCommonName",
+    envVar: "LVIS_CORP_CA_CN",
+    forcedValue: (envValue: string | undefined) => {
+      const trimmed = envValue?.trim();
+      return trimmed === undefined || trimmed === "" ? undefined : trimmed;
+    },
+  },
   {
     settingsPath: "marketplace.offlineCacheEnabled",
     envVar: "LVIS_MARKETPLACE_USE_CACHE",
@@ -124,10 +156,33 @@ export function envForcedSettingsPaths(
 export function envForcedValueForSettingsPath(
   settingsPath: string,
   env: NodeJS.ProcessEnv = process.env,
-): boolean | undefined {
+): boolean | string | undefined {
   const entry = ENV_BACKED_SETTINGS.find((item) => item.settingsPath === settingsPath);
   if (entry === undefined) return undefined;
   return entry.forcedValue(env[entry.envVar]);
+}
+
+/**
+ * {@link envForcedValueForSettingsPath} narrowed to a boolean setting. A
+ * non-boolean answer means the caller asked a text gate for a boolean, which
+ * is a wiring mistake rather than a forced value — so it reads as "not forced"
+ * instead of coercing something the resolver would then act on.
+ */
+export function envForcedBooleanForSettingsPath(
+  settingsPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean | undefined {
+  const value = envForcedValueForSettingsPath(settingsPath, env);
+  return typeof value === "boolean" ? value : undefined;
+}
+
+/** {@link envForcedValueForSettingsPath} narrowed to a text setting. */
+export function envForcedStringForSettingsPath(
+  settingsPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const value = envForcedValueForSettingsPath(settingsPath, env);
+  return typeof value === "string" ? value : undefined;
 }
 
 /** The variable a surface should name when it reports a forced setting. */

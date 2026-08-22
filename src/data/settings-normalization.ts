@@ -1,3 +1,6 @@
+import {
+  normalizeCorpCaCommonName,
+} from "../shared/corp-ca-common-name.js";
 import { isIP } from "node:net";
 import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import {
@@ -951,6 +954,9 @@ export function normalizeSystem(input: unknown): SystemSettings {
     appMode?: unknown;
     localApiServer?: unknown;
     hardwareAcceleration?: unknown;
+    corpCaEnabled?: unknown;
+    corpCaCommonName?: unknown;
+    corpCaDebugLog?: unknown;
     launchAtStartup?: unknown;
     launchMinimized?: unknown;
     sidePanelWidth?: unknown;
@@ -1002,6 +1008,35 @@ export function normalizeSystem(input: unknown): SystemSettings {
     log.warn(
       `system.hardwareAcceleration invalid (received ${JSON.stringify(rawHardwareAcceleration)}), using default %s`,
       DEFAULT_SETTINGS.system.hardwareAcceleration,
+    );
+  }
+  const rawCorpCaEnabled = obj.corpCaEnabled;
+  if (typeof rawCorpCaEnabled === "boolean") {
+    result.corpCaEnabled = rawCorpCaEnabled;
+  } else if (rawCorpCaEnabled !== undefined) {
+    log.warn(
+      `system.corpCaEnabled invalid (received ${JSON.stringify(rawCorpCaEnabled)}), using default %s`,
+      DEFAULT_SETTINGS.system.corpCaEnabled,
+    );
+  }
+  const rawCorpCaDebugLog = obj.corpCaDebugLog;
+  if (typeof rawCorpCaDebugLog === "boolean") {
+    result.corpCaDebugLog = rawCorpCaDebugLog;
+  } else if (rawCorpCaDebugLog !== undefined) {
+    log.warn(
+      `system.corpCaDebugLog invalid (received ${JSON.stringify(rawCorpCaDebugLog)}), using default %s`,
+      DEFAULT_SETTINGS.system.corpCaDebugLog,
+    );
+  }
+  const rawCorpCaCommonName = obj.corpCaCommonName;
+  const normalizedCorpCaCommonName = normalizeCorpCaCommonName(rawCorpCaCommonName);
+  if (normalizedCorpCaCommonName !== null) {
+    result.corpCaCommonName = normalizedCorpCaCommonName;
+  } else if (rawCorpCaCommonName !== undefined && rawCorpCaCommonName !== "") {
+    // The value is logged by shape, not by content: a hand-edited profile can
+    // put anything here, and this line goes to a file the user may share.
+    log.warn(
+      "system.corpCaCommonName invalid (not a usable certificate name), using default",
     );
   }
   const rawLaunchAtStartup = obj.launchAtStartup;

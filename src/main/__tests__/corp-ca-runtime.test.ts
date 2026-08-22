@@ -130,7 +130,10 @@ describe("ensureCorporateCa", () => {
     expect(result.certCount).toBe(1);
     // cache should have been written
     expect(mockedOpen).toHaveBeenCalledWith(
-      expect.stringContaining("corp-ca.pem"),
+      // The cache file is keyed by the common name it was extracted for, so
+      // changing the name in Settings is not shadowed by the previous CA's
+      // cache for up to seven days.
+      expect.stringMatching(/corp-ca-[0-9a-f]{16}\.pem$/),
       "w",
       0o600,
     );
