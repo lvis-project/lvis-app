@@ -52,6 +52,16 @@ export const de: Record<SeedMessageKey, string> = {
   "startupTab.shortcutRegisterFailedTitle": "Registrierung des Tastenkürzels fehlgeschlagen",
   "startupTab.shortcutRegisterFailedBody":
     "{accelerator} wird bereits von einer anderen App verwendet. Wähle eine andere Kombination.",
+  "startupTab.renderingSectionTitle":
+    "Darstellung",
+  "startupTab.renderingSectionDesc":
+    "Legt fest, ob LVIS die Grafikkarte zum Zeichnen der Oberfläche verwendet.",
+  "startupTab.hardwareAccelerationLabel":
+    "Hardwarebeschleunigung verwenden",
+  "startupTab.hardwareAccelerationHelp":
+    "Wird beim nächsten Start von LVIS wirksam. Schalten Sie sie aus, wenn das Fenster schwarz bleibt, flackert oder die App beim Zeichnen abstürzt — auf manchen verwalteten Rechnern und virtuellen Desktops kommen die Grafiktreiber damit nicht zurecht. Deshalb ist sie unter Windows und Linux standardmäßig aus.",
+  "startupTab.hardwareAccelerationEnvForced":
+    "Die Umgebungsvariable {envVar} schaltet dies derzeit ein, unabhängig vom hier gespeicherten Wert.",
   "startupTab.launchSectionTitle": "Beim Start ausführen",
   "startupTab.launchSectionDesc":
     "Legt fest, ob LVIS automatisch startet, wenn du dich an deinem Computer anmeldest.",

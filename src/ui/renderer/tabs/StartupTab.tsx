@@ -9,6 +9,7 @@ import {
 } from "../../../components/ui/radio-group.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { getApi } from "../api-client.js";
+import { envVarForSettingsPath } from "../../../shared/env-backed-settings.js";
 import { normalizeAccelerator } from "../../../shared/shortcuts.js";
 import { eventToAccelerator } from "../utils/accelerator-capture.js";
 import type { AppSettings } from "../types.js";
@@ -36,6 +37,14 @@ export function StartupTab() {
   const [closeBehavior, setCloseBehavior] = useState<"hide-to-tray" | "quit">(
     "hide-to-tray",
   );
+  // Placeholder only. `normalizeSystem` backfills the platform-derived default
+  // on every load, so the first real snapshot always carries a concrete boolean
+  // and the switch stays disabled until it arrives.
+  const [hardwareAcceleration, setHardwareAcceleration] = useState(true);
+  // `LVIS_KEEP_GPU=1` overrides the saved value. A switch that rendered only
+  // what is stored would be telling the user something untrue of the running
+  // app, so the section names the variable when it is in force.
+  const [hardwareAccelerationForced, setHardwareAccelerationForced] = useState(false);
   const [capturing, setCapturing] = useState(false);
   const captureInputRef = useRef<HTMLDivElement | null>(null);
 
@@ -45,6 +54,7 @@ export function StartupTab() {
     setLaunchAtStartup(s.system?.launchAtStartup ?? false);
     setLaunchMinimized(s.system?.launchMinimized ?? false);
     setCloseBehavior(s.system?.closeBehavior ?? "hide-to-tray");
+    setHardwareAcceleration(s.system?.hardwareAcceleration ?? true);
     setLoaded(true);
   }, []);
 
@@ -52,6 +62,9 @@ export function StartupTab() {
     let alive = true;
     void api.getSettings().then((s) => {
       if (alive) applySnapshot(s);
+    });
+    void api.envForcedSettings().then((paths) => {
+      if (alive) setHardwareAccelerationForced(paths.includes("system.hardwareAcceleration"));
     });
     const unsub = api.onSettingsUpdated((s) => applySnapshot(s));
     return () => {
@@ -72,6 +85,7 @@ export function StartupTab() {
       launchAtStartup?: boolean;
       launchMinimized?: boolean;
       closeBehavior?: "hide-to-tray" | "quit";
+      hardwareAcceleration?: boolean;
     }) => {
       void api.updateSettings({ system: next });
     },
@@ -102,6 +116,19 @@ export function StartupTab() {
     (value: boolean) => {
       setLaunchMinimized(value);
       persistSystem({ launchMinimized: value });
+    },
+    [persistSystem],
+  );
+
+  const handleHardwareAccelerationChange = useCallback(
+    (value: boolean) => {
+      setHardwareAcceleration(value);
+      // Persisted only. `app.disableHardwareAcceleration()` is a
+      // before-whenReady call, so nothing about the running process changes —
+      // the next launch reads this back through
+      // `readPersistedHardwareAccelerationSync`. The section copy says so
+      // rather than letting the switch imply an effect it does not have.
+      persistSystem({ hardwareAcceleration: value });
     },
     [persistSystem],
   );
@@ -264,6 +291,45 @@ export function StartupTab() {
             data-testid="startup-launch-minimized"
           />
         </div>
+      </SettingsSection>
+
+      {/* Rendering — the only lever for a machine whose GPU driver crashes the
+          renderer. It was `LVIS_KEEP_GPU=1` and nothing else, which a packaged
+          app's user cannot set. */}
+      <SettingsSection
+        title={t("startupTab.renderingSectionTitle")}
+        description={t("startupTab.renderingSectionDesc")}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex min-w-0 flex-1 items-center gap-1.5">
+            <span className="min-w-0 text-sm font-medium">
+              {t("startupTab.hardwareAccelerationLabel")}
+            </span>
+          </div>
+          <Switch
+            checked={hardwareAcceleration}
+            onCheckedChange={handleHardwareAccelerationChange}
+            disabled={!loaded}
+            aria-label={t("startupTab.hardwareAccelerationLabel")}
+            data-testid="startup-hardware-acceleration"
+          />
+        </div>
+        <p
+          className="mt-2 text-xs text-muted-foreground"
+          data-testid="startup-hardware-acceleration-help"
+        >
+          {t("startupTab.hardwareAccelerationHelp")}
+        </p>
+        {hardwareAccelerationForced ? (
+          <p
+            className="mt-2 text-xs text-muted-foreground"
+            data-testid="startup-hardware-acceleration-forced"
+          >
+            {t("startupTab.hardwareAccelerationEnvForced", {
+              envVar: envVarForSettingsPath("system.hardwareAcceleration") ?? "",
+            })}
+          </p>
+        ) : null}
       </SettingsSection>
 
       {/* Window close behavior (moved from the former General tab) */}

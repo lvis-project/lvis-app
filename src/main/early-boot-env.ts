@@ -18,6 +18,10 @@ import { registerPluginAssetProtocolScheme } from "./plugin-asset-protocol.js";
 import { registerMcpAppProtocolScheme } from "./mcp-app-protocol.js";
 import { scrubPackagedProcessEnv } from "./packaged-env-scrub.js";
 import { resolveAppIconPath } from "./app-icon.js";
+import {
+  readPersistedHardwareAccelerationSync,
+  resolveHardwareAcceleration,
+} from "./persisted-hardware-acceleration.js";
 
 const log = createLogger("lvis");
 export const WINDOWS_TOAST_ACTIVATOR_CLSID =
@@ -48,6 +52,12 @@ export function runEarlyBootEnv(): void {
       app.commandLine.appendSwitch("ozone-platform-hint", "x11");
     }
   }
+  // `setName` decides where `getPath("userData")` points, so it has to happen
+  // before anything reads the profile. The GPU block below reads the settings
+  // file out of that directory; with the old ordering it would have read the
+  // package-name directory instead and never seen the user's choice.
+  app.setName("LVIS");
+
   // §GPU: Prevent the Chromium GPU utility process from spawning on corp/VDI
   // machines where restricted drivers produce repeated ContextResult::kFatalFailure
   // errors that eventually kill the renderer process (GPU-lost IPC → render-process-gone).
@@ -55,12 +65,23 @@ export function runEarlyBootEnv(): void {
   // stop renderer compositing; only disableHardwareAcceleration() stops the GPU process.
   // Linux packaged builds also prune Electron's GPU fallback libraries afterPack,
   // so dev and packaged Linux both use the same software-rendered path.
-  // Mirror the same guard as scripts/run-electron.mjs: opt-out with LVIS_KEEP_GPU=1.
-  if ((process.platform === "win32" || process.platform === "linux") && process.env.LVIS_KEEP_GPU !== "1") {
+  //
+  // Windows/Linux default OFF stands, but it is now a DEFAULT rather than the
+  // whole policy: a user whose machine renders fine can turn the GPU back on
+  // from Settings. Before this, `LVIS_KEEP_GPU=1` was the only way, which a
+  // packaged app's user has no way to set — the feature existed for developers
+  // only. The env still wins (see resolveHardwareAcceleration) because it is
+  // the lever for a build that will not render at all.
+  if (
+    !resolveHardwareAcceleration({
+      setting: readPersistedHardwareAccelerationSync(app.getPath("userData")),
+      keepGpuEnv: process.env.LVIS_KEEP_GPU,
+      platform: process.platform,
+    })
+  ) {
     app.disableHardwareAcceleration();
   }
 
-  app.setName("LVIS");
   // Windows 10/11 OS notifications require an AppUserModelId — without this,
   // `new Notification(...)` toasts are silently dropped or grouped under the
   // generic "Electron" identity. Issue #260 NotificationService relies on this.

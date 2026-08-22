@@ -58,6 +58,16 @@ export const ja: Record<SeedMessageKey, string> = {
   "startupTab.shortcutRegisterFailedTitle": "ショートカットの登録に失敗しました",
   "startupTab.shortcutRegisterFailedBody":
     "{accelerator} は他のアプリで使用中です。別の組み合わせを選択してください。",
+  "startupTab.renderingSectionTitle":
+    "画面描画",
+  "startupTab.renderingSectionDesc":
+    "LVIS が画面を描画する際にグラフィックカードを使うかどうかを設定します。",
+  "startupTab.hardwareAccelerationLabel":
+    "ハードウェアアクセラレーションを使う",
+  "startupTab.hardwareAccelerationHelp":
+    "次回 LVIS を起動したときから適用されます。ウィンドウが真っ黒になる、ちらつく、描画中にアプリが落ちる場合はオフにしてください — 管理された PC や仮想デスクトップのグラフィックドライバーでは動作しないことがあります。そのため Windows と Linux では既定でオフです。",
+  "startupTab.hardwareAccelerationEnvForced":
+    "環境変数 {envVar} が、ここに保存された値に関係なくこの項目をオンにしています。",
   "startupTab.launchSectionTitle": "起動時に自動実行",
   "startupTab.launchSectionDesc":
     "コンピューターにサインインしたときに LVIS を自動的に起動するかを設定します。",
