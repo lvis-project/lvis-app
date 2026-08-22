@@ -121,8 +121,7 @@ export const TOOL_TIMEOUT_POLICY = {
   // (runShutdownRoutines → svc.shutdown → pluginRuntime.stopAll →
   //  windowManager.persistAll). On expiry the host force-kills tracked
   //  child processes and calls `app.exit(0)`. Override via env
-  //  `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS` (legacy alias
-  //  `LVIS_SHUTDOWN_TIMEOUT_MS` deprecated, removed by 2026-08-01).
+  //  `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS`.
   shutdownCleanupMs: 15_000,
   // Inner timeout for `forceKillProcessTree` between SIGTERM and SIGKILL on
   // a single tracked child. Bounded so shutdown never hangs on a stubborn
