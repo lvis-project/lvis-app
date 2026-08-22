@@ -2323,6 +2323,72 @@ describe("SettingsService diagnostics (#1499 E2)", () => {
   });
 });
 
+describe("SettingsService telemetry normalization", () => {
+  let userDataPath: string;
+  beforeEach(() => {
+    userDataPath = mkdtempSync(join(tmpdir(), "settings-store-telemetry-"));
+  });
+  afterEach(async () => {
+    await cleanupTmpDir(userDataPath);
+  });
+
+  it("defaults to everything off and no destination", () => {
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("telemetry")).toEqual({ enabled: false, crashReportingEnabled: false });
+  });
+
+  it("patches one field without disturbing the rest of the block", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ telemetry: { endpoint: "https://metrics.corp.example/v1" } });
+    await s.patch({ telemetry: { enabled: true } });
+    expect(s.get("telemetry")).toEqual({
+      enabled: true,
+      crashReportingEnabled: false,
+      endpoint: "https://metrics.corp.example/v1",
+    });
+  });
+
+  it("trims a submitted address and clears the field when it is emptied", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ telemetry: { endpoint: "  https://metrics.corp.example/v1  " } });
+    expect(s.get("telemetry").endpoint).toBe("https://metrics.corp.example/v1");
+    await s.patch({ telemetry: { endpoint: "" } });
+    expect(s.get("telemetry").endpoint).toBeUndefined();
+  });
+
+  it("drops a non-boolean switch and a non-string address, keeping the stored value", async () => {
+    const s = new SettingsService({ userDataPath });
+    await s.patch({ telemetry: { enabled: true, sentryDsn: "https://k@sentry.example/1" } });
+    await s.patch({ telemetry: { enabled: "yes" as never, sentryDsn: 42 as never } });
+    expect(s.get("telemetry")).toEqual({
+      enabled: true,
+      crashReportingEnabled: false,
+      sentryDsn: "https://k@sentry.example/1",
+    });
+  });
+
+  it("corrupt on-disk telemetry falls back to defaults field by field", () => {
+    writeFileSync(
+      join(userDataPath, "lvis-settings.json"),
+      JSON.stringify({
+        telemetry: {
+          enabled: "true",
+          crashReportingEnabled: true,
+          endpoint: { url: "https://nope.example" },
+          sentryDsn: "  https://k@sentry.example/1  ",
+        },
+      }),
+      "utf-8",
+    );
+    const s = new SettingsService({ userDataPath });
+    expect(s.get("telemetry")).toEqual({
+      enabled: false,
+      crashReportingEnabled: true,
+      sentryDsn: "https://k@sentry.example/1",
+    });
+  });
+});
+
 describe("SettingsService chat normalization", () => {
   let userDataPath: string;
   beforeEach(() => {

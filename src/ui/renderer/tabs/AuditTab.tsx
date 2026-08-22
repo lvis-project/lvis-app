@@ -8,6 +8,7 @@ import type { AuditEntry } from "../../../audit/audit-logger.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { DiagnosticsSection } from "./DiagnosticsSection.js";
+import { TelemetrySection } from "./TelemetrySection.js";
 
 interface AuditStats {
   totalByType: Record<string, number>;
@@ -328,6 +329,9 @@ export function AuditTab() {
 
         {/* ── Diagnostics: bundle export + log tail + crash list ── */}
         <DiagnosticsSection defaultDateFrom={dateFrom} defaultDateTo={dateTo} />
+
+        {/* ── Telemetry: what leaves this machine, and where it goes ── */}
+        <TelemetrySection />
       </div>
     </div>
   );

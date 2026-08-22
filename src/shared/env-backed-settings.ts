@@ -58,6 +58,18 @@ function forcesOffAt(offValue: string) {
     envValue === offValue ? false : undefined;
 }
 
+/**
+ * The text-setting shape: the variable supplies the value when it holds one,
+ * and leaves the decision to the setting when it is unset or blank. Whitespace
+ * is not a name, a DSN, or a URL — it is an empty export, and treating it as a
+ * forced value would make the control claim the environment is deciding while
+ * the app searches for nothing.
+ */
+function forcesTextWhenNonEmpty(envValue: string | undefined): string | undefined {
+  const trimmed = envValue?.trim();
+  return trimmed === undefined || trimmed === "" ? undefined : trimmed;
+}
+
 /** Values of `LVIS_MARKETPLACE_UPDATE_CHECK` that turn the update check off. */
 const UPDATE_CHECK_OFF_RE = /^(0|false)$/i;
 
@@ -117,10 +129,15 @@ export const ENV_BACKED_SETTINGS: readonly EnvBackedSetting[] = Object.freeze([
   {
     settingsPath: "system.corpCaCommonName",
     envVar: "LVIS_CORP_CA_CN",
-    forcedValue: (envValue: string | undefined) => {
-      const trimmed = envValue?.trim();
-      return trimmed === undefined || trimmed === "" ? undefined : trimmed;
-    },
+    forcedValue: forcesTextWhenNonEmpty,
+  },
+  // The Sentry DSN. A second text entry, and the one that had the settings key
+  // already: `telemetry.sentryDsn` has existed since crash reporting shipped,
+  // the environment simply outranked it with nothing on screen saying so.
+  {
+    settingsPath: "telemetry.sentryDsn",
+    envVar: "LVIS_SENTRY_DSN",
+    forcedValue: forcesTextWhenNonEmpty,
   },
   // The shutdown cleanup window: the first NUMERIC entry here. The gate is the
   // same parse the setting itself goes through

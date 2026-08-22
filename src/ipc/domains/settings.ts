@@ -12,6 +12,7 @@ import { CHANNELS } from "../../contract/app-contract.js";
 import { sendToWindow } from "../safe-send.js";
 import { normalizeLocale, setLocale, tryLoadLocaleMessages } from "../../i18n/index.js";
 import { reconcileGlobalShortcuts } from "../../main/global-shortcuts.js";
+import { telemetryAllowedHosts } from "../../main/telemetry.js";
 import { publishAppPreferenceChange } from "../../boot/steps/plugin-runtime/app-preference.js";
 import {
   reconcileStartupLaunch,
@@ -1438,6 +1439,12 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     await broadcastSettingsSnapshot(deps);
     return { ok: true };
   });
+
+  // Read-only. The allowlist bounds `telemetry.endpoint`, which the renderer
+  // can already write — so it is shown, never set: a control the same party
+  // could widen is not a bound. Host names only, which is exactly what the
+  // endpoint field needs the user to know.
+  ipcMain.handle(CHANNELS.telemetry.allowedHosts, () => telemetryAllowedHosts());
 
   // ─── Telemetry consent ────────────────────────
   ipcMain.handle(CHANNELS.telemetry.consentAnswer, async (e, accepted: boolean) => {

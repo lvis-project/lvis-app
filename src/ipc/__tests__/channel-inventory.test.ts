@@ -443,6 +443,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:telegram-connection:revoke-approval",
         "lvis:telegram-connection:revoke-pairing",
         "lvis:telegram-connection:snapshot",
+        "lvis:telemetry:allowed-hosts",
         "lvis:telemetry:consent-answer",
         "lvis:terminal:input",
         "lvis:terminal:kill",

@@ -102,6 +102,26 @@ const PRE_LAUNCH: readonly string[] = [
 ];
 
 /**
+ * Bounds a setting the user can already reach.
+ *
+ * `LVIS_TELEMETRY_ALLOWLIST` is the set of hosts `telemetry.endpoint` may
+ * point at, and the endpoint is a field in the Settings UI. A control over the
+ * allowlist would therefore be a control the same party could widen to match
+ * whatever endpoint they just typed — which is not a bound, it is a second
+ * click. The deployment sets it; the app shows it (Audit → Telemetry, testid
+ * `telemetry-allowed-hosts`) so the endpoint field is not rejecting hosts for
+ * invisible reasons.
+ *
+ * The obligation is still a surface obligation, just a read-only one: an entry
+ * here must be VISIBLE somewhere in the app. "The user cannot change it" is
+ * not the same claim as "the user cannot see it", and only the first one
+ * belongs in this bucket.
+ */
+const GUARDRAIL: readonly string[] = [
+  "LVIS_TELEMETRY_ALLOWLIST",
+];
+
+/**
  * Reachable from Settings today.
  *
  * The tailnet group is listed by name rather than through
@@ -130,11 +150,9 @@ const SETTINGS_BACKED: readonly string[] = [
  */
 const PENDING: readonly string[] = [
   "LVIS_PRICING_OVERRIDE",
-  "LVIS_SENTRY_DSN",
-  "LVIS_TELEMETRY_ALLOWLIST",
 ];
 
-const PENDING_CEILING = 3;
+const PENDING_CEILING = 1;
 
 /**
  * `process.env.NAME`, `process.env["NAME"]`, and the same two through a passed
@@ -210,6 +228,7 @@ export const BUCKETS: ReadonlyArray<readonly [string, readonly string[]]> = [
   ["development", DEVELOPMENT],
   ["internal", INTERNAL],
   ["pre-launch", PRE_LAUNCH],
+  ["guardrail", GUARDRAIL],
   ["settings", SETTINGS_BACKED],
   ["pending", PENDING],
 ];
@@ -281,6 +300,6 @@ if (process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(
     `[env-surface] OK — ${found.size} variable(s) read: `
     + `${SETTINGS_BACKED.length} with a control, ${PENDING.length} pending (ceiling ${PENDING_CEILING}), `
     + `${DEVELOPMENT.length} development, ${INTERNAL.length} internal, `
-    + `${PRE_LAUNCH.length} pre-launch`,
+    + `${PRE_LAUNCH.length} pre-launch, ${GUARDRAIL.length} guardrail`,
   );
 }

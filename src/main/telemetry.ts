@@ -34,6 +34,23 @@ function parseAllowlist(envVal: string | undefined): string[] {
     .filter((h) => h.length > 0);
 }
 
+/**
+ * The hosts telemetry may be sent to, for the settings surface to SHOW.
+ *
+ * Deliberately read-only, and deliberately not a setting. The allowlist is the
+ * bound on `telemetry.endpoint`, which the user can already edit — so a control
+ * the same user could widen would not be a bound at all, it would be a
+ * formality one extra click away. Showing it is the part that has to exist:
+ * without it the endpoint field silently rejects everything the operator did
+ * not permit, and the user has no way to learn why.
+ *
+ * Same parse as {@link validateTelemetryEndpoint} uses, so the list on screen
+ * is the list actually enforced rather than a second guess at it.
+ */
+export function telemetryAllowedHosts(env: NodeJS.ProcessEnv = process.env): readonly string[] {
+  return Object.freeze(parseAllowlist(env.LVIS_TELEMETRY_ALLOWLIST));
+}
+
 export interface EndpointValidationResult {
   valid: boolean;
   reason?: string;

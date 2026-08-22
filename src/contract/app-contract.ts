@@ -411,6 +411,7 @@ export const CHANNELS = {
   telemetry: {
     consentPrompt: "lvis:telemetry:consent-prompt",
     consentAnswer: "lvis:telemetry:consent-answer",
+    allowedHosts: "lvis:telemetry:allowed-hosts",
   },
   usage: {
     summary: "lvis:usage:summary",

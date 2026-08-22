@@ -520,6 +520,7 @@ describe("preload contextBridge world shape lock", () => {
             "revokePairing",
             "snapshot",
           ],
+          "telemetryAllowedHosts": "function",
           "terminal": [
             "input",
             "kill",

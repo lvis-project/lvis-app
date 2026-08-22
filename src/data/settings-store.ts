@@ -81,6 +81,9 @@ import {
   sanitizeStoredPluginConfigs,
   isActiveViewKey,
   isCloseBehavior,
+  normalizeTelemetry,
+  acceptTelemetryText,
+  TELEMETRY_TEXT_KEYS,
 } from "./settings-normalization.js";
 import {
   PATCHED_FIELD,
@@ -819,10 +822,17 @@ export class SettingsService {
   }
 
   async patch(
-    partial: Partial<Omit<AppSettings, "llm" | "marketplace" | "shortcuts" | "appliedMigrations">> & {
+    partial: Partial<Omit<
+      AppSettings,
+      "llm" | "marketplace" | "shortcuts" | "telemetry" | "appliedMigrations"
+    >> & {
       marketplace?: Partial<MarketplaceSettings>;
       llm?: LLMSettingsPatch;
       shortcuts?: ShortcutSettingsPatch;
+      // Field by field, like the blocks above: the telemetry surface writes one
+      // switch or one address at a time, and demanding the whole block would
+      // make every such write a read-modify-write the caller could get wrong.
+      telemetry?: Partial<TelemetrySettings>;
     },
   ): Promise<AppSettings> {
     const previousSettings = this.getAll();
@@ -878,7 +888,28 @@ export class SettingsService {
       this.settings.updates = { ...this.settings.updates, ...partial.updates };
     }
     if (partial.telemetry) {
-      this.settings.telemetry = { ...this.settings.telemetry, ...partial.telemetry };
+      // Field-level validation (mirrors `system`/`diagnostics`). These fields
+      // decide whether the app talks to a remote host at all, so a malformed
+      // payload must not be able to persist one — and an `enabled` that is not
+      // a boolean would be read as OFF by `enabled !== true`, silently meaning
+      // the opposite of what a truthy-looking value suggests.
+      const nextTelemetry: TelemetrySettings = { ...this.settings.telemetry };
+      acceptField(
+        nextTelemetry, "enabled", partial.telemetry.enabled,
+        isBooleanValue, "telemetry", PATCHED_FIELD,
+      );
+      acceptField(
+        nextTelemetry, "crashReportingEnabled", partial.telemetry.crashReportingEnabled,
+        isBooleanValue, "telemetry", PATCHED_FIELD,
+      );
+      acceptField(
+        nextTelemetry, "telemetryPromptAnswered", partial.telemetry.telemetryPromptAnswered,
+        isBooleanValue, "telemetry", PATCHED_FIELD,
+      );
+      for (const key of TELEMETRY_TEXT_KEYS) {
+        acceptTelemetryText(nextTelemetry, key, partial.telemetry[key], PATCHED_FIELD);
+      }
+      this.settings.telemetry = nextTelemetry;
     }
     if (partial.audit) {
       this.settings.audit = { ...this.settings.audit, ...partial.audit };
@@ -1398,7 +1429,7 @@ export class SettingsService {
         routine: normalizedRoutine,
         privacy: { ...DEFAULT_SETTINGS.privacy, ...parsed.privacy },
         updates: { ...DEFAULT_SETTINGS.updates, ...parsed.updates },
-        telemetry: { ...DEFAULT_SETTINGS.telemetry, ...parsed.telemetry },
+        telemetry: normalizeTelemetry(parsed.telemetry),
         audit: { ...DEFAULT_SETTINGS.audit, ...parsed.audit },
         diagnostics: normalizeDiagnostics(parsed.diagnostics),
         appearance,

@@ -42,6 +42,8 @@ type ApiOverrides = {
   getSettings?: () => Promise<unknown>;
   /** Settings paths the environment is forcing on (see env-backed-settings). */
   envForcedSettings?: readonly string[];
+  /** Hosts the telemetry endpoint may point at (see main/telemetry). */
+  telemetryAllowedHosts?: readonly string[];
   personaPrompts?: unknown[];
   sessions?: Array<{
     id: string;
@@ -238,6 +240,7 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
     // notice says so explicitly, and every other test gets the ordinary case
     // rather than a rejected promise from a missing method.
     envForcedSettings: vi.fn(async () => overrides.envForcedSettings ?? []),
+    telemetryAllowedHosts: vi.fn(async () => overrides.telemetryAllowedHosts ?? ["localhost"]),
     onSettingsUpdated: vi.fn((handler: (settings: unknown) => void) => {
       settingsUpdatedHandlers.add(handler);
       return () => settingsUpdatedHandlers.delete(handler);
