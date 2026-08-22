@@ -32,7 +32,7 @@
  */
 import { execFile } from "node:child_process";
 import { X509Certificate } from "node:crypto";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { open, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { createLogger } from "../lib/logger.js";
@@ -256,23 +256,39 @@ const LINUX_TRUST_SOURCES: readonly string[] = [
   "/etc/ca-certificates/trust-source/anchors",
 ];
 
-/** One file, or every certificate file one directory deep. "" when unreadable. */
-async function readCertSource(path: string): Promise<string> {
-  let info;
+/**
+ * One regular file, read through a single descriptor. "" for anything else.
+ *
+ * The size check and the read happen on the SAME open handle rather than on the
+ * path: a `stat(path)` followed by `readFile(path)` describes one file and then
+ * reads whatever the path points at afterwards, which for a trust-store path is
+ * exactly the swap worth not being exposed to.
+ */
+async function readCertFile(path: string): Promise<string> {
+  let handle;
   try {
-    info = await stat(path);
+    handle = await open(path, "r");
   } catch {
     return "";
   }
-  if (info.isFile()) {
-    if (info.size > MAX_SOURCE_BYTES) return "";
-    try {
-      return await readFile(path, "utf-8");
-    } catch {
-      return "";
-    }
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > MAX_SOURCE_BYTES) return "";
+    return await handle.readFile("utf-8");
+  } catch {
+    return "";
+  } finally {
+    await handle.close().catch(() => undefined);
   }
-  if (!info.isDirectory()) return "";
+}
+
+/** One file, or every certificate file one directory deep. "" when unreadable. */
+async function readCertSource(path: string): Promise<string> {
+  const fileText = await readCertFile(path);
+  if (fileText !== "") return fileText;
+  // Not a readable regular file — the other thing a trust source can be is a
+  // directory of drop-in anchors. `readdir` fails for everything else, which
+  // is the same "" this returns for an unreadable file.
   let entries: string[];
   try {
     entries = await readdir(path);
