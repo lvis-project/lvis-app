@@ -9,7 +9,7 @@
  */
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
-import { envForcedValueForSettingsPath } from "../shared/env-backed-settings.js";
+import { envForcedBooleanForSettingsPath } from "../shared/env-backed-settings.js";
 import type { PluginMarketplaceItem } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
@@ -36,7 +36,7 @@ const OFFLINE_CACHE_SETTINGS_PATH = "marketplace.offlineCacheEnabled";
  * service to ask.
  */
 export function isOfflineCacheEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return envForcedValueForSettingsPath(OFFLINE_CACHE_SETTINGS_PATH, env) ?? true;
+  return envForcedBooleanForSettingsPath(OFFLINE_CACHE_SETTINGS_PATH, env) ?? true;
 }
 
 /**
@@ -56,7 +56,7 @@ export function resolveOfflineCacheEnabled(
   settingEnabled: boolean | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return envForcedValueForSettingsPath(OFFLINE_CACHE_SETTINGS_PATH, env)
+  return envForcedBooleanForSettingsPath(OFFLINE_CACHE_SETTINGS_PATH, env)
     ?? settingEnabled
     ?? true;
 }

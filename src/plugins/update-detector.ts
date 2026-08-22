@@ -8,7 +8,7 @@
  * Feature flag: LVIS_MARKETPLACE_UPDATE_CHECK (default ON).
  * Set to "0" or "false" to disable the check entirely.
  */
-import { envForcedValueForSettingsPath } from "../shared/env-backed-settings.js";
+import { envForcedBooleanForSettingsPath } from "../shared/env-backed-settings.js";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve, dirname } from "node:path";
@@ -48,7 +48,7 @@ const UPDATE_CHECK_SETTINGS_PATH = "marketplace.updateCheckEnabled";
  * user can reach.
  */
 export function isUpdateCheckEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return envForcedValueForSettingsPath(UPDATE_CHECK_SETTINGS_PATH, env) ?? true;
+  return envForcedBooleanForSettingsPath(UPDATE_CHECK_SETTINGS_PATH, env) ?? true;
 }
 
 /**
@@ -64,7 +64,7 @@ export function resolveUpdateCheckEnabled(
   settingEnabled: boolean | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return envForcedValueForSettingsPath(UPDATE_CHECK_SETTINGS_PATH, env)
+  return envForcedBooleanForSettingsPath(UPDATE_CHECK_SETTINGS_PATH, env)
     ?? settingEnabled
     ?? true;
 }

@@ -24,6 +24,7 @@ import {
 import { distRoot, projectRoot } from "./main/main-paths.js";
 import { applyRuntimeAppIcon, runEarlyBootEnv } from "./main/early-boot-env.js";
 import { ensureCorporateCaInjected } from "./main/corp-ca-runtime.js";
+import { readPersistedCorpCaConfigSync } from "./main/persisted-corp-ca.js";
 import { loadMainStartupDependencies } from "./main/startup-dependencies.js";
 import { updateSplashStatus, waitForMinimumBootstrapSplash } from "./main/bootstrap-splash.js";
 import { runAppShutdownCleanup } from "./main/app-shutdown.js";
@@ -127,7 +128,10 @@ async function main() {
   updateSplashStatus(t("be_main.splashCheckingCerts"));
   const { bootstrap } = await loadMainStartupDependencies(
     () => import("./boot.js"),
-    ensureCorporateCaInjected,
+    // The settings file is read synchronously here because injection has to
+    // happen before the first outbound request, which is well before
+    // `bootstrap()` constructs SettingsService.
+    () => ensureCorporateCaInjected(readPersistedCorpCaConfigSync(app.getPath("userData"))),
     () => updateSplashStatus(t("be_main.splashLoadingSettings")),
   );
 

@@ -1,3 +1,7 @@
+import {
+  DEFAULT_CORP_CA_COMMON_NAME,
+  normalizeCorpCaCommonName,
+} from "../shared/corp-ca-common-name.js";
 import { safeStorage } from "electron";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -537,6 +541,27 @@ export interface SystemSettings {
    */
   hardwareAcceleration?: boolean;
   /**
+   * Whether to acquire the corporate root CA and inject it into the TLS stack.
+   * Applied ONLY at launch: injection has to precede the first outbound
+   * request, which is before `SettingsService` exists, so the reader is
+   * `persisted-corp-ca.ts` and the control says "next launch".
+   *
+   * `LVIS_SKIP_CORP_CA=1` forces this off.
+   */
+  corpCaEnabled?: boolean;
+  /**
+   * Certificate common name to look for in the system trust store. Empty or
+   * absent means the default placeholder name, which is almost never the right
+   * one — an organization whose CA is named anything else has to say so here.
+   * `LVIS_CORP_CA_CN` supplies it instead when set.
+   */
+  corpCaCommonName?: string;
+  /**
+   * Whether to log the certificate paths that are skipped rather than staying
+   * silent. Off by default. `LVIS_CORP_CA_DEBUG=1` forces it on.
+   */
+  corpCaDebugLog?: boolean;
+  /**
    * Persisted width (px) of the docked ChatSidePanel workspace rail, set by the
    * left-edge drag handle. Durable shell-layout preference; clamped to
    * [SIDE_PANEL_MIN_WIDTH, viewport) at drag time in the renderer. Default 448.
@@ -1001,6 +1026,41 @@ export class SettingsService {
           `system.hardwareAcceleration patch ignored (received ${JSON.stringify(rawHardwareAcceleration)}), keeping %s`,
           this.settings.system.hardwareAcceleration,
         );
+      }
+      // Corporate CA group — same validate-at-the-boundary shape. The common
+      // name is the only one that is not a boolean, and it is the only value
+      // here that reaches a child process (`security` on macOS, PowerShell on
+      // Windows), so a value that is not a name is dropped at this boundary
+      // rather than carried to the process that searches for it.
+      const rawCorpCaEnabled = partial.system.corpCaEnabled;
+      if (typeof rawCorpCaEnabled === "boolean") {
+        next.corpCaEnabled = rawCorpCaEnabled;
+      } else if (rawCorpCaEnabled !== undefined) {
+        log.warn(
+          `system.corpCaEnabled patch ignored (received ${JSON.stringify(rawCorpCaEnabled)}), keeping %s`,
+          this.settings.system.corpCaEnabled,
+        );
+      }
+      const rawCorpCaDebugLog = partial.system.corpCaDebugLog;
+      if (typeof rawCorpCaDebugLog === "boolean") {
+        next.corpCaDebugLog = rawCorpCaDebugLog;
+      } else if (rawCorpCaDebugLog !== undefined) {
+        log.warn(
+          `system.corpCaDebugLog patch ignored (received ${JSON.stringify(rawCorpCaDebugLog)}), keeping %s`,
+          this.settings.system.corpCaDebugLog,
+        );
+      }
+      const rawCorpCaCommonName = partial.system.corpCaCommonName;
+      if (rawCorpCaCommonName !== undefined) {
+        const normalized = normalizeCorpCaCommonName(rawCorpCaCommonName);
+        if (normalized !== null) {
+          next.corpCaCommonName = normalized;
+        } else if (rawCorpCaCommonName === "") {
+          // Clearing the field is a real choice: it means "use the default".
+          next.corpCaCommonName = DEFAULT_CORP_CA_COMMON_NAME;
+        } else {
+          log.warn("system.corpCaCommonName patch ignored (not a usable certificate name)");
+        }
       }
       // Launch-at-startup + launch-minimized booleans (same validate-at-
       // boundary pattern as localApiServer: invalid → keep prior value).
