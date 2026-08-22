@@ -9,7 +9,7 @@
  */
 import { mkdir, readFile, rm, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
-import { envForcedBooleanForSettingsPath } from "../shared/env-backed-settings.js";
+import { resolveEnvBackedBoolean } from "../shared/env-backed-settings.js";
 import type { PluginMarketplaceItem } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 import { writeFileAtomicAtPath } from "../main/storage/feature-namespace.js";
@@ -27,19 +27,6 @@ const log = createLogger("offline-cache");
 const OFFLINE_CACHE_SETTINGS_PATH = "marketplace.offlineCacheEnabled";
 
 /**
- * Returns `true` when the offline cache is enabled by the environment alone,
- * ignoring the setting. Defaults to `true`; set `LVIS_MARKETPLACE_USE_CACHE`
- * to `false` (or `0`/`no`/`off`) to disable.
- *
- * Prefer {@link resolveOfflineCacheEnabled}, which also honours the setting the
- * user can actually reach. This one remains for callers that have no settings
- * service to ask.
- */
-export function isOfflineCacheEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return envForcedBooleanForSettingsPath(OFFLINE_CACHE_SETTINGS_PATH, env) ?? true;
-}
-
-/**
  * Combine the `marketplace.offlineCacheEnabled` setting with the environment.
  *
  * The environment wins WHEN SET, in both directions — it was the only control
@@ -50,15 +37,15 @@ export function isOfflineCacheEnabled(env: NodeJS.ProcessEnv = process.env): boo
  * gave.
  *
  * The "when set, which way" half is not decided here: it is the registry entry
- * the settings UI reads to tell the user the environment is deciding this.
+ * the settings UI reads to tell the user the environment is deciding this. The
+ * precedence itself is not decided here either — every env-backed boolean
+ * resolves through the same function.
  */
 export function resolveOfflineCacheEnabled(
   settingEnabled: boolean | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return envForcedBooleanForSettingsPath(OFFLINE_CACHE_SETTINGS_PATH, env)
-    ?? settingEnabled
-    ?? true;
+  return resolveEnvBackedBoolean(OFFLINE_CACHE_SETTINGS_PATH, settingEnabled, env);
 }
 
 // ---------------------------------------------------------------------------

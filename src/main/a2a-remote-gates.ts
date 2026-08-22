@@ -1,4 +1,5 @@
 import type { SettingsService } from "../data/settings-store.js";
+import { resolveEnvBackedBoolean } from "../shared/env-backed-settings.js";
 
 export interface A2ARemoteGateSnapshot {
   outboundRouting: boolean;
@@ -11,8 +12,20 @@ export function snapshotA2ARemoteGates(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Readonly<A2ARemoteGateSnapshot> {
   const features = settings.get("features");
+  // Same rule, same registry, same fail-closed `=== true` as the loopback
+  // gates in local-api-server.ts — see resolveLoopbackRouteFamilies.
   return Object.freeze({
-    outboundRouting: features?.a2aRemoteRouting === true || env.LVIS_A2A_REMOTE === "1",
-    receiverProfile: features?.a2aRemoteReceiver === true || env.LVIS_A2A_REMOTE_RECEIVER === "1",
+    outboundRouting: resolveEnvBackedBoolean(
+      "features.a2aRemoteRouting",
+      features?.a2aRemoteRouting === true,
+      env,
+      false,
+    ),
+    receiverProfile: resolveEnvBackedBoolean(
+      "features.a2aRemoteReceiver",
+      features?.a2aRemoteReceiver === true,
+      env,
+      false,
+    ),
   });
 }

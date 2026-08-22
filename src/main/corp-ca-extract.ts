@@ -1,5 +1,5 @@
 /**
- * Per-platform acquisition of the corporate root CA, by common name.
+ * Acquisition of the corporate root CA from the operating system's trust store.
  *
  * Why this exists at all: Electron has two independent TLS stacks. Chromium's
  * network stack already trusts whatever the OS trusts, so pages load; Node's
@@ -9,22 +9,26 @@
  * fail while the browser half looks fine, which is exactly the confusing
  * half-broken state this module removes.
  *
- * macOS reads the System keychain through `security`. Windows and Linux used to
- * return null here with a "pending" comment, which meant the whole feature was
- * macOS-only in practice — the two platforms where the split above actually
- * bites. Both are implemented now:
+ * ONE pipeline, three readers. Everything that decides WHICH certificate is
+ * accepted — splitting the PEM, matching the common name, dropping duplicates,
+ * capping the result — happens once, here, for every platform. A reader's only
+ * job is to hand back the candidate certificate text its OS keeps:
  *
- *   Windows — PowerShell enumerates `Cert:\LocalMachine\Root`, `Cert:\CurrentUser\Root`
- *             and the intermediate `CA` stores and prints the matches as PEM.
- *   Linux   — the system trust anchors on disk are parsed with `node:crypto`'s
- *             X509Certificate and filtered by subject. No external tool, so it
+ *   macOS   — `security find-certificate` over the System keychain.
+ *   Windows — PowerShell enumerates the LocalMachine and CurrentUser stores.
+ *   Linux   — the trust anchors on disk, read directly. No external tool, so it
  *             works the same on a minimal container as on a full desktop.
+ *
+ * That split is the point: three platforms cannot drift into three different
+ * ideas of what "the certificate is named X" means, and a reader that returns
+ * something unexpected cannot widen what gets injected, because its output goes
+ * through the same filter as everyone else's.
  *
  * SECURITY — the common name is user-supplied (Settings) and reaches a child
  * process. It is NEVER interpolated into the PowerShell program text: the
  * script reads it from an environment variable, so a name containing quotes,
- * `$(...)`, or a semicolon is data to the script rather than syntax. On the
- * Linux path it never leaves this process at all.
+ * `$(...)`, or a semicolon is data to the script rather than syntax. On macOS
+ * it is one argv entry, and on Linux it never leaves this process at all.
  */
 import { execFile } from "node:child_process";
 import { X509Certificate } from "node:crypto";
@@ -32,6 +36,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { createLogger } from "../lib/logger.js";
+import type { CorpCaConfig } from "../shared/corp-ca-config.js";
 
 const log = createLogger("corp-ca");
 const execFileAsync = promisify(execFile);
@@ -39,11 +44,19 @@ const execFileAsync = promisify(execFile);
 const PEM_BEGIN = "-----BEGIN CERTIFICATE-----";
 const PEM_END = "-----END CERTIFICATE-----";
 
-/** Cap on how much certificate text is parsed from any one source. */
+/** Cap on how much certificate text is read from any one source. */
 const MAX_SOURCE_BYTES = 4 * 1024 * 1024;
 
 /** Cap on how many matching certificates are injected. */
 const MAX_MATCHES = 32;
+
+/**
+ * What a lookup needs to know. `enabled` is the caller's business — by the time
+ * a reader runs, the decision to look at all has been made.
+ */
+export type CorpCaLookup = Pick<CorpCaConfig, "commonName" | "debugLog">;
+
+// ─── Shared certificate handling — the part that is NOT per-platform ─────────
 
 /**
  * Split a PEM blob into individual certificate blocks.
@@ -64,6 +77,17 @@ export function splitPemBlocks(pem: string): string[] {
     index = end + PEM_END.length;
   }
   return blocks;
+}
+
+/**
+ * How many certificates a PEM blob holds.
+ *
+ * The one answer to that question: the cache reader, the log lines, and the
+ * result count all ask it, and a `BEGIN` tally would count a truncated block
+ * that nothing can parse.
+ */
+export function countCertificates(pem: string): number {
+  return splitPemBlocks(pem).length;
 }
 
 /**
@@ -89,6 +113,11 @@ export function subjectHasCommonName(subject: string, commonName: string): boole
  * Keep the certificate blocks whose subject CN matches, in input order,
  * skipping duplicates and anything that does not parse.
  *
+ * This is the gate every platform's output passes through, which is why the
+ * readers do not filter, deduplicate, or count for themselves. It matters most
+ * for the two that ask another program: what gets injected is what THIS process
+ * could parse and verify the subject of, not whatever text came back on stdout.
+ *
  * An unparseable block is skipped rather than fatal: a system trust directory
  * is a shared location that routinely holds a stray file, and one bad entry
  * must not cost the user every certificate after it.
@@ -113,92 +142,57 @@ export function selectCertificatesByCommonName(pem: string, commonName: string):
   return matches;
 }
 
-// ─── Linux ───────────────────────────────────────────────────────────────────
-
 /**
- * Where distributions keep trust anchors. Bundles first (one file, everything
- * the system trusts), then the drop-in directories an administrator or an MDM
- * writes a corporate root into.
+ * Run a trust-store tool and return its stdout, or "" when it could not run.
+ *
+ * Never throws: the app works fine without injection on a machine that has no
+ * corporate CA, and both tools this calls can be absent, slow, or refused by
+ * policy. The error TEXT is logged, never its output — that is certificate
+ * material and, on Windows, includes the name the user typed.
  */
-const LINUX_TRUST_SOURCES: readonly string[] = [
-  "/etc/ssl/certs/ca-certificates.crt",
-  "/etc/pki/tls/certs/ca-bundle.crt",
-  "/etc/ssl/ca-bundle.pem",
-  "/usr/local/share/ca-certificates",
-  "/usr/share/ca-certificates",
-  "/etc/pki/ca-trust/source/anchors",
-  "/etc/ca-certificates/trust-source/anchors",
-];
-
-async function readCertSource(path: string): Promise<string> {
-  let info;
+async function runTrustStoreTool(
+  file: string,
+  args: readonly string[],
+  env?: NodeJS.ProcessEnv,
+): Promise<string> {
   try {
-    info = await stat(path);
-  } catch {
+    const output = await execFileAsync(file, [...args], {
+      encoding: "utf8",
+      timeout: 20_000,
+      maxBuffer: MAX_SOURCE_BYTES,
+      windowsHide: true,
+      ...(env === undefined ? {} : { env }),
+    }) as unknown;
+    const stdout =
+      typeof output === "object" && output !== null && "stdout" in output
+        ? (output as { stdout?: string | Buffer }).stdout
+        : output;
+    return Buffer.isBuffer(stdout) ? stdout.toString("utf8") : String(stdout ?? "");
+  } catch (err) {
+    log.warn("%s lookup failed: %s", file, (err as Error).message);
     return "";
   }
-  if (info.isFile()) {
-    if (info.size > MAX_SOURCE_BYTES) return "";
-    try {
-      return await readFile(path, "utf-8");
-    } catch {
-      return "";
-    }
-  }
-  if (!info.isDirectory()) return "";
-  let entries: string[];
-  try {
-    entries = await readdir(path);
-  } catch {
-    return "";
-  }
-  const parts: string[] = [];
-  for (const entry of entries.sort()) {
-    if (!/\.(crt|pem|cer)$/i.test(entry)) continue;
-    parts.push(await readCertSource(join(path, entry)));
-  }
-  return parts.join("\n");
 }
 
-/**
- * Read the Linux system trust anchors and return the matching certificates.
- *
- * Returns null when nothing matches, which is the ordinary case on a machine
- * with no corporate CA — the caller keeps the default verification.
- */
-export async function extractLinuxCorporateCa(
-  commonName: string,
-  debugLog: boolean,
-  sources: readonly string[] = LINUX_TRUST_SOURCES,
-): Promise<string | null> {
-  const matches: string[] = [];
-  const seen = new Set<string>();
-  for (const source of sources) {
-    const text = await readCertSource(source);
-    if (text === "") continue;
-    for (const block of selectCertificatesByCommonName(text, commonName)) {
-      if (seen.has(block)) continue;
-      seen.add(block);
-      matches.push(block);
-    }
-    if (matches.length >= MAX_MATCHES) break;
-  }
-  if (matches.length === 0) {
-    if (debugLog) {
-      log.info("Linux: no trust anchor matched the configured certificate name");
-    }
-    return null;
-  }
-  if (debugLog) {
-    log.info("Linux: %d trust anchor(s) matched", matches.length);
-  }
-  return matches.join("");
+// ─── macOS ───────────────────────────────────────────────────────────────────
+
+async function readMacosTrustStore(lookup: CorpCaLookup): Promise<string> {
+  // `-c` is the tool's own name filter; the shared selector re-checks the CN
+  // anyway, so the two platforms that cannot pre-filter behave identically.
+  return await runTrustStoreTool("security", [
+    "find-certificate",
+    "-a",
+    "-c",
+    lookup.commonName,
+    "-p",
+    "/Library/Keychains/System.keychain",
+  ]);
 }
 
 // ─── Windows ─────────────────────────────────────────────────────────────────
 
 /**
- * Enumerate the Windows certificate stores and print every match as PEM.
+ * Enumerate the Windows certificate stores and print every candidate as PEM.
  *
  * The name is read from the environment rather than spliced into this text —
  * see the SECURITY note at the top of the file. `-like` needs a wildcard
@@ -235,52 +229,131 @@ foreach ($store in $stores) {
 }
 `;
 
+async function readWindowsTrustStore(lookup: CorpCaLookup): Promise<string> {
+  // `-NoProfile -NonInteractive` so a user profile script cannot change what
+  // comes back, and the name travels as data, never as script text.
+  return await runTrustStoreTool(
+    "powershell.exe",
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_EXPORT_SCRIPT],
+    { ...process.env, LVIS_CORP_CA_QUERY: lookup.commonName },
+  );
+}
+
+// ─── Linux ───────────────────────────────────────────────────────────────────
+
 /**
- * Read the Windows certificate stores and return the matching certificates.
- *
- * PowerShell is invoked with `-NoProfile -NonInteractive` so a user profile
- * script cannot change what this returns, and the output is re-parsed through
- * {@link selectCertificatesByCommonName} rather than trusted as-is: what gets
- * injected into the TLS trust store is what this process could parse and
- * verify the subject of, not whatever text came back on stdout.
+ * Where distributions keep trust anchors. Bundles first (one file, everything
+ * the system trusts), then the drop-in directories an administrator or an MDM
+ * writes a corporate root into.
  */
-export async function extractWindowsCorporateCa(
-  commonName: string,
-  debugLog: boolean,
-): Promise<string | null> {
+const LINUX_TRUST_SOURCES: readonly string[] = [
+  "/etc/ssl/certs/ca-certificates.crt",
+  "/etc/pki/tls/certs/ca-bundle.crt",
+  "/etc/ssl/ca-bundle.pem",
+  "/usr/local/share/ca-certificates",
+  "/usr/share/ca-certificates",
+  "/etc/pki/ca-trust/source/anchors",
+  "/etc/ca-certificates/trust-source/anchors",
+];
+
+/** One file, or every certificate file one directory deep. "" when unreadable. */
+async function readCertSource(path: string): Promise<string> {
+  let info;
   try {
-    const output = await execFileAsync(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", WINDOWS_EXPORT_SCRIPT],
-      {
-        encoding: "utf8",
-        timeout: 20_000,
-        maxBuffer: MAX_SOURCE_BYTES,
-        windowsHide: true,
-        // The name travels as data, never as script text.
-        env: { ...process.env, LVIS_CORP_CA_QUERY: commonName },
-      },
-    ) as unknown;
-    const stdout =
-      typeof output === "object" && output !== null && "stdout" in output
-        ? (output as { stdout?: string | Buffer }).stdout
-        : output;
-    const text = Buffer.isBuffer(stdout) ? stdout.toString("utf8") : String(stdout ?? "");
-    const matches = selectCertificatesByCommonName(text, commonName);
-    if (matches.length === 0) {
-      if (debugLog) {
-        log.info("Windows: no certificate store entry matched the configured name");
-      }
-      return null;
+    info = await stat(path);
+  } catch {
+    return "";
+  }
+  if (info.isFile()) {
+    if (info.size > MAX_SOURCE_BYTES) return "";
+    try {
+      return await readFile(path, "utf-8");
+    } catch {
+      return "";
     }
-    if (debugLog) {
-      log.info("Windows: %d certificate(s) matched", matches.length);
-    }
-    return matches.join("");
-  } catch (err) {
-    // Never fatal: the app runs fine without injection on a machine with no
-    // corporate CA, and PowerShell can be absent or locked down by policy.
-    log.warn("Windows extraction failed: %s", (err as Error).message);
+  }
+  if (!info.isDirectory()) return "";
+  let entries: string[];
+  try {
+    entries = await readdir(path);
+  } catch {
+    return "";
+  }
+  const parts: string[] = [];
+  for (const entry of entries.sort()) {
+    if (!/\.(crt|pem|cer)$/i.test(entry)) continue;
+    parts.push(await readCertSource(join(path, entry)));
+  }
+  return parts.join("\n");
+}
+
+/**
+ * Concatenate the Linux system trust anchors.
+ *
+ * Every distribution ships the same anchor in a bundle AND as a drop-in file,
+ * so this returns duplicates by design — the shared selector removes them by
+ * fingerprint, which is also what catches the same certificate arriving under
+ * two different file names.
+ *
+ * `sources` is a parameter so a test can point at a temp directory; nothing
+ * else overrides it.
+ */
+export async function readLinuxTrustStore(
+  _lookup: CorpCaLookup,
+  sources: readonly string[] = LINUX_TRUST_SOURCES,
+): Promise<string> {
+  const parts: string[] = [];
+  for (const source of sources) {
+    const text = await readCertSource(source);
+    if (text !== "") parts.push(text);
+  }
+  return parts.join("\n");
+}
+
+// ─── Dispatch ────────────────────────────────────────────────────────────────
+
+type TrustStoreReader = (lookup: CorpCaLookup) => Promise<string>;
+
+/**
+ * The only place platform is branched on. Adding a platform means adding a
+ * reader here; it cannot mean adding another idea of what a match is.
+ */
+const TRUST_STORE_READERS: Partial<Record<NodeJS.Platform, TrustStoreReader>> = {
+  darwin: readMacosTrustStore,
+  win32: readWindowsTrustStore,
+  linux: readLinuxTrustStore,
+};
+
+/**
+ * The corporate root CA for this machine, or null when there is none to find.
+ *
+ * Null is the ordinary outcome on a machine with no corporate CA — the caller
+ * keeps the default verification and says so once. `readers` is a parameter so
+ * a test can drive the shared half without a real trust store.
+ */
+export async function extractCorporateCa(
+  lookup: CorpCaLookup,
+  platform: NodeJS.Platform = process.platform,
+  readers: Partial<Record<NodeJS.Platform, TrustStoreReader>> = TRUST_STORE_READERS,
+): Promise<string | null> {
+  const read = readers[platform];
+  if (read === undefined) {
+    log.warn("unsupported platform %s — skipping the certificate lookup", platform);
     return null;
   }
+  const matches = selectCertificatesByCommonName(await read(lookup), lookup.commonName);
+  if (matches.length === 0) {
+    // Not warned about here: the caller already says once, unconditionally,
+    // that no corporate CA was found and that verification is unchanged. A
+    // second line for the same fact would be noise on every launch of every
+    // machine that has no such certificate, which is most of them.
+    if (lookup.debugLog) {
+      log.info("%s: no certificate in the trust store matched the configured name", platform);
+    }
+    return null;
+  }
+  if (lookup.debugLog) {
+    log.info("%s: %d certificate(s) matched", platform, matches.length);
+  }
+  return matches.join("");
 }

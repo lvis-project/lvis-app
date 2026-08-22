@@ -32,10 +32,10 @@ export interface ProtocolArgInputs {
   userDataDir: string | undefined;
   platform: NodeJS.Platform;
   /**
-   * Whether to inject the Windows-safe GPU disable flags. Caller wires this
-   * from `process.env.LVIS_KEEP_GPU !== "1"`. The env var stays a direct
-   * read at the call site because the GPU flag is purely a corp/VDI
-   * compatibility concession with no security surface (unlike sandbox).
+   * Whether to inject the Windows-safe GPU disable flags. The caller wires
+   * this from `resolveHardwareAcceleration` — the same setting-plus-environment
+   * decision the app makes at boot — so the registered launcher and the app it
+   * launches cannot disagree.
    */
   disableGpu: boolean;
   /**

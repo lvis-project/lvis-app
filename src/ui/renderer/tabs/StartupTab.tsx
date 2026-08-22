@@ -9,8 +9,8 @@ import {
   RadioGroupItem,
 } from "../../../components/ui/radio-group.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
+import { EnvForcedNotice, useEnvForcedSettings } from "../components/EnvForcedNotice.js";
 import { getApi } from "../api-client.js";
-import { envVarForSettingsPath } from "../../../shared/env-backed-settings.js";
 import { DEFAULT_CORP_CA_COMMON_NAME } from "../../../shared/corp-ca-common-name.js";
 import { normalizeAccelerator } from "../../../shared/shortcuts.js";
 import { eventToAccelerator } from "../utils/accelerator-capture.js";
@@ -46,7 +46,7 @@ export function StartupTab() {
   // Settings whose value the environment is deciding right now. A control that
   // rendered only what is stored would be telling the user something untrue of
   // the running app, so each affected control names its variable.
-  const [envForcedPaths, setEnvForcedPaths] = useState<readonly string[]>([]);
+  const envForcedPaths = useEnvForcedSettings(api);
   // Corporate root CA. Acquired and injected before `bootstrap()`, so — like
   // the GPU switch above — these are next-launch settings, and the section
   // says so instead of implying an effect they do not have.
@@ -86,9 +86,6 @@ export function StartupTab() {
     let alive = true;
     void api.getSettings().then((s) => {
       if (alive) applySnapshot(s);
-    });
-    void api.envForcedSettings().then((paths) => {
-      if (alive) setEnvForcedPaths(paths);
     });
     const unsub = api.onSettingsUpdated((s) => applySnapshot(s));
     return () => {
@@ -373,16 +370,13 @@ export function StartupTab() {
         >
           {t("startupTab.hardwareAccelerationHelp")}
         </p>
-        {envForcedPaths.includes("system.hardwareAcceleration") ? (
-          <p
-            className="mt-2 text-xs text-muted-foreground"
-            data-testid="startup-hardware-acceleration-forced"
-          >
-            {t("startupTab.hardwareAccelerationEnvForced", {
-              envVar: envVarForSettingsPath("system.hardwareAcceleration") ?? "",
-            })}
-          </p>
-        ) : null}
+        <EnvForcedNotice
+          settingsPath="system.hardwareAcceleration"
+          forcedPaths={envForcedPaths}
+          messageKey="startupTab.hardwareAccelerationEnvForced"
+          testId="startup-hardware-acceleration-forced"
+          className="mt-2"
+        />
       </SettingsSection>
 
       {/* Corporate root CA — see corp-ca-runtime.ts. Electron has two TLS
@@ -408,16 +402,13 @@ export function StartupTab() {
         <p className="mt-2 text-xs text-muted-foreground" data-testid="startup-corp-ca-help">
           {t("startupTab.corpCaEnabledHelp")}
         </p>
-        {envForcedPaths.includes("system.corpCaEnabled") ? (
-          <p
-            className="mt-2 text-xs text-muted-foreground"
-            data-testid="startup-corp-ca-enabled-forced"
-          >
-            {t("startupTab.corpCaEnabledEnvForced", {
-              envVar: envVarForSettingsPath("system.corpCaEnabled") ?? "",
-            })}
-          </p>
-        ) : null}
+        <EnvForcedNotice
+          settingsPath="system.corpCaEnabled"
+          forcedPaths={envForcedPaths}
+          messageKey="startupTab.corpCaEnabledEnvForced"
+          testId="startup-corp-ca-enabled-forced"
+          className="mt-2"
+        />
 
         <div className="mt-4 space-y-2">
           <Label className="text-sm font-medium" htmlFor="startup-corp-ca-common-name">
@@ -449,16 +440,12 @@ export function StartupTab() {
           >
             {t("startupTab.corpCaCommonNameHelp")}
           </p>
-          {envForcedPaths.includes("system.corpCaCommonName") ? (
-            <p
-              className="text-xs text-muted-foreground"
-              data-testid="startup-corp-ca-common-name-forced"
-            >
-              {t("startupTab.corpCaCommonNameEnvForced", {
-                envVar: envVarForSettingsPath("system.corpCaCommonName") ?? "",
-              })}
-            </p>
-          ) : null}
+          <EnvForcedNotice
+            settingsPath="system.corpCaCommonName"
+            forcedPaths={envForcedPaths}
+            messageKey="startupTab.corpCaCommonNameEnvForced"
+            testId="startup-corp-ca-common-name-forced"
+          />
         </div>
 
         <div className="mt-4 flex items-center justify-between gap-4">
@@ -476,16 +463,13 @@ export function StartupTab() {
         <p className="mt-2 text-xs text-muted-foreground" data-testid="startup-corp-ca-debug-help">
           {t("startupTab.corpCaDebugHelp")}
         </p>
-        {envForcedPaths.includes("system.corpCaDebugLog") ? (
-          <p
-            className="mt-2 text-xs text-muted-foreground"
-            data-testid="startup-corp-ca-debug-forced"
-          >
-            {t("startupTab.corpCaDebugEnvForced", {
-              envVar: envVarForSettingsPath("system.corpCaDebugLog") ?? "",
-            })}
-          </p>
-        ) : null}
+        <EnvForcedNotice
+          settingsPath="system.corpCaDebugLog"
+          forcedPaths={envForcedPaths}
+          messageKey="startupTab.corpCaDebugEnvForced"
+          testId="startup-corp-ca-debug-forced"
+          className="mt-2"
+        />
       </SettingsSection>
 
       {/* Window close behavior (moved from the former General tab) */}

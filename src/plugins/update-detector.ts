@@ -5,10 +5,11 @@
  * by reading each installed manifest from the registry. Returns only
  * plugins where a newer version is available in the catalog.
  *
- * Feature flag: LVIS_MARKETPLACE_UPDATE_CHECK (default ON).
- * Set to "0" or "false" to disable the check entirely.
+ * Whether the check runs at all is `marketplace.updateCheckEnabled` (default
+ * ON), which the user sets in Settings; a deployment can still pin it off with
+ * LVIS_MARKETPLACE_UPDATE_CHECK="0"/"false". See resolveUpdateCheckEnabled.
  */
-import { envForcedBooleanForSettingsPath } from "../shared/env-backed-settings.js";
+import { resolveEnvBackedBoolean } from "../shared/env-backed-settings.js";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve, dirname } from "node:path";
@@ -40,18 +41,6 @@ export type PluginUpdateCheckResult =
 const UPDATE_CHECK_SETTINGS_PATH = "marketplace.updateCheckEnabled";
 
 /**
- * Returns true when the update-check feature flag is enabled by the
- * environment alone, ignoring the setting.
- * Default ON — set LVIS_MARKETPLACE_UPDATE_CHECK=0 to opt out.
- *
- * Prefer {@link resolveUpdateCheckEnabled}, which also honours the setting the
- * user can reach.
- */
-export function isUpdateCheckEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return envForcedBooleanForSettingsPath(UPDATE_CHECK_SETTINGS_PATH, env) ?? true;
-}
-
-/**
  * Combine the `marketplace.updateCheckEnabled` setting with the environment.
  *
  * This variable only ever forces the check OFF: an ON value changes nothing,
@@ -64,9 +53,7 @@ export function resolveUpdateCheckEnabled(
   settingEnabled: boolean | undefined,
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
-  return envForcedBooleanForSettingsPath(UPDATE_CHECK_SETTINGS_PATH, env)
-    ?? settingEnabled
-    ?? true;
+  return resolveEnvBackedBoolean(UPDATE_CHECK_SETTINGS_PATH, settingEnabled, env);
 }
 
 export interface UpdateDetectorOptions {

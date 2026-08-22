@@ -12,7 +12,6 @@ import {
   getCachedCatalog,
   getCachedTarball,
   resolveOfflineCacheEnabled,
-  isOfflineCacheEnabled,
   setCachedCatalog,
   setCachedTarball
 } from "../offline-cache.js";
@@ -44,20 +43,6 @@ afterEach(async () => {
 // ---------------------------------------------------------------------------
 // Feature flag
 // ---------------------------------------------------------------------------
-
-describe("isOfflineCacheEnabled", () => {
-  it("defaults to true when env var is absent", () => {
-    expect(isOfflineCacheEnabled({})).toBe(true);
-  });
-
-  it("returns false when set to false", () => {
-    expect(isOfflineCacheEnabled({ LVIS_MARKETPLACE_USE_CACHE: "false" })).toBe(false);
-  });
-
-  it("returns true when set to 1", () => {
-    expect(isOfflineCacheEnabled({ LVIS_MARKETPLACE_USE_CACHE: "1" })).toBe(true);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // Catalog cache
