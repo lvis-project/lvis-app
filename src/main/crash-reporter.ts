@@ -8,7 +8,9 @@
  *      configurable URL.
  *   2. Optional @sentry/electron integration — loaded via dynamic require()
  *      guard. If the dep is absent OR no DSN is configured, this is a no-op.
- *      DSN may come from `LVIS_SENTRY_DSN` env or `settings.telemetry.sentryDsn`.
+ *      DSN may come from `LVIS_SENTRY_DSN` env or `settings.telemetry.sentryDsn`,
+ *      in that order — the pair is registered in ENV_BACKED_SETTINGS so the
+ *      settings control names the variable when it is the one deciding.
  *
  * No secrets are shipped in-code; the user provides DSN / endpoint at runtime.
  */
@@ -16,6 +18,7 @@ import { mkdirSync } from "node:fs";
 import { resolve } from "node:path";
 import type { TelemetrySettings } from "../data/settings-store.js";
 import { createLogger } from "../lib/logger.js";
+import { envForcedStringForSettingsPath } from "../shared/env-backed-settings.js";
 const log = createLogger("crash-reporter");
 
 export interface CrashReporterDeps {
@@ -89,7 +92,12 @@ export function startCrashReporter(deps: CrashReporterDeps): CrashReporterHandle
     }
   }
 
-  const dsn = process.env.LVIS_SENTRY_DSN ?? deps.telemetry.sentryDsn ?? "";
+  // Precedence through the registry rather than a local `env ?? setting`, so
+  // the Settings control can tell the user the environment is deciding using
+  // the same rule that decides it.
+  const dsn = envForcedStringForSettingsPath("telemetry.sentryDsn")
+    ?? deps.telemetry.sentryDsn
+    ?? "";
   let sentryActive = false;
   if (dsn) {
     const sentry = (deps.sentryLoader ?? loadSentry)();
