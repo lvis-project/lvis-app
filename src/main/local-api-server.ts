@@ -32,6 +32,7 @@ import { randomBytes } from "node:crypto";
 import type { BrowserWindow } from "electron";
 import type { AppServices } from "../boot.js";
 import type { SettingsService } from "../data/settings-store.js";
+import { resolveEnvBackedBoolean } from "../shared/env-backed-settings.js";
 import type { IpcDeps } from "../ipc/types.js";
 import {
   createConversationCommandPort,
@@ -133,11 +134,24 @@ export function resolveLoopbackRouteFamilies(
   settingsService: SettingsService,
   env: NodeJS.ProcessEnv = process.env,
 ): Readonly<LoopbackRouteFamilies> {
+  // Which variable turns each family on, and at which value, is the
+  // ENV_BACKED_SETTINGS registry's business — the same registry the Settings
+  // surface reads to tell the user the environment is deciding this switch.
+  // The `=== true` stays here: it is this gate's fail-closed rule that a
+  // non-boolean in a hand-edited profile is OFF, not the precedence rule.
   return Object.freeze({
-    localApi:
-      settingsService.get("system").localApiServer === true || env.LVIS_LOCAL_API === "1",
-    a2a:
-      settingsService.get("features")?.a2aLoopbackServer === true || env.LVIS_A2A === "1",
+    localApi: resolveEnvBackedBoolean(
+      "system.localApiServer",
+      settingsService.get("system").localApiServer === true,
+      env,
+      false,
+    ),
+    a2a: resolveEnvBackedBoolean(
+      "features.a2aLoopbackServer",
+      settingsService.get("features")?.a2aLoopbackServer === true,
+      env,
+      false,
+    ),
   });
 }
 

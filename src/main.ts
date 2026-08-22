@@ -23,7 +23,12 @@ import {
 } from "./main/app-update-install-intent.js";
 import { distRoot, projectRoot } from "./main/main-paths.js";
 import { applyRuntimeAppIcon, runEarlyBootEnv } from "./main/early-boot-env.js";
+import {
+  readPersistedHardwareAccelerationSync,
+  resolveHardwareAcceleration,
+} from "./main/persisted-hardware-acceleration.js";
 import { ensureCorporateCaInjected } from "./main/corp-ca-runtime.js";
+import { readPersistedCorpCaConfigSync } from "./main/persisted-corp-ca.js";
 import { loadMainStartupDependencies } from "./main/startup-dependencies.js";
 import { updateSplashStatus, waitForMinimumBootstrapSplash } from "./main/bootstrap-splash.js";
 import { runAppShutdownCleanup } from "./main/app-shutdown.js";
@@ -127,7 +132,10 @@ async function main() {
   updateSplashStatus(t("be_main.splashCheckingCerts"));
   const { bootstrap } = await loadMainStartupDependencies(
     () => import("./boot.js"),
-    ensureCorporateCaInjected,
+    // The settings file is read synchronously here because injection has to
+    // happen before the first outbound request, which is well before
+    // `bootstrap()` constructs SettingsService.
+    () => ensureCorporateCaInjected(readPersistedCorpCaConfigSync(app.getPath("userData"))),
     () => updateSplashStatus(t("be_main.splashLoadingSettings")),
   );
 
@@ -474,7 +482,15 @@ if (
           argv1: process.argv[1],
           userDataDir: app.getPath("userData") || undefined,
           platform: process.platform,
-          disableGpu: process.env.LVIS_KEEP_GPU !== "1",
+          // The same decision the app itself makes at boot, not a second
+          // reading of the environment: a developer who turned the GPU back
+          // on in Settings would otherwise get a registered launcher that
+          // disagrees with the app it launches.
+          disableGpu: !resolveHardwareAcceleration({
+            setting: readPersistedHardwareAccelerationSync(app.getPath("userData")),
+            env: process.env,
+            platform: process.platform,
+          }),
           disableSandbox: devNoSandboxAllowed(),
         }),
       );

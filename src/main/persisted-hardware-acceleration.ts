@@ -13,8 +13,8 @@
  * can be applied to the running process. A toggle that silently did nothing
  * until a restart would be worse than no toggle.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { settingsFilePath } from "../data/settings-store.js";
+import { readPersistedSystemBooleanSync } from "./persisted-settings-sync.js";
+import { resolveEnvBackedBoolean } from "../shared/env-backed-settings.js";
 
 /**
  * Read `system.hardwareAcceleration` from the persisted settings file.
@@ -28,25 +28,18 @@ import { settingsFilePath } from "../data/settings-store.js";
 export function readPersistedHardwareAccelerationSync(
   userDataPath: string,
 ): boolean | undefined {
-  const settingsPath = settingsFilePath(userDataPath);
-  if (!existsSync(settingsPath)) return undefined;
-  try {
-    const parsed = JSON.parse(readFileSync(settingsPath, "utf-8")) as Record<string, unknown>;
-    const system = parsed.system as Record<string, unknown> | undefined;
-    const value = system?.hardwareAcceleration;
-    return typeof value === "boolean" ? value : undefined;
-  } catch {
-    // Corrupt settings file — the async settings-service path surfaces the
-    // parse error later; here we just fall back to the platform default.
-    return undefined;
-  }
+  return readPersistedSystemBooleanSync(userDataPath, "hardwareAcceleration");
 }
 
 export interface HardwareAccelerationInputs {
   /** Persisted `system.hardwareAcceleration`, or undefined when unset. */
   readonly setting: boolean | undefined;
-  /** `LVIS_KEEP_GPU` — "1" forces the GPU on regardless of the setting. */
-  readonly keepGpuEnv: string | undefined;
+  /**
+   * The process environment. Which variable can force this on, and at which
+   * value, is ENV_BACKED_SETTINGS' business — the same registry the Settings
+   * UI reads to tell the user the environment is deciding.
+   */
+  readonly env: NodeJS.ProcessEnv;
   readonly platform: NodeJS.Platform;
 }
 
@@ -68,7 +61,10 @@ export interface HardwareAccelerationInputs {
  * bad persisted value could veto would be no lever.
  */
 export function resolveHardwareAcceleration(inputs: HardwareAccelerationInputs): boolean {
-  if (inputs.keepGpuEnv === "1") return true;
-  if (inputs.setting !== undefined) return inputs.setting;
-  return inputs.platform !== "win32" && inputs.platform !== "linux";
+  return resolveEnvBackedBoolean(
+    "system.hardwareAcceleration",
+    inputs.setting,
+    inputs.env,
+    inputs.platform !== "win32" && inputs.platform !== "linux",
+  );
 }

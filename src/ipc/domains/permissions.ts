@@ -8,6 +8,7 @@ import { loadPolicy, savePolicy } from "../../permissions/policy-store.js";
 import { isPolicyUserEditable } from "../../shared/policy-editability.js";
 import type { ApprovalDecision } from "../../permissions/approval-gate.js";
 import { PERMISSIONS } from "../../shared/ipc-channels.js";
+import { resolveEnvBackedBoolean } from "../../shared/env-backed-settings.js";
 import type {
   PermissionReviewSuggestionPayload,
   PermissionReviewSuggestionReason,
@@ -237,9 +238,15 @@ export function registerPermissionsHandlers(deps: IpcDeps): void {
       "../../shared/sandbox-capability-info.js"
     );
     const platform = process.platform;
-    const enabled =
-      (deps.settingsService.get("features")?.osToolSandbox ?? false) ||
-      process.env["LVIS_SANDBOX_ENABLED"] === "1";
+    // Must answer the same question boot answered (`sandboxOptIn` in
+    // sandbox-init.ts), so it resolves through the registry rather than
+    // re-stating which variable forces it on.
+    const enabled = resolveEnvBackedBoolean(
+      "features.osToolSandbox",
+      deps.settingsService.get("features")?.osToolSandbox ?? false,
+      process.env,
+      false,
+    );
     // Map the platform to the simplified confinement strength. macOS (Seatbelt)
     // and Linux (bwrap) confine fs + process + network ("full"). Windows
     // (srt-win) confines filesystem + network but not process, which is a

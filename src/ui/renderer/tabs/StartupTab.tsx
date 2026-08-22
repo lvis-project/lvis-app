@@ -3,13 +3,15 @@ import { useTranslation } from "../../../i18n/react.js";
 import { Button } from "../../../components/ui/button.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { Label } from "../../../components/ui/label.js";
+import { Input } from "../../../components/ui/input.js";
 import {
   RadioGroup,
   RadioGroupItem,
 } from "../../../components/ui/radio-group.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
+import { EnvForcedNotice, useEnvForcedSettings } from "../components/EnvForcedNotice.js";
 import { getApi } from "../api-client.js";
-import { envVarForSettingsPath } from "../../../shared/env-backed-settings.js";
+import { DEFAULT_CORP_CA_COMMON_NAME } from "../../../shared/corp-ca-common-name.js";
 import { normalizeAccelerator } from "../../../shared/shortcuts.js";
 import { eventToAccelerator } from "../utils/accelerator-capture.js";
 import type { AppSettings } from "../types.js";
@@ -41,10 +43,25 @@ export function StartupTab() {
   // on every load, so the first real snapshot always carries a concrete boolean
   // and the switch stays disabled until it arrives.
   const [hardwareAcceleration, setHardwareAcceleration] = useState(true);
-  // `LVIS_KEEP_GPU=1` overrides the saved value. A switch that rendered only
-  // what is stored would be telling the user something untrue of the running
-  // app, so the section names the variable when it is in force.
-  const [hardwareAccelerationForced, setHardwareAccelerationForced] = useState(false);
+  // Settings whose value the environment is deciding right now. A control that
+  // rendered only what is stored would be telling the user something untrue of
+  // the running app, so each affected control names its variable.
+  const envForcedPaths = useEnvForcedSettings(api);
+  // Corporate root CA. Acquired and injected before `bootstrap()`, so — like
+  // the GPU switch above — these are next-launch settings, and the section
+  // says so instead of implying an effect they do not have.
+  const [corpCaEnabled, setCorpCaEnabled] = useState(true);
+  const [corpCaDebugLog, setCorpCaDebugLog] = useState(false);
+  const [corpCaCommonName, setCorpCaCommonName] = useState(DEFAULT_CORP_CA_COMMON_NAME);
+  // Draft state: the name is a text field, so persisting per keystroke would
+  // write a partial name to the profile the next launch reads.
+  const [corpCaNameDraft, setCorpCaNameDraft] = useState(DEFAULT_CORP_CA_COMMON_NAME);
+  // The last name the host reported. `applySnapshot` runs again on EVERY
+  // settings update, including ones this tab caused (flipping a switch in this
+  // same section) and ones from elsewhere entirely — so it reseeds the draft
+  // only when the draft still matches what was stored, or it would wipe a name
+  // the user is halfway through typing.
+  const storedCorpCaNameRef = useRef(DEFAULT_CORP_CA_COMMON_NAME);
   const [capturing, setCapturing] = useState(false);
   const captureInputRef = useRef<HTMLDivElement | null>(null);
 
@@ -55,6 +72,13 @@ export function StartupTab() {
     setLaunchMinimized(s.system?.launchMinimized ?? false);
     setCloseBehavior(s.system?.closeBehavior ?? "hide-to-tray");
     setHardwareAcceleration(s.system?.hardwareAcceleration ?? true);
+    setCorpCaEnabled(s.system?.corpCaEnabled ?? true);
+    setCorpCaDebugLog(s.system?.corpCaDebugLog ?? false);
+    const name = s.system?.corpCaCommonName ?? DEFAULT_CORP_CA_COMMON_NAME;
+    const previousName = storedCorpCaNameRef.current;
+    storedCorpCaNameRef.current = name;
+    setCorpCaCommonName(name);
+    setCorpCaNameDraft((draft) => (draft === previousName ? name : draft));
     setLoaded(true);
   }, []);
 
@@ -62,9 +86,6 @@ export function StartupTab() {
     let alive = true;
     void api.getSettings().then((s) => {
       if (alive) applySnapshot(s);
-    });
-    void api.envForcedSettings().then((paths) => {
-      if (alive) setHardwareAccelerationForced(paths.includes("system.hardwareAcceleration"));
     });
     const unsub = api.onSettingsUpdated((s) => applySnapshot(s));
     return () => {
@@ -86,6 +107,9 @@ export function StartupTab() {
       launchMinimized?: boolean;
       closeBehavior?: "hide-to-tray" | "quit";
       hardwareAcceleration?: boolean;
+      corpCaEnabled?: boolean;
+      corpCaCommonName?: string;
+      corpCaDebugLog?: boolean;
     }) => {
       void api.updateSettings({ system: next });
     },
@@ -132,6 +156,32 @@ export function StartupTab() {
     },
     [persistSystem],
   );
+
+  const handleCorpCaEnabledChange = useCallback(
+    (value: boolean) => {
+      setCorpCaEnabled(value);
+      persistSystem({ corpCaEnabled: value });
+    },
+    [persistSystem],
+  );
+
+  const handleCorpCaDebugLogChange = useCallback(
+    (value: boolean) => {
+      setCorpCaDebugLog(value);
+      persistSystem({ corpCaDebugLog: value });
+    },
+    [persistSystem],
+  );
+
+  const commitCorpCaCommonName = useCallback(() => {
+    const next = corpCaNameDraft.trim();
+    // An emptied field means "use the default" rather than "search for
+    // nothing"; the host applies the same rule, so show what will be saved.
+    const applied = next === "" ? DEFAULT_CORP_CA_COMMON_NAME : next;
+    setCorpCaCommonName(applied);
+    setCorpCaNameDraft(applied);
+    persistSystem({ corpCaCommonName: applied });
+  }, [corpCaNameDraft, persistSystem]);
 
   const handleCloseBehaviorChange = useCallback(
     (value: string) => {
@@ -320,16 +370,106 @@ export function StartupTab() {
         >
           {t("startupTab.hardwareAccelerationHelp")}
         </p>
-        {hardwareAccelerationForced ? (
+        <EnvForcedNotice
+          settingsPath="system.hardwareAcceleration"
+          forcedPaths={envForcedPaths}
+          messageKey="startupTab.hardwareAccelerationEnvForced"
+          testId="startup-hardware-acceleration-forced"
+          className="mt-2"
+        />
+      </SettingsSection>
+
+      {/* Corporate root CA — see corp-ca-runtime.ts. Electron has two TLS
+          stacks: Chromium trusts the OS store, Node does not, so on a network
+          with a TLS-inspecting proxy the browser half works while every model
+          call fails. This is the control for the half that fails. */}
+      <SettingsSection
+        title={t("startupTab.corpCaSectionTitle")}
+        description={t("startupTab.corpCaSectionDesc")}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <span className="min-w-0 text-sm font-medium">
+            {t("startupTab.corpCaEnabledLabel")}
+          </span>
+          <Switch
+            checked={corpCaEnabled}
+            onCheckedChange={handleCorpCaEnabledChange}
+            disabled={!loaded}
+            aria-label={t("startupTab.corpCaEnabledLabel")}
+            data-testid="startup-corp-ca-enabled"
+          />
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="startup-corp-ca-help">
+          {t("startupTab.corpCaEnabledHelp")}
+        </p>
+        <EnvForcedNotice
+          settingsPath="system.corpCaEnabled"
+          forcedPaths={envForcedPaths}
+          messageKey="startupTab.corpCaEnabledEnvForced"
+          testId="startup-corp-ca-enabled-forced"
+          className="mt-2"
+        />
+
+        <div className="mt-4 space-y-2">
+          <Label className="text-sm font-medium" htmlFor="startup-corp-ca-common-name">
+            {t("startupTab.corpCaCommonNameLabel")}
+          </Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="startup-corp-ca-common-name"
+              value={corpCaNameDraft}
+              onChange={(e) => setCorpCaNameDraft(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") commitCorpCaCommonName(); }}
+              disabled={!loaded || !corpCaEnabled}
+              className="flex-1"
+              data-testid="startup-corp-ca-common-name"
+            />
+            <Button
+              type="button"
+              size="sm"
+              onClick={commitCorpCaCommonName}
+              disabled={!loaded || corpCaNameDraft.trim() === corpCaCommonName}
+              data-testid="startup-corp-ca-common-name-save"
+            >
+              {t("common.save")}
+            </Button>
+          </div>
           <p
-            className="mt-2 text-xs text-muted-foreground"
-            data-testid="startup-hardware-acceleration-forced"
+            className="text-xs text-muted-foreground"
+            data-testid="startup-corp-ca-common-name-help"
           >
-            {t("startupTab.hardwareAccelerationEnvForced", {
-              envVar: envVarForSettingsPath("system.hardwareAcceleration") ?? "",
-            })}
+            {t("startupTab.corpCaCommonNameHelp")}
           </p>
-        ) : null}
+          <EnvForcedNotice
+            settingsPath="system.corpCaCommonName"
+            forcedPaths={envForcedPaths}
+            messageKey="startupTab.corpCaCommonNameEnvForced"
+            testId="startup-corp-ca-common-name-forced"
+          />
+        </div>
+
+        <div className="mt-4 flex items-center justify-between gap-4">
+          <span className="min-w-0 text-sm font-medium">
+            {t("startupTab.corpCaDebugLabel")}
+          </span>
+          <Switch
+            checked={corpCaDebugLog}
+            onCheckedChange={handleCorpCaDebugLogChange}
+            disabled={!loaded}
+            aria-label={t("startupTab.corpCaDebugLabel")}
+            data-testid="startup-corp-ca-debug"
+          />
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="startup-corp-ca-debug-help">
+          {t("startupTab.corpCaDebugHelp")}
+        </p>
+        <EnvForcedNotice
+          settingsPath="system.corpCaDebugLog"
+          forcedPaths={envForcedPaths}
+          messageKey="startupTab.corpCaDebugEnvForced"
+          testId="startup-corp-ca-debug-forced"
+          className="mt-2"
+        />
       </SettingsSection>
 
       {/* Window close behavior (moved from the former General tab) */}

@@ -16,7 +16,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "../../../i18n/react.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { SettingsSection } from "../components/PageShell.js";
-import { envVarForSettingsPath } from "../../../shared/env-backed-settings.js";
+import { EnvForcedNotice, useEnvForcedSettings } from "../components/EnvForcedNotice.js";
 import { getApi } from "../api-client.js";
 import { isIpcErrorResult } from "../types.js";
 import type { AppSettings, DeepPartial } from "../types.js";
@@ -91,7 +91,7 @@ function patchFor(path: GateRow["path"], value: boolean): DeepPartial<AppSetting
 export function LocalApiSurfacesSection() {
   const { t } = useTranslation();
   const [gates, setGates] = useState<GateState>(ALL_OFF);
-  const [forced, setForced] = useState<readonly string[]>([]);
+  const forced = useEnvForcedSettings();
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<GateRow["path"] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -99,17 +99,13 @@ export function LocalApiSurfacesSection() {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [settings, forcedPaths] = await Promise.all([
-        getApi().getSettings(),
-        getApi().envForcedSettings(),
-      ]);
+      const settings = await getApi().getSettings();
       setGates({
         "system.localApiServer": settings.system?.localApiServer === true,
         "features.a2aLoopbackServer": settings.features?.a2aLoopbackServer === true,
         "features.a2aRemoteRouting": settings.features?.a2aRemoteRouting === true,
         "features.a2aRemoteReceiver": settings.features?.a2aRemoteReceiver === true,
       });
-      setForced(forcedPaths);
       setError(null);
     } catch {
       setError(t("localApiSurfaces.loadFailed"));
@@ -154,7 +150,6 @@ export function LocalApiSurfacesSection() {
     >
       <div className="space-y-4">
         {ROWS.map((row) => {
-          const forcedVar = forced.includes(row.path) ? envVarForSettingsPath(row.path) : null;
           return (
             <div key={row.path} className="grid gap-1">
               <div className="flex items-center justify-between gap-4">
@@ -168,14 +163,12 @@ export function LocalApiSurfacesSection() {
                 />
               </div>
               <span className="text-xs text-muted-foreground">{t(row.hintKey)}</span>
-              {forcedVar !== null ? (
-                <span
-                  className="text-xs text-muted-foreground"
-                  data-testid={`${row.testId}-forced`}
-                >
-                  {t("localApiSurfaces.envForced", { envVar: forcedVar })}
-                </span>
-              ) : null}
+              <EnvForcedNotice
+                settingsPath={row.path}
+                forcedPaths={forced}
+                messageKey="localApiSurfaces.envForced"
+                testId={`${row.testId}-forced`}
+              />
             </div>
           );
         })}

@@ -62,6 +62,28 @@ export const es: Record<SeedMessageKey, string> = {
     "Se aplica la próxima vez que se inicie LVIS. Desactívala si la ventana se queda en negro, parpadea o la aplicación se cierra al dibujar: en algunos equipos gestionados y escritorios virtuales los controladores gráficos no pueden con ella. Por eso viene desactivada de forma predeterminada en Windows y Linux.",
   "startupTab.hardwareAccelerationEnvForced":
     "La variable de entorno {envVar} está activando esto ahora mismo, independientemente de lo que se guarde aquí.",
+  "startupTab.corpCaSectionTitle":
+    "Certificado de red corporativa",
+  "startupTab.corpCaSectionDesc":
+    "Para redes que inspeccionan el tráfico TLS con un certificado raíz emitido por la empresa.",
+  "startupTab.corpCaEnabledLabel":
+    "Confiar en el certificado raíz corporativo",
+  "startupTab.corpCaEnabledHelp":
+    "Se aplica la próxima vez que se inicie LVIS. Para navegar, LVIS confía en los certificados en los que confía el sistema operativo, pero las llamadas al modelo, las peticiones al marketplace y la comprobación de actualizaciones se verifican por separado y no lo hacen. En una red que inspecciona el tráfico TLS, esas fallan con un error de certificado mientras las páginas normales cargan bien; esto es lo que lo soluciona. Déjalo activado si tienes dudas: en un equipo sin ese certificado no encuentra nada y no cambia nada.",
+  "startupTab.corpCaEnabledEnvForced":
+    "La variable de entorno {envVar} está desactivando esto ahora mismo, independientemente de lo que se guarde aquí.",
+  "startupTab.corpCaCommonNameLabel":
+    "Nombre del certificado",
+  "startupTab.corpCaCommonNameHelp":
+    "El nombre común (CN) del certificado raíz de tu empresa, tal como aparece en el almacén de confianza del sistema. El valor predeterminado de abajo es solo un marcador: pregunta a tu departamento de TI el nombre real si los errores de certificado continúan. Basta con una parte del nombre.",
+  "startupTab.corpCaCommonNameEnvForced":
+    "La variable de entorno {envVar} está proporcionando este nombre ahora mismo, en lugar del valor guardado aquí.",
+  "startupTab.corpCaDebugLabel":
+    "Registrar los detalles de la búsqueda de certificados",
+  "startupTab.corpCaDebugHelp":
+    "Escribe en el registro de la aplicación qué se buscó y qué se encontró. Actívalo solo mientras diagnosticas un problema de certificados.",
+  "startupTab.corpCaDebugEnvForced":
+    "La variable de entorno {envVar} está activando esto ahora mismo, independientemente de lo que se guarde aquí.",
   "startupTab.launchSectionTitle": "Iniciar al arrancar",
   "startupTab.launchSectionDesc":
     "Controla si LVIS se inicia automáticamente cuando inicias sesión en tu equipo.",
