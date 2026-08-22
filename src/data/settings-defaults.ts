@@ -63,6 +63,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
     installedProviderPresets: [],
     installedThemeBundleIds: [],
     installedLanguagePacks: [],
+    // Both default ON, which is what the pre-setting env-only resolvers did
+    // when their variables were unset — i.e. on every packaged install.
+    updateCheckEnabled: true,
+    offlineCacheEnabled: true,
   },
   routine: {},
   privacy: {

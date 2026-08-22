@@ -1592,6 +1592,22 @@ export const frMessages: Record<string, string> = {
   "marketplaceTab.advancedCollapse": "Réduire les options avancées",
   "marketplaceTab.advancedDescription": "URL du serveur · Authentification · Politique de confiance. Aucune modification nécessaire pour les déploiements par défaut.",
   "marketplaceTab.advancedExpand": "Développer les options avancées",
+  "marketplaceTab.maintenanceTitle":
+    "Mises à jour et copie hors ligne",
+  "marketplaceTab.maintenanceDescription":
+    "Quand la place de marché cherche de nouvelles versions, et ce qu'elle conserve sur le disque.",
+  "marketplaceTab.updateCheckLabel":
+    "Rechercher les mises à jour des plugins",
+  "marketplaceTab.updateCheckHelp":
+    "Prend effet au prochain démarrage de LVIS. Lorsque cette option est active, LVIS demande à la place de marché environ toutes les 10 minutes s'il existe des versions plus récentes de vos plugins installés et des annonces.",
+  "marketplaceTab.updateCheckEnvForced":
+    "La variable d'environnement {envVar} désactive actuellement cette option, quelle que soit la valeur enregistrée ici.",
+  "marketplaceTab.offlineCacheLabel":
+    "Conserver une copie hors ligne du catalogue et des téléchargements",
+  "marketplaceTab.offlineCacheHelp":
+    "S'applique immédiatement. La copie hors ligne permet à la place de marché d'afficher les paquets déjà vus lorsque le réseau est indisponible, et évite de retélécharger un plugin déjà récupéré. Désactivez-la pour ne plus écrire ces fichiers sur le disque.",
+  "marketplaceTab.offlineCacheEnvForced":
+    "La variable d'environnement {envVar} décide actuellement de cette option, à la place de la valeur enregistrée ici.",
   "marketplaceTab.advancedTitle": "Options avancées",
   "marketplaceTab.apiKeyHelp": "Entrez une clé uniquement si le serveur nécessite une authentification. La clé est cryptée et stockée dans le trousseau du système d'exploitation.",
   "marketplaceTab.apiKeyLabel": "Clé API (facultatif)",

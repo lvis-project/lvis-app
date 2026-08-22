@@ -1589,6 +1589,22 @@ export const deMessages: Record<string, string> = {
   "marketplaceTab.advancedCollapse": "Erweiterte Optionen einklappen",
   "marketplaceTab.advancedDescription": "Server-URL · Authentifizierung · Vertrauensrichtlinie. Für Standardbereitstellungen sind keine Änderungen erforderlich.",
   "marketplaceTab.advancedExpand": "Erweiterte Optionen erweitern",
+  "marketplaceTab.maintenanceTitle":
+    "Updates & Offline-Kopie",
+  "marketplaceTab.maintenanceDescription":
+    "Wann der Marketplace nach neuen Versionen sucht und was er auf der Festplatte behält.",
+  "marketplaceTab.updateCheckLabel":
+    "Nach Plugin-Updates suchen",
+  "marketplaceTab.updateCheckHelp":
+    "Wird beim nächsten Start von LVIS wirksam. Wenn aktiviert, fragt LVIS etwa alle 10 Minuten beim Marketplace nach, ob es neuere Versionen Ihrer installierten Plugins oder Ankündigungen gibt.",
+  "marketplaceTab.updateCheckEnvForced":
+    "Die Umgebungsvariable {envVar} schaltet dies derzeit aus, unabhängig vom hier gespeicherten Wert.",
+  "marketplaceTab.offlineCacheLabel":
+    "Offline-Kopie des Katalogs und der Downloads behalten",
+  "marketplaceTab.offlineCacheHelp":
+    "Wird sofort wirksam. Mit der Offline-Kopie zeigt der Marketplace bereits gesehene Pakete auch ohne Netzwerk an und lädt ein bereits geholtes Plugin nicht erneut herunter. Deaktivieren Sie sie, damit diese Dateien nicht mehr auf die Festplatte geschrieben werden.",
+  "marketplaceTab.offlineCacheEnvForced":
+    "Die Umgebungsvariable {envVar} entscheidet dies gerade anstelle des hier gespeicherten Werts.",
   "marketplaceTab.advancedTitle": "Erweiterte Optionen",
   "marketplaceTab.apiKeyHelp": "Geben Sie einen Schlüssel nur ein, wenn der Server eine Authentifizierung erfordert. Der Schlüssel wird verschlüsselt und im Schlüsselbund des Betriebssystems gespeichert.",
   "marketplaceTab.apiKeyLabel": "API-Schlüssel (optional)",

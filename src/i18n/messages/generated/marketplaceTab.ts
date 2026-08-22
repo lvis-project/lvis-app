@@ -52,6 +52,22 @@ export const en = {
   "marketplaceTab.privateNetworkLabel": "Allow private network (loopback / RFC1918)",
   "marketplaceTab.immediateApply": "Applied immediately",
   "marketplaceTab.privateNetworkHelp": "Enable when connecting to a local or internal marketplace server. This bypasses the SSRF guard — disable in external (prod) host environments.",
+  "marketplaceTab.maintenanceTitle":
+    "Updates & Offline Copy",
+  "marketplaceTab.maintenanceDescription":
+    "How the marketplace looks for new versions, and what it keeps on disk.",
+  "marketplaceTab.updateCheckLabel":
+    "Check for plugin updates",
+  "marketplaceTab.updateCheckHelp":
+    "Takes effect the next time LVIS starts. When on, LVIS asks the marketplace roughly every 10 minutes whether your installed plugins have newer versions, and whether there are announcements.",
+  "marketplaceTab.updateCheckEnvForced":
+    "The environment variable {envVar} is currently turning this off, whatever is saved here.",
+  "marketplaceTab.offlineCacheLabel":
+    "Keep an offline copy of the catalog and downloads",
+  "marketplaceTab.offlineCacheHelp":
+    "Applies right away. The offline copy lets the marketplace still show packages you have seen before when the network is unavailable, and skips re-downloading a plugin you already fetched. Turn it off to stop writing those files to disk.",
+  "marketplaceTab.offlineCacheEnvForced":
+    "The environment variable {envVar} is deciding this right now, instead of the value saved here.",
 } as const;
 export const ko: Record<keyof typeof en, string> = {
   "marketplaceTab.pageTitle": "마켓플레이스",
@@ -106,4 +122,20 @@ export const ko: Record<keyof typeof en, string> = {
   "marketplaceTab.privateNetworkLabel": "사설 네트워크 허용 (loopback / RFC1918)",
   "marketplaceTab.immediateApply": "즉시 적용",
   "marketplaceTab.privateNetworkHelp": "로컬 또는 내부 마켓플레이스 서버에 접속할 때 활성화합니다. SSRF 가드를 우회하므로 외부 호스트(prod) 환경에서는 끄세요.",
+  "marketplaceTab.maintenanceTitle":
+    "업데이트와 오프라인 사본",
+  "marketplaceTab.maintenanceDescription":
+    "마켓플레이스가 새 버전을 언제 확인하고, 무엇을 디스크에 남길지 설정합니다.",
+  "marketplaceTab.updateCheckLabel":
+    "플러그인 업데이트 확인",
+  "marketplaceTab.updateCheckHelp":
+    "다음 실행부터 적용됩니다. 켜면 약 10분마다 설치된 플러그인의 새 버전과 공지가 있는지 마켓플레이스에 확인합니다.",
+  "marketplaceTab.updateCheckEnvForced":
+    "환경 변수 {envVar} 가 여기에 저장된 값과 관계없이 이 항목을 끄고 있습니다.",
+  "marketplaceTab.offlineCacheLabel":
+    "카탈로그와 내려받은 파일의 오프라인 사본 보관",
+  "marketplaceTab.offlineCacheHelp":
+    "즉시 적용됩니다. 오프라인 사본이 있으면 네트워크가 없을 때도 이전에 본 패키지 목록을 보여 주고, 이미 받은 플러그인을 다시 내려받지 않습니다. 끄면 해당 파일을 디스크에 쓰지 않습니다.",
+  "marketplaceTab.offlineCacheEnvForced":
+    "환경 변수 {envVar} 가 여기에 저장된 값 대신 이 항목을 결정하고 있습니다.",
 };
