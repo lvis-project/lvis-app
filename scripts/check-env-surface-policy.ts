@@ -48,6 +48,11 @@ const DEVELOPMENT: readonly string[] = [
   "LVIS_E2E",
   "LVIS_E2E_WHITELIST_PUBLIC_KEY",
   "LVIS_LOG_FILE",
+  // Sibling of LVIS_LOG_FILE, and development for the same reason: a packaged
+  // build already resolves the JSON format from `isPackagedElectron`, and the
+  // three sources are OR-ed, so setting this in a packaged app cannot change
+  // what it does. It is a lever for a dev run and a CI pipeline only.
+  "LVIS_LOG_FORMAT",
   "LVIS_PLUGINS_DIR",
   "LVIS_REQUIRE_SANDBOX_CASES",
   "LVIS_RESOURCE_ROOT",
@@ -103,14 +108,13 @@ const SETTINGS_BACKED: readonly string[] = [
  */
 const PENDING: readonly string[] = [
   "LVIS_HOME",
-  "LVIS_LOG_FORMAT",
   "LVIS_PRICING_OVERRIDE",
   "LVIS_SENTRY_DSN",
   "LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS",
   "LVIS_TELEMETRY_ALLOWLIST",
 ];
 
-const PENDING_CEILING = 6;
+const PENDING_CEILING = 5;
 
 /**
  * `process.env.NAME`, `process.env["NAME"]`, and the same two through a passed
