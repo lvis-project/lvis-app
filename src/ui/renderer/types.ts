@@ -368,6 +368,12 @@ export type AppSettings = {
     corpCaCommonName?: string;
     /** Whether the skipped certificate paths are logged instead of silent. */
     corpCaDebugLog?: boolean;
+    /**
+     * Quit-time cleanup window in milliseconds. Mirrors the main-process SOT in
+     * `src/data/settings-store.ts` `SystemSettings.shutdownCleanupTimeoutMs`.
+     * Default 15_000; `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS` overrides it.
+     */
+    shutdownCleanupTimeoutMs?: number;
   };
   /** Global keyboard shortcuts. SOT: `ShortcutSettings` in settings-store. */
   shortcuts?: {

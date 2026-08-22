@@ -1,4 +1,8 @@
-import { TOOL_TIMEOUT_POLICY } from "../shared/tool-timeout-policy.js";
+import {
+  TOOL_TIMEOUT_POLICY,
+  normalizeShutdownCleanupTimeoutMs,
+} from "../shared/tool-timeout-policy.js";
+import { resolveEnvBackedNumber } from "../shared/env-backed-settings.js";
 import { createLogger } from "../lib/logger.js";
 
 const log = createLogger("lvis");
@@ -20,32 +24,51 @@ export type ShutdownCleanupResult =
   | { status: "timed-out" };
 
 /**
- * Resolve the cleanup timeout from environment, falling back to the SOT
- * default. `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS` is the only knob — the legacy
- * `LVIS_SHUTDOWN_TIMEOUT_MS` alias reached its published removal date
- * (2026-08-01) and is gone. A host still exporting it now gets the default,
- * which is what the deprecation warning had been telling it to expect.
+ * Resolve the cleanup timeout: what the environment forces, else what the user
+ * saved in Settings, else the SOT default.
  *
- * Invalid env values (non-numeric, ≤ 0, NaN) emit a one-shot warn so
- * operator misconfiguration is visible in production logs rather than
- * being silently swallowed.
+ * The window is a Settings control (Startup → System behavior) because a
+ * packaged-app user cannot set an environment variable, and a lever nobody can
+ * reach is not a lever. `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS` still wins where a
+ * launcher script or an MDM profile pins it — that precedence, and the parse
+ * that decides whether the variable is saying anything at all, are the
+ * registry's (ENV_BACKED_SETTINGS), so the notice the control shows the user is
+ * derived from the rule applied here. The legacy `LVIS_SHUTDOWN_TIMEOUT_MS`
+ * alias reached its published removal date (2026-08-01) and is gone.
+ *
+ * `settingMs` is passed through the same normalization as the environment
+ * value, so a profile carrying a nonsense timeout falls through to the default
+ * rather than resolving to something the timer cannot arm.
+ *
+ * An env value that is set but unusable (non-numeric, ≤ 0, NaN) emits a
+ * one-shot warn: without it the variable would silently stop deciding and the
+ * saved setting would take over, which looks from the outside like the pin
+ * being ignored.
  */
-export function resolveShutdownCleanupTimeoutMs(env: NodeJS.ProcessEnv = process.env): number {
-  const raw = env.LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS;
-  if (!raw) return DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS;
+export function resolveShutdownCleanupTimeoutMs(
+  settingMs: number | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): number {
+  warnOnceOnUnusableEnvValue(env);
+  return resolveEnvBackedNumber(
+    "system.shutdownCleanupTimeoutMs",
+    normalizeShutdownCleanupTimeoutMs(settingMs),
+    env,
+    DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS,
+  );
+}
 
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    if (!invalidEnvWarnedOnce) {
-      invalidEnvWarnedOnce = true;
-      log.warn(
-        `shutdown-timeout: env value ${JSON.stringify(raw)} is not a positive number; ` +
-          `falling back to default ${DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS}ms.`,
-      );
-    }
-    return DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS;
-  }
-  return Math.floor(parsed);
+function warnOnceOnUnusableEnvValue(env: NodeJS.ProcessEnv): void {
+  const raw = env.LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS;
+  if (raw === undefined || raw === "") return;
+  if (normalizeShutdownCleanupTimeoutMs(raw) !== undefined) return;
+  if (invalidEnvWarnedOnce) return;
+  invalidEnvWarnedOnce = true;
+  log.warn(
+    `shutdown-timeout: env value ${JSON.stringify(raw)} is not a positive number; ` +
+      "falling back to the saved setting or the default " +
+      `${DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS}ms.`,
+  );
 }
 
 /**

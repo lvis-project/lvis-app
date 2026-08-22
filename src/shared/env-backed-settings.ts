@@ -17,6 +17,8 @@
  * what the environment is doing.
  */
 
+import { normalizeShutdownCleanupTimeoutMs } from "./tool-timeout-policy.js";
+
 export interface EnvBackedSetting {
   /** Dotted path into the settings object, as `updateSettings` nests it. */
   readonly settingsPath: string;
@@ -28,11 +30,13 @@ export interface EnvBackedSetting {
    * does not act on".
    *
    * The return type follows the SETTING's type: a boolean gate answers with a
-   * boolean, a text setting answers with the string the environment supplies.
-   * Read it through {@link envForcedBooleanForSettingsPath} or
-   * {@link envForcedStringForSettingsPath}, which narrow it back.
+   * boolean, a text setting answers with the string the environment supplies,
+   * and a numeric setting answers with the number it parsed. Read it through
+   * the resolver for that type — {@link resolveEnvBackedBoolean},
+   * {@link envForcedStringForSettingsPath}, {@link resolveEnvBackedNumber} —
+   * which narrow it back.
    */
-  readonly forcedValue: (envValue: string | undefined) => boolean | string | undefined;
+  readonly forcedValue: (envValue: string | undefined) => boolean | string | number | undefined;
 }
 
 /**
@@ -118,6 +122,17 @@ export const ENV_BACKED_SETTINGS: readonly EnvBackedSetting[] = Object.freeze([
       return trimmed === undefined || trimmed === "" ? undefined : trimmed;
     },
   },
+  // The shutdown cleanup window: the first NUMERIC entry here. The gate is the
+  // same parse the setting itself goes through
+  // (`normalizeShutdownCleanupTimeoutMs`), so a value the environment supplies
+  // and a value the user picks are accepted or rejected on identical terms —
+  // and an unusable env value falls through to the setting rather than to no
+  // deadline at all.
+  {
+    settingsPath: "system.shutdownCleanupTimeoutMs",
+    envVar: "LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS",
+    forcedValue: normalizeShutdownCleanupTimeoutMs,
+  },
   {
     settingsPath: "marketplace.offlineCacheEnabled",
     envVar: "LVIS_MARKETPLACE_USE_CACHE",
@@ -157,7 +172,7 @@ export function envForcedSettingsPaths(
 export function envForcedValueForSettingsPath(
   settingsPath: string,
   env: NodeJS.ProcessEnv = process.env,
-): boolean | string | undefined {
+): boolean | string | number | undefined {
   const entry = ENV_BACKED_SETTINGS.find((item) => item.settingsPath === settingsPath);
   if (entry === undefined) return undefined;
   return entry.forcedValue(env[entry.envVar]);
@@ -206,6 +221,36 @@ export function envForcedStringForSettingsPath(
 ): string | undefined {
   const value = envForcedValueForSettingsPath(settingsPath, env);
   return typeof value === "string" ? value : undefined;
+}
+
+/**
+ * {@link envForcedValueForSettingsPath} narrowed to a numeric setting. Kept
+ * module-private for the same reason its boolean twin is: the forced value is
+ * only ever wanted together with the precedence rule below.
+ */
+function envForcedNumberForSettingsPath(
+  settingsPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): number | undefined {
+  const value = envForcedValueForSettingsPath(settingsPath, env);
+  return typeof value === "number" ? value : undefined;
+}
+
+/**
+ * {@link resolveEnvBackedBoolean} for a numeric setting: what the environment
+ * forces, else what the user saved, else the default.
+ *
+ * `settingValue` is expected to have passed the SAME normalization the registry
+ * entry uses, so a stored value that could not be a timeout is `undefined` here
+ * and falls through rather than being resolved to something unusable.
+ */
+export function resolveEnvBackedNumber(
+  settingsPath: string,
+  settingValue: number | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+  fallback: number,
+): number {
+  return envForcedNumberForSettingsPath(settingsPath, env) ?? settingValue ?? fallback;
 }
 
 /** The variable a surface should name when it reports a forced setting. */

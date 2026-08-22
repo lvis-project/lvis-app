@@ -92,6 +92,14 @@ export const de: Record<SeedMessageKey, string> = {
   "startupTab.launchMinimizedLabel": "Versteckt im Infobereich starten",
   "startupTab.launchMinimizedHint": "Beim Start mit der Anmeldung minimiert im Infobereich starten, ohne ein Fenster zu öffnen.",
   "startupTab.launchRegisterFailedTitle": "Start beim Anmelden konnte nicht angewendet werden",
+  "startupTab.shutdownTimeoutLabel":
+    "Zeit für die Bereinigung beim Beenden",
+  "startupTab.shutdownTimeoutHelp":
+    "Beim Beenden stoppt LVIS seine Routinen, Plug-ins und Hintergrundprozesse und speichert die Fensteranordnung, bevor es schließt. Ist das innerhalb dieser Zeit nicht abgeschlossen, schließt es trotzdem, und noch nicht Geschriebenes geht verloren. Erhöhe den Wert, wenn ein Plug-in länger zum Herunterfahren braucht; verringere ihn, wenn sich das Beenden langsam anfühlt.",
+  "startupTab.shutdownTimeoutEnvForced":
+    "Die Umgebungsvariable {envVar} liefert diesen Wert gerade, anstelle des hier gespeicherten Werts.",
+  "startupTab.shutdownTimeoutSeconds": "{seconds} Sekunden",
+  "startupTab.shutdownTimeoutSecondsDefault": "{seconds} Sekunden (Standard)",
   "startupTab.launchRegisterFailedBody":
     "LVIS konnte den Start bei der Anmeldung auf diesem System nicht registrieren. Öffne die Einstellungen, um es erneut zu versuchen.",
 };
