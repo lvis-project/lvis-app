@@ -92,6 +92,14 @@ export const fr: Record<SeedMessageKey, string> = {
   "startupTab.launchMinimizedLabel": "Démarrer masqué dans la barre d'état",
   "startupTab.launchMinimizedHint": "Au lancement à la connexion, démarrer réduit dans la barre d'état sans ouvrir de fenêtre.",
   "startupTab.launchRegisterFailedTitle": "Impossible d'appliquer le lancement au démarrage",
+  "startupTab.shutdownTimeoutLabel":
+    "Temps alloué au nettoyage à la fermeture",
+  "startupTab.shutdownTimeoutHelp":
+    "À la fermeture, LVIS arrête ses routines, ses extensions et ses processus en arrière-plan, puis enregistre la disposition des fenêtres avant de se fermer. Si cela n'est pas terminé dans ce délai, l'application se ferme quand même et ce qui était en cours d'écriture est abandonné. Augmentez-le si une extension a besoin de plus de temps pour s'arrêter ; réduisez-le si la fermeture vous semble lente.",
+  "startupTab.shutdownTimeoutEnvForced":
+    "La variable d'environnement {envVar} fournit actuellement cette valeur, à la place de celle enregistrée ici.",
+  "startupTab.shutdownTimeoutSeconds": "{seconds} secondes",
+  "startupTab.shutdownTimeoutSecondsDefault": "{seconds} secondes (par défaut)",
   "startupTab.launchRegisterFailedBody":
     "LVIS n'a pas pu s'enregistrer pour se lancer à la connexion sur ce système. Ouvrez les paramètres pour réessayer.",
 };

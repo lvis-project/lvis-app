@@ -57,8 +57,38 @@ export function acceptField<T extends object, K extends keyof T>(
   block: string,
   rejection: FieldRejection,
 ): void {
-  if (accept(raw)) {
-    target[key] = raw as T[K];
+  acceptNormalizedField(
+    target,
+    key,
+    raw,
+    (value) => (accept(value) ? (value as T[K]) : undefined),
+    block,
+    rejection,
+  );
+}
+
+/**
+ * {@link acceptField} for the fields whose validation is a TRANSFORM rather
+ * than a shape test — a width that is clamped to its pane range, a timeout that
+ * is floored and bounded. `normalize` returns the value to store, or
+ * `undefined` to reject.
+ *
+ * These were the blocks {@link acceptField} could not absorb, and they were
+ * left written out for exactly one turn before this file grew a second copy of
+ * the surrounding if/else/warn. It is the same three sentences either way, so
+ * the shape test is now just the transform that returns its input unchanged.
+ */
+export function acceptNormalizedField<T extends object, K extends keyof T>(
+  target: T,
+  key: K,
+  raw: unknown,
+  normalize: (value: unknown) => T[K] | undefined,
+  block: string,
+  rejection: FieldRejection,
+): void {
+  const normalized = normalize(raw);
+  if (normalized !== undefined) {
+    target[key] = normalized;
     return;
   }
   // Absent is not invalid: it is the ordinary case of a setting nobody has

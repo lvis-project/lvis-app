@@ -92,6 +92,14 @@ export const es: Record<SeedMessageKey, string> = {
   "startupTab.launchMinimizedLabel": "Iniciar oculto en la bandeja",
   "startupTab.launchMinimizedHint": "Al iniciar con el sistema, arranca minimizado en la bandeja sin abrir ventana.",
   "startupTab.launchRegisterFailedTitle": "No se pudo aplicar el inicio al arrancar",
+  "startupTab.shutdownTimeoutLabel":
+    "Tiempo permitido para la limpieza al salir",
+  "startupTab.shutdownTimeoutHelp":
+    "Al salir, LVIS detiene sus rutinas, complementos y procesos en segundo plano y guarda la disposición de las ventanas antes de cerrarse. Si no termina dentro de este tiempo, se cierra igualmente y se descarta lo que aún se estuviera escribiendo. Auméntalo si un complemento necesita más tiempo para cerrarse; redúcelo si salir se siente lento.",
+  "startupTab.shutdownTimeoutEnvForced":
+    "La variable de entorno {envVar} está proporcionando este valor ahora mismo, en lugar del valor guardado aquí.",
+  "startupTab.shutdownTimeoutSeconds": "{seconds} segundos",
+  "startupTab.shutdownTimeoutSecondsDefault": "{seconds} segundos (predeterminado)",
   "startupTab.launchRegisterFailedBody":
     "LVIS no pudo registrarse para iniciarse al iniciar sesión en este sistema. Abre Configuración para volver a intentarlo.",
 };

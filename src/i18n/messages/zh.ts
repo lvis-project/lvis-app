@@ -98,6 +98,14 @@ export const zh: Record<SeedMessageKey, string> = {
   "startupTab.launchMinimizedLabel": "启动时隐藏到托盘",
   "startupTab.launchMinimizedHint": "在登录启动时，最小化到托盘启动而不打开窗口。",
   "startupTab.launchRegisterFailedTitle": "无法应用开机自动启动",
+  "startupTab.shutdownTimeoutLabel":
+    "退出时允许的清理时间",
+  "startupTab.shutdownTimeoutHelp":
+    "退出时,LVIS 会停止例程、插件和后台进程并保存窗口布局,然后关闭。如果在此时间内未完成,它仍会关闭,尚未写完的内容将被丢弃。若某个插件需要更长时间关闭请调大,若觉得退出缓慢请调小。",
+  "startupTab.shutdownTimeoutEnvForced":
+    "环境变量 {envVar} 当前正在提供此值,而不是这里保存的值。",
+  "startupTab.shutdownTimeoutSeconds": "{seconds} 秒",
+  "startupTab.shutdownTimeoutSecondsDefault": "{seconds} 秒 (默认)",
   "startupTab.launchRegisterFailedBody":
     "LVIS 无法在此系统上注册登录时自动启动。请打开设置重试。",
 };

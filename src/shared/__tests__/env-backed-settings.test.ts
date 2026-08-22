@@ -5,6 +5,7 @@ import {
   envForcedValueForSettingsPath,
   envVarForSettingsPath,
   parseEnvForcedSettingsPaths,
+  resolveEnvBackedNumber,
 } from "../env-backed-settings.js";
 
 describe("env-backed settings registry", () => {
@@ -86,6 +87,38 @@ describe("env-backed settings registry", () => {
       .toBeUndefined();
     expect(envForcedSettingsPaths({ LVIS_CORP_CA_CN: "Acme Root CA", LVIS_CORP_CA_DEBUG: "1" }))
       .toEqual(["system.corpCaDebugLog", "system.corpCaCommonName"]);
+  });
+
+  it("carries the cleanup window as a number, parsed by the setting's own rule", () => {
+    // The only numeric entry. It answers with the value the timer will be armed
+    // with, not with "the variable is set" — a value the setting itself would
+    // reject is not a forced value either.
+    expect(envForcedValueForSettingsPath("system.shutdownCleanupTimeoutMs", {
+      LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "45000",
+    })).toBe(45_000);
+    expect(envForcedValueForSettingsPath("system.shutdownCleanupTimeoutMs", {
+      LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "0",
+    })).toBeUndefined();
+    expect(envForcedSettingsPaths({ LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "abc" })).toEqual([]);
+    expect(envForcedSettingsPaths({ LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "45000" }))
+      .toEqual(["system.shutdownCleanupTimeoutMs"]);
+  });
+
+  it("resolves a numeric setting environment-first, then saved, then default", () => {
+    expect(resolveEnvBackedNumber(
+      "system.shutdownCleanupTimeoutMs", 30_000,
+      { LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "45000" }, 15_000,
+    )).toBe(45_000);
+    expect(resolveEnvBackedNumber("system.shutdownCleanupTimeoutMs", 30_000, {}, 15_000))
+      .toBe(30_000);
+    expect(resolveEnvBackedNumber("system.shutdownCleanupTimeoutMs", undefined, {}, 15_000))
+      .toBe(15_000);
+    // A boolean gate asked for a number is a wiring mistake, not a forced
+    // value: the setting still decides rather than the timer being armed with
+    // something that was never a duration.
+    expect(resolveEnvBackedNumber(
+      "system.localApiServer", 30_000, { LVIS_LOCAL_API: "1" }, 15_000,
+    )).toBe(30_000);
   });
 
   it("returns undefined for a path that is not in the registry", () => {

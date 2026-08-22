@@ -4,6 +4,7 @@ import {
   resolveShutdownCleanupTimeoutMs,
   runCleanupWithHardTimeout,
 } from "../shutdown-timeout.js";
+import { MAX_TIMER_DELAY_MS } from "../../shared/tool-timeout-policy.js";
 
 describe("shutdown cleanup hard timeout", () => {
   it("returns completed when cleanup resolves before the deadline", async () => {
@@ -31,10 +32,12 @@ describe("shutdown cleanup hard timeout", () => {
   });
 
   it("resolves timeout from the canonical env var", () => {
-    expect(resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "1234" })).toBe(1234);
-    expect(resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "-1" })).toBe(
-      DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS,
-    );
+    expect(
+      resolveShutdownCleanupTimeoutMs(undefined, { LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "1234" }),
+    ).toBe(1234);
+    expect(
+      resolveShutdownCleanupTimeoutMs(undefined, { LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "-1" }),
+    ).toBe(DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS);
   });
 
   it("ignores the retired LVIS_SHUTDOWN_TIMEOUT_MS alias", () => {
@@ -42,21 +45,65 @@ describe("shutdown cleanup hard timeout", () => {
     // default — exactly what the deprecation warning promised would happen,
     // and NOT a silent honoring of a name that no longer exists.
     expect(
-      resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_TIMEOUT_MS: "2345" } as NodeJS.ProcessEnv),
+      resolveShutdownCleanupTimeoutMs(undefined, {
+        LVIS_SHUTDOWN_TIMEOUT_MS: "2345",
+      } as NodeJS.ProcessEnv),
     ).toBe(DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS);
   });
 
   it("falls back to the default for NaN / non-numeric / zero env values", () => {
-    expect(resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "abc" })).toBe(
-      DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS,
-    );
-    expect(resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "0" })).toBe(
+    expect(
+      resolveShutdownCleanupTimeoutMs(undefined, { LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "abc" }),
+    ).toBe(DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS);
+    expect(
+      resolveShutdownCleanupTimeoutMs(undefined, { LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "0" }),
+    ).toBe(DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS);
+  });
+
+  it("returns the default when neither the setting nor the env decides", () => {
+    expect(resolveShutdownCleanupTimeoutMs(undefined, {})).toBe(
       DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS,
     );
   });
 
-  it("returns the default when no env vars are set", () => {
-    expect(resolveShutdownCleanupTimeoutMs({})).toBe(DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS);
+  it("uses the saved setting when the environment is silent", () => {
+    expect(resolveShutdownCleanupTimeoutMs(30_000, {})).toBe(30_000);
+  });
+
+  it("lets the environment override the saved setting", () => {
+    // A launcher script or an MDM profile pinning the variable outranks the
+    // profile, which is the whole reason the pair is in ENV_BACKED_SETTINGS.
+    expect(
+      resolveShutdownCleanupTimeoutMs(30_000, { LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "45000" }),
+    ).toBe(45_000);
+  });
+
+  it("falls through to the setting when the env value is unusable", () => {
+    // NOT to the default: an env value that says nothing must not also erase
+    // the choice the user did make.
+    expect(
+      resolveShutdownCleanupTimeoutMs(30_000, { LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "abc" }),
+    ).toBe(30_000);
+  });
+
+  it("rejects a saved setting that could never be a timeout", () => {
+    expect(resolveShutdownCleanupTimeoutMs(0, {})).toBe(DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS);
+    expect(resolveShutdownCleanupTimeoutMs(-5, {})).toBe(DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS);
+    expect(resolveShutdownCleanupTimeoutMs(Number.NaN, {})).toBe(
+      DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS,
+    );
+  });
+
+  it("clamps a value past Node's timer ceiling instead of letting it overflow", () => {
+    // Above MAX_TIMER_DELAY_MS `setTimeout` warns and substitutes 1ms, so an
+    // operator asking for a very long grace period would get a cleanup killed
+    // almost instantly — the opposite of what they asked for.
+    expect(
+      resolveShutdownCleanupTimeoutMs(undefined, {
+        LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: String(MAX_TIMER_DELAY_MS + 1_000),
+      }),
+    ).toBe(MAX_TIMER_DELAY_MS);
+    expect(resolveShutdownCleanupTimeoutMs(MAX_TIMER_DELAY_MS * 2, {})).toBe(MAX_TIMER_DELAY_MS);
   });
 
   it("aborts the cleanup signal on timeout so callers can break out", async () => {

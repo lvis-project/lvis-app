@@ -8,13 +8,35 @@ import {
   RadioGroup,
   RadioGroupItem,
 } from "../../../components/ui/radio-group.js";
+import { NativeSelect, NativeSelectOption } from "../../../components/ui/native-select.js";
 import { SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
 import { EnvForcedNotice, useEnvForcedSettings } from "../components/EnvForcedNotice.js";
 import { getApi } from "../api-client.js";
 import { DEFAULT_CORP_CA_COMMON_NAME } from "../../../shared/corp-ca-common-name.js";
+import { TOOL_TIMEOUT_POLICY } from "../../../shared/tool-timeout-policy.js";
 import { normalizeAccelerator } from "../../../shared/shortcuts.js";
 import { eventToAccelerator } from "../utils/accelerator-capture.js";
 import type { AppSettings } from "../types.js";
+
+/**
+ * The cleanup windows the control offers, in milliseconds.
+ *
+ * A fixed list rather than a free number field: the setting is a deadline the
+ * app enforces on itself while quitting, and the two ways to get it wrong —
+ * too short to finish writing, long enough that quitting appears to hang —
+ * are both reachable by typing. The environment variable still accepts any
+ * positive value, which is the escape hatch for the deployment that needs one.
+ *
+ * The shipped default has to be one of these or the control would render a
+ * selection the user cannot choose again, so it is taken from the policy
+ * rather than restated.
+ */
+const SHUTDOWN_CLEANUP_TIMEOUT_CHOICES_MS: readonly number[] = Object.freeze([
+  5_000,
+  TOOL_TIMEOUT_POLICY.shutdownCleanupMs,
+  30_000,
+  60_000,
+]);
 
 /**
  * E4 — Startup / global shortcuts settings tab.
@@ -50,6 +72,12 @@ export function StartupTab() {
   // Corporate root CA. Acquired and injected before `bootstrap()`, so — like
   // the GPU switch above — these are next-launch settings, and the section
   // says so instead of implying an effect they do not have.
+  // Quit-time cleanup window. Unlike the switches above this one IS applied to
+  // the running app: the value is read when `before-quit` fires, so a change
+  // takes effect on the next quit rather than the next launch.
+  const [shutdownCleanupTimeoutMs, setShutdownCleanupTimeoutMs] = useState<number>(
+    TOOL_TIMEOUT_POLICY.shutdownCleanupMs,
+  );
   const [corpCaEnabled, setCorpCaEnabled] = useState(true);
   const [corpCaDebugLog, setCorpCaDebugLog] = useState(false);
   const [corpCaCommonName, setCorpCaCommonName] = useState(DEFAULT_CORP_CA_COMMON_NAME);
@@ -72,6 +100,9 @@ export function StartupTab() {
     setLaunchMinimized(s.system?.launchMinimized ?? false);
     setCloseBehavior(s.system?.closeBehavior ?? "hide-to-tray");
     setHardwareAcceleration(s.system?.hardwareAcceleration ?? true);
+    setShutdownCleanupTimeoutMs(
+      s.system?.shutdownCleanupTimeoutMs ?? TOOL_TIMEOUT_POLICY.shutdownCleanupMs,
+    );
     setCorpCaEnabled(s.system?.corpCaEnabled ?? true);
     setCorpCaDebugLog(s.system?.corpCaDebugLog ?? false);
     const name = s.system?.corpCaCommonName ?? DEFAULT_CORP_CA_COMMON_NAME;
@@ -110,6 +141,7 @@ export function StartupTab() {
       corpCaEnabled?: boolean;
       corpCaCommonName?: string;
       corpCaDebugLog?: boolean;
+      shutdownCleanupTimeoutMs?: number;
     }) => {
       void api.updateSettings({ system: next });
     },
@@ -182,6 +214,18 @@ export function StartupTab() {
     setCorpCaNameDraft(applied);
     persistSystem({ corpCaCommonName: applied });
   }, [corpCaNameDraft, persistSystem]);
+
+  const handleShutdownTimeoutChange = useCallback(
+    (event: React.ChangeEvent<HTMLSelectElement>) => {
+      const value = Number(event.target.value);
+      // The option values come from the frozen list above, so a value outside
+      // it means the DOM was tampered with rather than a choice being made.
+      if (!SHUTDOWN_CLEANUP_TIMEOUT_CHOICES_MS.includes(value)) return;
+      setShutdownCleanupTimeoutMs(value);
+      persistSystem({ shutdownCleanupTimeoutMs: value });
+    },
+    [persistSystem],
+  );
 
   const handleCloseBehaviorChange = useCallback(
     (value: string) => {
@@ -507,6 +551,44 @@ export function StartupTab() {
             </Label>
           </div>
         </RadioGroup>
+
+        <div className="mt-4 border-t pt-4">
+          <Label htmlFor="shutdown-cleanup-timeout" className="font-medium">
+            {t("startupTab.shutdownTimeoutLabel")}
+          </Label>
+          <NativeSelect
+            id="shutdown-cleanup-timeout"
+            className="mt-2 w-full"
+            value={String(shutdownCleanupTimeoutMs)}
+            onChange={handleShutdownTimeoutChange}
+            disabled={!loaded || envForcedPaths.includes("system.shutdownCleanupTimeoutMs")}
+            data-testid="startup-shutdown-timeout"
+          >
+            {SHUTDOWN_CLEANUP_TIMEOUT_CHOICES_MS.map((ms) => (
+              <NativeSelectOption key={ms} value={String(ms)}>
+                {t(
+                  ms === TOOL_TIMEOUT_POLICY.shutdownCleanupMs
+                    ? "startupTab.shutdownTimeoutSecondsDefault"
+                    : "startupTab.shutdownTimeoutSeconds",
+                  { seconds: String(Math.round(ms / 1000)) },
+                )}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <p
+            className="mt-2 text-xs text-muted-foreground"
+            data-testid="startup-shutdown-timeout-help"
+          >
+            {t("startupTab.shutdownTimeoutHelp")}
+          </p>
+          <EnvForcedNotice
+            settingsPath="system.shutdownCleanupTimeoutMs"
+            forcedPaths={envForcedPaths}
+            messageKey="startupTab.shutdownTimeoutEnvForced"
+            testId="startup-shutdown-timeout-forced"
+            className="mt-2"
+          />
+        </div>
       </SettingsSection>
     </div>
   );

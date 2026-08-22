@@ -85,7 +85,9 @@ export async function runAppShutdownCleanup(options: {
   setAppShutdownStarted(true);
   sealManagedChildProcessAdmission(options.reason);
   const svc = services;
-  const cleanupTimeoutMs = resolveShutdownCleanupTimeoutMs();
+  const cleanupTimeoutMs = resolveShutdownCleanupTimeoutMs(
+    svc.settingsService.get("system")?.shutdownCleanupTimeoutMs,
+  );
   appShutdownCleanupPromise = (async () => {
     const result = await runCleanupWithHardTimeout(async (signal) => {
       // A subscription runtime owns long-lived child processes. Keep it alive

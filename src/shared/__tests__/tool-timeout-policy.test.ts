@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { TOOL_TIMEOUT_POLICY, resolveSubAgentCeilingMs } from "../tool-timeout-policy.js";
+import {
+  MAX_TIMER_DELAY_MS,
+  TOOL_TIMEOUT_POLICY,
+  normalizeShutdownCleanupTimeoutMs,
+  resolveSubAgentCeilingMs,
+} from "../tool-timeout-policy.js";
 import {
   SUBAGENT_MAX_ROUNDS_DEFAULT,
   SUBAGENT_MAX_ROUNDS_MIN,
@@ -100,5 +105,36 @@ describe("TOOL_TIMEOUT_POLICY — single source of truth invariants", () => {
 
   it("shell SOT is ms-aligned — shellDefaultMs is divisible by 1000 so the Zod schema's `/ 1000` conversion yields an integer default", () => {
     expect(TOOL_TIMEOUT_POLICY.shellDefaultMs % 1000).toBe(0);
+  });
+});
+
+describe("normalizeShutdownCleanupTimeoutMs", () => {
+  it("accepts a positive number or its string form identically", () => {
+    // The setting arrives as a number and the environment variable as a string;
+    // one rule means they cannot disagree about what is acceptable.
+    expect(normalizeShutdownCleanupTimeoutMs(30_000)).toBe(30_000);
+    expect(normalizeShutdownCleanupTimeoutMs("30000")).toBe(30_000);
+    expect(normalizeShutdownCleanupTimeoutMs("  30000  ")).toBe(30_000);
+  });
+
+  it("floors a fractional value rather than handing a fraction to setTimeout", () => {
+    expect(normalizeShutdownCleanupTimeoutMs(1234.9)).toBe(1234);
+  });
+
+  it("rejects anything that could not be a deadline", () => {
+    for (const value of [0, -1, "0", "-1", "abc", "", "   ", Number.NaN, Infinity, null, undefined, {}, []]) {
+      expect(normalizeShutdownCleanupTimeoutMs(value)).toBeUndefined();
+    }
+  });
+
+  it("clamps past Node's timer ceiling instead of overflowing it to ~1ms", () => {
+    expect(normalizeShutdownCleanupTimeoutMs(MAX_TIMER_DELAY_MS)).toBe(MAX_TIMER_DELAY_MS);
+    expect(normalizeShutdownCleanupTimeoutMs(MAX_TIMER_DELAY_MS + 1)).toBe(MAX_TIMER_DELAY_MS);
+    expect(normalizeShutdownCleanupTimeoutMs("999999999999")).toBe(MAX_TIMER_DELAY_MS);
+  });
+
+  it("accepts the shipped default — the control must be able to offer it back", () => {
+    expect(normalizeShutdownCleanupTimeoutMs(TOOL_TIMEOUT_POLICY.shutdownCleanupMs))
+      .toBe(TOOL_TIMEOUT_POLICY.shutdownCleanupMs);
   });
 });

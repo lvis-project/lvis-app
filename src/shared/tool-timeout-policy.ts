@@ -138,6 +138,36 @@ export const TOOL_TIMEOUT_POLICY = {
 } as const;
 
 /**
+ * The one rule for what counts as a usable shutdown cleanup window.
+ *
+ * Three surfaces ask it — the `system.shutdownCleanupTimeoutMs` setting as it
+ * is read off disk, the same setting as it arrives in an update patch, and
+ * `LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS` (registered in ENV_BACKED_SETTINGS, which
+ * calls this as its `forcedValue`) — so it is written once rather than three
+ * times that could disagree about, say, whether `"0"` is a value.
+ *
+ * `undefined` means "not usable", which every caller reads as "fall through to
+ * the next source", never as "no timeout": a shutdown with no deadline is the
+ * hang this policy exists to prevent.
+ *
+ * The upper clamp is not cosmetic. The resolved value is handed to
+ * `setTimeout`, and a delay above {@link MAX_TIMER_DELAY_MS} overflows Node's
+ * signed 32-bit store — Node warns and substitutes `1`, so an operator asking
+ * for a month-long grace period would get a cleanup killed after one
+ * millisecond. Clamping degrades that to the longest window Node can arm.
+ */
+export function normalizeShutdownCleanupTimeoutMs(value: unknown): number | undefined {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value.trim())
+        : Number.NaN;
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return Math.min(Math.floor(parsed), MAX_TIMER_DELAY_MS);
+}
+
+/**
  * Wall-clock ceiling for ONE `agent_spawn` invocation, scaled to the round
  * budget that invocation may actually run.
  *
