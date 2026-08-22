@@ -66,6 +66,7 @@ import {
   acceptField,
   acceptNormalizedField,
   isBooleanValue,
+  type FieldRejection,
 } from "./settings-field-accept.js";
 import { normalizeShutdownCleanupTimeoutMs } from "../shared/tool-timeout-policy.js";
 import {
@@ -89,6 +90,7 @@ import type {
   MarketplaceSettings,
   SystemCloseBehavior,
   SystemSettings,
+  TelemetrySettings,
   ThemePreference,
   WebViewPreferredFlow,
   WebViewSettings,
@@ -1089,6 +1091,82 @@ export function normalizeDiagnostics(input: unknown): DiagnosticsSettings {
     result.logRetentionDays = clampLogRetentionDays(obj.logRetentionDays);
   }
   return result;
+}
+
+/**
+ * Telemetry + crash-reporting block, normalized at both store boundaries.
+ *
+ * This block was a blind spread on BOTH sides — the disk read and the patch —
+ * so a hand-edited profile or a misbehaving caller could put anything in it.
+ * That mattered less while nothing but a yes/no consent prompt wrote here; it
+ * matters now that the settings surface does, because these fields decide
+ * whether the app talks to a remote host at all. A non-boolean `enabled` is
+ * not a subtle bug: `enabled !== true` reads it as off, so the value would
+ * silently mean the opposite of what a truthy string looks like it means.
+ *
+ * The two URL-shaped fields are validated for SHAPE only. What makes an
+ * endpoint acceptable — https, and a host on the allowlist — is
+ * `validateTelemetryEndpoint`'s question, asked where the request is about to
+ * be made and against an allowlist this layer cannot see. Re-deciding it here
+ * would be a second, weaker copy of a security rule.
+ */
+export function normalizeTelemetry(input: unknown): TelemetrySettings {
+  const result: TelemetrySettings = { ...DEFAULT_SETTINGS.telemetry };
+  if (!input || typeof input !== "object" || Array.isArray(input)) return result;
+  const obj = input as {
+    enabled?: unknown;
+    endpoint?: unknown;
+    sentryDsn?: unknown;
+    crashReportEndpoint?: unknown;
+    crashReportingEnabled?: unknown;
+    telemetryPromptAnswered?: unknown;
+  };
+  acceptField(result, "enabled", obj.enabled, isBooleanValue, "telemetry", STORED_FIELD);
+  acceptField(
+    result, "crashReportingEnabled", obj.crashReportingEnabled,
+    isBooleanValue, "telemetry", STORED_FIELD,
+  );
+  acceptField(
+    result, "telemetryPromptAnswered", obj.telemetryPromptAnswered,
+    isBooleanValue, "telemetry", STORED_FIELD,
+  );
+  for (const key of TELEMETRY_TEXT_KEYS) {
+    acceptTelemetryText(result, key, obj[key], STORED_FIELD);
+  }
+  return result;
+}
+
+export const TELEMETRY_TEXT_KEYS = ["endpoint", "sentryDsn", "crashReportEndpoint"] as const;
+
+/**
+ * Assign one of the telemetry URL/DSN fields, with an explicit CLEAR arm.
+ *
+ * These cannot go through {@link acceptNormalizedField}: emptying the field is
+ * how a user says "stop sending anywhere", and that has to DELETE the key, not
+ * be rejected as an unusable value. Every consumer reads absent as off, so a
+ * stored `""` would be a falsy value sitting where anything checking presence
+ * reads it as configured.
+ *
+ * The warning names the field and never the value. An endpoint or a DSN can
+ * carry userinfo, a query-string secret, or a fragment token, and this line
+ * goes to a log file the user may hand to someone else.
+ */
+export function acceptTelemetryText(
+  target: TelemetrySettings,
+  key: (typeof TELEMETRY_TEXT_KEYS)[number],
+  raw: unknown,
+  rejection: FieldRejection,
+): void {
+  if (raw === undefined) return;
+  if (typeof raw !== "string") {
+    log.warn(
+      `telemetry.${key} ${rejection.reason} (not a string), ${rejection.verb} the stored value`,
+    );
+    return;
+  }
+  const trimmed = raw.trim();
+  if (trimmed === "") delete target[key];
+  else target[key] = trimmed;
 }
 
 /**
