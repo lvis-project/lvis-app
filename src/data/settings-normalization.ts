@@ -69,6 +69,7 @@ import {
   type FieldRejection,
 } from "./settings-field-accept.js";
 import { normalizeShutdownCleanupTimeoutMs } from "../shared/tool-timeout-policy.js";
+import { normalizePricingOverrides } from "../shared/pricing-overrides.js";
 import {
   MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH,
   isSubscriptionRuntimeId,
@@ -485,6 +486,9 @@ export function mergeLlmPatch(
       installedProviderIds,
       installedProviderPresets,
     ),
+    pricingOverrides: normalizePricingOverrides(
+      "pricingOverrides" in partial ? partial.pricingOverrides : base.pricingOverrides,
+    ),
     // `llm.hostResolverMap` is deliberately NOT carried forward. The manual
     // Chromium host-resolver map was removed with the private-endpoint access
     // path, so a value still on disk from an older build is inert. Dropping it
@@ -615,6 +619,7 @@ export function pruneLazyLlmVendorBlocks(
       inferredInstalledProviderIds,
       installedProviderPresets,
     ),
+    pricingOverrides: normalizePricingOverrides(llm.pricingOverrides),
   };
   if (marketplaceProviderPresetId) {
     prunedLlm.marketplaceProviderPresetId = marketplaceProviderPresetId;

@@ -46,6 +46,7 @@ import {
 } from "../../../shared/marketplace-package-assets.js";
 import { isIpcErrorResult, type LvisApi } from "../types.js";
 import { SettingsHelpPopover, SettingsPageHeader, SettingsSection } from "../components/PageShell.js";
+import { PricingOverridesSection } from "./PricingOverridesSection.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { SubscriptionProvidersController } from "./SubscriptionProvidersController.js";
 
@@ -1311,6 +1312,10 @@ export function LlmTab(props: LlmTabProps) {
           )}
         </div>
       </SettingsSection>
+
+      {/* Per-model price corrections — self-contained: it reads and writes the
+          one settings key it owns, so it does not join this tab's prop chain. */}
+      <PricingOverridesSection />
     </div>
   );
 }

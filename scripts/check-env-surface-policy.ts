@@ -149,10 +149,9 @@ const SETTINGS_BACKED: readonly string[] = [
  * variable — building the control is.
  */
 const PENDING: readonly string[] = [
-  "LVIS_PRICING_OVERRIDE",
 ];
 
-const PENDING_CEILING = 1;
+const PENDING_CEILING = 0;
 
 /**
  * `process.env.NAME`, `process.env["NAME"]`, and the same two through a passed

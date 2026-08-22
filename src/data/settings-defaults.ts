@@ -28,6 +28,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
     streamSmoothing: "none",
     fallbackChain: [],
     modelListCache: {},
+    pricingOverrides: [],
   },
   chat: {
     systemPrompt:

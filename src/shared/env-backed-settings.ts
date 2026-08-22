@@ -139,6 +139,18 @@ export const ENV_BACKED_SETTINGS: readonly EnvBackedSetting[] = Object.freeze([
     envVar: "LVIS_SENTRY_DSN",
     forcedValue: forcesTextWhenNonEmpty,
   },
+  // Per-model price corrections. The registry carries the RAW blob rather than
+  // the parsed list, because all this layer decides is "is the environment
+  // deciding this setting" — the parse and the whole-list precedence live in
+  // `shared/pricing-overrides.ts`, where the settings path and the env path
+  // meet. A blob that parses to nothing still counts as forced: the deployment
+  // set the variable, and a table the user could edit under it would be
+  // editing something the app is not reading.
+  {
+    settingsPath: "llm.pricingOverrides",
+    envVar: "LVIS_PRICING_OVERRIDE",
+    forcedValue: forcesTextWhenNonEmpty,
+  },
   // The shutdown cleanup window: the first NUMERIC entry here. The gate is the
   // same parse the setting itself goes through
   // (`normalizeShutdownCleanupTimeoutMs`), so a value the environment supplies

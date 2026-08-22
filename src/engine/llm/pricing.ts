@@ -3,8 +3,15 @@
  *
  * Thin Node-side layer over `src/shared/pricing-data.ts`. The shared module
  * holds the vendor/model/$-rate table (browser-safe, no Node-only imports) so
- * the renderer can import the same prices. This module layers env-override
- * logic via `LVIS_PRICING_OVERRIDE` JSON on top.
+ * the renderer can import the same prices. This module layers per-model price
+ * corrections on top.
+ *
+ * The corrections come from Settings (`llm.pricingOverrides`) or, for a
+ * deployment that already sets it, `LVIS_PRICING_OVERRIDE` — both resolved and
+ * merged by `shared/pricing-overrides.ts`, so there is one rule rather than an
+ * env path and a settings path that could disagree. Callers pass the resolved
+ * list in; this module does not reach for a settings service, because the
+ * usage aggregation that calls it has to cache against that same list.
  *
  * Values reflect publicly-announced list prices (2026-04). Free/unknown → 0.
  */
@@ -18,39 +25,35 @@ import {
   type ModelPricing,
   type UsageForCost,
 } from "../../shared/pricing-data.js";
+import {
+  applyPricingOverride,
+  type PricingOverride,
+} from "../../shared/pricing-overrides.js";
 
 export type { ModelPricing, UsageForCost };
 export { normalizeAiSdkUsageForCost };
 
-let cachedOverride: Record<LLMVendor, Record<string, ModelPricing>> | null = null;
-let cachedOverrideEnv: string | undefined = undefined;
-
-function getOverride(): Record<LLMVendor, Record<string, ModelPricing>> | null {
-  const raw = process.env.LVIS_PRICING_OVERRIDE;
-  if (raw === cachedOverrideEnv) return cachedOverride;
-  cachedOverrideEnv = raw;
-  if (!raw) { cachedOverride = null; return null; }
-  try {
-    cachedOverride = JSON.parse(raw) as Record<LLMVendor, Record<string, ModelPricing>>;
-  } catch {
-    cachedOverride = null;
-  }
-  return cachedOverride;
-}
-
-export function getModelPricing(vendor: LLMVendor, model: string): ModelPricing {
-  const overridden = getOverride()?.[vendor]?.[model];
-  if (overridden) return overridden;
+export function getModelPricing(
+  vendor: LLMVendor,
+  model: string,
+  overrides: readonly PricingOverride[] = [],
+): ModelPricing {
   // Shared lookup (exact → prefix → FALLBACK_PRICING). lookupPricing already
   // handles the miss path, so no extra wrapping needed here.
-  return lookupPricing(vendor, model);
+  return applyPricingOverride(vendor, model, overrides, lookupPricing(vendor, model));
 }
 
-export function getBillableModelPricing(vendor: LLMVendor, model: string): ModelPricing | undefined {
-  const overridden = getOverride()?.[vendor]?.[model];
-  if (overridden) return hasKnownTokenPricing(overridden) ? overridden : undefined;
-  if (vendor === "azure-foundry") return undefined;
-  const pricing = getModelPricing(vendor, model);
+export function getBillableModelPricing(
+  vendor: LLMVendor,
+  model: string,
+  overrides: readonly PricingOverride[] = [],
+): ModelPricing | undefined {
+  const overridden = overrides.some((e) => e.vendor === vendor && e.model === model);
+  // A correction is a statement that this model IS billed at these rates, so
+  // it also answers the billable question — including for `azure-foundry`,
+  // whose spend the app cannot otherwise attribute.
+  if (!overridden && vendor === "azure-foundry") return undefined;
+  const pricing = getModelPricing(vendor, model, overrides);
   return hasKnownTokenPricing(pricing) ? pricing : undefined;
 }
 
