@@ -276,6 +276,10 @@ export type AppSettings = {
     backend?: "real-cloud";
     cloudBaseUrl?: string;
     cloudAllowPrivateNetwork?: boolean;
+    /** Whether LVIS polls the marketplace for plugin updates and announcements. */
+    updateCheckEnabled?: boolean;
+    /** Whether the catalog and downloaded artifacts are kept on disk for offline use. */
+    offlineCacheEnabled?: boolean;
     /** Announcement banner ids the user has dismissed (persisted). */
     dismissedAnnouncementIds?: number[];
     /** Plugin update versions skipped until the marketplace publishes a newer version. */

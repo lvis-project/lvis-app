@@ -10,7 +10,8 @@ import { mkdtempSync } from "node:fs";
 import { writeFile, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {resolve, join} from "node:path";
-import { PluginUpdateDetector, isUpdateCheckEnabled } from "../update-detector.js";
+import { PluginUpdateDetector, resolveUpdateCheckEnabled,
+  isUpdateCheckEnabled } from "../update-detector.js";
 import { isNewerPluginVersion } from "../update-condition.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
@@ -414,5 +415,21 @@ describe("PluginUpdateDetector", () => {
     await expect(detector.checkForUpdatesResult()).resolves.toMatchObject({
       status: "error",
     });
+  });
+});
+
+describe("resolveUpdateCheckEnabled", () => {
+  it("lets the setting decide when the variable is unset", () => {
+    expect(resolveUpdateCheckEnabled(false, {})).toBe(false);
+    expect(resolveUpdateCheckEnabled(true, {})).toBe(true);
+    expect(resolveUpdateCheckEnabled(undefined, {})).toBe(true);
+  });
+
+  it("lets the environment turn the check off, but never back on", () => {
+    expect(resolveUpdateCheckEnabled(true, { LVIS_MARKETPLACE_UPDATE_CHECK: "0" })).toBe(false);
+    // The pre-existing host rule was `(setting ?? true) && env`: an ON value
+    // never resurrected a check the profile had turned off, and a launcher
+    // script must not gain that power by way of the new setting.
+    expect(resolveUpdateCheckEnabled(false, { LVIS_MARKETPLACE_UPDATE_CHECK: "1" })).toBe(false);
   });
 });

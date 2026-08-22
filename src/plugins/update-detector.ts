@@ -8,6 +8,7 @@
  * Feature flag: LVIS_MARKETPLACE_UPDATE_CHECK (default ON).
  * Set to "0" or "false" to disable the check entirely.
  */
+import { envForcedValueForSettingsPath } from "../shared/env-backed-settings.js";
 import { existsSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { isAbsolute, resolve, dirname } from "node:path";
@@ -35,14 +36,37 @@ export type PluginUpdateCheckResult =
   | { status: "catalog-unavailable" }
   | { status: "error"; error: unknown };
 
+/** Registry key for the `LVIS_MARKETPLACE_UPDATE_CHECK` / setting pair. */
+const UPDATE_CHECK_SETTINGS_PATH = "marketplace.updateCheckEnabled";
+
 /**
- * Returns true when the update-check feature flag is enabled.
+ * Returns true when the update-check feature flag is enabled by the
+ * environment alone, ignoring the setting.
  * Default ON — set LVIS_MARKETPLACE_UPDATE_CHECK=0 to opt out.
+ *
+ * Prefer {@link resolveUpdateCheckEnabled}, which also honours the setting the
+ * user can reach.
  */
 export function isUpdateCheckEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const v = env.LVIS_MARKETPLACE_UPDATE_CHECK;
-  if (v === undefined) return true; // default ON
-  return v !== "0" && v.toLowerCase() !== "false";
+  return envForcedValueForSettingsPath(UPDATE_CHECK_SETTINGS_PATH, env) ?? true;
+}
+
+/**
+ * Combine the `marketplace.updateCheckEnabled` setting with the environment.
+ *
+ * This variable only ever forces the check OFF: an ON value changes nothing,
+ * because the pre-existing host rule was `(setting ?? true) && env` and a
+ * deployment that wanted the check on simply left the variable unset. Keeping
+ * that asymmetry means turning the setting off is never quietly undone by a
+ * launcher script that exports `=1`.
+ */
+export function resolveUpdateCheckEnabled(
+  settingEnabled: boolean | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean {
+  return envForcedValueForSettingsPath(UPDATE_CHECK_SETTINGS_PATH, env)
+    ?? settingEnabled
+    ?? true;
 }
 
 export interface UpdateDetectorOptions {

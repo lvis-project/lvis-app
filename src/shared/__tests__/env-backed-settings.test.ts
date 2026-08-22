@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ENV_BACKED_SETTINGS,
   envForcedSettingsPaths,
+  envForcedValueForSettingsPath,
   envVarForSettingsPath,
   parseEnvForcedSettingsPaths,
 } from "../env-backed-settings.js";
@@ -30,6 +31,41 @@ describe("env-backed settings registry", () => {
       .toEqual(["system.localApiServer"]);
     expect(parseEnvForcedSettingsPaths("system.localApiServer")).toBeNull();
     expect(parseEnvForcedSettingsPaths(null)).toBeNull();
+  });
+
+  it("reports the update check forced only when the variable turns it OFF", () => {
+    // The host rule is `(setting ?? true) && env`, so an ON value cannot
+    // override a setting that says off — reporting it as forced would tell the
+    // user the switch is dead when it still works.
+    for (const on of ["1", "true", "yes", ""]) {
+      expect(envForcedValueForSettingsPath("marketplace.updateCheckEnabled", {
+        LVIS_MARKETPLACE_UPDATE_CHECK: on,
+      })).toBeUndefined();
+    }
+    for (const off of ["0", "false", "FALSE"]) {
+      expect(envForcedValueForSettingsPath("marketplace.updateCheckEnabled", {
+        LVIS_MARKETPLACE_UPDATE_CHECK: off,
+      })).toBe(false);
+    }
+    expect(envForcedValueForSettingsPath("marketplace.updateCheckEnabled", {})).toBeUndefined();
+  });
+
+  it("reports the offline copy forced in both directions once the variable is set", () => {
+    expect(envForcedValueForSettingsPath("marketplace.offlineCacheEnabled", {
+      LVIS_MARKETPLACE_USE_CACHE: "1",
+    })).toBe(true);
+    expect(envForcedValueForSettingsPath("marketplace.offlineCacheEnabled", {
+      LVIS_MARKETPLACE_USE_CACHE: "no",
+    })).toBe(false);
+    // Unset is the only value that leaves the decision to the setting.
+    expect(envForcedValueForSettingsPath("marketplace.offlineCacheEnabled", {})).toBeUndefined();
+    expect(envForcedSettingsPaths({ LVIS_MARKETPLACE_USE_CACHE: "off" }))
+      .toEqual(["marketplace.offlineCacheEnabled"]);
+  });
+
+  it("returns undefined for a path that is not in the registry", () => {
+    expect(envForcedValueForSettingsPath("system.notARealGate", { LVIS_LOCAL_API: "1" }))
+      .toBeUndefined();
   });
 
   it("pairs each settings path with exactly one variable", () => {

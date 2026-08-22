@@ -716,6 +716,12 @@ export function normalizeMarketplace(input: unknown): MarketplaceSettings {
     raw.installedLanguagePacks,
     isMarketplaceEligibleLocale,
   );
+  merged.updateCheckEnabled = typeof raw.updateCheckEnabled === "boolean"
+    ? raw.updateCheckEnabled
+    : DEFAULT_SETTINGS.marketplace.updateCheckEnabled;
+  merged.offlineCacheEnabled = typeof raw.offlineCacheEnabled === "boolean"
+    ? raw.offlineCacheEnabled
+    : DEFAULT_SETTINGS.marketplace.offlineCacheEnabled;
   return merged;
 }
 

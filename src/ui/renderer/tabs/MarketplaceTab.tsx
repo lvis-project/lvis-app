@@ -5,6 +5,7 @@ import { Checkbox } from "../../../components/ui/checkbox.js";
 import { Input } from "../../../components/ui/input.js";
 import { Label } from "../../../components/ui/label.js";
 import { ScrollArea } from "../../../components/ui/scroll-area.js";
+import { Switch } from "../../../components/ui/switch.js";
 import { Store } from "lucide-react";
 import { getHostMarketplaceApi } from "../host-marketplace-api.js";
 import { isIpcErrorResult, type LvisApi, type MarketplaceItem } from "../types.js";
@@ -30,6 +31,7 @@ import {
   marketplaceProviderPresetFromAsset,
 } from "../../../shared/marketplace-package-assets.js";
 import { isMarketplaceEligibleLLMVendor } from "../../../shared/llm-vendor-defaults.js";
+import { envVarForSettingsPath } from "../../../shared/env-backed-settings.js";
 
 type MarketplaceAssetInstallState = Pick<
   MarketplaceSettings,
@@ -150,6 +152,39 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
   const [workingSlug, setWorkingSlug] = useState<string | null>(null);
   // #1098/#1279 — plugin installs that need explicit pre-install disclosure.
   const [installDialogTarget, setInstallDialogTarget] = useState<MarketplaceItem | null>(null);
+
+  // Update check + offline cache. Both were environment-only flags
+  // (`LVIS_MARKETPLACE_UPDATE_CHECK`, `LVIS_MARKETPLACE_USE_CACHE`), which a
+  // packaged app's user has no way to set. They are ordinary settings now; the
+  // environment still decides when a deployment sets it, and the notice below
+  // says so rather than showing a switch that does nothing.
+  const [updateCheckEnabled, setUpdateCheckEnabled] = useState(true);
+  const [offlineCacheEnabled, setOfflineCacheEnabled] = useState(true);
+  const [envForcedPaths, setEnvForcedPaths] = useState<readonly string[]>([]);
+  const [marketplaceFlagsLoaded, setMarketplaceFlagsLoaded] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const settings = await api.getSettings();
+      if (!alive) return;
+      setUpdateCheckEnabled(settings.marketplace?.updateCheckEnabled ?? true);
+      setOfflineCacheEnabled(settings.marketplace?.offlineCacheEnabled ?? true);
+      setMarketplaceFlagsLoaded(true);
+    })();
+    void api.envForcedSettings().then((paths) => {
+      if (alive) setEnvForcedPaths(paths);
+    });
+    return () => { alive = false; };
+  }, [api]);
+  const persistMarketplaceFlag = useCallback(async (
+    patch: Partial<MarketplaceSettings>,
+  ) => {
+    const result = await api.updateSettings({ marketplace: patch });
+    if (isIpcErrorResult(result)) {
+      throw new Error(result.message ?? result.error);
+    }
+    onSaved();
+  }, [api, onSaved]);
   useEffect(() => {
     setFilter(initialFilter);
   }, [initialFilter]);
@@ -611,6 +646,71 @@ export function MarketplaceTab(props: MarketplaceTabProps) {
             })}
           </div>
         </ScrollArea>
+      </SettingsSection>
+
+      {/* Update check + offline cache — plain on/off settings that used to be
+          reachable only through the environment. */}
+      <SettingsSection
+        title={t("marketplaceTab.maintenanceTitle")}
+        description={t("marketplaceTab.maintenanceDescription")}
+      >
+        <div className="flex items-center justify-between gap-4">
+          <span className="min-w-0 text-sm font-medium">
+            {t("marketplaceTab.updateCheckLabel")}
+          </span>
+          <Switch
+            checked={updateCheckEnabled}
+            disabled={!marketplaceFlagsLoaded}
+            aria-label={t("marketplaceTab.updateCheckLabel")}
+            data-testid="marketplace:update-check"
+            onCheckedChange={(checked) => {
+              setUpdateCheckEnabled(checked);
+              void persistMarketplaceFlag({ updateCheckEnabled: checked });
+            }}
+          />
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="marketplace:update-check:help">
+          {t("marketplaceTab.updateCheckHelp")}
+        </p>
+        {envForcedPaths.includes("marketplace.updateCheckEnabled") ? (
+          <p
+            className="mt-2 text-xs text-muted-foreground"
+            data-testid="marketplace:update-check:forced"
+          >
+            {t("marketplaceTab.updateCheckEnvForced", {
+              envVar: envVarForSettingsPath("marketplace.updateCheckEnabled") ?? "",
+            })}
+          </p>
+        ) : null}
+
+        <div className="mt-4 flex items-center justify-between gap-4">
+          <span className="min-w-0 text-sm font-medium">
+            {t("marketplaceTab.offlineCacheLabel")}
+          </span>
+          <Switch
+            checked={offlineCacheEnabled}
+            disabled={!marketplaceFlagsLoaded}
+            aria-label={t("marketplaceTab.offlineCacheLabel")}
+            data-testid="marketplace:offline-cache"
+            onCheckedChange={(checked) => {
+              setOfflineCacheEnabled(checked);
+              void persistMarketplaceFlag({ offlineCacheEnabled: checked });
+            }}
+          />
+        </div>
+        <p className="mt-2 text-xs text-muted-foreground" data-testid="marketplace:offline-cache:help">
+          {t("marketplaceTab.offlineCacheHelp")}
+        </p>
+        {envForcedPaths.includes("marketplace.offlineCacheEnabled") ? (
+          <p
+            className="mt-2 text-xs text-muted-foreground"
+            data-testid="marketplace:offline-cache:forced"
+          >
+            {t("marketplaceTab.offlineCacheEnvForced", {
+              envVar: envVarForSettingsPath("marketplace.offlineCacheEnabled") ?? "",
+            })}
+          </p>
+        ) : null}
       </SettingsSection>
 
       {/* ── Advanced options ───────────────────────────────────
