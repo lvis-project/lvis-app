@@ -45,6 +45,7 @@ import {
   type UsageTrendPoint,
 } from "../usage-stats.js";
 import { getModelPricing, computeCost } from "../llm/pricing.js";
+import { resolvePricingOverrides } from "../../shared/pricing-overrides.js";
 
 function turn(partial: Partial<AuditTurnEntry>): AuditTurnEntry {
   return {
@@ -294,24 +295,33 @@ describe("usage-stats", () => {
   });
 
   it("respects env pricing override", () => {
-    process.env.LVIS_PRICING_OVERRIDE = JSON.stringify({
-      claude: { "claude-sonnet-4-6": { inputPer1M: 100, outputPer1M: 100, contextWindow: 1_000_000,
+    // `getModelPricing` no longer reads the environment for itself — the
+    // resolver decides between the setting and the variable, and the caller
+    // that caches on the answer hands it in. The claim under test is the same:
+    // an env blob makes the reported price the corrected one.
+    const overrides = resolvePricingOverrides(undefined, {
+      LVIS_PRICING_OVERRIDE: JSON.stringify({
+        claude: {
+          "claude-sonnet-4-6": {
+            inputPer1M: 100,
+            outputPer1M: 100,
+            contextWindow: 1_000_000,
+          },
         },
-      },
+      }),
     });
-    try {
-      const p = getModelPricing("claude", "claude-sonnet-4-6");
-      expect(p.inputPer1M).toBe(100);
-      expect(
-        computeCost(
-          { inputTokens: 1_000_000, outputTokens: 1_000_000 },
-          p,
-          "claude",
-        ),
-      ).toBeCloseTo(200, 5);
-    } finally {
-      delete process.env.LVIS_PRICING_OVERRIDE;
-    }
+    const p = getModelPricing("claude", "claude-sonnet-4-6", overrides);
+    expect(p.inputPer1M).toBe(100);
+    // The context window survives, because the override merges over the base
+    // instead of replacing it — the old path only kept it if the blob restated it.
+    expect(p.contextWindow).toBe(200_000);
+    expect(
+      computeCost(
+        { inputTokens: 1_000_000, outputTokens: 1_000_000 },
+        p,
+        "claude",
+      ),
+    ).toBeCloseTo(200, 5);
   });
 
   describe("computeCost — vendor branch coverage", () => {
@@ -1148,17 +1158,18 @@ describe("usage summary cache wiring", () => {
       const now = new Date("2026-07-04T12:00:00Z");
 
       const defaultPricing = await getUsageSummary(60, now);
-      process.env.LVIS_PRICING_OVERRIDE = JSON.stringify({
-        claude: {
-          "claude-sonnet-4-6": {
-            inputPer1M: 100,
-            outputPer1M: 100,
-            contextWindow: 1_000_000,
+      const overrides = resolvePricingOverrides(undefined, {
+        LVIS_PRICING_OVERRIDE: JSON.stringify({
+          claude: {
+            "claude-sonnet-4-6": {
+              inputPer1M: 100,
+              outputPer1M: 100,
+              contextWindow: 1_000_000,
+            },
           },
-        },
+        }),
       });
-      const overriddenPricing = await getUsageSummary(60, now);
-      delete process.env.LVIS_PRICING_OVERRIDE;
+      const overriddenPricing = await getUsageSummary(60, now, overrides);
       const restoredPricing = await getUsageSummary(60, now);
 
       expect(overriddenPricing.today.cost).toBeGreaterThan(defaultPricing.today.cost);

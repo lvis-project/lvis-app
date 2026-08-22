@@ -12,6 +12,7 @@ import {
   normalizeSidebarWidth,
 } from "../shared/side-panel.js";
 import { normalizeShutdownCleanupTimeoutMs } from "../shared/tool-timeout-policy.js";
+import type { PricingOverride } from "../shared/pricing-overrides.js";
 import {
   sanitizePluginConfig,
   sanitizePluginConfigKey,
@@ -167,6 +168,13 @@ export interface LLMSettings {
    * settings remount or offline restart.
    */
   modelListCache: LlmModelListCache;
+  /**
+   * Per-model price corrections for a deployment on negotiated rates. Empty
+   * means "use the published list prices". Affects reported spend (the Usage
+   * tab and its CSV export) — the same reach the `LVIS_PRICING_OVERRIDE`
+   * variable this surfaces has always had.
+   */
+  pricingOverrides: PricingOverride[];
 }
 
 /**
@@ -182,6 +190,7 @@ export interface LLMSettingsPatch {
   streamSmoothing?: "none" | "word" | "char";
   fallbackChain?: Array<{ provider: LLMVendor; model: string }>;
   modelListCache?: LlmModelListCache;
+  pricingOverrides?: PricingOverride[];
 }
 
 export interface ChatSettings {

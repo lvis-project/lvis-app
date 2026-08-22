@@ -8,29 +8,54 @@
  * exactly as before to keep it out of the boot-time graph.
  */
 import { redactForLLM } from "../../audit/dlp-filter.js";
+import {
+  resolvePricingOverrides,
+  type PricingOverride,
+} from "../../shared/pricing-overrides.js";
 
 export interface UsageAuditFlushBoundary {
   flush(): Promise<void>;
+}
+
+/**
+ * The price corrections in force, resolved here rather than in the engine.
+ *
+ * The aggregation caches its answer against this list, so it has to be one
+ * value decided once per call — not something the engine re-reads part-way
+ * through and disagrees with its own cache key about. The setting is the
+ * source; a deployment that still sets `LVIS_PRICING_OVERRIDE` wins, same
+ * precedence as every other env-backed setting.
+ */
+function pricingOverridesFor(
+  settingOverrides?: readonly PricingOverride[],
+): readonly PricingOverride[] {
+  return resolvePricingOverrides(settingOverrides);
 }
 
 /** PUBLIC `lvis:usage:summary` — rolling usage summary over `days` (default 60). */
 export async function handleUsageSummary(
   days?: number,
   auditLogger?: UsageAuditFlushBoundary,
+  settingOverrides?: readonly PricingOverride[],
 ) {
   await auditLogger?.flush();
   const { getUsageSummary } = await import("../../engine/usage-stats.js");
-  return getUsageSummary(typeof days === "number" ? days : 60);
+  return getUsageSummary(
+    typeof days === "number" ? days : 60,
+    new Date(),
+    pricingOverridesFor(settingOverrides),
+  );
 }
 
 /** PUBLIC `lvis:usage:range` — usage aggregated over an explicit date range. */
 export async function handleUsageRange(
   opts: { dateFrom: string; dateTo: string },
   auditLogger?: UsageAuditFlushBoundary,
+  settingOverrides?: readonly PricingOverride[],
 ) {
   await auditLogger?.flush();
   const { getUsageRange } = await import("../../engine/usage-stats.js");
-  return getUsageRange(opts);
+  return getUsageRange(opts, new Date(), pricingOverridesFor(settingOverrides));
 }
 
 export interface UsageDailySummaryItem {

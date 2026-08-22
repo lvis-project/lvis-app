@@ -9,7 +9,8 @@ import "../../../../../test/renderer/setup.js";
 import { describe, it, expect } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { TelemetrySection } from "../TelemetrySection.js";
-import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { installMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+
 
 const BASE_SETTINGS = {
   llm: { provider: "openai", vendors: {}, streamSmoothing: "none", fallbackChain: [] },
@@ -21,15 +22,9 @@ const BASE_SETTINGS = {
   telemetry: { enabled: false, crashReportingEnabled: false },
 };
 
-function installApi(overrides: Parameters<typeof makeMockLvisApi>[0] = {}) {
-  const { api } = makeMockLvisApi({ settings: BASE_SETTINGS, ...overrides });
-  (globalThis as unknown as { window: typeof window }).window.lvisApi = api as never;
-  return api;
-}
-
 describe("TelemetrySection", () => {
   it("turns telemetry back off after a consent answer that turned it on", async () => {
-    const api = installApi({
+    const api = installMockLvisApi({
       settings: {
         ...BASE_SETTINGS,
         telemetry: { enabled: true, telemetryPromptAnswered: true },
@@ -47,7 +42,7 @@ describe("TelemetrySection", () => {
   });
 
   it("marks the consent prompt answered when the switch is the answer", async () => {
-    const api = installApi();
+    const api = installMockLvisApi({ settings: BASE_SETTINGS });
     const { findByTestId } = render(<TelemetrySection />);
     const toggle = await findByTestId("telemetry-enabled");
     await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
@@ -60,7 +55,7 @@ describe("TelemetrySection", () => {
   });
 
   it("loads the stored endpoint and persists an edited one on save", async () => {
-    const api = installApi({
+    const api = installMockLvisApi({
       settings: {
         ...BASE_SETTINGS,
         telemetry: { enabled: true, endpoint: "https://old.example.com/v1" },
@@ -79,7 +74,7 @@ describe("TelemetrySection", () => {
   });
 
   it("shows the allowed hosts the endpoint is bounded by", async () => {
-    installApi({ telemetryAllowedHosts: ["metrics.corp.example", "localhost"] });
+    installMockLvisApi({ settings: BASE_SETTINGS, telemetryAllowedHosts: ["metrics.corp.example", "localhost"] });
     const { findByTestId } = render(<TelemetrySection />);
     const hosts = await findByTestId("telemetry-allowed-hosts");
     await waitFor(() => {
@@ -88,7 +83,7 @@ describe("TelemetrySection", () => {
   });
 
   it("locks the Sentry DSN and says why when the environment supplies it", async () => {
-    installApi({ envForcedSettings: ["telemetry.sentryDsn"] });
+    installMockLvisApi({ settings: BASE_SETTINGS, envForcedSettings: ["telemetry.sentryDsn"] });
     const { findByTestId } = render(<TelemetrySection />);
     const input = (await findByTestId("telemetry-sentry-dsn")) as HTMLInputElement;
     await waitFor(() => expect(input.disabled).toBe(true));
@@ -97,7 +92,7 @@ describe("TelemetrySection", () => {
   });
 
   it("keeps the crash-report endpoint unreachable while crash reporting is off", async () => {
-    installApi();
+    installMockLvisApi({ settings: BASE_SETTINGS });
     const { findByTestId } = render(<TelemetrySection />);
     const input = (await findByTestId("telemetry-crash-endpoint")) as HTMLInputElement;
     await waitFor(() => expect(input.disabled).toBe(true));

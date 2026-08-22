@@ -17,6 +17,7 @@ import type { McpUiModelContextOutcome } from "../../mcp/mcp-app-model-context.j
 import type { SerializedHistoryMessage } from "../../shared/chat-history.js";
 import type { ParentEscalationNotice } from "../../shared/parent-escalation-notice.js";
 import type { PluginConfigRecord } from "../../shared/plugin-config.js";
+import type { PricingOverride } from "../../shared/pricing-overrides.js";
 import type { MarketplaceEligibleLLMVendor } from "../../shared/llm-vendor-defaults.js";
 import type { MarketplaceInstalledProviderPreset } from "../../shared/marketplace-package-assets.js";
 import type { BundleId } from "../../shared/theme-bundles.js";
@@ -266,6 +267,12 @@ export type AppSettings = {
     streamSmoothing: "none" | "word" | "char";
     fallbackChain: Array<{ provider: string; model: string }>;
     modelListCache?: LlmModelListCache;
+    /**
+     * Per-model price corrections. Mirrors the main-process SOT in
+     * `src/data/settings-store.ts` `LLMSettings.pricingOverrides`. Optional
+     * here because a settings file written before this shipped has no list.
+     */
+    pricingOverrides?: PricingOverride[];
   };
   chat: { systemPrompt: string; autoCompact: boolean; subAgentMaxRounds?: number };
   webSearch: { provider: string };
