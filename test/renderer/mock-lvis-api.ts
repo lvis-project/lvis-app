@@ -40,6 +40,8 @@ type ApiOverrides = {
   settings?: unknown;
   /** Override the settings RPC itself when a renderer test needs to control its timing. */
   getSettings?: () => Promise<unknown>;
+  /** Settings paths the environment is forcing on (see env-backed-settings). */
+  envForcedSettings?: readonly string[];
   personaPrompts?: unknown[];
   sessions?: Array<{
     id: string;
@@ -232,6 +234,10 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
       settingsUpdatedHandlers.forEach((handler) => handler(settings));
       return settings;
     }),
+    // Nothing is env-forced by default: a test that cares about the forced
+    // notice says so explicitly, and every other test gets the ordinary case
+    // rather than a rejected promise from a missing method.
+    envForcedSettings: vi.fn(async () => overrides.envForcedSettings ?? []),
     onSettingsUpdated: vi.fn((handler: (settings: unknown) => void) => {
       settingsUpdatedHandlers.add(handler);
       return () => settingsUpdatedHandlers.delete(handler);

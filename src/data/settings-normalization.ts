@@ -944,6 +944,7 @@ export function normalizeSystem(input: unknown): SystemSettings {
     closeBehavior?: unknown;
     appMode?: unknown;
     localApiServer?: unknown;
+    hardwareAcceleration?: unknown;
     launchAtStartup?: unknown;
     launchMinimized?: unknown;
     sidePanelWidth?: unknown;
@@ -986,6 +987,15 @@ export function normalizeSystem(input: unknown): SystemSettings {
     log.warn(
       `system.localApiServer invalid (received ${JSON.stringify(rawLocalApi)}), using default %s`,
       DEFAULT_SETTINGS.system.localApiServer,
+    );
+  }
+  const rawHardwareAcceleration = obj.hardwareAcceleration;
+  if (typeof rawHardwareAcceleration === "boolean") {
+    result.hardwareAcceleration = rawHardwareAcceleration;
+  } else if (rawHardwareAcceleration !== undefined) {
+    log.warn(
+      `system.hardwareAcceleration invalid (received ${JSON.stringify(rawHardwareAcceleration)}), using default %s`,
+      DEFAULT_SETTINGS.system.hardwareAcceleration,
     );
   }
   const rawLaunchAtStartup = obj.launchAtStartup;

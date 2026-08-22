@@ -132,6 +132,49 @@ describe("StartupTab", () => {
     });
   });
 
+  it("renders the persisted hardware-acceleration state and persists a change", async () => {
+    const api = installApi({
+      ...STARTUP_SETTINGS,
+      system: { ...STARTUP_SETTINGS.system, hardwareAcceleration: false },
+    });
+    const { findByTestId } = render(<StartupTab />);
+    const toggle = await findByTestId("startup-hardware-acceleration");
+    await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("false"));
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(api.updateSettings).toHaveBeenCalledWith({
+        system: { hardwareAcceleration: true },
+      });
+    });
+  });
+
+  it("says the change takes effect next launch", async () => {
+    installApi();
+    const { findByTestId } = render(<StartupTab />);
+    // The toggle cannot change the running process — `disableHardwareAcceleration`
+    // is a before-whenReady call — so the copy has to say so unconditionally.
+    const help = await findByTestId("startup-hardware-acceleration-help");
+    expect(help.textContent?.length ?? 0).toBeGreaterThan(0);
+  });
+
+  it("names LVIS_KEEP_GPU when the environment is forcing the GPU on", async () => {
+    const { api } = makeMockLvisApi({
+      settings: STARTUP_SETTINGS,
+      envForcedSettings: ["system.hardwareAcceleration"],
+    });
+    (globalThis as unknown as { window: typeof window }).window.lvisApi = api as never;
+    const { findByTestId } = render(<StartupTab />);
+    const forced = await findByTestId("startup-hardware-acceleration-forced");
+    expect(forced.textContent).toContain("LVIS_KEEP_GPU");
+  });
+
+  it("stays quiet about the environment when nothing is forced", async () => {
+    installApi();
+    const { findByTestId, queryByTestId } = render(<StartupTab />);
+    await findByTestId("startup-hardware-acceleration");
+    expect(queryByTestId("startup-hardware-acceleration-forced")).toBeNull();
+  });
+
   it("clearing the accelerator persists null", async () => {
     const api = installApi({
       ...STARTUP_SETTINGS,

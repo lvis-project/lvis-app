@@ -58,6 +58,16 @@ export const zh: Record<SeedMessageKey, string> = {
   "startupTab.shortcutRegisterFailedTitle": "快捷键注册失败",
   "startupTab.shortcutRegisterFailedBody":
     "{accelerator} 已被其他应用占用。请选择其他组合。",
+  "startupTab.renderingSectionTitle":
+    "界面渲染",
+  "startupTab.renderingSectionDesc":
+    "控制 LVIS 绘制界面时是否使用显卡。",
+  "startupTab.hardwareAccelerationLabel":
+    "使用硬件加速",
+  "startupTab.hardwareAccelerationHelp":
+    "下次启动 LVIS 时生效。如果窗口变黑、闪烁，或应用在绘制时崩溃，请关闭此项 — 部分受管电脑和虚拟桌面的显卡驱动无法支持它。因此在 Windows 和 Linux 上默认关闭。",
+  "startupTab.hardwareAccelerationEnvForced":
+    "环境变量 {envVar} 正在开启此项，与这里保存的值无关。",
   "startupTab.launchSectionTitle": "开机自动启动",
   "startupTab.launchSectionDesc":
     "控制在登录到计算机时是否自动启动 LVIS。",
