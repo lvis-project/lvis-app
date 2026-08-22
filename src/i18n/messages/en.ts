@@ -105,6 +105,14 @@ export const en = {
   "startupTab.launchMinimizedLabel": "Start hidden in the tray",
   "startupTab.launchMinimizedHint": "When launching at login, start minimized to the tray without opening a window.",
   "startupTab.launchRegisterFailedTitle": "Launch at startup could not be applied",
+  "startupTab.shutdownTimeoutLabel":
+    "Time allowed for cleanup when quitting",
+  "startupTab.shutdownTimeoutHelp":
+    "When you quit, LVIS stops its routines, plugins, and background processes and saves your window layout before it closes. If that is not finished within this time, it closes anyway and whatever was still being written is abandoned. Raise it if a plugin needs longer to shut down; lower it if quitting feels slow.",
+  "startupTab.shutdownTimeoutEnvForced":
+    "The environment variable {envVar} is supplying this value right now, instead of the value saved here.",
+  "startupTab.shutdownTimeoutSeconds": "{seconds} seconds",
+  "startupTab.shutdownTimeoutSecondsDefault": "{seconds} seconds (default)",
   "startupTab.launchRegisterFailedBody":
     "LVIS could not register itself to launch at login on this system. Open Settings to try again.",
 } as const;

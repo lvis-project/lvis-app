@@ -110,11 +110,10 @@ const PENDING: readonly string[] = [
   "LVIS_HOME",
   "LVIS_PRICING_OVERRIDE",
   "LVIS_SENTRY_DSN",
-  "LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS",
   "LVIS_TELEMETRY_ALLOWLIST",
 ];
 
-const PENDING_CEILING = 5;
+const PENDING_CEILING = 4;
 
 /**
  * `process.env.NAME`, `process.env["NAME"]`, and the same two through a passed

@@ -4,12 +4,9 @@ import {
 import { isIP } from "node:net";
 import { isCanonicalA2APublicHttpsOrigin } from "../shared/a2a-public-origin.js";
 import {
-  SIDE_PANEL_DEFAULT_WIDTH,
-  SIDE_PANEL_MIN_WIDTH,
-  SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
-  SIDEBAR_DEFAULT_WIDTH,
-  clampSidePanelSplitPercent,
-  clampSidebarWidth,
+  normalizeSidePanelSplitPercent,
+  normalizeSidePanelWidth,
+  normalizeSidebarWidth,
 } from "../shared/side-panel.js";
 import {
   sanitizePluginConfig,
@@ -67,8 +64,10 @@ import { createLogger } from "../lib/logger.js";
 import {
   STORED_FIELD,
   acceptField,
+  acceptNormalizedField,
   isBooleanValue,
 } from "./settings-field-accept.js";
+import { normalizeShutdownCleanupTimeoutMs } from "../shared/tool-timeout-policy.js";
 import {
   MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH,
   isSubscriptionRuntimeId,
@@ -977,6 +976,7 @@ export function normalizeSystem(input: unknown): SystemSettings {
     corpCaDebugLog?: unknown;
     launchAtStartup?: unknown;
     launchMinimized?: unknown;
+    shutdownCleanupTimeoutMs?: unknown;
     sidePanelWidth?: unknown;
     sidebarWidth?: unknown;
     sidebarActiveTab?: unknown;
@@ -1022,34 +1022,27 @@ export function normalizeSystem(input: unknown): SystemSettings {
   acceptField(result, "launchAtStartup", rawLaunchAtStartup, isBooleanValue, "system", STORED_FIELD);
   const rawLaunchMinimized = obj.launchMinimized;
   acceptField(result, "launchMinimized", rawLaunchMinimized, isBooleanValue, "system", STORED_FIELD);
-  const rawSidePanelWidth = obj.sidePanelWidth;
-  if (typeof rawSidePanelWidth === "number" && Number.isFinite(rawSidePanelWidth)) {
-    result.sidePanelWidth = Math.max(SIDE_PANEL_MIN_WIDTH, Math.round(rawSidePanelWidth));
-  } else if (rawSidePanelWidth !== undefined) {
-    log.warn(
-      `system.sidePanelWidth invalid (received ${JSON.stringify(rawSidePanelWidth)}), using default %s`,
-      SIDE_PANEL_DEFAULT_WIDTH,
-    );
-  }
-  const rawSidebarWidth = obj.sidebarWidth;
-  if (typeof rawSidebarWidth === "number" && Number.isFinite(rawSidebarWidth)) {
-    result.sidebarWidth = clampSidebarWidth(rawSidebarWidth);
-  } else if (rawSidebarWidth !== undefined) {
-    log.warn(
-      `system.sidebarWidth invalid (received ${JSON.stringify(rawSidebarWidth)}), using default %s`,
-      SIDEBAR_DEFAULT_WIDTH,
-    );
-  }
+  acceptNormalizedField(
+    result,
+    "shutdownCleanupTimeoutMs",
+    obj.shutdownCleanupTimeoutMs,
+    normalizeShutdownCleanupTimeoutMs,
+    "system",
+    STORED_FIELD,
+  );
+  acceptNormalizedField(
+    result, "sidePanelWidth", obj.sidePanelWidth,
+    normalizeSidePanelWidth, "system", STORED_FIELD,
+  );
+  acceptNormalizedField(
+    result, "sidebarWidth", obj.sidebarWidth,
+    normalizeSidebarWidth, "system", STORED_FIELD,
+  );
   for (const key of SIDE_PANEL_SPLIT_KEYS) {
-    const raw = obj[key];
-    if (typeof raw === "number" && Number.isFinite(raw)) {
-      result[key] = clampSidePanelSplitPercent(raw);
-    } else if (raw !== undefined) {
-      log.warn(
-        `system.${key} invalid (received ${JSON.stringify(raw)}), using default %s`,
-        SIDE_PANEL_SPLIT_DEFAULT_PERCENT,
-      );
-    }
+    acceptNormalizedField(
+      result, key, obj[key],
+      normalizeSidePanelSplitPercent, "system", STORED_FIELD,
+    );
   }
   acceptField(result, "sidebarActiveTab", obj.sidebarActiveTab, isSidebarTab, "system", STORED_FIELD);
   acceptField(result, "activeView", obj.activeView, isActiveViewKey, "system", STORED_FIELD);

@@ -75,7 +75,7 @@ vi.mock("../terminal/pty-manager.js", () => ({
   forceKillAllTerminalsForShutdown: () => forceKillAllTerminalsForShutdown(),
 }));
 vi.mock("../shutdown-timeout.js", () => ({
-  resolveShutdownCleanupTimeoutMs: () => 5000,
+  resolveShutdownCleanupTimeoutMs: (_settingMs?: number) => 5000,
   // Run the cleanup body with a never-aborted signal and report completion.
   runCleanupWithHardTimeout: async (fn: (signal: AbortSignal) => Promise<void>) => {
     try {
@@ -103,6 +103,9 @@ function makeServices() {
     runPluginShutdownHandlers: vi.fn(async () => { calls.push("pluginShutdownHandlers"); }),
     shutdown: vi.fn(async () => { calls.push("servicesShutdown"); }),
     pluginRuntime: { stopAll: vi.fn(async () => { calls.push("stopPluginRuntime"); }) },
+    // The cleanup window is a Settings control now, so the shutdown path reads
+    // the persisted value before it arms the deadline.
+    settingsService: { get: vi.fn(() => ({})) },
   };
 }
 
