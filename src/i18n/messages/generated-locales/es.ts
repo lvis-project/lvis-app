@@ -1603,6 +1603,22 @@ export const esMessages: Record<string, string> = {
   "marketplaceTab.advancedCollapse": "Contraer opciones avanzadas",
   "marketplaceTab.advancedDescription": "URL del servidor · Autenticación · Política de confianza. No se necesitan cambios para las implementaciones predeterminadas.",
   "marketplaceTab.advancedExpand": "Ampliar opciones avanzadas",
+  "marketplaceTab.maintenanceTitle":
+    "Actualizaciones y copia sin conexión",
+  "marketplaceTab.maintenanceDescription":
+    "Cuándo busca el marketplace versiones nuevas y qué conserva en el disco.",
+  "marketplaceTab.updateCheckLabel":
+    "Buscar actualizaciones de complementos",
+  "marketplaceTab.updateCheckHelp":
+    "Se aplica la próxima vez que se inicie LVIS. Cuando está activado, LVIS pregunta al marketplace cada 10 minutos aproximadamente si hay versiones más nuevas de tus complementos instalados y si hay anuncios.",
+  "marketplaceTab.updateCheckEnvForced":
+    "La variable de entorno {envVar} está desactivando esto ahora mismo, independientemente de lo que se guarde aquí.",
+  "marketplaceTab.offlineCacheLabel":
+    "Conservar una copia sin conexión del catálogo y las descargas",
+  "marketplaceTab.offlineCacheHelp":
+    "Se aplica de inmediato. La copia sin conexión permite que el marketplace siga mostrando los paquetes que ya has visto cuando no hay red, y evita volver a descargar un complemento que ya obtuviste. Desactívala para dejar de escribir esos archivos en el disco.",
+  "marketplaceTab.offlineCacheEnvForced":
+    "La variable de entorno {envVar} está decidiendo esto ahora mismo, en lugar del valor guardado aquí.",
   "marketplaceTab.advancedTitle": "Opciones avanzadas",
   "marketplaceTab.apiKeyHelp": "Introduzca una clave únicamente si el servidor requiere autenticación. La clave está cifrada y almacenada en el llavero del sistema operativo.",
   "marketplaceTab.apiKeyLabel": "Clave API (opcional)",
