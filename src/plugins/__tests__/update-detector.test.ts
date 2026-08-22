@@ -10,8 +10,7 @@ import { mkdtempSync } from "node:fs";
 import { writeFile, mkdir, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import {resolve, join} from "node:path";
-import { PluginUpdateDetector, resolveUpdateCheckEnabled,
-  isUpdateCheckEnabled } from "../update-detector.js";
+import { PluginUpdateDetector, resolveUpdateCheckEnabled } from "../update-detector.js";
 import { isNewerPluginVersion } from "../update-condition.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
@@ -88,23 +87,6 @@ describe("isNewerPluginVersion", () => {
   it("numeric identifiers have lower precedence than non-numeric", () => {
     expect(isNewerPluginVersion("1.0.0-beta", "1.0.0-1")).toBe(true);
     expect(isNewerPluginVersion("1.0.0-1", "1.0.0-beta")).toBe(false);
-  });
-});
-
-// ─── isUpdateCheckEnabled ────────────────────────────────────────────────────
-
-describe("isUpdateCheckEnabled", () => {
-  it("is ON by default (no env var)", () => {
-    expect(isUpdateCheckEnabled({})).toBe(true);
-  });
-  it("is OFF when set to '0'", () => {
-    expect(isUpdateCheckEnabled({ LVIS_MARKETPLACE_UPDATE_CHECK: "0" })).toBe(false);
-  });
-  it("is OFF when set to 'false'", () => {
-    expect(isUpdateCheckEnabled({ LVIS_MARKETPLACE_UPDATE_CHECK: "false" })).toBe(false);
-  });
-  it("is ON when set to '1'", () => {
-    expect(isUpdateCheckEnabled({ LVIS_MARKETPLACE_UPDATE_CHECK: "1" })).toBe(true);
   });
 });
 

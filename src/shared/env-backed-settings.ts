@@ -26,8 +26,13 @@ export interface EnvBackedSetting {
    * value — or `undefined` when the environment leaves the decision to the
    * setting. `undefined` covers both "unset" and "set to something this gate
    * does not act on".
+   *
+   * The return type follows the SETTING's type: a boolean gate answers with a
+   * boolean, a text setting answers with the string the environment supplies.
+   * Read it through {@link envForcedBooleanForSettingsPath} or
+   * {@link envForcedStringForSettingsPath}, which narrow it back.
    */
-  readonly forcedValue: (envValue: string | undefined) => boolean | undefined;
+  readonly forcedValue: (envValue: string | undefined) => boolean | string | undefined;
 }
 
 /**
@@ -37,6 +42,16 @@ export interface EnvBackedSetting {
 function forcesOnAt(onValue: string) {
   return (envValue: string | undefined): boolean | undefined =>
     envValue === onValue ? true : undefined;
+}
+
+/**
+ * The mirror image: one exact value turns the setting OFF. Used by the
+ * variables whose NAME is the negative — `LVIS_SKIP_CORP_CA=1` means "do not
+ * do this", so it forces `corpCaEnabled` false rather than true.
+ */
+function forcesOffAt(offValue: string) {
+  return (envValue: string | undefined): boolean | undefined =>
+    envValue === offValue ? false : undefined;
 }
 
 /** Values of `LVIS_MARKETPLACE_UPDATE_CHECK` that turn the update check off. */
@@ -77,13 +92,31 @@ export const ENV_BACKED_SETTINGS: readonly EnvBackedSetting[] = Object.freeze([
   //   pinned it keeps that pin rather than having a profile quietly override
   //   it.
   //
-  // `isUpdateCheckEnabled` and `isOfflineCacheEnabled` call these functions, so
-  // the rule the UI reports is the rule the host applies.
+  // `resolveUpdateCheckEnabled` and `resolveOfflineCacheEnabled` resolve
+  // through these functions, so the rule the UI reports is the rule the host
+  // applies.
   {
     settingsPath: "marketplace.updateCheckEnabled",
     envVar: "LVIS_MARKETPLACE_UPDATE_CHECK",
     forcedValue: (envValue: string | undefined) =>
       envValue !== undefined && UPDATE_CHECK_OFF_RE.test(envValue) ? false : undefined,
+  },
+  // The corporate root CA group. Injection happens before `bootstrap()`, so
+  // these are read straight off the settings file (see persisted-corp-ca.ts)
+  // and the controls say "next launch" for the same reason the GPU one does.
+  //
+  // `LVIS_CORP_CA_CN` is the first TEXT setting here: it does not force a
+  // boolean, it supplies the name to look for. The registry reports it the
+  // same way regardless, so the control can say the environment is deciding.
+  { settingsPath: "system.corpCaEnabled", envVar: "LVIS_SKIP_CORP_CA", forcedValue: forcesOffAt("1") },
+  { settingsPath: "system.corpCaDebugLog", envVar: "LVIS_CORP_CA_DEBUG", forcedValue: forcesOnAt("1") },
+  {
+    settingsPath: "system.corpCaCommonName",
+    envVar: "LVIS_CORP_CA_CN",
+    forcedValue: (envValue: string | undefined) => {
+      const trimmed = envValue?.trim();
+      return trimmed === undefined || trimmed === "" ? undefined : trimmed;
+    },
   },
   {
     settingsPath: "marketplace.offlineCacheEnabled",
@@ -124,10 +157,55 @@ export function envForcedSettingsPaths(
 export function envForcedValueForSettingsPath(
   settingsPath: string,
   env: NodeJS.ProcessEnv = process.env,
-): boolean | undefined {
+): boolean | string | undefined {
   const entry = ENV_BACKED_SETTINGS.find((item) => item.settingsPath === settingsPath);
   if (entry === undefined) return undefined;
   return entry.forcedValue(env[entry.envVar]);
+}
+
+/**
+ * {@link envForcedValueForSettingsPath} narrowed to a boolean setting. A
+ * non-boolean answer means the caller asked a text gate for a boolean, which
+ * is a wiring mistake rather than a forced value — so it reads as "not forced"
+ * instead of coercing something the resolver would then act on.
+ *
+ * Module-private: {@link resolveEnvBackedBoolean} is the whole public use of
+ * it, and exporting a second entry point would invite a caller to read the
+ * forced value without applying the precedence rule that goes with it.
+ */
+function envForcedBooleanForSettingsPath(
+  settingsPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): boolean | undefined {
+  const value = envForcedValueForSettingsPath(settingsPath, env);
+  return typeof value === "boolean" ? value : undefined;
+}
+
+/**
+ * The whole rule for a boolean setting the environment can also decide:
+ * what the environment forces, else what the user saved, else the default.
+ *
+ * Every such setting resolves this way, so it resolves here — the per-feature
+ * entry points are named wrappers around this call, not their own copies of the
+ * precedence. Which values force, and in which direction, stays in the registry
+ * entry above, where the settings UI reads it to tell the user.
+ */
+export function resolveEnvBackedBoolean(
+  settingsPath: string,
+  settingValue: boolean | undefined,
+  env: NodeJS.ProcessEnv = process.env,
+  fallback = true,
+): boolean {
+  return envForcedBooleanForSettingsPath(settingsPath, env) ?? settingValue ?? fallback;
+}
+
+/** {@link envForcedValueForSettingsPath} narrowed to a text setting. */
+export function envForcedStringForSettingsPath(
+  settingsPath: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  const value = envForcedValueForSettingsPath(settingsPath, env);
+  return typeof value === "string" ? value : undefined;
 }
 
 /** The variable a surface should name when it reports a forced setting. */

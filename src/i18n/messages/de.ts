@@ -62,6 +62,28 @@ export const de: Record<SeedMessageKey, string> = {
     "Wird beim nächsten Start von LVIS wirksam. Schalten Sie sie aus, wenn das Fenster schwarz bleibt, flackert oder die App beim Zeichnen abstürzt — auf manchen verwalteten Rechnern und virtuellen Desktops kommen die Grafiktreiber damit nicht zurecht. Deshalb ist sie unter Windows und Linux standardmäßig aus.",
   "startupTab.hardwareAccelerationEnvForced":
     "Die Umgebungsvariable {envVar} schaltet dies derzeit ein, unabhängig vom hier gespeicherten Wert.",
+  "startupTab.corpCaSectionTitle":
+    "Unternehmenszertifikat",
+  "startupTab.corpCaSectionDesc":
+    "Für Netzwerke, die den TLS-Verkehr mit einem firmeneigenen Stammzertifikat aufbrechen.",
+  "startupTab.corpCaEnabledLabel":
+    "Stammzertifikat des Unternehmens vertrauen",
+  "startupTab.corpCaEnabledHelp":
+    "Wird beim nächsten Start von LVIS wirksam. Beim Surfen vertraut LVIS den Zertifikaten des Betriebssystems, aber Modellaufrufe, Marketplace-Anfragen und Update-Prüfungen prüfen getrennt und tun das nicht. In einem Netzwerk, das den TLS-Verkehr aufbricht, scheitern genau diese mit einem Zertifikatsfehler, während normale Seiten laden; das behebt es. Lassen Sie es im Zweifel an -- auf einem Rechner ohne ein solches Zertifikat findet es nichts und ändert nichts.",
+  "startupTab.corpCaEnabledEnvForced":
+    "Die Umgebungsvariable {envVar} schaltet dies derzeit aus, unabhängig vom hier gespeicherten Wert.",
+  "startupTab.corpCaCommonNameLabel":
+    "Zertifikatsname",
+  "startupTab.corpCaCommonNameHelp":
+    "Der Common Name (CN) des Stammzertifikats Ihres Unternehmens, so wie er im Systemzertifikatspeicher steht. Der Standardwert unten ist nur ein Platzhalter -- fragen Sie Ihre IT-Abteilung nach dem echten Namen, wenn weiterhin Zertifikatsfehler auftreten. Ein Namensteil genügt.",
+  "startupTab.corpCaCommonNameEnvForced":
+    "Die Umgebungsvariable {envVar} liefert diesen Namen gerade anstelle des hier gespeicherten Werts.",
+  "startupTab.corpCaDebugLabel":
+    "Details der Zertifikatssuche protokollieren",
+  "startupTab.corpCaDebugHelp":
+    "Schreibt in das Anwendungsprotokoll, wonach gesucht und was gefunden wurde. Nur zur Diagnose eines Zertifikatsproblems einschalten.",
+  "startupTab.corpCaDebugEnvForced":
+    "Die Umgebungsvariable {envVar} schaltet dies derzeit ein, unabhängig vom hier gespeicherten Wert.",
   "startupTab.launchSectionTitle": "Beim Start ausführen",
   "startupTab.launchSectionDesc":
     "Legt fest, ob LVIS automatisch startet, wenn du dich an deinem Computer anmeldest.",

@@ -243,7 +243,12 @@ describe("main bundle budget", () => {
     const createWindowAt = mainSource.indexOf("createWindow();");
     const loadBootAt = mainSource.indexOf('import("./boot.js")');
     const attachStartupAt = mainSource.indexOf("loadMainStartupDependencies(", createWindowAt);
-    const loadCorporateCaAt = mainSource.indexOf("ensureCorporateCaInjected,");
+    // Matched from the boot import onwards, and by identifier rather than by a
+    // bare `name,` reference: the CA argument is a wrapper now (it reads the
+    // persisted settings first). What this pins is unchanged — the boot import
+    // is the FIRST argument, so it is in flight while the certificate work
+    // runs, which is the whole reason these are one call.
+    const loadCorporateCaAt = mainSource.indexOf("ensureCorporateCaInjected", loadBootAt);
     expect(createWindowAt).toBeGreaterThan(-1);
     expect(createWindowAt).toBeLessThan(attachStartupAt);
     expect(createWindowAt).toBeLessThan(loadBootAt);

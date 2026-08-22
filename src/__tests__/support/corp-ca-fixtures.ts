@@ -1,0 +1,118 @@
+/**
+ * Certificate fixtures for the corporate-CA tests.
+ *
+ * Throwaway self-signed certificates, generated once for the test suite and
+ * never trusted by anything. They are real certificates on purpose: the
+ * acquisition pipeline parses every candidate with `X509Certificate` and reads
+ * the subject off it, so a hand-written PEM-shaped string proves nothing about
+ * what would be injected on a user's machine.
+ *
+ * The common names are chosen so both the extraction tests and the runtime
+ * tests can share this one set: {@link CORP_CA_PEM} and {@link CORP_CA_G2_PEM}
+ * carry `DEFAULT_CORP_CA_COMMON_NAME` as a prefix, which is the name a test
+ * that resolves the default configuration will search for.
+ */
+
+/** CN=Corporate Root CA, O=Example Corp. */
+export const CORP_CA_PEM = `-----BEGIN CERTIFICATE-----
+MIIDYTCCAkmgAwIBAgIULfTi5U5zbPkWOxKz15PeAvlDy60wDQYJKoZIhvcNAQEL
+BQAwQDELMAkGA1UEBhMCVVMxFTATBgNVBAoMDEV4YW1wbGUgQ29ycDEaMBgGA1UE
+AwwRQ29ycG9yYXRlIFJvb3QgQ0EwHhcNMjYwODIyMDcwODExWhcNNDYwODE3MDcw
+ODExWjBAMQswCQYDVQQGEwJVUzEVMBMGA1UECgwMRXhhbXBsZSBDb3JwMRowGAYD
+VQQDDBFDb3Jwb3JhdGUgUm9vdCBDQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCC
+AQoCggEBAN9R4Y0FNKmMKCkd6rctjKoxMnF8NZMlZuejgfH23SNz6BhnPXpK2AYZ
+8IKa3JdzCSF4SKBgSZZxH677shl1rFWXsWOEI+xiF3soJs8aMfdHVjbbN5x7iqNL
+PwCrjz2YI0xUMhB0TKeJiU9kwXQTgRjZzpKcjz8J9PvS+En169zu8BHGTyEKjWjC
+/jfFUE+chfhO51UPfn80s7/rKXqkoVZ8HQVSfEaBe9vSpNuwB4NZq2ojVFTyBb+8
+ZxLPoVjEMRA3bJYMgFQwigUEdrx7Bl0npMHlewPAfOJ9wCmrjBHySCTzMyHOVMWv
+UtQooPV49OMs0m5LznYzyP++xvbMDlsCAwEAAaNTMFEwHQYDVR0OBBYEFNx4chSX
+xKNiQUlOEYnkMV/N4fInMB8GA1UdIwQYMBaAFNx4chSXxKNiQUlOEYnkMV/N4fIn
+MA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBABJRpm4dF53v1d8G
+QKW+m8RzuAsUKY/jN52Exeggs1pA4KIRSlk/qoyCDXpuE4w68oDdtB2ByiNb7HTF
+yeGCmN6PkxrxGSUh23nW1Ze/VT7UDcKz5wk6RiLVYN5h8fTRuKXPQelXOX54GPDs
+X4bw3j2g33w54vqxLVmTs5EDnYfp0FH1DcN6IRS+s7Liry/dn4PzXDWb/o1Xw9ol
+EbqCze4y7VeU5GOTczHeYTGUefOgvvCjvWAcFNaxuAR7DTRouHtBSyaIFVUeJgXn
+XSmO04hdUOrA1YQ1KfCLLmBSwRwo5GroxwwSgtE/wGPPbII92xcQmCS9eQ6toLfx
+3+HxBeE=
+-----END CERTIFICATE-----
+`;
+
+/**
+ * CN=Corporate Root CA G2 — a second, DIFFERENT certificate that matches the
+ * same search. Organizations roll their root over and leave both deployed, so
+ * "one name, several certificates" is the normal case, not an edge case.
+ */
+export const CORP_CA_G2_PEM = `-----BEGIN CERTIFICATE-----
+MIIDZzCCAk+gAwIBAgIUK6BrgDzWAPxzjVprCQFu0TeUavQwDQYJKoZIhvcNAQEL
+BQAwQzELMAkGA1UEBhMCVVMxFTATBgNVBAoMDEV4YW1wbGUgQ29ycDEdMBsGA1UE
+AwwUQ29ycG9yYXRlIFJvb3QgQ0EgRzIwHhcNMjYwODIyMDcwODExWhcNNDYwODE3
+MDcwODExWjBDMQswCQYDVQQGEwJVUzEVMBMGA1UECgwMRXhhbXBsZSBDb3JwMR0w
+GwYDVQQDDBRDb3Jwb3JhdGUgUm9vdCBDQSBHMjCCASIwDQYJKoZIhvcNAQEBBQAD
+ggEPADCCAQoCggEBAMdimipVpto81LIQeQ5pZDFKyA/BicIXF88IBOs92nuhzqhn
+25cakiAWjOocNJBp691N+KI2i6dPmdPXPyMlgTaIxK1M83iH2BwYvIKIzMxRuJSv
+Tuncu212cZhoAI2EL7qv2s690Af0mOeHFv2KV4ZMDXxWpcIQkTPzrQAevEQh6szB
+LnvEQTY+glfFX+5DmCO2V3yZT42pmi7BJXj0yaH4tG703k34aOSHN5uJ4dASba87
+RhnuklWWTOByPi3CR+30n4GkRHppfxY28UNQW7mMeaf8LnaKwaiuDVYmcwWPweAP
+M93Ri3P06679aZ4BymUuGZ0F5ztt3sfxEfIm9msCAwEAAaNTMFEwHQYDVR0OBBYE
+FP/kG1a4aa4VOC0ocZjWnK+t5/4JMB8GA1UdIwQYMBaAFP/kG1a4aa4VOC0ocZjW
+nK+t5/4JMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBAFakH70e
++DEBZkKUQq6i+26D/BZtqWLvRRFT2np/PYkCP3ezF5Jv8/luqf2la8woPhuLhML/
+ro32Xn72cs8HjldlVOOJXVfAUI1SkRdqZeo0QFXs9V/XzgKfxAPerhYdWW3V4N/X
+TBynIXpubwBQSaNN8C0lxXWtEPRL3HlmzYicReRCZPzaT92Sqo+a+WMdDQrjxjAC
+MskSs8z6nvebrfENPbhD25LBy4GSwyyRm3Ksx3xbG4q9jX7qhkWnfqTiZxQ0L3wG
+/qbBWM53uKJydFbB2Cs2mUEv/Zo1Tn4dbWy3B1iciaF/CrtWomw2wab58n+HiQw2
+1zRn2nVBs8hyuf8=
+-----END CERTIFICATE-----
+`;
+
+/** CN=Unrelated Public Root — the kind of anchor a system bundle is full of. */
+export const PUBLIC_ROOT_PEM = `-----BEGIN CERTIFICATE-----
+MIIDaTCCAlGgAwIBAgIUNl60WAR+jlZ1qYIPjQHAuTOME7MwDQYJKoZIhvcNAQEL
+BQAwRDELMAkGA1UEBhMCVVMxFTATBgNVBAoMDFB1YmxpYyBUcnVzdDEeMBwGA1UE
+AwwVVW5yZWxhdGVkIFB1YmxpYyBSb290MB4XDTI2MDgyMjA0NDcxMVoXDTQ2MDgx
+NzA0NDcxMVowRDELMAkGA1UEBhMCVVMxFTATBgNVBAoMDFB1YmxpYyBUcnVzdDEe
+MBwGA1UEAwwVVW5yZWxhdGVkIFB1YmxpYyBSb290MIIBIjANBgkqhkiG9w0BAQEF
+AAOCAQ8AMIIBCgKCAQEAhNzXQkyLhPMpmaPeid+xe5f+K6TwpU0GUGxXhE7qqagS
+HyfKJ+VG001pLOkepjjN56eKoW84zcdKWOxT8iqO4lbwdSbI9v49KUSOwLBZQduM
+6j4/uU2BNkUqGUBrjK04VxAxTkZqnkLZ0EbPXuxui75X2iWYUMklUw4EON7SMIEZ
+5sKauMq0wxRz7wab+FzF3Z29pbsDu22GO01VuBEZcXJWz3S1nOfSjUWkmXg1n8FB
+NWVfiLWRN8md0XNbFFubLMmrqU2o5fZ733InqLViB1rLptWfrIBsfpSlyO5KhGqO
+Gz7caqaJiJ6o+iMCsBviAJnajP2lw1qPY3/aqe77MwIDAQABo1MwUTAdBgNVHQ4E
+FgQUvFiFZaWEmOdkV75bBMHZkJkFQAYwHwYDVR0jBBgwFoAUvFiFZaWEmOdkV75b
+BMHZkJkFQAYwDwYDVR0TAQH/BAUwAwEB/zANBgkqhkiG9w0BAQsFAAOCAQEAIXBh
+ZZETeQUiRFL5Uq2rqZzSwQ/+JnuTqlReddaJ296xQa+MDvdc46eZ8+iZ0B2+5f5n
+nxpHwfR/EOxYAOJTDkLrofCOHlQkoVgr/fpBopOcljjJ41t0eurqNs1+gqP3MHlO
+PWQVsVKBsqX45fmwfwiu3Y/GR8aOf5RGrD77A+xYhz7x2DtjERwjFM6BnxASyDN+
+1UtOeUZCNfISrajNlfaNFlMEks1unw3gInlaYMQjE0Igpz6s6VxDagrKqOGBbHoc
+xyI7lxDdZYkC4V1pVyOTTV+STggfuOhhRohh32O6VoPvcP2/UCcKN7kQIfbz3HvS
+yfNeLca0QToeWizTTw==
+-----END CERTIFICATE-----
+`;
+
+/**
+ * CN=Some Other Name, but O=Corporate Root CA Holdings. Searching the whole
+ * subject instead of the CN attribute would inject this certificate for a user
+ * who typed the name of their CA — which is why the selector reads the CN only.
+ */
+export const ORG_ONLY_PEM = `-----BEGIN CERTIFICATE-----
+MIIDeTCCAmGgAwIBAgIUF2MMQA//tRxgVywTtEW4UOMX84gwDQYJKoZIhvcNAQEL
+BQAwTDELMAkGA1UEBhMCVVMxIzAhBgNVBAoMGkNvcnBvcmF0ZSBSb290IENBIEhv
+bGRpbmdzMRgwFgYDVQQDDA9Tb21lIE90aGVyIE5hbWUwHhcNMjYwODIyMDcwODEx
+WhcNNDYwODE3MDcwODExWjBMMQswCQYDVQQGEwJVUzEjMCEGA1UECgwaQ29ycG9y
+YXRlIFJvb3QgQ0EgSG9sZGluZ3MxGDAWBgNVBAMMD1NvbWUgT3RoZXIgTmFtZTCC
+ASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEBALIYLw7OnM5r3NpR9vbQuuNV
+mFX083z+7wWjDjTHH8IvJaVYnAaS0GK/5pjNsSx77eVzid88Jx5VMTQSUMJDiuo3
+QcHw9v3vmwV4V0deQC4ym5/bMj0IHiMUtmdvT/DYpjZqAOp10VhrHxn7f9HWVIH5
+ZKX9bkej6QhXIoWM2uxA5DPoPUniScKoR3IY3GKKyCiIYcAYLOCfdX/3yKlO9Ags
+iv2QEd81o+R5WDDp+iMkweYI3WA4Z1KrjahfHvEtipWG+CRavs8MS4WhVGf2iT/f
+n9N1HnG5vTP1QgI4Edymiacm40kEZVDTVR6gEIpGC4bBfg1Fo0CylTLhmlcJZ6cC
+AwEAAaNTMFEwHQYDVR0OBBYEFPI8Qd6PuZQ0w4EhDVj54xBnv89nMB8GA1UdIwQY
+MBaAFPI8Qd6PuZQ0w4EhDVj54xBnv89nMA8GA1UdEwEB/wQFMAMBAf8wDQYJKoZI
+hvcNAQELBQADggEBAIw66AAXpQiWRXfQymsFKT+Qw3G+CYkxi+SMQJsO18ILyAWl
+yZigBl1iyAOzJzRViDusT7FbF6GlfMXtBOAcvJkOSUFeuxg1asHXLvACUxT5yYh6
+mv5cwTFPUp4MSHpkwX4NYNX4KbeZfkjhJigSjNpla+xTJPF1QXyzL4K7wK5mkyN5
+IE4pnfHnLUl3GwE2Js0s9gQnyXbc1usrHiPb4QsQgKFBBe+ENIoZEH/KaoNm+TsO
+LfCC4vchWpFzPRVoS/HngW0da4iiWNkB+7cZqQY7siLjrSRefyONOBh+mu6agUZX
+tTMuHxlnhlV0Zii4/dGJQ4g67ekdPBCo5r3XMl0=
+-----END CERTIFICATE-----
+`;

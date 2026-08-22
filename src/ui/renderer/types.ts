@@ -362,6 +362,12 @@ export type AppSettings = {
      * only, so the Settings toggle says so.
      */
     hardwareAcceleration?: boolean;
+    /** Whether the corporate root CA is acquired and injected at launch. */
+    corpCaEnabled?: boolean;
+    /** Certificate common name searched for in the system trust store. */
+    corpCaCommonName?: string;
+    /** Whether the skipped certificate paths are logged instead of silent. */
+    corpCaDebugLog?: boolean;
   };
   /** Global keyboard shortcuts. SOT: `ShortcutSettings` in settings-store. */
   shortcuts?: {
