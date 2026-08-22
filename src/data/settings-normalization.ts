@@ -65,6 +65,11 @@ import { projectRootKey } from "../shared/project-identity.js";
 import { clampLogRetentionDays } from "../shared/log-retention.js";
 import { createLogger } from "../lib/logger.js";
 import {
+  STORED_FIELD,
+  acceptField,
+  isBooleanValue,
+} from "./settings-field-accept.js";
+import {
   MAX_SUBSCRIPTION_RUNTIME_MODEL_ID_LENGTH,
   isSubscriptionRuntimeId,
   subscriptionRuntimeDescriptor,
@@ -907,6 +912,19 @@ export function normalizeWebView(input: unknown): WebViewSettings {
 
 export const VALID_CLOSE_BEHAVIORS: readonly SystemCloseBehavior[] = ["hide-to-tray", "quit"];
 
+/** The active-view shape test, asked by both settings paths. */
+export function isActiveViewKey(value: unknown): boolean {
+  return typeof value === "string" && isInlineViewKey(value);
+}
+
+/**
+ * The close-behavior shape test. Both settings paths ask it — the disk read
+ * here and the patch path in settings-store — so it is written once.
+ */
+export function isCloseBehavior(value: unknown): value is SystemCloseBehavior {
+  return typeof value === "string" && (VALID_CLOSE_BEHAVIORS as readonly string[]).includes(value);
+}
+
 const MAX_PINNED_PROJECT_ROOTS = 200;
 
 /**
@@ -970,18 +988,7 @@ export function normalizeSystem(input: unknown): SystemSettings {
   // back to its default while a valid sibling is preserved (mirrors the
   // per-field patch path in `update`).
   const result: SystemSettings = { ...DEFAULT_SETTINGS.system };
-  const rawBehavior = obj.closeBehavior;
-  if (
-    typeof rawBehavior === "string" &&
-    (VALID_CLOSE_BEHAVIORS as readonly string[]).includes(rawBehavior)
-  ) {
-    result.closeBehavior = rawBehavior as SystemCloseBehavior;
-  } else if (rawBehavior !== undefined) {
-    log.warn(
-      `system.closeBehavior invalid (received ${JSON.stringify(rawBehavior)}), using default %s`,
-      DEFAULT_SETTINGS.system.closeBehavior,
-    );
-  }
+  acceptField(result, "closeBehavior", obj.closeBehavior, isCloseBehavior, "system", STORED_FIELD);
   const rawAppMode = obj.appMode;
   const normalizedAppMode = normalizeAppMode(rawAppMode);
   if (normalizedAppMode !== null) {
@@ -993,41 +1000,13 @@ export function normalizeSystem(input: unknown): SystemSettings {
     );
   }
   const rawLocalApi = obj.localApiServer;
-  if (typeof rawLocalApi === "boolean") {
-    result.localApiServer = rawLocalApi;
-  } else if (rawLocalApi !== undefined) {
-    log.warn(
-      `system.localApiServer invalid (received ${JSON.stringify(rawLocalApi)}), using default %s`,
-      DEFAULT_SETTINGS.system.localApiServer,
-    );
-  }
+  acceptField(result, "localApiServer", rawLocalApi, isBooleanValue, "system", STORED_FIELD);
   const rawHardwareAcceleration = obj.hardwareAcceleration;
-  if (typeof rawHardwareAcceleration === "boolean") {
-    result.hardwareAcceleration = rawHardwareAcceleration;
-  } else if (rawHardwareAcceleration !== undefined) {
-    log.warn(
-      `system.hardwareAcceleration invalid (received ${JSON.stringify(rawHardwareAcceleration)}), using default %s`,
-      DEFAULT_SETTINGS.system.hardwareAcceleration,
-    );
-  }
+  acceptField(result, "hardwareAcceleration", rawHardwareAcceleration, isBooleanValue, "system", STORED_FIELD);
   const rawCorpCaEnabled = obj.corpCaEnabled;
-  if (typeof rawCorpCaEnabled === "boolean") {
-    result.corpCaEnabled = rawCorpCaEnabled;
-  } else if (rawCorpCaEnabled !== undefined) {
-    log.warn(
-      `system.corpCaEnabled invalid (received ${JSON.stringify(rawCorpCaEnabled)}), using default %s`,
-      DEFAULT_SETTINGS.system.corpCaEnabled,
-    );
-  }
+  acceptField(result, "corpCaEnabled", rawCorpCaEnabled, isBooleanValue, "system", STORED_FIELD);
   const rawCorpCaDebugLog = obj.corpCaDebugLog;
-  if (typeof rawCorpCaDebugLog === "boolean") {
-    result.corpCaDebugLog = rawCorpCaDebugLog;
-  } else if (rawCorpCaDebugLog !== undefined) {
-    log.warn(
-      `system.corpCaDebugLog invalid (received ${JSON.stringify(rawCorpCaDebugLog)}), using default %s`,
-      DEFAULT_SETTINGS.system.corpCaDebugLog,
-    );
-  }
+  acceptField(result, "corpCaDebugLog", rawCorpCaDebugLog, isBooleanValue, "system", STORED_FIELD);
   const rawCorpCaCommonName = obj.corpCaCommonName;
   const normalizedCorpCaCommonName = normalizeCorpCaCommonName(rawCorpCaCommonName);
   if (normalizedCorpCaCommonName !== null) {
@@ -1040,23 +1019,9 @@ export function normalizeSystem(input: unknown): SystemSettings {
     );
   }
   const rawLaunchAtStartup = obj.launchAtStartup;
-  if (typeof rawLaunchAtStartup === "boolean") {
-    result.launchAtStartup = rawLaunchAtStartup;
-  } else if (rawLaunchAtStartup !== undefined) {
-    log.warn(
-      `system.launchAtStartup invalid (received ${JSON.stringify(rawLaunchAtStartup)}), using default %s`,
-      DEFAULT_SETTINGS.system.launchAtStartup,
-    );
-  }
+  acceptField(result, "launchAtStartup", rawLaunchAtStartup, isBooleanValue, "system", STORED_FIELD);
   const rawLaunchMinimized = obj.launchMinimized;
-  if (typeof rawLaunchMinimized === "boolean") {
-    result.launchMinimized = rawLaunchMinimized;
-  } else if (rawLaunchMinimized !== undefined) {
-    log.warn(
-      `system.launchMinimized invalid (received ${JSON.stringify(rawLaunchMinimized)}), using default %s`,
-      DEFAULT_SETTINGS.system.launchMinimized,
-    );
-  }
+  acceptField(result, "launchMinimized", rawLaunchMinimized, isBooleanValue, "system", STORED_FIELD);
   const rawSidePanelWidth = obj.sidePanelWidth;
   if (typeof rawSidePanelWidth === "number" && Number.isFinite(rawSidePanelWidth)) {
     result.sidePanelWidth = Math.max(SIDE_PANEL_MIN_WIDTH, Math.round(rawSidePanelWidth));
@@ -1086,24 +1051,8 @@ export function normalizeSystem(input: unknown): SystemSettings {
       );
     }
   }
-  const rawSidebarActiveTab = obj.sidebarActiveTab;
-  if (isSidebarTab(rawSidebarActiveTab)) {
-    result.sidebarActiveTab = rawSidebarActiveTab;
-  } else if (rawSidebarActiveTab !== undefined) {
-    log.warn(
-      `system.sidebarActiveTab invalid (received ${JSON.stringify(rawSidebarActiveTab)}), using default %s`,
-      DEFAULT_SETTINGS.system.sidebarActiveTab,
-    );
-  }
-  const rawActiveView = obj.activeView;
-  if (typeof rawActiveView === "string" && isInlineViewKey(rawActiveView)) {
-    result.activeView = rawActiveView;
-  } else if (rawActiveView !== undefined) {
-    log.warn(
-      `system.activeView invalid (received ${JSON.stringify(rawActiveView)}), using default %s`,
-      DEFAULT_SETTINGS.system.activeView,
-    );
-  }
+  acceptField(result, "sidebarActiveTab", obj.sidebarActiveTab, isSidebarTab, "system", STORED_FIELD);
+  acceptField(result, "activeView", obj.activeView, isActiveViewKey, "system", STORED_FIELD);
   const rawSettingsTab = obj.settingsTab;
   if (rawSettingsTab !== undefined) {
     // `normalizeSettingsTab` already folds retired ids and anything
