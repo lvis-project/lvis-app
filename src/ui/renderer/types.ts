@@ -271,6 +271,20 @@ export type AppSettings = {
   webSearch: { provider: string };
   routine?: Record<string, unknown>;
   privacy?: { piiRedactEnabled: boolean };
+  /**
+   * Anonymous opt-in telemetry + crash reporting. Mirrors the main-process SOT
+   * in `src/data/settings-store.ts` `TelemetrySettings`. Every field is
+   * optional here for the same reason it is there: an install that never
+   * configured a destination stores no destination.
+   */
+  telemetry?: {
+    enabled: boolean;
+    endpoint?: string;
+    sentryDsn?: string;
+    crashReportEndpoint?: string;
+    crashReportingEnabled?: boolean;
+    telemetryPromptAnswered?: boolean;
+  };
   plugins?: Record<string, never>;
   marketplace?: {
     backend?: "real-cloud";
@@ -664,6 +678,8 @@ export type LvisApi = {
   updateSettings: (patch: DeepPartial<AppSettings>) => Promise<SettingsUpdateResult>;
   /** Settings paths the boot environment is forcing ON; presence only, never values. */
   envForcedSettings: () => Promise<readonly string[]>;
+  /** Hosts `telemetry.endpoint` may point at. Read-only: the bound, not a setting. */
+  telemetryAllowedHosts: () => Promise<readonly string[]>;
   onSettingsUpdated: (handler: (settings: AppSettings) => void) => () => void;
   onSubscriptionRuntimeStatusUpdated: (
     handler: (event: SubscriptionRuntimeStatusUpdatedEvent) => void,

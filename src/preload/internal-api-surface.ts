@@ -202,6 +202,10 @@ export function buildInternalApiSurface() {
   // this build's own registry, not something to render.
   envForcedSettings: async () =>
     parseEnvForcedSettingsPaths(await ipcRenderer.invoke(CHANNELS.settings.envForcedSettings)) ?? [],
+  telemetryAllowedHosts: async () => {
+    const hosts: unknown = await ipcRenderer.invoke(CHANNELS.telemetry.allowedHosts);
+    return Array.isArray(hosts) ? hosts.filter((h): h is string => typeof h === "string") : [];
+  },
   remoteA2a: {
     targets: async () => ipcRenderer.invoke(CHANNELS.remoteA2a.targets),
     status: async () => ipcRenderer.invoke(CHANNELS.remoteA2a.status),
