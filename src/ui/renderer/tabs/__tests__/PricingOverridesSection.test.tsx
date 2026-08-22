@@ -10,7 +10,8 @@ import "../../../../../test/renderer/setup.js";
 import { describe, it, expect } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import { PricingOverridesSection } from "../PricingOverridesSection.js";
-import { makeMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+import { installMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
+
 
 const BASE_SETTINGS = {
   llm: {
@@ -31,21 +32,15 @@ function withOverrides(pricingOverrides: unknown[]) {
   return { ...BASE_SETTINGS, llm: { ...BASE_SETTINGS.llm, pricingOverrides } };
 }
 
-function installApi(overrides: Parameters<typeof makeMockLvisApi>[0] = {}) {
-  const { api } = makeMockLvisApi({ settings: BASE_SETTINGS, ...overrides });
-  (globalThis as unknown as { window: typeof window }).window.lvisApi = api as never;
-  return api;
-}
-
 describe("PricingOverridesSection", () => {
   it("says nothing is corrected when the list is empty", async () => {
-    installApi();
+    installMockLvisApi({ settings: BASE_SETTINGS });
     const { findByTestId } = render(<PricingOverridesSection />);
     await findByTestId("llm-pricing-overrides-empty");
   });
 
   it("loads a stored correction into the table", async () => {
-    installApi({
+    installMockLvisApi({
       settings: withOverrides([
         { vendor: "claude", model: "claude-sonnet-4-6", inputPer1M: 2, outputPer1M: 9 },
       ]),
@@ -60,7 +55,7 @@ describe("PricingOverridesSection", () => {
   });
 
   it("refuses to save a row the store would silently drop", async () => {
-    installApi();
+    installMockLvisApi({ settings: BASE_SETTINGS });
     const { findByTestId } = render(<PricingOverridesSection />);
     fireEvent.click(await findByTestId("llm-pricing-override-add"));
     const save = (await findByTestId("llm-pricing-override-save")) as HTMLButtonElement;
@@ -73,7 +68,7 @@ describe("PricingOverridesSection", () => {
   });
 
   it("persists a completed row through updateSettings", async () => {
-    const api = installApi();
+    const api = installMockLvisApi({ settings: BASE_SETTINGS });
     const { findByTestId } = render(<PricingOverridesSection />);
     fireEvent.click(await findByTestId("llm-pricing-override-add"));
     fireEvent.change(await findByTestId("llm-pricing-override-vendor-0"), { target: { value: "openai" } });
@@ -93,7 +88,7 @@ describe("PricingOverridesSection", () => {
   });
 
   it("removes a row and persists the shorter list", async () => {
-    const api = installApi({
+    const api = installMockLvisApi({
       settings: withOverrides([
         { vendor: "claude", model: "claude-sonnet-4-6", inputPer1M: 2, outputPer1M: 9 },
       ]),
@@ -107,7 +102,7 @@ describe("PricingOverridesSection", () => {
   });
 
   it("goes read-only and says why when the environment supplies the rates", async () => {
-    installApi({
+    installMockLvisApi({
       envForcedSettings: ["llm.pricingOverrides"],
       settings: withOverrides([
         { vendor: "claude", model: "claude-sonnet-4-6", inputPer1M: 2, outputPer1M: 9 },

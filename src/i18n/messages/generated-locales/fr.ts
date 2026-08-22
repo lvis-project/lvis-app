@@ -2017,6 +2017,7 @@ export const frMessages: Record<string, string> = {
   "permissionsTab.osSandboxEnabled": "Activé",
   "permissionsTab.osSandboxPotentialReason": "Potentiel de la plateforme : {reason}",
   "permissionsTab.osSandboxRestartNote": "Les modifications prennent effet après le redémarrage de l'application: le bac à sable ASRT est initialisé au démarrage.",
+  "permissionsTab.osSandboxEnvForced": "La variable d'environnement {envVar} active le bac à sable pour cette exécution, quelle que soit la valeur enregistrée ici.",
   "permissionsTab.osSandboxRuntimeReason": "Environnement d’exécution actuel : {reason}",
   "permissionsTab.osSandboxBootDegradedHeading": "Le bac à sable d’outils du SE est ACTIVÉ mais n’a pas démarré lors de cette session.",
   "permissionsTab.osSandboxBootDegradedBody": "Les outils s’exécutent sans isolation du SE jusqu’à ce que cela soit résolu et l’application redémarrée.",

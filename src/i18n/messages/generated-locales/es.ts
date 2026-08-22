@@ -2030,6 +2030,7 @@ export const esMessages: Record<string, string> = {
   "permissionsTab.osSandboxEnabled": "Activado",
   "permissionsTab.osSandboxPotentialReason": "Potencial de la plataforma: {reason}",
   "permissionsTab.osSandboxRestartNote": "Los cambios entran en vigor después de reiniciar la aplicación: el entorno limitado de ASRT se inicializa al inicio.",
+  "permissionsTab.osSandboxEnvForced": "La variable de entorno {envVar} está activando el entorno limitado en esta ejecución, independientemente de lo que se guarde aquí.",
   "permissionsTab.osSandboxRuntimeReason": "Entorno de ejecución actual: {reason}",
   "permissionsTab.osSandboxBootDegradedHeading": "El sandbox de herramientas del SO está ACTIVADO pero no se inició en esta sesión.",
   "permissionsTab.osSandboxBootDegradedBody": "Las herramientas se ejecutan sin aislamiento del SO hasta que se resuelva y se reinicie la aplicación.",

@@ -9,7 +9,7 @@
  * gate is not reported as either.
  */
 import "../../../../../test/renderer/setup.js";
-import { MOCK_REVIEWER_PARENT_ADJUDICATION } from "../../../../../test/renderer/mock-lvis-api.js";
+import { MOCK_REVIEWER_PARENT_ADJUDICATION, installMockLvisApi } from "../../../../../test/renderer/mock-lvis-api.js";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,11 +106,7 @@ function installApi(boot: unknown, sandboxOn = true) {
     },
   };
   (globalThis as unknown as { window: typeof window }).window.lvis = lvis as never;
-  (globalThis as unknown as { window: { lvisApi?: unknown } }).window.lvisApi = {
-    onSettingsUpdated: vi.fn(() => () => undefined),
-    getSettings: vi.fn(async () => ({ features: { osToolSandbox: sandboxOn } })),
-    updateSettings: vi.fn(async () => ({})),
-  };
+  installMockLvisApi({ settings: { features: { osToolSandbox: sandboxOn } } });
   return lvis;
 }
 

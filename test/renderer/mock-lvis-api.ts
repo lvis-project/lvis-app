@@ -659,6 +659,21 @@ export function makeMockLvisApi(overrides: ApiOverrides = {}): {
   };
 }
 
+/**
+ * Build the double and put it where the renderer looks for it.
+ *
+ * Every settings-tab test needs the same two lines — make the api, assign it to
+ * `window.lvisApi` — and each one had written its own `installApi`, which is
+ * how two of them ended up as the same function under the same name in two
+ * files. One implementation, so a component that starts calling a new method
+ * gets it everywhere at once instead of failing per test file.
+ */
+export function installMockLvisApi(overrides: ApiOverrides = {}): MockLvisApi {
+  const { api } = makeMockLvisApi(overrides);
+  (globalThis as unknown as { window: { lvisApi?: unknown } }).window.lvisApi = api;
+  return api;
+}
+
 type LvisNamespaceOverrides = {
   env?: Partial<{
     isDev: boolean;
