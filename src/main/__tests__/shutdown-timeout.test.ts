@@ -30,12 +30,20 @@ describe("shutdown cleanup hard timeout", () => {
     ).resolves.toEqual({ status: "timed-out" });
   });
 
-  it("resolves timeout from env with compatibility fallback", () => {
+  it("resolves timeout from the canonical env var", () => {
     expect(resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "1234" })).toBe(1234);
-    expect(resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_TIMEOUT_MS: "2345" })).toBe(2345);
     expect(resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_CLEANUP_TIMEOUT_MS: "-1" })).toBe(
       DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS,
     );
+  });
+
+  it("ignores the retired LVIS_SHUTDOWN_TIMEOUT_MS alias", () => {
+    // Published removal date 2026-08-01. A host still exporting it gets the
+    // default — exactly what the deprecation warning promised would happen,
+    // and NOT a silent honoring of a name that no longer exists.
+    expect(
+      resolveShutdownCleanupTimeoutMs({ LVIS_SHUTDOWN_TIMEOUT_MS: "2345" } as NodeJS.ProcessEnv),
+    ).toBe(DEFAULT_SHUTDOWN_CLEANUP_TIMEOUT_MS);
   });
 
   it("falls back to the default for NaN / non-numeric / zero env values", () => {
