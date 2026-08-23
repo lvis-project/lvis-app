@@ -208,7 +208,7 @@ ${spec.prompt}
     state: 'visible',
     timeout: 15_000,
   });
-  // The card opens with the summary clamped to two lines and a "\ub354 \ubcf4\uae30" toggle.
+  // The card opens with the summary clamped to two lines and a "더 보기" toggle.
   // The published images are clamped too, but what they clamp away is the alert
   // itself, so the frame ends up showing the feature without showing what it
   // said. Expanding is a real state of the real card, reached by clicking the
@@ -255,6 +255,299 @@ const SEEDED_NOTE_BODY = [
 ].join('\n');
 
 /**
+ * The x-fraction of each sub-tab in the meeting plugin's minutes detail view,
+ * measured against the `<webview>` box in the 1120x1000 capture. They sit in one
+ * row, so a single shared y-fraction addresses all three.
+ */
+const MINUTES_SUB_TAB = {
+  /** The final summary, highlights and action items. */
+  summary: '회의록',
+  /** The intermediate summaries, one per covered prefix of the transcript. */
+  intermediate: '중간 리파인',
+  /** The per-speaker transcript. */
+  transcript: '전사',
+} as const;
+
+/**
+ * One minutes capture, differing only in which sub-tab ends up selected.
+ *
+ * The minutes view was previously recorded as unreachable on two counts, both of
+ * which were wrong. Playwright cannot reach a control inside a `<webview>`, but
+ * the main process can — see `clickInPluginGuest`. The second count, that a
+ * populated minutes body needs a
+ * completed STT recording, was aiming past the store: `SessionStore` keeps one
+ * JSON file per finished session under `<pluginDataDir>/sessions/`, so a
+ * fabricated finalised session seeds the same state a real recording would have
+ * left, with no audio anywhere in the path.
+ */
+function meetingMinutesScenario(subTab: (typeof MINUTES_SUB_TAB)[keyof typeof MINUTES_SUB_TAB]): ScenarioEntry {
+  return {
+    topic: 'meeting',
+    plugins: ['meeting'],
+    uiLocale: 'ko',
+    // Same approval-dock reason as meeting-upcoming.
+    executionMode: 'allow',
+    // Same guest-overflow reason as meeting-upcoming.
+    captureViewport: { width: 1120, height: 1000 },
+    seededCorpus: {
+      'plugins/meeting/data/sessions/demo-quarterly-rehearsal-0001.json':
+        fabricatedMeetingSession(),
+    },
+    steps: async ({ app, page }) => {
+      await openPluginPanel(page, '미팅');
+      // The right-hand tab of the guest's two-tab bar, then the seeded session's
+      // row in the list it reveals, then the sub-tab this capture is about. Each
+      // step waits for the control the previous one produced, so a broken chain
+      // names the link that broke instead of capturing a half-rendered frame.
+      await waitInPluginGuest(app, '.nav-btn', { text: '회의록', click: true });
+      await waitInPluginGuest(app, '.session-card', {
+        text: FABRICATED_MEETING_TITLE,
+        click: true,
+      });
+      await waitInPluginGuest(app, '.sub-tab', { text: subTab, click: true });
+      await page.waitForTimeout(1_500);
+    },
+  };
+}
+
+/**
+ * The title the fabricated meeting carries through the prep store, the session
+ * store, and the row the capture clicks to open it.
+ */
+const FABRICATED_MEETING_TITLE = '분기 데모 리허설';
+
+/**
+ * Wait for a control inside a plugin `<webview>` guest, named by CSS selector
+ * and — when a selector alone is ambiguous — by its own visible text, and
+ * optionally click it.
+ *
+ * Playwright cannot reach into a `<webview>`: from the renderer's side the guest
+ * is an opaque element with no children, so nothing in it has a locator. The
+ * main process can. Electron's `webContents.getAllWebContents()` hands back the
+ * guest as a first-class `WebContents` and `executeJavaScript` runs in its
+ * document — the same channel the harness already uses to drive the app through
+ * real IPC, pointed one frame deeper.
+ *
+ * Synthesised mouse events at window coordinates are the obvious alternative and
+ * were tried first. They do reach the guest, but not dependably: clicks measured
+ * against the same frame activated one control and passed straight through the
+ * one 40px above it. That makes coordinates an unreliable way to name a control
+ * even when the geometry has been verified. A selector has no such failure mode,
+ * it says what is being addressed rather than where, and — unlike a blind
+ * settle — it fails loudly when the guest never renders the control at all.
+ */
+async function waitInPluginGuest(
+  app: ElectronApplication,
+  selector: string,
+  options: { text?: string; click?: boolean; timeoutMs?: number } = {},
+): Promise<void> {
+  const { text, click = false, timeoutMs = 20_000 } = options;
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const hit = await app.evaluate(
+      async ({ webContents }, target) => {
+        const guests = webContents
+          .getAllWebContents()
+          .filter((contents) => contents.getType() === 'webview');
+        for (const guest of guests) {
+          const found = await guest.executeJavaScript(
+            `(() => {
+               const nodes = Array.from(document.querySelectorAll(${JSON.stringify(target.selector)}));
+               const wanted = ${JSON.stringify(target.text ?? null)};
+               const node = wanted === null
+                 ? nodes[0]
+                 : nodes.find((n) => (n.textContent || '').includes(wanted));
+               if (!node) return false;
+               if (${target.click ? 'true' : 'false'}) node.click();
+               return true;
+             })()`,
+          );
+          if (found) return true;
+        }
+        return false;
+      },
+      { selector, text, click },
+    );
+    if (hit) return;
+    if (Date.now() > deadline) {
+      throw new Error(
+        `waitInPluginGuest: no ${selector}${text ? ` matching "${text}"` : ''} in any plugin guest after ${timeoutMs}ms`,
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+}
+
+/**
+ * A fabricated finished meeting for the meeting plugin's session store.
+ *
+ * `SessionStore` writes one JSON file per session under
+ * `<pluginDataDir>/sessions/<sessionId>.json`, which the harness's
+ * `seededCorpus` can write directly the same way it writes the prep.
+ *
+ * Everything is invented. The published minutes captures carry a real meeting's
+ * transcript verbatim, so there is nothing in them to preserve — what has to
+ * survive is the SHAPE the three minutes tabs render: a final summary with
+ * highlights and action items, a set of intermediate summaries each covering a
+ * growing prefix of the transcript, and a transcript with more than one speaker
+ * so the per-speaker layout is visible. One session covers all three.
+ */
+function fabricatedMeetingSession(): string {
+  const started = new Date();
+  started.setDate(started.getDate() - 1);
+  started.setHours(14, 0, 0, 0);
+  const ended = new Date(started.getTime() + 42 * 60 * 1000);
+  const seg = (
+    i: number,
+    speaker: string,
+    original: string,
+    startSec: number,
+    endSec: number,
+  ) => ({
+    id: `seg-${i}`,
+    speaker,
+    original,
+    startSec,
+    endSec,
+    isFinal: true,
+    source: 'streaming',
+    createdAt: new Date(started.getTime() + startSec * 1000).toISOString(),
+  });
+  return JSON.stringify({
+    sessionId: 'demo-quarterly-rehearsal-0001',
+    context: {
+      id: 'demo-quarterly-rehearsal',
+      title: FABRICATED_MEETING_TITLE,
+      locale: 'ko',
+      organizer: '데모 진행자',
+      participants: ['문서 담당', '지원 담당'],
+      category: '정기 회의',
+      scheduledStart: started.toISOString(),
+      scheduledEnd: ended.toISOString(),
+      location: '온라인',
+    },
+    category: '정기 회의',
+    transcript: [
+      seg(1, '데모 진행자', '오늘은 다음 주 데모에서 보여줄 순서부터 정하고, 남는 시간에 녹화본 이야기를 하겠습니다.', 0, 11),
+      seg(2, '문서 담당', '시나리오는 세 개까지만 두는 게 좋겠습니다. 지난번처럼 다섯 개를 넣으면 준비 시간이 모자랍니다.', 12, 26),
+      seg(3, '데모 진행자', '그러면 설치, 첫 실행, 복구 이렇게 세 건으로 가겠습니다. 나머지는 질문이 나오면 즉석에서 보여주죠.', 27, 38),
+      seg(4, '지원 담당', '녹화본 보관 기간도 정해야 합니다. 지금은 기한 없이 쌓이고 있어서 용량이 계속 늘고 있습니다.', 39, 52),
+      seg(5, '데모 진행자', '다음 주까지만 보관하고, 지나면 지웁니다. 필요하면 그 전에 따로 내려받아 두세요.', 53, 64),
+      seg(6, '문서 담당', '그럼 시나리오 문서는 제가 오늘 중으로 갱신해서 공유하겠습니다. 화면 캡처도 새로 넣겠습니다.', 65, 78),
+      seg(7, '지원 담당', '보관 기간은 제가 공지로 알리겠습니다. 안내문에 삭제 예정일을 같이 적어 두겠습니다.', 79, 90),
+      seg(8, '데모 진행자', '남은 항목은 다음 회차로 넘기고 오늘은 여기까지 하겠습니다. 수고하셨습니다.', 91, 102),
+    ],
+    intermediateSummaries: [
+      {
+        coveredSegmentCount: 3,
+        data: {
+          summary: '데모에서 보여줄 순서를 먼저 정했습니다. 시나리오 수를 줄이자는 의견이 나와 설치, 첫 실행, 복구 세 건으로 좁혔습니다.',
+          highlights: [
+            '시나리오를 세 건으로 줄이자는 제안이 나옴',
+            '설치 · 첫 실행 · 복구 순서로 진행하기로 함',
+            '나머지는 질문이 나올 때 즉석에서 보여주기로 함',
+          ],
+          coveredSegmentIds: ['seg-1', 'seg-2', 'seg-3'],
+          createdAt: new Date(started.getTime() + 15 * 60 * 1000).toISOString(),
+        },
+      },
+      {
+        coveredSegmentCount: 5,
+        data: {
+          summary: '녹화본이 기한 없이 쌓여 용량이 늘고 있다는 문제가 제기되어, 보관 기간을 다음 주까지로 정했습니다.',
+          highlights: [
+            '녹화본이 기한 없이 누적되어 용량이 증가',
+            '보관 기간을 다음 주까지로 제한하기로 함',
+            '필요한 파일은 삭제 전에 각자 내려받기로 함',
+          ],
+          coveredSegmentIds: ['seg-1', 'seg-2', 'seg-3', 'seg-4', 'seg-5'],
+          createdAt: new Date(started.getTime() + 25 * 60 * 1000).toISOString(),
+        },
+      },
+    ],
+    finalized: true,
+    finalSummary: {
+      title: FABRICATED_MEETING_TITLE,
+      summary: [
+        '데모 순서를 먼저 확정하고, 녹화본 보관 기간을 짧게 가져가기로 했습니다.',
+        '남은 항목은 다음 회차로 넘깁니다.',
+      ].join('\n'),
+      highlights: [
+        '데모 시나리오 3건으로 확정',
+        '녹화본은 다음 주까지만 보관',
+      ],
+      actionItems: [
+        '데모 시나리오 문서 갱신 — 문서 담당',
+        '보관 기간 안내 공지 — 지원 담당',
+      ],
+      createdAt: ended.toISOString(),
+      lengthTier: 'medium',
+    },
+    createdAt: started.toISOString(),
+    updatedAt: ended.toISOString(),
+  });
+}
+
+/**
+ * A fabricated upcoming meeting for the meeting plugin's prep store.
+ *
+ * `PrepStore` reads one JSON file, `{ preps: StoredPrep[] }`, at
+ * `<pluginsRoot>/meeting/data/preps.json` — which under the isolated profile is
+ * `plugins/meeting/data/preps.json` relative to the LVIS home, so the harness's
+ * existing `seededCorpus` writes it and no second seeding hook is needed.
+ *
+ * The published capture of this panel is the worst image in the whole set: three
+ * real names with their grades and organisational paths, and a live conference
+ * URL printed alongside its meeting password, meeting key and host key. Nothing
+ * below is real. The times are computed relative to the run so the meeting stays
+ * "upcoming" forever rather than ageing out of the list.
+ */
+function fabricatedMeetingPrep(): string {
+  const start = new Date();
+  start.setDate(start.getDate() + 1);
+  start.setHours(14, 0, 0, 0);
+  const end = new Date(start.getTime() + 60 * 60 * 1000);
+  const joinUrl = 'https://conference.example.invalid/j/demo-rehearsal';
+  return JSON.stringify({
+    preps: [
+      {
+        id: 'demo-quarterly-rehearsal',
+        title: FABRICATED_MEETING_TITLE,
+        locale: 'ko',
+        organizer: '데모 진행자',
+        participants: ['문서 담당', '지원 담당'],
+        category: '정기 회의',
+        scheduledStart: start.toISOString(),
+        scheduledEnd: end.toISOString(),
+        location: '온라인',
+        description: [
+          'JOIN THE DEMO CONFERENCE',
+          `JOIN URL : ${joinUrl}`,
+          'Meeting Password : (발급 예정)',
+          'Host : (발급 예정)',
+        ].join('\n'),
+        conference: {
+          type: 'other',
+          joinUrl,
+          hostDisplayName: '데모 진행자',
+        },
+        agenda: [
+          '데모 시나리오 3건 확정',
+          '녹화본 보관 기간 정하기',
+        ],
+        previousSummary: {
+          title: '지난 회차 요약',
+          summary: [
+            '데모 순서를 먼저 정하고 나머지를 다음으로 넘겼습니다.',
+            '넘어온 항목 2건은 아직 열려 있습니다.',
+          ].join('\n'),
+        },
+      },
+    ],
+  });
+}
+
+/**
  * Fabricated work-assistant alerts.
  *
  * The published images for these keys carry a real organiser, real attendee
@@ -264,25 +557,25 @@ const SEEDED_NOTE_BODY = [
  * labels rather than person names.
  */
 const WA_CONFLICT_SUMMARY = [
-  '\uc0c8 \uc77c\uc815\uc774 \uae30\uc874 \uc77c\uc815\uacfc \uacb9\uce69\ub2c8\ub2e4.',
-  '- \uc0c8 \uc77c\uc815: \ubd84\uae30 \ub370\ubaa8 \ub9ac\ud5c8\uc124 (14:00~15:00)',
-  '- \uacb9\uce58\ub294 \uc77c\uc815 (1\uac1c):',
-  '  - \ubb38\uc11c\ud654 \uc2a4\ud504\ub9b0\ud2b8 \uc810\uac80 (14:30~15:30)',
+  '새 일정이 기존 일정과 겹칩니다.',
+  '- 새 일정: 분기 데모 리허설 (14:00~15:00)',
+  '- 겹치는 일정 (1개):',
+  '  - 문서화 스프린트 점검 (14:30~15:30)',
 ].join('\n');
 
 const WA_PREP_SUMMARY = [
-  '\uc57d 15\ubd84 \ud6c4 \uc77c\uc815\uc774 \uc2dc\uc791\ub429\ub2c8\ub2e4.',
-  '- \uc81c\ubaa9: \ubd84\uae30 \ub370\ubaa8 \ub9ac\ud5c8\uc124',
-  '- \uc8fc\ucd5c\uc790: \ub370\ubaa8 \uc9c4\ud589\uc790 (demo-host@example.invalid)',
-  '- \uc7a5\uc18c: \uc628\ub77c\uc778',
+  '약 15분 후 일정이 시작됩니다.',
+  '- 제목: 분기 데모 리허설',
+  '- 주최자: 데모 진행자 (demo-host@example.invalid)',
+  '- 장소: 온라인',
 ].join('\n');
 
 const WA_SUMMARY_SUMMARY = [
-  '\ubbf8\ud305\uc774 \ubc29\uae08 \uc885\ub8cc\ub418\uc5c8\uc2b5\ub2c8\ub2e4.',
-  '- \uc81c\ubaa9: \ubd84\uae30 \ub370\ubaa8 \ub9ac\ud5c8\uc124',
-  '- \uc8fc\uc694 \ub0b4\uc6a9:',
-  '  - \ub370\ubaa8 \uc2dc\ub098\ub9ac\uc624 3\uac74\uc744 \ud655\uc815\ud568',
-  '  - \ub179\ud654\ubcf8\uc740 \ub2e4\uc74c \uc8fc\uae4c\uc9c0\ub9cc \ubcf4\uad00\ud568',
+  '미팅이 방금 종료되었습니다.',
+  '- 제목: 분기 데모 리허설',
+  '- 주요 내용:',
+  '  - 데모 시나리오 3건을 확정함',
+  '  - 녹화본은 다음 주까지만 보관함',
 ].join('\n');
 
 export const scenarios: Record<string, ScenarioEntry> = {
@@ -757,26 +1050,39 @@ export const scenarios: Record<string, ScenarioEntry> = {
     topic: 'meeting',
     plugins: ['meeting'],
     uiLocale: 'ko',
-    steps: async ({ page }) => {
-      // Real lvis-plugin-meeting UI. The panel's default tab ("예정 회의" /
-      // upcoming) renders its empty-state (no seeded calendar events — that
-      // would need ms-graph). Honest: this captures the upcoming-meeting panel
-      // in its no-events state, not a populated agenda.
+    // The panel lists preps through its own `meeting_list_preps` tool. Left at
+    // the default, that call raises the approval dock over the lower half of the
+    // frame — the half holding the agenda and the join controls this image
+    // exists to show. Approving it is not what the shot is about.
+    executionMode: 'allow',
+    // Narrower than the default, and load-bearing rather than cosmetic. The
+    // page shell caps a plugin view at its 58rem reading column, and this guest
+    // reserves a fixed left gutter inside its own viewport: measured at a
+    // 1600px window the <webview> is 912px, the guest starts its card 481px in
+    // and lays it out 477px wide, so the last 46px — the right edge of every
+    // card and control — falls off the element. At 1120px the <webview> is
+    // 833px, which is the ~800px the host comment in `plugin-ui-host.tsx` says
+    // these panels were authored for, and everything fits. The overflow is a
+    // real responsive bug in the plugin guest, not a harness artefact; it is
+    // recorded in docs/development/screenshot-reshoot.md for the plugin repo.
+    captureViewport: { width: 1120, height: 1000 },
+    seededCorpus: { 'plugins/meeting/data/preps.json': fabricatedMeetingPrep() },
+    steps: async ({ app, page }) => {
+      // Real lvis-plugin-meeting UI, default tab ("예정 회의" / upcoming),
+      // reading the fabricated prep the corpus wrote into its own store.
       await openPluginPanel(page, '미팅');
+      // Waits for the prep itself rather than a fixed settle: the card renders
+      // only once `meeting_list_preps` returns, and that round trip is the slow
+      // part. If the seeding ever stops landing, this says so.
+      await waitInPluginGuest(app, '.pm-title', { text: FABRICATED_MEETING_TITLE });
+      await page.waitForTimeout(1_000);
     },
   },
-  'meeting-minutes': {
-    topic: 'meeting',
-    skip:
-      'The real lvis-plugin-meeting panel loads and is captured by meeting-upcoming, but the ' +
-      '"회의록" (minutes) tab and a populated minutes body live INSIDE the plugin <webview> guest ' +
-      'DOM (Playwright cannot click through a <webview> to switch its internal tab) AND require a ' +
-      'completed STT recording + generated minutes to populate — infeasible to seed (see ' +
-      'meeting-record-stt). Capturing the default tab under this key would be a misleading duplicate ' +
-      'of meeting-upcoming.',
-  },
-  'meeting-minutes-2': { topic: 'meeting', skip: 'Same as meeting-minutes.' },
-  'meeting-minutes-3': { topic: 'meeting', skip: 'Same as meeting-minutes.' },
+  // The three minutes captures are the same scenario with a different sub-tab
+  // selected, so they share one builder rather than three near-copies.
+  'meeting-minutes': meetingMinutesScenario(MINUTES_SUB_TAB.summary),
+  'meeting-minutes-2': meetingMinutesScenario(MINUTES_SUB_TAB.intermediate),
+  'meeting-minutes-3': meetingMinutesScenario(MINUTES_SUB_TAB.transcript),
 
   // ---- integration (meeting + outlook) ------------------------------------------------
   'meeting-outlook-mail': {
@@ -868,27 +1174,27 @@ export const scenarios: Record<string, ScenarioEntry> = {
             {
               kind: 'text',
               text: [
-                '\uacb9\uce58\ub294 \ub450 \uc77c\uc815\uc758 \uc0c1\uc138\ub294 \uc544\ub798\uc640 \uac19\uc2b5\ub2c8\ub2e4.',
+                '겹치는 두 일정의 상세는 아래와 같습니다.',
                 '',
-                '1. \ubd84\uae30 \ub370\ubaa8 \ub9ac\ud5c8\uc124',
+                '1. 분기 데모 리허설',
                 '',
-                '- \uc2dc\uac04: 2026-08-27 14:00 ~ 15:00',
-                '- \uc7a5\uc18c: \uc628\ub77c\uc778',
-                '- \uc8fc\ucd5c\uc790: \ub370\ubaa8 \uc9c4\ud589\uc790 (demo-host@example.invalid)',
-                '- \uc0c1\ud0dc: \ucc38\uc11d\uc790\uc5d0 \ubcf8\uc778 \ud3ec\ud568',
+                '- 시간: 2026-08-27 14:00 ~ 15:00',
+                '- 장소: 온라인',
+                '- 주최자: 데모 진행자 (demo-host@example.invalid)',
+                '- 상태: 참석자에 본인 포함',
                 '',
-                '2. \ubb38\uc11c\ud654 \uc2a4\ud504\ub9b0\ud2b8 \uc810\uac80',
+                '2. 문서화 스프린트 점검',
                 '',
-                '- \uc2dc\uac04: 2026-08-27 14:30 ~ 15:30',
-                '- \uc7a5\uc18c: \ud68c\uc758\uc2e4 B',
-                '- \uc8fc\ucd5c\uc790: \ubb38\uc11c \ub2f4\ub2f9 (demo-docs@example.invalid)',
-                '- \uc0c1\ud0dc: \uc218\ub77d, \uc815\uae30 \uc77c\uc815',
+                '- 시간: 2026-08-27 14:30 ~ 15:30',
+                '- 장소: 회의실 B',
+                '- 주최자: 문서 담당 (demo-docs@example.invalid)',
+                '- 상태: 수락, 정기 일정',
                 '',
-                '\uacb9\uce58\ub294 \uad6c\uac04\uc740 30\ubd84\uc785\ub2c8\ub2e4. \uc6d0\ud558\uc2dc\uba74 \ub2e4\uc74c \uc911 \ud558\ub098\ub85c \uc774\uc5b4\uac00\uaca0\uc2b5\ub2c8\ub2e4.',
+                '겹치는 구간은 30분입니다. 원하시면 다음 중 하나로 이어가겠습니다.',
                 '',
-                '1. \ub9ac\ud5c8\uc124\uc744 30\ubd84 \uc55e\ub2f9\uaca8 \uacb9\uce68\uc744 \uc5c6\uc568\ub2e4',
-                '2. \uc810\uac80\uc744 \ub2e4\uc74c \uc2ac\ub86f\uc73c\ub85c \ubbf8\ub8ec\ub2e4',
-                '3. \uc774\ubc88\uc5d4 \uadf8\ub300\ub85c \ub454\ub2e4',
+                '1. 리허설을 30분 앞당겨 겹침을 없앨다',
+                '2. 점검을 다음 슬롯으로 미룬다',
+                '3. 이번엔 그대로 둔다',
               ].join('\n'),
             },
           ],
@@ -940,12 +1246,12 @@ export const scenarios: Record<string, ScenarioEntry> = {
             {
               kind: 'text',
               text: [
-                '\uc2dc\uc791 \uc804 \uc900\ube44\ud560 \uac83\uc744 \uc815\ub9ac\ud588\uc2b5\ub2c8\ub2e4.',
+                '시작 전 준비할 것을 정리했습니다.',
                 '',
-                '- \uc9c0\ub09c \ud68c\ucc28\uc5d0\uc11c \ub118\uc5b4\uc628 \ud56d\ubaa9 2\uac74\uc774 \uc544\uc9c1 \uc5f4\ub824 \uc788\uc2b5\ub2c8\ub2e4.',
-                '- \ub370\ubaa8 \uc2dc\ub098\ub9ac\uc624 \ubb38\uc11c\ub294 \uc5b4\uc81c \uc800\ub141 \uc774\ud6c4 \ubcc0\uacbd\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.',
+                '- 지난 회차에서 넘어온 항목 2건이 아직 열려 있습니다.',
+                '- 데모 시나리오 문서는 어제 저녁 이후 변경이 없습니다.',
                 '',
-                '\uc9c0\uae08 \uc5f4\uc5b4\ub4dc\ub9b4\uae4c\uc694, \uc544\ub2c8\uba74 \uc694\uc57d\ub9cc \uba3c\uc800 \ubcf4\uc2dc\uaca0\uc5b4\uc694?',
+                '지금 열어드릴까요, 아니면 요약만 먼저 보시겠어요?',
               ].join('\n'),
             },
           ],
@@ -994,12 +1300,12 @@ export const scenarios: Record<string, ScenarioEntry> = {
             {
               kind: 'text',
               text: [
-                '\ubbf8\ud305\uc774 \uc885\ub8cc\ub41c \uac83\uc73c\ub85c \ubcf4\uc774\uace0, \uc694\uc57d\ub3c4 \ucda9\ubd84\ud788 \uc815\ub9ac\ub3fc \uc788\uc2b5\ub2c8\ub2e4.',
-                '\uc6d0\ud558\uc2dc\uba74 \ubc14\ub85c \ub2e4\uc74c \uc911 \ud558\ub098\ub97c \uc9c4\ud589\ud558\uaca0\uc2b5\ub2c8\ub2e4.',
+                '미팅이 종료된 것으로 보이고, 요약도 충분히 정리돼 있습니다.',
+                '원하시면 바로 다음 중 하나를 진행하겠습니다.',
                 '',
-                '1. \ud68c\uc758\ub85d\uc744 \uba54\uc77c\ub85c \uacf5\uc720',
-                '2. \uc624\ub298 work-log \uc5d0 \uac1c\uc778 \uae30\ub85d\uc73c\ub85c \ucd94\uac00',
-                '3. \ub458 \ub2e4 \ud558\uc9c0 \uc54a\uace0 \uc5ec\uae30\uc11c \uc885\ub8cc',
+                '1. 회의록을 메일로 공유',
+                '2. 오늘 work-log 에 개인 기록으로 추가',
+                '3. 둘 다 하지 않고 여기서 종료',
               ].join('\n'),
             },
           ],

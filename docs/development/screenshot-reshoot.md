@@ -22,18 +22,20 @@ exercise.
 
 | Verdict | Count | Meaning |
 | --- | --- | --- |
-| `reshoot` | 17 | Must be re-captured. Redaction cannot fix it, or would destroy what the image is there to show. |
+| `reshoot` | 13 | Must be re-captured. Redaction cannot fix it, or would destroy what the image is there to show. |
 | `redact` | 3 | One contiguous region carries the problem and is not the subject of the shot. |
 | `keep` | 21 | Nothing on screen identifies a third party or exposes a credential. |
 | `superseded` | 17 | The internal-portal plugin page and its images are removed by the in-flight de-identification change. No capture work here. |
-| `replaced` | 13 | Re-captured from seeded data by the harness. |
+| `replaced` | 17 | Re-captured from seeded data by the harness. |
 
-Thirteen images have been replaced with seeded captures so far, and the ratchet
-now stands at **19**. Seven of the thirteen moved it: `plugin-permission-grant`
-and the six `work-assistant-*` cards, which between them carried the worst of
-the backlog — two work addresses, a colleague's name, grade and full
-organisational path, and two base64 calendar identifiers from which a mailbox
-identifier is recoverable. The other six replacements were `keep` rows, and
+Seventeen images have been replaced with seeded captures so far, and the ratchet
+now stands at **15**. Eleven of the seventeen moved it: `plugin-permission-grant`,
+the six `work-assistant-*` cards, and the four `meeting-*` panel images, which
+between them carried the worst of the backlog — two work addresses, a
+colleague's name, grade and full organisational path, two base64 calendar
+identifiers from which a mailbox identifier is recoverable, a live conference
+join link printed alongside its password and host key, and a verbatim
+speaker-attributed transcript of a real meeting. The other six replacements were `keep` rows, and
 replacing a `keep` row leaves the backlog count alone by construction (the
 ratchet counts `third-party` entries only). Those six were still worth
 replacing: two of them printed the publisher's own home directory across several
@@ -123,26 +125,26 @@ yet have is coverage.
 ### What it covers, and what it does not
 
 `test/screenshots/matrix.ts` holds 37 entries, one of which (`_smoke-settings-llm`)
-is not a docs-site key. Of the remaining 36, **15 capture end-to-end today**:
+is not a docs-site key. Of the remaining 36, **19 capture end-to-end today**:
 `chat-app-update`, `chat-question-card`, `chat-todo-queue`, `chat-tool-thinking`,
 `chat-permission-directory`, `chat-permission-risk`, `chat-permission-llm-review`,
-`plugin-permission-grant`, `meeting-upcoming`, and the six `work-assistant-*`
-keys. A sixteenth, `local-indexer-home`, is written and correct but gated on a
-machine precondition (below). The rest carry an explicit `skip` with a stated
+`plugin-permission-grant`, `meeting-upcoming`, the three `meeting-minutes*` keys,
+and the six `work-assistant-*` keys. A twentieth, `local-indexer-home`, is
+written and correct but gated on a machine precondition (below). The rest carry an explicit `skip` with a stated
 blocker. Those blockers are real, not missing effort:
 
 | Blocked group | Blocker |
 | --- | --- |
 | `chat-plugin-panel` | The plugin whose panel this key shows does not load in the isolated profile: its bundle's factory spawns a confined child before the ASRT sandbox is active there, so the runtime tears the plugin down. Recorded as reproducing on an unmodified checkout, so it is not caused by this change. |
 | `local-indexer-*` (7) | The bundle's `start()` throws without a provisioned Python interpreter, so the runtime tears the plugin down and no UI provider registers. `LVIS_SCREENSHOT_REAL_PYTHON=1` supplies one by reusing a venv the host already built (no network, no compile), which fixes the interpreter half. Two machine preconditions remain and are the reason `local-indexer-home` still skips by default: a venv for this plugin's exact requirements lock must already exist under the real `~/.lvis/runtime/python-envs/`, and TCP `127.0.0.1:43129` must be free. **That port is hardcoded** (`port: options.port ?? 43129`), `hostPlugin.ts` never passes one, and the plugin's `configSchema` exposes no field for it — so a second LVIS instance on the same machine cannot run local-indexer at all. That is a product limitation, not a harness one, and it is worth an issue in the plugin repo independently of screenshots. |
-| `meeting-*` minutes / recorder (7) | Live inside the plugin `<webview>`, which Playwright cannot click through, and need a completed transcription or mail authorisation to populate. |
+| `meeting-*` recorder / mail (4) | `meeting-record` and `meeting-record-stt` need a live microphone and a completed transcription; `meeting-outlook-mail*` needs an authorised mailbox. The `<webview>` is no longer part of this blocker — see `waitInPluginGuest`. |
 | `outlook-*` (4) | The manifest declares a login tool, so selecting the panel goes straight to a live authorisation window. |
 | `agent-hub-*` (2) | No such plugin bundle exists in the workspace. |
 
-`meeting-upcoming` captures, but only in its empty state, with the plugin's
-first-tool-call approval dock over the lower half of the frame. Its caption
-promises a populated agenda, so that capture is **not** a usable replacement and
-the image stays in the backlog.
+`meeting-upcoming` and the three `meeting-minutes*` keys capture the real plugin
+panel over a fabricated corpus written straight into the plugin's own stores —
+one prep in `preps.json`, one finalised session under `sessions/`. Both were
+previously recorded as blocked, and both blockers were wrong; see item 4 below.
 
 The `mp-*`, `ah-*` and internal-portal keys are web/server screens from a
 separate app and are out of the harness's scope by construction — but note that
@@ -177,10 +179,28 @@ that buys the most coverage per unit of work:
    With that port held by another LVIS instance, `local-indexer-home` fails
    rather than skips, so it stays skipped unless the flag is set.
 
-What remains genuinely out of this repository's reach: the `meeting-*` minutes
-and recorder keys (inside the plugin `<webview>`, needing a completed
-transcription or mail authorisation), the `outlook-*` keys (a live Microsoft
-authorisation window), and `agent-hub-*` (no bundle exists). Until those change,
+4. **The plugin `<webview>` guest is reachable — from the main process.** The
+   earlier pass recorded the four `meeting-*` panel keys as unreachable on two
+   counts, both of them wrong. Playwright cannot query a `<webview>`: from the
+   renderer's side the guest is an element with no children. Electron can —
+   `webContents.getAllWebContents()` returns the guest as a first-class
+   `WebContents` and `executeJavaScript` runs in its document, which is the same
+   `app.evaluate` channel the harness already used for IPC seeding, pointed one
+   frame deeper. `waitInPluginGuest` in `matrix.ts` is that one helper: it waits
+   for a control by selector and text, and optionally clicks it. The second
+   count — that a populated minutes body needs a completed recording — was
+   aiming past the store. `SessionStore` keeps one JSON file per finished
+   session under the plugin's data directory, so a fabricated finalised session
+   seeds exactly the state a real recording would have left, with no audio
+   anywhere in the path. Synthesised mouse clicks at window coordinates were
+   tried first and are recorded here as a dead end: they reach the guest, but
+   not dependably — measured against the same frame, a click activated one
+   control and passed straight through the one 40px above it.
+
+What remains genuinely out of this repository's reach: `meeting-record` and
+`meeting-record-stt` (a live microphone and a completed transcription),
+`meeting-outlook-mail*` (an authorised mailbox), the `outlook-*` keys (a live
+Microsoft authorisation window), and `agent-hub-*` (no bundle exists). Until those change,
 the affected images have to be captured by hand — in which case they must be
 captured **on a machine that does not apply the identity overlay, signed into a
 demo identity, with a fabricated corpus**, and then amplification-checked before
@@ -188,7 +208,7 @@ they are committed.
 
 ## Worklist
 
-### `reshoot` — 17
+### `reshoot` — 13
 
 Shared preconditions for every row here: capture on a machine that does not
 apply the identity overlay; sign in with a demo identity, never a working
@@ -203,10 +223,6 @@ the result before committing.
 | `local-indexer-search-2.webp` | `local-indexer-search-2` | `/docs/plugins/local-indexer` | **Highest severity in this list.** The answer body is a full network path: internal file-server host, an administrative share, an individual's account name, and their work directory. The caption advertises "the exact path" as the feature, so redaction removes the subject. Retake against a fabricated share whose host and account are invented. |
 | `local-indexer-search-3.webp` | `local-indexer-search-3` | `/docs/plugins/local-indexer` | Reformats the same internal project material. Retake as the third step of the fabricated-corpus sequence so all three read as one flow. |
 | `local-indexer-index-search.png` | `local-indexer-index-search` | `/docs/plugins/local-indexer` | Internal work path plus a description of an internal architecture diagram. Retake against the fabricated corpus. |
-| `meeting-upcoming.png` | `meeting-upcoming` | `/docs/plugins/meeting` | **Highest severity in this list.** Carries live conferencing credentials — a join link with an embedded meeting identifier, a meeting password, a host key and a meeting key — plus an organiser's name and two attendees' names, grades and full organisational paths. Retake with a fabricated meeting and invented credentials. The harness captures this key today, in its empty state. |
-| `meeting-minutes.png` | `meeting-minutes` | `/docs/plugins/meeting` | Body is a real internal meeting summary under its real title. Retake from a fabricated recording. |
-| `meeting-minutes-2.png` | `meeting-minutes-2` | `/docs/plugins/meeting` | Interim summaries of the same real meeting, including a named outside company. Retake from the same fabricated recording. |
-| `meeting-minutes-3.png` | `meeting-minutes-3` | `/docs/plugins/meeting` | Verbatim speaker-attributed transcript of a real meeting. This is other people's recorded speech; nothing short of a new recording fixes it. |
 | `meeting-outlook-mail.png` | `meeting-outlook-mail` | `/docs/host/integration-recipes` | **Highest severity in this list.** Two recipients with names, grades and full organisational paths, and a sender signature block carrying a department chain and a direct mobile number. Retake with fabricated recipients and a demo signature. |
 | `meeting-outlook-mail-2.png` | `meeting-outlook-mail-2` | `/docs/host/integration-recipes` | Same recipients; signature partly in frame. Retake as the second step of the same fabricated flow. |
 | `outlook-login-trigger.png` | `outlook-login-trigger` | `/docs/plugins/ms-graph` | A work address, colleague names, room and building codes and an organisational path — **and the identity overlay is drawn diagonally across the answer text**. This is the clearest case in the set that redaction cannot solve. Retake against a demo mailbox. |
@@ -231,7 +247,7 @@ screenshot exists to show.
 | `agent-hub-team-board.png` | `agent-hub-team-board` | `/docs/plugins/agent-hub` | Same shape: seeded team rows, real right-hand schedule column. Mask the right column only. Same decommissioning question applies. |
 | `mp-admin-4.png` | `mp-admin-4` | `/docs/servers/marketplace/admin` | Mask the `Prefix` column of the key table. The screenshot exists to show that an admin can inventory and revoke keys, which the labels, roles, statuses and dates carry on their own. *Disagreement with the earlier pass: this is not clean. These are project-owned development keys on a server that rotates them, so exploitability is low and this is not an incident — but publishing a truncated prefix narrows a guess, and an admin key inventory should not be public regardless.* |
 
-### `replaced` — 13
+### `replaced` — 17
 
 Captured by the harness from seeded data, amplification-checked, and recorded in
 the manifest as `seeded` under the `host-capture-seed` account. Re-capture one
@@ -256,13 +272,29 @@ otherwise byte-identical.
 | `work-assistant-reminder-2.png` | `work-assistant-reminder-2` | Its confirmed state, showing the provenance bubble and a scripted prep summary. Replaces the second frame with a recoverable calendar identifier. |
 | `work-assistant-meeting-end-trigger.png` | `work-assistant-meeting-end-trigger` | A fabricated meeting-end summary card. |
 | `work-assistant-meeting-end-trigger-2.png` | `work-assistant-meeting-end-trigger-2` | Its confirmed state with the follow-up options. Replaces a frame of internal commercial subject matter. |
+| `meeting-upcoming.png` | `meeting-upcoming` | The real upcoming-meeting panel over a fabricated prep seeded into `preps.json`. Replaces the frame that printed a live conference join link next to its meeting password, host key and meeting key, plus three people's names, grades and organisational paths. |
+| `meeting-minutes.png` | `meeting-minutes` | The minutes detail view of a fabricated finalised session: summary, highlights, action items. |
+| `meeting-minutes-2.png` | `meeting-minutes-2` | The 중간 리파인 sub-tab of the same session — two intermediate summaries over a growing prefix of the transcript. |
+| `meeting-minutes-3.png` | `meeting-minutes-3` | The 전사 sub-tab of the same session — eight invented utterances across three role-labelled speakers. Replaces a verbatim transcript of other people's recorded speech. |
 
-`plugin-permission-grant` is the one row here that needs more than this
-repository: its panel comes from a sibling plugin repo, whose `dist/` is not
-committed, so that clone has to be present and built (`bun install && bun run
-build`) before the harness can seed it. Without it the harness reports the
-bundle missing and the key captures nothing. The six `chat-*` and six
+`plugin-permission-grant` and the four `meeting-*` rows are the ones that need
+more than this repository: their panels come from sibling plugin repos, whose
+`dist/` is not committed, so that clone has to be present and built (`bun install
+&& bun run build`) before the harness can seed it. Without it the harness reports
+the bundle missing and the key captures nothing. The six `chat-*` and six
 `work-assistant-*` rows need no sibling clone.
+
+The four `meeting-*` captures also run at a 1120px viewport rather than the
+default 1600px, and that is load-bearing rather than cosmetic. The page shell
+caps a plugin view at its 58rem reading column, and this guest reserves a fixed
+left gutter inside its own viewport: measured at a 1600px window the `<webview>`
+is 912px, the guest starts its card 481px in and lays it out 477px wide, so the
+last 46px — the right edge of every card and control — falls off the element. At
+1120px the `<webview>` is 833px, close to the ~800px the host comment in
+`plugin-ui-host.tsx` says these panels were authored for, and everything fits.
+**That overflow is a real responsive bug in the plugin guest, not a harness
+artefact**, and is worth an issue in the plugin repo independently of
+screenshots.
 
 Every string in the six `work-assistant-*` captures is invented in `matrix.ts`
 rather than read from anything on the capturing machine, and every address in
@@ -330,8 +362,9 @@ merges.
 3. Apply the three `redact` masks. Cheap, and removes real exposure immediately.
 4. Re-shoot the six `work-assistant-*` images (done — see the `replaced` table).
    Highest concentration of third-party content, and all six went at once.
-5. Re-shoot the `meeting-*` and `outlook-*` clusters against a demo mailbox and a
-   fabricated recording.
+5. Re-shoot the `meeting-*` panel keys against a fabricated corpus (done — see
+   the `replaced` table). The rest of the `meeting-*` and `outlook-*` clusters
+   need a demo mailbox and a real recording, which this repository cannot supply.
 6. Re-shoot the seven `local-indexer-*` images against a fabricated corpus, on a
    machine that satisfies both preconditions in the blocked-group table.
 7. Lower `pendingReplacementBaseline` with each batch. The gate fails if the
