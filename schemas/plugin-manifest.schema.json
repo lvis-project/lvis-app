@@ -166,26 +166,35 @@
       "properties": {
         "allowedDomains": {
           "type": "array",
-          "description": "Hostnames the plugin may reach via hostApi.hostFetch. Dot-boundary suffix-match allow-list ('openai.azure.com' allows 'x.openai.azure.com' but not 'openai.azure.com.attacker.com'). Lowercase ASCII hostnames, >=1 dot, RFC1035 label/length bounds; wildcards / URLs / ports / whitespace / IDN-punycode (xn--*) / bare public suffixes are rejected — mirrors the host's load-time validator and the auth.partitionDomains rules so manifest-publish surfaces them before runtime. Max 16. The host re-validates at every hostFetch call.",
+          "description": "Hostnames the plugin may reach via hostApi.hostFetch. Dot-boundary suffix-match allow-list ('openai.azure.com' allows 'x.openai.azure.com' but not 'openai.azure.com.attacker.com'). Lowercase ASCII hostnames, >=1 dot, RFC1035 label/length bounds; wildcards / URLs / ports / whitespace / IDN-punycode (xn--*) / bare public suffixes are rejected — mirrors the host's load-time validator and the auth.partitionDomains rules so manifest-publish surfaces them before runtime. The loopback literals 'localhost', '127.0.0.1' and '::1' may also be declared, for an endpoint the user runs on their own machine. Max 16. The host re-validates at every hostFetch call.",
           "minItems": 1,
           "maxItems": 16,
           "uniqueItems": true,
           "items": {
-            "allOf": [
+            "anyOf": [
               {
+                "description": "Loopback literals — the local machine, declared by name so a plugin can reach an endpoint the user runs there (LM Studio / LiteLLM / an internal proxy). Exact literals only: 'foo.localhost' carries a dot and goes through the ordinary rules below. Declaring one is what lets the host permit cleartext http to that host, since those bytes never leave the machine; the host still proves the name resolves to loopback, and the declaration opens neither the LAN (see allowPrivateNetworks) nor any other host.",
                 "type": "string",
-                "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$",
-                "not": { "pattern": "[\\r\\n]" },
-                "minLength": 3,
-                "maxLength": 253
+                "enum": ["localhost", "127.0.0.1", "::1"]
               },
               {
-                "not": {
-                  "enum": ["com", "net", "org", "kr", "co.kr", "or.kr", "go.kr", "io", "ai", "dev", "app"]
-                }
-              },
-              {
-                "not": { "type": "string", "pattern": "(^|\\.)xn--" }
+                "allOf": [
+                  {
+                    "type": "string",
+                    "pattern": "^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$",
+                    "not": { "pattern": "[\\r\\n]" },
+                    "minLength": 3,
+                    "maxLength": 253
+                  },
+                  {
+                    "not": {
+                      "enum": ["com", "net", "org", "kr", "co.kr", "or.kr", "go.kr", "io", "ai", "dev", "app"]
+                    }
+                  },
+                  {
+                    "not": { "type": "string", "pattern": "(^|\\.)xn--" }
+                  }
+                ]
               }
             ]
           }
@@ -196,7 +205,7 @@
         },
         "allowPrivateNetworks": {
           "type": "boolean",
-          "description": "Governance opt-in for allow-listed intranet/private-network egress. Applies to host-mediated hostApi.hostFetch and explicitly documented browser/direct intranet exceptions; loopback/link-local/metadata addresses remain denied by host guards where applicable."
+          "description": "Governance opt-in for allow-listed intranet/private-network (RFC1918/ULA) egress. Applies to host-mediated hostApi.hostFetch and explicitly documented browser/direct intranet exceptions; link-local and metadata addresses remain denied by host guards. Loopback is a separate axis this flag neither grants nor requires — declare the loopback literal in allowedDomains instead."
         }
       }
     },

@@ -236,7 +236,12 @@ export async function parsePluginJson(
       try {
         parsed.networkAccess = {
           ...parsed.networkAccess,
-          allowedDomains: normalizeAllowedHosts(allowedDomainsRaw),
+          // `allowLoopback` admits the `localhost` / `127.0.0.1` / `::1`
+          // literals a plugin uses to declare a local endpoint (a user-run
+          // inference server or proxy). Declaring one is not reachability —
+          // `host-fetch-guard.ts` still decides that — but the literal has to
+          // survive normalization or the declaration cannot be written at all.
+          allowedDomains: normalizeAllowedHosts(allowedDomainsRaw, { allowLoopback: true }),
         };
       } catch (err) {
         fail(

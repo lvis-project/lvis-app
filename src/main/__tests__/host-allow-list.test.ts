@@ -8,6 +8,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isLoopbackHost,
   normalizeAllowedHosts,
   normalizeHost,
   urlHostMatchesAllowList,
@@ -54,6 +55,23 @@ describe("normalizeAllowedHosts", () => {
       expect(
         normalizeAllowedHosts(["localhost", "127.0.0.1", "::1"], { allowLoopback: true }),
       ).toEqual(["localhost", "127.0.0.1", "::1"]);
+    });
+
+    it("accepts the bracketed IPv6 spelling as the same literal", () => {
+      expect(normalizeAllowedHosts(["[::1]"], { allowLoopback: true })).toEqual(["::1"]);
+      expect(urlHostMatchesAllowList(new URL("http://[::1]:1234/").hostname, ["::1"])).toBe(true);
+    });
+
+    it("recognizes the loopback literals by name, and nothing else", () => {
+      expect(isLoopbackHost("localhost")).toBe(true);
+      expect(isLoopbackHost("LOCALHOST")).toBe(true);
+      expect(isLoopbackHost("127.0.0.1")).toBe(true);
+      expect(isLoopbackHost("[::1]")).toBe(true);
+      expect(isLoopbackHost("::1")).toBe(true);
+      // A name that merely resolves to loopback is not a loopback literal.
+      expect(isLoopbackHost("foo.localhost")).toBe(false);
+      expect(isLoopbackHost("api.example.com")).toBe(false);
+      expect(isLoopbackHost("127.0.0.2")).toBe(false);
     });
 
     it("still refuses non-loopback single-label hosts", () => {
