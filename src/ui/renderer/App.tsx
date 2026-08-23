@@ -675,7 +675,12 @@ export function App() {
   // the uninstalled-plugin fallback), extracted as ONE unit. Routing no longer
   // reads appMode: every view renders inline in every mode. See
   // use-plugin-view-routing.ts.
-  const { handleViewSelect, activePluginView, activePluginAuthError } = usePluginViewRouting({
+  const {
+    handleViewSelect,
+    activePluginView,
+    activePluginPreparing,
+    activePluginAuthError,
+  } = usePluginViewRouting({
     api, t, activeView, setActiveView,
     pluginViews, pluginCards, pluginAuthStatuses, refreshPluginAuthStatus,
     statusPushToast,
@@ -1562,6 +1567,7 @@ export function App() {
                         return (
                           <PluginUiHostView
                             view={activePluginView ?? null}
+                            preparing={activePluginPreparing}
                             authError={activePluginAuthError ?? null}
                           />
                         );

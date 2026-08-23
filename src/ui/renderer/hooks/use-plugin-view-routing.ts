@@ -44,7 +44,20 @@ export interface UsePluginViewRoutingDeps {
 export interface UsePluginViewRoutingResult {
   handleViewSelect: (key: string) => void;
   activePluginView: PluginView | undefined;
+  /** The open plugin view's runtime is still starting — see the memo below. */
+  activePluginPreparing: boolean;
   activePluginAuthError: string | null;
+}
+
+/**
+ * Is this plugin still starting up?
+ *
+ * One reading of `loadStatus`, shared by the two places that ask: the
+ * selection handler, which must not refuse a click on a preparing plugin's
+ * row, and the fallback-to-home effect, which must not undo that navigation.
+ */
+function isPluginPreparing(cards: PluginCards, pluginId: string): boolean {
+  return cards.some((card) => card.id === pluginId && card.loadStatus === "preparing");
 }
 
 /**
@@ -90,6 +103,18 @@ export function usePluginViewRouting({
 
   const activePluginView = useMemo(() => pluginViews.find((i) => toViewKey(i) === activeView), [pluginViews, activeView]);
   const activePluginAuthError = activePluginView ? pluginAuthErrors.get(activePluginView.pluginId) ?? null : null;
+  /**
+   * The open view names a plugin whose runtime has not finished starting, so
+   * its view is not registered yet. The panel is a destination the user asked
+   * for, not a missing one: the host shows its loading state, and the view
+   * takes over the moment `pluginViews` gains it.
+   */
+  const activePluginPreparing = useMemo(() => {
+    if (activePluginView) return false;
+    const parsed = parseInlineViewKey(activeView);
+    if (parsed?.kind !== "plugin") return false;
+    return isPluginPreparing(pluginCards, parsed.pluginId);
+  }, [activePluginView, activeView, pluginCards]);
 
   const clearPluginAuthError = useCallback((pluginId: string) => {
     setPluginAuthErrors((prev) => {
@@ -143,27 +168,36 @@ export function usePluginViewRouting({
 
       if (parsed.kind === "plugin") {
         const view = pluginViews.find((v) => toViewKey(v) === key);
-        if (!view) return;
-        const card = pluginCards.find((c) => c.id === view.pluginId);
+        const card = pluginCards.find((c) => c.id === parsed.pluginId);
+        // A plugin that is still preparing has a row in the picker — App builds
+        // those from `card.uiExtensions` precisely so a user can reach a plugin
+        // whose runtime has not finished starting — but no entry in
+        // `pluginViews` yet, because the view is registered by the runtime.
+        // Refusing the selection here dropped that click on the floor: the
+        // picker closed, nothing opened, and nothing brought the user back when
+        // the view landed a few seconds later. Open the destination instead and
+        // let the host paint its loading state until the view registers.
+        if (!view && !isPluginPreparing(pluginCards, parsed.pluginId)) return;
+        const pluginId = view?.pluginId ?? parsed.pluginId;
         const loginTool = card?.auth?.loginTool;
-        const authState = pluginAuthStatuses.get(view.pluginId)?.kind;
+        const authState = pluginAuthStatuses.get(pluginId)?.kind;
         const openPluginView = () => {
           // Always inline, regardless of appMode.
           setActiveView(parsed.key);
         };
 
         if (!loginTool || authState === "authed") {
-          clearPluginAuthError(view.pluginId);
-          failedPluginAuthOpenRef.current.delete(view.pluginId);
+          clearPluginAuthError(pluginId);
+          failedPluginAuthOpenRef.current.delete(pluginId);
           openPluginView();
           return;
         }
 
-        pendingInlineAuthOpenRef.current.set(view.pluginId, parsed.key);
-        clearPluginAuthError(view.pluginId);
-        failedPluginAuthOpenRef.current.delete(view.pluginId);
+        pendingInlineAuthOpenRef.current.set(pluginId, parsed.key);
+        clearPluginAuthError(pluginId);
+        failedPluginAuthOpenRef.current.delete(pluginId);
 
-        const inflightKey = `${view.pluginId}:${loginTool}`;
+        const inflightKey = `${pluginId}:${loginTool}`;
         if (pluginAuthLoginInflightRef.current.has(inflightKey)) {
           return;
         }
@@ -171,20 +205,20 @@ export function usePluginViewRouting({
         void (async () => {
           try {
             await api.callPluginMethod(loginTool, undefined, { userAction: true });
-            refreshPluginAuthStatus(view.pluginId);
+            refreshPluginAuthStatus(pluginId);
           } catch (err) {
             // Raw err.message may carry OAuth/Bearer fragments — keep raw in
             // console only, and surface a sanitized code-oriented message.
             console.warn(
-              `[plugin-auth] ${view.pluginId} loginTool '${loginTool}' failed`,
+              `[plugin-auth] ${pluginId} loginTool '${loginTool}' failed`,
               err,
             );
-            pendingInlineAuthOpenRef.current.delete(view.pluginId);
-            failedPluginAuthOpenRef.current.add(view.pluginId);
+            pendingInlineAuthOpenRef.current.delete(pluginId);
+            failedPluginAuthOpenRef.current.add(pluginId);
             const message = formatPluginAuthLoginError(err);
             setPluginAuthErrors((prev) => {
               const next = new Map(prev);
-              next.set(view.pluginId, message);
+              next.set(pluginId, message);
               return next;
             });
             statusPushToast({ severity: "error", message, ttlMs: 10000 });
@@ -246,12 +280,15 @@ export function usePluginViewRouting({
 
   // If the currently-open plugin view belongs to a plugin that just got
   // uninstalled, fall back to home so the renderer doesn't render a "view
-  // not found" placeholder for a stale plugin id.
+  // not found" placeholder for a stale plugin id. A plugin that is merely
+  // still starting is not that case — leaving it here would undo the
+  // navigation `handleViewSelect` just made for a preparing plugin.
   useEffect(() => {
     if (!activeView.startsWith("plugin:")) return;
     if (activePluginView) return;
+    if (activePluginPreparing) return;
     setActiveView("home");
-  }, [activeView, activePluginView, setActiveView]);
+  }, [activeView, activePluginView, activePluginPreparing, setActiveView]);
 
-  return { handleViewSelect, activePluginView, activePluginAuthError };
+  return { handleViewSelect, activePluginView, activePluginPreparing, activePluginAuthError };
 }

@@ -12,14 +12,19 @@ describe("App plugin auth routing", () => {
   // the plugin's view row by its label. The auth/detach SECURITY behavior under
   // test is unchanged — selection still routes through the same App
   // handleViewSelect path — only the UI affordance moved.
-  const openPluginCategory = async (user: ReturnType<typeof userEvent.setup>) => {
+  // One call site for the harness. `userEvent`'s default export does not
+  // typecheck under this repo's NodeNext resolution (`tsconfig.tests.json`
+  // covers tests; the root config does not), and the diagnostic used to be
+  // repeated once per test — nine copies of one known gap. Naming the helper
+  // keeps it to one, and gives the two picker helpers a type to take.
+  const makeUser = () => userEvent.setup();
+  type PickerUser = ReturnType<typeof makeUser>;
+
+  const openPluginCategory = async (user: PickerUser) => {
     await user.click(screen.getByTestId("command-popover-trigger"));
     await user.click(await screen.findByTestId("slash-picker-cat-plugin"));
   };
-  const selectPluginView = async (
-    user: ReturnType<typeof userEvent.setup>,
-    label: string,
-  ) => {
+  const selectPluginView = async (user: PickerUser, label: string) => {
     await openPluginCategory(user);
     // Scope the row lookup to the picker's plugin group — the plugin's own
     // title can also appear elsewhere in the tree (e.g. a loaded inline view).
@@ -64,7 +69,7 @@ describe("App plugin auth routing", () => {
     // registered plugin cells"). At the App level after #1311 the contract is:
     // a preparing plugin card that declares a UI extension still appears as a
     // reachable entry inside the SlashPicker's 플러그인 category.
-    const user = userEvent.setup();
+    const user = makeUser();
     const { api } = await renderApp({
       pluginCards: [
         {
@@ -105,10 +110,61 @@ describe("App plugin auth routing", () => {
     expect(await within(group).findByText("로컬 인덱서")).toBeInTheDocument();
   });
 
+  it("opens a preparing plugin's panel on selection instead of dropping the click", async () => {
+    // The row above is reachable, and selecting it used to do nothing at all:
+    // `handleViewSelect` refused any key with no entry in `pluginViews`, and a
+    // preparing plugin has not registered its view yet. The picker closed, the
+    // app stayed where it was, and nothing opened the panel when the view
+    // landed seconds later — the first-run symptom was "clicking the plugin
+    // does nothing". The destination opens now and waits.
+    const user = makeUser();
+    const { api } = await renderApp({
+      pluginCards: [
+        {
+          id: "local-indexer",
+          name: "LVIS Local Indexer",
+          description: "Indexes local documents",
+          sampleTools: [],
+          capabilities: [],
+          tools: [],
+          loadStatus: "preparing",
+          preparationStatus: {
+            phase: "installing-python",
+            message: "Python 3.12 설치 중...",
+            progressPct: 10,
+            updatedAt: "2026-05-21T00:00:00.000Z",
+          },
+          icon: "Plug",
+          uiExtensions: [
+            {
+              id: "local-indexer-control",
+              slot: "sidebar",
+              kind: "embedded-module",
+              title: "로컬 인덱서",
+              entry: "dist/ui/indexer-control.js",
+            },
+          ],
+        },
+      ],
+      pluginUiExtensions: [],
+    });
+
+    await waitFor(() => {
+      expect(api.listPluginCards).toHaveBeenCalled();
+    });
+
+    await selectPluginView(user, "로컬 인덱서");
+
+    // The panel surface is on screen, showing the host's loading state rather
+    // than "플러그인 뷰를 찾을 수 없습니다." — which is what a missing view means.
+    expect(await screen.findByText("로딩 중...")).toBeInTheDocument();
+    expect(screen.queryByText("플러그인 뷰를 찾을 수 없습니다.")).toBeNull();
+  });
+
   // Plugin views ALWAYS render inline. The shared top toolbar owns navigation;
   // the plugin page heading proves the inline host rendered.
   it("unauthenticated auth plugin → host fires loginTool and does NOT navigate the panel (login-first)", async () => {
-    const user = userEvent.setup();
+    const user = makeUser();
     const { api } = await renderApp(authPluginFixture);
     api.callPluginMethod.mockImplementation(async (tool: string) =>
       tool === "token_status" ? { authenticated: false } : { ok: true },
@@ -129,7 +185,7 @@ describe("App plugin auth routing", () => {
   });
 
   it("authenticated auth plugin → navigates the panel inline without firing loginTool", async () => {
-    const user = userEvent.setup();
+    const user = makeUser();
     const { api } = await renderApp(authPluginFixture);
     api.callPluginMethod.mockImplementation(async (tool: string) =>
       tool === "token_status" ? { authenticated: true } : { ok: true },
@@ -146,7 +202,7 @@ describe("App plugin auth routing", () => {
   });
 
   it("login completes → navigates the deferred inline panel on the unauthed→authed transition", async () => {
-    const user = userEvent.setup();
+    const user = makeUser();
     const { api, emitPluginEvent } = await renderApp(authPluginFixture);
     // Start unauthenticated.
     let authed = false;
@@ -178,7 +234,7 @@ describe("App plugin auth routing", () => {
   });
 
   it("login failure keeps the plugin panel closed and surfaces a safe auth error code as a toast", async () => {
-    const user = userEvent.setup();
+    const user = makeUser();
     const { api, emitPluginEvent } = await renderApp(authPluginFixture);
     const nonCorpError = Object.assign(new Error("[non-corp-network] outside corporate network"), {
       code: "non-corp-network",
@@ -217,7 +273,7 @@ describe("App plugin auth routing", () => {
   });
 
   it("command-palette plugin actions navigate inline (authed), never detaching", async () => {
-    const user = userEvent.setup();
+    const user = makeUser();
     const { api } = await renderApp(authPluginFixture);
     // Authed so the command-palette selection navigates the view (an unauthed
     // auth plugin would route to loginTool instead).
@@ -276,7 +332,7 @@ describe("App plugin auth routing", () => {
       tool === "oauth_status" ? { authenticated: authed } : { authenticated: true },
     );
 
-    const user = userEvent.setup();
+    const user = makeUser();
     await selectPluginView(user, "OAuth Plugin");
 
     await waitFor(() => {
@@ -299,7 +355,7 @@ describe("App plugin auth routing", () => {
     // user on their previous view. The fix navigates inline regardless; the
     // plugin surface shows its own auth affordance. No detachment, and the host
     // does not fabricate a loginTool call.
-    const user = userEvent.setup();
+    const user = makeUser();
     const { api } = await renderApp({
       pluginCards: [
         {
