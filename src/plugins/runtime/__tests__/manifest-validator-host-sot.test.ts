@@ -368,6 +368,45 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     ).toBe(true);
   });
 
+  it("accepts the loopback literals in networkAccess.allowedDomains", async () => {
+    const validator = await buildManifestValidator();
+    expect(
+      validator({
+        id: "local-endpoint-plugin",
+        name: "Local Endpoint Plugin",
+        version: "1.0.0",
+        description: "Local inference endpoint fixture.",
+        publisher: "LVIS",
+        entry: "dist/index.js",
+        tools: [],
+        networkAccess: {
+          allowedDomains: ["localhost", "127.0.0.1", "::1", "api.example.com"],
+          reasoning: "A local inference server the user configures.",
+        },
+      }),
+    ).toBe(true);
+  });
+
+  it("still rejects single-label hosts that are not loopback literals", async () => {
+    const validator = await buildManifestValidator();
+    // The loopback exemption is three exact literals — it is not a general
+    // relaxation of the one-dot rule that stops a bare label blanket-matching.
+    for (const host of ["intranet", "localhost.", "::2", "127.0.0.1:1234"]) {
+      expect(
+        validator({
+          id: "local-endpoint-plugin",
+          name: "Local Endpoint Plugin",
+          version: "1.0.0",
+          description: "Local inference endpoint fixture.",
+          publisher: "LVIS",
+          entry: "dist/index.js",
+          tools: [],
+          networkAccess: { allowedDomains: [host] },
+        }),
+      ).toBe(false);
+    }
+  });
+
   // "Declared POLICY, served CONTENT": a uiResources[] entry declares the uri +
   // the resource's security policy. The card HTML is NOT a manifest field — the
   // plugin serves its own bytes (RuntimePlugin.readUiResource), so `uri` is the

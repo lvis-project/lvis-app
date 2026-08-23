@@ -339,15 +339,23 @@ export interface PluginManifest {
    * `host-allow-list.ts`). Deny-by-default: absent or empty ⇒ no egress is
    * permitted. `reasoning` is a human-readable justification surfaced to the
    * user at install for broad grants.
+   *
+   * The loopback literals `localhost`, `127.0.0.1` and `::1` may be declared
+   * here (exact literals only — `foo.localhost` goes through the normal rules).
+   * Declaring one is what lets a plugin reach a local endpoint the user
+   * configured, cleartext http included, since those bytes never leave the
+   * machine; the host still proves the name resolves to loopback before
+   * allowing it, and the grant extends to nothing else.
    */
   networkAccess?: {
     allowedDomains: string[];
     reasoning?: string;
     /**
      * Declarative, user-approved governance opt-in for reaching private-network
-     * allow-listed hosts through host-mediated egress or an explicitly
-     * documented browser/direct intranet exception. Loopback/link-local/metadata
-     * addresses remain denied by host guards where applicable.
+     * (RFC1918 / ULA) allow-listed hosts through host-mediated egress or an
+     * explicitly documented browser/direct intranet exception. Link-local and
+     * metadata addresses remain denied by host guards; loopback is a separate
+     * axis this flag neither grants nor requires — see `allowedDomains` above.
      */
     allowPrivateNetworks?: boolean;
   };

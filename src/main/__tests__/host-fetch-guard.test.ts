@@ -232,3 +232,148 @@ describe("evaluateHostFetch — allowPrivateNetworks governance opt-in", () => {
     if (!decision.ok) expect(decision.reason).toBe("ssrf-blocked");
   });
 });
+
+describe("evaluateHostFetch — declared loopback endpoint (local inference server)", () => {
+  // What a user pointing a plugin at LM Studio / LiteLLM / a local proxy has:
+  // a manifest that names the local machine, and a server that speaks http.
+  const LOCAL = ["localhost", "127.0.0.1", "::1", "api.example.com"];
+
+  it("allows cleartext http to a declared 127.0.0.1 endpoint", async () => {
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://127.0.0.1:1234/v1/embeddings",
+      method: "POST",
+      allowedDomains: LOCAL,
+    });
+    expect(decision.ok).toBe(true);
+    if (decision.ok) expect(decision.effect).toBe("write");
+    // An IP literal is its own resolution — no name to rebind, no lookup.
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it("allows cleartext http to a declared localhost that resolves to loopback", async () => {
+    lookupMock.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://localhost:1234/v1/embeddings",
+      allowedDomains: LOCAL,
+    });
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows https to the same declared loopback endpoint", async () => {
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://127.0.0.1:8443/v1/embeddings",
+      allowedDomains: LOCAL,
+    });
+    expect(decision.ok).toBe(true);
+  });
+
+  it("matches a declared `::1` against the bracketed URL host", async () => {
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://[::1]:1234/v1/embeddings",
+      allowedDomains: LOCAL,
+    });
+    expect(decision.ok).toBe(true);
+  });
+
+  it("denies cleartext http to loopback the manifest never declared", async () => {
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://127.0.0.1:1234/v1/embeddings",
+      allowedDomains: ALLOW,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("non-https");
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it("denies https to loopback the manifest never declared", async () => {
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://127.0.0.1:8443/x",
+      allowedDomains: ALLOW,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("not-allowlisted");
+  });
+
+  it("denies cleartext http to a declared localhost that resolves off-machine", async () => {
+    // Poisoned hosts file / rebinding answer: the literal was declared, but the
+    // request would leave the machine, so the https rule applies again.
+    lookupMock.mockResolvedValue([{ address: "203.0.113.7", family: 4 }]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://localhost:1234/v1/embeddings",
+      allowedDomains: LOCAL,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) {
+      expect(decision.reason).toBe("non-https");
+      expect(decision.detail).toContain("does not resolve to loopback");
+    }
+  });
+
+  it("denies cleartext http to a declared localhost that resolves to loopback AND a routable address", async () => {
+    lookupMock.mockResolvedValue([
+      { address: "127.0.0.1", family: 4 },
+      { address: "203.0.113.7", family: 4 },
+    ]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://localhost:1234/v1/embeddings",
+      allowedDomains: LOCAL,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("non-https");
+  });
+
+  it("denies cleartext http to a sub-label of a declared localhost", async () => {
+    // `foo.localhost` dot-boundary-matches the allow-list entry, but it is not
+    // the loopback literal — the exemption is by name, not by suffix.
+    lookupMock.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://foo.localhost/x",
+      allowedDomains: LOCAL,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("non-https");
+  });
+
+  it("keeps cleartext denied for an ordinary allow-listed host, even with allowPrivateNetworks", async () => {
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://api.example.com/x",
+      allowedDomains: LOCAL,
+      allowPrivateNetworks: true,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("non-https");
+    expect(lookupMock).not.toHaveBeenCalled();
+  });
+
+  it("does not let a declared loopback endpoint open the LAN for other hosts", async () => {
+    lookupMock.mockResolvedValue([{ address: "10.0.0.5", family: 4 }]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://api.example.com/x",
+      allowedDomains: LOCAL,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("ssrf-blocked");
+  });
+
+  it("does not let a declared loopback endpoint rebind an ordinary host onto the machine", async () => {
+    lookupMock.mockResolvedValue([{ address: "127.0.0.1", family: 4 }]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://api.example.com/x",
+      allowedDomains: LOCAL,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("ssrf-blocked");
+  });
+});

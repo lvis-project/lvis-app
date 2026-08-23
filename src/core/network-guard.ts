@@ -159,6 +159,30 @@ export async function ensurePublicHttpUrl(
 }
 
 /**
+ * Does `host` land EXCLUSIVELY on this machine?
+ *
+ * The question {@link ensurePublicHttpUrl} cannot answer: it says "no blocked
+ * address here", and a public address is never blocked — so a name that has
+ * been poisoned or rebound to a routable host passes it. A caller that is
+ * about to do something only safe on the local machine (send cleartext, for
+ * one) needs the positive form instead, and gets it from the same resolution
+ * and the same loopback predicate the SSRF layer uses — no second notion of
+ * "loopback" anywhere.
+ *
+ * Fails closed: an unresolvable host, or one that answers with nothing, is
+ * unproven and therefore not loopback.
+ */
+export async function resolvesToLoopbackOnly(host: string): Promise<boolean> {
+  let addresses: string[];
+  try {
+    addresses = await resolveHostAddresses(host);
+  } catch {
+    return false;
+  }
+  return addresses.length > 0 && addresses.every(isLoopbackAddress);
+}
+
+/**
  * Drop-in fetch wrapper that enforces per-hop redirect validation
  * and a timeout.
  *
