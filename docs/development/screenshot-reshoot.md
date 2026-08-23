@@ -396,11 +396,12 @@ merges.
 ## What the captures found
 
 Driving real panels rather than describing them turns the harness into a
-regression check, and the `local-indexer-*` batch surfaced four defects. Two were
-fixed in this change; two are recorded because the fix is a product decision
-rather than a screenshot one. Two further findings are not defects at all — they
-are host behaviours the harness was silently relying on, or silently violating,
-and they are recorded because the next person to move a capture will hit them.
+regression check, and the `local-indexer-*` batch surfaced four defects. Three
+are fixed — the two below plus the picker one, found when the third was
+re-probed; one is recorded because the fix is a product decision rather than a
+screenshot one. Two further findings are not defects at all — they are host
+behaviours the harness was silently relying on, or silently violating, and they
+are recorded because the next person to move a capture will hit them.
 
 **Fixed — a plugin panel opened during startup could never load its own bundle.**
 A renderer frame is handed its set of URL loaders once, when it begins loading. A
