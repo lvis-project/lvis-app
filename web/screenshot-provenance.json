@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pendingReplacementBaseline": 19,
+  "pendingReplacementBaseline": 15,
   "seededAccounts": [
     "work-board-seed",
     "marketplace-dev",
@@ -158,18 +158,27 @@
     },
     "screenshots/meeting-minutes-2.png": {
       "surface": "meeting plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts meeting-minutes*"
     },
     "screenshots/meeting-minutes-3.png": {
       "surface": "meeting plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts meeting-minutes*"
     },
     "screenshots/meeting-minutes.png": {
       "surface": "meeting plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts meeting-minutes*"
     },
     "screenshots/meeting-outlook-mail-2.png": {
       "surface": "meeting + mail integration",
@@ -193,8 +202,11 @@
     },
     "screenshots/meeting-upcoming.png": {
       "surface": "meeting plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts meeting-upcoming"
     },
     "screenshots/mp-admin-2.png": {
       "surface": "marketplace web app",
