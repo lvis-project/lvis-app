@@ -72,6 +72,27 @@ describe("manifest networkAccess (Tier A) — host-owned schema validator path",
     expect(parsed.networkAccess?.allowedDomains).toEqual(["api.example.com"]);
   });
 
+  it("carries the loopback literals through load-time normalization", async () => {
+    // End-to-end for a plugin declaring a local endpoint the user runs: the
+    // schema accepts the literals and `normalizeAllowedHosts` keeps them
+    // instead of throwing on the one-dot rule, which is what makes the
+    // declaration writable at all. Reachability is still `host-fetch-guard`'s.
+    const validator = await buildManifestValidator();
+    const path = await writeManifest({
+      networkAccess: {
+        allowedDomains: ["localhost", "127.0.0.1", "[::1]", "api.example.com"],
+        reasoning: "A local inference server the user configures.",
+      },
+    });
+    const parsed = await parsePluginJson(path, validator);
+    expect(parsed.networkAccess?.allowedDomains).toEqual([
+      "localhost",
+      "127.0.0.1",
+      "::1",
+      "api.example.com",
+    ]);
+  });
+
   it("rejects a bare public-suffix domain ('com')", async () => {
     const validator = await buildManifestValidator();
     const path = await writeManifest({ networkAccess: { allowedDomains: ["com"] } });

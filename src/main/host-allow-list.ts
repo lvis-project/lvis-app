@@ -30,15 +30,19 @@
 const MAX_HOSTS = 16;
 
 /**
- * Loopback literals `allowLoopback` admits verbatim. Cookies on these hosts
- * terminate on the user's own machine, so admitting them does not open the
- * cross-site blanket-match the single-label rule exists to prevent. The only
- * legitimate caller today is `openAuthWindow.cookieHosts` for OAuth loopback
- * redirects (`http://localhost:<port>` / `http://127.0.0.1:<port>`), where the
- * IdP's own SDK runs the local listener. Exact literals only — `foo.localhost`
- * carries a dot and goes through the normal rules.
+ * Loopback literals `allowLoopback` admits verbatim. Traffic to these hosts
+ * terminates on the user's own machine, so admitting them does not open the
+ * cross-site blanket-match the single-label rule exists to prevent. Callers:
+ * `openAuthWindow.cookieHosts` for OAuth loopback redirects
+ * (`http://localhost:<port>` / `http://127.0.0.1:<port>`), where the IdP's own
+ * SDK runs the local listener, and a plugin manifest's
+ * `networkAccess.allowedDomains` declaring a local inference/proxy endpoint.
+ * Exact literals only — `foo.localhost` carries a dot and goes through the
+ * normal rules. The bracketed IPv6 spelling (`[::1]`, which is what
+ * `new URL().hostname` returns) is not listed because {@link normalizeHost}
+ * strips the brackets before every lookup here.
  */
-const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 
 /** Block bare registry suffixes — see PSL note in the file header. */
 const FORBIDDEN_TOP_LEVELS = new Set([
@@ -55,10 +59,35 @@ const FORBIDDEN_TOP_LEVELS = new Set([
   "app",
 ]);
 
-/** Trim, lowercase, drop a leading `.` (cookie-domain artifact). */
+/**
+ * Trim, lowercase, drop a leading `.` (cookie-domain artifact), drop IPv6
+ * brackets.
+ *
+ * The brackets are URL syntax, not part of the host: `new URL("http://[::1]/")`
+ * reports `[::1]` as its hostname while an allow-list entry is written `::1`.
+ * Normalizing both spellings to the bare address is what lets a declared `::1`
+ * match the parsed URL at all — without it the two never compare equal.
+ */
 export function normalizeHost(raw: string): string {
   const trimmed = raw.trim().toLowerCase();
-  return trimmed.startsWith(".") ? trimmed.slice(1) : trimmed;
+  const undotted = trimmed.startsWith(".") ? trimmed.slice(1) : trimmed;
+  return undotted.startsWith("[") && undotted.endsWith("]")
+    ? undotted.slice(1, -1)
+    : undotted;
+}
+
+/**
+ * Is `host` one of the {@link LOOPBACK_HOSTS} literals — i.e. does the name
+ * itself say "this machine"?
+ *
+ * Deliberately a literal-set membership test and not an address-range test: a
+ * caller asking this question is deciding whether a DECLARATION names the
+ * local machine, and an ordinary name that happens to resolve to 127.0.0.1
+ * must not be able to answer yes (that is DNS rebinding, and the DNS-aware
+ * layer in `network-guard.ts` is what judges resolved addresses).
+ */
+export function isLoopbackHost(host: string): boolean {
+  return LOOPBACK_HOSTS.has(normalizeHost(host));
 }
 
 /**
@@ -69,8 +98,10 @@ export function normalizeHost(raw: string): string {
  * `allowLoopback` is a per-surface opt-in: it admits the {@link LOOPBACK_HOSTS}
  * literals (which the single-label rule would otherwise reject) and relaxes
  * nothing else. Surfaces whose flows legitimately end on a local listener
- * (OAuth loopback redirects) declare it; every other consumer keeps the strict
- * default.
+ * (OAuth loopback redirects; a plugin manifest declaring a local inference
+ * endpoint) declare it; every other consumer keeps the strict default.
+ * Admitting the literal into a list is not itself reachability — whether the
+ * request may go out is still the calling guard's decision.
  */
 export function normalizeAllowedHosts(
   raw: readonly string[],
