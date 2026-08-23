@@ -40,6 +40,7 @@ set -uo pipefail
 # is to rename the fixture instead.
 ALLOWED_ACCOUNTS=(
   example user users me you owner runner
+  public
   test tester testuser dev demo
   alice bob carol dave victim attacker
   u x y z foo bar baz
@@ -281,6 +282,16 @@ selftest() {
     printf 'const b = "C:\\\\Users\\\\sensitive-project";\n' >> a.ts
     printf 'const c = "/home/lvis-app";\n' >> a.ts
   }
+  w_shared_windows_profile() {
+    w_clean_placeholder
+    # `C:\Users\Public` is the OS's own shared profile directory, not
+    # somebody's account: Windows ships it and refuses to create a user of that
+    # name. A fixture that needs a real, writable, everyone-readable Windows
+    # location has nowhere else to go, so flagging it would push fixtures back
+    # under an operator's own account directory.
+    printf 'const p = "C:\\Users\\Public\\LVIS";
+' >> a.ts
+  }
   w_tilde_lookalike() {
     w_clean_placeholder
     # `~/` is not a personal path and must never be flagged, or every shell
@@ -301,6 +312,7 @@ selftest() {
   run_case extensionless-blocks      BLOCK w_extensionless_violation
   run_case hyphenated-placeholder    PASS  w_hyphenated_placeholder
   run_case tilde-home-not-flagged    PASS  w_tilde_lookalike
+  run_case shared-windows-profile    PASS  w_shared_windows_profile
 
   echo "  $pass passed, $fail failed"
   [ "$fail" -eq 0 ] || return 1
