@@ -80,26 +80,29 @@ export const shots: Record<string, Shot> = {
   "local-indexer-add-folder": {
     slug: "local-indexer-add-folder.png",
     topic: "local-indexer",
-    caption: "폴더 추가 다이얼로그 — include/exclude 패턴",
-    captionEn: "Add folder dialog — include/exclude patterns",
+    // The panel has no include/exclude dialog: folders are picked through the
+    // OS picker and the scan set is fixed by the supported document formats,
+    // which the card lists as chips. The caption now says that.
+    caption: "폴더 추가 — 지원 문서 형식과 스캔 대기 상태",
+    captionEn: "Adding a folder — supported document formats and the pending-scan state",
   },
   "local-indexer-search": {
-    slug: "local-indexer-search.webp",
+    slug: "local-indexer-search.png",
     topic: "local-indexer",
-    caption: "자료 검색 ① — 키워드 → 파일 후보 + 근거 (다른 파일 비교 인용)",
-    captionEn: "Document search 1 — keyword to candidate files with evidence (citing comparisons across files)",
+    caption: "자료 검색 ① — 한 번의 index_search 결과에서 두 문서를 골라 답변",
+    captionEn: "Document search 1 — one index_search call, answered from the two documents it turned up",
   },
   "local-indexer-search-2": {
-    slug: "local-indexer-search-2.webp",
+    slug: "local-indexer-search-2.png",
     topic: "local-indexer",
-    caption: "자료 검색 ② — 정확한 NAS 경로 + 같은 경로 기반 핵심 구조 요약",
-    captionEn: "Document search 2 — exact NAS path plus a structural summary based on that same path",
+    caption: "자료 검색 ② — 문서의 정확한 경로와 그 문서가 정한 단계 요약",
+    captionEn: "Document search 2 — the document's exact path, and the steps that document lays out",
   },
   "local-indexer-search-3": {
-    slug: "local-indexer-search-3.webp",
+    slug: "local-indexer-search-3.png",
     topic: "local-indexer",
-    caption: "자료 검색 ③ — 같은 컨텐츠를 한 장짜리 발표용 포맷으로 재변환",
-    captionEn: "Document search 3 — the same content reformatted into a one-page presentation",
+    caption: "자료 검색 ③ — 같은 답변을 한 장짜리 발표 자료 형식으로 재정리",
+    captionEn: "Document search 3 — the same answer reformatted into a one-page handout",
   },
   "local-indexer-index-search": {
     slug: "local-indexer-index-search.png",
