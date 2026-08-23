@@ -20,7 +20,7 @@ test.beforeAll(() => {
 
 for (const [key, entry] of Object.entries(scenarios)) {
   // Skipped scenarios declare a fixture-free test body so a full matrix run
-  // doesn't pay for an Electron launch per skip (35 of the 37 entries are
+  // doesn't pay for an Electron launch per skip (most of the 37 entries are
   // skips today — see README.md "Skip list"). Playwright only instantiates
   // fixtures a test's callback actually destructures, so omitting
   // `{ app, mainWindow }` here means `test.skip(reason)` fires with zero
@@ -66,6 +66,11 @@ for (const [key, entry] of Object.entries(scenarios)) {
     }
     if (entry.captureViewport) {
       test.use({ captureViewport: entry.captureViewport });
+    }
+    // Same describe-scope requirement as `test.use` above: a per-test timeout
+    // set from outside a test body goes through `describe.configure`.
+    if (entry.timeoutMs) {
+      test.describe.configure({ timeout: entry.timeoutMs });
     }
 
     test(`capture: ${key}`, async ({ app, mainWindow, scriptedProvider }) => {

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pendingReplacementBaseline": 25,
+  "pendingReplacementBaseline": 9,
   "seededAccounts": [
     "work-board-seed",
     "marketplace-dev",
@@ -123,53 +123,83 @@
     },
     "screenshots/local-indexer-add-folder.png": {
       "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-*"
     },
     "screenshots/local-indexer-home.png": {
       "surface": "local-indexer plugin panel",
-      "data": "owner",
-      "action": "none"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-*"
     },
     "screenshots/local-indexer-index-search.png": {
       "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-*"
     },
     "screenshots/local-indexer-indexing.png": {
       "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-*"
     },
-    "screenshots/local-indexer-search-2.webp": {
-      "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+    "screenshots/local-indexer-search-2.png": {
+      "surface": "local-indexer chat answer",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-search*"
     },
-    "screenshots/local-indexer-search-3.webp": {
-      "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+    "screenshots/local-indexer-search-3.png": {
+      "surface": "local-indexer chat answer",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-search*"
     },
-    "screenshots/local-indexer-search.webp": {
-      "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+    "screenshots/local-indexer-search.png": {
+      "surface": "local-indexer chat answer",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-search*"
     },
     "screenshots/meeting-minutes-2.png": {
       "surface": "meeting plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts meeting-minutes*"
     },
     "screenshots/meeting-minutes-3.png": {
       "surface": "meeting plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts meeting-minutes*"
     },
     "screenshots/meeting-minutes.png": {
       "surface": "meeting plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts meeting-minutes*"
     },
     "screenshots/meeting-outlook-mail-2.png": {
       "surface": "meeting + mail integration",
@@ -193,8 +223,11 @@
     },
     "screenshots/meeting-upcoming.png": {
       "surface": "meeting plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts meeting-upcoming"
     },
     "screenshots/mp-admin-2.png": {
       "surface": "marketplace web app",
@@ -285,34 +318,52 @@
       "overlayChecked": true
     },
     "screenshots/work-assistant-conflict-2.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     },
     "screenshots/work-assistant-conflict.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     },
     "screenshots/work-assistant-meeting-end-trigger-2.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     },
     "screenshots/work-assistant-meeting-end-trigger.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     },
     "screenshots/work-assistant-reminder-2.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     },
     "screenshots/work-assistant-reminder.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     }
   }
 }

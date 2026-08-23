@@ -824,6 +824,51 @@ function normalizeInteractiveBlock(parsed: unknown): ReviewerInteractiveBlock {
 }
 
 /**
+ * Compose the settings document a read-modify-write cycle is about to persist.
+ *
+ * Every persist path in this module ends the same way: keep the file's other
+ * top-level keys, keep the `permissions` keys this cycle did not touch, write
+ * the canonical `additionalDirectories`, and normalize the reviewer block so a
+ * hand-edited file cannot round-trip an invalid mode. Three call sites used to
+ * hand-roll that spread, which is three chances for one of them to forget the
+ * reviewer normalization on a later edit.
+ *
+ * The deprecated `permissions.allowedDirectories` alias is NOT touched here.
+ * The reader ignores it (see `normalizePermissionSettings`) — that is the whole
+ * compatibility contract, and it is the absence of code rather than a branch.
+ * The write-time cleanup that used to erase the key was retired on 2026-08-23
+ * once no supported writer could emit it (sunset entry
+ * `permission-allowed-directories-alias-convergence`, removed from
+ * `docs/development/legacy-sunset-inventory.json` with the code).
+ */
+function composeSettingsForPersist(
+  existing: Record<string, unknown>,
+  existingPerm: Record<string, unknown>,
+  next: {
+    additionalDirectories: readonly string[];
+    /** Omit to carry the existing block through the read-time normalizer. */
+    reviewer?: ReviewerSettingsBlock;
+    /**
+     * Already composed by `composePendingWorkspaceRootRemovals`, so it carries
+     * the malformed entries the reader kept on disk verbatim — hence `unknown`.
+     */
+    pendingWorkspaceRootRemovals?: readonly unknown[];
+  },
+): Record<string, unknown> {
+  return {
+    ...existing,
+    permissions: {
+      ...existingPerm,
+      additionalDirectories: [...next.additionalDirectories],
+      ...(next.pendingWorkspaceRootRemovals === undefined
+        ? {}
+        : { pendingWorkspaceRootRemovals: [...next.pendingWorkspaceRootRemovals] }),
+      reviewer: next.reviewer ?? normalizeReviewerBlock(existingPerm.reviewer),
+    },
+  };
+}
+
+/**
  * Atomically rewrite `~/.lvis/settings.json` with a fresh
  * `permissions.additionalDirectories` value. Preserves any other
  * top-level keys present in the existing file.
@@ -842,9 +887,6 @@ export async function writePermissionSettings(
   await withFileLock(filePath, async () => {
     const existing = readSettingsObjectForUpdate(filePath);
     const existingPerm = (existing.permissions ?? {}) as Record<string, unknown>;
-    // Drop the deprecated alias key on write — settings file converges
-    // on the canonical name with each persist.
-    delete existingPerm.allowedDirectories;
     const existingReviewer = normalizeReviewerBlock(existingPerm.reviewer);
     const nextReviewer: ReviewerSettingsBlock = patch.reviewer
       ? validateReviewerPatch({ ...existingReviewer, ...patch.reviewer })
@@ -855,14 +897,10 @@ export async function writePermissionSettings(
         : Array.isArray(existingPerm.additionalDirectories)
           ? (existingPerm.additionalDirectories as string[])
           : [];
-    const merged = {
-      ...existing,
-      permissions: {
-        ...existingPerm,
-        additionalDirectories: nextDirs,
-        reviewer: nextReviewer,
-      },
-    };
+    const merged = composeSettingsForPersist(existing, existingPerm, {
+      additionalDirectories: nextDirs,
+      reviewer: nextReviewer,
+    });
     writeUtf8FileAtomicSync(filePath, JSON.stringify(merged, null, 2), 0o600);
   });
 }
@@ -968,15 +1006,9 @@ async function mutateAllowedDirectoriesPersist(
     ) {
       return;
     }
-    delete existingPerm.allowedDirectories;
-    const merged = {
-      ...existing,
-      permissions: {
-        ...existingPerm,
-        additionalDirectories: next,
-        reviewer: normalizeReviewerBlock(existingPerm.reviewer),
-      },
-    };
+    const merged = composeSettingsForPersist(existing, existingPerm, {
+      additionalDirectories: next,
+    });
     writeUtf8FileAtomicSync(filePath, JSON.stringify(merged, null, 2), 0o600);
   });
   return result;
@@ -1099,19 +1131,13 @@ export async function beginWorkspaceRootRemovalPersist(
         : allowedDirectoryKey(candidate) !== runtimeKey,
     );
     const nextPending = existingIntent ? pending : [...pending, intent];
-    delete existingPerm.allowedDirectories;
-    const merged = {
-      ...existing,
-      permissions: {
-        ...existingPerm,
-        additionalDirectories: activeDirectories,
-        pendingWorkspaceRootRemovals: composePendingWorkspaceRootRemovals(
-          nextPending,
-          journal.malformed,
-        ),
-        reviewer: normalizeReviewerBlock(existingPerm.reviewer),
-      },
-    };
+    const merged = composeSettingsForPersist(existing, existingPerm, {
+      additionalDirectories: activeDirectories,
+      pendingWorkspaceRootRemovals: composePendingWorkspaceRootRemovals(
+        nextPending,
+        journal.malformed,
+      ),
+    });
     try {
       writeUtf8FileAtomicSync(filePath, JSON.stringify(merged, null, 2), 0o600);
     } catch (error: unknown) {

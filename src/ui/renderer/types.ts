@@ -1304,6 +1304,7 @@ export type LvisApi = {
     userDataPath: string;
   }>;
   registerPluginWebview: (payload: { webContentsId: number; pluginId: string; entryUrl: string }) => Promise<{ ok: boolean; error?: string }>;
+  ensurePluginPartition: (pluginId: string) => Promise<{ ok: boolean; error?: string }>;
   onViewActivate: (h: (k: string, settingsTab?: string) => void) => () => void;
   getUsageSummary: (days?: number) => Promise<UsageSummaryShape>;
   getUsageRange: (opts: { dateFrom: string; dateTo: string }) => Promise<UsageSummaryShape>;

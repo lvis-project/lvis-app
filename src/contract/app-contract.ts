@@ -338,6 +338,12 @@ export const CHANNELS = {
   },
   /** Plugin webview bridge (lvis:plugin:*) — sandboxed plugin-frame origin. */
   pluginBridge: {
+    // Renderer → main BEFORE a plugin panel's <webview> exists: install the
+    // partition's session policy (preload, network gate, asset scheme) so the
+    // guest frame is never the thing that creates the partition. A frame binds
+    // its URL loaders once, at first load, so a scheme installed after that
+    // point is unreachable from it for the frame's whole life.
+    ensurePartition: "lvis:plugin:ensure-partition",
     registerWebview: "lvis:plugin:register-webview",
     getEntryUrl: "lvis:plugin:get-entry-url",
     getTheme: "lvis:plugin:get-theme",

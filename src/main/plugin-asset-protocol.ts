@@ -86,16 +86,45 @@ type PartitionAssetRoot = {
   realRoot?: string;
 };
 
+/**
+ * Serve `lvis-plugin://asset/...` for one plugin partition, and point it at the
+ * plugin's install root.
+ *
+ * The two halves are deliberately separable. Registering the scheme on the
+ * session is what a renderer frame in that partition needs BEFORE it starts
+ * loading: a frame is handed its set of URL loaders once, when it begins
+ * loading, and a scheme registered afterwards is not in that set — every
+ * request the frame makes for it fails with `ERR_UNKNOWN_URL_SCHEME` without
+ * ever reaching the handler below, and it keeps failing for the life of the
+ * frame. No retry can recover it, because the frame is asking a loader table
+ * that has no entry for the scheme.
+ *
+ * The root, by contrast, is not known that early for every plugin. A
+ * worker-backed plugin's root is a per-generation payload directory that only
+ * exists once its runtime has been provisioned, so boot installs the partition
+ * policy with no root and calls back with one later. Registering the scheme
+ * only once a root was available is what put the plugin shell on the wrong side
+ * of that race — its `<webview>` loaded first, its `import()` of the entry
+ * module got `ERR_UNKNOWN_URL_SCHEME`, and the panel stayed on "Plugin UI
+ * failed to load" until the app restarted. So the handler goes on as soon as
+ * the partition exists and answers 404 until a root is set.
+ *
+ * @param pluginRoot the plugin's install root, or undefined when it is not
+ *   resolved yet. A later call with a root sets it; a call without one never
+ *   clears a root already recorded.
+ */
 export function installPluginAssetProtocolHandler(
   partitionName: string,
   ses: Session,
-  pluginRoot: string,
+  pluginRoot?: string,
 ): void {
-  const previous = rootsByPartition.get(partitionName);
-  rootsByPartition.set(
-    partitionName,
-    previous?.pluginRoot === pluginRoot ? previous : { pluginRoot },
-  );
+  if (pluginRoot) {
+    const previous = rootsByPartition.get(partitionName);
+    rootsByPartition.set(
+      partitionName,
+      previous?.pluginRoot === pluginRoot ? previous : { pluginRoot },
+    );
+  }
   if (handledPartitions.has(partitionName)) return;
   handledPartitions.add(partitionName);
 

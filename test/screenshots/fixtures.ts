@@ -13,12 +13,81 @@ import {
   buildIsolatedElectronEnv,
   buildLlmSettings,
 } from '../e2e/ui/seeded-electron.js';
-import { seedExecutionMode, seedRealPlugins, seedReviewerMode } from './plugin-seed.js';
+import {
+  REAL_PYTHON_CAPTURES,
+  seedExecutionMode,
+  seedRealPlugins,
+  seedReviewerMode,
+} from './plugin-seed.js';
 import { PROVIDER_PING_SYSTEM_PROMPT } from '../../src/engine/turn/provider.js';
 import { PERMISSION_REVIEWER_SYSTEM_PROMPT } from '../../src/shared/permission-reviewer-framework.js';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, '../..');
+
+/**
+ * Where the fabricated document corpus lives.
+ *
+ * Deliberately NOT under `os.tmpdir()`, and deliberately covering ONLY the
+ * corpus. A capture can render an absolute path into the published image — the
+ * local-indexer panel lists its registered scan folders by full path — and on
+ * Windows `os.tmpdir()` sits under `C:\Users\<account>\AppData\Local\Temp`, so the
+ * operator's account name would ship in the docs. `C:\Users\Public` is the OS's
+ * own shared, everyone-writable location and names nobody. POSIX `/tmp` already
+ * names nobody, so it only gains the `LVIS` segment for tidiness — that is the
+ * whole of the per-OS difference here.
+ *
+ * The per-run profile stays in `os.tmpdir()`; the `userDataDir` fixture below
+ * says why moving it here too was not a neutral change.
+ */
+const DEMO_DOCS_ROOT = process.platform === 'win32'
+  ? path.join(process.env.PUBLIC ?? 'C:\\Users\\Public', 'LVIS')
+  : path.join(os.tmpdir(), 'LVIS');
+
+/**
+ * The fabricated document corpus a scan-folder scenario indexes, at a stable
+ * readable path rather than inside the per-run profile: this corpus IS the
+ * subject of the local-indexer captures, and `…/lvis-screenshot-Ab12cd/
+ * lvis-state/…` reads as harness debris in a published screenshot where
+ * `…/LVIS/문서` reads as a folder someone might really have. Its files are
+ * rewritten from `seededCorpus` on every run, so nothing an earlier run left
+ * behind can reach a frame.
+ */
+const DEMO_DOCS_DIR = path.join(DEMO_DOCS_ROOT, '문서');
+
+/**
+ * Resolve the `{{LVIS_HOME}}` / `{{DEMO_DOCS}}` tokens a scenario may write in a
+ * `seededCorpus` key or value.
+ *
+ * The LVIS home exists only once a run has picked its profile directory, so a
+ * scenario in `matrix.ts` cannot write that absolute path itself, and the demo
+ * corpus is per-OS — while one of them has to appear verbatim inside seeded
+ * content, because the indexer's `folders.json` registers scan folders by
+ * absolute path. One token vocabulary covers both positions rather than a
+ * second seeding hook for the file whose body needs a path.
+ */
+function resolveCaptureTokens(
+  value: string,
+  lvisHome: string,
+  style: 'posix' | 'native' = 'posix',
+): string {
+  // POSIX is the default because the substitution has to be safe in every
+  // position a token can appear: seeded JSON (the indexer's
+  // `folders.json` is a JSON array of scan folders, and a native
+  // `C:\Users\…` path is not a valid JSON string body) as well as a path
+  // key. Node's fs takes either separator, and the app resolves what it reads
+  // before displaying it — so a capture still shows the native form.
+  //
+  // `native` exists for the one position where the separator is the subject
+  // rather than plumbing: prose a scripted reply puts on screen. A frame that
+  // answers “where is this file” with a forward-slashed Windows path is
+  // showing a path no other part of the same app writes that way.
+  const sep = (dir: string): string =>
+    style === 'native' ? dir : dir.split(path.sep).join('/');
+  return value
+    .split('{{LVIS_HOME}}').join(sep(lvisHome))
+    .split('{{DEMO_DOCS}}').join(sep(DEMO_DOCS_DIR));
+}
 
 /**
  * Recursively hardlink a directory tree.
@@ -224,6 +293,12 @@ function resolveSeededPaths(
   return turns.map((turn) => ({
     ...turn,
     parts: turn.parts.map((part) => {
+      // A reply that names where a file is has to name the real path, and only
+      // the run knows it — the same problem the tool inputs below have, so the
+      // same token vocabulary answers it rather than a second mechanism.
+      if (part.kind === 'text' || part.kind === 'reasoning') {
+        return { ...part, text: resolveCaptureTokens(part.text, lvisHome, 'native') };
+      }
       if (part.kind !== 'tool' || !part.seededPathFields) return part;
       const input = { ...part.input };
       for (const field of part.seededPathFields) {
@@ -233,7 +308,9 @@ function resolveSeededPaths(
             `scripted turn ${part.id}: "${field}" must name a seededCorpus entry (got ${JSON.stringify(key)})`,
           );
         }
-        input[field] = path.join(lvisHome, key);
+        input[field] = path.isAbsolute(resolveCaptureTokens(key, lvisHome))
+          ? resolveCaptureTokens(key, lvisHome)
+          : path.join(lvisHome, key);
       }
       return { ...part, input };
     }),
@@ -425,6 +502,62 @@ async function startScriptedProvider(
 }
 
 /**
+ * Plugin config seeded into the isolated profile's settings, keyed by plugin id.
+ *
+ * Only `local-indexer` needs one, and it needs it for a reason worth stating.
+ * Its worker binds a TCP port on 127.0.0.1, and left unset that port is 43129
+ * for every instance — so a capture run on a machine where LVIS is already open
+ * would either fail to start the worker or, worse, address the ALREADY RUNNING
+ * one and render the operator's real index into a published screenshot. Naming
+ * a port the OS just told us is free removes both. The setting this uses is the
+ * plugin's own `workerPort`, added for exactly this class of problem.
+ */
+async function capturePluginConfigs(
+  installPlugins: readonly string[],
+): Promise<Record<string, Record<string, unknown>>> {
+  if (!installPlugins.includes('local-indexer')) return {};
+  return {
+    'local-indexer': {
+      workerPort: await reserveFreePort(),
+      // Keep the indexer off the network. Its embedding side defaults to
+      // OpenAI and, with `apiKeySource: "host"`, picks up the harness's seeded
+      // test LLM key — then spends the whole capture timing out against
+      // api.openai.com: three documents indexed in two minutes, out of
+      // eighteen, and the scan killed by the host's 120s tool ceiling.
+      //
+      // `apiKeySource: "plugin"` with an empty key slot is the plugin's own
+      // switch for this: no key reaches the worker, the worker skips vector
+      // embedding entirely rather than calling anything, and what remains is
+      // the BM25 index — which is what these captures show, and it builds in
+      // seconds.
+      //
+      // Serving the embeddings from the harness instead does not work, and the
+      // reason is worth recording: the worker never calls the endpoint itself.
+      // Its egress goes through the plugin's host-mediated broker, whose
+      // upstream leg is `hostApi.hostFetch` — and that chokepoint is https-only
+      // with no opt-out, so a loopback `http://127.0.0.1:<port>` stub is denied
+      // before it is ever reached and every document ends in a 504 instead.
+      apiKeySource: 'plugin',
+      embeddingApiKey: '',
+    },
+  };
+}
+
+/**
+ * A TCP port nothing is listening on, obtained by letting the OS pick one and
+ * releasing it. Inherently a hint rather than a reservation — something else
+ * can take it in the gap — but on a capture machine that gap is empty, and the
+ * alternative (a second hardcoded port) is the problem this exists to avoid.
+ */
+async function reserveFreePort(): Promise<number> {
+  const probe = http.createServer();
+  await new Promise<void>((resolve) => probe.listen(0, '127.0.0.1', resolve));
+  const { port } = probe.address() as AddressInfo;
+  await new Promise<void>((resolve) => probe.close(() => resolve()));
+  return port;
+}
+
+/**
  * Seeded settings pointing the active vendor at the scripted endpoint.
  *
  * Built on top of `buildLlmSettings` so the vendor-block shape stays in
@@ -508,11 +641,16 @@ export type ScreenshotOptions = {
    */
   executionMode: 'default' | 'strict' | 'auto' | 'allow' | null;
   /**
-   * Fabricated files written under the isolated profile's LVIS home before
-   * launch, keyed by path relative to it. That directory is one of the two
-   * default allowed roots (`computeDefaultAllowedDirectories`), so a scripted
+   * Fabricated files written before launch, keyed by path relative to the
+   * isolated profile's LVIS home. That directory is one of the two default
+   * allowed roots (`computeDefaultAllowedDirectories`), so a scripted
    * `read_file` over one of these runs without an approval prompt and the
    * frame shows invented content only.
+   *
+   * A key or a value may contain `{{LVIS_HOME}}` or `{{DEMO_DOCS}}`, resolved
+   * at seeding time (see `resolveCaptureTokens`) — a key so a file can be
+   * written to the demo corpus the local-indexer captures index, a value so
+   * seeded content can name one of those directories by absolute path.
    */
   seededCorpus: Readonly<Record<string, string>>;
   /**
@@ -521,6 +659,15 @@ export type ScreenshotOptions = {
    * plugin-panel keys keep the harness's original English.
    */
   uiLocale: 'ko' | 'en';
+  /**
+   * Per-test timeout, or null for the config's 60s.
+   *
+   * Raised only by a scenario that legitimately takes longer — a worker-backed
+   * plugin's cold start, or an indexing run the capture has to wait out. Kept
+   * per-scenario rather than raised globally so the twenty-odd fast captures
+   * still fail within a minute when something is actually wrong.
+   */
+  timeoutMs: number | null;
   /**
    * Window size for this capture, or null for {@link CAPTURE_VIEWPORT}.
    *
@@ -554,6 +701,7 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
   scriptedScript: [null, { option: true }],
   uiLocale: ['en', { option: true }],
   captureViewport: [null, { option: true }],
+  timeoutMs: [null, { option: true }],
   reviewerMode: [null, { option: true }],
   executionMode: [null, { option: true }],
   seededCorpus: [{}, { option: true }],
@@ -570,6 +718,16 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
     await handle.close();
   },
 
+  // The isolated profile lives under `os.tmpdir()`, and that is load-bearing
+  // rather than incidental: `baseAllowedDirectories()` puts the OS temp
+  // directory on every turn's allow-list, so a profile inside it makes the
+  // scenarios' `~/…` operands — `~` is this directory — already-allowed paths.
+  // Moving the profile out, which is what keeping the operator's account name
+  // out of published frames appeared to require, flipped that: the Layer 1
+  // out-of-allowed-dir gate fired first and short-circuited the reviewer, and
+  // `chat-permission-llm-review`, which captures a review still in flight,
+  // timed out on a card that run would never render. No profile path reaches a
+  // frame, so only the corpus needs a neutral home (DEMO_DOCS_ROOT above).
   userDataDir: async ({}, use) => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lvis-screenshot-'));
     await use(dir);
@@ -600,12 +758,16 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
     // src/shared/initial-app-mode.ts) already matches the work-mode capture
     // requirement, and readPersistedAppModeSync falls back to it when the
     // settings file has no `system` block at all.
+    const pluginConfigs = await capturePluginConfigs(installPlugins);
     fs.writeFileSync(
       path.join(userDataDir, 'lvis-settings.json'),
       `${JSON.stringify(
-        scriptedProvider
-          ? scriptedProviderSettings(scriptedProvider.baseUrl, uiLocale)
-          : buildE2eBaseSettings(true, uiLocale),
+        {
+          ...(scriptedProvider
+            ? scriptedProviderSettings(scriptedProvider.baseUrl, uiLocale)
+            : buildE2eBaseSettings(true, uiLocale)),
+          ...(Object.keys(pluginConfigs).length > 0 ? { pluginConfigs } : {}),
+        },
         null,
         2,
       )}\n`,
@@ -624,11 +786,6 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
     // snapshot is produced for any host-secret grants they declare.
     if (reviewerMode) seedReviewerMode(lvisHomeForTest, reviewerMode);
     if (executionMode) seedExecutionMode(lvisHomeForTest, executionMode);
-    for (const [relative, contents] of Object.entries(seededCorpus)) {
-      const target = path.join(lvisHomeForTest, relative);
-      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(target, contents, { encoding: 'utf-8', mode: 0o600 });
-    }
     let pluginEnv: Record<string, string | undefined> = {};
     if (installPlugins.length === 0) {
       const pluginsRoot = path.join(lvisHomeForTest, 'plugins');
@@ -652,9 +809,30 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
       }
       // Opt-in: make a worker-backed plugin's live panel capturable by reusing
       // the machine's pre-provisioned Python venv (see reuseRealPythonRuntime).
-      if (process.env.LVIS_SCREENSHOT_REAL_PYTHON === '1') {
+      if (REAL_PYTHON_CAPTURES) {
         reuseRealPythonRuntime(lvisHomeForTest, result.seeded);
       }
+    }
+
+    // Seeded corpus is written AFTER the plugin install, not before: installing
+    // a plugin `rmSync`s its whole `plugins/<id>/` directory first (plugin-seed.ts),
+    // so a scenario seeding a plugin's own data file — `plugins/meeting/data/preps.json`,
+    // the store the upcoming-meeting panel lists — would have it deleted out from
+    // under it. Ordinary corpus paths (`notes/...`) do not care either way, so one
+    // ordering serves both rather than a second seeding hook for plugin data.
+    for (const [relative, contents] of Object.entries(seededCorpus)) {
+      // A key is relative to the LVIS home unless it resolves to an absolute
+      // path — which today means it named {{DEMO_DOCS}}, the one corpus that
+      // has to live outside the profile because the capture shows its path.
+      const resolvedKey = resolveCaptureTokens(relative, lvisHomeForTest);
+      const target = path.isAbsolute(resolvedKey)
+        ? resolvedKey
+        : path.join(lvisHomeForTest, resolvedKey);
+      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(target, resolveCaptureTokens(contents, lvisHomeForTest), {
+        encoding: 'utf-8',
+        mode: 0o600,
+      });
     }
 
     const app = await electron.launch({

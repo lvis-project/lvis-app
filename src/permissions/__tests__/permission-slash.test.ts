@@ -386,8 +386,19 @@ describe("normalizePermissionSettings — canonical permissions", () => {
   });
 });
 
-describe("writePermissionSettings — alias is dropped on write", () => {
-  it("removes legacy allowedDirectories key when re-saving", async () => {
+/**
+ * The `allowedDirectories` alias after its sunset.
+ *
+ * The write-time cleanup that used to erase the key is gone — sunset entry
+ * `permission-allowed-directories-alias-convergence`, retired 2026-08-23 and
+ * removed from `docs/development/legacy-sunset-inventory.json` with the code.
+ * What must survive is the
+ * part that was never code: the reader ignores the alias. A persist therefore
+ * carries the key through untouched — inert, not authoritative — and the
+ * canonical key still decides what the app grants.
+ */
+describe("writePermissionSettings — the retired alias is inert, not honoured", () => {
+  it("carries a legacy allowedDirectories key through a re-save without granting it", async () => {
     const path = tmpSettingsPath();
     writeFileSync(
       path,
@@ -401,9 +412,25 @@ describe("writePermissionSettings — alias is dropped on write", () => {
     );
     await writePermissionSettings({ additionalDirectories: ["/new"] }, path);
     const raw = JSON.parse(readFileSync(path, "utf-8"));
-    expect(raw.permissions.allowedDirectories).toBeUndefined();
     expect(raw.permissions.additionalDirectories).toEqual(["/new"]);
+    // Untouched keys survive a persist — the alias is now just one of them.
+    expect(raw.permissions.allowedDirectories).toEqual(["/legacy"]);
     expect(raw.permissions.someOtherKey).toBe(42);
+    // And it grants nothing: only the canonical key reaches the reader.
+    expect(readPermissionSettings(path).permissions.additionalDirectories).toEqual(["/new"]);
+  });
+
+  it("normalizes the reviewer block on every persist path, not just the patch path", async () => {
+    const path = tmpSettingsPath();
+    writeFileSync(
+      path,
+      JSON.stringify({ permissions: { reviewer: { mode: "nonsense-from-a-hand-edit" } } }),
+      "utf-8",
+    );
+    await addAllowedDirectoryPersist("/new", path);
+    const raw = JSON.parse(readFileSync(path, "utf-8"));
+    // "llm" is the read-time default; what matters is that the garbage is gone.
+    expect(raw.permissions.reviewer.mode).toBe("llm");
   });
 });
 

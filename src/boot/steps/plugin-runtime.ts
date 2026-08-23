@@ -509,6 +509,29 @@ export async function initPluginRuntime(
     // was first constructed. Refresh from the final durable snapshot before
     // startAll creates HostApi instances and trust decisions for those rows.
     if (input.deferStart) await refreshRegistryEntryCache();
+    // Partition policy first, plugin start second.
+    //
+    // The window is already up when this step runs, so a plugin panel can be
+    // opened while `startAll` is still working — and `startAll` is not quick
+    // for a worker-backed plugin, which provisions a Python runtime before it
+    // returns. A `<webview>` that attaches in that window binds its URL loaders
+    // once, at first load, from whatever the session offers at that instant: no
+    // `lvis-plugin:` handler yet means every asset request from that frame ends
+    // in ERR_UNKNOWN_URL_SCHEME without ever reaching the handler, for the life
+    // of the frame. The panel then shows "Plugin UI failed to load" and stays
+    // that way until the app restarts, while the very same URL fetched a second
+    // later from anywhere else succeeds.
+    //
+    // `load()` only reads the registry and manifests — it is the cheap half of
+    // `startAll`, it is idempotent, and it is enough to know which partitions
+    // will exist. Installing their policies here closes the window. The pass
+    // after `startAll` stays: it picks up ids that only appear once plugins are
+    // running, and re-points each partition at the install root the runtime
+    // finally resolved.
+    await pluginRuntime.load();
+    for (const pluginId of pluginRuntime.listPluginIds()) {
+      installLoadedPluginPartitionPolicy(pluginId);
+    }
     await pluginRuntime.startAll();
     log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
 
