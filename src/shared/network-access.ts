@@ -39,7 +39,13 @@ export function mapNetworkAccessGrant(value: unknown): NormalizedNetworkAccessGr
 export function normalizeNetworkAccessGrant(
   value: NetworkAccessGrant | null | undefined,
 ): NormalizedNetworkAccessGrant | undefined {
-  const allowedDomains = normalizeAllowedHosts(value?.allowedDomains ?? []);
+  // Loopback literals are admitted for the same reason the manifest validator
+  // admits them: the approval record has to be able to express the declaration
+  // it is approving. Both sides must agree, or a manifest declaring `localhost`
+  // would load and then fail its own acknowledgement comparison.
+  const allowedDomains = normalizeAllowedHosts(value?.allowedDomains ?? [], {
+    allowLoopback: true,
+  });
   const reasoning = typeof value?.reasoning === "string" && value.reasoning.trim().length > 0
     ? value.reasoning.trim()
     : undefined;

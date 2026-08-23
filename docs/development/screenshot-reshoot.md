@@ -396,10 +396,10 @@ merges.
 ## What the captures found
 
 Driving real panels rather than describing them turns the harness into a
-regression check, and the `local-indexer-*` batch surfaced four defects. Three
-are fixed — the two below plus the picker one, found when the third was
-re-probed; one is recorded because the fix is a product decision rather than a
-screenshot one. Two further findings are not defects at all — they are host
+regression check, and the `local-indexer-*` batch surfaced four defects. All four
+are fixed — the two below, the picker one found when the third was re-probed, and
+the unreachable local endpoint, whose fix is a host egress-policy change rather
+than a screenshot one. Two further findings are not defects at all — they are host
 behaviours the harness was silently relying on, or silently violating, and they
 are recorded because the next person to move a capture will hit them.
 
@@ -450,16 +450,27 @@ marker is gone afterwards, so the reload really happened, and the bridge, the
 mounted plugin UI and the host overlay all come back. The partition-ordering fix
 above is the likely reason it no longer bites.
 
-**Product decision — the plugin's own `embeddingEndpoint` setting cannot be
-used.** The local-indexer advertises an OpenAI-compatible endpoint (LM Studio,
-LiteLLM, an internal proxy). Its worker never calls that endpoint directly; egress
-goes through the plugin's broker, whose upstream leg is `hostApi.hostFetch`, and
-that chokepoint is https-only with no opt-out and matches the manifest's domain
-allowlist, which has no loopback entry. So a local endpoint is denied before it
-is reached, and every document ends in a 504. That is a security boundary, and
-widening it is not a screenshot decision — but as it stands the setting is a
-control that cannot control anything, which is the same failure mode as an
-env-only lever. The captures run with embedding off for that reason.
+**Fixed — the plugin's own `embeddingEndpoint` setting could not be used.** The
+local-indexer advertises an OpenAI-compatible endpoint (LM Studio, LiteLLM, an
+internal proxy). Its worker never calls that endpoint directly; egress goes
+through the plugin's broker, whose upstream leg is `hostApi.hostFetch`, and that
+chokepoint was https-only with no opt-out and matched a manifest allow-list with
+no loopback entry. So a local endpoint was denied before it was reached and every
+document ended in a 504 — a control that could not control anything, the same
+failure mode as an env-only lever.
+
+The exemption is narrow and it is the allow-list that grants it: a manifest may
+now declare the loopback literals `localhost` / `127.0.0.1` / `::1` in
+`networkAccess.allowedDomains`, and only for a host declared that way does
+`host-fetch-guard.ts` permit cleartext http and open the loopback axis of the
+SSRF check. Cleartext is not taken on the hostname's word — every resolved
+address must be loopback, so a `localhost` pointed off-machine by a poisoned
+hosts file or a rebinding answer is denied rather than sent in the clear. Nothing
+else moves: an ordinary allow-listed host still cannot be reached over http; a
+declared loopback endpoint opens neither the LAN nor any other host; and
+`allowPrivateNetworks` (RFC1918/ULA) neither grants loopback nor is required for
+it — the two axes stay independent in both directions. The captures still run
+with embedding off, which is now a harness choice rather than the only option.
 
 **Behaviour — the capture profile has to live inside the OS temp directory.**
 `baseAllowedDirectories()` puts `os.tmpdir()` on every turn's allow-list, and the
