@@ -13,7 +13,12 @@ import {
   buildIsolatedElectronEnv,
   buildLlmSettings,
 } from '../e2e/ui/seeded-electron.js';
-import { seedExecutionMode, seedRealPlugins, seedReviewerMode } from './plugin-seed.js';
+import {
+  REAL_PYTHON_CAPTURES,
+  seedExecutionMode,
+  seedRealPlugins,
+  seedReviewerMode,
+} from './plugin-seed.js';
 import { PROVIDER_PING_SYSTEM_PROMPT } from '../../src/engine/turn/provider.js';
 import { PERMISSION_REVIEWER_SYSTEM_PROMPT } from '../../src/shared/permission-reviewer-framework.js';
 
@@ -624,11 +629,6 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
     // snapshot is produced for any host-secret grants they declare.
     if (reviewerMode) seedReviewerMode(lvisHomeForTest, reviewerMode);
     if (executionMode) seedExecutionMode(lvisHomeForTest, executionMode);
-    for (const [relative, contents] of Object.entries(seededCorpus)) {
-      const target = path.join(lvisHomeForTest, relative);
-      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-      fs.writeFileSync(target, contents, { encoding: 'utf-8', mode: 0o600 });
-    }
     let pluginEnv: Record<string, string | undefined> = {};
     if (installPlugins.length === 0) {
       const pluginsRoot = path.join(lvisHomeForTest, 'plugins');
@@ -652,9 +652,21 @@ export const test = base.extend<ScreenshotFixtures & ScreenshotOptions>({
       }
       // Opt-in: make a worker-backed plugin's live panel capturable by reusing
       // the machine's pre-provisioned Python venv (see reuseRealPythonRuntime).
-      if (process.env.LVIS_SCREENSHOT_REAL_PYTHON === '1') {
+      if (REAL_PYTHON_CAPTURES) {
         reuseRealPythonRuntime(lvisHomeForTest, result.seeded);
       }
+    }
+
+    // Seeded corpus is written AFTER the plugin install, not before: installing
+    // a plugin `rmSync`s its whole `plugins/<id>/` directory first (plugin-seed.ts),
+    // so a scenario seeding a plugin's own data file — `plugins/meeting/data/preps.json`,
+    // the store the upcoming-meeting panel lists — would have it deleted out from
+    // under it. Ordinary corpus paths (`notes/...`) do not care either way, so one
+    // ordering serves both rather than a second seeding hook for plugin data.
+    for (const [relative, contents] of Object.entries(seededCorpus)) {
+      const target = path.join(lvisHomeForTest, relative);
+      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+      fs.writeFileSync(target, contents, { encoding: 'utf-8', mode: 0o600 });
     }
 
     const app = await electron.launch({

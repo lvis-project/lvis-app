@@ -10,6 +10,19 @@ import {
 import { canonicalJSON } from '../../src/plugins/whitelist/canonical-json.js';
 
 /**
+ * Whether this run may use the machine's pre-provisioned Python venvs.
+ *
+ * Off by default: a worker-backed plugin needs a real interpreter, and
+ * building one inside an isolated profile would mean a network install per
+ * capture. On, three things change together — the manifest keeps its `python`
+ * block (here), `fixtures.ts` hardlinks the matching venv in, and `matrix.ts`
+ * stops skipping the scenarios that need a live worker. One flag read in one
+ * place, because two of those three silently produce a plugin that loads and
+ * then tears itself down.
+ */
+export const REAL_PYTHON_CAPTURES = process.env.LVIS_SCREENSHOT_REAL_PYTHON === '1';
+
+/**
  * REAL plugin side-loader for the screenshot harness.
  *
  * Unlike `test/e2e/ui/fixtures.ts`'s `seedE2ePlugins`, which overwrites every
@@ -289,8 +302,7 @@ export async function seedRealPlugins(
     // computed against whichever manifest shape is written here.
     const seededManifest = { ...(manifest as Record<string, unknown>) };
     const pythonBlock = (manifest as { python?: { requirementsLock?: unknown } }).python;
-    const realPython = process.env.LVIS_SCREENSHOT_REAL_PYTHON === '1';
-    if (!realPython || !pythonBlock) {
+    if (!REAL_PYTHON_CAPTURES || !pythonBlock) {
       delete seededManifest.python;
     }
     // Drop manifest fields the host's current SDK schema does not yet accept
@@ -309,7 +321,7 @@ export async function seedRealPlugins(
     // it (it lives at the plugin repo root, not under dist/, so the dist copy
     // above does not include it). It MUST be added to the install receipt below
     // — the host now rejects a payload that contains any unlisted file.
-    if (realPython && pythonBlock && typeof pythonBlock.requirementsLock === 'string') {
+    if (REAL_PYTHON_CAPTURES && pythonBlock && typeof pythonBlock.requirementsLock === 'string') {
       const lockSrc = path.join(sourceDir, pythonBlock.requirementsLock);
       if (fs.existsSync(lockSrc)) {
         fs.copyFileSync(lockSrc, path.join(pluginDir, pythonBlock.requirementsLock));
@@ -340,7 +352,7 @@ export async function seedRealPlugins(
     for (const file of await listFilesRecursive(path.join(pluginDir, 'dist'))) {
       receiptFiles.push(`dist/${file}`);
     }
-    if (realPython && pythonBlock && typeof pythonBlock.requirementsLock === 'string'
+    if (REAL_PYTHON_CAPTURES && pythonBlock && typeof pythonBlock.requirementsLock === 'string'
       && fs.existsSync(path.join(pluginDir, pythonBlock.requirementsLock))) {
       receiptFiles.push(pythonBlock.requirementsLock);
     }

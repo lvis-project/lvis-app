@@ -14,6 +14,7 @@
 import { useOverlayContext } from "../context/OverlayContext.js";
 import { OverlayCard } from "./OverlayCard.js";
 import { useTranslation } from "../../../i18n/react.js";
+import { FLOATING_LANE_ITEM_WIDTH } from "./FloatingRightLane.js";
 
 export interface OverlayCardRegionProps {
   /**
@@ -39,7 +40,9 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
     return (
       <div
         data-testid="overlay-card-region"
-        className="pointer-events-none absolute right-4 top-2 z-20 w-[380px] max-w-[calc(100vw-2rem)]"
+        // Position comes from `FloatingRightLane`, which is also what keeps the
+        // action-panel rail from landing on top of this card's controls.
+        className={`pointer-events-none ${FLOATING_LANE_ITEM_WIDTH}`}
       >
         <div className="pointer-events-auto">
           <OverlayCard
@@ -82,7 +85,9 @@ export function OverlayCardRegion({ onPluginPrimaryAction, onRoutineAcknowledge 
     return (
       <div
         data-testid="overlay-card-region"
-        className="pointer-events-none absolute right-4 top-2 z-20 w-[380px] max-w-[calc(100vw-2rem)]"
+        // Position comes from `FloatingRightLane`, which is also what keeps the
+        // action-panel rail from landing on top of this card's controls.
+        className={`pointer-events-none ${FLOATING_LANE_ITEM_WIDTH}`}
       >
         <div className="pointer-events-auto">
           <OverlayCard
