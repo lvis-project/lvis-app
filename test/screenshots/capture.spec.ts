@@ -67,6 +67,11 @@ for (const [key, entry] of Object.entries(scenarios)) {
     if (entry.captureViewport) {
       test.use({ captureViewport: entry.captureViewport });
     }
+    // Same describe-scope requirement as `test.use` above: a per-test timeout
+    // set from outside a test body goes through `describe.configure`.
+    if (entry.timeoutMs) {
+      test.describe.configure({ timeout: entry.timeoutMs });
+    }
 
     test(`capture: ${key}`, async ({ app, mainWindow, scriptedProvider }) => {
     if (!entry.steps) {

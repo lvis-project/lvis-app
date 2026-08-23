@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pendingReplacementBaseline": 15,
+  "pendingReplacementBaseline": 9,
   "seededAccounts": [
     "work-board-seed",
     "marketplace-dev",
@@ -123,38 +123,59 @@
     },
     "screenshots/local-indexer-add-folder.png": {
       "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-*"
     },
     "screenshots/local-indexer-home.png": {
       "surface": "local-indexer plugin panel",
-      "data": "owner",
-      "action": "none"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-*"
     },
     "screenshots/local-indexer-index-search.png": {
       "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-*"
     },
     "screenshots/local-indexer-indexing.png": {
       "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-*"
     },
-    "screenshots/local-indexer-search-2.webp": {
-      "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+    "screenshots/local-indexer-search-2.png": {
+      "surface": "local-indexer chat answer",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-search*"
     },
-    "screenshots/local-indexer-search-3.webp": {
-      "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+    "screenshots/local-indexer-search-3.png": {
+      "surface": "local-indexer chat answer",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-search*"
     },
-    "screenshots/local-indexer-search.webp": {
-      "surface": "local-indexer plugin panel",
-      "data": "third-party",
-      "action": "reshoot"
+    "screenshots/local-indexer-search.png": {
+      "surface": "local-indexer chat answer",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts local-indexer-search*"
     },
     "screenshots/meeting-minutes-2.png": {
       "surface": "meeting plugin panel",

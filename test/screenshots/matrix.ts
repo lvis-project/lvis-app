@@ -1,6 +1,6 @@
 import type { ElectronApplication, Page } from 'playwright';
 import { openInlineSettings } from '../e2e/ui/inline-settings.js';
-import type { CaptureViewport, ScriptedScript } from './fixtures.js';
+import type { CaptureViewport, ScriptedScript, ScriptedTurn } from './fixtures.js';
 import { REAL_PYTHON_CAPTURES } from './plugin-seed.js';
 
 /**
@@ -84,6 +84,14 @@ export interface ScenarioEntry {
    * transcript, which the default frames inside a lot of empty background.
    */
   captureViewport?: CaptureViewport;
+  /**
+   * Per-test timeout for this capture, in ms. Omit for Playwright's own
+   * default; set it for a key whose preconditions are slow by nature rather
+   * than slow by accident — the local-indexer chat keys provision a Python
+   * runtime, scan a corpus and then run a multi-turn conversation, and the
+   * default cuts that off mid-scan.
+   */
+  timeoutMs?: number;
 }
 
 async function openWorkMode(page: Page): Promise<void> {
@@ -116,7 +124,41 @@ async function openWorkMode(page: Page): Promise<void> {
  * @param label the plugin's manifest `ui[].displayName` (its row label in the
  *   picker), e.g. "미팅" for meeting or "업무 도우미" for work-assistant.
  */
-async function openPluginPanel(page: Page, label: string): Promise<void> {
+async function openPluginPanel(
+  page: Page,
+  label: string,
+  options: { timeoutMs?: number } = {},
+): Promise<void> {
+  const deadline = Date.now() + (options.timeoutMs ?? 30_000);
+  for (;;) {
+    await selectPluginPanel(page, label);
+    try {
+      // The plugin panel host mounts a <webview>. Wait for it to attach and
+      // finish its first load; the guest bundle then renders its own DOM.
+      await page.locator('webview').first().waitFor({ state: 'visible', timeout: 8_000 });
+      break;
+    } catch (err) {
+      // Re-selecting, rather than waiting longer, is what actually converges.
+      // A worker-backed plugin registers its UI provider only after `start()`
+      // resolves — local-indexer's boots a Python worker, twenty-odd seconds on
+      // a cold profile — and a panel opened before that point can stay empty
+      // even once the provider appears, because the host re-renders the plugin
+      // LIST on `lvis:plugins:runtime-updated` but does not remount the panel
+      // already on screen. Walking the picker again mounts it from the live
+      // provider. (The stale panel is a real first-run defect, not a harness
+      // artefact: a user who opens the panel during that boot sees the same
+      // dead frame until they navigate away and back.)
+      if (Date.now() >= deadline) throw err;
+    }
+  }
+  // Give the guest bundle a settle beat to paint its initial (empty-state) UI
+  // after did-finish-load. No host-observable signal crosses the <webview>
+  // boundary, so a fixed settle is the pragmatic wait here.
+  await page.waitForTimeout(2_500);
+}
+
+/** One walk of the command popover to the named plugin's panel row. */
+async function selectPluginPanel(page: Page, label: string): Promise<void> {
   await openWorkMode(page);
 
   // Open the command popover (Ctrl/Cmd+K). The composer must be focused first
@@ -140,15 +182,6 @@ async function openPluginPanel(page: Page, label: string): Promise<void> {
   const row = pluginGroup.locator('[cmdk-item]').filter({ hasText: label }).first();
   await row.waitFor({ state: 'visible', timeout: 15_000 });
   await row.click();
-
-  // The plugin panel host mounts a <webview>. Wait for it to attach + finish
-  // its first load; the guest bundle then renders its own DOM inside.
-  const webview = page.locator('webview').first();
-  await webview.waitFor({ state: 'visible', timeout: 30_000 });
-  // Give the guest bundle a settle beat to paint its initial (empty-state) UI
-  // after did-finish-load. No host-observable signal crosses the <webview>
-  // boundary, so a fixed settle is the pragmatic wait here.
-  await page.waitForTimeout(2_500);
 }
 
 /**
@@ -273,7 +306,7 @@ const MINUTES_SUB_TAB = {
  *
  * The minutes view was previously recorded as unreachable on two counts, both of
  * which were wrong. Playwright cannot reach a control inside a `<webview>`, but
- * the main process can — see `clickInPluginGuest`. The second count, that a
+ * the main process can — see `waitInPluginGuest`. The second count, that a
  * populated minutes body needs a
  * completed STT recording, was aiming past the store: `SessionStore` keeps one
  * JSON file per finished session under `<pluginDataDir>/sessions/`, so a
@@ -339,9 +372,9 @@ const FABRICATED_MEETING_TITLE = '분기 데모 리허설';
 async function waitInPluginGuest(
   app: ElectronApplication,
   selector: string,
-  options: { text?: string; click?: boolean; timeoutMs?: number } = {},
+  options: { text?: string; click?: boolean; fill?: string; timeoutMs?: number } = {},
 ): Promise<void> {
-  const { text, click = false, timeoutMs = 20_000 } = options;
+  const { text, click = false, fill, timeoutMs = 20_000 } = options;
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     const hit = await app.evaluate(
@@ -359,6 +392,14 @@ async function waitInPluginGuest(
                  : nodes.find((n) => (n.textContent || '').includes(wanted));
                if (!node) return false;
                if (${target.click ? 'true' : 'false'}) node.click();
+               const value = ${JSON.stringify(target.fill ?? null)};
+               if (value !== null) {
+                 node.focus();
+                 node.value = value;
+                 // The guest listens on 'input', so assigning .value alone
+                 // changes what is on screen and nothing else.
+                 node.dispatchEvent(new Event('input', { bubbles: true }));
+               }
                return true;
              })()`,
           );
@@ -366,16 +407,58 @@ async function waitInPluginGuest(
         }
         return false;
       },
-      { selector, text, click },
+      { selector, text, click, fill },
     );
     if (hit) return;
     if (Date.now() > deadline) {
+      // Report what the guests DO show. A plugin UI that failed to load prints
+      // its reason into its own body ("Plugin UI failed to load: …"), and
+      // without this the only symptom is a selector that never matched.
+      const bodies = await guestBodyText(app);
       throw new Error(
-        `waitInPluginGuest: no ${selector}${text ? ` matching "${text}"` : ''} in any plugin guest after ${timeoutMs}ms`,
+        `waitInPluginGuest: no ${selector}${text ? ` matching "${text}"` : ''} in any plugin guest`
+        + ` after ${timeoutMs}ms. Guest bodies: ${JSON.stringify(bodies)}`,
       );
     }
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
+}
+
+/** The visible text of one control inside a plugin guest, or null if absent. */
+async function readInPluginGuest(
+  app: ElectronApplication,
+  selector: string,
+): Promise<string | null> {
+  return app.evaluate(async ({ webContents }, target) => {
+    const guests = webContents
+      .getAllWebContents()
+      .filter((contents) => contents.getType() === 'webview');
+    for (const guest of guests) {
+      const text = await guest.executeJavaScript(
+        `(() => {
+           const node = document.querySelector(${JSON.stringify(target)});
+           return node ? (node.textContent || '') : null;
+         })()`,
+      );
+      if (text !== null) return text as string;
+    }
+    return null;
+  }, selector);
+}
+
+/** Each plugin guest's visible text, truncated — failure diagnostics only. */
+async function guestBodyText(app: ElectronApplication): Promise<string[]> {
+  return app.evaluate(async ({ webContents }) => {
+    const out: string[] = [];
+    for (const guest of webContents.getAllWebContents()) {
+      if (guest.getType() !== 'webview') continue;
+      const text = await guest
+        .executeJavaScript('document.body ? document.body.innerText : "<no body>"')
+        .catch((err: unknown) => `<unreadable: ${String(err)}>`);
+      out.push(String(text).slice(0, 400));
+    }
+    return out;
+  });
 }
 
 /**
@@ -577,6 +660,403 @@ const WA_SUMMARY_SUMMARY = [
   '  - 데모 시나리오 3건을 확정함',
   '  - 녹화본은 다음 주까지만 보관함',
 ].join('\n');
+
+/**
+ * The fabricated document corpus every local-indexer capture indexes.
+ *
+ * The published local-indexer images show a real working corpus: a mapped
+ * network drive, `D:\업무\보고장표\2025\11월`, and the internal deck filenames
+ * under it. None of that can be redacted into a usable screenshot — the panel's
+ * whole subject IS the folder list and the document list — so the corpus is
+ * replaced rather than the frame retouched.
+ *
+ * It is written to {@link DEMO_DOCS_DIR} (`…/LVIS/문서`) rather than into the
+ * isolated profile, because these captures print the scan folder's absolute
+ * path and a per-run temp directory name would read as harness debris. Content
+ * is entirely invented and names no real person, team or system.
+ *
+ * The monthly reports are generated rather than written out: an operations
+ * report series is exactly the shape of thing a real scan folder holds a year
+ * of, and eighteen documents give the 문서 list enough rows to fill the panel
+ * and the scan enough work to be caught mid-progress.
+ */
+function demoDocument(
+  title: string,
+  lead: string,
+  sections: readonly (readonly [string, string])[],
+): string {
+  const body = sections
+    .map(([heading, text], i) => `## ${i + 1}. ${heading}\n\n${text}\n`)
+    .join('\n');
+  return `# ${title}\n\n${lead}\n\n${body}`;
+}
+
+function monthlyOperationsReport(month: string, index: number): string {
+  const indexed = 12_400 + index * 830;
+  const queries = 3_100 + index * 145;
+  const latency = (420 - index * 7) / 100;
+  return demoDocument(
+    `운영 리포트 ${month}`,
+    `${month} 한 달 동안의 색인·검색 운영 지표와 처리한 이슈를 정리한 문서입니다. 수치는 월말 기준 스냅숏이며, 다음 달 첫 주 회고에서 다시 확인합니다.`,
+    [
+      [
+        '처리량',
+        `이번 달 새로 색인된 문서는 ${indexed}건, 재색인은 ${Math.round(indexed / 9)}건입니다.`
+          + ` 검색 질의는 ${queries}건이 들어왔고 평균 응답 시간은 ${latency.toFixed(2)}초였습니다.`
+          + ' 야간 배치가 도는 시간대에 응답이 느려지는 경향은 지난달과 같습니다.',
+      ],
+      [
+        '이슈',
+        '스캔 도중 확장자만 바뀐 임시 파일이 함께 잡히는 문제가 두 건 보고되었습니다.'
+          + ' 제외 패턴에 임시 파일 규칙을 추가해 재발하지 않는 것을 확인했습니다.'
+          + ' 대용량 첨부가 들어간 문서 한 건은 청크 상한에 걸려 뒷부분이 잘렸고, 경고 목록에 남겨 두었습니다.',
+      ],
+      [
+        '다음 달 계획',
+        '보관 정책에 따라 2년이 지난 문서를 색인 대상에서 내리고, 폴더별 색인 주기를 주 1회로 맞춥니다.'
+          + ' 검색 품질 실험은 별도 노트에서 이어집니다.',
+      ],
+    ],
+  );
+}
+
+const LOCAL_INDEXER_CORPUS: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(
+    Array.from({ length: 12 }, (_, i) => {
+      const month = `2025-${String(i + 1).padStart(2, '0')}`;
+      return [`{{DEMO_DOCS}}/운영 리포트 ${month}.md`, monthlyOperationsReport(month, i)];
+    }),
+  ),
+  '{{DEMO_DOCS}}/제품 로드맵 2026 상반기.md': demoDocument(
+    '제품 로드맵 2026 상반기',
+    '상반기에 무엇을 먼저 하고 무엇을 미루는지에 대한 합의 문서입니다. 분기별 목표와 그 목표를 판단할 지표만 담고, 세부 설계는 각 기능 문서로 넘깁니다.',
+    [
+      ['1분기', '로컬 색인의 증분 스캔을 기본값으로 돌립니다. 전체 재색인은 사용자가 명시적으로 요청할 때만 수행합니다.'],
+      ['2분기', '검색 결과에 근거 문단을 함께 보여 줍니다. 어떤 파일의 어느 부분에서 나온 답인지 화면에서 바로 확인할 수 있어야 합니다.'],
+      ['미루는 것', '문서 자동 분류와 요약 저장은 이번 상반기에 하지 않습니다. 색인 정확도가 먼저입니다.'],
+      ['판단 지표', '검색 첫 화면에서 원하는 문서를 찾은 비율, 스캔 1회당 소요 시간, 색인 경고 건수 세 가지만 봅니다.'],
+    ],
+  ),
+  '{{DEMO_DOCS}}/검색 품질 개선 실험 노트.md': demoDocument(
+    '검색 품질 개선 실험 노트',
+    '검색 결과가 기대와 어긋난 사례를 모아 두고, 무엇을 바꿔 봤고 어떻게 됐는지 기록하는 노트입니다.',
+    [
+      ['사례 A — 제목만 맞고 내용이 다름', '파일 이름에 키워드가 있으면 내용과 무관하게 상위로 올라오는 문제. 제목 가중치를 낮추자 기대한 문서가 첫 화면으로 올라왔습니다.'],
+      ['사례 B — 표만 있는 문서', '표로만 이루어진 문서는 문장 단위 청크가 거의 만들어지지 않아 검색에 잡히지 않았습니다. 행 단위로 묶어 청크를 만드는 쪽으로 바꿨습니다.'],
+      ['사례 C — 같은 내용의 사본', '같은 내용이 폴더 두 곳에 있어 결과가 중복으로 보였습니다. 내용 해시가 같으면 한 줄로 접어서 보여 줍니다.'],
+      ['다음에 볼 것', '질문이 길어질수록 정확도가 떨어지는 경향이 있어, 질문을 짧은 조각으로 나눠 각각 검색한 뒤 합치는 방법을 실험할 예정입니다.'],
+    ],
+  ),
+  '{{DEMO_DOCS}}/신규 입사자 온보딩 가이드.md': demoDocument(
+    '신규 입사자 온보딩 가이드',
+    '첫 2주 동안 무엇을 읽고 무엇을 직접 해 보면 되는지 순서대로 적어 둔 문서입니다.',
+    [
+      ['첫날', '계정을 받고 개발 환경을 설치합니다. 설치가 끝나면 샘플 폴더를 색인해 검색이 되는 것까지 확인합니다.'],
+      ['첫 주', '제품 로드맵과 장애 대응 절차를 읽습니다. 코드는 가장 최근에 고쳐진 파일부터 훑는 편이 빠릅니다.'],
+      ['둘째 주', '작은 이슈 하나를 골라 처음부터 끝까지 처리해 봅니다. 리뷰에서 무엇을 물어보는지 익히는 것이 목적입니다.'],
+      ['막히면', '30분 넘게 같은 자리에서 막히면 물어봅니다. 물어보는 것이 늦는 것보다 낫습니다.'],
+    ],
+  ),
+  '{{DEMO_DOCS}}/보안 점검 체크리스트.md': demoDocument(
+    '보안 점검 체크리스트',
+    '분기마다 한 번씩 훑는 점검 목록입니다. 항목마다 확인 방법과 통과 기준을 함께 적어 두었습니다.',
+    [
+      ['접근 권한', '더 이상 쓰지 않는 계정이 남아 있는지 확인합니다. 90일 이상 로그인 기록이 없으면 비활성화합니다.'],
+      ['보관 자료', '색인 대상 폴더에 개인정보가 포함된 파일이 들어와 있지 않은지 확인합니다. 발견되면 폴더를 색인 대상에서 내리고 담당자에게 알립니다.'],
+      ['외부 전송', '외부로 나가는 요청 목록을 확인합니다. 목록에 없는 주소로 나가는 요청이 있으면 원인을 찾을 때까지 막아 둡니다.'],
+      ['기록', '점검 결과는 날짜와 확인자만 남기고, 발견 내용은 별도 이슈로 옮깁니다.'],
+    ],
+  ),
+  '{{DEMO_DOCS}}/장애 대응 절차.md': demoDocument(
+    '장애 대응 절차',
+    '색인 워커가 응답하지 않거나 검색이 비어서 돌아올 때 무엇을 먼저 보는지 정리한 문서입니다.',
+    [
+      ['먼저 확인', '워커가 살아 있는지, 포트를 다른 프로그램이 물고 있지 않은지 확인합니다. 같은 PC 에서 앱을 두 개 띄우면 두 번째는 포트를 잡지 못합니다.'],
+      ['그다음', '경고 목록을 봅니다. 특정 폴더에서만 실패하고 있다면 그 폴더의 권한과 경로 길이를 확인합니다.'],
+      ['복구', '색인 파일이 깨졌다고 판단되면 해당 폴더만 다시 색인합니다. 전체 재색인은 마지막 수단입니다.'],
+      ['기록', '원인을 찾았으면 무엇을 보고 그렇게 판단했는지 한 문단으로 남깁니다. 다음 사람이 같은 자리에서 헤매지 않도록 하는 것이 목적입니다.'],
+    ],
+  ),
+  '{{DEMO_DOCS}}/데이터 보관 정책.md': demoDocument(
+    '데이터 보관 정책',
+    '어떤 자료를 얼마나 보관하고 언제 지우는지에 대한 규칙입니다.',
+    [
+      ['보관 기간', '업무 문서는 3년, 운영 지표는 2년, 임시 산출물은 90일 보관합니다.'],
+      ['색인 대상', '보관 기간이 지난 자료는 색인 대상에서 먼저 내리고, 그다음 원본을 정리합니다. 순서를 지켜야 검색 결과에 지워진 문서가 남지 않습니다.'],
+      ['예외', '분쟁이나 감사와 관련된 자료는 종료될 때까지 보관합니다. 예외는 목록으로 관리하고 분기마다 다시 확인합니다.'],
+      ['삭제 기록', '무엇을 언제 지웠는지만 남기고 내용은 남기지 않습니다.'],
+    ],
+  ),
+};
+
+/**
+ * Everything a local-indexer capture needs on disk: the corpus itself plus the
+ * plugin's own `folders.json`, which is what registers the scan folder.
+ *
+ * Registering through the store rather than through the panel's folder picker
+ * is deliberate — the picker is an OS dialog, which a capture cannot drive, and
+ * the plugin re-reads this file at start, so the panel comes up with the folder
+ * already listed exactly as if someone had added it.
+ */
+const LOCAL_INDEXER_SEED: Readonly<Record<string, string>> = {
+  ...LOCAL_INDEXER_CORPUS,
+  'plugins/local-indexer/data/.local-indexer-workspace/folders.json':
+    `${JSON.stringify({ folders: ['{{DEMO_DOCS}}'] }, null, 2)}\n`,
+};
+
+/**
+ * One local-indexer panel capture, differing only in what happens after the
+ * panel is up.
+ *
+ * The shared preconditions are the reason these are built rather than written
+ * out four times: a real Python worker (hence `REAL_PYTHON_CAPTURES`), a
+ * fabricated corpus, a scan folder registered in the plugin's own store, and
+ * the same 1120px viewport the meeting panels need for the same guest-overflow
+ * reason. `timeoutMs` covers the worker's cold start plus a full scan of the
+ * corpus, which together do not fit the harness's 60s default.
+ */
+/**
+ * Why every local-indexer key is skipped without the flag. One string, because
+ * a second copy is a second thing to forget when the precondition changes.
+ */
+const LIVE_WORKER_SKIP =
+  'Needs a live Python worker. Re-run with LVIS_SCREENSHOT_REAL_PYTHON=1 on a '
+  + 'machine that has the venv provisioned (see the group comment above).';
+
+function localIndexerScenario(
+  after: (ctx: { app: ElectronApplication; page: Page }) => Promise<void>,
+): ScenarioEntry {
+  return {
+    topic: 'local-indexer',
+    plugins: ['local-indexer'],
+    uiLocale: 'ko',
+    executionMode: 'allow',
+    captureViewport: { width: 1120, height: 1000 },
+    timeoutMs: 240_000,
+    skip: REAL_PYTHON_CAPTURES ? undefined : LIVE_WORKER_SKIP,
+    seededCorpus: LOCAL_INDEXER_SEED,
+    steps: async ({ app, page }) => {
+      await openPluginPanel(page, '로컬 인덱서', { timeoutMs: 120_000 });
+      // The host paints its own placeholder until the guest document is up;
+      // wait for a control only the guest renders before doing anything to it.
+      await waitInPluginGuest(app, '[data-role="scanBtn"]');
+      await after({ app, page });
+    },
+  };
+}
+
+/**
+ * A chat capture answered out of the seeded corpus, indexed for real first.
+ *
+ * The index has to exist before the question is asked, and the panel is the
+ * honest way to build it: `runDemoIndexing` clicks the plugin's own 스캔
+ * control and waits for 완료, exactly as the panel keys do. Starting a new
+ * conversation afterwards leaves that behind, so the captured transcript holds
+ * the question and its answer and nothing else — the index itself survives,
+ * because it lives in the plugin's workspace rather than in the session.
+ *
+ * The reply text is scripted, as it is for every chat key here. The search
+ * under it is not: `index_search` runs against the index the scan just built,
+ * so the file names and the hit counts in the frame are a real tool result
+ * over real documents. `bm25` is the mode that works without an embedding key,
+ * which these captures deliberately do not have (`capturePluginConfigs`).
+ */
+/**
+ * The turn every plugin-tool conversation opens with, prepended here so no
+ * individual key can forget it.
+ *
+ * A plugin's tools are not in a turn's scope until the model activates the
+ * plugin: `resolveToolScope` seeds the active set from the previous turn, and a
+ * fresh chat has no previous turn, so `index_search` would be refused by the
+ * turn-scope gate in `invocation-runner.ts` before it ran. `request_plugin` is
+ * the meta-tool the host offers for exactly that, and it is what a real session
+ * against these plugins does first — so scripting it keeps the frame honest
+ * rather than working around the gate.
+ */
+const ACTIVATE_LOCAL_INDEXER: ScriptedTurn = {
+  expect: 'assistant',
+  parts: [
+    {
+      kind: 'tool',
+      id: 'capture-activate-local-indexer',
+      name: 'request_plugin',
+      input: { pluginId: 'local-indexer' },
+    },
+  ],
+};
+
+function localIndexerChatScenario(
+  turns: readonly ScriptedTurn[],
+  ask: (ctx: { page: Page }) => Promise<void>,
+): ScenarioEntry {
+  return {
+    topic: 'local-indexer',
+    plugins: ['local-indexer'],
+    uiLocale: 'ko',
+    executionMode: 'allow',
+    captureViewport: { width: 1440, height: 900 },
+    timeoutMs: 240_000,
+    skip: REAL_PYTHON_CAPTURES ? undefined : LIVE_WORKER_SKIP,
+    seededCorpus: LOCAL_INDEXER_SEED,
+    scriptedScript: { turns: [ACTIVATE_LOCAL_INDEXER, ...turns] },
+    steps: async ({ app, page }) => {
+      await openPluginPanel(page, '로컬 인덱서', { timeoutMs: 120_000 });
+      await waitInPluginGuest(app, '[data-role="scanBtn"]');
+      await runDemoIndexing(app);
+      await page.locator('[data-testid="sidebar-new-chat"]').first().click();
+      await page.locator('[data-testid="composer-textarea"]').first().waitFor({
+        state: 'visible',
+        timeout: 15_000,
+      });
+      await ask({ page });
+      await dismissPluginNudges(page);
+    },
+  };
+}
+
+/**
+ * Close any overlay card the plugin posted, and wait long enough to catch one
+ * that has not arrived yet.
+ *
+ * local-indexer raises a 야간 재인덱싱 nudge once a scan finishes, and it floats
+ * over the transcript these keys are about. Closing it is the card's own
+ * affordance, so the frame shows the state a user would be looking at. The
+ * settle before the sweep is not decoration: the card is posted a few seconds
+ * after the scan, which is often after the answer has already streamed.
+ */
+async function dismissPluginNudges(page: Page): Promise<void> {
+  await page.waitForTimeout(2_000);
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const dismiss = page.locator('[data-testid="routine-card-dismiss"]').first();
+    if (!(await dismiss.count())) break;
+    await dismiss.click().catch(() => {});
+    await page.waitForTimeout(400);
+  }
+}
+
+/**
+ * Open the work group and the tool row inside it, so the frame shows the search
+ * the answer was written from rather than a one-line "작업 1단계" summary.
+ *
+ * Both start collapsed and neither carries its own test id; the group's toggle
+ * is its only button, and the tool row's is the element the duration badge
+ * lives in.
+ */
+async function expandToolResult(page: Page): Promise<void> {
+  await page.locator('[data-testid="work-group"] button').first().click();
+  const duration = page.locator('[data-testid="tool-duration"]').first();
+  await duration.waitFor({ state: 'visible', timeout: 15_000 });
+  await duration.click();
+  // `ToolPayloadBlock` caps a payload at about five lines and scrolls the rest.
+  // A search result's first lines are its envelope — question, documentCount —
+  // so an unscrolled box shows a search with no hits in it. Dropping three
+  // lines brings the first hit into view; it is the scroll a reader makes, not
+  // a different rendering.
+  await page.evaluate((viewport) => {
+    const transcript = document.querySelector(`.lvis-chat-scroll ${viewport}`);
+    for (const payload of document.querySelectorAll('[data-testid="tool-payload"]')) {
+      const box = payload.closest(viewport) as HTMLElement | null;
+      // A short payload is not wrapped in a ScrollArea at all, so `closest`
+      // walks past it to the transcript's — which must not be scrolled here.
+      if (!box || box === transcript) continue;
+      const lineHeight = parseFloat(getComputedStyle(payload).lineHeight) || 0;
+      box.scrollTop = Math.min(3 * lineHeight, box.scrollHeight - box.clientHeight);
+    }
+  }, SCROLL_VIEWPORT);
+  // Settle before repositioning the transcript, and not merely order the two
+  // statements: scrolling a payload box makes the transcript's own
+  // stick-to-bottom hook run a frame later, which would undo a position set in
+  // the same tick.
+  await page.waitForTimeout(400);
+  // Expanding grew the transcript under a view that had already auto-scrolled
+  // to the bottom, which cuts the question that started the exchange in half at
+  // the top edge. The keys that expand are short enough that scrolling back to
+  // the start frames the whole exchange, answer included.
+  await scrollTranscript(page, 'top');
+}
+
+/** The Radix scroll viewport, which is the element that actually scrolls. */
+const SCROLL_VIEWPORT = '[data-radix-scroll-area-viewport]';
+
+/**
+ * Put the chat transcript at one end.
+ *
+ * Which end depends on what the key is about: an exchange that fits wants its
+ * question in frame, and one that does not wants its last answer whole.
+ */
+async function scrollTranscript(page: Page, to: 'top' | 'bottom'): Promise<void> {
+  await page.evaluate(({ selector, toTop }) => {
+    const box = document.querySelector(selector) as HTMLElement | null;
+    if (box) box.scrollTop = toTop ? 0 : box.scrollHeight;
+  }, { selector: `.lvis-chat-scroll ${SCROLL_VIEWPORT}`, toTop: to === 'top' });
+  await page.waitForTimeout(500);
+}
+
+/** Wait until a scripted reply has put this phrase on screen. */
+async function waitForChatText(page: Page, phrase: string): Promise<void> {
+  await page.getByText(phrase, { exact: false }).first().waitFor({
+    state: 'visible',
+    timeout: 60_000,
+  });
+}
+
+/** Run a full scan of the seeded corpus and wait for it to finish. */
+async function runDemoIndexing(app: ElectronApplication): Promise<void> {
+  await waitInPluginGuest(app, '[data-role="scanBtn"]', { click: true });
+  await waitInPluginGuest(app, '[data-role="scanBadgeText"]', {
+    text: '완료',
+    timeoutMs: 120_000,
+  });
+  // The 문서 list is filled from a follow-up query, not from the scan result.
+  await waitInPluginGuest(app, '.doc-item', { timeoutMs: 30_000 });
+  await dismissIndexingWarnings(app);
+}
+
+/**
+ * Dismiss the indexing-warning card, and keep dismissing until the stream that
+ * fills it has actually stopped.
+ *
+ * Vector embedding is off for these captures (`capturePluginConfigs` explains
+ * why), so the worker records one `embed.skipped` note per document — accurate,
+ * and eighteen of them stacked above the content every local-indexer key is
+ * about. Dismissing is the panel's own 경고 지우기 affordance, which a user
+ * without an embedding key would reach for too.
+ *
+ * One click is not enough: the host pumps `index.warning` after the scan badge
+ * already reads 완료, so a single dismissal empties a list that then refills
+ * behind it. Clicking until the count has read zero twice in a row waits the
+ * tail out without guessing a duration.
+ */
+/**
+ * Wait until the scan has processed at least one document.
+ *
+ * The summary the panel paints is `처리 완료 <processed> / <total>`, so the
+ * numbers are read from the same string a reader of the screenshot sees. The
+ * corpus is eighteen small files and no embedding runs, so this resolves in
+ * seconds; the deadline only exists so a stalled worker fails as a timeout
+ * rather than a hang.
+ */
+async function waitForScanProgress(app: ElectronApplication): Promise<void> {
+  const deadline = Date.now() + 60_000;
+  while (Date.now() < deadline) {
+    const summary = (await readInPluginGuest(app, '[data-role="scanSummary"]')) ?? '';
+    const match = /(\d+)\s*\/\s*(\d+)/.exec(summary);
+    if (match && Number(match[1]) > 0 && Number(match[2]) > 0) return;
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error('scan produced no progress within 60s');
+}
+
+async function dismissIndexingWarnings(app: ElectronApplication): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  let consecutiveEmpty = 0;
+  while (consecutiveEmpty < 2 && Date.now() < deadline) {
+    await waitInPluginGuest(app, '[data-role="clearWarningsBtn"]', { click: true });
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    const count = (await readInPluginGuest(app, '[data-role="warningCount"]'))?.trim();
+    consecutiveEmpty = count === '0' ? consecutiveEmpty + 1 : 0;
+  }
+}
 
 export const scenarios: Record<string, ScenarioEntry> = {
   // ---- chat (host app) ------------------------------------------------
@@ -993,57 +1473,140 @@ export const scenarios: Record<string, ScenarioEntry> = {
   // provisioned on this machine for the same requirements lock. No network, no
   // build, real worker.
   //
-  // Two preconditions the flag does NOT create, so they are stated rather than
-  // silently failed:
-  //   1. A venv for this plugin's exact lock must already exist under the real
-  //      `~/.lvis/runtime/python-envs/`. Running the plugin once in the real app
-  //      is what puts it there.
-  //   2. TCP 127.0.0.1:43129 must be free. The worker port is hardcoded
-  //      (`port: options.port ?? 43129`), `hostPlugin.ts` never passes one, and
-  //      the plugin's `configSchema` has no field for it — so there is no
-  //      override, and a second LVIS instance on the same machine cannot start
-  //      local-indexer at all. That is a real product limitation, not a harness
-  //      one; it is recorded in docs/development/screenshot-reshoot.md.
-  'local-indexer-home': {
-    topic: 'local-indexer',
-    plugins: ['local-indexer'],
-    uiLocale: 'ko',
-    executionMode: 'allow',
-    skip: REAL_PYTHON_CAPTURES
-      ? undefined
-      : 'Needs a live Python worker. Re-run with LVIS_SCREENSHOT_REAL_PYTHON=1 on a '
-        + 'machine that has the venv provisioned and port 43129 free (see the group '
-        + 'comment above).',
-    steps: async ({ page }) => {
-      await openPluginPanel(page, '로컬 색인');
+  // One precondition the flag does NOT create, so it is stated rather than
+  // silently failed: a venv for this plugin's exact lock must already exist
+  // under the real `~/.lvis/runtime/python-envs/`. Running the plugin once in
+  // the real app is what puts it there.
+  //
+  // The worker's TCP port used to be a second precondition — it was hardcoded
+  // to 43129 with no override, so a capture run on a machine where LVIS was
+  // already open could not start the worker, and worse, could have addressed
+  // the operator's ALREADY RUNNING one and rendered their real index into a
+  // published frame. The plugin now takes a `workerPort` setting and
+  // `fixtures.ts` names a free port per run; see `capturePluginConfigs`.
+  'local-indexer-add-folder': localIndexerScenario(async ({ app }) => {
+    // The registered-but-unscanned state: the scan folder is listed under
+    // 대기 / 스캔 필요 with its document count still zero.
+    await waitInPluginGuest(app, '[data-role="pendingFolderList"]', { text: '문서' });
+  }),
+  'local-indexer-indexing': localIndexerScenario(async ({ app }) => {
+    // Mid-scan, with work actually done. The badge flips to 진행 중 the instant
+    // the button is pressed, while the counters still read 0 / 0 — a frame that
+    // is true but shows none of what the key is about. Waiting for the guest's
+    // own summary to report a processed document captures the progress state
+    // instead of the moment before it.
+    await waitInPluginGuest(app, '[data-role="scanBtn"]', { click: true });
+    await waitInPluginGuest(app, '[data-role="scanBadgeText"]', { text: '진행 중' });
+    await waitForScanProgress(app);
+    // One dismissal, not the settle loop: mid-scan the stream never goes quiet,
+    // so waiting for it to would just wait out the whole scan. Clearing here
+    // keeps the frame on the progress card rather than on a column of
+    // embed.skipped notes (see `dismissIndexingWarnings` for why they exist).
+    await waitInPluginGuest(app, '[data-role="clearWarningsBtn"]', { click: true });
+  }),
+  'local-indexer-home': localIndexerScenario(async ({ app, page }) => {
+    await runDemoIndexing(app);
+    await page.waitForTimeout(1_000);
+  }),
+  'local-indexer-index-search': localIndexerScenario(async ({ app, page }) => {
+    await runDemoIndexing(app);
+    // The 문서 search box filters the indexed set by name or path. "운영" hits
+    // the twelve monthly reports and nothing else in the corpus.
+    await waitInPluginGuest(app, '[data-role="searchInput"]', { fill: '운영' });
+    await waitInPluginGuest(app, '.doc-item', { text: '운영 리포트' });
+    await page.waitForTimeout(1_000);
+  }),
+  // The three 자료 검색 keys. Each is one question answered out of the index the
+  // scan just built, so the tool row in the frame is a real `index_search` hit
+  // list over the seeded corpus; only the prose around it is scripted.
+  //
+  // ③ repeats ②'s turns because it IS ② one turn later — the reformat question
+  // only makes sense with the answer it reformats already on screen, and a
+  // capture cannot resume another capture's app.
+  'local-indexer-search': localIndexerChatScenario(
+    [
+        {
+          expect: 'assistant',
+          parts: [
+            {
+              kind: 'tool',
+              id: 'capture-index-search',
+              name: 'index_search',
+              input: { query: '검색 품질 개선 실험', mode: 'bm25' },
+            },
+          ],
+        },
+        {
+          expect: 'assistant',
+          parts: [{ kind: 'text', text:
+            '두 문서에 나누어져 있습니다.\n\n**검색 품질 개선 실험 노트.md** — 바꿔 본 것 자체가 사례별로 적혀 있습니다. 파일 이름에 키워드가 있으면 내용과 무관하게 상위로 올라오던 문제는 제목 가중치를 낮춰 잡았고, 표로만 이루어진 문서는 행 단위로 묶어 청크를 만드는 쪽으로 바꿨습니다. 같은 내용의 사본은 내용 해시가 같으면 한 줄로 접어서 보여 줍니다.\n\n**운영 리포트 2025-12.md** — 그 변경이 지표로 어떻게 나타났는지가 있습니다. 12월 검색 질의는 4,695건, 평균 응답 시간은 3.43초였습니다. 다만 야간 배치 시간대에 느려지는 경향은 지난달과 같다고 적혀 있어서, 응답 시간 쪽은 색인 품질 변경과는 별개 원인으로 보입니다.\n\n남은 실험은 노트 마지막에 있습니다 — 긴 질문을 짧은 조각으로 나눠 각각 검색한 뒤 합치는 방법.' }],
+        },
+    ],
+    async ({ page }) => {
+      await sendChatMessage(page, '색인 품질 관련해서 우리가 뭘 바꿨는지 자료 좀 찾아 줘.');
+      await waitForChatText(page, '검색 품질 개선 실험 노트');
+      await waitForChatText(page, '남은 실험은');
+      await expandToolResult(page);
     },
-  },
-  'local-indexer-indexing': {
-    topic: 'local-indexer',
-    skip: 'Same live-worker preconditions as local-indexer-home, plus a live indexing job.',
-  },
-  'local-indexer-add-folder': {
-    topic: 'local-indexer',
-    skip: 'Same live-worker preconditions as local-indexer-home.',
-  },
-  'local-indexer-search': {
-    topic: 'local-indexer',
-    skip:
-      'Same live-worker preconditions as local-indexer-home, plus a real search result ' +
-      'with LLM-authored citations over a seeded corpus.',
-  },
-  'local-indexer-search-2': {
-    topic: 'local-indexer',
-    skip: 'Same as local-indexer-search.',
-  },
-  'local-indexer-search-3': {
-    topic: 'local-indexer',
-    skip: 'Same as local-indexer-search.',
-  },
-  'local-indexer-index-search': {
-    topic: 'local-indexer',
-    skip: 'Same as local-indexer-search.',
-  },
+  ),
+  'local-indexer-search-2': localIndexerChatScenario(
+    [
+        {
+          expect: 'assistant',
+          parts: [
+            {
+              kind: 'tool',
+              id: 'capture-index-locate',
+              name: 'index_search',
+              input: { query: '장애 대응 절차 워커 포트', mode: 'bm25' },
+            },
+          ],
+        },
+        {
+          expect: 'assistant',
+          parts: [{ kind: 'text', text:
+            '파일은 한 곳에만 있습니다.\n\n`{{DEMO_DOCS}}\\장애 대응 절차.md`\n\n네 단계로 되어 있습니다.\n\n1. **먼저 확인** — 워커가 살아 있는지, 포트를 다른 프로그램이 물고 있지 않은지 봅니다.\n2. **범위 좁히기** — 경고 목록을 보고, 특정 폴더에서만 실패하면 그 폴더의 권한과 경로 길이를 확인합니다.\n3. **복구** — 색인 파일이 깨졌다고 판단되면 해당 폴더만 다시 색인합니다. 전체 재색인은 마지막 수단입니다.\n4. **기록** — 무엇을 보고 그렇게 판단했는지를 한 문단으로 남깁니다.' }],
+        },
+    ],
+    async ({ page }) => {
+      await sendChatMessage(page, '장애 대응 절차 문서 어디 있고 어떤 순서로 되어 있는지 알려 줘.');
+      await waitForChatText(page, '네 단계로 되어 있습니다');
+      await expandToolResult(page);
+    },
+  ),
+  'local-indexer-search-3': localIndexerChatScenario(
+    [
+        {
+          expect: 'assistant',
+          parts: [
+            {
+              kind: 'tool',
+              id: 'capture-index-locate',
+              name: 'index_search',
+              input: { query: '장애 대응 절차 워커 포트', mode: 'bm25' },
+            },
+          ],
+        },
+        {
+          expect: 'assistant',
+          parts: [{ kind: 'text', text:
+            '파일은 한 곳에만 있습니다.\n\n`{{DEMO_DOCS}}\\장애 대응 절차.md`\n\n네 단계로 되어 있습니다.\n\n1. **먼저 확인** — 워커가 살아 있는지, 포트를 다른 프로그램이 물고 있지 않은지 봅니다.\n2. **범위 좁히기** — 경고 목록을 보고, 특정 폴더에서만 실패하면 그 폴더의 권한과 경로 길이를 확인합니다.\n3. **복구** — 색인 파일이 깨졌다고 판단되면 해당 폴더만 다시 색인합니다. 전체 재색인은 마지막 수단입니다.\n4. **기록** — 무엇을 보고 그렇게 판단했는지를 한 문단으로 남깁니다.' }],
+        },
+        {
+          expect: 'assistant',
+          parts: [{ kind: 'text', text:
+            '## 장애 대응 절차 — 한 장 요약\n\n**언제** · 색인 워커가 응답하지 않거나 검색이 빈 결과로 돌아올 때\n\n| 순서 | 하는 일 | 판단 기준 |\n| --- | --- | --- |\n| 1 | 워커 생존·포트 점유 확인 | 앱이 두 개 떠 있으면 두 번째는 포트를 못 잡음 |\n| 2 | 경고 목록으로 범위 좁히기 | 한 폴더에서만 실패 → 권한·경로 길이 |\n| 3 | 해당 폴더만 재색인 | 전체 재색인은 마지막 수단 |\n| 4 | 판단 근거 한 문단 기록 | 다음 사람이 같은 자리에서 헤매지 않도록 |\n\n출처 · 장애 대응 절차.md' }],
+        },
+    ],
+    async ({ page }) => {
+      await sendChatMessage(page, '장애 대응 절차 문서 어디 있고 어떤 순서로 되어 있는지 알려 줘.');
+      await waitForChatText(page, '네 단계로 되어 있습니다');
+      await sendChatMessage(page, '이걸 한 장짜리 발표 자료 형식으로 정리해 줘.');
+      await waitForChatText(page, '한 장 요약');
+      // Two answers do not fit at once, so this key frames the second one.
+      await scrollTranscript(page, 'bottom');
+    },
+  ),
 
   // ---- meeting ------------------------------------------------
   'meeting-upcoming': {
