@@ -42,6 +42,10 @@ installPluginPartitionPolicy(
       ({
         webRequest: { onBeforeRequest },
         registerPreloadScript: vi.fn(),
+        // The asset scheme now registers with the rest of the partition policy,
+        // unconditionally — a frame binds its URL loaders once, so it has to be
+        // on the session before the partition's first frame loads.
+        protocol: { handle: vi.fn() },
       }) as unknown as Electron.Session,
   },
 );

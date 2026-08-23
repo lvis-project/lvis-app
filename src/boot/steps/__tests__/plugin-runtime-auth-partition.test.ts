@@ -24,6 +24,9 @@ const runtimeTestState = vi.hoisted(() => ({
   capturedRuntimeOptions: null as Record<string, unknown> | null,
   clearAuthPartitionService: vi.fn(async (_partition: string) => {}),
   runtime: {
+    // boot installs each loaded plugin's partition policy before starting any
+    // of them, so the double needs the cheap half of startAll too.
+    load: vi.fn(async () => {}),
     startAll: vi.fn(async () => {}),
     listToolNames: vi.fn(() => [] as string[]),
     listPluginIds: vi.fn(() => [] as string[]),
