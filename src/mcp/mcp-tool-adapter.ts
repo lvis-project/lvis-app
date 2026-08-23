@@ -7,6 +7,19 @@
  * adapter so the conversion contract stays in one auditable place
  * instead of being inlined at every call site.
  *
+ * Why this stays its own module, when the single-consumer diet (#2219) folded
+ * `http-request-headers.ts` and `uvx-command.ts` into `mcp-client.ts`: the
+ * production importer really is just `mcp-client.ts`, but three test files
+ * (`mcp/__tests__/mcp-ui-tool-call.test.ts`, `tools/__tests__/executor.test.ts`,
+ * `tools/__tests__/registry-model-exposure.test.ts`) import `mcpToolToTool`
+ * directly and none of them imports `mcp-client`. Folding would drag the
+ * 3k-line transport into every one of those unit tests to exercise a pure
+ * schema conversion. That — not the importer count — is the reason.
+ * (#2219's second commit message named five production importers that do not
+ * exist; those five files only mention this module in comments. The conclusion
+ * held, the stated reason did not, so it is replaced here rather than left to
+ * be re-derived from a commit message.)
+ *
  * Host-classifies-risk (project_permission_review_redesign): the hardcoded
  * `category:"network"` below is HOST-OWNED, not self-declared. An EXTERNAL MCP
  * server is a foreign, lowest-trust network peer (`trustFromSource("mcp")` →
