@@ -104,10 +104,22 @@
     }
     await mountFn({ root, bridge: window.lvisPlugin });
   } catch (err) {
+    // "Failed to fetch dynamically imported module" is the same message whether
+    // the bundle is missing, denied, or the frame cannot reach the scheme at
+    // all. Ask the same URL once more as a plain fetch and append what comes
+    // back, so the panel says which of those happened instead of leaving it to
+    // be guessed from the outside.
+    let detail = "";
+    try {
+      const probe = await fetch(entry);
+      detail = ` (asset fetch: HTTP ${probe.status})`;
+    } catch (probeErr) {
+      detail = ` (asset fetch: ${probeErr?.message ?? String(probeErr)})`;
+    }
     root.style.color = "red";
     root.style.padding = "8px";
     root.style.fontSize = "12px";
-    root.textContent = "[lvis] Plugin UI failed to load: " + (err?.message ?? String(err));
+    root.textContent = "[lvis] Plugin UI failed to load: " + (err?.message ?? String(err)) + detail;
     console.error("[lvis:plugin-shell] mount failed", err);
   }
 })();

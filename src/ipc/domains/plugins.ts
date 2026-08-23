@@ -43,8 +43,15 @@ import {
   validateThemePayload,
   type SafeThemePayload,
 } from "../../shared/plugin-theme-cache.js";
-import { pluginAssetUrlFromRealPath } from "../../main/plugin-asset-protocol.js";
-import { installMcpAppPartitionPolicy } from "../../main/html-preview-partition.js";
+import {
+  installPluginAssetProtocolHandler,
+  pluginAssetUrlFromRealPath,
+} from "../../main/plugin-asset-protocol.js";
+import { pluginPartitionName } from "../../shared/plugin-partition.js";
+import {
+  installMcpAppPartitionPolicy,
+  installPluginPartitionPolicy,
+} from "../../main/html-preview-partition.js";
 import { createMcpAppProxySession, disposeMcpAppProxySession } from "../../main/mcp-app-protocol.js";
 import { resolveMcpUiBackend } from "../../mcp/mcp-ui-backend-resolver.js";
 import {
@@ -2223,6 +2230,37 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       // Never let audit logging break the IPC sentinel return.
     }
   };
+  // Make a plugin's partition ready to be loaded into, before it is.
+  //
+  // The host renderer calls this and waits for it before it renders the panel's
+  // `<webview>` at all. Everything that has to be on the session at first load
+  // — the frame preload, the request gate, the `lvis-plugin:` asset scheme — is
+  // installed here, and the guest cannot outrun it because the guest does not
+  // exist yet.
+  //
+  // Installing at boot is not sufficient on its own: the window is up while
+  // plugins are still starting, and a panel opened in that window attached a
+  // `<webview>` whose loader table had no `lvis-plugin:` entry. Every asset
+  // request from that frame then failed with ERR_UNKNOWN_URL_SCHEME before
+  // reaching any handler, and kept failing — the frame asks a table that has no
+  // entry for the scheme, so no retry can help. The panel showed "Plugin UI
+  // failed to load" until the app was restarted, while the same URL fetched
+  // anywhere else worked. Idempotent per partition; the boot pass stays as the
+  // path that resolves install roots.
+  ipcMain.handle(CHANNELS.pluginBridge.ensurePartition, (e, payload: { pluginId?: string }) => {
+    if (!validateHostRendererSender(e)) {
+      auditUnauthorized(auditLogger, CHANNELS.pluginBridge.ensurePartition, e);
+      return UNAUTHORIZED_FRAME;
+    }
+    const pluginId = payload?.pluginId;
+    if (typeof pluginId !== "string" || !pluginRuntime.getPluginManifest(pluginId)) {
+      return { ok: false, error: "unknown-plugin-id" };
+    }
+    installPluginPartitionPolicy(pluginPartitionName(pluginId), {
+      pluginRoot: pluginRuntime.getPluginRoot(pluginId) || undefined,
+    });
+    return { ok: true };
+  });
   ipcMain.handle(CHANNELS.pluginBridge.registerWebview, (e, payload: { webContentsId: number; pluginId: string; entryUrl: string }) => {
     if (!validateHostRendererSender(e)) {
       auditUnauthorized(auditLogger, CHANNELS.pluginBridge.registerWebview, e);
@@ -2317,21 +2355,51 @@ export function registerPluginsHandlers(deps: IpcDeps): void {
       logRegisterReject("plugin-not-loaded", { webContentsId, pluginId, reason: "active-generation-missing" });
       return { ok: false, error: "plugin-not-loaded" };
     }
+    let targetWebview: Electron.WebContents | null = null;
     try {
-      const targetWebview = webContents.fromId(webContentsId);
-      if (
-        !targetWebview
-        || targetWebview.isDestroyed()
-        || targetWebview.getType() !== "webview"
-      ) {
-        logRegisterReject("webview-not-live", { webContentsId, pluginId });
-        logPluginLifecycle("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "webview-not-live" }, "webview register rejected");
-        return { ok: false, error: "webview-not-live" };
-      }
+      targetWebview = webContents.fromId(webContentsId) ?? null;
     } catch {
+      targetWebview = null;
+    }
+    if (
+      !targetWebview
+      || targetWebview.isDestroyed()
+      || targetWebview.getType() !== "webview"
+    ) {
       logRegisterReject("webview-not-live", { webContentsId, pluginId });
       logPluginLifecycle("warn", { pluginId, phase: PluginPhase.WEBVIEW_REJECT, webContentsId, reason: "webview-not-live" }, "webview register rejected");
       return { ok: false, error: "webview-not-live" };
+    }
+    // Point the asset protocol at the SAME root this URL was just built from,
+    // on the session that is about to fetch it, before the guest can import
+    // anything.
+    //
+    // The scheme itself is already on the session — the renderer awaits
+    // `ensurePartition` before it renders the <webview> at all, precisely so a
+    // frame never binds its loader table without it. What is still open here is
+    // the ROOT: it is a per-generation directory, and a plugin that reloads —
+    // which a worker-backed one does routinely, once its runtime finishes
+    // provisioning — gets a new one while the old is deleted. Re-recording it
+    // makes the invariant local: the root the entry URL is relative to is the
+    // root the handler serves.
+    //
+    // Its own try, and non-fatal. This used to sit inside the liveness check's
+    // try, where anything it threw came back as `webview-not-live` — a wrong
+    // answer about a live webview. A handler left pointing at the previous
+    // generation is a panel that may fail to load; refusing to register is a
+    // panel that certainly will not.
+    try {
+      installPluginAssetProtocolHandler(
+        pluginPartitionName(pluginId),
+        targetWebview.session,
+        resolvedRoot,
+      );
+    } catch (err) {
+      logPluginLifecycle(
+        "warn",
+        { pluginId, phase: PluginPhase.WEBVIEW_ATTACH, webContentsId, reason: scrubShortError(err instanceof Error ? err.message : String(err)) },
+        "plugin asset root re-bind failed",
+      );
     }
     const binding = {
       pluginId,

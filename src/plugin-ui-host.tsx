@@ -119,6 +119,13 @@ export function PluginUiHostView({
   // Shell src is empty until did-attach + registration complete for the current
   // view. Derived at render time — "" for any view key that hasn't registered.
   const [shellSrcBinding, setShellSrcBinding] = useState<{ viewKey: string; url: string } | null>(null);
+  // The plugin id whose partition main has confirmed is policy-installed. The
+  // `<webview>` is not rendered until this matches the view: a guest frame that
+  // loads into a partition before its session policy is on binds a loader table
+  // with no `lvis-plugin:` entry, and every asset request it makes for the rest
+  // of its life fails before reaching any handler. Ordering it here — rather
+  // than racing boot — is what makes that unreachable.
+  const [partitionReadyFor, setPartitionReadyFor] = useState<string | null>(null);
   const currentViewKey = view ? `${view.pluginId}:${view.extension.id}:${view.entryUrl ?? ""}:${view.runtimeRevision ?? 0}` : "";
   const shellSrc = shellSrcBinding?.viewKey === currentViewKey ? shellSrcBinding.url : "";
 
@@ -230,6 +237,7 @@ export function PluginUiHostView({
 
   useEffect(() => {
     setShellSrcBinding(null);
+    setPartitionReadyFor(null);
     registerAttemptRef.current = null;
     if (!view) {
       setErrorText(t("be_pluginUiHost.pluginViewNotFound"));
@@ -249,6 +257,31 @@ export function PluginUiHostView({
     const willRenderWebview = !!view.entryUrl && !!shellUrl && !!preloadUrl;
     setErrorText(null);
     setLoading(willRenderWebview);
+    if (!willRenderWebview) return;
+
+    const pluginId = view.pluginId;
+    const ensurePluginPartition = (window as unknown as {
+      lvisApi?: { ensurePluginPartition?: (id: string) => Promise<{ ok: boolean; error?: string } | null | undefined> };
+    }).lvisApi?.ensurePluginPartition;
+    if (typeof ensurePluginPartition !== "function") {
+      // Older preload surface — fall back to rendering immediately rather than
+      // leaving the panel on a spinner it can never leave.
+      setPartitionReadyFor(pluginId);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        await ensurePluginPartition(pluginId);
+      } catch {
+        // A failure here is not fatal on its own: boot may already have
+        // installed the policy. Render and let the shell report if it did not.
+      }
+      if (!cancelled) setPartitionReadyFor(pluginId);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [view]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
@@ -266,6 +299,10 @@ export function PluginUiHostView({
           {t("be_pluginUiHost.webviewAssetUrlNotFound")}
         </div>
       );
+    } else if (partitionReadyFor !== view.pluginId) {
+      // Partition policy still being installed — the loading overlay is already
+      // up. Rendering the <webview> now is the whole failure this avoids.
+      content = null;
     } else {
       const partition = pluginPartitionName(view.pluginId);
       // `key={view.pluginId}` 가 결정적. Electron `<webview>` 는 처음

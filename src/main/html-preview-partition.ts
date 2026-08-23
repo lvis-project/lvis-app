@@ -255,9 +255,10 @@ export function installPluginPartitionPolicy(
   sessionApi: SessionApi = getElectronSession(),
 ): void {
   const ses = sessionApi.fromPartition(partitionName);
-  if (options.pluginRoot) {
-    installPluginAssetProtocolHandler(partitionName, ses, options.pluginRoot);
-  }
+  // Unconditional: the scheme has to be on the session before the partition's
+  // first frame loads, and the root is allowed to arrive later. See
+  // `installPluginAssetProtocolHandler`.
+  installPluginAssetProtocolHandler(partitionName, ses, options.pluginRoot);
   if (installedPluginPartitions.has(partitionName)) return;
   installedPluginPartitions.add(partitionName);
 

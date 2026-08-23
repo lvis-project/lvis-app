@@ -524,6 +524,9 @@ export function buildInternalApiSurface() {
   // and any non-host frame.
   registerPluginWebview: async (payload: { webContentsId: number; pluginId: string; entryUrl: string }) =>
     ipcRenderer.invoke(CHANNELS.pluginBridge.registerWebview, payload) as Promise<{ ok: boolean; error?: string }>,
+  // Awaited before the panel renders its <webview> — see the channel comment.
+  ensurePluginPartition: async (pluginId: string) =>
+    ipcRenderer.invoke(CHANNELS.pluginBridge.ensurePartition, { pluginId }) as Promise<{ ok: boolean; error?: string }>,
   readPluginUiModule: async (pluginId: string, viewId: string) =>
     ipcRenderer.invoke(CHANNELS.plugins.uiReadModule, { pluginId, viewId }) as Promise<string>,
   // #1176 — toggle a plugin active/inactive. Returns the IPC result frame

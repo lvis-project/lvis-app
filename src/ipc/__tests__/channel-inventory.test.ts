@@ -330,6 +330,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:plugin:config:get",
         "lvis:plugin:config:set",
         "lvis:plugin:emit-event",
+        "lvis:plugin:ensure-partition",
         "lvis:plugin:get-entry-url",
         "lvis:plugin:get-theme",
         "lvis:plugin:register-webview",
