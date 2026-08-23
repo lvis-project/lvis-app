@@ -12,7 +12,39 @@ export type SafeThemePayload = {
 const ALLOWED_BUNDLE_IDS = new Set<string>(BUNDLE_IDS);
 const ALLOWED_SHELLS = new Set(["light", "dark"]);
 const PLUGIN_TOKEN_NAMES: Set<string> = new Set(LVIS_TOKEN_NAMES);
-const SAFE_TOKEN_VALUE = /^(hsl\(\s*-?\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%\s*\)|#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})|\d+(?:\.\d+)?(?:rem|em|px|%)|[1-9]00|\d+(?:\.\d+)?ms)$/;
+// Token values the host is allowed to hand a plugin frame, composed from the
+// shapes `bundleToPluginTokens` actually emits.
+//
+// Anything this rejects is dropped silently and the plugin keeps the SDK's
+// static fallback for that token — which is a dark-theme value, so a dropped
+// token shows up as a dark chip in a light shell rather than as an error. That
+// is what a flat `hsl()`-only pattern did to the seven derived tinted tokens
+// (`--lvis-*-bg-subtle`, `--lvis-primary-bg-strong`, `--lvis-surface-hover`,
+// `--lvis-focus-shadow`): every one is a `color-mix()` string, so every one was
+// filtered out of every payload, and the tokens the host added specifically so
+// plugins would stop hand-rolling their own mixes never arrived. `hsla()` — the
+// input-bar placeholder — was dropped for the same reason.
+//
+// Composed rather than written flat so widening stays legible: a value is a
+// color, a single non-nested `color-mix` of two colors, a length, a font
+// weight, or a duration. Nothing else parses, so no `url(...)`, no unbalanced
+// text, and no second function call can ride in behind a valid prefix.
+const _HSL = String.raw`hsla?\(\s*-?\d+(?:\.\d+)?\s*,\s*\d+(?:\.\d+)?%\s*,\s*\d+(?:\.\d+)?%\s*(?:,\s*(?:0|1|0?\.\d+)\s*)?\)`;
+const _HEX = String.raw`#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})`;
+const _COLOR = `(?:${_HSL}|${_HEX}|transparent)`;
+// String.raw, not a plain template: `\s` and `\d` would otherwise collapse to
+// the bare letters and the pattern would match nothing.
+const _COLOR_MIX = String.raw`color-mix\(in srgb,\s*${_COLOR}\s+\d+(?:\.\d+)?%\s*,\s*${_COLOR}\s*\)`;
+const _LENGTH = String.raw`\d+(?:\.\d+)?(?:rem|em|px|%)`;
+const _WEIGHT = String.raw`[1-9]00`;
+const _DURATION = String.raw`\d+(?:\.\d+)?ms`;
+// The three motion easing tokens; four numbers in 0..1 (the x pair must be, the
+// y pair may overshoot, which the bundle's own curves do not).
+const _NUM = String.raw`-?\d+(?:\.\d+)?`;
+const _EASING = String.raw`cubic-bezier\(\s*${_NUM}\s*,\s*${_NUM}\s*,\s*${_NUM}\s*,\s*${_NUM}\s*\)`;
+const SAFE_TOKEN_VALUE = new RegExp(
+  `^(?:${_COLOR}|${_COLOR_MIX}|${_LENGTH}|${_WEIGHT}|${_DURATION}|${_EASING})$`,
+);
 
 let lastThemePayload: SafeThemePayload | null = null;
 

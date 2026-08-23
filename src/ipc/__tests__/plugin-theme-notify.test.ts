@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { validateThemePayload } from "../domains/plugins.js";
+import { bundleToPluginTokens } from "../../ui/renderer/theme/plugin-token-map.js";
+import { loadAllThemeBundles } from "../../ui/renderer/theme/bundles/index.js";
 
 // v2 helper: a full ThemeProvider v2 payload shape — tokens required per spec
 const V2_PAYLOAD = {
@@ -192,6 +194,46 @@ describe("validateThemePayload", () => {
       const result = validateThemePayload({ bundleId, shell, tokens: { "--lvis-bg": "#000" } });
       expect(result.ok, `bundleId=${bundleId}`).toBe(true);
       if (result.ok) expect(result.safe.bundleId).toBe(bundleId);
+    }
+  });
+
+  // The validator and the token producer have to agree on value shapes. When
+  // they drifted, the seven derived color-mix tokens were dropped from every
+  // payload and plugin panels silently kept the SDK's dark-theme fallbacks —
+  // visible as a dark chip in a light shell, with nothing logged anywhere.
+  it("keeps every token every real bundle produces", async () => {
+    // Marketplace entries are manifests until loaded, so pull the full set.
+    const bundles = await loadAllThemeBundles();
+    expect(bundles.length).toBeGreaterThan(5);
+    for (const bundle of bundles) {
+      const tokens = bundleToPluginTokens(bundle);
+      const result = validateThemePayload({ bundleId: bundle.id, shell: bundle.shell, tokens });
+      expect(result.ok, `bundleId=${bundle.id}`).toBe(true);
+      if (!result.ok) continue;
+      const dropped = Object.keys(tokens).filter((key) => !(key in (result.safe.tokens ?? {})));
+      expect(dropped, `bundleId=${bundle.id}`).toEqual([]);
+    }
+  });
+
+  it("accepts a color-mix token but not one carrying a second declaration", () => {
+    const result = validateThemePayload({
+      bundleId: "violet-light",
+      shell: "light",
+      tokens: {
+        "--lvis-primary-bg-subtle": "color-mix(in srgb, hsl(217.2, 91.2%, 59.8%) 14%, hsl(0, 0%, 100%))",
+        "--lvis-focus-shadow": "color-mix(in srgb, #734dff 62%, transparent)",
+        "--lvis-input-bar-placeholder": "hsla(222.2, 84%, 7%, 0.82)",
+        "--lvis-surface-hover": "color-mix(in srgb, hsl(0, 0%, 0%) 6%, hsl(0, 0%, 96%)); background:url(https://evil.example)",
+        "--lvis-primary-bg-strong": "color-mix(in srgb, color-mix(in srgb, #fff 5%, #000) 28%, transparent)",
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(Object.keys(result.safe.tokens ?? {}).sort()).toEqual([
+        "--lvis-focus-shadow",
+        "--lvis-input-bar-placeholder",
+        "--lvis-primary-bg-subtle",
+      ]);
     }
   });
 
