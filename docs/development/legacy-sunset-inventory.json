@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "lastReviewed": "2026-07-01",
+  "lastReviewed": "2026-08-23",
   "minSupportedAppVersion": "0.4.4",
   "policy": {
     "migrationRetention": {
@@ -58,35 +58,25 @@
       "validation": [
         "bun run test:vitest -- run src/permissions/__tests__/permission-settings-store-664-migration.test.ts"
       ],
-      "sunsetNotBefore": "2026-08-15",
+      "sunsetNotBefore": "2026-11-15",
       "sunsetCriteria": [
         "At least two released app versions have shipped after the migration first shipped.",
         "The project has an explicit migration sunset issue confirming old settings files are outside the supported upgrade floor.",
         "The removal PR proves deliberate post-marker disabled settings remain pass-through LOW."
-      ]
-    },
-    {
-      "id": "permission-allowed-directories-alias-convergence",
-      "kind": "legacy-compatibility",
-      "status": "active",
-      "owner": "permissions",
-      "introduced": "2026-05-17",
-      "introducedBy": "c36f806e8168802fa807099e5b5fcadfda02f9fa",
-      "rationale": "The canonical settings key is permissions.additionalDirectories. Read-time ignores the old allowedDirectories alias; write-time removes the alias so files converge.",
-      "codeReferences": [
-        "src/permissions/permission-settings-store.ts"
       ],
-      "dataPreservationTests": [
-        "src/permissions/__tests__/permission-slash.test.ts"
-      ],
-      "validation": [
-        "bun run test:vitest -- run src/permissions/__tests__/permission-slash.test.ts"
-      ],
-      "sunsetNotBefore": "2026-08-15",
-      "sunsetCriteria": [
-        "No supported settings writer emits permissions.allowedDirectories.",
-        "The removal PR keeps the canonical additionalDirectories round-trip tests."
-      ]
+      "sunsetReview": {
+        "reviewedOn": "2026-08-23",
+        "verdict": "blocked",
+        "criteriaMet": [
+          "At least two released app versions have shipped after the migration first shipped. — the marker code is present in v0.4.3 (2026-07-01) and every release since, 17 releases through v0.6.2.",
+          "The removal PR proves deliberate post-marker disabled settings remain pass-through LOW. — already locked by cases (b), (c) and the end-to-end 'preserves user-chosen disabled after migration marker present' in the data-preservation test; a removal PR keeps them rather than writing them."
+        ],
+        "criteriaUnmet": [
+          "The project has an explicit migration sunset issue confirming old settings files are outside the supported upgrade floor. — no such issue exists (only #1413, which established this policy)."
+        ],
+        "blockingFact": "minSupportedAppVersion 0.4.4 already contains the migration, so every supported install that has BOOTED has had the marker stamped. What the floor does not cover is a settings file restored from a pre-v0.4.3 backup onto a current app: after removal its mode:'disabled' would read as pass-through LOW instead of the fail-closed posture the user chose. That is a fail-open, so accepting it is a human decision, not a date.",
+        "unblockedBy": "An issue that either (a) rules pre-v0.4.3 backup restores out of support, or (b) replaces the boot-time rewrite with a read-time guard that keeps unmarked mode:'disabled' fail-closed without mutating the file."
+      }
     },
     {
       "id": "mcp-stdio-out-of-process-transport",
