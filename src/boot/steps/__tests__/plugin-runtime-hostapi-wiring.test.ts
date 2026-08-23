@@ -36,6 +36,9 @@ const runtimeTestState = vi.hoisted(() => ({
   readPluginRegistry: vi.fn(async () => ({ version: 1, plugins: [] })),
   spawnWorker: vi.fn(),
   runtime: {
+    // boot installs each loaded plugin's partition policy before starting any
+    // of them, so the double needs the cheap half of startAll too.
+    load: vi.fn(async () => {}),
     startAll: vi.fn(async () => {}),
     listToolNames: vi.fn(() => [] as string[]),
     listPluginIds: vi.fn(() => [] as string[]),

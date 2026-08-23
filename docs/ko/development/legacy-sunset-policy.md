@@ -16,8 +16,10 @@ letting it stay on every boot and test path indefinitely.
 ## Required Inventory Fields
 
 Every migration or dormant experimental surface must have an entry in
-[`legacy-sunset-inventory.json`](./legacy-sunset-inventory.json). The inventory is
-checked by `bun run check:sunset-inventory`.
+[`legacy-sunset-inventory.json`](../../development/legacy-sunset-inventory.json).
+There is one inventory, not a per-language copy — it is machine-readable and
+`bun run check:sunset-inventory` gates only that path, so a mirror here could
+drift without any gate noticing.
 
 Required fields:
 

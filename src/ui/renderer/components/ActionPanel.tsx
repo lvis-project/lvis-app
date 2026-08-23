@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { type ReactNode } from "react";
 import { useTranslation } from "../../../i18n/react.js";
+import { FLOATING_LANE_ITEM_WIDTH } from "./FloatingRightLane.js";
 import { Button } from "../../../components/ui/button.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
 import {
@@ -247,7 +248,8 @@ function FloatingPanel({ children }: { children: ReactNode }) {
   return (
     <aside
       aria-label={t("actionPanel.title")}
-      className="lvis-surface-floating absolute right-4 top-2 z-50 flex w-[23rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl bg-card/(--opacity-solid) text-card-foreground backdrop-blur"
+      // Position comes from `FloatingRightLane`; this only describes the surface.
+      className={`lvis-surface-floating pointer-events-auto flex ${FLOATING_LANE_ITEM_WIDTH} flex-col overflow-hidden rounded-xl bg-card/(--opacity-solid) text-card-foreground backdrop-blur`}
       data-testid="action-panel"
       style={{ maxHeight: "min(34rem, calc(100vh - 7rem))" }}
     >
@@ -279,7 +281,7 @@ export function ActionPanel({
     return (
       <aside
         aria-label={t("actionPanel.title")}
-        className="pointer-events-none absolute right-4 top-2 z-50"
+        className="pointer-events-none"
         data-testid="action-panel-rail"
       >
         <div

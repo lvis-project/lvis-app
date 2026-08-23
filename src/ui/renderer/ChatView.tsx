@@ -34,6 +34,7 @@ import { useWorkspaceTabs } from "./preview/workspace-tabs.js";
 import { SIDE_PANEL_WIDTH_PREF, usePanelWidth } from "./hooks/use-panel-width.js";
 import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
 import { ActionPanel } from "./components/ActionPanel.js";
+import { FloatingRightLane } from "./components/FloatingRightLane.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
 import { useContainerNarrow } from "./hooks/use-container-narrow.js";
 import { WorkspaceRailDrawer } from "./components/WorkspaceRailDrawer.js";
@@ -629,21 +630,23 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
         data-testid="chat-main-column"
       >
-      {appMode !== "chat" ? (
-        <ActionPanel
-          open={actionPanelOpen}
-          onOpenChange={(open) => onActionPanelOpenChange?.(open)}
-          activity={actionPanelActivity}
-          onOpenItem={routeActivityItem}
-          onOpenItemPinned={routeActivityItemPinned}
-          onOpenItemInSystemApp={openActivityItemInSystemApp}
+      <FloatingRightLane>
+        {appMode !== "chat" ? (
+          <ActionPanel
+            open={actionPanelOpen}
+            onOpenChange={(open) => onActionPanelOpenChange?.(open)}
+            activity={actionPanelActivity}
+            onOpenItem={routeActivityItem}
+            onOpenItemPinned={routeActivityItemPinned}
+            onOpenItemInSystemApp={openActivityItemInSystemApp}
+          />
+        ) : null}
+        {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
+        <OverlayCardRegion
+          onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}
+          onRoutineAcknowledge={onRoutineAcknowledge}
         />
-      ) : null}
-      {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
-      <OverlayCardRegion
-        onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}
-        onRoutineAcknowledge={onRoutineAcknowledge}
-      />
+      </FloatingRightLane>
       <div className="relative min-h-0 min-w-0 max-w-full flex-1 overflow-hidden">
       <div className="grid h-full min-h-0 min-w-0 grid-cols-1">
       <div className="relative min-h-0 min-w-0 overflow-hidden">

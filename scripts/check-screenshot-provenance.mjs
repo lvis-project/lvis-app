@@ -52,14 +52,22 @@
  *    image that carries third-party content pushes the count above the
  *    baseline and fails. Replacing one and not lowering the baseline also
  *    fails, so the ledger cannot quietly stop tracking the backlog.
+ * 7. Reserved domains in the capture harness — every email address written into
+ *    `test/screenshots/` must sit in a domain that can never belong to anyone
+ *    (RFC 2606 / RFC 6761: `example.com|net|org`, `.example`, `.invalid`,
+ *    `.test`, `.localhost`). This is the one identity leak the gate CAN see
+ *    mechanically: a replacement capture renders the harness's own seeded
+ *    strings, so an address typed there reaches a published frame. It says
+ *    nothing about the pixels of any other image — rule 4 and the worklist
+ *    still own that.
  *
  * Run standalone with `node scripts/check-screenshot-provenance.mjs`.
  * `--root <dir>` points it at another checkout; the self-test uses that to
  * drive it against throwaway fixtures.
  */
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, resolve } from "node:path";
 
 const rootArgIndex = process.argv.indexOf("--root");
 const ROOT = rootArgIndex >= 0
@@ -78,6 +86,56 @@ const IMAGE_PATTERN = /\.(png|jpe?g|webp|gif|avif|bmp|tiff?|svg)$/i;
 const DATA_KINDS = new Set(["third-party", "owner", "seeded", "synthetic"]);
 const ACTIONS = new Set(["reshoot", "redact", "remove", "none"]);
 const REQUIRES_ACTION = "third-party";
+
+/** Where the replacement captures are authored. Rule 7 scans this tree. */
+const CAPTURE_HARNESS_DIR = "test/screenshots";
+const CAPTURE_HARNESS_EXTENSIONS = [".ts", ".tsx", ".mjs", ".md"];
+/**
+ * Local part is deliberately loose and the domain deliberately strict: the point
+ * is to catch anything that READS as an address in a rendered frame, not to
+ * validate mail routing.
+ */
+const EMAIL_PATTERN = /[A-Za-z0-9._%+-]+@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
+/**
+ * Domains reserved by RFC 2606 and RFC 6761. Nothing here can ever be
+ * registered, so an address in one of them cannot identify a real mailbox.
+ */
+const RESERVED_DOMAIN_SUFFIXES = [
+  "example.com",
+  "example.net",
+  "example.org",
+  ".example",
+  ".invalid",
+  ".test",
+  ".localhost",
+];
+
+function isReservedDomain(domain) {
+  const lower = domain.toLowerCase();
+  return RESERVED_DOMAIN_SUFFIXES.some(
+    (suffix) => lower === suffix || lower.endsWith(suffix),
+  );
+}
+
+function listHarnessSources(dir, out = []) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      // `out/` holds the captured PNGs (gitignored); nothing to read there.
+      if (entry.name === "node_modules" || entry.name === "out") continue;
+      listHarnessSources(full, out);
+    } else if (CAPTURE_HARNESS_EXTENSIONS.some((ext) => entry.name.endsWith(ext))) {
+      out.push(full);
+    }
+  }
+  return out;
+}
 
 // Git exports these to the hooks it runs and they outrank `-C`, so a gate
 // invoked from a hook would otherwise report on whichever repository git was
@@ -211,6 +269,23 @@ if (!Number.isInteger(baseline) || baseline < 0) {
   fail(`ratchet: ${thirdPartyCount} entries carry third-party content but the baseline is ${baseline}. A new image carrying third-party content is exactly what this gate refuses. If you are adding one, do not raise the baseline — capture it against a seeded account instead.`);
 } else if (thirdPartyCount < baseline) {
   fail(`ratchet: ${thirdPartyCount} entries carry third-party content but the baseline still says ${baseline}. Lower "pendingReplacementBaseline" to ${thirdPartyCount} so the backlog stays tracked.`);
+}
+
+// Rule 7 — no addressable domain in the capture harness's own seeded strings.
+for (const file of listHarnessSources(resolve(ROOT, CAPTURE_HARNESS_DIR))) {
+  let contents;
+  try {
+    contents = readFileSync(file, "utf8");
+  } catch {
+    continue;
+  }
+  const relativePath = file.slice(resolve(ROOT).length + 1).split("\\").join("/");
+  for (const match of contents.matchAll(EMAIL_PATTERN)) {
+    if (isReservedDomain(match[1])) continue;
+    fail(
+      `${relativePath}: seeded text contains an address at "${match[1]}", which is a domain someone could own. A capture renders these strings into a published frame — use a reserved domain (${RESERVED_DOMAIN_SUFFIXES.join(", ")}).`,
+    );
+  }
 }
 
 if (failures.length > 0) {
