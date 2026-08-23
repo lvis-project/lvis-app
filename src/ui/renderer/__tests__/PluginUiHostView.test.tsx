@@ -63,6 +63,16 @@ describe("PluginUiHostView — loading state", () => {
     expect(getByText("플러그인 뷰를 찾을 수 없습니다.")).toBeTruthy();
   });
 
+  it("holds the loading overlay, not the not-found error, while the plugin prepares", () => {
+    // A plugin whose runtime is still starting has no registered view yet. The
+    // user picked this destination a moment ago; "not found" is the wrong
+    // answer to a wait, and it is what made a first-run panel look broken.
+    stubLvisApi();
+    const { getByText, queryByText } = render(<PluginUiHostView view={null} preparing />);
+    expect(getByText("로딩 중...")).toBeTruthy();
+    expect(queryByText("플러그인 뷰를 찾을 수 없습니다.")).toBeNull();
+  });
+
   it("does NOT show loading overlay when view.entryUrl is missing", () => {
     stubLvisApi();
     const { queryByText } = render(<PluginUiHostView view={makeView({ entryUrl: undefined })} />);

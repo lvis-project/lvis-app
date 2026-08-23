@@ -109,10 +109,18 @@ export function PluginUiHostView({
   view,
   showChrome = true,
   authError = null,
+  preparing = false,
 }: {
   view: PluginUiExtensionView | null;
   showChrome?: boolean;
   authError?: string | null;
+  /**
+   * The destination names a plugin whose runtime is still starting, so there is
+   * no view to render yet. Distinct from `view == null` on its own, which means
+   * the view does not exist: one is a wait, the other is a mistake, and saying
+   * "not found" to the first is how a first-run panel looked broken.
+   */
+  preparing?: boolean;
 }) {
   const [errorText, setErrorText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -240,8 +248,10 @@ export function PluginUiHostView({
     setPartitionReadyFor(null);
     registerAttemptRef.current = null;
     if (!view) {
-      setErrorText(t("be_pluginUiHost.pluginViewNotFound"));
-      setLoading(false);
+      // Still starting: hold the loading overlay rather than claiming the view
+      // is missing. The effect re-runs when the view arrives.
+      setErrorText(preparing ? null : t("be_pluginUiHost.pluginViewNotFound"));
+      setLoading(preparing);
       return;
     }
     if (view.extension.kind === "embedded-page") {
@@ -282,13 +292,16 @@ export function PluginUiHostView({
     return () => {
       cancelled = true;
     };
-  }, [view]);
+  }, [view, preparing]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
   let content: React.ReactNode;
 
   if (errorText) {
     content = <div className="px-3 py-2 text-xs text-destructive">{errorText}</div>;
+  } else if (!view && preparing) {
+    // The loading overlay below is the whole frame for this state.
+    content = null;
   } else if (!view || !view.entryUrl) {
     content = <div className="px-3 py-2 text-xs text-muted-foreground">{t("be_pluginUiHost.uiModuleEntryNotFound")}</div>;
   } else {

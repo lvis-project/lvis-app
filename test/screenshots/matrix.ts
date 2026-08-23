@@ -141,13 +141,12 @@ async function openPluginPanel(
       // Re-selecting, rather than waiting longer, is what actually converges.
       // A worker-backed plugin registers its UI provider only after `start()`
       // resolves — local-indexer's boots a Python worker, twenty-odd seconds on
-      // a cold profile — and a panel opened before that point can stay empty
-      // even once the provider appears, because the host re-renders the plugin
-      // LIST on `lvis:plugins:runtime-updated` but does not remount the panel
-      // already on screen. Walking the picker again mounts it from the live
-      // provider. (The stale panel is a real first-run defect, not a harness
-      // artefact: a user who opens the panel during that boot sees the same
-      // dead frame until they navigate away and back.)
+      // a cold profile — so the row can be clicked before the view exists.
+      // Selecting it then used to do nothing at all: `handleViewSelect` refused
+      // any key with no registered view, which dropped the click and left the
+      // app where it was. That is fixed in the host (a preparing plugin's panel
+      // opens and waits), and this loop stays because it also covers the plainer
+      // case of a row that is not in the picker yet.
       if (Date.now() >= deadline) throw err;
     }
   }

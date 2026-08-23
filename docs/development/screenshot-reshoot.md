@@ -429,10 +429,25 @@ its pattern from the shapes the producer actually emits, and a test walks every
 real bundle through `bundleToPluginTokens` and asserts nothing is dropped, so the
 two cannot drift apart again silently.
 
-**Product decision — a reloaded plugin panel never recovers.** Reloading the
-guest leaves it permanently on 로딩 중…: the entry binding does not survive the
-reload. The harness works around it by never reloading; a user who reloads has no
-way back except restarting the app.
+**Fixed — selecting a plugin whose runtime is still starting did nothing.** The
+command picker lists a preparing plugin's panel on purpose (`App.tsx` builds
+those rows from `card.uiExtensions`, so a plugin can be reached while its
+runtime comes up), but `handleViewSelect` refused any key with no entry in
+`pluginViews` — and a preparing plugin has not registered its view yet. The
+picker closed, nothing opened, and nothing brought the user back when the view
+landed seconds later, so a first-run panel simply did not respond to the click.
+Reproduced here as roughly one capture run in three: the local-indexer panel
+never mounted, and the harness's own `openPluginPanel` retry loop is what hid
+it. Selection now opens the destination and the host holds its loading state
+until the view registers; the fall-back-to-home effect (whose job is an
+UNINSTALLED plugin) no longer undoes that navigation.
+
+**Not reproducible — "a reloaded plugin panel never recovers".** Recorded here
+in the previous pass. Re-probed against this branch by reloading the guest
+`webContents` from the main process with a marker set in the guest first: the
+marker is gone afterwards, so the reload really happened, and the bridge, the
+mounted plugin UI and the host overlay all come back. The partition-ordering fix
+above is the likely reason it no longer bites.
 
 **Product decision — the plugin's own `embeddingEndpoint` setting cannot be
 used.** The local-indexer advertises an OpenAI-compatible endpoint (LM Studio,
