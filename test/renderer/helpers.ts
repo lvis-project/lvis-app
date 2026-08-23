@@ -5,6 +5,7 @@ import { act, fireEvent } from "@testing-library/react";
 import type { MessageQueueStore } from "../../src/ui/renderer/state/message-queue-store.js";
 import { SETTINGS_TABS } from "../../src/shared/settings-tabs.js";
 import { MOCK_DEFAULT_SETTINGS } from "./mock-lvis-api.js";
+import type { ActionPanelActivityState } from "../../src/ui/renderer/components/ActionPanel.js";
 export { relativeLuminance } from "../contrast-helpers.js";
 
 /**
@@ -96,5 +97,30 @@ export function settingsWithActiveView(activeView: string, settingsTab?: string)
       activeView,
       ...(settingsTab ? { settingsTab } : {}),
     },
+  };
+}
+
+/**
+ * An ActionPanel activity state with nothing in it.
+ *
+ * Shared because two tests need the same empty starting point for different
+ * reasons — one exercises item routing after filling a list in, the other
+ * asserts the collapsed rail's placement in the floating lane. Two copies would
+ * let a change to `ActionPanelActivityState` be fixed in one and rot in the
+ * other.
+ */
+export function emptyActionPanelActivity(): ActionPanelActivityState {
+  return {
+    readFileCount: 0,
+    writtenFileCount: 0,
+    mcpCallCount: 0,
+    pluginCallCount: 0,
+    toolCallCount: 0,
+    fetchedPageCount: 0,
+    readFiles: [],
+    writtenFiles: [],
+    pluginCalls: [],
+    mcpCalls: [],
+    fetchedPages: [],
   };
 }

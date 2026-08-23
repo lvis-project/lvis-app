@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "pendingReplacementBaseline": 25,
+  "pendingReplacementBaseline": 19,
   "seededAccounts": [
     "work-board-seed",
     "marketplace-dev",
@@ -285,34 +285,52 @@
       "overlayChecked": true
     },
     "screenshots/work-assistant-conflict-2.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     },
     "screenshots/work-assistant-conflict.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     },
     "screenshots/work-assistant-meeting-end-trigger-2.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     },
     "screenshots/work-assistant-meeting-end-trigger.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     },
     "screenshots/work-assistant-reminder-2.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     },
     "screenshots/work-assistant-reminder.png": {
-      "surface": "work-assistant host notification card",
-      "data": "third-party",
-      "action": "reshoot"
+      "surface": "work-assistant host overlay card",
+      "data": "seeded",
+      "action": "none",
+      "account": "host-capture-seed",
+      "overlayChecked": true,
+      "replacedBy": "test/screenshots/matrix.ts work-assistant-*"
     }
   }
 }

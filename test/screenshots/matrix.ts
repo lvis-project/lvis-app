@@ -1,6 +1,7 @@
 import type { ElectronApplication, Page } from 'playwright';
 import { openInlineSettings } from '../e2e/ui/inline-settings.js';
 import type { CaptureViewport, ScriptedScript } from './fixtures.js';
+import { REAL_PYTHON_CAPTURES } from './plugin-seed.js';
 
 /**
  * Data-driven scenario matrix: one entry per docs-site screenshot key
@@ -44,7 +45,14 @@ export interface ScenarioEntry {
   keepReviewer?: boolean;
   /** Navigate/seed steps run before capture. Required unless `skip` is set. */
   steps?: (ctx: ScenarioContext) => Promise<void>;
-  /** Honest skip reason. Mutually exclusive with `steps`. */
+  /**
+   * Honest skip reason; `skip` wins over `steps` when both are present. Both is
+   * the shape a scenario takes when its blocker is a machine precondition
+   * rather than missing work: the steps are written and correct, and the reason
+   * resolves to `undefined` on a machine that meets the precondition (see
+   * `local-indexer-home`). An entry with neither is an incomplete entry and the
+   * spec fails it.
+   */
   skip?: string;
   /**
    * Transcript for the harness's local scripted endpoint (see fixtures.ts
@@ -156,6 +164,59 @@ async function sendChatMessage(page: Page, text: string): Promise<void> {
 }
 
 /**
+ * Push one plugin overlay card through the REAL main→renderer channel.
+ *
+ * The `work-assistant-*` docs keys are host-rendered overlay cards, not plugin
+ * panels. In production the plugin calls `hostApi.triggerConversation(spec)`
+ * and the host builds an `OverlayItem` and sends it on `lvis:overlay:show`
+ * (src/boot/steps/plugin-runtime/host-api-factory.ts). Firing the plugin's own
+ * detector needs a live ms-graph / meeting signal, so this composes the SAME
+ * item the host would compose and sends it on the SAME channel from the main
+ * process — the technique `chat-app-update` already uses for `lvis:update:state`.
+ * Everything downstream is the real thing: OverlayContext queues it,
+ * OverlayCardRegion renders the real OverlayCard, and the primary action runs
+ * the real imported-trigger insert.
+ *
+ * `intent` is the plugin's overlay source tag (`work_assistant.alert.<intent>`
+ * → `overlay:<intent>`); the host derives the card title from it when the spec
+ * carries no explicit title, which is what the published images show.
+ */
+async function pushPluginOverlay(
+  app: ElectronApplication,
+  page: Page,
+  spec: { intent: string; summary: string; prompt: string },
+): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, item) => {
+    const win = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed());
+    if (!win) return;
+    win.webContents.send('lvis:overlay:show', item);
+  }, {
+    id: `plugin:work-assistant:${spec.intent}`,
+    source: { kind: 'plugin', pluginId: 'work-assistant', eventId: spec.intent },
+    title: spec.intent,
+    summary: spec.summary,
+    running: false,
+    // The ko string `be_pluginRuntime.overlayPrimaryActionLabel` resolves to.
+    primaryActionLabel: '확인하기',
+    pendingPrompt:
+      `<imported-from-proactive source="overlay:${spec.intent}">
+${spec.prompt}
+</imported-from-proactive>`,
+    createdAt: new Date().toISOString(),
+  });
+  await page.locator('[data-testid="overlay-card-region"]').first().waitFor({
+    state: 'visible',
+    timeout: 15_000,
+  });
+  // The card opens with the summary clamped to two lines and a "\ub354 \ubcf4\uae30" toggle.
+  // The published images are clamped too, but what they clamp away is the alert
+  // itself, so the frame ends up showing the feature without showing what it
+  // said. Expanding is a real state of the real card, reached by clicking the
+  // real control.
+  await page.locator('[data-testid="overlay-card-expand-toggle"]').first().click();
+}
+
+/**
  * Everything in the captures below is invented. It is written here rather than
  * read from anywhere on the capturing machine so a frame cannot pick up a real
  * name, path, or document by accident — which is the whole reason these keys
@@ -191,6 +252,37 @@ const SEEDED_NOTE_BODY = [
   '',
   'Nothing here is real; this file exists so a capture has something to read.',
   '',
+].join('\n');
+
+/**
+ * Fabricated work-assistant alerts.
+ *
+ * The published images for these keys carry a real organiser, real attendee
+ * addresses and, on one, an opaque calendar event id. Everything below is
+ * invented for the capture: the addresses are at `example.invalid`, which is
+ * reserved by RFC 2606 and can never resolve to anyone, and the names are role
+ * labels rather than person names.
+ */
+const WA_CONFLICT_SUMMARY = [
+  '\uc0c8 \uc77c\uc815\uc774 \uae30\uc874 \uc77c\uc815\uacfc \uacb9\uce69\ub2c8\ub2e4.',
+  '- \uc0c8 \uc77c\uc815: \ubd84\uae30 \ub370\ubaa8 \ub9ac\ud5c8\uc124 (14:00~15:00)',
+  '- \uacb9\uce58\ub294 \uc77c\uc815 (1\uac1c):',
+  '  - \ubb38\uc11c\ud654 \uc2a4\ud504\ub9b0\ud2b8 \uc810\uac80 (14:30~15:30)',
+].join('\n');
+
+const WA_PREP_SUMMARY = [
+  '\uc57d 15\ubd84 \ud6c4 \uc77c\uc815\uc774 \uc2dc\uc791\ub429\ub2c8\ub2e4.',
+  '- \uc81c\ubaa9: \ubd84\uae30 \ub370\ubaa8 \ub9ac\ud5c8\uc124',
+  '- \uc8fc\ucd5c\uc790: \ub370\ubaa8 \uc9c4\ud589\uc790 (demo-host@example.invalid)',
+  '- \uc7a5\uc18c: \uc628\ub77c\uc778',
+].join('\n');
+
+const WA_SUMMARY_SUMMARY = [
+  '\ubbf8\ud305\uc774 \ubc29\uae08 \uc885\ub8cc\ub418\uc5c8\uc2b5\ub2c8\ub2e4.',
+  '- \uc81c\ubaa9: \ubd84\uae30 \ub370\ubaa8 \ub9ac\ud5c8\uc124',
+  '- \uc8fc\uc694 \ub0b4\uc6a9:',
+  '  - \ub370\ubaa8 \uc2dc\ub098\ub9ac\uc624 3\uac74\uc744 \ud655\uc815\ud568',
+  '  - \ub179\ud654\ubcf8\uc740 \ub2e4\uc74c \uc8fc\uae4c\uc9c0\ub9cc \ubcf4\uad00\ud568',
 ].join('\n');
 
 export const scenarios: Record<string, ScenarioEntry> = {
@@ -598,38 +690,54 @@ export const scenarios: Record<string, ScenarioEntry> = {
   },
 
   // ---- local-indexer ------------------------------------------------
-  // local-indexer's REAL bundle IS side-loadable (its manifest + dist copy in
-  // via plugin-seed.ts and the plugin *loads*), but its compiled hostPlugin
-  // `start()` hard-throws "localIndexerPlugin: pythonExecutable이 설정되지
-  // 않았습니다" without a provisioned Python interpreter (host
-  // PythonRuntimeBootstrapper.ensureReady() is not run in this test env, and the
-  // bundle requires the kiwi/FTS5 Python worker even to expose its UI provider).
-  // The runtime tears the plugin down after the start failure, so no UI provider
-  // registers and the panel is unreachable. Provisioning a real Python runtime +
-  // native deps (kiwipiepy, FTS5) is heavy and out of scope for a screenshot
-  // harness. Verified: dist/src/main/main.js:~178046 (runStartWithTimeout →
-  // localIndexerPlugin start throw). Kept skipped honestly.
+  // local-indexer's REAL bundle is side-loadable, but its compiled hostPlugin
+  // `start()` hard-throws without a provisioned Python interpreter — the
+  // kiwi/FTS5 worker has to be healthy before the plugin registers its UI
+  // provider at all, and a fresh isolated profile has an empty runtime cache.
+  //
+  // `LVIS_SCREENSHOT_REAL_PYTHON=1` answers that: plugin-seed keeps the manifest
+  // `python` block and fixtures hardlinks in the venv the host already
+  // provisioned on this machine for the same requirements lock. No network, no
+  // build, real worker.
+  //
+  // Two preconditions the flag does NOT create, so they are stated rather than
+  // silently failed:
+  //   1. A venv for this plugin's exact lock must already exist under the real
+  //      `~/.lvis/runtime/python-envs/`. Running the plugin once in the real app
+  //      is what puts it there.
+  //   2. TCP 127.0.0.1:43129 must be free. The worker port is hardcoded
+  //      (`port: options.port ?? 43129`), `hostPlugin.ts` never passes one, and
+  //      the plugin's `configSchema` has no field for it — so there is no
+  //      override, and a second LVIS instance on the same machine cannot start
+  //      local-indexer at all. That is a real product limitation, not a harness
+  //      one; it is recorded in docs/development/screenshot-reshoot.md.
   'local-indexer-home': {
     topic: 'local-indexer',
-    skip:
-      'Real lvis-plugin-local-indexer bundle loads but its start() hard-throws without a ' +
-      'provisioned Python interpreter (pythonExecutable not set — PythonRuntimeBootstrapper ' +
-      'is not run in this harness), so the plugin is torn down and its UI provider never ' +
-      'registers. Needs a real Python worker (kiwi/FTS5) — out of scope for a screenshot harness.',
+    plugins: ['local-indexer'],
+    uiLocale: 'ko',
+    executionMode: 'allow',
+    skip: REAL_PYTHON_CAPTURES
+      ? undefined
+      : 'Needs a live Python worker. Re-run with LVIS_SCREENSHOT_REAL_PYTHON=1 on a '
+        + 'machine that has the venv provisioned and port 43129 free (see the group '
+        + 'comment above).',
+    steps: async ({ page }) => {
+      await openPluginPanel(page, '로컬 색인');
+    },
   },
   'local-indexer-indexing': {
     topic: 'local-indexer',
-    skip: 'Same Python-runtime blocker as local-indexer-home, plus requires a live indexing job.',
+    skip: 'Same live-worker preconditions as local-indexer-home, plus a live indexing job.',
   },
   'local-indexer-add-folder': {
     topic: 'local-indexer',
-    skip: 'Same Python-runtime blocker as local-indexer-home.',
+    skip: 'Same live-worker preconditions as local-indexer-home.',
   },
   'local-indexer-search': {
     topic: 'local-indexer',
     skip:
-      'Same Python-runtime blocker as local-indexer-home, plus requires a real search result ' +
-      'with LLM-authored citations.',
+      'Same live-worker preconditions as local-indexer-home, plus a real search result ' +
+      'with LLM-authored citations over a seeded corpus.',
   },
   'local-indexer-search-2': {
     topic: 'local-indexer',
@@ -717,37 +825,201 @@ export const scenarios: Record<string, ScenarioEntry> = {
 
   // ---- work-assistant ------------------------------------------------
   // These six keys are NOT plugin-panel screens — they are host-rendered
-  // notification cards (OS toast + host overlay) emitted when a work-assistant
-  // detector fires (work_assistant.alert.<intent>, see the plugin's
-  // notificationEvents + decision/*-detector.ts). Firing a detector needs real
-  // external signals (ms-graph email.new / calendar.event.conflict.detected /
-  // meeting.summary.created events) — the work-assistant src has NO dev/test
-  // trigger tool to synthesize them (verified: no fixture/mock/seed IPC path in
-  // lvis-plugin-work-assistant/src). The plugin's own detector-toggle PANEL does
-  // render with the real bundle and is captured under chat-plugin-panel; these
-  // card states remain unreachable without a live upstream event source.
+  // overlay cards emitted when a work-assistant detector fires
+  // (work_assistant.alert.<intent>, see the plugin's notificationEvents +
+  // decision/*-detector.ts). The DETECTOR still needs real external signals
+  // (ms-graph email.new / calendar.event.conflict.detected /
+  // meeting.summary.created) and the plugin ships no dev trigger to synthesize
+  // them — but the detector is not what these images show. What they show is
+  // the host's own card, and the host builds it in one place from one IPC
+  // message, so `pushPluginOverlay` sends that exact message on that exact
+  // channel and everything downstream is the production path: OverlayContext,
+  // OverlayCardRegion, the real OverlayCard, and the real imported-trigger
+  // insert behind the primary action. The `-2` keys click that button for real.
+  // (The plugin's own detector-toggle panel is a separate surface, captured
+  // under chat-plugin-panel.)
   'work-assistant-conflict': {
     topic: 'work-assistant',
-    skip:
-      'Host-rendered notification card (work_assistant.alert.calendar-conflict-prep), not a plugin ' +
-      'panel. Fires only on a real calendar.event.conflict.detected signal from ms-graph; no ' +
-      'dev/test trigger exists in the work-assistant plugin to synthesize it.',
+    // Card plus chat, without the dead space the default viewport leaves.
+    captureViewport: { width: 1440, height: 820 },
+    uiLocale: 'ko',
+    steps: async ({ app, page }) => {
+      await openWorkMode(page);
+      await pushPluginOverlay(app, page, {
+        intent: 'calendar-conflict-prep',
+        summary: WA_CONFLICT_SUMMARY,
+        prompt: WA_CONFLICT_SUMMARY,
+      });
+    },
   },
-  'work-assistant-conflict-2': { topic: 'work-assistant', skip: 'Same as work-assistant-conflict — host card needing a live external signal.' },
+  'work-assistant-conflict-2': {
+    topic: 'work-assistant',
+    // Taller than its siblings: this reply carries both event detail blocks, and
+    // a shorter frame scrolls the imported-trigger bubble — the thing that shows
+    // the card's prompt became a chat turn — off the top.
+    captureViewport: { width: 1440, height: 980 },
+    uiLocale: 'ko',
+    reviewerMode: 'disabled',
+    scriptedScript: {
+      turns: [
+        {
+          expect: 'assistant',
+          parts: [
+            {
+              kind: 'text',
+              text: [
+                '\uacb9\uce58\ub294 \ub450 \uc77c\uc815\uc758 \uc0c1\uc138\ub294 \uc544\ub798\uc640 \uac19\uc2b5\ub2c8\ub2e4.',
+                '',
+                '1. \ubd84\uae30 \ub370\ubaa8 \ub9ac\ud5c8\uc124',
+                '',
+                '- \uc2dc\uac04: 2026-08-27 14:00 ~ 15:00',
+                '- \uc7a5\uc18c: \uc628\ub77c\uc778',
+                '- \uc8fc\ucd5c\uc790: \ub370\ubaa8 \uc9c4\ud589\uc790 (demo-host@example.invalid)',
+                '- \uc0c1\ud0dc: \ucc38\uc11d\uc790\uc5d0 \ubcf8\uc778 \ud3ec\ud568',
+                '',
+                '2. \ubb38\uc11c\ud654 \uc2a4\ud504\ub9b0\ud2b8 \uc810\uac80',
+                '',
+                '- \uc2dc\uac04: 2026-08-27 14:30 ~ 15:30',
+                '- \uc7a5\uc18c: \ud68c\uc758\uc2e4 B',
+                '- \uc8fc\ucd5c\uc790: \ubb38\uc11c \ub2f4\ub2f9 (demo-docs@example.invalid)',
+                '- \uc0c1\ud0dc: \uc218\ub77d, \uc815\uae30 \uc77c\uc815',
+                '',
+                '\uacb9\uce58\ub294 \uad6c\uac04\uc740 30\ubd84\uc785\ub2c8\ub2e4. \uc6d0\ud558\uc2dc\uba74 \ub2e4\uc74c \uc911 \ud558\ub098\ub85c \uc774\uc5b4\uac00\uaca0\uc2b5\ub2c8\ub2e4.',
+                '',
+                '1. \ub9ac\ud5c8\uc124\uc744 30\ubd84 \uc55e\ub2f9\uaca8 \uacb9\uce68\uc744 \uc5c6\uc568\ub2e4',
+                '2. \uc810\uac80\uc744 \ub2e4\uc74c \uc2ac\ub86f\uc73c\ub85c \ubbf8\ub8ec\ub2e4',
+                '3. \uc774\ubc88\uc5d4 \uadf8\ub300\ub85c \ub454\ub2e4',
+              ].join('\n'),
+            },
+          ],
+        },
+      ],
+    },
+    steps: async ({ app, page }) => {
+      await openWorkMode(page);
+      await pushPluginOverlay(app, page, {
+        intent: 'calendar-conflict-prep',
+        summary: WA_CONFLICT_SUMMARY,
+        prompt: WA_CONFLICT_SUMMARY,
+      });
+      // The published image for this key is the state AFTER the card's primary
+      // action: the staged prompt lands in chat as an imported trigger and the
+      // assistant answers it. Clicking the real button is what produces it.
+      await page.locator('[data-testid="overlay-card-primary-action"]').first().click();
+      await page.locator('[data-testid="assistant-message-body"]').last().waitFor({
+        state: 'visible',
+        timeout: 30_000,
+      });
+    },
+  },
   'work-assistant-reminder': {
     topic: 'work-assistant',
-    skip:
-      'Host-rendered reminder notification card, not a plugin panel. Needs a real scheduled/upstream ' +
-      'trigger (ms-graph/meeting event); no dev/test synthesizer exists in the plugin.',
+    // Card plus chat, without the dead space the default viewport leaves.
+    captureViewport: { width: 1440, height: 820 },
+    uiLocale: 'ko',
+    steps: async ({ app, page }) => {
+      await openWorkMode(page);
+      await pushPluginOverlay(app, page, {
+        intent: 'calendar-event-prep',
+        summary: WA_PREP_SUMMARY,
+        prompt: WA_PREP_SUMMARY,
+      });
+    },
   },
-  'work-assistant-reminder-2': { topic: 'work-assistant', skip: 'Same as work-assistant-reminder — host card needing a live external signal.' },
+  'work-assistant-reminder-2': {
+    topic: 'work-assistant',
+    // Card plus chat, without the dead space the default viewport leaves.
+    captureViewport: { width: 1440, height: 820 },
+    uiLocale: 'ko',
+    reviewerMode: 'disabled',
+    scriptedScript: {
+      turns: [
+        {
+          expect: 'assistant',
+          parts: [
+            {
+              kind: 'text',
+              text: [
+                '\uc2dc\uc791 \uc804 \uc900\ube44\ud560 \uac83\uc744 \uc815\ub9ac\ud588\uc2b5\ub2c8\ub2e4.',
+                '',
+                '- \uc9c0\ub09c \ud68c\ucc28\uc5d0\uc11c \ub118\uc5b4\uc628 \ud56d\ubaa9 2\uac74\uc774 \uc544\uc9c1 \uc5f4\ub824 \uc788\uc2b5\ub2c8\ub2e4.',
+                '- \ub370\ubaa8 \uc2dc\ub098\ub9ac\uc624 \ubb38\uc11c\ub294 \uc5b4\uc81c \uc800\ub141 \uc774\ud6c4 \ubcc0\uacbd\uc774 \uc5c6\uc2b5\ub2c8\ub2e4.',
+                '',
+                '\uc9c0\uae08 \uc5f4\uc5b4\ub4dc\ub9b4\uae4c\uc694, \uc544\ub2c8\uba74 \uc694\uc57d\ub9cc \uba3c\uc800 \ubcf4\uc2dc\uaca0\uc5b4\uc694?',
+              ].join('\n'),
+            },
+          ],
+        },
+      ],
+    },
+    steps: async ({ app, page }) => {
+      await openWorkMode(page);
+      await pushPluginOverlay(app, page, {
+        intent: 'calendar-event-prep',
+        summary: WA_PREP_SUMMARY,
+        prompt: WA_PREP_SUMMARY,
+      });
+      await page.locator('[data-testid="overlay-card-primary-action"]').first().click();
+      await page.locator('[data-testid="assistant-message-body"]').last().waitFor({
+        state: 'visible',
+        timeout: 30_000,
+      });
+    },
+  },
   'work-assistant-meeting-end-trigger': {
     topic: 'work-assistant',
-    skip:
-      'Host-rendered meeting-end notification card, not a plugin panel. Fires on a real ' +
-      'meeting.summary.created / meeting.ended event from the meeting plugin; no dev/test trigger exists.',
+    // Card plus chat, without the dead space the default viewport leaves.
+    captureViewport: { width: 1440, height: 820 },
+    uiLocale: 'ko',
+    steps: async ({ app, page }) => {
+      await openWorkMode(page);
+      await pushPluginOverlay(app, page, {
+        intent: 'meeting-summary',
+        summary: WA_SUMMARY_SUMMARY,
+        prompt: WA_SUMMARY_SUMMARY,
+      });
+    },
   },
-  'work-assistant-meeting-end-trigger-2': { topic: 'work-assistant', skip: 'Same as work-assistant-meeting-end-trigger — host card needing a live external signal.' },
+  'work-assistant-meeting-end-trigger-2': {
+    topic: 'work-assistant',
+    // Card plus chat, without the dead space the default viewport leaves.
+    captureViewport: { width: 1440, height: 820 },
+    uiLocale: 'ko',
+    reviewerMode: 'disabled',
+    scriptedScript: {
+      turns: [
+        {
+          expect: 'assistant',
+          parts: [
+            {
+              kind: 'text',
+              text: [
+                '\ubbf8\ud305\uc774 \uc885\ub8cc\ub41c \uac83\uc73c\ub85c \ubcf4\uc774\uace0, \uc694\uc57d\ub3c4 \ucda9\ubd84\ud788 \uc815\ub9ac\ub3fc \uc788\uc2b5\ub2c8\ub2e4.',
+                '\uc6d0\ud558\uc2dc\uba74 \ubc14\ub85c \ub2e4\uc74c \uc911 \ud558\ub098\ub97c \uc9c4\ud589\ud558\uaca0\uc2b5\ub2c8\ub2e4.',
+                '',
+                '1. \ud68c\uc758\ub85d\uc744 \uba54\uc77c\ub85c \uacf5\uc720',
+                '2. \uc624\ub298 work-log \uc5d0 \uac1c\uc778 \uae30\ub85d\uc73c\ub85c \ucd94\uac00',
+                '3. \ub458 \ub2e4 \ud558\uc9c0 \uc54a\uace0 \uc5ec\uae30\uc11c \uc885\ub8cc',
+              ].join('\n'),
+            },
+          ],
+        },
+      ],
+    },
+    steps: async ({ app, page }) => {
+      await openWorkMode(page);
+      await pushPluginOverlay(app, page, {
+        intent: 'meeting-summary',
+        summary: WA_SUMMARY_SUMMARY,
+        prompt: WA_SUMMARY_SUMMARY,
+      });
+      await page.locator('[data-testid="overlay-card-primary-action"]').first().click();
+      await page.locator('[data-testid="assistant-message-body"]').last().waitFor({
+        state: 'visible',
+        timeout: 30_000,
+      });
+    },
+  },
 
   // ---- agent-hub plugin (host sidebar) ------------------------------------------------
   'agent-hub-my-work': {

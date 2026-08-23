@@ -13,8 +13,11 @@
  *   blocks  — a "seeded" claim that has not been overlay-checked
  *   blocks  — a manifest entry left behind after its image is gone
  *   blocks  — a backlog that shrank without the baseline following it down
+ *   blocks  — a capture-harness source seeding an address at a domain someone
+ *             could own
  *   passes  — an image added the way a replacement is supposed to look:
- *             seeded data, an allow-listed account, overlay-checked
+ *             seeded data, an allow-listed account, overlay-checked, and a
+ *             harness that seeds only reserved-domain addresses
  *
  * Run standalone with `node scripts/check-screenshot-provenance-self-test.mjs`.
  */
@@ -42,10 +45,11 @@ function run(cwd, command, args) {
 }
 
 /**
- * Build a throwaway repository holding `images` (relative to web/public) and
- * the given manifest, then run the gate against it.
+ * Build a throwaway repository holding `images` (relative to web/public), the
+ * given manifest and any `harnessFiles` (relative to test/screenshots), then
+ * run the gate against it.
  */
-function gateOn({ images, manifest }) {
+function gateOn({ images, manifest, harnessFiles = {} }) {
   const dir = mkdtempSync(join(tmpdir(), "lvis-shot-provenance-selftest-"));
   try {
     run(dir, "git", ["init", "-q"]);
@@ -55,6 +59,11 @@ function gateOn({ images, manifest }) {
       const target = join(dir, "web", "public", relative);
       mkdirSync(dirname(target), { recursive: true });
       writeFileSync(target, PNG_BYTES);
+    }
+    for (const [relative, contents] of Object.entries(harnessFiles)) {
+      const target = join(dir, "test", "screenshots", relative);
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, contents, "utf-8");
     }
     mkdirSync(join(dir, "web"), { recursive: true });
     writeFileSync(
@@ -191,6 +200,26 @@ const CLEAN_ENTRY = {
   });
 }
 
+// --- must block: harness seeding an address at a domain someone could own ---
+{
+  const { status, out } = gateOn({
+    images: ["screenshots/newly-added.png"],
+    manifest: {
+      schemaVersion: 1,
+      pendingReplacementBaseline: 0,
+      seededAccounts: SEEDED_ACCOUNTS,
+      images: { "screenshots/newly-added.png": CLEAN_ENTRY },
+    },
+    harnessFiles: {
+      // A plausible slip: a real organiser copied out of the image being replaced.
+      "matrix.ts": "const ORGANISER = 'somebody@a-real-company.com';\n",
+    },
+  });
+  expect("blocks a harness address at an ownable domain", {
+    expected: 1, actual: status, needle: "a-real-company.com", out,
+  });
+}
+
 // --- must pass: a replacement declared the way the process expects ---------
 {
   const { status, out } = gateOn({
@@ -203,6 +232,10 @@ const CLEAN_ENTRY = {
         "screenshots/kept.png": { surface: "host chat surface", data: "third-party", action: "reshoot" },
         "screenshots/newly-added.png": CLEAN_ENTRY,
       },
+    },
+    harnessFiles: {
+      // Reserved by RFC 2606 — it can never resolve to a real mailbox.
+      "matrix.ts": "const ORGANISER = 'demo-host@example.invalid';\n",
     },
   });
   expect("passes a properly declared seeded capture", {

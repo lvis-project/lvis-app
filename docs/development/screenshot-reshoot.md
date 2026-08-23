@@ -22,19 +22,23 @@ exercise.
 
 | Verdict | Count | Meaning |
 | --- | --- | --- |
-| `reshoot` | 23 | Must be re-captured. Redaction cannot fix it, or would destroy what the image is there to show. |
+| `reshoot` | 17 | Must be re-captured. Redaction cannot fix it, or would destroy what the image is there to show. |
 | `redact` | 3 | One contiguous region carries the problem and is not the subject of the shot. |
 | `keep` | 21 | Nothing on screen identifies a third party or exposes a credential. |
 | `superseded` | 17 | The internal-portal plugin page and its images are removed by the in-flight de-identification change. No capture work here. |
-| `replaced` | 7 | Re-captured from seeded data by the harness. |
+| `replaced` | 13 | Re-captured from seeded data by the harness. |
 
-Seven images have been replaced with seeded captures so far. Only one of them —
-`plugin-permission-grant` — was in the third-party backlog, so the ratchet moved
-26 → 25 and has not moved since; the other six were `keep` rows, and replacing a
-`keep` row leaves the backlog count alone by construction (the ratchet counts
-`third-party` entries only). Those six are still worth replacing: two of them
-printed the publisher's own home directory across several fields, and all six now
-come from the harness rather than from a working session.
+Thirteen images have been replaced with seeded captures so far, and the ratchet
+now stands at **19**. Seven of the thirteen moved it: `plugin-permission-grant`
+and the six `work-assistant-*` cards, which between them carried the worst of
+the backlog — two work addresses, a colleague's name, grade and full
+organisational path, and two base64 calendar identifiers from which a mailbox
+identifier is recoverable. The other six replacements were `keep` rows, and
+replacing a `keep` row leaves the backlog count alone by construction (the
+ratchet counts `third-party` entries only). Those six were still worth
+replacing: two of them printed the publisher's own home directory across several
+fields, and all six now come from the harness rather than from a working
+session.
 
 `web/screenshot-provenance.json` is the machine-readable form of the same table,
 and the gate described at the end of this document reads it.
@@ -119,21 +123,20 @@ yet have is coverage.
 ### What it covers, and what it does not
 
 `test/screenshots/matrix.ts` holds 37 entries, one of which (`_smoke-settings-llm`)
-is not a docs-site key. Of the remaining 36, **9 capture end-to-end today**:
+is not a docs-site key. Of the remaining 36, **15 capture end-to-end today**:
 `chat-app-update`, `chat-question-card`, `chat-todo-queue`, `chat-tool-thinking`,
 `chat-permission-directory`, `chat-permission-risk`, `chat-permission-llm-review`,
-`plugin-permission-grant`, `meeting-upcoming`. The six conversational ones among
-those are new — they are what the scripted provider below unblocked. The rest
-carry an explicit `skip` with a stated blocker. Those blockers are real, not
-missing effort:
+`plugin-permission-grant`, `meeting-upcoming`, and the six `work-assistant-*`
+keys. A sixteenth, `local-indexer-home`, is written and correct but gated on a
+machine precondition (below). The rest carry an explicit `skip` with a stated
+blocker. Those blockers are real, not missing effort:
 
 | Blocked group | Blocker |
 | --- | --- |
 | `chat-plugin-panel` | The plugin whose panel this key shows does not load in the isolated profile: its bundle's factory spawns a confined child before the ASRT sandbox is active there, so the runtime tears the plugin down. Recorded as reproducing on an unmodified checkout, so it is not caused by this change. |
-| `local-indexer-*` (7) | The bundle's `start()` throws without a provisioned Python interpreter, so the runtime tears the plugin down and no UI provider registers. |
+| `local-indexer-*` (7) | The bundle's `start()` throws without a provisioned Python interpreter, so the runtime tears the plugin down and no UI provider registers. `LVIS_SCREENSHOT_REAL_PYTHON=1` supplies one by reusing a venv the host already built (no network, no compile), which fixes the interpreter half. Two machine preconditions remain and are the reason `local-indexer-home` still skips by default: a venv for this plugin's exact requirements lock must already exist under the real `~/.lvis/runtime/python-envs/`, and TCP `127.0.0.1:43129` must be free. **That port is hardcoded** (`port: options.port ?? 43129`), `hostPlugin.ts` never passes one, and the plugin's `configSchema` exposes no field for it — so a second LVIS instance on the same machine cannot run local-indexer at all. That is a product limitation, not a harness one, and it is worth an issue in the plugin repo independently of screenshots. |
 | `meeting-*` minutes / recorder (7) | Live inside the plugin `<webview>`, which Playwright cannot click through, and need a completed transcription or mail authorisation to populate. |
 | `outlook-*` (4) | The manifest declares a login tool, so selecting the panel goes straight to a live authorisation window. |
-| `work-assistant-*` (6) | Host notification cards emitted when a detector fires. Firing one needs a real external signal; the plugin ships no synthetic trigger. |
 | `agent-hub-*` (2) | No such plugin bundle exists in the workspace. |
 
 `meeting-upcoming` captures, but only in its empty state, with the plugin's
@@ -154,23 +157,38 @@ that buys the most coverage per unit of work:
 1. **A scripted provider fixture for the harness — done.** See "The scripted
    provider" below. It unblocked all six of the conversational `chat-*` keys —
    the ones listed under `replaced`.
-2. **A synthetic detector trigger in the work-assistant plugin.** A dev-only tool
-   that emits a fabricated schedule-conflict / reminder / meeting-end event
-   unblocks all six `work-assistant-*` keys. These are the images carrying the
-   most third-party content, so this is the highest-value item by risk removed.
-3. **Python provisioning in the harness profile**, or a plugin start path that
-   registers its UI provider before the worker is healthy, for the seven
-   `local-indexer-*` keys.
+2. **The overlay card sent on its own channel — done, and it needed no plugin
+   change.** The earlier pass concluded these six needed a synthetic detector
+   inside the work-assistant plugin. That was aiming at the wrong layer. The
+   detector is not what the images show; the host's overlay card is, and the
+   host builds that card in one place from one IPC message
+   (`host-api-factory.ts` → `lvis:overlay:show`). `pushPluginOverlay` in
+   `matrix.ts` composes the same `OverlayItem` and sends it on the same channel
+   from the main process — the technique `chat-app-update` already used for
+   `lvis:update:state` — so everything downstream is the production path:
+   `OverlayContext`, `OverlayCardRegion`, the real `OverlayCard`, and the real
+   imported-trigger insert behind the primary action, which the `-2` keys click
+   for real. All six replaced; they carried the worst content in the backlog.
+3. **Reuse of an already-provisioned Python venv — done, gated on a machine
+   precondition.** `LVIS_SCREENSHOT_REAL_PYTHON=1` (one predicate,
+   `REAL_PYTHON_CAPTURES` in `plugin-seed.ts`, read by plugin-seed, fixtures and
+   the matrix together) hardlinks the host's existing venv into the isolated
+   runtime. What it cannot supply is a free port 43129 — see the table above.
+   With that port held by another LVIS instance, `local-indexer-home` fails
+   rather than skips, so it stays skipped unless the flag is set.
 
-Items 2 and 3 are plugin-repo changes and belong in their own changes, in their
-own repositories. Nothing in this repository unblocks them. Until they land, the affected images have to be captured by
-hand — in which case they must be captured **on a machine that does not apply
-the identity overlay, signed into a demo identity, with a fabricated corpus**,
-and then amplification-checked before they are committed.
+What remains genuinely out of this repository's reach: the `meeting-*` minutes
+and recorder keys (inside the plugin `<webview>`, needing a completed
+transcription or mail authorisation), the `outlook-*` keys (a live Microsoft
+authorisation window), and `agent-hub-*` (no bundle exists). Until those change,
+the affected images have to be captured by hand — in which case they must be
+captured **on a machine that does not apply the identity overlay, signed into a
+demo identity, with a fabricated corpus**, and then amplification-checked before
+they are committed.
 
 ## Worklist
 
-### `reshoot` — 23
+### `reshoot` — 17
 
 Shared preconditions for every row here: capture on a machine that does not
 apply the identity overlay; sign in with a demo identity, never a working
@@ -196,12 +214,6 @@ the result before committing.
 | `outlook-login-after.png` | `outlook-login-after` | `/docs/plugins/ms-graph` | The signed-in mailbox address, a second person's name and their address, an internal policy notice — and the overlay, carrying a different trailing value than the one on the trigger frame. Retake against a demo mailbox with fabricated messages. |
 | `meeting-record.png` | `meeting-record` | `/docs/plugins/meeting` | Briefing panel lists a mandatory internal training entry naming two employer sites. Retake with a fabricated day's agenda. |
 | `meeting-record-stt.png` | `meeting-record-stt` | `/docs/plugins/meeting` | Same briefing plus an interim transcription of a real meeting. Retake from the fabricated recording. |
-| `work-assistant-conflict.png` | `work-assistant-conflict` | `/docs/plugins/work-assistant` | Internal training entry and employer site names. **A region of this image has already been manually blurred**, which is direct evidence something identifying was in frame; treat the unblurred remainder as unreviewed. Retake from a synthetic conflict event. |
-| `work-assistant-conflict-2.png` | `work-assistant-conflict-2` | `/docs/plugins/work-assistant` | **Highest severity in this list.** The card body prints a base64 calendar item identifier from which a mailbox identifier is recoverable, alongside internal schedule entries. Retake from a synthetic event so the identifier is fabricated. |
-| `work-assistant-reminder.png` | `work-assistant-reminder` | `/docs/plugins/work-assistant` | **Highest severity in this list.** Two work addresses — a system sender and the signed-in user — plus a colleague's name, grade and full organisational path. Retake from a synthetic reminder. |
-| `work-assistant-reminder-2.png` | `work-assistant-reminder-2` | `/docs/plugins/work-assistant` | A colleague's name, grade, organisational path and team, plus **a second base64 calendar item identifier**. *Disagreement with the earlier pass: the recoverable mailbox identifier appears on two images, not one — this row and the conflict row above.* |
-| `work-assistant-meeting-end-trigger.png` | `work-assistant-meeting-end-trigger` | `/docs/plugins/meeting`<br>`/docs/plugins/work-assistant`<br>`/docs/routines/meeting-end` | Real meeting title and internal commercial subject matter; a region is already manually blurred. Retake from a synthetic meeting-end event. |
-| `work-assistant-meeting-end-trigger-2.png` | `work-assistant-meeting-end-trigger-2` | `/docs/plugins/meeting`<br>`/docs/plugins/work-assistant`<br>`/docs/routines/meeting-end` | Expanded card carrying internal commercial terms. No personal data, but not publishable business content. Retake from the same synthetic event. |
 
 ### `redact` — 3
 
@@ -219,14 +231,15 @@ screenshot exists to show.
 | `agent-hub-team-board.png` | `agent-hub-team-board` | `/docs/plugins/agent-hub` | Same shape: seeded team rows, real right-hand schedule column. Mask the right column only. Same decommissioning question applies. |
 | `mp-admin-4.png` | `mp-admin-4` | `/docs/servers/marketplace/admin` | Mask the `Prefix` column of the key table. The screenshot exists to show that an admin can inventory and revoke keys, which the labels, roles, statuses and dates carry on their own. *Disagreement with the earlier pass: this is not clean. These are project-owned development keys on a server that rotates them, so exploitability is low and this is not an incident — but publishing a truncated prefix narrows a guess, and an admin key inventory should not be public regardless.* |
 
-### `replaced` — 7
+### `replaced` — 13
 
 Captured by the harness from seeded data, amplification-checked, and recorded in
 the manifest as `seeded` under the `host-capture-seed` account. Re-capture one
 with `node scripts/capture-screenshots.mjs --skip-build --grep <key>`; the six
-`chat-*` rows need nothing else; `plugin-permission-grant` needs one more thing,
-noted under the table. The two approval-dock crops differ between runs by one
-row — the tool-call id — and are otherwise byte-identical.
+`chat-*` and six `work-assistant-*` rows need nothing else;
+`plugin-permission-grant` needs one more thing, noted under the table. The two
+approval-dock crops differ between runs by one row — the tool-call id — and are
+otherwise byte-identical.
 
 | File | `screenshots.ts` key | What the replacement shows |
 | --- | --- | --- |
@@ -237,13 +250,24 @@ row — the tool-call id — and are otherwise byte-identical.
 | `chat-permission-directory.png` | `chat-permission-directory` | The directory-level read grant, over an invented path outside the profile's allowed scope. Replaces a frame that printed the publisher's home directory in six places. |
 | `chat-permission-risk.png` | `chat-permission-risk` | A HIGH-risk shell approval with its impact detail expanded. The verdict comes from the scripted reviewer — see the tamper check under "The scripted provider". |
 | `chat-permission-llm-review.png` | `chat-permission-llm-review` | The in-flight review card for a shell call, captured while the scripted reviewer's answer is still streaming. |
+| `work-assistant-conflict.png` | `work-assistant-conflict` | The real host overlay card for a fabricated schedule conflict, summary expanded so the alert is legible rather than clamped to two lines. Came off the third-party backlog. |
+| `work-assistant-conflict-2.png` | `work-assistant-conflict-2` | The state after the card's primary action: the `overlay:calendar-conflict-prep` imported-trigger bubble, then a scripted reply detailing both events and offering three ways out. Replaces the highest-severity frame in the set — it printed a base64 calendar identifier from which a mailbox identifier was recoverable. |
+| `work-assistant-reminder.png` | `work-assistant-reminder` | A fabricated pre-meeting reminder card. Replaces a frame carrying two work addresses and a colleague's name, grade and full organisational path. |
+| `work-assistant-reminder-2.png` | `work-assistant-reminder-2` | Its confirmed state, showing the provenance bubble and a scripted prep summary. Replaces the second frame with a recoverable calendar identifier. |
+| `work-assistant-meeting-end-trigger.png` | `work-assistant-meeting-end-trigger` | A fabricated meeting-end summary card. |
+| `work-assistant-meeting-end-trigger-2.png` | `work-assistant-meeting-end-trigger-2` | Its confirmed state with the follow-up options. Replaces a frame of internal commercial subject matter. |
 
 `plugin-permission-grant` is the one row here that needs more than this
 repository: its panel comes from a sibling plugin repo, whose `dist/` is not
 committed, so that clone has to be present and built (`bun install && bun run
 build`) before the harness can seed it. Without it the harness reports the
-bundle missing and the key captures nothing. The six `chat-*` rows need no
-sibling clone.
+bundle missing and the key captures nothing. The six `chat-*` and six
+`work-assistant-*` rows need no sibling clone.
+
+Every string in the six `work-assistant-*` captures is invented in `matrix.ts`
+rather than read from anything on the capturing machine, and every address in
+them is at `example.invalid` — reserved by RFC 2606, so it cannot resolve to a
+real mailbox. Rule 7 of the guard enforces that mechanically; see below.
 
 ### `keep` — 21
 
@@ -304,12 +328,12 @@ merges.
    what it unblocks. That is where `plugin-permission-grant` and the six `chat-*`
    replacements came from.
 3. Apply the three `redact` masks. Cheap, and removes real exposure immediately.
-4. Re-shoot the six `work-assistant-*` images. Highest concentration of
-   third-party content, and item 2 in the enabling-change list unblocks all six
-   at once.
+4. Re-shoot the six `work-assistant-*` images (done — see the `replaced` table).
+   Highest concentration of third-party content, and all six went at once.
 5. Re-shoot the `meeting-*` and `outlook-*` clusters against a demo mailbox and a
    fabricated recording.
-6. Re-shoot the seven `local-indexer-*` images against a fabricated corpus.
+6. Re-shoot the seven `local-indexer-*` images against a fabricated corpus, on a
+   machine that satisfies both preconditions in the blocked-group table.
 7. Lower `pendingReplacementBaseline` with each batch. The gate fails if the
    backlog shrinks and the baseline does not follow.
 8. Only once replacements are in place, remove anything left over.
@@ -347,16 +371,33 @@ both fail. The count of images still carrying third-party content is ratcheted
 in both directions against `pendingReplacementBaseline`: adding a new one fails,
 and re-shooting one without lowering the baseline also fails.
 
+It also scans the capture harness itself. Every email address written anywhere
+under `test/screenshots/` must sit in a domain nobody can own — `example.com`,
+`example.net`, `example.org`, or anything under `.example`, `.invalid`, `.test`
+or `.localhost` (RFC 2606 and RFC 6761). This is the one identity leak the gate
+can see mechanically, and it is worth seeing: a replacement capture renders the
+harness's own seeded strings, so an address pasted in there — copied out of the
+very image being replaced, most likely — ends up in a published frame. A real
+domain in a scenario fails the build with the domain named.
+
 The practical effect is that a new screenshot cannot enter the tree without
-someone writing down where its content came from, and cannot enter at all if the
-answer is "from a real session".
+someone writing down where its content came from, cannot enter at all if the
+answer is "from a real session", and cannot be *manufactured* carrying an
+address that belongs to anyone.
 
 ### What it cannot see
 
 **It does not read pixels.** There is no OCR and no image model. It cannot tell
 you whether a name, an address, a hostname, or a credential is visible in a PNG.
 It cannot detect the identity overlay — that takes the deliberate amplification
-pass above, run by a person.
+pass above, run by a person. Rule 7 is not an exception to this: it reads the
+harness's *source*, so it constrains what a future capture can be made to say,
+and says nothing about any image already in the tree.
+
+**Rule 7 catches addresses, not identities.** A fabricated person's name, an org
+chart path, or a job grade passes it untouched. Use role labels
+("데모 진행자", "문서 담당") rather than invented person names when seeding a
+capture — an invented name is still a name, and some real person has it.
 
 An OCR-free heuristic over image bytes catches almost nothing real here: the
 severity of these findings comes from *meaning* — that a string is somebody's
@@ -371,7 +412,7 @@ and that is what this blocks.
 
 ### Proof it works
 
-Run against a fixture repository, seven expectations, all holding:
+Run against a fixture repository, eight expectations, all holding:
 
 ```
 $ node scripts/check-screenshot-provenance-self-test.mjs
@@ -381,8 +422,9 @@ PASS blocks a seeded claim with an account outside the allow-list (exit 1, expec
 PASS blocks a seeded claim that is not overlay-checked (exit 1, expected 1)
 PASS blocks a stale entry (exit 1, expected 1)
 PASS blocks a baseline left above the real backlog (exit 1, expected 1)
+PASS blocks a harness address at an ownable domain (exit 1, expected 1)
 PASS passes a properly declared seeded capture (exit 0, expected 0)
-OK — 7/7 expectations held.
+OK — 8/8 expectations held.
 ```
 
 And exercised against this repository by staging one extra image and declaring
@@ -392,9 +434,9 @@ replacement. Numbers below are what the gate printed at the current HEAD:
 | Declaration | Gate says | Exit |
 | --- | --- | --- |
 | none — image staged, no manifest entry | `undeclared image: web/public/screenshots/tamper-probe.png has no entry in web/screenshot-provenance.json` | 1 |
-| `data: "third-party"` | `ratchet: 26 entries carry third-party content but the baseline is 25` | 1 |
-| `data: "seeded"`, allow-listed account, overlay-checked | `OK — 57 tracked images, all declared; 25 awaiting replacement (baseline 25)` | 0 |
-| image removed again, baseline left at 26 | `ratchet: 25 entries carry third-party content but the baseline still says 26` | 1 |
+| `data: "third-party"` | `ratchet: 20 entries carry third-party content but the baseline is 19` | 1 |
+| `data: "seeded"`, allow-listed account, overlay-checked | `OK — 57 tracked images, all declared; 19 awaiting replacement (baseline 19)` | 0 |
+| image removed again, baseline left at 20 | `ratchet: 19 entries carry third-party content but the baseline still says 20` | 1 |
 
 Reproduce the first three by copying any existing screenshot to a new name under
 `web/public/screenshots/`, `git add`-ing it, and running the gate; the fourth by
