@@ -433,18 +433,23 @@ it from the pattern of the ones around it.
 - Enforcement is the `deidentification-gate` job in
   `.github/workflows/naming-gate.yml`, beside the process-label job that
   `Domain labels versus process labels` describes, because both answer the same
-  question about a token in a diff. The pattern list lives with that job and
-  deliberately not here: writing the literals into this file in order to ban
-  them would republish exactly what the rule removes, and a second copy of a
-  pattern list is the split this file exists to prevent. This clause owns the
-  rule; the job owns the patterns.
+  question about a token in a diff. The pattern list is not here and not in
+  that job either: writing the literals into a tracked file in order to ban
+  them republishes exactly what the rule removes, and this repository is
+  public, so the job file was as much a disclosure as this one would be. The
+  list is a repository secret the job reads at run time. An empty list matches
+  nothing and would look exactly like a clean diff, so the job treats an
+  unavailable list as an error rather than a pass — a fork PR gets no secrets.
+  This clause owns the rule; the secret holds the patterns.
 - What that job reaches is narrower than what this clause says, and the gap is
   reviewer work rather than coverage. It matches added lines in changed text
   files under `src/`, `test/`, `docs/`, `web/` and `.github/`, and separately
   matches the *names* of every changed path in those directories — which is how
   a screenshot is caught, a name being the only part of a binary a grep can
-  read. It excludes the workflow that carries it, because a gate cannot avoid
-  containing the literals it greps for. Everything else is rule without gate:
+  read. It no longer excludes itself: it used to, because a gate that carried
+  its own deny-list could not be scanned without matching every pattern in it,
+  and moving the list into a secret removed that reason. Everything else is
+  rule without gate:
   the repository root, `scripts/`, `resources/`, `build/`, `fixtures/`,
   `schemas/` and `.omc/`; commit messages and PR descriptions; the contents of
   a binary; and a person's name in prose, which no pattern generalizes. This

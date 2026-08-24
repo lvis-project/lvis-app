@@ -101,12 +101,12 @@ jobs:
             : > /tmp/deident-scoped.txt
           fi
 
-          if grep -Fxv '.github/workflows/naming-gate.yml' /tmp/deident-scoped.txt > /tmp/deident-changed.txt
-          then :; else
-            status=$?
-            [ "$status" -ge 2 ] && { echo "::error::self-exclusion filter failed (exit $status)"; exit 1; }
-            : > /tmp/deident-changed.txt
-          fi
+          # This job used to exclude itself, because a gate that carried its own
+          # deny-list could not be scanned without matching every pattern in it.
+          # The list is a secret now, so the file has nothing to hide from and
+          # the exclusion only bought a blind spot over the one file where a
+          # leak is hardest to notice.
+          cp /tmp/deident-scoped.txt /tmp/deident-changed.txt
           echo "changed files in scope:"
           cat /tmp/deident-changed.txt
 
