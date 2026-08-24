@@ -305,3 +305,56 @@ describe("hostFetch verb snapshot — single read, recorded effect == wire verb"
     expect(wireInit.method).toBe("GET");
   });
 });
+
+/**
+ * The redirect pin, which nothing held.
+ *
+ * The host overrides whatever `redirect` a plugin sends with `"error"`, and the
+ * closure carries a paragraph explaining why. Nothing asserted it, so the value
+ * could have been changed to `"follow"` — the one setting that makes the guard
+ * blind — without a single test noticing. That is the dangerous direction: the
+ * allow-list and the SSRF check run against the URL the plugin asked for, and a
+ * followed hop is a request to a DIFFERENT host that no gate ever saw.
+ *
+ * Pinned here rather than left implicit because there is live pressure to
+ * change it: a plugin whose sign-in flow reads a 302 cannot use `hostFetch`
+ * today, and "just let redirect through" is the obvious wrong fix. It is wrong
+ * twice over — it would blind the guard, and it would not even work, because
+ * `hostFetch` runs on Electron `net.fetch`, which cannot return a 3xx at all
+ * (`manual` throws `Redirect was cancelled`). The real fix is host-side and
+ * tracked as #2245: rebuild the chokepoint on `net.request`, whose `redirect`
+ * event gives the host a per-hop veto with the `Location` visible, so the
+ * allow-list can run on every hop instead of only the first.
+ *
+ * So this case is not "the current value is correct forever". It is: changing
+ * it is a decision, and the decision has to be made here, in the open.
+ */
+describe("hostFetch redirect pin — the plugin does not choose", () => {
+  beforeEach(() => {
+    harness.readPluginRegistry.mockReset();
+    harness.readPluginRegistry.mockResolvedValue({ version: 1, plugins: [] });
+  });
+
+  it("pins redirect to error, overriding whatever the plugin asked for", async () => {
+    const { hostApi, networkFetch } = await buildRealHostApi();
+    const { wireInit } = await driveHostFetch(
+      hostApi,
+      networkFetch,
+      "https://api.example.com/x",
+      // The two a redirect-reading plugin actually wants. Neither survives.
+      { redirect: "follow" },
+    );
+    expect(wireInit.redirect).toBe("error");
+  });
+
+  it("pins it for manual too — the mode that follows nothing is still refused", async () => {
+    const { hostApi, networkFetch } = await buildRealHostApi();
+    const { wireInit } = await driveHostFetch(
+      hostApi,
+      networkFetch,
+      "https://api.example.com/x",
+      { redirect: "manual" },
+    );
+    expect(wireInit.redirect).toBe("error");
+  });
+});
