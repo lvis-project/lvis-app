@@ -17,8 +17,13 @@
 import { BrowserWindow as ElectronBrowserWindow } from "electron";
 import type { BrowserWindow } from "electron";
 import { randomUUID, createHash } from "node:crypto";
-import { normalizeAllowedHosts } from "../../../main/host-allow-list.js";
+import { normalizeAllowedHosts, urlHostMatchesAllowList } from "../../../main/host-allow-list.js";
 import { evaluateHostFetch, runHostFetchHops } from "../../../main/host-fetch-guard.js";
+import {
+  partitionCookieHeaderForUrl,
+  partitionCookiesForUrl,
+} from "../../../main/auth-partition-cookie-jar.js";
+import { session as electronSession } from "electron";
 import type { AuditLogger } from "../../../audit/audit-logger.js";
 import type { PluginRuntime } from "../../../plugins/runtime.js";
 import { instrumentEffectsByPath } from "../../../permissions/hostapi-effect-recorder.js";
@@ -53,6 +58,7 @@ import {
 } from "../../../plugins/config-change-bus.js";
 import type {
   ApprovalChoice,
+  AuthPartitionCookie,
   AuthWindowCookie,
   ConversationTriggerSpec,
   OpenAuthWindowBaseOptions,
@@ -882,6 +888,36 @@ export function createHostApiFactory(
         // saw (#2245). method PINNED to the snapshot: `restInit` excludes the
         // original `method` getter, so the verb the loop starts from is the
         // single-read primitive, never a re-read of a live getter.
+        // Session-cookie vault: when the plugin declares
+        // `networkAccess.authCookiePartition`, the host attaches the harvested
+        // session cookies FROM that partition per hop and the plugin bundle
+        // never sees a value. The declaring plugin must not also send its own
+        // `Cookie` header — that would be a second, plugin-controlled credential
+        // origin defeating the vault; reject it loudly (fail-closed, no
+        // silent precedence rule). Non-declaring plugins are unaffected: no
+        // injector, and their own `Cookie` header passes through as before.
+        const authCookieSub = manifest.networkAccess?.authCookiePartition;
+        let injectSessionCookie: ((target: URL) => Promise<string>) | undefined;
+        if (typeof authCookieSub === "string" && authCookieSub.length > 0) {
+          const pluginSentCookie = new Headers(
+            (restInit.headers as HeadersInit | undefined) ?? {},
+          ).has("cookie");
+          if (pluginSentCookie) {
+            auditEgressDeny(
+              "cookie-vault",
+              "plugin sent its own Cookie header while authCookiePartition is declared",
+            );
+            throw new Error(
+              `[plugin:${pluginId}] hostFetch: a plugin declaring networkAccess.authCookiePartition `
+                + `must not send its own Cookie header — the host injects session cookies from `
+                + `persist:plugin-auth:${pluginId}:${authCookieSub}`,
+            );
+          }
+          const partition = `persist:plugin-auth:${encodeURIComponent(pluginId)}:${authCookieSub}`;
+          const partitionSession = electronSession.fromPartition(partition);
+          injectSessionCookie = (target: URL) =>
+            partitionCookieHeaderForUrl(partitionSession, target);
+        }
         return runHostFetchHops({
           pluginId,
           first: decision,
@@ -889,6 +925,7 @@ export function createHostApiFactory(
           transport: networkFetch,
           allowedDomains: manifest.networkAccess?.allowedDomains ?? [],
           allowPrivateNetworks: manifest.networkAccess?.allowPrivateNetworks === true,
+          ...(injectSessionCookie ? { injectSessionCookie } : {}),
           auditHop: (line) => {
             try {
               bootAuditLogger.log({
@@ -1229,6 +1266,74 @@ export function createHostApiFactory(
           });
         } catch { /* audit must not break host */ }
         await clearAuthPartitionService(partition);
+      },
+
+      getAuthPartitionCookies: async (opts: {
+        partitionSub: string;
+        urls: string[];
+      }): Promise<Array<{ url: string; cookies: AuthPartitionCookie[] }>> => {
+        if (!manifest.capabilities?.includes(CAPABILITY_EXTERNAL_AUTH_CONSUMER)) {
+          try {
+            bootAuditLogger.log({
+              timestamp: new Date().toISOString(),
+              sessionId: "plugin",
+              type: "error",
+              input: `[plugin:${pluginId}] get_auth_partition_cookies_capability_denied missingCapability=external-auth-consumer`,
+            });
+          } catch { /* audit must not break host */ }
+          throw new Error(
+            `[plugin:${pluginId}] capability not declared: external-auth-consumer`,
+          );
+        }
+        const { partitionSub, urls } = opts ?? { partitionSub: "", urls: [] };
+        if (typeof partitionSub !== "string" || partitionSub.length === 0 || partitionSub.includes(":")) {
+          throw new Error(
+            `[plugin:${pluginId}] getAuthPartitionCookies: partitionSub must be a non-empty string naming one sub-namespace (no ':')`,
+          );
+        }
+        if (!Array.isArray(urls) || !urls.every((u): u is string => typeof u === "string")) {
+          throw new Error(
+            `[plugin:${pluginId}] getAuthPartitionCookies: urls must be an array of strings`,
+          );
+        }
+        // Only cookies scoped to a URL whose host is on THIS plugin's declared
+        // allow-list are returned — the same allow-list that gates hostFetch —
+        // so the gated read cannot exfiltrate cookies for a host the plugin was
+        // never approved to reach. An unparseable or off-allow-list URL yields
+        // an empty group rather than an error, so one bad entry cannot fail a
+        // batch.
+        const normalizedAllowed = normalizeAllowedHosts(
+          manifest.networkAccess?.allowedDomains ?? [],
+          { allowLoopback: true },
+        );
+        const partition = `persist:plugin-auth:${encodeURIComponent(pluginId)}:${partitionSub}`;
+        const partitionSession = electronSession.fromPartition(partition);
+        const results: Array<{ url: string; cookies: AuthPartitionCookie[] }> = [];
+        for (const rawUrl of urls) {
+          let parsed: URL | null = null;
+          try {
+            parsed = new URL(rawUrl);
+          } catch {
+            parsed = null;
+          }
+          if (parsed === null || !urlHostMatchesAllowList(parsed.hostname, normalizedAllowed)) {
+            results.push({ url: rawUrl, cookies: [] });
+            continue;
+          }
+          const scoped = await partitionCookiesForUrl(partitionSession, parsed);
+          results.push({ url: rawUrl, cookies: scoped });
+        }
+        try {
+          bootAuditLogger.log({
+            timestamp: new Date().toISOString(),
+            sessionId: "plugin",
+            type: "tool_call",
+            input:
+              `[plugin:${pluginId}] getAuthPartitionCookies partitionSub=${partitionSub} ` +
+              `urls=${urls.length} origins=${results.map((r) => { try { return new URL(r.url).origin; } catch { return "[invalid]"; } }).join(",")}`,
+          });
+        } catch { /* audit must not break host */ }
+        return results;
       },
 
       // ─── §8 Agent Approval — hostApi.agentApproval ────────────────────

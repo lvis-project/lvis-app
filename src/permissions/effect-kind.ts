@@ -54,6 +54,9 @@ export type ChokepointKind =
   // stages an overlay prompt; `agentApprovalRespond` resolves a pending
   // approval. All mutate host-owned state, so all must record (see above).
   | "clearAuthPartition"
+  // Reads the host's auth-partition jar for the caller's own plugin. A read:
+  // it returns state, changes none.
+  | "getAuthPartitionCookies"
   | "openAuthWindow"
   | "triggerConversation"
   | "agentApprovalRespond"
@@ -121,6 +124,7 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   storageMkdir: "write",
   // Host-mediated mutations reached only via hostApi closures.
   clearAuthPartition: "write",
+  getAuthPartitionCookies: "read",
   openAuthWindow: "write",
   triggerConversation: "write",
   agentApprovalRespond: "write",
@@ -366,6 +370,10 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   openAuthPartitionViewer: { kind: "openAuthPartitionViewer", async: true, targetFromArgs: urlOriginFromOpts,
   },
   clearAuthPartition: { kind: "clearAuthPartition", async: true, targetFromArgs: firstStringArg,
+  },
+  getAuthPartitionCookies: {
+    kind: "getAuthPartitionCookies", async: true,
+    targetFromArgs: objectStringField("partitionSub"),
   },
   triggerConversation: { kind: "triggerConversation", async: true, targetFromArgs: objectStringField("source"),
   },

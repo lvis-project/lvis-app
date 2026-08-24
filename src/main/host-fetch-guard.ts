@@ -289,6 +289,23 @@ export interface HostFetchHopOptions {
   allowedDomains: string[];
   /** `manifest.networkAccess.allowPrivateNetworks`, same flag every hop. */
   allowPrivateNetworks: boolean;
+  /**
+   * Host-side session-cookie injector (the auth-partition vault). When present,
+   * it is consulted BEFORE every hop with that hop's resolved URL and returns
+   * the `Cookie` header the host should attach — the harvested session cookies
+   * live only in the plugin's Electron partition, never in the plugin bundle.
+   *
+   * Contract:
+   *   - Re-run per hop with the hop's own URL, so a redirect that lands on a
+   *     different portal path/host gets exactly the cookies scoped to it.
+   *   - Returns `""` when nothing applies; the header is then left unset.
+   *   - The plugin MUST NOT also send `Cookie` (enforced by the caller before
+   *     this loop): host injection is the single source, no double-origin.
+   *   - Runs AFTER the cross-origin credential strip below, so a cross-origin
+   *     hop first drops any prior `cookie` and then receives only what the
+   *     vault scopes to the new origin.
+   */
+  injectSessionCookie?: (url: URL) => Promise<string>;
   /** Audit sink for an allowed hop (hop >= 1; the caller logged hop 0). */
   auditHop?: (line: string) => void;
   /** Audit sink for a denied hop — same shape the caller uses for hop 0. */
@@ -340,6 +357,7 @@ export async function runHostFetchHops(options: HostFetchHopOptions): Promise<Re
     ensurePublicUrl,
     resolveLoopbackOnly,
     resolvePrivateOnly,
+    injectSessionCookie,
   } = options;
   const requestedPolicy = init.redirect;
   const policy: "error" | "manual" | "follow" =
@@ -350,6 +368,17 @@ export async function runHostFetchHops(options: HostFetchHopOptions): Promise<Re
   let url = first.url;
   let method = first.method;
   let body = init.body;
+  // Attach the vault's session cookies for THIS hop's URL. Set (or cleared)
+  // fresh every hop so a followed redirect gets exactly what its own origin
+  // scopes to — never the previous hop's. An empty header string means "no
+  // applicable cookie": remove the header rather than send an empty one.
+  const applyInjectedCookie = async (target: URL): Promise<void> => {
+    if (!injectSessionCookie) return;
+    const header = await injectSessionCookie(target);
+    if (header.length > 0) headers.set("cookie", header);
+    else headers.delete("cookie");
+  };
+  await applyInjectedCookie(url);
   for (let hop = 0; ; hop++) {
     const response = await transport(url.toString(), {
       ...init,
@@ -430,6 +459,11 @@ export async function runHostFetchHops(options: HostFetchHopOptions): Promise<Re
       headers.delete("cookie");
     }
     url = decision.url;
+    // Re-scope the vault's cookies to the NEW hop URL. Placed after the
+    // cross-origin strip so a same-origin hop refreshes its cookie and a
+    // cross-origin hop — whose prior `cookie` was just dropped — receives only
+    // what the vault scopes to the new origin (empty ⇒ header stays removed).
+    await applyInjectedCookie(url);
     auditHop?.(`host_fetch ${url.origin} method=${method} effect=${decision.effect} hop=${hop + 1}`);
   }
 }

@@ -136,6 +136,7 @@ export function createNoopHostApi(
     openAuthPartitionViewer: async () => {
       throw new Error("openAuthPartitionViewer not available in noop context");
     },
+    getAuthPartitionCookies: async () => [],
     clearAuthPartition: async () => {
       throw new Error("clearAuthPartition not available in noop context");
     },

@@ -110,4 +110,42 @@ describe("manifest networkAccess (Tier A) — host-owned schema validator path",
     const path = await writeManifest({ bogusUnknownField: 123 });
     await expect(parsePluginJson(path, validator)).rejects.toThrow();
   });
+
+  it("accepts networkAccess.authCookiePartition and carries it through load", async () => {
+    const validator = await buildManifestValidator();
+    const path = await writeManifest({
+      networkAccess: {
+        allowedDomains: ["portal.example.com"],
+        reasoning: "Portal REST via host-mediated fetch.",
+        authCookiePartition: "portal",
+      },
+    });
+    const parsed = await parsePluginJson(path, validator);
+    expect(parsed.networkAccess?.authCookiePartition).toBe("portal");
+  });
+
+  it("rejects an authCookiePartition carrying a colon (partition-namespace escape)", async () => {
+    // Only the `<sub>` segment may be declared; the host composes
+    // `persist:plugin-auth:<pluginId>:<sub>`. A colon would let a declaration
+    // append segments to that composition.
+    const validator = await buildManifestValidator();
+    const path = await writeManifest({
+      networkAccess: {
+        allowedDomains: ["portal.example.com"],
+        authCookiePartition: "portal:extra",
+      },
+    });
+    await expect(parsePluginJson(path, validator)).rejects.toThrow();
+  });
+
+  it("rejects an empty authCookiePartition", async () => {
+    const validator = await buildManifestValidator();
+    const path = await writeManifest({
+      networkAccess: {
+        allowedDomains: ["portal.example.com"],
+        authCookiePartition: "",
+      },
+    });
+    await expect(parsePluginJson(path, validator)).rejects.toThrow();
+  });
 });

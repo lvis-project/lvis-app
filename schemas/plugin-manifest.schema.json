@@ -206,6 +206,13 @@
         "allowPrivateNetworks": {
           "type": "boolean",
           "description": "Governance opt-in for allow-listed intranet/private-network (RFC1918/ULA) egress. Applies to host-mediated hostApi.hostFetch and explicitly documented browser/direct intranet exceptions; link-local and metadata addresses remain denied by host guards. Loopback is a separate axis this flag neither grants nor requires — declare the loopback literal in allowedDomains instead."
+        },
+        "authCookiePartition": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^:]+$",
+          "not": { "pattern": "[\\r\\n]" },
+          "description": "Opt-in session-cookie vault: names the sub-namespace of this plugin's own auth partition (persist:plugin-auth:<pluginId>:<sub>) whose harvested session cookies the host attaches to every hostApi.hostFetch request, scoped per URL and re-scoped per redirect hop. For portals with no SSO/OAuth — where the session cookie IS the credential — this keeps the value on the host: the plugin never receives it (pair with openAuthWindow({ retainCookies: true })). A plugin that declares this must not send its own Cookie header; the host rejects such a request. Only the <sub> segment is named here, so a plugin cannot address another plugin's partition."
         }
       }
     },

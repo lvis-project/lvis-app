@@ -292,6 +292,7 @@ export const HOSTAPI_DISPATCH_TABLE: Record<HostApiPath, HostApiPathHandler> = {
   openAuthWindow: unimplementedHostApiPath("openAuthWindow"),
   openAuthPartitionViewer: unimplementedHostApiPath("openAuthPartitionViewer"),
   clearAuthPartition: unimplementedHostApiPath("clearAuthPartition"),
+  getAuthPartitionCookies: unimplementedHostApiPath("getAuthPartitionCookies"),
   triggerConversation: unimplementedHostApiPath("triggerConversation"),
   "agentApproval.request": unimplementedHostApiPath("agentApproval.request"),
   "agentApproval.respond": unimplementedHostApiPath("agentApproval.respond"),
@@ -492,6 +493,7 @@ export function createInteractionHostApiPaths(
 export type ServiceHostApi = Pick<
   PluginHostApi,
   | "getSecret"
+  | "getAuthPartitionCookies"
   | "hasRoutineBySource"
   | "probePrivateHost"
   | "resolveApiKey"
@@ -684,6 +686,24 @@ function getSecretPath(hostApi: ServiceHostApi): HostApiPathHandler {
  * ran while the resolve was in flight, and drops the credential the host was
  * about to hand to a process that no longer exists.
  */
+/**
+ * `getAuthPartitionCookies(opts) → Array<{ url, cookies }>`.
+ *
+ * A credential READ, which is why it sits beside `getSecret` rather than with
+ * the members that put something in front of the user: it prompts nobody and
+ * refuses nobody, so it has no "the user said no" answer to distinguish from a
+ * delivery failure. As with `getSecret`, the scoping that bounds it — own
+ * partition only, intersected with the manifest allow-list — stays in the host
+ * implementation; the boundary adds a shape check and nothing else.
+ */
+function getAuthPartitionCookiesPath(hostApi: ServiceHostApi): HostApiPathHandler {
+  return defineHostApiPath("getAuthPartitionCookies", async (call) =>
+    hostApi.getAuthPartitionCookies(
+      call.args[0] as { partitionSub: string; urls: string[] },
+    ),
+  );
+}
+
 function resolveApiKeyPath(hostApi: ServiceHostApi): HostApiPathHandler {
   return defineHostApiPath("resolveApiKey", async (call, scope) => {
     // Presence-checked, then called through the object: a detached reference
@@ -1114,6 +1134,7 @@ export function createServiceHostApiPaths(
 ): Record<ServiceHostApiPath, HostApiPathHandler> {
   return {
     getSecret: getSecretPath(hostApi),
+    getAuthPartitionCookies: getAuthPartitionCookiesPath(hostApi),
     hasRoutineBySource: hasRoutineBySourcePath(hostApi),
     probePrivateHost: probePrivateHostPath(hostApi),
     resolveApiKey: resolveApiKeyPath(hostApi),

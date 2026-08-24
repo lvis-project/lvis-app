@@ -90,6 +90,20 @@ export type AuthWindowCookie = {
   expirationDate?: number;
 };
 
+/**
+ * A cookie returned by `getAuthPartitionCookies` — carries the value (that is
+ * the point of the gated read) plus the attributes a browser-context injector
+ * needs. Only a plugin that harvested the session owns the partition it reads.
+ */
+export type AuthPartitionCookie = {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  /** Unix seconds. Omitted for session cookies. */
+  expirationDate?: number;
+};
+
 export type OpenAuthWindowBaseOptions = {
   url: string;
   completionUrlPatterns: string[];
@@ -113,6 +127,21 @@ export type OpenAuthWindowBaseOptions = {
    * @since SDK 5.6.0
    */
   show?: boolean;
+  /**
+   * Session-cookie vault mode. When `true`, harvested cookie VALUES are
+   * withheld from the return — each returned cookie keeps its name/domain/path
+   * (so existence and count checks still work) but its `value` is `""`. The
+   * real values remain only in the persistent `persistPartition`, from which
+   * `hostFetch` attaches them per request when the plugin also declares
+   * `networkAccess.authCookiePartition`.
+   *
+   * For portals with no SSO/OAuth — where the session cookie IS the credential
+   * — this keeps that credential on the host, never in the plugin bundle.
+   *
+   * @default false
+   * @since SDK 12.2.0
+   */
+  retainCookies?: boolean;
 };
 
 export type OpenAuthWindowWithFinalUrlOptions = OpenAuthWindowBaseOptions & {
@@ -358,6 +387,24 @@ export interface PluginManifest {
      * axis this flag neither grants nor requires — see `allowedDomains` above.
      */
     allowPrivateNetworks?: boolean;
+    /**
+     * Opt-in: the sub-namespace of this plugin's own auth partition
+     * (`persist:plugin-auth:<pluginId>:<sub>`) whose harvested session cookies
+     * the host attaches to every `hostFetch` request, scoped per URL.
+     *
+     * For portals that offer no SSO/OAuth — where the session cookie IS the
+     * credential — this keeps the harvested cookie VALUES on the host: the
+     * plugin declares `authCookiePartition: "<sub>"`, `openAuthWindow` writes
+     * the session into `persist:plugin-auth:<pluginId>:<sub>`, and `hostFetch`
+     * reads it back from there. The plugin bundle never sees the value. A
+     * plugin that declares this MUST NOT also send its own `Cookie` header
+     * (the host rejects a request that does — single injection origin).
+     *
+     * The value is only the `<sub>` segment; the host composes the full
+     * `persist:plugin-auth:<pluginId>:<sub>` partition, so a plugin cannot
+     * name another plugin's partition here.
+     */
+    authCookiePartition?: string;
   };
 
 
@@ -1241,6 +1288,34 @@ export interface PluginHostApi {
    * successful while leaving the partition populated.
    */
   clearAuthPartition(partition: string): Promise<void>;
+
+  /**
+   * Read the session cookies the host holds for this plugin in its auth
+   * partition, scoped to the given request URLs. The counterpart to
+   * `networkAccess.authCookiePartition` for flows that `hostFetch` cannot cover
+   * — chiefly a browser/page-automation flow that must inject the session into
+   * a separate browser context.
+   *
+   * The harvested cookie VALUES normally never leave the host (see
+   * `openAuthWindow({ retainCookies: true })` + `authCookiePartition`); this is
+   * the ONE gated, audited door through which a declaring plugin may read them
+   * back, on demand, for the moment it needs to inject them — never persisted,
+   * never held. Prefer `hostFetch` injection wherever the call is HTTP.
+   *
+   * `partitionSub` names only the `<sub>` segment; the host composes
+   * `persist:plugin-auth:<pluginId>:<sub>`. Each returned group is the cookies
+   * that apply to the corresponding `urls[i]`, scoped with the same rules the
+   * host's `hostFetch` injector uses (including the legacy-http Secure
+   * divergence). The host audits every call.
+   *
+   * **Capability gate:** `external-auth-consumer`, same as `openAuthWindow`.
+   *
+   * @since SDK 12.2.0
+   */
+  getAuthPartitionCookies(opts: {
+    partitionSub: string;
+    urls: string[];
+  }): Promise<Array<{ url: string; cookies: AuthPartitionCookie[] }>>;
 
   /**
    * §B3 — Open an arbitrary external URL routed through the host's webView
