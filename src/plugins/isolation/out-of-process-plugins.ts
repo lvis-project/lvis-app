@@ -382,7 +382,7 @@
  * over because an assumption that reads like a measurement is how both wrong
  * admissions happened.
  *
- * `work-assistant` — ADMITTED, and the only member of the set. KNOWN FROM ITS
+ * `work-assistant` — ADMITTED. KNOWN FROM ITS
  *   SOURCES: its production sources reach ten hostApi members — `callLlm`, `config.get`,
  *   `config.set`, `emitEvent`, `getInstalledPluginIds`, `hasRoutineBySource`,
  *   `logEvent`, `onEvent`, `onPluginsChanged`, `triggerConversation` — and
@@ -578,22 +578,44 @@
  *   census a source read could see. It is not what blocks the id.
  *
  *   The admission precondition was therefore not a set of measurements but one
- *   architectural change: the loopback listener for interactive sign-in has to
- *   live on the host side of the wire. That change now EXISTS —
- *   `hostApi.authRedirect` (axis 1, inbound) is the host-owned redirect
- *   catcher, shaped to be handed to MSAL as `customLoopbackClient`. What it is
- *   NOT is an admission: this file's criterion is that a plugin passes when
- *   every axis it touches has a mediated form AND THE PLUGIN ALREADY USES IT.
- *   The plugin still constructs no custom client, so its sign-in still binds
- *   its own socket, and this id stays out until it does. That is the whole
- *   remaining step: measured over its own sources, `ms-graph` names no other
- *   ambient axis — it reaches no `electron` specifier by any resolution path,
- *   spawns nothing, and opens no socket of its own.
+ *   architectural change: the loopback listener for interactive sign-in had to
+ *   live on the host side of the wire. It does — `hostApi.authRedirect` (axis 1,
+ *   inbound) — and the plugin USES it: at its single `acquireTokenInteractive`
+ *   call site it passes a `customLoopbackClient` backed by that member, and
+ *   refuses the sign-in outright on a host without it rather than letting MSAL
+ *   construct the socket-binding default.
+ *
+ *   MEASURED over the BUILT BUNDLE rather than the sources, which is where the
+ *   dependency half of every axis lives. The three `electron` hits in it are the
+ *   word "electronic" inside a JSDoc paragraph, and the one `.node` hit is
+ *   `MSAL_SKU: "msal.js.node"`, a telemetry label — the same string this entry
+ *   already named. There is no spawn, and no `tmpdir()`, `homedir()` or
+ *   `process.cwd()` anywhere in it. MSAL's `LoopbackClient` IS still bundled,
+ *   `node:http` and all: what makes it dead rather than reachable is
+ *   `customLoopbackClient || new LoopbackClient()`, whose only caller now always
+ *   supplies one. Bundled and reachable are different questions, and only the
+ *   second one decides admission.
+ *
+ *   MEASURED, finally, through THIS FILE'S production spawn, on macOS with the
+ *   sandbox active: the real build ACTIVATES inside the jail and returns its
+ *   thirty tool handlers, while in the same child `listen(0, "127.0.0.1")` comes
+ *   back `EPERM` and `require("electron")` comes back `MODULE_NOT_FOUND`. The
+ *   `EPERM` is the control rather than a footnote — it is the socket MSAL's
+ *   default client would have bound, and without it "the plugin activated" would
+ *   be a sentence about a machine whose fence might simply have been off.
+ *
+ *   Its axis-6 migration is jail-aware rather than merely error-checked: the
+ *   `rename` out of `context.hostRoot` is refused, and the code answers that by
+ *   READING the legacy file — which the deny-only read model still permits — and
+ *   writing it into `pluginDataDir`, then logging the leftover it cannot unlink.
+ *   The user's reply history crosses the boundary it cannot be moved across.
+ *
+ *   ADMITTED.
  *
  * `template` — not installed; a scaffold, out of scope.
  */
 export const OUT_OF_PROCESS_PLUGIN_IDS: ReadonlySet<string> = Object.freeze(
-  new Set<string>(["work-assistant"]),
+  new Set<string>(["work-assistant", "ms-graph"]),
 );
 
 /** Whether `pluginId` loads out-of-process. */
