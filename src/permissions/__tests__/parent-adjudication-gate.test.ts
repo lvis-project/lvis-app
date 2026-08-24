@@ -462,6 +462,21 @@ describe("parent adjudication — what stays with the user", () => {
     await expectNotAdjudicated({ reviewerVerdict: undefined });
   });
 
+  // The same statement the HIGH exclusion makes, on the other axis. A verdict
+  // the host could not determine the effect of is the user's call to answer
+  // even when its rank sits inside the ceiling: the rank compare alone would
+  // hand it to the parent agent, which is the one reader that cannot know the
+  // rank is a strict default rather than an observation.
+  it("skips a verdict that requires explicit approval, inside the ceiling", async () => {
+    await expectNotAdjudicated({
+      reviewerVerdict: {
+        level: "medium",
+        reason: "no declared write path",
+        requiresExplicitApproval: true,
+      },
+    });
+  });
+
   it("skips a MEDIUM verdict when the ceiling is low", async () => {
     await expectNotAdjudicated(
       {},

@@ -94,6 +94,10 @@ describe("RuleBasedRiskClassifier — #664 P1 / #885 v6 host-derived sandbox-wri
   });
 
   it("(e) manifest mistake — pathFields declared but resolves to nothing → HIGH (not declared)", () => {
+    // Declared-but-unresolved must NOT reach the unknown-MEDIUM below: an empty
+    // resolve is reachable from the CALL's arguments (non-string, empty string,
+    // canonicalization throw), so keying on the resolved value would let a
+    // plugin that declared its paths move off HIGH by choosing an argument.
     const v = rb.classify(
       ctx({
         ownerPluginSandboxRoot: SANDBOX_ROOT,
@@ -129,7 +133,11 @@ describe("RuleBasedRiskClassifier — OS-confined no-declared-write-path LOW", (
     expect(v.reason).toContain("OS-confined to owner plugin sandbox");
   });
 
-  it("same call with substrate none (in-process plugin) keeps the HIGH", () => {
+  it("same call with substrate none (in-process plugin) drops to MEDIUM, not LOW", () => {
+    // The LOW above is earned by kernel confinement. Without it there is no
+    // containment fact to state, so the verdict must NOT be LOW — but it is not
+    // HIGH either, because nothing here observed a write. MEDIUM is what "we do
+    // not know" looks like, and unlike HIGH it can be answered once.
     const v = rb.classify(
       ctx({
         toolName: "work_assistant_list_detectors",
@@ -139,8 +147,55 @@ describe("RuleBasedRiskClassifier — OS-confined no-declared-write-path LOW", (
         // detectSandboxCapability() default in tests — kind none
       }),
     );
+    expect(v.level).toBe("medium");
+    expect(v.reason).toMatch(/strict default, not an observation/);
+    // The level alone would ALSO open foreground auto-approve and the
+    // parent-adjudication ceiling. This flag is what keeps those shut.
+    expect(v.requiresExplicitApproval).toBe(true);
+  });
+
+  it("a non-plugin source cannot reach the unknown-MEDIUM even carrying an owner root", () => {
+    // The rule keys on `source`, not merely on the presence of a plugin-shaped
+    // root, so a future builtin that gains a `pluginId` for ownership reasons
+    // cannot silently inherit it.
+    const v = rb.classify(
+      ctx({
+        toolName: "some_builtin",
+        source: "builtin",
+        ownerPluginSandboxRoot: SANDBOX_ROOT,
+        pathFields: [],
+        finalInput: {},
+      }),
+    );
     expect(v.level).toBe("high");
     expect(v.reason).toBe("write path not declared");
+  });
+
+  it("a builtin tool with no declared path is untouched — still HIGH", () => {
+    // `ownerPluginSandboxRoot` is host-set for plugin-owned tools only, so the
+    // new MEDIUM cannot reach a builtin or MCP tool. This is the guard that
+    // keeps the change from widening past the plugin lane.
+    const v = rb.classify(
+      ctx({ toolName: "file_write", source: "builtin", pathFields: [], finalInput: {} }),
+    );
+    expect(v.level).toBe("high");
+    expect(v.reason).toBe("write path not declared");
+  });
+
+  it("a plugin call that NAMES a target keeps its lexical write verdict", () => {
+    // The multiplexed-tool case: `index_folders` with action=list declares no
+    // folder and lands on MEDIUM above, but the same tool with action=add names
+    // one — and then the path rules decide, exactly as before.
+    const v = rb.classify(
+      ctx({
+        toolName: "index_folders",
+        ownerPluginSandboxRoot: SANDBOX_ROOT,
+        pathFields: ["folder"],
+        finalInput: { folder: `${TMP}/somewhere-else/docs` },
+      }),
+    );
+    expect(v.level).toBe("high");
+    expect(v.reason).toBe("write outside allowed dirs");
   });
 
   it("declared path OUTSIDE the owner root stays on the lexical rules even under asrt", () => {

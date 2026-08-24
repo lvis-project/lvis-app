@@ -1589,8 +1589,15 @@ export class ApprovalGate {
     //     per-invocation human consent.
     //   - a HIGH verdict, or none at all: the ceiling, enforced before the
     //     parent is asked rather than applied to its answer.
+    // `requiresExplicitApproval` is the same statement the ceiling makes, held
+    // on a different axis: HIGH is absent from `ParentAdjudicationMaxVerdict`
+    // BY TYPE because a HIGH call is the class the user asked to see. A verdict
+    // that says "the host could not determine what this does" belongs to that
+    // class too — it just is not spelled HIGH, so the rank compare alone would
+    // hand it to the parent agent.
     const withinCeiling =
       verdict !== undefined &&
+      verdict.requiresExplicitApproval !== true &&
       RISK_LEVEL_RANK[verdict.level] <= RISK_LEVEL_RANK[policy.maxVerdict];
     const eligible =
       input.callerEligible &&

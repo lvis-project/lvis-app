@@ -89,6 +89,27 @@ describe("PermissionManager.resolveReviewerDecision", () => {
       });
     });
 
+    it("medium threshold: a requiresExplicitApproval medium → ask, not allow", () => {
+      // The threshold says "medium is fine to run unattended". A verdict
+      // carrying this flag is not saying the call is mildly risky — it is
+      // saying the host could not tell what the call does, and that is the
+      // opposite of a thing to run unattended. Without this the flagged verdict
+      // would be allowed with NO prompt, which is strictly weaker than the HIGH
+      // it replaced.
+      pm.setInteractiveAutoApprove("medium");
+      const v: RiskVerdict = {
+        level: "medium",
+        reason: "medium reason",
+        requiresExplicitApproval: true,
+      };
+      expect(pm.resolveReviewerDecision(v, "foreground-auto")).toEqual({
+        decision: "ask",
+        reason: "reviewer medium: medium reason",
+        layer: 5,
+        reviewer: { route: "foreground-auto", verdict: v },
+      });
+    });
+
     it("high → ask(layer 5) with route+verdict", () => {
       pm.setInteractiveAutoApprove("medium");
       const v = verdict("high");
