@@ -22,7 +22,9 @@ vi.mock("node:dns", () => ({
 
 // Module under test imported AFTER the mock so network-guard's
 // `import { promises as dns } from "node:dns"` binds to the stub.
-const { evaluateHostFetch } = await import("../host-fetch-guard.js");
+const { evaluateHostFetch, runHostFetchHops, MAX_REDIRECT_HOPS } = await import(
+  "../host-fetch-guard.js",
+);
 
 beforeEach(() => {
   lookupMock.mockReset();
@@ -375,5 +377,274 @@ describe("evaluateHostFetch — declared loopback endpoint (local inference serv
     });
     expect(decision.ok).toBe(false);
     if (!decision.ok) expect(decision.reason).toBe("ssrf-blocked");
+  });
+});
+
+// ─── the hop loop — every followed redirect faces the same gate ─────────────
+
+/** Public addresses for every lookup: the SSRF layer approves, the loop decides. */
+function publicDns(): void {
+  lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+}
+
+/**
+ * A scripted single-hop transport. Each entry answers one hop; the snapshots
+ * are taken AT CALL TIME because the loop mutates one shared Headers object
+ * across hops — reading it afterwards would show every call the final state.
+ */
+function scriptedTransport(responses: Response[]) {
+  const calls: Array<{ url: string; method: string; headers: Record<string, string> }> = [];
+  const transport = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+    const headers = new Headers(init?.headers as HeadersInit | undefined);
+    calls.push({
+      url: String(input),
+      method: init?.method ?? "GET",
+      headers: Object.fromEntries(headers.entries()),
+    });
+    const next = responses.shift();
+    if (!next) throw new Error("scripted transport ran out of responses");
+    return next;
+  }) as unknown as typeof fetch;
+  return { transport, calls };
+}
+
+const redirect = (status: number, location: string): Response =>
+  new Response(null, { status, headers: { location } });
+
+async function firstAllow(rawUrl: string, method = "GET") {
+  const decision = await evaluateHostFetch({
+    pluginId: "p",
+    rawUrl,
+    method,
+    allowedDomains: ["api.example.com", "sso.example.com"],
+  });
+  if (!decision.ok) throw new Error(`test setup: first hop denied: ${decision.message}`);
+  return decision;
+}
+
+function hopOptions(
+  first: Awaited<ReturnType<typeof firstAllow>>,
+  init: Omit<RequestInit, "method">,
+  transport: typeof fetch,
+) {
+  const denials: Array<{ reason: string; detail: string }> = [];
+  const hops: string[] = [];
+  return {
+    options: {
+      pluginId: "p",
+      first,
+      init,
+      transport,
+      allowedDomains: ["api.example.com", "sso.example.com"],
+      allowPrivateNetworks: false,
+      auditHop: (line: string) => hops.push(line),
+      auditDeny: (reason: string, detail: string) => denials.push({ reason, detail }),
+    },
+    denials,
+    hops,
+  };
+}
+
+describe("runHostFetchHops — redirect policy", () => {
+  it("default (no redirect field) refuses a redirect, after one hop only", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([redirect(302, "https://api.example.com/next")]);
+    const { options, denials } = hopOptions(await firstAllow("https://api.example.com/a"), {}, transport);
+    await expect(runHostFetchHops(options)).rejects.toThrow(/redirect refused/);
+    expect(calls).toHaveLength(1);
+    expect(denials[0]?.reason).toBe("redirect-cap");
+  });
+
+  it("an unrecognized policy value fails closed to the refusal", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([redirect(302, "https://api.example.com/next")]);
+    const { options } = hopOptions(
+      await firstAllow("https://api.example.com/a"),
+      { redirect: "totally-new-mode" as RequestRedirect },
+      transport,
+    );
+    await expect(runHostFetchHops(options)).rejects.toThrow(/redirect refused/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("manual RETURNS the 3xx with its location readable — the SSO-detection case", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([
+      redirect(302, "https://sso.example.com/login?from=api"),
+    ]);
+    const { options } = hopOptions(
+      await firstAllow("https://api.example.com/a"),
+      { redirect: "manual" },
+      transport,
+    );
+    const response = await runHostFetchHops(options);
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe("https://sso.example.com/login?from=api");
+    expect(calls).toHaveLength(1);
+  });
+
+  it("follow takes the hop when the next URL passes the gate, and audits it", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([
+      redirect(302, "https://sso.example.com/token"),
+      new Response("landed", { status: 200 }),
+    ]);
+    const { options, hops } = hopOptions(
+      await firstAllow("https://api.example.com/a"),
+      { redirect: "follow" },
+      transport,
+    );
+    const response = await runHostFetchHops(options);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("landed");
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://api.example.com/a",
+      "https://sso.example.com/token",
+    ]);
+    expect(hops).toEqual(["host_fetch https://sso.example.com method=GET effect=read hop=1"]);
+  });
+
+  it("follow REFUSES a hop to a host outside the allow-list — the gate runs per hop", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([redirect(302, "https://evil.com/steal")]);
+    const { options, denials } = hopOptions(
+      await firstAllow("https://api.example.com/a"),
+      { redirect: "follow" },
+      transport,
+    );
+    await expect(runHostFetchHops(options)).rejects.toThrow(/not in networkAccess.allowedDomains/);
+    expect(calls).toHaveLength(1);
+    expect(denials[0]).toEqual({
+      reason: "not-allowlisted",
+      detail: "redirect hop 1: https://evil.com not in networkAccess.allowedDomains",
+    });
+  });
+
+  it("follow refuses a downgrade to cleartext on a later hop — scheme is re-gated too", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([redirect(302, "http://api.example.com/a")]);
+    const { options, denials } = hopOptions(
+      await firstAllow("https://api.example.com/a"),
+      { redirect: "follow" },
+      transport,
+    );
+    await expect(runHostFetchHops(options)).rejects.toThrow(/only https is permitted/);
+    expect(calls).toHaveLength(1);
+    expect(denials[0]?.reason).toBe("non-https");
+  });
+
+  it("stops at the hop cap instead of looping", async () => {
+    publicDns();
+    const bounce = () => redirect(302, "https://api.example.com/again");
+    const { transport, calls } = scriptedTransport([
+      bounce(), bounce(), bounce(), bounce(), bounce(), bounce(),
+    ]);
+    const { options, denials } = hopOptions(
+      await firstAllow("https://api.example.com/a"),
+      { redirect: "follow" },
+      transport,
+    );
+    await expect(runHostFetchHops(options)).rejects.toThrow(/too many redirects/);
+    expect(calls).toHaveLength(MAX_REDIRECT_HOPS + 1);
+    expect(denials[0]?.reason).toBe("redirect-cap");
+  });
+
+  it("a 3xx without a location is a final response, not a hop", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([new Response(null, { status: 302 })]);
+    const { options } = hopOptions(
+      await firstAllow("https://api.example.com/a"),
+      { redirect: "follow" },
+      transport,
+    );
+    const response = await runHostFetchHops(options);
+    expect(response.status).toBe(302);
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("runHostFetchHops — method, body, and credentials across a followed hop", () => {
+  it("303 turns POST into a bodyless GET, per fetch", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([
+      redirect(303, "https://api.example.com/created"),
+      new Response("ok", { status: 200 }),
+    ]);
+    const first = await firstAllow("https://api.example.com/submit", "POST");
+    const { options } = hopOptions(
+      first,
+      { redirect: "follow", body: "payload", headers: { "content-type": "application/json" } },
+      transport,
+    );
+    await runHostFetchHops(options);
+    expect(calls[0]).toMatchObject({ method: "POST" });
+    expect(calls[0]!.headers["content-type"]).toBe("application/json");
+    expect(calls[1]).toMatchObject({ method: "GET", url: "https://api.example.com/created" });
+    expect(calls[1]!.headers["content-type"]).toBeUndefined();
+  });
+
+  it("307 keeps the verb and the body", async () => {
+    publicDns();
+    let secondHopBody: unknown;
+    const inner = scriptedTransport([
+      redirect(307, "https://api.example.com/moved"),
+      new Response("ok", { status: 200 }),
+    ]);
+    const transport = (async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith("/moved")) secondHopBody = init?.body;
+      return (inner.transport as unknown as typeof fetch)(input as string, init);
+    }) as typeof fetch;
+    const first = await firstAllow("https://api.example.com/submit", "PUT");
+    const { options } = hopOptions(first, { redirect: "follow", body: "payload" }, transport);
+    await runHostFetchHops(options);
+    expect(inner.calls[1]).toMatchObject({ method: "PUT" });
+    expect(secondHopBody).toBe("payload");
+  });
+
+  it("a cross-origin hop drops authorization and cookie; a same-origin hop keeps them", async () => {
+    publicDns();
+    const crossOrigin = scriptedTransport([
+      redirect(302, "https://sso.example.com/login"),
+      new Response("ok", { status: 200 }),
+    ]);
+    const { options: crossOptions } = hopOptions(
+      await firstAllow("https://api.example.com/a"),
+      {
+        redirect: "follow",
+        headers: { authorization: "Bearer t", cookie: "sid=1", "x-app": "keep" },
+      },
+      crossOrigin.transport,
+    );
+    await runHostFetchHops(crossOptions);
+    expect(crossOrigin.calls[0]!.headers.authorization).toBe("Bearer t");
+    expect(crossOrigin.calls[1]!.headers.authorization).toBeUndefined();
+    expect(crossOrigin.calls[1]!.headers.cookie).toBeUndefined();
+    expect(crossOrigin.calls[1]!.headers["x-app"]).toBe("keep");
+
+    const sameOrigin = scriptedTransport([
+      redirect(302, "https://api.example.com/b"),
+      new Response("ok", { status: 200 }),
+    ]);
+    const { options: sameOptions } = hopOptions(
+      await firstAllow("https://api.example.com/a"),
+      { redirect: "follow", headers: { authorization: "Bearer t" } },
+      sameOrigin.transport,
+    );
+    await runHostFetchHops(sameOptions);
+    expect(sameOrigin.calls[1]!.headers.authorization).toBe("Bearer t");
+  });
+
+  it("refuses to replay a stream body across a 307 instead of sending it empty", async () => {
+    publicDns();
+    const { transport } = scriptedTransport([redirect(307, "https://api.example.com/moved")]);
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("chunk"));
+        controller.close();
+      },
+    });
+    const first = await firstAllow("https://api.example.com/submit", "PUT");
+    const { options } = hopOptions(first, { redirect: "follow", body: stream }, transport);
+    await expect(runHostFetchHops(options)).rejects.toThrow(/cannot replay a stream body/);
   });
 });

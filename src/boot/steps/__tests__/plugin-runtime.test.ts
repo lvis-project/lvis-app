@@ -700,25 +700,41 @@ describe("initPluginRuntime HostApi factory", () => {
     );
   });
 
-  it("hostFetch pins redirect:error even when plugin init requests redirect:follow", async () => {
-    dnsTestState.lookup.mockResolvedValueOnce([
+  it("hostFetch follows a gated redirect when the plugin asks to follow", async () => {
+    // One lookup per gated evaluation: the plugin's request, then the hop.
+    dnsTestState.lookup.mockResolvedValue([
       { address: "93.184.216.34", family: 4 },
     ]);
-    const { api, networkFetch, bootAuditLogger } = await buildHostFetchApi();
+    const hoppingFetch = vi.fn(
+      async (url: RequestInfo | URL, _init?: RequestInit) =>
+        String(url).endsWith("/v1/me")
+          ? new Response(null, {
+              status: 302,
+              headers: { location: "https://api.example.com/v2/me" },
+            })
+          : new Response("landed", { status: 200 }),
+    );
+    const { api, bootAuditLogger } = await buildHostFetchApi({
+      networkFetch: hoppingFetch as typeof fetch,
+    });
 
-    await expect(
-      api.hostFetch("https://api.example.com/v1/me", {
-        method: "GET",
-        redirect: "follow",
-      }),
-    ).resolves.toBeInstanceOf(Response);
+    const response = await api.hostFetch("https://api.example.com/v1/me", {
+      method: "GET",
+      redirect: "follow",
+    });
+    expect(response.status).toBe(200);
 
-    expect(networkFetch).toHaveBeenCalledWith(
+    // The transport is never told to follow — each hop is its own wire call,
+    // and the SECOND one exists only because the hop passed the gate.
+    expect(hoppingFetch).toHaveBeenNthCalledWith(
+      1,
       "https://api.example.com/v1/me",
-      expect.objectContaining({
-        method: "GET",
-        redirect: "error",
-      }),
+      expect.objectContaining({ method: "GET", redirect: "manual" }),
+    );
+    expect(hoppingFetch).toHaveBeenNthCalledWith(
+      2,
+      "https://api.example.com/v2/me",
+      expect.objectContaining({ method: "GET", redirect: "manual" }),
     );
     expect(bootAuditLogger.log).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -727,39 +743,61 @@ describe("initPluginRuntime HostApi factory", () => {
           "[plugin:host-fetch-plugin] host_fetch https://api.example.com method=GET effect=read",
       }),
     );
+    // The hop gets its own audit line, and — same rule as hop 0 — origin only:
+    // no path segment of either URL may reach the audit log.
+    expect(bootAuditLogger.log).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "tool_call",
+        input:
+          "[plugin:host-fetch-plugin] host_fetch https://api.example.com method=GET effect=read hop=1",
+      }),
+    );
     const auditInputs = bootAuditLogger.log.mock.calls
       .map(([entry]) => entry?.input)
       .filter((input): input is string => typeof input === "string");
     expect(auditInputs.join("\n")).not.toContain("/v1/me");
+    expect(auditInputs.join("\n")).not.toContain("/v2/me");
   });
 
-  it("hostFetch propagates redirect:error rejection for allowed-host 3xx responses", async () => {
-    dnsTestState.lookup.mockResolvedValueOnce([
+  it("hostFetch refuses a followed hop that leaves the allow-list", async () => {
+    dnsTestState.lookup.mockResolvedValue([
       { address: "93.184.216.34", family: 4 },
     ]);
-    const redirectingFetch = vi.fn(
-      async (_url: RequestInfo | URL, init?: RequestInit) => {
-        if (init?.redirect === "error") {
-          throw new TypeError("redirect mode is error");
-        }
-        return new Response(null, {
-          status: 302,
-          headers: { location: "https://api.example.com/next" },
-        });
-      },
+    const escapingFetch = vi.fn(async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://evil.example.net/exfil" },
+      }),
+    );
+    const { api } = await buildHostFetchApi({
+      networkFetch: escapingFetch as typeof fetch,
+    });
+
+    await expect(
+      api.hostFetch("https://api.example.com/redirect", { redirect: "follow" }),
+    ).rejects.toThrow(/not in networkAccess.allowedDomains/);
+    // The refused hop never became a wire call.
+    expect(escapingFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("hostFetch default policy refuses a redirect without following it", async () => {
+    dnsTestState.lookup.mockResolvedValue([
+      { address: "93.184.216.34", family: 4 },
+    ]);
+    const redirectingFetch = vi.fn(async () =>
+      new Response(null, {
+        status: 302,
+        headers: { location: "https://api.example.com/next" },
+      }),
     );
     const { api } = await buildHostFetchApi({
       networkFetch: redirectingFetch as typeof fetch,
     });
 
     await expect(
-      api.hostFetch("https://api.example.com/redirect", { redirect: "follow" }),
-    ).rejects.toThrow("redirect mode is error");
-
-    expect(redirectingFetch).toHaveBeenCalledWith(
-      "https://api.example.com/redirect",
-      expect.objectContaining({ redirect: "error" }),
-    );
+      api.hostFetch("https://api.example.com/redirect"),
+    ).rejects.toThrow(/redirect refused/);
+    expect(redirectingFetch).toHaveBeenCalledTimes(1);
   });
 
   it("rejects agentApproval.request before prompting when the manifest has not declared the scope", async () => {
