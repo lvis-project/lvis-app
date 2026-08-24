@@ -59,6 +59,27 @@ export type RiskLevel = "low" | "medium" | "high";
 export interface RiskVerdict {
   level: RiskLevel;
   reason: string;
+  /**
+   * This verdict means "the host could not determine what this call does" —
+   * NOT "the host determined it is mildly risky". A person has to answer it.
+   *
+   * The distinction needs its own axis because `level` is not one gate, it is
+   * the key to three that read it independently:
+   *   (a) UI persistability — "Always allow" is disabled on HIGH
+   *       (`ToolApprovalContent`).
+   *   (b) the foreground auto-approve threshold — `interactive.autoApprove`
+   *       ships as `"medium"`, so a MEDIUM allows with NO prompt at all
+   *       (`PermissionManager.resolveReviewerDecision`).
+   *   (c) the parent-adjudication ceiling — `ParentAdjudicationMaxVerdict` is
+   *       `"low" | "medium"`, HIGH excluded FROM THE TYPE precisely so a child
+   *       agent's call in that class always reaches a person (`ApprovalGate`).
+   *
+   * A verdict that lands below HIGH to become answerable-once (a) would
+   * otherwise also become auto-executable (b) and agent-approvable (c). This
+   * flag keeps (b) and (c) shut while (a) opens, so "unknown" can be answered
+   * by a human once instead of being asked forever OR waved through silently.
+   */
+  requiresExplicitApproval?: boolean;
 }
 
 export interface LlmRiskClassificationTrace {
@@ -670,10 +691,21 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
   // for plugin-owned tools only, so builtin and MCP tools are untouched.
   (ctx) => {
     if (ctx.category !== "write") return null;
+    if (ctx.source !== "plugin") return null;
     if (!ctx.ownerPluginSandboxRoot) return null; // host-set; plugin-owned tools only
+    // Declared-but-unresolved is NOT the same as never declared. The auto-LOW
+    // rule above states the promise this would otherwise break: a manifest that
+    // declares `pathFields` and resolves to nothing "falls through to the
+    // standard HIGH so manifest bugs do not silently downgrade verdicts". An
+    // empty result also covers a non-string value, an empty string, and a
+    // canonicalization throw — all of them reachable from the CALL's arguments,
+    // which the plugin controls. Keying on the DECLARATION instead means an
+    // argument cannot move a tool off the HIGH its manifest earned.
+    if (ctx.pathFields.length > 0) return null;
     if (extractDeclaredPaths(ctx).length > 0) return null;
     return {
       level: "medium",
+      requiresExplicitApproval: true,
       reason: "no declared write path; plugin category is a strict default, not an observation",
     };
   },
@@ -1102,10 +1134,21 @@ export class LlmRiskClassifier implements RiskClassifier {
     // un-persistable, so that cost recurred on EVERY invocation of the same
     // tool. Skip the call. If composition ever gains a genuine downgrade
     // path, this early-return must be re-derived alongside it.
-    if (ruleVerdict.level === "high") {
+    if (
+      ruleVerdict.level === "high" ||
+      ruleVerdict.requiresExplicitApproval === true
+    ) {
       // "host-determined" is the existing outcome for exactly this semantic:
       // the rule verdict is final by construction and the LLM was never
       // consulted (see ReviewerDispatchOutcome).
+      //
+      // `requiresExplicitApproval` joins HIGH here for two reasons. The call is
+      // going to a person either way, so the round trip cannot change the
+      // outcome — the same argument the paragraph above makes for HIGH. And
+      // `maxVerdict` returns ONE of the two verdicts whole: an LLM verdict at
+      // the SAME level wins the tie and would carry the flag away with it,
+      // silently re-opening (b) and (c). Not asking is what keeps that from
+      // being possible rather than merely unlikely.
       return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict, outcome: "host-determined" };
     }
 

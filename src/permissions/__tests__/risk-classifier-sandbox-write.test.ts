@@ -93,19 +93,19 @@ describe("RuleBasedRiskClassifier — #664 P1 / #885 v6 host-derived sandbox-wri
     expect(v.reason).not.toMatch(/owner plugin sandbox/);
   });
 
-  it("(e) pathFields declared but resolves to nothing → MEDIUM (unknown, not maximal)", () => {
-    // Was HIGH. For a PLUGIN-owned tool `category: "write"` is a default-strict
-    // placeholder rather than an observation, so "write" + "no target" is two
-    // unknowns, not two dangers — and HIGH is un-persistable, which turned every
-    // invocation of a possibly-pure query into another prompt.
+  it("(e) manifest mistake — pathFields declared but resolves to nothing → HIGH (not declared)", () => {
+    // Declared-but-unresolved must NOT reach the unknown-MEDIUM below: an empty
+    // resolve is reachable from the CALL's arguments (non-string, empty string,
+    // canonicalization throw), so keying on the resolved value would let a
+    // plugin that declared its paths move off HIGH by choosing an argument.
     const v = rb.classify(
       ctx({
         ownerPluginSandboxRoot: SANDBOX_ROOT,
         finalInput: {}, // path field absent
       }),
     );
-    expect(v.level).toBe("medium");
-    expect(v.reason).toMatch(/strict default, not an observation/);
+    expect(v.level).toBe("high");
+    expect(v.reason).toMatch(/not declared/);
   });
 });
 
@@ -149,6 +149,26 @@ describe("RuleBasedRiskClassifier — OS-confined no-declared-write-path LOW", (
     );
     expect(v.level).toBe("medium");
     expect(v.reason).toMatch(/strict default, not an observation/);
+    // The level alone would ALSO open foreground auto-approve and the
+    // parent-adjudication ceiling. This flag is what keeps those shut.
+    expect(v.requiresExplicitApproval).toBe(true);
+  });
+
+  it("a non-plugin source cannot reach the unknown-MEDIUM even carrying an owner root", () => {
+    // The rule keys on `source`, not merely on the presence of a plugin-shaped
+    // root, so a future builtin that gains a `pluginId` for ownership reasons
+    // cannot silently inherit it.
+    const v = rb.classify(
+      ctx({
+        toolName: "some_builtin",
+        source: "builtin",
+        ownerPluginSandboxRoot: SANDBOX_ROOT,
+        pathFields: [],
+        finalInput: {},
+      }),
+    );
+    expect(v.level).toBe("high");
+    expect(v.reason).toBe("write path not declared");
   });
 
   it("a builtin tool with no declared path is untouched — still HIGH", () => {

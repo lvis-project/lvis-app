@@ -536,9 +536,17 @@ export class PermissionManager {
     lane: ReviewerLane,
   ): PermissionCheckResult {
     const isLow = verdict.level === "low";
+    // `requiresExplicitApproval` marks a verdict that means "the host could not
+    // determine what this call does". `interactive.autoApprove` ships as
+    // `"medium"`, so without this check such a verdict would be allowed with no
+    // prompt — turning "we don't know" into "go ahead" at exactly the moment a
+    // person should be looking. It never relaxes: LOW is unaffected, and a
+    // flagged verdict can only make the decision stricter than the threshold.
     const isForegroundAutoApproved =
       isLow ||
-      (verdict.level === "medium" && this.interactiveAutoApprove === "medium");
+      (verdict.level === "medium" &&
+        this.interactiveAutoApprove === "medium" &&
+        verdict.requiresExplicitApproval !== true);
     if (lane === "headless") {
       if (isLow) {
         return {
