@@ -144,6 +144,20 @@ describe("what it accepts", () => {
     // absence is the point: a caller-supplied template would be plugin markup
     // rendered by the user's browser on a loopback origin.
   });
+
+  it("tells the user the sign-in FAILED when the provider refused", async () => {
+    // The refusal arrives at the same URI as the success — `?error=` instead of
+    // `?code=`. A landing page that said "complete" for that would be telling
+    // the user something the app is about to contradict.
+    const catchers = new AuthRedirectCatchers();
+    const { handle, redirectUri } = await open(catchers);
+    const waiting = catchers.wait(OWNER, handle);
+    await hit(redirectUri, "/?error=access_denied&error_description=User+cancelled");
+    await expect(waiting).resolves.toMatchObject({ error: "access_denied" });
+    const landing = await hit(redirectUri, "/");
+    expect(landing.body).toContain("Sign-in failed");
+    expect(landing.body).not.toContain("Sign-in complete");
+  });
 });
 
 describe("what it refuses", () => {

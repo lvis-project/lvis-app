@@ -70,6 +70,12 @@ interface LiveCatcher {
   server: Server;
   /** Set once the redirect arrives; read by a `wait` that comes in after it. */
   received: AuthRedirectParams | null;
+  /**
+   * Whether what arrived was a refusal. Decided when the redirect lands, not
+   * when the landing page is served — by then the query is gone, because the
+   * 303 below is what removes it.
+   */
+  receivedFailure: boolean;
   waiters: Array<{
     resolve: (params: AuthRedirectParams) => void;
     reject: (err: Error) => void;
@@ -77,12 +83,29 @@ interface LiveCatcher {
   closed: boolean;
 }
 
-function successPage(): string {
-  return `<!doctype html><html lang="en"><head><meta charset="utf-8" />
-<title>Sign-in complete</title></head>
+/**
+ * The page the user is left looking at.
+ *
+ * It reports the OUTCOME, not the arrival. A provider that refuses — the user
+ * cancelled, the tenant blocked the app — redirects to this same URI carrying
+ * `?error=`, and a page that said "complete" for that would be telling the user
+ * something the app is about to contradict.
+ *
+ * Bilingual because the app's users are, and because this page is the host's:
+ * a plugin cannot supply markup here, so it cannot supply its own wording
+ * either, and the wording still has to reach the person reading it.
+ */
+function outcomePage(failed: boolean): string {
+  const title = failed ? "로그인 실패 (Sign-in failed)" : "로그인 완료 (Sign-in complete)";
+  const color = failed ? "#f87171" : "#60a5fa";
+  const body = failed
+    ? "이 창을 닫고 앱에서 다시 시도해 주세요. (You may close this window and try again.)"
+    : "이 창을 닫고 앱으로 돌아가세요. (You may close this window.)";
+  return `<!doctype html><html lang="ko"><head><meta charset="utf-8" />
+<title>${failed ? "Sign-in failed" : "Sign-in complete"}</title></head>
 <body style="font-family:system-ui,sans-serif;text-align:center;padding:60px;background:#0b1222;color:#e2e8f0">
-<h2 style="color:#60a5fa">Sign-in complete</h2>
-<p>You can close this window and return to the app.</p>
+<h2 style="color:${color}">${title}</h2>
+<p>${body}</p>
 </body></html>`;
 }
 
@@ -189,6 +212,7 @@ export class AuthRedirectCatchers {
         redirectUri,
         server,
         received: null,
+        receivedFailure: false,
         waiters: [],
         closed: false,
       };
@@ -219,7 +243,7 @@ export class AuthRedirectCatchers {
       // The landing page: the browser followed the 303 below, or the provider
       // sent the user here with nothing to report.
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
-      res.end(successPage());
+      res.end(outcomePage(catcher.receivedFailure));
       return;
     }
     // Redirect the browser to the bare URI so the authorization code does not
@@ -229,6 +253,10 @@ export class AuthRedirectCatchers {
     res.end();
     if (catcher.received !== null) return; // single-use; a replay changes nothing
     catcher.received = params;
+    // `error` is the OAuth 2.0 spelling (RFC 6749 §4.1.2.1) and the only one
+    // this layer reads. Which error it was is the caller's to interpret; that
+    // there WAS one is what the page has to say.
+    catcher.receivedFailure = typeof params.error === "string" && params.error.length > 0;
     const waiters = catcher.waiters.splice(0);
     for (const waiter of waiters) waiter.resolve(params);
   }
