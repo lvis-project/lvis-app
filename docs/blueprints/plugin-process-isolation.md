@@ -796,6 +796,42 @@ source census most often gets wrong in the plugin's favour, because a refusal ar
 as a runtime `EPERM` a `catch` may discard and the `homedir()` case never fails at
 all — which is why the last step is always a real child and not a grep.
 
+#### The inbound-listener question, answered
+
+A second first-party plugin is refused on the **inbound** half of the egress axis:
+its interactive sign-in binds a loopback listener to catch the OAuth redirect, and a
+confined child does not get one. Unlike the windowing question below, this one has a
+mediated form, and the reason is that the request underneath it is *one* request
+rather than three: **something has to answer at the redirect URI**. Nothing about the
+plugin's own code needs to run there.
+
+So `hostApi.authRedirect` is a host capability with a narrow shape — `open`, `wait`,
+`close`. The host binds `127.0.0.1:0`, answers the redirect, and hands back the query
+parameters. The plugin chooses *when*, and nothing else: not the interface, not the
+port, not the accepted method, not the response body. In particular the success page
+is the host's, because a caller-supplied template would be plugin markup rendered by
+the user's browser on a loopback origin — a capability nobody asked for, arriving
+through a hole opened for a courtesy page.
+
+Two details are load-bearing rather than cosmetic:
+
+- The URI is reported as `http://localhost:<port>`, **by host name**. Identity
+  providers register loopback redirect URIs by host and allow any port; `127.0.0.1`
+  is a *different*, unregistered URI. Getting this wrong fails the sign-in at the
+  provider, not in our code.
+- A second `open` for the same plugin is **refused**, not granted by replacing the
+  first. Replacing would strand a sign-in already in flight, whose redirect would then
+  arrive at a closed port *after* the user had entered their password — which is the
+  same post-authentication failure the capability exists to prevent.
+
+`openAuthWindow` looks like it could already do this and cannot. Completion is
+checked on `did-navigate` and deliberately **not** on `will-redirect` ("pre-commit
+redirect intent — not yet observed by server"), so catching a redirect to a port
+where nothing listens would rest on Chromium committing an error page for a refused
+connection — and no response would be served, which the provider's flow expects.
+Resting a credential path on error-page commit semantics is the kind of thing that
+works until a Chromium upgrade.
+
 #### The windowing question, answered rather than deferred
 
 One first-party plugin is refused on the Electron axis: its primary tool opens a

@@ -18,6 +18,7 @@ import { BrowserWindow as ElectronBrowserWindow } from "electron";
 import type { BrowserWindow } from "electron";
 import { randomUUID, createHash } from "node:crypto";
 import { normalizeAllowedHosts, urlHostMatchesAllowList } from "../../../main/host-allow-list.js";
+import type { AuthRedirectCatchers } from "../../../main/auth-redirect-catcher.js";
 import { evaluateHostFetch, runHostFetchHops } from "../../../main/host-fetch-guard.js";
 import {
   partitionCookieHeaderForUrl,
@@ -200,6 +201,13 @@ export interface CreateHostApiFactoryDeps {
     opts: import("../../../main/auth-partition-viewer-service.js").OpenAuthPartitionViewerOptions,
   ) => Promise<void>;
   clearAuthPartitionService: (partition: string) => Promise<void>;
+  /**
+   * The registry of host-owned loopback redirect catchers, SHARED across
+   * plugins and keyed by plugin id inside. Injected rather than module-scoped
+   * so a test host gets its own — a module singleton would carry one test's
+   * bound port into the next.
+   */
+  authRedirectCatchers: AuthRedirectCatchers;
   shellOpenExternal: (url: string) => Promise<void>;
   approvalGate: import("../../../permissions/approval-gate.js").ApprovalGate;
   permissionManager?: import("../../../permissions/permission-manager.js").PermissionManager;
@@ -240,6 +248,7 @@ export function createHostApiFactory(
     openLinkWindowService,
     openAuthPartitionViewerService,
     clearAuthPartitionService,
+    authRedirectCatchers,
     shellOpenExternal,
     approvalGate,
     permissionManager,
@@ -1053,6 +1062,21 @@ export function createHostApiFactory(
       //
       // Logs record only origin + path. Sensitive SAML/OAuth query values
       // (SAMLRequest, code, state, session id, etc.) are excluded to avoid leaks.
+      /**
+       * The plugin names no owner: the owner is THIS hostApi's plugin id,
+       * closed over here. That is the whole isolation argument — a plugin
+       * cannot reach another plugin's catcher because it has no way to say
+       * whose catcher it means, exactly as the auth PARTITION is composed
+       * host-side rather than passed in.
+       */
+      authRedirect: {
+        open: async () => await authRedirectCatchers.open(pluginId),
+        wait: async (opts: { handle: string; timeoutMs?: number }) =>
+          await authRedirectCatchers.wait(pluginId, opts.handle, opts.timeoutMs),
+        close: async (opts: { handle: string }) => {
+          authRedirectCatchers.close(pluginId, opts.handle);
+        },
+      },
       openAuthWindow: (async (opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean }) => {
         const safeUrlForLog = (() => {
           try {

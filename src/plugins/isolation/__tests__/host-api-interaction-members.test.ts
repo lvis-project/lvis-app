@@ -74,6 +74,12 @@ interface HostImplementations {
     windowTitle?: string;
   }) => Promise<void>;
   clearAuthPartition: (partition: string) => Promise<void>;
+  authRedirectOpen: () => Promise<{ handle: string; redirectUri: string }>;
+  authRedirectWait: (opts: {
+    handle: string;
+    timeoutMs?: number;
+  }) => Promise<Readonly<Record<string, string>>>;
+  authRedirectClose: (opts: { handle: string }) => Promise<void>;
   triggerConversation: (
     spec: ConversationTriggerSpec,
   ) => Promise<ConversationTriggerResult>;
@@ -97,6 +103,12 @@ function defaultImplementations(): HostImplementations {
     openAuthWindow: async () => COOKIES,
     openAuthPartitionViewer: async () => {},
     clearAuthPartition: async () => {},
+    authRedirectOpen: async () => ({
+      handle: REDIRECT_HANDLE,
+      redirectUri: "http://localhost:49152",
+    }),
+    authRedirectWait: async () => Object.freeze({ code: "auth-code", state: "xyz" }),
+    authRedirectClose: async () => {},
     triggerConversation: async (spec) => ({
       accepted: true,
       source: spec.source,
@@ -131,6 +143,11 @@ async function harness(
       impl.openAuthWindow(options_)) as unknown as PluginHostApi["openAuthWindow"],
     openAuthPartitionViewer: (opts) => impl.openAuthPartitionViewer(opts),
     clearAuthPartition: (partition) => impl.clearAuthPartition(partition),
+    authRedirect: {
+      open: () => impl.authRedirectOpen(),
+      wait: (opts) => impl.authRedirectWait(opts),
+      close: (opts) => impl.authRedirectClose(opts),
+    },
     triggerConversation: (spec) => impl.triggerConversation(spec),
     agentApproval: {
       request: (input) => impl.approvalRequest(input),
@@ -213,6 +230,8 @@ function invoke(
 }
 
 /** Representative arguments for each member, used by the table-driven checks. */
+const REDIRECT_HANDLE = "8f1c2e5a-0000-4000-8000-aaaaaaaaaaaa";
+
 const SAMPLE_ARGS: Record<InteractionHostApiPath, readonly unknown[]> = {
   openExternalUrl: ["https://docs.example.com/help"],
   openAuthWindow: [
@@ -227,6 +246,9 @@ const SAMPLE_ARGS: Record<InteractionHostApiPath, readonly unknown[]> = {
     { url: "https://portal.example.com/inbox", windowTitle: "Portal" },
   ],
   clearAuthPartition: [`persist:plugin-auth:${PLUGIN_ID}`],
+  "authRedirect.open": [],
+  "authRedirect.wait": [{ handle: REDIRECT_HANDLE }],
+  "authRedirect.close": [{ handle: REDIRECT_HANDLE }],
   triggerConversation: [
     {
       prompt: "Meeting starts in 5 minutes",
@@ -241,12 +263,15 @@ const SAMPLE_ARGS: Record<InteractionHostApiPath, readonly unknown[]> = {
 };
 
 describe("the group carries exactly the members whose refusal is an answer", () => {
-  it("names seven paths, every one a declared hostApi member", () => {
+  it("names ten paths, every one a declared hostApi member", () => {
     expect([...INTERACTION_HOSTAPI_PATHS]).toEqual([
       "openExternalUrl",
       "openAuthWindow",
       "openAuthPartitionViewer",
       "clearAuthPartition",
+      "authRedirect.open",
+      "authRedirect.wait",
+      "authRedirect.close",
       "triggerConversation",
       "agentApproval.request",
       "agentApproval.respond",
@@ -298,6 +323,11 @@ describe("the group carries exactly the members whose refusal is an answer", () 
       openAuthWindow: (async () => COOKIES) as unknown as PluginHostApi["openAuthWindow"],
       openAuthPartitionViewer: async () => {},
       clearAuthPartition: async () => {},
+      authRedirect: {
+        open: async () => ({ handle: REDIRECT_HANDLE, redirectUri: "http://localhost:49152" }),
+        wait: async () => Object.freeze({ code: "auth-code" }),
+        close: async () => {},
+      },
       triggerConversation: async () => ({ accepted: true, source: "overlay:x" }),
       agentApproval: {
         request: async () => "allow-once",
@@ -347,6 +377,9 @@ describe("arguments reach the host exactly as the plugin passed them", () => {
         openAuthPartitionViewer:
           record as unknown as HostImplementations["openAuthPartitionViewer"],
         clearAuthPartition: record as HostImplementations["clearAuthPartition"],
+        authRedirectOpen: record as unknown as HostImplementations["authRedirectOpen"],
+        authRedirectWait: record as unknown as HostImplementations["authRedirectWait"],
+        authRedirectClose: record as unknown as HostImplementations["authRedirectClose"],
         triggerConversation:
           record as unknown as HostImplementations["triggerConversation"],
         approvalRequest: record as unknown as HostImplementations["approvalRequest"],
@@ -455,18 +488,24 @@ describe("every error identity each contract lists survives the wire", () => {
     ),
   );
 
-  it("declares the gate on six of the seven, and exempts the approval response", () => {
+  it("declares the gate on eight of the ten, and exempts the two reads", () => {
     expect([...gated]).toEqual([
       "openExternalUrl",
       "openAuthWindow",
       "openAuthPartitionViewer",
       "clearAuthPartition",
+      "authRedirect.open",
+      "authRedirect.close",
       "triggerConversation",
       "agentApproval.request",
     ]);
     // `agentApproval.respond` resolves host-owned approval machinery; gating it
     // with that same machinery would be circular, so its contract lists nothing.
     expect(HOSTAPI_PATH_CONTRACTS["agentApproval.respond"].errors).toEqual([]);
+    // `authRedirect.wait` mutates nothing — it reports what already arrived at
+    // a listener the OPEN already answered for. A mutating-effect gate cannot
+    // fire on it, so a denial is not among its error identities.
+    expect(HOSTAPI_PATH_CONTRACTS["authRedirect.wait"].errors).toEqual([]);
   });
 
   for (const path of gated) {
@@ -479,6 +518,8 @@ describe("every error identity each contract lists survives the wire", () => {
         openAuthWindow: denied,
         openAuthPartitionViewer: denied,
         clearAuthPartition: denied,
+        authRedirectOpen: denied as unknown as HostImplementations["authRedirectOpen"],
+        authRedirectClose: denied as unknown as HostImplementations["authRedirectClose"],
         triggerConversation: denied as unknown as HostImplementations["triggerConversation"],
         approvalRequest: denied as unknown as HostImplementations["approvalRequest"],
       });

@@ -58,6 +58,15 @@ export type ChokepointKind =
   // it returns state, changes none.
   | "getAuthPartitionCookies"
   | "openAuthWindow"
+  // ─── authRedirect.* ─────────────────────────────────────────────────────
+  // A host-owned loopback listener for one OAuth redirect. `open` and `close`
+  // both mutate host-owned state — a bound port is host state, and so is its
+  // release. `wait` returns what arrived and changes nothing, so it is a read;
+  // it is still recorded, because the moment a credential redirect lands is
+  // exactly the moment an audit trail is worth having.
+  | "authRedirectOpen"
+  | "authRedirectWait"
+  | "authRedirectClose"
   | "triggerConversation"
   | "agentApprovalRespond"
   // ─── Structural-completeness vocabulary ────────────────────────────────
@@ -126,6 +135,9 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   clearAuthPartition: "write",
   getAuthPartitionCookies: "read",
   openAuthWindow: "write",
+  authRedirectOpen: "write",
+  authRedirectWait: "read",
+  authRedirectClose: "write",
   triggerConversation: "write",
   agentApprovalRespond: "write",
   // Structural-completeness vocabulary — writes (egress / persist / session).
@@ -374,6 +386,15 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   getAuthPartitionCookies: {
     kind: "getAuthPartitionCookies", async: true,
     targetFromArgs: objectStringField("partitionSub"),
+  },
+  "authRedirect.open": { kind: "authRedirectOpen", async: true },
+  "authRedirect.wait": {
+    kind: "authRedirectWait", async: true,
+    targetFromArgs: objectStringField("handle"),
+  },
+  "authRedirect.close": {
+    kind: "authRedirectClose", async: true,
+    targetFromArgs: objectStringField("handle"),
   },
   triggerConversation: { kind: "triggerConversation", async: true, targetFromArgs: objectStringField("source"),
   },

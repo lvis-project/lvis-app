@@ -854,6 +854,34 @@ export const HOSTAPI_PATH_CONTRACTS = {
     lifetime: "none",
     errors: ["effect-boundary-denied"],
   },
+  // The host-owned loopback redirect catcher. `handle` is the only state that
+  // crosses, and it is a NAME rather than a resource: the child cannot act on
+  // it except by handing it back to one of these three members, each of which
+  // re-checks that the calling plugin is its owner. That is why `lifetime` is
+  // "none" and not "child-disposable" — nothing on the child side needs
+  // disposing, because nothing on the child side holds anything.
+  "authRedirect.open": {
+    arguments: "plain-json",
+    result: "plain-json",
+    lifetime: "none",
+    errors: ["effect-boundary-denied"],
+  },
+  // A read of what already arrived, so no mutating-effect verdict applies —
+  // the same reasoning `getAuthPartitionCookies` carries. Its bound is the
+  // host's ownership check plus the timeout, neither of which is a boundary
+  // denial.
+  "authRedirect.wait": {
+    arguments: "plain-json",
+    result: "plain-json",
+    lifetime: "none",
+    errors: [],
+  },
+  "authRedirect.close": {
+    arguments: "plain-json",
+    result: "void",
+    lifetime: "none",
+    errors: ["effect-boundary-denied"],
+  },
   // The gated read-back of the host-held session cookies. Values cross the
   // boundary by design — that is what the caller needs to inject a session
   // into a separate browser context — so the host, not the child, decides
@@ -923,12 +951,15 @@ export const INTERACTION_HOSTAPI_PATHS = [
   "openAuthWindow",
   "openAuthPartitionViewer",
   "clearAuthPartition",
+  "authRedirect.open",
+  "authRedirect.wait",
+  "authRedirect.close",
   "triggerConversation",
   "agentApproval.request",
   "agentApproval.respond",
 ] as const satisfies readonly HostApiPath[];
 
-/** One of the seven. */
+/** One of the ten. */
 export type InteractionHostApiPath = (typeof INTERACTION_HOSTAPI_PATHS)[number];
 
 /** The members the service handler group carries. */
