@@ -483,11 +483,14 @@
  *   private-or-loopback — one public answer, the metadata range, or an
  *   unresolvable name stays denied, per hop included. This plugin's manifest
  *   already declares both the hosts and the opt-in, so NO host work blocks it
- *   any more. What remains is the order the census always stated, minus its
- *   first item: the plugin's own clients migrate to `hostApi.hostFetch`
- *   (with `redirect: "manual"` where they read an SSO bounce); the
- *   browser-driven flow gets an answer that is not "the plugin launches a
- *   browser"; and the reach is measured again over both sets.
+ *   any more. The first item of the census's stated order is DONE as well:
+ *   its five Node-side REST call sites route through a bound
+ *   `hostApi.hostFetch` (plugin 0.18.7 — with `redirect: "manual"` where an
+ *   SSO bounce is read as an expired session; the eleven `fetch` calls
+ *   inside `page.evaluate` bodies are the browser's and stay). What remains
+ *   for admission is the tail of that order: the browser-driven flow gets an
+ *   answer that is not "the plugin launches a browser"; and the reach is
+ *   measured again over both sets.
  *
  *   After those: the browser-driven flow gets an answer that is not "the
  *   plugin launches a browser"; and the reach is measured again over both sets.
