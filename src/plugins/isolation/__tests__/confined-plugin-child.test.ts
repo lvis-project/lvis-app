@@ -57,10 +57,13 @@
  *    substitutes its own `TMPDIR` and creates nothing, so the meeting case
  *    below asserts what a child does when that path is absent rather than
  *    assuming the host's temp directory carried over.
- *  - Network confinement. The macOS backend filters egress through a proxy
- *    rather than a namespace, so a localhost probe would prove something
- *    different on each platform and an internet probe would pass on an offline
- *    machine for the wrong reason.
+ *  - EGRESS confinement. The macOS backend filters egress through a proxy
+ *    rather than a namespace, so an internet probe would pass on an offline
+ *    machine for the wrong reason. Loopback BIND is a separate question and it
+ *    IS measured, at the bottom of this file: "a localhost probe proves
+ *    something different on each platform" turned out to be the finding rather
+ *    than the objection, because one plugin's admission depended on which
+ *    thing each platform proves.
  *  - Anything at all, on a machine where the sandbox backend cannot
  *    initialize — for the five cases that need a live one. Where
  *    `asrtCanInitialize()` answers false they return before measuring. That is
@@ -115,6 +118,7 @@ import {
   resetAsrtSandbox,
 } from "../../../permissions/asrt-sandbox.js";
 import { asrtCanInitialize } from "../../../permissions/__tests__/test-helpers.js";
+import { connect } from "node:net";
 import { spawnConfinedPluginChild } from "../out-of-process-plugin.js";
 
 const PLUGIN_ID = "work-assistant";
@@ -570,6 +574,105 @@ process.stdout.write("PROBE:" + JSON.stringify(attempt(() => readFileSync(${JSON
     child.link.input.on("error", reject);
   });
 }
+
+/**
+ * Does a confined child get to BIND a loopback TCP listener?
+ *
+ * The header above says network confinement is not proven here because "a
+ * localhost probe would prove something different on each platform". That is
+ * true, and it is the reason to run one rather than the reason to skip it: the
+ * difference between the platforms IS the result, and a plugin admission turned
+ * on it. `ms-graph` was carried as a candidate on the assumption that its auth
+ * library opens no socket outside the injected egress client. It does —
+ * `acquireTokenInteractive` falls back to MSAL's own `LoopbackClient`, which
+ * spins up an HTTP server to catch the `localhost` redirect — so what a child
+ * can do with `listen()` decides whether that plugin can ever move.
+ *
+ * The two backends refuse in shapes that are not interchangeable:
+ *
+ *  - macOS. The Seatbelt profile emits `network-bind` only under ASRT's
+ *    `allowLocalBinding`, which this app never sets. `listen()` fails.
+ *  - Linux. The child always runs under `--unshare-net`, so `listen()`
+ *    SUCCEEDS into a loopback nobody else is in. The failure moves from the
+ *    bind to the connect, and in the real flow it moves to after the user has
+ *    already typed a password.
+ *
+ * So this returns both halves — what the child saw, and what the HOST saw when
+ * it tried to reach what the child claimed to have bound — and lets each
+ * platform assert its own shape. Resolving on the PROBE line rather than on
+ * `end` is deliberate: a child that really did bind is still listening, and
+ * waiting for it to exit first would measure nothing.
+ */
+async function runLoopbackBindProbe(
+  fx: Fixture,
+): Promise<{ child: { ok: boolean; port?: number; code?: string }; hostReach?: string }> {
+  const probePath = join(fx.root, "loopback-bind-probe.mjs");
+  writeFileSync(
+    probePath,
+    `import { createServer } from "node:http";
+const server = createServer((_req, res) => res.end("reached"));
+const report = (value) => process.stdout.write("PROBE:" + JSON.stringify(value) + "\\n");
+server.on("error", (error) => report({ ok: false, code: error.code ?? error.name }));
+server.listen(0, "127.0.0.1", () => report({ ok: true, port: server.address().port }));
+// Stay up long enough for the host to try the port, then leave on our own so a
+// refused bind and a successful one both end without the runner reaping us.
+setTimeout(() => process.exit(0), 4000).unref?.();
+`,
+    "utf-8",
+  );
+  const child = await spawnConfinedPluginChild({
+    pluginId: PLUGIN_ID,
+    envelope: baseEnvelope(fx),
+    childEntryPath: probePath,
+  });
+  try {
+    const report = await new Promise<{ ok: boolean; port?: number; code?: string }>(
+      (resolve, reject) => {
+        let stdout = "";
+        const timer = setTimeout(
+          () => reject(new Error(`the loopback probe never reported; stdout was: ${stdout}`)),
+          15_000,
+        );
+        child.link.input.on("data", (chunk: Buffer) => {
+          stdout += chunk.toString("utf-8");
+          const line = stdout.split("\n").find((entry) => entry.startsWith("PROBE:"));
+          if (!line) return;
+          clearTimeout(timer);
+          resolve(JSON.parse(line.slice("PROBE:".length)));
+        });
+        child.link.input.on("end", () => {
+          clearTimeout(timer);
+          reject(new Error(`the loopback probe exited without reporting; stdout was: ${stdout}`));
+        });
+        child.link.input.on("error", (error: Error) => {
+          clearTimeout(timer);
+          reject(error);
+        });
+      },
+    );
+    if (!report.ok || report.port === undefined) return { child: report };
+    // The child says it is listening. Ask from OUT here, which is the only
+    // vantage point that can tell a bind apart from a reachable bind.
+    const hostReach = await new Promise<string>((resolve) => {
+      const socket = connect({ host: "127.0.0.1", port: report.port!, timeout: 2000 });
+      socket.on("connect", () => {
+        socket.destroy();
+        resolve("connected");
+      });
+      socket.on("timeout", () => {
+        socket.destroy();
+        resolve("ETIMEDOUT");
+      });
+      socket.on("error", (error: NodeJS.ErrnoException) => {
+        resolve(error.code ?? error.name);
+      });
+    });
+    return { child: report, hostReach };
+  } finally {
+    child.link.terminate("loopback bind probe finished");
+  }
+}
+
 
 beforeEach(() => {
   fixture = makeFixture();
@@ -2059,6 +2162,57 @@ export const createPlugin = async (context) => {
         await instance.stop?.();
         rmSync(childOutDir, { recursive: true, force: true });
       }
+    },
+    120_000,
+  );
+});
+
+/**
+ * The loopback listener, which is an admission verdict rather than a curiosity.
+ *
+ * A plugin whose sign-in flow needs to CATCH a redirect needs a server, and a
+ * server needs a bind. `out-of-process-plugins.ts` carried `ms-graph` as a
+ * candidate on the written assumption that its auth library opens no socket
+ * outside the injected egress client; it does, and this is where that stops
+ * being an assumption. The case is kept platform-split because the backends do
+ * not refuse the same way, and flattening them into one expectation would hide
+ * the half that matters: on Linux the bind SUCCEEDS and the flow still cannot
+ * work, which is a strictly worse failure than being told no.
+ */
+describe("a confined child and a loopback TCP listener", () => {
+  it.runIf(process.platform === "darwin")(
+    "on macOS the bind is refused outright, so the failure arrives before the user does",
+    async () => {
+      if (!(await sandboxCasesRun())) return;
+      const fx = fixture!;
+      // The same posture every other confinement case here measures against,
+      // and the same one production boots: deny-by-default egress, and no
+      // `allowLocalBinding` — because nothing in this app ever sets it.
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+      const { child } = await runLoopbackBindProbe(fx);
+      // No `allowLocalBinding` anywhere in this app, so the Seatbelt profile
+      // emits no `network-bind` rule and `listen()` has nothing to match.
+      expect(child.ok).toBe(false);
+      expect(child.code).toMatch(/EPERM|EACCES|EAFNOSUPPORT|EINVAL/);
+    },
+    120_000,
+  );
+
+  it.runIf(process.platform === "linux")(
+    "on Linux the bind succeeds into a loopback the host is not in",
+    async () => {
+      if (!(await sandboxCasesRun())) return;
+      const fx = fixture!;
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+      const { child, hostReach } = await runLoopbackBindProbe(fx);
+      // `--unshare-net` gives the child its own 127.0.0.1. Nothing refuses the
+      // bind because, inside that namespace, nothing is wrong with it.
+      expect(child.ok).toBe(true);
+      expect(typeof child.port).toBe("number");
+      // …and this is the assertion the child could not make about itself: the
+      // host, which is where a browser's redirect would come from, cannot
+      // reach the port the child is certain it is serving.
+      expect(hostReach).not.toBe("connected");
     },
     120_000,
   );

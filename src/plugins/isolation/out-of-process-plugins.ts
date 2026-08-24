@@ -120,6 +120,28 @@
  *    different things per platform, and an internet probe passes on an offline
  *    machine for the wrong reason. What would resolve it is a per-platform case
  *    that reaches a HOST-CONTROLLED listener rather than the internet.
+ *
+ *    THE OTHER DIRECTION — INBOUND. The heading says egress, and for a long
+ *    time this axis only asked what a child could reach. It also has to ask
+ *    what can reach the child, because a plugin that CATCHES a redirect needs
+ *    a listener, and a listener needs a bind. That is not egress and no amount
+ *    of egress measurement finds it: `ms-graph` was carried as a candidate
+ *    precisely because its egress was mediated, while the socket its sign-in
+ *    actually opens was never looked at.
+ *    A confined child does NOT get a usable loopback listener, and the two
+ *    backends refuse in shapes that are not interchangeable — asserted
+ *    per-platform in the confinement suite rather than flattened, because the
+ *    difference IS the result. On macOS the Seatbelt profile emits
+ *    `network-bind` only under ASRT's `allowLocalBinding`, which this app never
+ *    sets, so `listen()` fails `EPERM`. On Linux the child always runs under
+ *    `--unshare-net`, so `listen()` SUCCEEDS into a loopback nothing else is
+ *    in; the failure moves from the bind to whoever tries to reach it, and in a
+ *    real sign-in that is after the user has already entered credentials. The
+ *    Linux case is therefore asserted from the HOST side — the only vantage
+ *    point that can tell a bind apart from a reachable bind.
+ *    MEDIATED FORM: none today. A plugin needing an inbound listener needs the
+ *    listener to live on the host side of the wire, which is a design, not a
+ *    grant — see the `ms-graph` entry.
  * 2. ELECTRON MAIN-PROCESS APIs — the `electron` specifier reached by ANY
  *    resolution path, in the plugin or in anything it loads: a static import,
  *    a bare `require`, a `require` held in a variable, a `createRequire`, a
@@ -415,11 +437,52 @@
  *   a child — and that the browser it launches writes a profile directory of
  *   its own, which as a grandchild would land inside the same write jail
  *   (axis 6). That last one is a dependency's behaviour rather than the
- *   plugin's, and it is why axis 6 has to be read over dependencies too. What it needs first, in order: its HTTP clients call
- *   `hostApi.hostFetch` rather than `fetch` (its manifest already declares the
- *   capability and the hosts, which is what that path is checked against); the
- *   browser-driven flow gets an answer that is not "the plugin launches a
- *   browser"; and the reach is measured again over both sets.
+ *   plugin's, and it is why axis 6 has to be read over dependencies too.
+ *
+ *   Its first prerequisite used to be written here as plugin work — "its HTTP
+ *   clients call `hostApi.hostFetch` rather than `fetch`", with the manifest
+ *   already carrying the capability and the hosts. Measuring it found that
+ *   sentence wrong at the first step: the work is not the plugin's, and doing
+ *   it would break the flows it touches. Two INDEPENDENT reasons, either one
+ *   sufficient:
+ *
+ *     - Scheme. Its endpoints are `http://` intranet hosts. The guard is
+ *       https-only for everything but loopback, so every one of those requests
+ *       is denied `non-https` before the allow-list is even consulted.
+ *     - Redirect. All five of its REST clients read redirects: ten sites ask
+ *       for `manual` so a 302 to the SSO login can be recognised as an expired
+ *       session and reported as one, and ten more need `follow` for
+ *       same-origin and http→https bounces. (An eleventh `follow` sits inside
+ *       a `page.evaluate` body, which is the browser's egress and not this
+ *       plugin's — the same distinction that keeps its other eleven `fetch`
+ *       calls out of this count entirely.) The chokepoint pins `redirect` to
+ *       `"error"`, and unpinning it would not be enough: `hostFetch` runs on
+ *       Electron's `net.fetch`, which cannot return a 3xx at ALL. Measured
+ *       against a local redirecting server — `manual` throws "Redirect was
+ *       cancelled", `error` throws, and only `follow` returns, having already
+ *       followed the hop without the guard seeing it. Node's own `fetch`,
+ *       which is what these clients use today, returns the 302 with `location`
+ *       readable; that difference is the whole reason they work now.
+ *
+ *   So the pin is not the obstacle — the transport under it is, and it is also
+ *   why the pin is right today: `follow` on `net.fetch` follows invisibly, and
+ *   `manual`, the one mode that makes no further request and would leave the
+ *   host in control, is the one that stack does not offer.
+ *
+ *   There IS a host-side path, and it was measured rather than imagined:
+ *   `net.request({ redirect: "manual" })` emits a `redirect` event carrying the
+ *   status, the resolved next URL and the response headers, and the host may
+ *   `followRedirect()` or `abort()` from inside it. That is a per-hop veto on
+ *   Chromium's stack — it keeps the proxy/PAC/OS-trust properties `net.fetch`
+ *   was chosen for, lets the allow-list be re-run on every hop instead of the
+ *   first, and makes an SSO bounce something the host can report rather than
+ *   something it erases. Until `hostFetch` is built on that, and until the
+ *   scheme question has an answer for cleartext intranet hosts, this plugin's
+ *   migration is host work that has not happened, not plugin work waiting to
+ *   be done. Tracked as issue #2245.
+ *
+ *   After those: the browser-driven flow gets an answer that is not "the
+ *   plugin launches a browser"; and the reach is measured again over both sets.
  *
  * `local-indexer` — REFUSED. KNOWN FROM ITS SOURCES: it operates its own loopback HTTP listener
  *   and its own upstream TLS client as a broker, holds a control channel over
@@ -454,32 +517,51 @@
  *   questions rather than wiring, and they are why this id is also the
  *   in-process counter-example the routing tests use.
  *
- * `ms-graph` — the only remaining CANDIDATE, and it is a candidate rather than
- *   an admission because the difference is what this comment is about. KNOWN
- *   FROM ITS SOURCES, and from nothing stronger — no case has driven it
- *   through a child: no direct `fetch`, no `node:http`/`https`/`net`, no
- *   `electron`, no `child_process`, and its auth library's network client is
- *   explicitly replaced with one that calls `hostApi.hostFetch`, so its token
- *   and API egress is mediated by construction rather than by convention. Its
- *   window-shaped needs go through `openAuthWindow`,
- *   `openAuthPartitionViewer` and `clearAuthPartition`, all of which the wire
- *   carries. It is NOT clean on axis 6, and adding that axis is what surfaced
- *   it: its activation body carries a one-time move of a stored file out of a
- *   `context.hostRoot`-rooted path into `pluginDataDir`, which the write jail
- *   refuses. Unlike `meeting`'s the move sits inside a `catch` that discards
- *   the error, so it does not stop activation — it fails SILENTLY, and the
- *   user's stored history stays where the plugin will never look again. That
- *   is the quieter half of axis 6 and the reason its check ends in "drive it
- *   through a child": a source census sees a migration that looks handled.
- *   Everything else it writes is rooted at `pluginDataDir`, so this is one
- *   call site rather than a shape, and moving it is the plugin's work, not a
- *   wire's. ASSUMED, and NOT measured: that its auth library opens no socket
- *   of its own outside the injected client; that no transitive dependency
- *   loads a native module built for the wrong ABI (axis 4); and that its one
- *   `ui[]` entry is renderer-loaded and therefore indifferent to which process
- *   the factory ran in. Those three assumptions plus the axis-6 call site are
- *   the content of its admission PR — each has to become a measurement against
- *   a real confined child before the id is added here.
+ * `ms-graph` — REFUSED, and the refusal is a measurement overturning what this
+ *   comment used to assume. Its three open assumptions have now been driven
+ *   against the real bundle and the real jail. Two held: no transitive
+ *   dependency loads a native module (axis 4) — the bundle's only `.node`
+ *   token is the string `"msal.js.node"`, an SKU label in a telemetry header —
+ *   and its `ui[]` entry is renderer-loaded, which is not a property of this
+ *   plugin at all but a host invariant every `ui[]` entry shares, so it could
+ *   never have distinguished a candidate from a refusal.
+ *
+ *   The third is FALSE, and it is disqualifying. The assumption was that the
+ *   auth library "opens no socket of its own outside the injected client".
+ *   The injected client replaces EGRESS. Interactive sign-in does not use it:
+ *   `acquireTokenInteractive` resolves `customLoopbackClient || new
+ *   LoopbackClient()`, and `@azure/msal-node`'s `LoopbackClient` imports
+ *   `node:http` and, in its own words, "spins up a loopback server" to catch
+ *   the `localhost` redirect. `ms-graph` calls `acquireTokenInteractive` at
+ *   four sites and passes no custom client at any of them. So the earlier
+ *   census was measuring the wrong socket: the mediated one, not the one the
+ *   sign-in flow actually binds.
+ *
+ *   What confinement does with that bind is worth stating, because the two
+ *   platforms fail in different shapes and neither fails usefully. On macOS
+ *   the Seatbelt profile emits `network-bind` only under ASRT's
+ *   `allowLocalBinding`, which this app never sets, so `listen()` is refused
+ *   outright. On Linux the child always runs under `--unshare-net`, so
+ *   `listen()` SUCCEEDS — into a private loopback the user's browser is not
+ *   in. The redirect then goes to the host's 127.0.0.1, nothing is listening
+ *   there, and the flow hangs AFTER the user has already entered credentials.
+ *   A refusal that arrives post-authentication as a hang is worse than one
+ *   that arrives as an error, which is why this is a refusal and not a
+ *   configuration knob: admitting the id would trade a working sign-in for a
+ *   silent one.
+ *
+ *   Its axis-6 defect is separately FIXED (0.3.47): the activation-time move
+ *   of a stored file out of a `context.hostRoot`-rooted path into
+ *   `pluginDataDir` no longer sits in a `catch` that discards the error, and
+ *   no longer clobbers a newer file when both exist. That was the half of the
+ *   census a source read could see. It is not what blocks the id.
+ *
+ *   The admission precondition is therefore no longer a set of measurements —
+ *   it is one architectural change: the loopback listener for interactive
+ *   sign-in has to live on the host side of the wire, either as a host-owned
+ *   redirect catcher handed to MSAL as `customLoopbackClient`, or by moving
+ *   interactive acquisition behind `hostApi` entirely. Until one of those
+ *   exists, this id stays out.
  *
  * `template` — not installed; a scaffold, out of scope.
  */
