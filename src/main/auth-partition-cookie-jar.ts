@@ -33,7 +33,7 @@ export interface JarCookie {
   expirationDate?: number;
 }
 
-/** RFC 6265 cookies carry at most one leading dot; `.lge.com` and `lge.com` scope alike. */
+/** RFC 6265 cookies carry at most one leading dot; `.example.com` and `example.com` scope alike. */
 export function normalizeCookieDomain(domain?: string): string | undefined {
   if (!domain) return undefined;
   return domain.trim().replace(/^\./, "").toLowerCase();
