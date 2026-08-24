@@ -454,32 +454,51 @@
  *   questions rather than wiring, and they are why this id is also the
  *   in-process counter-example the routing tests use.
  *
- * `ms-graph` — the only remaining CANDIDATE, and it is a candidate rather than
- *   an admission because the difference is what this comment is about. KNOWN
- *   FROM ITS SOURCES, and from nothing stronger — no case has driven it
- *   through a child: no direct `fetch`, no `node:http`/`https`/`net`, no
- *   `electron`, no `child_process`, and its auth library's network client is
- *   explicitly replaced with one that calls `hostApi.hostFetch`, so its token
- *   and API egress is mediated by construction rather than by convention. Its
- *   window-shaped needs go through `openAuthWindow`,
- *   `openAuthPartitionViewer` and `clearAuthPartition`, all of which the wire
- *   carries. It is NOT clean on axis 6, and adding that axis is what surfaced
- *   it: its activation body carries a one-time move of a stored file out of a
- *   `context.hostRoot`-rooted path into `pluginDataDir`, which the write jail
- *   refuses. Unlike `meeting`'s the move sits inside a `catch` that discards
- *   the error, so it does not stop activation — it fails SILENTLY, and the
- *   user's stored history stays where the plugin will never look again. That
- *   is the quieter half of axis 6 and the reason its check ends in "drive it
- *   through a child": a source census sees a migration that looks handled.
- *   Everything else it writes is rooted at `pluginDataDir`, so this is one
- *   call site rather than a shape, and moving it is the plugin's work, not a
- *   wire's. ASSUMED, and NOT measured: that its auth library opens no socket
- *   of its own outside the injected client; that no transitive dependency
- *   loads a native module built for the wrong ABI (axis 4); and that its one
- *   `ui[]` entry is renderer-loaded and therefore indifferent to which process
- *   the factory ran in. Those three assumptions plus the axis-6 call site are
- *   the content of its admission PR — each has to become a measurement against
- *   a real confined child before the id is added here.
+ * `ms-graph` — REFUSED, and the refusal is a measurement overturning what this
+ *   comment used to assume. Its three open assumptions have now been driven
+ *   against the real bundle and the real jail. Two held: no transitive
+ *   dependency loads a native module (axis 4) — the bundle's only `.node`
+ *   token is the string `"msal.js.node"`, an SKU label in a telemetry header —
+ *   and its `ui[]` entry is renderer-loaded, which is not a property of this
+ *   plugin at all but a host invariant every `ui[]` entry shares, so it could
+ *   never have distinguished a candidate from a refusal.
+ *
+ *   The third is FALSE, and it is disqualifying. The assumption was that the
+ *   auth library "opens no socket of its own outside the injected client".
+ *   The injected client replaces EGRESS. Interactive sign-in does not use it:
+ *   `acquireTokenInteractive` resolves `customLoopbackClient || new
+ *   LoopbackClient()`, and `@azure/msal-node`'s `LoopbackClient` imports
+ *   `node:http` and, in its own words, "spins up a loopback server" to catch
+ *   the `localhost` redirect. `ms-graph` calls `acquireTokenInteractive` at
+ *   four sites and passes no custom client at any of them. So the earlier
+ *   census was measuring the wrong socket: the mediated one, not the one the
+ *   sign-in flow actually binds.
+ *
+ *   What confinement does with that bind is worth stating, because the two
+ *   platforms fail in different shapes and neither fails usefully. On macOS
+ *   the Seatbelt profile emits `network-bind` only under ASRT's
+ *   `allowLocalBinding`, which this app never sets, so `listen()` is refused
+ *   outright. On Linux the child always runs under `--unshare-net`, so
+ *   `listen()` SUCCEEDS — into a private loopback the user's browser is not
+ *   in. The redirect then goes to the host's 127.0.0.1, nothing is listening
+ *   there, and the flow hangs AFTER the user has already entered credentials.
+ *   A refusal that arrives post-authentication as a hang is worse than one
+ *   that arrives as an error, which is why this is a refusal and not a
+ *   configuration knob: admitting the id would trade a working sign-in for a
+ *   silent one.
+ *
+ *   Its axis-6 defect is separately FIXED (0.3.47): the activation-time move
+ *   of a stored file out of a `context.hostRoot`-rooted path into
+ *   `pluginDataDir` no longer sits in a `catch` that discards the error, and
+ *   no longer clobbers a newer file when both exist. That was the half of the
+ *   census a source read could see. It is not what blocks the id.
+ *
+ *   The admission precondition is therefore no longer a set of measurements —
+ *   it is one architectural change: the loopback listener for interactive
+ *   sign-in has to live on the host side of the wire, either as a host-owned
+ *   redirect catcher handed to MSAL as `customLoopbackClient`, or by moving
+ *   interactive acquisition behind `hostApi` entirely. Until one of those
+ *   exists, this id stays out.
  *
  * `template` — not installed; a scaffold, out of scope.
  */
