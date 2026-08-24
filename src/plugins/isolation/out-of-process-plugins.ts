@@ -120,6 +120,28 @@
  *    different things per platform, and an internet probe passes on an offline
  *    machine for the wrong reason. What would resolve it is a per-platform case
  *    that reaches a HOST-CONTROLLED listener rather than the internet.
+ *
+ *    THE OTHER DIRECTION — INBOUND. The heading says egress, and for a long
+ *    time this axis only asked what a child could reach. It also has to ask
+ *    what can reach the child, because a plugin that CATCHES a redirect needs
+ *    a listener, and a listener needs a bind. That is not egress and no amount
+ *    of egress measurement finds it: `ms-graph` was carried as a candidate
+ *    precisely because its egress was mediated, while the socket its sign-in
+ *    actually opens was never looked at.
+ *    A confined child does NOT get a usable loopback listener, and the two
+ *    backends refuse in shapes that are not interchangeable — asserted
+ *    per-platform in the confinement suite rather than flattened, because the
+ *    difference IS the result. On macOS the Seatbelt profile emits
+ *    `network-bind` only under ASRT's `allowLocalBinding`, which this app never
+ *    sets, so `listen()` fails `EPERM`. On Linux the child always runs under
+ *    `--unshare-net`, so `listen()` SUCCEEDS into a loopback nothing else is
+ *    in; the failure moves from the bind to whoever tries to reach it, and in a
+ *    real sign-in that is after the user has already entered credentials. The
+ *    Linux case is therefore asserted from the HOST side — the only vantage
+ *    point that can tell a bind apart from a reachable bind.
+ *    MEDIATED FORM: none today. A plugin needing an inbound listener needs the
+ *    listener to live on the host side of the wire, which is a design, not a
+ *    grant — see the `ms-graph` entry.
  * 2. ELECTRON MAIN-PROCESS APIs — the `electron` specifier reached by ANY
  *    resolution path, in the plugin or in anything it loads: a static import,
  *    a bare `require`, a `require` held in a variable, a `createRequire`, a
