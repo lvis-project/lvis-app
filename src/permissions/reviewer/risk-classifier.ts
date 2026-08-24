@@ -642,6 +642,41 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     if (!sandboxRelaxesCategory(ctx.sandboxCapability, "write")) return null;
     return { level: "low", reason: "no declared write path; OS-confined to owner plugin sandbox" };
   },
+  // The same call one step weaker: a plugin-owned tool with no declared target
+  // that is NOT OS-confined. HIGH is the wrong answer here, and the reason is
+  // what `category` means for a plugin tool.
+  //
+  // `mcpToolToPluginTool` sets `category = "write"` on EVERY plugin tool
+  // unconditionally — it is a default-strict placeholder, not a classification
+  // (#885: the host does not trust a plugin's self-declared category, so it
+  // reads none). The rule below then treats that placeholder as an assertion
+  // that a write happens, and combines it with a SECOND absence of knowledge
+  // ("no target declared") to produce the MAXIMUM verdict. Two things we do not
+  // know are multiplied into certainty of danger.
+  //
+  // What makes that concretely harmful is that HIGH is un-persistable, so the
+  // user is re-asked on every single invocation of a tool that may well be a
+  // pure query. `skill_load` above carries the identical argument in its own
+  // comment; the difference is that skill_load could name a stronger control to
+  // defer to, and here there is none — so this lands on MEDIUM rather than LOW.
+  // MEDIUM is the honest encoding of "unknown": still deny-by-default, still
+  // prompts, but the user's decision can be durable instead of being asked for
+  // forever until they stop reading it.
+  //
+  // Scope is narrow by construction. A call that names a target does not reach
+  // here — `extractDeclaredPaths` non-empty falls through to the lexical rules
+  // below, so a multiplexed tool (list vs add) keeps its write verdict on the
+  // arm that actually names a folder. And `ownerPluginSandboxRoot` is host-set
+  // for plugin-owned tools only, so builtin and MCP tools are untouched.
+  (ctx) => {
+    if (ctx.category !== "write") return null;
+    if (!ctx.ownerPluginSandboxRoot) return null; // host-set; plugin-owned tools only
+    if (extractDeclaredPaths(ctx).length > 0) return null;
+    return {
+      level: "medium",
+      reason: "no declared write path; plugin category is a strict default, not an observation",
+    };
+  },
   (ctx) => {
     if (ctx.category !== "write") return null;
     const paths = extractDeclaredPaths(ctx);
