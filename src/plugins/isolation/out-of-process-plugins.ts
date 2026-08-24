@@ -476,10 +476,18 @@
  *   and the default stays a refusal. Chromium's stack throughout, so the
  *   proxy/PAC/OS-trust properties `net.fetch` was chosen for are kept.
  *
- *   What still blocks THIS plugin is the scheme half alone: its endpoints are
- *   cleartext `http://` intranet hosts and the gate is https-only outside
- *   loopback. That is a policy decision, deliberately not bundled with the
- *   transport work — see #2245.
+ *   The scheme half is DECIDED and BUILT too (#2247, closing #2245): the user
+ *   ruled cleartext to the intranet permitted, and the gate now allows http
+ *   exactly when the host is allow-listed, the manifest opts into
+ *   `allowPrivateNetworks`, and every resolved address proves
+ *   private-or-loopback — one public answer, the metadata range, or an
+ *   unresolvable name stays denied, per hop included. This plugin's manifest
+ *   already declares both the hosts and the opt-in, so NO host work blocks it
+ *   any more. What remains is the order the census always stated, minus its
+ *   first item: the plugin's own clients migrate to `hostApi.hostFetch`
+ *   (with `redirect: "manual"` where they read an SSO bounce); the
+ *   browser-driven flow gets an answer that is not "the plugin launches a
+ *   browser"; and the reach is measured again over both sets.
  *
  *   After those: the browser-driven flow gets an answer that is not "the
  *   plugin launches a browser"; and the reach is measured again over both sets.
