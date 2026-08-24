@@ -126,6 +126,20 @@ export interface OpenAuthWindowOptions {
    * @default true
    */
   show?: boolean;
+  /**
+   * Session-cookie vault mode. When `true`, the harvested cookie VALUES are
+   * withheld from the return: every returned cookie keeps its `name`/`domain`/
+   * `path` (so the plugin's existence and count checks still work) but its
+   * `value` is redacted to `""`. The real values remain only in the persistent
+   * `persistPartition`, from which `hostFetch` attaches them per request.
+   *
+   * For portals with no SSO/OAuth — where the session cookie IS the credential —
+   * this keeps that credential on the host. Pair with a persistent
+   * `persistPartition` and `networkAccess.authCookiePartition`.
+   *
+   * @default false (legacy: values are returned)
+   */
+  retainCookies?: boolean;
 }
 
 export interface OpenAuthWindowResult {
@@ -395,16 +409,31 @@ export function sanitizeUrlForLog(url: string): string {
 }
 
 /**
+ * Redact cookie VALUES for `retainCookies` mode: keep name/domain/path (so
+ * existence and count checks work) but blank the value, which stays only in the
+ * persistent partition. A no-op when `retain` is false.
+ */
+export function redactCookieValues(cookies: AuthCookie[], retain: boolean): AuthCookie[] {
+  if (!retain) return cookies;
+  return cookies.map((cookie) => ({ ...cookie, value: "" }));
+}
+
+/**
  * Result-shape selector for `openAuthWindow`. Pulled out as a pure function so the
  * `returnFinalUrl` contract can be exercised without spinning up a BrowserWindow;
  * inline, that branch had no test covering it.
+ *
+ * `retainCookies` redacts values BEFORE the shape is chosen, so both the bare
+ * `AuthCookie[]` and the `{ cookies, finalUrl }` shapes withhold the value.
  */
 export function buildAuthResult(
   cookies: AuthCookie[],
   finalUrl: string,
   returnFinalUrl: boolean,
+  retainCookies = false,
 ): AuthCookie[] | OpenAuthWindowResult {
-  return returnFinalUrl ? { cookies, finalUrl } : cookies;
+  const shaped = redactCookieValues(cookies, retainCookies);
+  return returnFinalUrl ? { cookies: shaped, finalUrl } : shaped;
 }
 
 function extractCompletionTarget(url: string): string {
@@ -456,6 +485,7 @@ export async function openAuthWindow(
     windowTitle = "Login",
     persistPartition,
     returnFinalUrl = false,
+    retainCookies = false,
     show: showRequested = true,
   } = options;
   // Silent warmups (show:false) MUST pair with an explicit timeoutMs so an
@@ -714,7 +744,7 @@ export async function openAuthWindow(
         const filtered = filterCookiesByHost(allCookies, normalizedCookieHosts);
         finish(() => {
           clearTimeout(timer);
-          resolve(buildAuthResult(filtered, currentUrl, returnFinalUrl));
+          resolve(buildAuthResult(filtered, currentUrl, returnFinalUrl, retainCookies));
           if (!authWindow.isDestroyed()) authWindow.close();
         });
       } catch (err) {
@@ -944,7 +974,7 @@ export async function openAuthWindow(
                 },
                 `[auth-window:closed-grace-resolved] cookies=${filtered.length} elapsedMs=${sinceCreated()}`,
               );
-              resolve(buildAuthResult(filtered, capturedUrl, returnFinalUrl));
+              resolve(buildAuthResult(filtered, capturedUrl, returnFinalUrl, retainCookies));
             });
           } catch (err) {
             const errMsg = err instanceof Error ? err.message : String(err);

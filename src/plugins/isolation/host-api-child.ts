@@ -49,6 +49,7 @@ import { canEmitEvent } from "../capabilities.js";
 import { getDeclaredEmittedEvents } from "../runtime/manifest-validation.js";
 import { resolvePluginStoragePath } from "../plugin-storage-containment.js";
 import type {
+  AuthPartitionCookie,
   PluginManifest,
   PluginWorkerSpec,
   SpawnedPluginWorker,
@@ -249,6 +250,11 @@ export function createServiceChildMembers(
   return {
     getSecret: async (...args) =>
       call("getSecret", positional(args[0])) as Promise<string | null>,
+
+    getAuthPartitionCookies: async (...args) =>
+      call("getAuthPartitionCookies", positional(args[0])) as Promise<
+        Array<{ url: string; cookies: AuthPartitionCookie[] }>
+      >,
 
     hasRoutineBySource: async (...args) =>
       call("hasRoutineBySource", positional(args[0])) as Promise<boolean>,

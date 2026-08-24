@@ -19,6 +19,7 @@ const {
   shouldGraceCollectClosedAuthWindow,
   sanitizeUrlForLog,
   buildAuthResult,
+  redactCookieValues,
   buildAuthWindowShellHtml,
   openAuthWindow,
   wirePluginAuthPartitionPersistence,
@@ -487,5 +488,48 @@ describe("wirePluginAuthPartitionPersistence + rememberPluginAuthPartition", () 
       onError: vi.fn(),
     });
     await forgetTrackedPluginAuthPartitions("concurrent.plugin");
+  });
+});
+
+describe("retainCookies (session-cookie vault mode)", () => {
+  const harvested = [
+    { name: "SMSESSION", value: "secret-sso", domain: ".example.com", path: "/" },
+    { name: "JSESSIONID", value: "secret-app", domain: "portal.example.com", path: "/app" },
+  ];
+
+  it("blanks values while keeping the attributes a plugin checks", () => {
+    const redacted = redactCookieValues(harvested, true);
+    expect(redacted).toEqual([
+      { name: "SMSESSION", value: "", domain: ".example.com", path: "/" },
+      { name: "JSESSIONID", value: "", domain: "portal.example.com", path: "/app" },
+    ]);
+    // The count and names — what a plugin branches on to decide "logged in" —
+    // survive, so the vault does not change the login-success signal.
+    expect(redacted).toHaveLength(harvested.length);
+  });
+
+  it("is a no-op when off, so the legacy contract is byte-identical", () => {
+    expect(redactCookieValues(harvested, false)).toBe(harvested);
+  });
+
+  it("withholds values in BOTH result shapes", () => {
+    const bare = buildAuthResult(harvested, "https://portal.example.com/home", false, true);
+    expect((bare as typeof harvested).every((c) => c.value === "")).toBe(true);
+
+    const withUrl = buildAuthResult(harvested, "https://portal.example.com/home", true, true);
+    expect("cookies" in withUrl).toBe(true);
+    const shaped = (withUrl as { cookies: typeof harvested }).cookies;
+    expect(shaped.every((c) => c.value === "")).toBe(true);
+    expect(shaped.map((c) => c.name)).toEqual(["SMSESSION", "JSESSIONID"]);
+  });
+
+  it("returns real values when the mode is off (default)", () => {
+    const bare = buildAuthResult(harvested, "https://portal.example.com/home", false);
+    expect((bare as typeof harvested)[0]?.value).toBe("secret-sso");
+  });
+
+  it("does not mutate the harvested array", () => {
+    redactCookieValues(harvested, true);
+    expect(harvested[0]?.value).toBe("secret-sso");
   });
 });

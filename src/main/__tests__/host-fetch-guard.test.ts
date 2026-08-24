@@ -819,3 +819,62 @@ describe("runHostFetchHops — a followed hop into the intranet exemption", () =
     expect(calls).toHaveLength(1);
   });
 });
+
+describe("runHostFetchHops — session-cookie injection", () => {
+  it("attaches the vault's cookie for the first hop", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([new Response("ok", { status: 200 })]);
+    const first = await firstAllow("https://api.example.com/me");
+    const { options } = hopOptions(first, {}, transport);
+    await runHostFetchHops({
+      ...options,
+      injectSessionCookie: async (url) =>
+        url.hostname === "api.example.com" ? "SMSESSION=sso" : "",
+    });
+    expect(calls[0]?.headers.cookie).toBe("SMSESSION=sso");
+  });
+
+  it("re-scopes per hop — a followed redirect gets ITS OWN cookie, not the previous hop's", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([
+      redirect(302, "https://sso.example.com/bounce"),
+      new Response("ok", { status: 200 }),
+    ]);
+    const first = await firstAllow("https://api.example.com/me");
+    const { options } = hopOptions(first, { redirect: "follow" }, transport);
+    await runHostFetchHops({
+      ...options,
+      // Distinct per host: proves the injector is consulted again with the hop's
+      // own URL rather than the header surviving from hop 0.
+      injectSessionCookie: async (url) =>
+        url.hostname === "api.example.com" ? "API=1" : "SSO=2",
+    });
+    expect(calls[0]?.headers.cookie).toBe("API=1");
+    expect(calls[1]?.headers.cookie).toBe("SSO=2");
+  });
+
+  it("clears the header on a hop the vault scopes nothing to", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([
+      redirect(302, "https://sso.example.com/bounce"),
+      new Response("ok", { status: 200 }),
+    ]);
+    const first = await firstAllow("https://api.example.com/me");
+    const { options } = hopOptions(first, { redirect: "follow" }, transport);
+    await runHostFetchHops({
+      ...options,
+      injectSessionCookie: async (url) => (url.hostname === "api.example.com" ? "API=1" : ""),
+    });
+    expect(calls[0]?.headers.cookie).toBe("API=1");
+    expect(calls[1]?.headers.cookie).toBeUndefined();
+  });
+
+  it("leaves requests untouched when no injector is supplied", async () => {
+    publicDns();
+    const { transport, calls } = scriptedTransport([new Response("ok", { status: 200 })]);
+    const first = await firstAllow("https://api.example.com/me");
+    const { options } = hopOptions(first, { headers: { cookie: "PLUGIN=own" } }, transport);
+    await runHostFetchHops(options);
+    expect(calls[0]?.headers.cookie).toBe("PLUGIN=own");
+  });
+});

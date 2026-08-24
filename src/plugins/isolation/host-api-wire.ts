@@ -854,6 +854,20 @@ export const HOSTAPI_PATH_CONTRACTS = {
     lifetime: "none",
     errors: ["effect-boundary-denied"],
   },
+  // The gated read-back of the host-held session cookies. Values cross the
+  // boundary by design — that is what the caller needs to inject a session
+  // into a separate browser context — so the host, not the child, decides
+  // which cookies are in the answer (own partition ∩ declared allow-list).
+  getAuthPartitionCookies: {
+    arguments: "plain-json",
+    result: "plain-json",
+    lifetime: "none",
+    // A READ of the host's own jar: it mutates nothing, so the mutating-effect
+    // gate cannot fire and there is no denial for the boundary to carry. What
+    // bounds it is the host's own scoping (own partition ∩ declared allow-list)
+    // plus the capability gate, neither of which is an effect-boundary verdict.
+    errors: [],
+  },
   triggerConversation: {
     arguments: "plain-json",
     result: "plain-json",
@@ -920,6 +934,7 @@ export type InteractionHostApiPath = (typeof INTERACTION_HOSTAPI_PATHS)[number];
 /** The members the service handler group carries. */
 export const SERVICE_HOSTAPI_PATHS = [
   "getSecret",
+  "getAuthPartitionCookies",
   "hasRoutineBySource",
   "probePrivateHost",
   "resolveApiKey",
@@ -930,7 +945,7 @@ export const SERVICE_HOSTAPI_PATHS = [
   "spawnWorker",
 ] as const satisfies readonly HostApiPath[];
 
-/** One of the nine. */
+/** One of the ten. */
 export type ServiceHostApiPath = (typeof SERVICE_HOSTAPI_PATHS)[number];
 
 

@@ -291,6 +291,11 @@ const HOSTAPI_MARSHALLING: Record<string, MarshallingDecision> = {
     args: "partition: string",
     returns: "Promise<void>",
   },
+  getAuthPartitionCookies: {
+    jsonRepresentable: true,
+    args: "opts: { partitionSub: string, urls: string[] }",
+    returns: "Promise<Array<{ url: string, cookies: AuthPartitionCookie[] }>> — plain data",
+  },
   openExternalUrl: {
     jsonRepresentable: true,
     args: "url: string",

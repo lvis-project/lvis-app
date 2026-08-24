@@ -251,6 +251,25 @@ export async function parsePluginJson(
         );
       }
     }
+    // `authCookiePartition` names only the `<sub>` segment of this plugin's own
+    // auth partition; the host composes `persist:plugin-auth:<pluginId>:<sub>`.
+    // Reject a colon so a declaration cannot smuggle extra partition segments
+    // (or escape into another namespace) past the host's composition.
+    const authCookieRaw = (networkAccessRaw as { authCookiePartition?: unknown })
+      .authCookiePartition;
+    if (authCookieRaw !== undefined) {
+      if (
+        typeof authCookieRaw !== "string" ||
+        authCookieRaw.length === 0 ||
+        authCookieRaw.includes(":")
+      ) {
+        fail(
+          "networkAccess.authCookiePartition",
+          "must be a non-empty string naming a single partition sub-namespace (no ':')",
+          `"networkAccess": { "authCookiePartition": "portal" }`,
+        );
+      }
+    }
   }
 
   if (Array.isArray(parsed.ui)) {
