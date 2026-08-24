@@ -188,9 +188,11 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
           // true per-worker isolation needs a future ASRT with per-process
           // proxies. See asrt-sandbox.ts header.
           //
-          // Manifests are already loaded here (this block runs AFTER
-          // initPluginRuntime), so the union is computed once at init — no
-          // deferred updateConfig needed.
+          // This gate now runs BEFORE startPlugins() (factories spawn
+          // confined children during startAll and need ASRT active), so the
+          // manifest half of the union is EMPTY here — startPluginsOnce
+          // re-derives it via the same builder right after load() and
+          // live-swaps the shared config before startAll().
           //
           // Build the enforced allow-list via the SAME builder the live-refresh
           // closure uses (buildSandboxUnionDomains): manifest UNION ∪ host-
@@ -256,7 +258,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
             confines,
           });
           log.info(
-            "boot: ASRT OS tool sandbox initialized (%s, %s, strict allow-list enforced, %d union domains across %d plugins)",
+            "boot: ASRT OS tool sandbox initialized (%s, %s, strict allow-list enforced, %d union domains at init across %d plugins; manifest union refreshed after plugin load)",
             process.platform,
             asrtBackend,
             unionAllowedDomains.length,

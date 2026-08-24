@@ -136,8 +136,8 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
   // GATED: no-op when ASRT is not active (gate OFF, or deps-missing/Windows-
   // not-ready paths where the sandbox was never initialized) — there is no live
   // config to update, and we must not initialize one outside the boot gate.
-  const refreshSandboxNetworkConfig = (): void => {
-    void (async () => {
+  const refreshSandboxNetworkConfig = (): Promise<void> =>
+    (async () => {
       const {
         isAsrtSandboxActive,
         updateAsrtSandboxConfig,
@@ -156,16 +156,18 @@ export async function setupMarketplace(ctx: BootContext): Promise<void> {
         userDataDir: app.getPath("userData"),
       });
       log.info(
-        "boot: ASRT network config live-refreshed (%d union domains after settings change)",
+        "boot: ASRT network config live-refreshed (%d union domains)",
         allowedDomains.length,
       );
     })().catch((err) => {
+      // Degrade loudly rather than throw: a failed refresh only keeps the
+      // enforced allow-list NARROWER than declared (deny-by-default stands),
+      // and the boot-path awaiter must not brick startup over it.
       log.warn(
         "boot: ASRT network config live-refresh failed: %s",
         err instanceof Error ? err.message : String(err),
       );
     });
-  };
 
   ctx.marketplaceFetcher = marketplaceFetcher;
   ctx.pluginMarketplace = pluginMarketplace;

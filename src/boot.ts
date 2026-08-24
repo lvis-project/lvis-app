@@ -623,6 +623,9 @@ export async function bootstrap(
       );
     },
     deferStart: true,
+    // Lazily reads ctx: setupMarketplace() installs the closure AFTER this
+    // call, but startPluginsOnce only fires at startPlugins() further below.
+    refreshSandboxUnionDomains: () => ctx.refreshSandboxNetworkConfig(),
   });
   ctx.pluginRuntime = pluginRuntime;
   ctx.deploymentGuard = deploymentGuard;
@@ -795,11 +798,16 @@ export async function bootstrap(
     mode: "pre-start-sync",
     admitPreStartOperation,
   });
+  // §691: OS-level tool sandbox — decided exactly once here at boot, and
+  // BEFORE startPlugins(): an out-of-process plugin's factory spawns its
+  // confined child inside startAll(), and wrapWorkerCommand refuses to build
+  // a spawn plan while ASRT is not yet active. The network union computed at
+  // init predates pluginRuntime.load(), so startPluginsOnce refreshes it
+  // (same builder, safe global live-swap) after load() and before startAll().
+  await initSandboxGate(ctx);
+
   const sealedPluginStart = startPlugins();
   await Promise.all([managedPreStartSync, sealedPluginStart]);
-
-  // §691: OS-level tool sandbox — decided exactly once here at boot.
-  await initSandboxGate(ctx);
 
   log.info(
     "boot: ready (%d tools, %d plugins, %d mcp)",

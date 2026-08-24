@@ -206,6 +206,14 @@ export interface InitPluginRuntimeInput {
   routinesStore: RoutinesStore;
   /** Production defers activation until Skill/Hook/MCP lifecycle wiring exists. */
   deferStart?: boolean;
+  /**
+   * Re-derives the ASRT shared network union AFTER `load()` reads the
+   * manifests and BEFORE `startAll()` spawns anything: the sandbox gate now
+   * runs before startPlugins(), so its init-time union predates the manifest
+   * read. No-ops internally when ASRT is not active. Optional only for
+   * harnesses that never run the sandbox gate.
+   */
+  refreshSandboxUnionDomains?: () => Promise<void>;
   /** Renderer authority revocation hook owned by the IPC layer. */
   onPluginUiRevisionChange?: (pluginId: string) => void;
 }
@@ -532,6 +540,10 @@ export async function initPluginRuntime(
     for (const pluginId of pluginRuntime.listPluginIds()) {
       installLoadedPluginPartitionPolicy(pluginId);
     }
+    // The union the sandbox enforces must reflect the manifests `load()` just
+    // read BEFORE any factory spawns a confined child in `startAll()` — the
+    // gate initialized pre-load with only host-resolved dynamic endpoints.
+    await input.refreshSandboxUnionDomains?.();
     await pluginRuntime.startAll();
     log.info("boot: plugins loaded: %s", pluginRuntime.listToolNames());
 

@@ -156,7 +156,7 @@ export class BootContext {
   declare refreshActiveLlmWildcard: () => void;
   /** Cancels the active-LLM wildcard restart debounce during host shutdown. */
   declare disposeRefreshActiveLlmWildcard: () => void;
-  declare refreshSandboxNetworkConfig: () => void;
+  declare refreshSandboxNetworkConfig: () => Promise<void>;
   declare buildSandboxUnionDomains: () => Promise<string[]>;
 
   // ── Prompt / reviewer wiring ───────────────────────────────────────────────

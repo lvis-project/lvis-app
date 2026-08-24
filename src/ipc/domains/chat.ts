@@ -1047,7 +1047,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
       // a baseUrl was present it remains unchanged and the guard is a no-op.
       // Included for completeness in case future patches extend this handler.
       if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
-        deps.refreshSandboxNetworkConfig?.();
+        void deps.refreshSandboxNetworkConfig?.();
       }
       conversationLoop.refreshProvider();
       try {
@@ -1063,7 +1063,7 @@ export function registerChatHandlers(deps: IpcDeps): void {
         // the restore brings baseUrl back to the same value, the guard here is
         // also a no-op (prevBlock was the original, sig matches original).
         if (vendorBaseUrlSignature(settingsService.get("llm")) !== prevVendorBaseUrlSig) {
-          deps.refreshSandboxNetworkConfig?.();
+          void deps.refreshSandboxNetworkConfig?.();
         }
         conversationLoop.refreshProvider();
       }
