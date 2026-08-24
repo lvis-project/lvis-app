@@ -457,7 +457,7 @@
  *   something it erases. Until `hostFetch` is built on that, and until the
  *   scheme question has an answer for cleartext intranet hosts, this plugin's
  *   migration is host work that has not happened, not plugin work waiting to
- *   be done.
+ *   be done. Tracked as issue #2245.
  *
  *   After those: the browser-driven flow gets an answer that is not "the
  *   plugin launches a browser"; and the reach is measured again over both sets.
