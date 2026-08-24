@@ -290,12 +290,14 @@ describe("the routing set names the isolated plugins and nothing else", () => {
     // plugin were routed out-of-process without its own e2e evidence — and the
     // whole point of a per-plugin SOT is that each addition is a reviewed,
     // visible decision.
-    expect([...OUT_OF_PROCESS_PLUGIN_IDS]).toEqual(["work-assistant"]);
+    expect([...OUT_OF_PROCESS_PLUGIN_IDS]).toEqual(["work-assistant", "ms-graph"]);
     expect(isOutOfProcessPlugin("work-assistant")).toBe(true);
-    // The three first-party ids the SOT names in prose as REFUSED, each for a
-    // measured ambient dependency the boundary removes: `meeting` reaches the
-    // windowing system through `electron`, `ep-api` reaches the network through
-    // the global `fetch`, `local-indexer` operates its own egress leg. Asserted
+    expect(isOutOfProcessPlugin("ms-graph")).toBe(true);
+    // The three first-party ids the SOT still names in prose as REFUSED, each
+    // for a measured ambient dependency the boundary removes: `meeting` reaches
+    // the windowing system through `electron`, `ep-api` drives a browser it
+    // launches itself and spawns a shell for directory lookups,
+    // `local-indexer` operates its own egress leg. Asserted
     // by id so the prose and the set cannot drift apart — the prose is the only
     // record of WHY, and a set that quietly gained one of them would leave that
     // record describing something untrue.
@@ -309,6 +311,7 @@ describe("the routing set names the isolated plugins and nothing else", () => {
     expect(allPluginsAreOutOfProcess(["local-indexer"])).toBe(false);
     expect(allPluginsAreOutOfProcess(["work-assistant", "local-indexer"])).toBe(false);
     expect(allPluginsAreOutOfProcess(["work-assistant"])).toBe(true);
+    expect(allPluginsAreOutOfProcess(["work-assistant", "ms-graph"])).toBe(true);
     // An empty install list is not "all isolated" — it is no evidence either way.
     expect(allPluginsAreOutOfProcess([])).toBe(false);
   });
