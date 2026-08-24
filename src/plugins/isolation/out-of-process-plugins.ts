@@ -415,11 +415,52 @@
  *   a child — and that the browser it launches writes a profile directory of
  *   its own, which as a grandchild would land inside the same write jail
  *   (axis 6). That last one is a dependency's behaviour rather than the
- *   plugin's, and it is why axis 6 has to be read over dependencies too. What it needs first, in order: its HTTP clients call
- *   `hostApi.hostFetch` rather than `fetch` (its manifest already declares the
- *   capability and the hosts, which is what that path is checked against); the
- *   browser-driven flow gets an answer that is not "the plugin launches a
- *   browser"; and the reach is measured again over both sets.
+ *   plugin's, and it is why axis 6 has to be read over dependencies too.
+ *
+ *   Its first prerequisite used to be written here as plugin work — "its HTTP
+ *   clients call `hostApi.hostFetch` rather than `fetch`", with the manifest
+ *   already carrying the capability and the hosts. Measuring it found that
+ *   sentence wrong at the first step: the work is not the plugin's, and doing
+ *   it would break the flows it touches. Two INDEPENDENT reasons, either one
+ *   sufficient:
+ *
+ *     - Scheme. Its endpoints are `http://` intranet hosts. The guard is
+ *       https-only for everything but loopback, so every one of those requests
+ *       is denied `non-https` before the allow-list is even consulted.
+ *     - Redirect. All five of its REST clients read redirects: ten sites ask
+ *       for `manual` so a 302 to the SSO login can be recognised as an expired
+ *       session and reported as one, and ten more need `follow` for
+ *       same-origin and http→https bounces. (An eleventh `follow` sits inside
+ *       a `page.evaluate` body, which is the browser's egress and not this
+ *       plugin's — the same distinction that keeps its other eleven `fetch`
+ *       calls out of this count entirely.) The chokepoint pins `redirect` to
+ *       `"error"`, and unpinning it would not be enough: `hostFetch` runs on
+ *       Electron's `net.fetch`, which cannot return a 3xx at ALL. Measured
+ *       against a local redirecting server — `manual` throws "Redirect was
+ *       cancelled", `error` throws, and only `follow` returns, having already
+ *       followed the hop without the guard seeing it. Node's own `fetch`,
+ *       which is what these clients use today, returns the 302 with `location`
+ *       readable; that difference is the whole reason they work now.
+ *
+ *   So the pin is not the obstacle — the transport under it is, and it is also
+ *   why the pin is right today: `follow` on `net.fetch` follows invisibly, and
+ *   `manual`, the one mode that makes no further request and would leave the
+ *   host in control, is the one that stack does not offer.
+ *
+ *   There IS a host-side path, and it was measured rather than imagined:
+ *   `net.request({ redirect: "manual" })` emits a `redirect` event carrying the
+ *   status, the resolved next URL and the response headers, and the host may
+ *   `followRedirect()` or `abort()` from inside it. That is a per-hop veto on
+ *   Chromium's stack — it keeps the proxy/PAC/OS-trust properties `net.fetch`
+ *   was chosen for, lets the allow-list be re-run on every hop instead of the
+ *   first, and makes an SSO bounce something the host can report rather than
+ *   something it erases. Until `hostFetch` is built on that, and until the
+ *   scheme question has an answer for cleartext intranet hosts, this plugin's
+ *   migration is host work that has not happened, not plugin work waiting to
+ *   be done.
+ *
+ *   After those: the browser-driven flow gets an answer that is not "the
+ *   plugin launches a browser"; and the reach is measured again over both sets.
  *
  * `local-indexer` — REFUSED. KNOWN FROM ITS SOURCES: it operates its own loopback HTTP listener
  *   and its own upstream TLS client as a broker, holds a control channel over
