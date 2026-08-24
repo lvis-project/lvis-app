@@ -54,6 +54,7 @@ import { buildAppPreferenceReader } from "./plugin-runtime/app-preference.js";
 // ── HIGH-RISK orchestrator clusters (HostApi factory + lifecycle callbacks
 //    + registry-entry cache) live under ./plugin-runtime/*; wired into
 //    initPluginRuntime below.
+import { AuthRedirectCatchers } from "../../main/auth-redirect-catcher.js";
 import { createHostApiFactory } from "./plugin-runtime/host-api-factory.js";
 import { createLifecycleCallbacks } from "./plugin-runtime/lifecycle.js";
 import { createRegistryEntryCache } from "./plugin-runtime/registry-cache.js";
@@ -432,6 +433,12 @@ export async function initPluginRuntime(
       log.error({ err: error }, "plugin runtime audit sink failed");
     }
   };
+  /**
+   * Owned here rather than threaded in from boot: the registry's lifetime is
+   * the plugin runtime's, and a catcher outliving the runtime that opened it
+   * would be a bound port with no owner left to close it.
+   */
+  const authRedirectCatchers = new AuthRedirectCatchers();
   const createHostApi = createHostApiFactory({
     getPluginRuntime: () => pluginRuntime,
     lateBinding,
@@ -449,6 +456,7 @@ export async function initPluginRuntime(
     openLinkWindowService,
     openAuthPartitionViewerService,
     clearAuthPartitionService,
+    authRedirectCatchers,
     shellOpenExternal,
     approvalGate,
     permissionManager,

@@ -139,9 +139,16 @@
  *    real sign-in that is after the user has already entered credentials. The
  *    Linux case is therefore asserted from the HOST side — the only vantage
  *    point that can tell a bind apart from a reachable bind.
- *    MEDIATED FORM: none today. A plugin needing an inbound listener needs the
- *    listener to live on the host side of the wire, which is a design, not a
- *    grant — see the `ms-graph` entry.
+ *    MEDIATED FORM: `hostApi.authRedirect` — a host-owned loopback listener for
+ *    ONE OAuth authorization-code redirect (`open`/`wait`/`close`). The host
+ *    binds `127.0.0.1:0`, answers the redirect with a page of its OWN, and
+ *    returns the query parameters alone. The plugin chooses when to open, when
+ *    to stop waiting, and when to close; it does not choose the interface, the
+ *    port, the accepted method or the response body, and the handle is bound to
+ *    the calling plugin the same way an auth partition is. That covers the
+ *    inbound shape a sign-in needs. It does NOT cover an inbound listener a
+ *    plugin operates as a SERVER — a broker with its own upstream leg is a
+ *    different request and still has no mediated form (see `local-indexer`).
  * 2. ELECTRON MAIN-PROCESS APIs — the `electron` specifier reached by ANY
  *    resolution path, in the plugin or in anything it loads: a static import,
  *    a bare `require`, a `require` held in a variable, a `createRequire`, a
@@ -543,10 +550,13 @@
  *   `acquireTokenInteractive` resolves `customLoopbackClient || new
  *   LoopbackClient()`, and `@azure/msal-node`'s `LoopbackClient` imports
  *   `node:http` and, in its own words, "spins up a loopback server" to catch
- *   the `localhost` redirect. `ms-graph` calls `acquireTokenInteractive` at
- *   four sites and passes no custom client at any of them. So the earlier
- *   census was measuring the wrong socket: the mediated one, not the one the
- *   sign-in flow actually binds.
+ *   the `localhost` redirect. `ms-graph` calls `acquireTokenInteractive` and
+ *   passes no custom client. So the earlier census was measuring the wrong
+ *   socket: the mediated one, not the one the sign-in flow actually binds.
+ *   (This entry said "four sites" until the call sites were COUNTED rather than
+ *   grepped: there is ONE, in `src/auth/msal-client.ts`, and the other three
+ *   occurrences of the name are comments. That is the mentions-as-reach error
+ *   this file warns about in the `local-indexer` entry, made by this file.)
  *
  *   What confinement does with that bind is worth stating, because the two
  *   platforms fail in different shapes and neither fails usefully. On macOS
@@ -567,12 +577,18 @@
  *   no longer clobbers a newer file when both exist. That was the half of the
  *   census a source read could see. It is not what blocks the id.
  *
- *   The admission precondition is therefore no longer a set of measurements —
- *   it is one architectural change: the loopback listener for interactive
- *   sign-in has to live on the host side of the wire, either as a host-owned
- *   redirect catcher handed to MSAL as `customLoopbackClient`, or by moving
- *   interactive acquisition behind `hostApi` entirely. Until one of those
- *   exists, this id stays out.
+ *   The admission precondition was therefore not a set of measurements but one
+ *   architectural change: the loopback listener for interactive sign-in has to
+ *   live on the host side of the wire. That change now EXISTS —
+ *   `hostApi.authRedirect` (axis 1, inbound) is the host-owned redirect
+ *   catcher, shaped to be handed to MSAL as `customLoopbackClient`. What it is
+ *   NOT is an admission: this file's criterion is that a plugin passes when
+ *   every axis it touches has a mediated form AND THE PLUGIN ALREADY USES IT.
+ *   The plugin still constructs no custom client, so its sign-in still binds
+ *   its own socket, and this id stays out until it does. That is the whole
+ *   remaining step: measured over its own sources, `ms-graph` names no other
+ *   ambient axis — it reaches no `electron` specifier by any resolution path,
+ *   spawns nothing, and opens no socket of its own.
  *
  * `template` — not installed; a scaffold, out of scope.
  */

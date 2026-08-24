@@ -130,6 +130,17 @@ export function createNoopHostApi(
     // Fail-safe to false (no corp network) — a probe should never throw the
     // caller's flow; matches hasRoutineBySource's graceful noop default.
     probePrivateHost: async () => false,
+    authRedirect: {
+      open: async () => {
+        throw new Error("authRedirect.open not available in noop context");
+      },
+      wait: async () => {
+        throw new Error("authRedirect.wait not available in noop context");
+      },
+      close: async () => {
+        throw new Error("authRedirect.close not available in noop context");
+      },
+    },
     openAuthWindow: async () => {
       throw new Error("openAuthWindow not available in noop context");
     },

@@ -157,6 +157,20 @@ export type OpenAuthWindowFinalUrlResult = {
   finalUrl: string;
 };
 
+/** The query parameters of a caught OAuth redirect. Nothing else crosses. */
+export type AuthRedirectParams = Readonly<Record<string, string>>;
+
+export type AuthRedirectOpenResult = {
+  /** Names the listener. It is not the listener, and it is not transferable. */
+  handle: string;
+  /**
+   * `http://localhost:<port>`. The spelling matters: identity providers
+   * register loopback redirect URIs by HOST and allow any port, so
+   * `127.0.0.1` would be a different — unregistered — URI.
+   */
+  redirectUri: string;
+};
+
 export interface DependencySpec {
   pluginId: string;
   versionRange?: string;
@@ -1222,6 +1236,48 @@ export interface PluginHostApi {
   openAuthWindow(
     options: OpenAuthWindowCookieOptions,
   ): Promise<AuthWindowCookie[]>;
+
+  /**
+   * A host-owned loopback listener that catches ONE OAuth authorization-code
+   * redirect.
+   *
+   * WHY IT EXISTS. The authorization-code flow needs something listening at the
+   * redirect URI. A plugin loaded in-process opened that socket itself; a
+   * plugin loaded in a confined child cannot — on macOS the bind is refused
+   * outright, and on Linux it SUCCEEDS into a private loopback the user's
+   * browser is not in, so the sign-in hangs after the password has already been
+   * typed. Moving the listener to the host is what makes the flow survive the
+   * process boundary; see `plugin-process-isolation.md` Stage 8.
+   *
+   * WHAT THE PLUGIN CONTROLS: when to open, when to stop waiting, when to
+   * close. Nothing else. It does not choose the interface, the port, the
+   * accepted method, or the response body, and it receives the redirect's QUERY
+   * PARAMETERS alone — no headers, no path, no body. The response page is the
+   * host's on purpose: a plugin-supplied template would be plugin markup
+   * rendered by the user's browser on a loopback origin.
+   *
+   * CROSS-PLUGIN: the handle is bound to the calling plugin, and one catcher
+   * may be open per plugin at a time. A handle belonging to another plugin is
+   * reported as unknown rather than as forbidden, so a plugin cannot use these
+   * members to detect that another plugin has a sign-in in flight.
+   *
+   * SHAPE. Three members rather than one because the caller needs the redirect
+   * URI BEFORE the browser opens and the parameters AFTER it returns, and
+   * because a flow that fails in between still has to release the port. This is
+   * also the shape `@azure/msal-node`'s `ILoopbackClient` asks for, which is
+   * not a coincidence — it is the same flow.
+   */
+  authRedirect: {
+    /** Bind the listener. Rejects when this plugin already has one open. */
+    open(): Promise<AuthRedirectOpenResult>;
+    /**
+     * Resolve with the redirect's query parameters, or reject on timeout or
+     * close. Resolves immediately when the redirect has already arrived.
+     */
+    wait(options: { handle: string; timeoutMs?: number }): Promise<AuthRedirectParams>;
+    /** Release the listener. Idempotent. */
+    close(options: { handle: string }): Promise<void>;
+  };
 
   /**
    * Open a hardened viewer BrowserWindow that loads `url` inside the

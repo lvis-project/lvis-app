@@ -291,6 +291,24 @@ const HOSTAPI_MARSHALLING: Record<string, MarshallingDecision> = {
     args: "partition: string",
     returns: "Promise<void>",
   },
+  // The handle is a STRING that NAMES a host-owned listener, not a reference to
+  // one. That is what makes this family crossable at all: the socket never
+  // leaves the host, and the child holds nothing it could fail to dispose.
+  "authRedirect.open": {
+    jsonRepresentable: true,
+    args: "()",
+    returns: "Promise<{ handle: string, redirectUri: string }> — plain data",
+  },
+  "authRedirect.wait": {
+    jsonRepresentable: true,
+    args: "opts: { handle: string, timeoutMs?: number }",
+    returns: "Promise<Readonly<Record<string, string>>> — the redirect's query parameters, plain data",
+  },
+  "authRedirect.close": {
+    jsonRepresentable: true,
+    args: "opts: { handle: string }",
+    returns: "Promise<void>",
+  },
   getAuthPartitionCookies: {
     jsonRepresentable: true,
     args: "opts: { partitionSub: string, urls: string[] }",

@@ -292,6 +292,9 @@ export const HOSTAPI_DISPATCH_TABLE: Record<HostApiPath, HostApiPathHandler> = {
   openAuthWindow: unimplementedHostApiPath("openAuthWindow"),
   openAuthPartitionViewer: unimplementedHostApiPath("openAuthPartitionViewer"),
   clearAuthPartition: unimplementedHostApiPath("clearAuthPartition"),
+  "authRedirect.open": unimplementedHostApiPath("authRedirect.open"),
+  "authRedirect.wait": unimplementedHostApiPath("authRedirect.wait"),
+  "authRedirect.close": unimplementedHostApiPath("authRedirect.close"),
   getAuthPartitionCookies: unimplementedHostApiPath("getAuthPartitionCookies"),
   triggerConversation: unimplementedHostApiPath("triggerConversation"),
   "agentApproval.request": unimplementedHostApiPath("agentApproval.request"),
@@ -355,6 +358,7 @@ export type InteractionHostApi = Pick<
   | "openAuthWindow"
   | "openAuthPartitionViewer"
   | "clearAuthPartition"
+  | "authRedirect"
   | "triggerConversation"
   | "agentApproval"
 >;
@@ -404,6 +408,24 @@ export function createInteractionHostApiPaths(
     ),
     clearAuthPartition: defineHostApiPath("clearAuthPartition", (call) =>
       hostApi.clearAuthPartition(call.args[0] as string),
+    ),
+    // No owner argument crosses in either direction. The host binds the owner
+    // from the incarnation this group was composed over, so a child that made
+    // one up would be naming a field nobody reads.
+    "authRedirect.open": defineHostApiPath("authRedirect.open", async () =>
+      await hostApi.authRedirect.open(),
+    ),
+    // Blocks until the user finishes signing in, or until the host's own
+    // timeout. No boundary deadline for the same reason `agentApproval.request`
+    // has none: a call abandoned here would leave a bound port in the host with
+    // nobody left to close it.
+    "authRedirect.wait": defineHostApiPath("authRedirect.wait", async (call) =>
+      await hostApi.authRedirect.wait(
+        call.args[0] as { handle: string; timeoutMs?: number },
+      ),
+    ),
+    "authRedirect.close": defineHostApiPath("authRedirect.close", (call) =>
+      hostApi.authRedirect.close(call.args[0] as { handle: string }),
     ),
     // `{ accepted: false, reason }` is a RESULT, not an error — the plugin is
     // documented to branch on `accepted`. A throw from here means the trigger
