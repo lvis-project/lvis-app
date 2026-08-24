@@ -8,6 +8,10 @@ export const MAIN_BUNDLE_ROOT_FILES = Object.freeze([
   "main.js",
   "subscription-grok-tool-policy-hook.js",
   "subscription-tool-mcp-server.js",
+  // Confined plugin child entry — its OWN root entrypoint because a different
+  // process executes it (`spawnConfinedPluginChild` runs it directly; a module
+  // buried inside main.js has no path to be run from). See build-main-esbuild.
+  "plugin-child-main.js",
 ]);
 
 const MAIN_BUNDLE_CHUNK_PATH = /^chunks\/[a-zA-Z0-9_-]+\.js$/;
