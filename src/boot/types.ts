@@ -198,7 +198,7 @@ export interface AppServices {
    * (ASRT never initialized) — there is no live config to update. Invoked from
    * the settings IPC handler when a vendor/endpoint changes.
    */
-  refreshSandboxNetworkConfig?: () => void;
+  refreshSandboxNetworkConfig?: () => Promise<void>;
   /** Whether knowledge search tools were successfully registered. */
   knowledgeAvailable: boolean;
   /** Starred messages persistence (~/.lvis/starred.json) */

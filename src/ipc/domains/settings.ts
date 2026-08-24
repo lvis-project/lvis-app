@@ -358,7 +358,7 @@ async function finishProviderPresetMarketplaceMutation(
   refreshChatRuntimeProviders(deps);
   deps.refreshActiveLlmWildcard?.();
   if (vendorBaseUrlSignature(prevLlm) !== vendorBaseUrlSignature(newLlm)) {
-    deps.refreshSandboxNetworkConfig?.();
+    void deps.refreshSandboxNetworkConfig?.();
   }
   await broadcastSettingsSnapshot(deps);
   return rewireError;
@@ -872,7 +872,7 @@ export function registerSettingsHandlers(deps: IpcDeps): void {
     // endpoint host is enforced/allowed (and the old one dropped) without a
     // restart. No-op inside the closure when the sandbox gate is OFF.
     if (vendorBaseUrlSignature(newLlm) !== prevVendorBaseUrlSig) {
-      deps.refreshSandboxNetworkConfig?.();
+      void deps.refreshSandboxNetworkConfig?.();
     }
     // Reconcile the OS-level global accelerator + login item to the newly
     // persisted shortcut/startup fields (no-op when unchanged; see closure).

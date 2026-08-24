@@ -1898,3 +1898,66 @@ describe("hostApi.hasRoutineBySource — prefix-scoped idempotency probe", () =>
     ).resolves.toBe(false);
   });
 });
+
+describe("initPluginRuntime sandbox union ordering", () => {
+  it("refreshes the ASRT union after load() and before startAll()", async () => {
+    runtimeTestState.capturedRuntimeOptions = null;
+    runtimeTestState.runtime.listPluginIds.mockReturnValue([]);
+    runtimeTestState.runtime.listPluginManifests.mockReturnValue([]);
+
+    // The sandbox gate now runs BEFORE startPlugins(), so its init-time union
+    // holds no manifest domains. The refresh hook is the one chance to widen
+    // the enforced allow-list to what load() discovered before any factory
+    // spawns a confined child in startAll().
+    const order: string[] = [];
+    runtimeTestState.runtime.load.mockImplementation(async () => {
+      order.push("load");
+    });
+    runtimeTestState.runtime.startAll.mockImplementation(async () => {
+      order.push("startAll");
+    });
+    const refreshSandboxUnionDomains = vi.fn(async () => {
+      order.push("refresh");
+    });
+
+    const output = await initPluginRuntime({
+      projectRoot: "/tmp/lvis-test/project",
+      settingsService: {
+        get: vi.fn((key: string) => {
+          if (key === "llm") return { provider: "openai" };
+          if (key === "pluginConfigs") return {};
+          return undefined;
+        }),
+        getSecret: vi.fn(() => undefined),
+        getPluginConfig: vi.fn(() => ({})),
+        setPluginConfig: vi.fn(),
+      } as never,
+      memoryManager: {} as never,
+      networkFetch: vi.fn() as never,
+      clearAuthPartitionService: vi.fn(),
+      toolRegistry: {
+        unregisterByPlugin: vi.fn(),
+        register: vi.fn(),
+        listAll: vi.fn(() => []),
+        listPluginIds: vi.fn(() => []),
+        replacePluginTools: vi.fn(),
+      } as never,
+      pythonPath: undefined,
+      bootAuditLogger: { log: vi.fn() } as never,
+      mainWindow: {} as never,
+      openAuthWindowService: vi.fn(),
+      openLinkWindowService: vi.fn(),
+      openAuthPartitionViewerService: vi.fn(),
+      shellOpenExternal: vi.fn(),
+      approvalGate: {} as never,
+      routinesStore: { list: () => [] } as never,
+      deferStart: true,
+      refreshSandboxUnionDomains,
+    });
+
+    await output.startPlugins();
+
+    expect(order).toEqual(["load", "refresh", "startAll"]);
+    expect(refreshSandboxUnionDomains).toHaveBeenCalledTimes(1);
+  });
+});
