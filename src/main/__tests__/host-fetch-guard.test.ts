@@ -345,7 +345,14 @@ describe("evaluateHostFetch — declared loopback endpoint (local inference serv
     if (!decision.ok) expect(decision.reason).toBe("non-https");
   });
 
-  it("keeps cleartext denied for an ordinary allow-listed host, even with allowPrivateNetworks", async () => {
+  it("cleartext to an ordinary allow-listed host still needs the private PROOF — a public answer stays denied", async () => {
+    // This case used to pin "allowPrivateNetworks never opens cleartext, no
+    // DNS consulted". That invariant was repealed on purpose: cleartext to a
+    // PROVEN-private intranet host is now permitted (see the intranet
+    // describe below). What survives is the half that matters — the flag
+    // alone opens nothing; the resolution has to prove every address private,
+    // and a public answer is exactly the case the old rule existed for.
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
     const decision = await evaluateHostFetch({
       pluginId: "p",
       rawUrl: "http://api.example.com/x",
@@ -353,8 +360,10 @@ describe("evaluateHostFetch — declared loopback endpoint (local inference serv
       allowPrivateNetworks: true,
     });
     expect(decision.ok).toBe(false);
-    if (!decision.ok) expect(decision.reason).toBe("non-https");
-    expect(lookupMock).not.toHaveBeenCalled();
+    if (!decision.ok) {
+      expect(decision.reason).toBe("non-https");
+      expect(decision.message).toContain("requires every resolved address to be private");
+    }
   });
 
   it("does not let a declared loopback endpoint open the LAN for other hosts", async () => {
@@ -646,5 +655,167 @@ describe("runHostFetchHops — method, body, and credentials across a followed h
     const first = await firstAllow("https://api.example.com/submit", "PUT");
     const { options } = hopOptions(first, { redirect: "follow", body: stream }, transport);
     await expect(runHostFetchHops(options)).rejects.toThrow(/cannot replay a stream body/);
+  });
+});
+
+// ─── the second cleartext exemption: a proven-private intranet endpoint ─────
+
+describe("evaluateHostFetch — cleartext to a proven-private intranet host", () => {
+  const INTRANET = ["portal.internal.example"];
+
+  it("allows http when the host is allow-listed, the manifest opts in, and every address is private", async () => {
+    lookupMock.mockResolvedValue([{ address: "10.20.30.40", family: 4 }]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://portal.internal.example/api",
+      allowedDomains: INTRANET,
+      allowPrivateNetworks: true,
+    });
+    expect(decision.ok).toBe(true);
+  });
+
+  it("split-horizon with a loopback answer ends DENIED — the SSRF layer owns loopback, not this flag", async () => {
+    // The private-only PROOF counts loopback (those bytes stay local), so the
+    // cleartext layer passes. The SSRF layer then rejects the loopback
+    // address, because reaching the user's own machine is a separate grant
+    // (the declared-literal mechanism) that allowPrivateNetworks never
+    // implies. Two layers, two questions, and the stricter one wins.
+    lookupMock.mockResolvedValue([
+      { address: "10.20.30.40", family: 4 },
+      { address: "127.0.0.1", family: 4 },
+    ]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://portal.internal.example/api",
+      allowedDomains: INTRANET,
+      allowPrivateNetworks: true,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("ssrf-blocked");
+  });
+
+  it("without the allowPrivateNetworks opt-in, http stays denied — the flag is the user's approval", async () => {
+    lookupMock.mockResolvedValue([{ address: "10.20.30.40", family: 4 }]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://portal.internal.example/api",
+      allowedDomains: INTRANET,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) {
+      expect(decision.reason).toBe("non-https");
+      expect(decision.message).toContain("only https is permitted");
+    }
+  });
+
+  it("a name with ONE public address puts cleartext on the open wire — denied", async () => {
+    lookupMock.mockResolvedValue([
+      { address: "10.20.30.40", family: 4 },
+      { address: "93.184.216.34", family: 4 },
+    ]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://portal.internal.example/api",
+      allowedDomains: INTRANET,
+      allowPrivateNetworks: true,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) {
+      expect(decision.reason).toBe("non-https");
+      expect(decision.message).toContain("requires every resolved address to be private");
+    }
+  });
+
+  it("link-local is not the intranet: the metadata address flunks the proof", async () => {
+    lookupMock.mockResolvedValue([{ address: "169.254.169.254", family: 4 }]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://portal.internal.example/api",
+      allowedDomains: INTRANET,
+      allowPrivateNetworks: true,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("non-https");
+  });
+
+  it("an unresolvable name is unproven, and unproven fails closed", async () => {
+    lookupMock.mockRejectedValue(new Error("ENOTFOUND"));
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "http://portal.internal.example/api",
+      allowedDomains: INTRANET,
+      allowPrivateNetworks: true,
+    });
+    expect(decision.ok).toBe(false);
+    if (!decision.ok) expect(decision.reason).toBe("non-https");
+  });
+
+  it("https to the same intranet host never needed any of this and still just works", async () => {
+    lookupMock.mockResolvedValue([{ address: "10.20.30.40", family: 4 }]);
+    const decision = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://portal.internal.example/api",
+      allowedDomains: INTRANET,
+      allowPrivateNetworks: true,
+    });
+    expect(decision.ok).toBe(true);
+  });
+});
+
+describe("runHostFetchHops — a followed hop into the intranet exemption", () => {
+  it("follows an https→http hop when the target proves private and the manifest opted in", async () => {
+    lookupMock.mockResolvedValue([{ address: "10.20.30.40", family: 4 }]);
+    const { transport, calls } = scriptedTransport([
+      redirect(302, "http://portal.internal.example/landing"),
+      new Response("landed", { status: 200 }),
+    ]);
+    const first = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://portal.internal.example/a",
+      allowedDomains: ["portal.internal.example"],
+      allowPrivateNetworks: true,
+    });
+    if (!first.ok) throw new Error("test setup: first hop denied");
+    const response = await runHostFetchHops({
+      pluginId: "p",
+      first,
+      init: { redirect: "follow" },
+      transport,
+      allowedDomains: ["portal.internal.example"],
+      allowPrivateNetworks: true,
+    });
+    expect(response.status).toBe(200);
+    expect(calls.map((c) => c.url)).toEqual([
+      "https://portal.internal.example/a",
+      "http://portal.internal.example/landing",
+    ]);
+  });
+
+  it("the same hop WITHOUT the opt-in stays a refused downgrade", async () => {
+    // Hop 0 starts from a PUBLIC host: without allowPrivateNetworks a
+    // private-resolving origin would not clear the SSRF layer even over
+    // https, and this case is about the hop, not the origin.
+    lookupMock.mockResolvedValue([{ address: "93.184.216.34", family: 4 }]);
+    const { transport, calls } = scriptedTransport([
+      redirect(302, "http://portal.internal.example/landing"),
+    ]);
+    const first = await evaluateHostFetch({
+      pluginId: "p",
+      rawUrl: "https://api.example.com/a",
+      allowedDomains: ["api.example.com", "portal.internal.example"],
+      allowPrivateNetworks: false,
+    });
+    if (!first.ok) throw new Error("test setup: first hop denied");
+    await expect(
+      runHostFetchHops({
+        pluginId: "p",
+        first,
+        init: { redirect: "follow" },
+        transport,
+        allowedDomains: ["api.example.com", "portal.internal.example"],
+        allowPrivateNetworks: false,
+      }),
+    ).rejects.toThrow(/only https is permitted/);
+    expect(calls).toHaveLength(1);
   });
 });

@@ -43,6 +43,7 @@ import {
   validateHttpUrl,
   ensurePublicHttpUrl,
   resolvesToLoopbackOnly,
+  resolvesToPrivateNetworkOnly,
   NetworkGuardError,
 } from "../core/network-guard.js";
 import { methodEffect, type Effect } from "../permissions/effect-kind.js";
@@ -117,6 +118,11 @@ export interface HostFetchGuardInput {
    * Same seam, same reason as {@link ensurePublicUrl}.
    */
   resolveLoopbackOnly?: typeof resolvesToLoopbackOnly;
+  /**
+   * Injectable private-network proof — defaults to
+   * {@link resolvesToPrivateNetworkOnly}. Same seam, same reason.
+   */
+  resolvePrivateOnly?: typeof resolvesToPrivateNetworkOnly;
 }
 
 function deny(
@@ -144,6 +150,7 @@ export async function evaluateHostFetch(
     allowPrivateNetworks = false,
     ensurePublicUrl = ensurePublicHttpUrl,
     resolveLoopbackOnly = resolvesToLoopbackOnly,
+    resolvePrivateOnly = resolvesToPrivateNetworkOnly,
   } = input;
   // Host-observed effect — derived from the verb the host holds at the
   // chokepoint, not from anything the plugin self-declares. Recorded on the
@@ -184,16 +191,38 @@ export async function evaluateHostFetch(
   // than putting the request on the wire in cleartext.
   if (url.protocol !== "https:") {
     const provenLocal = declaredLoopback && (await resolveLoopbackOnly(url.hostname));
-    if (!provenLocal) {
+    // The second cleartext exemption: an INTRANET endpoint. Three conditions,
+    // none inferable from another — the host is in the user-approved
+    // allow-list, the manifest carries the user-approved
+    // `allowPrivateNetworks` governance opt-in, and every address behind the
+    // name is proven private (or loopback — split-horizon names may answer
+    // both). The proof is what keeps this from being "http is fine now": a
+    // name with one public address puts cleartext on the open wire and stays
+    // denied. Residual risk, stated rather than hidden: on a hostile LAN an
+    // attacker's DNS can satisfy "resolves private" with its own RFC1918
+    // address. That is inherent to trusting private DNS at all, it is the
+    // reality the opt-in flag asks the user to approve, and it is strictly
+    // less exposure than the ungated `fetch` these plugins used before.
+    const provenPrivate =
+      !provenLocal
+      && allowListed
+      && allowPrivateNetworks
+      && (await resolvePrivateOnly(url.hostname));
+    if (!provenLocal && !provenPrivate) {
+      const suffix = declaredLoopback
+        ? " (declared loopback host does not resolve to loopback)"
+        : allowListed && allowPrivateNetworks
+          ? " (allowPrivateNetworks is declared but the host does not resolve to private addresses only)"
+          : "";
       return deny(
         pluginId,
         "non-https",
-        declaredLoopback
-          ? `non-https scheme ${url.protocol}//${url.hostname} (declared loopback host does not resolve to loopback)`
-          : `non-https scheme ${url.protocol}//${url.hostname}`,
+        `non-https scheme ${url.protocol}//${url.hostname}${suffix}`,
         declaredLoopback
           ? `hostFetch denied: ${url.hostname} is declared as loopback but does not resolve to a loopback address`
-          : `hostFetch denied: only https is permitted (got ${url.protocol})`,
+          : allowListed && allowPrivateNetworks
+            ? `hostFetch denied: cleartext to ${url.hostname} requires every resolved address to be private (got a non-private answer or no answer)`
+            : `hostFetch denied: only https is permitted (got ${url.protocol})`,
       );
     }
   }
@@ -267,6 +296,7 @@ export interface HostFetchHopOptions {
   /** Test seams, forwarded into {@link evaluateHostFetch} per hop. */
   ensurePublicUrl?: HostFetchGuardInput["ensurePublicUrl"];
   resolveLoopbackOnly?: HostFetchGuardInput["resolveLoopbackOnly"];
+  resolvePrivateOnly?: HostFetchGuardInput["resolvePrivateOnly"];
 }
 
 /**
@@ -309,6 +339,7 @@ export async function runHostFetchHops(options: HostFetchHopOptions): Promise<Re
     auditDeny,
     ensurePublicUrl,
     resolveLoopbackOnly,
+    resolvePrivateOnly,
   } = options;
   const requestedPolicy = init.redirect;
   const policy: "error" | "manual" | "follow" =
@@ -367,6 +398,7 @@ export async function runHostFetchHops(options: HostFetchHopOptions): Promise<Re
       allowPrivateNetworks,
       ...(ensurePublicUrl ? { ensurePublicUrl } : {}),
       ...(resolveLoopbackOnly ? { resolveLoopbackOnly } : {}),
+      ...(resolvePrivateOnly ? { resolvePrivateOnly } : {}),
     });
     if (!decision.ok) {
       auditDeny?.(decision.reason, `redirect hop ${hop + 1}: ${decision.detail}`);

@@ -183,6 +183,42 @@ export async function resolvesToLoopbackOnly(host: string): Promise<boolean> {
 }
 
 /**
+ * Does `host` land EXCLUSIVELY on the private network (or this machine)?
+ *
+ * The second positive form, for the second cleartext exemption: a plugin the
+ * user granted `allowPrivateNetworks` may speak http to an INTRANET host,
+ * because bytes that never cross the public internet have nothing for https
+ * to protect them from on the way. That sentence is only true if every
+ * address behind the name is actually private — a name with one public
+ * address would put cleartext on the open wire — so this proves the positive
+ * with the same resolution and the same classifiers the SSRF layer uses.
+ *
+ * Loopback counts toward THE PROOF — those bytes stay local — but passing
+ * this proof does not reach loopback: whether 127.0.0.1 is reachable at all
+ * stays the SSRF layer's decision, under the separate declared-literal grant.
+ * A split-horizon name answering 127.0.0.1 alongside 10.x proves private here
+ * and is then refused there. Link-local and CGNAT do NOT count — 169.254.x
+ * is where cloud metadata lives, and neither range is what "the user's
+ * intranet" means.
+ *
+ * Fails closed: unresolvable, or resolving to nothing, is unproven.
+ */
+export async function resolvesToPrivateNetworkOnly(host: string): Promise<boolean> {
+  let addresses: string[];
+  try {
+    addresses = await resolveHostAddresses(host);
+  } catch {
+    return false;
+  }
+  return (
+    addresses.length > 0
+    && addresses.every(
+      (address) => isPrivateNetworkAddress(address) || isLoopbackAddress(address),
+    )
+  );
+}
+
+/**
  * Drop-in fetch wrapper that enforces per-hop redirect validation
  * and a timeout.
  *
