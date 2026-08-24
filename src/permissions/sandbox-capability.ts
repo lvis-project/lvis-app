@@ -415,6 +415,54 @@ export function isPluginWorkerWrapped(pluginId: string, workerId: string): boole
 }
 
 /**
+ * The set of PLUGIN ids whose out-of-process CHILD was ACTUALLY spawned
+ * through the ASRT wrap in THIS process (`spawnConfinedPluginChild`).
+ *
+ * Third long-lived substrate next to the wrapped MCP servers and the wrapped
+ * plugin workers above: an admitted out-of-process plugin executes EVERY tool
+ * inside one host-spawned confined child whose filesystem write set is the
+ * host-derived envelope (rooted at the plugin's own sandbox) — so a
+ * `source === 'plugin'` call owned by such a plugin genuinely runs jailed.
+ * Populated by the confined spawn's wrapped path only (gate ON + wrap
+ * succeeded) and cleared on child exit / spawn failure. Membership is
+ * necessary but NOT sufficient: {@link resolveReviewerSandboxCapability}
+ * re-checks {@link detectSandboxCapability} so a torn-down sandbox cannot
+ * leave a stale `asrt` report (the #1359/#1364 no-leak invariant).
+ *
+ * Keyed by bare pluginId: a plugin has at most ONE confined child, and the
+ * restart sequence stops the old child (unmark) before the next spawn marks.
+ */
+const _confinedPluginChildIds = new Set<string>();
+
+/**
+ * Record that a plugin's out-of-process child was spawned through the ASRT wrap.
+ * @internal — only `spawnConfinedPluginChild`'s wrapped path and tests call this.
+ */
+export function markPluginChildConfined(pluginId: string): void {
+  if (!_confinedPluginChildIds.has(pluginId)) _sandboxGeneration += 1;
+  _confinedPluginChildIds.add(pluginId);
+}
+
+/**
+ * Drop a plugin's confined-child marker (child exited / spawn failed).
+ * Idempotent.
+ * @internal — only `spawnConfinedPluginChild` and tests call this.
+ */
+export function unmarkPluginChildConfined(pluginId: string): void {
+  if (_confinedPluginChildIds.delete(pluginId)) {
+    _sandboxGeneration += 1;
+  }
+}
+
+/**
+ * Whether a plugin's out-of-process child is currently ASRT-confined.
+ * @internal — exported for the reviewer resolver + tests.
+ */
+export function isPluginChildConfined(pluginId: string): boolean {
+  return _confinedPluginChildIds.has(pluginId);
+}
+
+/**
  * Drop every wrapped-plugin-worker marker. Called by {@link resetAsrtSandbox}
  * on sandbox teardown so no stale `asrt` signal survives, and by test teardown.
  * @internal
@@ -422,6 +470,16 @@ export function isPluginWorkerWrapped(pluginId: string, workerId: string): boole
 export function clearWrappedPluginWorkers(): void {
   if (_wrappedPluginWorkerIds.size > 0) _sandboxGeneration += 1;
   _wrappedPluginWorkerIds.clear();
+}
+
+/**
+ * Drop every confined-plugin-child marker. Same teardown/no-leak contract as
+ * {@link clearWrappedPluginWorkers}.
+ * @internal
+ */
+export function clearConfinedPluginChildren(): void {
+  if (_confinedPluginChildIds.size > 0) _sandboxGeneration += 1;
+  _confinedPluginChildIds.clear();
 }
 
 /**
@@ -513,6 +571,29 @@ export function resolveReviewerSandboxCapability(
       return {
         ...active,
         reason: `plugin worker '${pluginId}/${workerId}' ASRT-wrapped — ${active.reason}`,
+      };
+    }
+  }
+  // An admitted OUT-OF-PROCESS plugin executes every tool inside its one
+  // host-spawned ASRT-confined child (`spawnConfinedPluginChild`) — no
+  // workerId exists on those Tool descriptors because the substrate is the
+  // plugin child itself, keyed by pluginId. Same TWO main-process-only
+  // signals as the branches around it: (1) the pluginId is in the
+  // confined-child registry (populated only by the confined spawn's wrapped
+  // path, cleared on exit/failure/teardown); (2) the active capability is a
+  // genuine verified `asrt`. Both must hold (no-leak). The wrapped-worker
+  // branch above stays first so a worker-backed call keeps its more specific
+  // reason string.
+  if (
+    source === "plugin" &&
+    pluginId !== undefined &&
+    isPluginChildConfined(pluginId)
+  ) {
+    const active = detectSandboxCapability();
+    if (active.kind === "asrt") {
+      return {
+        ...active,
+        reason: `plugin child '${pluginId}' ASRT-confined — ${active.reason}`,
       };
     }
   }

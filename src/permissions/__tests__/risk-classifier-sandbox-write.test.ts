@@ -104,3 +104,69 @@ describe("RuleBasedRiskClassifier — #664 P1 / #885 v6 host-derived sandbox-wri
     expect(v.reason).toMatch(/not declared/);
   });
 });
+
+describe("RuleBasedRiskClassifier — OS-confined no-declared-write-path LOW", () => {
+  const rb = new RuleBasedRiskClassifier();
+  const ASRT_FULL = {
+    kind: "asrt",
+    confidence: "verified",
+    platform: "darwin",
+    reason: "ASRT (Seatbelt) active",
+    confines: { filesystem: true, process: true, network: true },
+  } as const;
+
+  it("write + owner root + NO resolvable path + asrt-full substrate → LOW", () => {
+    const v = rb.classify(
+      ctx({
+        toolName: "work_assistant_list_detectors",
+        ownerPluginSandboxRoot: SANDBOX_ROOT,
+        pathFields: [],
+        finalInput: {},
+        sandboxCapability: { ...ASRT_FULL },
+      }),
+    );
+    expect(v.level).toBe("low");
+    expect(v.reason).toContain("OS-confined to owner plugin sandbox");
+  });
+
+  it("same call with substrate none (in-process plugin) keeps the HIGH", () => {
+    const v = rb.classify(
+      ctx({
+        toolName: "work_assistant_list_detectors",
+        ownerPluginSandboxRoot: SANDBOX_ROOT,
+        pathFields: [],
+        finalInput: {},
+        // detectSandboxCapability() default in tests — kind none
+      }),
+    );
+    expect(v.level).toBe("high");
+    expect(v.reason).toBe("write path not declared");
+  });
+
+  it("declared path OUTSIDE the owner root stays on the lexical rules even under asrt", () => {
+    const v = rb.classify(
+      ctx({
+        ownerPluginSandboxRoot: SANDBOX_ROOT,
+        finalInput: { path: `${TMP}/somewhere-else/x.txt` },
+        sandboxCapability: { ...ASRT_FULL },
+      }),
+    );
+    // The confined-LOW rule must NOT swallow a resolvable declared path —
+    // the path either proves containment lexically or escalates.
+    expect(v.reason).not.toContain("OS-confined to owner plugin sandbox");
+  });
+
+  it("builtin tool without owner root cannot reach the confined LOW", () => {
+    const v = rb.classify(
+      ctx({
+        source: "builtin",
+        toolName: "write_file",
+        pathFields: [],
+        finalInput: {},
+        sandboxCapability: { ...ASRT_FULL },
+      }),
+    );
+    expect(v.level).toBe("high");
+    expect(v.reason).toBe("write path not declared");
+  });
+});

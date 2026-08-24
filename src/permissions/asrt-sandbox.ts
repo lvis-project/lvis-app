@@ -1523,11 +1523,11 @@ export async function resetAsrtSandbox(): Promise<void> {
   // reviewer would honour. Lazy import keeps the module-load edge one-way
   // (sandbox-capability is renderer-safe and never imports back into this
   // main-only module).
-  const { clearWrappedMcpServers, clearWrappedPluginWorkers } = await import(
-    "./sandbox-capability.js"
-  );
+  const { clearWrappedMcpServers, clearWrappedPluginWorkers, clearConfinedPluginChildren } =
+    await import("./sandbox-capability.js");
   clearWrappedMcpServers();
   clearWrappedPluginWorkers();
+  clearConfinedPluginChildren();
 }
 
 /**

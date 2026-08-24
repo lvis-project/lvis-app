@@ -32,6 +32,10 @@ import { mainDir } from "../../main/main-paths.js";
 import { TOOL_TIMEOUT_POLICY } from "../../shared/tool-timeout-policy.js";
 import { RAW_RESULT_META } from "../../mcp/protocol-constants.js";
 import { spawnConfinedChild } from "../../permissions/confined-child.js";
+import {
+  markPluginChildConfined,
+  unmarkPluginChildConfined,
+} from "../../permissions/sandbox-capability.js";
 import { createSandboxProcessHome } from "../../permissions/sandbox-process-home.js";
 import { cleanupAsrtSandboxAfterCommand } from "../../permissions/asrt-sandbox.js";
 import { buildSafeChildEnv } from "../../tools/safe-env.js";
@@ -806,6 +810,10 @@ export async function spawnConfinedPluginChild(
   const sandboxHome = createSandboxProcessHome();
   let wrapped = false;
   const releaseSandboxState = (): void => {
+    // Reviewer no-leak: the confined marker must not outlive the child. Runs
+    // unconditionally (idempotent) so a spawn that failed AFTER onWrapped and
+    // a normal exit both clear it.
+    unmarkPluginChildConfined(spec.pluginId);
     if (wrapped) {
       wrapped = false;
       void cleanupAsrtSandboxAfterCommand();
@@ -864,6 +872,11 @@ export async function spawnConfinedPluginChild(
       stdio: ["pipe", "pipe", "pipe"],
       onWrapped: () => {
         wrapped = true;
+        // Reviewer signal (sandbox-capability registry): tools owned by this
+        // plugin now execute in a genuinely ASRT-confined child, so
+        // resolveReviewerSandboxCapability may report the real capability for
+        // them. Set ONLY on the wrapped path — an unwrapped spawn never marks.
+        markPluginChildConfined(spec.pluginId);
       },
     });
     if (!child.stdin || !child.stdout) {

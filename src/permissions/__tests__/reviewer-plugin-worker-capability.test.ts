@@ -21,6 +21,10 @@ import {
   unmarkPluginWorkerWrapped,
   clearWrappedPluginWorkers,
   isPluginWorkerWrapped,
+  markPluginChildConfined,
+  unmarkPluginChildConfined,
+  isPluginChildConfined,
+  clearConfinedPluginChildren,
   resolveReviewerSandboxCapability,
   setActiveSandboxCapability,
 } from "../sandbox-capability.js";
@@ -130,5 +134,78 @@ describe("resolveReviewerSandboxCapability — plugin-worker substrate awareness
     unmarkPluginWorkerWrapped("plugin-a", "main");
     expect(isPluginWorkerWrapped("plugin-a", "main")).toBe(false);
     expect(isPluginWorkerWrapped("plugin-b", "main")).toBe(false);
+  });
+});
+
+describe("resolveReviewerSandboxCapability — confined plugin CHILD substrate", () => {
+  const ASRT = {
+    kind: "asrt",
+    confidence: "verified",
+    platform: "darwin",
+    reason: "ASRT (Seatbelt) active — fs+process+network contained",
+    confines: { filesystem: true, process: true, network: true },
+  } as const;
+
+  afterEach(() => {
+    __resetActiveSandboxCapabilityForTest();
+    clearConfinedPluginChildren();
+  });
+
+  it("reports genuine asrt for a plugin tool whose OWNER's confined child is marked (no workerId)", () => {
+    setActiveSandboxCapability({ ...ASRT });
+    markPluginChildConfined("work-assistant");
+
+    const cap = resolveReviewerSandboxCapability(
+      "plugin",
+      "work_assistant_list_detectors",
+      undefined,
+      undefined,
+      "work-assistant",
+    );
+    expect(cap.kind).toBe("asrt");
+    expect(isWeakSandbox(cap)).toBe(false);
+    expect(cap.reason).toContain("plugin child 'work-assistant' ASRT-confined");
+  });
+
+  it("forces none for a plugin whose child is NOT marked, even when the global cap is asrt", () => {
+    setActiveSandboxCapability({ ...ASRT });
+    const cap = resolveReviewerSandboxCapability(
+      "plugin",
+      "meeting_start",
+      undefined,
+      undefined,
+      "meeting",
+    );
+    expect(cap.kind).toBe("none");
+    expect(isWeakSandbox(cap)).toBe(true);
+  });
+
+  it("no-leak: a marked child reports none once the sandbox is torn down", () => {
+    setActiveSandboxCapability({ ...ASRT });
+    markPluginChildConfined("work-assistant");
+    __resetActiveSandboxCapabilityForTest(); // capability back to none
+    const cap = resolveReviewerSandboxCapability(
+      "plugin",
+      "work_assistant_list_detectors",
+      undefined,
+      undefined,
+      "work-assistant",
+    );
+    expect(cap.kind).toBe("none");
+  });
+
+  it("unmark on child exit drops the relaxation immediately", () => {
+    setActiveSandboxCapability({ ...ASRT });
+    markPluginChildConfined("work-assistant");
+    unmarkPluginChildConfined("work-assistant");
+    expect(isPluginChildConfined("work-assistant")).toBe(false);
+    const cap = resolveReviewerSandboxCapability(
+      "plugin",
+      "work_assistant_list_detectors",
+      undefined,
+      undefined,
+      "work-assistant",
+    );
+    expect(cap.kind).toBe("none");
   });
 });
