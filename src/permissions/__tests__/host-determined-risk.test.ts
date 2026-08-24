@@ -147,12 +147,20 @@ describe("host-determined risk bypass", () => {
     const { provider, spy } = alwaysHighProvider();
     const classifier = new LlmRiskClassifier(provider, "test-model");
 
+    // A rule-HIGH input would be composition-pinned and skip the provider,
+    // so the non-bypass is shown on a non-HIGH rule verdict: the LLM is
+    // consulted and its escalation lands in the composed verdict.
     const trace = await classifier.classifyWithTrace(
-      ctx({ toolName: "write_file", category: "write", finalInput: { path: "/tmp/x" } }),
+      ctx({
+        toolName: "write_file",
+        category: "write",
+        finalInput: { path: "/Users/example/work/x.md" },
+      }),
     );
 
     expect(spy).toHaveBeenCalled();
     expect(trace.outcome).toBe("fresh");
+    expect(trace.ruleVerdict.level).not.toBe("high");
     expect(trace.finalVerdict.level).toBe("high");
   });
 });

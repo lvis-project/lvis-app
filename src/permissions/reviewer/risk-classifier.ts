@@ -623,6 +623,25 @@ const RULES: Array<(ctx: ToolInvocationContext) => RiskVerdict | null> = [
     if (ctx.source !== "builtin" || ctx.toolName !== "skill_load") return null;
     return { level: "low", reason: "skill load governed by body-hash approval" };
   },
+  // A plugin-owned write-category tool with NO resolvable target path would
+  // fall to the "write path not declared" HIGH below. But when this CALL's
+  // execution substrate is genuinely OS-confined — the owner plugin's ASRT
+  // child or wrapped worker, whose filesystem write set is the host-derived
+  // envelope rooted at the owner's own sandbox — the kernel already bounds
+  // every filesystem side-effect to the owner's jail. That is the SAME
+  // containment fact the declared-path LOW above proves lexically, held by a
+  // stronger authority, so even a manifest mistake cannot widen anything.
+  // Keyed on the host-resolved per-call capability (produced by
+  // resolveReviewerSandboxCapability from the no-leak wrapped registries) —
+  // never on a manifest claim; an in-process plugin tool resolves to `none`
+  // and keeps the HIGH below.
+  (ctx) => {
+    if (ctx.category !== "write") return null;
+    if (!ctx.ownerPluginSandboxRoot) return null; // host-set; plugin-owned tools only
+    if (extractDeclaredPaths(ctx).length > 0) return null; // declared paths take the lexical rules
+    if (!sandboxRelaxesCategory(ctx.sandboxCapability, "write")) return null;
+    return { level: "low", reason: "no declared write path; OS-confined to owner plugin sandbox" };
+  },
   (ctx) => {
     if (ctx.category !== "write") return null;
     const paths = extractDeclaredPaths(ctx);
@@ -1037,6 +1056,21 @@ export class LlmRiskClassifier implements RiskClassifier {
     // Name-scoped and builtin-only: a plugin/MCP tool that happens to share
     // the name still takes the full composed path.
     if (isHostDeterminedRiskTool(input)) {
+      return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict, outcome: "host-determined" };
+    }
+
+    // Composition-pinned HIGH: the final verdict is maxVerdict(rule, llm) and
+    // HIGH is the top of the scale, so once the RULE verdict is HIGH the
+    // provider round-trip cannot change the outcome — the LLM can only raise
+    // or tie (a tie merely swaps the reason text). It only adds seconds in
+    // front of a modal the user is already going to see — and HIGH is
+    // un-persistable, so that cost recurred on EVERY invocation of the same
+    // tool. Skip the call. If composition ever gains a genuine downgrade
+    // path, this early-return must be re-derived alongside it.
+    if (ruleVerdict.level === "high") {
+      // "host-determined" is the existing outcome for exactly this semantic:
+      // the rule verdict is final by construction and the LLM was never
+      // consulted (see ReviewerDispatchOutcome).
       return { ruleVerdict, llmVerdict: null, finalVerdict: ruleVerdict, outcome: "host-determined" };
     }
 

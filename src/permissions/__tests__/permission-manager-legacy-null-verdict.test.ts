@@ -11,6 +11,7 @@
  * guard for that gate.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
+import { canonicalizePathForMatch, caseFoldForMatch } from "../sensitive-paths.js";
 import { join } from "node:path";
 
 // vi.mock must be at top level (hoisted). We feed the mock from a
@@ -210,8 +211,11 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
     const pm = new PermissionManager(tmpFile("permissions.json"));
     const classifier = new LlmRiskClassifier(
       {
+        // The LLM ESCALATES: a rule-HIGH probe would be composition-pinned
+        // and never reach the provider, so verdict separation is shown on a
+        // non-HIGH rule verdict with a disagreeing (higher) LLM verdict.
         complete: vi.fn(async () => ({
-          text: '{"level":"low","reason":"llm would allow"}',
+          text: '{"level":"high","reason":"llm escalates"}',
           tokensIn: 1,
           tokensOut: 1,
           costUsd: 0,
@@ -223,12 +227,14 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
     const queue = new DeferredQueue(tmpFile("deferred-queue.jsonl"));
     pm.setReviewer({ classifier, cache, deferredQueue: queue });
 
-    await pm.dispatchReviewer("bash", {
+    await pm.dispatchReviewer("write_file", {
       source: "builtin",
-      category: "shell",
-      pathFields: [],
-      finalInput: { command: "rm -rf /tmp/lvis-audit-probe" },
-      allowedDirectories: ["/Users/example/work"],
+      category: "write",
+      pathFields: ["path"],
+      finalInput: { path: "/Users/example/work/audit-probe.md" },
+      // Canonicalized like the executor lane does — the classifier's
+      // containment compare is over canonical case-folded strings.
+      allowedDirectories: [caseFoldForMatch(canonicalizePathForMatch("/Users/example/work"))],
       executionCwd: process.cwd(),
       sensitivePathsAdjacent: [],
       trustOrigin: "llm-tool-arg" as const,
@@ -243,8 +249,8 @@ describe("PermissionManager — fail-closed gate against legacy null-verdict ent
           };
         }
       | undefined;
-    expect(auditEntry?.reviewer.ruleVerdict).toBe("high");
-    expect(auditEntry?.reviewer.llmVerdict).toBe("low");
+    expect(auditEntry?.reviewer.ruleVerdict).not.toBe("high");
+    expect(auditEntry?.reviewer.llmVerdict).toBe("high");
     expect(auditEntry?.reviewer.finalVerdict).toBe("high");
   });
 

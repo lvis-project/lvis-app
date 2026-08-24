@@ -285,14 +285,39 @@ describe("LlmRiskClassifier — composition rule (security M1)", () => {
   });
 
   it("trace preserves raw LLM verdict separately from composed final verdict", async () => {
-    const provider = makeProvider(`{"level":"low","reason":"llm tried to allow"}`);
+    // A rule-HIGH input no longer reaches the provider (rule-terminal skip
+    // below), so the raw-vs-composed split is shown on an LLM ESCALATION.
+    const provider = makeProvider(`{"level":"high","reason":"llm escalates"}`);
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    const trace = await c.classifyWithTrace(
+      ctx({ category: "read", finalInput: { path: "/Users/example/work/a.txt" } }),
+    );
+    expect(trace.ruleVerdict.level).not.toBe("high");
+    expect(trace.llmVerdict?.level).toBe("high");
+    expect(trace.finalVerdict.level).toBe("high");
+  });
+
+  it("rule HIGH skips the provider entirely (composition-pinned, outcome rule-terminal)", async () => {
+    const provider = makeProvider(`{"level":"low","reason":"never consulted"}`);
     const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
     const trace = await c.classifyWithTrace(
       ctx({ category: "shell", finalInput: { command: "rm -rf /tmp/x" } }),
     );
     expect(trace.ruleVerdict.level).toBe("high");
-    expect(trace.llmVerdict?.level).toBe("low");
+    expect(trace.llmVerdict).toBeNull();
     expect(trace.finalVerdict.level).toBe("high");
+    expect(trace.outcome).toBe("host-determined");
+    expect(provider.complete).not.toHaveBeenCalled();
+  });
+
+  it("rule MEDIUM still consults the provider (only HIGH is terminal)", async () => {
+    const provider = makeProvider(`{"level":"medium","reason":"agree"}`);
+    const c = new LlmRiskClassifier(provider, "gpt-4o-mini");
+    const trace = await c.classifyWithTrace(
+      ctx({ category: "write", finalInput: { path: "/Users/example/work/x.md" } }),
+    );
+    expect(trace.ruleVerdict.level).not.toBe("high");
+    expect(provider.complete).toHaveBeenCalledTimes(1);
   });
 
   it("rule MEDIUM + llm MEDIUM → MEDIUM", async () => {
@@ -572,7 +597,9 @@ describe("MEDIUM-2: LlmRiskClassifier.classify threads abortSignal to provider.c
     const classifier = new LlmRiskClassifier(provider, "gpt-4o-mini");
 
     const ac = new AbortController();
-    const input = ctx({ toolName: "read_file", finalInput: { path: "/tmp/a.txt" } });
+    // category read + in-allowed path: rule verdict is non-HIGH, so the
+    // provider IS consulted and the signal plumbing can be observed.
+    const input = ctx({ toolName: "read_file", category: "read", finalInput: { path: "/Users/example/work/a.txt" } });
     await (classifier as unknown as {
       classify(input: ToolInvocationContext, opts: { abortSignal?: AbortSignal }): Promise<RiskVerdict>;
     }).classify(input, { abortSignal: ac.signal });
@@ -592,7 +619,9 @@ describe("MEDIUM-2: LlmRiskClassifier.classify threads abortSignal to provider.c
     const provider: LlmReviewerProvider = { complete: completeSpy };
     const classifier = new LlmRiskClassifier(provider, "gpt-4o-mini");
 
-    const input = ctx({ toolName: "read_file", finalInput: { path: "/tmp/a.txt" } });
+    // category read + in-allowed path: rule verdict is non-HIGH, so the
+    // provider IS consulted and the signal plumbing can be observed.
+    const input = ctx({ toolName: "read_file", category: "read", finalInput: { path: "/Users/example/work/a.txt" } });
     await classifier.classify(input);
 
     expect(completeSpy).toHaveBeenCalledWith(
@@ -612,7 +641,9 @@ describe("MEDIUM-2: LlmRiskClassifier.classify threads abortSignal to provider.c
 
     const ac = new AbortController();
     ac.abort();
-    const input = ctx({ toolName: "read_file", finalInput: { path: "/tmp/a.txt" } });
+    // category read + in-allowed path: rule verdict is non-HIGH, so the
+    // provider IS consulted and the signal plumbing can be observed.
+    const input = ctx({ toolName: "read_file", category: "read", finalInput: { path: "/Users/example/work/a.txt" } });
     await (classifier as unknown as {
       classify(input: ToolInvocationContext, opts: { abortSignal?: AbortSignal }): Promise<RiskVerdict>;
     }).classify(input, { abortSignal: ac.signal });
