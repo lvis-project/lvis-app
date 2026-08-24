@@ -235,3 +235,169 @@ export async function evaluateHostFetch(
 
   return { ok: true, url, method: normalizedMethod, effect };
 }
+
+/** Statuses that name another location instead of answering. */
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+/** How many gated hops a `redirect: "follow"` request may take after the first. */
+export const MAX_REDIRECT_HOPS = 5;
+
+export interface HostFetchHopOptions {
+  /** The plugin whose manifest governs every hop. */
+  pluginId: string;
+  /** The first request, already evaluated and allowed by {@link evaluateHostFetch}. */
+  first: HostFetchAllow;
+  /** Everything from the plugin's `init` except `method` (verb-snapshot rule). */
+  init: Omit<RequestInit, "method">;
+  /**
+   * The single-hop transport (`createSingleHopFetch`). CONTRACT: it never
+   * follows a redirect — a 3xx comes back as a Response with `location` set.
+   * A transport that followed on its own would move requests past this gate,
+   * which is the exact failure this loop exists to close.
+   */
+  transport: typeof fetch;
+  /** `manifest.networkAccess.allowedDomains`, same list every hop. */
+  allowedDomains: string[];
+  /** `manifest.networkAccess.allowPrivateNetworks`, same flag every hop. */
+  allowPrivateNetworks: boolean;
+  /** Audit sink for an allowed hop (hop >= 1; the caller logged hop 0). */
+  auditHop?: (line: string) => void;
+  /** Audit sink for a denied hop — same shape the caller uses for hop 0. */
+  auditDeny?: (reason: HostFetchDenyReason | "redirect-cap", detail: string) => void;
+  /** Test seams, forwarded into {@link evaluateHostFetch} per hop. */
+  ensurePublicUrl?: HostFetchGuardInput["ensurePublicUrl"];
+  resolveLoopbackOnly?: HostFetchGuardInput["resolveLoopbackOnly"];
+}
+
+/**
+ * Drive one hostFetch request through as many gated hops as its policy allows.
+ *
+ * The policy is the plugin's own `init.redirect`, and each value means what it
+ * would mean under `fetch` — with the difference that FOLLOWING is the host's
+ * act here, never the transport's:
+ *
+ *   - `"error"` (and anything unrecognized — fail closed): a redirect throws.
+ *     The pre-hop behaviour, byte-compatible in outcome if not in message.
+ *   - `"manual"`: the 3xx is RETURNED, headers included. This is what lets a
+ *     plugin recognise an SSO bounce as an expired session instead of a
+ *     generic transport failure. It hands over no new reach: any follow-up
+ *     request the plugin makes with that `location` re-enters `hostFetch` at
+ *     hop 0 and faces the full gate.
+ *   - `"follow"`: the host follows, at most {@link MAX_REDIRECT_HOPS} hops, and
+ *     EVERY hop passes the complete gate — scheme, allow-list, DNS/SSRF —
+ *     before any bytes move. This is the mode `net.fetch` could never offer:
+ *     there, a followed hop was a request no gate ever saw.
+ *
+ * Method and body follow the fetch spec across a followed hop: 303 always
+ * becomes GET, 301/302 become GET when the verb was POST, 307/308 keep both.
+ * The verb can only move TOWARD the read class, so the effect recorded from
+ * the original snapshot never understates what was sent. A stream body that
+ * a 307/308 would need to replay throws instead of replaying a drained stream.
+ * On a cross-ORIGIN hop the `authorization`, `proxy-authorization` and
+ * `cookie` headers are dropped — credentials meant for one origin do not
+ * travel to another, allow-listed or not.
+ */
+export async function runHostFetchHops(options: HostFetchHopOptions): Promise<Response> {
+  const {
+    pluginId,
+    first,
+    init,
+    transport,
+    allowedDomains,
+    allowPrivateNetworks,
+    auditHop,
+    auditDeny,
+    ensurePublicUrl,
+    resolveLoopbackOnly,
+  } = options;
+  const requestedPolicy = init.redirect;
+  const policy: "error" | "manual" | "follow" =
+    requestedPolicy === "manual" || requestedPolicy === "follow" ? requestedPolicy : "error";
+  // Normalized ONCE so per-hop credential stripping operates on one object
+  // rather than on whatever shape (Headers / entries / record) the plugin sent.
+  const headers = new Headers((init.headers as HeadersInit | undefined) ?? {});
+  let url = first.url;
+  let method = first.method;
+  let body = init.body;
+  for (let hop = 0; ; hop++) {
+    const response = await transport(url.toString(), {
+      ...init,
+      headers,
+      body,
+      method,
+      // The transport ignores this by contract; pinned so a call site reads
+      // true and a future fetch-shaped transport fails toward NOT following.
+      redirect: "manual",
+    });
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+    const location = response.headers.get("location");
+    // A 3xx without a location names nowhere; per fetch it is a final response.
+    if (location === null) return response;
+    if (policy === "error") {
+      auditDeny?.(
+        "redirect-cap",
+        `redirect refused (policy error): ${response.status} at ${url.origin}`,
+      );
+      throw new Error(
+        `[plugin:${pluginId}] hostFetch: redirect refused — ${response.status} from ${url.origin} `
+          + `(init.redirect is "error"; pass "manual" to see the redirect or "follow" for gated hops)`,
+      );
+    }
+    if (policy === "manual") return response;
+    if (hop >= MAX_REDIRECT_HOPS) {
+      auditDeny?.("redirect-cap", `redirect cap exceeded after ${MAX_REDIRECT_HOPS} hops at ${url.origin}`);
+      throw new Error(
+        `[plugin:${pluginId}] hostFetch: too many redirects (limit ${MAX_REDIRECT_HOPS})`,
+      );
+    }
+    let nextRaw: string;
+    try {
+      nextRaw = new URL(location, url).toString();
+    } catch {
+      throw new Error(`[plugin:${pluginId}] hostFetch: unparseable redirect location`);
+    }
+    // THE point of this loop: the next hop faces the same complete gate the
+    // first request did. `net.fetch`'s own follow mode is refused as the
+    // transport precisely because it cannot stop here.
+    const decision = await evaluateHostFetch({
+      pluginId,
+      rawUrl: nextRaw,
+      method,
+      allowedDomains,
+      allowPrivateNetworks,
+      ...(ensurePublicUrl ? { ensurePublicUrl } : {}),
+      ...(resolveLoopbackOnly ? { resolveLoopbackOnly } : {}),
+    });
+    if (!decision.ok) {
+      auditDeny?.(decision.reason, `redirect hop ${hop + 1}: ${decision.detail}`);
+      throw new Error(decision.message);
+    }
+    if (
+      response.status === 303
+      || ((response.status === 301 || response.status === 302) && method === "POST")
+    ) {
+      method = "GET";
+      body = undefined;
+      headers.delete("content-type");
+      headers.delete("content-length");
+    } else if (
+      (response.status === 307 || response.status === 308)
+      && body !== null
+      && body !== undefined
+      && typeof (body as ReadableStream).getReader === "function"
+    ) {
+      // The stream was consumed sending hop N; replaying it would send an
+      // empty body and call it the same request.
+      throw new Error(
+        `[plugin:${pluginId}] hostFetch: ${response.status} redirect cannot replay a stream body`,
+      );
+    }
+    if (decision.url.origin !== url.origin) {
+      headers.delete("authorization");
+      headers.delete("proxy-authorization");
+      headers.delete("cookie");
+    }
+    url = decision.url;
+    auditHop?.(`host_fetch ${url.origin} method=${method} effect=${decision.effect} hop=${hop + 1}`);
+  }
+}

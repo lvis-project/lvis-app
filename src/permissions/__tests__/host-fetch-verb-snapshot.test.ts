@@ -97,7 +97,14 @@ vi.mock("../../plugins/registry.js", () => ({
 // Deterministic egress allow: the verb the closure passes (`methodSnapshot`)
 // flows straight back as decision.method/effect, isolating the verb-snapshot
 // flow from the real DNS/SSRF/allow-list gate (unchanged; tested separately).
-vi.mock("../../main/host-fetch-guard.js", () => ({
+// PARTIAL mock: `evaluateHostFetch` is replaced with a deterministic allow so
+// the verb-snapshot flow is isolated from DNS/SSRF (unchanged, covered by
+// host-fetch-guard.test.ts) — but `runHostFetchHops` stays REAL, because the
+// wire behaviour under test now lives inside it. The cases below never follow
+// a hop, so the loop's own internal `evaluateHostFetch` (which the partial
+// mock cannot reach) never runs and no live DNS is touched.
+vi.mock("../../main/host-fetch-guard.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../main/host-fetch-guard.js")>()),
   evaluateHostFetch: vi.fn(
     async (input: { rawUrl: string; method: string }) => ({
       ok: true,
@@ -307,54 +314,62 @@ describe("hostFetch verb snapshot — single read, recorded effect == wire verb"
 });
 
 /**
- * The redirect pin, which nothing held.
+ * The redirect boundary, restated for the hop engine.
  *
- * The host overrides whatever `redirect` a plugin sends with `"error"`, and the
- * closure carries a paragraph explaining why. Nothing asserted it, so the value
- * could have been changed to `"follow"` — the one setting that makes the guard
- * blind — without a single test noticing. That is the dangerous direction: the
- * allow-list and the SSRF check run against the URL the plugin asked for, and a
- * followed hop is a request to a DIFFERENT host that no gate ever saw.
- *
- * Pinned here rather than left implicit because there is live pressure to
- * change it: a plugin whose sign-in flow reads a 302 cannot use `hostFetch`
- * today, and "just let redirect through" is the obvious wrong fix. It is wrong
- * twice over — it would blind the guard, and it would not even work, because
- * `hostFetch` runs on Electron `net.fetch`, which cannot return a 3xx at all
- * (`manual` throws `Redirect was cancelled`). The real fix is host-side and
- * tracked as #2245: rebuild the chokepoint on `net.request`, whose `redirect`
- * event gives the host a per-hop veto with the `Location` visible, so the
- * allow-list can run on every hop instead of only the first.
- *
- * So this case is not "the current value is correct forever". It is: changing
- * it is a decision, and the decision has to be made here, in the open.
+ * The previous version of this block pinned `redirect: "error"` on the wire,
+ * because that blanket pin was the only thing standing between the guard and
+ * a followed hop it never saw. #2245 replaced the blanket: the transport under
+ * `hostFetch` now takes exactly ONE hop (a 3xx comes BACK instead of being
+ * followed or thrown), and following is a host-side loop that re-runs the full
+ * gate per hop (pinned in host-fetch-guard.test.ts). What this file still owns
+ * is the WIRE: whatever a plugin asks for, the transport itself must never be
+ * told to follow. `"manual"` on the wire is that guarantee — the one mode that
+ * issues no further request — and the plugin-visible policy is enforced above
+ * it, in the loop.
  */
-describe("hostFetch redirect pin — the plugin does not choose", () => {
+describe("hostFetch redirect boundary — the transport is never told to follow", () => {
   beforeEach(() => {
     harness.readPluginRegistry.mockReset();
     harness.readPluginRegistry.mockResolvedValue({ version: 1, plugins: [] });
   });
 
-  it("pins redirect to error, overriding whatever the plugin asked for", async () => {
+  it('the wire sees "manual" even when the plugin asks to follow', async () => {
     const { hostApi, networkFetch } = await buildRealHostApi();
     const { wireInit } = await driveHostFetch(
       hostApi,
       networkFetch,
       "https://api.example.com/x",
-      // The two a redirect-reading plugin actually wants. Neither survives.
       { redirect: "follow" },
     );
-    expect(wireInit.redirect).toBe("error");
+    expect(wireInit.redirect).toBe("manual");
   });
 
-  it("pins it for manual too — the mode that follows nothing is still refused", async () => {
+  it("the default policy still refuses a redirect — one hop, then a thrown refusal", async () => {
     const { hostApi, networkFetch } = await buildRealHostApi();
-    const { wireInit } = await driveHostFetch(
-      hostApi,
-      networkFetch,
-      "https://api.example.com/x",
-      { redirect: "manual" },
+    networkFetch.mockResolvedValueOnce(
+      new Response(null, { status: 302, headers: { location: "https://api.example.com/next" } }),
     );
-    expect(wireInit.redirect).toBe("error");
+    const ledger = createEffectLedger("cid-redirect");
+    await expect(
+      runWithEffectLedger(ledger, async () => {
+        await hostApi.hostFetch!("https://api.example.com/x");
+      }),
+    ).rejects.toThrow(/redirect refused/);
+    expect(networkFetch).toHaveBeenCalledOnce();
+  });
+
+  it('"manual" hands the 3xx to the plugin with its location readable', async () => {
+    const { hostApi, networkFetch } = await buildRealHostApi();
+    networkFetch.mockResolvedValueOnce(
+      new Response(null, { status: 302, headers: { location: "https://sso.example.com/login" } }),
+    );
+    const ledger = createEffectLedger("cid-manual");
+    let response: Response | undefined;
+    await runWithEffectLedger(ledger, async () => {
+      response = await hostApi.hostFetch!("https://api.example.com/x", { redirect: "manual" });
+    });
+    expect(response?.status).toBe(302);
+    expect(response?.headers.get("location")).toBe("https://sso.example.com/login");
+    expect(networkFetch).toHaveBeenCalledOnce();
   });
 });

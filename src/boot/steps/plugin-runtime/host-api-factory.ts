@@ -18,7 +18,7 @@ import { BrowserWindow as ElectronBrowserWindow } from "electron";
 import type { BrowserWindow } from "electron";
 import { randomUUID, createHash } from "node:crypto";
 import { normalizeAllowedHosts } from "../../../main/host-allow-list.js";
-import { evaluateHostFetch } from "../../../main/host-fetch-guard.js";
+import { evaluateHostFetch, runHostFetchHops } from "../../../main/host-fetch-guard.js";
 import type { AuditLogger } from "../../../audit/audit-logger.js";
 import type { PluginRuntime } from "../../../plugins/runtime.js";
 import { instrumentEffectsByPath } from "../../../permissions/hostapi-effect-recorder.js";
@@ -870,15 +870,36 @@ export function createHostApiFactory(
             input: `[plugin:${pluginId}] host_fetch ${url.origin} method=${decision.method} effect=${decision.effect}`,
           });
         } catch { /* audit must not break host */ }
-        // redirect:"error" — a plugin egress path must not silently follow
-        // cross-origin redirects (mirrors the host LLM/auth fetch posture).
-        // method PINNED to the snapshot: `restInit` excludes the original
-        // `method` getter, so the wire verb is the single-read primitive, never a
-        // re-read of a live (possibly stateful) getter.
-        return networkFetch(url.toString(), {
-          ...restInit,
-          method: methodSnapshot,
-          redirect: "error",
+        // Redirects: the transport underneath takes exactly ONE hop and hands a
+        // 3xx back instead of following (see `createSingleHopFetch`), and
+        // `runHostFetchHops` decides what happens next from the plugin's own
+        // `init.redirect` — throw (the default, and anything unrecognized),
+        // return the 3xx (`"manual"`, which is how an SSO bounce becomes a
+        // reportable expired session), or follow up to a capped number of hops
+        // (`"follow"`) with THIS SAME `evaluateHostFetch` gate re-run on every
+        // hop before any bytes move. `net.fetch`'s own follow mode is exactly
+        // what this replaces: there, a followed hop was a request no gate ever
+        // saw (#2245). method PINNED to the snapshot: `restInit` excludes the
+        // original `method` getter, so the verb the loop starts from is the
+        // single-read primitive, never a re-read of a live getter.
+        return runHostFetchHops({
+          pluginId,
+          first: decision,
+          init: restInit,
+          transport: networkFetch,
+          allowedDomains: manifest.networkAccess?.allowedDomains ?? [],
+          allowPrivateNetworks: manifest.networkAccess?.allowPrivateNetworks === true,
+          auditHop: (line) => {
+            try {
+              bootAuditLogger.log({
+                timestamp: new Date().toISOString(),
+                sessionId: "plugin",
+                type: "tool_call",
+                input: `[plugin:${pluginId}] ${line}`,
+              });
+            } catch { /* audit must not break host */ }
+          },
+          auditDeny: auditEgressDeny,
         });
       },
       logEvent: (level, message, data) => {

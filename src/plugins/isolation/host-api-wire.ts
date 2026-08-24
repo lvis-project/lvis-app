@@ -1193,9 +1193,11 @@ export function decodePluginLifecycle(payload: unknown): PluginLifecycleDelivery
  * a plugin most wants to smuggle past the host is one that changes where the
  * request goes.
  *
- * `redirect` is carried even though the host pins it to `"error"`: refusing to
- * carry it would turn an explicit `redirect: "error"` from a careful plugin into
- * a marshalling failure.
+ * `redirect` is the plugin's POLICY, not the transport's mode: the host's hop
+ * loop reads it — throw (`"error"`, the default), hand back the 3xx
+ * (`"manual"`), or follow with the full egress gate re-run per hop
+ * (`"follow"`) — and the transport underneath is always told `"manual"`.
+ * Dropping it here would silently demote every policy to the default.
  */
 const WIRE_REQUEST_INIT_FIELDS = [
   "method",
