@@ -138,6 +138,20 @@ const PLUGIN_CODE_BYTES = "the plugin's own code, which it may read and may not 
 const SHARED_TEMP_BYTES = "bytes one confined child left where another confined child can read them";
 
 /**
+ * ASRT's own default temp root — the one this app no longer uses, and now denies.
+ *
+ * The probe writes here to prove the deny floor refuses it. A write to a
+ * directory that is NOT THERE fails too, with `ENOENT`, and that answer proves
+ * nothing: it is what a machine with no sandbox history returns whether the
+ * floor is in place or not. So the host CREATES the directory before the child
+ * runs, which is the condition the deny exists for — another ASRT consumer on
+ * the box already made it. Creating it is not litter: it is the standard root
+ * any sandboxed run on this machine would create on first use, and it is left
+ * empty.
+ */
+const ASRT_DEFAULT_TEMP_ROOT = "/tmp/claude";
+
+/**
  * Whether the cases that need a live sandbox may run here — and whether being
  * unable to run them is allowed to be silent.
  *
@@ -396,7 +410,7 @@ const report = {
   // the bytes back to show the last part.
   childTmpdir: tmpdir(),
   writeChildTmpdir: attempt(() => { mkdirSync(tmpdir(), { recursive: true }); writeFileSync(join(tmpdir(), ${JSON.stringify(fx.sharedTempName)}), ${JSON.stringify(SHARED_TEMP_BYTES)}); return "written"; }),
-  writeAsrtDefaultTemp: attempt(() => { writeFileSync("/tmp/claude/lvis-confined-probe.txt", "escaped"); return "written"; }),
+  writeAsrtDefaultTemp: attempt(() => { writeFileSync(${JSON.stringify(join(ASRT_DEFAULT_TEMP_ROOT, "lvis-confined-probe.txt"))}, "escaped"); return "written"; }),
   writeAsrtDefaultNpmLogs: attempt(() => { writeFileSync(${JSON.stringify(join(homedir(), ".npm", "_logs", "lvis-confined-probe.txt"))}, "escaped"); return "written"; }),
   asrtDefaultNpmLogsExists: attempt(() => existsSync(${JSON.stringify(join(homedir(), ".npm", "_logs"))}) ? "yes" : "no"),
   readCa: attempt(() => readFileSync(${JSON.stringify(fx.caFile)}, "utf-8")),
@@ -505,6 +519,9 @@ async function runProbe(
   fx: Fixture,
   envelope: DelegatedWorkerConfinement = baseEnvelope(fx),
 ): Promise<ProbeReport> {
+  // See ASRT_DEFAULT_TEMP_ROOT — the deny is only measurable against a
+  // directory that exists.
+  mkdirSync(ASRT_DEFAULT_TEMP_ROOT, { recursive: true });
   const child = await spawnConfinedPluginChild({
     pluginId: PLUGIN_ID,
     envelope,
@@ -1242,10 +1259,15 @@ describe("the confined child, against the real sandbox", () => {
       // applications entirely. They are on the deny floor now, and that is
       // what this pins.
       //
-      // `~/.npm/_logs` gets an EXISTENCE control beside it, because a write to
-      // a missing directory also fails — `ENOENT` — and a case that accepted
-      // any failure would go green on a machine that simply has no npm cache.
-      // Only `EPERM` beside a directory that IS there says "refused".
+      // BOTH get an existence control, because a write to a missing directory
+      // also fails — `ENOENT` — and a case that accepted any failure would go
+      // green on a machine that simply never made the directory. Only `EPERM`
+      // beside a directory that IS there says "refused". The two controls
+      // differ in kind: the temp root the host CREATES (see
+      // `ASRT_DEFAULT_TEMP_ROOT`), so the measurement is taken everywhere; the
+      // npm cache it cannot create without inventing state that is not the
+      // machine's, so that one is measured only where it is already present.
+      expect(existsSync(ASRT_DEFAULT_TEMP_ROOT)).toBe(true);
       expect(report.writeAsrtDefaultTemp.ok, JSON.stringify(report.writeAsrtDefaultTemp)).toBe(false);
       expect(report.writeAsrtDefaultTemp.code).toBe("EPERM");
       if (report.asrtDefaultNpmLogsExists.value === "yes") {
