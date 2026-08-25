@@ -187,6 +187,8 @@ async function harness(
       pluginRoot: "/plugins/interaction",
       hostRoot: "/app",
       pluginDataDir: "/plugins/interaction/data",
+      userHome: "/Users/example",
+      lvisHome: "/Users/example/.lvis",
       installedPluginIds: [],
       generationId: GENERATION,
     },

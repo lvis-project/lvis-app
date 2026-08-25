@@ -102,6 +102,7 @@ import {
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { resolvePluginSocketDir } from "../../plugin-storage-layout.js";
+import { lvisHome } from "../../../shared/lvis-home.js";
 // The child entry is bundled by the shared module rather than here: its
 // externals, banner and target are the shipped build's, and a second copy of
 // them is a second chance for one case to prove something about a child that
@@ -1514,6 +1515,8 @@ export const createPlugin = async (context) => ({
         pluginRoot: fx.pluginRoot,
         hostRoot: repoRoot,
         pluginDataDir: fx.pluginDataDir,
+        userHome: homedir(),
+        lvisHome: lvisHome(),
         config: {},
         log: () => undefined,
         hostApi,
@@ -1687,6 +1690,8 @@ export const createPlugin = async (context) => {
         pluginRoot: fx.pluginRoot,
         hostRoot: repoRoot,
         pluginDataDir: fx.pluginDataDir,
+        userHome: homedir(),
+        lvisHome: lvisHome(),
         config: { watched: "before" },
         log: () => undefined,
         hostApi,
@@ -2101,6 +2106,8 @@ export const createPlugin = async (context) => {
         // an assertion rather than a coincidence.
         hostRoot: fx.hostRoot,
         pluginDataDir: plugin.pluginDataDir,
+        userHome: homedir(),
+        lvisHome: lvisHome(),
         config: Object.fromEntries(configValues),
         log: () => undefined,
         hostApi,

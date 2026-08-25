@@ -71,6 +71,20 @@ export interface PluginChildContext {
   readonly pluginRoot: string;
   readonly hostRoot: string;
   readonly pluginDataDir: string;
+  /**
+   * The real user home and the host's storage root, as the HOST process reads
+   * them.
+   *
+   * CARRIED, not derived — which is the opposite of `pluginSocketDir` below,
+   * and for the opposite reason. That one is a pure function of a value already
+   * on this payload, so recomputing it in the child cannot disagree with the
+   * host. These two are functions of the child's ENVIRONMENT, and the child's
+   * environment is deliberately not the host's: the sandbox substitutes `HOME`
+   * with a throwaway. Recomputing them here would answer with that throwaway,
+   * silently, and the answer would still look like a directory.
+   */
+  readonly userHome: string;
+  readonly lvisHome: string;
   /** The already-resolved config object, not the schema. */
   readonly config?: Record<string, unknown>;
   /** The incarnation this child serves. Stamped on every outbound message. */
@@ -528,6 +542,22 @@ export async function startPluginChildRuntime(
     (path) => members[path] ?? unimplementedChildMember(pluginId, path),
   );
 
+  // A payload without these is a host that predates them, and the child cannot
+  // fill the gap: `homedir()` here answers with the sandbox's throwaway and
+  // `LVIS_HOME` is not part of the child's environment either. Refuse
+  // construction rather than hand the plugin `undefined`, which every `join`
+  // and `startsWith` downstream would treat as an ordinary — and wrong — path.
+  for (const field of ["userHome", "lvisHome"] as const) {
+    const value = context[field];
+    if (typeof value !== "string" || value.length === 0) {
+      throw new Error(
+        `[plugin-child:${pluginId}] construction payload is missing '${field}'. `
+          + "The child cannot derive it — its HOME is a sandbox throwaway — so the "
+          + "host must send it.",
+      );
+    }
+  }
+
   const runtimeContext: PluginRuntimeContext = {
     pluginId,
     pluginRoot: context.pluginRoot,
@@ -538,6 +568,8 @@ export async function startPluginChildRuntime(
     // directory the sandbox was told about and the one the plugin is handed
     // cannot come apart. A second wire field could.
     pluginSocketDir: resolvePluginSocketDir(context.pluginDataDir),
+    userHome: context.userHome,
+    lvisHome: context.lvisHome,
     config: context.config,
     log,
     hostApi,

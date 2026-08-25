@@ -213,6 +213,8 @@ function hostContext(
     hostRoot: "/app",
     pluginDataDir: "/plugins/work-assistant/data",
     pluginSocketDir: "/plugins/work-assistant/sockets",
+    userHome: "/Users/example",
+    lvisHome: "/Users/example/.lvis",
     config: { domains: ["portal.example.com"] },
     log: () => undefined,
     hostApi,
