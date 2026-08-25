@@ -256,12 +256,20 @@
  *    is those two — `pluginDataDir` and the throwaway sandbox HOME
  *    (`out-of-process-plugin.ts`, `spawnConfinedPluginChild`) — PLUS the
  *    default write paths ASRT merges into every wrap it builds. "Two" is a fact
- *    about the plugins listed here rather than about the spawn: the spawn grants
- *    the child's `envelope.write`, and none of the ids in
- *    `OUT_OF_PROCESS_PLUGIN_IDS` holds a row in `PLUGIN_ENVELOPE_GRANTS`, so for
- *    each of them that list is `pluginDataDir` alone. Routing a plugin that does
- *    hold a row makes this count wrong, and the count is what the outcomes below
- *    are written against.
+ *    about SOME of the plugins listed here rather than about the spawn: the
+ *    spawn grants the child's `envelope.write`, and for an id with no row in
+ *    `PLUGIN_ENVELOPE_GRANTS` that list is `pluginDataDir` alone. That is
+ *    `work-assistant` and `ms-graph`. It is NOT `local-indexer`, which is the
+ *    one id that holds a row, and the outcomes below are read against it with
+ *    that difference in mind: its write list is `pluginDataDir` plus whichever
+ *    of `indexStorageRoot` and `workspace` the user has pointed outside it, and
+ *    its read list additionally carries `~/.lvis/runtime` (the provisioned
+ *    Python) and `~/.lvis/certs` (the corporate CA, which the deny floor
+ *    otherwise covers). Neither addition changes WHICH outcomes exist — (b)
+ *    still refuses everything outside the grants — only where the line between
+ *    (a) and (b) falls for that one plugin. A future admission that also holds
+ *    a row has to be read the same way rather than against the two-path
+ *    sentence this paragraph used to state unconditionally.
  *      The merge is unconditional: `sandbox-manager.js` composes the
  *    allow-list as `[...getDefaultWritePaths(), ...userAllowWrite]`, so an
  *    ALLOW grant cannot subtract from it. A DENY grant can, which is the lever
@@ -521,50 +529,94 @@
  *   answer that is not "the plugin launches a browser"; and the reach is
  *   measured again over both sets.
  *
- * `local-indexer` — REFUSED. KNOWN FROM ITS SOURCES: it operates its own loopback HTTP listener
- *   and its own upstream TLS client as a broker, holds a control channel over
- *   a unix socket, and calls `execFile` on a shell interpreter to resolve a
- *   drive mapping. The indexing work itself is the one part of axis 3 that is
- *   already mediated: it reaches `hostApi.spawnWorker` at a SINGLE call site,
- *   and THROWS rather than starting when that member is absent — so what is
- *   unmediated on this axis is the `execFile`, not the worker. The name occurs
- *   many more times than that in its sources, in comments, a type, a guard and
- *   a bind; counting those as reach is the grep-for-a-census error this
- *   comment is about, which is why a check counts CALL SITES and not mentions.
- *   The broker's upstream leg is exactly the direct egress axis 1
- *   measures a child as not having, so the broker would stop at its first
- *   request. It is also on axis 2, which no `hostApi` census would have
- *   surfaced: its folder picker reaches `dialog` through a `require` of the
- *   `electron` specifier held in a VARIABLE — the construct axis 2 says a
- *   literal grep misses, and the same one the windowed plugin reaches it by.
- *   Both of those now have a mediated form, and the two are at DIFFERENT
- *   stages, which is the distinction this entry has to keep straight.
- *   AXIS 2 IS CLOSED. `hostApi.pickFolders` exists and the plugin USES it
- *   (0.5.37): measured in the built bundle rather than the sources, `dist`
- *   mentions `electron` only inside a comment and `createRequire` only as the
- *   bundler's own interop banner. No call site is left.
- *   AXIS 1 (INBOUND) IS NOT. `context.pluginSocketDir` gives the broker a place
- *   to bind a Unix socket instead of loopback TCP, and the plugin does not yet
- *   bind there — its `EgressBroker` already ACCEPTS a `uds` transport and its
- *   construction site still falls through to `tcp`, and the worker's Python
- *   client dials a URL. A mediated form EXISTING is not admission; the plugin
- *   using it is.
- *   It is on axis 6 more heavily than any other plugin
- *   here, and in both directions: it writes its index state under a path
- *   rooted at `homedir()` rather than `pluginDataDir`, it carries its own
- *   `hostRoot`-rooted workspace migration, and its whole PURPOSE is reading
- *   folders the user chose. Those three land on three DIFFERENT outcomes of
- *   the four the axis names: the scanned folders keep
- *   working, because a folder the user picked is not on the deny floor and
- *   reading is not jailed; the `hostRoot` migration is refused `EPERM`, and it
- *   sits inside a `catch` that logs and continues, so it fails quietly; and
- *   the `homedir()`-rooted index state SUCCEEDS into the substituted HOME that
- *   is deleted when the child exits — an index that reports itself written and
- *   is empty again on the next start. ASSUMED: whether `spawnWorker`'s
- *   confinement envelope can carry that worker at all, and whether the
- *   worker's own egress — which is not the plugin's — has any mediated form. Both are open
- *   questions rather than wiring, and they are why this id is also the
- *   in-process counter-example the routing tests use.
+ * `local-indexer` — ADMITTED, and the entry is kept long because the route to
+ *   it corrected this file twice. KNOWN FROM ITS SOURCES at the first census:
+ *   it operated its own loopback HTTP listener and its own upstream TLS client
+ *   as a broker, held a control channel over a unix socket, and called
+ *   `execFile` on a shell interpreter to resolve a drive mapping. The name
+ *   `spawn` occurs many more times than that in its sources — in comments, a
+ *   type, a guard and a bind — and counting those as reach is the
+ *   grep-for-a-census error this comment is about, which is why a check counts
+ *   CALL SITES and not mentions.
+ *
+ *   AXIS 2 — the folder picker reached `dialog` through a `require` of the
+ *   `electron` specifier held in a VARIABLE, the construct a literal grep
+ *   misses. `hostApi.pickFolders` replaced it and the plugin USES it (0.5.37).
+ *   Measured in the BUILT BUNDLE: `electron` survives only inside a comment,
+ *   and `createRequire` only as the bundler's own interop banner.
+ *
+ *   AXIS 1, INBOUND — the broker bound loopback TCP, which is the half of axis
+ *   1 a child cannot do at all: refused on macOS, and on Linux succeeding into
+ *   a namespace nobody outside is in. `context.pluginSocketDir` gave it a
+ *   directory the host registers with the sandbox before the spawn, and the
+ *   broker binds `egress.sock` there (0.5.38). The worker reaches it with
+ *   `httpx.HTTPTransport(uds=...)`, so the provider SDK's own pool never opens
+ *   a TCP socket; `--egress-broker-url` still crosses because those SDKs insist
+ *   on parsing an authority, but it now carries one with no port. The TCP
+ *   branch is still IN the bundle and is dead: its one construction site always
+ *   passes `{kind:"uds"}`. Bundled and reachable are different questions, and
+ *   only the second decides admission — the same distinction MSAL's
+ *   `LoopbackClient` needed below.
+ *
+ *   AXIS 5 — this is the correction worth keeping. The entry used to name only
+ *   the index state written under a `homedir()`-rooted path, which is the
+ *   WRITE case, and the write case is the one the substituted HOME handles
+ *   correctly by design. What it missed is that five other sites read
+ *   `homedir()` as path POLICY: `isBlockedIndexPath`, `isHomeChild`,
+ *   `isOtherUserHome` and `isHighChurnFolderPath` judge paths the USER dropped
+ *   or typed, against the user's home. In a confined child every one of them
+ *   returns `false` — `~/.ssh` is not under the throwaway — while still
+ *   reporting that it checked. That is a worse failure than the one this entry
+ *   did name, because nothing reports it. `context.userHome` and
+ *   `context.lvisHome` answer both, and the plugin takes an `IndexPathPolicy`
+ *   whose `userHome` is REQUIRED with no default, so the compiler names every
+ *   site rather than a reader having to remember them (0.5.39). What the deny
+ *   floor still covers regardless is worth stating, because it bounds what a
+ *   PRE-0.5.39 install could reach if one is present: the floor's `home` rows
+ *   are anchored host-side to the REAL home, so `.ssh`, `.aws`, `.gnupg`,
+ *   `.npmrc` and the secret parts of `~/.lvis` are refused by the kernel even
+ *   when the plugin's own blocklist has gone quiet. The residue is `/etc`,
+ *   `/usr` and the non-secret parts of the home — load and noise rather than
+ *   credentials.
+ *
+ *   AXIS 3 — `hostApi.spawnWorker` was always the mediated form for the
+ *   indexing work, at a SINGLE call site that THROWS rather than starting when
+ *   the member is absent. What was unmediated was the `execFile` on
+ *   `powershell.exe` that resolved which UNC path a mapped drive points at.
+ *   `hostApi.resolveMappedDriveRoot` replaced it (0.5.40): the plugin supplies
+ *   a drive letter, the host supplies the command. Its old body ended `catch {
+ *   return null }`, and `null` already meant "ordinary local disk" — so a
+ *   refused spawn was indistinguishable from a local drive and the allowed-root
+ *   list came out silently short. This axis needs a STRUCTURAL check rather
+ *   than a runtime one, and the plugin now carries one: the Seatbelt profile
+ *   ASRT generates contains `(allow process-exec)`, so a reintroduced spawn
+ *   does not fail — it runs, inside the same jail, and the confinement argument
+ *   stops being true with nothing going red.
+ *
+ *   AXIS 6 — the plugin is on it more heavily than anything else here, and in
+ *   both directions: it writes its index state, it carries a `hostRoot`-rooted
+ *   workspace migration, and its whole PURPOSE is reading folders the user
+ *   chose. Those land on three DIFFERENT outcomes of the four the axis names.
+ *   The scanned folders keep working — a folder the user picked is on no deny
+ *   floor and reading is not jailed. The `hostRoot` migration is refused
+ *   `EPERM`, and the plugin now says so: the `catch` logs the path and states
+ *   that the index rebuilds from scratch, which is true because what the legacy
+ *   directory held is the incremental-scan ledger and worker scratch, all of it
+ *   REBUILDABLE. And the index state no longer roots at `homedir()` — the
+ *   constructor requires the path, which closed the outcome where a write
+ *   SUCCEEDS into the substituted HOME and the index reports itself written and
+ *   is empty again on the next start.
+ *
+ *   AXIS 4 — no native module. The built bundle's `.node` token count is zero.
+ *
+ *   MEASURED through THIS FILE'S production spawn, on macOS with the sandbox
+ *   active (`confined-plugin-child.test.ts`): a child gets `context.userHome`
+ *   equal to the host's `homedir()` while its OWN `homedir()` is not — the pair
+ *   is the evidence, since the first assertion alone would pass if the
+ *   substitution had quietly stopped and the second alone would pass if the
+ *   host had handed over the throwaway — and `hostApi.resolveMappedDriveRoot`
+ *   crosses the wire and comes back as an answer, with the host recording that
+ *   it was the one asked.
  *
  * `ms-graph` — REFUSED, and the refusal is a measurement overturning what this
  *   comment used to assume. Its three open assumptions have now been driven
@@ -646,7 +698,7 @@
  * `template` — not installed; a scaffold, out of scope.
  */
 export const OUT_OF_PROCESS_PLUGIN_IDS: ReadonlySet<string> = Object.freeze(
-  new Set<string>(["work-assistant", "ms-graph"]),
+  new Set<string>(["work-assistant", "ms-graph", "local-indexer"]),
 );
 
 /** Whether `pluginId` loads out-of-process. */

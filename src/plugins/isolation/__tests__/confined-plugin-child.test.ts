@@ -2511,3 +2511,143 @@ describe("a confined child and a loopback TCP listener", () => {
     120_000,
   );
 });
+
+/**
+ * `local-indexer`'s changed paths, through the real confined spawn.
+ *
+ * Modelled rather than run as the real build, for the same reason the recorder
+ * above is: the real plugin starts a Python worker, and what is under test is
+ * not whether Python runs but whether the three answers it now takes from the
+ * host arrive, and whether the one it used to compute for itself is still
+ * wrong in the way that motivated the change.
+ *
+ * The `homedir()` case is the one worth stating carefully. It asserts that the
+ * child's own `homedir()` is NOT the user's — which is the sandbox working as
+ * designed — and that `context.userHome` is. Only the pair is evidence: the
+ * first alone would pass on a machine where the substitution silently stopped
+ * happening, and the second alone would pass if the host had handed over the
+ * throwaway.
+ */
+describe("the indexer's host-supplied answers, out of process and confined", () => {
+  it.runIf(process.platform === "darwin" || process.platform === "linux")(
+    "hands over the real home, the real LVIS root, and the drive lookup it no longer spawns for",
+    async () => {
+      if (!(await sandboxCasesRun())) return;
+      const fx = fixture!;
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+      const plugin = installPlugin(fx, "local-indexer");
+      const repoRoot = repositoryRoot();
+      const childOutDir = childBundleDir(repoRoot);
+      const childEntryPath = await buildChildEntry(repoRoot);
+      const entryPath = join(plugin.pluginRoot, "plugin.mjs");
+
+      writeFileSync(
+        entryPath,
+        `import { homedir } from "node:os";
+export default async function createPlugin(context) {
+  return {
+    handlers: {
+      indexer_home_probe: async () => ({
+        contextUserHome: context.userHome,
+        contextLvisHome: context.lvisHome,
+        ownHomedir: homedir(),
+      }),
+      // The member that replaced a \`powershell.exe\` spawn. On this platform
+      // the honest answer is \`null\` — there are no mapped drives — and what
+      // the case proves is that the QUESTION crossed the boundary and came
+      // back as an answer rather than as an unimplemented member.
+      indexer_drive_probe: async () => {
+        try {
+          return { ok: true, value: await context.hostApi.resolveMappedDriveRoot("Z:") };
+        } catch (error) {
+          return { ok: false, message: String(error && error.message ? error.message : error) };
+        }
+      },
+    },
+  };
+}
+`,
+        "utf-8",
+      );
+
+      let askedFor: string[] = [];
+      const hostApi = {
+        resolveMappedDriveRoot: async (drive: string) => {
+          askedFor.push(drive);
+          return null;
+        },
+        emitEvent: () => undefined,
+        logEvent: () => undefined,
+        onEvent: () => () => undefined,
+        getInstalledPluginIds: () => ["local-indexer"],
+        onPluginsChanged: () => () => undefined,
+        config: {
+          get: () => undefined,
+          set: async () => undefined,
+          onChange: () => () => undefined,
+        },
+      } as unknown as PluginHostApi;
+
+      const factory = createOutOfProcessPluginFactory({
+        manifest: {
+          id: "local-indexer",
+          name: "LVIS Local Indexer",
+          version: "0.5.40",
+          entry: "plugin.mjs",
+          description: "the indexer's host-supplied answers",
+          tools: ["indexer_home_probe", "indexer_drive_probe"].map((name) => ({
+            name,
+            description: name,
+            inputSchema: { type: "object", properties: {} },
+          })),
+        } as PluginManifest,
+        entryPath,
+        childEntryPath,
+      });
+
+      const instance = await factory({
+        pluginId: "local-indexer",
+        pluginSocketDir: resolvePluginSocketDir(plugin.pluginDataDir),
+        pluginRoot: plugin.pluginRoot,
+        hostRoot: fx.hostRoot,
+        pluginDataDir: plugin.pluginDataDir,
+        userHome: homedir(),
+        lvisHome: lvisHome(),
+        config: {},
+        log: () => undefined,
+        hostApi,
+      } as PluginRuntimeContext);
+
+      try {
+        const homes = (await instance.handlers.indexer_home_probe!()) as {
+          contextUserHome: string;
+          contextLvisHome: string;
+          ownHomedir: string;
+        };
+        // The substitution is real: what the child would have used as "the
+        // user's home" belongs to nobody.
+        expect(homes.ownHomedir).not.toBe(homedir());
+        // …and what it is given instead is the one the host reads, which is
+        // also the one the sensitive-path deny floor is anchored to.
+        expect(homes.contextUserHome).toBe(homedir());
+        expect(homes.contextLvisHome).toBe(lvisHome());
+
+        const drive = (await instance.handlers.indexer_drive_probe!()) as {
+          ok: boolean;
+          value?: string | null;
+          message?: string;
+        };
+        expect(drive.ok).toBe(true);
+        expect(drive.value).toBeNull();
+        // The control for that `null`: it is the host's answer, not the child
+        // quietly deciding for itself. Without this the same `null` could have
+        // come from a member that was never reached.
+        expect(askedFor).toEqual(["Z:"]);
+      } finally {
+        await instance.stop?.();
+        rmSync(childOutDir, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+});
