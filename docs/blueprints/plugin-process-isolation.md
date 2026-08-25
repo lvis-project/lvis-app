@@ -1029,9 +1029,10 @@ could not be reduced to.
 both. **Neither was blocked on a missing host API. Both shipped code written to
 run somewhere the boundary does not reach.**
 
-- `ep-api` drives portal pages with Playwright. Of its 40 `evaluate` call
-  sites, 31 pass a **function body** that is compiled and run inside an
-  authenticated page. Still open.
+- `ep-api` drives portal pages with Playwright. Of its 36 `evaluate` call
+  sites, 29 pass a **function body** that is compiled and run inside an
+  authenticated page. Still open. (Counts at plugin 0.19.2; the section opened
+  with 40/31 at an earlier version.)
 - `meeting` opened a recorder `BrowserWindow` whose `preload` and renderer were
   the plugin's own files, loaded into a renderer outside the sandbox. **Closed
   in plugin 0.7.0** by the second of the two routes below — see the section on
@@ -1050,34 +1051,63 @@ migrations rather than wires:
 
 ### `ep-api` — one id, three unrelated problems
 
-Measured per client file, which is what shows they are not one problem:
+Measured per client file, which is what shows they are not one problem.
+**Re-measured at plugin 0.19.2**, and three of the original rows had gone stale
+in the direction that discourages work — they described as undecided or
+untouched things that had since moved:
 
-| client | Playwright sites | `hostFetch` | what it means |
+| client | `evaluate` sites | REST call sites | what it means |
 | --- | ---: | ---: | --- |
-| `attendanceClient` | 0 | 2 | already route (2) |
-| `approvalClient` | 0 | 2 | already route (2) |
-| the internal REST client | 0 | 3 | already route (2) |
-| `parkingClient` | 40 | 2 | route (2), **started** |
-| `videoConferenceClient` | 13 | 2 | route (2), **started** |
-| the internal chat-assistant client | 38 | 0 | genuinely open |
-| the directory-identity client | 0 | 0 | not a browser problem at all |
+| `attendanceClient` | 0 | 5 | route (2) complete |
+| `approvalClient` | 0 | 1 | route (2) complete |
+| the internal REST client | 0 | 15 | route (2) complete |
+| `parkingClient` | 10 | 1 | route (2), started |
+| `videoConferenceClient` | 6 | 7 | route (2), **now majority REST** |
+| the internal chat-assistant client | 19 | 4 | route (2), started — see below |
+| the directory-identity client | 0 | 0 | **closed**, and not a browser problem |
 
-Three clients have already completed route (2), which is the existence proof
-that the route works for this portal. Two more have begun it — the `hostFetch`
-calls in `parkingClient` and `videoConferenceClient` are not decoration, they
-are the first endpoints of the same migration. So the bulk of `ep-api` is not a
-design question; it is unfinished work with a proven pattern.
+Three clients completed route (2), which is the existence proof that the route
+works for this portal. Three more have begun it. So the bulk of `ep-api` is not
+a design question; it is unfinished work with a proven pattern.
 
-What is left after that is two things the browser question never covered:
+Two corrections worth stating on their own, because each retires a reason to
+stop:
 
-- **the chat-assistant client** — an internal chat UI with no API behind it. Route (2) needs an
-  endpoint that does not exist yet; route (1) needs the driving code to become
-  host first-party. This is the only part of `ep-api` that is genuinely undecided.
-- **the directory-identity client** — `spawn`s a shell interpreter and a
-  directory-lookup binary to resolve a
-  user identity. Ambient axis 3, reachable from the plugin's entry, and **the
-  routing SOT does not name it**. It needs a mediated identity lookup and is
-  unaffected by whatever happens to the browser flows.
+- **The chat-assistant client is no longer "genuinely undecided."** This
+  section opened calling it an internal chat UI *with no API behind it*, so
+  that route (2) would need an endpoint that does not exist. It has one. Four
+  of its call sites are REST already, against versioned `/api/v4/...` paths —
+  a session-health read, a channel list and a chat stream among them. What
+  remains there is migration, not design.
+- **The directory-identity client is closed.** It used to `spawn` a shell
+  interpreter and a directory-lookup binary directly — ambient axis 3, and the
+  routing SOT did not name it. Every process start in that file now goes
+  through `hostApi.spawnWorker`; `child_process` survives only in three
+  comments explaining why falling back to it would restore the reach the file
+  routes away.
+
+What is left, then, is one thing rather than three: **the plugin drives a
+browser.** 36 `evaluate` sites across three clients, 29 of them passing a
+function body, and 5 `chromium.launch`.
+
+That single fact refuses admission on its own, and NOT for the reason this
+section originally gave. The framing was "the browser it launches would be a
+grandchild of the confined child and inherit its fence" — which suggests a
+host-launched browser plus `connectOverCDP` as a way out. Measured in
+`playwright-core` 1.59, the DRIVER needs the fenced capabilities itself:
+`require("net")` in 12 files, `http` in 4, `https` in 4, `tls` in 5, and
+`require("child_process")` in 11 with spawn/execFile/fork in 6. That code runs
+in the child, not in a grandchild, and the CDP transport is itself a socket it
+opens. (One thing that measurement retired: the package ships **no** native
+binary, so axis 4 is clean — an assumption the routing SOT had left open.)
+
+So route (2) is the only route, and the remaining work is bounded by what can
+be observed rather than by what can be designed. The obstacle is not knowing
+the request contracts: `parkingClient`'s save posts
+`jQuery("#createForm").serialize()` — the whole SERVER-RENDERED form, hidden
+fields and tokens included — so no amount of reading the plugin's source yields
+the payload. It has to be recorded from a real session, which is what
+`scripts/rest-probe.mjs` in the plugin repo exists to do.
 
 ### `meeting` — the window was not the request (DONE)
 

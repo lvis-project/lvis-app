@@ -486,25 +486,61 @@
  *   dock concludes the teardown was its own and leaves the recording running
  *   with nothing driving it.
 
- * `ep-api` — REFUSED. KNOWN FROM ITS SOURCES: every one of its REST clients reaches the network
- *   through the global `fetch`, and no code path in it CALLS
- *   `hostApi.hostFetch` — the name occurs in its sources exactly once, in a
- *   comment observing that a browser process cannot be brokered by it.
- *   One flow drives a browser the plugin launches itself, which would be a
- *   grandchild of the confined child and inherit its fence (axes 1 and 3).
- *   On axis 6 its OWN sources are clean — they open no file for writing at
- *   all, and its session state goes through the wire.
- *   ASSUMED: that nothing else in it touches axes 2 or 4 — its sources name
- *   neither, but the browser driver it depends on has not been measured inside
- *   a child — and that the browser it launches writes a profile directory of
- *   its own, which as a grandchild would land inside the same write jail
- *   (axis 6). That last one is a dependency's behaviour rather than the
- *   plugin's, and it is why axis 6 has to be read over dependencies too.
+ * `ep-api` — REFUSED, on ONE thing: it drives a browser.
  *
- *   Its first prerequisite used to be written here as plugin work — "its HTTP
- *   clients call `hostApi.hostFetch` rather than `fetch`", with the manifest
- *   already carrying the capability and the hosts. Measuring it found that
- *   sentence wrong at the first step: the work is not the plugin's, and doing
+ *   THE EGRESS SENTENCE THAT USED TO OPEN THIS ENTRY CONTRADICTED THE ENTRY,
+ *   which is a worse failure than being out of date. It said every REST client
+ *   reached the network through the global `fetch` and that `hostApi.hostFetch`
+ *   occurred in the sources exactly once, in a comment — while a paragraph
+ *   forty lines below recorded the migration as DONE at plugin 0.18.7. A
+ *   reader who stopped at the first sentence, which is what an opening
+ *   sentence is for, would go and redo finished work.
+ *
+ *   Re-measured at plugin 0.19.2 so the top of the entry states the same fact
+ *   as the bottom: `hostFetch` is CALLED from seven files, and the seven
+ *   remaining bare `fetch(` sites are all inside `page.evaluate` bodies — the
+ *   browser's egress, not this plugin's. The counts below are from 0.18.7 and
+ *   have moved since; where they differ, both were true when taken.
+ *
+ *   MEASURED at 0.19.2, over the plugin's own sources: axis 2 names `electron`
+ *   nowhere and has no `createRequire`; axis 3 has no `child_process`; axis 4
+ *   has no `bindings()` and no `.node`; axis 5 has no `tmpdir`, `cwd` or
+ *   `homedir`; axis 6 opens no file for writing at all — no `writeFileSync`,
+ *   `mkdirSync`, `renameSync` or `createWriteStream` — and its session state
+ *   goes through the wire.
+ *
+ *   So the plugin's own code is clean on every axis. What is not clean is what
+ *   it imports, and THAT is now measured too rather than assumed. The previous
+ *   entry assumed "nothing else touches axes 2 or 4" and noted the browser
+ *   driver had never been measured inside a child. Measured in
+ *   `playwright-core` 1.59:
+ *     - Axis 4 is CLEAN. There is no native binary in the package at all —
+ *       `find -name '*.node'` returns nothing. Half the old assumption closes
+ *       as a pass.
+ *     - Axis 2 is CLEAN. It does not reach Electron.
+ *     - Axes 1 and 3 are NOT, and not in the indirect way the old entry
+ *       described. It framed the problem as "the browser it launches would be
+ *       a grandchild and inherit the fence". The DRIVER needs them directly:
+ *       `require("net")` in 12 files, `http` in 4, `https` in 4, `tls` in 5,
+ *       and `require("child_process")` in 11, with spawn/execFile/fork in 6.
+ *       That runs IN the child, not in a grandchild.
+ *
+ *   The distinction matters because it kills the obvious workaround. If only
+ *   the grandchild were fenced, a host-launched browser plus
+ *   `connectOverCDP` would look like a way out. It is not: the CDP transport
+ *   is itself a socket the driver opens from inside the child.
+ *
+ *   ASSUMED, still: the profile directory. The browser writes a
+ *   `userDataDir` the plugin names, which as a grandchild would land inside
+ *   the same write jail (axis 6). That is a dependency's behaviour rather
+ *   than the plugin's, and it is why axis 6 has to be read over dependencies
+ *   too. It is moot while axes 1 and 3 refuse first.
+ *
+ *   HOW THE EGRESS HALF WAS SETTLED, kept because the reasoning is what makes
+ *   the current state legible. Its first prerequisite used to be written here
+ *   as plugin work — "its HTTP clients call `hostApi.hostFetch` rather than
+ *   `fetch`", with the manifest already carrying the capability and the hosts.
+ *   Measuring it found that sentence wrong at the first step: the work is not the plugin's, and doing
  *   it would break the flows it touches. Two INDEPENDENT reasons, either one
  *   sufficient:
  *
