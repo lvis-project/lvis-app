@@ -55,10 +55,16 @@ function manifestFor(pluginId: string): PluginManifest {
  * file quietly tests the isolated arm twice and the in-process arm not at all —
  * a suite that grows greener as it stops checking the thing it is named after.
  */
-// Was `local-indexer` until that id was admitted. The first case below is what
-// forced this line to move rather than letting the suite go on naming an id
-// that had crossed over.
-const IN_PROCESS_PLUGIN_ID = "meeting";
+// `local-indexer`, then `meeting`. The first case below is what forced this
+// line to move each time, rather than letting the suite go on naming an id that
+// had crossed over.
+//
+// `ep-api` is the LAST first-party id on this side, so the next admission has
+// nowhere to move it to. When that happens the counter-example has to become a
+// fixture rather than a real plugin — the in-process arm still exists and still
+// needs testing, and deleting the case because no shipped plugin uses it would
+// retire coverage for a code path that is still reachable.
+const IN_PROCESS_PLUGIN_ID = "ep-api";
 
 describe("importPluginFactoryForLifecycle chooses one arm per plugin", () => {
   it("has an in-process plugin left to be the counter-example", () => {

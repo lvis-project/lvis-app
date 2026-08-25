@@ -486,12 +486,15 @@ export function createServiceChildMembers(
       const handle = requireHandle(reply, "attachFloatingPanel") as unknown as WireFloatingPanelHandle;
       const listeners: ((reason: DetachReason) => void)[] = [];
       let height = handle.height;
-      let detached = false;
+      // The REASON, not a flag. A late subscriber has to be told the same
+      // thing an early one was, and a boolean cannot carry it — see
+      // `onDetached` below for what inventing one costs.
+      let detachedAs: DetachReason | null = null;
       const dispose = deps.adoptSubscription("attachFloatingPanel", handle.handleId, (payload) => {
         const event = asWireFloatingPanelEvent(payload, "attachFloatingPanel(event)");
-        if (detached) return;
-        detached = true;
-        for (const listener of listeners) listener(event.reason as DetachReason);
+        if (detachedAs) return;
+        detachedAs = event.reason as DetachReason;
+        for (const listener of listeners) listener(detachedAs);
         listeners.length = 0;
         // Not disposed here, for the reason spelled out on `spawnWorker`: the
         // host owns the slot, so the host owns the news that it closed.
@@ -509,10 +512,20 @@ export function createServiceChildMembers(
           dispose();
         },
         onDetached: (listener) => {
-          if (detached) {
+          if (detachedAs) {
             // Late subscriber on a slot that is already gone. Silence would
-            // leave it waiting for an event that has already happened.
-            listener("requested");
+            // leave it waiting for an event that has already happened — and
+            // answering with a GUESS is worse than silence.
+            //
+            // This used to say `"requested"` unconditionally while holding the
+            // real reason one closure away. The window is narrow (a plugin
+            // subscribes in the same turn the attach resolves in) but it is
+            // real, and `"requested"` is the one value that means "the plugin
+            // asked for this". A recorder that hears it after the USER closed
+            // the dock concludes the teardown was its own and leaves the
+            // recording running with nothing on screen driving it, which is
+            // the exact failure the reason exists to prevent.
+            listener(detachedAs);
             return;
           }
           listeners.push(listener);

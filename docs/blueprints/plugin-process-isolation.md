@@ -998,12 +998,17 @@ execute.
 
 ---
 
-## 10. The two plugins no wire can admit, and why
+## 10. The plugins no wire can admit, and why
 
 *Added 2026-08-25, from measurement rather than from estimate. The routing SOT
-carries the per-plugin verdicts; this section carries the reason the last two
-are a different KIND of problem from the first three, so a future reader does
-not spend a quarter building the wire that cannot work.*
+carries the per-plugin verdicts; this section carries the reason the remainder
+are a different KIND of problem from the ones already admitted, so a future
+reader does not spend a quarter building the wire that cannot work.*
+
+*It opened naming TWO. `meeting` came off the list the same day, by the second
+of the two routes below, and its section is kept as a worked example of that
+route rather than deleted — the shape it took is the one the next such
+migration should copy. `ep-api` is what remains.*
 
 `work-assistant`, `ms-graph` and `local-indexer` were admitted the same way
 each time: an ambient axis had a mediated form, and the plugin was changed to
@@ -1017,18 +1022,20 @@ What they have in common is worth naming, because it is the test a proposed
 capability has to pass: in every one of them the plugin contributes **data** and
 the host contributes **code**. A drive letter, a partition name, a config key —
 never a command, a script, or a function body. That is why each of these could
-be added without moving the boundary, and it is exactly what the two plugins
-below cannot be reduced to.
+be added without moving the boundary, and it is exactly what the plugins below
+could not be reduced to.
 
-`ep-api` and `meeting` do not fit that shape, and the reason is the same for
-both. **Neither is blocked on a missing host API. Both ship code that is
-written to run somewhere the boundary does not reach.**
+`ep-api` and `meeting` did not fit that shape, and the reason was the same for
+both. **Neither was blocked on a missing host API. Both shipped code written to
+run somewhere the boundary does not reach.**
 
 - `ep-api` drives portal pages with Playwright. Of its 40 `evaluate` call
   sites, 31 pass a **function body** that is compiled and run inside an
-  authenticated page.
-- `meeting` opens a recorder `BrowserWindow` whose `preload` and renderer are
-  the plugin's own files, loaded into a renderer outside the sandbox.
+  authenticated page. Still open.
+- `meeting` opened a recorder `BrowserWindow` whose `preload` and renderer were
+  the plugin's own files, loaded into a renderer outside the sandbox. **Closed
+  in plugin 0.7.0** by the second of the two routes below — see the section on
+  it, which is now a record rather than a plan.
 
 A wire cannot mediate that. To mediate it, the host would have to accept
 plugin-authored code and execute it in a privileged context on the plugin's
@@ -1072,31 +1079,53 @@ What is left after that is two things the browser question never covered:
   routing SOT does not name it**. It needs a mediated identity lookup and is
   unaffected by whatever happens to the browser flows.
 
-### `meeting` — the window is not the request
+### `meeting` — the window was not the request (DONE)
 
-The floating recorder looks like "a plugin needs a window". It is three
-requests wearing one coat, and the code says which is which:
+The floating recorder looked like "a plugin needs a window". It was three
+requests wearing one coat, and the code said which was which:
 
 1. **Chrome and placement** — frameless, transparent, `alwaysOnTop`, positioned
    from `screen.getPrimaryDisplay().workArea`. Parameters. A host that owned the
    window would take them as data.
-2. **Capture** — the renderer exists for Web APIs that only exist in a renderer:
-   `getUserMedia`, `getDisplayMedia`, `AudioContext`, `AudioWorklet`, with the
-   system-audio leg routed through a partition-scoped `session` and
-   `electron-audio-loopback`'s handler. This is the irreducible part, and it is
-   irreducible in the HOST's favour: only the host has a renderer inside the
-   trust boundary.
-3. **The plugin's own UI code** — `recorder-window-preload.cjs` plus a
-   1247-line renderer, loaded from `pluginRoot`.
+2. **Capture** — the renderer existed for Web APIs that only exist in a
+   renderer: `getUserMedia`, `getDisplayMedia`, `AudioContext`, `AudioWorklet`,
+   with the system-audio leg routed through a partition-scoped `session` and
+   `electron-audio-loopback`'s handler. Irreducible, and irreducible in the
+   HOST's favour: only the host has a renderer inside the trust boundary.
+3. **The plugin's own UI code** — `recorder-window-preload.cjs` plus a renderer,
+   loaded from `pluginRoot`.
 
-The protocol between them is **already data-shaped**: ten `ipcMain` channels,
-and nine of them are `get-init`, `get-theme`, `get-detail`, `get-levels`,
-`resize`, and the four lifecycle verbs. Only `push-chunk` carries a payload,
-and it carries audio.
+The protocol between them was **already data-shaped**: twelve `ipcMain`
+channels, and only `push-chunk` carried a payload — audio.
 
-That is the whole design. A host-owned recorder capability serves (1) and (2),
-answers the `get-*` channels from data the plugin supplies over the existing
-boundary, and delivers chunks back to it. The plugin stops owning a window and
-becomes the consumer of a recording. **Do not build a windowing wire** — a wire
-that let a plugin open a BrowserWindow and load its own preload would hand back
-exactly the reach isolation removed, with more steps.
+All three are closed, in that order and by separate releases:
+
+- (2) went first, in plugin 0.6.0: `hostApi.startAudioCapture`. The host
+  captures as first-party code and the plugin receives PCM as data, so
+  `push-chunk` — the one channel that carried anything — stopped existing
+  before the window did.
+- (1) and (3) went together in plugin 0.7.0: `hostApi.attachFloatingPanel`.
+  The remaining eleven channels became ordinary tools on the bridge every
+  plugin card already has, and the renderer became an `embedded-module`
+  served by the host's own `plugin-ui-shell.html`.
+
+**This is not the windowing wire the paragraph below warns against**, and the
+two are close enough that the difference is worth stating. The plugin does not
+get a window; it gets a SLOT in the one dock the host owns. Frameless,
+transparent, always-on-top, screen position, and how large the dock may grow
+are the host's and reach no parameter — so (1) was not handed over as data, it
+was **taken away**. The card loads through the HOST's shell and the HOST's
+preload, never the plugin's, which is (3). And the height cap is on the whole
+dock rather than per slot, because per-slot caps alone would let several slots
+add up to a full-height overlay.
+
+The security argument that makes it offerable at all: a borderless
+always-on-top surface a plugin can place and size freely is a clickjacking
+primitive; the same pixels inside host chrome at host-chosen coordinates are
+not.
+
+**Do not build a windowing wire** — a wire that let a plugin open a
+BrowserWindow and load its own preload would hand back exactly the reach
+isolation removes, with more steps. The distinction is not the word "window":
+it is whether the plugin decides the geometry and supplies the preload. It
+does neither.

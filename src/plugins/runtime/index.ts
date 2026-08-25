@@ -7277,6 +7277,12 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     pluginId: string,
     extensionId: string,
   ): ResolvedFloatingSurface | FloatingDockErrorCode {
+    // The REGISTRY, and deliberately nothing else. Both loader arms register
+    // here after a successful load, so this answers the same for a plugin in
+    // its own process as for one in ours — which matters because the only
+    // plugin that floats a surface runs out-of-process. Branching on isolation
+    // would be deciding whether a plugin may sit on top of every other
+    // application based on where it happens to run.
     const plugin = this.plugins.get(pluginId);
     if (!plugin) return "unknown-plugin";
     const extension = (plugin.manifest.ui ?? []).find((candidate) => candidate.id === extensionId);
