@@ -32,6 +32,24 @@ test("resolveBuildAssets exposes one SOT for build and dev watched assets", () =
           "dist/src/plugin-ui-shell.js",
         ],
         [
+          "audio-capture",
+          "audio-capture-window.html",
+          "src/audio-capture-window.html",
+          "dist/src/audio-capture-window.html",
+        ],
+        [
+          "audio-capture",
+          "audio-capture-window.js",
+          "src/audio-capture-window.js",
+          "dist/src/audio-capture-window.js",
+        ],
+        [
+          "audio-capture",
+          "audio-capture-window-preload.cjs",
+          "src/audio-capture-window-preload.cjs",
+          "dist/src/audio-capture-window-preload.cjs",
+        ],
+        [
           "runtime-script",
           "electron-flags.mjs",
           "scripts/electron-flags.mjs",
@@ -46,6 +64,10 @@ test("resolveBuildAssets exposes one SOT for build and dev watched assets", () =
       ],
     );
     assert.equal(resolveBuildAssets(root, "runtime-script").length, 2);
+    // The capture window is three files that only work together — the page,
+    // its script and its preload. A build that copied two of them would fail
+    // at capture time rather than at build time.
+    assert.equal(resolveBuildAssets(root, "audio-capture").length, 3);
   } finally {
     if (existsSync(root)) rmSync(root, { recursive: true, force: true });
   }

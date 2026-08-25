@@ -317,6 +317,22 @@ const HOSTAPI_MARSHALLING: Record<string, MarshallingDecision> = {
     args: "()",
     returns: "Promise<{ canceled: boolean, folders: string[] }> — plain data",
   },
+  // No arguments, an array of `{ deviceId, label }` out. Plain data both ways.
+  listAudioInputDevices: {
+    jsonRepresentable: true,
+    args: "(none)",
+    returns: "Promise<readonly AudioCaptureDevice[]> — plain data",
+  },
+  // Not JSON-representable for the same reason `spawnWorker` is not: the
+  // answer is live control over a resource the host keeps owning. The PCM
+  // itself does cross as JSON, base64-encoded, because the wire has no bytes —
+  // a `Uint8Array` put through it arrives as an object with numeric keys,
+  // which is not an error anywhere, just audio that decodes to noise.
+  startAudioCapture: {
+    jsonRepresentable: false,
+    args: "request: AudioCaptureRequest (plain data)",
+    returns: "Promise<AudioCaptureHandle> — live capture control: stop / onFrame / onEnd are functions",
+  },
   // A drive letter in, a UNC string or `null` out. `null` is a real answer —
   // the drive is a local disk — so it must survive the wire distinctly from a
   // rejection, which is what a lookup that could not run produces.
@@ -389,6 +405,7 @@ const REQUIRES_DECIDED_REPRESENTATION: readonly string[] = [
   "onShutdown",
   "resolveApiKey",
   "spawnWorker",
+  "startAudioCapture",
   "storage.read",
   "storage.write",
 ];

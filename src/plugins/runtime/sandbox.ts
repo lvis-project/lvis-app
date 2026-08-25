@@ -161,6 +161,12 @@ export function createNoopHostApi(
     pickFolders: async () => {
       throw new Error("pickFolders not available in noop context");
     },
+    listAudioInputDevices: async () => {
+      throw new Error("listAudioInputDevices not available in noop context");
+    },
+    startAudioCapture: async () => {
+      throw new Error("startAudioCapture not available in noop context");
+    },
     resolveMappedDriveRoot: async () => {
       throw new Error("resolveMappedDriveRoot not available in noop context");
     },

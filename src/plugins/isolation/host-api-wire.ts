@@ -906,6 +906,25 @@ export const HOSTAPI_PATH_CONTRACTS = {
     lifetime: "none",
     errors: [],
   },
+  listAudioInputDevices: {
+    arguments: "plain-json",
+    result: "plain-json",
+    lifetime: "none",
+    errors: [],
+  },
+  // A handle for the same reason `spawnWorker` is one: the host owns the
+  // resource and has to keep owning it, and the frames are addressed to the
+  // ONE plugin that asked. Delivering them on the event bus instead would hand
+  // every installed plugin the microphone, because that bus broadcasts.
+  startAudioCapture: {
+    arguments: "plain-json",
+    result: "handle",
+    lifetime: "child-disposable",
+    // Opening a microphone is a WRITE in the effect SOT, so the gate can fire
+    // on it and the denial has to be a verdict the child can tell apart from
+    // a capture that simply failed to start.
+    errors: ["effect-boundary-denied"],
+  },
   // The gated read-back of the host-held session cookies. Values cross the
   // boundary by design — that is what the caller needs to inject a session
   // into a separate browser context — so the host, not the child, decides
@@ -1000,9 +1019,11 @@ export const SERVICE_HOSTAPI_PATHS = [
   "hostFetch",
   "spawnWorker",
   "resolveMappedDriveRoot",
+  "listAudioInputDevices",
+  "startAudioCapture",
 ] as const satisfies readonly HostApiPath[];
 
-/** One of the eleven. */
+/** One of the thirteen. */
 export type ServiceHostApiPath = (typeof SERVICE_HOSTAPI_PATHS)[number];
 
 
@@ -1602,6 +1623,57 @@ export type WireWorkerEvent =
       readonly code: number | null;
       readonly signal: string | null;
     };
+
+/** What `startAudioCapture` puts on the wire in place of the handle. */
+export interface WireAudioCaptureHandle {
+  readonly handleId: string;
+  readonly captureId: string;
+  readonly opened: { readonly microphone: boolean; readonly systemAudio: boolean };
+}
+
+/**
+ * One host→child push for a live capture, keyed by the capture's `handleId`.
+ *
+ * `pcm` is base64 rather than bytes because this wire is JSON and JSON has no
+ * bytes. A `Uint8Array` sent through it arrives as an object with numeric
+ * keys — which is not an error anywhere, just audio that decodes to noise.
+ */
+export type WireAudioCaptureEvent =
+  | { readonly kind: "frame"; readonly seq: number; readonly pcm: string; readonly peak: number }
+  | { readonly kind: "end"; readonly reason: string; readonly detail?: string };
+
+/** Child side: read a capture push, refusing anything that is not one. */
+export function asWireAudioCaptureEvent(payload: unknown, label: string): WireAudioCaptureEvent {
+  const event = payload as WireAudioCaptureEvent | null;
+  if (event === null || typeof event !== "object") {
+    throw new HostApiBoundaryError(
+      "result-marshalling-rejected",
+      `[host-api-wire] ${label}: not a capture event`,
+    );
+  }
+  if (event.kind === "frame") {
+    if (typeof event.pcm !== "string" || typeof event.seq !== "number" || typeof event.peak !== "number") {
+      throw new HostApiBoundaryError(
+        "result-marshalling-rejected",
+        `[host-api-wire] ${label}: frame is missing seq, pcm or peak`,
+      );
+    }
+    return event;
+  }
+  if (event.kind === "end") {
+    if (typeof event.reason !== "string") {
+      throw new HostApiBoundaryError(
+        "result-marshalling-rejected",
+        `[host-api-wire] ${label}: end carries no reason`,
+      );
+    }
+    return event;
+  }
+  throw new HostApiBoundaryError(
+    "result-marshalling-rejected",
+    `[host-api-wire] ${label}: unknown capture event kind`,
+  );
+}
 
 /** Child side: read a worker push, refusing anything that is not one. */
 export function asWireWorkerEvent(payload: unknown, label: string): WireWorkerEvent {

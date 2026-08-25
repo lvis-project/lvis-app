@@ -49,6 +49,7 @@ import {
   type PluginHostApi,
   type PluginWorkerSpec,
   type StorageEncoding,
+  type AudioCaptureRequest,
 } from "../public-contract.js";
 import { isResolvedPathWithin } from "../plugin-storage-containment.js";
 import {
@@ -81,6 +82,8 @@ import {
   type WireHttpResponse,
   type WireResolveApiKeyOptions,
   type WireWorkerHandle,
+  type WireAudioCaptureEvent,
+  type WireAudioCaptureHandle,
 } from "./host-api-wire.js";
 import { SubscriptionLedger } from "./subscription-ledger.js";
 
@@ -289,6 +292,8 @@ export const HOSTAPI_DISPATCH_TABLE: Record<HostApiPath, HostApiPathHandler> = {
   hostFetch: unimplementedHostApiPath("hostFetch"),
   spawnWorker: unimplementedHostApiPath("spawnWorker"),
   resolveMappedDriveRoot: unimplementedHostApiPath("resolveMappedDriveRoot"),
+  listAudioInputDevices: unimplementedHostApiPath("listAudioInputDevices"),
+  startAudioCapture: unimplementedHostApiPath("startAudioCapture"),
   openExternalUrl: unimplementedHostApiPath("openExternalUrl"),
   openAuthWindow: unimplementedHostApiPath("openAuthWindow"),
   openAuthPartitionViewer: unimplementedHostApiPath("openAuthPartitionViewer"),
@@ -533,6 +538,8 @@ export type ServiceHostApi = Pick<
   | "hostFetch"
   | "spawnWorker"
   | "resolveMappedDriveRoot"
+  | "listAudioInputDevices"
+  | "startAudioCapture"
 >;
 
 /**
@@ -885,6 +892,76 @@ function callLlmPath(hostApi: ServiceHostApi): HostApiPathHandler {
  * validator in front of it would be a place for the two to disagree about what
  * a drive letter is.
  */
+/** `listAudioInputDevices() → AudioCaptureDevice[]`. No arguments, plain data back. */
+function listAudioInputDevicesPath(hostApi: ServiceHostApi): HostApiPathHandler {
+  return defineHostApiPath("listAudioInputDevices", async () => hostApi.listAudioInputDevices());
+}
+
+/**
+ * `startAudioCapture(request) → AudioCaptureHandle`.
+ *
+ * The same shape as `spawnWorker` and for the same reason: the host owns the
+ * resource and must keep owning it. What crosses is
+ * `{ handleId, captureId, opened }`; `stop()` becomes the release of that
+ * registration, and `onFrame`/`onEnd` become host notifications the child fans
+ * out to child-local listeners.
+ *
+ * WHY NOT THE EVENT BUS. Frames are addressed to the ONE plugin that started
+ * the capture. `emitHostEvent` broadcasts to every installed plugin, so
+ * delivering audio that way would hand all of them the microphone — the reason
+ * a streaming capability that looks event-shaped is a handle here.
+ *
+ * The host listeners are registered EAGERLY, before this returns, because
+ * audio produced between the start and the plugin's first `onFrame` call would
+ * otherwise be lost, and the round trip makes that window far wider than it is
+ * in-process.
+ */
+function startAudioCapturePath(hostApi: ServiceHostApi): HostApiPathHandler {
+  return defineHostApiPath("startAudioCapture", async (call, scope) => {
+    const capture = await hostApi.startAudioCapture(call.args[0] as AudioCaptureRequest);
+
+    let ended = false;
+    let live = true;
+    const handleId = scope.open(() => {
+      live = false;
+      // A capture that already ended must not be stopped again: `stop()` is
+      // idempotent on this side, but releasing twice is not.
+      if (!ended) void capture.stop();
+    });
+    // Guarded at the push rather than at the end: `deliver` throws on an
+    // unknown subscription, and a frame arriving after the handle was released
+    // would turn a routine race into an exception inside a listener.
+    const push = (payload: WireAudioCaptureEvent): void => {
+      if (live) scope.deliver(handleId, payload);
+    };
+    capture.onFrame((frame) => {
+      push({
+        kind: "frame",
+        seq: frame.seq,
+        // Base64 because the wire is JSON. A `Uint8Array` put through it
+        // arrives as an object with numeric keys — not an error anywhere, just
+        // audio that decodes to noise.
+        pcm: Buffer.from(frame.pcm).toString("base64"),
+        peak: frame.peak,
+      });
+    });
+    capture.onEnd((end) => {
+      ended = true;
+      push({ kind: "end", reason: end.reason, ...(end.detail === undefined ? {} : { detail: end.detail }) });
+      // The capture is over, so the registration has nothing left to own.
+      // Released here rather than left for `childGone` so a plugin that records
+      // repeatedly does not accumulate host-side entries.
+      scope.release(handleId);
+    });
+
+    return {
+      handleId,
+      captureId: capture.captureId,
+      opened: capture.opened,
+    } satisfies WireAudioCaptureHandle;
+  });
+}
+
 function resolveMappedDriveRootPath(hostApi: ServiceHostApi): HostApiPathHandler {
   return defineHostApiPath("resolveMappedDriveRoot", async (call) =>
     hostApi.resolveMappedDriveRoot(String(call.args[0])),
@@ -1189,6 +1266,8 @@ export function createServiceHostApiPaths(
     hostFetch: hostFetchPath(hostApi),
     spawnWorker: spawnWorkerPath(hostApi, confinement),
     resolveMappedDriveRoot: resolveMappedDriveRootPath(hostApi),
+    listAudioInputDevices: listAudioInputDevicesPath(hostApi),
+    startAudioCapture: startAudioCapturePath(hostApi),
   };
 }
 

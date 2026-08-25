@@ -20,6 +20,24 @@ export const BUILD_ASSETS = Object.freeze([
     category: "plugin-shell",
   },
   {
+    src: "src/audio-capture-window.html",
+    out: "dist/src/audio-capture-window.html",
+    label: "audio-capture-window.html",
+    category: "audio-capture",
+  },
+  {
+    src: "src/audio-capture-window.js",
+    out: "dist/src/audio-capture-window.js",
+    label: "audio-capture-window.js",
+    category: "audio-capture",
+  },
+  {
+    src: "src/audio-capture-window-preload.cjs",
+    out: "dist/src/audio-capture-window-preload.cjs",
+    label: "audio-capture-window-preload.cjs",
+    category: "audio-capture",
+  },
+  {
     src: "scripts/electron-flags.mjs",
     out: "dist/scripts/electron-flags.mjs",
     label: "electron-flags.mjs",
