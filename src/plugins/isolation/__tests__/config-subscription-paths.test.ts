@@ -201,6 +201,8 @@ async function harness(
       pluginRoot: "/plugins/subscriber",
       hostRoot: "/app",
       pluginDataDir: "/plugins/subscriber/data",
+      userHome: "/Users/example",
+      lvisHome: "/Users/example/.lvis",
       installedPluginIds: [],
       config: options.config ?? { theme: "dark" },
       generationId: GENERATION,

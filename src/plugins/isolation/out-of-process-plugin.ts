@@ -1269,6 +1269,12 @@ export function createOutOfProcessPluginFactory(
         pluginRoot: context.pluginRoot,
         hostRoot: context.hostRoot,
         pluginDataDir: context.pluginDataDir,
+        // From the context the HOST built, not re-read here. Re-reading would
+        // work today — this line runs in main — but it would put a second
+        // reader of the same two environment values on the spawn path, and the
+        // two would only ever disagree in the case that matters.
+        userHome: context.userHome,
+        lvisHome: context.lvisHome,
         generationId,
         installedPluginIds: hostApi.getInstalledPluginIds(),
         ...(context.config !== undefined ? { config: context.config } : {}),

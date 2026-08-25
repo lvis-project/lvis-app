@@ -1698,6 +1698,37 @@ export interface PluginRuntimeContext {
    * unlink before binding.
    */
   pluginSocketDir: string;
+  /**
+   * The real user's home directory, as the HOST process sees it.
+   *
+   * WHY THE HOST HAS TO SAY. A confined child's `HOME` is a throwaway the
+   * sandbox substitutes, so `os.homedir()` inside the child answers with a
+   * directory that belongs to nobody. For code that uses the home as a WRITE
+   * target that substitution is the point and should stay. For code that uses
+   * it as PATH POLICY — "is this under the user's home", "is this someone
+   * else's home", "is this `~/.ssh`" — the paths being judged came from the
+   * USER, and against the throwaway every one of those answers turns to
+   * `false`. A blocklist that quietly stops matching is worse than no
+   * blocklist, because it still reports that it checked.
+   *
+   * This is an ANSWER, not a grant. Knowing where the home is does not make it
+   * reachable: what a confined child may read is decided by the sandbox, and
+   * the sensitive-path deny floor is anchored to this same directory host-side.
+   */
+  userHome: string;
+  /**
+   * The host's own storage root — `~/.lvis`, or wherever `LVIS_HOME` moved it.
+   *
+   * `pluginDataDir` already lives under this, so nothing here is newly visible.
+   * It is named because a plugin that rebuilt the path from `os.homedir()` got
+   * it wrong in two different ways: in a confined child the home is a
+   * throwaway, and even in the main process `LVIS_HOME` can point somewhere
+   * else entirely. Host-owned files a plugin is separately granted — the
+   * corporate CA bundle under `certs/`, the provisioned Python under
+   * `runtime/` — hang off THIS root, and the envelope that grants them
+   * resolves them the same way.
+   */
+  lvisHome: string;
   config?: Record<string, unknown>;
   log: (message: string, meta?: unknown) => void;
   hostApi: PluginHostApi;

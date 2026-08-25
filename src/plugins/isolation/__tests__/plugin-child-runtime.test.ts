@@ -12,6 +12,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 import { PassThrough } from "node:stream";
+import { homedir } from "node:os";
 import { frameMessage, StdioFrameDecoder } from "../../../mcp/stdio-framing.js";
 import type { PluginManifest, RuntimePlugin } from "../../types.js";
 import {
@@ -135,6 +136,8 @@ async function harness(
       pluginRoot: "/plugins/child",
       hostRoot: "/app",
       pluginDataDir: "/plugins/child/data",
+      userHome: "/Users/example",
+      lvisHome: "/Users/example/.lvis",
       installedPluginIds: [],
       config: { enabled: true },
       generationId: GENERATION,
@@ -224,6 +227,8 @@ describe("the child serves its plugin over framed stdio", () => {
           pluginRoot: "/plugins/child",
           hostRoot: "/app",
           pluginDataDir: "/plugins/child/data",
+          userHome: "/Users/example",
+          lvisHome: "/Users/example/.lvis",
           installedPluginIds: [],
           generationId: GENERATION,
         },
@@ -295,6 +300,77 @@ describe("the hostApi stub the child hands the plugin", () => {
     ).toThrow(/not wired/u);
   });
 
+  it("hands the plugin the HOST's home, not the one this process would read", async () => {
+    // The point of the field, stated as a control: the fixture names a home
+    // that is deliberately NOT this process's, so a child that fell back to
+    // `homedir()` would answer with something else and the equality below
+    // would fail. Without the second assertion the first would still pass on a
+    // machine where the two happened to match.
+    let seen: { userHome: string; lvisHome: string } | null = null;
+    await startPluginChildRuntime({
+      input: new PassThrough(),
+      output: new PassThrough(),
+      manifest: MANIFEST,
+      context: {
+        pluginId: PLUGIN_ID,
+        pluginRoot: "/plugins/child",
+        hostRoot: "/app",
+        pluginDataDir: "/plugins/child/data",
+        userHome: "/Users/example",
+        lvisHome: "/somewhere/else/.lvis",
+        installedPluginIds: [],
+        generationId: GENERATION,
+      },
+      channel: {
+        call: () => Promise.reject(new Error("unused")),
+        notify: () => {},
+      },
+      loadFactory: async () => (context) => {
+        seen = { userHome: context.userHome, lvisHome: context.lvisHome };
+        return { handlers: {} };
+      },
+    });
+    expect(seen).toEqual({ userHome: "/Users/example", lvisHome: "/somewhere/else/.lvis" });
+    expect(homedir()).not.toBe("/Users/example");
+  });
+
+  it.each(["userHome", "lvisHome"] as const)(
+    "refuses construction when the payload omits '%s'",
+    async (field) => {
+      const context = {
+        pluginId: PLUGIN_ID,
+        pluginRoot: "/plugins/child",
+        hostRoot: "/app",
+        pluginDataDir: "/plugins/child/data",
+        userHome: "/Users/example",
+        lvisHome: "/Users/example/.lvis",
+        installedPluginIds: [],
+        generationId: GENERATION,
+      };
+      delete (context as Record<string, unknown>)[field];
+      let factoryRan = false;
+      await expect(
+        startPluginChildRuntime({
+          input: new PassThrough(),
+          output: new PassThrough(),
+          manifest: MANIFEST,
+          context: context as never,
+          channel: {
+            call: () => Promise.reject(new Error("unused")),
+            notify: () => {},
+          },
+          loadFactory: async () => () => {
+            factoryRan = true;
+            return { handlers: {} };
+          },
+        }),
+      ).rejects.toThrow(new RegExp(`missing '${field}'`, "u"));
+      // The refusal happens BEFORE the plugin exists. A plugin constructed with
+      // the field undefined would already have joined it into a path.
+      expect(factoryRan).toBe(false);
+    },
+  );
+
   it("routes context.log to the host as a notification", async () => {
     const notifications: HostApiNotification[] = [];
     const child = await startPluginChildRuntime({
@@ -306,6 +382,8 @@ describe("the hostApi stub the child hands the plugin", () => {
         pluginRoot: "/plugins/child",
         hostRoot: "/app",
         pluginDataDir: "/plugins/child/data",
+        userHome: "/Users/example",
+        lvisHome: "/Users/example/.lvis",
         installedPluginIds: [],
         generationId: GENERATION,
       },

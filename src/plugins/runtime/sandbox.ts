@@ -3,11 +3,13 @@
  */
 
 import { mkdirSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import type { PluginHostApi, PluginManifest } from "../types.js";
 import { createPluginStorage } from "../storage.js";
 import { applyConfigDefaults } from "../config-schema.js";
 import { createLogger } from "../../lib/logger.js";
+import { lvisHome } from "../../shared/lvis-home.js";
 import { PLUGIN_DATA_DIR_NAME, resolvePluginSocketDir } from "../plugin-storage-layout.js";
 const log = createLogger("sandbox");
 
@@ -215,6 +217,13 @@ export function buildPluginContext(opts: {
     // put a `mkdir` inside a pure context builder, and a caller that wanted
     // only the shape of a context would fail on a filesystem it never touched.
     pluginSocketDir: resolvePluginSocketDir(opts.pluginDataDir),
+    // READ HERE rather than passed in, and read with the same two functions
+    // every other host reader uses. This builder runs in the main process, so
+    // both answer with the real values; the out-of-process path carries what
+    // this produced rather than recomputing it in the child, where `homedir()`
+    // would answer with the sandbox's throwaway.
+    userHome: homedir(),
+    lvisHome: lvisHome(),
     // configSchema defaults backfill keys missing from `manifest.config`
     // and the override layers — without this, plugins that document a
     // `default` for a config key would

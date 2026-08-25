@@ -51,12 +51,13 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { spawn, type ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 // The child entry is bundled by the shared module rather than here, so this
 // suite and `confined-plugin-child.test.ts` cannot drift into exercising two
 // different bundles while reading like they exercise one.
 import { buildChildEntry, childBundleDir, repositoryRoot } from "./child-entry-bundle.js";
+import { lvisHome } from "../../../shared/lvis-home.js";
 import type { PluginHostApi, PluginManifest, PluginRuntimeContext, RuntimePlugin } from "../../types.js";
 import {
   createOutOfProcessPluginFactory,
@@ -359,6 +360,8 @@ describe("the config values a plugin reads, across a real child process", () => 
         hostRoot: repositoryRoot(),
         pluginDataDir,
         pluginSocketDir: resolvePluginSocketDir(pluginDataDir),
+        userHome: homedir(),
+        lvisHome: lvisHome(),
         // The stray cleartext copy a secret key can still have: the host deletes
         // it on a secret write, and the child must do the same rather than
         // storing the sentinel in its place.
@@ -439,6 +442,8 @@ describe("the config values a plugin reads, across a real child process", () => 
         hostRoot: repositoryRoot(),
         pluginDataDir,
         pluginSocketDir: resolvePluginSocketDir(pluginDataDir),
+        userHome: homedir(),
+        lvisHome: lvisHome(),
         config: {},
         log: () => undefined,
         hostApi,
@@ -509,6 +514,8 @@ describe("the config values a plugin reads, across a real child process", () => 
         hostRoot: repositoryRoot(),
         pluginDataDir,
         pluginSocketDir: resolvePluginSocketDir(pluginDataDir),
+        userHome: homedir(),
+        lvisHome: lvisHome(),
         config: {},
         log: () => undefined,
         hostApi,
@@ -562,6 +569,8 @@ describe("the config values a plugin reads, across a real child process", () => 
           hostRoot: repositoryRoot(),
           pluginDataDir,
         pluginSocketDir: resolvePluginSocketDir(pluginDataDir),
+        userHome: homedir(),
+        lvisHome: lvisHome(),
           config: {},
           log: () => undefined,
           hostApi,
