@@ -1306,6 +1306,26 @@ export interface PluginHostApi {
   pickFolders(): Promise<{ canceled: boolean; folders: string[] }>;
 
   /**
+   * The UNC path behind a Windows mapped drive (`"Z:"` → `"\\\\server\\share"`),
+   * or `null` when the drive has no UNC backing.
+   *
+   * WHY THE HOST OWNS IT. Windows exposes no binding for this, so answering it
+   * means running `powershell.exe`. Spawning an interpreter is ambient axis 3 in
+   * the routing SOT — the axis confinement exists to take away — and the answer
+   * is one string. The caller supplies a DRIVE LETTER and the host supplies the
+   * command, so nothing a plugin passes reaches a shell.
+   *
+   * `null` MEANS AN ORDINARY LOCAL DISK, and is a complete answer. It never
+   * means the lookup failed: that REJECTS. A caller building an allow-list has
+   * to tell those apart, because a drive it could not resolve leaves a root
+   * missing with nothing to report.
+   *
+   * Every non-Windows platform answers `null` — a mapped drive is not a thing
+   * there.
+   */
+  resolveMappedDriveRoot(drive: string): Promise<string | null>;
+
+  /**
    * Open a hardened viewer BrowserWindow that loads `url` inside the
    * caller plugin's `persist:plugin-auth:<pluginId>` partition. The
    * existing cookies in that partition (typically deposited by an

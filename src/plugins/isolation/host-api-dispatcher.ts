@@ -288,6 +288,7 @@ export const HOSTAPI_DISPATCH_TABLE: Record<HostApiPath, HostApiPathHandler> = {
   callLlm: unimplementedHostApiPath("callLlm"),
   hostFetch: unimplementedHostApiPath("hostFetch"),
   spawnWorker: unimplementedHostApiPath("spawnWorker"),
+  resolveMappedDriveRoot: unimplementedHostApiPath("resolveMappedDriveRoot"),
   openExternalUrl: unimplementedHostApiPath("openExternalUrl"),
   openAuthWindow: unimplementedHostApiPath("openAuthWindow"),
   openAuthPartitionViewer: unimplementedHostApiPath("openAuthPartitionViewer"),
@@ -478,10 +479,11 @@ export function createInteractionHostApiPaths(
  * The host handlers for the hostApi members that reach a host SERVICE
  * (`docs/blueprints/plugin-process-isolation.md` §3.1, §3.2).
  *
- * Nine members: network egress (`hostFetch`, `probePrivateHost`), the LLM
+ * Ten members: network egress (`hostFetch`, `probePrivateHost`), the LLM
  * provider (`callLlm`), credentials (`getSecret`, `resolveApiKey`), the worker
  * supervisor (`spawnWorker`), the event bus (`emitEvent`), the audit log
- * (`logEvent`) and the routine store (`hasRoutineBySource`). Between them they
+ * (`logEvent`), the routine store (`hasRoutineBySource`) and the Windows
+ * drive-mapping lookup (`resolveMappedDriveRoot`). Between them they
  * hold every member §3.2 classified as not JSON-representable, which is why the
  * marshalling work concentrates here.
  *
@@ -530,6 +532,7 @@ export type ServiceHostApi = Pick<
   | "callLlm"
   | "hostFetch"
   | "spawnWorker"
+  | "resolveMappedDriveRoot"
 >;
 
 /**
@@ -874,6 +877,20 @@ function callLlmPath(hostApi: ServiceHostApi): HostApiPathHandler {
 }
 
 /** `probePrivateHost(host, opts?) → Promise<boolean>`. Plain data both ways. */
+/**
+ * `resolveMappedDriveRoot(drive) → Promise<string | null>`. Plain data both ways.
+ *
+ * The argument is coerced to a string and handed on WITHOUT a shape check here:
+ * the host implementation validates the drive letter itself, and a second
+ * validator in front of it would be a place for the two to disagree about what
+ * a drive letter is.
+ */
+function resolveMappedDriveRootPath(hostApi: ServiceHostApi): HostApiPathHandler {
+  return defineHostApiPath("resolveMappedDriveRoot", async (call) =>
+    hostApi.resolveMappedDriveRoot(String(call.args[0])),
+  );
+}
+
 function probePrivateHostPath(hostApi: ServiceHostApi): HostApiPathHandler {
   return defineHostApiPath("probePrivateHost", async (call) => {
     const host = requireString(call, 0, "host");
@@ -1171,6 +1188,7 @@ export function createServiceHostApiPaths(
     callLlm: callLlmPath(hostApi),
     hostFetch: hostFetchPath(hostApi),
     spawnWorker: spawnWorkerPath(hostApi, confinement),
+    resolveMappedDriveRoot: resolveMappedDriveRootPath(hostApi),
   };
 }
 

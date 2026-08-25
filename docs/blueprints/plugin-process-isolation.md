@@ -929,7 +929,16 @@ not spend a quarter building the wire that cannot work.*
 `local-indexer` were admitted the same way each time: an ambient axis had a
 mediated form, and the plugin was changed to use it. `authRedirect` replaced a
 socket. `pickFolders` replaced `dialog`. `pluginSocketDir` replaces a loopback
-bind. Each is a small, host-owned answer to a narrow request.
+bind. `userHome`/`lvisHome` replace a `homedir()` that a confined child answers
+wrongly. `resolveMappedDriveRoot` replaces a `powershell.exe` spawn. Each is a
+small, host-owned answer to a narrow request.
+
+What they have in common is worth naming, because it is the test a proposed
+capability has to pass: in every one of them the plugin contributes **data** and
+the host contributes **code**. A drive letter, a partition name, a config key —
+never a command, a script, or a function body. That is why each of these could
+be added without moving the boundary, and it is exactly what the two plugins
+below cannot be reduced to.
 
 `ep-api` and `meeting` do not fit that shape, and the reason is the same for
 both. **Neither is blocked on a missing host API. Both ship code that is
