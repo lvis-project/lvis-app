@@ -80,12 +80,17 @@
     {
       "type": "exports",
       "file": "scripts/a2a-p4-5-live/evidence-lib.mjs",
-      "name": "resolveEvidencePath"
+      "name": "SHA256_RE"
     },
     {
       "type": "exports",
       "file": "scripts/a2a-p4-5-live/evidence-lib.mjs",
-      "name": "SHA256_RE"
+      "name": "resolveEvidencePath"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/a2a-p4-5-live/installer-provenance-lib.mjs",
+      "name": "SUPPORTED_INSTALLER_OSES"
     },
     {
       "type": "exports",
@@ -96,11 +101,6 @@
       "type": "exports",
       "file": "scripts/a2a-p4-5-live/installer-provenance-lib.mjs",
       "name": "readAndValidateProvenance"
-    },
-    {
-      "type": "exports",
-      "file": "scripts/a2a-p4-5-live/installer-provenance-lib.mjs",
-      "name": "SUPPORTED_INSTALLER_OSES"
     },
     {
       "type": "exports",
@@ -140,22 +140,22 @@
     {
       "type": "exports",
       "file": "scripts/lib/main-bundle-budget.mjs",
-      "name": "isMainBundleRootScriptPath"
-    },
-    {
-      "type": "exports",
-      "file": "scripts/lib/main-bundle-budget.mjs",
       "name": "MAIN_BUNDLE_ROOT_FILES"
     },
     {
       "type": "exports",
-      "file": "scripts/packaged-runtime-assets.mjs",
-      "name": "hostRuntimeAssetsForInstallerTarget"
+      "file": "scripts/lib/main-bundle-budget.mjs",
+      "name": "isMainBundleRootScriptPath"
     },
     {
       "type": "exports",
       "file": "scripts/packaged-runtime-assets.mjs",
       "name": "PLUGIN_MANAGED_RUNTIME_ASSETS"
+    },
+    {
+      "type": "exports",
+      "file": "scripts/packaged-runtime-assets.mjs",
+      "name": "hostRuntimeAssetsForInstallerTarget"
     },
     {
       "type": "exports",
@@ -300,12 +300,12 @@
     {
       "type": "exports",
       "file": "src/data/settings-store.ts",
-      "name": "isValidFontFamilyOverride"
+      "name": "LLM_VENDORS"
     },
     {
       "type": "exports",
       "file": "src/data/settings-store.ts",
-      "name": "LLM_VENDORS"
+      "name": "isValidFontFamilyOverride"
     },
     {
       "type": "exports",
@@ -331,6 +331,11 @@
       "type": "exports",
       "file": "src/engine/turn/tool-scope.ts",
       "name": "scopedToolNameSet"
+    },
+    {
+      "type": "exports",
+      "file": "src/i18n/index.ts",
+      "name": "SUPPORTED_LOCALES"
     },
     {
       "type": "exports",
@@ -369,13 +374,13 @@
     },
     {
       "type": "exports",
-      "file": "src/i18n/index.ts",
-      "name": "SUPPORTED_LOCALES"
+      "file": "src/i18n/runtime.ts",
+      "name": "onLocaleChange"
     },
     {
       "type": "exports",
-      "file": "src/i18n/runtime.ts",
-      "name": "onLocaleChange"
+      "file": "src/ipc/handlers/chat.ts",
+      "name": "SESSION_KIND_VALUES"
     },
     {
       "type": "exports",
@@ -389,18 +394,13 @@
     },
     {
       "type": "exports",
-      "file": "src/ipc/handlers/chat.ts",
-      "name": "SESSION_KIND_VALUES"
+      "file": "src/ipc/index.ts",
+      "name": "UNAUTHORIZED_FRAME"
     },
     {
       "type": "exports",
       "file": "src/ipc/index.ts",
       "name": "auditUnauthorized"
-    },
-    {
-      "type": "exports",
-      "file": "src/ipc/index.ts",
-      "name": "UNAUTHORIZED_FRAME"
     },
     {
       "type": "exports",
@@ -805,12 +805,12 @@
     {
       "type": "exports",
       "file": "src/shared/plugin-config.ts",
-      "name": "isPlainObject"
+      "name": "PLUGIN_CONFIG_RESERVED_KEYS"
     },
     {
       "type": "exports",
       "file": "src/shared/plugin-config.ts",
-      "name": "PLUGIN_CONFIG_RESERVED_KEYS"
+      "name": "isPlainObject"
     },
     {
       "type": "exports",
@@ -836,21 +836,6 @@
       "type": "exports",
       "file": "src/shared/project-identity.ts",
       "name": "projectIdentityFromRoot"
-    },
-    {
-      "type": "exports",
-      "file": "src/shared/render-html-preview.ts",
-      "name": "buildRenderHtmlCspMeta"
-    },
-    {
-      "type": "exports",
-      "file": "src/shared/render-html-preview.ts",
-      "name": "buildRenderHtmlThemeStyle"
-    },
-    {
-      "type": "exports",
-      "file": "src/shared/render-html-preview.ts",
-      "name": "clampRenderHtmlWindowSize"
     },
     {
       "type": "exports",
@@ -886,6 +871,21 @@
       "type": "exports",
       "file": "src/shared/render-html-preview.ts",
       "name": "RENDER_HTML_WINDOW_MIN_WIDTH"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "buildRenderHtmlCspMeta"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "buildRenderHtmlThemeStyle"
+    },
+    {
+      "type": "exports",
+      "file": "src/shared/render-html-preview.ts",
+      "name": "clampRenderHtmlWindowSize"
     },
     {
       "type": "exports",
@@ -974,21 +974,6 @@
     },
     {
       "type": "exports",
-      "file": "src/ui/renderer/components/permissions/PermissionDecisionCard.tsx",
-      "name": "formatSummaryValue"
-    },
-    {
-      "type": "exports",
-      "file": "src/ui/renderer/components/slash-picker-data.ts",
-      "name": "normalizeSlashQuery"
-    },
-    {
-      "type": "exports",
-      "file": "src/ui/renderer/components/slash-picker-data.ts",
-      "name": "SLASH_COMMANDS"
-    },
-    {
-      "type": "exports",
       "file": "src/ui/renderer/components/SlashPickerPanel.tsx",
       "name": "SlashPickerPanel"
     },
@@ -1004,6 +989,21 @@
     },
     {
       "type": "exports",
+      "file": "src/ui/renderer/components/permissions/PermissionDecisionCard.tsx",
+      "name": "formatSummaryValue"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/components/slash-picker-data.ts",
+      "name": "SLASH_COMMANDS"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/components/slash-picker-data.ts",
+      "name": "normalizeSlashQuery"
+    },
+    {
+      "type": "exports",
       "file": "src/ui/renderer/hooks/status-bar/toast-field.ts",
       "name": "TOAST_FIELD_MAX"
     },
@@ -1011,6 +1011,16 @@
       "type": "exports",
       "file": "src/ui/renderer/hooks/status-bar/vendor-label.ts",
       "name": "vendorEmoji"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/ThemeProvider.tsx",
+      "name": "BUNDLES"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/ThemeProvider.tsx",
+      "name": "bundleToPluginTokens"
     },
     {
       "type": "exports",
@@ -1025,12 +1035,17 @@
     {
       "type": "exports",
       "file": "src/ui/renderer/theme/index.ts",
-      "name": "applyBundleToDocument"
+      "name": "BUNDLES"
     },
     {
       "type": "exports",
       "file": "src/ui/renderer/theme/index.ts",
-      "name": "BUNDLES"
+      "name": "MARKETPLACE_THEME_BUNDLES"
+    },
+    {
+      "type": "exports",
+      "file": "src/ui/renderer/theme/index.ts",
+      "name": "applyBundleToDocument"
     },
     {
       "type": "exports",
@@ -1055,11 +1070,6 @@
     {
       "type": "exports",
       "file": "src/ui/renderer/theme/index.ts",
-      "name": "MARKETPLACE_THEME_BUNDLES"
-    },
-    {
-      "type": "exports",
-      "file": "src/ui/renderer/theme/index.ts",
       "name": "resolveSystemPair"
     },
     {
@@ -1071,16 +1081,6 @@
       "type": "exports",
       "file": "src/ui/renderer/theme/resolve-theme.ts",
       "name": "bundleShell"
-    },
-    {
-      "type": "exports",
-      "file": "src/ui/renderer/theme/ThemeProvider.tsx",
-      "name": "BUNDLES"
-    },
-    {
-      "type": "exports",
-      "file": "src/ui/renderer/theme/ThemeProvider.tsx",
-      "name": "bundleToPluginTokens"
     },
     {
       "type": "exports",
@@ -1100,12 +1100,12 @@
     {
       "type": "exports",
       "file": "src/work-board/storage.ts",
-      "name": "featureNamespaceStorage"
+      "name": "WORK_BOARD_FEATURE"
     },
     {
       "type": "exports",
       "file": "src/work-board/storage.ts",
-      "name": "WORK_BOARD_FEATURE"
+      "name": "featureNamespaceStorage"
     },
     {
       "type": "exports",
@@ -1266,6 +1266,11 @@
       "type": "files",
       "file": "src/data/__tests__/fixtures/secret-store-process-child.ts",
       "name": "src/data/__tests__/fixtures/secret-store-process-child.ts"
+    },
+    {
+      "type": "files",
+      "file": "src/floating-dock-window.js",
+      "name": "src/floating-dock-window.js"
     },
     {
       "type": "files",
@@ -2739,36 +2744,6 @@
     },
     {
       "type": "types",
-      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
-      "name": "McpUiDisplayMode"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
-      "name": "McpUiHostStyles"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
-      "name": "McpUiStyles"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
-      "name": "McpUiStyleVariableKey"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
-      "name": "McpUiTheme"
-    },
-    {
-      "type": "types",
-      "file": "src/ui/renderer/components/permissions/PermissionModeBadge.tsx",
-      "name": "ModeBadgeVariant"
-    },
-    {
-      "type": "types",
       "file": "src/ui/renderer/components/StarredView.tsx",
       "name": "StarredItem"
     },
@@ -2786,6 +2761,36 @@
       "type": "types",
       "file": "src/ui/renderer/components/TranscriptRenderer.tsx",
       "name": "TranscriptSearchProps"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
+      "name": "McpUiDisplayMode"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
+      "name": "McpUiHostStyles"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
+      "name": "McpUiStyleVariableKey"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
+      "name": "McpUiStyles"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/mcp-app-host-context.ts",
+      "name": "McpUiTheme"
+    },
+    {
+      "type": "types",
+      "file": "src/ui/renderer/components/permissions/PermissionModeBadge.tsx",
+      "name": "ModeBadgeVariant"
     },
     {
       "type": "types",

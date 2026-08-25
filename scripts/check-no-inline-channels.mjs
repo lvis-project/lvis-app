@@ -66,6 +66,9 @@ const TARGETS = [
   // Separate sandboxed plugin-webview preload entry. This is not under
   // src/preload/, so it must be listed explicitly.
   "src/plugin-preload.ts",
+  // The floating dock's preload, for the same reason: a separate sandboxed
+  // entry outside src/preload/.
+  "src/floating-dock-preload.ts",
   // Main-side producers paired with the preload/domain consumers above.
   "src/boot/plugins.ts",
   "src/boot/steps/ipc-bridge.ts",

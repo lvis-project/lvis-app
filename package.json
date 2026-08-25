@@ -42,6 +42,7 @@
     "build:styles": "tailwindcss --input src/styles.css --output dist/src/styles.css --minify",
     "build:preload": "webpack --config webpack.config.cjs --config-name preload",
     "build:plugin-preload": "webpack --config webpack.config.cjs --config-name pluginPreload",
+    "build:floating-dock-preload": "webpack --config webpack.config.cjs --config-name floatingDockPreload",
     "build:icons": "node scripts/generate-lvis-icons.cjs",
     "build": "bun run check:import-cycles && node scripts/clean-dist.mjs && bun run build:icons && node scripts/check-generated-assets.mjs && bun run build:main && bun run check:i18n-catalog && bun run check:i18n-barrels && bun run build:webpack && bun run build:styles && node scripts/copy-build-assets.mjs && node scripts/check-no-tls-bypass.mjs && node scripts/check-opacity-tokens.mjs && node scripts/check-color-tokens.mjs && node scripts/check-no-inline-channels.mjs && bun run check:source-text-safe",
     "typecheck": "tsc --noEmit",

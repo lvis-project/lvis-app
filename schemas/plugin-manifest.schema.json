@@ -75,7 +75,8 @@
           },
           "slot": {
             "enum": [
-              "sidebar"
+              "sidebar",
+              "floating"
             ]
           },
           "kind": {

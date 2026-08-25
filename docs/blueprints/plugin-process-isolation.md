@@ -283,6 +283,52 @@ the same shape as `spawnWorker` for the same reason.
   decisions about the SUBJECT of a recording, and the subject belongs to
   whoever asked for the audio.
 
+**`attachFloatingPanel(request) → FloatingPanelHandle`.** Returns
+`{ panelId, height, resize(), detach(), onDetached() }` — a live slot in the
+host's floating dock, and a handle for the same reason the two above are.
+
+- The host **owns the window, not just the frame around it**. There is exactly
+  ONE dock: a frameless, transparent, always-on-top window with host-drawn
+  chrome and a stack of slots under it. A plugin never opens a window; it names
+  one of its own manifest surfaces (`slot: "floating"`) and gets a slot.
+- *Why one window and not one each.* A plugin that could open its own frameless
+  transparent always-on-top window can draw anything anywhere — including a
+  convincing copy of the host's approval dialog over the real one, so the
+  user's click lands somewhere they cannot see. Inside the dock that has
+  nowhere to stand: the host's chrome is always around the plugin's pixels, the
+  position and width are the host's, and the dock's TOTAL height is capped
+  against the work area so no set of attachments can grow to cover a screen.
+  Per-slot caps alone would not do it — four slots would add up.
+- *This is a privilege reduction.* The capability replaces a plugin that was
+  already constructing its own `BrowserWindow` through a variable-held
+  `require("electron")`, plus a dozen private `ipcMain` channels behind it.
+  Everything the mediated form can do is a strict subset.
+- Reply: `{ handleId, panelId, height }`. `height` is what the host APPLIED
+  after clamping, which is not always what was asked for.
+- *`detach()` is the subscription's dispose, not a call.* The wire carries
+  calls by path; a handle is a host-side object the child holds a receipt for.
+  Releasing the receipt IS the detach, and the host's release callback performs
+  it. `onDetached` registers **child-local** listeners fed by host
+  notifications keyed by `handleId`, carrying the reason — `user-closed` and
+  `renderer-gone` are what let an orphaned recording be told from a stopped one.
+- *`resize` is the exception, and needs its own path.* It has to answer with
+  the height that was applied, and a handle method cannot cross. So
+  `resizeFloatingPanel(panelId, height) → number` is a member in its own right,
+  plain JSON both ways, naming an existing slot rather than opening one. The
+  host checks the panel against the CALLING plugin's slots; another plugin's
+  id gets the same answer a stale one does, because distinguishing them would
+  tell one plugin about another's.
+- *No `context` payload.* An attached card is served by the same
+  `plugin-ui-shell.html` and the same `lvis:plugin:*` bridge a sidebar card
+  gets, so it already has `callTool`, `emitEvent`, config, storage and theme. A
+  card that needs to know what it is showing asks its own plugin. Carrying a
+  host-opaque payload would have invented a second delivery channel for
+  plugin-to-plugin data that the host cannot read or validate and would then
+  have to marshal.
+- *What the host deliberately does not decide:* what the card renders. The
+  slot's title comes from the manifest and is placed as TEXT inside host
+  chrome; everything below it is the plugin's.
+
 - *Confinement composes.* `PluginWorkerSpec` lets the caller name its own
   `allowReadPaths` and `allowWritePaths`, and in one heap that was harmless — the
   plugin and the worker supervisor were the same trust domain. Across the boundary
@@ -617,9 +663,10 @@ the real hostApi and asserts, per path, whether its arguments and return values 
 JSON-representable — with the non-representable members named explicitly as
 requiring a decided representation rather than being silently allowed.
 
-*Correction from doing it.* That set is **ten**, not eight — and **eleven** once
-audio capture lands. Alongside `hostFetch`,
-`resolveApiKey`, `spawnWorker`, `startAudioCapture`, `storage.read`, `storage.write` and the three
+*Correction from doing it.* That set is **ten**, not eight — **eleven** once
+audio capture landed, and **twelve** with the floating dock. Alongside `hostFetch`,
+`resolveApiKey`, `spawnWorker`, `startAudioCapture`, `attachFloatingPanel`,
+`storage.read`, `storage.write` and the three
 disposer-returning subscriptions (`onEvent`, `onPluginsChanged`,
 `config.onChange`), the criterion "arguments **and** return values" also catches:
 

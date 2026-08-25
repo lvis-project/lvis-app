@@ -16,6 +16,7 @@ const BASE_FILES = [
   "src/sdk/index.ts",
   "src/cli/index.ts",
   "src/plugin-preload.ts",
+  "src/floating-dock-preload.ts",
   "src/boot/plugins.ts",
   "src/boot/steps/ipc-bridge.ts",
   "src/boot/steps/post-boot.ts",

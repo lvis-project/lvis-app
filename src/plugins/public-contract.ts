@@ -613,7 +613,16 @@ export interface PluginConfigSchemaProperty {
 
 export interface PluginUiExtension {
   id: string;
-  slot: "sidebar";
+  /**
+   * Where the surface renders.
+   *
+   * `"sidebar"` is a panel inside the app window. `"floating"` is a slot in
+   * the host's floating dock — one host-owned always-on-top window, framed by
+   * host chrome, that a plugin attaches into with `hostApi.attachFloatingPanel`.
+   * Declaring `"floating"` does not open anything; it only makes the surface
+   * eligible to be attached.
+   */
+  slot: "sidebar" | "floating";
   /**
    * Panel surface kind. The `"action"` kind (an icon that dispatched a declared
    * tool with no panel) was removed in #885 v6 along with its `tool` field —
@@ -1345,6 +1354,49 @@ export interface PluginHostApi {
    * queued — a queued recording would begin at a moment nobody chose.
    */
   startAudioCapture(request: AudioCaptureRequest): Promise<AudioCaptureHandle>;
+  /**
+   * Attach one of this plugin's declared `floating` surfaces to the host's
+   * floating dock — the single always-on-top window the host owns.
+   *
+   * THE PLUGIN DOES NOT GET A WINDOW. It gets a slot inside one, framed by
+   * host chrome that is always around its pixels. Everything about the window
+   * as a window — frameless, transparent, always-on-top, where on the screen
+   * it sits, how large the whole dock may grow — is the host's and reaches no
+   * parameter here. That split is the reason this capability can be offered at
+   * all: a transparent borderless always-on-top surface a plugin could place
+   * and size freely is a clickjacking primitive, and one framed by host chrome
+   * at host-chosen coordinates is not.
+   *
+   * A handle rather than an event subscription, for the same reason
+   * `startAudioCapture` is one: detach has to reach the ONE plugin whose card
+   * went away, and the host's event bus broadcasts to all of them.
+   *
+   * The card inside is served by the same shell and the same `lvis:plugin:*`
+   * bridge a sidebar card gets, so it already has `callTool`, `emitEvent`,
+   * config, storage and theme. A card that needs to talk to its plugin calls
+   * the plugin's own tools.
+   *
+   * Refused, never silently downgraded, when the surface is not declared
+   * `floating`, when its kind cannot render, or when the dock has no room
+   * left. `dock-full` is a condition to retry; the rest are bugs in the
+   * plugin, and the error code says which.
+   */
+  attachFloatingPanel(request: AttachFloatingPanelRequest): Promise<FloatingPanelHandle>;
+  /**
+   * Change one of this plugin's dock slots to a new height.
+   *
+   * The same operation {@link FloatingPanelHandle.resize} performs, exposed as
+   * an addressable member because a handle's method cannot cross a process
+   * boundary on its own — the wire carries calls by path, and a handle is a
+   * host-side object the child holds a receipt for. Prefer the handle method;
+   * this is what it delegates to.
+   *
+   * `panelId` is checked against the calling plugin's own slots, so naming
+   * another plugin's panel is a refusal rather than a resize.
+   *
+   * Clamped exactly as the attach was, and resolves to what was applied.
+   */
+  resizeFloatingPanel(panelId: string, height: number): Promise<number>;
 
   /**
    * Open a hardened viewer BrowserWindow that loads `url` inside the
@@ -1819,6 +1871,62 @@ export interface AudioCaptureDevice {
   readonly deviceId: string;
   /** Empty until microphone access has been granted at least once. */
   readonly label: string;
+}
+
+/** What a plugin asks for when it attaches a card to the floating dock. */
+export interface AttachFloatingPanelRequest {
+  /** The id of one of this plugin's own manifest `ui` entries, slot `floating`. */
+  readonly extensionId: string;
+  /**
+   * Requested slot height in device-independent pixels.
+   *
+   * Clamped by the host and never honoured verbatim — the dock's total height
+   * is capped against the work area, so what a plugin gets depends on the
+   * display and on what is already attached. Read {@link FloatingPanelHandle.height}
+   * for what was actually applied. A non-finite or non-positive value is
+   * REFUSED rather than defaulted, because silently opening a minimum-height
+   * slot would hide the caller's arithmetic bug.
+   */
+  readonly height?: number;
+}
+
+/** Why a dock slot went away. */
+export type DetachReason =
+  /** The plugin called `detach()`. */
+  | "requested"
+  /** The user closed the dock. */
+  | "user-closed"
+  /** The card's renderer died. */
+  | "renderer-gone"
+  /** The plugin was stopped, reloaded or uninstalled. */
+  | "plugin-stopped"
+  /** The app is shutting down. */
+  | "host-shutdown";
+
+/** A live dock slot, as the plugin holds it. */
+export interface FloatingPanelHandle {
+  readonly panelId: string;
+  /** The slot height the host actually used, after clamping. */
+  readonly height: number;
+  /**
+   * Ask for a new height. Clamped identically; resolves to what was applied.
+   *
+   * Asynchronous because for an out-of-process plugin the dock is on the other
+   * side of a wire. Rejects when the slot is already detached rather than
+   * quietly doing nothing — a resize on a dead slot means the caller lost track
+   * of it, and silence would let that keep happening.
+   */
+  resize(height: number): Promise<number>;
+  /** Idempotent. */
+  detach(): Promise<void>;
+  /**
+   * Fires exactly once, whoever detached the slot.
+   *
+   * The reason is what separates an orphaned session from a deliberate stop —
+   * a recorder that hears `user-closed` has cleanup to do, and one that hears
+   * nothing keeps recording into a window that is gone.
+   */
+  onDetached(listener: (reason: DetachReason) => void): void;
 }
 
 /** What a plugin asks for. Every field is data; none of it is a command. */

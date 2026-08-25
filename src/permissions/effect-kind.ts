@@ -90,6 +90,8 @@ export type ChokepointKind =
   // records.
   | "listAudioInputDevices"
   | "startAudioCapture"
+  | "attachFloatingPanel"
+  | "resizeFloatingPanel"
   | "triggerConversation"
   | "agentApprovalRespond"
   // ─── Structural-completeness vocabulary ────────────────────────────────
@@ -165,6 +167,15 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   resolveMappedDriveRoot: "read",
   listAudioInputDevices: "read",
   startAudioCapture: "write",
+  // A WRITE: it puts pixels on top of every other application on the machine.
+  // Nothing is read and nothing is stored, but "did something the user can
+  // see and did not initiate" is the boundary the effect gate exists for, and
+  // treating it as a read would take an always-on-top surface outside it.
+  attachFloatingPanel: "write",
+  // Also a write: it changes what the always-on-top surface covers. Smaller
+  // than opening one, but the same kind of thing, and classifying it as a read
+  // would put growing a panel outside the gate that admitting it went through.
+  resizeFloatingPanel: "write",
   triggerConversation: "write",
   agentApprovalRespond: "write",
   // Structural-completeness vocabulary — writes (egress / persist / session).
@@ -433,6 +444,17 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   // aimed at — there is no path or id in it to name.
   listAudioInputDevices: { kind: "listAudioInputDevices", async: true },
   startAudioCapture: { kind: "startAudioCapture", async: true },
+  // The target IS the surface id: it is the only thing a plugin names, and it
+  // is what an audit reader needs to know which of the plugin's own cards went
+  // on top of everything. The height is not a target — it is a request the
+  // host clamps, and recording it would suggest the host honoured it.
+  attachFloatingPanel: {
+    kind: "attachFloatingPanel",
+    async: true,
+    targetFromArgs: objectStringField("extensionId"),
+  },
+  // The panel id, which is the first positional argument rather than a field.
+  resizeFloatingPanel: { kind: "resizeFloatingPanel", async: true },
   triggerConversation: { kind: "triggerConversation", async: true, targetFromArgs: objectStringField("source"),
   },
   // ─── agentApproval.* ──────────────────────────────────────────────────────

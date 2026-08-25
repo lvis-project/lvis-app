@@ -130,4 +130,9 @@ module.exports = [
   // MCP-App sandbox-proxy relay. Installed via session.setPreloads() on the
   // per-server `lvis-mcp-app:<hex>` partition (see html-preview-partition.ts).
   preloadConfig("mcpAppPreload", "src/mcp-app-preload.ts", "mcp-app-preload.cjs"),
+  // The floating dock's own preload. Bundled rather than shipped as hand-written
+  // `.cjs` (the way `audio-capture-window-preload.cjs` is) because it imports
+  // the channel constants — `check-no-inline-channels.mjs` exists precisely to
+  // stop a preload from restating a channel string it could import.
+  preloadConfig("floatingDockPreload", "src/floating-dock-preload.ts", "floating-dock-preload.cjs"),
 ];

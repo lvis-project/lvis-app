@@ -167,6 +167,12 @@ export function createNoopHostApi(
     startAudioCapture: async () => {
       throw new Error("startAudioCapture not available in noop context");
     },
+    attachFloatingPanel: async () => {
+      throw new Error("attachFloatingPanel not available in noop context");
+    },
+    resizeFloatingPanel: async () => {
+      throw new Error("resizeFloatingPanel not available in noop context");
+    },
     resolveMappedDriveRoot: async () => {
       throw new Error("resolveMappedDriveRoot not available in noop context");
     },

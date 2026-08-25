@@ -280,6 +280,16 @@ describe("lvis-prose CSS coverage — markdown tables stay readable", () => {
       extract: (text) => text.match(/html,body\s*\{[^{}]*?font-family:\s*([^;}]+)/)?.[1] ?? null,
     },
     {
+      // The floating dock is a host-owned shell in its own window, so it bakes
+      // the stack the same way the plugin shell does. Registered as a mirror
+      // rather than allowlisted: an exemption would let it drift, and a dock
+      // whose letterforms differ from the app window's reads as a different
+      // application floating on top of one.
+      label: "floating-dock-window.html body",
+      path: "src/floating-dock-window.html",
+      extract: (text) => text.match(/body\s*\{[^{}]*?font-family:\s*([^;}]+)/)?.[1] ?? null,
+    },
+    {
       label: "window-titlebar-shell.ts body",
       path: "src/main/window-titlebar-shell.ts",
       extract: (text) => text.match(/body\s*\{[^{}]*?font-family:\s*([^;}]+)/)?.[1] ?? null,

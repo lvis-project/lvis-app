@@ -22,8 +22,10 @@ import type { AuthRedirectCatchers } from "../../../main/auth-redirect-catcher.j
 import { pickFoldersForPlugin } from "../../../main/host-api/pick-folders.js";
 import { resolveMappedDriveRoot } from "../../../main/host-api/mapped-drive-root.js";
 import { AudioCaptureService } from "../../../main/audio-capture.js";
-import type { AudioCaptureRequest } from "../../../plugins/public-contract.js";
+import type { AttachFloatingPanelRequest, AudioCaptureRequest } from "../../../plugins/public-contract.js";
 import { ElectronAudioCaptureSurface } from "../../../main/audio-capture-surface.js";
+import { FloatingDock } from "../../../main/floating-dock.js";
+import { ElectronFloatingDockSurface } from "../../../main/floating-dock-surface.js";
 import { evaluateHostFetch, runHostFetchHops } from "../../../main/host-fetch-guard.js";
 import {
   partitionCookieHeaderForUrl,
@@ -171,6 +173,33 @@ let sharedAudioCaptureService: AudioCaptureService | null = null;
 function audioCaptureService(): AudioCaptureService {
   sharedAudioCaptureService ??= new AudioCaptureService(new ElectronAudioCaptureSurface());
   return sharedAudioCaptureService;
+}
+
+/**
+ * The one floating dock, built on first use.
+ *
+ * Lazy for a plainer reason than the capture service's: constructing it does
+ * nothing visible, but there is no point holding a dock in an installation
+ * where nothing ever attaches to it. One instance because the dock IS one
+ * window — a second would defeat the framing argument that lets a plugin
+ * surface float above other applications at all.
+ *
+ * The surface resolver is read through the runtime getter rather than captured,
+ * because the runtime binding is assigned after this factory is built and a
+ * captured reference would be the pre-assignment one.
+ */
+let sharedFloatingDock: FloatingDock | null = null;
+function floatingDock(getPluginRuntime: () => PluginRuntime): FloatingDock {
+  sharedFloatingDock ??= new FloatingDock(
+    new ElectronFloatingDockSurface(),
+    (pluginId, extensionId) => getPluginRuntime().resolveFloatingSurface(pluginId, extensionId),
+  );
+  return sharedFloatingDock;
+}
+
+/** The dock, if one was ever built. Shutdown and the dock's IPC use it. */
+export function peekFloatingDock(): FloatingDock | null {
+  return sharedFloatingDock;
 }
 
 
@@ -1137,6 +1166,19 @@ export function createHostApiFactory(
       listAudioInputDevices: async () => audioCaptureService().listInputDevices(),
       startAudioCapture: async (request: AudioCaptureRequest) =>
         audioCaptureService().start(request),
+      /**
+       * The window is the HOST's. What the plugin contributes is the id of a
+       * surface it already declared in its own manifest, and a height the host
+       * clamps — never a position, never a window flag, never a size the dock
+       * will honour verbatim.
+       *
+       * `pluginId` comes from the binding this factory was built for, not from
+       * the request, so a plugin cannot attach a surface belonging to another.
+       */
+      attachFloatingPanel: async (request: AttachFloatingPanelRequest) =>
+        floatingDock(deps.getPluginRuntime).attach(pluginId, request),
+      resizeFloatingPanel: async (panelId: string, height: number) =>
+        floatingDock(deps.getPluginRuntime).resizeByPanelId(pluginId, panelId, height),
       openAuthWindow: (async (opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean }) => {
         const safeUrlForLog = (() => {
           try {

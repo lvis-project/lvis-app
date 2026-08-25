@@ -20,6 +20,18 @@ export const BUILD_ASSETS = Object.freeze([
     category: "plugin-shell",
   },
   {
+    src: "src/floating-dock-window.html",
+    out: "dist/src/floating-dock-window.html",
+    label: "floating-dock-window.html",
+    category: "floating-dock",
+  },
+  {
+    src: "src/floating-dock-window.js",
+    out: "dist/src/floating-dock-window.js",
+    label: "floating-dock-window.js",
+    category: "floating-dock",
+  },
+  {
     src: "src/audio-capture-window.html",
     out: "dist/src/audio-capture-window.html",
     label: "audio-capture-window.html",

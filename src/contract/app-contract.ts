@@ -357,6 +357,28 @@ export const CHANNELS = {
     // Fan-out to plugin webviews (main → plugin frame).
     event: "lvis:plugin:event",
   },
+  /**
+   * Floating dock (lvis:dock:*) — the host's always-on-top window.
+   *
+   * Main-to-dock unless the comment says otherwise. Separate from
+   * `pluginBridge` because these are the HOST's channels: the plugin cards
+   * inside the dock talk over `pluginBridge` exactly as sidebar cards do, and
+   * nothing here is reachable from a plugin frame.
+   */
+  dock: {
+    /** Replace the host's activity line. `null` clears it. */
+    activity: "lvis:dock:activity",
+    /** Add a plugin card to a slot. */
+    mount: "lvis:dock:mount",
+    /** Change one card's height. */
+    resize: "lvis:dock:resize",
+    /** Remove a plugin card. */
+    unmount: "lvis:dock:unmount",
+    /** Dock-to-main: the user pressed the dock's close control. */
+    requestClose: "lvis:dock:request-close",
+    /** Dock-to-main: one slot's guest died. */
+    slotGone: "lvis:dock:slot-gone",
+  },
   host: {
     pluginThemeNotify: "lvis:host:plugin-theme-notify",
   },
