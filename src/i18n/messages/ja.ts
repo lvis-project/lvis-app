@@ -30,6 +30,7 @@ export const ja: Record<SeedMessageKey, string> = {
   "mainDialog.updateRestartMessage": "LVIS は v{version} に再起動します。",
   "mainDialog.updateRestartDetail": "進行中の作業は終了します。続行しますか？",
   "mainDialog.attachTitle": "添付ファイルを選択",
+  "mainDialog.pluginPickFolderTitle": "{plugin} で使用するフォルダーを選択",
   "mainDialog.installLocalPluginTitle": "ローカルプラグインをインストール (開発者)",
   "mainDialog.installLocalPluginMessage": "plugin.json を含むビルドフォルダーを選択してください",
   "mainDialog.unauthorizedFrame": "許可されていないフレームです。",

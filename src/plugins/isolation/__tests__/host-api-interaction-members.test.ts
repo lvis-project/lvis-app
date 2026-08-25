@@ -80,6 +80,7 @@ interface HostImplementations {
     timeoutMs?: number;
   }) => Promise<Readonly<Record<string, string>>>;
   authRedirectClose: (opts: { handle: string }) => Promise<void>;
+  pickFolders: () => Promise<{ canceled: boolean; folders: string[] }>;
   triggerConversation: (
     spec: ConversationTriggerSpec,
   ) => Promise<ConversationTriggerResult>;
@@ -109,6 +110,7 @@ function defaultImplementations(): HostImplementations {
     }),
     authRedirectWait: async () => Object.freeze({ code: "auth-code", state: "xyz" }),
     authRedirectClose: async () => {},
+    pickFolders: async () => ({ canceled: false, folders: ["/Users/example/Documents"] }),
     triggerConversation: async (spec) => ({
       accepted: true,
       source: spec.source,
@@ -148,6 +150,7 @@ async function harness(
       wait: (opts) => impl.authRedirectWait(opts),
       close: (opts) => impl.authRedirectClose(opts),
     },
+    pickFolders: () => impl.pickFolders(),
     triggerConversation: (spec) => impl.triggerConversation(spec),
     agentApproval: {
       request: (input) => impl.approvalRequest(input),
@@ -249,6 +252,8 @@ const SAMPLE_ARGS: Record<InteractionHostApiPath, readonly unknown[]> = {
   "authRedirect.open": [],
   "authRedirect.wait": [{ handle: REDIRECT_HANDLE }],
   "authRedirect.close": [{ handle: REDIRECT_HANDLE }],
+  // Takes nothing: the user's answer is the whole payload, in one direction.
+  pickFolders: [],
   triggerConversation: [
     {
       prompt: "Meeting starts in 5 minutes",
@@ -263,7 +268,7 @@ const SAMPLE_ARGS: Record<InteractionHostApiPath, readonly unknown[]> = {
 };
 
 describe("the group carries exactly the members whose refusal is an answer", () => {
-  it("names ten paths, every one a declared hostApi member", () => {
+  it("names eleven paths, every one a declared hostApi member", () => {
     expect([...INTERACTION_HOSTAPI_PATHS]).toEqual([
       "openExternalUrl",
       "openAuthWindow",
@@ -272,6 +277,7 @@ describe("the group carries exactly the members whose refusal is an answer", () 
       "authRedirect.open",
       "authRedirect.wait",
       "authRedirect.close",
+      "pickFolders",
       "triggerConversation",
       "agentApproval.request",
       "agentApproval.respond",
@@ -328,6 +334,7 @@ describe("the group carries exactly the members whose refusal is an answer", () 
         wait: async () => Object.freeze({ code: "auth-code" }),
         close: async () => {},
       },
+      pickFolders: async () => ({ canceled: true, folders: [] }),
       triggerConversation: async () => ({ accepted: true, source: "overlay:x" }),
       agentApproval: {
         request: async () => "allow-once",
@@ -380,6 +387,7 @@ describe("arguments reach the host exactly as the plugin passed them", () => {
         authRedirectOpen: record as unknown as HostImplementations["authRedirectOpen"],
         authRedirectWait: record as unknown as HostImplementations["authRedirectWait"],
         authRedirectClose: record as unknown as HostImplementations["authRedirectClose"],
+        pickFolders: record as unknown as HostImplementations["pickFolders"],
         triggerConversation:
           record as unknown as HostImplementations["triggerConversation"],
         approvalRequest: record as unknown as HostImplementations["approvalRequest"],

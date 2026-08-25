@@ -141,6 +141,9 @@ export function createNoopHostApi(
         throw new Error("authRedirect.close not available in noop context");
       },
     },
+    pickFolders: async () => {
+      throw new Error("pickFolders not available in noop context");
+    },
     openAuthWindow: async () => {
       throw new Error("openAuthWindow not available in noop context");
     },

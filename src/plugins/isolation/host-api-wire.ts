@@ -882,6 +882,18 @@ export const HOSTAPI_PATH_CONTRACTS = {
     lifetime: "none",
     errors: ["effect-boundary-denied"],
   },
+  // The folder chooser. Takes nothing and returns paths, so the only thing
+  // crossing is the user's answer. `errors` is empty for the same reason
+  // `authRedirect.wait` has none: the effect is a READ (the picked directory
+  // was already readable — the child's read confinement is deny-only), so no
+  // mutating-effect verdict applies. Its bounds are the user's dismissal and
+  // the one-chooser-per-plugin refusal, neither of which is a boundary denial.
+  pickFolders: {
+    arguments: "plain-json",
+    result: "plain-json",
+    lifetime: "none",
+    errors: [],
+  },
   // The gated read-back of the host-held session cookies. Values cross the
   // boundary by design — that is what the caller needs to inject a session
   // into a separate browser context — so the host, not the child, decides
@@ -954,12 +966,13 @@ export const INTERACTION_HOSTAPI_PATHS = [
   "authRedirect.open",
   "authRedirect.wait",
   "authRedirect.close",
+  "pickFolders",
   "triggerConversation",
   "agentApproval.request",
   "agentApproval.respond",
 ] as const satisfies readonly HostApiPath[];
 
-/** One of the ten. */
+/** One of the eleven. */
 export type InteractionHostApiPath = (typeof INTERACTION_HOSTAPI_PATHS)[number];
 
 /** The members the service handler group carries. */

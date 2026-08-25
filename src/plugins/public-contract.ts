@@ -1280,6 +1280,32 @@ export interface PluginHostApi {
   };
 
   /**
+   * Ask the user which folders the plugin should work on.
+   *
+   * AN ANSWER, NOT A GRANT. A confined plugin child's read confinement is
+   * deny-only, so an ordinary user directory was already readable; what the
+   * plugin could not do is find out WHICH one the user meant. Nothing here
+   * widens the child's envelope — writing to a picked path is still refused
+   * unless a reviewed `userChosenDirectory` row already granted it.
+   *
+   * WHY THE HOST OWNS IT. `dialog` is an Electron main API. A plugin that
+   * resolves `electron` to reach one method holds main's whole surface, which
+   * is what keeps it from being routed out-of-process at all.
+   *
+   * A CANCEL IS AN ANSWER. `canceled` is true when the user dismissed the
+   * chooser or selected nothing; it is not an error, and the two are not worth
+   * distinguishing because both mean the user named no folder.
+   *
+   * ATTRIBUTION: the chooser's title names the calling plugin, decided by the
+   * host from the HostApi instance rather than supplied by the caller.
+   *
+   * Rejects when this plugin already has a chooser open — a modal the user must
+   * dismiss is a claim on their attention, and stacking them is refused rather
+   * than queued.
+   */
+  pickFolders(): Promise<{ canceled: boolean; folders: string[] }>;
+
+  /**
    * Open a hardened viewer BrowserWindow that loads `url` inside the
    * caller plugin's `persist:plugin-auth:<pluginId>` partition. The
    * existing cookies in that partition (typically deposited by an
