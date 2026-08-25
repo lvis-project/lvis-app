@@ -915,3 +915,99 @@ The one genuine contract break in this plan is `getSecret` in Stage 4, and it is
 handled as a flag-day across all seven repositories rather than as a dual-signature
 shim — precisely because a shim there would need a removal plan nobody would ever
 execute.
+
+---
+
+## 10. The two plugins no wire can admit, and why
+
+*Added 2026-08-25, from measurement rather than from estimate. The routing SOT
+carries the per-plugin verdicts; this section carries the reason the last two
+are a different KIND of problem from the first three, so a future reader does
+not spend a quarter building the wire that cannot work.*
+
+`work-assistant`, `ms-graph` and — once its broker stops binding TCP —
+`local-indexer` were admitted the same way each time: an ambient axis had a
+mediated form, and the plugin was changed to use it. `authRedirect` replaced a
+socket. `pickFolders` replaced `dialog`. `pluginSocketDir` replaces a loopback
+bind. Each is a small, host-owned answer to a narrow request.
+
+`ep-api` and `meeting` do not fit that shape, and the reason is the same for
+both. **Neither is blocked on a missing host API. Both ship code that is
+written to run somewhere the boundary does not reach.**
+
+- `ep-api` drives portal pages with Playwright. Of its 40 `evaluate` call
+  sites, 31 pass a **function body** that is compiled and run inside an
+  authenticated page.
+- `meeting` opens a recorder `BrowserWindow` whose `preload` and renderer are
+  the plugin's own files, loaded into a renderer outside the sandbox.
+
+A wire cannot mediate that. To mediate it, the host would have to accept
+plugin-authored code and execute it in a privileged context on the plugin's
+behalf — which removes the boundary rather than enforcing it. **Mediating
+`evaluate` mediates nothing.** So there are exactly two ways out, and both are
+migrations rather than wires:
+
+1. **The code moves to the host** and becomes first-party — reviewed, signed
+   and released with the app, rather than installed from a marketplace.
+2. **The need is met by data instead of code** — a REST call, a parameter, a
+   declarative spec — so nothing needs to execute anywhere privileged.
+
+### `ep-api` — one id, three unrelated problems
+
+Measured per client file, which is what shows they are not one problem:
+
+| client | Playwright sites | `hostFetch` | what it means |
+| --- | ---: | ---: | --- |
+| `attendanceClient` | 0 | 2 | already route (2) |
+| `approvalClient` | 0 | 2 | already route (2) |
+| the internal REST client | 0 | 3 | already route (2) |
+| `parkingClient` | 40 | 2 | route (2), **started** |
+| `videoConferenceClient` | 13 | 2 | route (2), **started** |
+| the internal chat-assistant client | 38 | 0 | genuinely open |
+| the directory-identity client | 0 | 0 | not a browser problem at all |
+
+Three clients have already completed route (2), which is the existence proof
+that the route works for this portal. Two more have begun it — the `hostFetch`
+calls in `parkingClient` and `videoConferenceClient` are not decoration, they
+are the first endpoints of the same migration. So the bulk of `ep-api` is not a
+design question; it is unfinished work with a proven pattern.
+
+What is left after that is two things the browser question never covered:
+
+- **the chat-assistant client** — an internal chat UI with no API behind it. Route (2) needs an
+  endpoint that does not exist yet; route (1) needs the driving code to become
+  host first-party. This is the only part of `ep-api` that is genuinely undecided.
+- **the directory-identity client** — `spawn`s a shell interpreter and a
+  directory-lookup binary to resolve a
+  user identity. Ambient axis 3, reachable from the plugin's entry, and **the
+  routing SOT does not name it**. It needs a mediated identity lookup and is
+  unaffected by whatever happens to the browser flows.
+
+### `meeting` — the window is not the request
+
+The floating recorder looks like "a plugin needs a window". It is three
+requests wearing one coat, and the code says which is which:
+
+1. **Chrome and placement** — frameless, transparent, `alwaysOnTop`, positioned
+   from `screen.getPrimaryDisplay().workArea`. Parameters. A host that owned the
+   window would take them as data.
+2. **Capture** — the renderer exists for Web APIs that only exist in a renderer:
+   `getUserMedia`, `getDisplayMedia`, `AudioContext`, `AudioWorklet`, with the
+   system-audio leg routed through a partition-scoped `session` and
+   `electron-audio-loopback`'s handler. This is the irreducible part, and it is
+   irreducible in the HOST's favour: only the host has a renderer inside the
+   trust boundary.
+3. **The plugin's own UI code** — `recorder-window-preload.cjs` plus a
+   1247-line renderer, loaded from `pluginRoot`.
+
+The protocol between them is **already data-shaped**: ten `ipcMain` channels,
+and nine of them are `get-init`, `get-theme`, `get-detail`, `get-levels`,
+`resize`, and the four lifecycle verbs. Only `push-chunk` carries a payload,
+and it carries audio.
+
+That is the whole design. A host-owned recorder capability serves (1) and (2),
+answers the `get-*` channels from data the plugin supplies over the existing
+boundary, and delivers chunks back to it. The plugin stops owning a window and
+becomes the consumer of a recording. **Do not build a windowing wire** — a wire
+that let a plugin open a BrowserWindow and load its own preload would hand back
+exactly the reach isolation removed, with more steps.
