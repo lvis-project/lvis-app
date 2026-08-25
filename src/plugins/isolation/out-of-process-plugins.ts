@@ -486,7 +486,7 @@
  *   dock concludes the teardown was its own and leaves the recording running
  *   with nothing driving it.
 
- * `ep-api` — REFUSED, on ONE thing: it drives a browser.
+ * `ep-api` — REFUSED, on ONE thing: ONE of its flows drives a browser.
  *
  *   THE EGRESS SENTENCE THAT USED TO OPEN THIS ENTRY CONTRADICTED THE ENTRY,
  *   which is a worse failure than being out of date. It said every REST client
@@ -606,22 +606,53 @@
  *     - The conferencing client already submitted directly; only its dry run
  *       opened a browser, to fill a form it then discarded, and it stopped
  *       (0.19.5). The `evaluate` sites left in that file are its cancel path's.
- *     - The assistant client is the real one. A browser-free query answers the
- *       plain case over four REST calls (0.19.3), and an expired session no
- *       longer buys a launch (0.19.6) — the page flow re-ran the same session
- *       check against the same vault cookies and threw the same error, so the
- *       launch only delayed it. What still needs a page is a scoped question,
- *       and not for want of trying: the page read that scope out of the SPA's
- *       session storage, the provider keeps no server-side record of it, and
- *       the request fields for those question types have never been observed
- *       on the wire. Inventing them would answer confidently out of the wrong
- *       corpus, which is worse than answering slowly.
+ *     - The assistant client opens no browser at all as of 0.19.11, and the
+ *       route there corrected this entry twice. A browser-free query answered
+ *       the plain case over four REST calls (0.19.3), and an expired session
+ *       stopped buying a launch (0.19.6) — the page flow re-ran the same
+ *       session check against the same vault cookies and threw the same
+ *       error, so the launch only delayed it.
  *
- *   So the tail is not "migrate four clients". It is: observe ONE scoped
- *   request, then retire the fallbacks the direct paths have made
- *   unnecessary. The mutating half of those fallbacks is the part that cannot
- *   be observed without performing a real booking or cancellation, which is a
- *   decision for the operator rather than a measurement.
+ *       This entry then said a SCOPED question still needed a page. That was
+ *       wrong, and wrong in the direction that costs the most: it named an
+ *       observation as the next step. The public handler exposes no scope
+ *       parameter, and every page context was created blank, so the page had
+ *       never answered a scoped question — there was no way to ask it one.
+ *       The observation would have unblocked nothing.
+ *
+ *       What actually kept the page was narrower: a stream that arrived and
+ *       the plugin's parser did not recognise. The page renders the same
+ *       stream through the vendor's own renderer, so a vendor payload change
+ *       would have been an outage rather than a bug. Answered directly
+ *       (0.19.11) — the parser takes a second pass over events not labelled
+ *       as model output, since a renamed event type is exactly that failure
+ *       and the FIELD NAMES identify an answer. It does not extend the same
+ *       tolerance to a bare token field: that field is overloaded in this
+ *       payload and an auth event carries one, so an unguarded pass would
+ *       assemble a reply out of a credential.
+ *
+ *       With that, the whole DOM prompt flow went: 3142 -> 1012 lines, 19
+ *       `evaluate` -> 0, no browser driver imported. Its token refresh moved
+ *       to mediated REST in the same change; the page had been there for one
+ *       capability, reading web storage, and nothing replaces that rung
+ *       because inventing a value would rotate a token against a principal
+ *       never confirmed. An unresolved token throws into the auth ladder's
+ *       existing re-login step — slower, never wrong.
+ *
+ *   So the tail is ONE flow, not four clients: the conferencing client's
+ *   CANCEL. Not its list read, which is a fetch-and-parse with the browser
+ *   behind it — the mutation itself. And it is a genuine blocker rather than
+ *   unfinished migration: that code does not KNOW the cancel endpoint. It
+ *   navigates to the detail page, clicks whatever reads as a cancel control,
+ *   and recognises success by watching for a request URL matching a pattern.
+ *   A contract discovered at runtime cannot be reimplemented from the source.
+ *
+ *   Two ways to settle it, and they cost very differently. Reading the detail
+ *   page's cancel control and the handler behind it yields the endpoint and
+ *   its body with NO mutation performed — the same read-only technique that
+ *   already produced two other form contracts here. Recording a real
+ *   cancellation is the fallback if that handler turns out to be opaque, and
+ *   that one is a decision for the operator rather than a measurement.
  *
  *   ALSO REMOVED, 0.19.7: an interactive-login helper and a session probe,
  *   and with them the persistent-profile launch mode and the `userDataDir`
