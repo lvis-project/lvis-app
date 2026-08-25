@@ -518,6 +518,7 @@ vi.mock("../../permissions/sandbox-capability.js", () => ({
 }));
 vi.mock("../../permissions/asrt-sandbox.js", () => ({
   initializeAsrtSandbox: vi.fn(async () => {}),
+  useAppOwnedSandboxTempRoot: vi.fn(() => "/tmp/lvis-test-sandbox-tmp"),
   checkAsrtDependencies: vi.fn(async () => ({ errors: [], warnings: [] })),
   isAsrtLinuxRuntimeProbeError: vi.fn(() => false),
   isAsrtSandboxActive: vi.fn(() => false),

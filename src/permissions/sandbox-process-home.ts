@@ -32,6 +32,13 @@ export function sandboxProcessProfileEnvironment(
       USERPROFILE: homePath,
       APPDATA: appData,
       LOCALAPPDATA: localAppData,
+      // Windows only, and it DOES take effect here: ASRT deletes the `TMPDIR`
+      // it generates on this platform ("serves no purpose on Windows and breaks
+      // msys2 tools") and sets no replacement, so the profile's own value is
+      // what the child sees. Node reads TEMP then TMP; both, so a child that
+      // consults either lands in the same place.
+      TEMP: win32.join(homePath, "tmp"),
+      TMP: win32.join(homePath, "tmp"),
     };
     const drive = win32.parse(homePath).root.slice(0, 2);
     if (/^[A-Za-z]:$/.test(drive)) {
@@ -52,6 +59,12 @@ export function sandboxProcessProfileEnvironment(
     XDG_DATA_HOME: join(homePath, "data"),
     XDG_CACHE_HOME: join(homePath, "cache"),
     XDG_STATE_HOME: join(homePath, "state"),
+    // NO `TMPDIR` here, deliberately. On macOS and Linux ASRT writes its own
+    // `TMPDIR=` into the sandboxed command line, which is evaluated INSIDE the
+    // sandbox and therefore wins over anything this env carries. Setting one
+    // would be a value that never applies — a comment claiming a substitution
+    // the child never sees. The POSIX temp root is set where it CAN take
+    // effect, at `sandbox-init.ts`, through the variable ASRT reads.
   };
 }
 
@@ -65,19 +78,44 @@ function createProfileDirectories(env: Readonly<Record<string, string>>): void {
     env.XDG_DATA_HOME,
     env.XDG_CACHE_HOME,
     env.XDG_STATE_HOME,
+    // The temp root has to EXIST, and that is the whole point of it being
+    // here. ASRT substitutes a temp root and creates nothing, so a confined
+    // child's `os.tmpdir()` routinely names a directory that is not there —
+    // `readdirSync` and `mkdtempSync` fail `ENOENT` while a recursive `mkdir`
+    // on the same path succeeds. An unguarded sweep of `tmpdir()` in a
+    // plugin's activation body therefore does not degrade a feature, it stops
+    // the plugin from loading.
+    env.TMPDIR,
+    env.TEMP,
+    env.TMP,
   ])) {
     if (directory) mkdirSync(directory, { recursive: true, mode: 0o700 });
   }
 }
 
 /**
- * Create a fresh HOME/profile for one ASRT-confined process lifetime.
+ * Create a fresh HOME/profile — and temp root — for one ASRT-confined process
+ * lifetime.
  *
  * The real user HOME remains on the sandbox deny-list, but child programs no
  * longer probe denied implicit config files such as `.gitconfig`, `.npmrc`, or
  * shell startup files. A unique directory is mandatory: sharing a writable
  * synthetic HOME would let one sandboxed command persist config that changes a
  * later command's behavior.
+ *
+ * THE TEMP ROOT IS PART OF THAT, and it is the one substitution that is right
+ * BECAUSE it vanishes. Rooting durable state at the throwaway HOME is a trap —
+ * the write succeeds and the state is gone at exit, which reads as working and
+ * costs the user their data on the next start. Temp is the case where vanishing
+ * at exit is the contract rather than the defect.
+ *
+ * Without it, `os.tmpdir()` in a confined child names the root ASRT
+ * substitutes, which is SHARED: it is one of ASRT's own default write paths, so
+ * every confined process on the machine reaches the same directory — two
+ * plugins, or a plugin and a worker, meeting in a place neither one's manifest
+ * mentions. Every caller of this module already grants `home.path` for writing,
+ * so a temp root beneath it needs no new grant; that uniformity is what makes
+ * this a property of confinement rather than a favour done for one caller.
  */
 export function createSandboxProcessHome(
   platform: NodeJS.Platform = process.platform,

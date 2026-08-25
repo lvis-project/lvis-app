@@ -4,6 +4,7 @@
 
 
 import { spawn } from "node:child_process";
+import { mkdirSync } from "node:fs";
 import { createRequire } from "node:module";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
@@ -651,6 +652,28 @@ export function getDefaultSensitiveWriteDenyPaths(userDataDir?: string): string[
     // that in a dev checkout this exe can sit inside a write grant). Grandparent
     // of the exe → covers every arch subdir + build script. Inert off win32.
     dirname(dirname(getVendoredSrtWinExePath())),
+    // ── ASRT's OWN default write paths ─────────────────────────────────────
+    // `sandbox-manager` composes the write allow-list as
+    // `[...getDefaultWritePaths(), ...userAllowWrite]`, so an ALLOW grant
+    // cannot subtract from it and every confined process on the machine — this
+    // app's plugins, this app's workers, and any OTHER ASRT consumer — reaches
+    // the same directories. Measured before this deny existed: a confined
+    // plugin child listed 141 entries under `/tmp/claude` and wrote a file of
+    // its own, and a second child spawned with a different plugin root read it
+    // back. That is a channel between two plugins the boundary exists to keep
+    // apart, and a channel out of the sandbox into two directories under the
+    // user's REAL home that belong to other tools.
+    //
+    // A DENY is what closes it: ASRT applies these as `denyWithinAllow`, which
+    // takes precedence over its own defaults. This could not be done until now
+    // for one reason, and it was not a small one — ASRT pointed `TMPDIR` AT
+    // this list, so denying it also broke every `writeFileSync(join(tmpdir(),
+    // …))` in every confined child. `useAppOwnedSandboxTempRoot` moved the temp
+    // root under `~/.lvis` first, which is what makes the deny survivable.
+    "/tmp/claude",
+    "/private/tmp/claude",
+    join(home, ".npm", "_logs"),
+    join(home, ".claude", "debug"),
   ];
   const seen = new Set<string>();
   const out: string[] = [];
@@ -1109,6 +1132,11 @@ export async function wrapToolCommand(
   if (!isAsrtSandboxActive()) {
     throw new Error("wrapToolCommand: ASRT sandbox is not active (initialize at boot first)");
   }
+  // Publish the temp root HERE rather than trusting a boot step to have run.
+  // The deny floor refuses ASRT's shared default paths unconditionally, so a
+  // wrap that happened without this would hand the child a `TMPDIR` it is not
+  // allowed to write — a broken temp directory with no visible cause. Idempotent.
+  useAppOwnedSandboxTempRoot();
   assertPerExecFilesystemSupported(options.filesystem, "wrapToolCommand");
   const SandboxManager = await loadSandboxManager();
   const wrapped = await SandboxManager.wrapWithSandboxArgv(
@@ -1118,6 +1146,57 @@ export async function wrapToolCommand(
     options.abortSignal,
   );
   return wrapped;
+}
+
+
+/**
+ * Point ASRT's substituted temp root at a directory this app owns.
+ *
+ * WHAT IT REPLACES, and why that is not a hypothetical. On macOS and Linux ASRT
+ * writes `TMPDIR=` into the sandboxed command line itself, reading
+ * `CLAUDE_CODE_TMPDIR` (or the legacy `CLAUDE_TMPDIR`) from the WRAPPING
+ * process and falling back to `/tmp/claude`. Because the assignment is inside
+ * the command, no environment a caller composes can outrank it — measured: a
+ * confined child whose `extraEnv` carried a `TMPDIR` still reported
+ * `/tmp/claude`, while the `HOME` from that same object came through.
+ *
+ * `/tmp/claude` is not ours. It is a per-MACHINE path shared by every ASRT
+ * consumer, and it is also one of ASRT's own default write paths, which no
+ * grant this app passes can subtract from. Measured on a developer machine: a
+ * confined plugin child listed 141 entries there and wrote a file of its own —
+ * a read/write channel between this app's sandbox and whatever else on the
+ * machine uses the same runtime, in both directions, that no manifest mentions.
+ *
+ * WHAT THIS CLOSES, and what it does not. Moving the root under `~/.lvis` ends
+ * the CROSS-APPLICATION half: the directory is ours, created `0o700`. It does
+ * NOT end the cross-PLUGIN half — every confined child of this app still shares
+ * one root, so two plugins still meet there. Closing that needs a root per
+ * child, and ASRT takes the value from the wrapping process's environment
+ * rather than from a per-command option, so a per-child root would mean
+ * mutating `process.env` around an `await` on the spawn path. That is a
+ * concurrency hazard on a security boundary, and it is why this stops here
+ * rather than going one step further quietly.
+ *
+ * Called once, before any wrap, so nothing observes it changing.
+ */
+export function appOwnedSandboxTempRoot(): string {
+  return join(lvisHome(), "sandbox", "tmp");
+}
+
+let appOwnedTempRootReady = false;
+
+export function useAppOwnedSandboxTempRoot(): string {
+  const root = appOwnedSandboxTempRoot();
+  if (appOwnedTempRootReady) return root;
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  // The current name and the one ASRT keeps for compatibility. Both, because
+  // reading which one a given ASRT version prefers is a fact that can change
+  // under us, and disagreeing with ourselves would put the child somewhere
+  // neither we nor the reader expects.
+  process.env.CLAUDE_CODE_TMPDIR = root;
+  process.env.CLAUDE_TMPDIR = root;
+  appOwnedTempRootReady = true;
+  return root;
 }
 
 /**
@@ -1163,6 +1242,11 @@ export async function wrapWorkerCommand(
   if (!isAsrtSandboxActive()) {
     throw new Error("wrapWorkerCommand: ASRT sandbox is not active (initialize at boot first)");
   }
+  // Publish the temp root HERE rather than trusting a boot step to have run.
+  // The deny floor refuses ASRT's shared default paths unconditionally, so a
+  // wrap that happened without this would hand the child a `TMPDIR` it is not
+  // allowed to write — a broken temp directory with no visible cause. Idempotent.
+  useAppOwnedSandboxTempRoot();
   assertPerExecFilesystemSupported(options.filesystem, "wrapWorkerCommand");
   const SandboxManager = await loadSandboxManager();
   const wrapped = await SandboxManager.wrapWithSandboxArgv(

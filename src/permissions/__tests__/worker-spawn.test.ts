@@ -108,6 +108,7 @@ vi.mock("../asrt-sandbox.js", () => ({
   // The host-secret read floor restated on the worker wrap (#1365 SOT).
   getDefaultSensitiveReadDenyPaths: () => ["/home/u/.lvis/secrets", "/home/u/.ssh"],
   // The persistence-vector write floor restated on the worker wrap (#1449 SOT).
+  appOwnedSandboxTempRoot: () => "/tmp/lvis-test-sandbox-tmp",
   getDefaultSensitiveWriteDenyPaths: () => [
     "/home/u/.lvis/secrets",
     "/home/u/.ssh",
@@ -303,7 +304,11 @@ describe("spawnWorker — gate ON (macOS)", () => {
       string,
       { filesystem: { allowWrite: string[]; allowRead: string[]; denyRead?: string[]; denyWrite?: string[] }; allowUnixSocketPath?: string; allowAllUnixSockets?: boolean },
     ];
-    expect(options.filesystem.allowWrite[0]).toBe(socketDir);
+    // The confinement primitive prepends the temp root it grants every child,
+    // so the socket dir is the first path the CALLER contributed rather than
+    // the first path in the list.
+    expect(options.filesystem.allowWrite).toContain(socketDir);
+    expect(options.filesystem.allowWrite[0]).toBe("/tmp/lvis-test-sandbox-tmp");
     expect(options.filesystem.allowWrite).toContain(SANDBOX_HOME);
     expect(options.filesystem.allowRead).toContain(SANDBOX_HOME);
     expect(options.filesystem.allowWrite).toContain("/data/index");

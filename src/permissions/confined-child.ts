@@ -23,6 +23,7 @@
 import { spawn, type ChildProcess, type StdioOptions } from "node:child_process";
 
 import {
+  appOwnedSandboxTempRoot,
   getDefaultSensitiveReadDenyPaths,
   getDefaultSensitiveWriteDenyPaths,
   wrapWorkerCommand,
@@ -140,9 +141,18 @@ function buildFilesystemConfinement(spec: ConfinedChildSpec): {
     denyWrite: getDefaultSensitiveWriteDenyPaths(),
   };
   if (spec.grantMode === "deny-only") return floor;
+  // The temp root is granted here for the same reason the deny floor is
+  // restated here: no caller should have to remember it, and one that forgot
+  // would produce a child whose `os.tmpdir()` names a directory it cannot write
+  // — which is a failure with no obvious cause, arriving inside whatever
+  // library happened to want a temp file. It used to need no grant because ASRT
+  // pointed `TMPDIR` at one of its OWN default write paths; moving the root
+  // under `~/.lvis` is what makes the grant necessary, and is the same change
+  // that stops this app's confined children from sharing a directory with every
+  // other ASRT consumer on the machine.
   return {
     allowRead: [...(spec.allowRead ?? [])],
-    allowWrite: [...(spec.allowWrite ?? [])],
+    allowWrite: [appOwnedSandboxTempRoot(), ...(spec.allowWrite ?? [])],
     ...floor,
   };
 }
