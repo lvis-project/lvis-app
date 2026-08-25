@@ -309,6 +309,14 @@ const HOSTAPI_MARSHALLING: Record<string, MarshallingDecision> = {
     args: "opts: { handle: string }",
     returns: "Promise<void>",
   },
+  // Nothing crosses on the way in, and what comes back is the user's answer as
+  // plain strings. No handle, no resource: the chooser is gone by the time the
+  // call resolves.
+  pickFolders: {
+    jsonRepresentable: true,
+    args: "()",
+    returns: "Promise<{ canceled: boolean, folders: string[] }> — plain data",
+  },
   getAuthPartitionCookies: {
     jsonRepresentable: true,
     args: "opts: { partitionSub: string, urls: string[] }",

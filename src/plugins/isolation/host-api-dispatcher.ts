@@ -295,6 +295,7 @@ export const HOSTAPI_DISPATCH_TABLE: Record<HostApiPath, HostApiPathHandler> = {
   "authRedirect.open": unimplementedHostApiPath("authRedirect.open"),
   "authRedirect.wait": unimplementedHostApiPath("authRedirect.wait"),
   "authRedirect.close": unimplementedHostApiPath("authRedirect.close"),
+  pickFolders: unimplementedHostApiPath("pickFolders"),
   getAuthPartitionCookies: unimplementedHostApiPath("getAuthPartitionCookies"),
   triggerConversation: unimplementedHostApiPath("triggerConversation"),
   "agentApproval.request": unimplementedHostApiPath("agentApproval.request"),
@@ -359,6 +360,7 @@ export type InteractionHostApi = Pick<
   | "openAuthPartitionViewer"
   | "clearAuthPartition"
   | "authRedirect"
+  | "pickFolders"
   | "triggerConversation"
   | "agentApproval"
 >;
@@ -427,6 +429,10 @@ export function createInteractionHostApiPaths(
     "authRedirect.close": defineHostApiPath("authRedirect.close", (call) =>
       hostApi.authRedirect.close(call.args[0] as { handle: string }),
     ),
+    // Blocks until the user answers the chooser, with no boundary deadline: a
+    // dialog the user has not dismissed is not a stall, and abandoning the call
+    // would leave a modal on screen that nobody is waiting for.
+    pickFolders: defineHostApiPath("pickFolders", async () => await hostApi.pickFolders()),
     // `{ accepted: false, reason }` is a RESULT, not an error — the plugin is
     // documented to branch on `accepted`. A throw from here means the trigger
     // never reached the overlay at all.

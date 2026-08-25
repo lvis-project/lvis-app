@@ -67,6 +67,13 @@ export type ChokepointKind =
   | "authRedirectOpen"
   | "authRedirectWait"
   | "authRedirectClose"
+  // ─── pickFolders ────────────────────────────────────────────────────────
+  // Shows the user a native folder chooser and returns what they named. It
+  // returns state and mutates none — a picked path carries no new reach,
+  // because the child's read confinement is deny-only and the directory was
+  // already readable. A READ, and still recorded: the moment a plugin puts a
+  // modal in front of the user is worth having in the trail.
+  | "pickFolders"
   | "triggerConversation"
   | "agentApprovalRespond"
   // ─── Structural-completeness vocabulary ────────────────────────────────
@@ -138,6 +145,7 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   authRedirectOpen: "write",
   authRedirectWait: "read",
   authRedirectClose: "write",
+  pickFolders: "read",
   triggerConversation: "write",
   agentApprovalRespond: "write",
   // Structural-completeness vocabulary — writes (egress / persist / session).
@@ -396,6 +404,9 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
     kind: "authRedirectClose", async: true,
     targetFromArgs: objectStringField("handle"),
   },
+  // No target: the chooser takes no arguments, and the paths it returns are the
+  // ANSWER rather than a pivot the call was aimed at.
+  pickFolders: { kind: "pickFolders", async: true },
   triggerConversation: { kind: "triggerConversation", async: true, targetFromArgs: objectStringField("source"),
   },
   // ─── agentApproval.* ──────────────────────────────────────────────────────

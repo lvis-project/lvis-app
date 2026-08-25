@@ -24,6 +24,7 @@ export const es: Record<SeedMessageKey, string> = {
   "mainDialog.updateRestartMessage": "LVIS se reiniciará en v{version}.",
   "mainDialog.updateRestartDetail": "El trabajo en curso finalizará. ¿Quieres continuar?",
   "mainDialog.attachTitle": "Seleccionar archivos adjuntos",
+  "mainDialog.pluginPickFolderTitle": "Seleccionar carpetas para {plugin}",
   "mainDialog.installLocalPluginTitle": "Instalar plugin local (desarrollador)",
   "mainDialog.installLocalPluginMessage": "Selecciona la carpeta de build que contiene plugin.json",
   "mainDialog.unauthorizedFrame": "Marco no autorizado.",

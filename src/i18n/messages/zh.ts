@@ -30,6 +30,7 @@ export const zh: Record<SeedMessageKey, string> = {
   "mainDialog.updateRestartMessage": "LVIS 将重启到 v{version}。",
   "mainDialog.updateRestartDetail": "正在进行的工作将结束。要继续吗？",
   "mainDialog.attachTitle": "选择附件文件",
+  "mainDialog.pluginPickFolderTitle": "选择供 {plugin} 使用的文件夹",
   "mainDialog.installLocalPluginTitle": "安装本地插件 (开发者)",
   "mainDialog.installLocalPluginMessage": "请选择包含 plugin.json 的构建文件夹",
   "mainDialog.unauthorizedFrame": "未经授权的框架。",

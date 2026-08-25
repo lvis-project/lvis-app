@@ -19,6 +19,7 @@ import type { BrowserWindow } from "electron";
 import { randomUUID, createHash } from "node:crypto";
 import { normalizeAllowedHosts, urlHostMatchesAllowList } from "../../../main/host-allow-list.js";
 import type { AuthRedirectCatchers } from "../../../main/auth-redirect-catcher.js";
+import { pickFoldersForPlugin } from "../../../main/host-api/pick-folders.js";
 import { evaluateHostFetch, runHostFetchHops } from "../../../main/host-fetch-guard.js";
 import {
   partitionCookieHeaderForUrl,
@@ -1076,6 +1077,25 @@ export function createHostApiFactory(
         close: async (opts: { handle: string }) => {
           authRedirectCatchers.close(pluginId, opts.handle);
         },
+      },
+      /**
+       * The folder chooser. `pluginId` is closed over here for the same reason
+       * the redirect catcher's owner is: a caller that could name the plugin
+       * could attribute its dialog to a different one.
+       *
+       * `getFocusedWindow()` first so the sheet lands on whatever the user is
+       * actually looking at, falling back to the app's main window; `null` when
+       * there is none, which the picker answers with an unparented chooser
+       * rather than a failure.
+       */
+      pickFolders: async () => {
+        const result = await pickFoldersForPlugin(pluginId, {
+          parentWindow: () => ElectronBrowserWindow.getFocusedWindow() ?? getMainWindow?.() ?? null,
+        });
+        // Copied out of the host's readonly answer: the contract hands the
+        // plugin a list of its own, so nothing the plugin does to it is
+        // visible here.
+        return { canceled: result.canceled, folders: [...result.folders] };
       },
       openAuthWindow: (async (opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean }) => {
         const safeUrlForLog = (() => {

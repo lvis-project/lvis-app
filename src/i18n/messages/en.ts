@@ -37,6 +37,7 @@ export const en = {
   "mainDialog.updateRestartMessage": "LVIS will restart to v{version}.",
   "mainDialog.updateRestartDetail": "Work in progress will end. Do you want to continue?",
   "mainDialog.attachTitle": "Select attachment files",
+  "mainDialog.pluginPickFolderTitle": "Choose folders for {plugin}",
   "mainDialog.installLocalPluginTitle": "Install local plugin (developer)",
   "mainDialog.installLocalPluginMessage": "Select the build folder that contains plugin.json",
   "mainDialog.unauthorizedFrame": "Unauthorized frame.",
