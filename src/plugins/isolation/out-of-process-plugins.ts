@@ -590,6 +590,47 @@
  *   answer that is not "the plugin launches a browser"; and the reach is
  *   measured again over both sets.
  *
+ *   WHAT "THE BROWSER-DRIVEN FLOW" ACTUALLY IS, measured at plugin 0.19.6 and
+ *   written down because this entry's own headline reads as more work than is
+ *   left. "It drives a browser" was inferred from `evaluate` counts, and a
+ *   count does not say whether the call sites sit on a REACHED path. Read per
+ *   flow instead of per grep, three of its four clients were already REST on
+ *   the path a user takes, with the browser behind them as a fallback:
+ *
+ *     - The parking client runs fetch + parse-the-returned-form + POST as its
+ *       PRIMARY path for all three operations. Every `evaluate` in that file
+ *       is inside a legacy function reached only when the direct path
+ *       declines. Its read half was checked against the live provider rather
+ *       than argued from the source, and each direct step returned what the
+ *       parser expects.
+ *     - The conferencing client already submitted directly; only its dry run
+ *       opened a browser, to fill a form it then discarded, and it stopped
+ *       (0.19.5). The `evaluate` sites left in that file are its cancel path's.
+ *     - The assistant client is the real one. A browser-free query answers the
+ *       plain case over four REST calls (0.19.3), and an expired session no
+ *       longer buys a launch (0.19.6) — the page flow re-ran the same session
+ *       check against the same vault cookies and threw the same error, so the
+ *       launch only delayed it. What still needs a page is a scoped question,
+ *       and not for want of trying: the page read that scope out of the SPA's
+ *       session storage, the provider keeps no server-side record of it, and
+ *       the request fields for those question types have never been observed
+ *       on the wire. Inventing them would answer confidently out of the wrong
+ *       corpus, which is worse than answering slowly.
+ *
+ *   So the tail is not "migrate four clients". It is: observe ONE scoped
+ *   request, then retire the fallbacks the direct paths have made
+ *   unnecessary. The mutating half of those fallbacks is the part that cannot
+ *   be observed without performing a real booking or cancellation, which is a
+ *   decision for the operator rather than a measurement.
+ *
+ *   ALSO REMOVED, 0.19.7: an interactive-login helper and a session probe,
+ *   and with them the persistent-profile launch mode and the `userDataDir`
+ *   input. Nothing called any of it — login had moved to `openAuthWindow` and
+ *   these were left pointing at nothing. Recorded here because admission is
+ *   measured over what a plugin CAN reach: an uncalled persistent browser
+ *   profile is still a filesystem-and-process capability sitting in the
+ *   module, and it would have had to be accounted for on axes 3 and 6 anyway.
+ *
  * `local-indexer` — ADMITTED, and the entry is kept long because the route to
  *   it corrected this file twice. KNOWN FROM ITS SOURCES at the first census:
  *   it operated its own loopback HTTP listener and its own upstream TLS client
