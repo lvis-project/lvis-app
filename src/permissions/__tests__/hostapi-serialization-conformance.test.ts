@@ -317,6 +317,14 @@ const HOSTAPI_MARSHALLING: Record<string, MarshallingDecision> = {
     args: "()",
     returns: "Promise<{ canceled: boolean, folders: string[] }> — plain data",
   },
+  // A drive letter in, a UNC string or `null` out. `null` is a real answer —
+  // the drive is a local disk — so it must survive the wire distinctly from a
+  // rejection, which is what a lookup that could not run produces.
+  resolveMappedDriveRoot: {
+    jsonRepresentable: true,
+    args: "drive: string",
+    returns: "Promise<string | null> — plain data",
+  },
   getAuthPartitionCookies: {
     jsonRepresentable: true,
     args: "opts: { partitionSub: string, urls: string[] }",

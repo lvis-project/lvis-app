@@ -20,6 +20,7 @@ import { randomUUID, createHash } from "node:crypto";
 import { normalizeAllowedHosts, urlHostMatchesAllowList } from "../../../main/host-allow-list.js";
 import type { AuthRedirectCatchers } from "../../../main/auth-redirect-catcher.js";
 import { pickFoldersForPlugin } from "../../../main/host-api/pick-folders.js";
+import { resolveMappedDriveRoot } from "../../../main/host-api/mapped-drive-root.js";
 import { evaluateHostFetch, runHostFetchHops } from "../../../main/host-fetch-guard.js";
 import {
   partitionCookieHeaderForUrl,
@@ -1097,6 +1098,13 @@ export function createHostApiFactory(
         // visible here.
         return { canceled: result.canceled, folders: [...result.folders] };
       },
+      /**
+       * The lookup runs HERE, in main, with a command this file owns. What the
+       * plugin contributes is one drive letter, validated inside the resolver
+       * rather than on the way in — one validator, in the place that builds the
+       * command.
+       */
+      resolveMappedDriveRoot: async (drive: string) => resolveMappedDriveRoot(drive),
       openAuthWindow: (async (opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean }) => {
         const safeUrlForLog = (() => {
           try {

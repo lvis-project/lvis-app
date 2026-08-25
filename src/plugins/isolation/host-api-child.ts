@@ -262,6 +262,9 @@ export function createServiceChildMembers(
     probePrivateHost: async (...args) =>
       call("probePrivateHost", positional(args[0], args[1])) as Promise<boolean>,
 
+    resolveMappedDriveRoot: async (...args) =>
+      call("resolveMappedDriveRoot", positional(args[0])) as Promise<string | null>,
+
     /**
      * Synchronous throw preserved. The host cannot answer in time to make a
      * denied emit throw at the plugin's own call site, so the child re-runs

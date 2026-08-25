@@ -74,6 +74,13 @@ export type ChokepointKind =
   // already readable. A READ, and still recorded: the moment a plugin puts a
   // modal in front of the user is worth having in the trail.
   | "pickFolders"
+  // ─── resolveMappedDriveRoot ─────────────────────────────────────────────
+  // Answers what UNC path backs a Windows mapped drive. Returns state and
+  // mutates none; the host runs the lookup, so the plugin gains no ability to
+  // execute anything. A READ, recorded because the host running a command on a
+  // plugin's behalf is worth having in the trail even when the command is
+  // fixed.
+  | "resolveMappedDriveRoot"
   | "triggerConversation"
   | "agentApprovalRespond"
   // ─── Structural-completeness vocabulary ────────────────────────────────
@@ -146,6 +153,7 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   authRedirectWait: "read",
   authRedirectClose: "write",
   pickFolders: "read",
+  resolveMappedDriveRoot: "read",
   triggerConversation: "write",
   agentApprovalRespond: "write",
   // Structural-completeness vocabulary — writes (egress / persist / session).
@@ -407,6 +415,8 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   // No target: the chooser takes no arguments, and the paths it returns are the
   // ANSWER rather than a pivot the call was aimed at.
   pickFolders: { kind: "pickFolders", async: true },
+  resolveMappedDriveRoot: { kind: "resolveMappedDriveRoot", targetFromArgs: firstStringArg,
+    async: true },
   triggerConversation: { kind: "triggerConversation", async: true, targetFromArgs: objectStringField("source"),
   },
   // ─── agentApproval.* ──────────────────────────────────────────────────────

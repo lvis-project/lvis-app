@@ -894,6 +894,18 @@ export const HOSTAPI_PATH_CONTRACTS = {
     lifetime: "none",
     errors: [],
   },
+  // A drive letter in, a UNC string or `null` out. Plain data both ways, and
+  // the only caller-influenced value never reaches a shell: the host validates
+  // the letter and owns the command. `errors` is empty because the two
+  // outcomes that cross are both ANSWERS — a UNC root, or `null` for a local
+  // disk. A lookup that could not run rejects, and a rejection is not a
+  // boundary verdict.
+  resolveMappedDriveRoot: {
+    arguments: "plain-json",
+    result: "plain-json",
+    lifetime: "none",
+    errors: [],
+  },
   // The gated read-back of the host-held session cookies. Values cross the
   // boundary by design — that is what the caller needs to inject a session
   // into a separate browser context — so the host, not the child, decides
@@ -987,9 +999,10 @@ export const SERVICE_HOSTAPI_PATHS = [
   "callLlm",
   "hostFetch",
   "spawnWorker",
+  "resolveMappedDriveRoot",
 ] as const satisfies readonly HostApiPath[];
 
-/** One of the ten. */
+/** One of the eleven. */
 export type ServiceHostApiPath = (typeof SERVICE_HOSTAPI_PATHS)[number];
 
 

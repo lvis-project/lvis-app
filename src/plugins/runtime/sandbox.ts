@@ -161,6 +161,9 @@ export function createNoopHostApi(
     pickFolders: async () => {
       throw new Error("pickFolders not available in noop context");
     },
+    resolveMappedDriveRoot: async () => {
+      throw new Error("resolveMappedDriveRoot not available in noop context");
+    },
     openAuthWindow: async () => {
       throw new Error("openAuthWindow not available in noop context");
     },
