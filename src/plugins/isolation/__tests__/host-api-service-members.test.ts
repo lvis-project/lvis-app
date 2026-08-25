@@ -1384,3 +1384,119 @@ describe("startAudioCapture crosses as an id, and the PCM survives the wire", ()
     expect(ends).toEqual([{ reason: "sources-lost", detail: "microphone track ended" }]);
   });
 });
+
+describe("attachFloatingPanel crosses as a receipt, and the detach reason survives", () => {
+  /** A dock slot whose detach the test decides. */
+  function makeFakePanel(height = 180) {
+    const listeners: ((reason: string) => void)[] = [];
+    const detach = vi.fn(async () => {});
+    const resize = vi.fn(async (next: number) => Math.min(next, 300));
+    return {
+      panelId: "panel-1",
+      height,
+      detach,
+      resize,
+      onDetached: (listener: (reason: string) => void) => { listeners.push(listener); },
+      fire: (reason: string) => { for (const listener of listeners) listener(reason); },
+      listenerCount: () => listeners.length,
+    };
+  }
+
+  it("hands over an id rather than the panel", async () => {
+    const panel = makeFakePanel();
+    const harness = await createServiceHarness({
+      attachFloatingPanel: async () => panel,
+    } as unknown as Partial<PluginHostApi>);
+    const handle = await harness.child.hostApi.attachFloatingPanel({
+      extensionId: "some-card",
+      height: 240,
+    });
+
+    // The height the DOCK applied, not the one asked for. A plugin that reads
+    // back its own request cannot tell it was clamped.
+    expect(handle.height).toBe(180);
+
+    const reply = await harness.host.handle(
+      harness.requests.find((request) => request.path === "attachFloatingPanel")!,
+    );
+    expect(reply.ok).toBe(true);
+    if (!reply.ok) return;
+    // Nothing that could be a live panel — the same property `spawnWorker` and
+    // `startAudioCapture` have.
+    for (const value of Object.values(reply.value as Record<string, unknown>)) {
+      expect(typeof value).not.toBe("function");
+    }
+  });
+
+  it("resizes through its own path and returns what the host applied", async () => {
+    const panel = makeFakePanel();
+    const harness = await createServiceHarness({
+      attachFloatingPanel: async () => panel,
+      resizeFloatingPanel: async (_id: string, next: number) => Math.min(next, 300),
+    } as unknown as Partial<PluginHostApi>);
+    const handle = await harness.child.hostApi.attachFloatingPanel({ extensionId: "some-card" });
+
+    // A handle's METHOD cannot cross on its own — the wire carries calls by
+    // path — so resize is its own addressable member and this is the proof it
+    // is wired to one.
+    expect(await handle.resize(900)).toBe(300);
+    expect(handle.height).toBe(300);
+    expect(harness.requests.some((request) => request.path === "resizeFloatingPanel")).toBe(true);
+  });
+
+  it("detaches the host-side slot when the child releases its receipt", async () => {
+    const panel = makeFakePanel();
+    const harness = await createServiceHarness({
+      attachFloatingPanel: async () => panel,
+    } as unknown as Partial<PluginHostApi>);
+    const handle = await harness.child.hostApi.attachFloatingPanel({ extensionId: "some-card" });
+
+    await handle.detach();
+    await settle();
+
+    // Releasing the subscription IS the detach. Without this the child's
+    // `detach()` would resolve while the slot stayed on the user's screen
+    // forever, and nothing would report it.
+    expect(panel.detach).toHaveBeenCalledTimes(1);
+  });
+
+  it("delivers the reason the host gave, once", async () => {
+    const panel = makeFakePanel();
+    const harness = await createServiceHarness({
+      attachFloatingPanel: async () => panel,
+    } as unknown as Partial<PluginHostApi>);
+    const handle = await harness.child.hostApi.attachFloatingPanel({ extensionId: "some-card" });
+    const reasons: string[] = [];
+    handle.onDetached((reason) => reasons.push(reason));
+
+    panel.fire("user-closed");
+    panel.fire("user-closed");
+    await settle();
+
+    expect(reasons).toEqual(["user-closed"]);
+  });
+
+  it("tells a late subscriber the real reason, not a fabricated one", async () => {
+    // THE NARROW ONE, and the reason it matters more than its width.
+    //
+    // A plugin subscribes in the same turn its attach resolves in, so the gap
+    // is a microtask. But `"requested"` is the one value that means "the
+    // plugin asked for this", and the child had the true reason one closure
+    // away while answering with that constant. A recorder told `"requested"`
+    // after the USER closed the dock concludes the teardown was its own, skips
+    // its orphan handling, and leaves a recording running with nothing on
+    // screen driving it.
+    const panel = makeFakePanel();
+    const harness = await createServiceHarness({
+      attachFloatingPanel: async () => panel,
+    } as unknown as Partial<PluginHostApi>);
+    const handle = await harness.child.hostApi.attachFloatingPanel({ extensionId: "some-card" });
+
+    panel.fire("renderer-gone");
+    await settle();
+
+    const late: string[] = [];
+    handle.onDetached((reason) => late.push(reason));
+    expect(late).toEqual(["renderer-gone"]);
+  });
+});

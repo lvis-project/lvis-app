@@ -332,7 +332,9 @@
  *    than from a per-command option — which is exactly why the other half is
  *    still open.
  *      WHAT REMAINS. The temp root is one directory for ALL of this app's
- *    confined children, so two plugins still meet in it. Narrower than it was,
+ *    confined children, so every admitted plugin meets every other one in it —
+ *    four of them now, and the channel widens with each admission rather than
+ *    staying the size it was when it was written down. Narrower than it was,
  *    and still a channel neither manifest declares. Closing it needs a root per
  *    CHILD, and because ASRT takes the value from the wrapping process's
  *    environment that means mutating `process.env` around an `await` on the
@@ -425,55 +427,64 @@
  *   `context.pluginDataDir`. `context.hostRoot` appears in its tests only. Its tools are driven end-to-end through a real confined child.
  *   ASSUMED: nothing load-bearing.
  *
- * `meeting` — REFUSED, on ONE axis. Everything else this entry used to name
- *   has been closed, and the entry is rewritten rather than annotated because
- *   a census that lists fixed blockers is worse than one that lists none: it
- *   makes the remaining one look like a detail among many.
+ * `meeting` — ADMITTED. Its last axis closed in plugin 0.7.0; the entry is
+ *   rewritten rather than annotated, because a census that lists fixed
+ *   blockers reads as a plugin with problems.
  *
- *   STILL REFUSED, axis 2: its primary tool opens a floating recorder window
- *   and reaches `BrowserWindow`, `screen`, `session.fromPartition` and
- *   `ipcMain` through one lazily-resolved `require` of the `electron`
- *   specifier held in a VARIABLE — not the literal, which occurs in its
- *   sources only inside comments and in a renderer preload that is not on this
- *   axis at all. In a confined child that require is `MODULE_NOT_FOUND`, so
- *   the tool's own pre-flight guard throws before it side-effects — measured,
- *   both bare and with the package vendored beside the plugin. Axis 2 has no
- *   mediated form for any of those members, so admitting it today would not
- *   degrade recording, it would END it.
+ *   AXIS 2, the one that held it, is closed by a MEDIATED FORM rather than by
+ *   the feature going away. The recorder opened a floating window it built
+ *   itself — `BrowserWindow`, `screen`, `session.fromPartition` and `ipcMain`,
+ *   all through one lazily-resolved `require` of the `electron` specifier held
+ *   in a VARIABLE, which is why a literal grep never found it. It is a SLOT in
+ *   the host's dock now (`hostApi.attachFloatingPanel`), and the plugin's
+ *   sources resolve `electron` by no path at all: `createRequire` is gone with
+ *   its only consumer.
  *
- *   CLOSED since this entry was written, each measured against the plugin's
- *   current sources rather than assumed from its changelog:
- *   - Axis 1, the media-runtime download. It went out over `node:https`
- *     directly; it goes through `hostApi.hostFetch` now, with both hosts of
- *     the release redirect declared in the manifest (plugin 0.5.45).
- *   - Axis 3, the eleven process starts the same installer made — `tar`,
- *     `unzip`, `Expand-Archive`, `otool`, `install_name_tool`, and the version
- *     probes. All go through `hostApi.spawnWorker` with named grants, and
- *     `node:child_process` is gone from the file (0.5.46). The plugin guards
- *     it with an import-form test, which is the only thing that would notice:
- *     ASRT's profile carries `(allow process-exec)`, so a reintroduced spawn
- *     would run rather than fail.
- *   - Axis 5, the `os.tmpdir()` sweep in the activation body. Staged uploads
- *     live under `pluginDataDir` now; `tmpdir()` survives in that file only
- *     inside a comment explaining why it is not used (0.5.43).
- *   - Axis 6, the one-time move out of `context.hostRoot`. It was a per-file
- *     `renameSync` out of a directory the child may read but not write, which
- *     stranded a user's existing recordings behind a plugin that would not
- *     start. It is a copy followed by a delete, inside a `try`, collecting
- *     what it could not remove (0.5.43).
- *   - The renderer's own capture. `getUserMedia`, `getDisplayMedia`, the audio
- *     graph and the worklet are gone from the recorder window; the host
- *     captures and the plugin receives PCM through `startAudioCapture`
- *     (0.6.0). This one had no runtime signal either — a plugin renderer that
- *     captures WORKS — so the plugin guards it structurally too.
+ *   That trade is the shape this boundary wants, and it is worth naming as a
+ *   REDUCTION rather than a swap. What the plugin gave up is not the ability
+ *   to float a surface — it kept that — but the ability to CHOOSE the
+ *   surface's geometry. Frameless, transparent, always-on-top, where on the
+ *   screen it sits and how large it may grow are the host's, and none of them
+ *   is a parameter. A borderless always-on-top window a plugin places and
+ *   sizes freely is a clickjacking primitive; the same pixels inside host
+ *   chrome at host-chosen coordinates are not.
  *
- *   ASSUMED: nothing. The window blocker was driven through a real child; the
- *   five closures were read out of the plugin's current sources, and the two
- *   with no runtime signal carry structural guards in the plugin's own suite.
- *   What would change the answer is a mediated form for axis 2 — the recorder
- *   moving onto the sandboxed `ui://` card path, which is where every other
- *   plugin surface already draws. The shape it would have to take is written
- *   up beside the design's Stage 8.
+ *   The other five, each re-measured against the plugin's sources at 0.7.0
+ *   rather than read out of the entry that claimed them:
+ *   - Axis 1. No `node:https`/`http`/`net`/`tls`/`dgram`, no socket library,
+ *     no bare `fetch`. The media-runtime download goes through
+ *     `hostApi.hostFetch` with both hosts of the release redirect declared.
+ *   - Axis 3. No `node:child_process` in any form; every process start,
+ *     including the eleven the runtime installer makes, goes through
+ *     `hostApi.spawnWorker` with named grants. The plugin guards this with an
+ *     import-form test, which is the only thing that would notice — ASRT's
+ *     profile carries `(allow process-exec)`, so a reintroduced spawn would
+ *     RUN rather than fail.
+ *   - Axis 4. No native binding, no `.node`, no `bindings()`. The
+ *     `electron-audio-loopback` vendor is referenced in one comment and loaded
+ *     nowhere: the host captures and the plugin receives PCM through
+ *     `startAudioCapture`.
+ *   - Axis 5. No `tmpdir()`, no `cwd()`, no `homedir()`. The `process.env`
+ *     reads that remain are configuration lookups, which the boundary does not
+ *     take away.
+ *   - Axis 6. Every write lands under `pluginDataDir` — the runtime install
+ *     included, which derives its staging and cache directories from the same
+ *     root. `context.hostRoot` is READ once, for a one-time session migration
+ *     that copies and then attempts a delete, collecting what it could not
+ *     remove and reporting it. A write jail therefore costs the user nothing
+ *     but a duplicate directory that gets NAMED, and the plugin still starts.
+ *
+ *   ASSUMED: nothing about the plugin. One thing about the wire, stated
+ *   because it is the newest path here and the only one this plugin is the
+ *   first to use: `attachFloatingPanel` returns a handle, and a handle is a
+ *   host-side object the child holds a receipt for. Releasing the receipt IS
+ *   the detach, since the wire carries no per-handle call channel; `resize`
+ *   needs an answer back and so is its own addressable member. Both directions
+ *   are asserted in `host-api-service-members.test.ts`, including that a late
+ *   `onDetached` subscriber is told the REASON the slot went away rather than
+ *   a fabricated one — a recorder told `"requested"` after the USER closed the
+ *   dock concludes the teardown was its own and leaves the recording running
+ *   with nothing driving it.
 
  * `ep-api` — REFUSED. KNOWN FROM ITS SOURCES: every one of its REST clients reaches the network
  *   through the global `fetch`, and no code path in it CALLS
@@ -712,7 +723,7 @@
  * `template` — not installed; a scaffold, out of scope.
  */
 export const OUT_OF_PROCESS_PLUGIN_IDS: ReadonlySet<string> = Object.freeze(
-  new Set<string>(["work-assistant", "ms-graph", "local-indexer"]),
+  new Set<string>(["work-assistant", "ms-graph", "local-indexer", "meeting"]),
 );
 
 /** Whether `pluginId` loads out-of-process. */
