@@ -925,13 +925,13 @@ carries the per-plugin verdicts; this section carries the reason the last two
 are a different KIND of problem from the first three, so a future reader does
 not spend a quarter building the wire that cannot work.*
 
-`work-assistant`, `ms-graph` and — once its broker stops binding TCP —
-`local-indexer` were admitted the same way each time: an ambient axis had a
-mediated form, and the plugin was changed to use it. `authRedirect` replaced a
-socket. `pickFolders` replaced `dialog`. `pluginSocketDir` replaces a loopback
-bind. `userHome`/`lvisHome` replace a `homedir()` that a confined child answers
-wrongly. `resolveMappedDriveRoot` replaces a `powershell.exe` spawn. Each is a
-small, host-owned answer to a narrow request.
+`work-assistant`, `ms-graph` and `local-indexer` were admitted the same way
+each time: an ambient axis had a mediated form, and the plugin was changed to
+use it. `authRedirect` replaced a socket. `pickFolders` replaced `dialog`.
+`pluginSocketDir` replaced a loopback bind. `userHome`/`lvisHome` replaced a
+`homedir()` that a confined child answers wrongly. `resolveMappedDriveRoot`
+replaced a `powershell.exe` spawn. Each is a small, host-owned answer to a
+narrow request.
 
 What they have in common is worth naming, because it is the test a proposed
 capability has to pass: in every one of them the plugin contributes **data** and

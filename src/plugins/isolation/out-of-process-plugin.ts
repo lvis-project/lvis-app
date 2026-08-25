@@ -296,7 +296,11 @@ type PluginEnvelopeGrant =
  *
  * An entry is INERT until the plugin is actually routed out-of-process: nothing
  * reads this table for an in-process plugin, which still loads in main with no
- * confinement of its own.
+ * confinement of its own. The one entry here is no longer inert —
+ * `local-indexer` is in `OUT_OF_PROCESS_PLUGIN_IDS` — which is what makes this
+ * table the only place where a routed plugin's write list is wider than
+ * `pluginDataDir`, and why the routing SOT's outcome list says so explicitly
+ * rather than describing every routed child as holding two paths.
  *
  * `local-indexer`'s row is derived from what its worker spawn actually asks for
  * (`allowReadPaths: [pythonExecutable, workerScriptPath, corpCaPath?]`,
