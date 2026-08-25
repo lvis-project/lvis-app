@@ -10,7 +10,10 @@ import { describe, it, expect } from "vitest";
 import { resolve, sep } from "node:path";
 import {
   PLUGIN_DATA_DIR_NAME,
+  PLUGIN_OWN_SOCKET_DIR_NAME,
   PLUGIN_WORKER_RUN_DIR_NAME,
+  assertUnixSocketPathFits,
+  resolvePluginSocketDir,
   resolvePluginWritableRoot,
 } from "../plugin-storage-layout.js";
 import { lvisHome } from "../../shared/lvis-home.js";
@@ -109,5 +112,58 @@ describe("isResolvedPathWithin", () => {
     // on. Made explicit here so a future edit cannot drop it silently.
     expect(isResolvedPathWithin(process.cwd(), "package.json")).toBe(true);
     expect(isResolvedPathWithin(resolve(process.cwd(), "src"), "package.json")).toBe(false);
+  });
+});
+
+describe("resolvePluginSocketDir", () => {
+  it("sits BESIDE the data directory, not inside it", () => {
+    // Inside would be simpler and wrong. The Unix-socket ALLOW is scoped to one
+    // directory on macOS, so putting the socket dir under `data` would make
+    // every ordinary plugin file share that scope — and the case in
+    // `confined-plugin-child.test.ts` that proves the ALLOW is separate from
+    // the write jail would have nothing left to measure.
+    const dataDir = resolvePluginWritableRoot(PLUGIN_ID);
+    expect(resolvePluginSocketDir(dataDir)).toBe(
+      resolve(lvisHome(), "plugins", PLUGIN_ID, PLUGIN_OWN_SOCKET_DIR_NAME),
+    );
+  });
+
+  it("follows a relocated data directory rather than rebuilding from the home", () => {
+    // The property that keeps the granted directory and the created one equal.
+    // A derivation from `lvisHome()` and the id would answer with the
+    // production path for a plugin whose data dir is somewhere else — and the
+    // child would then be handed a directory the sandbox never heard of.
+    expect(resolvePluginSocketDir("/somewhere/else/plugins/p/data")).toBe(
+      `/somewhere/else/plugins/p/${PLUGIN_OWN_SOCKET_DIR_NAME}`,
+    );
+  });
+});
+
+describe("assertUnixSocketPathFits", () => {
+  const limit = process.platform === "darwin" ? 103 : 107;
+
+  it("accepts a path exactly at the limit", () => {
+    expect(() => assertUnixSocketPathFits("/".repeat(limit), "probe")).not.toThrow();
+  });
+
+  it("refuses one byte over, and says the length rather than leaving EINVAL to explain it", () => {
+    // The failure this replaces is `bind()` answering `EINVAL` — "malformed
+    // address" — which names nothing and sends the reader at the address
+    // family, the permissions, anywhere but a length.
+    expect(() => assertUnixSocketPathFits("/".repeat(limit + 1), "probe")).toThrow(
+      new RegExp(`${String(limit + 1)} bytes`),
+    );
+    expect(() => assertUnixSocketPathFits("/".repeat(limit + 1), "worker control socket")).toThrow(
+      /worker control socket/,
+    );
+  });
+
+  it("counts BYTES, not characters", () => {
+    // A path is bytes to the kernel. A limit measured in JS string length would
+    // pass a name of multi-byte characters that the kernel then refuses — the
+    // guard would be the thing making the failure opaque.
+    const multiByte = "가".repeat(Math.ceil(limit / 3));
+    expect(multiByte.length).toBeLessThanOrEqual(limit);
+    expect(() => assertUnixSocketPathFits(multiByte, "probe")).toThrow(/bytes/);
   });
 });

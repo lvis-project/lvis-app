@@ -146,9 +146,21 @@
  *    to stop waiting, and when to close; it does not choose the interface, the
  *    port, the accepted method or the response body, and the handle is bound to
  *    the calling plugin the same way an auth partition is. That covers the
- *    inbound shape a sign-in needs. It does NOT cover an inbound listener a
- *    plugin operates as a SERVER — a broker with its own upstream leg is a
- *    different request and still has no mediated form (see `local-indexer`).
+ *    inbound shape a sign-in needs.
+ *    SECOND MEDIATED FORM, for the shape `authRedirect` does not cover — an
+ *    inbound listener a plugin operates as a SERVER, which is what a broker
+ *    with its own upstream leg needs: `context.pluginSocketDir`, one directory
+ *    per plugin in which the child may bind a UNIX-DOMAIN socket. It answers
+ *    the axis by leaving it: a Unix socket is a filesystem object, so the
+ *    macOS refusal and the Linux namespace both stop applying, and the process
+ *    on the other end connects by PATH rather than by port. The host registers
+ *    that directory with ASRT BEFORE wrapping the child, because the ALLOW is
+ *    a shared-config entry the seatbelt profile is generated from — measured
+ *    both ways: the bind succeeds and the HOST reaches the socket, and the
+ *    same bind one directory over, in the writable `data` dir the host did not
+ *    register, is refused `EPERM`.
+ *    What it does NOT answer is the broker's UPSTREAM leg, which is ordinary
+ *    egress and is covered above.
  * 2. ELECTRON MAIN-PROCESS APIs — the `electron` specifier reached by ANY
  *    resolution path, in the plugin or in anything it loads: a static import,
  *    a bare `require`, a `require` held in a variable, a `createRequire`, a
@@ -509,9 +521,6 @@
  *   answer that is not "the plugin launches a browser"; and the reach is
  *   measured again over both sets.
  *
- *   After those: the browser-driven flow gets an answer that is not "the
- *   plugin launches a browser"; and the reach is measured again over both sets.
- *
  * `local-indexer` — REFUSED. KNOWN FROM ITS SOURCES: it operates its own loopback HTTP listener
  *   and its own upstream TLS client as a broker, holds a control channel over
  *   a unix socket, and calls `execFile` on a shell interpreter to resolve a
@@ -527,8 +536,15 @@
  *   request. It is also on axis 2, which no `hostApi` census would have
  *   surfaced: its folder picker reaches `dialog` through a `require` of the
  *   `electron` specifier held in a VARIABLE — the construct axis 2 says a
- *   literal grep misses, and the same one the windowed plugin reaches it by —
- *   and `dialog` has no mediated form either. It is on axis 6 more heavily than any other plugin
+ *   literal grep misses, and the same one the windowed plugin reaches it by.
+ *   BOTH of those now HAVE a mediated form — `hostApi.pickFolders` for the
+ *   picker, `context.pluginSocketDir` for the broker's inbound half — and
+ *   neither changes this entry yet, because admission asks whether the plugin
+ *   USES the mediated form, not whether one exists. The published bundle still
+ *   reaches `electron` and still binds loopback TCP. What the two DO change is
+ *   the shape of what is left: the remaining work is on the plugin's side of
+ *   the boundary rather than the host's.
+ *   It is on axis 6 more heavily than any other plugin
  *   here, and in both directions: it writes its index state under a path
  *   rooted at `homedir()` rather than `pluginDataDir`, it carries its own
  *   `hostRoot`-rooted workspace migration, and its whole PURPOSE is reading

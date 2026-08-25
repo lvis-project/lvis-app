@@ -8,7 +8,7 @@ import type { PluginHostApi, PluginManifest } from "../types.js";
 import { createPluginStorage } from "../storage.js";
 import { applyConfigDefaults } from "../config-schema.js";
 import { createLogger } from "../../lib/logger.js";
-import { PLUGIN_DATA_DIR_NAME } from "../plugin-storage-layout.js";
+import { PLUGIN_DATA_DIR_NAME, resolvePluginSocketDir } from "../plugin-storage-layout.js";
 const log = createLogger("sandbox");
 
 /**
@@ -93,8 +93,23 @@ export function ensurePluginDataDir(
   const baseRoot = pluginsRoot ?? dirname(pluginRoot);
   const dataDir = resolve(baseRoot, pluginId, PLUGIN_DATA_DIR_NAME);
   mkdirSync(dataDir, { recursive: true });
+  // The socket directory beside it, made HERE because this is the one function
+  // that owns "bring this plugin's directories into existence" — and because
+  // the alternative, making it where the context is built, would put a `mkdir`
+  // in a pure builder and fail a caller that only wanted the paths.
+  //
+  // `0o700`: a socket in a directory others can write can be replaced between
+  // the plugin's `unlink` and its `listen`, and whatever connects afterwards
+  // would be talking to whoever won that race.
+  //
+  // A confined child does not depend on this call — its spawn materialises
+  // every directory in the envelope, this one included. It is what an
+  // IN-PROCESS plugin gets, so both kinds find the same layout.
+  mkdirSync(resolvePluginSocketDir(dataDir), { recursive: true, mode: 0o700 });
   return dataDir;
 }
+
+
 
 /**
  * Noop HostApi — test harnesses must inject this explicitly.
@@ -192,6 +207,11 @@ export function buildPluginContext(opts: {
     pluginRoot: opts.pluginRoot,
     hostRoot: opts.hostRoot,
     pluginDataDir: opts.pluginDataDir,
+    // RESOLVED, not created — `ensurePluginDataDir` makes it, and the confined
+    // spawn makes it again from the envelope. Creating it here instead would
+    // put a `mkdir` inside a pure context builder, and a caller that wanted
+    // only the shape of a context would fail on a filesystem it never touched.
+    pluginSocketDir: resolvePluginSocketDir(opts.pluginDataDir),
     // configSchema defaults backfill keys missing from `manifest.config`
     // and the override layers — without this, plugins that document a
     // `default` for a config key would

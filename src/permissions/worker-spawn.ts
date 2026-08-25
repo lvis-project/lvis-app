@@ -61,7 +61,10 @@ import { unlinkSync, rmdirSync, chmodSync, lstatSync } from "node:fs";
 import { join, resolve as pathResolve } from "node:path";
 
 import { lvisHome } from "../shared/lvis-home.js";
-import { PLUGIN_WORKER_RUN_DIR_NAME } from "../plugins/plugin-storage-layout.js";
+import {
+  assertUnixSocketPathFits,
+  PLUGIN_WORKER_RUN_DIR_NAME,
+} from "../plugins/plugin-storage-layout.js";
 import { buildSafeChildEnv } from "../tools/safe-env.js";
 import { spawnConfinedChild } from "./confined-child.js";
 import { terminateChildProcess } from "../tools/terminate-child-process.js";
@@ -463,6 +466,10 @@ export async function spawnWorker(spec: SpawnWorkerSpec): Promise<SpawnedWorker>
     safeWorker,
   );
   const socketPath = join(socketDir, "control.sock");
+  // A path over `sun_path` fails as `EINVAL` — "malformed address" — which
+  // sends the diagnosis anywhere but at a length. Checked here, where the path
+  // was just assembled and the message can name every part of it.
+  assertUnixSocketPathFits(socketPath, `worker control socket for ${safePlugin}/${safeWorker}`);
   // Crash-safe: unlink any stale socket from a previous worker that died
   // without cleanup BEFORE recreating the dir.
   try {
