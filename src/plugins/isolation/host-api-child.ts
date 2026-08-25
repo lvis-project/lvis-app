@@ -53,6 +53,11 @@ import type {
   PluginManifest,
   PluginWorkerSpec,
   SpawnedPluginWorker,
+  AudioCaptureDevice,
+  AudioCaptureEnd,
+  AudioCaptureFrame,
+  AudioCaptureHandle,
+  AudioCaptureRequest,
 } from "../public-contract.js";
 import type { HostApiCaller, PluginChildContext } from "./plugin-child-runtime.js";
 import {
@@ -79,6 +84,8 @@ import {
   type WireCallLlmOptions,
   type WireResolveApiKeyOptions,
   type WireWorkerHandle,
+  asWireAudioCaptureEvent,
+  type WireAudioCaptureHandle,
 } from "./host-api-wire.js";
 
 /** One hostApi member as the child's stub table holds it. */
@@ -405,6 +412,60 @@ export function createServiceChildMembers(
      * which is the security improvement §3.2 names — in-process the plugin holds
      * a live `ChildProcess`-derived object in the same heap.
      */
+    listAudioInputDevices: async () =>
+      call("listAudioInputDevices", positional()) as Promise<readonly AudioCaptureDevice[]>,
+    /**
+     * The capture handle, rebuilt on this side from a host-allocated id.
+     *
+     * Frames arrive as host notifications and are fanned out to child-local
+     * listeners here — the listener functions themselves never cross, which is
+     * the same property that makes `spawnWorker`'s `onStdout` safe.
+     */
+    startAudioCapture: async (...args) => {
+      const request = args[0] as AudioCaptureRequest;
+      const reply = await call("startAudioCapture", [request]);
+      const handle = requireHandle(reply, "startAudioCapture") as unknown as WireAudioCaptureHandle;
+      const frames: ((frame: AudioCaptureFrame) => void)[] = [];
+      const ends: ((end: AudioCaptureEnd) => void)[] = [];
+      const dispose = deps.adoptSubscription("startAudioCapture", handle.handleId, (payload) => {
+        const event = asWireAudioCaptureEvent(payload, "startAudioCapture(event)");
+        if (event.kind === "frame") {
+          // Decoded once, here, and handed to every listener: decoding per
+          // listener would copy a frame of audio for each one.
+          const pcm = new Uint8Array(Buffer.from(event.pcm, "base64"));
+          for (const listener of frames) listener({ seq: event.seq, pcm, peak: event.peak });
+          return;
+        }
+        for (const listener of ends) {
+          listener({
+            reason: event.reason as AudioCaptureEnd["reason"],
+            ...(event.detail === undefined ? {} : { detail: event.detail }),
+          });
+        }
+        // Not disposed here, for the reason spelled out on `spawnWorker`: the
+        // host owns the capture, so the host owns the news that it ended.
+      });
+      const capture: AudioCaptureHandle = {
+        captureId: handle.captureId,
+        opened: handle.opened,
+        onFrame: (listener) => {
+          frames.push(listener);
+          return () => {
+            const at = frames.indexOf(listener);
+            if (at >= 0) frames.splice(at, 1);
+          };
+        },
+        onEnd: (listener) => {
+          ends.push(listener);
+          return () => {
+            const at = ends.indexOf(listener);
+            if (at >= 0) ends.splice(at, 1);
+          };
+        },
+        stop: async () => { dispose(); },
+      };
+      return capture;
+    },
     spawnWorker: async (...args) => {
       const spec = args[0] as PluginWorkerSpec;
       const reply = await call("spawnWorker", [spec]);

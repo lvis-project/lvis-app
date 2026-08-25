@@ -81,6 +81,15 @@ export type ChokepointKind =
   // plugin's behalf is worth having in the trail even when the command is
   // fixed.
   | "resolveMappedDriveRoot"
+  // ─── audio capture ──────────────────────────────────────────────────────
+  // Enumerating microphones returns state and changes none: a READ. Starting a
+  // capture opens a physical input — about as far from "mutates nothing" as
+  // this surface goes — so it is a WRITE, and the entry in the trail that says
+  // a recording began. The capture's END needs no kind of its own: it happens
+  // through the handle's release, which the subscription ledger already
+  // records.
+  | "listAudioInputDevices"
+  | "startAudioCapture"
   | "triggerConversation"
   | "agentApprovalRespond"
   // ─── Structural-completeness vocabulary ────────────────────────────────
@@ -154,6 +163,8 @@ export const CHOKEPOINT_EFFECT: Record<StaticChokepointKind, Effect> = {
   authRedirectClose: "write",
   pickFolders: "read",
   resolveMappedDriveRoot: "read",
+  listAudioInputDevices: "read",
+  startAudioCapture: "write",
   triggerConversation: "write",
   agentApprovalRespond: "write",
   // Structural-completeness vocabulary — writes (egress / persist / session).
@@ -417,6 +428,11 @@ export const HOSTAPI_EFFECT_BY_PATH: Record<string, HostApiEffectSpec> = {
   pickFolders: { kind: "pickFolders", async: true },
   resolveMappedDriveRoot: { kind: "resolveMappedDriveRoot", targetFromArgs: firstStringArg,
     async: true },
+  // No target on either: the enumeration takes no arguments, and a capture
+  // request is a description of what to open rather than a thing the call is
+  // aimed at — there is no path or id in it to name.
+  listAudioInputDevices: { kind: "listAudioInputDevices", async: true },
+  startAudioCapture: { kind: "startAudioCapture", async: true },
   triggerConversation: { kind: "triggerConversation", async: true, targetFromArgs: objectStringField("source"),
   },
   // ─── agentApproval.* ──────────────────────────────────────────────────────

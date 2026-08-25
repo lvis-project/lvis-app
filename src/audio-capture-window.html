@@ -1,0 +1,24 @@
+<!doctype html>
+<!--
+  The host's audio capture surface.
+
+  Never shown. It exists because `getUserMedia`, `getDisplayMedia`,
+  `AudioContext` and `AudioWorklet` live in a renderer and nowhere else, and
+  the host is the only party that may have one inside the boundary. There is
+  no UI here on purpose: every visible part of a recording belongs to whatever
+  plugin asked for the audio, and it draws that in the sandboxed plugin-UI
+  shell like any other plugin surface.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' blob:; worker-src blob:;"
+    />
+    <title>audio capture</title>
+  </head>
+  <body>
+    <script type="module" src="./audio-capture-window.js"></script>
+  </body>
+</html>

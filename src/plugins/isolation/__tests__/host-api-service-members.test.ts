@@ -1267,3 +1267,120 @@ describe("a revoked key lease stops being spendable in the child", () => {
     expect(() => lease.bearer()).toThrow(/lease already released/);
   });
 });
+
+describe("startAudioCapture crosses as an id, and the PCM survives the wire", () => {
+  /** A capture whose frames and end the test decides. */
+  function makeFakeCapture(opened = { microphone: true, systemAudio: true }) {
+    const frames: ((frame: { seq: number; pcm: Uint8Array; peak: number }) => void)[] = [];
+    const ends: ((end: { reason: string; detail?: string }) => void)[] = [];
+    const stop = vi.fn(async () => {});
+    return {
+      captureId: "capture-1",
+      opened,
+      stop,
+      onFrame: (listener: (frame: { seq: number; pcm: Uint8Array; peak: number }) => void) => {
+        frames.push(listener);
+        return () => {};
+      },
+      onEnd: (listener: (end: { reason: string; detail?: string }) => void) => {
+        ends.push(listener);
+        return () => {};
+      },
+      emitFrame: (frame: { seq: number; pcm: Uint8Array; peak: number }) => {
+        for (const listener of frames) listener(frame);
+      },
+      emitEnd: (end: { reason: string; detail?: string }) => {
+        for (const listener of ends) listener(end);
+      },
+    };
+  }
+
+  it("delivers bytes no text codec could round-trip", async () => {
+    const capture = makeFakeCapture();
+    const harness = await createServiceHarness({
+      startAudioCapture: async () => capture,
+    } as unknown as Partial<PluginHostApi>);
+    const handle = await harness.child.hostApi.startAudioCapture({
+      sampleRate: 16_000,
+      frameMs: 200,
+      microphone: true,
+      systemAudio: true,
+    });
+
+    const got: Uint8Array[] = [];
+    handle.onFrame((frame) => got.push(frame.pcm));
+    // A NUL, a lone continuation byte and a 0xFF — none of which survive a
+    // text codec, which is exactly the mistake a `res.ok`-shaped test misses.
+    // Silence in int16 is 0x0000, so a codec that mangles NUL mangles silence.
+    const pcm = new Uint8Array([0x00, 0x00, 0x80, 0xff, 0xfe, 0x7f]);
+    capture.emitFrame({ seq: 0, pcm, peak: 0.5 });
+    await settle();
+
+    expect(got).toHaveLength(1);
+    expect(Array.from(got[0]!)).toEqual(Array.from(pcm));
+  });
+
+  it("carries seq and peak alongside the bytes", async () => {
+    const capture = makeFakeCapture();
+    const harness = await createServiceHarness({
+      startAudioCapture: async () => capture,
+    } as unknown as Partial<PluginHostApi>);
+    const handle = await harness.child.hostApi.startAudioCapture({
+      sampleRate: 16_000, frameMs: 200, microphone: true, systemAudio: false,
+    });
+    const seen: { seq: number; peak: number }[] = [];
+    handle.onFrame(({ seq, peak }) => seen.push({ seq, peak }));
+
+    capture.emitFrame({ seq: 7, pcm: new Uint8Array([1, 2]), peak: 0.25 });
+    await settle();
+
+    // `seq` is what lets a plugin notice it lost audio; a frame that arrives
+    // without it looks exactly like one that did not.
+    expect(seen).toEqual([{ seq: 7, peak: 0.25 }]);
+  });
+
+  it("reports what actually opened, and hands over an id rather than the capture", async () => {
+    const capture = makeFakeCapture({ microphone: true, systemAudio: false });
+    const harness = await createServiceHarness({
+      startAudioCapture: async () => capture,
+    } as unknown as Partial<PluginHostApi>);
+    const handle = await harness.child.hostApi.startAudioCapture({
+      sampleRate: 16_000, frameMs: 200, microphone: true, systemAudio: true,
+    });
+
+    // Asked for both, got one, and the plugin can see the difference.
+    expect(handle.opened).toEqual({ microphone: true, systemAudio: false });
+
+    const reply = await harness.host.handle(
+      harness.requests.find((request) => request.path === "startAudioCapture")!,
+    );
+    expect(reply.ok).toBe(true);
+    if (!reply.ok) return;
+    // Nothing that could be a live capture — no MediaStream, no AudioContext,
+    // no function. The same property `spawnWorker` has.
+    expect(Object.keys(reply.value as object).sort()).toEqual([
+      "captureId",
+      "handleId",
+      "opened",
+    ]);
+  });
+
+  it("delivers the end once, with the reason the host gave", async () => {
+    const capture = makeFakeCapture();
+    const harness = await createServiceHarness({
+      startAudioCapture: async () => capture,
+    } as unknown as Partial<PluginHostApi>);
+    const handle = await harness.child.hostApi.startAudioCapture({
+      sampleRate: 16_000, frameMs: 200, microphone: true, systemAudio: false,
+    });
+    const ends: { reason: string; detail?: string }[] = [];
+    handle.onEnd((end) => ends.push(end));
+
+    capture.emitEnd({ reason: "sources-lost", detail: "microphone track ended" });
+    await settle();
+
+    // A plugin finalising its recording here needs to know WHY: a lost source
+    // is a truncated meeting, and a `stopped` is not.
+    expect(ends).toEqual([{ reason: "sources-lost", detail: "microphone track ended" }]);
+  });
+});

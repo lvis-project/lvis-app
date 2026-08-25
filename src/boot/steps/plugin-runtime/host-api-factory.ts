@@ -21,6 +21,9 @@ import { normalizeAllowedHosts, urlHostMatchesAllowList } from "../../../main/ho
 import type { AuthRedirectCatchers } from "../../../main/auth-redirect-catcher.js";
 import { pickFoldersForPlugin } from "../../../main/host-api/pick-folders.js";
 import { resolveMappedDriveRoot } from "../../../main/host-api/mapped-drive-root.js";
+import { AudioCaptureService } from "../../../main/audio-capture.js";
+import type { AudioCaptureRequest } from "../../../plugins/public-contract.js";
+import { ElectronAudioCaptureSurface } from "../../../main/audio-capture-surface.js";
 import { evaluateHostFetch, runHostFetchHops } from "../../../main/host-fetch-guard.js";
 import {
   partitionCookieHeaderForUrl,
@@ -155,6 +158,22 @@ function enforceActiveHostApi(
 }
 
 /** Explicit deps the HostApi factory needs. Lazy bindings arrive as getters. */
+
+/**
+ * The one capture service, built on first use.
+ *
+ * Lazy because constructing the surface is cheap but wiring the loopback
+ * handlers is not free of consequence — an installation that never records
+ * should never install a display-media request handler at all. One instance
+ * because the hardware is one.
+ */
+let sharedAudioCaptureService: AudioCaptureService | null = null;
+function audioCaptureService(): AudioCaptureService {
+  sharedAudioCaptureService ??= new AudioCaptureService(new ElectronAudioCaptureSurface());
+  return sharedAudioCaptureService;
+}
+
+
 export interface CreateHostApiFactoryDeps {
   /** Getter for the mutable `pluginRuntime` binding (assigned after this factory is built). */
   getPluginRuntime: () => PluginRuntime;
@@ -1105,6 +1124,19 @@ export function createHostApiFactory(
        * command.
        */
       resolveMappedDriveRoot: async (drive: string) => resolveMappedDriveRoot(drive),
+      /**
+       * The capture runs HERE, in main, in a window this host owns. What the
+       * plugin contributes is a sample rate, a frame length and two booleans;
+       * the renderer, the worklet and the loopback wiring are first-party code
+       * it never sees.
+       *
+       * One service for the whole process, not one per plugin: the microphone
+       * and the system mixer are single physical things, and a per-plugin
+       * service would let two plugins each believe they held them.
+       */
+      listAudioInputDevices: async () => audioCaptureService().listInputDevices(),
+      startAudioCapture: async (request: AudioCaptureRequest) =>
+        audioCaptureService().start(request),
       openAuthWindow: (async (opts: OpenAuthWindowBaseOptions & { returnFinalUrl?: boolean }) => {
         const safeUrlForLog = (() => {
           try {

@@ -251,6 +251,38 @@ onStdout(), onStderr(), onExit() }` — live process control.
   permitted to spawn its own workers. ASRT grants are keyed to host-allocated paths
   and, on Windows, to a holder PID; a plugin-spawned grandchild would be outside
   that. The worker stays a child of main.
+**`startAudioCapture(request) → AudioCaptureHandle`.** Returns
+`{ captureId, opened, stop(), onFrame(), onEnd() }` — live capture control, and
+the same shape as `spawnWorker` for the same reason.
+
+- The host **keeps owning the capture**. It must: the capture needs
+  `getUserMedia`, `getDisplayMedia`, an `AudioContext` and an `AudioWorklet`,
+  and those exist only in a renderer. A plugin that wants them ships its own
+  renderer and loads it outside the sandbox — which is not a boundary a host API
+  can mediate, because mediating it would mean running plugin code in a
+  privileged context, and that removes the boundary rather than moving it. So
+  the renderer, the worklet and the loopback wiring become first-party.
+- Reply: `{ handleId, captureId, opened }`. `stop()` releases that registration;
+  `onFrame` / `onEnd` register **child-local** listeners fed by host
+  notifications keyed by `handleId`.
+- *Why a handle and not an event.* Frames are addressed to the ONE plugin that
+  started the capture. The host's event bus (`emitHostEvent`) broadcasts to
+  every installed plugin, so delivering audio that way would hand all of them
+  the microphone. A capability that looks event-shaped is a handle here for that
+  reason alone.
+- *The PCM crosses as base64.* The wire is JSON and JSON has no bytes; a
+  `Uint8Array` put through it arrives as an object with numeric keys, which is
+  not an error anywhere — just audio that decodes to noise. The child decodes
+  once per frame and fans the result out, rather than once per listener.
+- *`opened` is not the request.* It reports which sources actually opened.
+  Asking for both and getting one is an ordinary outcome, and a plugin that
+  cannot tell the difference will label a microphone-only recording as a full
+  one.
+- *What the host deliberately does not decide:* no silence detection, no chunk
+  boundaries, no mixing policy beyond summing the requested sources. Those are
+  decisions about the SUBJECT of a recording, and the subject belongs to
+  whoever asked for the audio.
+
 - *Confinement composes.* `PluginWorkerSpec` lets the caller name its own
   `allowReadPaths` and `allowWritePaths`, and in one heap that was harmless — the
   plugin and the worker supervisor were the same trust domain. Across the boundary
@@ -585,8 +617,9 @@ the real hostApi and asserts, per path, whether its arguments and return values 
 JSON-representable — with the non-representable members named explicitly as
 requiring a decided representation rather than being silently allowed.
 
-*Correction from doing it.* That set is **ten**, not eight. Alongside `hostFetch`,
-`resolveApiKey`, `spawnWorker`, `storage.read`, `storage.write` and the three
+*Correction from doing it.* That set is **ten**, not eight — and **eleven** once
+audio capture lands. Alongside `hostFetch`,
+`resolveApiKey`, `spawnWorker`, `startAudioCapture`, `storage.read`, `storage.write` and the three
 disposer-returning subscriptions (`onEvent`, `onPluginsChanged`,
 `config.onChange`), the criterion "arguments **and** return values" also catches:
 

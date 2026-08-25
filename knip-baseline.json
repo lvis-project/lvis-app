@@ -1254,6 +1254,16 @@
     },
     {
       "type": "files",
+      "file": "src/audio-capture-window-preload.cjs",
+      "name": "src/audio-capture-window-preload.cjs"
+    },
+    {
+      "type": "files",
+      "file": "src/audio-capture-window.js",
+      "name": "src/audio-capture-window.js"
+    },
+    {
+      "type": "files",
       "file": "src/data/__tests__/fixtures/secret-store-process-child.ts",
       "name": "src/data/__tests__/fixtures/secret-store-process-child.ts"
     },

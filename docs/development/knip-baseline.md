@@ -38,8 +38,11 @@ debt changes should a maintainer run `bun run check:knip:update`. That command
 flushes a same-directory staging file and atomically replaces the snapshot, so
 an interrupted update cannot truncate the reviewed baseline.
 
-The current snapshot contains 626 accepted findings: 25 files, 234 exports,
-353 types, 7 duplicate-export groups, and 7 dev dependencies. Resolved entries
+The current snapshot contains 629 accepted findings: 20 files, 226 exports,
+370 types, 8 duplicate-export groups, and 5 dev dependencies. Two of the files
+are the host's audio capture window and its preload: Electron loads them by
+path rather than importing them, so static analysis cannot see the reference —
+the same reason `src/plugin-ui-shell.js` is here. Resolved entries
 do not fail the gate; the command asks maintainers to shrink the snapshot.
 
 `vitest.config.ts` remains the runtime assertion boundary. Knip reads the pure

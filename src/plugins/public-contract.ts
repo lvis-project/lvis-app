@@ -1324,6 +1324,27 @@ export interface PluginHostApi {
    * there.
    */
   resolveMappedDriveRoot(drive: string): Promise<string | null>;
+  /**
+   * Microphones the user could pick. Labels are empty until microphone access
+   * has been granted at least once — the browser's rule, not this host's, and
+   * an empty label means "not yet permitted", never "no device".
+   */
+  listAudioInputDevices(): Promise<readonly AudioCaptureDevice[]>;
+  /**
+   * Begin capturing audio. The HOST owns the capture — the renderer, the
+   * worklet and the loopback wiring are first-party code — and the plugin
+   * receives PCM as data.
+   *
+   * A handle rather than an event subscription, and that is not a style
+   * choice: the host's event bus broadcasts to every installed plugin, so
+   * frames delivered as events would hand all of them the microphone. A handle
+   * is addressed to the one plugin that asked.
+   *
+   * At most one capture runs host-wide, because the microphone and the system
+   * mixer are single physical things. A second start is refused rather than
+   * queued — a queued recording would begin at a moment nobody chose.
+   */
+  startAudioCapture(request: AudioCaptureRequest): Promise<AudioCaptureHandle>;
 
   /**
    * Open a hardened viewer BrowserWindow that loads `url` inside the
@@ -1791,3 +1812,84 @@ export interface RuntimePlugin {
 
 export type RuntimePluginFactory = (context: PluginRuntimeContext,
 ) => Promise<RuntimePlugin> | RuntimePlugin;
+
+
+/** A microphone a plugin could ask the host to capture from. */
+export interface AudioCaptureDevice {
+  readonly deviceId: string;
+  /** Empty until microphone access has been granted at least once. */
+  readonly label: string;
+}
+
+/** What a plugin asks for. Every field is data; none of it is a command. */
+export interface AudioCaptureRequest {
+  /** Samples per second of the delivered PCM, 8000–48000. */
+  readonly sampleRate: number;
+  /** How much audio each delivered frame carries, 20–1000 ms. */
+  readonly frameMs: number;
+  /** Open the microphone. */
+  readonly microphone: boolean;
+  /** Open system audio (loopback). */
+  readonly systemAudio: boolean;
+  /**
+   * Which microphone, from {@link AudioCaptureDevice.deviceId}. Omitted means
+   * the OS default. A named device that is gone is an ERROR rather than a
+   * fallback to the default: silently recording a different microphone than
+   * the user picked is worse than not recording.
+   */
+  readonly microphoneDeviceId?: string;
+}
+
+/** The answer to a successful the host's audio capture. */
+export interface AudioCaptureStarted {
+  readonly captureId: string;
+  /**
+   * Which sources actually opened — NOT which were asked for. Asking for both
+   * and getting one is an ordinary outcome (no loopback support, permission
+   * denied), and a plugin that cannot tell the difference will label a
+   * microphone-only recording as a full one.
+   */
+  readonly opened: { readonly microphone: boolean; readonly systemAudio: boolean };
+}
+
+/** One delivered frame of captured audio. */
+export interface AudioCaptureFrame {
+  /**
+   * 0-based and gap-free. A plugin that sees a gap has lost audio, and can say
+   * so instead of producing a recording that is quietly short.
+   */
+  readonly seq: number;
+  /** Mono, little-endian int16, at the requested sample rate. */
+  readonly pcm: Uint8Array;
+  /** Loudest absolute sample in this frame, 0..1. */
+  readonly peak: number;
+}
+
+/** Why a capture stopped. */
+export interface AudioCaptureEnd {
+  readonly reason: "stopped" | "sources-lost" | "surface-lost";
+  /** Present when the reason is a failure, absent when the plugin asked. */
+  readonly detail?: string;
+}
+
+/**
+ * A running capture.
+ *
+ * The same lifetime shape as a spawned worker — a host-allocated id,
+ * subscriptions the caller opens, one way to end it — so an out-of-process
+ * plugin reaches it over machinery that already exists.
+ */
+export interface AudioCaptureHandle {
+  readonly captureId: string;
+  /**
+   * Which sources actually opened — NOT which were asked for. Asking for both
+   * and getting one is an ordinary outcome (no loopback support, permission
+   * denied), and a plugin that cannot tell the difference will label a
+   * microphone-only recording as a full one.
+   */
+  readonly opened: { readonly microphone: boolean; readonly systemAudio: boolean };
+  onFrame(listener: (frame: AudioCaptureFrame) => void): () => void;
+  /** Fires exactly once, however the capture ended. */
+  onEnd(listener: (end: AudioCaptureEnd) => void): () => void;
+  stop(): Promise<void>;
+}
