@@ -1,0 +1,149 @@
+<!doctype html>
+<!--
+  Floating dock — the host's always-on-top window.
+
+  Draws its own header and activity line, and hosts plugin cards as <webview>
+  guests pointed at plugin-ui-shell.html. The host chrome is ALWAYS around a
+  guest: that framing is the reason a plugin surface can float above every
+  other application without being able to impersonate one.
+
+  window.lvisDock is injected by floating-dock-preload.ts before this script.
+  window.lvisApi is unreachable here.
+-->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <!-- No 'unsafe-inline' and no nonce, matching plugin-ui-shell.html: the
+         bootstrap is an external sibling file so it loads under
+         `script-src 'self'`. An inline block here would be refused and leave
+         a transparent window with nothing painted and no error text.
+         `connect-src 'none'` because this renderer talks to main over IPC and
+         has no business reaching the network. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none';"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LVIS</title>
+    <style>
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; width: 100%; background: transparent; }
+      body {
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Apple SD Gothic Neo", "Noto Sans KR", "Malgun Gothic", sans-serif;
+        color: var(--dock-fg, #1a1a1a);
+        overflow: hidden;
+      }
+
+      /* The whole surface is one rounded card. The border is what separates
+         the dock from whatever it happens to be floating over — without it a
+         transparent overlay on a light background reads as part of that
+         application, which is exactly the confusion the host chrome exists to
+         prevent. */
+      #dock {
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        border-radius: 12px;
+        border: 1px solid var(--dock-border, rgba(0, 0, 0, 0.12));
+        background: var(--dock-bg, rgba(255, 255, 255, 0.96));
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+        overflow: hidden;
+      }
+
+      /* -webkit-app-region: drag is the only way to move the window, and it is
+         the host's header that carries it — a plugin card cannot become a drag
+         handle. */
+      #chrome {
+        flex: 0 0 auto;
+        padding: 10px 12px;
+        -webkit-app-region: drag;
+        border-bottom: 1px solid var(--dock-border, rgba(0, 0, 0, 0.08));
+      }
+
+      #chrome-row { display: flex; align-items: center; gap: 8px; }
+      #mark { font-size: 12px; font-weight: 650; letter-spacing: 0.02em; opacity: 0.75; }
+      #spacer { flex: 1 1 auto; }
+
+      #close {
+        -webkit-app-region: no-drag;
+        appearance: none;
+        border: 0;
+        background: transparent;
+        color: inherit;
+        font-size: 15px;
+        line-height: 1;
+        padding: 2px 6px;
+        border-radius: 6px;
+        cursor: pointer;
+        opacity: 0.55;
+      }
+      #close:hover { opacity: 1; background: var(--dock-hover, rgba(0, 0, 0, 0.06)); }
+
+      #activity { margin-top: 6px; font-size: 12px; line-height: 1.35; }
+      #activity[hidden] { display: none; }
+      #summary { font-weight: 550; }
+      #detail { opacity: 0.62; margin-top: 1px; }
+      #summary, #detail {
+        /* A long task title must not widen the dock — its width is the host's
+           and is not negotiable. */
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      #bar {
+        margin-top: 7px;
+        height: 3px;
+        border-radius: 2px;
+        background: var(--dock-track, rgba(0, 0, 0, 0.10));
+        overflow: hidden;
+      }
+      #bar[hidden] { display: none; }
+      #bar > i { display: block; height: 100%; background: var(--dock-accent, #3f6fd8); }
+
+      #slots { flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; }
+
+      .slot { display: flex; flex-direction: column; overflow: hidden; }
+      .slot + .slot { border-top: 1px solid var(--dock-border, rgba(0, 0, 0, 0.08)); }
+
+      /* The host draws the slot's title, not the plugin. A card that could
+         paint its own header could paint a convincing host one. */
+      .slot-head {
+        flex: 0 0 auto;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 5px 10px;
+        font-size: 11px;
+        opacity: 0.6;
+        -webkit-app-region: drag;
+      }
+      .slot-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+      .slot webview { flex: 1 1 auto; width: 100%; border: 0; background: transparent; }
+
+      #empty { padding: 14px 12px; font-size: 12px; opacity: 0.55; }
+      #empty[hidden] { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="dock">
+      <div id="chrome">
+        <div id="chrome-row">
+          <span id="mark">LVIS</span>
+          <span id="spacer"></span>
+          <button id="close" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="activity" hidden>
+          <div id="summary"></div>
+          <div id="detail"></div>
+        </div>
+        <div id="bar" hidden><i></i></div>
+      </div>
+      <div id="slots"></div>
+      <div id="empty" hidden></div>
+    </div>
+    <script type="module" src="./floating-dock-window.js"></script>
+  </body>
+</html>

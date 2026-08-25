@@ -54,6 +54,7 @@ import { createOutOfProcessPluginFactory } from "../isolation/out-of-process-plu
 import { createPluginStorage, createPluginStorageAuditSink } from "../storage.js";
 import { runWithCeiling } from "../../tools/executor-ceiling.js";
 import { checkRuntimeAdmission } from "./runtime-admission.js";
+import type { FloatingDockErrorCode, ResolvedFloatingSurface } from "../../main/floating-dock.js";
 import type { InvocationOrigin } from "./origin-chain.js";
 
 const log = createLogger("plugin-runtime");
@@ -7257,11 +7258,100 @@ export class PluginRuntime extends PluginRuntimeLifecycle {
     return createPluginStorage(pluginId, this.ensureDataDir(pluginId, plugin.pluginRoot), audit);
   }
 
+  /**
+   * Resolve one plugin's declared FLOATING surface for the dock, or say why
+   * not.
+   *
+   * This is the admission gate for the host's always-on-top window. Everything
+   * downstream — the slot, the clamp, the chrome — assumes this said yes for a
+   * good reason, so a wrong yes here is the one that matters: it puts a
+   * plugin's pixels on top of every other application on the machine.
+   *
+   * Returns a {@link ResolvedFloatingSurface} on success, or a
+   * {@link FloatingDockErrorCode} naming the refusal. The codes are the
+   * plugin-visible vocabulary and they are not interchangeable — "you did not
+   * declare this" is a bug in the plugin, while "this plugin is not loaded" is
+   * a condition that may pass.
+   */
+  resolveFloatingSurface(
+    pluginId: string,
+    extensionId: string,
+  ): ResolvedFloatingSurface | FloatingDockErrorCode {
+    const plugin = this.plugins.get(pluginId);
+    if (!plugin) return "unknown-plugin";
+    const extension = (plugin.manifest.ui ?? []).find((candidate) => candidate.id === extensionId);
+    if (!extension) return "surface-not-declared";
+
+    // The dock renders through `plugin-ui-shell.html`, which resolves an
+    // entry URL and `import()`s it. That is the ONLY thing it can do, so the
+    // kinds below are not a policy preference — they are what the surface can
+    // actually paint.
+    //
+    //   `embedded-page` is refused everywhere already: the sidebar answers it
+    //   with `legacyIframeNotSupported`, because the iframe path it needs no
+    //   longer exists. Admitting it here would produce a transparent
+    //   always-on-top window with nothing in it, which is worse than a
+    //   refusal — the user would see a defect and the plugin would see
+    //   success.
+    //
+    //   `info-card` is not required to declare an entry at all (see
+    //   `manifest-validation.ts`), so there is nothing for the shell to
+    //   import. Same outcome.
+    if (extension.slot !== "floating") return "surface-not-floating";
+    if (extension.kind !== "embedded-module") return "surface-not-floating";
+
+    // Restating an invariant the manifest validator already holds — it
+    // requires `entry` + `exportName` for `embedded-module`, so a declaration
+    // without them never becomes a loaded plugin and this branch is not
+    // reachable from a valid manifest. It stays because the TYPE says these
+    // fields are optional, and a narrowing that throws away the reason is
+    // worse than one that names it.
+    const entrySource = extension.entry ?? extension.page;
+    if (!entrySource) return "surface-has-no-entry";
+
+    let entryPath: string;
+    try {
+      entryPath = this.resolveEntryPathForPlugin(plugin.pluginRoot, entrySource);
+    } catch (err) {
+      // `listUiExtensions` swallows this and skips the entry, which is right
+      // for building a LIST: one bad declaration should not cost the user
+      // every other panel. A single resolve is the opposite case — somebody
+      // asked about exactly this surface and is waiting for an answer, so the
+      // refusal is the answer. Still audited, because a path outside the
+      // install root is a containment violation and not a typo.
+      log.warn(`floating ui entry rejected for '${pluginId}': ${(err as Error).message}`);
+      this.auditLog?.("error", "plugin_ui_entry_path_rejected", {
+        pluginId,
+        entry: entrySource,
+        reason: (err as Error).message,
+      });
+      return "surface-entry-rejected";
+    }
+
+    return {
+      pluginId,
+      extensionId: extension.id,
+      entryUrl: this.buildPluginUiEntryUrl(pluginId, plugin.manifest, entryPath),
+      // The plugin's string, rendered inside the host's chrome. It is placed
+      // as TEXT by the dock renderer, never as markup — a title is a label,
+      // not a way to draw into the host's own frame.
+      title: extension.title,
+    };
+  }
+
   listUiExtensions(): Array<{ pluginId: string; icon?: string; iconText?: string; extension: PluginUiExtension; entryUrl?: string; runtimeRevision?: number }> {
     const result: Array<{ pluginId: string; icon?: string; iconText?: string; extension: PluginUiExtension; entryUrl?: string; runtimeRevision?: number }> = [];
     for (const [pluginId, plugin] of this.plugins) {
       const runtimeRevision = this.getPluginUiRevision(pluginId);
       for (const extension of plugin.manifest.ui ?? []) {
+        // Sidebar only. Every caller of this list renders its entries as
+        // in-window panels — the sidebar rail, the app menu, and the `uiList`
+        // IPC behind them — and until the floating slot existed `"sidebar"`
+        // was the only possible value, so none of them ever had to ask. A
+        // floating surface reaching them would appear as a panel the plugin
+        // never asked for, in addition to the dock slot it did.
+        // `resolveFloatingSurface` above is the floating slot's own lookup.
+        if (extension.slot !== "sidebar") continue;
         const entrySource = extension.entry ?? extension.page;
         let entryPath: string | undefined;
         if (entrySource) {

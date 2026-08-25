@@ -33,6 +33,7 @@ import {
   setAppShutdownCompleted,
   setAppShutdownStarted,
 } from "./app-state.js";
+import { peekFloatingDock } from "../boot/steps/plugin-runtime/host-api-factory.js";
 
 const log = createLogger("lvis");
 
@@ -101,6 +102,13 @@ export async function runAppShutdownCleanup(options: {
       // throw past its own internal try/catch) so a wedged or throwing later
       // step can't leave accelerators bound after quit.
       unregisterAllGlobalShortcuts();
+      // Same reasoning, same position: the floating dock is an always-on-top
+      // window that outlives the app window by design. If a later stage wedges
+      // or the hard timeout fires, a dock left up is a window floating over
+      // everything with no process behind it. Synchronous, idempotent, and a
+      // no-op when nothing ever attached — `peekFloatingDock` does not build
+      // one just to tear it down.
+      peekFloatingDock()?.shutdown();
       if (signal.aborted) return;
       // Stop the opt-in local API server EARLY — it's fast (destroys idle
       // sockets + ends live SSE streams) and blanks its on-disk discovery file

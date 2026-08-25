@@ -56,7 +56,10 @@ import type {
   AudioCaptureDevice,
   AudioCaptureEnd,
   AudioCaptureFrame,
+  AttachFloatingPanelRequest,
   AudioCaptureHandle,
+  DetachReason,
+  FloatingPanelHandle,
   AudioCaptureRequest,
 } from "../public-contract.js";
 import type { HostApiCaller, PluginChildContext } from "./plugin-child-runtime.js";
@@ -85,6 +88,8 @@ import {
   type WireResolveApiKeyOptions,
   type WireWorkerHandle,
   asWireAudioCaptureEvent,
+  asWireFloatingPanelEvent,
+  type WireFloatingPanelHandle,
   type WireAudioCaptureHandle,
 } from "./host-api-wire.js";
 
@@ -466,6 +471,57 @@ export function createServiceChildMembers(
       };
       return capture;
     },
+    /**
+     * The dock slot, rebuilt on this side.
+     *
+     * `detach()` is the SUBSCRIPTION's dispose, not a call: the wire carries
+     * calls by path and a handle is a host-side object this side holds a
+     * receipt for, so releasing the receipt is what "detach" means across the
+     * boundary. `resize` is the opposite case — it needs an answer back, so it
+     * goes out as its own addressable path carrying the panel id.
+     */
+    attachFloatingPanel: async (...args) => {
+      const request = args[0] as AttachFloatingPanelRequest;
+      const reply = await call("attachFloatingPanel", [request]);
+      const handle = requireHandle(reply, "attachFloatingPanel") as unknown as WireFloatingPanelHandle;
+      const listeners: ((reason: DetachReason) => void)[] = [];
+      let height = handle.height;
+      let detached = false;
+      const dispose = deps.adoptSubscription("attachFloatingPanel", handle.handleId, (payload) => {
+        const event = asWireFloatingPanelEvent(payload, "attachFloatingPanel(event)");
+        if (detached) return;
+        detached = true;
+        for (const listener of listeners) listener(event.reason as DetachReason);
+        listeners.length = 0;
+        // Not disposed here, for the reason spelled out on `spawnWorker`: the
+        // host owns the slot, so the host owns the news that it closed.
+      });
+      const panel: FloatingPanelHandle = {
+        panelId: handle.panelId,
+        get height() {
+          return height;
+        },
+        resize: async (next: number) => {
+          height = Number(await call("resizeFloatingPanel", [handle.panelId, next]));
+          return height;
+        },
+        detach: async () => {
+          dispose();
+        },
+        onDetached: (listener) => {
+          if (detached) {
+            // Late subscriber on a slot that is already gone. Silence would
+            // leave it waiting for an event that has already happened.
+            listener("requested");
+            return;
+          }
+          listeners.push(listener);
+        },
+      };
+      return panel;
+    },
+    resizeFloatingPanel: async (...args) =>
+      call("resizeFloatingPanel", [String(args[0]), Number(args[1])]),
     spawnWorker: async (...args) => {
       const spec = args[0] as PluginWorkerSpec;
       const reply = await call("spawnWorker", [spec]);

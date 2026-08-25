@@ -333,6 +333,20 @@ const HOSTAPI_MARSHALLING: Record<string, MarshallingDecision> = {
     args: "request: AudioCaptureRequest (plain data)",
     returns: "Promise<AudioCaptureHandle> — live capture control: stop / onFrame / onEnd are functions",
   },
+  attachFloatingPanel: {
+    jsonRepresentable: false,
+    args: "request: AttachFloatingPanelRequest (plain data)",
+    returns:
+      "Promise<FloatingPanelHandle> — live slot control: resize / detach / onDetached are functions",
+  },
+  // Names an EXISTING slot and answers with a number, so it crosses whole. It
+  // exists as its own member precisely because the handle method above cannot:
+  // the wire carries calls by path, and `resize` needs an answer back.
+  resizeFloatingPanel: {
+    jsonRepresentable: true,
+    args: "panelId: string, height: number",
+    returns: "Promise<number> — the height actually applied, after clamping",
+  },
   // A drive letter in, a UNC string or `null` out. `null` is a real answer —
   // the drive is a local disk — so it must survive the wire distinctly from a
   // rejection, which is what a lookup that could not run produces.
@@ -406,6 +420,7 @@ const REQUIRES_DECIDED_REPRESENTATION: readonly string[] = [
   "resolveApiKey",
   "spawnWorker",
   "startAudioCapture",
+  "attachFloatingPanel",
   "storage.read",
   "storage.write",
 ];

@@ -925,6 +925,28 @@ export const HOSTAPI_PATH_CONTRACTS = {
     // a capture that simply failed to start.
     errors: ["effect-boundary-denied"],
   },
+  // A handle for the same reason the two above are: the host owns the window
+  // and has to keep owning it, and a detach is addressed to the ONE plugin
+  // whose card went away. On the event bus every installed plugin would hear
+  // that another one's recorder had closed.
+  // Plain JSON both ways: a panel id in, the applied height out. It names an
+  // existing handle rather than creating one, so it opens no lifetime of its
+  // own.
+  resizeFloatingPanel: {
+    arguments: "plain-json",
+    result: "plain-json",
+    lifetime: "none",
+    errors: ["effect-boundary-denied"],
+  },
+  attachFloatingPanel: {
+    arguments: "plain-json",
+    result: "handle",
+    lifetime: "child-disposable",
+    // Putting a surface on top of every other application is a WRITE in the
+    // effect SOT, so the gate can fire on it, and the denial has to be a
+    // verdict the child can tell apart from a dock that was simply full.
+    errors: ["effect-boundary-denied"],
+  },
   // The gated read-back of the host-held session cookies. Values cross the
   // boundary by design — that is what the caller needs to inject a session
   // into a separate browser context — so the host, not the child, decides
@@ -1021,9 +1043,11 @@ export const SERVICE_HOSTAPI_PATHS = [
   "resolveMappedDriveRoot",
   "listAudioInputDevices",
   "startAudioCapture",
+  "attachFloatingPanel",
+  "resizeFloatingPanel",
 ] as const satisfies readonly HostApiPath[];
 
-/** One of the thirteen. */
+/** One of the fifteen. */
 export type ServiceHostApiPath = (typeof SERVICE_HOSTAPI_PATHS)[number];
 
 
@@ -1641,6 +1665,44 @@ export interface WireAudioCaptureHandle {
 export type WireAudioCaptureEvent =
   | { readonly kind: "frame"; readonly seq: number; readonly pcm: string; readonly peak: number }
   | { readonly kind: "end"; readonly reason: string; readonly detail?: string };
+
+/** What `attachFloatingPanel` puts on the wire in place of the handle. */
+export interface WireFloatingPanelHandle {
+  readonly handleId: string;
+  readonly panelId: string;
+  /** What the host actually applied, after clamping. */
+  readonly height: number;
+}
+
+/**
+ * One host-to-child push for a live dock slot.
+ *
+ * Only one kind, because a slot has one thing to say: it went away, and why.
+ * A union of one is still a union — a second kind (a user-driven resize, say)
+ * would arrive as a new member rather than as an unlabelled payload.
+ */
+export type WireFloatingPanelEvent = {
+  readonly kind: "detached";
+  readonly reason: string;
+};
+
+/** Child side: read a dock push, refusing anything that is not one. */
+export function asWireFloatingPanelEvent(payload: unknown, label: string): WireFloatingPanelEvent {
+  const event = payload as WireFloatingPanelEvent | null;
+  if (event === null || typeof event !== "object") {
+    throw new HostApiBoundaryError(
+      "result-marshalling-rejected",
+      `[host-api-wire] ${label}: not a dock event`,
+    );
+  }
+  if (event.kind !== "detached" || typeof event.reason !== "string") {
+    throw new HostApiBoundaryError(
+      "result-marshalling-rejected",
+      `[host-api-wire] ${label}: unknown dock event`,
+    );
+  }
+  return event;
+}
 
 /** Child side: read a capture push, refusing anything that is not one. */
 export function asWireAudioCaptureEvent(payload: unknown, label: string): WireAudioCaptureEvent {

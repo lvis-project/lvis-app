@@ -49,6 +49,7 @@ import {
   type PluginHostApi,
   type PluginWorkerSpec,
   type StorageEncoding,
+  type AttachFloatingPanelRequest,
   type AudioCaptureRequest,
 } from "../public-contract.js";
 import { isResolvedPathWithin } from "../plugin-storage-containment.js";
@@ -83,6 +84,8 @@ import {
   type WireResolveApiKeyOptions,
   type WireWorkerHandle,
   type WireAudioCaptureEvent,
+  type WireFloatingPanelEvent,
+  type WireFloatingPanelHandle,
   type WireAudioCaptureHandle,
 } from "./host-api-wire.js";
 import { SubscriptionLedger } from "./subscription-ledger.js";
@@ -294,6 +297,8 @@ export const HOSTAPI_DISPATCH_TABLE: Record<HostApiPath, HostApiPathHandler> = {
   resolveMappedDriveRoot: unimplementedHostApiPath("resolveMappedDriveRoot"),
   listAudioInputDevices: unimplementedHostApiPath("listAudioInputDevices"),
   startAudioCapture: unimplementedHostApiPath("startAudioCapture"),
+  attachFloatingPanel: unimplementedHostApiPath("attachFloatingPanel"),
+  resizeFloatingPanel: unimplementedHostApiPath("resizeFloatingPanel"),
   openExternalUrl: unimplementedHostApiPath("openExternalUrl"),
   openAuthWindow: unimplementedHostApiPath("openAuthWindow"),
   openAuthPartitionViewer: unimplementedHostApiPath("openAuthPartitionViewer"),
@@ -540,6 +545,8 @@ export type ServiceHostApi = Pick<
   | "resolveMappedDriveRoot"
   | "listAudioInputDevices"
   | "startAudioCapture"
+  | "attachFloatingPanel"
+  | "resizeFloatingPanel"
 >;
 
 /**
@@ -962,6 +969,50 @@ function startAudioCapturePath(hostApi: ServiceHostApi): HostApiPathHandler {
   });
 }
 
+function attachFloatingPanelPath(hostApi: ServiceHostApi): HostApiPathHandler {
+  return defineHostApiPath("attachFloatingPanel", async (call, scope) => {
+    const panel = await hostApi.attachFloatingPanel(
+      call.args[0] as AttachFloatingPanelRequest,
+    );
+
+    let detached = false;
+    let live = true;
+    const handleId = scope.open(() => {
+      live = false;
+      // Releasing the handle IS the child's detach — the wire carries no
+      // per-handle call channel, so `detach()` on the child side disposes the
+      // subscription and this callback is what that means on the host side.
+      // Guarded because a slot that already went away must not be detached
+      // twice: `detach` is idempotent on the dock, but releasing is not.
+      if (!detached) void panel.detach();
+    });
+
+    panel.onDetached((reason) => {
+      detached = true;
+      // Guarded at the push rather than at the end: `deliver` throws on an
+      // unknown subscription, and a detach arriving after the handle was
+      // released would turn a routine race into an exception in a listener.
+      if (live) scope.deliver(handleId, { kind: "detached", reason } satisfies WireFloatingPanelEvent);
+      // The slot is gone, so the registration has nothing left to own.
+      // Released here rather than left for `childGone` so a plugin that
+      // attaches repeatedly does not accumulate host-side entries.
+      scope.release(handleId);
+    });
+
+    return {
+      handleId,
+      panelId: panel.panelId,
+      height: panel.height,
+    } satisfies WireFloatingPanelHandle;
+  });
+}
+
+function resizeFloatingPanelPath(hostApi: ServiceHostApi): HostApiPathHandler {
+  return defineHostApiPath("resizeFloatingPanel", async (call) =>
+    hostApi.resizeFloatingPanel(String(call.args[0]), Number(call.args[1])),
+  );
+}
+
 function resolveMappedDriveRootPath(hostApi: ServiceHostApi): HostApiPathHandler {
   return defineHostApiPath("resolveMappedDriveRoot", async (call) =>
     hostApi.resolveMappedDriveRoot(String(call.args[0])),
@@ -1268,6 +1319,8 @@ export function createServiceHostApiPaths(
     resolveMappedDriveRoot: resolveMappedDriveRootPath(hostApi),
     listAudioInputDevices: listAudioInputDevicesPath(hostApi),
     startAudioCapture: startAudioCapturePath(hostApi),
+    attachFloatingPanel: attachFloatingPanelPath(hostApi),
+    resizeFloatingPanel: resizeFloatingPanelPath(hostApi),
   };
 }
 
