@@ -110,7 +110,7 @@ function defaultImplementations(): HostImplementations {
     }),
     authRedirectWait: async () => Object.freeze({ code: "auth-code", state: "xyz" }),
     authRedirectClose: async () => {},
-    pickFolders: async () => ({ canceled: false, folders: ["/Users/probe/Documents"] }),
+    pickFolders: async () => ({ canceled: false, folders: ["/Users/example/Documents"] }),
     triggerConversation: async (spec) => ({
       accepted: true,
       source: spec.source,

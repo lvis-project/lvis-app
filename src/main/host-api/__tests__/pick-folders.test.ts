@@ -36,7 +36,7 @@ beforeEach(() => {
 
 describe("what the host asks the OS for", () => {
   it("asks for directories, allows more than one, and names the caller in the title", async () => {
-    showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ["/Users/probe/Docs"] });
+    showOpenDialog.mockResolvedValue({ canceled: false, filePaths: ["/Users/example/Docs"] });
 
     await pickFoldersForPlugin("local-indexer", withWindow);
 
@@ -65,12 +65,12 @@ describe("what the plugin gets back", () => {
   it("returns the paths the OS reported, in order", async () => {
     showOpenDialog.mockResolvedValue({
       canceled: false,
-      filePaths: ["/Users/probe/A", "/Users/probe/B"],
+      filePaths: ["/Users/example/A", "/Users/example/B"],
     });
 
     const result = await pickFoldersForPlugin("local-indexer", withWindow);
 
-    expect(result).toEqual({ canceled: false, folders: ["/Users/probe/A", "/Users/probe/B"] });
+    expect(result).toEqual({ canceled: false, folders: ["/Users/example/A", "/Users/example/B"] });
   });
 
   it("reports a dismissal as an answer, not an error", async () => {
@@ -127,12 +127,12 @@ describe("one chooser per plugin", () => {
         release = resolve;
       }),
     );
-    showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ["/Users/probe/C"] });
+    showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ["/Users/example/C"] });
 
     const first = pickFoldersForPlugin("local-indexer", withWindow);
     const second = await pickFoldersForPlugin("meeting", withWindow);
 
-    expect(second).toEqual({ canceled: false, folders: ["/Users/probe/C"] });
+    expect(second).toEqual({ canceled: false, folders: ["/Users/example/C"] });
     release({ canceled: true, filePaths: [] });
     await first;
   });
@@ -141,10 +141,10 @@ describe("one chooser per plugin", () => {
     showOpenDialog.mockRejectedValueOnce(new Error("dialog exploded"));
     await expect(pickFoldersForPlugin("local-indexer", withWindow)).rejects.toThrow("dialog exploded");
 
-    showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ["/Users/probe/D"] });
+    showOpenDialog.mockResolvedValueOnce({ canceled: false, filePaths: ["/Users/example/D"] });
     await expect(pickFoldersForPlugin("local-indexer", withWindow)).resolves.toEqual({
       canceled: false,
-      folders: ["/Users/probe/D"],
+      folders: ["/Users/example/D"],
     });
   });
 });
