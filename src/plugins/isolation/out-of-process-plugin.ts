@@ -37,7 +37,12 @@ import {
   unmarkPluginChildConfined,
 } from "../../permissions/sandbox-capability.js";
 import { createSandboxProcessHome } from "../../permissions/sandbox-process-home.js";
-import { cleanupAsrtSandboxAfterCommand } from "../../permissions/asrt-sandbox.js";
+import {
+  cleanupAsrtSandboxAfterCommand,
+  registerWorkerUnixSocketDir,
+  unregisterWorkerUnixSocketDir,
+} from "../../permissions/asrt-sandbox.js";
+import { resolvePluginSocketDir } from "../plugin-storage-layout.js";
 import { buildSafeChildEnv } from "../../tools/safe-env.js";
 // The allowlist is READ where it is declared rather than mirrored here. It is
 // the host's answer to "which preferences may a plugin see", and a second copy
@@ -680,8 +685,16 @@ function resolveUserChosenDirectory(
 export function derivePluginChildEnvelope(
   inputs: PluginChildEnvelopeInputs,
 ): DelegatedWorkerConfinement {
-  const read = [inputs.pluginRoot, inputs.pluginDataDir];
-  const write = [inputs.pluginDataDir];
+  // The socket directory is in the BASE envelope rather than in a per-plugin
+  // grant row, and that is deliberate. It grants no reach: the directory is
+  // inside the plugin's own storage namespace, which `pluginDataDir` already
+  // sits in, so a plugin that could write one could always write the other.
+  // What it does is make the ONE place a plugin may bind a Unix socket exist
+  // for every confined child, so the spawn can register that place with ASRT
+  // unconditionally instead of only for the plugins someone remembered.
+  const socketDir = resolvePluginSocketDir(inputs.pluginDataDir);
+  const read = [inputs.pluginRoot, inputs.pluginDataDir, socketDir];
+  const write = [inputs.pluginDataDir, socketDir];
   for (const grant of PLUGIN_ENVELOPE_GRANTS.get(inputs.pluginId) ?? []) {
     if (grant.kind === "hostDirectory") {
       const directory = hostGrantDirectory(grant);
@@ -724,6 +737,16 @@ export interface ConfinedPluginChildSpec {
    * in `out-of-process-plugins.ts`.
    */
   readonly envelope: DelegatedWorkerConfinement;
+  /**
+   * Where this child may bind a Unix-domain socket, as
+   * {@link resolvePluginSocketDir} derived it from the plugin's data directory.
+   *
+   * Passed rather than recomputed here. It is already inside
+   * {@link envelope}, but as one entry among several with nothing marking which
+   * — and the registration below has to name exactly one directory, so reading
+   * it back out of the list would mean guessing.
+   */
+  readonly socketDir: string;
   /** The child's own entry module. Injected so a test can serve a stand-in. */
   readonly childEntryPath: string;
 }
@@ -808,12 +831,21 @@ export async function spawnConfinedPluginChild(
   spec: ConfinedPluginChildSpec,
 ): Promise<ConfinedPluginChild> {
   const sandboxHome = createSandboxProcessHome();
+  const socketDir = spec.socketDir;
+  let socketDirRegistered = false;
   let wrapped = false;
   const releaseSandboxState = (): void => {
     // Reviewer no-leak: the confined marker must not outlive the child. Runs
     // unconditionally (idempotent) so a spawn that failed AFTER onWrapped and
     // a normal exit both clear it.
     unmarkPluginChildConfined(spec.pluginId);
+    if (socketDirRegistered) {
+      socketDirRegistered = false;
+      // The ALLOW is a SHARED-config entry, so it outlives the child that
+      // needed it and would accumulate one `(subpath <dir>)` per plugin ever
+      // loaded. Removed on the same unconditional path the confined marker is.
+      void unregisterWorkerUnixSocketDir(socketDir);
+    }
     if (wrapped) {
       wrapped = false;
       void cleanupAsrtSandboxAfterCommand();
@@ -846,6 +878,22 @@ export async function spawnConfinedPluginChild(
     for (const directory of [...spec.envelope.read, ...spec.envelope.write]) {
       mkdirSync(directory, { recursive: true, mode: 0o700 });
     }
+    // BEFORE the wrap, and that ordering is the whole point rather than a
+    // preference. The Unix-socket ALLOW lives on ASRT's SHARED config, and the
+    // seatbelt profile the child runs under is GENERATED when the command is
+    // wrapped — so a registration that arrived afterwards would apply to the
+    // next child and not to this one, and the symptom would be an `EPERM` on a
+    // bind the host believes it permitted. (`asrt-sandbox.ts`, WORKER UDS
+    // header: a per-command `allowUnixSockets` is inert; only the shared one is
+    // read, and on macOS it must name the DIRECTORY, not the socket file.)
+    //
+    // Registered for EVERY confined child rather than for the plugins known to
+    // want a socket: the directory is inside the plugin's own namespace and
+    // grants no reach beyond it, so making it conditional would buy nothing and
+    // would make "the plugin binds and it fails" depend on a list someone has
+    // to remember to update.
+    await registerWorkerUnixSocketDir(socketDir);
+    socketDirRegistered = true;
     const child = await spawnConfinedChild({
       // `process.execPath` is the Electron binary — in production AND under
       // this repository's own test runner, which launches Vitest through that
@@ -1038,7 +1086,12 @@ export function createOutOfProcessPluginFactory(
       pluginDataDir: context.pluginDataDir,
       configValue: (key) => hostApi.config.get(key),
     });
-    const child = await connect({ pluginId, envelope, childEntryPath });
+    const child = await connect({
+      pluginId,
+      envelope,
+      socketDir: resolvePluginSocketDir(context.pluginDataDir),
+      childEntryPath,
+    });
 
     let live = true;
     const transport = new PluginChildTransport({

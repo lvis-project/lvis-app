@@ -101,6 +101,7 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { resolvePluginSocketDir } from "../../plugin-storage-layout.js";
 // The child entry is bundled by the shared module rather than here: its
 // externals, banner and target are the shipped build's, and a second copy of
 // them is a second chance for one case to prove something about a child that
@@ -506,6 +507,18 @@ interface ProbeReport {
  * else, as `derivePluginChildEnvelope` produces for a plugin with no row in
  * `PLUGIN_ENVELOPE_GRANTS`.
  */
+/**
+ * The socket directory every confined child gets, in the BASE envelope.
+ *
+ * Named here so the expectations below say WHICH directory the extra entry is
+ * rather than growing an unexplained third path. It carries no reach — it is
+ * inside the plugin's own storage namespace, beside `data` — and it exists in
+ * every envelope so the spawn can register it with the sandbox unconditionally.
+ */
+function socketDirOf(fx: Fixture): string {
+  return resolvePluginSocketDir(fx.pluginDataDir);
+}
+
 function baseEnvelope(fx: Fixture): DelegatedWorkerConfinement {
   return derivePluginChildEnvelope({
     pluginId: PLUGIN_ID,
@@ -524,6 +537,7 @@ async function runProbe(
   mkdirSync(ASRT_DEFAULT_TEMP_ROOT, { recursive: true });
   const child = await spawnConfinedPluginChild({
     pluginId: PLUGIN_ID,
+    socketDir: resolvePluginSocketDir(fx.pluginDataDir),
     envelope,
     childEntryPath: writeProbeModule(fx),
   });
@@ -573,6 +587,7 @@ process.stdout.write("PROBE:" + JSON.stringify(attempt(() => readFileSync(${JSON
   );
   const child = await spawnConfinedPluginChild({
     pluginId: reader.pluginId,
+    socketDir: resolvePluginSocketDir(reader.pluginDataDir),
     envelope: derivePluginChildEnvelope({
       pluginId: reader.pluginId,
       pluginRoot: reader.pluginRoot,
@@ -645,6 +660,7 @@ setTimeout(() => process.exit(0), 4000).unref?.();
   );
   const child = await spawnConfinedPluginChild({
     pluginId: PLUGIN_ID,
+    socketDir: resolvePluginSocketDir(fx.pluginDataDir),
     envelope: baseEnvelope(fx),
     childEntryPath: probePath,
   });
@@ -738,8 +754,8 @@ describe("the host decides how far a plugin child reaches", () => {
         configValue: () => undefined,
       }),
     ).toEqual({
-      read: [fx.pluginRoot, fx.pluginDataDir],
-      write: [fx.pluginDataDir],
+      read: [fx.pluginRoot, fx.pluginDataDir, socketDirOf(fx)],
+      write: [fx.pluginDataDir, socketDirOf(fx)],
     });
   });
 
@@ -754,6 +770,7 @@ describe("the host decides how far a plugin child reaches", () => {
     expect(envelope.read).toEqual([
       fx.pluginRoot,
       fx.pluginDataDir,
+      socketDirOf(fx),
       join(fx.lvisHome, "runtime"),
       join(fx.lvisHome, "certs"),
     ]);
@@ -761,7 +778,7 @@ describe("the host decides how far a plugin child reaches", () => {
     // its config keys are unset, so it cannot also show that no OTHER grant
     // puts the same directory into `write`. The case that does is `refuses a
     // chosen directory naming a host root the row grants READ`.
-    expect(envelope.write).toEqual([fx.pluginDataDir]);
+    expect(envelope.write).toEqual([fx.pluginDataDir, socketDirOf(fx)]);
   });
 
   it("admits a chosen directory the user approved, as read AND write", () => {
@@ -773,7 +790,7 @@ describe("the host decides how far a plugin child reaches", () => {
       configValue: (key) => (key === "indexStorageRoot" ? fx.userRoot : undefined),
     });
     expect(envelope.read).toContain(fx.userRoot);
-    expect(envelope.write).toEqual([fx.pluginDataDir, fx.userRoot]);
+    expect(envelope.write).toEqual([fx.pluginDataDir, socketDirOf(fx), fx.userRoot]);
   });
 
   it("refuses a chosen directory no approved workspace root covers", () => {
@@ -832,7 +849,7 @@ describe("the host decides how far a plugin child reaches", () => {
       pluginDataDir: fx.pluginDataDir,
       configValue: (key) => (key === "indexStorageRoot" ? inside : undefined),
     });
-    expect(envelope.write).toEqual([fx.pluginDataDir, inside]);
+    expect(envelope.write).toEqual([fx.pluginDataDir, socketDirOf(fx), inside]);
   });
 
   it("refuses a chosen directory under the plugin's own immutable runtime root", () => {
@@ -989,7 +1006,7 @@ describe("the host decides how far a plugin child reaches", () => {
       pluginDataDir: fx.pluginDataDir,
       configValue: (key) => (key === "indexStorageRoot" ? inside : undefined),
     });
-    expect(envelope.write).toEqual([fx.pluginDataDir, inside]);
+    expect(envelope.write).toEqual([fx.pluginDataDir, socketDirOf(fx), inside]);
   });
 
   it("still admits the plugin's own data dir when an approved root covers the runtime root", () => {
@@ -1005,7 +1022,7 @@ describe("the host decides how far a plugin child reaches", () => {
       pluginDataDir: fx.pluginDataDir,
       configValue: (key) => (key === "indexStorageRoot" ? inside : undefined),
     });
-    expect(envelope.write).toEqual([fx.pluginDataDir, inside]);
+    expect(envelope.write).toEqual([fx.pluginDataDir, socketDirOf(fx), inside]);
   });
 
   it("refuses a chosen directory that reaches out of the data dir through a symlink", () => {
@@ -1043,7 +1060,7 @@ describe("the host decides how far a plugin child reaches", () => {
       pluginDataDir: fx.pluginDataDir,
       configValue: (key) => (key === "indexStorageRoot" ? link : undefined),
     });
-    expect(envelope.write).toEqual([fx.pluginDataDir, link]);
+    expect(envelope.write).toEqual([fx.pluginDataDir, socketDirOf(fx), link]);
   });
 
   it("refuses a relative value rather than resolving it against the host's cwd", () => {
@@ -1080,7 +1097,7 @@ describe("the host decides how far a plugin child reaches", () => {
       pluginDataDir: fx.pluginDataDir,
       configValue: (key) => (key === "indexStorageRoot" ? "" : undefined),
     });
-    expect(envelope.write).toEqual([fx.pluginDataDir]);
+    expect(envelope.write).toEqual([fx.pluginDataDir, socketDirOf(fx)]);
   });
 });
 
@@ -1091,6 +1108,7 @@ describe("a plugin that cannot be confined is not spawned", () => {
     await expect(
       spawnConfinedPluginChild({
         pluginId: PLUGIN_ID,
+        socketDir: resolvePluginSocketDir(fx.pluginDataDir),
         envelope: baseEnvelope(fx),
         childEntryPath: writeProbeModule(fx),
       }),
@@ -1112,6 +1130,7 @@ describe("a plugin that cannot be confined is not spawned", () => {
     await expect(
       spawnConfinedPluginChild({
         pluginId: PLUGIN_ID,
+        socketDir: resolvePluginSocketDir(fx.pluginDataDir),
         envelope: { read: [fx.pluginRoot, fx.pluginDataDir, dangling], write: [dangling] },
         childEntryPath: writeProbeModule(fx),
       }),
@@ -1138,6 +1157,7 @@ describe("a plugin that cannot be confined is not spawned", () => {
         await expect(
           spawnConfinedPluginChild({
             pluginId: PLUGIN_ID,
+            socketDir: resolvePluginSocketDir(fx.pluginDataDir),
             envelope: { read: [fx.pluginRoot, fx.pluginDataDir, dangling], write: [dangling] },
             childEntryPath: writeProbeModule(fx),
           }),
@@ -1490,6 +1510,7 @@ export const createPlugin = async (context) => ({
       } as unknown as PluginHostApi;
       const instance = await factory({
         pluginId: PLUGIN_ID,
+        pluginSocketDir: resolvePluginSocketDir(fx.pluginDataDir),
         pluginRoot: fx.pluginRoot,
         hostRoot: repoRoot,
         pluginDataDir: fx.pluginDataDir,
@@ -1662,6 +1683,7 @@ export const createPlugin = async (context) => {
       });
       const instance = await factory({
         pluginId: PLUGIN_ID,
+        pluginSocketDir: resolvePluginSocketDir(fx.pluginDataDir),
         pluginRoot: fx.pluginRoot,
         hostRoot: repoRoot,
         pluginDataDir: fx.pluginDataDir,
@@ -2072,6 +2094,7 @@ export const createPlugin = async (context) => {
 
       const instance = await factory({
         pluginId: "meeting",
+        pluginSocketDir: resolvePluginSocketDir(plugin.pluginDataDir),
         pluginRoot: plugin.pluginRoot,
         // The app root, as production passes it — a directory the child has no
         // write grant for, which is what makes the legacy-migration case below
@@ -2243,6 +2266,206 @@ export const createPlugin = async (context) => {
  * the half that matters: on Linux the bind SUCCEEDS and the flow still cannot
  * work, which is a strictly worse failure than being told no.
  */
+/**
+ * Bind a Unix-domain socket inside a confined child and report what happened,
+ * then — when the bind succeeded — try to reach it FROM THE HOST.
+ *
+ * The host half is the point. A child can say `listen()` returned, and a child
+ * saying that is exactly what the loopback case above produces on Linux while
+ * the socket sits in a namespace nobody else is in. Only an outside connect
+ * distinguishes "bound" from "bound and reachable", which is the property a
+ * plugin's spawned worker actually depends on.
+ *
+ * @param socketPath where to bind. Passed rather than derived so a case can aim
+ * it at a directory the host did NOT register — the control that separates
+ * "the registration did it" from "unix sockets are simply allowed".
+ */
+/**
+ * A plugin layout rooted somewhere SHORT, made for the Unix-socket cases only.
+ *
+ * The suite's own fixture lives under `tmpdir()`, which on macOS is
+ * `/var/folders/<two>/<thirty-odd>/T/...` — and a socket path over
+ * `sockaddr_un`'s 104 bytes fails `bind()` with `EINVAL`. That failure is real
+ * (it is what {@link assertUnixSocketPathFits} now refuses up front) but it is
+ * not the question these cases ask, and a case that hit it would report
+ * "refused" for the wrong reason.
+ *
+ * `/private/tmp` rather than `/tmp`: on macOS the latter is a symlink to the
+ * former, and the sandbox compares canonical paths — so an allow spelled `/tmp`
+ * and a bind the kernel resolves to `/private/tmp` would not match, and the
+ * miss would look exactly like the refusal the second case is about.
+ */
+interface ShortRootedPlugin {
+  readonly root: string;
+  readonly pluginRoot: string;
+  readonly pluginDataDir: string;
+  readonly socketDir: string;
+}
+
+function makeShortRootedPlugin(): ShortRootedPlugin {
+  const base = process.platform === "darwin" ? "/private/tmp" : tmpdir();
+  const root = mkdtempSync(join(base, "lv-uds-"));
+  const pluginRoot = join(root, "p");
+  const pluginDataDir = join(pluginRoot, "data");
+  const socketDir = resolvePluginSocketDir(pluginDataDir);
+  mkdirSync(pluginDataDir, { recursive: true, mode: 0o700 });
+  mkdirSync(socketDir, { recursive: true, mode: 0o700 });
+  return { root, pluginRoot, pluginDataDir, socketDir };
+}
+
+/**
+ * Bind a Unix-domain socket inside a confined child and report what happened,
+ * then — when the bind succeeded — try to reach it FROM THE HOST.
+ *
+ * The host half is the point. A child can say `listen()` returned, and a child
+ * saying that is exactly what the loopback case below produces on Linux while
+ * the socket sits in a namespace nobody else is in. Only an outside connect
+ * distinguishes "bound" from "bound and reachable", which is the property a
+ * plugin's spawned worker actually depends on.
+ *
+ * @param socketPath where to bind. Passed rather than derived so a case can aim
+ * it at a directory the host did NOT register — the control that separates
+ * "the registration did it" from "unix sockets are simply allowed".
+ */
+async function runUnixBindProbe(
+  plugin: ShortRootedPlugin,
+  socketPath: string,
+): Promise<{ child: { ok: boolean; code?: string }; hostReach?: string }> {
+  const probePath = join(plugin.pluginRoot, "unix-bind-probe.mjs");
+  writeFileSync(
+    probePath,
+    `import { createServer } from "node:http";
+import { unlinkSync } from "node:fs";
+const socketPath = ${JSON.stringify(socketPath)};
+const server = createServer((_req, res) => res.end("reached"));
+const report = (value) => process.stdout.write("PROBE:" + JSON.stringify(value) + "\\n");
+server.on("error", (error) => report({ ok: false, code: error.code ?? error.name }));
+// A socket file left by an earlier run makes listen() fail EADDRINUSE, which
+// would read as a refusal. The plugin owns cleanup of what it created.
+try { unlinkSync(socketPath); } catch { /* nothing there */ }
+server.listen({ path: socketPath }, () => report({ ok: true }));
+setTimeout(() => process.exit(0), 4000).unref?.();
+`,
+    "utf-8",
+  );
+  const child = await spawnConfinedPluginChild({
+    pluginId: PLUGIN_ID,
+    socketDir: plugin.socketDir,
+    envelope: derivePluginChildEnvelope({
+      pluginId: PLUGIN_ID,
+      pluginRoot: plugin.pluginRoot,
+      pluginDataDir: plugin.pluginDataDir,
+      configValue: () => undefined,
+    }),
+    childEntryPath: probePath,
+  });
+  try {
+    const report = await new Promise<{ ok: boolean; code?: string }>((resolve, reject) => {
+      let stdout = "";
+      const timer = setTimeout(
+        () => reject(new Error(`the unix probe never reported; stdout was: ${stdout}`)),
+        15_000,
+      );
+      child.link.input.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString("utf-8");
+        const line = stdout.split("\n").find((entry) => entry.startsWith("PROBE:"));
+        if (!line) return;
+        clearTimeout(timer);
+        resolve(JSON.parse(line.slice("PROBE:".length)));
+      });
+      child.link.input.on("end", () => {
+        clearTimeout(timer);
+        reject(new Error(`the unix probe exited without reporting; stdout was: ${stdout}`));
+      });
+      child.link.input.on("error", (error: Error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+    if (!report.ok) return { child: report };
+    const hostReach = await new Promise<string>((resolve) => {
+      const socket = connect({ path: socketPath, timeout: 2000 });
+      socket.on("connect", () => {
+        socket.destroy();
+        resolve("connected");
+      });
+      socket.on("timeout", () => {
+        socket.destroy();
+        resolve("ETIMEDOUT");
+      });
+      socket.on("error", (error: NodeJS.ErrnoException) => {
+        socket.destroy();
+        resolve(error.code ?? error.name);
+      });
+    });
+    return { child: report, hostReach };
+  } finally {
+    child.link.terminate("unix probe done");
+  }
+}
+
+describe("a confined child and a Unix-domain socket", () => {
+  let shortPlugin: ShortRootedPlugin | undefined;
+
+  afterEach(() => {
+    if (shortPlugin) rmSync(shortPlugin.root, { recursive: true, force: true });
+    shortPlugin = undefined;
+  });
+
+  it.runIf(process.platform !== "win32")(
+    "binds in the directory the host registered, and the HOST reaches it",
+    async () => {
+      if (!(await sandboxCasesRun())) return;
+      // The same posture the loopback cases measure against: deny-by-default
+      // egress, no local binding. What changes the answer here is not a looser
+      // network policy — it is that this socket is a FILESYSTEM object in a
+      // directory the spawn registered before wrapping.
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+      shortPlugin = makeShortRootedPlugin();
+      const { child, hostReach } = await runUnixBindProbe(
+        shortPlugin,
+        join(shortPlugin.socketDir, "probe.sock"),
+      );
+
+      expect(child.ok, JSON.stringify(child)).toBe(true);
+      // The half the child cannot assert about itself, and the half the whole
+      // capability exists for: a loopback TCP bind either fails (macOS) or
+      // succeeds into a namespace nobody else is in (Linux). This one is
+      // reachable from outside on both.
+      expect(hostReach).toBe("connected");
+    },
+    120_000,
+  );
+
+  it.runIf(process.platform === "darwin")(
+    "refuses a socket in a directory that is writable but NOT registered",
+    async () => {
+      if (!(await sandboxCasesRun())) return;
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+      shortPlugin = makeShortRootedPlugin();
+      // `pluginDataDir` is in `envelope.write` — the child creates ordinary
+      // files there throughout this suite. So a refusal here cannot be about
+      // write permission, which is what makes it evidence that the Unix-socket
+      // ALLOW is a SEPARATE, directory-scoped grant rather than something the
+      // write jail implies.
+      //
+      // darwin only: the macOS rule is `(subpath <dir>)` and therefore has a
+      // place to miss. On Linux the seccomp re-permit is path-BLIND — it
+      // re-allows the AF_UNIX family for the whole child — so there is no
+      // second directory for this case to be about, and asserting a refusal
+      // there would be asserting something false.
+      const { child } = await runUnixBindProbe(
+        shortPlugin,
+        join(shortPlugin.pluginDataDir, "unregistered.sock"),
+      );
+
+      expect(child.ok, JSON.stringify(child)).toBe(false);
+      expect(child.code).toMatch(/EPERM|EACCES/);
+    },
+    120_000,
+  );
+});
+
 describe("a confined child and a loopback TCP listener", () => {
   it.runIf(process.platform === "darwin")(
     "on macOS the bind is refused outright, so the failure arrives before the user does",

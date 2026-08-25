@@ -1675,6 +1675,29 @@ export interface PluginRuntimeContext {
    * (`pluginRoot`) which is overwritten on plugin updates.
    */
   pluginDataDir: string;
+  /**
+   * Absolute path to the one directory this plugin may bind a Unix-domain
+   * socket in, at `<pluginsRoot>/<pluginId>/sockets/`. The host creates it
+   * before calling the plugin factory.
+   *
+   * WHY A SEPARATE DIRECTORY, when `pluginDataDir` is writable too. A confined
+   * child's permission to create a socket is not its permission to create a
+   * FILE: it is a separate ALLOW, scoped on macOS to one directory, and the
+   * host has to register that directory with the sandbox BEFORE the child is
+   * spawned. `sockets/` is the directory it registers. A socket bound anywhere
+   * else — `pluginDataDir` included — is refused with `EPERM`.
+   *
+   * WHAT IT IS FOR. A plugin that has to be REACHED by a process it spawned
+   * used to bind loopback TCP. A confined child cannot: on macOS the bind is
+   * refused, and on Linux the child's network namespace puts loopback out of
+   * reach from outside. A Unix socket is a filesystem object and has neither
+   * problem. Pass the path to the other process and connect to it there.
+   *
+   * The plugin owns what it creates here, including cleanup: a socket file left
+   * by a crashed run makes the next `listen()` fail with `EADDRINUSE`, so
+   * unlink before binding.
+   */
+  pluginSocketDir: string;
   config?: Record<string, unknown>;
   log: (message: string, meta?: unknown) => void;
   hostApi: PluginHostApi;

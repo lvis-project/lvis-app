@@ -34,6 +34,7 @@ import {
 import type { PluginUiResourceProvider } from "../../mcp/plugin-ui-resource-provider.js";
 import { describeNonJson } from "../../shared/json-representable.js";
 import { RAW_RESULT_META } from "../../mcp/protocol-constants.js";
+import { resolvePluginSocketDir } from "../plugin-storage-layout.js";
 import type {
   PluginHostApi,
   PluginManifest,
@@ -532,6 +533,11 @@ export async function startPluginChildRuntime(
     pluginRoot: context.pluginRoot,
     hostRoot: context.hostRoot,
     pluginDataDir: context.pluginDataDir,
+    // DERIVED, not carried. It is a pure function of the data directory, and
+    // the host's spawn path computes it with the SAME function — so the
+    // directory the sandbox was told about and the one the plugin is handed
+    // cannot come apart. A second wire field could.
+    pluginSocketDir: resolvePluginSocketDir(context.pluginDataDir),
     config: context.config,
     log,
     hostApi,

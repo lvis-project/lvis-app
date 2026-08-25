@@ -76,6 +76,7 @@ import {
   _resetAppPreferencePublisher,
 } from "../../../boot/steps/plugin-runtime/app-preference.js";
 import type { SettingsService, WebViewPreferredFlow } from "../../../data/settings-store.js";
+import { resolvePluginSocketDir } from "../../plugin-storage-layout.js";
 
 const PLUGIN_ID = "work-assistant";
 
@@ -357,6 +358,7 @@ describe("the config values a plugin reads, across a real child process", () => 
         pluginRoot: root,
         hostRoot: repositoryRoot(),
         pluginDataDir,
+        pluginSocketDir: resolvePluginSocketDir(pluginDataDir),
         // The stray cleartext copy a secret key can still have: the host deletes
         // it on a secret write, and the child must do the same rather than
         // storing the sentinel in its place.
@@ -436,6 +438,7 @@ describe("the config values a plugin reads, across a real child process", () => 
         pluginRoot: root,
         hostRoot: repositoryRoot(),
         pluginDataDir,
+        pluginSocketDir: resolvePluginSocketDir(pluginDataDir),
         config: {},
         log: () => undefined,
         hostApi,
@@ -505,6 +508,7 @@ describe("the config values a plugin reads, across a real child process", () => 
         pluginRoot: root,
         hostRoot: repositoryRoot(),
         pluginDataDir,
+        pluginSocketDir: resolvePluginSocketDir(pluginDataDir),
         config: {},
         log: () => undefined,
         hostApi,
@@ -557,6 +561,7 @@ describe("the config values a plugin reads, across a real child process", () => 
           pluginRoot: root,
           hostRoot: repositoryRoot(),
           pluginDataDir,
+        pluginSocketDir: resolvePluginSocketDir(pluginDataDir),
           config: {},
           log: () => undefined,
           hostApi,
