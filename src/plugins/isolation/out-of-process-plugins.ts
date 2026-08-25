@@ -537,13 +537,18 @@
  *   surfaced: its folder picker reaches `dialog` through a `require` of the
  *   `electron` specifier held in a VARIABLE — the construct axis 2 says a
  *   literal grep misses, and the same one the windowed plugin reaches it by.
- *   BOTH of those now HAVE a mediated form — `hostApi.pickFolders` for the
- *   picker, `context.pluginSocketDir` for the broker's inbound half — and
- *   neither changes this entry yet, because admission asks whether the plugin
- *   USES the mediated form, not whether one exists. The published bundle still
- *   reaches `electron` and still binds loopback TCP. What the two DO change is
- *   the shape of what is left: the remaining work is on the plugin's side of
- *   the boundary rather than the host's.
+ *   Both of those now have a mediated form, and the two are at DIFFERENT
+ *   stages, which is the distinction this entry has to keep straight.
+ *   AXIS 2 IS CLOSED. `hostApi.pickFolders` exists and the plugin USES it
+ *   (0.5.37): measured in the built bundle rather than the sources, `dist`
+ *   mentions `electron` only inside a comment and `createRequire` only as the
+ *   bundler's own interop banner. No call site is left.
+ *   AXIS 1 (INBOUND) IS NOT. `context.pluginSocketDir` gives the broker a place
+ *   to bind a Unix socket instead of loopback TCP, and the plugin does not yet
+ *   bind there — its `EgressBroker` already ACCEPTS a `uds` transport and its
+ *   construction site still falls through to `tcp`, and the worker's Python
+ *   client dials a URL. A mediated form EXISTING is not admission; the plugin
+ *   using it is.
  *   It is on axis 6 more heavily than any other plugin
  *   here, and in both directions: it writes its index state under a path
  *   rooted at `homedir()` rather than `pluginDataDir`, it carries its own
