@@ -425,42 +425,56 @@
  *   `context.pluginDataDir`. `context.hostRoot` appears in its tests only. Its tools are driven end-to-end through a real confined child.
  *   ASSUMED: nothing load-bearing.
  *
- * `meeting` — REFUSED, and this is the measured answer rather than an
- *   oversight. KNOWN: its primary tool opens a floating recorder window and
- *   reaches `BrowserWindow`, `screen`, `session.fromPartition` and `ipcMain`
- *   through one lazily-resolved `require` of the `electron` specifier held in
- *   a VARIABLE — not the literal, which occurs in its sources only inside
- *   comments and in a renderer preload that is not on this axis at all. In a
- *   confined child that require is `MODULE_NOT_FOUND`, so the tool's own
- *   pre-flight guard throws before it
- *   side-effects — measured, both bare and with the package vendored beside
- *   the plugin. Axis 2 has no mediated form for any of those members, so
- *   admitting it would not degrade recording, it would END it. KNOWN also, and
- *   independently sufficient: its `createPlugin` sweeps `os.tmpdir()`
- *   unguarded in its activation body — not behind a `try`, not deferred to a
- *   tool call, so it runs on every load — and on a machine where the
- *   substituted temp root is absent (axis 5) the `ENOENT` escapes activation
- *   and the plugin does not load at all — no tools, no UI entry. KNOWN also,
- *   and on axis 6: the same activation body carries a one-time move of a
- *   session directory it once kept under `context.hostRoot` into
- *   `pluginDataDir`, and `hostRoot` is outside the child's write jail. The move
- *   is a per-file `renameSync`, also unguarded, so on an install that still
- *   holds un-migrated files there — the only state the plugin's own
- *   `existsSync` guard lets reach the move — the `EPERM` escapes activation the
- *   same way the `ENOENT` does. Measured through a real child: the child LISTS
- *   that directory successfully and is then refused the rename, with nothing
- *   moved and the original left in place. That is the axis-6 failure in its
- *   most expensive form — not a degraded feature but the user's existing
- *   recordings stranded behind a plugin that will not start. And its media
- *   runtime auto-install reaches the network over `node:https` directly (axis
- *   1) and executes a staged binary (axis 3). The transcription path is the
- *   one part that is already mediated: it goes through `hostApi.hostFetch` and
- *   refuses to run without it. ASSUMED: nothing — the window, temp-root and
- *   legacy-move blockers were driven through a real child, and the egress and
- *   spawn ones read directly out of its sources. What would change the answer is a mediated
- *   form for axis 2, which is a design question this file does not settle;
- *   the shape it would have to take is written up beside the design's Stage 8.
+ * `meeting` — REFUSED, on ONE axis. Everything else this entry used to name
+ *   has been closed, and the entry is rewritten rather than annotated because
+ *   a census that lists fixed blockers is worse than one that lists none: it
+ *   makes the remaining one look like a detail among many.
  *
+ *   STILL REFUSED, axis 2: its primary tool opens a floating recorder window
+ *   and reaches `BrowserWindow`, `screen`, `session.fromPartition` and
+ *   `ipcMain` through one lazily-resolved `require` of the `electron`
+ *   specifier held in a VARIABLE — not the literal, which occurs in its
+ *   sources only inside comments and in a renderer preload that is not on this
+ *   axis at all. In a confined child that require is `MODULE_NOT_FOUND`, so
+ *   the tool's own pre-flight guard throws before it side-effects — measured,
+ *   both bare and with the package vendored beside the plugin. Axis 2 has no
+ *   mediated form for any of those members, so admitting it today would not
+ *   degrade recording, it would END it.
+ *
+ *   CLOSED since this entry was written, each measured against the plugin's
+ *   current sources rather than assumed from its changelog:
+ *   - Axis 1, the media-runtime download. It went out over `node:https`
+ *     directly; it goes through `hostApi.hostFetch` now, with both hosts of
+ *     the release redirect declared in the manifest (plugin 0.5.45).
+ *   - Axis 3, the eleven process starts the same installer made — `tar`,
+ *     `unzip`, `Expand-Archive`, `otool`, `install_name_tool`, and the version
+ *     probes. All go through `hostApi.spawnWorker` with named grants, and
+ *     `node:child_process` is gone from the file (0.5.46). The plugin guards
+ *     it with an import-form test, which is the only thing that would notice:
+ *     ASRT's profile carries `(allow process-exec)`, so a reintroduced spawn
+ *     would run rather than fail.
+ *   - Axis 5, the `os.tmpdir()` sweep in the activation body. Staged uploads
+ *     live under `pluginDataDir` now; `tmpdir()` survives in that file only
+ *     inside a comment explaining why it is not used (0.5.43).
+ *   - Axis 6, the one-time move out of `context.hostRoot`. It was a per-file
+ *     `renameSync` out of a directory the child may read but not write, which
+ *     stranded a user's existing recordings behind a plugin that would not
+ *     start. It is a copy followed by a delete, inside a `try`, collecting
+ *     what it could not remove (0.5.43).
+ *   - The renderer's own capture. `getUserMedia`, `getDisplayMedia`, the audio
+ *     graph and the worklet are gone from the recorder window; the host
+ *     captures and the plugin receives PCM through `startAudioCapture`
+ *     (0.6.0). This one had no runtime signal either — a plugin renderer that
+ *     captures WORKS — so the plugin guards it structurally too.
+ *
+ *   ASSUMED: nothing. The window blocker was driven through a real child; the
+ *   five closures were read out of the plugin's current sources, and the two
+ *   with no runtime signal carry structural guards in the plugin's own suite.
+ *   What would change the answer is a mediated form for axis 2 — the recorder
+ *   moving onto the sandboxed `ui://` card path, which is where every other
+ *   plugin surface already draws. The shape it would have to take is written
+ *   up beside the design's Stage 8.
+
  * `ep-api` — REFUSED. KNOWN FROM ITS SOURCES: every one of its REST clients reaches the network
  *   through the global `fetch`, and no code path in it CALLS
  *   `hostApi.hostFetch` — the name occurs in its sources exactly once, in a
