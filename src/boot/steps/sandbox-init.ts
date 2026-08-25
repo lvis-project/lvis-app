@@ -34,6 +34,7 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
   {
     const {
       initializeAsrtSandbox,
+      useAppOwnedSandboxTempRoot,
       checkAsrtDependencies,
       isAsrtLinuxRuntimeProbeError,
     } = await import("../../permissions/asrt-sandbox.js");
@@ -213,6 +214,11 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
           // enforced allow-list + strict flag. Per-command filesystem scoping
           // (write-jail + HOME read-deny) is applied at the call site via the
           // narrow `filesystem` option, never here as a weakening channel.
+          // Before the first wrap, because ASRT reads the variable this sets
+          // from THIS process's environment at wrap time — a value published
+          // after a wrap would apply to some children and not others, which is
+          // the one shape a temp-root decision must not have.
+          const sandboxTempRoot = useAppOwnedSandboxTempRoot();
           await initializeAsrtSandbox({
             allowedDomains: unionAllowedDomains,
             strictAllowlist: true,
@@ -258,11 +264,12 @@ export async function initSandboxGate(ctx: BootContext): Promise<void> {
             confines,
           });
           log.info(
-            "boot: ASRT OS tool sandbox initialized (%s, %s, strict allow-list enforced, %d union domains at init across %d plugins; manifest union refreshed after plugin load)",
+            "boot: ASRT OS tool sandbox initialized (%s, %s, strict allow-list enforced, %d union domains at init across %d plugins; manifest union refreshed after plugin load; confined temp root %s)",
             process.platform,
             asrtBackend,
             unionAllowedDomains.length,
             manifestAllowLists.length,
+            sandboxTempRoot,
           );
           sandboxActive = true;
           recordGate("activate", decision.reason);

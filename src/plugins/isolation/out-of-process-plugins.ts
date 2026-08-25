@@ -211,8 +211,13 @@
  *    directory. This axis is about those values being DIFFERENT in a child, not
  *    about what the child may then do with them — that is axis 6, and the two
  *    are separated because a plugin can be broken by either one alone. The
- *    sandbox SUBSTITUTES the temp root and creates nothing, so a child's
- *    `os.tmpdir()` routinely does not exist. Measured against an absent path
+ *    sandbox SUBSTITUTES the temp root, and it is now THIS APP'S:
+ *    `useAppOwnedSandboxTempRoot` publishes `~/.lvis/sandbox/tmp` through the
+ *    variable ASRT reads, from the wrap path itself rather than from a boot
+ *    step a caller could skip, and creates it `0o700`. A confined child's
+ *    `os.tmpdir()` therefore now names a directory that EXISTS and that the
+ *    confinement primitive grants for writing. Before, it named ASRT's
+ *    `/tmp/claude`, which ASRT creates nothing for. Measured against an absent path
  *    that is INSIDE the write jail: `readdirSync` and `mkdtempSync` fail
  *    `ENOENT` while a recursive `mkdir` on the same path succeeds — absence,
  *    not permission, which is what decides where a fix goes. The home directory
@@ -283,31 +288,36 @@
  *          did not exist, and it is now asserted rather than described: a case
  *          writes into the substituted temp root — which is on that list — and
  *          the host reads the bytes back.
- *      (d) IS A HOLE, AND IT IS WORTH CLOSING. Two things follow from it that
- *    no manifest declares. First, those paths are SHARED: the jail this spawn
- *    builds is per-plugin, ASRT's defaults are per-machine, so two confined
- *    plugins reach the same directory. Measured and now asserted — one confined
- *    child wrote bytes under the substituted temp root and a second confined
- *    child, spawned with a different `pluginRoot` and `pluginDataDir`, read
- *    them back. That is a write channel between two plugins the boundary is
- *    supposed to keep apart, and it is also a channel out of a confined plugin
- *    into two paths under the user's real home that belong to other tools.
- *    Second,
- *    it means the check below cannot be "is this path one of the two grants".
- *      What closing it would take, and what it would cost, both measured here
- *    on macOS/arm64 rather than reasoned about: the lever exists —
- *    `confined-child.ts` already restates a write DENY floor on every wrap, and
- *    ASRT applies it as `denyWithinAllow`, which takes precedence. Adding
- *    `/tmp/claude`, `/private/tmp/claude`, `<real home>/.npm/_logs` and
- *    `<real home>/.claude/debug` to that floor turned all four writes above
- *    into `EPERM` while `pluginDataDir` kept working. The cost is the reason it
- *    is not done in this change: measured in the same child, `tmpdir()` was
- *    `/tmp/claude`, so the same edit also made
- *    `writeFileSync(join(tmpdir(), …))` fail `EPERM`.
- *    Closing (d) therefore needs a per-child temp root first — one inside the
- *    plugin's own grant — and that is a change to what a plugin child is
- *    handed, not a line in a deny list. Recorded here as an open defect with
- *    its lever and its blocker named, NOT fixed.
+ *      (d) WAS A HOLE, AND THE CROSS-APPLICATION HALF IS NOW CLOSED. Those
+ *    paths are per-MACHINE while the jail this spawn builds is per-plugin, so
+ *    before the fix two confined plugins reached the same directory — measured,
+ *    one confined child wrote bytes under the substituted temp root and a
+ *    second, spawned with a different `pluginRoot` and `pluginDataDir`, read
+ *    them back — and so did every OTHER ASRT consumer on the machine: a
+ *    confined plugin child listed 141 entries under `/tmp/claude` that were not
+ *    this app's.
+ *      `getDefaultSensitiveWriteDenyPaths` now carries `/tmp/claude`,
+ *    `/private/tmp/claude`, `<real home>/.npm/_logs` and
+ *    `<real home>/.claude/debug`; ASRT applies the floor as `denyWithinAllow`,
+ *    which takes precedence over its own defaults. ASSERTED, with an EXISTENCE
+ *    control beside the `~/.npm/_logs` case — a write to a missing directory
+ *    also fails, and a case that accepted any failure would go green on a
+ *    machine that simply has no npm cache. Only `EPERM` beside a directory that
+ *    IS there says refused.
+ *      What made it possible was doing the temp root FIRST. The blocker
+ *    recorded here was real: ASRT pointed `TMPDIR` AT that list, so denying it
+ *    also broke every `writeFileSync(join(tmpdir(), …))` in every confined
+ *    child. The mechanism the earlier note could not name is
+ *    `CLAUDE_CODE_TMPDIR`, which ASRT reads from the WRAPPING process rather
+ *    than from a per-command option — which is exactly why the other half is
+ *    still open.
+ *      WHAT REMAINS. The temp root is one directory for ALL of this app's
+ *    confined children, so two plugins still meet in it. Narrower than it was,
+ *    and still a channel neither manifest declares. Closing it needs a root per
+ *    CHILD, and because ASRT takes the value from the wrapping process's
+ *    environment that means mutating `process.env` around an `await` on the
+ *    spawn path — a concurrency hazard on a security boundary, which is why
+ *    this stopped here rather than going one step further quietly.
  *      READ is NOT a jail, and calling it one would be the same error facing
  *    the other way. ASRT's read model is deny-only (`asrt-sandbox.ts`,
  *    `getDefaultSensitiveReadDenyPaths`, which says so in its own header): a

@@ -30,6 +30,9 @@ vi.mock("../asrt-sandbox.js", () => ({
     wrapWorkerCommandMock(command, options),
   getDefaultSensitiveReadDenyPaths: () => ["/home/u/.lvis/secrets", "/home/u/.ssh"],
   getDefaultSensitiveWriteDenyPaths: () => ["/home/u/.lvis/secrets", "/home/u/.bashrc"],
+  // The temp root the primitive grants unconditionally. Named here so the
+  // allow-list cases can say which entry is the caller's and which is not.
+  appOwnedSandboxTempRoot: () => "/home/u/.lvis/sandbox/tmp",
 }));
 vi.mock("../../main/managed-child-processes.js", () => ({
   assertManagedChildProcessAdmissionOpen: (label: string) => admissionMock(label),
@@ -89,8 +92,24 @@ describe("spawnConfinedChild", () => {
 
     const fs = lastFilesystem();
     expect(fs.allowRead).toEqual(["/data/in"]);
-    expect(fs.allowWrite).toEqual(["/data/out"]);
+    // The temp root comes FIRST and is not the caller's — the primitive grants
+    // it the way it restates the deny floor, for the same reason: a caller that
+    // forgot would produce a child whose `os.tmpdir()` names a directory it
+    // cannot write, and that failure surfaces inside whatever library happened
+    // to want a temp file rather than at the spawn.
+    expect(fs.allowWrite).toEqual(["/home/u/.lvis/sandbox/tmp", "/data/out"]);
     expect(fs.denyRead).toContain("/home/u/.ssh");
+  });
+
+  it("grants the temp root even when the caller passes no write paths", async () => {
+    await spawnConfinedChild({
+      command: "/usr/bin/python3",
+      args: [],
+      label: "worker:x:main",
+      grantMode: "allow-list",
+      baseEnv: {},
+    });
+    expect(lastFilesystem().allowWrite).toEqual(["/home/u/.lvis/sandbox/tmp"]);
   });
 
   it("omits allow paths under deny-only, where ACLs grant reachability instead", async () => {

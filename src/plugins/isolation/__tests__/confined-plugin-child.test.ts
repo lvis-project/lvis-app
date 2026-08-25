@@ -360,7 +360,7 @@ function writeProbeModule(fx: Fixture): string {
   );
   writeFileSync(
     probePath,
-    `import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+    `import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createRequire } from "node:module";
@@ -396,6 +396,9 @@ const report = {
   // the bytes back to show the last part.
   childTmpdir: tmpdir(),
   writeChildTmpdir: attempt(() => { mkdirSync(tmpdir(), { recursive: true }); writeFileSync(join(tmpdir(), ${JSON.stringify(fx.sharedTempName)}), ${JSON.stringify(SHARED_TEMP_BYTES)}); return "written"; }),
+  writeAsrtDefaultTemp: attempt(() => { writeFileSync("/tmp/claude/lvis-confined-probe.txt", "escaped"); return "written"; }),
+  writeAsrtDefaultNpmLogs: attempt(() => { writeFileSync(${JSON.stringify(join(homedir(), ".npm", "_logs", "lvis-confined-probe.txt"))}, "escaped"); return "written"; }),
+  asrtDefaultNpmLogsExists: attempt(() => existsSync(${JSON.stringify(join(homedir(), ".npm", "_logs"))}) ? "yes" : "no"),
   readCa: attempt(() => readFileSync(${JSON.stringify(fx.caFile)}, "utf-8")),
   writeCa: attempt(() => { writeFileSync(${JSON.stringify(fx.caFile)}, "rewritten"); return "written"; }),
   writeUserRoot: attempt(() => { writeFileSync(${JSON.stringify(join(fx.userRoot, "index.bin"))}, "index"); return "written"; }),
@@ -468,6 +471,9 @@ interface ProbeReport {
   readonly writeChildHome: ProbeAttempt;
   readonly childTmpdir: string;
   readonly writeChildTmpdir: ProbeAttempt;
+  readonly writeAsrtDefaultTemp: ProbeAttempt;
+  readonly writeAsrtDefaultNpmLogs: ProbeAttempt;
+  readonly asrtDefaultNpmLogsExists: ProbeAttempt;
   readonly readCa: ProbeAttempt;
   readonly writeCa: ProbeAttempt;
   readonly writeUserRoot: ProbeAttempt;
@@ -1172,13 +1178,22 @@ describe("the confined child, against the real sandbox", () => {
 
       // ── the FOURTH answer: outside both grants, and DURABLE ────────────
       //
-      // The write jail is NOT what the spawn names. ASRT merges its own
-      // default write paths into every wrap it builds, and the temp root it
-      // substitutes is one of them — so this is a path in no grant this spawn
-      // made, that the child writes and the HOST then reads back. Asserted
-      // rather than described because "exactly two paths" survived two
-      // revisions of the routing SOT and the blueprint with no case able to
-      // contradict it.
+      // The write jail is NOT what the spawn names. The temp root is a third
+      // granted path, added by the confinement primitive rather than by this
+      // spawn — so this is a path in no grant this spawn made, that the child
+      // writes and the HOST then reads back. Asserted rather than described
+      // because "exactly two paths" survived two revisions of the routing SOT
+      // and the blueprint with no case able to contradict it.
+      //
+      // WHAT CHANGED, and what did not. The root used to be ASRT's own
+      // substituted temp dir, which is per-MACHINE: every ASRT consumer on the
+      // box reached it, so the channel ran between this app's sandbox and
+      // whatever else used the same runtime. It is now `~/.lvis/sandbox/tmp`,
+      // and ASRT's default write paths are on the deny floor — measured, with
+      // `~/.npm/_logs` present on the machine and refused `EPERM` rather than
+      // missing. What remains is narrower and still real: the root is one
+      // directory for ALL of this app's confined children, so the two below
+      // still meet in it.
       // Written against `tmpdir()` rather than a literal so it asks the same
       // question whichever backend is underneath.
       const sharedTemp = join(report.childTmpdir, fx.sharedTempName);
@@ -1198,11 +1213,15 @@ describe("the confined child, against the real sandbox", () => {
 
         // …and that path is SHARED. A second confined child, from a second
         // plugin with its own `pluginRoot` and `pluginDataDir`, reads the first
-        // one's bytes. The per-plugin jail is per-plugin; the default paths
-        // ASRT merges are not, so two confined plugins have a write channel
-        // between them that neither manifest declares. Recorded as a defect
-        // rather than closed here — the SOT's axis 6 says what closing it would
-        // take and what it would cost.
+        // one's bytes. The per-plugin jail is per-plugin; the temp root is not,
+        // so two confined plugins have a write channel between them that
+        // neither manifest declares. Still a defect, and narrower than it was:
+        // the directory is now this app's rather than one shared with every
+        // ASRT consumer on the machine. Closing the rest needs a root per
+        // CHILD, and ASRT takes that value from the wrapping process's
+        // environment rather than from a per-command option — so it would mean
+        // mutating `process.env` around an `await` on the spawn path. The SOT's
+        // axis 6 carries that, with the reason it is not done in passing.
         const crossPluginRead = await runCrossPluginReadProbe(
           fx,
           installPlugin(fx, "a-second-confined-plugin"),
@@ -1212,6 +1231,29 @@ describe("the confined child, against the real sandbox", () => {
         expect(crossPluginRead.value).toBe(SHARED_TEMP_BYTES);
       } finally {
         rmSync(sharedTemp, { force: true });
+      }
+
+      // ── ASRT's own default write paths, which are NOT ours ────────────
+      //
+      // `sandbox-manager` composes the write allow-list as
+      // `[...getDefaultWritePaths(), ...userAllowWrite]`, so an ALLOW grant
+      // cannot subtract from it: without a DENY these are writable by every
+      // confined process on the machine, including ones belonging to other
+      // applications entirely. They are on the deny floor now, and that is
+      // what this pins.
+      //
+      // `~/.npm/_logs` gets an EXISTENCE control beside it, because a write to
+      // a missing directory also fails — `ENOENT` — and a case that accepted
+      // any failure would go green on a machine that simply has no npm cache.
+      // Only `EPERM` beside a directory that IS there says "refused".
+      expect(report.writeAsrtDefaultTemp.ok, JSON.stringify(report.writeAsrtDefaultTemp)).toBe(false);
+      expect(report.writeAsrtDefaultTemp.code).toBe("EPERM");
+      if (report.asrtDefaultNpmLogsExists.value === "yes") {
+        expect(
+          report.writeAsrtDefaultNpmLogs.ok,
+          JSON.stringify(report.writeAsrtDefaultNpmLogs),
+        ).toBe(false);
+        expect(report.writeAsrtDefaultNpmLogs.code).toBe("EPERM");
       }
 
       // Nothing the host DID NOT widen this plugin with is reachable — the

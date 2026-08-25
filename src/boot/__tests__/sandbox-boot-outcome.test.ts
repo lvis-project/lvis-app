@@ -36,6 +36,7 @@ vi.mock("../../lib/logger.js", () => ({
 
 vi.mock("../../permissions/asrt-sandbox.js", () => ({
   initializeAsrtSandbox: h.initialize,
+  useAppOwnedSandboxTempRoot: () => "/tmp/lvis-test-sandbox-tmp",
   checkAsrtDependencies: h.checkDeps,
   isAsrtLinuxRuntimeProbeError: h.isProbeError,
 }));
