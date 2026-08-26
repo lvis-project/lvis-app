@@ -12,10 +12,20 @@ const LINUX_GPU_RUNTIME_FILES = [
   "vk_swiftshader_icd.json",
 ];
 
+// macOS defaults hardware acceleration ON (see resolveHardwareAcceleration:
+// the default is `platform !== "win32" && platform !== "linux"`), and the GPU
+// process loads ANGLE — libGLESv2 + libEGL — to do it. Pruning those two made
+// the default unreachable: the GPU process logged
+// `Failed to load .../libGLESv2.dylib` and exited during initialization, so
+// every mac build rendered in software and the Settings toggle changed
+// nothing. They stay. 6.3 MB buys back the accelerated path the policy
+// already asks for.
+//
+// SwiftShader is a different thing and still goes: it is the *software*
+// rasterizer used only when there is no GPU at all, which is 17 MB of weight
+// for a path an accelerated mac never takes.
 const MAC_WEBGL_FALLBACK_FILES = [
   "libvk_swiftshader.dylib",
-  "libGLESv2.dylib",
-  "libEGL.dylib",
   "vk_swiftshader_icd.json",
 ];
 
