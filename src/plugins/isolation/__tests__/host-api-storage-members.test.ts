@@ -121,7 +121,11 @@ function harness(
   options: { readonly bind?: boolean } = {},
 ): Harness {
   const requests: HostApiRequest[] = [];
+  const hostLogs: { message: string; meta?: unknown }[] = [];
   const host = new HostApiDispatcher({
+    // Captured, not dropped: a sink that discards is what shipped, and a
+    // test that discards could not tell the difference.
+    log: (message, meta) => hostLogs.push({ message, meta }),
     pluginId: PLUGIN_ID,
     generationId: GENERATION,
     isActive: () => true,
@@ -596,7 +600,11 @@ describe("malformed arguments are refused, never coerced", () => {
 describe("the boundary refuses a member the plugin is no longer entitled to", () => {
   it("stops a storage call from a retired incarnation", async () => {
     const hostApi = createNoopHostApi(PLUGIN_ID, dataDir);
+    const hostLogs: { message: string; meta?: unknown }[] = [];
     const host = new HostApiDispatcher({
+      // Captured, not dropped: a sink that discards is what shipped, and a
+      // test that discards could not tell the difference.
+      log: (message, meta) => hostLogs.push({ message, meta }),
       pluginId: PLUGIN_ID,
       generationId: GENERATION,
       isActive: () => false,

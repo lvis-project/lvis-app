@@ -112,7 +112,11 @@ async function harness(
     },
   };
 
+  const hostLogs: { message: string; meta?: unknown }[] = [];
   host = new HostApiDispatcher({
+    // Captured, not dropped: a sink that discards is what shipped, and a
+    // test that discards could not tell the difference.
+    log: (message, meta) => hostLogs.push({ message, meta }),
     pluginId: PLUGIN_ID,
     generationId: GENERATION,
     isActive: options.isActive ?? (() => true),

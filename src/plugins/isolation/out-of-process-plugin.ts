@@ -1108,6 +1108,17 @@ export function createOutOfProcessPluginFactory(
       // one exists so a call arriving after `stop()` is refused at the wire
       // instead of being carried to a hostApi that will refuse it anyway.
       isActive: () => live,
+      // Same shape the in-process arm emits from `buildPluginContext`, so a
+      // reader searching the log by `pluginId` finds an isolated plugin's lines
+      // next to an in-process one's rather than not at all. The module tag
+      // differs — these did come from a child — and that is the only difference.
+      log: (message, meta) => {
+        if (meta !== undefined) {
+          log.info({ pluginId, meta }, message);
+          return;
+        }
+        log.info({ pluginId }, message);
+      },
       table: createBoundHostApiDispatchTable(hostApi, envelope),
       link: child.link,
     });
