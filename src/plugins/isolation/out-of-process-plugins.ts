@@ -486,7 +486,7 @@
  *   dock concludes the teardown was its own and leaves the recording running
  *   with nothing driving it.
 
- * `ep-api` — REFUSED, on ONE thing: ONE of its flows drives a browser.
+ * `ep-api` — ADMITTED (plugin 0.20.0). The last one in, and the longest.
  *
  *   THE EGRESS SENTENCE THAT USED TO OPEN THIS ENTRY CONTRADICTED THE ENTRY,
  *   which is a worse failure than being out of date. It said every REST client
@@ -518,7 +518,7 @@
  *       `find -name '*.node'` returns nothing. Half the old assumption closes
  *       as a pass.
  *     - Axis 2 is CLEAN. It does not reach Electron.
- *     - Axes 1 and 3 are NOT, and not in the indirect way the old entry
+ *     - Axes 1 and 3 were NOT, and not in the indirect way the old entry
  *       described. It framed the problem as "the browser it launches would be
  *       a grandchild and inherit the fence". The DRIVER needs them directly:
  *       `require("net")` in 12 files, `http` in 4, `https` in 4, `tls` in 5,
@@ -530,11 +530,11 @@
  *   `connectOverCDP` would look like a way out. It is not: the CDP transport
  *   is itself a socket the driver opens from inside the child.
  *
- *   ASSUMED, still: the profile directory. The browser writes a
- *   `userDataDir` the plugin names, which as a grandchild would land inside
- *   the same write jail (axis 6). That is a dependency's behaviour rather
- *   than the plugin's, and it is why axis 6 has to be read over dependencies
- *   too. It is moot while axes 1 and 3 refuse first.
+ *   That last assumption — the profile directory the browser writes, which as
+ *   a grandchild would land inside the same write jail (axis 6) — is CLOSED,
+ *   and closed in the only way an assumption about a dependency ever really
+ *   closes: the dependency is gone. It is not that the write was measured and
+ *   found harmless; there is nothing left to write it.
  *
  *   HOW THE EGRESS HALF WAS SETTLED, kept because the reasoning is what makes
  *   the current state legible. Its first prerequisite used to be written here
@@ -639,20 +639,43 @@
  *       never confirmed. An unresolved token throws into the auth ladder's
  *       existing re-login step — slower, never wrong.
  *
- *   So the tail is ONE flow, not four clients: the conferencing client's
- *   CANCEL. Not its list read, which is a fetch-and-parse with the browser
- *   behind it — the mutation itself. And it is a genuine blocker rather than
- *   unfinished migration: that code does not KNOW the cancel endpoint. It
- *   navigates to the detail page, clicks whatever reads as a cancel control,
- *   and recognises success by watching for a request URL matching a pattern.
- *   A contract discovered at runtime cannot be reimplemented from the source.
+ *   The tail came down to ONE flow: the conferencing client's CANCEL. Not its
+ *   list read — the mutation itself. And it was a genuine blocker rather than
+ *   unfinished migration, because that code did not KNOW the cancel endpoint.
+ *   It navigated to the detail page, clicked whatever read as a cancel
+ *   control, and recognised success by watching for a request URL matching a
+ *   pattern. A contract discovered at runtime cannot be reimplemented from the
+ *   source.
  *
- *   Two ways to settle it, and they cost very differently. Reading the detail
- *   page's cancel control and the handler behind it yields the endpoint and
- *   its body with NO mutation performed — the same read-only technique that
- *   already produced two other form contracts here. Recording a real
- *   cancellation is the fallback if that handler turns out to be opaque, and
- *   that one is a decision for the operator rather than a measurement.
+ *   SETTLED by the cheaper of the two routes this entry named, and it is worth
+ *   recording that the cheap one worked: the detail page's cancel control and
+ *   the handler behind it were READ, with no cancellation performed. The
+ *   handler is a confirm() guarding a plain navigation, so a cancel is a GET
+ *   whose query is the same query the detail link already carries. The plugin
+ *   now swaps the path on that href rather than rebuilding the parameters,
+ *   which is why the field distinguishing the two conferencing backends is
+ *   carried through instead of guessed.
+ *
+ *   Success is read from STATE, not from the response: that response was never
+ *   observed, so the flow re-reads the list and checks the reservation is
+ *   gone. Still listed is reported as a mutation whose outcome is unverified,
+ *   which is the honest answer and not a failure.
+ *
+ *   One thing found on the way is worth keeping, because it is the shape of a
+ *   mistake rather than a fact about this provider: the list read had been
+ *   sending NO date range, so it always got the page's default one-month
+ *   window, and an empty window read as "unparseable" and bought a browser.
+ *   The browser never fixed it — the page it rendered used the SAME window. A
+ *   fallback that re-asks the identical question more expensively looks like
+ *   resilience and is really a missing parameter.
+ *
+ *   MEASURED after, over the BUILT bundle rather than the sources, because
+ *   what ships is what runs: network and TLS, inbound bind, process spawn,
+ *   native modules, process identity, and filesystem writes all read zero. The
+ *   one `createRequire` hit is the bundler's own ESM interop banner — the same
+ *   benign construct recorded under `local-indexer` below. `playwright-core`
+ *   is no longer a dependency at all, and the bundle went from 4.39 MB to
+ *   640 KB, which is the driver leaving.
  *
  *   ALSO REMOVED, 0.19.7: an interactive-login helper and a session probe,
  *   and with them the persistent-profile launch mode and the `userDataDir`
@@ -831,7 +854,7 @@
  * `template` — not installed; a scaffold, out of scope.
  */
 export const OUT_OF_PROCESS_PLUGIN_IDS: ReadonlySet<string> = Object.freeze(
-  new Set<string>(["work-assistant", "ms-graph", "local-indexer", "meeting"]),
+  new Set<string>(["work-assistant", "ms-graph", "local-indexer", "meeting", "ep-api"]),
 );
 
 /** Whether `pluginId` loads out-of-process. */
