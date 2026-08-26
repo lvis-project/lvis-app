@@ -42,7 +42,10 @@ import {
   registerWorkerUnixSocketDir,
   unregisterWorkerUnixSocketDir,
 } from "../../permissions/asrt-sandbox.js";
-import { resolvePluginSocketDir } from "../plugin-storage-layout.js";
+import {
+  resolvePluginSocketDir,
+  resolvePluginWorkerRunRoot,
+} from "../plugin-storage-layout.js";
 import { buildSafeChildEnv } from "../../tools/safe-env.js";
 // The allowlist is READ where it is declared rather than mirrored here. It is
 // the host's answer to "which preferences may a plugin see", and a second copy
@@ -697,7 +700,13 @@ export function derivePluginChildEnvelope(
   // for every confined child, so the spawn can register that place with ASRT
   // unconditionally instead of only for the plugins someone remembered.
   const socketDir = resolvePluginSocketDir(inputs.pluginDataDir);
-  const read = [inputs.pluginRoot, inputs.pluginDataDir, socketDir];
+  // READ, not write: the child is the CLIENT of a worker socket the host
+  // allocated and the worker bound. Connecting needs the directory reachable
+  // and named on the Unix-socket allow; creating anything in it is the host's
+  // job, and granting write would hand the plugin the ability to leave a socket
+  // where the host expects to find its own.
+  const workerRunRoot = resolvePluginWorkerRunRoot(inputs.pluginDataDir);
+  const read = [inputs.pluginRoot, inputs.pluginDataDir, socketDir, workerRunRoot];
   const write = [inputs.pluginDataDir, socketDir];
   for (const grant of PLUGIN_ENVELOPE_GRANTS.get(inputs.pluginId) ?? []) {
     if (grant.kind === "hostDirectory") {
@@ -751,6 +760,13 @@ export interface ConfinedPluginChildSpec {
    * it back out of the list would mean guessing.
    */
   readonly socketDir: string;
+  /**
+   * Where a worker this plugin asks the host to spawn will bind its control
+   * socket, as {@link resolvePluginWorkerRunRoot} derived it. Registered next to
+   * {@link socketDir} and for the same reason — the child has to be able to
+   * CONNECT there, and the allow is generated when the child is wrapped.
+   */
+  readonly workerRunRoot: string;
   /** The child's own entry module. Injected so a test can serve a stand-in. */
   readonly childEntryPath: string;
 }
@@ -836,7 +852,9 @@ export async function spawnConfinedPluginChild(
 ): Promise<ConfinedPluginChild> {
   const sandboxHome = createSandboxProcessHome();
   const socketDir = spec.socketDir;
+  const workerRunRoot = spec.workerRunRoot;
   let socketDirRegistered = false;
+  let workerRunRootRegistered = false;
   let wrapped = false;
   const releaseSandboxState = (): void => {
     // Reviewer no-leak: the confined marker must not outlive the child. Runs
@@ -849,6 +867,10 @@ export async function spawnConfinedPluginChild(
       // needed it and would accumulate one `(subpath <dir>)` per plugin ever
       // loaded. Removed on the same unconditional path the confined marker is.
       void unregisterWorkerUnixSocketDir(socketDir);
+    }
+    if (workerRunRootRegistered) {
+      workerRunRootRegistered = false;
+      void unregisterWorkerUnixSocketDir(workerRunRoot);
     }
     if (wrapped) {
       wrapped = false;
@@ -898,6 +920,13 @@ export async function spawnConfinedPluginChild(
     // to remember to update.
     await registerWorkerUnixSocketDir(socketDir);
     socketDirRegistered = true;
+    // The OTHER direction across the same boundary. `worker-spawn.ts` registers
+    // one worker's leaf so that worker may BIND; this registers the plugin's
+    // whole `run/` subtree so the child that asked for the worker may CONNECT.
+    // Both are needed and neither implies the other: the bind allow is granted
+    // to the worker's profile, and a profile is generated per wrapped command.
+    await registerWorkerUnixSocketDir(workerRunRoot);
+    workerRunRootRegistered = true;
     const child = await spawnConfinedChild({
       // `process.execPath` is the Electron binary — in production AND under
       // this repository's own test runner, which launches Vitest through that
@@ -1094,6 +1123,7 @@ export function createOutOfProcessPluginFactory(
       pluginId,
       envelope,
       socketDir: resolvePluginSocketDir(context.pluginDataDir),
+      workerRunRoot: resolvePluginWorkerRunRoot(context.pluginDataDir),
       childEntryPath,
     });
 
