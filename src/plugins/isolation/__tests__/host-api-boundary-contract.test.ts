@@ -295,6 +295,7 @@ describe("the routing set names the isolated plugins and nothing else", () => {
       "ms-graph",
       "local-indexer",
       "meeting",
+      "ep-api",
     ]);
     expect(isOutOfProcessPlugin("work-assistant")).toBe(true);
     expect(isOutOfProcessPlugin("ms-graph")).toBe(true);
@@ -304,22 +305,28 @@ describe("the routing set names the isolated plugins and nothing else", () => {
     // through a `require` whose specifier lived in a variable. It takes a slot
     // in the host's dock now and resolves `electron` by no path at all.
     expect(isOutOfProcessPlugin("meeting")).toBe(true);
-    // The ONE first-party id the SOT still names in prose as REFUSED, and its
-    // reason differs in KIND from anything the four above had to fix: it is
-    // not missing a host API. It ships code written to run where the boundary
-    // does not reach — function bodies compiled inside an authenticated page.
-    // Asserted by id so the prose and the set cannot drift apart: the prose is
-    // the only record of WHY, and a set that quietly gained it would leave
-    // that record describing something untrue.
-    expect(isOutOfProcessPlugin("ep-api")).toBe(false);
+    // `ep-api` was the last one out, and the reason it took longest differed
+    // in KIND from the four above: it was not missing a host API. It shipped
+    // code written to run where the boundary does not reach — function bodies
+    // compiled inside an authenticated page. Those are gone; its cancel flow
+    // was the final one, and it could not simply be rewritten because the code
+    // did not KNOW the endpoint it used. It was read off the live page instead.
+    // Still asserted by id, in the other direction now, so the prose and the
+    // set cannot drift apart.
+    expect(isOutOfProcessPlugin("ep-api")).toBe(true);
     expect(Object.isFrozen(OUT_OF_PROCESS_PLUGIN_IDS)).toBe(true);
   });
 
   it("reports the in-process loader as still needed while any plugin is in-process", () => {
-    expect(allPluginsAreOutOfProcess(["ep-api"])).toBe(false);
-    expect(allPluginsAreOutOfProcess(["work-assistant", "ep-api"])).toBe(false);
+    // No FIRST-PARTY id is in-process any more, so the counter-example is a
+    // fixture. That is not the same as the predicate being unreachable: a
+    // third-party plugin the SOT does not name is exactly this case, and it is
+    // why `importPluginFactory` still has to exist.
+    const thirdParty = "someinstalledthirdpartyplugin";
+    expect(allPluginsAreOutOfProcess([thirdParty])).toBe(false);
+    expect(allPluginsAreOutOfProcess(["work-assistant", thirdParty])).toBe(false);
     expect(allPluginsAreOutOfProcess(["work-assistant"])).toBe(true);
-    expect(allPluginsAreOutOfProcess(["work-assistant", "ms-graph", "local-indexer", "meeting"])).toBe(true);
+    expect(allPluginsAreOutOfProcess([...OUT_OF_PROCESS_PLUGIN_IDS])).toBe(true);
     // An empty install list is not "all isolated" — it is no evidence either way.
     expect(allPluginsAreOutOfProcess([])).toBe(false);
   });

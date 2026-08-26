@@ -47,24 +47,24 @@ function manifestFor(pluginId: string): PluginManifest {
 }
 
 /**
- * The in-process counter-example: a real plugin id the routing SOT does not
- * carry.
+ * The in-process counter-example.
  *
- * Named literally, and its absence from the SOT is asserted by the first case
- * below. Without that assertion the day this id is admitted is the day this
- * file quietly tests the isolated arm twice and the in-process arm not at all —
- * a suite that grows greener as it stops checking the thing it is named after.
+ * It used to be a real plugin id, and it moved each time one was admitted —
+ * `local-indexer`, then `meeting`, then `ep-api`. The note here predicted the
+ * end of that: `ep-api` was the LAST first-party id on this side, so this
+ * admission had nowhere left to move it to.
+ *
+ * So it is a FIXTURE now, exactly as that note said it would have to be. The
+ * in-process arm is still reachable — a third-party plugin the SOT does not
+ * name takes it — and deleting the case because no first-party plugin uses it
+ * would retire coverage for a live code path.
+ *
+ * Its absence from the SOT is still asserted by the first case below, which is
+ * what keeps this from silently testing the isolated arm twice. Deliberately
+ * not a real id and deliberately hyphen-free, so it cannot collide with a
+ * plugin name or read as one.
  */
-// `local-indexer`, then `meeting`. The first case below is what forced this
-// line to move each time, rather than letting the suite go on naming an id that
-// had crossed over.
-//
-// `ep-api` is the LAST first-party id on this side, so the next admission has
-// nowhere to move it to. When that happens the counter-example has to become a
-// fixture rather than a real plugin — the in-process arm still exists and still
-// needs testing, and deleting the case because no shipped plugin uses it would
-// retire coverage for a code path that is still reachable.
-const IN_PROCESS_PLUGIN_ID = "ep-api";
+const IN_PROCESS_PLUGIN_ID = "inprocessroutingfixture";
 
 describe("importPluginFactoryForLifecycle chooses one arm per plugin", () => {
   it("has an in-process plugin left to be the counter-example", () => {
