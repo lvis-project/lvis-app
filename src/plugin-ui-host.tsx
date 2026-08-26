@@ -257,7 +257,23 @@ export function PluginUiHostView({
     }
   }, [attemptRegisterWebview]);
 
+  // Keyed on the view's VALUE, not its object identity. `activePluginView`
+  // is `pluginViews.find(...)`, so every upstream refresh hands this component
+  // a fresh object with identical contents — and this effect tears the live
+  // webview down (`setPartitionReadyFor(null)`) before re-running the
+  // `ensurePluginPartition` round trip that puts it back. On identity churn
+  // that becomes a mount/unmount cycle one round trip long, which is what a
+  // cold boot showed: 39 webviews created and destroyed in 55s, ~0.7s each,
+  // visible as flicker. The `key` below already derives from these same
+  // fields for the same reason.
+  const viewIdentity = view
+    ? `${view.pluginId}:${view.extension.id}:${view.extension.kind}:${view.entryUrl ?? ""}:${view.runtimeRevision ?? 0}`
+    : null;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
   useEffect(() => {
+    const view = viewRef.current;
     setShellSrcBinding(null);
     setPartitionReadyFor(null);
     registerAttemptRef.current = null;
@@ -306,7 +322,7 @@ export function PluginUiHostView({
     return () => {
       cancelled = true;
     };
-  }, [view, preparing]);
+  }, [viewIdentity, preparing]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
   let content: React.ReactNode;
