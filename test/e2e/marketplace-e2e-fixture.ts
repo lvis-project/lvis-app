@@ -1,6 +1,7 @@
 import AdmZip from "adm-zip";
 import type { MarketplaceHttp } from "../../src/plugins/marketplace-installer.js";
 import type { SignatureEnvelope } from "../../src/plugins/types.js";
+import { agentPluginsDocument } from "../../src/plugins/__tests__/test-helpers.js";
 
 export const EXACT_LOOPBACK_MARKETPLACE_ORIGIN = "http://127.0.0.1:8765";
 
@@ -125,7 +126,7 @@ export function buildPluginZip(
         }
       : {}),
   };
-  zip.addFile("plugin.json", Buffer.from(JSON.stringify(pluginJson)));
+  zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument(pluginJson))));
   const serializedHandlerNames = JSON.stringify([
     toolName,
     ...(options.bundledContributions

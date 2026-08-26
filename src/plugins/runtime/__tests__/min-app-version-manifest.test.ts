@@ -12,6 +12,10 @@ import { join } from "node:path";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { parsePluginJson } from "../manifest-validation.js";
+import {
+  agentPluginsDocument,
+  permissiveManifestEnvelopeSchema,
+} from "../../__tests__/test-helpers.js";
 
 describe("manifest requires.minAppVersion validator", () => {
   let workDir: string;
@@ -27,27 +31,23 @@ describe("manifest requires.minAppVersion validator", () => {
   function makeValidator() {
     const ajv = new Ajv({ allErrors: true });
     addFormats(ajv);
-    return ajv.compile({
-      type: "object",
-      additionalProperties: true,
-      required: ["id", "name", "version", "entry", "tools", "description"],
-      properties: {
-        id: { type: "string", pattern: "^[a-zA-Z][a-zA-Z0-9._-]*$", minLength: 3 },
-        name: { type: "string" },
-        description: { type: "string" },
-        version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" },
-        entry: { type: "string" },
-        tools: { type: "array" },
-        requires: { type: "object" },
-      },
-    });
+    return ajv.compile(
+      permissiveManifestEnvelopeSchema({
+        namespaceProperties: {
+          entry: { type: "string" },
+          tools: { type: "array" },
+          requires: { type: "object" },
+        },
+        namespaceRequired: ["entry", "tools"],
+      }),
+    );
   }
 
   async function writeManifest(extra: Record<string, unknown>): Promise<string> {
     const path = join(workDir, "plugin.json");
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "min-app-version-test",
         name: "Min App Version Test",
         description: "x",
@@ -55,8 +55,7 @@ describe("manifest requires.minAppVersion validator", () => {
         entry: "dist/p.js",
         tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         ...extra,
-      }),
-    );
+      })));
     return path;
   }
 

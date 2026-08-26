@@ -24,6 +24,7 @@ import {
 import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
 import { canonicalJSON } from "../../whitelist/canonical-json.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 type WrittenPlugin = {
   id: string;
@@ -115,7 +116,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
       "utf8",
     );
     const manifestPath = join(pluginDir, "plugin.json");
-    await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
+    await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(manifest)), "utf8");
     return {
       id: options.id,
       pluginDir,
@@ -300,7 +301,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
       }],
     };
     await mkdir(pluginRoot, { recursive: true });
-    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
+    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf8");
     await writeFile(
       join(pluginRoot, "entry.mjs"),
       `export default async function createPlugin() {
@@ -326,7 +327,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
       registryEntry: {
         installSource: "user",
         manifestSha256: createHash("sha256")
-          .update(canonicalJSON(manifest))
+          .update(canonicalJSON(agentPluginsDocument(manifest)))
           .digest("hex"),
       },
       toolName,
@@ -369,7 +370,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
       }],
     };
     await mkdir(pluginRoot, { recursive: true });
-    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
+    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf8");
     await writeFile(
       join(pluginRoot, "entry.mjs"),
       `export default async function createPlugin() {
@@ -399,7 +400,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
       registryEntry: {
         installSource: "user",
         manifestSha256: createHash("sha256")
-          .update(canonicalJSON(manifest))
+          .update(canonicalJSON(agentPluginsDocument(manifest)))
           .digest("hex"),
       },
       toolName,
@@ -1118,7 +1119,7 @@ export default async function createPlugin() {
     delete replacementManifest.capabilities;
     await writeFile(
       provider.manifestPath,
-      JSON.stringify(replacementManifest),
+      JSON.stringify(agentPluginsDocument(replacementManifest)),
       "utf8",
     );
 
@@ -1150,7 +1151,7 @@ export default async function createPlugin() {
     delete replacementManifest.capabilities;
     await writeFile(
       firstProvider.manifestPath,
-      JSON.stringify(replacementManifest),
+      JSON.stringify(agentPluginsDocument(replacementManifest)),
       "utf8",
     );
 
@@ -1181,9 +1182,8 @@ export default async function createPlugin() {
     await mkdir(stagingRoot, { recursive: true });
     await writeFile(
       join(stagingRoot, "plugin.json"),
-      JSON.stringify(replacementManifest),
-      "utf8",
-    );
+      JSON.stringify(agentPluginsDocument(replacementManifest)),
+      "utf8");
     await writeFile(
       join(stagingRoot, "entry.mjs"),
       `export default async function createPlugin() {
@@ -1202,7 +1202,7 @@ export default async function createPlugin() {
       registryEntry: {
         installSource: "user",
         manifestSha256: createHash("sha256")
-          .update(canonicalJSON(replacementManifest))
+          .update(canonicalJSON(agentPluginsDocument(replacementManifest)))
           .digest("hex"),
       },
       durableCommit,

@@ -16,6 +16,7 @@ import {
   TestPluginRuntime as PluginRuntime,
 } from "./test-helpers.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 function writePlugin(root: string, id: string, opts: {
   name: string;
@@ -66,7 +67,7 @@ function writePlugin(root: string, id: string, opts: {
     ),
     ui: opts.ui,
   };
-  writeFileSync(join(dir, "plugin.json"), JSON.stringify(manifest));
+  writeFileSync(join(dir, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)));
   const handlers = opts.tools
     .map((t) => `  ${t}: async () => ({ ok: true })`)
     .join(",\n");
@@ -332,7 +333,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
     mkdirSync(failedDir, { recursive: true });
     writeFileSync(
       join(failedDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "example-failed",
         name: "Failed",
         version: "1.0.0",
@@ -340,8 +341,7 @@ describe("PluginRuntime.listPluginCards — Phase 1.5 Option C catalog", () => {
         publisher: "Test fixture",
         entry: "index.mjs",
         tools: ["failed_read"],
-      }),
-    );
+      })));
     writeFileSync(
       join(failedDir, "index.mjs"),
       `throw new Error("boom"); export default () => ({ handlers: { failed_read: async () => ({ ok: true }) } });`,

@@ -57,6 +57,7 @@ import {
 } from "./plugin-removal-transaction.js";
 import type { PluginAdmissionRecord, PluginInstallReceipt } from "./plugin-install-receipt.js";
 import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
+import { flattenAgentPluginsManifest } from "./public-contract.js";
 import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import type { PluginInstallFailureKind } from "../shared/plugin-install-failure.js";
@@ -778,7 +779,7 @@ export class PluginMarketplaceService {
       : resolve(dirname(this.registryPath), installedManifestPath);
     try {
       const raw = await readFile(abs, "utf-8");
-      const parsed = JSON.parse(raw) as { installPolicy?: InstallPolicy };
+      const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
       return normalizeInstallPolicy(parsed) === "admin";
     } catch {
       return false;
@@ -1848,7 +1849,7 @@ export class PluginMarketplaceService {
   private async appendHistoryFromManifestVersion(pluginId: string, manifestPath: string): Promise<void> {
     try {
       const raw = await readFile(manifestPath, "utf-8");
-      const parsed = JSON.parse(raw) as { version?: unknown };
+      const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
       if (typeof parsed.version !== "string" || parsed.version.trim().length === 0) return;
       await this.artifactStore.appendHistory(pluginId, {
         version: parsed.version,
@@ -1873,7 +1874,7 @@ export class PluginMarketplaceService {
       : resolve(dirname(this.registryPath), entry.manifestPath);
     try {
       const raw = await readFile(manifestAbs, "utf-8");
-      const parsed = JSON.parse(raw) as Pick<PluginManifest, "configSchema">;
+      const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
       return [...listSecretKeys(parsed.configSchema)];
     } catch (err) {
       log.warn(
@@ -2046,7 +2047,7 @@ export class PluginMarketplaceService {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw err;
     }
-    const parsed = JSON.parse(raw) as { version?: unknown };
+    const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
     return typeof parsed.version === "string" ? parsed.version : null;
   }
 
@@ -2256,7 +2257,7 @@ export class PluginMarketplaceService {
         if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw err;
       }
-      manifests.push(JSON.parse(raw) as PluginManifest);
+      manifests.push(flattenAgentPluginsManifest(JSON.parse(raw)));
     }
     return manifests;
   }
@@ -2284,7 +2285,7 @@ export class PluginMarketplaceService {
     },
   ): Promise<string> {
     const manifestRaw = await readFile(resolve(pluginRoot, "plugin.json"), "utf-8");
-    const manifest = JSON.parse(manifestRaw) as PluginManifest;
+    const manifest = flattenAgentPluginsManifest(JSON.parse(manifestRaw));
     // Resolve every declaration and build the exact receipt against the staged
     // tree. Neither live payload nor durable metadata has changed yet.
     await materializePluginContributions(pluginRoot, manifest);
@@ -2336,6 +2337,7 @@ export class PluginMarketplaceService {
         let receiptCommitted = false;
         let preparedReceiptRaw: string | undefined;
         let preparedManifest: PluginManifest | undefined;
+        let preparedDocument: unknown;
         try {
           throwIfMarketplaceInstallAborted(opts.signal, plugin.id);
           const transaction = await this.artifactStore.extractZipWithCommit(
@@ -2374,7 +2376,8 @@ export class PluginMarketplaceService {
                   pluginRoot,
                   validateCatalogMetadata,
                 );
-                preparedManifest = JSON.parse(manifestRaw) as PluginManifest;
+                preparedDocument = JSON.parse(manifestRaw) as unknown;
+                preparedManifest = flattenAgentPluginsManifest(preparedDocument);
                 preparedReceiptRaw = await this.prepareInstallReceipt(plugin.id, pluginRoot, {
                   version,
                   installSource: "marketplace",
@@ -2390,7 +2393,11 @@ export class PluginMarketplaceService {
                   receiptRaw: preparedReceiptRaw,
                   registryEntry: {
                     installSource: opts.registryInstallSource,
-                    manifestSha256: shaOfManifest(preparedManifest),
+                    // The pin covers the FILE, so it hashes the document —
+                    // `readManifestSha256` re-derives it that way on every later
+                    // read, and a pin taken over the projection would never
+                    // match one taken over the file.
+                    manifestSha256: shaOfManifest(preparedDocument),
                   },
                   ...(plugin.pluginAccess ? { approvedPluginAccess: plugin.pluginAccess } : {}),
                   durableCommit,
@@ -2556,7 +2563,11 @@ export class PluginMarketplaceService {
         throw new Error(`plugin "${plugin.id}" manifest must be a JSON object`);
       }
 
-      const manifest = parsed as Partial<PluginManifest> & Record<string, unknown>;
+      // Compare against the projection, not the raw document: every field below
+      // (`id`, `installPolicy`, `networkAccess`, ...) is an LVIS field, and in
+      // an Agent Plugins document those live inside the extension namespace.
+      const manifest = flattenAgentPluginsManifest(parsed) as
+        Partial<PluginManifest> & Record<string, unknown>;
       if (manifest.id !== plugin.id) {
         throw new Error(
           `plugin "${plugin.id}" artifact manifest id mismatch: expected "${plugin.id}", got "${String(manifest.id ?? "")}"`,
@@ -2688,7 +2699,9 @@ export class PluginMarketplaceService {
     let manifest: { id?: unknown };
     try {
       const raw = await readFile(manifestPath, "utf-8");
-      manifest = JSON.parse(raw) as { id?: unknown };
+      manifest = flattenAgentPluginsManifest(JSON.parse(raw)) as {
+        id?: unknown;
+      };
     } catch {
       throw new Error(`[installLocal] could not read plugin.json in ${sourcePath}`);
     }
@@ -2735,9 +2748,14 @@ export class PluginMarketplaceService {
     // Read and parse plugin.json from the source directory.
     const manifestPath = resolve(sourcePath, "plugin.json");
     let manifest: PluginManifest & { id?: unknown; [key: string]: unknown };
+    // The document is kept alongside the projection: reads go through the
+    // projection, but the registry's manifest pin covers the file.
+    let manifestDocument: unknown;
     try {
       const raw = await readFile(manifestPath, "utf-8");
-      manifest = JSON.parse(raw) as PluginManifest & { id?: unknown; [key: string]: unknown };
+      manifestDocument = JSON.parse(raw) as unknown;
+      manifest = flattenAgentPluginsManifest(manifestDocument) as
+        PluginManifest & { id?: unknown; [key: string]: unknown };
     } catch {
       throw new Error(`[installLocal] could not read plugin.json in ${sourcePath}`);
     }
@@ -2841,7 +2859,7 @@ export class PluginMarketplaceService {
         const localInstallSource: PluginRegistryEntryInstallSource =
           manifest.installPolicy === "admin" ? "admin" : "local-dev";
         const registryManifestPath = posix.join(pluginId, "plugin.json");
-        const manifestSha256 = shaOfManifest(manifest);
+        const manifestSha256 = shaOfManifest(manifestDocument);
         const approvedPluginAccess = manifest.pluginAccess;
 
         const durableCommit = (): Promise<string> => {

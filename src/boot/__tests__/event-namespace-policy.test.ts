@@ -25,6 +25,7 @@ import {
 import { getDeclaredEmittedEvents } from "../../plugins/runtime/manifest-validation.js";
 import { registerManifestEventSubscriptions } from "../plugins.js";
 import { mkdtempSync } from "node:fs";
+import { agentPluginsDocument } from "../../plugins/__tests__/test-helpers.js";
 
 describe("capabilities module namespace policy", () => {
   it("classifies private namespaces as 'private'", () => {
@@ -171,7 +172,7 @@ describe("registerManifestEventSubscriptions namespace gate", () => {
       eventSubscriptions,
       ...extra,
     };
-    await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
+    await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
     await mkdir(join(testDir, "plugins"), { recursive: true });
     await writeFile(
       registryPath,
@@ -319,7 +320,7 @@ describe("capability emit gate", () => {
       emittedEvents,
       ...extra,
     };
-    await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
+    await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
     await mkdir(join(testDir, "plugins"), { recursive: true });
     await writeFile(
       registryPath,

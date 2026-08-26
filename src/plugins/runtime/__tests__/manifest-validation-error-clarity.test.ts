@@ -14,6 +14,10 @@ import { join } from "node:path";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { parsePluginJson } from "../manifest-validation.js";
+import {
+  agentPluginsDocument,
+  permissiveManifestEnvelopeSchema,
+} from "../../__tests__/test-helpers.js";
 
 describe("manifest-validation enriched error messages (#737)", () => {
   let workDir: string;
@@ -30,19 +34,16 @@ describe("manifest-validation enriched error messages (#737)", () => {
     // Strict schema mirroring the SDK's additionalProperties:false discipline.
     const ajv = new Ajv({ allErrors: true });
     addFormats(ajv);
-    return ajv.compile({
-      type: "object",
-      additionalProperties: false,
-      required: ["id", "name", "version", "entry", "tools", "description"],
-      properties: {
-        id: { type: "string", pattern: "^[a-zA-Z][a-zA-Z0-9._-]*$", minLength: 3 },
-        name: { type: "string" },
-        description: { type: "string" },
-        version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" },
-        entry: { type: "string" },
-        tools: { type: "array", items: { type: "string" } },
-      },
-    });
+    return ajv.compile(
+      permissiveManifestEnvelopeSchema({
+        strict: true,
+        namespaceProperties: {
+          entry: { type: "string" },
+          tools: { type: "array", items: { type: "string" } },
+        },
+        namespaceRequired: ["entry", "tools"],
+      }),
+    );
   }
 
   it("names the unknown top-level property and includes a reinstall hint", async () => {
@@ -51,7 +52,7 @@ describe("manifest-validation enriched error messages (#737)", () => {
     // ms-graph v0.3.2 case the user hit).
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "ms-graph",
         name: "MS Graph",
         description: "x",
@@ -59,8 +60,7 @@ describe("manifest-validation enriched error messages (#737)", () => {
         entry: "dist/p.js",
         tools: ["a"],
         startupTools: ["a"],
-      }),
-    );
+      })));
 
     const validator = makeValidator();
     await expect(parsePluginJson(path, validator)).rejects.toThrow(
@@ -75,7 +75,7 @@ describe("manifest-validation enriched error messages (#737)", () => {
     const path = join(workDir, "plugin.json");
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "x-x",
         name: "X",
         description: "y",
@@ -84,8 +84,7 @@ describe("manifest-validation enriched error messages (#737)", () => {
         tools: [],
         deprecatedField1: 1,
         deprecatedField2: 2,
-      }),
-    );
+      })));
 
     const validator = makeValidator();
     const err = await parsePluginJson(path, validator).then(
@@ -102,7 +101,7 @@ describe("manifest-validation enriched error messages (#737)", () => {
     const path = join(workDir, "plugin.json");
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "x-x",
         name: "X",
         description: "y",
@@ -110,8 +109,7 @@ describe("manifest-validation enriched error messages (#737)", () => {
         entry: "e",
         tools: [],
         oneStrayField: 1,
-      }),
-    );
+      })));
 
     const validator = makeValidator();
     await expect(parsePluginJson(path, validator)).rejects.toThrow(
@@ -125,15 +123,14 @@ describe("manifest-validation enriched error messages (#737)", () => {
     // and the AJV pattern message, but NOT the reinstall hint.
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "x-x",
         name: "X",
         description: "y",
         version: "not-semver",
         entry: "e",
         tools: [],
-      }),
-    );
+      })));
 
     const validator = makeValidator();
     const err = await parsePluginJson(path, validator).then(
@@ -152,15 +149,14 @@ describe("manifest-validation enriched error messages (#737)", () => {
     // only logged the AJV default text, which lost the regex itself.
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "x-x",
         name: "X",
         description: "y",
         version: "abc",
         entry: "e",
         tools: [],
-      }),
-    );
+      })));
 
     const validator = makeValidator();
     const err = await parsePluginJson(path, validator).then(
@@ -181,15 +177,14 @@ describe("manifest-validation enriched error messages (#737)", () => {
     // NOT fall through to the opaque "Invalid tool name 'undefined'".
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "legacy-plugin",
         name: "Legacy",
         description: "y",
         version: "0.1.0",
         entry: "dist/p.js",
         tools: ["legacy_tool_a", "legacy_tool_b"],
-      }),
-    );
+      })));
 
     const validator = makeValidator(); // accepts string-item tools
     const err = await parsePluginJson(path, validator).then(

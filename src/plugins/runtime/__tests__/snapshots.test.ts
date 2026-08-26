@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readEnabledManifestSnapshots, resolveManifestLoadPlan } from "../index.js";
 import { buildManifestValidator } from "../manifest-validation.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 let validator: Awaited<ReturnType<typeof buildManifestValidator>>;
 
@@ -47,7 +48,7 @@ describe("readEnabledManifestSnapshots", () => {
     const dir = await makeTempDir();
     try {
       const manifestPath = join(dir, "plugin.json");
-      await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
+      await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(VALID_MANIFEST)), "utf-8");
 
       const result = await readEnabledManifestSnapshots(
         [{ manifestPath, enabled: true, pluginIdHint: "override-id" }],
@@ -64,7 +65,7 @@ describe("readEnabledManifestSnapshots", () => {
     const dir = await makeTempDir();
     try {
       const manifestPath = join(dir, "plugin.json");
-      await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
+      await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(VALID_MANIFEST)), "utf-8");
 
       const result = await readEnabledManifestSnapshots(
         [{ manifestPath, enabled: true }],
@@ -82,7 +83,7 @@ describe("readEnabledManifestSnapshots", () => {
       const badPath = join(dir, "bad-plugin.json");
       const goodPath = join(dir, "good-plugin.json");
       await writeFile(badPath, "{ not json", "utf-8");
-      await writeFile(goodPath, JSON.stringify(VALID_MANIFEST), "utf-8");
+      await writeFile(goodPath, JSON.stringify(agentPluginsDocument(VALID_MANIFEST)), "utf-8");
 
       const result = await readEnabledManifestSnapshots(
         [
@@ -110,7 +111,7 @@ describe("readEnabledManifestSnapshots", () => {
     const dir = await makeTempDir();
     try {
       const manifestPath = join(dir, "plugin.json");
-      await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
+      await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(VALID_MANIFEST)), "utf-8");
       const access = { plugins: [{ pluginId: "test-other", events: ["other.event"] }] };
 
       const result = await readEnabledManifestSnapshots(
@@ -149,7 +150,7 @@ describe("resolveManifestLoadPlan — pending registry updates", () => {
       const pluginDir = join(dir, "pending-plugin");
       const registryPath = join(dir, "registry.json");
       await mkdir(pluginDir);
-      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(VALID_MANIFEST));
+      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(agentPluginsDocument(VALID_MANIFEST)));
       await writeFile(registryPath, JSON.stringify({
         version: 1,
         plugins: [{
@@ -183,7 +184,7 @@ describe("resolveManifestLoadPlan — registry", () => {
       const pluginDir = join(pluginsRoot, "test-snap");
       await mkdir(pluginDir, { recursive: true });
       const manifestPath = join(pluginDir, "plugin.json");
-      await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
+      await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(VALID_MANIFEST)), "utf-8");
 
       const registryPath = join(dir, "registry.json");
       await writeFile(

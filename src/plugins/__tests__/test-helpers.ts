@@ -23,6 +23,10 @@ import {
   type PluginRuntimeOptions,
 } from "../runtime.js";
 import type { PluginManifest, Tool } from "../types.js";
+import {
+  AGENT_PLUGINS_SCHEMA_URL,
+  LVIS_EXTENSION_NAMESPACE,
+} from "../public-contract.js";
 import type {
   HostPluginGenerationState,
   PluginRuntimeGenerationProjection,
@@ -249,6 +253,152 @@ export function makeTestPluginEntrySource(
 `;
 }
 
+/**
+ * Patch LVIS fields inside an on-disk Agent Plugins document.
+ *
+ * A fixture that reads `plugin.json`, edits a field and writes it back is
+ * editing a DOCUMENT, not a flat manifest — passing it through
+ * {@link agentPluginsDocument} again would nest the whole document inside the
+ * namespace. This edits at the right depth instead, and throws if the namespace
+ * is missing rather than creating one, so a wrong-shaped fixture fails loudly.
+ */
+export function patchLvisFields(
+  document: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const extensions = document.extensions as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  const namespace = extensions?.[LVIS_EXTENSION_NAMESPACE];
+  if (!namespace) {
+    throw new Error(
+      `manifest document has no extensions["${LVIS_EXTENSION_NAMESPACE}"] to patch`,
+    );
+  }
+  Object.assign(namespace, patch);
+  return document;
+}
+
+/**
+ * A deliberately permissive Agent Plugins envelope, for suites that want to
+ * exercise a HOST cross-field check rather than the real manifest schema.
+ *
+ * Those suites pass `parsePluginJson` a loose validator on purpose: if the test
+ * passes, the rejection came from the host check and not from the schema. That
+ * only works while the stand-in agrees with the document shape — an envelope
+ * that disagrees fails for the wrong reason and the suite stops measuring what
+ * it is about. Hence one definition rather than a literal per suite.
+ *
+ * `namespaceProperties` names the LVIS fields a given suite cares about;
+ * everything else inside the namespace is left unconstrained unless `strict`.
+ */
+export function permissiveManifestEnvelopeSchema(options: {
+  namespaceProperties?: Record<string, unknown>;
+  namespaceRequired?: string[];
+  strict?: boolean;
+} = {}): Record<string, unknown> {
+  const strict = options.strict ?? false;
+  return {
+    type: "object",
+    additionalProperties: !strict,
+    required: ["$schema", "name", "version", "description", "extensions"],
+    properties: {
+      $schema: { type: "string" },
+      name: { type: "string", pattern: "^[a-zA-Z][a-zA-Z0-9._-]*$", minLength: 3 },
+      description: { type: "string" },
+      version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" },
+      extensions: {
+        type: "object",
+        // Non-strict still has to admit a foreign namespace, which is an
+        // object of someone else's shape.
+        additionalProperties: strict ? false : { type: "object" },
+        properties: {
+          [LVIS_EXTENSION_NAMESPACE]: {
+            type: "object",
+            additionalProperties: !strict,
+            required: options.namespaceRequired ?? [],
+            properties: {
+              displayName: { type: "string" },
+              ...options.namespaceProperties,
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+/**
+ * The `properties` map of the LVIS namespace inside the host manifest schema.
+ *
+ * Every LVIS field sits under `extensions["xyz.lvisai"]` in an Agent Plugins
+ * document, so a suite reaching for `schema.properties.<lvisField>` is reaching
+ * into the portable top level, where that field is not. The path gets one
+ * definition here rather than one per suite, and throws rather than returning
+ * undefined so a wrong path fails loudly instead of asserting against nothing.
+ */
+export function lvisSchemaProperties(
+  schema: unknown,
+): Record<string, Record<string, unknown>> {
+  const properties = (schema as { properties?: Record<string, unknown> })
+    .properties;
+  const extensions = properties?.extensions as
+    | { properties?: Record<string, unknown> }
+    | undefined;
+  const namespace = extensions?.properties?.[LVIS_EXTENSION_NAMESPACE] as
+    | { properties?: Record<string, Record<string, unknown>> }
+    | undefined;
+  if (!namespace?.properties) {
+    throw new Error(
+      `host manifest schema has no extensions["${LVIS_EXTENSION_NAMESPACE}"].properties`,
+    );
+  }
+  return namespace.properties;
+}
+
+/**
+ * Fields Agent Plugins 1.0.0 puts at the top level besides identity. A fixture
+ * naming one of these means the top-level field, not a host field that happens
+ * to share the name — the split has to match `flattenAgentPluginsManifest`, or
+ * a round trip would move a field.
+ */
+const AGENT_PLUGINS_PORTABLE_FIELDS: ReadonlySet<string> = new Set([
+  "version",
+  "description",
+  "author",
+  "homepage",
+  "repository",
+  "license",
+  "keywords",
+]);
+
+/**
+ * Project a flat manifest into the Agent Plugins 1.0.0 document that actually
+ * goes on disk — the inverse of the host's `flattenAgentPluginsManifest`.
+ *
+ * Fixtures stay flat because that is the shape assertions read and the shape a
+ * test is usually about. Only the bytes written to `plugin.json` are nested, so
+ * a fixture's subject stays its content rather than its envelope.
+ *
+ * Faithful about absence: a fixture that omits `id` produces a document with no
+ * `name`, which is how a test drives the "missing identity" path.
+ */
+export function agentPluginsDocument(
+  manifest: Readonly<Record<string, unknown>> | PluginManifest,
+): Record<string, unknown> {
+  const { id, name, ...rest } = manifest as Record<string, unknown>;
+  const top: Record<string, unknown> = { $schema: AGENT_PLUGINS_SCHEMA_URL };
+  if (id !== undefined) top.name = id;
+  const lvis: Record<string, unknown> = {};
+  if (name !== undefined) lvis.displayName = name;
+  for (const [key, value] of Object.entries(rest)) {
+    if (AGENT_PLUGINS_PORTABLE_FIELDS.has(key)) top[key] = value;
+    else lvis[key] = value;
+  }
+  top.extensions = { [LVIS_EXTENSION_NAMESPACE]: lvis };
+  return top;
+}
+
 export async function writeTestPlugin(
   fixture: TestPluginRuntimeFixture,
   options: WriteTestPluginOptions,
@@ -267,7 +417,11 @@ export async function writeTestPlugin(
     ...options.manifest,
   });
   const manifestPath = join(pluginDir, "plugin.json");
-  await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+  await writeFile(
+    manifestPath,
+    JSON.stringify(agentPluginsDocument(manifest)),
+    "utf-8",
+  );
   return { pluginDir, manifestPath, manifest };
 }
 

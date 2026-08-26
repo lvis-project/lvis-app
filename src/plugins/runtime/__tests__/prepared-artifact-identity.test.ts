@@ -16,6 +16,7 @@ import {
 } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
 import { canonicalJSON } from "../../whitelist/canonical-json.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 const roots: string[] = [];
 
@@ -59,7 +60,7 @@ async function writePreparedPlugin(
     }],
     ...manifestOverrides,
   };
-  await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
+  await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf8");
   await writeFile(
     join(pluginRoot, "entry.mjs"),
     entrySource?.(toolName) ?? `export default async function createPlugin() {
@@ -84,7 +85,7 @@ async function writePreparedPlugin(
     registryEntry: {
       installSource: "user",
       manifestSha256: createHash("sha256")
-        .update(canonicalJSON(manifest))
+        .update(canonicalJSON(agentPluginsDocument(manifest)))
         .digest("hex"),
     },
   };

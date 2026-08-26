@@ -21,6 +21,7 @@ import { getDeclaredEmittedEvents } from "../../plugins/runtime/manifest-validat
 import { registerManifestEventSubscriptions } from "../plugins.js";
 import type { AuditEntry } from "../../audit/audit-logger.js";
 import { mkdtempSync } from "node:fs";
+import { agentPluginsDocument } from "../../plugins/__tests__/test-helpers.js";
 
 function collectingAudit() {
   const entries: AuditEntry[] = [];
@@ -108,7 +109,7 @@ describe("M4 — capability violation audit trail", () => {
       ],
       ...extra,
     };
-    await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
+    await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({

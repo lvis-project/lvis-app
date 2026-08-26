@@ -18,6 +18,13 @@ import type { ValidateFunction } from "ajv";
 // file is byte-identical to the SDK's former canonical copy; the SDK now
 // mirrors from here (host is SOT).
 import manifestSchema from "../../../schemas/plugin-manifest.schema.json" with { type: "json" };
+import {
+  AGENT_PLUGINS_SCHEMA_URL,
+  AGENT_PLUGINS_TOP_LEVEL_FIELDS,
+  LVIS_EXTENSION_NAMESPACE,
+  flattenAgentPluginsManifest,
+  foreignManifestTopLevelFields,
+} from "../public-contract.js";
 import type {
   PluginManifest,
   PluginToolOperationPolicy,
@@ -180,7 +187,28 @@ function materializeManifest(manifest: PluginManifest): PluginManifest {
 }
 
 /**
+ * Map an internal field path onto the place in the file an author actually has
+ * to edit. The internal manifest is flat and the document is not, so a bare
+ * "entry" would send someone looking at a top level that does not have it.
+ *
+ * Derived from {@link AGENT_PLUGINS_TOP_LEVEL_FIELDS} rather than a second list
+ * of its own: one definition of what "portable" means, so the two cannot drift.
+ */
+function onDiskFieldPath(fieldPath: string): string {
+  if (fieldPath === "id") return "name";
+  const root = fieldPath.split(/[.[]/, 1)[0] ?? fieldPath;
+  if (AGENT_PLUGINS_TOP_LEVEL_FIELDS.includes(root)) return fieldPath;
+  return `extensions["${LVIS_EXTENSION_NAMESPACE}"].${fieldPath}`;
+}
+
+/**
  * Parse and fully validate a plugin.json manifest file.
+ *
+ * The file on disk is an Agent Plugins 1.0.0 document; every host consumer
+ * reads the flat {@link PluginManifest}. This is the sole boundary between the
+ * two: {@link flattenAgentPluginsManifest} projects the document, the AJV
+ * validation runs against the *document* (so the schema stays the SOT for what
+ * an author writes), and everything after that works on the projection.
  *
  * Runs the Host-owned AJV schema validation, then materializes each tool's surface
  * visibility and the `name` default via `materializeManifest` (SoT §3.1), then
@@ -195,14 +223,24 @@ export async function parsePluginJson(
   // Detailed, per-field error messages shaped as
   //   "Invalid plugin manifest '<pluginId>' at '<fieldPath>': <reason>. Example: <correction>"
   const raw = await readFile(path, "utf-8");
+  // `doc` is the file as authored — the Agent Plugins 1.0.0 shape the schema
+  // describes, and therefore the thing the validator must see. `parsed` is the
+  // flat internal projection every check below and every consumer downstream
+  // reads. Validating the document rather than the projection keeps the schema
+  // honest as the SOT for what a plugin author writes (and keeps the host
+  // agreeing with the CI job that validates the same file with the same schema).
+  let doc: unknown;
   let parsed: PluginManifest;
   try {
-    parsed = JSON.parse(raw) as PluginManifest;
+    doc = JSON.parse(raw) as unknown;
+    parsed = flattenAgentPluginsManifest(doc);
   } catch (err) {
     throw new Error(
       `Invalid plugin manifest '<unknown>' at '${path}': JSON parse error (${(err as Error).message}). ` +
-        `Example: {"id":"sample-plugin","name":"Sample","version":"1.0.0","entry":"dist/index.js",` +
-        `"description":"Sample plugin.","tools":[{"name":"sample_ping","inputSchema":{"type":"object","properties":{}}}]}`,
+        `Example: {"$schema":"${AGENT_PLUGINS_SCHEMA_URL}","name":"sample-plugin",` +
+        `"version":"1.0.0","description":"Sample plugin.","extensions":{"${LVIS_EXTENSION_NAMESPACE}":` +
+        `{"displayName":"Sample","entry":"dist/index.js",` +
+        `"tools":[{"name":"sample_ping","inputSchema":{"type":"object","properties":{}}}]}}}`,
     );
   }
   const pid =
@@ -211,12 +249,27 @@ export async function parsePluginJson(
       : "<unknown>";
   const fail = (fieldPath: string, reason: string, example: string): never => {
     throw new Error(
-      `Invalid plugin manifest '${pid}' at '${fieldPath}' (${path}): ${reason}. Example: ${example}`,
+      `Invalid plugin manifest '${pid}' at '${onDiskFieldPath(fieldPath)}' (${path}): ${reason}. Example: ${example}`,
     );
   };
 
   if (!validator) {
     throw new Error("Host plugin manifest validator is required");
+  }
+
+  // Agent Plugins 1.0.0 is explicit that a client reports and ignores unknown
+  // top-level fields rather than refusing the plugin over another vendor's
+  // data. The projection already drops them; this is the "reports" half, kept
+  // here rather than inside the projection so that projection stays pure and
+  // mirrorable into the SDK.
+  const foreign = foreignManifestTopLevelFields(doc);
+  if (foreign.length > 0) {
+    log.warn(
+      `[manifest] ${path}: ignoring non-portable top-level field(s) ` +
+        `${foreign.join(", ")} — Agent Plugins 1.0.0 reserves the manifest top ` +
+        `level; client-specific data belongs under ` +
+        `extensions["${LVIS_EXTENSION_NAMESPACE}"]`,
+    );
   }
 
   const networkAccessRaw: unknown = parsed.networkAccess;
@@ -234,15 +287,20 @@ export async function parsePluginJson(
       )
     ) {
       try {
-        parsed.networkAccess = {
-          ...parsed.networkAccess,
+        // Normalize IN PLACE rather than replacing `parsed.networkAccess`.
+        // `parsed` is a shallow projection of the document, so this object is
+        // the same one the document holds — and the AJV run below validates the
+        // DOCUMENT. Replacing the field would normalize only the projection and
+        // leave validation looking at the raw value, which the schema's
+        // lowercase-hostname rule would then reject: a manifest that loads today
+        // would stop loading, and the normalization step would be doing nothing.
+        (networkAccessRaw as { allowedDomains: string[] }).allowedDomains =
           // `allowLoopback` admits the `localhost` / `127.0.0.1` / `::1`
           // literals a plugin uses to declare a local endpoint (a user-run
           // inference server or proxy). Declaring one is not reachability —
           // `host-fetch-guard.ts` still decides that — but the literal has to
           // survive normalization or the declaration cannot be written at all.
-          allowedDomains: normalizeAllowedHosts(allowedDomainsRaw, { allowLoopback: true }),
-        };
+          normalizeAllowedHosts(allowedDomainsRaw, { allowLoopback: true });
       } catch (err) {
         fail(
           "networkAccess.allowedDomains",
@@ -306,7 +364,7 @@ export async function parsePluginJson(
     }
   }
 
-  if (!validator(parsed)) {
+  if (!validator(doc)) {
     // Enrich the error so users can act on it. Pre-fix AJV's default text
     // for additional-properties was "/ must NOT have additional properties"
     // — never named WHICH property was rejected, leaving users stuck (#737).

@@ -18,6 +18,11 @@ import {
   isAllowedHostSecretKey,
 } from "../../../shared/marketplace-package-assets.js";
 import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
+import {
+  agentPluginsDocument,
+  lvisSchemaProperties,
+  permissiveManifestEnvelopeSchema,
+} from "../../__tests__/test-helpers.js";
 
 describe("manifest hostSecrets.read[] validator (#893)", () => {
   let workDir: string;
@@ -36,27 +41,23 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
     // manifest-validation-error-clarity.test.ts.
     const ajv = new Ajv({ allErrors: true });
     addFormats(ajv);
-    return ajv.compile({
-      type: "object",
-      additionalProperties: true,
-      required: ["id", "name", "version", "entry", "tools", "description"],
-      properties: {
-        id: { type: "string", pattern: "^[a-zA-Z][a-zA-Z0-9._-]*$", minLength: 3 },
-        name: { type: "string" },
-        description: { type: "string" },
-        version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" },
-        entry: { type: "string" },
-        tools: { type: "array" },
-        hostSecrets: { type: "object" },
-      },
-    });
+    return ajv.compile(
+      permissiveManifestEnvelopeSchema({
+        namespaceProperties: {
+          entry: { type: "string" },
+          tools: { type: "array" },
+          hostSecrets: { type: "object" },
+        },
+        namespaceRequired: ["entry", "tools"],
+      }),
+    );
   }
 
   async function writeManifest(extra: Record<string, unknown>): Promise<string> {
     const path = join(workDir, "plugin.json");
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "host-secrets-test",
         name: "Host Secrets Test",
         description: "x",
@@ -64,8 +65,7 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
         entry: "dist/p.js",
         tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         ...extra,
-      }),
-    );
+      })));
     return path;
   }
 
@@ -96,7 +96,7 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
 
   it("patches the SDK schema to accept marketplace provider preset host secret keys", async () => {
     const validator = await buildManifestValidator();
-    const valid = validator({
+    const valid = validator(agentPluginsDocument({
       id: "marketplace-provider-secret",
       name: "Marketplace Provider Secret Plugin",
       version: "1.0.0",
@@ -107,7 +107,7 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
       hostSecrets: {
         read: ["llm.marketplaceProvider.future-router.apiKey"],
       },
-    });
+    }));
     expect(valid, JSON.stringify(validator.errors, null, 2)).toBe(true);
   });
 
@@ -134,7 +134,7 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
       "webApiKey.tavily",
     ];
     for (const key of corpus) {
-      const schemaAccepts = validator({
+      const schemaAccepts = validator(agentPluginsDocument({
         id: "host-secret-corpus",
         name: "Host Secret Corpus Plugin",
         version: "1.0.0",
@@ -143,7 +143,7 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
         entry: "dist/index.js",
         tools: [],
         hostSecrets: { read: [key] },
-      });
+      }));
       expect(isAllowedHostSecretKey(key), `key ${JSON.stringify(key)}`)
         .toBe(schemaAccepts);
     }
@@ -241,15 +241,14 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
       const path = join(workDir, "plugin.json");
       await writeFile(
         path,
-        JSON.stringify({
+        JSON.stringify(agentPluginsDocument({
           id,
           name: "Id Test",
           description: "x",
           version: "1.0.0",
           entry: "dist/p.js",
           tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-        }),
-      );
+        })));
       return path;
     }
 
@@ -295,16 +294,10 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
   // string, `parsePluginJson` on a manifest file.
   describe("hostSecrets.read[] collection bounds (#1939)", () => {
     const readSchema = (
-      manifestSchema as unknown as {
-        properties: {
-          hostSecrets: {
-            properties: {
-              read: { maxItems?: number; uniqueItems?: boolean };
-            };
-          };
-        };
+      lvisSchemaProperties(manifestSchema).hostSecrets as {
+        properties: { read: { maxItems?: number; uniqueItems?: boolean } };
       }
-    ).properties.hostSecrets.properties.read;
+    ).properties.read;
 
     /** `count` distinct, individually well-formed host-secret keys. */
     function distinctKeys(count: number): string[] {
@@ -419,22 +412,22 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
         tools: [],
       };
       expect(
-        validator({
+        validator(agentPluginsDocument({
           ...base,
           hostSecrets: { read: distinctKeys(HOST_SECRET_READ_MAX_ITEMS + 1) },
-        }),
+        })),
       ).toBe(false);
       expect(
-        validator({
+        validator(agentPluginsDocument({
           ...base,
           hostSecrets: { read: ["llm.apiKey.openai", "llm.apiKey.openai"] },
-        }),
+        })),
       ).toBe(false);
       expect(
-        validator({
+        validator(agentPluginsDocument({
           ...base,
           hostSecrets: { read: distinctKeys(HOST_SECRET_READ_MAX_ITEMS) },
-        }),
+        })),
         JSON.stringify(validator.errors, null, 2),
       ).toBe(true);
     });

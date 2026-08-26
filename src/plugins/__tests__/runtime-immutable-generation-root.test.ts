@@ -9,7 +9,7 @@ import type {
   HostPluginGenerationState,
   PluginRuntimeGenerationProjection,
 } from "../plugin-host-generation.js";
-import { makeTestTreeWritable } from "./test-helpers.js";
+import { agentPluginsDocument, makeTestTreeWritable } from "./test-helpers.js";
 
 const roots: string[] = [];
 
@@ -45,7 +45,7 @@ describe("PluginRuntime immutable generation root", () => {
         _meta: { ui: { visibility: ["model"] } },
       }],
     };
-    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
+    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf8");
     await writeFile(join(pluginRoot, "value.txt"), "g1", "utf8");
     await writeFile(
       join(pluginRoot, "entry.mjs"),

@@ -2997,18 +2997,36 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 
 ### 9.2 Plugin Manifest Spec
 
+`plugin.json`은 **Agent Plugins 1.0.0** 문서다 (agent-plugins.org). 최상위에는
+스펙이 정의한 portable 필드(`$schema`, `name`, `version`, `description`,
+`author`, `homepage`, `repository`, `license`, `keywords`)만 오고, LVIS가 쓰는
+모든 필드는 reverse-domain namespace `extensions["xyz.lvisai"]` 안에 들어간다.
+플러그인 식별자는 portable `name`이며, 사람이 읽는 표시 이름은 namespace 안의
+`displayName`이다.
+
+호스트 내부에서 읽는 `PluginManifest`는 여전히 flat이다. 문서 → flat 투영은
+`flattenAgentPluginsManifest`(`src/plugins/runtime/manifest-validation.ts`) 한
+곳에서만 일어나고, AJV 검증은 **문서**를 대상으로 돌린다. 즉 스키마는 저자가
+실제로 쓰는 파일의 진실 소스로 남고, 소비자는 파일이 중첩돼 있다는 사실을 알
+필요가 없다.
+
 매니페스트 스키마의 단일 진실 소스는 Host의
-`schemas/plugin-manifest.schema.json`이다. SDK는 이 파일과
-`src/plugins/public-contract.ts`를 생성 시점에 그대로 동기화하며 독자 계약을
-추가하지 않는다. Callable surface는 pure MCP `Tool[]` 하나뿐이고
-`toolSchemas`, `uiActions`, `keywords`는 스키마가 거부한다.
+`schemas/plugin-manifest.schema.json`이다. 이 스키마는 portable 스키마보다
+엄격하다 — `version`/`description`/`extensions`를 필수로 요구하고, `name`은
+스펙 규칙과 LVIS 플러그인 id 규칙의 **교집합**(kebab-case, 점 불가, 3~64자)만
+받는다. SDK는 이 파일과 `src/plugins/public-contract.ts`를 생성 시점에 그대로
+동기화하며 독자 계약을 추가하지 않는다. Callable surface는 pure MCP `Tool[]`
+하나뿐이고 `toolSchemas`, `uiActions`, `keywords`는 스키마가 거부한다.
 
 ```json
 {
-  "id": "meeting",
-  "name": "LVIS Meeting",
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "meeting",
   "version": "0.3.2",
   "description": "회의 녹음·음성 전사(STT)·요약 생성 플러그인.",
+  "extensions": {
+    "xyz.lvisai": {
+  "displayName": "LVIS Meeting",
   "entry": "dist/hostPlugin.js",
   "publisher": "example-publisher",
   "installPolicy": "user",
@@ -3081,6 +3099,8 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
     { "id": "plugin-panel", "slot": "sidebar", "kind": "embedded-module",
       "title": "플러그인 패널", "entry": "ui/panel.js", "exportName": "PluginPanel" }
   ]
+    }
+  }
 }
 ```
 
@@ -3088,8 +3108,12 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 
 | 필드 | 타입 | 역할 |
 |----------------------------------------- |----------------------------------------------- |--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `id` | string (`^[a-zA-Z][a-zA-Z0-9._-]*$`, 3~128자) | 플러그인 식별자. **flat form 권장** (번들 플러그인은 모두 flat); dot form 허용. |
-| `name`, `version`, `entry`, `description` | string | 메타데이터. `description` ≤ 280자, `version` anchored semver. |
+| `$schema` | string (const) | Agent Plugins 1.0.0 스키마 식별자. 최상위 필수이며, 매니페스트 형식 마커 역할을 겸한다. |
+| `name` | string (`^(?!.*--)[a-z][a-z0-9-]*[a-z0-9]$`, 3~64자) | 플러그인 식별자 (최상위, portable). 호스트가 `PluginManifest.id`로 읽는 값. **점(dot) 불가** — 스펙은 점을 허용하지만 LVIS는 kebab-case만 받는다. |
+| `extensions["xyz.lvisai"]` | object | LVIS가 읽는 모든 필드가 이 안에 있다. 다른 클라이언트의 namespace는 그대로 통과시키고 읽지 않는다. |
+| `displayName` (namespace) | string | 사람이 읽는 표시 이름. 생략 시 `name`으로 채워진다. |
+| `version`, `description` (최상위) / `entry` (namespace) | string | 메타데이터. `description` ≤ 280자, `version` anchored semver. |
+| `author`, `homepage`, `repository`, `license`, `keywords` (최상위) | portable metadata | 스키마는 받지만 호스트는 **읽지 않는다** — 카탈로그 성격의 정보이고, `public-contract.ts`는 카탈로그 개념을 플러그인 계약에서 의도적으로 배제한다. |
 | `tools` | **pure MCP `Tool[]`** | 유일한 callable surface. 이름은 `^[a-zA-Z_][a-zA-Z0-9_]*$`; description/inputSchema/visibility/Host metadata를 각 객체가 직접 보유한다.                                                                                                                                                                                                                                           |
 | `tools[]._meta.ui.visibility`             | `Array<"model" \| "app">`                       | model/app 노출을 한 Tool 객체에서 선언한다. 별도 app-action map은 없다. |
 | `tools[]._meta["lvisai/pathFields"]` | `string[]` | 파일 경로 입력 필드를 Host의 allowed-directory 검사로 연결한다.                                                                                                                                                                                                                                                                                                                   |
@@ -3117,7 +3141,7 @@ wrapper(macOS Seatbelt / Linux bwrap)로 감싼다.
 
 **마켓플레이스 검증:** 플러그인 repo는 sidecar signature를 만들지 않는다. Marketplace upload API가 zip/manifest/schema/version/policy/dependency/access를 검증하고 최종 artifact envelope에 서명한다. Host는 설치 시 envelope를 검증하고 install receipt를 저장한다.
 
-**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → Host-owned AJV schema → cross-field (Tool name/visibility/auth/operation policy, contribution id/path, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop.
+**검증 플로우:** marketplace envelope verification → install receipt file-hash verification → JSON.parse → `flattenAgentPluginsManifest` (문서 → flat 투영) → 문서 대상 Host-owned AJV schema → cross-field (Tool name/visibility/auth/operation policy, contribution id/path, `startupTimeoutMs > 0`) → capability enforcement → entry import. 각 단계 실패 시 해당 플러그인 fail-soft drop.
 
 부트 preflight는 install receipt 검증을 manifest 파싱보다 먼저 수행한다. Receipt hash와 manifest 검증은 제한된 동시성으로 겹쳐 실행하되, 성공 결과와 실패 상태는 registry 순서대로 반영한다. 무결성 검증에 실패한 payload는 tool/event 소유권이나 dependency capability 계산에 들어가지 않으며, 통과한 manifest는 해당 부트에서 한 번만 파싱한다.
 

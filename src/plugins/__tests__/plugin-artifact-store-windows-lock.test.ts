@@ -29,6 +29,7 @@ import { mkdir, open, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { isTransientFsLockError, retryOnTransientFsLock } from "../plugin-artifact-store.js";
 import { cleanupTmpDir, makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 const TMP_PREFIX = "artifact-store-winlock-";
 
@@ -113,7 +114,7 @@ describe.skipIf(process.platform !== "win32")(
         }, 300);
 
         const zip = new AdmZip();
-        zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "meeting", version: "new" })));
+        zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "meeting", version: "new" }))));
 
         try {
           const { files } = await store.extractZipWithCommit(
@@ -159,7 +160,7 @@ describe.skipIf(process.platform !== "win32")(
         const handle = await open(lockedFile, "r");
         try {
           const zip = new AdmZip();
-          zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "meeting", version: "new" })));
+          zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "meeting", version: "new" }))));
 
           await expect(
             store.extractZipWithCommit("meeting", zip.toBuffer(), async () => undefined),

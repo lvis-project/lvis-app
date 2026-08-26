@@ -13,6 +13,7 @@ import {
 } from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 /**
  * Sprint 3-B §9.6 + Phase 2-final — install → update → rollback lifecycle.
@@ -117,7 +118,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
       const candidateDir = join(testDir, `candidate-${version}`);
       const manifest = sampleManifest(version);
       await mkdir(candidateDir, { recursive: true });
-      await writeFile(join(candidateDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
+      await writeFile(join(candidateDir, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
       const coordinated = await opts.activatePreparedArtifact({
         installId: _plugin.id,
         pluginRoot: candidateDir,
@@ -127,7 +128,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
         durableCommit: async () => {
           await mkdir(pluginDir, { recursive: true });
           const manifestFile = join(pluginDir, "plugin.json");
-          await writeFile(manifestFile, JSON.stringify(manifest), "utf-8");
+          await writeFile(manifestFile, JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
           await opts.commit?.("example-sample/plugin.json", manifestFile);
           return "example-sample/plugin.json";
         },
@@ -300,7 +301,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
 
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(restored.plugins[0].installSource).toBe("admin");
-    expect(restored.plugins[0].manifestSha256).toBe(manifestSha(sampleManifest("1.0.0")));
+    expect(restored.plugins[0].manifestSha256).toBe(manifestSha(agentPluginsDocument(sampleManifest("1.0.0"))));
   });
 
   it("rollback normalises a legacy dev-link registry value to 'user' regardless of packaged/dev mode", async () => {

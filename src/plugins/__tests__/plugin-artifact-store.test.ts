@@ -29,6 +29,7 @@ import { CommittedPluginGenerationPublicationError } from "../committed-generati
 import { TOMBSTONE_SUBDIR } from "../installed-entry-fs.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import { cleanupTmpDir, makeStore, makeTmpDir } from "./artifact-store-test-helpers.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 describe("PluginArtifactStore — history journal", () => {
   it("appendHistory + readHistory round-trip preserves order", async () => {
@@ -84,8 +85,7 @@ describe("PluginArtifactStore — findRollbackTarget", () => {
         await mkdir(dir, { recursive: true });
         await writeFile(
           resolve(dir, "plugin.json"),
-          JSON.stringify({ id: "acme", version, name: "acme", entry: "x" }),
-        );
+          JSON.stringify(agentPluginsDocument({ id: "acme", version, name: "acme", entry: "x" })));
       }
       const target = await store.findRollbackTarget("acme", "2.0.0");
       expect(target).toBe("1.0.1");
@@ -105,8 +105,7 @@ describe("PluginArtifactStore — findRollbackTarget", () => {
         await mkdir(dir, { recursive: true });
         await writeFile(
           resolve(dir, "plugin.json"),
-          JSON.stringify({ id: "acme", version, name: "acme", entry: "x" }),
-        );
+          JSON.stringify(agentPluginsDocument({ id: "acme", version, name: "acme", entry: "x" })));
       }
       // Pretend 2.0.0 is current — should pick 1.0.0.
       expect(await store.findRollbackTarget("acme", "2.0.0")).toBe("1.0.0");
@@ -126,8 +125,7 @@ describe("PluginArtifactStore — findRollbackTarget", () => {
       await mkdir(dir, { recursive: true });
       await writeFile(
         resolve(dir, "plugin.json"),
-        JSON.stringify({ id: "acme", version: "1.0.0", name: "acme", entry: "x" }),
-      );
+        JSON.stringify(agentPluginsDocument({ id: "acme", version: "1.0.0", name: "acme", entry: "x" })));
       // Current is 2.0.0 (not in history) — rollback skips 1.0.1 (missing
       // snapshot) and returns 1.0.0.
       expect(await store.findRollbackTarget("acme", "2.0.0")).toBe("1.0.0");
@@ -147,8 +145,7 @@ describe("PluginArtifactStore — findRollbackTarget", () => {
       await mkdir(dir, { recursive: true });
       await writeFile(
         resolve(dir, "plugin.json"),
-        JSON.stringify({ id: "acme", version: "1.0.0", name: "acme", entry: "x" }),
-      );
+        JSON.stringify(agentPluginsDocument({ id: "acme", version: "1.0.0", name: "acme", entry: "x" })));
       expect(await store.findRollbackTarget("acme", "2.0.0")).toBe("1.0.0");
     } finally {
       await cleanupTmpDir(tmp);
@@ -228,7 +225,7 @@ describe("PluginArtifactStore — extractZip", () => {
     try {
       const store = makeStore(tmp);
       const zip = new AdmZip();
-      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "evil" })));
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "evil" }))));
       await expect(store.extractZip("../evil", zip.toBuffer())).rejects.toThrow(
         /invalid artifact slug/,
       );
@@ -243,10 +240,10 @@ describe("PluginArtifactStore — extractZip", () => {
       const store = makeStore(tmp);
       const installDir = store.installDirFor("acme");
       await mkdir(installDir, { recursive: true });
-      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
 
       const zip = new AdmZip();
-      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
 
       await expect(
         store.extractZipWithCommit("acme", zip.toBuffer(), async () => {
@@ -267,9 +264,9 @@ describe("PluginArtifactStore — extractZip", () => {
       const store = makeStore(tmp);
       const installDir = store.installDirFor("acme");
       await mkdir(installDir, { recursive: true });
-      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
       const zip = new AdmZip();
-      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
       const durableCommit = vi.fn(async () => undefined);
 
       await expect(store.extractZipWithCommit("acme", zip.toBuffer(), durableCommit, {
@@ -292,9 +289,9 @@ describe("PluginArtifactStore — extractZip", () => {
       const installRoot = resolve(tmp, "installed");
       const installDir = store.installDirFor("acme");
       await mkdir(installDir, { recursive: true });
-      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
       const zip = new AdmZip();
-      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
       let releaseRetirement!: () => void;
       const retirement = new Promise<void>((resolveRetirement) => { releaseRetirement = resolveRetirement; });
       let durableFinished!: () => void;
@@ -332,9 +329,9 @@ describe("PluginArtifactStore — extractZip", () => {
       const installRoot = resolve(tmp, "installed");
       const installDir = store.installDirFor("acme");
       await mkdir(installDir, { recursive: true });
-      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+      await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
       const zip = new AdmZip();
-      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
       const publicationCause = new Error("projection publish failed");
       const retirementCause = new Error("predecessor retirement failed");
       const retirement = Promise.reject(retirementCause);
@@ -548,9 +545,9 @@ describe("PluginArtifactStore — extractZip", () => {
         const store = makeStore(tmp);
         const installDir = store.installDirFor("acme");
         await mkdir(installDir, { recursive: true });
-        await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+        await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
         const zip = new AdmZip();
-        zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+        zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
         const commitError = new Error("registry publication failed");
 
         const error = await store.extractZipWithCommit("acme", zip.toBuffer(), async () => {
@@ -590,9 +587,9 @@ describe("PluginArtifactStore — extractZip", () => {
         );
         const installDir = store.installDirFor("acme");
         await mkdir(installDir, { recursive: true });
-        await writeFile(resolve(installDir, "plugin.json"), JSON.stringify({ id: "acme", version: "old" }));
+        await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
         const zip = new AdmZip();
-        zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+        zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
 
         await store.extractZipWithCommit("acme", zip.toBuffer(), async () => undefined);
 
@@ -704,13 +701,14 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
       await mkdir(resolve(tmp, "live"), { recursive: true });
       await writeFile(
         sourceManifest,
-        JSON.stringify({ id: "acme", version: "1.2.3", name: "acme", entry: "x" }),
-      );
+        JSON.stringify(agentPluginsDocument({ id: "acme", version: "1.2.3", name: "acme", entry: "x" })));
       await store.cacheVersionFromManifest("acme", sourceManifest);
       const cached = resolve(tmp, "cache", "acme", "1.2.3", "plugin.json");
       const { readFile: read } = await import("node:fs/promises");
       const raw = await read(cached, "utf-8");
-      expect(JSON.parse(raw)).toMatchObject({ id: "acme", version: "1.2.3" });
+      // The cached snapshot is a byte copy of the document, so identity is the
+      // portable `name`, not the flat `id` the host projects it to.
+      expect(JSON.parse(raw)).toMatchObject({ name: "acme", version: "1.2.3" });
     } finally {
       await cleanupTmpDir(tmp);
     }
@@ -724,8 +722,7 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
       await mkdir(resolve(tmp, "live"), { recursive: true });
       await writeFile(
         sourceManifest,
-        JSON.stringify({ id: "acme", version: "1.2.3", name: "acme", entry: "x" }),
-      );
+        JSON.stringify(agentPluginsDocument({ id: "acme", version: "1.2.3", name: "acme", entry: "x" })));
 
       await store.cacheVersionFromManifest("acme", sourceManifest, {
         installSource: "admin",

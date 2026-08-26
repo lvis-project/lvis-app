@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { readPluginRegistry } from "./registry.js";
+import { flattenAgentPluginsManifest } from "./public-contract.js";
 import type { InstallPolicy } from "./types.js";
 import { createLogger } from "../lib/logger.js";
 const log = createLogger("deployment-guard");
@@ -143,7 +144,11 @@ export class PluginDeploymentGuard {
   private async readManifestSafe(path: string): Promise<{ installPolicy?: InstallPolicy } | null> {
     try {
       const raw = await readFile(path, "utf-8");
-      return JSON.parse(raw) as { installPolicy?: InstallPolicy };
+      // `installPolicy` is an LVIS field, so in an Agent Plugins document it is
+      // inside the extension namespace, not at the top level. Reading the raw
+      // document here would see `undefined` and silently downgrade an admin
+      // plugin to the "user" default.
+      return flattenAgentPluginsManifest(JSON.parse(raw));
     } catch (err) {
       // Corrupted / missing manifest. Path check alone may have already
       // decided, so we don't throw — but surface for forensics.

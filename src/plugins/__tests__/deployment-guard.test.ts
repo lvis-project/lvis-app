@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { PluginDeploymentGuard } from "../deployment-guard.js";
 import { mkdtempSync } from "node:fs";
 import { writeTestPluginRegistry } from "./test-helpers.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 /**
  * Phase 1.5 test gate — PluginDeploymentGuard §7.2-§7.3
@@ -116,7 +117,7 @@ describe("PluginDeploymentGuard", () => {
     const manifestPath = join(userDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({ id: "p-managed-inside", installPolicy: "admin" }),
+      JSON.stringify(agentPluginsDocument({ id: "p-managed-inside", installPolicy: "admin" })),
       "utf-8",
     );
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-managed-inside", manifestPath }]);
@@ -134,7 +135,7 @@ describe("PluginDeploymentGuard", () => {
     const manifestPath = join(userDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({ id: "p-user-explicit", installPolicy: "user" }),
+      JSON.stringify(agentPluginsDocument({ id: "p-user-explicit", installPolicy: "user" })),
       "utf-8",
     );
     await writeTestPluginRegistry({ registryPath }, [{ id: "p-user-explicit", manifestPath }]);

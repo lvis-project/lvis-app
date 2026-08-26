@@ -15,6 +15,7 @@ import { isNewerPluginVersion } from "../update-condition.js";
 import type { MarketplaceFetcher } from "../marketplace-fetcher.js";
 import type { PluginMarketplaceItem } from "../types.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 // ─── helpers ────────────────────────────────────────────────────────────────
 
@@ -121,9 +122,8 @@ describe("PluginUpdateDetector", () => {
       await mkdir(dir, { recursive: true });
       await writeFile(
         resolve(dir, "plugin.json"),
-        JSON.stringify({ id, version, name: id, entry: "dist/index.js", tools: [] }),
-        "utf-8",
-      );
+        JSON.stringify(agentPluginsDocument({ id, version, name: id, entry: "dist/index.js", tools: [] })),
+        "utf-8");
       entries.push({ id, manifestPath: `installed/${id}/plugin.json` });
     }
 
@@ -264,9 +264,8 @@ describe("PluginUpdateDetector", () => {
     await mkdir(installedDir, { recursive: true });
     await writeFile(
       resolve(installedDir, "plugin.json"),
-      JSON.stringify({ id: "agent-hub", version: "1.0.0", name: "agent-hub", entry: "dist/index.js", tools: [] }),
-      "utf-8",
-    );
+      JSON.stringify(agentPluginsDocument({ id: "agent-hub", version: "1.0.0", name: "agent-hub", entry: "dist/index.js", tools: [] })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -367,9 +366,8 @@ describe("PluginUpdateDetector", () => {
     await mkdir(outsideDir, { recursive: true });
     await writeFile(
       resolve(outsideDir, "plugin.json"),
-      JSON.stringify({ id: "local-indexer", version: "1.0.0", name: "local-indexer", entry: "dist/index.js", tools: [] }),
-      "utf-8",
-    );
+      JSON.stringify(agentPluginsDocument({ id: "local-indexer", version: "1.0.0", name: "local-indexer", entry: "dist/index.js", tools: [] })),
+      "utf-8");
 
     const installedDir = resolve(tmpDir, "installed");
     await mkdir(installedDir, { recursive: true });

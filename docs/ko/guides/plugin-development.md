@@ -113,10 +113,31 @@ interface Tool {
 }
 ```
 
+### 문서 형태 — Agent Plugins 1.0.0
+
+`plugin.json` 은 **Agent Plugins 1.0.0** 문서다 (agent-plugins.org). 최상위에는
+스펙이 정의한 portable 필드만 오고, LVIS 가 읽는 필드는 전부
+`extensions["xyz.lvisai"]` 안에 들어간다.
+
+| 위치 | 필드 |
+|------|------|
+| 최상위 (portable) | `$schema`(필수), `name`(필수 — 플러그인 식별자), `version`, `description`, `author`, `homepage`, `repository`, `license`, `keywords` |
+| `extensions["xyz.lvisai"]` | `displayName`, `entry`, `tools`, `capabilities`, `ui`, `auth`, `networkAccess`, `configSchema`, `skills`, `hooks`, `mcpServers`, `publisher`, `installPolicy`, `requires`, … |
+
+- **플러그인 식별자는 최상위 `name`** 이다. 예전 `id` 필드는 없어졌다.
+- **사람이 읽는 표시 이름은 `displayName`** (namespace 안). 생략하면 `name` 이 쓰인다.
+- 다른 클라이언트의 namespace (`com.example` 등) 는 그대로 둬도 된다 — 호스트는
+  읽지 않고 통과시킨다.
+- `author`/`homepage`/`repository`/`license`/`keywords` 는 스키마가 받지만 호스트는
+  읽지 않는다 (카탈로그 성격 정보).
+
 스키마 규칙(AJV 검증):
 
 - 최상위 `additionalProperties: false` — 선언되지 않은 필드는 로드 거부.
-- `id` 패턴 `^[a-zA-Z][a-zA-Z0-9._-]*$`, 길이 3–128.
+  (런타임 호스트는 스펙대로 미지 최상위 필드를 **경고 후 무시**하지만, CI 검증은
+  이 스키마를 그대로 써서 오타를 잡는다.)
+- `name` 패턴 `^(?!.*--)[a-z][a-z0-9-]*[a-z0-9]$`, 길이 3–64. 스펙은 점을 허용하지만
+  LVIS 는 kebab-case 만 받는다.
 - `tools[].name` 패턴 `^[a-zA-Z_][a-zA-Z0-9_]*$`, 길이 ≤64.
 - `version` 은 anchored semver (prerelease/build 메타데이터 포함 가능).
 - `ui[]` 는 `kind` 에 따라 필수 필드가 달라짐 (embedded-module → `entry`+`exportName`, embedded-page → `page`, info-card → 최소 필드).
@@ -126,23 +147,139 @@ interface Tool {
 
 ```json
 {
-  "id": "meeting",
-  "name": "LVIS Meeting",
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "meeting",
   "version": "1.0.0",
-  "installPolicy": "admin",
-  "publisher": "example-publisher",
-  "startupTimeoutMs": 5000,
-  "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
   "description": "회의 녹음·전사·요약 및 액션 아이템 추출",
-  "tools": [
-    { "name": "meeting_start", "description": "회의 녹음 세션을 시작한다. sessionId 를 전달한다.", "inputSchema": { "type": "object", "properties": { "sessionId": { "type": "string" } }, "required": ["sessionId"] }, "_meta": { "ui": { "visibility": ["model", "app"] } } },
-    { "name": "meeting_push_chunk", "description": "PCM16 오디오 청크를 세션에 추가한다 (패널 전용).", "inputSchema": { "type": "object", "properties": { "sessionId": { "type": "string" }, "chunk": { "type": "array" } }, "required": ["sessionId", "chunk"] }, "_meta": { "ui": { "visibility": ["app"] } } },
-    { "name": "meeting_stop", "description": "녹음 세션을 종료하고 요약을 생성한다.", "inputSchema": { "type": "object", "properties": { "sessionId": { "type": "string" } }, "required": ["sessionId"] }, "_meta": { "ui": { "visibility": ["model", "app"] } } },
-    { "name": "meeting_transcript", "description": "세션의 전사 결과를 반환한다.", "inputSchema": { "type": "object", "properties": { "sessionId": { "type": "string" } }, "required": ["sessionId"] }, "_meta": { "ui": { "visibility": ["model", "app"] } } },
-    { "name": "meeting_sessions", "description": "저장된 회의 세션 목록을 반환한다.", "inputSchema": { "type": "object", "properties": {} }, "_meta": { "ui": { "visibility": ["model", "app"] } } }
-  ],
-  "capabilities": ["meeting-recorder"],
-  "eventSubscriptions": ["meeting.summary.created", "meeting.ended"]
+  "extensions": {
+    "xyz.lvisai": {
+      "displayName": "LVIS Meeting",
+      "installPolicy": "admin",
+      "publisher": "example-publisher",
+      "startupTimeoutMs": 5000,
+      "entry": "../../../node_modules/@lvis/plugin-meeting/dist/hostPlugin.js",
+      "tools": [
+        {
+          "name": "meeting_start",
+          "description": "회의 녹음 세션을 시작한다. sessionId 를 전달한다.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sessionId"
+            ]
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "model",
+                "app"
+              ]
+            }
+          }
+        },
+        {
+          "name": "meeting_push_chunk",
+          "description": "PCM16 오디오 청크를 세션에 추가한다 (패널 전용).",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              },
+              "chunk": {
+                "type": "array"
+              }
+            },
+            "required": [
+              "sessionId",
+              "chunk"
+            ]
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "app"
+              ]
+            }
+          }
+        },
+        {
+          "name": "meeting_stop",
+          "description": "녹음 세션을 종료하고 요약을 생성한다.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sessionId"
+            ]
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "model",
+                "app"
+              ]
+            }
+          }
+        },
+        {
+          "name": "meeting_transcript",
+          "description": "세션의 전사 결과를 반환한다.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "sessionId"
+            ]
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "model",
+                "app"
+              ]
+            }
+          }
+        },
+        {
+          "name": "meeting_sessions",
+          "description": "저장된 회의 세션 목록을 반환한다.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "model",
+                "app"
+              ]
+            }
+          }
+        }
+      ],
+      "capabilities": [
+        "meeting-recorder"
+      ],
+      "eventSubscriptions": [
+        "meeting.summary.created",
+        "meeting.ended"
+      ]
+    }
+  }
 }
 ```
 

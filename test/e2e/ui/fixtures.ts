@@ -19,6 +19,7 @@ import {
 } from "./seeded-electron";
 import { canonicalJSON } from "../../../src/plugins/whitelist/canonical-json.js";
 import { makeTestT, type TestT } from "./i18n.js";
+import { agentPluginsDocument } from "../../../src/plugins/__tests__/test-helpers.js";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -298,7 +299,7 @@ async function seedE2ePlugins(
     },
     hostPluginSource: string,
   ): Promise<void> {
-    const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+    const manifestText = `${JSON.stringify(agentPluginsDocument(manifest), null, 2)}\n`;
     const pluginDir = path.join(pluginsRoot, manifest.id);
     fs.rmSync(pluginDir, { recursive: true, force: true });
     fs.mkdirSync(path.join(pluginDir, "dist"), {
@@ -393,7 +394,7 @@ async function seedE2ePlugins(
       ) {
         throw new Error(`[e2e] invalid plugin manifest: ${sourceManifest}`);
       }
-      const manifestText = `${JSON.stringify(manifest, null, 2)}\n`;
+      const manifestText = `${JSON.stringify(agentPluginsDocument(manifest), null, 2)}\n`;
       const pluginDir = path.join(pluginsRoot, manifest.id);
       fs.rmSync(pluginDir, { recursive: true, force: true });
       fs.mkdirSync(pluginDir, { recursive: true, mode: 0o700 });

@@ -23,6 +23,7 @@ import {
 import type { PluginManifest } from "../../types.js";
 import { MCP_APP_PERMISSION_FEATURES } from "../../../shared/mcp-app-permissions.js";
 import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 const CRLF_GUARD_PATTERN = "[\\r\\n]";
 
@@ -56,7 +57,7 @@ function patternNodesMissingCrlfGuard(value: unknown, path = "$"): string[] {
 
 function manifestWithFirstTask(firstTask: Record<string, unknown>,
 ): Record<string, unknown> {
-  return {
+  return agentPluginsDocument({
     id: "sample-onboarding-plugin",
     name: "Sample Onboarding Plugin",
     version: "1.0.0",
@@ -65,7 +66,7 @@ function manifestWithFirstTask(firstTask: Record<string, unknown>,
     entry: "dist/index.js",
     tools: [],
     onboarding: { firstTask },
-  };
+  });
 }
 
 const validFirstTask = {
@@ -97,16 +98,16 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       entry: "dist/index.js",
       tools: [],
     };
-    expect(validator({ ...base, id: "line-safe-plugin\n" })).toBe(false);
-    expect(validator({
+    expect(validator(agentPluginsDocument({ ...base, id: "line-safe-plugin\n" }))).toBe(false);
+    expect(validator(agentPluginsDocument({
       ...base,
       requires: { minAppVersion: "1.0.0\r" },
-    })).toBe(false);
+    }))).toBe(false);
   });
 
   it("accepts structured plugin-owned Skill, Hook, and MCP declarations", async () => {
     const validator = await buildManifestValidator();
-    expect(validator({
+    expect(validator(agentPluginsDocument({
       id: "atomic-bundle-plugin",
       version: "1.0.0",
       description: "Atomic contribution bundle fixture.",
@@ -115,20 +116,20 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       skills: [{ id: "attendance", path: "skills/attendance" }],
       hooks: [{ id: "audit", path: "hooks/audit.json" }],
       mcpServers: [{ id: "ep", path: "mcp/ep.json" }],
-    }),
+    })),
     ).toBe(true);
   });
 
   it("rejects malformed contribution declarations and unknown fields", async () => {
     const validator = await buildManifestValidator();
-    expect(validator({
+    expect(validator(agentPluginsDocument({
       id: "atomic-bundle-plugin",
       version: "1.0.0",
       description: "Atomic contribution bundle fixture.",
       entry: "dist/index.js",
       tools: [],
       skills: [{ id: "invalid-id", path: "skills/attendance", trust: true }],
-    }),
+    })),
     ).toBe(false);
     expect(validator.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({ keyword: "additionalProperties" }),
@@ -155,7 +156,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       "operationGovernance",
       "appAllowed",
     ]) {
-      expect(validator({ ...base, [field]: {} }), field).toBe(false);
+      expect(validator(agentPluginsDocument({ ...base, [field]: {} })), field).toBe(false);
       expect(validator.errors).toEqual(expect.arrayContaining([
         expect.objectContaining({
           keyword: "additionalProperties",
@@ -165,7 +166,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
       );
     }
 
-    expect(validator({
+    expect(validator(agentPluginsDocument({
       ...base,
       tools: [{
         name: "legacy_governed",
@@ -185,7 +186,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         },
       },
         ],
-    }),
+    })),
     ).toBe(false);
     expect(validator.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({
@@ -201,7 +202,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("accepts a pure MCP Tool[] object carrying _meta.ui.visibility", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "pure-tool-plugin",
         name: "Pure Tool Plugin",
         version: "1.0.0",
@@ -216,7 +217,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
             _meta: { ui: { visibility: ["model"] } },
           },
         ],
-      }),
+      })),
     ).toBe(true);
   });
 
@@ -279,7 +280,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     // the schema half of the Doctor safety net: rejection → `manifest_schema`
     // → `manifest-validation-error` → auto-reinstall of the migrated version.
     const validator = await buildManifestValidator();
-    const result = validator({
+    const result = validator(agentPluginsDocument({
       id: "legacy-meta-plugin",
       name: "Legacy Meta Plugin",
       version: "1.0.0",
@@ -300,7 +301,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
           },
         },
       ],
-    });
+    }));
     expect(result).toBe(false);
     // The rejection specifically names the legacy key as the disallowed
     // additional property (not some unrelated failure).
@@ -318,7 +319,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
 
   it("REJECTS retired pluginAccess.plugins[].tools grants (fail-closed)", async () => {
     const validator = await buildManifestValidator();
-    const result = validator({
+    const result = validator(agentPluginsDocument({
       id: "retired-plugin-access-tool-grant",
       name: "Retired Plugin Access Tool Grant",
       version: "1.0.0",
@@ -335,7 +336,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
           },
         ],
       },
-    });
+    }));
 
     expect(result).toBe(false);
     expect(validator.errors).toEqual(
@@ -351,7 +352,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("accepts networkAccess.allowPrivateNetworks", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "private-network-plugin",
         name: "Private Network Plugin",
         version: "1.0.0",
@@ -364,14 +365,14 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
           allowPrivateNetworks: true,
           reasoning: "Host-mediated intranet access.",
         },
-      }),
+      })),
     ).toBe(true);
   });
 
   it("accepts the loopback literals in networkAccess.allowedDomains", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "local-endpoint-plugin",
         name: "Local Endpoint Plugin",
         version: "1.0.0",
@@ -383,7 +384,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
           allowedDomains: ["localhost", "127.0.0.1", "::1", "api.example.com"],
           reasoning: "A local inference server the user configures.",
         },
-      }),
+      })),
     ).toBe(true);
   });
 
@@ -393,7 +394,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     // relaxation of the one-dot rule that stops a bare label blanket-matching.
     for (const host of ["intranet", "localhost.", "::2", "127.0.0.1:1234"]) {
       expect(
-        validator({
+        validator(agentPluginsDocument({
           id: "local-endpoint-plugin",
           name: "Local Endpoint Plugin",
           version: "1.0.0",
@@ -402,7 +403,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
           entry: "dist/index.js",
           tools: [],
           networkAccess: { allowedDomains: [host] },
-        }),
+        })),
       ).toBe(false);
     }
   });
@@ -414,7 +415,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("accepts a uiResources[] ui:// serving declaration (csp buckets)", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "ui-resource-plugin",
         name: "UI Resource Plugin",
         version: "1.0.0",
@@ -431,7 +432,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
             },
           },
         ],
-      }),
+      })),
     ).toBe(true);
   });
 
@@ -442,7 +443,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     // set is exactly what an e2e proved works (mcp-app-permissions.spec.ts).
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "ui-resource-plugin",
         name: "UI Resource Plugin",
         version: "1.0.0",
@@ -456,7 +457,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
             permissions: { camera: {}, microphone: {}, geolocation: {} },
           },
         ],
-      }),
+      })),
     ).toBe(true);
   });
 
@@ -467,7 +468,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
     // any unknown feature — fail validation loudly rather than silently doing nothing.
     const validator = await buildManifestValidator();
     const withPermission = (permissions: Record<string, unknown>) =>
-      validator({
+      validator(agentPluginsDocument({
         id: "ui-resource-plugin",
         name: "UI Resource Plugin",
         version: "1.0.0",
@@ -478,7 +479,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         uiResources: [
           { uri: "ui://ui-resource-plugin/card.html", permissions },
         ],
-      });
+      }));
     expect(withPermission({ clipboardWrite: {} })).toBe(false);
     expect(withPermission({ notARealFeature: {} })).toBe(false);
   });
@@ -505,7 +506,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("accepts a uiResources[] entry declaring only its uri (policy is optional)", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "ui-resource-bare",
         name: "UI Resource Bare",
         version: "1.0.0",
@@ -514,14 +515,14 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         entry: "dist/index.js",
         tools: [],
         uiResources: [{ uri: "ui://ui-resource-bare/card.html" }],
-      }),
+      })),
     ).toBe(true);
   });
 
   it("rejects a uiResources[] entry with an unknown sub-property (additionalProperties:false)", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "ui-resource-bad",
         name: "UI Resource Bad",
         version: "1.0.0",
@@ -535,7 +536,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
             cspHeader: "default-src 'none'",
           },
         ],
-      }),
+      })),
     ).toBe(false);
   });
 
@@ -545,7 +546,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("rejects a uiResources[] entry still declaring the removed html path", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "ui-resource-legacy",
         name: "UI Resource Legacy",
         version: "1.0.0",
@@ -559,14 +560,14 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
             html: "dist/cards/card.html",
           },
         ],
-      }),
+      })),
     ).toBe(false);
   });
 
   it("accepts a marketplace-provider host secret grant", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "marketplace-provider-secret",
         name: "Marketplace Provider Secret Plugin",
         version: "1.0.0",
@@ -575,7 +576,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         entry: "dist/index.js",
         tools: [],
         hostSecrets: { read: ["llm.marketplaceProvider.future-router.apiKey"] },
-      }),
+      })),
     ).toBe(true);
   });
 
@@ -583,7 +584,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
   it("rejects a pure tool carrying a removed field (writesToOwnSandbox)", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "removed-field-plugin",
         name: "Removed Field Plugin",
         version: "1.0.0",
@@ -599,14 +600,14 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
             _meta: { ui: { visibility: ["model"] } },
           },
         ],
-      }),
+      })),
     ).toBe(false);
   });
 
   it("rejects an empty _meta.ui.visibility: [] (minItems:1)", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "empty-visibility-plugin",
         name: "Empty Visibility Plugin",
         version: "1.0.0",
@@ -621,14 +622,14 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
             _meta: { ui: { visibility: [] } },
           },
         ],
-      }),
+      })),
     ).toBe(false);
   });
 
   it('rejects a ui[] extension declaring the removed kind:"action"', async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "ui-action-kind-plugin",
         name: "UI Action Kind Plugin",
         version: "1.0.0",
@@ -639,14 +640,14 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
         ui: [
           { id: "a", slot: "sidebar", kind: "action", title: "x", tool: "t" },
         ],
-      }),
+      })),
     ).toBe(false);
   });
 
   it("rejects retired ui[] detached-window hints", async () => {
     const validator = await buildManifestValidator();
     expect(
-      validator({
+      validator(agentPluginsDocument({
         id: "ui-window-hints-plugin",
         name: "UI Window Hints Plugin",
         version: "1.0.0",
@@ -664,7 +665,7 @@ describe("buildManifestValidator — host-owned schema SOT (ph2)", () => {
             window: { width: 640 },
           },
         ],
-      }),
+      })),
     ).toBe(false);
     expect(validator.errors).toEqual(
       expect.arrayContaining([
@@ -731,7 +732,7 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       "A representative manifest exercising every host-required field.",
     publisher: "LVIS",
     packageName: "@lvis/full-featured-plugin",
-    author: "LVIS Team",
+    author: { name: "LVIS Team" },
     uiSlots: ["sidebar"],
     entry: "dist/index.js",
     tools: [
@@ -809,11 +810,14 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       interpreter: "python3",
     },
     startupTimeoutMs: 8000,
-  } satisfies PluginManifest;
+    // `author` is portable Agent Plugins metadata, so it rides at the document
+    // level and is deliberately absent from PluginManifest — which is the point
+    // of the `"author" in parsed` assertion below.
+  } satisfies PluginManifest & { author: { name: string } };
 
   it("validates against the compiled host schema", async () => {
     const validator = await buildManifestValidator();
-    const ok = validator(fullFeatured);
+    const ok = validator(agentPluginsDocument(fullFeatured));
     if (!ok) {
       // eslint-disable-next-line no-console
       console.error("AJV errors:", validator.errors);
@@ -828,14 +832,19 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
     );
     try {
       const file = join(dir, "plugin.json");
-      await writeFile(file, JSON.stringify(fullFeatured), "utf-8");
+      await writeFile(file, JSON.stringify(agentPluginsDocument(fullFeatured)), "utf-8");
       const parsed = await parsePluginJson(file, validator);
 
       expect(parsed.id).toBe("full-featured-plugin");
       expect(parsed.auth?.statusTool).toBe("ff_status");
       expect(parsed.auth?.logoutTool).toBe("ff_logout");
       expect(parsed.packageName).toBe("@lvis/full-featured-plugin");
-      expect(parsed.author).toBe("LVIS Team");
+      // Portable Agent Plugins metadata is accepted by the schema (the fixture
+      // carries `author`) and deliberately does NOT cross into the manifest the
+      // host reads: it is catalog-facing, and `public-contract.ts` keeps catalog
+      // concepts out of the plugin contract. Asserted rather than assumed, so a
+      // future flattener change that starts leaking it is caught here.
+      expect("author" in parsed).toBe(false);
       expect(parsed.uiSlots).toEqual(["sidebar"]);
       expect(parsed.python).toEqual({
         managedBy: "lvis-app",
@@ -870,7 +879,7 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       const file = join(dir, "plugin.json");
       await writeFile(
         file,
-        JSON.stringify({
+        JSON.stringify(agentPluginsDocument({
           id: "default-visibility-plugin",
           name: "Default Visibility Plugin",
           version: "1.0.0",
@@ -887,9 +896,8 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
               inputSchema: { type: "object", properties: {} },
             },
           ],
-        }),
-        "utf-8",
-      );
+        })),
+        "utf-8");
 
       const parsed = await parsePluginJson(file, validator);
       const first = parsed.tools[0]?._meta?.ui?.visibility;
@@ -978,7 +986,7 @@ describe("colocated operation policy cross-field contract", () => {
     );
     try {
       const file = join(dir, "plugin.json");
-      await writeFile(file, JSON.stringify(value), "utf-8");
+      await writeFile(file, JSON.stringify(agentPluginsDocument(value as Record<string, unknown>)), "utf-8");
       return await parsePluginJson(file, await buildManifestValidator());
     } finally {
       await rm(dir, { recursive: true, force: true });

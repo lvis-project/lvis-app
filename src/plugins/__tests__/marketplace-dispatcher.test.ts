@@ -34,12 +34,14 @@ import {
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
+import { flattenAgentPluginsManifest } from "../public-contract.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 function makePluginZip(manifest: Record<string, unknown>, files: Record<string, string> = {}): Buffer {
   const zip = new AdmZip();
-  zip.addFile("plugin.json", Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf-8"));
+  zip.addFile("plugin.json", Buffer.from(`${JSON.stringify(agentPluginsDocument(manifest), null, 2)}\n`, "utf-8"));
   zip.addFile(
     "dist/hostPlugin.js",
     Buffer.from("export default async function createPlugin() { return { handlers: {} }; }\n", "utf-8"),
@@ -326,11 +328,12 @@ describe("PluginMarketplaceService install()", () => {
     expect(entryPath).toBe("test-plugin/plugin.json");
     expect(entryPath).not.toMatch(/^[/\\]|^[A-Za-z]:/);
     expect(entryPath).not.toContain("\\");
-    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(pluginManifest));
+    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(agentPluginsDocument(pluginManifest)));
 
-    const manifest = JSON.parse(
-      await readFile(manifestPathToAbs(entryPath), "utf-8"),
-    ) as { version: string; entry: string };
+    // Project through the production flattener rather than reading the document
+    // directly: the assertion is about what the host will resolve `entry` to,
+    // not about where the byte sits in the file.
+    const manifest = flattenAgentPluginsManifest(JSON.parse(await readFile(manifestPathToAbs(entryPath), "utf-8"))) as unknown as { version: string; entry: string };
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
   });
@@ -508,7 +511,7 @@ describe("PluginMarketplaceService install()", () => {
       expect(registry.plugins[0]).toMatchObject({
         id: current.id,
         manifestPath: `${current.id}/plugin.json`,
-        manifestSha256: manifestSha({ ...current, entry: "./dist/hostPlugin.js" }),
+        manifestSha256: manifestSha(agentPluginsDocument({ ...current, entry: "./dist/hostPlugin.js" })),
       });
       expect(registry.plugins[0]?.pendingUpdate).toBeUndefined();
       expect(registry.plugins[0]?.pendingCleanup).toBeUndefined();
@@ -525,9 +528,11 @@ describe("PluginMarketplaceService install()", () => {
       expect(JSON.parse(await readFile(join(installedDir, current.id, "plugin.json"), "utf-8")))
         .toMatchObject({ version: current.version });
 
-      const persistedManifest = JSON.parse(
-        await readFile(join(installedDir, current.id, "plugin.json"), "utf-8"),
-      );
+      // `activatePreparedArtifact` takes the flat manifest its caller already
+      // projected, and re-reads the file itself to check identity — so a fixture
+      // handing it the raw document would fail that check on `id`.
+      const persistedManifestPath = join(installedDir, current.id, "plugin.json");
+      const persistedManifest = flattenAgentPluginsManifest(JSON.parse(await readFile(persistedManifestPath, "utf-8")));
       const persistedReceipt = await readFile(
         join(cacheRoot, current.id, "install-receipt.json"),
         "utf-8",
@@ -809,14 +814,14 @@ describe("PluginMarketplaceService install()", () => {
     };
     for (const id of ["bundle-root", member.id]) {
       await mkdir(join(installedDir, id), { recursive: true });
-      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify({
+      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify(agentPluginsDocument({
         id,
         name: id,
         description: id,
         version: "1.0.0",
         entry: "./dist/hostPlugin.js",
         tools: [],
-      }));
+      })));
     }
     await writeFile(registryPath, JSON.stringify({
       version: 1,
@@ -899,7 +904,7 @@ describe("PluginMarketplaceService install()", () => {
   it("rejects a cross-wired registry row before it can remove another plugin directory", async () => {
     for (const id of ["owner-a", "owner-b"]) {
       await mkdir(join(installedDir, id), { recursive: true });
-      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify({ id }));
+      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify(agentPluginsDocument({ id })));
     }
     await writeFile(registryPath, JSON.stringify({
       version: 1,
@@ -1040,13 +1045,13 @@ describe("PluginMarketplaceService install()", () => {
     for (const pluginId of ["work-assistant", "email"]) {
       const pluginDir = join(installedDir, pluginId);
       await mkdir(join(pluginDir, "dist"), { recursive: true });
-      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify({
+      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(agentPluginsDocument({
         id: pluginId,
         name: pluginId,
         version: "1.0.0",
         entry: "./dist/hostPlugin.js",
         tools: [],
-      }), "utf-8");
+      })), "utf-8");
       await writeFile(join(pluginDir, "dist", "hostPlugin.js"), "export default {};\n", "utf-8");
     }
     await writeFile(registryPath, JSON.stringify({
@@ -1190,7 +1195,7 @@ describe("PluginMarketplaceService install()", () => {
       expect.objectContaining({ id: plugin.id, installSource: "admin" }),
     ]);
     expect(JSON.parse(await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8")))
-      .toMatchObject({ id: plugin.id, version: "2.0.0" });
+      .toMatchObject({ name: plugin.id, version: "2.0.0" });
   }, 20_000);
 
   it("rechecks installed version under lock so an older managed retry cannot downgrade a newer install", async () => {
@@ -1899,7 +1904,7 @@ describe("PluginMarketplaceService install()", () => {
       plugins: Array<{ manifestSha256?: string }>;
     };
     expect(receipt.artifactSha256).toBe(plugin.artifactSha256);
-    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(v2Manifest));
+    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(agentPluginsDocument(v2Manifest)));
     expect(downloadArtifact).toHaveBeenCalledTimes(2);
     expect(fetchSignatureEnvelope).toHaveBeenCalledTimes(2);
   });
@@ -2137,25 +2142,25 @@ describe("PluginMarketplaceService install()", () => {
       tools: [],
     };
     const v1 = new AdmZip();
-    v1.addFile("plugin.json", Buffer.from(JSON.stringify({
+    v1.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({
       id: plugin.id,
       name: plugin.name,
       version: "1.0.0",
       entry: "./dist/hostPlugin.js",
       tools: [],
-    }), "utf-8"));
+    })), "utf-8"));
     v1.addFile("dist/hostPlugin.js", Buffer.from("export default {};\n", "utf-8"));
     v1.addFile("dist/stale.txt", Buffer.from("stale\n", "utf-8"));
     const v1Buffer = v1.toBuffer();
 
     const v2 = new AdmZip();
-    v2.addFile("plugin.json", Buffer.from(JSON.stringify({
+    v2.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({
       id: plugin.id,
       name: plugin.name,
       version: "1.1.0",
       entry: "./dist/hostPlugin.js",
       tools: [],
-    }), "utf-8"));
+    })), "utf-8"));
     v2.addFile("dist/hostPlugin.js", Buffer.from("export default { upgraded: true };\n", "utf-8"));
     const v2Buffer = v2.toBuffer();
 

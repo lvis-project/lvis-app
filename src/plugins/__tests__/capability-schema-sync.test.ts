@@ -12,6 +12,7 @@ import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { KNOWN_CAPABILITIES } from "../capabilities.js";
+import { lvisSchemaProperties } from "./test-helpers.js";
 
 async function loadCapabilitiesItemsSchema(): Promise<{
   enum?: string[];
@@ -22,12 +23,11 @@ async function loadCapabilitiesItemsSchema(): Promise<{
   const schemaPath = fileURLToPath(
     new URL("../../../schemas/plugin-manifest.schema.json", import.meta.url),
   );
-  const schema = JSON.parse(await readFile(schemaPath, "utf-8")) as {
-    properties: {
-      capabilities: { items: { enum?: string[]; pattern?: string; type?: string } };
-    };
+  const schema: unknown = JSON.parse(await readFile(schemaPath, "utf-8"));
+  const capabilities = lvisSchemaProperties(schema).capabilities as {
+    items: { enum?: string[]; pattern?: string; type?: string };
   };
-  return schema.properties.capabilities.items;
+  return capabilities.items;
 }
 
 describe("capability schema contract (free-form, not a closed enum)", () => {

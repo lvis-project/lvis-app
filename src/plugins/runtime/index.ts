@@ -19,6 +19,7 @@
 import type { PluginAccessSpec, PluginManifest, PluginHostApi, PluginRegistryEntry, PluginToolHandler, RuntimePlugin, RuntimePluginFactory, InstallPolicy, PluginAuthSpec, PluginConfigSchema, PluginOnboardingSpec, PluginUiExtension } from "../types.js";
 import { classifySubscription } from "../capabilities.js";
 import { normalizeInstallPolicy, parsePluginJson, buildManifestValidator, getDeclaredEmittedEvents } from "./manifest-validation.js";
+import { flattenAgentPluginsManifest } from "../public-contract.js";
 import { isModelVisible } from "./tool-visibility.js";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, isAbsolute, resolve, basename } from "node:path";
@@ -2452,17 +2453,24 @@ abstract class PluginRuntimeState {
     }
   }
 
+  /**
+   * `manifestDocument` is the `plugin.json` as authored, not the flat
+   * projection: the registry's `manifestSha256` pins the FILE, and every other
+   * producer of that value hashes the document. Re-deriving it from the
+   * projection here would make the pin disagree with itself.
+   */
   protected validatePreparedRegistryEntry(
     manifest: PluginManifest,
     registryEntry: Readonly<
       Pick<PluginRegistryEntry, "installSource" | "manifestSha256">
     > | undefined,
+    manifestDocument: unknown,
   ): Readonly<Pick<PluginRegistryEntry, "installSource" | "manifestSha256">> {
     if (!registryEntry) {
       throw new Error(`prepared artifact registry provenance missing for '${manifest.id}'`);
     }
     const candidateManifestSha256 = createHash("sha256")
-      .update(canonicalJSON(manifest))
+      .update(canonicalJSON(manifestDocument))
       .digest("hex");
     if (
       registryEntry.manifestSha256 !== undefined
@@ -4625,8 +4633,10 @@ abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePublication
   ): Promise<CommittedPluginGeneration<T>> {
     const generationLifecycle = this.requireCapabilityCommitLifecycle("prepared artifact activation");
     if (!this.installReceiptCacheRoot) throw new Error("prepared artifact activation requires installReceiptCacheRoot");
-    const manifestRaw = await readFile(resolve(input.pluginRoot, "plugin.json"), "utf8");
-    const manifest = JSON.parse(manifestRaw) as PluginManifest;
+    const manifestPath = resolve(input.pluginRoot, "plugin.json");
+    const manifestRaw = await readFile(manifestPath, "utf8");
+    const manifestDocument: unknown = JSON.parse(manifestRaw);
+    const manifest = flattenAgentPluginsManifest(manifestDocument);
     if (manifest.id !== input.manifest.id || manifest.version !== input.manifest.version) {
       throw new Error(`prepared artifact manifest identity changed for '${input.manifest.id}'`);
     }
@@ -4637,7 +4647,11 @@ abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePublication
       "prepared artifact activation",
     );
     return this.withPreparedInstallIdentity(manifest.id, input.installId, async (installId) => {
-    const candidateRegistryEntry = this.validatePreparedRegistryEntry(manifest, input.registryEntry);
+    const candidateRegistryEntry = this.validatePreparedRegistryEntry(
+      manifest,
+      input.registryEntry,
+      manifestDocument,
+    );
     // Marketplace activation builds and starts the candidate directly from the
     // verified staging tree, so it does not pass through restartPlugin's
     // dependency-preparation gate. Prepare declared host-managed runtimes here

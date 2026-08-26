@@ -28,6 +28,105 @@ export const HOST_BROWSER_EXTERNAL_MODULES = ["react", "react-dom"] as const;
  */
 export const BUNDLE_EVERYTHING_REGEX = new RegExp(".*");
 
+/**
+ * Agent Plugins 1.0.0 manifest schema identifier (agent-plugins.org). A
+ * `plugin.json` MUST carry this exact string in `$schema`; the schema pins it
+ * as a `const`, so it doubles as the manifest-format marker.
+ */
+export const AGENT_PLUGINS_SCHEMA_URL =
+  "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+
+/**
+ * The reverse-domain namespace LVIS owns inside the portable `extensions`
+ * object (domain `lvisai.xyz`). Agent Plugins assigns no semantics to a
+ * namespace's contents, so everything the host needs in order to load, sandbox
+ * and govern a plugin lives under this one key.
+ */
+export const LVIS_EXTENSION_NAMESPACE = "xyz.lvisai";
+
+/**
+ * The top level Agent Plugins 1.0.0 defines. Anything else up there belongs to
+ * no one, and the specification is explicit that a client reports and ignores
+ * it rather than refusing the plugin.
+ */
+export const AGENT_PLUGINS_TOP_LEVEL_FIELDS: readonly string[] = [
+  "$schema",
+  "name",
+  "version",
+  "description",
+  "author",
+  "homepage",
+  "repository",
+  "license",
+  "keywords",
+  "extensions",
+];
+
+/**
+ * Top-level fields of a manifest document that Agent Plugins 1.0.0 does not
+ * define. Separated from {@link flattenAgentPluginsManifest} so the projection
+ * stays pure: the specification's "report and ignore" is two obligations, and
+ * only the reporting half needs somewhere to report to.
+ */
+export function foreignManifestTopLevelFields(document: unknown): string[] {
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    return [];
+  }
+  return Object.keys(document as Record<string, unknown>).filter(
+    (key) => !AGENT_PLUGINS_TOP_LEVEL_FIELDS.includes(key),
+  );
+}
+
+/**
+ * Convert an on-disk Agent Plugins 1.0.0 document into the flat
+ * {@link PluginManifest} every consumer reads.
+ *
+ * This is the one definition of where each field lives in the file. It is in
+ * the public contract, not beside the host's validator, because plugin repos
+ * read their own `plugin.json` too — in tests, in event validators, in install
+ * scripts. Seven repos each writing their own projection is seven chances for
+ * the copies to disagree about, say, whether identity is `name` or `id`.
+ *
+ * The portable `name` lands on `id` and `extensions["xyz.lvisai"]` is spread
+ * flat, with its `displayName` becoming the internal `name` — which is why
+ * consumers do not know the file on disk is nested.
+ *
+ * Pure and total: a document of the wrong shape is passed through, so a caller
+ * that validates gets an error naming the actual defect rather than one thrown
+ * from here first.
+ *
+ * Portable metadata (`author`, `homepage`, `repository`, `license`,
+ * `keywords`) is deliberately NOT projected. It is catalog-facing, and this
+ * contract keeps catalog concepts out of the plugin manifest. Only `version`
+ * and `description`, which the host itself acts on, cross over.
+ */
+export function flattenAgentPluginsManifest(document: unknown): PluginManifest {
+  if (!document || typeof document !== "object" || Array.isArray(document)) {
+    return document as PluginManifest;
+  }
+  const top = document as Record<string, unknown>;
+  const extensions = top.extensions;
+  const namespaced =
+    extensions && typeof extensions === "object" && !Array.isArray(extensions)
+      ? (extensions as Record<string, unknown>)[LVIS_EXTENSION_NAMESPACE]
+      : undefined;
+  const lvis =
+    namespaced && typeof namespaced === "object" && !Array.isArray(namespaced)
+      ? (namespaced as Record<string, unknown>)
+      : {};
+  const { displayName, ...hostFields } = lvis;
+  const flat: Record<string, unknown> = {
+    ...hostFields,
+    id: top.name,
+    version: top.version,
+    description: top.description,
+  };
+  if (displayName !== undefined) flat.name = displayName;
+  // Pre-validation: the assertion states the shape the caller is about to
+  // prove, not one already proven.
+  return flat as unknown as PluginManifest;
+}
+
 /** One signed first-party `ui://` resource declaration. */
 export interface PluginUiResourceDecl {
   uri: string;
@@ -518,8 +617,6 @@ export interface PluginManifest {
     /** Allowlisted secret keys this plugin can read via `hostApi.getSecret`. */
     read?: string[];
   };
-  /** Individual maintainer name or contact, distinct from the publishing organization. */
-  author?: string;
   /** Marketplace-only advertisement of UI slot names; bindings remain in `ui[].slot`. */
   uiSlots?: string[];
 }
