@@ -728,6 +728,10 @@ export class PluginBundleLifecycle implements PluginBundleLifecycleHandler {
       }
       if (dispatchReady) {
         try {
+          // Only host-owned generation-fence faults reach this catch. A plugin
+          // whose own onPublished() failed is published, dispatchable, and
+          // recorded as degraded by the runtime — it does not arrive here, so
+          // the health journal's "internal post-commit fault" stays truthful.
           await this.coordinator.runPostCommitWithGeneration(
             pluginId,
             candidate.generationId,

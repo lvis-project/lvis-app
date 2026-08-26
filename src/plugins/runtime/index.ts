@@ -3284,11 +3284,28 @@ abstract class PluginRuntimePublicationState extends PluginRuntimeState {
     });
   }
 
+  /**
+   * Two different owners can fail here, and they do not deserve the same answer.
+   *
+   * `hostEffects.postPublish()` is the host's own generation fence. If it fails
+   * the host can no longer say which generation owns which effect, so throwing
+   * — which keeps dispatch closed — is the only safe answer.
+   *
+   * `instance.onPublished()` is the plugin's startup, and by the time it runs
+   * the instance is constructed and its handlers are already in the method map.
+   * A plugin whose startup failed is in the same state as one whose worker dies
+   * a second after a successful startup — except the later death leaves dispatch
+   * open and lets each call report the real reason, while the earlier one used
+   * to close dispatch for the whole session with no retry path, since readiness
+   * is only replaced when a new generation is committed. One condition, two
+   * opposite outcomes, decided by timing. So a startup failure is recorded as
+   * degraded and dispatch opens; the plugin answers per call.
+   */
   async postPublishRuntimeGeneration(runtime: PluginRuntimeGenerationProjection): Promise<void> {
-    const faults: Error[] = [];
+    const hostFaults: Error[] = [];
     for (const error of runtime.hostEffects?.postPublish() ?? []) {
       log.error(`generation post-publish signal failed for ${runtime.manifest.id}: %s`, error.message);
-      faults.push(error);
+      hostFaults.push(error);
     }
     try {
       await runtime.instance.onPublished?.();
@@ -3299,10 +3316,12 @@ abstract class PluginRuntimePublicationState extends PluginRuntimeState {
         version: runtime.manifest.version,
         error: error instanceof Error ? error.message.slice(0, 500) : String(error).slice(0, 500),
       });
-      faults.push(error instanceof Error ? error : new Error(String(error)));
     }
-    if (faults.length > 0) {
-      throw new AggregateError(faults, `plugin '${runtime.manifest.id}' runtime post-publish failed`);
+    if (hostFaults.length > 0) {
+      throw new AggregateError(
+        hostFaults,
+        `plugin '${runtime.manifest.id}' host generation effects failed to publish`,
+      );
     }
   }
 
