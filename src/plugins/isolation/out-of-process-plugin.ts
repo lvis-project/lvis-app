@@ -925,6 +925,15 @@ export async function spawnConfinedPluginChild(
     // whole `run/` subtree so the child that asked for the worker may CONNECT.
     // Both are needed and neither implies the other: the bind allow is granted
     // to the worker's profile, and a profile is generated per wrapped command.
+    //
+    // The Unix-socket allow list is SHARED, so every registered directory
+    // appears in every profile generated afterwards — plugin A's child carries
+    // an allow naming plugin B's `run/`. That widens nothing, and the reason is
+    // the same one that makes the `sockets/` registration above safe: the allow
+    // is necessary but not sufficient. Reaching B's socket also means reaching
+    // its PATH, and the filesystem jail is per-plugin — A's envelope names A's
+    // directories and no others. The fs jail is the boundary; this list only
+    // decides whether a Unix socket may be used at all.
     await registerWorkerUnixSocketDir(workerRunRoot);
     workerRunRootRegistered = true;
     const child = await spawnConfinedChild({
