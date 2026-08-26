@@ -456,3 +456,12 @@ module.exports = async function afterPack(context) {
     }
   }
 };
+
+// The footprint audit asserts the ABSENCE of exactly what this file prunes.
+// Stating that twice is how the two drifted: restoring ANGLE for macOS here
+// left the audit still demanding it be gone, and the release build failed on
+// a rule no longer in force. Export the lists so "pruned" and "must be
+// absent" cannot disagree.
+module.exports.LINUX_GPU_RUNTIME_FILES = LINUX_GPU_RUNTIME_FILES;
+module.exports.MAC_WEBGL_FALLBACK_FILES = MAC_WEBGL_FALLBACK_FILES;
+module.exports.WIN_WEBGL_FALLBACK_FILES = WIN_WEBGL_FALLBACK_FILES;
