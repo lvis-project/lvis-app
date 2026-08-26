@@ -48,18 +48,18 @@ describe("PluginMarketplaceService.installLocal", () => {
     await mkdir(join(sourceDir, "dist"), { recursive: true });
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify(agentPluginsDocument(
-        {
+      JSON.stringify(
+        agentPluginsDocument({
           id: "test-plugin",
           name: "Test Plugin",
           version: "1.2.3",
           description: "fixture",
           publisher: "tests",
           entry: "dist/hostPlugin.js",
-        },
+        }),
         null,
         2,
-      )),
+      ),
       "utf-8");
     await writeFile(
       join(sourceDir, "dist", "hostPlugin.js"),
@@ -524,8 +524,8 @@ describe("PluginMarketplaceService.installLocal", () => {
     };
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify(agentPluginsDocument(
-        {
+      JSON.stringify(
+        agentPluginsDocument({
           id: "test-plugin",
           name: "Test Plugin",
           version: "1.2.3",
@@ -533,10 +533,10 @@ describe("PluginMarketplaceService.installLocal", () => {
           publisher: "tests",
           entry: "dist/hostPlugin.js",
           pluginAccess: accessSpec,
-        },
+        }),
         null,
         2,
-      )),
+      ),
       "utf-8");
 
     const service = makeService();
@@ -579,8 +579,8 @@ describe("PluginMarketplaceService.installLocal", () => {
     );
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify(agentPluginsDocument(
-        {
+      JSON.stringify(
+        agentPluginsDocument({
           id: "test-plugin",
           name: "Test Plugin",
           version: "1.2.3",
@@ -588,10 +588,10 @@ describe("PluginMarketplaceService.installLocal", () => {
           publisher: "tests",
           entry: "dist/hostPlugin.js",
           pluginAccess: accessSpec,
-        },
+        }),
         null,
         2,
-      )),
+      ),
       "utf-8");
 
     const service = makeService();

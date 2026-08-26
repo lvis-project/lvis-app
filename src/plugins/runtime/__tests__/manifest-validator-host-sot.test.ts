@@ -810,7 +810,10 @@ describe("schema ↔ types ↔ parsePluginJson coherence (ph2)", () => {
       interpreter: "python3",
     },
     startupTimeoutMs: 8000,
-  } satisfies PluginManifest;
+    // `author` is portable Agent Plugins metadata, so it rides at the document
+    // level and is deliberately absent from PluginManifest — which is the point
+    // of the `"author" in parsed` assertion below.
+  } satisfies PluginManifest & { author: { name: string } };
 
   it("validates against the compiled host schema", async () => {
     const validator = await buildManifestValidator();
@@ -983,7 +986,7 @@ describe("colocated operation policy cross-field contract", () => {
     );
     try {
       const file = join(dir, "plugin.json");
-      await writeFile(file, JSON.stringify(agentPluginsDocument(value)), "utf-8");
+      await writeFile(file, JSON.stringify(agentPluginsDocument(value as Record<string, unknown>)), "utf-8");
       return await parsePluginJson(file, await buildManifestValidator());
     } finally {
       await rm(dir, { recursive: true, force: true });

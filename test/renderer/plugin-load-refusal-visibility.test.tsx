@@ -39,6 +39,7 @@ import {
 } from "../../src/plugins/plugin-install-receipt.js";
 import type { PluginCardSummary } from "../../src/ui/renderer/types.js";
 import { renderApp } from "./render-app.js";
+import { agentPluginsDocument } from "../../src/plugins/__tests__/test-helpers.js";
 
 const STRAY_REGISTRY_PLUGIN = "stray-registry-plugin";
 const SWITCHED_OFF_PLUGIN = "switched-off-plugin";
@@ -61,7 +62,7 @@ describe("installed plugins boot refuses to run", () => {
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id,
         name: `Plugin ${id}`,
         version: "1.0.0",
@@ -70,9 +71,8 @@ describe("installed plugins boot refuses to run", () => {
         entry: "entry.mjs",
         tools: [],
         ui: [{ id: `${id}-panel`, slot: "sidebar", kind: "info-card", title: `Panel ${id}` }],
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     const { receipt } = await buildInstallReceipt(pluginDir, {
       pluginId: id,
       version: "1.0.0",
@@ -100,7 +100,7 @@ describe("installed plugins boot refuses to run", () => {
     strayManifestPath = join(strayDir, "plugin.json");
     await writeFile(
       strayManifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: STRAY_REGISTRY_PLUGIN,
         name: "Stray Registry Plugin",
         version: "1.0.0",
@@ -108,9 +108,8 @@ describe("installed plugins boot refuses to run", () => {
         publisher: "Test",
         entry: "entry.mjs",
         tools: [],
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const switchedOffManifest = await writePlugin(SWITCHED_OFF_PLUGIN);
     const crashingManifest = await writePlugin(CRASHING_PLUGIN);

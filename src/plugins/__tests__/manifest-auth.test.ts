@@ -107,7 +107,7 @@ describe("manifest validation — auth cross-field", () => {
         )
       : [];
     await mkdir(testDir, { recursive: true });
-    await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(merged, null, 2)), "utf-8");
+    await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(merged), null, 2), "utf-8");
   }
 
   it("accepts a manifest whose auth Tools are app-only", async () => {

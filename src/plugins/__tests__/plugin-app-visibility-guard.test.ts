@@ -42,7 +42,7 @@ async function writeTempPlugin(opts: {
       ])),
     installPolicy: opts.installPolicy,
   };
-  writeFileSync(join(root, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest, null, 2)));
+  writeFileSync(join(root, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest), null, 2));
   return join(root, "plugin.json");
 }
 

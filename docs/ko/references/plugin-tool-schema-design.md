@@ -171,74 +171,147 @@ interface Tool {
 
 ```json
 {
-  "id": "meeting",
-  "name": "LVIS Meeting",
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "meeting",
   "version": "0.3.2",
   "description": "회의 녹음·음성 전사(STT)·요약 생성 플러그인.",
-  "entry": "dist/hostPlugin.js",
-  "capabilities": ["meeting-recorder"],
-  "tools": [
-    {
-      "name": "meeting_start",
-      "description": "회의 녹음 세션을 시작한다. 이후 meeting_push_chunk 로 오디오를 push 하고 meeting_stop 으로 종료한다.",
-      "inputSchema": {
-        "type": "object",
-        "required": ["sessionId"],
-        "properties": {
-          "sessionId": { "type": "string", "description": "세션 고유 식별자" },
-          "context": {
+  "extensions": {
+    "xyz.lvisai": {
+      "displayName": "LVIS Meeting",
+      "entry": "dist/hostPlugin.js",
+      "capabilities": [
+        "meeting-recorder"
+      ],
+      "tools": [
+        {
+          "name": "meeting_start",
+          "description": "회의 녹음 세션을 시작한다. 이후 meeting_push_chunk 로 오디오를 push 하고 meeting_stop 으로 종료한다.",
+          "inputSchema": {
             "type": "object",
+            "required": [
+              "sessionId"
+            ],
             "properties": {
-              "title": { "type": "string" },
-              "participants": { "type": "array", "items": { "type": "string" } }
+              "sessionId": {
+                "type": "string",
+                "description": "세션 고유 식별자"
+              },
+              "context": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "participants": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "model"
+              ]
+            }
+          }
+        },
+        {
+          "name": "meeting_push_chunk",
+          "description": "PCM16LE 오디오 청크를 세션에 추가. STT는 비동기 처리.",
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "sessionId",
+              "chunk"
+            ],
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              },
+              "chunk": {
+                "type": "object"
+              }
+            }
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "model"
+              ]
+            }
+          }
+        },
+        {
+          "name": "meeting_stop",
+          "description": "회의 녹음 세션을 종료하고 최종 전사 요약 생성을 요청한다.",
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "sessionId"
+            ],
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              }
+            }
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "model"
+              ]
+            }
+          }
+        },
+        {
+          "name": "meeting_transcript",
+          "description": "저장된 회의 세션의 전사 텍스트를 조회한다.",
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "sessionId"
+            ],
+            "properties": {
+              "sessionId": {
+                "type": "string"
+              }
+            }
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "model",
+                "app"
+              ]
+            }
+          }
+        },
+        {
+          "name": "meeting_sessions",
+          "description": "사용 가능한 회의 세션 목록을 조회한다.",
+          "inputSchema": {
+            "type": "object",
+            "properties": {}
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "model",
+                "app"
+              ]
             }
           }
         }
-      },
-      "_meta": { "ui": { "visibility": ["model"] } }
-    },
-    {
-      "name": "meeting_push_chunk",
-      "description": "PCM16LE 오디오 청크를 세션에 추가. STT는 비동기 처리.",
-      "inputSchema": {
-        "type": "object",
-        "required": ["sessionId", "chunk"],
-        "properties": {
-          "sessionId": { "type": "string" },
-          "chunk": { "type": "object" }
-        }
-      },
-      "_meta": { "ui": { "visibility": ["model"] } }
-    },
-    {
-      "name": "meeting_stop",
-      "description": "회의 녹음 세션을 종료하고 최종 전사 요약 생성을 요청한다.",
-      "inputSchema": {
-        "type": "object",
-        "required": ["sessionId"],
-        "properties": { "sessionId": { "type": "string" } }
-      },
-      "_meta": { "ui": { "visibility": ["model"] } }
-    },
-    {
-      "name": "meeting_transcript",
-      "description": "저장된 회의 세션의 전사 텍스트를 조회한다.",
-      "inputSchema": {
-        "type": "object",
-        "required": ["sessionId"],
-        "properties": { "sessionId": { "type": "string" } }
-      },
-      "_meta": { "ui": { "visibility": ["model", "app"] } }
-    },
-    {
-      "name": "meeting_sessions",
-      "description": "사용 가능한 회의 세션 목록을 조회한다.",
-      "inputSchema": { "type": "object", "properties": {} },
-      "_meta": { "ui": { "visibility": ["model", "app"] } }
+      ],
+      "installPolicy": "user",
+      "publisher": "example-publisher"
     }
-  ],
-  "installPolicy": "user",
-  "publisher": "example-publisher"
+  }
 }
 ```
 
@@ -427,7 +500,9 @@ OAuth-flow 를 소유한 플러그인이 자기 `persist:plugin-auth:<pluginId>`
 
 ```jsonc
 {
-  "id": "ms-graph",
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "ms-graph",
+  "extensions": { "xyz.lvisai": {
   "capabilities": ["external-auth-consumer"],
   "tools": [
     { "name": "msgraph_open_outlook_calendar", "description": "Outlook 캘린더 뷰어를 연다.", "inputSchema": { "type": "object", "properties": {} }, "_meta": { "ui": { "visibility": ["model", "app"] } },
@@ -452,6 +527,7 @@ OAuth-flow 를 소유한 플러그인이 자기 `persist:plugin-auth:<pluginId>`
       "office365.com",
     ],
   },
+  } }
 }
 ```
 
@@ -505,7 +581,7 @@ plugin.json
 **단계별 실제 에러 포맷:**
 
 ```
-[manifest:<unknown>] JSON parse error (Unexpected token ...). Example: {"id":"com.example.sample",...}
+[manifest:<unknown>] JSON parse error (Unexpected token ...). Example: {"$schema":"https://agent-plugins.org/schemas/1.0.0/plugin.schema.json","name":"sample",...}
 [manifest:meeting] schema validation failed (/path/to/plugin.json): /tools/0/name must match pattern "^[a-zA-Z_][a-zA-Z0-9_]*$"
 Invalid tool name 'meeting.start' in plugin 'meeting' at 'tools[0]' (/path/to/plugin.json): tool names must match ^[a-zA-Z_][a-zA-Z0-9_]*$ (start with letter/underscore, then letters/digits/underscores). Example: "tools": ["meeting_start"] (not "meeting.start")
 [plugin-runtime] managed plugin 'lvis-plugin-ms-graph' rejected — signature invalid
@@ -1022,26 +1098,41 @@ export const createPlugin: RuntimePluginFactory = async (context) => {
 
 ```json
 {
-  "id": "com.example.my-plugin",
-  "name": "내 플러그인",
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "my-plugin",
   "version": "1.0.0",
   "description": "입력을 대문자로 변환하는 샘플 플러그인.",
-  "entry": "dist/index.js",
-  "tools": [
-    {
-      "name": "my_action",
-      "description": "입력 문자열을 대문자로 변환한다.",
-      "inputSchema": {
-        "type": "object",
-        "required": ["input"],
-        "properties": {
-          "input": { "type": "string" }
+  "extensions": {
+    "xyz.lvisai": {
+      "displayName": "내 플러그인",
+      "entry": "dist/index.js",
+      "tools": [
+        {
+          "name": "my_action",
+          "description": "입력 문자열을 대문자로 변환한다.",
+          "inputSchema": {
+            "type": "object",
+            "required": [
+              "input"
+            ],
+            "properties": {
+              "input": {
+                "type": "string"
+              }
+            }
+          },
+          "_meta": {
+            "ui": {
+              "visibility": [
+                "model"
+              ]
+            }
+          }
         }
-      },
-      "_meta": { "ui": { "visibility": ["model"] } }
+      ],
+      "installPolicy": "user"
     }
-  ],
-  "installPolicy": "user"
+  }
 }
 ```
 

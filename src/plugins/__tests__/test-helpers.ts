@@ -384,9 +384,9 @@ const AGENT_PLUGINS_PORTABLE_FIELDS: ReadonlySet<string> = new Set([
  * `name`, which is how a test drives the "missing identity" path.
  */
 export function agentPluginsDocument(
-  manifest: Record<string, unknown>,
+  manifest: Readonly<Record<string, unknown>> | PluginManifest,
 ): Record<string, unknown> {
-  const { id, name, ...rest } = manifest;
+  const { id, name, ...rest } = manifest as Record<string, unknown>;
   const top: Record<string, unknown> = { $schema: AGENT_PLUGINS_SCHEMA_URL };
   if (id !== undefined) top.name = id;
   const lvis: Record<string, unknown> = {};
