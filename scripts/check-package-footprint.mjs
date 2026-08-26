@@ -12,7 +12,17 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, dirname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+// Read the prune lists from the afterPack that removes them, so this audit
+// cannot demand the absence of a file the packager now keeps — which is
+// exactly how the macOS ANGLE restore failed the release build.
+import { createRequire } from "node:module";
 import { gunzipSync } from "node:zlib";
+
+const {
+  LINUX_GPU_RUNTIME_FILES,
+  MAC_WEBGL_FALLBACK_FILES,
+  WIN_WEBGL_FALLBACK_FILES,
+} = createRequire(import.meta.url)("./electron-after-pack.cjs");
 import { resolveBuildAssets } from "./lib/build-assets.mjs";
 import {
   findUnexpectedMainBundleRootScripts,
@@ -424,14 +434,7 @@ if (!existsSync(uvLicense)) fail(`uv license notice missing: ${uvLicense}`);
 const localeCount = isMacAppPackage() ? validateMacElectronLocales() : validatePakElectronLocales();
 
 if (isLinuxUnpackedPackage()) {
-  const linuxGpuRuntimeFiles = [
-    "libEGL.so",
-    "libGLESv2.so",
-    "libvk_swiftshader.so",
-    "libvulkan.so.1",
-    "vk_swiftshader_icd.json",
-  ];
-  const leakedGpuFiles = linuxGpuRuntimeFiles.filter((entry) => existsSync(resolve(appOutDir, entry)));
+  const leakedGpuFiles = LINUX_GPU_RUNTIME_FILES.filter((entry) => existsSync(resolve(appOutDir, entry)));
   if (leakedGpuFiles.length > 0) fail("Linux GPU runtime files leaked into package", leakedGpuFiles);
 }
 
@@ -446,13 +449,7 @@ if (!keepWebgl && isMacAppPackage()) {
     "A",
     "Libraries",
   );
-  const macWebglFallbackFiles = [
-    "libvk_swiftshader.dylib",
-    "libGLESv2.dylib",
-    "libEGL.dylib",
-    "vk_swiftshader_icd.json",
-  ];
-  const leakedMacWebgl = macWebglFallbackFiles.filter((entry) => existsSync(resolve(macFallbackDir, entry)));
+  const leakedMacWebgl = MAC_WEBGL_FALLBACK_FILES.filter((entry) => existsSync(resolve(macFallbackDir, entry)));
   if (leakedMacWebgl.length > 0) fail("macOS WebGL fallback libraries leaked into package", leakedMacWebgl);
 }
 
@@ -461,14 +458,7 @@ function isWinUnpackedPackage() {
 }
 
 if (!keepWebgl && isWinUnpackedPackage()) {
-  const winWebglFallbackFiles = [
-    "vk_swiftshader.dll",
-    "libGLESv2.dll",
-    "libEGL.dll",
-    "vulkan-1.dll",
-    "vk_swiftshader_icd.json",
-  ];
-  const leakedWinWebgl = winWebglFallbackFiles.filter((entry) => existsSync(resolve(appOutDir, entry)));
+  const leakedWinWebgl = WIN_WEBGL_FALLBACK_FILES.filter((entry) => existsSync(resolve(appOutDir, entry)));
   if (leakedWinWebgl.length > 0) fail("Windows WebGL fallback libraries leaked into package", leakedWinWebgl);
 }
 
