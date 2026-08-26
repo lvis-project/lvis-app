@@ -123,17 +123,37 @@ describe("PluginUiHostView — webview attach flow", () => {
       pluginPreloadUrl: PRELOAD_URL,
       registerPluginWebview,
     });
-    // First cold attach can happen before the host observes did-attach. In
-    // that case the ref/lifecycle retry path must still bind the webContentsId
-    // before the shell's pending get-entry-url request expires.
+    // Model the real accessor: Electron THROWS on a guest that is not attached
+    // yet. The previous stub returned an id unconditionally, so it certified a
+    // path production never takes — the host called it from `did-start-loading`
+    // and from a microtask queued in the ref callback, and both threw on every
+    // mount (measured: 90 uncaught exceptions over 27s on a cold boot).
+    let attached = false;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (HTMLElement.prototype as any).getWebContentsId = () => 84;
+    (HTMLElement.prototype as any).getWebContentsId = () => {
+      if (!attached) {
+        throw new Error(
+          "The WebView must be attached to the DOM and the dom-ready event emitted before this method can be called.",
+        );
+      }
+      return 84;
+    };
 
     const container = mountHost(VIEW);
     const webview = container.querySelector("webview");
     expect(webview).not.toBeNull();
 
     await act(async () => {
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    // Nothing has attached yet, so nothing may have been read or registered.
+    expect(registerPluginWebview).toHaveBeenCalledTimes(0);
+
+    // did-attach missed; the guest lifecycle events still carry the handshake.
+    attached = true;
+    await act(async () => {
+      webview!.dispatchEvent(new Event("dom-ready"));
       await new Promise((r) => setTimeout(r, 0));
     });
 
@@ -144,14 +164,44 @@ describe("PluginUiHostView — webview attach flow", () => {
       entryUrl: VIEW.entryUrl,
     });
 
+    // Later guest events must not re-register.
     await act(async () => {
-      webview!.dispatchEvent(new Event("did-start-loading"));
-      webview!.dispatchEvent(new Event("dom-ready"));
       webview!.dispatchEvent(new Event("did-finish-load"));
       await new Promise((r) => setTimeout(r, 0));
     });
-
     expect(registerPluginWebview).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the live webview when an equal-valued view object arrives", async () => {
+    const registerPluginWebview = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal("lvisApi", {
+      pluginShellUrl: SHELL_URL,
+      pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview,
+      ensurePluginPartition: vi.fn().mockResolvedValue({ ok: true }),
+    });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (HTMLElement.prototype as any).getWebContentsId = () => 84;
+
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    const root = createRoot(container);
+    activeRoot = root;
+    act(() => { root.render(<PluginUiHostView view={VIEW} />); });
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    const first = container.querySelector("webview");
+    expect(first).not.toBeNull();
+
+    // `activePluginView` is `pluginViews.find(...)`, so any upstream refresh
+    // hands down a fresh object with identical contents. That must not tear
+    // the guest down: doing so re-runs ensurePluginPartition and remounts,
+    // and on repeated churn becomes the ~0.7s mount/unmount flicker loop.
+    await act(async () => {
+      root.render(<PluginUiHostView view={{ ...VIEW, extension: { ...VIEW.extension } }} />);
+      await new Promise((r) => setTimeout(r, 0));
+    });
+
+    expect(container.querySelector("webview")).toBe(first);
   });
 
   it("remounts the webview when the plugin runtime revision changes", () => {

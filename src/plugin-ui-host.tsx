@@ -149,6 +149,12 @@ export function PluginUiHostView({
     setErrorText(t("be_pluginUiHost.webviewLoadFailed"));
   });
 
+  // `getWebContentsId()` THROWS on a <webview> that is not yet attached and
+  // dom-ready. Only events that cannot fire before attachment may lead to it,
+  // so record attachment rather than probing for it — Electron exposes no
+  // predicate, and catching the throw would turn a lifecycle bug into a
+  // swallowed one.
+  const attachedRef = useRef(false);
   const onDidAttachRef = useRef<((e: Event) => void) | null>(null);
   const onLifecycleRegisterRef = useRef<((e: Event) => void) | null>(null);
   const registerAttemptRef = useRef<{ key: string; status: "pending" | "done" } | null>(null);
@@ -157,6 +163,7 @@ export function PluginUiHostView({
   const attemptRegisterWebview = useCallback((node: Electron.WebviewTag | null) => {
     if (!node || !view?.pluginId || !view?.entryUrl) return;
     if (typeof node.getWebContentsId !== "function") return;
+    if (!attachedRef.current) return;
     const wcId = node.getWebContentsId();
     if (!Number.isFinite(wcId)) return;
     const { shellUrl: url } = readPluginAssetUrls();
@@ -216,11 +223,11 @@ export function PluginUiHostView({
       if (onDidAttach) prev.removeEventListener("did-attach", onDidAttach);
       const onLifecycleRegister = onLifecycleRegisterRef.current;
       if (onLifecycleRegister) {
-        prev.removeEventListener("did-start-loading", onLifecycleRegister);
         prev.removeEventListener("dom-ready", onLifecycleRegister);
         prev.removeEventListener("did-finish-load", onLifecycleRegister);
       }
     }
+    attachedRef.current = false;
     webviewRef.current = node;
     if (node) {
       node.addEventListener("did-finish-load", onFinishRef.current);
@@ -230,20 +237,43 @@ export function PluginUiHostView({
         // method `getWebContentsId()` (canonical Electron API) instead of
         // reading a non-standard `e.webContentsId` property which returns
         // undefined and silently aborts the registration handshake.
+        attachedRef.current = true;
         attemptRegisterWebview(node);
       };
-      const onLifecycleRegister = () => attemptRegisterWebview(node);
+      // `dom-ready` and `did-finish-load` are guest events: they cannot fire
+      // before the guest is attached, so they are safe retries when the
+      // `did-attach` listener was bound too late to observe it. `did-start-
+      // loading` and an immediate microtask are NOT — both run before
+      // attachment, and each one threw on every mount.
+      const onLifecycleRegister = () => {
+        attachedRef.current = true;
+        attemptRegisterWebview(node);
+      };
       onDidAttachRef.current = onDidAttach;
       onLifecycleRegisterRef.current = onLifecycleRegister;
       node.addEventListener("did-attach", onDidAttach);
-      node.addEventListener("did-start-loading", onLifecycleRegister);
       node.addEventListener("dom-ready", onLifecycleRegister);
       node.addEventListener("did-finish-load", onLifecycleRegister);
-      queueMicrotask(() => attemptRegisterWebview(node));
     }
   }, [attemptRegisterWebview]);
 
+  // Keyed on the view's VALUE, not its object identity. `activePluginView`
+  // is `pluginViews.find(...)`, so every upstream refresh hands this component
+  // a fresh object with identical contents — and this effect tears the live
+  // webview down (`setPartitionReadyFor(null)`) before re-running the
+  // `ensurePluginPartition` round trip that puts it back. On identity churn
+  // that becomes a mount/unmount cycle one round trip long, which is what a
+  // cold boot showed: 39 webviews created and destroyed in 55s, ~0.7s each,
+  // visible as flicker. The `key` below already derives from these same
+  // fields for the same reason.
+  const viewIdentity = view
+    ? `${view.pluginId}:${view.extension.id}:${view.extension.kind}:${view.entryUrl ?? ""}:${view.runtimeRevision ?? 0}`
+    : null;
+  const viewRef = useRef(view);
+  viewRef.current = view;
+
   useEffect(() => {
+    const view = viewRef.current;
     setShellSrcBinding(null);
     setPartitionReadyFor(null);
     registerAttemptRef.current = null;
@@ -292,7 +322,7 @@ export function PluginUiHostView({
     return () => {
       cancelled = true;
     };
-  }, [view, preparing]);
+  }, [viewIdentity, preparing]);
 
   // ─── Render ────────────────────────────────────────────────────────────────
   let content: React.ReactNode;

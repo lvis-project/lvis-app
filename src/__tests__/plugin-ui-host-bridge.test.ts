@@ -14,6 +14,8 @@
  * locks the new dedicated-channel contract so a regression to the dotted name
  * cannot reintroduce that silent-fail.
  */
+import { readFileSync } from "node:fs";
+
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 // ─── Capture contextBridge registrations ─────────────────────────────────────
@@ -190,5 +192,47 @@ describe("plugin-preload bridge.storage namespace (#B1)", () => {
     const channel = mockInvoke.mock.calls.at(-1)?.[0] as string;
     expect(channel).toBe("lvis:plugin:storage:get");
     expect(channel).not.toMatch(/callTool|hostApi\./);
+  });
+});
+
+// ─── webview registration lifecycle ──────────────────────────────────────────
+//
+// `getWebContentsId()` THROWS on an Electron <webview> that is not yet attached
+// and dom-ready. `plugin-ui-host.tsx` used to call it from `did-start-loading`
+// and from a microtask queued in the ref callback — both run before attachment
+// — so every plugin panel mount threw repeatedly (measured: 90 identical
+// uncaught exceptions over 27s on a cold boot), and the resulting re-render
+// churn is visible as flicker.
+//
+// This reads the source rather than rendering the component on purpose: jsdom
+// has no Electron <webview>, so a rendered test would only exercise a stand-in
+// element this test defined itself, and would prove nothing about the real
+// throw. The invariant that broke is structural — which events may lead to the
+// call — so that is what is asserted.
+describe("plugin UI host — webview registration lifecycle", () => {
+  const source = readFileSync(
+    new URL("../plugin-ui-host.tsx", import.meta.url),
+    "utf8",
+  );
+
+  it("never reaches getWebContentsId() from a pre-attach trigger", () => {
+    expect(source).not.toMatch(/addEventListener\(\s*"did-start-loading"/);
+    expect(source).not.toMatch(/queueMicrotask\(\s*\(\)\s*=>\s*attemptRegisterWebview/);
+  });
+
+  it("gates the getWebContentsId() read on observed attachment", () => {
+    const call = source.indexOf("node.getWebContentsId()");
+    expect(call).toBeGreaterThan(-1);
+    const guard = source.indexOf("if (!attachedRef.current) return;");
+    expect(guard).toBeGreaterThan(-1);
+    expect(guard).toBeLessThan(call);
+  });
+
+  it("still registers on did-attach, and retries only on guest events", () => {
+    expect(source).toMatch(/addEventListener\(\s*"did-attach"/);
+    // Both can only fire after the guest is attached, so they are safe retries
+    // for the case where the did-attach listener was bound too late.
+    expect(source).toMatch(/addEventListener\(\s*"dom-ready"/);
+    expect(source).toMatch(/addEventListener\(\s*"did-finish-load"/);
   });
 });
