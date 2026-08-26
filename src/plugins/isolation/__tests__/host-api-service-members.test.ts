@@ -29,6 +29,7 @@ import type {
   PluginManifest,
   SpawnedPluginWorker,
 } from "../../types.js";
+import type { PluginRuntimeContext } from "../../public-contract.js";
 import {
   HOSTAPI_DISPATCH_TABLE,
   HostApiDispatcher,
@@ -133,6 +134,16 @@ interface ServiceHarness {
   readonly pushed: HostApiNotification[];
   /** Every reply the host produced, in order, so a handle id can be named. */
   readonly replies: HostApiReply[];
+  /**
+   * Every `context.log` line the HOST actually received.
+   *
+   * Separate from `notifications`, which records what the CHILD put on the
+   * wire. Asserting on that one only proves the child sent something; the host
+   * dropping every `log` notification on the floor looks identical from there.
+   */
+  readonly hostLogs: { message: string; meta?: unknown }[];
+  /** The context the child handed the plugin factory — the plugin's own view. */
+  readonly pluginContext: PluginRuntimeContext;
   /** Drop the child, as the host does on child exit. */
   readonly killChild: () => number;
 }
@@ -152,6 +163,7 @@ async function createServiceHarness(
   const notifications: HostApiNotification[] = [];
   const pushed: HostApiNotification[] = [];
   const replies: HostApiReply[] = [];
+  let pluginContext: PluginRuntimeContext | undefined;
   let host!: HostApiDispatcher;
   let child!: PluginChildRuntime;
 
@@ -169,7 +181,11 @@ async function createServiceHarness(
   };
 
   const api = hostApi as PluginHostApi;
+  const hostLogs: { message: string; meta?: unknown }[] = [];
   host = new HostApiDispatcher({
+    // Captured, not dropped: a sink that discards is what shipped, and a
+    // test that discards could not tell the difference.
+    log: (message, meta) => hostLogs.push({ message, meta }),
     pluginId: PLUGIN_ID,
     generationId: GENERATION,
     isActive: () => true,
@@ -203,8 +219,13 @@ async function createServiceHarness(
       generationId: GENERATION,
     },
     channel,
-    loadFactory: async () => () => ({ handlers: {} }),
+    loadFactory: async () => (runtimeContext) => {
+      pluginContext = runtimeContext;
+      return { handlers: {} };
+    },
   });
+
+  if (!pluginContext) throw new Error("the child never called the plugin factory");
 
   return {
     child,
@@ -214,6 +235,8 @@ async function createServiceHarness(
     notifications,
     pushed,
     replies,
+    hostLogs,
+    pluginContext,
     killChild: () => host.childGone(),
   };
 }
@@ -741,6 +764,63 @@ describe("resolveApiKey crosses as a lease, not as two closures", () => {
       .signalChannelId).toBe("string");
     expect(hostSignal).toBeInstanceOf(AbortSignal);
     expect(harness.host.openSubscriptionCount).toBe(0);
+  });
+});
+
+describe("context.log reaches the host and is not merely sent", () => {
+  it("delivers the plugin's own log line, meta and all, to the host sink", async () => {
+    const harness = await createServiceHarness();
+
+    harness.pluginContext.log("worker exited before becoming healthy", { code: 1 });
+    harness.pluginContext.log("no meta on this one");
+    await settle();
+
+    expect(harness.hostLogs).toEqual([
+      { message: "worker exited before becoming healthy", meta: { code: 1 } },
+      { message: "no meta on this one", meta: undefined },
+    ]);
+  });
+
+  it("is not satisfied by the child having sent the notification", async () => {
+    // The gap this closes was invisible for exactly this reason: the child DID
+    // put a well-formed `log` notification on the wire, and a test that stopped
+    // there passed while the host discarded every one of them. Both sides are
+    // asserted so the two can never again be confused for each other.
+    const harness = await createServiceHarness();
+
+    harness.pluginContext.log("sent and received are different claims");
+    await settle();
+
+    const sent = harness.notifications.filter((n) => n.kind === "log");
+    expect(sent).toHaveLength(1);
+    expect(harness.hostLogs).toHaveLength(sent.length);
+  });
+
+  it("carries a worker's forwarded stderr all the way to the host", async () => {
+    // The path that actually failed in the field: a plugin spawns a worker,
+    // forwards the worker's stderr through `context.log`, and the operator
+    // reads it in the host log. Exercised end to end rather than asserted at
+    // the plugin's own call, because every hop after that call is where it went
+    // wrong.
+    const worker = makeFakeWorker();
+    const harness = await createServiceHarness({
+      spawnWorker: async () => worker as unknown as SpawnedPluginWorker,
+    });
+
+    const handle = await harness.pluginContext.hostApi.spawnWorker!({
+      workerId: "control",
+      command: "/usr/bin/true",
+      args: [],
+    });
+    handle.onStderr((chunk) => harness.pluginContext.log(`[stderr] ${chunk.trim()}`));
+    await settle();
+
+    worker.emitStderr("ModuleNotFoundError: No module named 'lancedb'\n");
+    await settle();
+
+    expect(harness.hostLogs.map((line) => line.message)).toContain(
+      "[stderr] ModuleNotFoundError: No module named 'lancedb'",
+    );
   });
 });
 

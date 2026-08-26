@@ -83,6 +83,31 @@ export function resolvePluginSocketDir(pluginDataDir: string): string {
 }
 
 /**
+ * Where the HOST binds control sockets for workers this plugin asked for:
+ * `~/.lvis/plugins/<pluginId>/run`.
+ *
+ * WHY THE CHILD NEEDS IT. `permissions/worker-spawn.ts` allocates
+ * `run/<workerId>/control.sock`, registers that directory so the WORKER may
+ * bind, and its header records the assumption that made the other half
+ * unnecessary: "the host connects from OUTSIDE the sandbox (unconstrained)."
+ * That stopped being true when every plugin moved out of process. The client is
+ * now the plugin's own confined child, and a child whose profile does not name
+ * this directory binds nothing and connects nowhere — `connect EPERM` on a
+ * socket that exists and that an unconfined process reaches without trouble.
+ *
+ * The whole subtree rather than one worker's leaf, and registered for every
+ * child rather than the ones known to spawn workers, for the reason
+ * {@link resolvePluginSocketDir} carries: the directory is inside the plugin's
+ * own namespace and grants no reach beyond it, and the alternative is a list
+ * someone has to remember to update.
+ */
+export function resolvePluginWorkerRunRoot(pluginDataDir: string): string {
+  // Derived FROM the data directory for the reason resolvePluginSocketDir is:
+  // the two must not be able to disagree about which plugin root they mean.
+  return resolve(dirname(pluginDataDir), PLUGIN_WORKER_RUN_DIR_NAME);
+}
+
+/**
  * The most bytes a Unix-domain socket PATH can have on this platform.
  *
  * `sockaddr_un.sun_path` is a fixed char array — 104 on macOS/BSD, 108 on

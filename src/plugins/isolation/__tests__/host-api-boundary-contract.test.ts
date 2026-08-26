@@ -85,7 +85,11 @@ function request(overrides: Partial<HostApiRequest> = {}): HostApiRequest {
 function dispatcher(
   options: Partial<ConstructorParameters<typeof HostApiDispatcher>[0]> = {},
 ): HostApiDispatcher {
+  const hostLogs: { message: string; meta?: unknown }[] = [];
   return new HostApiDispatcher({
+    // Captured, not dropped: a sink that discards is what shipped, and a
+    // test that discards could not tell the difference.
+    log: (message, meta) => hostLogs.push({ message, meta }),
     pluginId: PLUGIN_ID,
     generationId: GENERATION,
     isActive: () => true,

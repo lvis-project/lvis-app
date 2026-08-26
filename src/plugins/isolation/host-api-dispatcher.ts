@@ -1861,6 +1861,20 @@ export interface HostApiDispatcherOptions {
   readonly isActive: () => boolean;
   /** Where host-originated notifications go. */
   readonly notifications: ChildNotificationSink;
+  /**
+   * Where the child's `context.log` goes.
+   *
+   * Required, not optional. The in-process arm writes these straight to the
+   * host logger, and for a long time this arm dropped them on the floor: the
+   * child emitted a `log` notification, the wire declared it, and
+   * {@link HostApiDispatcher.handleNotification} handled only the two
+   * registration-ending kinds. Every `context.log` from every out-of-process
+   * plugin went nowhere, which is how a plugin whose worker failed to start on
+   * every boot could ship — it was forwarding the worker's stderr into a sink
+   * that did not exist. A dispatcher with nowhere to put a log line must not be
+   * constructible.
+   */
+  readonly log: (message: string, meta?: unknown) => void;
   /** Injectable so a handler can be exercised without the whole table. */
   readonly table?: Record<HostApiPath, HostApiPathHandler>;
 }
@@ -1910,11 +1924,21 @@ export class HostApiDispatcher {
   }
 
   /**
-   * Child → host notifications. Both of the ones the boundary itself owns end a
-   * registration, and both go through the same ledger — an abort is not a
-   * second mechanism, it is a close whose teardown happens to cancel.
+   * Child → host notifications.
+   *
+   * Two of them end a registration and go through the same ledger — an abort is
+   * not a second mechanism, it is a close whose teardown happens to cancel. The
+   * third, `log`, ends nothing: it is the child's `context.log` arriving, and it
+   * is forwarded to the sink the owner supplied.
    */
   handleNotification(notification: HostApiNotification): void {
+    if (notification.kind === "log") {
+      // The message is the plugin's own text, passed through unchanged so an
+      // isolated plugin's log line reads the same as an in-process one. Only
+      // the attribution is the host's to add, and the owner does that.
+      this.options.log(notification.message, notification.meta);
+      return;
+    }
     if (notification.kind === "subscription-release") {
       // `disposed` rather than `peer-gone`: the child is alive and has already
       // dropped its side, so the host teardown must not send anything back.

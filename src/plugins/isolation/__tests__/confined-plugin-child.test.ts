@@ -101,7 +101,10 @@ import {
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { resolvePluginSocketDir } from "../../plugin-storage-layout.js";
+import {
+  resolvePluginSocketDir,
+  resolvePluginWorkerRunRoot,
+} from "../../plugin-storage-layout.js";
 import { lvisHome } from "../../../shared/lvis-home.js";
 // The child entry is bundled by the shared module rather than here: its
 // externals, banner and target are the shipped build's, and a second copy of
@@ -121,6 +124,7 @@ import {
 } from "../../../permissions/asrt-sandbox.js";
 import { asrtCanInitialize } from "../../../permissions/__tests__/test-helpers.js";
 import { connect } from "node:net";
+import { createServer } from "node:http";
 import { spawnConfinedPluginChild } from "../out-of-process-plugin.js";
 
 const PLUGIN_ID = "work-assistant";
@@ -520,6 +524,15 @@ function socketDirOf(fx: Fixture): string {
   return resolvePluginSocketDir(fx.pluginDataDir);
 }
 
+/**
+ * The other half of the same boundary: `run/` is where the HOST binds a control
+ * socket for a worker this plugin asked for, and the child is the client. READ
+ * only — the child connects, it does not create anything there.
+ */
+function workerRunRootOf(fx: Fixture): string {
+  return resolvePluginWorkerRunRoot(fx.pluginDataDir);
+}
+
 function baseEnvelope(fx: Fixture): DelegatedWorkerConfinement {
   return derivePluginChildEnvelope({
     pluginId: PLUGIN_ID,
@@ -539,6 +552,7 @@ async function runProbe(
   const child = await spawnConfinedPluginChild({
     pluginId: PLUGIN_ID,
     socketDir: resolvePluginSocketDir(fx.pluginDataDir),
+    workerRunRoot: resolvePluginWorkerRunRoot(fx.pluginDataDir),
     envelope,
     childEntryPath: writeProbeModule(fx),
   });
@@ -589,6 +603,7 @@ process.stdout.write("PROBE:" + JSON.stringify(attempt(() => readFileSync(${JSON
   const child = await spawnConfinedPluginChild({
     pluginId: reader.pluginId,
     socketDir: resolvePluginSocketDir(reader.pluginDataDir),
+    workerRunRoot: resolvePluginWorkerRunRoot(reader.pluginDataDir),
     envelope: derivePluginChildEnvelope({
       pluginId: reader.pluginId,
       pluginRoot: reader.pluginRoot,
@@ -662,6 +677,7 @@ setTimeout(() => process.exit(0), 4000).unref?.();
   const child = await spawnConfinedPluginChild({
     pluginId: PLUGIN_ID,
     socketDir: resolvePluginSocketDir(fx.pluginDataDir),
+    workerRunRoot: resolvePluginWorkerRunRoot(fx.pluginDataDir),
     envelope: baseEnvelope(fx),
     childEntryPath: probePath,
   });
@@ -755,7 +771,7 @@ describe("the host decides how far a plugin child reaches", () => {
         configValue: () => undefined,
       }),
     ).toEqual({
-      read: [fx.pluginRoot, fx.pluginDataDir, socketDirOf(fx)],
+      read: [fx.pluginRoot, fx.pluginDataDir, socketDirOf(fx), workerRunRootOf(fx)],
       write: [fx.pluginDataDir, socketDirOf(fx)],
     });
   });
@@ -772,6 +788,7 @@ describe("the host decides how far a plugin child reaches", () => {
       fx.pluginRoot,
       fx.pluginDataDir,
       socketDirOf(fx),
+      workerRunRootOf(fx),
       join(fx.lvisHome, "runtime"),
       join(fx.lvisHome, "certs"),
     ]);
@@ -1110,6 +1127,7 @@ describe("a plugin that cannot be confined is not spawned", () => {
       spawnConfinedPluginChild({
         pluginId: PLUGIN_ID,
         socketDir: resolvePluginSocketDir(fx.pluginDataDir),
+        workerRunRoot: resolvePluginWorkerRunRoot(fx.pluginDataDir),
         envelope: baseEnvelope(fx),
         childEntryPath: writeProbeModule(fx),
       }),
@@ -1132,6 +1150,7 @@ describe("a plugin that cannot be confined is not spawned", () => {
       spawnConfinedPluginChild({
         pluginId: PLUGIN_ID,
         socketDir: resolvePluginSocketDir(fx.pluginDataDir),
+        workerRunRoot: resolvePluginWorkerRunRoot(fx.pluginDataDir),
         envelope: { read: [fx.pluginRoot, fx.pluginDataDir, dangling], write: [dangling] },
         childEntryPath: writeProbeModule(fx),
       }),
@@ -1159,6 +1178,7 @@ describe("a plugin that cannot be confined is not spawned", () => {
           spawnConfinedPluginChild({
             pluginId: PLUGIN_ID,
             socketDir: resolvePluginSocketDir(fx.pluginDataDir),
+            workerRunRoot: resolvePluginWorkerRunRoot(fx.pluginDataDir),
             envelope: { read: [fx.pluginRoot, fx.pluginDataDir, dangling], write: [dangling] },
             childEntryPath: writeProbeModule(fx),
           }),
@@ -2358,6 +2378,7 @@ setTimeout(() => process.exit(0), 4000).unref?.();
   const child = await spawnConfinedPluginChild({
     pluginId: PLUGIN_ID,
     socketDir: plugin.socketDir,
+    workerRunRoot: resolvePluginWorkerRunRoot(plugin.pluginDataDir),
     envelope: derivePluginChildEnvelope({
       pluginId: PLUGIN_ID,
       pluginRoot: plugin.pluginRoot,
@@ -2411,6 +2432,80 @@ setTimeout(() => process.exit(0), 4000).unref?.();
   }
 }
 
+/**
+ * The OTHER direction: something outside binds a socket in the plugin's `run/`
+ * directory and the CONFINED CHILD tries to connect to it.
+ *
+ * This is the shape of a plugin talking to a worker `hostApi.spawnWorker`
+ * started for it — `worker-spawn.ts` allocates `run/<workerId>/control.sock`
+ * and the worker binds it, so the binder here stands in for that worker and
+ * the child stands in for the plugin that asked for it. Every case in this file
+ * before this one measured a BIND, which is why a child that could bind
+ * everywhere it needed to and connect nowhere read as covered.
+ */
+async function runUnixConnectProbe(
+  plugin: ShortRootedPlugin,
+  socketPath: string,
+): Promise<{ ok: boolean; code?: string }> {
+  const probePath = join(plugin.pluginRoot, "unix-connect-probe.mjs");
+  writeFileSync(
+    probePath,
+    `import { connect } from "node:net";
+const socketPath = ${JSON.stringify(socketPath)};
+const report = (value) => process.stdout.write("PROBE:" + JSON.stringify(value) + "\\n");
+const socket = connect({ path: socketPath, timeout: 3000 });
+socket.on("connect", () => { socket.destroy(); report({ ok: true }); });
+socket.on("timeout", () => { socket.destroy(); report({ ok: false, code: "ETIMEDOUT" }); });
+socket.on("error", (error) => { socket.destroy(); report({ ok: false, code: error.code ?? error.name }); });
+setTimeout(() => process.exit(0), 5000).unref?.();
+`,
+    "utf-8",
+  );
+  // Bound from HERE, unconfined, exactly as the host spawns the worker that
+  // binds it in production.
+  const server = createServer((_req, res) => res.end("reached"));
+  await new Promise<void>((resolve) => server.listen({ path: socketPath }, () => resolve()));
+  const child = await spawnConfinedPluginChild({
+    pluginId: PLUGIN_ID,
+    socketDir: plugin.socketDir,
+    workerRunRoot: resolvePluginWorkerRunRoot(plugin.pluginDataDir),
+    envelope: derivePluginChildEnvelope({
+      pluginId: PLUGIN_ID,
+      pluginRoot: plugin.pluginRoot,
+      pluginDataDir: plugin.pluginDataDir,
+      configValue: () => undefined,
+    }),
+    childEntryPath: probePath,
+  });
+  try {
+    return await new Promise<{ ok: boolean; code?: string }>((resolve, reject) => {
+      let stdout = "";
+      const timer = setTimeout(
+        () => reject(new Error(`the connect probe never reported; stdout was: ${stdout}`)),
+        15_000,
+      );
+      child.link.input.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString("utf-8");
+        const line = stdout.split("\n").find((entry) => entry.startsWith("PROBE:"));
+        if (!line) return;
+        clearTimeout(timer);
+        resolve(JSON.parse(line.slice("PROBE:".length)));
+      });
+      child.link.input.on("end", () => {
+        clearTimeout(timer);
+        reject(new Error(`the connect probe exited without reporting; stdout was: ${stdout}`));
+      });
+      child.link.input.on("error", (error: Error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+  } finally {
+    child.link.terminate("connect probe done");
+    server.close();
+  }
+}
+
 describe("a confined child and a Unix-domain socket", () => {
   let shortPlugin: ShortRootedPlugin | undefined;
 
@@ -2440,6 +2535,31 @@ describe("a confined child and a Unix-domain socket", () => {
       // succeeds into a namespace nobody else is in (Linux). This one is
       // reachable from outside on both.
       expect(hostReach).toBe("connected");
+    },
+    120_000,
+  );
+
+  it.runIf(process.platform !== "win32")(
+    "connects to a worker socket the host bound in the plugin's run directory",
+    async () => {
+      if (!(await sandboxCasesRun())) return;
+      // The field failure this closes: local-indexer's worker bound its control
+      // socket successfully — an unconfined probe reached it — and the plugin's
+      // own confined child got `connect EPERM` on the same path, every boot, so
+      // the health check timed out at 30s and every one of that plugin's tools
+      // was refused for the rest of the session. `worker-spawn.ts` registers the
+      // directory so the WORKER may bind; nothing registered it for the client,
+      // because its header recorded an assumption — "the host connects from
+      // OUTSIDE the sandbox (unconstrained)" — that stopped being true when
+      // every plugin moved out of process.
+      await initializeAsrtSandbox({ allowedDomains: [], strictAllowlist: true });
+      shortPlugin = makeShortRootedPlugin();
+      const runDir = join(resolvePluginWorkerRunRoot(shortPlugin.pluginDataDir), "w");
+      mkdirSync(runDir, { recursive: true, mode: 0o700 });
+
+      const report = await runUnixConnectProbe(shortPlugin, join(runDir, "control.sock"));
+
+      expect(report, JSON.stringify(report)).toEqual({ ok: true });
     },
     120_000,
   );
