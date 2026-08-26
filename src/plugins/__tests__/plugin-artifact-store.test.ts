@@ -701,8 +701,7 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
       await mkdir(resolve(tmp, "live"), { recursive: true });
       await writeFile(
         sourceManifest,
-        JSON.stringify({ id: "acme", version: "1.2.3", name: "acme", entry: "x" }),
-      );
+        JSON.stringify(agentPluginsDocument({ id: "acme", version: "1.2.3", name: "acme", entry: "x" })));
       await store.cacheVersionFromManifest("acme", sourceManifest);
       const cached = resolve(tmp, "cache", "acme", "1.2.3", "plugin.json");
       const { readFile: read } = await import("node:fs/promises");
@@ -721,8 +720,7 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
       await mkdir(resolve(tmp, "live"), { recursive: true });
       await writeFile(
         sourceManifest,
-        JSON.stringify({ id: "acme", version: "1.2.3", name: "acme", entry: "x" }),
-      );
+        JSON.stringify(agentPluginsDocument({ id: "acme", version: "1.2.3", name: "acme", entry: "x" })));
 
       await store.cacheVersionFromManifest("acme", sourceManifest, {
         installSource: "admin",

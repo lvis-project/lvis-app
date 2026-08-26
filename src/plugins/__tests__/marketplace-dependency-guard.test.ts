@@ -66,7 +66,7 @@ async function setupTestDir(
     const manifestPath = resolve(manifestDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: p.id,
         name: p.id,
         version: "1.0.0",
@@ -75,8 +75,7 @@ async function setupTestDir(
         description: "Test fixture.",
         publisher: "Test fixture",
         capabilities: p.capabilities
-      }),
-    );
+      })));
     // Registry manifestPath is relative to `plugins/` (the registry's parent dir).
     registryEntries.push({
       id: p.id,

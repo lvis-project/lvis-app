@@ -128,7 +128,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
         durableCommit: async () => {
           await mkdir(pluginDir, { recursive: true });
           const manifestFile = join(pluginDir, "plugin.json");
-          await writeFile(manifestFile, JSON.stringify(manifest), "utf-8");
+          await writeFile(manifestFile, JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
           await opts.commit?.("example-sample/plugin.json", manifestFile);
           return "example-sample/plugin.json";
         },

@@ -5,6 +5,7 @@ import { join } from "node:path";
 import * as nodeFs from "node:fs";
 import { TestPluginRuntime as PluginRuntime } from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 // ---------------------------------------------------------------------------
 // Module-level mock — hoisted by vitest before any imports.
@@ -78,7 +79,7 @@ describe("PluginRuntime.reloadPlugin", () => {
       tools: [{ name: methodName, description: `${methodName} tool`, inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
     };
     const manifestPath = join(pluginDir, "plugin.json");
-    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
     return manifestPath;
   }
 

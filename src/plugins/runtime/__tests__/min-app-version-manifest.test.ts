@@ -12,6 +12,7 @@ import { join } from "node:path";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { parsePluginJson } from "../manifest-validation.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 describe("manifest requires.minAppVersion validator", () => {
   let workDir: string;
@@ -27,18 +28,32 @@ describe("manifest requires.minAppVersion validator", () => {
   function makeValidator() {
     const ajv = new Ajv({ allErrors: true });
     addFormats(ajv);
+    // Deliberately permissive stand-in for a stale schema: it validates the
+    // Agent Plugins document envelope and says nothing about `requires`, so a
+    // passing test proves the HOST cross-field check rejected the manifest —
+    // not the schema.
     return ajv.compile({
       type: "object",
       additionalProperties: true,
-      required: ["id", "name", "version", "entry", "tools", "description"],
+      required: ["$schema", "name", "version", "description", "extensions"],
       properties: {
-        id: { type: "string", pattern: "^[a-zA-Z][a-zA-Z0-9._-]*$", minLength: 3 },
-        name: { type: "string" },
+        $schema: { type: "string" },
+        name: { type: "string", pattern: "^[a-zA-Z][a-zA-Z0-9._-]*$", minLength: 3 },
         description: { type: "string" },
         version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" },
-        entry: { type: "string" },
-        tools: { type: "array" },
-        requires: { type: "object" },
+        extensions: {
+          type: "object",
+          additionalProperties: {
+            type: "object",
+            additionalProperties: true,
+            properties: {
+              displayName: { type: "string" },
+              entry: { type: "string" },
+              tools: { type: "array" },
+              requires: { type: "object" },
+            },
+          },
+        },
       },
     });
   }
@@ -47,7 +62,7 @@ describe("manifest requires.minAppVersion validator", () => {
     const path = join(workDir, "plugin.json");
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "min-app-version-test",
         name: "Min App Version Test",
         description: "x",
@@ -55,8 +70,7 @@ describe("manifest requires.minAppVersion validator", () => {
         entry: "dist/p.js",
         tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         ...extra,
-      }),
-    );
+      })));
     return path;
   }
 

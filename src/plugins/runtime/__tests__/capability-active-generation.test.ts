@@ -116,7 +116,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
       "utf8",
     );
     const manifestPath = join(pluginDir, "plugin.json");
-    await writeFile(manifestPath, JSON.stringify(manifest), "utf8");
+    await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(manifest)), "utf8");
     return {
       id: options.id,
       pluginDir,

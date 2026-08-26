@@ -31,6 +31,7 @@ import {
   _resetPluginConfigChangeBus,
 } from "../config-change-bus.js";
 import type { PluginConfigSchema } from "../types.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 // Host-owned manifest schema SOT (ph2) — resolved relative to this test file
 // so it works regardless of cwd and no longer depends on the SDK package.
@@ -187,7 +188,7 @@ describe("pure Tool authority metadata — no toolSchemas, category, or workerId
     const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-cat-less-"));
     try {
       const file = join(dir, "plugin.json");
-      await writeFile(file, JSON.stringify(manifest), "utf-8");
+      await writeFile(file, JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
       const parsed = await parsePluginJson(file, validator);
       expect(parsed.id).toBe("category-less-plugin");
     } finally {
@@ -221,7 +222,7 @@ describe("pure Tool authority metadata — no toolSchemas, category, or workerId
     const dir = await mkdtemp(join(realpathSync(tmpdir()), "manifest-worker-id-"));
     try {
       const file = join(dir, "plugin.json");
-      await writeFile(file, JSON.stringify(manifest), "utf-8");
+      await writeFile(file, JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
       const parsed = await parsePluginJson(file, validator);
       const tool = parsed.tools.find((t) => t.name === "worker_ping");
       expect(tool).toBeDefined();

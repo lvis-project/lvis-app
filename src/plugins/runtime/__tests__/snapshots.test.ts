@@ -48,7 +48,7 @@ describe("readEnabledManifestSnapshots", () => {
     const dir = await makeTempDir();
     try {
       const manifestPath = join(dir, "plugin.json");
-      await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
+      await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(VALID_MANIFEST)), "utf-8");
 
       const result = await readEnabledManifestSnapshots(
         [{ manifestPath, enabled: true, pluginIdHint: "override-id" }],
@@ -65,7 +65,7 @@ describe("readEnabledManifestSnapshots", () => {
     const dir = await makeTempDir();
     try {
       const manifestPath = join(dir, "plugin.json");
-      await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
+      await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(VALID_MANIFEST)), "utf-8");
 
       const result = await readEnabledManifestSnapshots(
         [{ manifestPath, enabled: true }],
@@ -111,7 +111,7 @@ describe("readEnabledManifestSnapshots", () => {
     const dir = await makeTempDir();
     try {
       const manifestPath = join(dir, "plugin.json");
-      await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
+      await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(VALID_MANIFEST)), "utf-8");
       const access = { plugins: [{ pluginId: "test-other", events: ["other.event"] }] };
 
       const result = await readEnabledManifestSnapshots(
@@ -184,7 +184,7 @@ describe("resolveManifestLoadPlan — registry", () => {
       const pluginDir = join(pluginsRoot, "test-snap");
       await mkdir(pluginDir, { recursive: true });
       const manifestPath = join(pluginDir, "plugin.json");
-      await writeFile(manifestPath, JSON.stringify(VALID_MANIFEST), "utf-8");
+      await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(VALID_MANIFEST)), "utf-8");
 
       const registryPath = join(dir, "registry.json");
       await writeFile(

@@ -20,6 +20,7 @@ import { join } from "node:path";
 import Ajv from "ajv";
 import { parsePluginJson } from "../runtime/manifest-validation.js";
 import type { PluginManifest, Tool } from "../types.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 /** Accept any object so a fixture reaches parsePluginJson's structural checks + materialization. */
 function permissiveValidator() {
@@ -39,7 +40,7 @@ describe("parsePluginJson — manifest materialization (visibility + name defaul
 
   async function parse(manifest: Record<string, unknown>): Promise<PluginManifest> {
     const path = join(workDir, "plugin.json");
-    await writeFile(path, JSON.stringify(manifest));
+    await writeFile(path, JSON.stringify(agentPluginsDocument(manifest)));
     return parsePluginJson(path, permissiveValidator());
   }
 

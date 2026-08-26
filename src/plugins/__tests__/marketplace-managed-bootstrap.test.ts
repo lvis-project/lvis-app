@@ -710,7 +710,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "user-plugin",
         name: "User Plugin",
         version: "1.0.0",
@@ -720,9 +720,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         pluginAccess: {
           plugins: [{ pluginId: "email", events: ["email.analyzed"] }],
         },
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const service = makeManagedService(testDir, marketplacePath);
     await expect(
@@ -756,7 +755,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "network-plugin",
         name: "Network Plugin",
         version: "1.0.0",
@@ -768,9 +767,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
           allowedDomains: ["api.example.com", "login.example.com"],
           reasoning: "Broader artifact grant.",
         },
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const service = makeManagedService(testDir, marketplacePath);
     await expect(
@@ -813,7 +811,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "network-capability-positive",
         name: "Network Capability Positive",
         version: "1.0.0",
@@ -821,9 +819,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         tools: [],
         description: "Test fixture.",
         capabilities: ["external-auth-consumer", "host:overlay"],
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const service = makeManagedService(testDir, marketplacePath);
     await expect(
@@ -857,7 +854,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "network-capability-plugin",
         name: "Network Capability Plugin",
         version: "1.0.0",
@@ -865,9 +862,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         tools: [],
         description: "Test fixture.",
         capabilities: ["external-auth-consumer"],
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const service = makeManagedService(testDir, marketplacePath);
     await expect(
@@ -905,7 +901,7 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "overlay-capability-plugin",
         name: "Overlay Capability Plugin",
         version: "1.0.0",
@@ -913,9 +909,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
         tools: [],
         description: "Test fixture.",
         capabilities: ["host:overlay"],
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const service = makeManagedService(testDir, marketplacePath);
     await expect(

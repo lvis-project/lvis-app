@@ -781,7 +781,7 @@ export class PluginMarketplaceService {
       : resolve(dirname(this.registryPath), installedManifestPath);
     try {
       const raw = await readFile(abs, "utf-8");
-      const parsed = JSON.parse(raw) as { installPolicy?: InstallPolicy };
+      const parsed = flattenAgentPluginsManifest(JSON.parse(raw), abs);
       return normalizeInstallPolicy(parsed) === "admin";
     } catch {
       return false;
@@ -1851,7 +1851,7 @@ export class PluginMarketplaceService {
   private async appendHistoryFromManifestVersion(pluginId: string, manifestPath: string): Promise<void> {
     try {
       const raw = await readFile(manifestPath, "utf-8");
-      const parsed = JSON.parse(raw) as { version?: unknown };
+      const parsed = flattenAgentPluginsManifest(JSON.parse(raw), manifestPath);
       if (typeof parsed.version !== "string" || parsed.version.trim().length === 0) return;
       await this.artifactStore.appendHistory(pluginId, {
         version: parsed.version,
@@ -1876,7 +1876,7 @@ export class PluginMarketplaceService {
       : resolve(dirname(this.registryPath), entry.manifestPath);
     try {
       const raw = await readFile(manifestAbs, "utf-8");
-      const parsed = JSON.parse(raw) as Pick<PluginManifest, "configSchema">;
+      const parsed = flattenAgentPluginsManifest(JSON.parse(raw), manifestAbs);
       return [...listSecretKeys(parsed.configSchema)];
     } catch (err) {
       log.warn(
@@ -2049,7 +2049,7 @@ export class PluginMarketplaceService {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw err;
     }
-    const parsed = JSON.parse(raw) as { version?: unknown };
+    const parsed = flattenAgentPluginsManifest(JSON.parse(raw), manifestPath);
     return typeof parsed.version === "string" ? parsed.version : null;
   }
 
@@ -2565,7 +2565,11 @@ export class PluginMarketplaceService {
         throw new Error(`plugin "${plugin.id}" manifest must be a JSON object`);
       }
 
-      const manifest = parsed as Partial<PluginManifest> & Record<string, unknown>;
+      // Compare against the projection, not the raw document: every field below
+      // (`id`, `installPolicy`, `networkAccess`, ...) is an LVIS field, and in
+      // an Agent Plugins document those live inside the extension namespace.
+      const manifest = flattenAgentPluginsManifest(parsed, manifestFile) as
+        Partial<PluginManifest> & Record<string, unknown>;
       if (manifest.id !== plugin.id) {
         throw new Error(
           `plugin "${plugin.id}" artifact manifest id mismatch: expected "${plugin.id}", got "${String(manifest.id ?? "")}"`,

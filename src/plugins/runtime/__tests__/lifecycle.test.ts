@@ -15,6 +15,7 @@ import {
   makeTestPluginRuntime,
   TestPluginRuntime,
 } from "../../__tests__/test-helpers.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 describe("PluginRuntime lifecycle — restartPlugin", () => {
   let testDir: string;
@@ -72,7 +73,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "lc-restart",
         name: "LC Restart",
         version: "1.0.0",
@@ -80,9 +81,8 @@ export default async function createPlugin() {
         tools: [{ name: "lc_restart_ping", description: "lc_restart_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "Lifecycle restart test",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -137,7 +137,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "lc-restart-remove-race",
         name: "Restart Remove Race",
         version: "1.0.0",
@@ -145,9 +145,8 @@ export default async function createPlugin() {
         tools: [{ name: "lc_restart_remove_race_ping", description: "restart removal race regression tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "Lifecycle race regression",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -212,7 +211,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: pluginId,
         name: "Restart Shutdown Cancel",
         version: "1.0.0",
@@ -225,9 +224,8 @@ export default async function createPlugin() {
         }],
         description: "Cancellation must prevent an in-flight replacement from starting or publishing.",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({ version: 1, plugins: [{ id: pluginId, manifestPath, enabled: true }] }),
@@ -278,7 +276,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "lc-restart-timeout",
         name: "Restart Timeout",
         version: "1.0.0",
@@ -292,9 +290,8 @@ export default async function createPlugin() {
         }],
         description: "Lifecycle restart timeout regression.",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -331,7 +328,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "lc-stop-timeout",
         name: "Stop Timeout",
         version: "1.0.0",
@@ -344,9 +341,8 @@ export default async function createPlugin() {
         }],
         description: "Stop timeout regression.",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -394,7 +390,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "lc-bust",
         name: "LC Cache Bust",
         version: "1.0.0",
@@ -402,9 +398,8 @@ export default async function createPlugin() {
         tools: [{ name: "lc_bust_version", description: "lc_bust_version tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "Cache-bust regression test",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -451,7 +446,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "lc-fail-manifest",
         name: "LC Fail Manifest",
         version: "1.0.0",
@@ -459,9 +454,8 @@ export default async function createPlugin() {
         tools: [{ name: "lc_fail_manifest_ping", description: "lc_fail_manifest_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "Lifecycle fail manifest test",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -499,7 +493,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "lc-restartall",
         name: "LC RestartAll",
         version: "1.0.0",
@@ -507,9 +501,8 @@ export default async function createPlugin() {
         tools: [{ name: "lc_restartall_ping", description: "lc_restartall_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "Lifecycle restartAll test",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -543,7 +536,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "lc-disable",
         name: "LC Disable",
         version: "1.0.0",
@@ -551,9 +544,8 @@ export default async function createPlugin() {
         tools: [{ name: "lc_disable_ping", description: "lc_disable_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "Lifecycle disable test",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -600,7 +592,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: pluginId,
         name: pluginId,
         version: "1.0.0",
@@ -608,9 +600,8 @@ export default async function createPlugin() {
         tools: [{ name: `${pluginId.replace(/-/g, "_")}_ping`, description: "lifecycle ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "x",
         publisher: "x",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -636,7 +627,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: pluginId,
         name: pluginId,
         version: "1.0.0",
@@ -651,9 +642,8 @@ export default async function createPlugin() {
         ],
         description: "x",
         publisher: "x",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     return { pluginId, manifestPath, toolName };
   }
 
@@ -773,7 +763,7 @@ export default async function createPlugin() {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: pluginId,
         name: pluginId,
         version: "1.0.0",
@@ -781,9 +771,8 @@ export default async function createPlugin() {
         tools: [{ name: "lc_add_fail_ping", description: "lc_add_fail_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "x",
         publisher: "x",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({

@@ -17,6 +17,7 @@ import * as AddFormatsModule from "ajv-formats";
 import type { ValidateFunction } from "ajv";
 import { parsePluginJson } from "../runtime/manifest-validation.js";
 import { pureTool } from "./test-helpers.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 // `buildManifestValidator(hereFileUrl)` resolves `schemas/plugin.schema.json`
 // using path arithmetic anchored at `dirname(hereFileUrl)`. That math
@@ -106,7 +107,7 @@ describe("manifest validation — auth cross-field", () => {
         )
       : [];
     await mkdir(testDir, { recursive: true });
-    await writeFile(manifestPath, JSON.stringify(merged, null, 2), "utf-8");
+    await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(merged, null, 2)), "utf-8");
   }
 
   it("accepts a manifest whose auth Tools are app-only", async () => {

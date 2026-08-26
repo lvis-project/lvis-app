@@ -254,6 +254,22 @@ export function makeTestPluginEntrySource(
 }
 
 /**
+ * Fields Agent Plugins 1.0.0 puts at the top level besides identity. A fixture
+ * naming one of these means the top-level field, not a host field that happens
+ * to share the name — the split has to match `flattenAgentPluginsManifest`, or
+ * a round trip would move a field.
+ */
+const AGENT_PLUGINS_PORTABLE_FIELDS: ReadonlySet<string> = new Set([
+  "version",
+  "description",
+  "author",
+  "homepage",
+  "repository",
+  "license",
+  "keywords",
+]);
+
+/**
  * Project a flat manifest into the Agent Plugins 1.0.0 document that actually
  * goes on disk — the inverse of the host's `flattenAgentPluginsManifest`.
  *
@@ -267,16 +283,17 @@ export function makeTestPluginEntrySource(
 export function agentPluginsDocument(
   manifest: Record<string, unknown>,
 ): Record<string, unknown> {
-  const { id, name, version, description, ...hostFields } = manifest;
-  const lvis: Record<string, unknown> = { ...hostFields };
+  const { id, name, ...rest } = manifest;
+  const top: Record<string, unknown> = { $schema: AGENT_PLUGINS_SCHEMA_URL };
+  if (id !== undefined) top.name = id;
+  const lvis: Record<string, unknown> = {};
   if (name !== undefined) lvis.displayName = name;
-  return {
-    $schema: AGENT_PLUGINS_SCHEMA_URL,
-    ...(id !== undefined ? { name: id } : {}),
-    ...(version !== undefined ? { version } : {}),
-    ...(description !== undefined ? { description } : {}),
-    extensions: { [LVIS_EXTENSION_NAMESPACE]: lvis },
-  };
+  for (const [key, value] of Object.entries(rest)) {
+    if (AGENT_PLUGINS_PORTABLE_FIELDS.has(key)) top[key] = value;
+    else lvis[key] = value;
+  }
+  top.extensions = { [LVIS_EXTENSION_NAMESPACE]: lvis };
+  return top;
 }
 
 export async function writeTestPlugin(

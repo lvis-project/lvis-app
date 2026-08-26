@@ -30,6 +30,7 @@ import {
   TestPluginRuntime as PluginRuntime,
   writeTestPluginRegistry,
 } from "./test-helpers.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 const ENTRY_SOURCE = `export default async function createPlugin(ctx) {
   return { handlers: { tb_ping: async () => "pong" }, start: async () => {}, stop: async () => {} };
@@ -75,7 +76,7 @@ describe("Phase 1 — plugin trust boundary", () => {
     };
     if (opts?.installPolicy) manifest.installPolicy = opts.installPolicy;
     const manifestPath = join(pluginDir, "plugin.json");
-    await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+    await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
     return manifestPath;
   }
 

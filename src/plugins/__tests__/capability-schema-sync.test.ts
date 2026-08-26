@@ -22,12 +22,25 @@ async function loadCapabilitiesItemsSchema(): Promise<{
   const schemaPath = fileURLToPath(
     new URL("../../../schemas/plugin-manifest.schema.json", import.meta.url),
   );
+  // `capabilities` is an LVIS field, so it lives under the namespace the host
+  // owns inside the portable `extensions` object.
   const schema = JSON.parse(await readFile(schemaPath, "utf-8")) as {
     properties: {
-      capabilities: { items: { enum?: string[]; pattern?: string; type?: string } };
+      extensions: {
+        properties: {
+          "xyz.lvisai": {
+            properties: {
+              capabilities: {
+                items: { enum?: string[]; pattern?: string; type?: string };
+              };
+            };
+          };
+        };
+      };
     };
   };
-  return schema.properties.capabilities.items;
+  return schema.properties.extensions.properties["xyz.lvisai"].properties
+    .capabilities.items;
 }
 
 describe("capability schema contract (free-form, not a closed enum)", () => {

@@ -18,6 +18,7 @@ import {
   isAllowedHostSecretKey,
 } from "../../../shared/marketplace-package-assets.js";
 import manifestSchema from "../../../../schemas/plugin-manifest.schema.json" with { type: "json" };
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 describe("manifest hostSecrets.read[] validator (#893)", () => {
   let workDir: string;
@@ -56,7 +57,7 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
     const path = join(workDir, "plugin.json");
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "host-secrets-test",
         name: "Host Secrets Test",
         description: "x",
@@ -64,8 +65,7 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
         entry: "dist/p.js",
         tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         ...extra,
-      }),
-    );
+      })));
     return path;
   }
 
@@ -241,15 +241,14 @@ describe("manifest hostSecrets.read[] validator (#893)", () => {
       const path = join(workDir, "plugin.json");
       await writeFile(
         path,
-        JSON.stringify({
+        JSON.stringify(agentPluginsDocument({
           id,
           name: "Id Test",
           description: "x",
           version: "1.0.0",
           entry: "dist/p.js",
           tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
-        }),
-      );
+        })));
       return path;
     }
 

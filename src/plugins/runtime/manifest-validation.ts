@@ -236,9 +236,11 @@ const AGENT_PLUGINS_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set([
  * less specific first.
  *
  * Portable metadata (`author`, `homepage`, `repository`, `license`,
- * `keywords`) is validated by the schema and deliberately not surfaced: no host
- * consumer reads it, and carrying a field nothing consumes invites the copy to
- * drift from the file.
+ * `keywords`) is validated by the schema and deliberately NOT surfaced. It is
+ * catalog-facing, and `public-contract.ts` keeps catalog concepts out of the
+ * plugin contract on purpose — `public-contract-boundary.test.ts` forbids the
+ * marketplace types and a `keywords:` field there by name. Only `version` and
+ * `description`, which the host itself acts on, cross over.
  */
 export function flattenAgentPluginsManifest(
   doc: unknown,
@@ -368,15 +370,20 @@ export async function parsePluginJson(
       )
     ) {
       try {
-        parsed.networkAccess = {
-          ...parsed.networkAccess,
+        // Normalize IN PLACE rather than replacing `parsed.networkAccess`.
+        // `parsed` is a shallow projection of the document, so this object is
+        // the same one the document holds — and the AJV run below validates the
+        // DOCUMENT. Replacing the field would normalize only the projection and
+        // leave validation looking at the raw value, which the schema's
+        // lowercase-hostname rule would then reject: a manifest that loads today
+        // would stop loading, and the normalization step would be doing nothing.
+        (networkAccessRaw as { allowedDomains: string[] }).allowedDomains =
           // `allowLoopback` admits the `localhost` / `127.0.0.1` / `::1`
           // literals a plugin uses to declare a local endpoint (a user-run
           // inference server or proxy). Declaring one is not reachability —
           // `host-fetch-guard.ts` still decides that — but the literal has to
           // survive normalization or the declaration cannot be written at all.
-          allowedDomains: normalizeAllowedHosts(allowedDomainsRaw, { allowLoopback: true }),
-        };
+          normalizeAllowedHosts(allowedDomainsRaw, { allowLoopback: true });
       } catch (err) {
         fail(
           "networkAccess.allowedDomains",

@@ -17,6 +17,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 describe("manifest networkAccess (Tier A) — host-owned schema validator path", () => {
   let workDir: string;
@@ -32,7 +33,7 @@ describe("manifest networkAccess (Tier A) — host-owned schema validator path",
     const path = join(workDir, "plugin.json");
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "network-access-test",
         name: "Network Access Test",
         description: "x",
@@ -40,8 +41,7 @@ describe("manifest networkAccess (Tier A) — host-owned schema validator path",
         entry: "dist/p.js",
         tools: [{ name: "t_one", description: "t_one tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         ...extra,
-      }),
-    );
+      })));
     return path;
   }
 

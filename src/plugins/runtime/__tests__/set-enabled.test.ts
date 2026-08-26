@@ -17,6 +17,7 @@ import {
   installReceiptPath,
   writeInstallReceipt,
 } from "../../plugin-install-receipt.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 const registryCommitGate = vi.hoisted(() => ({
   started: undefined as (() => void) | undefined,
@@ -99,7 +100,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     );
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "se-plugin",
         name: "SE Plugin",
         version: "1.0.0",
@@ -107,9 +108,8 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
         tools: [{ name: "se_ping", description: "se_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "set-enabled test",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({ version: 1, plugins: [{ id: "se-plugin", manifestPath, enabled: true }] }),
@@ -207,7 +207,7 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
     );
     await writeFile(
       providerManifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: providerId,
         name: "Calendar provider",
         version: "1.0.0",
@@ -216,12 +216,11 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
         capabilities: ["calendar-source"],
         description: "set-enabled provider fixture",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     const consumerManifest = JSON.parse(await readFile(manifestPath, "utf-8"));
     consumerManifest.requires = { capabilities: ["calendar-source"] };
-    await writeFile(manifestPath, JSON.stringify(consumerManifest), "utf-8");
+    await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(consumerManifest)), "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({

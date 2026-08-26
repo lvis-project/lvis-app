@@ -8,6 +8,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildManifestValidator, parsePluginJson } from "../manifest-validation.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 describe("parsePluginJson — SDK schema validator required", () => {
   let testDir: string;
@@ -19,7 +20,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
     await mkdir(testDir, { recursive: true });
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-validator",
         name: "Validator Test",
         version: "1.0.0",
@@ -27,9 +28,8 @@ describe("parsePluginJson — SDK schema validator required", () => {
         tools: [{ name: "validator_ping", description: "validator_ping tool", inputSchema: { type: "object", properties: {} }, _meta: { ui: { visibility: ["model", "app"] } } }],
         description: "Validator required test plugin",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
   });
 
   afterEach(async () => {
@@ -52,7 +52,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
   it("fails closed instead of normalizing invalid installPolicy before SDK validation", async () => {
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-validator",
         name: "Validator Test",
         version: "1.0.0",
@@ -61,9 +61,8 @@ describe("parsePluginJson — SDK schema validator required", () => {
         description: "Validator required test plugin",
         publisher: "Test",
         installPolicy: "root",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const validator = await buildManifestValidator();
     await expect(parsePluginJson(manifestPath, validator)).rejects.toThrow(/schema validation failed/);
@@ -72,7 +71,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
   it("#885 v6 — a pure app-only Tool loads and carries no uiActions map", async () => {
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-validator",
         name: "Validator Test",
         version: "1.0.0",
@@ -86,9 +85,8 @@ describe("parsePluginJson — SDK schema validator required", () => {
         ],
         description: "Validator UI-only runtime method test plugin",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const validator = await buildManifestValidator();
     const manifest = await parsePluginJson(manifestPath, validator);
@@ -101,7 +99,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
   it("#885 v6 — a pure app-only Tool with a description loads", async () => {
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-validator",
         name: "Validator Test",
         version: "1.0.0",
@@ -116,9 +114,8 @@ describe("parsePluginJson — SDK schema validator required", () => {
         ],
         description: "Validator UI action runtime method test plugin",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const validator = await buildManifestValidator();
     const manifest = await parsePluginJson(manifestPath, validator);
@@ -130,7 +127,7 @@ describe("parsePluginJson — SDK schema validator required", () => {
   it("#885 v6 — pure app-only auth tools pass the auth-visibility check", async () => {
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-validator",
         name: "Validator Test",
         version: "1.0.0",
@@ -145,9 +142,8 @@ describe("parsePluginJson — SDK schema validator required", () => {
         },
         description: "Validator UI action auth test plugin",
         publisher: "Test",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const validator = await buildManifestValidator();
     const manifest = await parsePluginJson(manifestPath, validator);

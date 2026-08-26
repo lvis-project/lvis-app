@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { buildManifestValidator, parsePluginJson,
 } from "../manifest-validation.js";
 import { pureTool } from "../../__tests__/test-helpers.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 describe("#885 v6 — dual-declared visibility (the #1554 governed-vs-bypass invariant)", () => {
   let workDir: string;
@@ -34,7 +35,7 @@ describe("#885 v6 — dual-declared visibility (the #1554 governed-vs-bypass inv
     } & Record<string, unknown>;
     await writeFile(
       path,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "overlap-test",
         name: "Overlap Test",
         description: "x",
@@ -45,8 +46,7 @@ describe("#885 v6 — dual-declared visibility (the #1554 governed-vs-bypass inv
         tools: (tools ?? []).map((tool) =>
           typeof tool === "string" ? pureTool(tool, ["model"]) : tool,
         ),
-      }),
-    );
+      })));
     return path;
   }
 

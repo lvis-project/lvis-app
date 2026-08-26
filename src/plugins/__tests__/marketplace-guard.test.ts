@@ -11,6 +11,7 @@ import {
   writeTestPluginRegistry,
 } from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 /**
  * Phase 1.5 F-round §F6: integration test for
@@ -185,16 +186,15 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "agent-hub",
         name: "Agent Hub",
         version: "1.0.0",
         entry: "dist/hostPlugin.js",
         tools: [],
         installPolicy: "admin",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeTestPluginRegistry(
       { registryPath },
       [{ id: "agent-hub", manifestPath, enabled: true, installSource: "admin" }],
@@ -223,16 +223,15 @@ describe("PluginMarketplaceService + PluginDeploymentGuard canInstall", () => {
     const manifestPath = join(pluginDir, "plugin.json");
     await writeFile(
       manifestPath,
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "agent-hub",
         name: "Agent Hub",
         version: "1.0.0",
         entry: "dist/hostPlugin.js",
         tools: [],
         installPolicy: "admin",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeTestPluginRegistry(
       { registryPath },
       [{ id: "agent-hub", manifestPath, enabled: true, installSource: "admin" }],
