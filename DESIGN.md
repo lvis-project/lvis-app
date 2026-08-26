@@ -123,6 +123,12 @@ Plugin UIs are **free**: the SDK ships no UI components, tokens, or style checks
 - The host draws the page chrome: sidebar entry, `PageShell` title/back control for plugin pages, and panel framing. **Do not draw a second page title bar or back button inside your panel** — your surface starts inside the content area.
 - Inline, fullscreen, picture-in-picture, and side-panel presentation are host decisions; the same panel markup must work across them.
 
+### Panel width is yours to spend
+- The host hands the panel the **full width of the main pane** and does not cap it (`plugin-ui-host.tsx`, `maxWidth="none"`). Deciding how much of that a given piece of content should use is the plugin's job.
+- Cap with `max-width`, never a fixed `width`. A fixed width makes the layout dead to the panel — the plugin renders identically at 928px and at 1960px, and widening the window changes nothing on screen. Stay fluid below the cap so the 448px floor still fills.
+- Pick the cap from the content: prose (mail subjects, summaries) wants a reading measure; tabular content (folder lists, counts, matrices) wants the room.
+- History: the host used to clamp every plugin panel to the chat reading column (~928px) because the plugin UIs were authored for a ~800px detached window and stretched at full width. That clamp treated the symptom and cost real width. It was removed once the plugins capped themselves; do not reintroduce it.
+
 ### Mandatory / recommended / free
 | Level | Items |
 |---|---|
