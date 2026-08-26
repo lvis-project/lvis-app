@@ -11,6 +11,7 @@ import {
 import type { PluginManifest, RuntimePlugin } from "../../types.js";
 import { PluginRuntime } from "../index.js";
 import { createNoopHostApiForTests } from "../sandbox.js";
+import { HostApiGenerationScope } from "../../plugin-host-effect-scope.js";
 
 const TARGET_ID = "dispatch-readiness-target";
 const CALLER_ID = "dispatch-readiness-caller";
@@ -39,6 +40,7 @@ function projection(input: {
   manifest: PluginManifest;
   instance: RuntimePlugin;
   methods: PluginRuntimeGenerationProjection["methods"];
+  hostEffects?: HostApiGenerationScope;
 }): PluginRuntimeGenerationProjection {
   return {
     activationId: input.activationId,
@@ -47,6 +49,7 @@ function projection(input: {
     pluginRoot: `/tmp/${input.manifest.id}`,
     instance: input.instance,
     methods: input.methods,
+    hostEffects: input.hostEffects,
   };
 }
 
@@ -96,10 +99,19 @@ async function publish(
   return transition;
 }
 
-function runtimeFixture() {
+function runtimeFixture(
+  auditEntries?: Array<{ level: string; message: string; data?: unknown }>,
+) {
   const runtime = new PluginRuntime({
     hostRoot: "/tmp",
     createHostApi: createNoopHostApiForTests,
+    ...(auditEntries
+      ? {
+          auditLog: (level: string, message: string, data?: unknown) => {
+            auditEntries.push({ level, message, data });
+          },
+        }
+      : {}),
   });
   const coordinator = new PluginGenerationCoordinator<HostPluginGenerationState>();
   const lifecycle: PluginRuntimeGenerationLifecycle = {
@@ -144,7 +156,7 @@ function runtimeFixture() {
     waitForRetirements: async () => undefined,
   };
   runtime.setGenerationAccess(lifecycle);
-  return { coordinator, runtime };
+  return { coordinator, runtime, lifecycle };
 }
 
 function targetManifest(version: string): PluginManifest {
@@ -374,5 +386,124 @@ describe("generation dispatch readiness", () => {
     await expect(runtime.call(CALLER_TOOL)).rejects.toThrow(/dispatch blocked/);
     expect(ensureStarted).not.toHaveBeenCalled();
     expect(start).not.toHaveBeenCalled();
+  });
+});
+
+describe("post-publish fault ownership", () => {
+  function throwingHostEffect(pluginId: string, lifecycle: PluginRuntimeGenerationLifecycle) {
+    // A real scope, not a stub: `emitEvent` is queued while the scope is
+    // preparing and replayed by postPublish(), which is where it throws. A
+    // stub returning a canned array would pass even if the host stopped
+    // replaying queued signals at all.
+    const scope = new HostApiGenerationScope(pluginId);
+    const api = scope.wrapHostApi({
+      emitEvent: () => { throw new Error("generation fence signal failed"); },
+      logEvent: vi.fn(),
+      config: { get: vi.fn(), set: vi.fn(), onChange: vi.fn() },
+    } as never);
+    api.emitEvent("ready", {});
+    return { scope, bind: (generationId: string) => { scope.bindGeneration(lifecycle, generationId); } };
+  }
+
+  async function commitCandidate(
+    runtime: PluginRuntime,
+    coordinator: PluginGenerationCoordinator<HostPluginGenerationState>,
+    candidate: PluginRuntimeGenerationProjection,
+    digest: string,
+  ) {
+    const prepared = runtime.prepareRuntimeGeneration(candidate, undefined);
+    return coordinator.commit(
+      generation(candidate, digest),
+      async () => undefined,
+      undefined,
+      candidate.manifest.id,
+      prepared.publish,
+    );
+  }
+
+  it("keeps dispatch open when the plugin's own onPublished fails, and records it as degraded", async () => {
+    const audit: Array<{ level: string; message: string; data?: unknown }> = [];
+    const { coordinator, runtime } = runtimeFixture(audit);
+    const candidate = projection({
+      activationId: "a".repeat(64),
+      manifest: targetManifest("1.0.0"),
+      instance: {
+        handlers: {},
+        onPublished: async () => { throw new Error("worker failed health check within 30000ms"); },
+      },
+      methods: new Map([
+        [MODEL_TOOL, async () => "reached the plugin"],
+        [APP_TOOL, async () => "reached the plugin"],
+      ]),
+    });
+    const transition = await commitCandidate(runtime, coordinator, candidate, "a");
+
+    await expect(runtime.postPublishRuntimeGeneration(candidate)).resolves.toBeUndefined();
+    await transition.markDispatchReady();
+
+    // The whole point: a startup failure must not spend the rest of the
+    // session refusing every tool with a host message.
+    await expect(runtime.call(MODEL_TOOL)).resolves.toBe("reached the plugin");
+    await expect(runtime.callDeclaredAppOnlyTool(APP_TOOL)).resolves.toBe("reached the plugin");
+    expect(audit).toContainEqual(expect.objectContaining({
+      level: "warn",
+      message: "plugin_post_publish_startup_degraded",
+      data: expect.objectContaining({
+        pluginId: TARGET_ID,
+        error: expect.stringContaining("failed health check"),
+      }),
+    }));
+  });
+
+  it("still refuses dispatch when the host's own generation fence fails", async () => {
+    const { coordinator, runtime, lifecycle } = runtimeFixture();
+    const effect = throwingHostEffect(TARGET_ID, lifecycle);
+    const candidate = projection({
+      activationId: "b".repeat(64),
+      manifest: targetManifest("1.0.0"),
+      instance: { handlers: {} },
+      methods: new Map([[MODEL_TOOL, async () => "reached the plugin"]]),
+      hostEffects: effect.scope,
+    });
+    effect.bind(candidate.activationId);
+    const transition = await commitCandidate(runtime, coordinator, candidate, "b");
+
+    await expect(runtime.postPublishRuntimeGeneration(candidate))
+      .rejects.toThrow(/host generation effects failed to publish/);
+
+    // The caller closes dispatch on that throw, exactly as before the split.
+    transition.markDispatchUnavailable(new Error("host generation effects failed to publish"));
+    await expect(runtime.call(MODEL_TOOL)).rejects.toThrow(/dispatch blocked/);
+  });
+
+  it("does not fold a plugin startup failure back into the host fence faults", async () => {
+    // The control for the split. If both classes are merged into one
+    // AggregateError again, this AggregateError carries two errors and the
+    // plugin's message leaks into a host-owned fault.
+    const audit: Array<{ level: string; message: string; data?: unknown }> = [];
+    const { coordinator, runtime, lifecycle } = runtimeFixture(audit);
+    const effect = throwingHostEffect(TARGET_ID, lifecycle);
+    const candidate = projection({
+      activationId: "c".repeat(64),
+      manifest: targetManifest("1.0.0"),
+      instance: {
+        handlers: {},
+        onPublished: async () => { throw new Error("plugin startup blew up"); },
+      },
+      methods: new Map([[MODEL_TOOL, async () => "reached the plugin"]]),
+      hostEffects: effect.scope,
+    });
+    effect.bind(candidate.activationId);
+    await commitCandidate(runtime, coordinator, candidate, "c");
+
+    const failure = await runtime.postPublishRuntimeGeneration(candidate).catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(AggregateError);
+    const errors = (failure as AggregateError).errors as Error[];
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.message).toBe("generation fence signal failed");
+    // The plugin fault is still recorded — on its own channel, not this one.
+    expect(audit).toContainEqual(expect.objectContaining({
+      message: "plugin_post_publish_startup_degraded",
+    }));
   });
 });
