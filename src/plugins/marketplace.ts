@@ -2342,6 +2342,7 @@ export class PluginMarketplaceService {
         let receiptCommitted = false;
         let preparedReceiptRaw: string | undefined;
         let preparedManifest: PluginManifest | undefined;
+        let preparedDocument: unknown;
         try {
           throwIfMarketplaceInstallAborted(opts.signal, plugin.id);
           const transaction = await this.artifactStore.extractZipWithCommit(
@@ -2380,8 +2381,9 @@ export class PluginMarketplaceService {
                   pluginRoot,
                   validateCatalogMetadata,
                 );
+                preparedDocument = JSON.parse(manifestRaw) as unknown;
                 preparedManifest = flattenAgentPluginsManifest(
-                  JSON.parse(manifestRaw),
+                  preparedDocument,
                   manifestFile,
                 );
                 preparedReceiptRaw = await this.prepareInstallReceipt(plugin.id, pluginRoot, {
@@ -2399,7 +2401,11 @@ export class PluginMarketplaceService {
                   receiptRaw: preparedReceiptRaw,
                   registryEntry: {
                     installSource: opts.registryInstallSource,
-                    manifestSha256: shaOfManifest(preparedManifest),
+                    // The pin covers the FILE, so it hashes the document —
+                    // `readManifestSha256` re-derives it that way on every later
+                    // read, and a pin taken over the projection would never
+                    // match one taken over the file.
+                    manifestSha256: shaOfManifest(preparedDocument),
                   },
                   ...(plugin.pluginAccess ? { approvedPluginAccess: plugin.pluginAccess } : {}),
                   durableCommit,
@@ -2750,9 +2756,13 @@ export class PluginMarketplaceService {
     // Read and parse plugin.json from the source directory.
     const manifestPath = resolve(sourcePath, "plugin.json");
     let manifest: PluginManifest & { id?: unknown; [key: string]: unknown };
+    // The document is kept alongside the projection: reads go through the
+    // projection, but the registry's manifest pin covers the file.
+    let manifestDocument: unknown;
     try {
       const raw = await readFile(manifestPath, "utf-8");
-      manifest = flattenAgentPluginsManifest(JSON.parse(raw), manifestPath) as
+      manifestDocument = JSON.parse(raw) as unknown;
+      manifest = flattenAgentPluginsManifest(manifestDocument, manifestPath) as
         PluginManifest & { id?: unknown; [key: string]: unknown };
     } catch {
       throw new Error(`[installLocal] could not read plugin.json in ${sourcePath}`);
@@ -2857,7 +2867,7 @@ export class PluginMarketplaceService {
         const localInstallSource: PluginRegistryEntryInstallSource =
           manifest.installPolicy === "admin" ? "admin" : "local-dev";
         const registryManifestPath = posix.join(pluginId, "plugin.json");
-        const manifestSha256 = shaOfManifest(manifest);
+        const manifestSha256 = shaOfManifest(manifestDocument);
         const approvedPluginAccess = manifest.pluginAccess;
 
         const durableCommit = (): Promise<string> => {

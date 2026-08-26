@@ -17,7 +17,10 @@ import {
   installReceiptPath,
   writeInstallReceipt,
 } from "../../plugin-install-receipt.js";
-import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
+import {
+  agentPluginsDocument,
+  patchLvisFields,
+} from "../../__tests__/test-helpers.js";
 
 const registryCommitGate = vi.hoisted(() => ({
   started: undefined as (() => void) | undefined,
@@ -219,8 +222,10 @@ describe("PluginRuntime — active/inactive toggle (#1176)", () => {
       })),
       "utf-8");
     const consumerManifest = JSON.parse(await readFile(manifestPath, "utf-8"));
-    consumerManifest.requires = { capabilities: ["calendar-source"] };
-    await writeFile(manifestPath, JSON.stringify(agentPluginsDocument(consumerManifest)), "utf-8");
+    patchLvisFields(consumerManifest, {
+      requires: { capabilities: ["calendar-source"] },
+    });
+    await writeFile(manifestPath, JSON.stringify(consumerManifest), "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({

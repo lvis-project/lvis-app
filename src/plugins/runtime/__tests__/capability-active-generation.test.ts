@@ -327,7 +327,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
       registryEntry: {
         installSource: "user",
         manifestSha256: createHash("sha256")
-          .update(canonicalJSON(manifest))
+          .update(canonicalJSON(agentPluginsDocument(manifest)))
           .digest("hex"),
       },
       toolName,
@@ -400,7 +400,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
       registryEntry: {
         installSource: "user",
         manifestSha256: createHash("sha256")
-          .update(canonicalJSON(manifest))
+          .update(canonicalJSON(agentPluginsDocument(manifest)))
           .digest("hex"),
       },
       toolName,
@@ -1119,7 +1119,7 @@ export default async function createPlugin() {
     delete replacementManifest.capabilities;
     await writeFile(
       provider.manifestPath,
-      JSON.stringify(replacementManifest),
+      JSON.stringify(agentPluginsDocument(replacementManifest)),
       "utf8",
     );
 
@@ -1151,7 +1151,7 @@ export default async function createPlugin() {
     delete replacementManifest.capabilities;
     await writeFile(
       firstProvider.manifestPath,
-      JSON.stringify(replacementManifest),
+      JSON.stringify(agentPluginsDocument(replacementManifest)),
       "utf8",
     );
 
@@ -1202,7 +1202,7 @@ export default async function createPlugin() {
       registryEntry: {
         installSource: "user",
         manifestSha256: createHash("sha256")
-          .update(canonicalJSON(replacementManifest))
+          .update(canonicalJSON(agentPluginsDocument(replacementManifest)))
           .digest("hex"),
       },
       durableCommit,

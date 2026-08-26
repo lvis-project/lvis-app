@@ -15,7 +15,7 @@ import {
   writeTestPlugin,
   writeTestPluginRegistry,
 } from "./test-helpers.js";
-import { agentPluginsDocument } from "./test-helpers.js";
+import { agentPluginsDocument, patchLvisFields } from "./test-helpers.js";
 
 function makeGenerationBoundRuntime(
   options: Omit<ConstructorParameters<typeof PluginRuntime>[0], "createHostApi">
@@ -2264,7 +2264,7 @@ export default async function createPlugin({ hostApi }) {
   it("addPlugin does not let a disabled provider satisfy a consumer capability", async () => {
     const providerPath = await writePlugin("p-calendar-provider");
     const providerManifest = JSON.parse(await readFile(providerPath, "utf-8"));
-    providerManifest.capabilities = ["calendar-source"];
+    patchLvisFields(providerManifest, { capabilities: ["calendar-source"] });
     await writeFile(providerPath, JSON.stringify(providerManifest), "utf-8");
     await writeFile(
       registryPath,
@@ -2279,7 +2279,9 @@ export default async function createPlugin({ hostApi }) {
 
     const consumerPath = await writePlugin("p-calendar-consumer");
     const consumerManifest = JSON.parse(await readFile(consumerPath, "utf-8"));
-    consumerManifest.requires = { capabilities: ["calendar-source"] };
+    patchLvisFields(consumerManifest, {
+      requires: { capabilities: ["calendar-source"] },
+    });
     await writeFile(consumerPath, JSON.stringify(consumerManifest), "utf-8");
     await writeFile(
       registryPath,

@@ -34,6 +34,7 @@ import {
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
+import { flattenAgentPluginsManifest } from "../runtime/manifest-validation.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
 import { agentPluginsDocument } from "./test-helpers.js";
@@ -327,11 +328,15 @@ describe("PluginMarketplaceService install()", () => {
     expect(entryPath).toBe("test-plugin/plugin.json");
     expect(entryPath).not.toMatch(/^[/\\]|^[A-Za-z]:/);
     expect(entryPath).not.toContain("\\");
-    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(pluginManifest));
+    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(agentPluginsDocument(pluginManifest)));
 
-    const manifest = JSON.parse(
-      await readFile(manifestPathToAbs(entryPath), "utf-8"),
-    ) as { version: string; entry: string };
+    // Project through the production flattener rather than reading the document
+    // directly: the assertion is about what the host will resolve `entry` to,
+    // not about where the byte sits in the file.
+    const manifest = flattenAgentPluginsManifest(
+      JSON.parse(await readFile(manifestPathToAbs(entryPath), "utf-8")),
+      entryPath,
+    ) as unknown as { version: string; entry: string };
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
   });
@@ -509,7 +514,7 @@ describe("PluginMarketplaceService install()", () => {
       expect(registry.plugins[0]).toMatchObject({
         id: current.id,
         manifestPath: `${current.id}/plugin.json`,
-        manifestSha256: manifestSha({ ...current, entry: "./dist/hostPlugin.js" }),
+        manifestSha256: manifestSha(agentPluginsDocument({ ...current, entry: "./dist/hostPlugin.js" })),
       });
       expect(registry.plugins[0]?.pendingUpdate).toBeUndefined();
       expect(registry.plugins[0]?.pendingCleanup).toBeUndefined();
@@ -526,8 +531,13 @@ describe("PluginMarketplaceService install()", () => {
       expect(JSON.parse(await readFile(join(installedDir, current.id, "plugin.json"), "utf-8")))
         .toMatchObject({ version: current.version });
 
-      const persistedManifest = JSON.parse(
-        await readFile(join(installedDir, current.id, "plugin.json"), "utf-8"),
+      // `activatePreparedArtifact` takes the flat manifest its caller already
+      // projected, and re-reads the file itself to check identity — so a fixture
+      // handing it the raw document would fail that check on `id`.
+      const persistedManifestPath = join(installedDir, current.id, "plugin.json");
+      const persistedManifest = flattenAgentPluginsManifest(
+        JSON.parse(await readFile(persistedManifestPath, "utf-8")),
+        persistedManifestPath,
       );
       const persistedReceipt = await readFile(
         join(cacheRoot, current.id, "install-receipt.json"),
@@ -1191,7 +1201,7 @@ describe("PluginMarketplaceService install()", () => {
       expect.objectContaining({ id: plugin.id, installSource: "admin" }),
     ]);
     expect(JSON.parse(await readFile(join(installedDir, plugin.id, "plugin.json"), "utf-8")))
-      .toMatchObject({ id: plugin.id, version: "2.0.0" });
+      .toMatchObject({ name: plugin.id, version: "2.0.0" });
   }, 20_000);
 
   it("rechecks installed version under lock so an older managed retry cannot downgrade a newer install", async () => {
@@ -1900,7 +1910,7 @@ describe("PluginMarketplaceService install()", () => {
       plugins: Array<{ manifestSha256?: string }>;
     };
     expect(receipt.artifactSha256).toBe(plugin.artifactSha256);
-    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(v2Manifest));
+    expect(registry.plugins[0].manifestSha256).toBe(manifestSha(agentPluginsDocument(v2Manifest)));
     expect(downloadArtifact).toHaveBeenCalledTimes(2);
     expect(fetchSignatureEnvelope).toHaveBeenCalledTimes(2);
   });

@@ -706,7 +706,9 @@ describe("PluginArtifactStore — cacheVersionFromManifest", () => {
       const cached = resolve(tmp, "cache", "acme", "1.2.3", "plugin.json");
       const { readFile: read } = await import("node:fs/promises");
       const raw = await read(cached, "utf-8");
-      expect(JSON.parse(raw)).toMatchObject({ id: "acme", version: "1.2.3" });
+      // The cached snapshot is a byte copy of the document, so identity is the
+      // portable `name`, not the flat `id` the host projects it to.
+      expect(JSON.parse(raw)).toMatchObject({ name: "acme", version: "1.2.3" });
     } finally {
       await cleanupTmpDir(tmp);
     }

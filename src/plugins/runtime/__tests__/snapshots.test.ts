@@ -83,7 +83,7 @@ describe("readEnabledManifestSnapshots", () => {
       const badPath = join(dir, "bad-plugin.json");
       const goodPath = join(dir, "good-plugin.json");
       await writeFile(badPath, "{ not json", "utf-8");
-      await writeFile(goodPath, JSON.stringify(VALID_MANIFEST), "utf-8");
+      await writeFile(goodPath, JSON.stringify(agentPluginsDocument(VALID_MANIFEST)), "utf-8");
 
       const result = await readEnabledManifestSnapshots(
         [

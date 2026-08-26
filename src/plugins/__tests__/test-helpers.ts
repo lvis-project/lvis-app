@@ -254,6 +254,32 @@ export function makeTestPluginEntrySource(
 }
 
 /**
+ * Patch LVIS fields inside an on-disk Agent Plugins document.
+ *
+ * A fixture that reads `plugin.json`, edits a field and writes it back is
+ * editing a DOCUMENT, not a flat manifest — passing it through
+ * {@link agentPluginsDocument} again would nest the whole document inside the
+ * namespace. This edits at the right depth instead, and throws if the namespace
+ * is missing rather than creating one, so a wrong-shaped fixture fails loudly.
+ */
+export function patchLvisFields(
+  document: Record<string, unknown>,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const extensions = document.extensions as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+  const namespace = extensions?.[LVIS_EXTENSION_NAMESPACE];
+  if (!namespace) {
+    throw new Error(
+      `manifest document has no extensions["${LVIS_EXTENSION_NAMESPACE}"] to patch`,
+    );
+  }
+  Object.assign(namespace, patch);
+  return document;
+}
+
+/**
  * A deliberately permissive Agent Plugins envelope, for suites that want to
  * exercise a HOST cross-field check rather than the real manifest schema.
  *

@@ -85,7 +85,7 @@ async function writePreparedPlugin(
     registryEntry: {
       installSource: "user",
       manifestSha256: createHash("sha256")
-        .update(canonicalJSON(manifest))
+        .update(canonicalJSON(agentPluginsDocument(manifest)))
         .digest("hex"),
     },
   };

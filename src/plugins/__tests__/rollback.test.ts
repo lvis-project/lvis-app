@@ -301,7 +301,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
 
     const restored = JSON.parse(await readFile(registryPath, "utf-8"));
     expect(restored.plugins[0].installSource).toBe("admin");
-    expect(restored.plugins[0].manifestSha256).toBe(manifestSha(sampleManifest("1.0.0")));
+    expect(restored.plugins[0].manifestSha256).toBe(manifestSha(agentPluginsDocument(sampleManifest("1.0.0"))));
   });
 
   it("rollback normalises a legacy dev-link registry value to 'user' regardless of packaged/dev mode", async () => {
