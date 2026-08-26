@@ -350,3 +350,34 @@ describe("PluginUiHostView — webview security attributes", () => {
     expect(partition).toMatch(/^persist:plugin:[0-9a-f]{8}$/);
   });
 });
+
+describe("PluginUiHostView — panel width", () => {
+  /**
+   * The panel used to be clamped to the chat reading column (max-w-[58rem]).
+   * That clamp was compensation: the plugin UIs were authored for a ~800px
+   * detached window, so the host pinned the panel narrow rather than let their
+   * non-adapting layouts show. Measured consequence — at a 2200px window the
+   * shell had 1960px available and the webview still rendered at 912px.
+   *
+   * The plugins now cap their own content column, so the clamp only wasted
+   * width. Pinned here because nothing else can see it: typecheck, build and
+   * every other test pass either way, and the regression is invisible until
+   * someone opens a plugin panel on a wide screen.
+   */
+  it("hands the plugin the full pane instead of the reading column", () => {
+    vi.stubGlobal("lvisApi", {
+      pluginShellUrl: SHELL_URL,
+      pluginPreloadUrl: PRELOAD_URL,
+      registerPluginWebview: vi.fn().mockResolvedValue({ ok: true }),
+    });
+
+    const container = mountHost(VIEW);
+
+    // Assert the shell rendered first. Without this, a shell that failed to
+    // render at all would satisfy the "no clamp" check and read as a pass.
+    expect(container.querySelector('[data-testid="plugin-page-shell"]')).not.toBeNull();
+
+    // The clamp lives on the shell's inner column, not on the testid node.
+    expect(container.querySelector('[class*="max-w-[58rem]"]')).toBeNull();
+  });
+});

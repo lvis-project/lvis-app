@@ -73,6 +73,26 @@ render within the provided root and use the bridge for host interaction.
 If the entry cannot load, the shell shows English fallback errors. A blank plugin
 surface is considered a regression.
 
+### Panel Width
+
+The host gives the panel the full width of the main pane and does not cap it.
+A plugin UI therefore owns its own measure.
+
+- Cap content with `max-width`, never a fixed `width`. A fixed width makes the
+  layout dead to the panel: widening the window changes nothing on screen.
+- Stay fluid below the cap so a narrow sidebar still fills.
+- Prefer `@container` over `@media`. The webview viewport equals the panel box
+  today, but the panel is the axis that governs the layout; set
+  `container-type: inline-size` on your content column and query that.
+- Content wider than the panel (tables, matrices, code) scrolls inside its own
+  `overflow-x: auto` container. It must never push the panel into a horizontal
+  scroll.
+- Korean body text needs at least 14px; keep 12px for metadata only.
+
+The host previously clamped the panel to the chat reading column because the
+plugin UIs were authored for a ~800px detached window and stretched at full
+width. That clamp is gone — it hid non-adapting layouts rather than fixing them.
+
 This is the host-mounted **sidebar panel** surface (`ui[]` in the manifest). It is
 not the only one: a plugin can also ship an **MCP App** — an interactive `ui://`
 card the host renders next to a tool result, built on the standard
