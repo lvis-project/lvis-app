@@ -23,6 +23,7 @@ import type { PluginMarketplaceItem } from "../types.js";
 import { MissingPluginDependenciesError } from "../types.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginMarketplaceService } from "./test-helpers.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 class StubFetcher {
   constructor(private items: PluginMarketplaceItem[]) {}
@@ -62,7 +63,7 @@ async function seedInstalledPlugin(
   await mkdir(pluginDir, { recursive: true });
   await writeFile(
     resolve(pluginDir, "plugin.json"),
-    JSON.stringify({
+    JSON.stringify(agentPluginsDocument({
       id: pluginId,
       name: pluginId,
       version: "1.0.0",
@@ -71,8 +72,7 @@ async function seedInstalledPlugin(
       description: "Test fixture.",
       publisher: "Test fixture",
       ...manifestPatch,
-    }),
-  );
+    })));
 }
 
 async function writeRegistry(

@@ -8,6 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readEnabledManifestSnapshots, resolveManifestLoadPlan } from "../index.js";
 import { buildManifestValidator } from "../manifest-validation.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 let validator: Awaited<ReturnType<typeof buildManifestValidator>>;
 
@@ -149,7 +150,7 @@ describe("resolveManifestLoadPlan — pending registry updates", () => {
       const pluginDir = join(dir, "pending-plugin");
       const registryPath = join(dir, "registry.json");
       await mkdir(pluginDir);
-      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(VALID_MANIFEST));
+      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(agentPluginsDocument(VALID_MANIFEST)));
       await writeFile(registryPath, JSON.stringify({
         version: 1,
         plugins: [{

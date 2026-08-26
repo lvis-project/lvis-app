@@ -45,12 +45,13 @@ describe("PluginRuntime immutable generation root", () => {
         _meta: { ui: { visibility: ["model"] } },
       }],
     };
-    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
+    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf8");
     await writeFile(join(pluginRoot, "value.txt"), "g1", "utf8");
     await writeFile(
       join(pluginRoot, "entry.mjs"),
       `import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { agentPluginsDocument } from "./test-helpers.js";
 export default async function createPlugin(ctx) {
   return { handlers: { immutable_root_read: async () => readFile(resolve(ctx.pluginRoot, "value.txt"), "utf8") } };
 }`,

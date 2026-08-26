@@ -23,6 +23,10 @@ import {
   type PluginRuntimeOptions,
 } from "../runtime.js";
 import type { PluginManifest, Tool } from "../types.js";
+import {
+  AGENT_PLUGINS_SCHEMA_URL,
+  LVIS_EXTENSION_NAMESPACE,
+} from "../runtime/manifest-validation.js";
 import type {
   HostPluginGenerationState,
   PluginRuntimeGenerationProjection,
@@ -249,6 +253,32 @@ export function makeTestPluginEntrySource(
 `;
 }
 
+/**
+ * Project a flat manifest into the Agent Plugins 1.0.0 document that actually
+ * goes on disk — the inverse of the host's `flattenAgentPluginsManifest`.
+ *
+ * Fixtures stay flat because that is the shape assertions read and the shape a
+ * test is usually about. Only the bytes written to `plugin.json` are nested, so
+ * a fixture's subject stays its content rather than its envelope.
+ *
+ * Faithful about absence: a fixture that omits `id` produces a document with no
+ * `name`, which is how a test drives the "missing identity" path.
+ */
+export function agentPluginsDocument(
+  manifest: Record<string, unknown>,
+): Record<string, unknown> {
+  const { id, name, version, description, ...hostFields } = manifest;
+  const lvis: Record<string, unknown> = { ...hostFields };
+  if (name !== undefined) lvis.displayName = name;
+  return {
+    $schema: AGENT_PLUGINS_SCHEMA_URL,
+    ...(id !== undefined ? { name: id } : {}),
+    ...(version !== undefined ? { version } : {}),
+    ...(description !== undefined ? { description } : {}),
+    extensions: { [LVIS_EXTENSION_NAMESPACE]: lvis },
+  };
+}
+
 export async function writeTestPlugin(
   fixture: TestPluginRuntimeFixture,
   options: WriteTestPluginOptions,
@@ -267,7 +297,11 @@ export async function writeTestPlugin(
     ...options.manifest,
   });
   const manifestPath = join(pluginDir, "plugin.json");
-  await writeFile(manifestPath, JSON.stringify(manifest), "utf-8");
+  await writeFile(
+    manifestPath,
+    JSON.stringify(agentPluginsDocument(manifest)),
+    "utf-8",
+  );
   return { pluginDir, manifestPath, manifest };
 }
 

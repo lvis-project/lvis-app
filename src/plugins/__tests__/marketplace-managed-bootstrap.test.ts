@@ -12,6 +12,7 @@ import {
 } from "./test-helpers.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
 import { removeQuiescentPluginResidualState } from "../uninstall-lifecycle.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 function makeManagedService(testDir: string, marketplacePath: string): PluginMarketplaceService {
   const paths = makeTestPluginPaths({ rootDir: testDir });
@@ -149,16 +150,15 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     await mkdir(pluginDir, { recursive: true });
     await writeFile(
       join(pluginDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "meeting",
         name: "Meeting",
         version: "1.0.0",
         entry: "dist/hostPlugin.js",
         tools: [],
         description: "fixture",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -360,13 +360,13 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   ) {
     const pluginDir = join(pluginsDir, pluginId);
     mkdirSync(pluginDir, { recursive: true });
-    writeFileSync(join(pluginDir, "plugin.json"), JSON.stringify({
+    writeFileSync(join(pluginDir, "plugin.json"), JSON.stringify(agentPluginsDocument({
       id: pluginId,
       name: pluginId,
       version: installedVersion,
       entry: "dist/index.js",
       tools: [],
-    }));
+    })));
     writeFileSync(registryPath, JSON.stringify({
       version: 1,
       plugins: [{
@@ -950,28 +950,26 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     await mkdir(emailDir, { recursive: true });
     await writeFile(
       join(calendarDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "calendar",
         name: "Calendar",
         version: "1.0.0",
         entry: "dist/index.js",
         tools: [],
         description: "Test fixture.",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       join(emailDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "email",
         name: "Email",
         version: "1.0.0",
         entry: "dist/index.js",
         tools: [],
         description: "Test fixture.",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     await writeFile(
       registryPath,
       JSON.stringify({
@@ -1039,12 +1037,12 @@ describe("PluginMarketplaceService managed bootstrap", () => {
   it("preserves registry and live files when install rollback staging fails", async () => {
     const emailDir = join(pluginsDir, "email");
     await mkdir(emailDir, { recursive: true });
-    await writeFile(join(emailDir, "plugin.json"), JSON.stringify({
+    await writeFile(join(emailDir, "plugin.json"), JSON.stringify(agentPluginsDocument({
       id: "email",
       name: "Email",
       version: "1.0.0",
       entry: "dist/index.js",
-    }), "utf-8");
+    })), "utf-8");
     const originalRegistry = `${JSON.stringify({
       version: 1,
       plugins: [
@@ -1093,16 +1091,15 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       await mkdir(pluginDir, { recursive: true });
       await writeFile(
         join(pluginDir, "plugin.json"),
-        JSON.stringify({
+        JSON.stringify(agentPluginsDocument({
           id: pluginId,
           name: pluginId,
           version: "1.0.0",
           entry: "dist/index.js",
           tools: [],
           description: "Test fixture.",
-        }),
-        "utf-8",
-      );
+        })),
+        "utf-8");
     }
     await writeFile(
       registryPath,
@@ -1172,12 +1169,12 @@ describe("PluginMarketplaceService managed bootstrap", () => {
     for (const pluginId of ["work-assistant", "email"]) {
       const pluginDir = join(pluginsDir, pluginId);
       await mkdir(join(pluginDir, "dist"), { recursive: true });
-      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify({
+      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(agentPluginsDocument({
         id: pluginId,
         name: pluginId,
         version: "1.0.0",
         entry: "dist/index.js",
-      }), "utf-8");
+      })), "utf-8");
       await writeFile(join(pluginDir, "dist", "index.js"), "export default {};\n", "utf-8");
     }
     await writeFile(registryPath, JSON.stringify({
@@ -1190,12 +1187,12 @@ describe("PluginMarketplaceService managed bootstrap", () => {
 
     const sourceDir = join(testDir, "email-source");
     await mkdir(join(sourceDir, "dist"), { recursive: true });
-    await writeFile(join(sourceDir, "plugin.json"), JSON.stringify({
+    await writeFile(join(sourceDir, "plugin.json"), JSON.stringify(agentPluginsDocument({
       id: "email",
       name: "email replacement",
       version: "2.0.0",
       entry: "dist/index.js",
-    }), "utf-8");
+    })), "utf-8");
     await writeFile(join(sourceDir, "dist", "index.js"), "export default { version: 2 };\n", "utf-8");
 
     let resumeStaging!: () => void;
@@ -1288,9 +1285,8 @@ describe("PluginMarketplaceService managed bootstrap", () => {
       await mkdir(join(pluginsDir, "ep-api"), { recursive: true });
       await writeFile(
         join(pluginsDir, "ep-api", "plugin.json"),
-        JSON.stringify({ id: "ep-api", version: "0.17.32", ...manifestExtras }),
-        "utf-8",
-      );
+        JSON.stringify(agentPluginsDocument({ id: "ep-api", version: "0.17.32", ...manifestExtras })),
+        "utf-8");
     }
 
     function stubDetail(

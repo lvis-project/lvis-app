@@ -518,8 +518,6 @@ export interface PluginManifest {
     /** Allowlisted secret keys this plugin can read via `hostApi.getSecret`. */
     read?: string[];
   };
-  /** Individual maintainer name or contact, distinct from the publishing organization. */
-  author?: string;
   /** Marketplace-only advertisement of UI slot names; bindings remain in `ui[].slot`. */
   uiSlots?: string[];
 }

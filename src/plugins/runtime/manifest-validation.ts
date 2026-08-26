@@ -180,7 +180,131 @@ function materializeManifest(manifest: PluginManifest): PluginManifest {
 }
 
 /**
+ * Agent Plugins 1.0.0 manifest schema identifier (agent-plugins.org). A
+ * `plugin.json` MUST carry this exact string in `$schema`; the schema pins it
+ * as a `const`, so it doubles as the manifest-format marker.
+ */
+export const AGENT_PLUGINS_SCHEMA_URL =
+  "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
+
+/**
+ * The reverse-domain namespace LVIS owns inside the portable `extensions`
+ * object (domain `lvisai.xyz`). Agent Plugins assigns no semantics to a
+ * namespace's contents, so everything the host needs in order to load, sandbox
+ * and govern a plugin lives under this one key.
+ */
+export const LVIS_EXTENSION_NAMESPACE = "xyz.lvisai";
+
+/**
+ * The top level Agent Plugins 1.0.0 defines. Anything else up there belongs to
+ * no one, and the specification is explicit that a client reports and ignores
+ * it rather than refusing the plugin — so {@link flattenAgentPluginsManifest}
+ * drops unknown top-level fields with a warning. The schema stays strict about
+ * them on purpose: it validates an author's file in CI, where an unrecognised
+ * top-level key is a typo worth failing on, not a foreign client's data.
+ */
+const AGENT_PLUGINS_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set([
+  "$schema",
+  "name",
+  "version",
+  "description",
+  "author",
+  "homepage",
+  "repository",
+  "license",
+  "keywords",
+  "extensions",
+]);
+
+/**
+ * Convert an on-disk Agent Plugins 1.0.0 document into the flat
+ * {@link PluginManifest} every host consumer reads.
+ *
+ * Exported because `parsePluginJson` is not the only code that reads a
+ * `plugin.json` off disk — install, activation and registry-scan paths parse
+ * one directly to check identity. They all project it through here, so where
+ * the id lives in the file has exactly one definition.
+ *
+ * This function is the only place the two shapes meet. The portable `name`
+ * lands on `id`, `extensions["xyz.lvisai"]` is spread flat, and its
+ * `displayName` becomes the internal `name` — which is why the hundreds of
+ * `manifest.id` / `manifest.name` call sites downstream do not know the file on
+ * disk is nested.
+ *
+ * Pure and total: a document of the wrong shape is passed through so the AJV
+ * error names the actual defect, instead of this function throwing something
+ * less specific first.
+ *
+ * Portable metadata (`author`, `homepage`, `repository`, `license`,
+ * `keywords`) is validated by the schema and deliberately not surfaced: no host
+ * consumer reads it, and carrying a field nothing consumes invites the copy to
+ * drift from the file.
+ */
+export function flattenAgentPluginsManifest(
+  doc: unknown,
+  path: string,
+): PluginManifest {
+  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
+    return doc as PluginManifest;
+  }
+  const top = doc as Record<string, unknown>;
+  const foreign = Object.keys(top).filter(
+    (key) => !AGENT_PLUGINS_TOP_LEVEL_FIELDS.has(key),
+  );
+  if (foreign.length > 0) {
+    log.warn(
+      `[manifest] ${path}: ignoring non-portable top-level field(s) ` +
+        `${foreign.join(", ")} — Agent Plugins 1.0.0 reserves the manifest top ` +
+        `level; client-specific data belongs under ` +
+        `extensions["${LVIS_EXTENSION_NAMESPACE}"]`,
+    );
+  }
+  const extensions = top.extensions;
+  const namespaced =
+    extensions && typeof extensions === "object" && !Array.isArray(extensions)
+      ? (extensions as Record<string, unknown>)[LVIS_EXTENSION_NAMESPACE]
+      : undefined;
+  const lvis =
+    namespaced && typeof namespaced === "object" && !Array.isArray(namespaced)
+      ? (namespaced as Record<string, unknown>)
+      : {};
+  const { displayName, ...hostFields } = lvis;
+  const flat: Record<string, unknown> = {
+    ...hostFields,
+    id: top.name,
+    version: top.version,
+    description: top.description,
+  };
+  if (displayName !== undefined) flat.name = displayName;
+  // Pre-validation, exactly like the `JSON.parse(raw) as PluginManifest` this
+  // replaced: the assertion states the shape the caller is about to prove, not
+  // one already proven. The AJV run in `parsePluginJson` is that proof.
+  return flat as unknown as PluginManifest;
+}
+
+/**
+ * Map an internal field path onto the place in the file an author actually has
+ * to edit. The internal manifest is flat and the document is not, so a bare
+ * "entry" would send someone looking at a top level that does not have it.
+ *
+ * Derived from {@link AGENT_PLUGINS_TOP_LEVEL_FIELDS} rather than a second list
+ * of its own: one definition of what "portable" means, so the two cannot drift.
+ */
+function onDiskFieldPath(fieldPath: string): string {
+  if (fieldPath === "id") return "name";
+  const root = fieldPath.split(/[.[]/, 1)[0] ?? fieldPath;
+  if (AGENT_PLUGINS_TOP_LEVEL_FIELDS.has(root)) return fieldPath;
+  return `extensions["${LVIS_EXTENSION_NAMESPACE}"].${fieldPath}`;
+}
+
+/**
  * Parse and fully validate a plugin.json manifest file.
+ *
+ * The file on disk is an Agent Plugins 1.0.0 document; every host consumer
+ * reads the flat {@link PluginManifest}. This is the sole boundary between the
+ * two: {@link flattenAgentPluginsManifest} projects the document, the AJV
+ * validation runs against the *document* (so the schema stays the SOT for what
+ * an author writes), and everything after that works on the projection.
  *
  * Runs the Host-owned AJV schema validation, then materializes each tool's surface
  * visibility and the `name` default via `materializeManifest` (SoT §3.1), then
@@ -195,14 +319,24 @@ export async function parsePluginJson(
   // Detailed, per-field error messages shaped as
   //   "Invalid plugin manifest '<pluginId>' at '<fieldPath>': <reason>. Example: <correction>"
   const raw = await readFile(path, "utf-8");
+  // `doc` is the file as authored — the Agent Plugins 1.0.0 shape the schema
+  // describes, and therefore the thing the validator must see. `parsed` is the
+  // flat internal projection every check below and every consumer downstream
+  // reads. Validating the document rather than the projection keeps the schema
+  // honest as the SOT for what a plugin author writes (and keeps the host
+  // agreeing with the CI job that validates the same file with the same schema).
+  let doc: unknown;
   let parsed: PluginManifest;
   try {
-    parsed = JSON.parse(raw) as PluginManifest;
+    doc = JSON.parse(raw) as unknown;
+    parsed = flattenAgentPluginsManifest(doc, path);
   } catch (err) {
     throw new Error(
       `Invalid plugin manifest '<unknown>' at '${path}': JSON parse error (${(err as Error).message}). ` +
-        `Example: {"id":"sample-plugin","name":"Sample","version":"1.0.0","entry":"dist/index.js",` +
-        `"description":"Sample plugin.","tools":[{"name":"sample_ping","inputSchema":{"type":"object","properties":{}}}]}`,
+        `Example: {"$schema":"${AGENT_PLUGINS_SCHEMA_URL}","name":"sample-plugin",` +
+        `"version":"1.0.0","description":"Sample plugin.","extensions":{"${LVIS_EXTENSION_NAMESPACE}":` +
+        `{"displayName":"Sample","entry":"dist/index.js",` +
+        `"tools":[{"name":"sample_ping","inputSchema":{"type":"object","properties":{}}}]}}}`,
     );
   }
   const pid =
@@ -211,7 +345,7 @@ export async function parsePluginJson(
       : "<unknown>";
   const fail = (fieldPath: string, reason: string, example: string): never => {
     throw new Error(
-      `Invalid plugin manifest '${pid}' at '${fieldPath}' (${path}): ${reason}. Example: ${example}`,
+      `Invalid plugin manifest '${pid}' at '${onDiskFieldPath(fieldPath)}' (${path}): ${reason}. Example: ${example}`,
     );
   };
 
@@ -306,7 +440,7 @@ export async function parsePluginJson(
     }
   }
 
-  if (!validator(parsed)) {
+  if (!validator(doc)) {
     // Enrich the error so users can act on it. Pre-fix AJV's default text
     // for additional-properties was "/ must NOT have additional properties"
     // — never named WHICH property was rejected, leaving users stuck (#737).

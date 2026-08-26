@@ -13,6 +13,7 @@ import {
 } from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 /**
  * Sprint 3-B §9.6 + Phase 2-final — install → update → rollback lifecycle.
@@ -117,7 +118,7 @@ describe("PluginMarketplaceService install → update → rollback", () => {
       const candidateDir = join(testDir, `candidate-${version}`);
       const manifest = sampleManifest(version);
       await mkdir(candidateDir, { recursive: true });
-      await writeFile(join(candidateDir, "plugin.json"), JSON.stringify(manifest), "utf-8");
+      await writeFile(join(candidateDir, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf-8");
       const coordinated = await opts.activatePreparedArtifact({
         installId: _plugin.id,
         pluginRoot: candidateDir,

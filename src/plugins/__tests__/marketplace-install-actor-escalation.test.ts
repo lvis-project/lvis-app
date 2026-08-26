@@ -32,6 +32,7 @@ import {
   preparedActivationOptionsForTest,
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 interface CapturedAuditEntry {
   timestamp: string;
@@ -119,14 +120,13 @@ describe("PluginMarketplaceService.install — actor escalation", () => {
     await mkdir(pluginDir, { recursive: true });
     await writeFile(
       join(pluginDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "mp-test",
         name: "Marketplace Test",
         version,
         entry: "dist/index.js",
         tools: [],
-      }),
-    );
+      })));
     await writeFile(
       registryPath,
       JSON.stringify({

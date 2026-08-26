@@ -15,6 +15,7 @@ import { hashReceiptFiles } from "../plugin-install-receipt.js";
 import type { PluginRuntimeGenerationProjection } from "../plugin-host-generation.js";
 import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
 import { makeTestTreeWritable } from "./test-helpers.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 const roots: string[] = [];
 
@@ -68,7 +69,7 @@ async function fixture(hookContent = JSON.stringify({ hooks: { PreToolUse: [] } 
     hooks: [{ id: "policy", path: "hooks/policy.json" }],
     mcpServers: [{ id: "ep", path: "mcp/ep.json" }],
   } as unknown as PluginManifest;
-  await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
+  await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf8");
   await writeFile(join(pluginRoot, "skills", "attendance", "SKILL.md"), "---\nname: attendance\ndescription: Attendance workflow\n---\nUse the EP attendance API.", "utf8");
   await writeFile(join(pluginRoot, "hooks", "policy.json"), hookContent, "utf8");
   await writeFile(join(pluginRoot, "mcp", "ep.json"), JSON.stringify({ transport: "http", url: "https://ep.example.test/mcp" }), "utf8");

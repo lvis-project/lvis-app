@@ -24,6 +24,7 @@ import {
 import { createNoopHostApiForTests, PluginRuntime } from "../../runtime.js";
 import type { PluginManifest } from "../../types.js";
 import { canonicalJSON } from "../../whitelist/canonical-json.js";
+import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
 
 type WrittenPlugin = {
   id: string;
@@ -300,7 +301,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
       }],
     };
     await mkdir(pluginRoot, { recursive: true });
-    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
+    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf8");
     await writeFile(
       join(pluginRoot, "entry.mjs"),
       `export default async function createPlugin() {
@@ -369,7 +370,7 @@ describe("PluginRuntime capability dependencies use active generations", () => {
       }],
     };
     await mkdir(pluginRoot, { recursive: true });
-    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(manifest), "utf8");
+    await writeFile(join(pluginRoot, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest)), "utf8");
     await writeFile(
       join(pluginRoot, "entry.mjs"),
       `export default async function createPlugin() {
@@ -1181,9 +1182,8 @@ export default async function createPlugin() {
     await mkdir(stagingRoot, { recursive: true });
     await writeFile(
       join(stagingRoot, "plugin.json"),
-      JSON.stringify(replacementManifest),
-      "utf8",
-    );
+      JSON.stringify(agentPluginsDocument(replacementManifest)),
+      "utf8");
     await writeFile(
       join(stagingRoot, "entry.mjs"),
       `export default async function createPlugin() {

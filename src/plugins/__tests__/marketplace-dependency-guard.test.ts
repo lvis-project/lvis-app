@@ -13,6 +13,7 @@ import { MissingDependenciesError } from "../types.js";
 import { _resetForTest, setIsPackaged } from "../../boot/dev-flags.js";
 import { makeTestPluginMarketplaceService } from "./test-helpers.js";
 import { mkdtempSync } from "node:fs";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 // Minimal in-memory fetcher
 class StubFetcher {
@@ -183,7 +184,7 @@ describe("marketplace install dependency guard (S14)", () => {
     await mkdir(pluginDir, { recursive: true });
     await writeFile(
       resolve(pluginDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "cap-b-provider",
         name: "B",
         version: "1.0.0",
@@ -192,8 +193,7 @@ describe("marketplace install dependency guard (S14)", () => {
         description: "Test fixture.",
         publisher: "Test fixture",
         capabilities: ["cap-b"]
-      }),
-    );
+      })));
     await mkdir(resolve(tmpDir, "plugins"), { recursive: true });
     await writeFile(
       resolve(tmpDir, "plugins", "registry.json"),
@@ -229,15 +229,14 @@ describe("marketplace install dependency guard (S14)", () => {
     await mkdir(pluginDir, { recursive: true });
     await writeFile(
       resolve(pluginDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "meeting-plugin",
         name: "Meeting",
         version: "1.0.0",
         entry: "dist/index.js",
         tools: [],
         capabilities: ["meeting-recorder"]
-      }),
-    );
+      })));
     await mkdir(resolve(tmpDir, "plugins"), { recursive: true });
     await writeFile(
       resolve(tmpDir, "plugins", "registry.json"),

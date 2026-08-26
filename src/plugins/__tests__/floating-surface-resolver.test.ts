@@ -22,6 +22,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 import { pureTool, TestPluginRuntime as PluginRuntime } from "./test-helpers.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 type UiEntry = {
   id: string;
@@ -39,7 +40,7 @@ function writePlugin(root: string, id: string, ui: UiEntry[]): string {
   writeFileSync(join(dir, "dist", "card.js"), "export const Card = () => null;");
   writeFileSync(
     join(dir, "plugin.json"),
-    JSON.stringify({
+    JSON.stringify(agentPluginsDocument({
       id,
       name: id,
       version: "1.0.0",
@@ -48,8 +49,7 @@ function writePlugin(root: string, id: string, ui: UiEntry[]): string {
       entry: "index.mjs",
       tools: [pureTool(`${id}_noop`, ["model"])],
       ui,
-    }),
-  );
+    })));
   writeFileSync(join(dir, "index.mjs"), "export default () => ({ handlers: {} });");
   return join(dir, "plugin.json");
 }

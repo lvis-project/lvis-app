@@ -56,7 +56,10 @@ import {
   type RemovalTransactionKind,
 } from "./plugin-removal-transaction.js";
 import type { PluginAdmissionRecord, PluginInstallReceipt } from "./plugin-install-receipt.js";
-import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
+import {
+  STABLE_SEMVER_RE,
+  flattenAgentPluginsManifest,
+} from "./runtime/manifest-validation.js";
 import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import type { PluginInstallFailureKind } from "../shared/plugin-install-failure.js";
@@ -2256,7 +2259,7 @@ export class PluginMarketplaceService {
         if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw err;
       }
-      manifests.push(JSON.parse(raw) as PluginManifest);
+      manifests.push(flattenAgentPluginsManifest(JSON.parse(raw), abs));
     }
     return manifests;
   }
@@ -2284,7 +2287,10 @@ export class PluginMarketplaceService {
     },
   ): Promise<string> {
     const manifestRaw = await readFile(resolve(pluginRoot, "plugin.json"), "utf-8");
-    const manifest = JSON.parse(manifestRaw) as PluginManifest;
+    const manifest = flattenAgentPluginsManifest(
+      JSON.parse(manifestRaw),
+      resolve(pluginRoot, "plugin.json"),
+    );
     // Resolve every declaration and build the exact receipt against the staged
     // tree. Neither live payload nor durable metadata has changed yet.
     await materializePluginContributions(pluginRoot, manifest);
@@ -2374,7 +2380,10 @@ export class PluginMarketplaceService {
                   pluginRoot,
                   validateCatalogMetadata,
                 );
-                preparedManifest = JSON.parse(manifestRaw) as PluginManifest;
+                preparedManifest = flattenAgentPluginsManifest(
+                  JSON.parse(manifestRaw),
+                  manifestFile,
+                );
                 preparedReceiptRaw = await this.prepareInstallReceipt(plugin.id, pluginRoot, {
                   version,
                   installSource: "marketplace",
@@ -2688,7 +2697,9 @@ export class PluginMarketplaceService {
     let manifest: { id?: unknown };
     try {
       const raw = await readFile(manifestPath, "utf-8");
-      manifest = JSON.parse(raw) as { id?: unknown };
+      manifest = flattenAgentPluginsManifest(JSON.parse(raw), manifestPath) as {
+        id?: unknown;
+      };
     } catch {
       throw new Error(`[installLocal] could not read plugin.json in ${sourcePath}`);
     }
@@ -2737,7 +2748,8 @@ export class PluginMarketplaceService {
     let manifest: PluginManifest & { id?: unknown; [key: string]: unknown };
     try {
       const raw = await readFile(manifestPath, "utf-8");
-      manifest = JSON.parse(raw) as PluginManifest & { id?: unknown; [key: string]: unknown };
+      manifest = flattenAgentPluginsManifest(JSON.parse(raw), manifestPath) as
+        PluginManifest & { id?: unknown; [key: string]: unknown };
     } catch {
       throw new Error(`[installLocal] could not read plugin.json in ${sourcePath}`);
     }

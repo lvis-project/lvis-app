@@ -9,6 +9,7 @@ import {
   TestPluginRuntime as PluginRuntime,
 } from "./test-helpers.js";
 import { cleanupTmpDir } from "../../__tests__/support/tmp-dir-teardown.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -41,7 +42,7 @@ async function writeTempPlugin(opts: {
       ])),
     installPolicy: opts.installPolicy,
   };
-  writeFileSync(join(root, "plugin.json"), JSON.stringify(manifest, null, 2));
+  writeFileSync(join(root, "plugin.json"), JSON.stringify(agentPluginsDocument(manifest, null, 2)));
   return join(root, "plugin.json");
 }
 

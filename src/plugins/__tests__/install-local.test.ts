@@ -13,6 +13,7 @@ import {
 } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
 import { CommittedPluginGenerationPublicationError } from "../committed-generation-publication-error.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 function manifestSha(manifest: unknown): string {
   return createHash("sha256").update(canonicalJSON(manifest)).digest("hex");
@@ -47,7 +48,7 @@ describe("PluginMarketplaceService.installLocal", () => {
     await mkdir(join(sourceDir, "dist"), { recursive: true });
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify(
+      JSON.stringify(agentPluginsDocument(
         {
           id: "test-plugin",
           name: "Test Plugin",
@@ -58,9 +59,8 @@ describe("PluginMarketplaceService.installLocal", () => {
         },
         null,
         2,
-      ),
-      "utf-8",
-    );
+      )),
+      "utf-8");
     await writeFile(
       join(sourceDir, "dist", "hostPlugin.js"),
       "export default {};\n",
@@ -141,15 +141,14 @@ describe("PluginMarketplaceService.installLocal", () => {
   it("rejects manifests that lack a string version field — and leaves no partial install dir / registry entry", async () => {
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-plugin",
         name: "Test Plugin",
         description: "fixture",
         publisher: "tests",
         entry: "dist/hostPlugin.js",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const service = makeService();
     await expect(service.installLocal(sourceDir)).rejects.toThrow(/non-empty 'version' string/);
@@ -262,16 +261,15 @@ describe("PluginMarketplaceService.installLocal", () => {
     };
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-plugin",
         name: "Test Plugin",
         version: "2.0.0",
         description: "broken staged candidate",
         publisher: "tests",
         entry: "dist/hostPlugin.js",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     const activatePreparedArtifact = vi.fn(async (prepared: {
       installId: string;
       pluginRoot: string;
@@ -339,16 +337,15 @@ describe("PluginMarketplaceService.installLocal", () => {
     );
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-plugin",
         name: "Test Plugin",
         version: "2.0.0",
         description: "fixture v2",
         publisher: "tests",
         entry: "dist/hostPlugin.js",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     const store = (service as unknown as {
       artifactStore: { persistPreparedInstallReceipt: (...args: unknown[]) => Promise<unknown> };
     }).artifactStore;
@@ -380,16 +377,15 @@ describe("PluginMarketplaceService.installLocal", () => {
     await service.installLocal(sourceDir, preparedActivationOptionsForTest);
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-plugin",
         name: "Test Plugin",
         version: "2.0.0",
         description: "committed candidate",
         publisher: "tests",
         entry: "dist/hostPlugin.js",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
     const publicationCause = new Error("local projection publish failed");
 
     const failure = await service.installLocal(sourceDir, {
@@ -436,16 +432,15 @@ describe("PluginMarketplaceService.installLocal", () => {
     await service.installLocal(sourceDir);
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-plugin",
         name: "Test Plugin",
         version: "2.0.0",
         description: "fixture v2",
         publisher: "tests",
         entry: "dist/hostPlugin.js",
-      }),
-      "utf-8",
-    );
+      })),
+      "utf-8");
 
     const internals = service as unknown as {
       artifactStore: { persistPreparedInstallReceipt: (...args: unknown[]) => Promise<unknown> };
@@ -498,15 +493,14 @@ describe("PluginMarketplaceService.installLocal", () => {
     await writeFile(join(pluginsDir, "test-plugin", "dist", "hostPlugin.js"), "corrupted");
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify({
+      JSON.stringify(agentPluginsDocument({
         id: "test-plugin",
         name: "Test Plugin",
         version: "2.0.0",
         description: "verified retry",
         publisher: "tests",
         entry: "dist/hostPlugin.js",
-      }),
-    );
+      })));
 
     await expect(service.installLocal(sourceDir)).resolves.toEqual({ pluginId: "test-plugin", installed: true });
 
@@ -530,7 +524,7 @@ describe("PluginMarketplaceService.installLocal", () => {
     };
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify(
+      JSON.stringify(agentPluginsDocument(
         {
           id: "test-plugin",
           name: "Test Plugin",
@@ -542,9 +536,8 @@ describe("PluginMarketplaceService.installLocal", () => {
         },
         null,
         2,
-      ),
-      "utf-8",
-    );
+      )),
+      "utf-8");
 
     const service = makeService();
     await service.installLocal(sourceDir);
@@ -586,7 +579,7 @@ describe("PluginMarketplaceService.installLocal", () => {
     );
     await writeFile(
       join(sourceDir, "plugin.json"),
-      JSON.stringify(
+      JSON.stringify(agentPluginsDocument(
         {
           id: "test-plugin",
           name: "Test Plugin",
@@ -598,9 +591,8 @@ describe("PluginMarketplaceService.installLocal", () => {
         },
         null,
         2,
-      ),
-      "utf-8",
-    );
+      )),
+      "utf-8");
 
     const service = makeService();
     await service.installLocal(sourceDir);

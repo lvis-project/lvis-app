@@ -36,6 +36,7 @@ import {
 import { canonicalJSON } from "../whitelist/canonical-json.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
+import { agentPluginsDocument } from "./test-helpers.js";
 
 function makePluginZip(manifest: Record<string, unknown>, files: Record<string, string> = {}): Buffer {
   const zip = new AdmZip();
@@ -809,14 +810,14 @@ describe("PluginMarketplaceService install()", () => {
     };
     for (const id of ["bundle-root", member.id]) {
       await mkdir(join(installedDir, id), { recursive: true });
-      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify({
+      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify(agentPluginsDocument({
         id,
         name: id,
         description: id,
         version: "1.0.0",
         entry: "./dist/hostPlugin.js",
         tools: [],
-      }));
+      })));
     }
     await writeFile(registryPath, JSON.stringify({
       version: 1,
@@ -899,7 +900,7 @@ describe("PluginMarketplaceService install()", () => {
   it("rejects a cross-wired registry row before it can remove another plugin directory", async () => {
     for (const id of ["owner-a", "owner-b"]) {
       await mkdir(join(installedDir, id), { recursive: true });
-      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify({ id }));
+      await writeFile(join(installedDir, id, "plugin.json"), JSON.stringify(agentPluginsDocument({ id })));
     }
     await writeFile(registryPath, JSON.stringify({
       version: 1,
@@ -1040,13 +1041,13 @@ describe("PluginMarketplaceService install()", () => {
     for (const pluginId of ["work-assistant", "email"]) {
       const pluginDir = join(installedDir, pluginId);
       await mkdir(join(pluginDir, "dist"), { recursive: true });
-      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify({
+      await writeFile(join(pluginDir, "plugin.json"), JSON.stringify(agentPluginsDocument({
         id: pluginId,
         name: pluginId,
         version: "1.0.0",
         entry: "./dist/hostPlugin.js",
         tools: [],
-      }), "utf-8");
+      })), "utf-8");
       await writeFile(join(pluginDir, "dist", "hostPlugin.js"), "export default {};\n", "utf-8");
     }
     await writeFile(registryPath, JSON.stringify({
