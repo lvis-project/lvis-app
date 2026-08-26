@@ -139,6 +139,57 @@ describe("plugin load-time bundle integrity", () => {
     expect(outcome.ok).toBe(true);
   });
 
+  it("still admits the load with a leftover file in the plugin's own socket dir", async () => {
+    await mkdir(join(pluginRoot, "sockets"), { recursive: true });
+    await writeFile(join(pluginRoot, "sockets", "broker.pid"), "4242", "utf8");
+    const outcome = await preflight();
+    expect(outcome.ok).toBe(true);
+  });
+
+  // Same shape as the worker-socket case below, and separate from it on purpose:
+  // `run/` is the HOST's socket directory and `sockets/` is the PLUGIN's, kept
+  // apart so an operator can tell who created a stale socket. That separation is
+  // also why the exclusion written for one did not carry to the other — this
+  // directory was scanned, and local-indexer's egress broker leaving
+  // `sockets/egress.sock` behind made the next boot refuse an intact plugin.
+  it.skipIf(process.platform === "win32")(
+    "still admits the load when the plugin left its own socket behind",
+    async () => {
+      const shortRoot = await mkdtemp("/tmp/lvis-psock-");
+      const shortPluginRoot = join(shortRoot, "p");
+      const shortCacheRoot = join(shortRoot, "c");
+      const socketDir = join(shortPluginRoot, "sockets");
+      await mkdir(join(shortPluginRoot, "dist"), { recursive: true });
+      await mkdir(socketDir, { recursive: true });
+      await writeFile(join(shortPluginRoot, "plugin.json"), "{}\n", "utf8");
+      await writeFile(join(shortPluginRoot, "dist", "index.js"), "export default 1;\n", "utf8");
+      const { receipt } = await buildInstallReceipt(shortPluginRoot, {
+        pluginId: PLUGIN_ID,
+        version: MANIFEST.version,
+        installSource: "marketplace",
+        artifactSha256: "c".repeat(64),
+        signerKeyId: "test-signer",
+        files: ["plugin.json", "dist/index.js"],
+      });
+      await mkdir(join(shortCacheRoot, PLUGIN_ID), { recursive: true });
+      await writeInstallReceipt(shortCacheRoot, receipt);
+
+      const server = createServer();
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(join(socketDir, "egress.sock"), resolve);
+      });
+      try {
+        await expect(
+          verifyPluginIntegrity(shortCacheRoot, PLUGIN_ID, shortPluginRoot),
+        ).resolves.toMatchObject({ ok: true });
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await rm(shortRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   // The real-world trigger is a control socket a crashed worker never unlinked:
   // a non-regular entry the payload scan rejects outright. `sun_path` is capped
   // near 104 bytes, so this case builds its own short-pathed fixture rather than
