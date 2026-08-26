@@ -18,7 +18,8 @@
 
 import type { PluginAccessSpec, PluginManifest, PluginHostApi, PluginRegistryEntry, PluginToolHandler, RuntimePlugin, RuntimePluginFactory, InstallPolicy, PluginAuthSpec, PluginConfigSchema, PluginOnboardingSpec, PluginUiExtension } from "../types.js";
 import { classifySubscription } from "../capabilities.js";
-import { normalizeInstallPolicy, parsePluginJson, buildManifestValidator, getDeclaredEmittedEvents, flattenAgentPluginsManifest } from "./manifest-validation.js";
+import { normalizeInstallPolicy, parsePluginJson, buildManifestValidator, getDeclaredEmittedEvents } from "./manifest-validation.js";
+import { flattenAgentPluginsManifest } from "../public-contract.js";
 import { isModelVisible } from "./tool-visibility.js";
 import { createHash, randomUUID } from "node:crypto";
 import { dirname, isAbsolute, resolve, basename } from "node:path";
@@ -4635,7 +4636,7 @@ abstract class PluginRuntimeCapabilityLifecycle extends PluginRuntimePublication
     const manifestPath = resolve(input.pluginRoot, "plugin.json");
     const manifestRaw = await readFile(manifestPath, "utf8");
     const manifestDocument: unknown = JSON.parse(manifestRaw);
-    const manifest = flattenAgentPluginsManifest(manifestDocument, manifestPath);
+    const manifest = flattenAgentPluginsManifest(manifestDocument);
     if (manifest.id !== input.manifest.id || manifest.version !== input.manifest.version) {
       throw new Error(`prepared artifact manifest identity changed for '${input.manifest.id}'`);
     }

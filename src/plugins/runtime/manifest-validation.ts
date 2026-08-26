@@ -18,6 +18,13 @@ import type { ValidateFunction } from "ajv";
 // file is byte-identical to the SDK's former canonical copy; the SDK now
 // mirrors from here (host is SOT).
 import manifestSchema from "../../../schemas/plugin-manifest.schema.json" with { type: "json" };
+import {
+  AGENT_PLUGINS_SCHEMA_URL,
+  AGENT_PLUGINS_TOP_LEVEL_FIELDS,
+  LVIS_EXTENSION_NAMESPACE,
+  flattenAgentPluginsManifest,
+  foreignManifestTopLevelFields,
+} from "../public-contract.js";
 import type {
   PluginManifest,
   PluginToolOperationPolicy,
@@ -180,111 +187,6 @@ function materializeManifest(manifest: PluginManifest): PluginManifest {
 }
 
 /**
- * Agent Plugins 1.0.0 manifest schema identifier (agent-plugins.org). A
- * `plugin.json` MUST carry this exact string in `$schema`; the schema pins it
- * as a `const`, so it doubles as the manifest-format marker.
- */
-export const AGENT_PLUGINS_SCHEMA_URL =
-  "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json";
-
-/**
- * The reverse-domain namespace LVIS owns inside the portable `extensions`
- * object (domain `lvisai.xyz`). Agent Plugins assigns no semantics to a
- * namespace's contents, so everything the host needs in order to load, sandbox
- * and govern a plugin lives under this one key.
- */
-export const LVIS_EXTENSION_NAMESPACE = "xyz.lvisai";
-
-/**
- * The top level Agent Plugins 1.0.0 defines. Anything else up there belongs to
- * no one, and the specification is explicit that a client reports and ignores
- * it rather than refusing the plugin — so {@link flattenAgentPluginsManifest}
- * drops unknown top-level fields with a warning. The schema stays strict about
- * them on purpose: it validates an author's file in CI, where an unrecognised
- * top-level key is a typo worth failing on, not a foreign client's data.
- */
-const AGENT_PLUGINS_TOP_LEVEL_FIELDS: ReadonlySet<string> = new Set([
-  "$schema",
-  "name",
-  "version",
-  "description",
-  "author",
-  "homepage",
-  "repository",
-  "license",
-  "keywords",
-  "extensions",
-]);
-
-/**
- * Convert an on-disk Agent Plugins 1.0.0 document into the flat
- * {@link PluginManifest} every host consumer reads.
- *
- * Exported because `parsePluginJson` is not the only code that reads a
- * `plugin.json` off disk — install, activation and registry-scan paths parse
- * one directly to check identity. They all project it through here, so where
- * the id lives in the file has exactly one definition.
- *
- * This function is the only place the two shapes meet. The portable `name`
- * lands on `id`, `extensions["xyz.lvisai"]` is spread flat, and its
- * `displayName` becomes the internal `name` — which is why the hundreds of
- * `manifest.id` / `manifest.name` call sites downstream do not know the file on
- * disk is nested.
- *
- * Pure and total: a document of the wrong shape is passed through so the AJV
- * error names the actual defect, instead of this function throwing something
- * less specific first.
- *
- * Portable metadata (`author`, `homepage`, `repository`, `license`,
- * `keywords`) is validated by the schema and deliberately NOT surfaced. It is
- * catalog-facing, and `public-contract.ts` keeps catalog concepts out of the
- * plugin contract on purpose — `public-contract-boundary.test.ts` forbids the
- * marketplace types and a `keywords:` field there by name. Only `version` and
- * `description`, which the host itself acts on, cross over.
- */
-export function flattenAgentPluginsManifest(
-  doc: unknown,
-  path: string,
-): PluginManifest {
-  if (!doc || typeof doc !== "object" || Array.isArray(doc)) {
-    return doc as PluginManifest;
-  }
-  const top = doc as Record<string, unknown>;
-  const foreign = Object.keys(top).filter(
-    (key) => !AGENT_PLUGINS_TOP_LEVEL_FIELDS.has(key),
-  );
-  if (foreign.length > 0) {
-    log.warn(
-      `[manifest] ${path}: ignoring non-portable top-level field(s) ` +
-        `${foreign.join(", ")} — Agent Plugins 1.0.0 reserves the manifest top ` +
-        `level; client-specific data belongs under ` +
-        `extensions["${LVIS_EXTENSION_NAMESPACE}"]`,
-    );
-  }
-  const extensions = top.extensions;
-  const namespaced =
-    extensions && typeof extensions === "object" && !Array.isArray(extensions)
-      ? (extensions as Record<string, unknown>)[LVIS_EXTENSION_NAMESPACE]
-      : undefined;
-  const lvis =
-    namespaced && typeof namespaced === "object" && !Array.isArray(namespaced)
-      ? (namespaced as Record<string, unknown>)
-      : {};
-  const { displayName, ...hostFields } = lvis;
-  const flat: Record<string, unknown> = {
-    ...hostFields,
-    id: top.name,
-    version: top.version,
-    description: top.description,
-  };
-  if (displayName !== undefined) flat.name = displayName;
-  // Pre-validation, exactly like the `JSON.parse(raw) as PluginManifest` this
-  // replaced: the assertion states the shape the caller is about to prove, not
-  // one already proven. The AJV run in `parsePluginJson` is that proof.
-  return flat as unknown as PluginManifest;
-}
-
-/**
  * Map an internal field path onto the place in the file an author actually has
  * to edit. The internal manifest is flat and the document is not, so a bare
  * "entry" would send someone looking at a top level that does not have it.
@@ -295,7 +197,7 @@ export function flattenAgentPluginsManifest(
 function onDiskFieldPath(fieldPath: string): string {
   if (fieldPath === "id") return "name";
   const root = fieldPath.split(/[.[]/, 1)[0] ?? fieldPath;
-  if (AGENT_PLUGINS_TOP_LEVEL_FIELDS.has(root)) return fieldPath;
+  if (AGENT_PLUGINS_TOP_LEVEL_FIELDS.includes(root)) return fieldPath;
   return `extensions["${LVIS_EXTENSION_NAMESPACE}"].${fieldPath}`;
 }
 
@@ -331,7 +233,7 @@ export async function parsePluginJson(
   let parsed: PluginManifest;
   try {
     doc = JSON.parse(raw) as unknown;
-    parsed = flattenAgentPluginsManifest(doc, path);
+    parsed = flattenAgentPluginsManifest(doc);
   } catch (err) {
     throw new Error(
       `Invalid plugin manifest '<unknown>' at '${path}': JSON parse error (${(err as Error).message}). ` +
@@ -353,6 +255,21 @@ export async function parsePluginJson(
 
   if (!validator) {
     throw new Error("Host plugin manifest validator is required");
+  }
+
+  // Agent Plugins 1.0.0 is explicit that a client reports and ignores unknown
+  // top-level fields rather than refusing the plugin over another vendor's
+  // data. The projection already drops them; this is the "reports" half, kept
+  // here rather than inside the projection so that projection stays pure and
+  // mirrorable into the SDK.
+  const foreign = foreignManifestTopLevelFields(doc);
+  if (foreign.length > 0) {
+    log.warn(
+      `[manifest] ${path}: ignoring non-portable top-level field(s) ` +
+        `${foreign.join(", ")} — Agent Plugins 1.0.0 reserves the manifest top ` +
+        `level; client-specific data belongs under ` +
+        `extensions["${LVIS_EXTENSION_NAMESPACE}"]`,
+    );
   }
 
   const networkAccessRaw: unknown = parsed.networkAccess;

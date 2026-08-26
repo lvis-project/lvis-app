@@ -26,7 +26,7 @@ import type { PluginManifest, Tool } from "../types.js";
 import {
   AGENT_PLUGINS_SCHEMA_URL,
   LVIS_EXTENSION_NAMESPACE,
-} from "../runtime/manifest-validation.js";
+} from "../public-contract.js";
 import type {
   HostPluginGenerationState,
   PluginRuntimeGenerationProjection,

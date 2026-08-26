@@ -34,7 +34,7 @@ import {
   TestPluginMarketplaceService,
 } from "./test-helpers.js";
 import { canonicalJSON } from "../whitelist/canonical-json.js";
-import { flattenAgentPluginsManifest } from "../runtime/manifest-validation.js";
+import { flattenAgentPluginsManifest } from "../public-contract.js";
 import * as installedEntryFs from "../installed-entry-fs.js";
 import * as removalTransaction from "../plugin-removal-transaction.js";
 import { agentPluginsDocument } from "./test-helpers.js";
@@ -333,10 +333,7 @@ describe("PluginMarketplaceService install()", () => {
     // Project through the production flattener rather than reading the document
     // directly: the assertion is about what the host will resolve `entry` to,
     // not about where the byte sits in the file.
-    const manifest = flattenAgentPluginsManifest(
-      JSON.parse(await readFile(manifestPathToAbs(entryPath), "utf-8")),
-      entryPath,
-    ) as unknown as { version: string; entry: string };
+    const manifest = flattenAgentPluginsManifest(JSON.parse(await readFile(manifestPathToAbs(entryPath), "utf-8"))) as unknown as { version: string; entry: string };
     expect(manifest.version).toBe("1.2.3");
     expect(manifest.entry).toBe("./dist/hostPlugin.js");
   });
@@ -535,10 +532,7 @@ describe("PluginMarketplaceService install()", () => {
       // projected, and re-reads the file itself to check identity — so a fixture
       // handing it the raw document would fail that check on `id`.
       const persistedManifestPath = join(installedDir, current.id, "plugin.json");
-      const persistedManifest = flattenAgentPluginsManifest(
-        JSON.parse(await readFile(persistedManifestPath, "utf-8")),
-        persistedManifestPath,
-      );
+      const persistedManifest = flattenAgentPluginsManifest(JSON.parse(await readFile(persistedManifestPath, "utf-8")));
       const persistedReceipt = await readFile(
         join(cacheRoot, current.id, "install-receipt.json"),
         "utf-8",

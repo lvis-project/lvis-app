@@ -56,10 +56,8 @@ import {
   type RemovalTransactionKind,
 } from "./plugin-removal-transaction.js";
 import type { PluginAdmissionRecord, PluginInstallReceipt } from "./plugin-install-receipt.js";
-import {
-  STABLE_SEMVER_RE,
-  flattenAgentPluginsManifest,
-} from "./runtime/manifest-validation.js";
+import { STABLE_SEMVER_RE } from "./runtime/manifest-validation.js";
+import { flattenAgentPluginsManifest } from "./public-contract.js";
 import { KNOWN_CAPABILITY_IDS } from "./capabilities.js";
 import type { InstallPolicy, PluginRegistryEntry } from "./types.js";
 import type { PluginInstallFailureKind } from "../shared/plugin-install-failure.js";
@@ -781,7 +779,7 @@ export class PluginMarketplaceService {
       : resolve(dirname(this.registryPath), installedManifestPath);
     try {
       const raw = await readFile(abs, "utf-8");
-      const parsed = flattenAgentPluginsManifest(JSON.parse(raw), abs);
+      const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
       return normalizeInstallPolicy(parsed) === "admin";
     } catch {
       return false;
@@ -1851,7 +1849,7 @@ export class PluginMarketplaceService {
   private async appendHistoryFromManifestVersion(pluginId: string, manifestPath: string): Promise<void> {
     try {
       const raw = await readFile(manifestPath, "utf-8");
-      const parsed = flattenAgentPluginsManifest(JSON.parse(raw), manifestPath);
+      const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
       if (typeof parsed.version !== "string" || parsed.version.trim().length === 0) return;
       await this.artifactStore.appendHistory(pluginId, {
         version: parsed.version,
@@ -1876,7 +1874,7 @@ export class PluginMarketplaceService {
       : resolve(dirname(this.registryPath), entry.manifestPath);
     try {
       const raw = await readFile(manifestAbs, "utf-8");
-      const parsed = flattenAgentPluginsManifest(JSON.parse(raw), manifestAbs);
+      const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
       return [...listSecretKeys(parsed.configSchema)];
     } catch (err) {
       log.warn(
@@ -2049,7 +2047,7 @@ export class PluginMarketplaceService {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw err;
     }
-    const parsed = flattenAgentPluginsManifest(JSON.parse(raw), manifestPath);
+    const parsed = flattenAgentPluginsManifest(JSON.parse(raw));
     return typeof parsed.version === "string" ? parsed.version : null;
   }
 
@@ -2259,7 +2257,7 @@ export class PluginMarketplaceService {
         if ((err as NodeJS.ErrnoException).code === "ENOENT") continue;
         throw err;
       }
-      manifests.push(flattenAgentPluginsManifest(JSON.parse(raw), abs));
+      manifests.push(flattenAgentPluginsManifest(JSON.parse(raw)));
     }
     return manifests;
   }
@@ -2287,10 +2285,7 @@ export class PluginMarketplaceService {
     },
   ): Promise<string> {
     const manifestRaw = await readFile(resolve(pluginRoot, "plugin.json"), "utf-8");
-    const manifest = flattenAgentPluginsManifest(
-      JSON.parse(manifestRaw),
-      resolve(pluginRoot, "plugin.json"),
-    );
+    const manifest = flattenAgentPluginsManifest(JSON.parse(manifestRaw));
     // Resolve every declaration and build the exact receipt against the staged
     // tree. Neither live payload nor durable metadata has changed yet.
     await materializePluginContributions(pluginRoot, manifest);
@@ -2382,10 +2377,7 @@ export class PluginMarketplaceService {
                   validateCatalogMetadata,
                 );
                 preparedDocument = JSON.parse(manifestRaw) as unknown;
-                preparedManifest = flattenAgentPluginsManifest(
-                  preparedDocument,
-                  manifestFile,
-                );
+                preparedManifest = flattenAgentPluginsManifest(preparedDocument);
                 preparedReceiptRaw = await this.prepareInstallReceipt(plugin.id, pluginRoot, {
                   version,
                   installSource: "marketplace",
@@ -2574,7 +2566,7 @@ export class PluginMarketplaceService {
       // Compare against the projection, not the raw document: every field below
       // (`id`, `installPolicy`, `networkAccess`, ...) is an LVIS field, and in
       // an Agent Plugins document those live inside the extension namespace.
-      const manifest = flattenAgentPluginsManifest(parsed, manifestFile) as
+      const manifest = flattenAgentPluginsManifest(parsed) as
         Partial<PluginManifest> & Record<string, unknown>;
       if (manifest.id !== plugin.id) {
         throw new Error(
@@ -2707,7 +2699,7 @@ export class PluginMarketplaceService {
     let manifest: { id?: unknown };
     try {
       const raw = await readFile(manifestPath, "utf-8");
-      manifest = flattenAgentPluginsManifest(JSON.parse(raw), manifestPath) as {
+      manifest = flattenAgentPluginsManifest(JSON.parse(raw)) as {
         id?: unknown;
       };
     } catch {
@@ -2762,7 +2754,7 @@ export class PluginMarketplaceService {
     try {
       const raw = await readFile(manifestPath, "utf-8");
       manifestDocument = JSON.parse(raw) as unknown;
-      manifest = flattenAgentPluginsManifest(manifestDocument, manifestPath) as
+      manifest = flattenAgentPluginsManifest(manifestDocument) as
         PluginManifest & { id?: unknown; [key: string]: unknown };
     } catch {
       throw new Error(`[installLocal] could not read plugin.json in ${sourcePath}`);
