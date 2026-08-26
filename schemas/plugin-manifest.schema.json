@@ -46,35 +46,71 @@
       "additionalProperties": false,
       "properties": {
         "name": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
         },
         "email": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 254,
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
         },
         "url": {
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "not": {
+            "pattern": "[\\r\\n]"
+          }
         }
       },
       "description": "Agent Plugins 1.0.0 author object. Distinct from extensions[\"xyz.lvisai\"].publisher, which is the marketplace publishing identity the host verifies."
     },
     "homepage": {
       "type": "string",
-      "description": "Project homepage URL."
+      "description": "Project homepage URL.",
+      "minLength": 1,
+      "maxLength": 2048,
+      "not": {
+        "pattern": "[\\r\\n]"
+      }
     },
     "repository": {
       "type": "string",
-      "description": "Source repository URL."
+      "description": "Source repository URL.",
+      "minLength": 1,
+      "maxLength": 2048,
+      "not": {
+        "pattern": "[\\r\\n]"
+      }
     },
     "license": {
       "type": "string",
-      "description": "SPDX license identifier."
+      "description": "SPDX license identifier.",
+      "minLength": 1,
+      "maxLength": 64,
+      "not": {
+        "pattern": "[\\r\\n]"
+      }
     },
     "keywords": {
       "type": "array",
       "items": {
-        "type": "string"
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 64,
+        "not": {
+          "pattern": "[\\r\\n]"
+        }
       },
-      "description": "Free-form discovery keywords."
+      "description": "Free-form discovery keywords.",
+      "maxItems": 32
     },
     "extensions": {
       "type": "object",

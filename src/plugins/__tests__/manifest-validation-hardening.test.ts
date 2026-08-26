@@ -318,4 +318,49 @@ describe("runtime manifest validation hardening", () => {
     expect(data.manifestPath).toContain("p-audit-target");
     expect(data.error).toMatch(/additional|startupTools|schema/i);
   });
+
+  // 7) The portable half of the document is bounded too.
+  //
+  // Agent Plugins 1.0.0 replaced the flat `author` string with an object. The
+  // string it replaced was capped at 256 characters; an object of unbounded
+  // strings would be strictly looser than what it replaced, and this manifest
+  // is rendered in the catalog and in editor intellisense.
+  it("7) accepts a bounded portable author and rejects an unbounded one", async () => {
+    await writePlugin("p-author-ok", {
+      tools: ["pao_hello"],
+      author: { name: "Maintainer", email: "m@example.com", url: "https://example.com" },
+      homepage: "https://example.com/plugin",
+      license: "MIT",
+      keywords: ["email"],
+    });
+    const okRuntime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    const okCapture = captureErrors();
+    try {
+      await okRuntime.load();
+    } finally {
+      okCapture.restore();
+    }
+    expect(okRuntime.listPluginIds()).toContain("p-author-ok");
+
+    await writePlugin("p-author-long", {
+      tools: ["pal_hello"],
+      author: { name: "x".repeat(257) },
+    });
+    const runtime = new PluginRuntime({
+      hostRoot: testDir,
+      registryPath,
+      pluginsRoot: installedDir,
+    });
+    const cap = captureErrors();
+    try {
+      await runtime.load();
+    } finally {
+      cap.restore();
+    }
+    expect(runtime.listPluginIds()).not.toContain("p-author-long");
+  });
 });
