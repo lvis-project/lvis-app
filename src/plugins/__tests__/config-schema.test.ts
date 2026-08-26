@@ -31,7 +31,7 @@ import {
   _resetPluginConfigChangeBus,
 } from "../config-change-bus.js";
 import type { PluginConfigSchema } from "../types.js";
-import { agentPluginsDocument } from "./test-helpers.js";
+import { agentPluginsDocument, lvisSchemaProperties } from "./test-helpers.js";
 
 // Host-owned manifest schema SOT (ph2) — resolved relative to this test file
 // so it works regardless of cwd and no longer depends on the SDK package.
@@ -60,15 +60,16 @@ async function loadHostManifestSchema() {
 describe("US-B1 — host plugin.schema.json declares configSchema", () => {
   it("schema includes configSchema property with required 'properties'", async () => {
     const schema = await loadHostManifestSchema();
-    expect(schema.properties.configSchema).toBeTypeOf("object");
-    expect(schema.properties.configSchema.required).toContain("properties");
-    expect(schema.properties.configSchema.additionalProperties).toBe(false);
+    const configSchema = lvisSchemaProperties(schema).configSchema;
+    expect(configSchema).toBeTypeOf("object");
+    expect(configSchema.required).toContain("properties");
+    expect(configSchema.additionalProperties).toBe(false);
   });
 
   it("AJV strict accepts a manifest with a well-formed configSchema", async () => {
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
-    const ok = validate({
+    const ok = validate(agentPluginsDocument({
       id: "test-plugin",
       name: "Test",
       version: "1.0.0",
@@ -93,7 +94,7 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
         },
         required: ["enabled"],
       },
-    });
+    }));
     if (!ok) {
       // eslint-disable-next-line no-console
       console.error("AJV errors:", validate.errors);
@@ -104,7 +105,7 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
   it("AJV strict rejects malformed configSchema (missing 'properties')", async () => {
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
-    const ok = validate({
+    const ok = validate(agentPluginsDocument({
       id: "test-plugin",
       name: "Test",
       version: "1.0.0",
@@ -114,14 +115,14 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
         // missing required `properties`
         required: ["foo"],
       },
-    });
+    }));
     expect(ok).toBe(false);
   });
 
   it("AJV strict rejects an unknown property type", async () => {
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
-    const ok = validate({
+    const ok = validate(agentPluginsDocument({
       id: "test-plugin",
       name: "Test",
       version: "1.0.0",
@@ -132,14 +133,14 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
           weird: { type: "object" }, // not in enum
         },
       },
-    });
+    }));
     expect(ok).toBe(false);
   });
 
   it("AJV strict rejects an unknown UI format", async () => {
     const ajv = buildAjv();
     const validate = ajv.compile(await loadHostManifestSchema());
-    const ok = validate({
+    const ok = validate(agentPluginsDocument({
       id: "test-plugin",
       name: "Test",
       version: "1.0.0",
@@ -150,7 +151,7 @@ describe("US-B1 — host plugin.schema.json declares configSchema", () => {
           token: { type: "string", format: "credit-card" },
         },
       },
-    });
+    }));
     expect(ok).toBe(false);
   });
 });
@@ -296,7 +297,7 @@ describe("US-B1 regression — baseline manifest WITHOUT configSchema still vali
     // Replicates the shape of the current (post-#885 v6) meeting / local-indexer
     // / ms-graph manifests — no configSchema, but heavy use of pure Tool[] +
     // capabilities. Must keep loading without modification (DoD §4).
-    const ok = validate({
+    const ok = validate(agentPluginsDocument({
       id: "meeting-recorder",
       name: "회의록 녹음",
       version: "1.3.0",
@@ -327,7 +328,7 @@ describe("US-B1 regression — baseline manifest WITHOUT configSchema still vali
       ],
       capabilities: ["meeting-recorder"],
       eventSubscriptions: ["calendar.event.started"],
-    });
+    }));
     if (!ok) {
       // eslint-disable-next-line no-console
       console.error("AJV regression errors:", validate.errors);

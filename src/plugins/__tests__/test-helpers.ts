@@ -254,6 +254,83 @@ export function makeTestPluginEntrySource(
 }
 
 /**
+ * A deliberately permissive Agent Plugins envelope, for suites that want to
+ * exercise a HOST cross-field check rather than the real manifest schema.
+ *
+ * Those suites pass `parsePluginJson` a loose validator on purpose: if the test
+ * passes, the rejection came from the host check and not from the schema. That
+ * only works while the stand-in agrees with the document shape — an envelope
+ * that disagrees fails for the wrong reason and the suite stops measuring what
+ * it is about. Hence one definition rather than a literal per suite.
+ *
+ * `namespaceProperties` names the LVIS fields a given suite cares about;
+ * everything else inside the namespace is left unconstrained unless `strict`.
+ */
+export function permissiveManifestEnvelopeSchema(options: {
+  namespaceProperties?: Record<string, unknown>;
+  namespaceRequired?: string[];
+  strict?: boolean;
+} = {}): Record<string, unknown> {
+  const strict = options.strict ?? false;
+  return {
+    type: "object",
+    additionalProperties: !strict,
+    required: ["$schema", "name", "version", "description", "extensions"],
+    properties: {
+      $schema: { type: "string" },
+      name: { type: "string", pattern: "^[a-zA-Z][a-zA-Z0-9._-]*$", minLength: 3 },
+      description: { type: "string" },
+      version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" },
+      extensions: {
+        type: "object",
+        // Non-strict still has to admit a foreign namespace, which is an
+        // object of someone else's shape.
+        additionalProperties: strict ? false : { type: "object" },
+        properties: {
+          [LVIS_EXTENSION_NAMESPACE]: {
+            type: "object",
+            additionalProperties: !strict,
+            required: options.namespaceRequired ?? [],
+            properties: {
+              displayName: { type: "string" },
+              ...options.namespaceProperties,
+            },
+          },
+        },
+      },
+    },
+  };
+}
+
+/**
+ * The `properties` map of the LVIS namespace inside the host manifest schema.
+ *
+ * Every LVIS field sits under `extensions["xyz.lvisai"]` in an Agent Plugins
+ * document, so a suite reaching for `schema.properties.<lvisField>` is reaching
+ * into the portable top level, where that field is not. The path gets one
+ * definition here rather than one per suite, and throws rather than returning
+ * undefined so a wrong path fails loudly instead of asserting against nothing.
+ */
+export function lvisSchemaProperties(
+  schema: unknown,
+): Record<string, Record<string, unknown>> {
+  const properties = (schema as { properties?: Record<string, unknown> })
+    .properties;
+  const extensions = properties?.extensions as
+    | { properties?: Record<string, unknown> }
+    | undefined;
+  const namespace = extensions?.properties?.[LVIS_EXTENSION_NAMESPACE] as
+    | { properties?: Record<string, Record<string, unknown>> }
+    | undefined;
+  if (!namespace?.properties) {
+    throw new Error(
+      `host manifest schema has no extensions["${LVIS_EXTENSION_NAMESPACE}"].properties`,
+    );
+  }
+  return namespace.properties;
+}
+
+/**
  * Fields Agent Plugins 1.0.0 puts at the top level besides identity. A fixture
  * naming one of these means the top-level field, not a host field that happens
  * to share the name — the split has to match `flattenAgentPluginsManifest`, or

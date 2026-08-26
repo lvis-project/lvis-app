@@ -225,7 +225,7 @@ describe("PluginArtifactStore — extractZip", () => {
     try {
       const store = makeStore(tmp);
       const zip = new AdmZip();
-      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "evil" })));
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "evil" }))));
       await expect(store.extractZip("../evil", zip.toBuffer())).rejects.toThrow(
         /invalid artifact slug/,
       );
@@ -243,7 +243,7 @@ describe("PluginArtifactStore — extractZip", () => {
       await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
 
       const zip = new AdmZip();
-      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
 
       await expect(
         store.extractZipWithCommit("acme", zip.toBuffer(), async () => {
@@ -266,7 +266,7 @@ describe("PluginArtifactStore — extractZip", () => {
       await mkdir(installDir, { recursive: true });
       await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
       const zip = new AdmZip();
-      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
       const durableCommit = vi.fn(async () => undefined);
 
       await expect(store.extractZipWithCommit("acme", zip.toBuffer(), durableCommit, {
@@ -291,7 +291,7 @@ describe("PluginArtifactStore — extractZip", () => {
       await mkdir(installDir, { recursive: true });
       await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
       const zip = new AdmZip();
-      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
       let releaseRetirement!: () => void;
       const retirement = new Promise<void>((resolveRetirement) => { releaseRetirement = resolveRetirement; });
       let durableFinished!: () => void;
@@ -331,7 +331,7 @@ describe("PluginArtifactStore — extractZip", () => {
       await mkdir(installDir, { recursive: true });
       await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
       const zip = new AdmZip();
-      zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+      zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
       const publicationCause = new Error("projection publish failed");
       const retirementCause = new Error("predecessor retirement failed");
       const retirement = Promise.reject(retirementCause);
@@ -547,7 +547,7 @@ describe("PluginArtifactStore — extractZip", () => {
         await mkdir(installDir, { recursive: true });
         await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
         const zip = new AdmZip();
-        zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+        zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
         const commitError = new Error("registry publication failed");
 
         const error = await store.extractZipWithCommit("acme", zip.toBuffer(), async () => {
@@ -589,7 +589,7 @@ describe("PluginArtifactStore — extractZip", () => {
         await mkdir(installDir, { recursive: true });
         await writeFile(resolve(installDir, "plugin.json"), JSON.stringify(agentPluginsDocument({ id: "acme", version: "old" })));
         const zip = new AdmZip();
-        zip.addFile("plugin.json", Buffer.from(JSON.stringify({ id: "acme", version: "new" })));
+        zip.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({ id: "acme", version: "new" }))));
 
         await store.extractZipWithCommit("acme", zip.toBuffer(), async () => undefined);
 

@@ -14,7 +14,10 @@ import { join } from "node:path";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 import { parsePluginJson } from "../manifest-validation.js";
-import { agentPluginsDocument } from "../../__tests__/test-helpers.js";
+import {
+  agentPluginsDocument,
+  permissiveManifestEnvelopeSchema,
+} from "../../__tests__/test-helpers.js";
 
 describe("manifest-validation enriched error messages (#737)", () => {
   let workDir: string;
@@ -31,33 +34,16 @@ describe("manifest-validation enriched error messages (#737)", () => {
     // Strict schema mirroring the SDK's additionalProperties:false discipline.
     const ajv = new Ajv({ allErrors: true });
     addFormats(ajv);
-    return ajv.compile({
-      type: "object",
-      additionalProperties: false,
-      required: ["$schema", "name", "version", "description", "extensions"],
-      properties: {
-        $schema: { type: "string" },
-        name: { type: "string", pattern: "^[a-zA-Z][a-zA-Z0-9._-]*$", minLength: 3 },
-        description: { type: "string" },
-        version: { type: "string", pattern: "^\\d+\\.\\d+\\.\\d+$" },
-        extensions: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            "xyz.lvisai": {
-              type: "object",
-              additionalProperties: false,
-              required: ["entry", "tools"],
-              properties: {
-                displayName: { type: "string" },
-                entry: { type: "string" },
-                tools: { type: "array", items: { type: "string" } },
-              },
-            },
-          },
+    return ajv.compile(
+      permissiveManifestEnvelopeSchema({
+        strict: true,
+        namespaceProperties: {
+          entry: { type: "string" },
+          tools: { type: "array", items: { type: "string" } },
         },
-      },
-    });
+        namespaceRequired: ["entry", "tools"],
+      }),
+    );
   }
 
   it("names the unknown top-level property and includes a reinstall hint", async () => {

@@ -40,7 +40,7 @@ import { agentPluginsDocument } from "./test-helpers.js";
 
 function makePluginZip(manifest: Record<string, unknown>, files: Record<string, string> = {}): Buffer {
   const zip = new AdmZip();
-  zip.addFile("plugin.json", Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`, "utf-8"));
+  zip.addFile("plugin.json", Buffer.from(`${JSON.stringify(agentPluginsDocument(manifest), null, 2)}\n`, "utf-8"));
   zip.addFile(
     "dist/hostPlugin.js",
     Buffer.from("export default async function createPlugin() { return { handlers: {} }; }\n", "utf-8"),
@@ -2138,25 +2138,25 @@ describe("PluginMarketplaceService install()", () => {
       tools: [],
     };
     const v1 = new AdmZip();
-    v1.addFile("plugin.json", Buffer.from(JSON.stringify({
+    v1.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({
       id: plugin.id,
       name: plugin.name,
       version: "1.0.0",
       entry: "./dist/hostPlugin.js",
       tools: [],
-    }), "utf-8"));
+    })), "utf-8"));
     v1.addFile("dist/hostPlugin.js", Buffer.from("export default {};\n", "utf-8"));
     v1.addFile("dist/stale.txt", Buffer.from("stale\n", "utf-8"));
     const v1Buffer = v1.toBuffer();
 
     const v2 = new AdmZip();
-    v2.addFile("plugin.json", Buffer.from(JSON.stringify({
+    v2.addFile("plugin.json", Buffer.from(JSON.stringify(agentPluginsDocument({
       id: plugin.id,
       name: plugin.name,
       version: "1.1.0",
       entry: "./dist/hostPlugin.js",
       tools: [],
-    }), "utf-8"));
+    })), "utf-8"));
     v2.addFile("dist/hostPlugin.js", Buffer.from("export default { upgraded: true };\n", "utf-8"));
     const v2Buffer = v2.toBuffer();
 
