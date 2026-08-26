@@ -425,18 +425,23 @@ export function PluginUiHostView({
   // already its own framed surface, so host-level Card/border chrome creates a
   // visible box-inside-box regression across every plugin view.
   //
-  // `maxWidth="reading"` caps the panel at the chat conversation column width
-  // (max-w-[58rem], ~928px) instead of the default 6xl (~1152px). These sidebar
-  // plugins were authored for the ~800px detached window they used to open in
-  // (chat mode, pre-inline); at the full main-pane width their own layouts
-  // stretch (e.g. the meeting tab bar spreads edge to edge). Aligning to the
-  // chat reading column keeps an inline plugin panel visually consistent with
-  // the conversation beside it and within the width the plugin UIs expect.
+  // `maxWidth="none"` hands the plugin the whole main pane. This used to be
+  // "reading" (max-w-[58rem], ~928px), a clamp added because the plugin UIs
+  // were authored for the ~800px detached window they opened in and stretched
+  // at full pane width. That treated the symptom: the panel was pinned narrow
+  // so nobody saw layouts that could not adapt, and widening the window past
+  // ~1180px changed nothing on screen.
+  //
+  // The plugins now own their own measure (each caps its content column and
+  // stays fluid below the cap), so the clamp has nothing left to hide and its
+  // only remaining effect was to waste width. The contract is documented in
+  // docs/guides/plugin-development.md: the host gives the panel the pane,
+  // the plugin decides how much of it its content should use.
   return (
     <PageShell
       title={view ? getPluginViewLabel(view) : t("be_pluginUiHost.pluginUiTitle")}
       description={view?.extension.description ?? t("be_pluginUiHost.pluginUiLoadingDesc")}
-      maxWidth="reading"
+      maxWidth="none"
       contentClassName="flex min-h-0 flex-1 flex-col px-2 pb-2"
       data-testid="plugin-page-shell"
     >
