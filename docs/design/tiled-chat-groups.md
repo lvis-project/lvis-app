@@ -126,17 +126,35 @@ Each phase is independently shippable and independently verifiable.
 insertion point, so no frame can escape unlabelled — and have the renderer drop
 frames addressed to another group.
 
-### Phase 3 — renderer: conversation state per group
+### Phase 3 — renderer: conversation state per group. **Done.**
 
-`<ChatView>` takes 43 props from App's conversation state. Extract
-`useChatState`, `useSendMessage`, `useWorkflowTools`, `useSearch`, the status
-bar, and attachments into a `<ChatGroupSession groupId>` component that owns
-them and renders `ChatView`.
+`<ChatGroupSession>` owns one tile's conversation: `useChatState`,
+`useWorkflowTools`, `useCurrentSession`, `useSendMessage`, the context budget,
+the cost estimate, the composer draft and attachments, and every per-turn
+handler. Every hook there is keyed on the tile's group-bound api, so mounting
+it twice gives two conversations that stream at once.
 
-`useSessions` is the crux: it owns **both** the window-scoped list (which the
-sidebar reads) and the group-scoped current-session pointer (which one tile
-reads). Split it into `useSessionList()` and `useCurrentSession(groupId)`
-before anything else in this phase.
+`useSessions` split into `useSessionList()` — the window's list, the same for
+every tile — and `useCurrentSession()`, which answers about ONE tile.
+
+What stayed in the window, and why: the status bar (a toast about a project
+error is the window's news), search (the panel is an overlay over everything,
+reading the transcript on screen), export (it takes an explicit session id),
+and the session list. The window reads the focused tile through
+`chat-group-session-registry.ts` rather than through props — every control that
+names "the conversation" means the tile the user is looking at, and reading it
+in one place is what keeps that meaning single.
+
+Two rules the tiles must keep:
+
+- **The conversations stay mounted across view navigation.** A tile subscribes
+  to its group's stream when it mounts, so unmounting the surface to render
+  Settings drops the frames of a turn still running — and takes the composer
+  draft and scroll position with it. The router hides it instead.
+- **Stream accumulators advance at frame time, not inside a state updater.**
+  React runs an updater at flush time, so a ref mutated in one only catches up
+  when React re-renders. Two frames landing in the same tick then read a stale
+  (or already-cleared) accumulator, and a finished turn renders a blank body.
 
 ### Phase 4 — the control
 

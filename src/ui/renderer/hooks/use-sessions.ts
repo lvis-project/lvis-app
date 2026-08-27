@@ -45,32 +45,64 @@ function sessionProjectFromHistory(
 }
 
 /**
- * Sessions hook.
- * Owns session list, current session id, load/fork actions. The streaming
- * guard on load lives here; callers pass `streaming` so we don't swap
- * history mid-turn (ConversationLoop.runTurn has no concurrency guard).
+ * The window's list of conversations.
  *
- * Fork needs to truncate renderer entries (which include reasoning/tool_group
- * rows the backend history doesn't track) — so the caller passes the resolved
- * history index and a `setEntries` truncator.
+ * Separate from `useCurrentSession` because the two answer to different
+ * owners: the LIST describes the window and is the same for every tile, while
+ * which session a tile is holding is that tile's own business. Keeping them in
+ * one hook meant every tile would have refetched the list, and the sidebar
+ * would have had to pick one tile's copy of it to render.
  */
-export function useSessions(
-  api: LvisApi,
-  applyInitialSession?: (entries: ChatEntry[]) => void,
-  onLoadedSession?: () => void,
+export function useSessionList(api: LvisApi) {
+  const [sessions, setSessions] = useState<SessionSummary[]>([]);
+
+  const refreshSessions = useCallback(async () => {
+    try {
+      const r = await api.chatSessions({ kind: "main" });
+      setSessions(r.sessions);
+    } catch { /* ignore */ }
+  }, [api]);
+
+  return { sessions, refreshSessions };
+}
+
+export interface CurrentSessionDeps {
+  applyInitialSession?: (entries: ChatEntry[]) => void;
+  onLoadedSession?: () => void;
   /**
    * Seed the sub-agent panel from rows the load handlers rebuilt on disk. The
    * panel is otherwise fed only by the live `agent_spawn` event stream, which
    * is empty after a restart. Called on EVERY path that establishes a session's
    * entries, so a restored conversation and a switched-to one behave alike.
    */
-  restoreSubAgents?: (rows: readonly RestoredSubAgentRow[]) => void,
-) {
+  restoreSubAgents?: (rows: readonly RestoredSubAgentRow[]) => void;
+  /**
+   * Tell the window its list is stale. A fork creates a session, and the
+   * sidebar has to learn about it — but the LIST is not this hook's to hold.
+   */
+  onSessionsChanged?: () => void | Promise<void>;
+}
+
+/**
+ * Which conversation ONE tile is holding, plus the load and fork actions that
+ * change it.
+ *
+ * `api` is the tile's group-bound surface, so every read here answers about
+ * that tile's ConversationLoop and two tiles never see each other's session.
+ *
+ * The streaming guard on load lives here; callers pass `streaming` so we don't
+ * swap history mid-turn (ConversationLoop.runTurn has no concurrency guard).
+ *
+ * Fork needs to truncate renderer entries (which include reasoning/tool_group
+ * rows the backend history doesn't track) — so the caller passes the resolved
+ * history index and a `setEntries` truncator.
+ */
+export function useCurrentSession(api: LvisApi, deps: CurrentSessionDeps = {}) {
+  const { applyInitialSession, onLoadedSession, restoreSubAgents, onSessionsChanged } = deps;
   const [currentSessionId, setCurrentSessionId] = useState<string>("");
   const [currentSessionKind, setCurrentSessionKind] = useState<"main" | "routine">("main");
   const [currentSessionTitle, setCurrentSessionTitle] = useState<string | undefined>(undefined);
   const [currentSessionProject, setCurrentSessionProject] = useState<SessionProjectSummary>({});
-  const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const sessionReadTokenRef = useRef(0);
 
   const refreshSessionId = useCallback(async () => {
@@ -110,9 +142,9 @@ export function useSessions(
     try {
       const h = await api.chatGetHistory();
       if (token !== sessionReadTokenRef.current) return;
-      const listed = await api.chatSessions({ kind: "main" });
+      // Hydration is also the window's first chance to fill its list.
+      await onSessionsChanged?.();
       if (token !== sessionReadTokenRef.current) return;
-      setSessions(listed.sessions);
       const activeState = await api.chatMainActiveState();
       if (token !== sessionReadTokenRef.current) return;
       if (!activeState || activeState.mainActiveMode === "fresh" || !activeState.mainActiveSessionId) {
@@ -152,14 +184,7 @@ export function useSessions(
       restoreSubAgents?.(persisted.restoredSubAgents ?? []);
       applyInitialSession?.(sessionHistoryToEntries(persisted));
     } catch { /* ignore */ }
-  }, [api, applyInitialSession]);
-
-  const refreshSessions = useCallback(async () => {
-    try {
-      const r = await api.chatSessions({ kind: "main" });
-      setSessions(r.sessions);
-    } catch { /* ignore */ }
-  }, [api]);
+  }, [api, applyInitialSession, restoreSubAgents, onSessionsChanged]);
 
   useEffect(() => { void hydrateInitialSession(); }, [hydrateInitialSession]);
 
@@ -208,7 +233,7 @@ export function useSessions(
         if (res.ok) {
           truncateToEntry(entryIdx);
           await refreshSessionId();
-          await refreshSessions();
+          await onSessionsChanged?.();
           return { ok: true };
         }
         return { ok: false };
@@ -217,7 +242,7 @@ export function useSessions(
         return { ok: false };
       }
     },
-    [api, refreshSessionId, refreshSessions],
+    [api, refreshSessionId, onSessionsChanged],
   );
 
   return {
@@ -226,9 +251,7 @@ export function useSessions(
     currentSessionTitle,
     currentSessionProject,
     setCurrentSessionId,
-    sessions,
     refreshSessionId,
-    refreshSessions,
     handleLoadSession,
     handleFork,
   };

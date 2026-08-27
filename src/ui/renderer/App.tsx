@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "../../i18n/react.js";
-import { composeOutgoing as composeOutgoingUtil, type ComposedOutgoing } from "./utils/compose.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { TooltipProvider } from "../../components/ui/tooltip.js";
 import { ThemeProvider } from "./theme/index.js";
@@ -14,8 +13,12 @@ import { MarketplaceAnnouncementBanner } from "./components/MarketplaceAnnouncem
 import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
-import { ChatContextProvider, type ChatContextValue } from "./context/ChatContext.js";
-import { ChatView } from "./ChatView.js";
+import { ChatGroupSession, type ChatGroupEnvironment } from "./components/ChatGroupSession.js";
+import {
+  ChatGroupSessionRegistry,
+  useChatGroupSession,
+} from "./components/chat-group-session-registry.js";
+import type { ChatEntry } from "../../lib/chat-stream-state.js";
 // The away surfaces for an MCP-app card that left its home mount — one singleton
 // each (each renders nothing while no card occupies its slot).
 import { McpAppPipPanel } from "./components/McpAppPipPanel.js";
@@ -27,11 +30,11 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { ChatGroupFrame, buildChatGroupActions, chatGroupApi, useChatGroups } from "./components/ChatGroupFrame.js";
+import { ChatGroupFrame, useChatGroups } from "./components/ChatGroupFrame.js";
+import { useSessionList, type SessionSummary } from "./hooks/use-sessions.js";
 import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
-import { McpPromptArgsDialog } from "./dialogs/McpPromptArgsDialog.js";
 import { SpotlightTour } from "./components/SpotlightTour.js";
 import { PostTourFirstTask } from "./onboarding/PostTourFirstTask.js";
 import { DevConsoleToggle } from "./components/DevConsoleToggle.js";
@@ -58,36 +61,25 @@ import { useActiveView } from "./hooks/use-active-view.js";
 import { useSettingsTab } from "./hooks/use-settings-tab.js";
 import { useProjectPreferences } from "./hooks/use-project-preferences.js";
 import { useRoutineOverlay } from "./hooks/use-routine-overlay.js";
-import { useSendMessage } from "./hooks/use-send-message.js";
 import { usePluginViewRouting } from "./hooks/use-plugin-view-routing.js";
 import { useOnboardingTourController } from "./hooks/use-onboarding-tour-controller.js";
 import { usePluginLifecycleRefresh } from "./hooks/use-plugin-lifecycle-refresh.js";
-import { useChatStatusIndicators } from "./hooks/use-chat-status-indicators.js";
 import { useStatusBar, type NotificationToastMeta } from "./hooks/use-status-bar.js";
 import { useSettings } from "./hooks/use-settings.js";
-import { lookupBillablePricingOptional } from "../../shared/pricing-data.js";
-import { estimateOutgoingUserMessageTokens } from "../../shared/multimodal-token-estimate.js";
-import { useChatState } from "./hooks/use-chat-state.js";
 import { useApproval } from "./hooks/use-approval.js";
 import { useApprovalSentence } from "./hooks/use-approval-sentence.js";
 import { useSearch } from "./hooks/use-search.js";
-import { useContextBudget } from "./hooks/use-context-budget.js";
-import { useCostEstimate } from "./hooks/use-cost-estimate.js";
 import { useStarred } from "./hooks/use-starred.js";
-import { useSessions } from "./hooks/use-sessions.js";
 import { useMarketplaceUpdates } from "./hooks/use-marketplace-updates.js";
 import { useMarketplaceAnnouncements } from "./hooks/use-marketplace-announcements.js";
 import { useBootstrapStatus } from "./hooks/use-bootstrap-status.js";
 import { usePluginMarketplace } from "./hooks/use-plugin-marketplace.js";
 import { usePluginAuthStatuses } from "./hooks/use-plugin-auth-status.js";
-import type { Attachment } from "./types/attachments.js";
 import { useRolePresets } from "./hooks/use-role-presets.js";
 import { useAppBootstrap } from "./hooks/use-app-bootstrap.js";
 import { useWindowFileDropGuard } from "./hooks/use-window-file-drop-guard.js";
-import { useWorkflowTools } from "./hooks/use-workflow-tools.js";
 import { useMarketplaceUrl } from "./hooks/use-marketplace-url.js";
 import type { UserKeyboardIntentSnapshot } from "../../shared/chat-origin.js";
-import type { McpPromptEntry } from "./components/slash-picker-data.js";
 import { normalizeSettingsTab } from "../../shared/settings-tabs.js";
 import { toViewLocation, viewLocationBreadcrumb, type ViewLocation } from "./utils/view-location.js";
 import { useViewHistory } from "./hooks/use-view-history.js";
@@ -116,6 +108,9 @@ import type { ProjectErrorReporter } from "./hooks/use-add-project-folder.js";
  */
 const CONTENT_TITLE_INSET = 16;
 
+/** The per-turn output ceiling the cost projection assumes. */
+const MAX_OUTPUT_TOKENS = 4096;
+
 export function App() {
   const { t } = useTranslation();
   const api = useMemo(() => getApi(), []);
@@ -124,28 +119,19 @@ export function App() {
   // (the drag-drop indexing feature was removed; this guard is all that remains).
   useWindowFileDropGuard();
 
-  // Workflow tools (S1+S2) — lifted to App level so the question request queue
-  // survives view navigation (question state persists across view changes).
-  const {
-    askQuestions,
-    subAgentSpawns,
-    loadedSkills,
-    dismissAskQuestion,
-    resetForNewSession,
-    restoreSubAgentSpawns,
-  } = useWorkflowTools(api);
+  // The tiles' conversations. Each ChatGroupSession publishes its handle here
+  // and the WINDOW reads whichever tile is focused — see
+  // chat-group-session-registry.ts for why this is a store and not state.
+  const chatGroupSessions = useMemo(() => new ChatGroupSessionRegistry(), []);
 
-  // Chat state + stream lifecycle (useChatState is the sole owner of entries).
-  const {
-    entries, streaming, isCompacting, compactTriggerSource, isRecoveryExhausted, beginStreamingRequest, finishStreamingRequest, markLastAssistantInterrupted, editingEntryIdx, setEditingEntryIdx, editBusy,
-    entryIndexToHistoryIndex, handleEditSave, handleRetryEffort, handleContinueFromLastUser,
-    resetStreamAccumulators, setErrorWithThought, handleCompactCommand,
-    clearForNewChat, appendUserEntry, dropUserEntry, appendSystemEntry, applyInitialSession, applyLoadedSession, truncateToEntry,
-    fallbackToast,
-    insertImportedTriggerEntry,
-  } = useChatState(api);
-  // Top chat-area status surface: persistent operational items plus transient
-  // toasts. Initialized early because plugin auth selection can emit toasts.
+  // The window's conversation list. Separate from any tile's current session:
+  // the list describes the window and is the same for all of them.
+  const { sessions, refreshSessions } = useSessionList(api);
+
+  // Top status surface: persistent operational items plus transient toasts.
+  // Window-scoped — a toast about a project error or an app update is the
+  // window's news, not one conversation's. Initialized early because plugin
+  // auth selection can emit toasts.
   const {
     persistent: statusPersistent,
     visibleToast: statusVisibleToast,
@@ -156,11 +142,24 @@ export function App() {
     removePersistent: statusRemovePersistent,
   } = useStatusBar({ api });
 
-  // Composer attachment warnings share the existing App-owned StatusBar queue.
-  // No second toast store or renderer-global channel is introduced for this flow.
-  const handleAttachmentWarning = useCallback((message: string) => {
-    statusPushToast({ severity: "warning", message, ttlMs: 8000 });
-  }, [statusPushToast]);
+  // Issue #260 — when a notification toast is clicked, dispatch the click via
+  // notifyClick IPC (which restores+focuses the window) and dismiss the toast.
+  // Other toast producers leave `notification` undefined so this is a no-op.
+  const handleStatusToastClick = useCallback(
+    (toast: { id: string; notification?: NotificationToastMeta }) => {
+      if (!toast.notification) return;
+      try {
+        void api.notifyClick?.({
+          kind: toast.notification.kind,
+          contextRef: toast.notification.contextRef,
+        });
+      } catch {
+        // notifyClick is best-effort UX; failure must not crash the bar.
+      }
+      statusRemoveToast(toast.id);
+    },
+    [api, statusRemoveToast],
+  );
 
   // App auto-update badge — surfaces main-process electron-updater events as a
   // permanent badge next to the Home button. User-gated: download/install only
@@ -179,21 +178,6 @@ export function App() {
       ttlMs: 20000,
     });
   });
-
-  const [question, setQuestion] = useState("");
-  const chatEndRef = useRef<HTMLDivElement>(null);
-  // Forward-ref cycle bridge — App OWNS this ref and passes it to both hooks:
-  // use-send-message WRITES it (handleAskRef.current = handleAsk each render) and
-  // use-routine-overlay's handlePluginPrimaryAction READS it to start a
-  // trigger-import turn. Keeping the ref in App (rather than inline-breaking the
-  // cycle) is what lets the two hooks reference each other safely.
-  const handleAskRef = useRef<(
-    q: string,
-    mode?: "default" | "trigger-import" | "app-message" | "mcp-prompt",
-    userIntent?: UserKeyboardIntentSnapshot,
-  ) => Promise<void>>(
-    async () => { /* populated below */ },
-  );
 
   // App state
   const {
@@ -220,7 +204,6 @@ export function App() {
   const {
     appMode, setAppMode,
     sidebarCollapsed, setSidebarCollapsed,
-    actionPanelOpen, setActionPanelOpen,
     setSidePanelOpen,
   } = useAppMode(api);
   // Durable expanded-width of the primary navigation sidebar (drag-to-resize on
@@ -233,6 +216,76 @@ export function App() {
   } = usePanelWidth(api, SIDEBAR_WIDTH_PREF);
   // Sidebar Chats/Projects tab — persisted the same way as sidebarWidth.
   const { activeTab: sidebarActiveTab, setActiveTab: setSidebarActiveTab } = useSidebarTab(api);
+
+  // The tiled chat groups — the geometry. See `useChatGroups` and
+  // docs/design/tiled-chat-groups.md.
+  const chatGroups = useChatGroups(appMode);
+
+  /**
+   * The conversation the WINDOW is talking about.
+   *
+   * Every window control that names "the conversation" — the toolbar's
+   * streaming state, the sidebar's highlighted session, the search panel's
+   * transcript, a prefill from the tour — means the tile the user is looking
+   * at. Reading it here once is what keeps that meaning in one place.
+   */
+  // The tile area in pixels. The split control halves the focused tile's LONGER
+  // side, and the tree only knows fractions — a fraction cannot say which side
+  // of a tile is longer.
+  const chatGroupCanvasRef = useRef<HTMLDivElement>(null);
+
+  const focusedSession = useChatGroupSession(chatGroupSessions, chatGroups.focusedId);
+  // use-routine-overlay wants a REF it can read at fire time. The focused tile
+  // can change between mount and fire, so the ref is re-pointed each render
+  // rather than captured — otherwise a routine would start its turn in
+  // whichever tile happened to be focused when the overlay mounted.
+  const focusedAskRef = useRef<(
+    q: string,
+    mode?: "default" | "trigger-import" | "app-message" | "mcp-prompt",
+    userIntent?: UserKeyboardIntentSnapshot,
+  ) => Promise<void>>(async () => {});
+  focusedAskRef.current = focusedSession.ask;
+  const { entries, streaming, currentSessionId, currentSessionProject, fallbackToast } = focusedSession;
+
+  // Search is window chrome (the panel is an overlay over everything), reading
+  // the focused tile's transcript — the one actually on screen.
+  const {
+    open: searchOpen, query: searchQuery, caseSensitive: searchCase,
+    matches: searchMatches, matchSet: searchMatchSet, matchIdx: searchIdx, highlight: searchHighlight,
+    changeQuery: searchChangeQuery, toggleCase: searchToggleCase,
+    openOverlay: searchOpenOverlay, toggleOverlay: searchToggleOverlay, closeOverlay: searchCloseOverlay,
+    nextMatch: searchNext, prevMatch: searchPrev, jumpToMatch: searchJumpToMatch,
+  } = useSearch(entries as unknown as ChatEntry[]);
+
+  const handleExport = useCallback(async (format: "markdown" | "json", sessionId?: string) => {
+    try { await api.chatExport(format, sessionId); }
+    catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
+  }, [api]);
+
+  // Reverse of handleExport. Returns the new sessionId on success so the caller
+  // can load it and refresh the sidebar, matching the export/import symmetry —
+  // import always yields a brand-new session, never overwrites the current one.
+  const handleImport = useCallback(async (): Promise<string | null> => {
+    try {
+      const result = await api.chatImport();
+      return result.ok ? result.sessionId : null;
+    } catch (err) {
+      console.warn("[lvis] import failed:", (err as Error).message);
+      return null;
+    }
+  }, [api]);
+
+  const handleLoadSessionAndRefresh = useCallback(
+    (sessionId: string) => focusedSession.loadSession(sessionId),
+    [focusedSession],
+  );
+
+  const handleImportAndLoad = useCallback(async () => {
+    const sessionId = await handleImport();
+    if (!sessionId) return;
+    await handleLoadSessionAndRefresh(sessionId);
+  }, [handleImport, handleLoadSessionAndRefresh]);
+
   // Pinned-project preference — pinned projects sort to the top of the
   // sidebar's Projects tab.
   const {
@@ -286,7 +339,7 @@ export function App() {
     // display.
     approvalRequest:
       approvalQueue[0]?.kind === "out-of-allowed-dir" ? approvalQueue[0] : null,
-    onNotice: appendSystemEntry,
+    onNotice: (message: string) => focusedSession.appendSystemEntry(message),
   });
 
   // Routine + plugin-overlay IPC pipeline. Owns runningRoutines, the addFireRef
@@ -299,7 +352,13 @@ export function App() {
     runningRoutines,
     handlePluginPrimaryAction,
     handleRoutineAcknowledge,
-  } = useRoutineOverlay({ api, t, insertImportedTriggerEntry, handleAskRef });
+  } = useRoutineOverlay({
+    api, t,
+    // Both reach the FOCUSED tile: a routine firing has a conversation to say
+    // something to, and the one it means is the tile the user is looking at.
+    insertImportedTriggerEntry: (input) => focusedSession.insertImportedTriggerEntry(input),
+    handleAskRef: focusedAskRef,
+  });
 
   // Marketplace + plugin UI extensions
   const {
@@ -381,20 +440,6 @@ export function App() {
 
   // Role preset, cost preview, multimodal attachments
   const { rolePresets, activePreset, activePresetId, setActivePresetId } = useRolePresets(api);
-  const [attachments, setAttachments] = useState<Attachment[]>([]);
-  // Strictly increasing N — never reassigned even after attachment removal so
-  // textarea markers ([Image #N]) keep referring to the same payload.
-  const attachmentNCounter = useRef(0);
-  const [maxOutputTokens] = useState<number>(4096);
-
-  // Search / starred / sessions
-  const {
-    open: searchOpen, query: searchQuery, caseSensitive: searchCase,
-    matches: searchMatches, matchSet: searchMatchSet, matchIdx: searchIdx, highlight: searchHighlight,
-    changeQuery: searchChangeQuery, toggleCase: searchToggleCase,
-    openOverlay: searchOpenOverlay, toggleOverlay: searchToggleOverlay, closeOverlay: searchCloseOverlay,
-    nextMatch: searchNext, prevMatch: searchPrev, jumpToMatch: searchJumpToMatch,
-  } = useSearch(entries);
   const {
     starred,
     refreshStarred,
@@ -403,28 +448,6 @@ export function App() {
     isSessionStarred,
     handleToggleSessionStar,
   } = useStarred(api);
-  const {
-    currentSessionId, currentSessionKind, currentSessionTitle, sessions, refreshSessionId, refreshSessions,
-    currentSessionProject,
-    handleLoadSession: sessionLoad, handleFork: sessionFork,
-  } = useSessions(api, applyInitialSession, resetForNewSession, restoreSubAgentSpawns);
-  const attachmentSessionScopeRef = useRef<{ initialized: boolean; sessionId?: string }>({
-    initialized: false,
-    sessionId: undefined,
-  });
-
-  useEffect(() => {
-    const scope = attachmentSessionScopeRef.current;
-    if (!scope.initialized) {
-      scope.initialized = true;
-      scope.sessionId = currentSessionId;
-      return;
-    }
-    if (scope.sessionId === currentSessionId) return;
-    scope.sessionId = currentSessionId;
-    setAttachments([]);
-  }, [currentSessionId]);
-
   const handleProjectError = useCallback<ProjectErrorReporter>((operation, error, message) => {
     statusPushToast({
       severity: "error",
@@ -517,15 +540,13 @@ export function App() {
       }
       try {
         setActiveView("home");
-        const loaded = await sessionLoad(sessionId, streaming, applyLoadedSession);
-        if (loaded !== false) await refreshSessions();
-        return loaded;
+        return await focusedSession.loadSession(sessionId);
       } catch (err) {
         console.warn("[lvis] openRoutineSession failed:", (err as Error).message);
         return false;
       }
     },
-    [applyLoadedSession, refreshSessions, sessionLoad, streaming],
+    [focusedSession, setActiveView],
   );
 
   useEffect(() => {
@@ -535,98 +556,6 @@ export function App() {
   }, [refreshSessions, refreshStarred, searchOpen]);
 
   // Small adapter callbacks that bridge hook outputs to ChatView / MainToolbar.
-  // Purely wiring — no new state.
-  const handleLoadSession = useCallback(
-    (sessionId: string) => sessionLoad(sessionId, streaming, applyLoadedSession),
-    [sessionLoad, streaming, applyLoadedSession],
-  );
-
-  const isEntryStarred = useCallback(
-    (entryIdx: number): string | null => starredIsEntry(entryIdx, currentSessionId, entryIndexToHistoryIndex),
-    [starredIsEntry, currentSessionId, entryIndexToHistoryIndex],
-  );
-
-  const handleFork = useCallback(async (entryIdx: number) => {
-    const histIdx = entryIndexToHistoryIndex.get(entryIdx);
-    if (histIdx === undefined) return;
-    await sessionFork(histIdx, entryIdx, truncateToEntry);
-  }, [entryIndexToHistoryIndex, sessionFork, truncateToEntry]);
-
-  const handleToggleStar = useCallback(
-    (entryIdx: number) => starredToggle(entryIdx, entries, currentSessionId, entryIndexToHistoryIndex),
-    [starredToggle, entries, currentSessionId, entryIndexToHistoryIndex],
-  );
-
-  const handleAbort = useCallback(async () => {
-    // chatAbort resolves only after the turn settles as interrupted, so the
-    // badge lands exactly when the stream stops — the initiator marks it, not
-    // a "[중단됨]" literal pushed through the delta stream by the engine.
-    try { await api.chatAbort(); } catch { /* no-op */ }
-    markLastAssistantInterrupted();
-  }, [api, markLastAssistantInterrupted]);
-
-  const handleGuide = useCallback(async (
-    text: string,
-  ): Promise<{ ok: true } | { ok: false; error: string }> => {
-    if (text.trim().length === 0) return { ok: false, error: "empty-text" };
-    try {
-      const result = await api.chatGuide(text);
-      // Main-process handler returns `{ ok: boolean, error?: string }`.
-      // Type-narrow defensively since the IPC boundary is `Promise<unknown>`.
-      if (result && typeof result === "object" && "ok" in result) {
-        const r = result as { ok: boolean; error?: string };
-        if (r.ok) return { ok: true };
-        return { ok: false, error: r.error ?? "unknown-error" };
-      }
-      return { ok: false, error: "invalid-response" };
-    } catch (err) {
-      return { ok: false, error: (err as Error)?.message ?? "ipc-error" };
-    }
-  }, [api]);
-
-  const handleFeedback = useCallback(async (messageIdx: number, rating: "up" | "down", reason?: string) => {
-    if (!api.submitFeedback) return;
-    try { await api.submitFeedback({ sessionId: currentSessionId, messageIndex: messageIdx, rating, reason }); } catch { /* no-op */ }
-  }, [api, currentSessionId]);
-
-  const handleExport = useCallback(async (format: "markdown" | "json", sessionId?: string) => {
-    try { await api.chatExport(format, sessionId); } catch (err) { console.warn("[lvis] export failed:", (err as Error).message); }
-  }, [api]);
-
-
-  // #1500 (E3) — reverse of handleExport. Returns the new sessionId on
-  // success so the caller can load it and refresh the sidebar, matching the
-  // export/import symmetry — import always yields a brand-new session, never
-  // overwrites the current one.
-  const handleImport = useCallback(async (): Promise<string | null> => {
-    try {
-      const result = await api.chatImport();
-      return result.ok ? result.sessionId : null;
-    } catch (err) {
-      console.warn("[lvis] import failed:", (err as Error).message);
-      return null;
-    }
-  }, [api]);
-
-  const handleLoadSessionAndRefresh = useCallback(async (sessionId: string) => {
-    const loaded = await handleLoadSession(sessionId);
-    if (loaded !== false) {
-      await refreshSessions();
-    }
-    return loaded;
-  }, [handleLoadSession, refreshSessions]);
-
-  // #1500 (E3) — import always creates a brand-new session; on success,
-  // load it into the current view and refresh the sidebar (export/import
-  // symmetry: neither mutates the session currently open).
-  const handleImportAndLoad = useCallback(async () => {
-    const sessionId = await handleImport();
-    if (sessionId) {
-      await handleLoadSessionAndRefresh(sessionId);
-    }
-  }, [handleImport, handleLoadSessionAndRefresh]);
-
-  // LLM settings + context budget (single source of truth: src/shared/pricing-data.ts)
   const {
     llmVendor,
     llmModel,
@@ -666,32 +595,6 @@ export function App() {
   const subscriptionPendingProvider = subscriptionRuntimePolicy.pendingProvider;
   const subscriptionImageAttachmentProvider = subscriptionRuntimePolicy.imageAttachmentProvider;
   const subscriptionFileAttachmentProvider = subscriptionRuntimePolicy.fileAttachmentProvider;
-  const composeOutgoing = useCallback(
-    (raw: string) => composeOutgoingUtil({ raw, activePreset, attachments }),
-    [activePreset, attachments],
-  );
-  // This is the same trimmed draft the send path composes. Both pre-send
-  // surfaces consume it, so pasted text, file paths, resource text parts, and
-  // images cannot drift from the actual user payload.
-  const composedDraft = useMemo<ComposedOutgoing>(() => {
-    const trimmedQuestion = question.trim();
-    return trimmedQuestion.length > 0
-      ? composeOutgoing(trimmedQuestion)
-      : { text: "", attachments: [] };
-  }, [question, composeOutgoing]);
-  const draftTokenEstimate = useMemo(
-    () => estimateOutgoingUserMessageTokens(composedDraft.text, composedDraft.attachments),
-    [composedDraft],
-  );
-
-  const { usedTokens, contextBudget, effectiveBudget, contextOverflowPct, tpmLimit, tpmPct, isTpmOverflow } =
-    useContextBudget({
-      entries,
-      llmVendor: subscriptionRuntimeSelected ? undefined : llmVendor,
-      llmModel: subscriptionRuntimeSelected ? undefined : llmModel,
-      draftTokenEstimate,
-      enabled: apiUsageProjectionAvailable,
-    });
   // Plugin/built-in view routing + host-managed plugin auth lifecycle (the 4
   // auth-gate refs + action guard + pluginAuthErrors + the two drain effects +
   // the uninstalled-plugin fallback), extracted as ONE unit. Routing no longer
@@ -739,24 +642,6 @@ export function App() {
 
   // The conversation action set. Built once so the chat-group header and the
   // sidebar row's context menu cannot drift apart about what is offered.
-  const chatGroupActions = useMemo(
-    () =>
-      buildChatGroupActions({
-        t,
-        pinned: Boolean(currentSessionId && isSessionStarred(currentSessionId)),
-        onTogglePin: () =>
-          currentSessionId
-            ? handleToggleSessionStar(
-                currentSessionId,
-                sessions.find((s) => s.id === currentSessionId)?.title,
-              )
-            : Promise.resolve(),
-        onExport: handleExport,
-        onImport: handleImportAndLoad,
-      }),
-    [t, currentSessionId, isSessionStarred, sessions, handleToggleSessionStar, handleExport, handleImportAndLoad],
-  );
-
   // Build flat PluginEntry list for InputActionBar plugin grid.
   // `unauthed` is set when the owning plugin declares `manifest.auth` AND its
   // current statusTool result is `kind: "unauthed"`. The grid renders a
@@ -939,119 +824,17 @@ export function App() {
   // writes handleAskRef.current each render so the forward-ref cycle with
   // use-routine-overlay's handlePluginPrimaryAction stays live. See
   // use-send-message.ts.
-  const { handleAsk } = useSendMessage({
-    api, t, streaming, checkApiKey, composeOutgoing,
-    appendUserEntry, dropUserEntry, resetStreamAccumulators, beginStreamingRequest, finishStreamingRequest,
-    markLastAssistantInterrupted,
-    setErrorWithThought, handleCompactCommand, sessionLoad, applyLoadedSession,
-    refreshSessionId, refreshSessions, attachments, setAttachments,
-    llmVendor, llmModel, llmReadyWithoutApiKey: chatReadyWithoutApiKey,
-    settingsReady: settingsLoaded,
-    subscriptionRuntimePolicy,
-    onOpenSettings, setQuestion, handleAskRef,
-  });
-
-  // Run a server-declared MCP prompt. The host fetches it and returns the text
-  // ALREADY wrapped in its provenance envelope; we send that verbatim under the
-  // staged `mcp-prompt` mode. It deliberately does NOT go through the composer
-  // draft: a draft the user then submits would enter as `user-keyboard`, which
-  // would launder server-authored text into a fully trusted turn.
-  // Arguments are collected by HOST chrome (McpPromptArgsDialog) — the renderer
-  // has no `window.prompt`, and a composer draft would re-enter as
-  // `user-keyboard`. An argument-less prompt skips the form entirely.
-  const [mcpPromptAwaitingArgs, setMcpPromptAwaitingArgs] = useState<McpPromptEntry | null>(null);
-
-  const runMcpPrompt = useCallback(
-    async (prompt: McpPromptEntry, args: Record<string, string>) => {
-      // The prompt NAME is server-authored, so it is bounded before it goes near
-      // host chrome (React escapes it; this is about layout, and about the toast
-      // staying readable).
-      const label = prompt.name.slice(0, 64);
-      const fail = (error?: string) => {
-        // The handler distinguishes rate-limited from empty-prompt from
-        // prompt-failed. Collapsing them into one string is what makes "it just
-        // doesn't work" undiagnosable — `formatIpcError` already owns the wording
-        // for each code, and falls back to the generic line for an unknown one.
-        statusPushToast({
-          severity: "error",
-          message: formatIpcError(error, undefined, {
-            fallbackContext: t("app.mcpPromptFailed", { name: label }),
-          }),
-          ttlMs: 10000,
-        });
-      };
-      // One catch for the whole path: an IPC rejection, a missing bridge, or a
-      // send-gate refusal all surface as a toast rather than an unhandled
-      // rejection the user never sees.
-      try {
-        const outcome = await window.lvis?.mcp?.getPrompt?.(prompt.serverId, prompt.name, args);
-        if (!outcome || outcome.ok !== true) {
-          fail(outcome?.ok === false ? outcome.error : undefined);
-          return;
-        }
-        // The host clipped what the server returned. Saying so is the difference
-        // between a prompt that looks complete and one the user knows is partial.
-        if (outcome.truncated || (outcome.omittedBlocks ?? 0) > 0) {
-          statusPushToast({
-            severity: "warning",
-            message: t("app.mcpPromptClipped", { name: label }),
-            ttlMs: 8000,
-          });
-        }
-        await handleAskRef.current?.(outcome.envelope, "mcp-prompt");
-      } catch {
-        fail();
-      }
-    },
-    [handleAskRef, statusPushToast, t],
-  );
-
-  const handleRunMcpPrompt = useCallback((prompt: McpPromptEntry) => {
-    if (prompt.arguments.length > 0) {
-      setMcpPromptAwaitingArgs(prompt);
-      return;
-    }
-    void runMcpPrompt(prompt, {});
-  }, [runMcpPrompt]);
-
-  const handleMcpPromptArgsSubmit = useCallback(
-    (prompt: McpPromptEntry, args: Record<string, string>) => {
-      setMcpPromptAwaitingArgs(null);
-      void runMcpPrompt(prompt, args);
-    },
-    [runMcpPrompt],
-  );
-
-  const { costEstimate, costBadgeClass } =
-    useCostEstimate({
-      entries,
-      draft: composedDraft,
-      llmVendor: subscriptionRuntimeSelected ? undefined : llmVendor,
-      llmModel: subscriptionRuntimeSelected ? undefined : llmModel,
-      maxOutputTokens,
-      enabled: apiUsageProjectionAvailable,
-    });
-  // Strict variant — `undefined` means "model not in catalog" so the cost
-  // toggle in TokenCostBadge stays disabled rather than showing $0 from
-  // FALLBACK_PRICING.
-  const activePricing = useMemo(
-    () => apiUsageProjectionAvailable ? lookupBillablePricingOptional(llmVendor, llmModel) : undefined,
-    [apiUsageProjectionAvailable, llmVendor, llmModel],
-  );
-
   const handleNewChat = useCallback(async (project?: { projectRoot?: string; projectName?: string }) => {
     if (streaming) { console.warn("new chat blocked during streaming"); return; }
     const nextProject = resolveKnownProject(projectIdentityFromPayload(project)) ?? activeProject ?? defaultWorkspaceProject;
-    await api.chatNew(nextProject
+    // The tile starts it: chatNew has to reach the FOCUSED tile's loop, and
+    // the reset has to land on that tile's transcript.
+    await focusedSession.startNewChat(nextProject
       ? { projectRoot: nextProject.projectRoot, projectName: nextProject.projectName }
       : undefined);
     if (nextProject) setActiveProject(nextProject);
-    clearForNewChat();
-    resetForNewSession();
     setActiveView("home");
-    await refreshSessionId();
-    await refreshSessions();
-  }, [activeProject, api, clearForNewChat, defaultWorkspaceProject, refreshSessionId, refreshSessions, resetForNewSession, resolveKnownProject, streaming]);
+  }, [activeProject, defaultWorkspaceProject, focusedSession, resolveKnownProject, setActiveView]);
 
   // ── What a conversation ROW can do to itself ───────────────────────────────
   // Assembled here because these are the only place that has both the IPC
@@ -1110,9 +893,6 @@ export function App() {
     };
   }, [api, sessions, refreshSessions, handleExport, handleImportAndLoad, handleNewChat]);
 
-  // The tiled chat groups. See `useChatGroups` for why the list is flat and
-  // why it stops at the number of ConversationLoops that actually exist.
-  const chatGroups = useChatGroups(appMode);
   // The work panel is per-GROUP state now (each conversation carries its own),
   // but WIDENING THE WINDOW is a window-level effect: it has to fire when ANY
   // group wants the extra room, and stop the moment we leave the surface those
@@ -1188,79 +968,77 @@ export function App() {
   );
 
 
-  // ChatView context bundle — avoids drilling ~40 props through the tree.
-  // `effectiveLlmReady` combines the provider-key probe with explicit
-  // keyless-compatible provider readiness and a subscription runtime that has
-  // explicitly verified chat support.
-  // Until the persisted runtime selection has loaded, API-vendor defaults are
-  // not a safe authority for a setting that a selected subscription runtime
-  // does not expose. Keep this control fail-closed with send/attachment UX.
-  const chatReasoningAvailable = settingsLoaded && activeSubscriptionRuntime === null;
-  const chatActiveVendor = apiUsageProjectionAvailable ? llmVendor : undefined;
-  const chatContextValue = useMemo<ChatContextValue>(() => ({
-    entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, currentSessionId, hasApiKey: effectiveLlmReady, settingsLoaded, onOpenSettings,
-    searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx, searchHighlight,
-    searchChangeQuery, searchToggleCase, searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
-    contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
-    tpmLimit, tpmPct, isTpmOverflow,
-    usageAvailable: apiUsageProjectionAvailable,
+  /**
+   * Everything a tile needs that is NOT its own conversation.
+   *
+   * One object rather than fifty props: a tile is rendered in a loop, so
+   * threading these individually would put fifty lines at every call site and
+   * make adding one a change in two places.
+   */
+  const chatGroupEnvironment = useMemo<ChatGroupEnvironment>(() => ({
+    llmVendor, llmModel, settingsLoaded,
+    subscriptionRuntimeSelected, subscriptionRuntimePolicy,
+    subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider,
+    subscriptionUnavailableProvider, subscriptionPendingProvider,
+    apiUsageProjectionAvailable,
+    // Until the persisted runtime selection has loaded, API-vendor defaults are
+    // not a safe authority for a setting a selected subscription runtime does
+    // not expose. Keep this control fail-closed with send/attachment UX.
+    chatReasoningAvailable: settingsLoaded && activeSubscriptionRuntime === null,
+    effectiveLlmReady, chatReadyWithoutApiKey, checkApiKey,
+    onOpenSettings, maxOutputTokens: MAX_OUTPUT_TOKENS,
     rolePresets, activePreset, activePresetId, setActivePresetId,
-    subscriptionRuntimePolicy,
-    subscriptionImageAttachmentProvider,
-    subscriptionFileAttachmentProvider,
-    subscriptionUnavailableProvider,
-    subscriptionPendingProvider,
-    attachments, setAttachments, attachmentNCounter,
-    enableThinkingChat, reasoningAvailable: chatReasoningAvailable,
-    toggleThinking, costEstimate, costBadgeClass,
-    activePricing,
-    activeVendor: chatActiveVendor,
-  }), [
-    entries, streaming, editingEntryIdx, setEditingEntryIdx, editBusy,
-    question, setQuestion, chatEndRef, currentSessionId,
-    effectiveLlmReady, settingsLoaded, onOpenSettings,
-    searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet,
-    searchIdx, searchHighlight, searchChangeQuery, searchToggleCase,
-    searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
-    contextOverflowPct, usedTokens, contextBudget, effectiveBudget,
-    tpmLimit, tpmPct, isTpmOverflow,
-    rolePresets, activePreset, activePresetId, setActivePresetId,
-    attachments, setAttachments, attachmentNCounter,
-    enableThinkingChat, chatReasoningAvailable, toggleThinking, apiUsageProjectionAvailable,
-    subscriptionRuntimePolicy, subscriptionImageAttachmentProvider,
-    subscriptionFileAttachmentProvider, subscriptionUnavailableProvider,
-    subscriptionPendingProvider,
-    costEstimate, costBadgeClass, activePricing, chatActiveVendor,
-  ]);
-
-  // Issue #260 — when a notification toast is clicked, dispatch the click via
-  // notifyClick IPC (which restores+focuses the window) and dismiss the
-  // toast. Other toast producers leave `notification` undefined so this
-  // handler is a no-op for them.
-  // Persistent StatusBar indicators for pre-turn auto-compact + exhausted
-  // force-recover budget, keyed off useChatState flags. See
-  // use-chat-status-indicators.ts.
-  useChatStatusIndicators({
-    t, isCompacting, compactTriggerSource, isRecoveryExhausted,
-    statusUpsertPersistent, statusRemovePersistent,
-  });
-
-  const handleStatusToastClick = useCallback(
-    (toast: { id: string; notification?: NotificationToastMeta }) => {
-      if (!toast.notification) return;
-      try {
-        void api.notifyClick?.({
-          kind: toast.notification.kind,
-          contextRef: toast.notification.contextRef,
-        });
-      } catch {
-        // notifyClick is best-effort UX; failure must not crash the bar.
-      }
-      statusRemoveToast(toast.id);
+    enableThinkingChat, toggleThinking,
+    refreshSessions, sessions,
+    isSessionStarred: (sessionId: string) => Boolean(isSessionStarred(sessionId)),
+    handleToggleSessionStar,
+    starredIsEntry, starredToggle,
+    statusBar: {
+      persistent: statusPersistent,
+      visibleToast: statusVisibleToast,
+      pendingCount: statusPendingCount,
+      onToastClick: handleStatusToastClick,
+      onToastDismiss: (toast) => statusRemoveToast(toast.id),
     },
-    [api, statusRemoveToast],
-  );
+    statusPushToast, statusUpsertPersistent, statusRemovePersistent,
+    search: {
+      searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet,
+      searchIdx, searchHighlight, searchChangeQuery, searchToggleCase,
+      searchNext, searchPrev, searchCloseOverlay, searchToggleOverlay,
+    },
+    onExport: handleExport, onImport: handleImport,
+    plugins: pluginEntries,
+    onSelectPlugin: handleViewSelectWithDoctor,
+    appMode,
+    onOpenApprovalQueue: () => setDeferredQueueOpen(true),
+    commandActions, commandPopoverOpen, onCommandPopoverOpenChange: setCommandPopoverOpen,
+    onPluginPrimaryAction: (id: string) => { void handlePluginPrimaryAction(id); },
+    onRoutineAcknowledge: handleRoutineAcknowledge,
+    approvalSentenceInterceptSubmit: interceptApprovalSentence,
+    activeProject: activeProject ?? defaultWorkspaceProject,
+    workspaceProjects,
+    onNewChatForProject,
+    onRefreshProjects: refreshWorkspaceProjects,
+    onProjectError: handleProjectError,
+  }), [
+    llmVendor, llmModel, settingsLoaded, subscriptionRuntimeSelected, subscriptionRuntimePolicy,
+    subscriptionImageAttachmentProvider, subscriptionFileAttachmentProvider,
+    subscriptionUnavailableProvider, subscriptionPendingProvider,
+    apiUsageProjectionAvailable, activeSubscriptionRuntime,
+    effectiveLlmReady, chatReadyWithoutApiKey, checkApiKey, onOpenSettings,
+    rolePresets, activePreset, activePresetId, setActivePresetId,
+    enableThinkingChat, toggleThinking, refreshSessions, sessions,
+    isSessionStarred, handleToggleSessionStar, starredIsEntry, starredToggle,
+    statusPersistent, statusVisibleToast, statusPendingCount, handleStatusToastClick,
+    statusRemoveToast, statusPushToast, statusUpsertPersistent, statusRemovePersistent,
+    searchOpen, searchQuery, searchCase, searchMatches, searchMatchSet, searchIdx,
+    searchHighlight, searchChangeQuery, searchToggleCase, searchNext, searchPrev,
+    searchCloseOverlay, searchToggleOverlay,
+    handleExport, handleImport, pluginEntries, handleViewSelectWithDoctor, appMode,
+    commandActions, commandPopoverOpen, handlePluginPrimaryAction, handleRoutineAcknowledge,
+    interceptApprovalSentence, activeProject, defaultWorkspaceProject, workspaceProjects,
+    onNewChatForProject, refreshWorkspaceProjects, handleProjectError,
+  ]);
 
   // ─── Render ───────────────────────────────────
   return (
@@ -1422,7 +1200,7 @@ export function App() {
                       open={searchOpen}
                       query={searchQuery}
                       caseSensitive={searchCase}
-                      entries={entries}
+                      entries={entries as ChatEntry[]}
                       conversationMatches={searchMatches}
                       currentConversationMatch={searchIdx}
                       sessions={sessions}
@@ -1484,6 +1262,105 @@ export function App() {
                         setActiveView("home");
                       }}
                     >
+                      {/* The conversations, always mounted.
+                          A tile subscribes to its group's stream when it mounts, so
+                          swapping it out to render Settings would drop the frames of
+                          a turn still in flight — and take the composer draft and
+                          scroll position with it. `contents` keeps the wrapper out of
+                          the layout entirely, so the flex chain reads exactly as it
+                          does when this is the only child. */}
+                      <div
+                        data-testid="chat-surface"
+                        data-visible={activeView === "home" ? "true" : "false"}
+                        className={activeView === "home" ? "contents" : "hidden"}
+                      >
+                        <PageShell
+                              padded={false}
+                              maxWidth="none"
+                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
+                              data-testid="main-pane-shell"
+                            >
+                              <>
+                                {/* The away surfaces for an MCP-app card that left its home
+                                    mount — one singleton each (each renders nothing while no
+                                    card occupies its slot). Mounted once here rather than
+                                    per-transcript-card, matching the slots' own
+                                    single-occupant design. */}
+                                <McpAppPipPanel />
+                                <McpAppFullscreenPanel />
+                                {/* Tiles are positioned from the split tree's boxes rather
+                                    than nested flex containers, so a tile's rectangle is
+                                    one number that the layout, a drag hit-test, and a
+                                    measurement in a test all read the same way. */}
+                                <div className="min-h-0 min-w-0 flex-1 pb-2 pl-1 pr-2 pt-0" data-testid="chat-group-row">
+                                {/* The positioning context is INSIDE the padding: an
+                                    absolutely-positioned child resolves against the padding
+                                    box, so anchoring the tiles to the row itself would eat
+                                    the air that lines the chat group's bottom edge up with
+                                    the sidebar's. */}
+                                <div ref={chatGroupCanvasRef} className="relative h-full w-full" data-testid="chat-group-canvas">
+                                {chatGroups.groups.map((group) => (
+                                <div
+                                  key={group.id}
+                                  /* p-1 is the half-gutter: two adjacent tiles make the
+                                     8px gap the row used to get from `gap-2`, and the row's
+                                     own padding is reduced by the same 4px so the outer
+                                     edges land exactly where they did — the chat group's
+                                     bottom line has to stay on the sidebar's. */
+                                  className="absolute flex p-1"
+                                  style={{
+                                    left: `${group.box.left}%`,
+                                    top: `${group.box.top}%`,
+                                    width: `${group.box.width}%`,
+                                    height: `${group.box.height}%`,
+                                  }}
+                                  data-testid={`chat-group-cell:${group.id}`}
+                                >
+                                  {/* The tile owns its conversation: every hook inside is
+                                      keyed on its group-bound api, so two tiles stream at
+                                      once without either seeing the other's transcript. */}
+                                  <ChatGroupSession
+                                    chatGroupId={group.id}
+                                    api={api}
+                                    registry={chatGroupSessions}
+                                    env={chatGroupEnvironment}
+                                    panelOpen={group.panelOpen}
+                                    onSidePanelOpenChange={(open) => chatGroups.setPanelOpen(group.id, open)}
+                                  >
+                                    {({ actions, content }) => (
+                                      <ChatGroupFrame
+                                        title={
+                                          sessions.find((session: SessionSummary) => session.id === currentSessionId)?.title
+                                          ?? t("mainToolbar.newChat")
+                                        }
+                                        focused={chatGroups.focusedId === group.id}
+                                        onFocus={() => chatGroups.focus(group.id)}
+                                        panelOpen={group.panelOpen}
+                                        onTogglePanel={() => chatGroups.setPanelOpen(group.id, !group.panelOpen)}
+                                        actions={actions}
+                                        {...(chatGroups.canSplit ? {
+                                          onSplit: () => {
+                                            const canvas = chatGroupCanvasRef.current;
+                                            chatGroups.split(canvas
+                                              ? { width: canvas.clientWidth, height: canvas.clientHeight }
+                                              : undefined);
+                                          },
+                                        } : {})}
+                                        {...(group.id === MAIN_CHAT_GROUP_ID
+                                          ? {}
+                                          : { onClose: () => chatGroups.close(group.id) })}
+                                      >
+                                        {content}
+                                      </ChatGroupFrame>
+                                    )}
+                                  </ChatGroupSession>
+                                </div>
+                                ))}
+                                </div>
+                                </div>
+                              </>
+                            </PageShell>
+                      </div>
                       {/* Renders the active main-pane content. One branch per view
                           keeps the router readable; every branch wraps its panel in
                           the same PageShell (`main-pane-shell`). */}
@@ -1588,139 +1465,12 @@ export function App() {
                           );
                         }
 
-                        if (activeView === "home") {
-                          return (
-                            <PageShell
-                              padded={false}
-                              maxWidth="none"
-                              contentClassName="flex min-h-0 min-w-0 flex-1 flex-col"
-                              data-testid="main-pane-shell"
-                            >
-                              <ChatContextProvider value={chatContextValue}>
-                                {/* The away surfaces for an MCP-app card that left its home
-                                    mount — one singleton each (each renders nothing while no
-                                    card occupies its slot). Mounted once here rather than
-                                    per-transcript-card, matching the slots' own
-                                    single-occupant design. */}
-                                <McpAppPipPanel />
-                                <McpAppFullscreenPanel />
-                                {/* ChatView is the single chat renderer (issue #547).
-                                    It is wrapped in the chat GROUP: an outlined
-                                    container carrying its own title + the actions
-                                    that operate on this conversation. */}
-                                {/* The group is a floating card like the sidebar,
-                                    so it needs the same air around it. `pb-3`
-                                    is the sidebar's own `bottom-3`: the two
-                                    cards then end on ONE line, which is the
-                                    thing the eye actually checks. */}
-                                {/* Tiles are positioned from the split tree's boxes rather
-                                    than nested flex containers, so a tile's rectangle is
-                                    one number that the layout, a drag hit-test, and a
-                                    measurement in a test all read the same way. */}
-                                <div className="min-h-0 min-w-0 flex-1 pb-2 pl-1 pr-2 pt-0" data-testid="chat-group-row">
-                                {/* The positioning context is INSIDE the padding: an
-                                    absolutely-positioned child resolves against the padding
-                                    box, so anchoring the tiles to the row itself would eat
-                                    the air that lines the chat group's bottom edge up with
-                                    the sidebar's. */}
-                                <div className="relative h-full w-full" data-testid="chat-group-canvas">
-                                {chatGroups.groups.map((group) => (
-                                <div
-                                  key={group.id}
-                                  /* p-1 is the half-gutter: two adjacent tiles make the
-                                     8px gap the row used to get from `gap-2`, and the row's
-                                     own padding is reduced by the same 4px so the outer
-                                     edges land exactly where they did — the chat group's
-                                     bottom line has to stay on the sidebar's. */
-                                  className="absolute flex p-1"
-                                  style={{
-                                    left: `${group.box.left}%`,
-                                    top: `${group.box.top}%`,
-                                    width: `${group.box.width}%`,
-                                    height: `${group.box.height}%`,
-                                  }}
-                                  data-testid={`chat-group-cell:${group.id}`}
-                                >
-                                <ChatGroupFrame
-                                  title={
-                                    sessions.find((s) => s.id === currentSessionId)?.title
-                                    ?? t("mainToolbar.newChat")
-                                  }
-                                  focused={chatGroups.focusedId === group.id}
-                                  onFocus={() => chatGroups.focus(group.id)}
-                                  panelOpen={group.panelOpen}
-                                  onTogglePanel={() => chatGroups.setPanelOpen(group.id, !group.panelOpen)}
-                                  actions={chatGroupActions}
-                                  {...(chatGroups.canSplit ? { onSplit: chatGroups.split } : {})}
-                                  {...(group.id === MAIN_CHAT_GROUP_ID
-                                    ? {}
-                                    : { onClose: () => chatGroups.close(group.id) })}
-                                >
-                                <ChatView
-                                  // The tile's own view of the per-conversation
-                                  // channels: its calls name this group and its
-                                  // stream only carries this group's frames.
-                                  api={chatGroupApi(api, group.id)}
-                                  onAsk={(q, intent, opts) => handleAsk(q, "default", intent, opts)}
-                                  /* opts 의 inputOrigin / injectHint 가 그대로 handleAsk 4번째
-                                     인자로 전달 — queue-auto inject path 활성. */
-                                  onRunMcpPrompt={handleRunMcpPrompt}
-                                  onEditSave={handleEditSave}
-                                  onFork={handleFork}
-                                  onToggleStar={handleToggleStar}
-                                  onRetryEffort={handleRetryEffort}
-                                  onContinueFromLastUser={handleContinueFromLastUser}
-                                  isEntryStarred={isEntryStarred}
-                                  onAbort={handleAbort}
-                                  onGuide={handleGuide}
-                                  onGuideError={(msg) => appendSystemEntry(t("app.guideErrorMessage", { msg }))}
-                                  onFeedback={handleFeedback}
-                                  subAgentSpawns={subAgentSpawns}
-                                  loadedSkills={loadedSkills}
-                                  hasAskQuestions={askQuestions.length > 0}
-                                  askQuestions={askQuestions}
-                                  onResolveAskQuestion={dismissAskQuestion}
-                                  approvalSentenceInterceptSubmit={interceptApprovalSentence}
-                                  plugins={pluginEntries}
-                                  onSelectPlugin={handleViewSelectWithDoctor}
-                                  appMode={appMode}
-                                  onOpenApprovalQueue={() => setDeferredQueueOpen(true)}
-                                  currentSessionKind={currentSessionKind}
-                                  currentSessionTitle={currentSessionTitle}
-                                  onLoadSession={handleLoadSessionAndRefresh}
-                                  commandActions={commandActions}
-                                  commandPopoverOpen={commandPopoverOpen}
-                                  onCommandPopoverOpenChange={setCommandPopoverOpen}
-                                  onPluginPrimaryAction={(id) => { void handlePluginPrimaryAction(id); }}
-                                  onRoutineAcknowledge={handleRoutineAcknowledge}
-                                  statusBar={{
-                                    persistent: statusPersistent,
-                                    visibleToast: statusVisibleToast,
-                                    pendingCount: statusPendingCount,
-                                    onToastClick: handleStatusToastClick,
-                                    onToastDismiss: (toast) => statusRemoveToast(toast.id),
-                                  }}
-                                  onAttachmentWarning={handleAttachmentWarning}
-                                  actionPanelOpen={actionPanelOpen}
-                                  onActionPanelOpenChange={setActionPanelOpen}
-                                  sidePanelOpen={group.panelOpen}
-                                  onSidePanelOpenChange={(open) => chatGroups.setPanelOpen(group.id, open)}
-                                  blogLayout={appMode === "work"}
-                                  activeProject={activeProject ?? defaultWorkspaceProject}
-                                  workspaceProjects={workspaceProjects}
-                                  onNewChatForProject={onNewChatForProject}
-                                  onRefreshProjects={refreshWorkspaceProjects}
-                                  onProjectError={handleProjectError}
-                                />
-                                </ChatGroupFrame>
-                                </div>
-                                ))}
-                                </div>
-                                </div>
-                              </ChatContextProvider>
-                            </PageShell>
-                          );
-                        }
+                        // The conversations are rendered OUTSIDE this router — see
+                        // `chatSurface` above. They must stay mounted across view
+                        // navigation: each tile's stream subscription starts when it
+                        // mounts, so unmounting them to show Settings would drop the
+                        // frames of a turn that is still running.
+                        if (activeView === "home") return null;
 
                         // Everything above narrowed away an inline BUILT-IN key, so what is
                         // left is a plugin view — proven, not assumed. The annotation is the
@@ -1761,18 +1511,13 @@ export function App() {
 
             {/* App-level dialogs that remain available after removing setup flows. */}
             <DeferredQueueDialog open={deferredQueueOpen} onOpenChange={setDeferredQueueOpen} />
-            <McpPromptArgsDialog
-              onCancel={() => setMcpPromptAwaitingArgs(null)}
-              onSubmit={handleMcpPromptArgsSubmit}
-              prompt={mcpPromptAwaitingArgs}
-            />
             <SpotlightTour
               api={api}
               onComplete={onTourComplete}
               onDismiss={onTourDismiss}
             />
             <PostTourFirstTask
-              onPrefillComposer={setQuestion}
+              onPrefillComposer={focusedSession.prefillComposer}
               pluginCards={pluginCards}
               tourCompleted={tourCompleted}
             />

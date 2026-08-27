@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useSyncExternalStore } from "react";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { RestoredSubAgentRow } from "../hooks/use-workflow-tools.js";
+import type { UserKeyboardIntentSnapshot } from "../../../shared/chat-origin.js";
+import type { SendMode } from "../hooks/use-send-message.js";
+import type { SessionProjectSummary } from "../hooks/use-sessions.js";
 
 /**
  * What the WINDOW still needs from a conversation once the conversation lives
@@ -33,6 +36,46 @@ export interface ChatGroupSessionHandle {
   /** Drop the workflow-tool state (questions, spawns) a new session invalidates. */
   resetForNewSession: () => void;
   restoreSubAgentSpawns: (restored: readonly RestoredSubAgentRow[]) => void;
+  /**
+   * Start a turn in this conversation.
+   *
+   * The routine overlay and the plugin trigger-import path are window-level
+   * subscriptions with a conversation to say something to, and the one they
+   * mean is the focused tile's.
+   */
+  ask: (
+    question: string,
+    mode?: SendMode,
+    userIntent?: UserKeyboardIntentSnapshot,
+  ) => Promise<void>;
+  /** Put a trigger-import row in the transcript — same window-level origin. */
+  insertImportedTriggerEntry: (input: {
+    sessionId: string;
+    /** Provenance tag — `plugin:<pluginId>` or `app:<serverId>`. */
+    source: string;
+    prompt: string;
+    summary: string;
+  }) => void;
+  /** Which session this tile is holding — the sidebar highlights it. */
+  currentSessionId: string;
+  currentSessionProject: SessionProjectSummary;
+  /** Load a session into this tile, refusing mid-turn. */
+  loadSession: (sessionId: string) => Promise<boolean>;
+  /** The provider-fallback banner App renders above the content area. */
+  fallbackToast: string | null;
+  /** Put text in this tile's composer without sending it. */
+  prefillComposer: (text: string) => void;
+  /** Write a system row into this tile's transcript. */
+  appendSystemEntry: (message: string) => void;
+  /**
+   * Start a fresh conversation IN THIS TILE.
+   *
+   * The tile owns it because `chatNew` has to reach this tile's loop and the
+   * reset has to land on this tile's transcript — doing it from the window
+   * would start the conversation in the primary group no matter which tile the
+   * user was looking at.
+   */
+  startNewChat: (project?: { projectRoot?: string; projectName?: string }) => Promise<void>;
 }
 
 type Listener = () => void;
@@ -52,6 +95,15 @@ export const EMPTY_CHAT_GROUP_SESSION: ChatGroupSessionHandle = Object.freeze({
   clearForNewChat: () => {},
   resetForNewSession: () => {},
   restoreSubAgentSpawns: () => {},
+  ask: async () => {},
+  insertImportedTriggerEntry: () => {},
+  currentSessionId: "",
+  currentSessionProject: {},
+  loadSession: async () => false,
+  fallbackToast: null,
+  prefillComposer: () => {},
+  appendSystemEntry: () => {},
+  startNewChat: async () => {},
 });
 
 /**
@@ -84,6 +136,9 @@ export class ChatGroupSessionRegistry {
     const unchanged = previous !== undefined
       && previous.entries === handle.entries
       && previous.streaming === handle.streaming
+      && previous.currentSessionId === handle.currentSessionId
+      && previous.currentSessionProject === handle.currentSessionProject
+      && previous.fallbackToast === handle.fallbackToast
       && this.snapshots.has(chatGroupId);
     if (unchanged) return;
 
@@ -131,6 +186,25 @@ export class ChatGroupSessionRegistry {
       resetForNewSession: () => live()?.resetForNewSession(),
       restoreSubAgentSpawns: (restored: readonly RestoredSubAgentRow[]) =>
         live()?.restoreSubAgentSpawns(restored),
+      ask: async (
+        question: string,
+        mode?: SendMode,
+        userIntent?: UserKeyboardIntentSnapshot,
+      ) => {
+        await live()?.ask(question, mode, userIntent);
+      },
+      insertImportedTriggerEntry: (input: Parameters<
+        ChatGroupSessionHandle["insertImportedTriggerEntry"]
+      >[0]) => live()?.insertImportedTriggerEntry(input),
+      currentSessionId: handle.currentSessionId,
+      currentSessionProject: handle.currentSessionProject,
+      loadSession: async (sessionId: string) => await live()?.loadSession(sessionId) ?? false,
+      fallbackToast: handle.fallbackToast,
+      prefillComposer: (text: string) => live()?.prefillComposer(text),
+      appendSystemEntry: (message: string) => live()?.appendSystemEntry(message),
+      startNewChat: async (project?: { projectRoot?: string; projectName?: string }) => {
+        await live()?.startNewChat(project);
+      },
     });
   }
 

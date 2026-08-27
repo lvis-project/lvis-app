@@ -403,10 +403,39 @@ export function useChatGroups(appMode?: "chat" | "work") {
     return id;
   }, [tree]);
 
-  /** The split control: same thing as a drop on the focused tile's right edge. */
-  const split = useCallback(() => {
-    dropOnEdge(focusedId, "right");
-  }, [dropOnEdge, focusedId]);
+  /**
+   * The split control, without a drop to say which way.
+   *
+   * It halves the focused tile along its LONGER side. Always splitting right
+   * would walk 4 tiles down to 124px columns — a quarter of the 448px floor a
+   * chat column needs — while halving the long side turns the same four clicks
+   * into the 2x2 the space actually affords.
+   *
+   * `canvasSize` is the tile area in pixels; the tree only knows fractions, and
+   * a fraction cannot tell you which side of a tile is longer.
+   */
+  const split = useCallback((canvasSize?: { width: number; height: number }) => {
+    const area = canvasSize ?? { width: 16, height: 9 };
+    const boxes = layoutBoxes(tree);
+    if (boxes.length === 0) return;
+
+    // Halve the BIGGEST tile, not the focused one. Focus follows a split, so
+    // repeatedly halving the focused tile walks four clicks down to a 124px
+    // column — a quarter of the 448px floor a chat column needs. Taking the
+    // biggest each time is what turns the same four clicks into a 2x2.
+    const pixels = (box: typeof boxes[number]) => ({
+      width: (box.width / 100) * area.width,
+      height: (box.height / 100) * area.height,
+    });
+    const target = boxes.reduce((biggest, box) => {
+      const a = pixels(box);
+      const b = pixels(biggest);
+      return a.width * a.height > b.width * b.height ? box : biggest;
+    }, boxes[0]!);
+
+    const size = pixels(target);
+    dropOnEdge(target.chatGroupId, size.width >= size.height ? "right" : "bottom");
+  }, [dropOnEdge, tree]);
 
   const close = useCallback((id: string) => {
     // The primary group is the window's conversation. Closing it would leave
@@ -438,19 +467,11 @@ export function useChatGroups(appMode?: "chat" | "work") {
     [tree, appMode, focusedId, panelOpenIds],
   );
 
-  // The main process can serve MAX_CHAT_GROUPS conversations: every channel is
-  // group-addressed and every stream frame is labelled. The RENDERER cannot yet
-  // — App still owns one set of conversation state for the window
-  // (useChatState, useSendMessage, and the per-turn handlers), so a second tile
-  // would render the first tile's transcript over its own group's stream.
-  //
-  // Phase 3 in docs/design/tiled-chat-groups.md extracts that state per group.
-  // When it lands this constant goes away and the ceiling is MAX_CHAT_GROUPS.
-  // Until then the honest ceiling is one: a split button that produced a tile
-  // showing another conversation is worse than no split button.
-  const RENDERER_GROUP_CEILING = 1;
-  const ceiling = Math.min(MAX_CHAT_GROUPS, RENDERER_GROUP_CEILING);
-  const canSplit = appMode !== "chat" && countLeaves(tree) < ceiling;
+  // Both halves can serve MAX_CHAT_GROUPS conversations now: main gives every
+  // group its own ConversationLoop and labels every stream frame, and each tile
+  // owns its conversation state through ChatGroupSession. The ceiling is the
+  // number of loops, nothing weaker.
+  const canSplit = appMode !== "chat" && countLeaves(tree) < MAX_CHAT_GROUPS;
 
   return {
     groups,
