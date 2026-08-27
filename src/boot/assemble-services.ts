@@ -55,6 +55,7 @@ export function assembleAppServices(ctx: ReadyBootContext): AppServices {
     // by name like everything else here, so leaving it out is how the IPC
     // domain ends up unable to build any group but the primary.
     resolveChatGroupLoop: ctx.resolveChatGroupLoop,
+    releaseChatGroupLoop: ctx.releaseChatGroupLoop,
     routineEngine: ctx.routineEngine,
     mcpManager: ctx.mcpManager,
     pluginLoopbackManager: ctx.pluginLoopbackManager,

@@ -245,6 +245,7 @@ describe("IPC channel inventory (#1409 wire lock)", () => {
         "lvis:chat:get-sub-agent-transcript",
         "lvis:chat:get-verbatim-tool-result",
         "lvis:chat:get-write-diff",
+        "lvis:chat:group-release",
         "lvis:chat:guide",
         "lvis:chat:has-provider",
         "lvis:chat:import",

@@ -30,6 +30,8 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
   return {
   // ─── Chat (ConversationLoop) ─────────────────────
   chatHasProvider: async () => ipcRenderer.invoke(CHANNELS.chat.hasProvider, chatGroupId) as Promise<boolean>,
+  chatGroupRelease: async () =>
+    ipcRenderer.invoke(CHANNELS.chat.groupRelease, chatGroupId) as Promise<{ ok: boolean; released?: boolean; error?: string }>,
   captureUserKeyboardIntent,
   chatSend: async (
     input: string,
@@ -172,14 +174,14 @@ function buildSurfaceForChatGroup(chatGroupId: string) {
   chatAbort: async () => ipcRenderer.invoke(CHANNELS.chat.abort, chatGroupId) as Promise<{ ok: boolean }>,
   // Lazy-load verbatim tool_result content (in-session only).
   chatGetVerbatimToolResult: async (sessionId: string, toolUseId: string) =>
-    ipcRenderer.invoke(CHANNELS.chat.getVerbatimToolResult, { sessionId, toolUseId }) as Promise<
+    ipcRenderer.invoke(CHANNELS.chat.getVerbatimToolResult, { sessionId, toolUseId }, chatGroupId) as Promise<
       { content: string; lineCount: number } | null
     >,
   chatGetSubAgentTranscript: async (opts: {
     originSessionId: string;
     childSessionId: string;
   }) =>
-    ipcRenderer.invoke(CHANNELS.chat.getSubAgentTranscript, opts) as Promise<
+    ipcRenderer.invoke(CHANNELS.chat.getSubAgentTranscript, opts, chatGroupId) as Promise<
       | {
           ok: true;
           childSessionId: string;

@@ -44,7 +44,10 @@ describe("settings model chooser", () => {
 
     await waitFor(() => expect(api.updateSettings).toHaveBeenCalled(), { timeout: 2_000 });
     const patch = api.updateSettings.mock.calls.at(-1)![0] as { llm: { provider: string; vendors: Record<string, { model: string }> } };
-    const picked = other.textContent ?? "";
-    expect(picked).toContain(patch.llm.vendors[patch.llm.provider]!.model);
+    // Equality, not containment: a stale `gpt-5.4` would sit inside a picked
+    // `gpt-5.4-mini` and pass a substring check.
+    const pickedModelId = other.querySelector("[data-model-id]")?.getAttribute("data-model-id");
+    expect(pickedModelId).toBeTruthy();
+    expect(patch.llm.vendors[patch.llm.provider]!.model).toBe(pickedModelId);
   });
 });

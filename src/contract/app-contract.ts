@@ -92,6 +92,8 @@ export const CHANNELS = {
     enterCheckpointView: "lvis:chat:enter-checkpoint-view",
     exitCheckpointView: "lvis:chat:exit-checkpoint-view",
     branchFromCheckpoint: "lvis:chat:branch-from-checkpoint",
+    // A closed tile lets go of its conversation. INTERNAL (mutating).
+    groupRelease: "lvis:chat:group-release",
     getVerbatimToolResult: "lvis:chat:get-verbatim-tool-result",
     getSubAgentTranscript: "lvis:chat:get-sub-agent-transcript",
     getWriteDiff: "lvis:chat:get-write-diff",

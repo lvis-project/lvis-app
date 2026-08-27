@@ -394,7 +394,7 @@ export async function wireConversation(
     if (existing) return existing;
     // The cap counts the primary loop, which is not in the map.
     if (groupLoops.size + 1 >= MAX_CHAT_GROUPS) {
-      throw new Error(`chat-group-limit-reached:${MAX_CHAT_GROUPS}`);
+      throw new Error("chat-group-limit-reached");
     }
     let groupLoop!: ConversationLoop;
     const groupRationaleBindings = createLoopRationaleBindings({
@@ -446,6 +446,16 @@ export async function wireConversation(
     return groupLoop;
   };
   ctx.resolveChatGroupLoop = resolveChatGroupLoop;
+  // The other half of the ceiling: a closed tile's loop leaves the map, so
+  // the count is of tiles that exist, not of tiles that ever existed. Ids
+  // are never reused (see the renderer), so nothing can reach a released
+  // loop by name afterwards.
+  ctx.releaseChatGroupLoop = (chatGroupId: string): void => {
+    const loop = groupLoops.get(chatGroupId);
+    if (!loop) return;
+    loop.abortCurrentTurn();
+    groupLoops.delete(chatGroupId);
+  };
 
 
 

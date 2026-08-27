@@ -305,9 +305,16 @@ describe("ChatGroupFrame drop gesture", () => {
     const onSessionDrop = vi.fn();
     const tile = tileWithRect({ onSessionDrop, canSplit: true });
 
+    // Each side, and the middle. A tile with no size answers "right" to
+    // every point (the far edge is nearest to everything), so only the other
+    // answers prove the rectangle was actually read.
+    drag("drop", tile, carriedSession, { x: 5, y: 300 });
+    drag("drop", tile, carriedSession, { x: 400, y: 5 });
+    drag("drop", tile, carriedSession, { x: 400, y: 595 });
+    drag("drop", tile, carriedSession, { x: 400, y: 300 });
     drag("drop", tile, carriedSession, { x: 795, y: 300 });
 
-    expect(onSessionDrop).toHaveBeenCalledWith("session-7", "right");
+    expect(onSessionDrop.mock.calls.map((call) => call[1])).toEqual(["left", "top", "bottom", "center", "right"]);
   });
 
   it("collapses every edge to the centre once no tile fits, so the ceiling is felt before the drop", () => {

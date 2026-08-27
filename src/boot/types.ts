@@ -118,6 +118,8 @@ export interface AppServices {
    * request is the main group by definition.
    */
   resolveChatGroupLoop?: (chatGroupId: string) => ConversationLoop;
+  /** Forgets a group's loop once its tile is gone, so the ceiling counts live tiles only. */
+  releaseChatGroupLoop?: (chatGroupId: string) => void;
   routineEngine?: RoutineEngine;
   mcpManager: McpManager;
   /**

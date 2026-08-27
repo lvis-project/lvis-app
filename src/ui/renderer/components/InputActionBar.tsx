@@ -34,6 +34,7 @@ import type { PluginEntry } from "./PluginGridButton.js";
 import { SlashPicker, type QuickAction } from "./SlashPicker.js";
 import { ReasoningLevelControl, useReasoningLevel } from "./ReasoningSlider.js";
 import { getApi } from "../api-client.js";
+import { isIpcErrorResult } from "../types.js";
 import { modelCardChoices, type ModelCardChoice } from "../hooks/use-settings.js";
 import type { AppSettings } from "../types.js";
 import type { RolePreset } from "../../../data/role-presets.js";
@@ -513,6 +514,12 @@ function ModelQuickPicker({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
+  // The chip sits outside the card, so Radix would treat a click on it as
+  // "outside" — dismiss, then the click reopens: a flicker. The card is told
+  // the chip is not outside, and the chip toggles like the trigger does.
+  // Whichever of the two opened the card gets focus back when it closes.
+  const chipRef = useRef<HTMLButtonElement>(null);
+  const openedByChipRef = useRef(false);
   const [choices, setChoices] = useState<ModelCardChoice[]>([]);
   const [anyPinned, setAnyPinned] = useState(true);
   const runtimeRef = useRef<string>("api");
@@ -536,20 +543,29 @@ function ModelQuickPicker({
   }, [open]);
 
   const pick = async (choice: ModelCardChoice) => {
-    setOpen(false);
-    if (choice.current) return;
+    if (choice.current) {
+      setOpen(false);
+      return;
+    }
     const api = getApi();
-    await api.updateSettings({
+    // The card closes only once the pick took. A refused or failed save
+    // leaves it open with the current mark unmoved — the honest state.
+    const saved = await api.updateSettings({
       llm: {
         provider: choice.vendor,
         vendors: { [choice.vendor]: { model: choice.modelId } },
       },
     });
+    if (isIpcErrorResult(saved)) {
+      console.warn("[lvis] model pick was refused: %s", saved.error);
+      return;
+    }
     // A pinned model is an API model, so picking one is also choosing the
     // API path when a subscription runtime was in use. That switch has its
     // own request — the settings patch refuses a runtime change on its own —
     // and it is the same one the settings chooser sends.
     if (runtimeRef.current !== "api") await api.subscriptionUseApiForChat();
+    setOpen(false);
   };
 
   const reasoningLabel = t("bottomActionRow.reasoning");
@@ -559,6 +575,7 @@ function ModelQuickPicker({
         <button
           type="button"
           data-testid="iab-status-model"
+          onClick={() => { openedByChipRef.current = false; }}
           className="inline-flex min-w-0 shrink items-center gap-1 text-left transition-opacity duration-(--motion-fast) ease-(--motion-ease-standard) hover:opacity-80 focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
           title={vendorModel}
         >
@@ -571,13 +588,17 @@ function ModelQuickPicker({
           <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
           <button
             type="button"
+            ref={chipRef}
             data-testid="iab-status-reasoning"
             data-level={level}
             aria-haspopup="dialog"
             aria-expanded={open}
             aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
             title={`${reasoningLabel}: ${levelLabels[level]}`}
-            onClick={() => setOpen(true)}
+            onClick={() => {
+              openedByChipRef.current = !open;
+              setOpen(!open);
+            }}
             className={`flex shrink-0 cursor-pointer items-center gap-0.5 transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
           >
             <Lightbulb className="h-3 w-3 shrink-0" aria-hidden="true" />
@@ -591,6 +612,14 @@ function ModelQuickPicker({
         sideOffset={6}
         className="w-72 p-0"
         data-testid="model-quick-picker"
+        onInteractOutside={(event) => {
+          if (chipRef.current?.contains(event.target as Node)) event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          if (!openedByChipRef.current) return;
+          event.preventDefault();
+          chipRef.current?.focus();
+        }}
       >
         <div className="px-3 pt-3 text-caption font-medium text-muted-foreground">
           {t("bottomActionRow.modelPickerModels")}

@@ -247,7 +247,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toEqual({ content, lineCount: 3 });
   });
 
@@ -257,7 +257,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: "other-session", toolUseId: "tu-1" });
+    const result = invoke(CHANNEL, { sessionId: "other-session", toolUseId: "tu-1" }, "main");
     expect(result).toBeNull();
   });
 
@@ -267,7 +267,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-UNKNOWN" });
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-UNKNOWN" }, "main");
     expect(result).toBeNull();
   });
 
@@ -282,7 +282,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toBeNull();
   });
 
@@ -302,7 +302,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toBeNull();
   });
 
@@ -329,7 +329,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
       createdAt: "2026-05-19T00:00:00.000Z",
     });
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toEqual({ content: artifactContent, lineCount: 2 });
     expect(deps.memoryManager.loadToolResultArtifact).toHaveBeenCalledWith(SESSION_ID, "tu-1");
   });
@@ -342,7 +342,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toBeNull();
   });
 
@@ -362,7 +362,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toEqual({ content, lineCount: 2 });
   });
 
@@ -382,7 +382,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-prefix" });
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-prefix" }, "main");
     expect(result).toEqual({ content, lineCount: 2 });
   });
 
@@ -399,7 +399,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" });
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-1" }, "main");
     expect(result).toEqual({ content, lineCount: 2 });
   });
 
@@ -411,7 +411,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-50" }) as {
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-50" }, "main") as {
       content: string;
       lineCount: number;
     };
@@ -427,7 +427,7 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-single" }) as {
+    const result = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-single" }, "main") as {
       content: string;
       lineCount: number;
     };
@@ -444,8 +444,8 @@ describe("lvis:chat:get-verbatim-tool-result", () => {
     ]);
     await setupHandlers(loop);
 
-    const resultA = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-A" });
-    const resultB = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-B" });
+    const resultA = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-A" }, "main");
+    const resultB = invoke(CHANNEL, { sessionId: SESSION_ID, toolUseId: "tu-B" }, "main");
     expect((resultA as any).content).toBe("content-A");
     expect((resultB as any).content).toBe("content-B");
   });
@@ -493,7 +493,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     const result = invoke(CHANNEL, {
       originSessionId: SESSION_ID,
       childSessionId: "child-1",
-    });
+    }, "main");
 
     expect(result).toEqual({
       ok: true,
@@ -515,7 +515,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
       originSessionId: SESSION_ID,
       toolUseId: "tu-agent",
       spawnId: "spawn-live",
-    });
+    }, "main");
 
     expect(result).toEqual({ ok: false, error: "invalid-child-session-id" });
     expect(getPersistedTranscript).not.toHaveBeenCalled();
@@ -533,7 +533,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     const result = invoke(CHANNEL, {
       originSessionId: SESSION_ID,
       childSessionId: "child-1",
-    });
+    }, "main");
 
     expect(result).toEqual({
       ok: true,
@@ -586,7 +586,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     const result = invoke(CHANNEL, {
       originSessionId: SESSION_ID,
       childSessionId: "child-artifact",
-    });
+    }, "main");
 
     expect(deps.memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(SESSION_ID, expect.any(Array));
     expect(result).toEqual({
@@ -605,7 +605,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     const result = invoke(CHANNEL, {
       originSessionId: "other-session",
       childSessionId: "child-1",
-    });
+    }, "main");
 
     expect(result).toEqual({ ok: false, error: "origin-session-not-active" });
     expect(getPersistedTranscript).not.toHaveBeenCalled();
@@ -619,7 +619,7 @@ describe("lvis:chat:get-sub-agent-transcript", () => {
     const result = invoke(CHANNEL, {
       originSessionId: SESSION_ID,
       childSessionId: "child-from-another-run",
-    });
+    }, "main");
 
     expect(result).toEqual({ ok: false, error: "sub-agent-reference-not-found" });
     expect(getPersistedTranscript).not.toHaveBeenCalled();
@@ -631,7 +631,7 @@ describe("lvis:chat active main state", () => {
     const loop = makeConversationLoop("session-active", []);
     const deps = await setupHandlers(loop);
 
-    await invoke("lvis:chat:new");
+    await invoke("lvis:chat:new", undefined, "main");
 
     expect(loop.newConversation).toHaveBeenCalled();
     expect(deps.memoryManager.markMainActiveFresh).toHaveBeenCalledTimes(1);
@@ -648,7 +648,7 @@ describe("lvis:chat active main state", () => {
     const loop = makeConversationLoop("session-active", []);
     const deps = await setupHandlers(loop);
 
-    await invoke("lvis:chat:new");
+    await invoke("lvis:chat:new", undefined, "main");
 
     expect(deps.memoryManager.saveSessionMetadata).not.toHaveBeenCalled();
   });
@@ -663,7 +663,7 @@ describe("lvis:chat active main state", () => {
     const loop = makeConversationLoop("session-active", []);
     const deps = await setupHandlers(loop);
 
-    await invoke("lvis:chat:new", { projectRoot: explicitProjectRoot, projectName: "spoofed-project-name" });
+    await invoke("lvis:chat:new", { projectRoot: explicitProjectRoot, projectName: "spoofed-project-name" }, "main");
 
     expect(deps.memoryManager.saveSessionMetadata).toHaveBeenCalledTimes(1);
     const [savedId, savedMeta] = (deps.memoryManager.saveSessionMetadata as any).mock.calls[0];
@@ -685,7 +685,7 @@ describe("lvis:chat active main state", () => {
     mainLoop.resetAndResume.mockReturnValue({ ok: true });
     const mainDeps = await setupHandlers(mainLoop);
 
-    await invoke("lvis:chat:session-resume", "session-main");
+    await invoke("lvis:chat:session-resume", "session-main", "main");
 
     expect(mainDeps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("session-main");
 
@@ -694,7 +694,7 @@ describe("lvis:chat active main state", () => {
     routineLoop.resetAndResume.mockReturnValue({ ok: true });
     const routineDeps = await setupHandlers(routineLoop);
 
-    await invoke("lvis:chat:session-resume", "session-routine");
+    await invoke("lvis:chat:session-resume", "session-routine", "main");
 
     expect(routineDeps.memoryManager.markMainActiveResume).not.toHaveBeenCalled();
   });
@@ -703,7 +703,7 @@ describe("lvis:chat active main state", () => {
     const loop = makeConversationLoop("session-main", []);
     const deps = await setupHandlers(loop);
 
-    const result = await invoke("lvis:chat:session-resume", "../evil") as { ok: boolean };
+    const result = await invoke("lvis:chat:session-resume", "../evil", "main") as { ok: boolean };
 
     expect(result.ok).toBe(false);
     expect(loop.resetAndResume).not.toHaveBeenCalled();
@@ -719,7 +719,7 @@ describe("lvis:chat active main state", () => {
       input: "next",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    });
+    }, "main");
 
     expect(mainDeps.memoryManager.markMainActiveResume).toHaveBeenCalledWith("session-main");
 
@@ -732,7 +732,7 @@ describe("lvis:chat active main state", () => {
       input: "continue routine",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    });
+    }, "main");
 
     expect(routineDeps.memoryManager.markMainActiveResume).not.toHaveBeenCalled();
     expect(routineDeps.memoryManager.markMainActiveFresh).not.toHaveBeenCalled();
@@ -786,7 +786,7 @@ describe("lvis:chat:fork", () => {
       summaryPreamble: "요약된 이전 맥락",
     });
 
-    const result = await invoke("lvis:chat:fork", undefined) as { ok: boolean; sessionId: string | null };
+    const result = await invoke("lvis:chat:fork", undefined, "main") as { ok: boolean; sessionId: string | null };
 
     expect(result.ok).toBe(true);
     expect(result.sessionId).toEqual(expect.any(String));
@@ -830,7 +830,7 @@ describe("lvis:chat:fork", () => {
       }),
     );
 
-    const result = await invoke("lvis:chat:fork", undefined) as { ok: boolean; sessionId: string | null };
+    const result = await invoke("lvis:chat:fork", undefined, "main") as { ok: boolean; sessionId: string | null };
 
     expect(result.ok).toBe(true);
     expect(deps.memoryManager.rehydrateToolResultArtifacts).toHaveBeenCalledWith(
@@ -861,21 +861,21 @@ describe("lvis:chat:fork", () => {
       }
     });
 
-    const forkPromise = invoke("lvis:chat:fork", undefined) as Promise<unknown>;
+    const forkPromise = invoke("lvis:chat:fork", undefined, "main") as Promise<unknown>;
 
     // The mutation lease is visible before the deferred fork factory starts.
     await expect(invoke("lvis:chat:send", {
       input: "must not enter fork",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    })).resolves.toEqual({ error: "streaming-active" });
+    }, "main")).resolves.toEqual({ error: "streaming-active" });
 
     await firstSaveEntered.promise;
-    await expect(invoke("lvis:chat:new")).resolves.toEqual({
+    await expect(invoke("lvis:chat:new", undefined, "main")).resolves.toEqual({
       ok: false,
       error: "streaming-active",
     });
-    await expect(invoke("lvis:chat:session-resume", "session-fork-source")).resolves.toEqual(
+    await expect(invoke("lvis:chat:session-resume", "session-fork-source", "main")).resolves.toEqual(
       expect.objectContaining({ ok: false, error: "streaming-active" }),
     );
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -900,7 +900,7 @@ describe("lvis:chat:continue-last-user", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: "other-session" });
+    const result = await invoke(CHANNEL, { sessionId: "other-session" }, "main");
 
     expect(result).toEqual({ ok: false, error: "session-mismatch" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -914,7 +914,7 @@ describe("lvis:chat:continue-last-user", () => {
     ]);
     await setupHandlers(loop);
 
-    const result = await invoke(CHANNEL, { sessionId: SESSION_ID });
+    const result = await invoke(CHANNEL, { sessionId: SESSION_ID }, "main");
 
     expect(result).toEqual({ ok: false, error: "last-message-not-user" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -928,7 +928,7 @@ describe("lvis:chat:continue-last-user", () => {
     await setupHandlers(loop);
     const history = loop.getHistory();
 
-    await expect(invoke(CHANNEL, { sessionId: SESSION_ID })).rejects.toThrow("provider missing");
+    await expect(invoke(CHANNEL, { sessionId: SESSION_ID }, "main")).rejects.toThrow("provider missing");
 
     expect(history.truncate).toHaveBeenCalledWith(0);
     expect(history.restore).toHaveBeenCalledWith([terminalUser]);
@@ -948,7 +948,7 @@ describe("lvis:chat:send provenance", () => {
     await invoke("lvis:chat:send", {
       input,
       inputOrigin: "plugin-emitted",
-    });
+    }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       input,
@@ -969,7 +969,7 @@ describe("lvis:chat:send provenance", () => {
     const input = `<mcp-prompt source="mcp-prompt:demo">
 summarize the repo
 </mcp-prompt>`;
-    await invoke("lvis:chat:send", { input, inputOrigin: "mcp-prompt-emitted" });
+    await invoke("lvis:chat:send", { input, inputOrigin: "mcp-prompt-emitted" }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       input,
@@ -989,7 +989,7 @@ summarize the repo
     const result = await invoke("lvis:chat:send", {
       input: "summarize the repo",
       inputOrigin: "mcp-prompt-emitted",
-    });
+    }, "main");
 
     expect(result).toEqual({ ok: false, error: "missing-mcp-prompt-envelope" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -1008,7 +1008,7 @@ rm -rf everything
 </mcp-prompt>`,
       inputOrigin: "user-keyboard",
       userActivation: true,
-    });
+    }, "main");
 
     expect(result).toEqual({ ok: false, error: "origin-envelope-mismatch" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -1043,7 +1043,7 @@ B${i}
         })),
         { type: "text", text: "my own note" },
       ],
-    });
+    }, "main");
 
     const options = loop.runTurn.mock.calls[0][3] as { attachments?: Array<{ text: string }> };
     const parts = options.attachments ?? [];
@@ -1066,7 +1066,7 @@ B${i}
         type: "text",
         text: resourceFence(i),
       })),
-    })).rejects.toThrow("too-many-resource-attachments");
+    }, "main")).rejects.toThrow("too-many-resource-attachments");
     expect(loop.runTurn).not.toHaveBeenCalled();
   });
 
@@ -1083,7 +1083,7 @@ B${i}
       inputOrigin: "user-keyboard",
       userActivation: true,
       attachments: [{ type: "text", text: joined }],
-    })).rejects.toThrow("too-many-resource-attachments");
+    }, "main")).rejects.toThrow("too-many-resource-attachments");
     expect(loop.runTurn).not.toHaveBeenCalled();
   });
 
@@ -1102,7 +1102,7 @@ B${i}
       input: `why were these ignored?\n\n${pasted}`,
       inputOrigin: "user-keyboard",
       userActivation: true,
-    });
+    }, "main");
 
     expect(result).not.toMatchObject({ ok: false });
     expect(loop.runTurn).toHaveBeenCalledTimes(1);
@@ -1115,7 +1115,7 @@ B${i}
     const loop = makeConversationLoop("session-provenance", []);
     await setupHandlers(loop);
 
-    const result = await invoke("lvis:chat:send", { input: "/permission auto" });
+    const result = await invoke("lvis:chat:send", { input: "/permission auto" }, "main");
 
     expect(result).toEqual({ ok: false, error: "missing-input-origin" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -1128,7 +1128,7 @@ B${i}
     const result = await invoke("lvis:chat:send", {
       input: "/permission reviewer mode disabled",
       inputOrigin: "user-keyboard",
-    });
+    }, "main");
 
     expect(result).toEqual({ ok: false, error: "user-keyboard-required" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -1143,7 +1143,7 @@ B${i}
       input: "hello",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    });
+    }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       "hello",
@@ -1170,7 +1170,7 @@ B${i}
       inputOrigin: "user-keyboard",
       userActivation: true,
       personaPromptId: "reviewer",
-    });
+    }, "main");
 
     expect(personaPromptStore.get).toHaveBeenCalledWith("reviewer");
     expect(loop.runTurn).toHaveBeenCalledWith(
@@ -1216,7 +1216,7 @@ B${i}
       inputOrigin: "user-keyboard",
       userActivation: true,
       personaPromptId: "reviewer",
-    }) as Promise<unknown>;
+    }, "main") as Promise<unknown>;
 
     await personaEntered.promise;
     loop.getSessionId.mockReturnValue("session-after-persona");
@@ -1243,7 +1243,7 @@ B${i}
       inputOrigin: "user-keyboard",
       userActivation: true,
       personaPromptId: "deleted",
-    });
+    }, "main");
 
     expect(result).toEqual({ ok: false, error: "persona-prompt-not-found" });
     expect(loop.runTurn).not.toHaveBeenCalled();
@@ -1258,7 +1258,7 @@ B${i}
       input: "queued follow-up",
       inputOrigin: "queue-auto",
       personaPromptId: "reviewer",
-    });
+    }, "main");
 
     expect(result).toEqual({ ok: false, error: "persona-prompt-origin-restricted" });
     expect(personaPromptStore.get).not.toHaveBeenCalled();
@@ -1284,7 +1284,7 @@ B${i}
       input: "/permission mode allow",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    });
+    }, "main");
 
     expect(sent).toContainEqual({
       channel: "lvis:chat:stream",
@@ -1323,7 +1323,7 @@ B${i}
       input: "hello",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    }) as Promise<unknown>).resolves.toEqual({ text: "ok", toolCalls: [], stopReason: "end_turn" });
+    }, "main") as Promise<unknown>).resolves.toEqual({ text: "ok", toolCalls: [], stopReason: "end_turn" });
 
     expect(sent).toEqual([
       {
@@ -1369,7 +1369,7 @@ B${i}
     };
     await setupHandlers(loop, { personaPromptStore });
 
-    await invoke("lvis:chat:edit-resend", 0, "new text");
+    await invoke("lvis:chat:edit-resend", 0, "new text", "main");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       "new text",
@@ -1433,7 +1433,7 @@ B${i}
     const restoreRedactor = await redactPii();
 
     try {
-      await invoke("lvis:chat:edit-resend", 0, "contact alice@example.com");
+      await invoke("lvis:chat:edit-resend", 0, "contact alice@example.com", "main");
 
       expect(editLoop.runTurn.mock.calls[0]?.[0]).toBe("contact [REDACTED:EMAIL]");
       // Every frame carries the tiled chat group it belongs to, so a second
@@ -1470,7 +1470,7 @@ B${i}
         return {};
       });
 
-      await invoke("lvis:chat:continue-last-user", { sessionId: "session-replay-redaction" });
+      await invoke("lvis:chat:continue-last-user", { sessionId: "session-replay-redaction" }, "main");
 
       const replayInput = replayLoop.runTurn.mock.calls[0]?.[0] as string;
       const replayOptions = replayLoop.runTurn.mock.calls[0]?.[3] as Record<string, unknown>;
@@ -1510,7 +1510,7 @@ B${i}
       // DLP turns the source header into a non-parseable placeholder. The
       // replay must fail closed rather than treat the originally app-authored
       // message as user-keyboard input with its force-ask gate removed.
-      await expect(invoke("lvis:chat:continue-last-user", { sessionId: "session-staged-redaction" }))
+      await expect(invoke("lvis:chat:continue-last-user", { sessionId: "session-staged-redaction" }, "main"))
         .rejects.toThrow("missing-app-envelope");
       expect(stagedLoop.runTurn).not.toHaveBeenCalled();
       expect(sent.filter(({ payload }) => (payload as { type?: string }).type === "redact_notice"))
@@ -1560,7 +1560,7 @@ B${i}
         return {};
       });
 
-      await expect(invoke("lvis:chat:edit-resend", 0, stagedInput))
+      await expect(invoke("lvis:chat:edit-resend", 0, stagedInput, "main"))
         .rejects.toThrow("missing-app-envelope");
       expect(editLoop.runTurn).not.toHaveBeenCalled();
       expect(editLoop.getHistory().restore).toHaveBeenCalledWith(original);
@@ -1578,7 +1578,7 @@ B${i}
         return {};
       });
 
-      await expect(invoke("lvis:chat:retry-effort", { enableThinking: true }))
+      await expect(invoke("lvis:chat:retry-effort", { enableThinking: true }, "main"))
         .rejects.toThrow("missing-app-envelope");
       expect(retryLoop.runTurn).not.toHaveBeenCalled();
       expect(retryLoop.getHistory().restore).toHaveBeenCalledWith(retryOriginal);
@@ -1619,7 +1619,7 @@ B${i}
     };
     await setupHandlers(loop, { personaPromptStore });
 
-    await invoke("lvis:chat:retry-effort", { enableThinking: true, thinkingBudgetTokens: 12345 });
+    await invoke("lvis:chat:retry-effort", { enableThinking: true, thinkingBudgetTokens: 12345 }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       "retry text",
@@ -1664,7 +1664,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
       input: "What changed?",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    });
+    }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledWith(
       "What changed?",
@@ -1711,7 +1711,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
       input: "Consume child result",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    }) as Promise<unknown>).rejects.toThrow("main-active-bookkeeping-failed");
+    }, "main") as Promise<unknown>).rejects.toThrow("main-active-bookkeeping-failed");
 
     expect(acknowledgeParentMailbox).toHaveBeenCalledTimes(1);
     expect(acknowledgeParentMailbox).toHaveBeenCalledWith(
@@ -1739,7 +1739,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
       peekParentMailbox: vi.fn(() => {
         // This re-entrant mutation observes whether trackStreamTurn published
         // its lease before executing the mailbox factory.
-        reentrantNew = invoke("lvis:chat:new") as Promise<unknown>;
+        reentrantNew = invoke("lvis:chat:new", undefined, "main") as Promise<unknown>;
         peekEntered.resolve(undefined);
         return peekGate.promise;
       }),
@@ -1754,14 +1754,14 @@ describe("sub-agent parent mailbox on manual turns", () => {
       input: "Consume child result",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    }) as Promise<unknown>;
+    }, "main") as Promise<unknown>;
 
     await peekEntered.promise;
     await expect(reentrantNew).resolves.toEqual({ ok: false, error: "streaming-active" });
-    await expect(invoke("lvis:chat:session-resume", "parent-session")).resolves.toEqual(
+    await expect(invoke("lvis:chat:session-resume", "parent-session", "main")).resolves.toEqual(
       expect.objectContaining({ ok: false, error: "streaming-active" }),
     );
-    await expect(invoke("lvis:chat:fork", undefined)).resolves.toEqual({
+    await expect(invoke("lvis:chat:fork", undefined, "main")).resolves.toEqual({
       ok: false,
       sessionId: null,
       error: "streaming-active",
@@ -1779,7 +1779,7 @@ describe("sub-agent parent mailbox on manual turns", () => {
 
     // ACK is part of the same lease, so switching sessions is still forbidden
     // after the LLM turn has returned but before durable removal completes.
-    await expect(invoke("lvis:chat:new")).resolves.toEqual({
+    await expect(invoke("lvis:chat:new", undefined, "main")).resolves.toEqual({
       ok: false,
       error: "streaming-active",
     });
@@ -1910,8 +1910,8 @@ describe("sub-agent autonomous parent wake", () => {
       input: "concurrent user message",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    })).resolves.toEqual({ error: "streaming-active" });
-    await expect(invoke("lvis:chat:new")).resolves.toEqual({
+    }, "main")).resolves.toEqual({ error: "streaming-active" });
+    await expect(invoke("lvis:chat:new", undefined, "main")).resolves.toEqual({
       ok: false,
       error: "streaming-active",
     });
@@ -1986,7 +1986,7 @@ describe("sub-agent autonomous parent wake", () => {
       input: "manual parent turn",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    }) as Promise<unknown>;
+    }, "main") as Promise<unknown>;
     await manualEntered.promise;
 
     const wakePromise = wakeHandler!("parent-session");
@@ -2042,7 +2042,7 @@ describe("sub-agent autonomous parent wake", () => {
       return mutationGate.promise;
     });
 
-    const mutationPromise = invoke("lvis:chat:new") as Promise<unknown>;
+    const mutationPromise = invoke("lvis:chat:new", undefined, "main") as Promise<unknown>;
     await mutationEntered.promise;
     const wakePromise = wakeHandler!("parent-session");
     await Promise.resolve();
@@ -2081,7 +2081,7 @@ describe("sub-agent autonomous parent wake", () => {
       return mutationGate.promise;
     });
 
-    const mutationPromise = invoke("lvis:chat:new") as Promise<unknown>;
+    const mutationPromise = invoke("lvis:chat:new", undefined, "main") as Promise<unknown>;
     await mutationEntered.promise;
     const wakePromise = wakeHandler!("parent-session");
     mutationGate.resolve(undefined);
@@ -2151,7 +2151,7 @@ describe("lvis:chat:continue-last-user — a resource turn's row", () => {
     expect((seeded[seeded.length - 1] as { meta?: { displayText?: string } }).meta?.displayText)
       .toBe("summarize [Resource #1]");
 
-    await invoke("lvis:chat:continue-last-user", { sessionId: SESSION_ID });
+    await invoke("lvis:chat:continue-last-user", { sessionId: SESSION_ID }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledTimes(1);
     const options = loop.runTurn.mock.calls[0][3] as { displayText?: string };
@@ -2175,7 +2175,7 @@ describe("lvis:chat:continue-last-user — a resource turn's row", () => {
     await setupHandlers(loop);
     loop.runTurn.mockResolvedValue({ text: "ok", toolCalls: [], stopReason: "end_turn" });
 
-    await invoke("lvis:chat:continue-last-user", { sessionId: SESSION_ID });
+    await invoke("lvis:chat:continue-last-user", { sessionId: SESSION_ID }, "main");
 
     expect(loop.runTurn).toHaveBeenCalledTimes(1);
     const options = loop.runTurn.mock.calls[0][3] as Record<string, unknown>;
@@ -2205,15 +2205,15 @@ describe("shared main-conversation lease on replay commands", () => {
       input: "from-local-api-surface",
       inputOrigin: "user-keyboard",
       userActivation: true,
-    }) as Promise<unknown>;
+    }, "main") as Promise<unknown>;
     await turnEntered.promise;
 
-    await expect(invoke(CHANNELS.chat.editResend, 0, "replacement"))
+    await expect(invoke(CHANNELS.chat.editResend, 0, "replacement", "main"))
       .resolves.toEqual({ ok: false, error: "streaming-active" });
     await expect(invoke(CHANNELS.chat.continueLastUser, {
       sessionId: "shared-lease-session",
-    })).resolves.toEqual({ ok: false, error: "streaming-active" });
-    await expect(invoke(CHANNELS.chat.retryEffort, { enableThinking: true }))
+    }, "main")).resolves.toEqual({ ok: false, error: "streaming-active" });
+    await expect(invoke(CHANNELS.chat.retryEffort, { enableThinking: true }, "main"))
       .resolves.toEqual({ ok: false, error: "streaming-active" });
 
     expect(history.truncate).not.toHaveBeenCalled();

@@ -51,7 +51,7 @@ Per **window** — shared, and deliberately not multiplied:
 `continue-last-user`, `edit-resend`, `compact`, `session-resume`,
 `get-history`, `get-write-diff`, `get-verbatim-tool-result`,
 `get-sub-agent-transcript`, `enter-checkpoint-view`, `exit-checkpoint-view`,
-`branch-from-checkpoint`, `main-active-state`, `has-provider`
+`branch-from-checkpoint`, `main-active-state`, `has-provider`, `group-release`
 
 **Window-scoped — unchanged:**
 `sessions`, `session-history`, `session-update`, `session-delete`,
@@ -163,11 +163,19 @@ Each piece is independently shippable and independently verifiable.
 1. `resolveChatGroupLoop(chatGroupId)` in `boot/steps/conversation-wiring.ts`:
    a lazy `Map<string, ConversationLoop>` over the shared memory manager,
    enforcing `MAX_CHAT_GROUPS`. **Done.**
-2. `src/ipc/domains/chat.ts` currently closes over ONE `conversationLoop` at
-   registration (53 references) and builds one command port, one surface
-   runtime, and one legacy adapter from it. Replace that with a memoized
-   `chatGroupContext(chatGroupId)` returning the whole bundle, and have each
-   per-conversation handler resolve its group from the payload.
+2. `src/ipc/domains/chat.ts` builds a memoized `chatGroupContext(chatGroupId)`
+   — loop, command port, surface runtime, legacy adapter, **and the turn
+   machinery** (leases, stream ids, sinks, and the edit/continue/retry replay
+   paths). Every per-conversation handler resolves its group from the payload
+   and reaches turns only through it. The replay paths were once one closure
+   family over the primary loop; a handler that read a group's history and
+   replayed it through those ran that tile's turn in the primary conversation.
+   **Done.**
+3. `group-release`: closing a tile sends it, and main stops any running turn,
+   detaches the group's frames, and forgets the loop. Ids are never reused, so
+   without this a closed tile would count against `MAX_CHAT_GROUPS` for the
+   rest of the session. Release is tied to **close**, not unmount — the
+   chat-mode toggle unmounts tiles too, and must not destroy anything. **Done.**
 
 ### Channels: frames say which tile they belong to
 

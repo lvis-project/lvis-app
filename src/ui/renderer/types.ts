@@ -921,6 +921,11 @@ export type LvisApi = {
    * See docs/design/tiled-chat-groups.md.
    */
   chatGroup?: (chatGroupId: string) => LvisApi;
+  /**
+   * Let go of this group's conversation in main. Sent when its tile closes;
+   * the primary group refuses it.
+   */
+  chatGroupRelease: () => Promise<{ ok: boolean; released?: boolean; error?: string }>;
   onChatFallback: (h: (payload: { from: string; to: string }) => void) => () => void;
   chatGetHistory: () => Promise<{ restoredSubAgents?: RestoredSubAgentPayload[]; sessionId: string; sessionTitle?: string; sessionKind: "main" | "routine"; routineId?: string; routineTitle?: string; projectRoot?: string; projectName?: string; projectIsDefault?: boolean; messages: SerializedHistoryMessage[] }>;
   chatMainActiveState: () => Promise<{ mainActiveSessionId: string | null; mainActiveMode: "resume" | "fresh"; updatedAt: string } | null>;

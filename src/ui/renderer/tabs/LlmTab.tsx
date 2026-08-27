@@ -511,6 +511,7 @@ function ModelSelectItemContent({
   return (
     <span
       className="flex w-full min-w-0 items-center gap-2"
+      data-model-id={option}
       {...(isFree ? { title: t("llmTab.openRouterFreeDisclaimer") } : {})}
     >
       {provider && (

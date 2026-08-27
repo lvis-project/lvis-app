@@ -30,7 +30,7 @@ import { StarredView } from "./components/StarredView.js";
 import { SettingsInlineView } from "./SettingsInlineView.js";
 import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
-import { ChatGroupFrame, ChatGroupGutter, areaStyle, useChatGroups } from "./components/ChatGroupFrame.js";
+import { ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups } from "./components/ChatGroupFrame.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
 import { useSessionList, type SessionSummary } from "./hooks/use-sessions.js";
 import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
@@ -286,6 +286,17 @@ export function App() {
     if (!sessionId) return;
     await handleLoadSessionAndRefresh(sessionId);
   }, [handleImport, handleLoadSessionAndRefresh]);
+
+  // Closing a tile is the one moment its conversation is let go of in main —
+  // not unmount, which the chat-mode toggle also causes and must not destroy
+  // anything. The tile leaves the tree at once; the release is fire-and-forget
+  // because nothing in the window can address that group afterwards.
+  const closeChatGroup = useCallback((chatGroupId: string) => {
+    chatGroups.close(chatGroupId);
+    void chatGroupApi(api, chatGroupId).chatGroupRelease().catch((err: unknown) => {
+      console.warn("[lvis] chat group release failed: %s", (err as Error).message);
+    });
+  }, [api, chatGroups]);
 
   /**
    * A conversation dragged out of the sidebar and dropped on a tile.
@@ -1388,7 +1399,7 @@ export function App() {
                                         } : {})}
                                         {...(group.id === MAIN_CHAT_GROUP_ID
                                           ? {}
-                                          : { onClose: () => chatGroups.close(group.id) })}
+                                          : { onClose: () => closeChatGroup(group.id) })}
                                       >
                                         {content}
                                       </ChatGroupFrame>
