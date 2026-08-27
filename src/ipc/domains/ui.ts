@@ -93,7 +93,13 @@ const NATIVE_LABEL: Record<NativeContextMenuCommand, () => string> = {
   "project.pin": () => t("sidebar.pinProject"),
   "project.unpin": () => t("sidebar.unpinProject"),
   "project.edit": () => t("sidebar.projectMenuEdit"),
-  "project.reveal": () => t("sidebar.projectMenuReveal"),
+  // Names the actual file manager, the way workspace.reveal already does. A
+  // generic "reveal folder" made the same action read differently depending on
+  // which menu you opened it from.
+  "project.reveal": () =>
+    t(process.platform === "darwin"
+      ? "chatPreviewRail.revealInFinder"
+      : "chatPreviewRail.revealInExplorer"),
   "project.archive": () => t("sidebar.projectMenuArchive"),
   "project.unarchive": () => t("sidebar.projectMenuUnarchive"),
   "project.add": () => t("sidebar.projectMenuAdd"),
