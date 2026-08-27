@@ -324,7 +324,7 @@ export function useSendMessage(deps: UseSendMessageDeps): UseSendMessageResult {
           opts?.inputOrigin === "queue-auto"
             ? undefined
             : mode === "default" ? composed.personaPromptId : undefined,
-          interrupt ? { interrupt: true } : undefined,
+          ...(interrupt ? [{ interrupt: true }] : []),
         );
         const refusal = chatSendRefusal(result);
         if (refusal !== undefined) throw new ChatSendRefusedError(refusal);
