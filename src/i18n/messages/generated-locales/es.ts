@@ -2558,6 +2558,7 @@ export const esMessages: Record<string, string> = {
   "sidebar.unpinProject": "Dejar de fijar proyecto",
   "sidebar.pinConversation": "Fijar conversación",
   "sidebar.unpinConversation": "Dejar de fijar conversación",
+  "sidebar.sessionResponding": "Respondiendo…",
   "sidebar.renameConversation": "Cambiar nombre",
   "sidebar.markConversationUnread": "Marcar como no leído",
   "sidebar.markConversationRead": "Marcar como leído",

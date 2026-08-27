@@ -2537,6 +2537,7 @@ export const deMessages: Record<string, string> = {
   "sidebar.unpinProject": "Projekt-Anheftung aufheben",
   "sidebar.pinConversation": "Unterhaltung anheften",
   "sidebar.unpinConversation": "Anheftung der Unterhaltung aufheben",
+  "sidebar.sessionResponding": "Antwortet…",
   "sidebar.renameConversation": "Umbenennen",
   "sidebar.markConversationUnread": "Als ungelesen markieren",
   "sidebar.markConversationRead": "Als gelesen markieren",

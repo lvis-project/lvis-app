@@ -2553,6 +2553,7 @@ export const jaMessages: Record<string, string> = {
   "sidebar.projectsTab": "プロジェクト",
   "sidebar.resizeHandleAriaLabel": "サイドバーのサイズを変更する",
   "sidebar.unpinConversation": "会話の固定を解除する",
+  "sidebar.sessionResponding": "応答中…",
   "sidebar.renameConversation": "名前を変更",
   "sidebar.markConversationUnread": "未読にする",
   "sidebar.markConversationRead": "既読にする",

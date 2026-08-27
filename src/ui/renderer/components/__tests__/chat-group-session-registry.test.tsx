@@ -6,6 +6,7 @@ import {
   ChatGroupSessionRegistry,
   useChatGroupSession,
   useRegisterChatGroupSession,
+  useTileSessions,
   type ChatGroupSessionHandle,
 } from "../chat-group-session-registry.js";
 
@@ -120,5 +121,57 @@ describe("useChatGroupSession", () => {
     const other = renderHook(() => useChatGroupSession(registry, "group-2"));
 
     expect(other.result.current.streaming).toBe(false);
+  });
+});
+
+describe("tile sessions — every tile at once", () => {
+  const holding = (sessionId: string, streaming: boolean): ChatGroupSessionHandle =>
+    ({ ...handleFor(streaming), currentSessionId: sessionId });
+
+  it("lists every tile's conversation and streaming state, in publish order", () => {
+    const registry = new ChatGroupSessionRegistry();
+    registry.publish("main", holding("s-1", false));
+    registry.publish("group-2", holding("s-2", true));
+    expect(registry.readTiles()).toEqual([
+      { chatGroupId: "main", sessionId: "s-1", streaming: false },
+      { chatGroupId: "group-2", sessionId: "s-2", streaming: true },
+    ]);
+    registry.retract("group-2");
+    expect(registry.readTiles()).toEqual([{ chatGroupId: "main", sessionId: "s-1", streaming: false }]);
+  });
+
+  it("keeps the same array while only transcripts change — tokens must not re-render the sidebar", () => {
+    const registry = new ChatGroupSessionRegistry();
+    const woken = vi.fn();
+    registry.subscribeTiles(woken);
+    registry.publish("main", holding("s-1", true));
+    const first = registry.readTiles();
+    expect(woken).toHaveBeenCalledTimes(1);
+    registry.publish("main", { ...holding("s-1", true), entries: [{ role: "assistant", content: "…" } as unknown as ChatEntry] });
+    expect(registry.readTiles()).toBe(first);
+    expect(woken).toHaveBeenCalledTimes(1);
+    registry.publish("main", holding("s-1", false));
+    expect(registry.readTiles()).not.toBe(first);
+    expect(registry.readTiles()[0]!.streaming).toBe(false);
+    expect(woken).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the same array when another tile republishes with nothing tile-visible changed", () => {
+    const registry = new ChatGroupSessionRegistry();
+    registry.publish("main", holding("s-1", false));
+    registry.publish("group-2", holding("s-2", true));
+    const first = registry.readTiles();
+    registry.publish("main", { ...holding("s-1", false), entries: [{ role: "user", content: "…" } as unknown as ChatEntry] });
+    expect(registry.readTiles()).toBe(first);
+  });
+
+  it("useTileSessions follows the store", () => {
+    const registry = new ChatGroupSessionRegistry();
+    const { result } = renderHook(() => useTileSessions(registry));
+    expect(result.current).toEqual([]);
+    act(() => registry.publish("group-2", holding("s-2", true)));
+    expect(result.current).toEqual([{ chatGroupId: "group-2", sessionId: "s-2", streaming: true }]);
+    act(() => registry.retract("group-2"));
+    expect(result.current).toEqual([]);
   });
 });

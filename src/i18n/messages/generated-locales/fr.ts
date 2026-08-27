@@ -2541,6 +2541,7 @@ export const frMessages: Record<string, string> = {
   "sidebar.unpinProject": "Désépingler le projet",
   "sidebar.pinConversation": "Épingler la conversation",
   "sidebar.unpinConversation": "Désépingler la conversation",
+  "sidebar.sessionResponding": "Réponse en cours…",
   "sidebar.renameConversation": "Renommer",
   "sidebar.markConversationUnread": "Marquer comme non lu",
   "sidebar.markConversationRead": "Marquer comme lu",

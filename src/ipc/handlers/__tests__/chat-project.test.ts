@@ -180,6 +180,33 @@ describe("markMainActiveAfterTurn project metadata", () => {
   });
 });
 
+describe("handleChatSessions row state", () => {
+  it("carries the archived and unread marks the sidebar draws from", () => {
+    const listSessionsPage = vi.fn(() => [{
+      id: "session-1",
+      modifiedAt: new Date("2026-08-27T00:00:00Z"),
+      title: "t",
+      sessionKind: "main",
+      archivedAt: "2026-08-27T01:00:00Z",
+      unreadSince: "2026-08-27T02:00:00Z",
+    }, {
+      id: "session-2",
+      modifiedAt: new Date("2026-08-27T00:00:00Z"),
+      title: "u",
+      sessionKind: "main",
+    }]);
+    const deps = {
+      conversationLoop: { getSessionId: () => "session-1" },
+      memoryManager: { listSessionsPage },
+    } as unknown as IpcDeps;
+
+    const { sessions } = handleChatSessions(deps, { kind: "main" });
+    expect(sessions[0]).toMatchObject({ id: "session-1", archivedAt: "2026-08-27T01:00:00Z", unreadSince: "2026-08-27T02:00:00Z" });
+    expect(sessions[1]).not.toHaveProperty("archivedAt");
+    expect(sessions[1]).not.toHaveProperty("unreadSince");
+  });
+});
+
 describe("handleChatSessions project filters", () => {
   it("does not add a project filter when the caller requests the project sidebar list", () => {
     const listSessionsPage = vi.fn(() => []);

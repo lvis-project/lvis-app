@@ -610,6 +610,8 @@ function useWorkspaceProjects(enabled: boolean): ProjectIdentity[] {
 export interface ConversationRowActions {
   isArchived: (sessionId: string) => boolean;
   isUnread: (sessionId: string) => boolean;
+  /** A turn is running in some tile that holds this conversation. */
+  isResponding: (sessionId: string) => boolean;
   onRename: (sessionId: string, title: string) => void | Promise<void>;
   onSetArchived: (sessionId: string, archived: boolean) => void | Promise<void>;
   onSetUnread: (sessionId: string, unread: boolean) => void | Promise<void>;
@@ -690,6 +692,7 @@ function SessionRow({
   onTogglePin,
   onOpenMenu,
   unread,
+  responding,
   archived,
   renaming,
   onCommitRename,
@@ -707,8 +710,10 @@ function SessionRow({
   /** Open this row's actions menu. Wired to BOTH the right-click and the
    *  trailing entry button, so the two cannot offer different things. */
   onOpenMenu?: (event: MouseEvent<HTMLElement>) => void;
-  /** Manually marked unread — drawn as a dot plus a heavier title. */
+  /** Marked unread — drawn as a dot plus a heavier title. */
   unread?: boolean;
+  /** A turn is running here — the kind glyph gives way to a pulsing dot. */
+  responding?: boolean;
   /** Archived — kept legible but visibly set aside. */
   archived?: boolean;
   renaming?: boolean;
@@ -735,6 +740,7 @@ function SessionRow({
       ].filter(Boolean).join(" ")}
       data-archived={archived ? "true" : undefined}
       data-unread={unread ? "true" : undefined}
+      data-responding={responding ? "true" : undefined}
     >
       {/* ── Leading slot. One 14px square that holds the row's KIND at rest and
           its pin on hover. The two never coexist, so the row's text never
@@ -761,15 +767,33 @@ function SessionRow({
             <Pin className={`h-3 w-3 ${isPinned ? "fill-current" : ""}`} />
           </button>
         ) : null}
-        <MessageSquareText
-          className={[
-            "h-3.5 w-3.5",
-            // Hidden — not removed. The glyph keeps reserving the square so the
-            // swap costs no layout.
-            isPinned ? "invisible" : "group-hover:invisible group-focus-within:invisible",
-          ].join(" ")}
-          aria-hidden="true"
-        />
+        {responding ? (
+          /* A turn is running here. The pulse is the signal; with reduced
+             motion the dot stands still and the label carries it. Same square
+             as the glyph, hidden the same way under the pin. */
+          <span
+            role="img"
+            aria-label={t("sidebar.sessionResponding")}
+            title={t("sidebar.sessionResponding")}
+            data-testid={`sidebar-session-responding-${session.id}`}
+            className={[
+              "flex h-3.5 w-3.5 items-center justify-center",
+              isPinned ? "invisible" : "group-hover:invisible group-focus-within:invisible",
+            ].join(" ")}
+          >
+            <span className="h-2 w-2 rounded-full bg-primary animate-pulse motion-reduce:animate-none" />
+          </span>
+        ) : (
+          <MessageSquareText
+            className={[
+              "h-3.5 w-3.5",
+              // Hidden — not removed. The glyph keeps reserving the square so the
+              // swap costs no layout.
+              isPinned ? "invisible" : "group-hover:invisible group-focus-within:invisible",
+            ].join(" ")}
+            aria-hidden="true"
+          />
+        )}
       </span>
       {renaming && onCommitRename && onCancelRename ? (
         <div className="flex min-w-0 flex-1 items-center px-2 py-1">
@@ -1072,6 +1096,7 @@ function ProjectSessionList({
       onTogglePin={onToggleSessionStar ? () => onToggleSessionStar(session.id, session.title) : undefined}
       onOpenMenu={(event) => openNativeContextMenu(event, "conversation", conversationMenuHandlers(session))}
       unread={conversationActions?.isUnread(session.id)}
+      responding={conversationActions?.isResponding(session.id)}
       archived={conversationActions?.isArchived(session.id)}
       renaming={renamingKey === `session:${session.id}`}
       onCommitRename={conversationActions
