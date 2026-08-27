@@ -18,7 +18,7 @@ test('composer status row exposes permission, model, reasoning, and activity sta
   await expect(model).toBeVisible();
   await expect(model).toHaveAttribute('title', /.+/);
 
-  await expect(row.locator('[data-testid="reasoning-slider"]')).toBeVisible();
+  await expect(row.locator('[data-testid="iab-status-reasoning"]')).toBeVisible();
   const activeDot = row.locator('[data-testid="iab-status-active-dot"]');
   await expect(activeDot).toBeVisible();
   await expect(activeDot).toHaveAttribute('aria-label', /.+/);

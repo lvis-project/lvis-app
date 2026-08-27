@@ -24,7 +24,7 @@
  * Spec: docs/blueprints/composer-redesign-message-queue.md
  */
 import { useCallback, useEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { ArrowUp, Brain, Check, ChevronRight, HelpCircle, Paperclip, Square, User } from "lucide-react";
+import { ArrowUp, Brain, Check, ChevronRight, HelpCircle, Lightbulb, Paperclip, Square, User } from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
@@ -32,7 +32,7 @@ import { t } from "../../../i18n/runtime.js";
 import { useTranslation } from "../../../i18n/react.js";
 import type { PluginEntry } from "./PluginGridButton.js";
 import { SlashPicker, type QuickAction } from "./SlashPicker.js";
-import { ReasoningLevelControl, ReasoningSlider, useReasoningLevel } from "./ReasoningSlider.js";
+import { ReasoningLevelControl, useReasoningLevel } from "./ReasoningSlider.js";
 import { getApi } from "../api-client.js";
 import { pinnedModelChoices, type PinnedModelChoice } from "../hooks/use-settings.js";
 import type { AppSettings } from "../types.js";
@@ -100,7 +100,7 @@ export interface InputActionBarProps {
   /** Workspace mode controls compact status-row model labeling. */
   appMode?: "chat" | "work";
   /** Opens Settings → LLM — the model card's way to the full catalogue. */
-  onOpenModelSettings?: () => void;
+  onOpenModelSettings: () => void;
   /** Opens Settings → Permissions when the permission cell is clicked. */
   onOpenPermissions?: () => void;
   /** Opens the deferred approval queue dialog. Separate from permission settings. */
@@ -371,7 +371,7 @@ function StatusSubRow({
   statusRow: InputStatusRow;
   appMode: "chat" | "work";
   ringSlot: ReactNode;
-  onOpenModelSettings?: () => void;
+  onOpenModelSettings: () => void;
   onOpenPermissions?: () => void;
   onOpenApprovalQueue?: () => void;
   enableThinkingChat: boolean;
@@ -457,36 +457,18 @@ function StatusSubRow({
         <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 
         {/* Model — brain icon + compact label; chat mode hides vendor prefix.
-            Clicking opens the model card: the pinned models, the reasoning
-            level, and the way to the full catalogue. Settings is one more
-            click away, not the first thing a model click does. */}
-        {onOpenModelSettings ? (
-          <ModelQuickPicker
-            vendorModel={vendorModel}
-            displayModel={displayModel}
-            enableThinking={enableThinkingChat}
-            reasoningAvailable={reasoningAvailable}
-            onToggleThinking={onToggleThinking}
-            onOpenModelSettings={onOpenModelSettings}
-          />
-        ) : (
-          <span
-            data-testid="iab-status-model"
-            className="inline-flex min-w-0 shrink items-center gap-1"
-            title={vendorModel}
-          >
-            <Brain className="h-3 w-3 shrink-0 text-input-bar-placeholder" aria-hidden="true" />
-            <span className="min-w-0 truncate">{displayModel}</span>
-          </span>
-        )}
-
-        {reasoningAvailable && (
-          <>
-            <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
-            {/* 추론 (reasoning) slider — BETWEEN the model cell and the dot. */}
-            <ReasoningSlider enabled={enableThinkingChat} onToggle={onToggleThinking} />
-          </>
-        )}
+            Clicking it, or the reasoning chip after it, opens the model card:
+            the pinned models, the reasoning level, and the way to the full
+            catalogue. Settings is one more click away, not the first thing a
+            model click does. */}
+        <ModelQuickPicker
+          vendorModel={vendorModel}
+          displayModel={displayModel}
+          enableThinking={enableThinkingChat}
+          reasoningAvailable={reasoningAvailable}
+          onToggleThinking={onToggleThinking}
+          onOpenModelSettings={onOpenModelSettings}
+        />
 
         <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
 
@@ -510,6 +492,9 @@ function StatusSubRow({
  * same list the settings chooser pins with, so the card and the chooser
  * cannot disagree about what is pinned; a pick persists at once, the same
  * way the chooser's does.
+ *
+ * The reasoning chip beside the model cell is a second way in, not a
+ * second control: it shows the current level and opens this same card.
  */
 function ModelQuickPicker({
   vendorModel,
@@ -579,6 +564,25 @@ function ModelQuickPicker({
           <span className="min-w-0 truncate">{displayModel}</span>
         </button>
       </PopoverTrigger>
+      {reasoningAvailable ? (
+        <>
+          <span className="shrink-0 opacity-30" aria-hidden="true">·</span>
+          <button
+            type="button"
+            data-testid="iab-status-reasoning"
+            data-level={level}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
+            title={`${reasoningLabel}: ${levelLabels[level]}`}
+            onClick={() => setOpen(true)}
+            className={`flex shrink-0 cursor-pointer items-center gap-0.5 transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
+          >
+            <Lightbulb className="h-3 w-3 shrink-0" aria-hidden="true" />
+            <span className="shrink-0 tabular-nums">{levelLabels[level]}</span>
+          </button>
+        </>
+      ) : null}
       <PopoverContent
         align="end"
         side="top"

@@ -95,7 +95,7 @@ test('InputActionBar: command → persona → attach leading controls and reason
     'iab-assistant-context-button',
     'iab-attach-button',
   ]);
-  await expect(mainWindow.locator('[data-testid="reasoning-slider"]')).toBeVisible();
+  await expect(mainWindow.locator('[data-testid="iab-status-reasoning"]')).toBeVisible();
 });
 
 test('큐 항목 수정 (더블클릭) — input 진입 + Enter commit', async ({ mainWindow }) => {

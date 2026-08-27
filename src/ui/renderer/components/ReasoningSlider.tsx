@@ -1,6 +1,4 @@
 import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, Lightbulb } from "lucide-react";
-import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
 import { useTranslation } from "../../../i18n/react.js";
 import { getApi } from "../api-client.js";
 import {
@@ -30,7 +28,7 @@ function narrowVendor(raw: unknown): LLMVendor {
   return isLLMVendor(raw) ? raw : DEFAULT_LLM_VENDOR;
 }
 
-export interface ReasoningSliderProps {
+export interface ReasoningLevelOptions {
   /** Host-owned thinking on/off (persisted per-vendor). */
   enabled: boolean;
   onToggle: (next: boolean) => void | Promise<void>;
@@ -43,10 +41,11 @@ export type ReasoningLevel = 0 | 1 | 2 | 3;
  *
  * Level 0 is thinking off; 1–3 are the depths, persisted per vendor as a
  * token budget. The depth follows the settings broadcast rather than a
- * one-time seed, because two controls show it — the status-row chip and
- * the model card — and a change made in either has to reach the other.
+ * one-time seed, because more than one surface shows it — the status-row
+ * chip, the model card it opens, and every other tile's composer — and a
+ * change made in any of them has to reach the rest.
  */
-export function useReasoningLevel({ enabled, onToggle }: ReasoningSliderProps): {
+export function useReasoningLevel({ enabled, onToggle }: ReasoningLevelOptions): {
   level: ReasoningLevel;
   levelLabels: string[];
   apply: (next: number) => void;
@@ -151,44 +150,5 @@ export function ReasoningLevelControl({
         ))}
       </div>
     </>
-  );
-}
-
-export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
-  const { t } = useTranslation();
-  const { level, levelLabels, apply } = useReasoningLevel({ enabled, onToggle });
-  const reasoningLabel = t("bottomActionRow.reasoning");
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <button
-          type="button"
-          data-testid="reasoning-slider"
-          data-level={level}
-          aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
-          title={`${reasoningLabel}: ${levelLabels[level]}`}
-          className="flex shrink-0 cursor-pointer items-center gap-0.5 text-input-bar-placeholder transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-input-bar-action focus:outline-none focus-visible:ring-1 focus-visible:ring-input-bar-focus motion-reduce:transition-none"
-        >
-          <Lightbulb
-            className={`h-3 w-3 shrink-0 ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}
-            aria-hidden="true"
-          />
-          <span className={`shrink-0 tabular-nums ${level > 0 ? "text-input-bar-action" : "text-input-bar-placeholder"}`}>
-            {levelLabels[level]}
-          </span>
-          <ChevronDown className="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
-        </button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        side="top"
-        sideOffset={6}
-        className="w-52 p-3"
-        data-testid="reasoning-popover"
-      >
-        <div className="mb-2 text-caption font-medium text-muted-foreground">{reasoningLabel}</div>
-        <ReasoningLevelControl level={level} levelLabels={levelLabels} apply={apply} label={reasoningLabel} />
-      </PopoverContent>
-    </Popover>
   );
 }

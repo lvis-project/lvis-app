@@ -1649,30 +1649,6 @@ export function LlmTab(props: LlmTabProps) {
         description={t("llmTab.pageDescription")}
       />
 
-      <SettingsSection
-        title={t("llmTab.currentConfiguration")}
-        id="llm-current-configuration"
-      >
-        <dl className="grid gap-3 sm:grid-cols-3" data-testid="llm-tab:configuration-summary">
-          <div className="min-w-0 rounded-md border border-border/(--opacity-medium) p-3">
-            <dt className="text-xs font-medium text-muted-foreground">{t("llmTab.vendor")}</dt>
-            <dd className="mt-1 truncate text-sm font-medium text-foreground">{vendorInfo.label}</dd>
-          </div>
-          <div className="min-w-0 rounded-md border border-border/(--opacity-medium) p-3">
-            <dt className="text-xs font-medium text-muted-foreground">{t("llmTab.model")}</dt>
-            <dd className="mt-1 truncate text-sm font-medium text-foreground">{model || "—"}</dd>
-          </div>
-          <div className="min-w-0 rounded-md border border-border/(--opacity-medium) p-3">
-            <dt className="text-xs font-medium text-muted-foreground">{t("llmTab.apiKey")}</dt>
-            <dd className="mt-1">
-              <Badge variant={hasKey ? "default" : "outline"} className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">
-                {hasKey ? t("llmTab.apiKeySet") : t("llmTab.apiKeyNotSet")}
-              </Badge>
-            </dd>
-          </div>
-        </dl>
-      </SettingsSection>
-
       {/* Provider configuration — API keys and endpoint settings are edited
           directly here. */}
       <SettingsSection

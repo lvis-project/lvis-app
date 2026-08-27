@@ -77,6 +77,7 @@ function renderBar(overrides: Partial<Parameters<typeof InputActionBar>[0]> = {}
     enableThinkingChat: false,
     onToggleThinking: vi.fn(),
     statusRow: defaultStatusRow,
+    onOpenModelSettings: vi.fn(),
     ...overrides,
   };
   return render(
@@ -129,12 +130,12 @@ describe("InputActionBar (unified bar)", () => {
     const send = trailing.querySelector("[data-testid='composer-send-button']");
     expect(help && send).toBeTruthy();
     expect(help!.compareDocumentPosition(send!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // Reasoning/thinking is no longer in the trailing cluster — it now lives in
-    // the status sub-row (between vendor·model and the active dot).
+    // Reasoning/thinking is no longer in the trailing cluster — it is the
+    // status sub-row chip after the model cell (and opens the model card).
     expect(trailing.querySelector("[data-testid='thinking-button']")).toBeNull();
     const statusRow = getByTestId("iab-status-row");
-    expect(statusRow.querySelector("[data-testid='reasoning-slider']")).toBeTruthy();
-    expect(statusRow.querySelector("[data-testid='reasoning-slider'] svg")).toBeTruthy();
+    expect(statusRow.querySelector("[data-testid='iab-status-reasoning']")).toBeTruthy();
+    expect(statusRow.querySelector("[data-testid='iab-status-reasoning'] svg")).toBeTruthy();
   });
 
   it("does NOT render the legacy PluginGridButton (plugins live in the sidebar + slash picker)", () => {
@@ -428,6 +429,21 @@ describe("model card (status-row model cell)", () => {
     fireEvent.click(getByTestId("iab-status-model"));
     expect(await findByTestId("model-quick-picker")).toBeTruthy();
     expect(onOpenModelSettings).not.toHaveBeenCalled();
+  });
+
+  it("the reasoning chip is a second way into the same card, and goes with reasoning", async () => {
+    const onOpenModelSettings = vi.fn();
+    const { getByTestId, findByTestId, queryByTestId, unmount } = renderBar({ onOpenModelSettings, enableThinkingChat: true });
+    const chip = getByTestId("iab-status-reasoning");
+    expect(chip.getAttribute("data-level")).not.toBe("0");
+    fireEvent.click(chip);
+    expect(await findByTestId("model-quick-picker")).toBeTruthy();
+    expect(queryByTestId("reasoning-popover")).toBeNull();
+    expect(onOpenModelSettings).not.toHaveBeenCalled();
+    unmount();
+    const without = renderBar({ onOpenModelSettings, reasoningAvailable: false });
+    expect(without.queryByTestId("iab-status-reasoning")).toBeNull();
+    expect(without.getByTestId("iab-status-model")).toBeTruthy();
   });
 
   it("lists the pinned models only — in pinned order, and none that nothing offers", async () => {
