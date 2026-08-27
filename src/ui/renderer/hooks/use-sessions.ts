@@ -1,5 +1,6 @@
 import type { RestoredSubAgentRow } from "./use-workflow-tools.js";
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { TileSession } from "../components/chat-group-session-registry.js";
 import type { ChatEntry } from "../../../lib/chat-stream-state.js";
 import type { LvisApi } from "../types.js";
 import { historyToEntries } from "../utils/history.js";
@@ -267,4 +268,77 @@ export function sessionHistoryToEntries(history: Awaited<ReturnType<LvisApi["cha
     },
     ...entries,
   ];
+}
+
+/**
+ * Where the user is looking: the focused tile, and whether the conversation
+ * surface is on screen at all (Settings and plugin views cover it).
+ */
+export interface Attention {
+  focusedChatGroupId: string;
+  conversationVisible: boolean;
+}
+
+/**
+ * The conversations whose turn just ended somewhere the user was not looking.
+ *
+ * A turn ending under the user's eyes needs no mark — they saw it. One that
+ * ends in another tile, or while Settings covers the conversation, is what a
+ * chat app bolds: something happened that has not been seen. A tile that
+ * moved to a different conversation between the two readings is skipped;
+ * the turn that ended belonged to a session the tile no longer shows, and
+ * marking it would point at history the user already left.
+ */
+export function turnsEndedUnseen(
+  previous: readonly TileSession[],
+  current: readonly TileSession[],
+  attention: Attention,
+): string[] {
+  const before = new Map(previous.map((tile) => [tile.chatGroupId, tile]));
+  const unseen: string[] = [];
+  for (const tile of current) {
+    const was = before.get(tile.chatGroupId);
+    if (!was?.streaming || tile.streaming) continue;
+    if (was.sessionId !== tile.sessionId || !tile.sessionId) continue;
+    const looking = attention.conversationVisible && tile.chatGroupId === attention.focusedChatGroupId;
+    if (!looking) unseen.push(tile.sessionId);
+  }
+  return unseen;
+}
+
+/**
+ * Keeps the unread mark honest against what is on screen: a turn that ends
+ * unseen marks its conversation, and looking at a conversation reads it.
+ *
+ * "Looking" is a transition — focusing the tile, returning to the conversation
+ * view, or loading a session into the focused tile — not a standing condition.
+ * A conversation the user marks unread by hand while it is in front of them
+ * therefore stays marked until they look away and back, which is what the
+ * manual mark is for.
+ */
+export function useTurnAttention(input: {
+  tiles: readonly TileSession[];
+  attention: Attention;
+  isUnread: (sessionId: string) => boolean;
+  setUnread: (sessionId: string, unread: boolean) => void | Promise<void>;
+}): void {
+  const { tiles, attention } = input;
+  const { focusedChatGroupId, conversationVisible } = attention;
+  const previousTiles = useRef(tiles);
+  const latest = useRef(input);
+  latest.current = input;
+
+  useEffect(() => {
+    const previous = previousTiles.current;
+    previousTiles.current = tiles;
+    for (const sessionId of turnsEndedUnseen(previous, tiles, latest.current.attention)) {
+      void latest.current.setUnread(sessionId, true);
+    }
+  }, [tiles]);
+
+  const focusedSessionId = tiles.find((tile) => tile.chatGroupId === focusedChatGroupId)?.sessionId;
+  useEffect(() => {
+    if (!conversationVisible || !focusedSessionId) return;
+    if (latest.current.isUnread(focusedSessionId)) void latest.current.setUnread(focusedSessionId, false);
+  }, [conversationVisible, focusedChatGroupId, focusedSessionId]);
 }

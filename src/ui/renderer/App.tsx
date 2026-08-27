@@ -14,10 +14,7 @@ import { DevToolsPanel } from "./components/DevToolsPanel.js";
 import { UnifiedSearchPanel } from "./components/UnifiedSearchPanel.js";
 import { PluginUiHostView } from "../../plugin-ui-host.js";
 import { ChatGroupSession, type ChatGroupEnvironment } from "./components/ChatGroupSession.js";
-import {
-  ChatGroupSessionRegistry,
-  useChatGroupSession,
-} from "./components/chat-group-session-registry.js";
+import { ChatGroupSessionRegistry, useChatGroupSession, useTileSessions } from "./components/chat-group-session-registry.js";
 import type { ChatEntry } from "../../lib/chat-stream-state.js";
 // The away surfaces for an MCP-app card that left its home mount — one singleton
 // each (each renders nothing while no card occupies its slot).
@@ -32,7 +29,7 @@ import { PageShell } from "./components/PageShell.js";
 import type { ConversationRowActions, ProjectRowActions } from "./components/Sidebar.js";
 import { ChatGroupFrame, ChatGroupGutter, areaStyle, chatGroupApi, useChatGroups } from "./components/ChatGroupFrame.js";
 import type { DropTarget } from "./components/chat-group-drop.js";
-import { useSessionList, type SessionSummary } from "./hooks/use-sessions.js";
+import { useSessionList, useTurnAttention, type SessionSummary } from "./hooks/use-sessions.js";
 import { MAIN_CHAT_GROUP_ID } from "../../contract/app-contract.js";
 import type { PluginViewKey } from "../../shared/view-key.js";
 import { DeferredQueueDialog } from "./dialogs/DeferredQueueDialog.js";
@@ -236,6 +233,7 @@ export function App() {
   const chatGroupCanvasRef = useRef<HTMLDivElement>(null);
 
   const focusedSession = useChatGroupSession(chatGroupSessions, chatGroups.focusedId);
+  const tileSessions = useTileSessions(chatGroupSessions);
   // use-routine-overlay wants a REF it can read at fire time. The focused tile
   // can change between mount and fire, so the ref is re-pointed each render
   // rather than captured — otherwise a routine would start its turn in
@@ -908,6 +906,8 @@ export function App() {
     return {
       isArchived: (sessionId) => Boolean(findSession(sessionId)?.archivedAt),
       isUnread: (sessionId) => Boolean(findSession(sessionId)?.unreadSince),
+      isResponding: (sessionId) =>
+        tileSessions.some((tile) => tile.sessionId === sessionId && tile.streaming),
       onRename: (sessionId, title) => applyUpdate({ sessionId, title }),
       onSetArchived: (sessionId, archived) => applyUpdate({ sessionId, archived }),
       onSetUnread: (sessionId, unread) => applyUpdate({ sessionId, unread }),
@@ -944,7 +944,15 @@ export function App() {
         await refreshSessions();
       },
     };
-  }, [api, sessions, refreshSessions, handleExport, handleImportAndLoad, handleNewChat]);
+  }, [api, sessions, tileSessions, refreshSessions, handleExport, handleImportAndLoad, handleNewChat]);
+  // A turn that ends where the user is not looking marks its row; looking
+  // at a conversation reads it. The sidebar's bold rows come from here.
+  useTurnAttention({
+    tiles: tileSessions,
+    attention: { focusedChatGroupId: chatGroups.focusedId, conversationVisible: activeView === "home" },
+    isUnread: conversationActions.isUnread,
+    setUnread: conversationActions.onSetUnread,
+  });
 
   // The work panel is per-GROUP state now (each conversation carries its own),
   // but WIDENING THE WINDOW is a window-level effect: it has to fire when ANY

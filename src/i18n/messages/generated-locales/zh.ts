@@ -2553,6 +2553,7 @@ export const zhMessages: Record<string, string> = {
   "sidebar.projectsTab": "项目",
   "sidebar.resizeHandleAriaLabel": "调整侧边栏大小",
   "sidebar.unpinConversation": "取消固定对话",
+  "sidebar.sessionResponding": "正在回复…",
   "sidebar.renameConversation": "重命名",
   "sidebar.markConversationUnread": "标记为未读",
   "sidebar.markConversationRead": "标记为已读",

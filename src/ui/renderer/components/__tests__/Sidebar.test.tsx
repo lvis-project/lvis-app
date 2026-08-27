@@ -865,6 +865,7 @@ describe("Sidebar conversation row actions", () => {
   const rowState = () => ({
     archived: new Set<string>(),
     unread: new Set<string>(),
+    responding: new Set<string>(),
     onRename: vi.fn(),
     onSetArchived: vi.fn(),
     onSetUnread: vi.fn(),
@@ -876,12 +877,28 @@ describe("Sidebar conversation row actions", () => {
   const asActions = (state: ReturnType<typeof rowState>) => ({
     isArchived: (id: string) => state.archived.has(id),
     isUnread: (id: string) => state.unread.has(id),
+    isResponding: (id: string) => state.responding.has(id),
     onRename: state.onRename,
     onSetArchived: state.onSetArchived,
     onSetUnread: state.onSetUnread,
     onShare: state.onShare,
     onCopy: state.onCopy,
     onDelete: state.onDelete,
+  });
+
+  it("shows a responding dot on a row whose conversation has a turn running, in place of the kind glyph", () => {
+    const state = rowState();
+    state.responding.add("sess-2");
+    const { getByTestId, queryByTestId, restore } = renderSidebar({ conversationActions: asActions(state) });
+    try {
+      const dot = getByTestId("sidebar-session-responding-sess-2");
+      expect(dot.getAttribute("aria-label")).toBeTruthy();
+      expect(getByTestId("sidebar-session-sess-2").closest("[data-responding='true']")).toBeTruthy();
+      expect(queryByTestId("sidebar-session-responding-sess-1")).toBeNull();
+      expect(getByTestId("sidebar-session-sess-1").closest("[data-responding='true']")).toBeNull();
+    } finally {
+      restore();
+    }
   });
 
   it("opens the same menu from the trailing button as from a right-click", () => {

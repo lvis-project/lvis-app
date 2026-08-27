@@ -107,6 +107,17 @@ const EMPTY_CHAT_GROUP_SESSION: ChatGroupSessionHandle = Object.freeze({
 });
 
 /**
+ * One tile as the window sees it: which conversation it holds and whether a
+ * turn is running there. What the sidebar needs to mark a row, and nothing a
+ * row could act on.
+ */
+export interface TileSession {
+  chatGroupId: string;
+  sessionId: string;
+  streaming: boolean;
+}
+
+/**
  * The live handles, one per mounted tile.
  *
  * A store rather than React state because the writers are the CHILDREN: a tile
@@ -122,6 +133,8 @@ export class ChatGroupSessionRegistry {
    *  snapshot in the sense useSyncExternalStore requires. */
   private readonly snapshots = new Map<string, ChatGroupSessionHandle>();
   private readonly listeners = new Map<string, Set<Listener>>();
+  private tiles: readonly TileSession[] = Object.freeze([]);
+  private readonly tileListeners = new Set<Listener>();
 
   publish(chatGroupId: string, handle: ChatGroupSessionHandle): void {
     const previous = this.latest.get(chatGroupId);
@@ -143,6 +156,7 @@ export class ChatGroupSessionRegistry {
     if (unchanged) return;
 
     this.snapshots.set(chatGroupId, this.snapshot(chatGroupId, handle));
+    this.refreshTiles();
     this.wake(chatGroupId);
   }
 
@@ -150,7 +164,38 @@ export class ChatGroupSessionRegistry {
     const held = this.latest.delete(chatGroupId);
     this.snapshots.delete(chatGroupId);
     if (!held) return;
+    this.refreshTiles();
     this.wake(chatGroupId);
+  }
+
+  /** Every tile, in publish order. The same array until a tile's session or streaming changes. */
+  readTiles(): readonly TileSession[] {
+    return this.tiles;
+  }
+
+  subscribeTiles(listener: Listener): () => void {
+    this.tileListeners.add(listener);
+    return () => { this.tileListeners.delete(listener); };
+  }
+
+  // A transcript changes with every token; the tile list must not. It is
+  // rebuilt only when a field it carries changed, so a subscriber keyed on
+  // its identity re-renders on session and streaming edges, not on tokens.
+  private refreshTiles(): void {
+    const next = [...this.snapshots].map(([chatGroupId, handle]) => ({
+      chatGroupId,
+      sessionId: handle.currentSessionId,
+      streaming: handle.streaming,
+    }));
+    const same = next.length === this.tiles.length && next.every((tile, index) => {
+      const previous = this.tiles[index]!;
+      return previous.chatGroupId === tile.chatGroupId
+        && previous.sessionId === tile.sessionId
+        && previous.streaming === tile.streaming;
+    });
+    if (same) return;
+    this.tiles = Object.freeze(next.map((tile) => Object.freeze(tile)));
+    for (const listener of this.tileListeners) listener();
   }
 
   read(chatGroupId: string): ChatGroupSessionHandle | null {
@@ -246,4 +291,11 @@ export function useChatGroupSession(
   );
   const read = useCallback(() => registry.read(chatGroupId), [registry, chatGroupId]);
   return useSyncExternalStore(subscribe, read, read) ?? EMPTY_CHAT_GROUP_SESSION;
+}
+
+/** Every tile's conversation and streaming state — what the sidebar marks rows with. */
+export function useTileSessions(registry: ChatGroupSessionRegistry): readonly TileSession[] {
+  const subscribe = useCallback((listener: Listener) => registry.subscribeTiles(listener), [registry]);
+  const read = useCallback(() => registry.readTiles(), [registry]);
+  return useSyncExternalStore(subscribe, read, read);
 }
