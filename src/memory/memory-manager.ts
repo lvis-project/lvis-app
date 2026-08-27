@@ -321,6 +321,10 @@ export interface SessionListEntry {
   parentSessionId?: string;
   /** Compact sequence number this session was forked from. Only set on true checkpoint forks. */
   branchedFromCompactNum?: number;
+  /** ISO time the user archived this conversation. Absent = not archived. */
+  archivedAt?: string;
+  /** ISO time the user marked it unread. Absent = read. */
+  unreadSince?: string;
   /** ISO timestamp when this session was branched. Only set on true checkpoint forks. */
   branchedAt?: string;
 }

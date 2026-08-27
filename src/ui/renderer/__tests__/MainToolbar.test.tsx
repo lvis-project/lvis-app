@@ -7,14 +7,6 @@ import { MainToolbar } from "../MainToolbar.js";
 function defaultProps(overrides: Partial<Parameters<typeof MainToolbar>[0]> = {}) {
   return {
     leadClearance: 64,
-    viewNav: {
-      segments: [{ key: "home", label: "홈" }],
-      canGoBack: false,
-      canGoForward: false,
-      onBack: vi.fn(),
-      onForward: vi.fn(),
-      onSelectSegment: vi.fn(),
-    },
     streaming: false,
     hasApiKey: true as boolean | null,
     appMode: "work" as const,
@@ -47,19 +39,12 @@ describe("MainToolbar", () => {
   });
 
   it("does not render a Home button (Home nav is owned by the Sidebar)", () => {
-    // The band names the current location in the path, but it never offers a
-    // Home control of its own.
-    renderWithProvider(defaultProps({
-      viewNav: {
-        segments: [{ key: "memory", label: "메모리" }],
-        canGoBack: true,
-        canGoForward: false,
-        onBack: vi.fn(),
-        onForward: vi.fn(),
-        onSelectSegment: vi.fn(),
-      },
-    }));
+    // The band does not name the location at all any more — the path moved to
+    // the canvas's leading edge and history moved to the sidebar. It has never
+    // offered a Home control of its own either.
+    renderWithProvider(defaultProps());
     expect(screen.queryByTitle("홈")).toBeNull();
+    expect(document.querySelector("[data-testid='view-path-breadcrumb']")).toBeNull();
   });
 
   // The search / star / export controls + the collapse toggle moved to the
