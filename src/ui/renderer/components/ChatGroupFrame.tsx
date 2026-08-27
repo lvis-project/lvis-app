@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from "react";
 import {
   Columns2, Download, PanelBottomClose, PanelBottomOpen,
   Pin, Upload, X,
@@ -84,6 +84,29 @@ export function useChatGroupHeaderSlot(): HTMLElement | null {
   return useContext(ChatGroupHeaderSlotContext);
 }
 
+/**
+ * The work panel's share of the header.
+ *
+ * The panel is a COLUMN of the group, so the header line above it belongs to
+ * the panel the same way the rest of the line belongs to the conversation —
+ * one band across the group, split where the columns split. That is why the
+ * panel has no title row of its own: its tabs ARE its header.
+ *
+ * The panel reports its own width up so the band can match it; the frame owns
+ * the width because the toggle that closes the panel has to sit inside the
+ * band even when there is no panel to portal anything into it.
+ */
+export interface ChatGroupPanelBand {
+  slot: HTMLElement | null;
+  setWidth: (px: number | null) => void;
+}
+
+const ChatGroupPanelBandContext = createContext<ChatGroupPanelBand | null>(null);
+
+export function useChatGroupPanelBand(): ChatGroupPanelBand | null {
+  return useContext(ChatGroupPanelBandContext);
+}
+
 export function ChatGroupFrame({
   title,
   actions,
@@ -97,6 +120,12 @@ export function ChatGroupFrame({
 }: ChatGroupFrameProps) {
   const { t } = useTranslation();
   const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
+  const [panelSlot, setPanelSlot] = useState<HTMLDivElement | null>(null);
+  const [panelBandWidth, setPanelBandWidth] = useState<number | null>(null);
+  const panelBand = useMemo<ChatGroupPanelBand>(
+    () => ({ slot: panelSlot, setWidth: setPanelBandWidth }),
+    [panelSlot],
+  );
   const panelLabel = panelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open");
   return (
     <section
@@ -196,6 +225,27 @@ export function ChatGroupFrame({
             <TooltipContent side="bottom">{t("chatGroup.split")}</TooltipContent>
           </Tooltip>
         ) : null}
+        {/* The panel's share of the header line: its tabs on the left, the
+            control that closes it on the right, sized to the panel column so
+            the divider between them is ONE line from the header to the bottom
+            of the group. */}
+        <div
+          data-testid="chat-group-panel-band"
+          className={[
+            "flex h-full shrink-0 items-center gap-1",
+            // `-mr-2` cancels the header's own right padding so the band's
+            // right edge is the GROUP's inner edge — the same edge the panel
+            // column ends on. Without it the band sits 8px inboard and its
+            // divider misses the column's by exactly that much.
+            panelBandWidth === null ? "" : "-mr-2 border-l border-border/(--opacity-half) pl-2 pr-2",
+          ].join(" ")}
+          style={panelBandWidth === null ? undefined : { width: `${panelBandWidth}px` }}
+        >
+          <div
+            ref={setPanelSlot}
+            className="flex h-full min-w-0 flex-1 items-center overflow-hidden"
+            data-testid="chat-group-panel-slot"
+          />
         {/* The work panel is per-GROUP. It shows what THIS conversation is
             doing, so a single window-level toggle could only ever be right for
             one of the groups on screen. */}
@@ -234,12 +284,15 @@ export function ChatGroupFrame({
             <TooltipContent side="bottom">{t("chatGroup.close")}</TooltipContent>
           </Tooltip>
         ) : null}
+        </div>
       </header>
       {/* The conversation list is the WINDOW's sidebar and only that. A second
           copy of it inside the frame said the same thing twice and cost the
           transcript the width to say it. */}
       <ChatGroupHeaderSlotContext.Provider value={headerSlot}>
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+        <ChatGroupPanelBandContext.Provider value={panelBand}>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+        </ChatGroupPanelBandContext.Provider>
       </ChatGroupHeaderSlotContext.Provider>
     </section>
   );

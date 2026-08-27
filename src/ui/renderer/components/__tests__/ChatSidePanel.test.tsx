@@ -169,10 +169,12 @@ describe("ChatSidePanel", () => {
       />,
     );
 
-    // Empty workspace -> launcher, no tab bar.
+    // Empty workspace -> launcher body, no tabs. The strip itself stays: it
+    // is the panel's header now, so the control that opens the first tab has
+    // to be reachable before there is a tab to hang it beside.
     expect(screen.getByTestId("chat-side-panel-launcher")).toBeTruthy();
     expect(screen.queryAllByRole("tab")).toHaveLength(0);
-    expect(screen.queryByTestId("chat-side-panel-tab-actions")).toBeNull();
+    expect(screen.getByTestId("chat-side-panel-add-tab")).toBeTruthy();
 
     // Six launcher items (side-chat is now a launcher item — its engine ships
     // in this PR).
