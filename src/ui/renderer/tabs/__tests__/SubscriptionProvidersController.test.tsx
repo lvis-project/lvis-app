@@ -9,7 +9,7 @@ import type {
 } from "../../../../shared/subscription-runtime.js";
 import type { AppSettings, LvisApi } from "../../types.js";
 import { useSubscriptionProviders } from "../SubscriptionProvidersController.js";
-import { SubscriptionProvidersSection } from "../SubscriptionProvidersSection.js";
+import { SubscriptionProviderRow } from "../SubscriptionProvidersSection.js";
 
 /**
  * What the settings tab does with the hook, in one place.
@@ -22,7 +22,34 @@ import { SubscriptionProvidersSection } from "../SubscriptionProvidersSection.js
  */
 function SubscriptionProvidersController({ api }: { api: LvisApi }) {
   const { props } = useSubscriptionProviders(api);
-  return <SubscriptionProvidersSection {...props} />;
+  return (
+    <div>
+      {/* The settings page returns chat to the API path by CHOOSING an API
+          model in the unified chooser; there is no separate button any more.
+          The harness calls the same action directly so these tests keep
+          exercising the controller rather than a particular control. */}
+      <button
+        type="button"
+        data-testid="subscription-providers:use-api-for-chat"
+        disabled={props.apiChatActive || props.apiChatBusy || props.chatSelectionBusy}
+        onClick={() => void props.actions.useApiForChat?.()}
+      >
+        use api
+      </button>
+      {props.apiChatError ? (
+        <p data-testid="subscription-providers:api-chat-error">{props.apiChatError}</p>
+      ) : null}
+      {props.providers.map((provider) => (
+        <SubscriptionProviderRow
+          key={provider.descriptor.id}
+          provider={provider}
+          activeSelection={props.activeSelection}
+          chatSelectionBusy={props.chatSelectionBusy ?? false}
+          actions={props.actions}
+        />
+      ))}
+    </div>
+  );
 }
 
 function connectedStatus(provider: SubscriptionRuntimeId): SubscriptionRuntimeStatus {

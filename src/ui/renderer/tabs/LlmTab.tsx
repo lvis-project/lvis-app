@@ -15,7 +15,13 @@ import {
 import { Slider } from "../../../components/ui/slider.js";
 import { Switch } from "../../../components/ui/switch.js";
 import { Tooltip, TooltipContent, TooltipTrigger } from "../../../components/ui/tooltip.js";
-import { ChevronDown, ChevronUp, Loader2, Pin, RefreshCw, Store } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, Pin, Plus, RefreshCw, Store } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../../../components/ui/dropdown-menu.js";
 import {
   REASONING_EFFORT_STEPS,
   VENDORS,
@@ -52,10 +58,16 @@ import { useTranslation } from "../../../i18n/react.js";
 import {
   API_PATH_RUNTIME_CAPABILITIES,
   DEFAULT_SUBSCRIPTION_RUNTIME_CAPABILITIES,
+  SUBSCRIPTION_RUNTIME_API_COUNTERPART,
   type SubscriptionRuntimeId,
 } from "../../../shared/subscription-runtime.js";
 import { useSubscriptionProviders } from "./SubscriptionProvidersController.js";
-import { ProviderCapabilityGrid, SubscriptionProvidersSection } from "./SubscriptionProvidersSection.js";
+import {
+  ERROR_MESSAGE_KEYS,
+  ProviderCapabilityGrid,
+  SubscriptionProviderRow,
+  type SubscriptionProviderView,
+} from "./SubscriptionProvidersSection.js";
 
 export interface FallbackEntry {
   provider: string;
@@ -532,6 +544,24 @@ interface UnifiedModelOption {
 }
 
 /** Marks the API-key provider inside a unified option value. */
+/**
+ * One provider, however it is reached.
+ *
+ * A provider with both halves is ONE row: the same company, two ways in. The
+ * settings list must not make a user learn that "OpenAI" and "Codex" are the
+ * same account seen from two angles.
+ */
+interface ProviderConnection {
+  /** The subscription runtime id when paired, otherwise the API vendor id. */
+  id: string;
+  label: string;
+  /** Present when this provider can be reached with an API key. */
+  apiVendorId?: string;
+  apiConfigured: boolean;
+  subscription?: SubscriptionProviderView;
+  connected: boolean;
+}
+
 const API_PROVIDER_PREFIX = "api:";
 
 function apiProviderId(vendorId: string): string {
@@ -1046,6 +1076,7 @@ export function LlmTab(props: LlmTabProps) {
   }, [api, pinnedModels]);
 
   const [providerConfigOpen, setProviderConfigOpen] = useState(false);
+  const [addedRowIds, setAddedRowIds] = useState<readonly string[]>([]);
   // A vendor with no usable credential has not answered the checklist yet.
   const apiPathConfigured = hasKey || !activeProviderRequiresApiKey;
 
@@ -1053,12 +1084,7 @@ export function LlmTab(props: LlmTabProps) {
     () => providerOptionsForPresets(marketplaceProviderPresets),
     [marketplaceProviderPresets],
   );
-  const marketplaceProviderPresetSelectIds = useMemo(
-    () => marketplaceProviderPresets.map((preset) =>
-      marketplaceProviderPresetSecretId(preset.providerId)
-    ),
-    [marketplaceProviderPresets],
-  );
+
   useEffect(() => {
     let cancelled = false;
     let unsubscribe: (() => void) | undefined;
@@ -1131,11 +1157,17 @@ export function LlmTab(props: LlmTabProps) {
     }
   }, [fallbackOpen, fallbackProviderKey, requestModelList, settingsLoaded]);
 
-  const displayVendor = selectedMarketplaceProviderPreset
-    ? marketplaceProviderPresetSecretId(selectedMarketplaceProviderPreset.providerId)
-    : vendor;
-  const isMarketplaceProviderSelected =
-    marketplaceProviderIds.includes(vendor) || Boolean(selectedMarketplaceProviderPreset);
+  // A provider that arrived from the marketplace says so on its row. The badge
+  // used to hang off the vendor dropdown; the dropdown is gone, but where a
+  // provider CAME FROM is still something the user needs to be able to see.
+  const marketplaceVendorIds = useMemo(
+    () => new Set<string>([
+      ...marketplaceProviderIds,
+      ...marketplaceProviderPresets.map((preset) =>
+        marketplaceProviderPresetSecretId(preset.providerId)),
+    ]),
+    [marketplaceProviderIds, marketplaceProviderPresets],
+  );
   const handleVendorChange = useCallback(
     (v: string) => {
       const preset = marketplaceProviderPresets.find(
@@ -1158,6 +1190,311 @@ export function LlmTab(props: LlmTabProps) {
       setVendor,
     ],
   );
+  // ─── Connections ────────────────────────────────────────────────────────
+  // ONE list. A provider a user recognises as one company is one row, whether
+  // it is reached with an API key, by signing in to its subscription runtime,
+  // or both — `SUBSCRIPTION_RUNTIME_API_COUNTERPART` is the join that says
+  // which pairs are the same company.
+  const configuredApiVendorIds = useMemo(() => {
+    // A vendor that answered a /models handshake is configured by definition.
+    // The vendor the form points at counts too, so a key that was just entered
+    // shows up before its first fetch lands.
+    const ids = new Set<string>();
+    for (const cacheKey of Object.keys(modelLists)) {
+      const cachedVendor = cacheKey.split("\n")[0];
+      if (cachedVendor) ids.add(cachedVendor);
+    }
+    if (apiPathConfigured) ids.add(vendor);
+    return ids;
+  }, [modelLists, apiPathConfigured, vendor]);
+
+  const connections = useMemo<ProviderConnection[]>(() => {
+    const claimed = new Set<string>();
+    const rows: ProviderConnection[] = [];
+    for (const view of subscription.providers) {
+      const counterpart = SUBSCRIPTION_RUNTIME_API_COUNTERPART[view.descriptor.id];
+      if (counterpart) claimed.add(counterpart);
+      const apiConfigured = counterpart ? configuredApiVendorIds.has(counterpart) : false;
+      rows.push({
+        id: view.descriptor.id,
+        // The company's name, not the runtime's: "OpenAI", not "Codex".
+        label: counterpart ? getVendorInfo(counterpart).label : view.descriptor.label,
+        ...(counterpart ? { apiVendorId: counterpart } : {}),
+        apiConfigured,
+        subscription: view,
+        connected: view.status?.connection === "connected" || apiConfigured,
+      });
+    }
+    for (const vendorId of configuredApiVendorIds) {
+      if (claimed.has(vendorId)) continue;
+      rows.push({
+        id: vendorId,
+        label: getVendorInfo(vendorId).label,
+        apiVendorId: vendorId,
+        apiConfigured: true,
+        connected: true,
+      });
+    }
+    return rows;
+  }, [subscription.providers, configuredApiVendorIds]);
+
+  // A provider picked from "add a provider" has to STAY on screen while it is
+  // being set up: signing in to a subscription runtime happens on its row, and
+  // a row that vanishes because it is not connected yet takes the login button
+  // with it.
+  const visibleRows = connections.filter(
+    (row) => row.connected || addedRowIds.includes(row.id),
+  );
+  // Everything else goes behind "add a provider". The catalogue keeps growing
+  // with marketplace presets, so the list's length has to track the number of
+  // providers the user actually USES, not the number that exist.
+  const addableRows = connections.filter(
+    (row) => !row.connected && !addedRowIds.includes(row.id),
+  );
+  const addableVendors = useMemo(
+    () => providerSelectOptions.filter((option) =>
+      !configuredApiVendorIds.has(option.id)
+      && !connections.some((row) => row.apiVendorId === option.id)),
+    [providerSelectOptions, configuredApiVendorIds, connections],
+  );
+
+  const revealRow = useCallback((rowId: string) => {
+    setAddedRowIds((current) => current.includes(rowId) ? current : [...current, rowId]);
+  }, []);
+
+  const openApiConfig = useCallback((vendorId: string) => {
+    if (vendorId !== vendor) handleVendorChange(vendorId);
+    setProviderConfigOpen(true);
+  }, [handleVendorChange, vendor]);
+
+  // The credential form for whichever provider row is open. One form, because
+  // one vendor is being edited at a time — the row that owns it just moved.
+  const credentialForm = (
+      <div
+        className="space-y-3"
+        data-testid="llm-tab:manual-section"
+      >
+        {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
+          <div className="space-y-2">
+            <Label className="text-sm font-medium">
+              {t("llmTab.endpointBaseUrlLabel")}{vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
+            </Label>
+            <Input
+              data-testid="llm-base-url-input"
+              value={selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl}
+              onChange={(e) => {
+                if (endpointLockedToMarketplacePreset) return;
+                setBaseUrl(e.target.value);
+              }}
+              placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
+              readOnly={endpointLockedToMarketplacePreset}
+            />
+            <p className="text-[11px] text-muted-foreground">
+              {t("llmTab.baseUrlDiscardWarning")}
+            </p>
+            {vendor === "azure-foundry" && (
+              <p className="text-[11px] text-muted-foreground">
+                {t("llmTab.azureEndpointFormat")}
+                {" "}<code>https://{"{resource}"}.openai.azure.com/openai/v1/</code>
+                {" "}— {t("llmTab.azureDeploymentNote")}
+              </p>
+            )}
+            {(vendor === "openai" || vendor === "copilot") && (
+              <p className="text-[11px] text-muted-foreground">
+                {t("llmTab.proxyEndpointNote")}
+              </p>
+            )}
+          </div>
+        )}
+        {vendor === "vertex-ai" && (
+          <div className="space-y-2 rounded-md border p-3">
+            <p className="text-sm font-medium">{t("llmTab.vertexTitle")}</p>
+            <p className="text-[11px] text-muted-foreground">
+              {t("llmTab.vertexAuthDesc1")}<code>gcloud auth application-default login</code>{t("llmTab.vertexAuthDesc2")}
+              {t("llmTab.vertexAuthDesc3")}<code>GOOGLE_APPLICATION_CREDENTIALS</code>{t("llmTab.vertexAuthDesc4")}
+            </p>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">{t("llmTab.gcpProjectIdLabel")}</Label>
+              <Input
+                value={vertexProject}
+                onChange={(e) => setVertexProject(e.target.value)}
+                placeholder="my-gcp-project"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">
+                {t("llmTab.vertexLocationLabel", { optional: t("llmTab.optional") })}
+              </Label>
+              <Input
+                value={vertexLocation}
+                onChange={(e) => setVertexLocation(e.target.value)}
+                placeholder={t("llmTab.vertexLocationPlaceholder")}
+              />
+            </div>
+          </div>
+        )}
+        {vendor !== "vertex-ai" && (
+          <div
+            className="min-w-0 space-y-2"
+            data-testid="llm-tab:api-key-section"
+            data-api-key-required={activeProviderRequiresApiKey ? "true" : "false"}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <Label className="min-w-0 text-sm font-medium" data-testid="llm-tab:api-key-label">
+              {vendorLabel ? `${vendorLabel} ` : ""}{t("llmTab.apiKey")}
+              {!activeProviderRequiresApiKey ? ` (${t("llmTab.optional")})` : ""}
+            </Label>
+              {hasKey ? (
+                <Badge variant="default" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">{t("llmTab.apiKeySet")}</Badge>
+              ) : (
+                <Badge variant="secondary" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">
+                  {activeProviderRequiresApiKey ? t("llmTab.apiKeyNotSet") : t("llmTab.optional")}
+                </Badge>
+              )}
+              {hasKey && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 text-xs text-destructive"
+                  onClick={() => void api.deleteApiKey(activeCredentialProviderId).then(() => { setHasKey(false); onSaved(); })}
+                >
+                  {t("llmTab.delete")}
+                </Button>
+              )}
+            </div>
+            <Input
+              data-testid="llm-api-key-input"
+              type="password"
+              placeholder={hasKey ? t("llmTab.replaceKey") : vendorInfo.placeholder}
+              value={keyInput}
+              onChange={(e) => setKeyInput(e.target.value)}
+            />
+          </div>
+        )}
+        </div>
+  );
+
+  // Which of this provider's two routes is serving chat right now. The user
+  // asked for exactly this: the row says the provider, the badge says the mode.
+  const modeBadge = (row: ProviderConnection) => {
+    const active = subscription.activeRuntime.kind === "subscription"
+      ? (subscription.activeRuntime.provider === row.id ? "subscription" : null)
+      : (row.apiVendorId && row.apiVendorId === vendor ? "api" : null);
+    if (!active) return null;
+    return (
+      <Badge variant="default" className="h-5 px-2 text-[10px]" data-testid={`llm-tab:connection-mode:${row.id}`}>
+        {active === "subscription" ? t("llmTab.modeSubscription") : t("llmTab.modeApiKey")}
+      </Badge>
+    );
+  };
+
+  const apiKeyChip = (row: ProviderConnection) => {
+    if (!row.apiVendorId) return null;
+    const isOpen = providerConfigOpen && row.apiVendorId === vendor;
+    return (
+      <>
+        <Button
+          type="button"
+          size="sm"
+          variant={isOpen ? "secondary" : "outline"}
+          className="h-6 px-2 text-[11px]"
+          onClick={() => (isOpen ? setProviderConfigOpen(false) : openApiConfig(row.apiVendorId!))}
+          data-testid={`llm-tab:connection-api-key:${row.id}`}
+        >
+          {t("llmTab.authApiKey")}
+        </Button>
+      </>
+    );
+  };
+
+  const connectionsList = (
+    <div className="space-y-3" data-testid="llm-tab:connections">
+      <p className="rounded-md border bg-muted/(--opacity-muted) px-3 py-2 text-xs text-muted-foreground">
+        {t("subscriptionProvidersSection.securityNotice")}
+      </p>
+      {subscription.props.apiChatError ? (
+        <p
+          role="alert"
+          className="rounded-md border border-destructive/(--opacity-medium) bg-destructive/(--opacity-subtle) px-3 py-2 text-xs text-destructive"
+          data-testid="llm-tab:connections-error"
+        >
+          {t(ERROR_MESSAGE_KEYS[subscription.props.apiChatError])}
+        </p>
+      ) : null}
+      {visibleRows.length === 0 ? (
+        <p className="rounded-md border px-3 py-4 text-center text-xs text-muted-foreground" data-testid="llm-tab:connections-empty">
+          {t("llmTab.connectionsEmpty")}
+        </p>
+      ) : null}
+      {visibleRows.map((row) => row.subscription ? (
+        <SubscriptionProviderRow
+          key={row.id}
+          provider={row.subscription}
+          label={row.label}
+          activeSelection={subscription.props.activeSelection}
+          chatSelectionBusy={subscription.props.chatSelectionBusy ?? false}
+          actions={subscription.props.actions}
+          leading={<>{modeBadge(row)}{apiKeyChip(row)}</>}
+          {...(providerConfigOpen && row.apiVendorId === vendor ? { trailing: credentialForm } : {})}
+        />
+      ) : (
+        <div
+          key={row.id}
+          className="space-y-3 rounded-md border bg-card p-3"
+          data-testid={`llm-tab:connection:${row.id}`}
+        >
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">{row.label}</span>
+            {modeBadge(row)}
+            {row.apiVendorId && marketplaceVendorIds.has(row.apiVendorId) ? (
+              <span
+                className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
+                data-testid={`llm-tab:selected-provider-marketplace:${row.apiVendorId}`}
+              >
+                {t("llmTab.marketplaceInstalledBadge")}
+              </span>
+            ) : null}
+            {apiKeyChip(row)}
+          </div>
+          {providerConfigOpen && row.apiVendorId === vendor ? credentialForm : null}
+        </div>
+      ))}
+      <div className="flex flex-wrap items-center gap-2">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button type="button" size="sm" variant="outline" className="h-7 gap-1.5 text-xs" data-testid="llm-tab:add-provider">
+              <Plus className="size-3.5" aria-hidden={true} />
+              {t("llmTab.addProvider")}
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="max-h-80 w-64 overflow-y-auto">
+            {addableRows.map((row) => (
+              <DropdownMenuItem
+                key={row.id}
+                data-testid={`llm-tab:add-provider-item:${row.id}`}
+                onClick={() => {
+                  revealRow(row.id);
+                  if (row.apiVendorId) openApiConfig(row.apiVendorId);
+                }}
+              >
+                {row.label}
+              </DropdownMenuItem>
+            ))}
+            {addableVendors.map((option) => (
+              <DropdownMenuItem
+                key={option.id}
+                data-testid={`llm-tab:add-provider-item:${option.id}`}
+                onClick={() => openApiConfig(option.id)}
+              >
+                {option.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+
   return (
     <div className="min-w-0 space-y-6">
       <SettingsPageHeader
@@ -1302,167 +1639,7 @@ export function LlmTab(props: LlmTabProps) {
             known={() => apiPathConfigured}
             testIdPrefix="llm-tab:api-provider"
           />
-          {/* The chooser and the checklist describe the connection; the
-              credentials behind it do not. Collapsing only the credential
-              form is what stops the two provider blocks from reading as two
-              equal places to pick a model — and it keeps the checklist above
-              the fold instead of pushing it off the bottom of the page. */}
-          <div className="rounded-md border">
-            <button
-              type="button"
-              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
-              aria-expanded={providerConfigOpen}
-              aria-controls="llm-provider-config"
-              onClick={() => setProviderConfigOpen((open) => !open)}
-              data-testid="llm-tab:provider-config-toggle"
-            >
-              <span className="flex min-w-0 flex-wrap items-center gap-2">
-                <span className="text-sm font-medium">{t("llmTab.providerConfig")}</span>
-                <span className="truncate text-xs text-muted-foreground">{vendorInfo.label}</span>
-                <Badge variant={apiPathConfigured ? "default" : "outline"} className="h-5 px-2 text-[10px]">
-                  {apiPathConfigured ? t("llmTab.apiKeySet") : t("llmTab.apiKeyNotSet")}
-                </Badge>
-              </span>
-              {providerConfigOpen
-                ? <ChevronUp className="size-4 shrink-0" aria-hidden={true} />
-                : <ChevronDown className="size-4 shrink-0" aria-hidden={true} />}
-            </button>
-            {providerConfigOpen && (
-              <div id="llm-provider-config" className="space-y-3 border-t p-3">
-            {/* Provider selector — the single provider switcher for the manual
-                API-key configuration. */}
-            <div className="space-y-2">
-              <Label htmlFor="vendor-select" className="flex min-w-0 flex-wrap items-center gap-2">
-                {t("llmTab.vendor")}
-                <ImmediateBadge />
-                {isMarketplaceProviderSelected && (
-                  <span
-                    className="inline-flex h-5 items-center rounded-full bg-secondary px-1.5 text-[10px] font-medium text-secondary-foreground"
-                    data-testid={`llm-tab:selected-provider-marketplace:${displayVendor}`}
-                  >
-                    {t("llmTab.marketplaceInstalledBadge")}
-                  </span>
-                )}
-              </Label>
-              <ProviderSelect
-                value={displayVendor}
-                onValueChange={handleVendorChange}
-                triggerId="vendor-select"
-                triggerClassName="w-full"
-                placeholder={t("llmTab.vendorPlaceholder")}
-                vendorOptions={providerSelectOptions}
-                marketplaceProviderIds={[
-                  ...marketplaceProviderIds,
-                  ...marketplaceProviderPresetSelectIds,
-                ]}
-              />
-            </div>
-            {/* Provider detail form — the manual API-key configuration. */}
-            <div
-              className="space-y-3"
-              data-testid="llm-tab:manual-section"
-            >
-              {vendor !== "vertex-ai" && (vendorInfo.needsBaseUrl || vendor === "openai" || vendor === "copilot") && (
-                <div className="space-y-2">
-                  <Label className="text-sm font-medium">
-                    {t("llmTab.endpointBaseUrlLabel")}{vendorInfo.needsBaseUrl ? " *" : ` (${t("llmTab.optional")})`}
-                  </Label>
-                  <Input
-                    data-testid="llm-base-url-input"
-                    value={selectedMarketplaceProviderPreset?.baseUrl ?? baseUrl}
-                    onChange={(e) => {
-                      if (endpointLockedToMarketplacePreset) return;
-                      setBaseUrl(e.target.value);
-                    }}
-                    placeholder={(vendorInfo as any).baseUrlPlaceholder ?? "https://..."}
-                    readOnly={endpointLockedToMarketplacePreset}
-                  />
-                  <p className="text-[11px] text-muted-foreground">
-                    {t("llmTab.baseUrlDiscardWarning")}
-                  </p>
-                  {vendor === "azure-foundry" && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {t("llmTab.azureEndpointFormat")}
-                      {" "}<code>https://{"{resource}"}.openai.azure.com/openai/v1/</code>
-                      {" "}— {t("llmTab.azureDeploymentNote")}
-                    </p>
-                  )}
-                  {(vendor === "openai" || vendor === "copilot") && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {t("llmTab.proxyEndpointNote")}
-                    </p>
-                  )}
-                </div>
-              )}
-              {vendor === "vertex-ai" && (
-                <div className="space-y-2 rounded-md border p-3">
-                  <p className="text-sm font-medium">{t("llmTab.vertexTitle")}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {t("llmTab.vertexAuthDesc1")}<code>gcloud auth application-default login</code>{t("llmTab.vertexAuthDesc2")}
-                    {t("llmTab.vertexAuthDesc3")}<code>GOOGLE_APPLICATION_CREDENTIALS</code>{t("llmTab.vertexAuthDesc4")}
-                  </p>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">{t("llmTab.gcpProjectIdLabel")}</Label>
-                    <Input
-                      value={vertexProject}
-                      onChange={(e) => setVertexProject(e.target.value)}
-                      placeholder="my-gcp-project"
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">
-                      {t("llmTab.vertexLocationLabel", { optional: t("llmTab.optional") })}
-                    </Label>
-                    <Input
-                      value={vertexLocation}
-                      onChange={(e) => setVertexLocation(e.target.value)}
-                      placeholder={t("llmTab.vertexLocationPlaceholder")}
-                    />
-                  </div>
-                </div>
-              )}
-              {vendor !== "vertex-ai" && (
-                <div
-                  className="min-w-0 space-y-2"
-                  data-testid="llm-tab:api-key-section"
-                  data-api-key-required={activeProviderRequiresApiKey ? "true" : "false"}
-                >
-                  <div className="flex min-w-0 flex-wrap items-center gap-2">
-                    <Label className="min-w-0 text-sm font-medium" data-testid="llm-tab:api-key-label">
-                    {vendorLabel ? `${vendorLabel} ` : ""}{t("llmTab.apiKey")}
-                    {!activeProviderRequiresApiKey ? ` (${t("llmTab.optional")})` : ""}
-                  </Label>
-                    {hasKey ? (
-                      <Badge variant="default" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">{t("llmTab.apiKeySet")}</Badge>
-                    ) : (
-                      <Badge variant="secondary" data-testid="llm-tab:api-key-status" className="h-5 shrink-0 whitespace-nowrap px-2.5 text-xs">
-                        {activeProviderRequiresApiKey ? t("llmTab.apiKeyNotSet") : t("llmTab.optional")}
-                      </Badge>
-                    )}
-                    {hasKey && (
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-7 text-xs text-destructive"
-                        onClick={() => void api.deleteApiKey(activeCredentialProviderId).then(() => { setHasKey(false); onSaved(); })}
-                      >
-                        {t("llmTab.delete")}
-                      </Button>
-                    )}
-                  </div>
-                  <Input
-                    data-testid="llm-api-key-input"
-                    type="password"
-                    placeholder={hasKey ? t("llmTab.replaceKey") : vendorInfo.placeholder}
-                    value={keyInput}
-                    onChange={(e) => setKeyInput(e.target.value)}
-                  />
-                </div>
-              )}
-              </div>
-              </div>
-            )}
-          </div>
+          {connectionsList}
 
           {hasOnSave && (
             <SectionSaveBar
@@ -1474,8 +1651,6 @@ export function LlmTab(props: LlmTabProps) {
           )}
         </div>
       </SettingsSection>
-
-      <SubscriptionProvidersSection {...subscription.props} />
 
       {/* Section B — Extended Thinking / Reasoning */}
       <SettingsSection

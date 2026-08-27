@@ -5,7 +5,7 @@ import { getLocale, setLocale } from "../../../../i18n/runtime.js";
 import type { SubscriptionRuntimeCapabilities } from "../../../../shared/subscription-runtime.js";
 import {
   ProviderCapabilityGrid,
-  SubscriptionProvidersSection,
+  SubscriptionProviderRow,
   type SubscriptionProviderView,
 } from "../SubscriptionProvidersSection.js";
 import {
@@ -69,6 +69,37 @@ beforeEach(() => {
 afterEach(() => {
   setLocale(localeBeforeTest);
 });
+
+
+/**
+ * The settings page lays these rows out itself now, so the tests drive the ROW
+ * — the piece that still ships — through the same prop shape the page uses.
+ */
+function SubscriptionProvidersSection({
+  providers,
+  activeSelection,
+  chatSelectionBusy,
+  actions,
+}: {
+  providers: readonly SubscriptionProviderView[];
+  activeSelection: Parameters<typeof SubscriptionProviderRow>[0]["activeSelection"];
+  chatSelectionBusy?: boolean;
+  actions: Parameters<typeof SubscriptionProviderRow>[0]["actions"];
+}) {
+  return (
+    <div>
+      {providers.map((provider) => (
+        <SubscriptionProviderRow
+          key={provider.descriptor.id}
+          provider={provider}
+          activeSelection={activeSelection}
+          chatSelectionBusy={chatSelectionBusy ?? false}
+          actions={actions}
+        />
+      ))}
+    </div>
+  );
+}
 
 describe("SubscriptionProvidersSection", () => {
   it("shows only host-verified runtime capabilities as available", () => {
