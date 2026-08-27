@@ -822,7 +822,7 @@ export const esMessages: Record<string, string> = {
   "bottomActionRow.shortcutImmediate": "Inyectar inmediatamente",
   "bottomActionRow.shortcutNewline": "Nueva linea",
   "bottomActionRow.shortcutPalette": "Comandos/recursos",
-  "bottomActionRow.modelPickerPinned": "Modelos fijados",
+  "bottomActionRow.modelPickerModels": "Modelos",
   "bottomActionRow.modelPickerNoPins": "Aún no hay modelos fijados. Fije uno en Ajustes.",
   "bottomActionRow.modelPickerMore": "Más modelos…",
   "bottomActionRow.shortcuts": "Atajos",

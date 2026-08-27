@@ -34,7 +34,7 @@ import type { PluginEntry } from "./PluginGridButton.js";
 import { SlashPicker, type QuickAction } from "./SlashPicker.js";
 import { ReasoningLevelControl, useReasoningLevel } from "./ReasoningSlider.js";
 import { getApi } from "../api-client.js";
-import { pinnedModelChoices, type PinnedModelChoice } from "../hooks/use-settings.js";
+import { modelCardChoices, type ModelCardChoice } from "../hooks/use-settings.js";
 import type { AppSettings } from "../types.js";
 import type { RolePreset } from "../../../data/role-presets.js";
 import type { AssistantContextMenuAction } from "../../../shared/assistant-context-menu.js";
@@ -486,12 +486,12 @@ function StatusSubRow({
 /**
  * The model card: what the status row's model cell opens.
  *
- * It holds the three things a person changes mid-conversation — which of
- * their pinned models to use, how deep to reason, and, when neither is
- * enough, the way to the full catalogue in Settings. Pins come from the
- * same list the settings chooser pins with, so the card and the chooser
- * cannot disagree about what is pinned; a pick persists at once, the same
- * way the chooser's does.
+ * It holds the three things a person changes mid-conversation — which
+ * model to use (the current one, and the pinned ones), how deep to reason,
+ * and, when neither is enough, the way to the full catalogue in Settings.
+ * Pins come from the same list the settings chooser pins with, so the card
+ * and the chooser cannot disagree about what is pinned; a pick persists at
+ * once, the same way the chooser's does.
  *
  * The reasoning chip beside the model cell is a second way in, not a
  * second control: it shows the current level and opens this same card.
@@ -513,7 +513,8 @@ function ModelQuickPicker({
 }) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [choices, setChoices] = useState<PinnedModelChoice[]>([]);
+  const [choices, setChoices] = useState<ModelCardChoice[]>([]);
+  const [anyPinned, setAnyPinned] = useState(true);
   const runtimeRef = useRef<string>("api");
   const { level, levelLabels, apply } = useReasoningLevel({ enabled: enableThinking, onToggle: onToggleThinking });
 
@@ -524,7 +525,8 @@ function ModelQuickPicker({
     let cancelled = false;
     const take = (settings: AppSettings) => {
       if (cancelled) return;
-      setChoices(pinnedModelChoices(settings.llm));
+      setChoices(modelCardChoices(settings.llm));
+      setAnyPinned((settings.llm.pinnedModels ?? []).length > 0);
       runtimeRef.current = settings.llm.activeChatRuntime?.kind ?? "api";
     };
     const api = getApi();
@@ -533,7 +535,7 @@ function ModelQuickPicker({
     return () => { cancelled = true; unsubscribe(); };
   }, [open]);
 
-  const pick = async (choice: PinnedModelChoice) => {
+  const pick = async (choice: ModelCardChoice) => {
     setOpen(false);
     if (choice.current) return;
     const api = getApi();
@@ -591,14 +593,10 @@ function ModelQuickPicker({
         data-testid="model-quick-picker"
       >
         <div className="px-3 pt-3 text-caption font-medium text-muted-foreground">
-          {t("bottomActionRow.modelPickerPinned")}
+          {t("bottomActionRow.modelPickerModels")}
         </div>
-        <ul className="max-h-56 overflow-y-auto px-1 py-1" role="listbox" aria-label={t("bottomActionRow.modelPickerPinned")}>
-          {choices.length === 0 ? (
-            <li className="px-2 py-2 text-caption text-muted-foreground" data-testid="model-quick-picker-empty">
-              {t("bottomActionRow.modelPickerNoPins")}
-            </li>
-          ) : choices.map((choice) => (
+        <ul className="max-h-56 overflow-y-auto px-1 py-1" role="listbox" aria-label={t("bottomActionRow.modelPickerModels")}>
+          {choices.map((choice) => (
             <li key={`${choice.vendor}::${choice.modelId}`} role="option" aria-selected={choice.current}>
               <button
                 type="button"
@@ -613,6 +611,11 @@ function ModelQuickPicker({
             </li>
           ))}
         </ul>
+        {anyPinned ? null : (
+          <p className="px-3 pb-2 text-caption text-muted-foreground" data-testid="model-quick-picker-no-pins">
+            {t("bottomActionRow.modelPickerNoPins")}
+          </p>
+        )}
         {reasoningAvailable ? (
           <div className="border-t border-border/(--opacity-medium) px-3 py-3" data-testid="model-quick-picker-reasoning">
             <div className="mb-2 text-caption font-medium text-muted-foreground">{reasoningLabel}</div>

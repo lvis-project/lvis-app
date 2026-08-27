@@ -805,7 +805,7 @@ export const jaMessages: Record<string, string> = {
   "bottomActionRow.shortcutImmediate": "すぐに注射してください",
   "bottomActionRow.shortcutNewline": "改行",
   "bottomActionRow.shortcutPalette": "コマンド/リソース",
-  "bottomActionRow.modelPickerPinned": "ピン留めしたモデル",
+  "bottomActionRow.modelPickerModels": "モデル",
   "bottomActionRow.modelPickerNoPins": "ピン留めしたモデルはまだありません。設定でピン留めしてください。",
   "bottomActionRow.modelPickerMore": "モデルをもっと見る…",
   "bottomActionRow.shortcuts": "ショートカット",

@@ -805,7 +805,7 @@ export const zhMessages: Record<string, string> = {
   "bottomActionRow.shortcutImmediate": "立即注射",
   "bottomActionRow.shortcutNewline": "新线",
   "bottomActionRow.shortcutPalette": "命令/资源",
-  "bottomActionRow.modelPickerPinned": "已固定的模型",
+  "bottomActionRow.modelPickerModels": "模型",
   "bottomActionRow.modelPickerNoPins": "还没有固定的模型。请在设置中固定。",
   "bottomActionRow.modelPickerMore": "更多模型…",
   "bottomActionRow.shortcuts": "快捷方式",

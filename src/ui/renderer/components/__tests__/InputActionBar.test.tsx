@@ -509,10 +509,22 @@ describe("model card (status-row model cell)", () => {
     expect(onOpenModelSettings).toHaveBeenCalledTimes(1);
   });
 
-  it("says so when nothing is pinned", async () => {
+  it("still lists the current model when nothing is pinned, and says where to pin", async () => {
     getSettings.mockResolvedValue({ ...settingsWithPins(), llm: { ...settingsWithPins().llm, pinnedModels: [] } });
-    const { getByTestId, findByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
+    const { getByTestId, findByTestId, queryByTestId } = renderBar({ onOpenModelSettings: vi.fn() });
     fireEvent.click(getByTestId("iab-status-model"));
-    expect(await findByTestId("model-quick-picker-empty")).toBeTruthy();
+    const card = await findByTestId("model-quick-picker");
+    await waitFor(() => expect(card.querySelectorAll("[role='option']").length).toBe(1));
+    expect(card.querySelector("[role='option'][aria-selected='true'] button")?.getAttribute("data-testid"))
+      .toBe("model-quick-picker-option:openai-compatible:qwen3.8-27b-gguf");
+    expect(await findByTestId("model-quick-picker-no-pins")).toBeTruthy();
+    // With pins, the hint is not there.
+    getSettings.mockResolvedValue(settingsWithPins());
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() => expect(queryByTestId("model-quick-picker")).toBeNull());
+    fireEvent.click(getByTestId("iab-status-model"));
+    const reopened = await findByTestId("model-quick-picker");
+    await waitFor(() => expect(reopened.querySelectorAll("[role='option']").length).toBe(2));
+    expect(queryByTestId("model-quick-picker-no-pins")).toBeNull();
   });
 });

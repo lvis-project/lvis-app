@@ -813,7 +813,7 @@ export const deMessages: Record<string, string> = {
   "bottomActionRow.shortcutImmediate": "Sofort injizieren",
   "bottomActionRow.shortcutNewline": "Neue Zeile",
   "bottomActionRow.shortcutPalette": "Befehle/Ressourcen",
-  "bottomActionRow.modelPickerPinned": "Angepinnte Modelle",
+  "bottomActionRow.modelPickerModels": "Modelle",
   "bottomActionRow.modelPickerNoPins": "Noch keine angepinnten Modelle. In den Einstellungen anpinnen.",
   "bottomActionRow.modelPickerMore": "Weitere Modelle…",
   "bottomActionRow.shortcuts": "Verknüpfungen",

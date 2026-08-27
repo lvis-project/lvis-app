@@ -816,7 +816,7 @@ export const frMessages: Record<string, string> = {
   "bottomActionRow.shortcutImmediate": "Injecter immédiatement",
   "bottomActionRow.shortcutNewline": "Nouvelle ligne",
   "bottomActionRow.shortcutPalette": "Commandes/ressources",
-  "bottomActionRow.modelPickerPinned": "Modèles épinglés",
+  "bottomActionRow.modelPickerModels": "Modèles",
   "bottomActionRow.modelPickerNoPins": "Aucun modèle épinglé. Épinglez-en un dans les Réglages.",
   "bottomActionRow.modelPickerMore": "Plus de modèles…",
   "bottomActionRow.shortcuts": "Raccourcis",

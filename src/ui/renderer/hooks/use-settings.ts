@@ -296,7 +296,7 @@ export function useSettings(api: LvisApi): UseSettingsResult {
   };
 }
 
-export interface PinnedModelChoice {
+export interface ModelCardChoice {
   vendor: string;
   vendorLabel: string;
   modelId: string;
@@ -305,7 +305,13 @@ export interface PinnedModelChoice {
 }
 
 /**
- * The pinned models, resolved to the vendor that offers each.
+ * What the composer's model card lists: the model the chat is on, then the
+ * pinned models, resolved to the vendor that offers each.
+ *
+ * The current model is always there, pinned or not — the card is where a
+ * person looks to see what they are talking to, and a list that omits it
+ * answers the wrong question. It leads when it is not itself pinned;
+ * otherwise it sits where the pin order puts it.
  *
  * `pinnedModels` stores ids only, so a stored id is matched against what is
  * actually offered — the active vendor's curated line plus every synced
@@ -314,9 +320,8 @@ export interface PinnedModelChoice {
  * composer's card and the settings chooser cannot disagree about what a pin
  * points at. Pinned order is kept: it is the order the user reaches for.
  */
-export function pinnedModelChoices(llm: AppSettings["llm"]): PinnedModelChoice[] {
+export function modelCardChoices(llm: AppSettings["llm"]): ModelCardChoice[] {
   const pinned = llm.pinnedModels ?? [];
-  if (pinned.length === 0) return [];
   const offered = new Map<string, Set<string>>();
   const offer = (vendor: string, modelId: string) => {
     let models = offered.get(modelId);
@@ -332,7 +337,7 @@ export function pinnedModelChoices(llm: AppSettings["llm"]): PinnedModelChoice[]
     for (const modelId of entry.models) offer(entry.vendor, modelId);
   }
   const currentModel = llm.vendors[active]?.model;
-  const choices: PinnedModelChoice[] = [];
+  const choices: ModelCardChoice[] = [];
   for (const modelId of pinned) {
     for (const vendor of offered.get(modelId) ?? []) {
       choices.push({
@@ -342,6 +347,9 @@ export function pinnedModelChoices(llm: AppSettings["llm"]): PinnedModelChoice[]
         current: vendor === active && modelId === currentModel,
       });
     }
+  }
+  if (currentModel && !choices.some((choice) => choice.current)) {
+    choices.unshift({ vendor: active, vendorLabel: getVendorOption(active).label, modelId: currentModel, current: true });
   }
   return choices;
 }
