@@ -1,7 +1,3 @@
-
-
-
-
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, Lightbulb } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "../../../components/ui/popover.js";
@@ -40,27 +36,39 @@ export interface ReasoningSliderProps {
   onToggle: (next: boolean) => void | Promise<void>;
 }
 
-export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
+export type ReasoningLevel = 0 | 1 | 2 | 3;
+
+/**
+ * The reasoning level as ONE value the composer's controls all read.
+ *
+ * Level 0 is thinking off; 1–3 are the depths, persisted per vendor as a
+ * token budget. The depth follows the settings broadcast rather than a
+ * one-time seed, because two controls show it — the status-row chip and
+ * the model card — and a change made in either has to reach the other.
+ */
+export function useReasoningLevel({ enabled, onToggle }: ReasoningSliderProps): {
+  level: ReasoningLevel;
+  levelLabels: string[];
+  apply: (next: number) => void;
+} {
   const { t } = useTranslation();
   const [depth, setDepth] = useState<Depth>("medium");
 
-  // Seed the depth from the active vendor's persisted budget.
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      try {
-        const s = await getApi().getSettings();
-        const provider = narrowVendor(s.llm.provider);
-        const budget = getLlmVendorSettings(
-          s.llm.vendors,
-          provider,
-        ).thinkingBudgetTokens;
-        if (!cancelled && typeof budget === "number") setDepth(budgetToDepth(budget));
-      } catch {
-        /* keep default */
-      }
-    })();
-    return () => { cancelled = true; };
+    const seed = (llm: { provider: unknown; vendors: Parameters<typeof getLlmVendorSettings>[0] }) => {
+      const budget = getLlmVendorSettings(llm.vendors, narrowVendor(llm.provider)).thinkingBudgetTokens;
+      if (!cancelled && typeof budget === "number") setDepth(budgetToDepth(budget));
+    };
+    let unsubscribe = () => {};
+    try {
+      const api = getApi();
+      void api.getSettings().then((s) => seed(s.llm)).catch(() => { /* keep default */ });
+      unsubscribe = api.onSettingsUpdated((s) => seed(s.llm));
+    } catch {
+      /* no api in this surface: keep default */
+    }
+    return () => { cancelled = true; unsubscribe(); };
   }, []);
 
   const persistDepth = useCallback(async (next: Depth) => {
@@ -76,8 +84,7 @@ export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
     }
   }, []);
 
-  // Current 0–3 level: 0 when thinking is off; otherwise depth + 1.
-  const level: 0 | 1 | 2 | 3 = enabled ? DEPTH_LEVEL[depth] : 0;
+  const level: ReasoningLevel = enabled ? DEPTH_LEVEL[depth] : 0;
 
   const levelLabels = [
     t("bottomActionRow.reasoningNone"),
@@ -88,7 +95,7 @@ export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
 
   const apply = useCallback(
     (next: number) => {
-      const lvl = Math.max(0, Math.min(3, Math.round(next))) as 0 | 1 | 2 | 3;
+      const lvl = Math.max(0, Math.min(3, Math.round(next))) as ReasoningLevel;
       if (lvl === 0) {
         if (enabled) void onToggle(false);
         return;
@@ -101,6 +108,55 @@ export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
     [enabled, onToggle, persistDepth],
   );
 
+  return { level, levelLabels, apply };
+}
+
+/** The range and its four labels — the same control wherever the level is set. */
+export function ReasoningLevelControl({
+  level,
+  levelLabels,
+  apply,
+  label,
+}: {
+  level: ReasoningLevel;
+  levelLabels: string[];
+  apply: (next: number) => void;
+  label: string;
+}) {
+  return (
+    <>
+      <input
+        type="range"
+        min={0}
+        max={3}
+        step={1}
+        value={level}
+        onChange={(e) => apply(Number(e.target.value))}
+        aria-label={`${label}: ${levelLabels[level]}`}
+        className="lvis-reasoning-range h-1 w-full cursor-pointer accent-primary"
+        data-testid="reasoning-range"
+      />
+      <div className="mt-1.5 flex justify-between text-micro text-muted-foreground">
+        {levelLabels.map((text, idx) => (
+          <button
+            key={text}
+            type="button"
+            onClick={() => apply(idx)}
+            className={`shrink-0 cursor-pointer transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-foreground motion-reduce:transition-none ${
+              idx === level ? "font-medium text-primary" : ""
+            }`}
+          >
+            {text}
+          </button>
+        ))}
+      </div>
+    </>
+  );
+}
+
+export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
+  const { t } = useTranslation();
+  const { level, levelLabels, apply } = useReasoningLevel({ enabled, onToggle });
   const reasoningLabel = t("bottomActionRow.reasoning");
   return (
     <Popover>
@@ -131,30 +187,7 @@ export function ReasoningSlider({ enabled, onToggle }: ReasoningSliderProps) {
         data-testid="reasoning-popover"
       >
         <div className="mb-2 text-caption font-medium text-muted-foreground">{reasoningLabel}</div>
-        <input
-          type="range"
-          min={0}
-          max={3}
-          step={1}
-          value={level}
-          onChange={(e) => apply(Number(e.target.value))}
-          aria-label={`${reasoningLabel}: ${levelLabels[level]}`}
-          className="lvis-reasoning-range h-1 w-full cursor-pointer accent-primary"
-        />
-        <div className="mt-1.5 flex justify-between text-micro text-muted-foreground">
-          {levelLabels.map((label, idx) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => apply(idx)}
-              className={`shrink-0 cursor-pointer transition-colors duration-(--motion-fast) ease-(--motion-ease-standard) hover:text-foreground motion-reduce:transition-none ${
-                idx === level ? "font-medium text-primary" : ""
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <ReasoningLevelControl level={level} levelLabels={levelLabels} apply={apply} label={reasoningLabel} />
       </PopoverContent>
     </Popover>
   );

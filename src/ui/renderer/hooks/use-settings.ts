@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { LvisApi } from "../types.js";
+import { getVendorOption } from "../constants.js";
+import type { AppSettings, LvisApi } from "../types.js";
 import {
   canUseLlmVendorWithoutApiKey,
   DEFAULT_LLM_VENDOR,
@@ -293,4 +294,54 @@ export function useSettings(api: LvisApi): UseSettingsResult {
     toggleThinking,
     settingsLoaded,
   };
+}
+
+export interface PinnedModelChoice {
+  vendor: string;
+  vendorLabel: string;
+  modelId: string;
+  /** The model the chat is on right now. */
+  current: boolean;
+}
+
+/**
+ * The pinned models, resolved to the vendor that offers each.
+ *
+ * `pinnedModels` stores ids only, so a stored id is matched against what is
+ * actually offered — the active vendor's curated line plus every synced
+ * catalogue — and one that nothing offers simply does not appear. That is
+ * the chooser's own rule (see `UnifiedModelSelect`), applied here so the
+ * composer's card and the settings chooser cannot disagree about what a pin
+ * points at. Pinned order is kept: it is the order the user reaches for.
+ */
+export function pinnedModelChoices(llm: AppSettings["llm"]): PinnedModelChoice[] {
+  const pinned = llm.pinnedModels ?? [];
+  if (pinned.length === 0) return [];
+  const offered = new Map<string, Set<string>>();
+  const offer = (vendor: string, modelId: string) => {
+    let models = offered.get(modelId);
+    if (!models) {
+      models = new Set();
+      offered.set(modelId, models);
+    }
+    models.add(vendor);
+  };
+  const active = llm.provider;
+  for (const modelId of getVendorOption(active).modelOptions) offer(active, modelId);
+  for (const entry of Object.values(llm.modelListCache ?? {})) {
+    for (const modelId of entry.models) offer(entry.vendor, modelId);
+  }
+  const currentModel = llm.vendors[active]?.model;
+  const choices: PinnedModelChoice[] = [];
+  for (const modelId of pinned) {
+    for (const vendor of offered.get(modelId) ?? []) {
+      choices.push({
+        vendor,
+        vendorLabel: getVendorOption(vendor).label,
+        modelId,
+        current: vendor === active && modelId === currentModel,
+      });
+    }
+  }
+  return choices;
 }

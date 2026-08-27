@@ -273,17 +273,19 @@ export interface LlmTabProps {
   setFallbackOpen: (updater: boolean | ((o: boolean) => boolean)) => void;
   onSaved: () => void;
   /**
-   * Called after the user changes an immediate-apply control (vendor /
-   * thinking toggle / reasoning slider). The dialog debounces these and
-   * persists via `s.save("llm")` so the user gets immediate-feel
-   * application without spamming saves.
+   * Called after the user changes an immediate-apply control (the model
+   * chooser / vendor / thinking toggle / reasoning slider). The dialog
+   * debounces these and persists via `s.save("llm")` so the user gets
+   * immediate-feel application without spamming saves.
    */
   onImmediateChange?: () => void;
   /**
-   * Section-anchored explicit save handler. Both the 공급자 구성 and
-   * Fallback Chain sections render their own Save button that calls
-   * this — the orchestration save() persists the whole `llm` payload,
-   * so the two buttons are functionally identical and the visual
+   * Section-anchored explicit save handler, for the TYPED fields — an API
+   * key, a base URL — where a keystroke is not yet a decision. A pick from
+   * a chooser is, and goes through `onImmediateChange` instead. Both the
+   * 공급자 구성 and Fallback Chain sections render their own Save button
+   * that calls this — the orchestration save() persists the whole `llm`
+   * payload, so the two buttons are functionally identical and the visual
    * placement just anchors each Save to its inputs.
    */
   onSave?: () => void;
@@ -1093,6 +1095,11 @@ export function LlmTab(props: LlmTabProps) {
       const pickedVendor = parsed.providerId.slice(API_PROVIDER_PREFIX.length);
       if (pickedVendor === vendor) setModel(parsed.modelId);
       else selectApiVendorModel(pickedVendor, parsed.modelId);
+      // A pick is the decision. It persists the way the vendor row and the
+      // thinking controls do — through the debounced save — rather than
+      // waiting on the section's Save button, which exists for the typed
+      // fields (a key, a base URL) where a keystroke is not yet a decision.
+      onImmediateChange?.();
       // Only switch the runtime when it is not already the API path. Calling
       // it unconditionally rewrites settings on every pick, and that broadcast
       // is what used to snap the chosen model back to the persisted one.
@@ -1105,7 +1112,10 @@ export function LlmTab(props: LlmTabProps) {
       parsed.providerId as SubscriptionRuntimeId,
       parsed.modelId === "" ? null : parsed.modelId,
     );
-  }, [selectApiVendorModel, setModel, vendor, subscription.activeRuntime.kind, subscription.props.actions]);
+  }, [
+    onImmediateChange, selectApiVendorModel, setModel, vendor,
+    subscription.activeRuntime.kind, subscription.props.actions,
+  ]);
 
   const handleTogglePin = useCallback((modelId: string) => {
     const next = pinnedModels.includes(modelId)
