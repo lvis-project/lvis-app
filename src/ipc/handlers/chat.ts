@@ -644,6 +644,8 @@ export function handleChatSessions(
         ...(!isLegacyDefaultTagged && s.projectName ? { projectName: s.projectName } : {}),
         ...(s.branchedFromCompactNum !== undefined ? { branchedFromCompactNum: s.branchedFromCompactNum } : {}),
         ...(s.branchedAt ? { branchedAt: s.branchedAt } : {}),
+        ...(s.archivedAt ? { archivedAt: s.archivedAt } : {}),
+        ...(s.unreadSince ? { unreadSince: s.unreadSince } : {}),
       };
     });
   return {
