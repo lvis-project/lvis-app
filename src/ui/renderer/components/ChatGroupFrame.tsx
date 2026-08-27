@@ -43,10 +43,10 @@ import {
 /**
  * The least a tile may be dragged down to, in px.
  *
- * Width is the 448px floor DESIGN.md gives every chat column — the same one
- * the side panel clamps to. Height has no documented floor; 240px is a header,
- * a composer, and one visible turn, below which a tile is a composer with no
- * transcript above it.
+ * Width is `SIDE_PANEL_MIN_WIDTH`: DESIGN.md's 448px is the narrowest any
+ * surface must work at, and a tile is one more surface held to it. Height has
+ * no documented floor; 240px is a header, a composer, and one visible turn,
+ * below which a tile is a composer with no transcript above it.
  */
 const CHAT_GROUP_MIN_WIDTH = SIDE_PANEL_MIN_WIDTH;
 const CHAT_GROUP_MIN_HEIGHT = 240;

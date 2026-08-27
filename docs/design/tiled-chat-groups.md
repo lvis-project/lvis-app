@@ -71,9 +71,10 @@ chat groups, not a flat list.
 
 Two facts settle this.
 
-`DESIGN.md` puts the floor for a chat column at **448px**. The main area is
-roughly 1000px wide with the sidebar open, so four columns give each tile 250px
-— under the floor the plugin-panel work already established. Four tiles have to
+`DESIGN.md` makes **448px** the narrowest width any surface must work at — the
+side panel's `SIDE_PANEL_MIN_WIDTH`, and the mobile-class baseline — so that is
+the floor a tile inherits. The main area is roughly 1000px wide with the sidebar
+open, so four columns give each tile 250px, under that floor. Four tiles have to
 nest. Once the layout nests at all, a flat list cannot describe it.
 
 The addressability objection that argued for a flat list does not survive
@@ -118,26 +119,35 @@ rather than only a read.
 
 ## Resizing: the gutter between two tiles
 
-A boundary between siblings is a gutter, and a gutter is the same
-`EdgeResizeBar` the sidebar and the side panel resize with — standing on the
-boundary instead of on a panel's edge. The leading tile is the "panel", its
-extent along the split's axis is the "width", and the trailing tile takes what
-is left of the pair. The hook gained one option for it, `axis`, because a
-boundary between a top and a bottom tile follows the pointer's Y; everything
-else — sign, clamp, keyboard steps, Home/End, double-click reset — is the
-same code, which is the point of it being an option rather than a second hook.
+A boundary between two sibling tiles is a gutter. Dragging it moves that one
+boundary: the tile before it grows or shrinks along the split's axis, and the
+tile after it takes whatever is left of the pair.
 
-A gutter is identified by where it is in the tree (the split's path and the
-pair's index), not by an id: a split has none, and the nodes either side of it
-may be splits themselves. Moving a gutter changes the two shares it separates
-and nothing else — siblings and everything nested inside either side keep
-their own proportions, so a drag on one boundary never moves a boundary the
-user was not holding.
+The bar on the gutter is `EdgeResizeBar`, the one control the sidebar and the
+side panel already resize with. That control thinks in terms of one panel with
+one width; on a gutter, the tile before the boundary plays the panel and its
+extent along the axis plays the width. The hook gained one option for it,
+`axis`, because a boundary between a top and a bottom tile follows the
+pointer's Y. Sign, clamp, keyboard steps, Home/End and double-click reset are
+the same code either way — which is the point of it being an option rather
+than a second hook.
 
-The floors are in pixels — 448px across, the column floor DESIGN.md gives
-every chat surface, and 240px down — while the tree only knows shares, so the
-bar converts through the measured canvas. A pair that cannot hold two floors
-offers no bar at all, rather than a bar that snaps back on every drag.
+A split has no id, so a gutter is named by its position: the path of child
+indices down to the split that owns it, plus the index of the pair it sits
+between. `ChatGroupGutter.key` is that position written as a string — it is
+how the DOM addresses a gutter, and it survives a resize because a resize
+changes shares, not shape. Either side of a gutter may itself be a split.
+
+Moving a gutter changes the two shares it separates and nothing else. The
+other siblings, and everything nested inside either side, keep their own
+proportions, so a drag on one boundary never moves a boundary the user was not
+holding.
+
+The floors are pixels: 448px across — `SIDE_PANEL_MIN_WIDTH`, the narrowest
+width DESIGN.md holds any surface to — and 240px down. The tree only knows
+shares, so the bar converts through the measured canvas. A pair that cannot
+hold two floors offers no bar at all, rather than a bar that snaps back on
+every drag.
 
 During a drag the new layout is written straight to the cells' style, the
 same DOM-direct path the sidebar uses, and the tree is committed once on
@@ -202,8 +212,8 @@ Two rules the tiles must keep:
 `MAX_CHAT_GROUPS` in work mode and 1 in chat mode; chat mode collapses to the
 focused group. `split()` halves the **largest** tile along its longer side, not
 the focused one — focus moves to whatever was just added, so a focus-based split
-walks four clicks down to 124px columns, a quarter of the 448px a chat column
-needs. Halving the largest turns the same four clicks into a 2x2.
+walks four clicks down to 124px columns, a quarter of the 448px floor a tile
+inherits. Halving the largest turns the same four clicks into a 2x2.
 
 Placement itself is the drop gesture above; the split control is the same thing
 without a pointer to say which way.
