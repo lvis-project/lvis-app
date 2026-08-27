@@ -224,3 +224,23 @@ describe("useEdgeResize on the y axis", () => {
     }));
   });
 });
+
+describe("useEdgeResize in a unit other than px", () => {
+  it("scales the pointer's px into the extent's unit and snaps to whole pixels, not whole units", () => {
+    const onWidthChange = vi.fn();
+    const { result } = renderHook(() =>
+      useEdgeResize({
+        // A percent of a 400px container: one px is a quarter of a percent.
+        width: 45, edge: "end", unitsPerPixel: 100 / 400,
+        onWidthChange, onWidthCommit: vi.fn(), min: 22, max: 78,
+      }),
+    );
+    act(() => { result.current.onPointerDown(makePointerDownEvent(100)); });
+    act(() => { dispatchWindowPointerMove(101); });
+    // One pixel moved: a quarter percent, which whole-unit rounding would
+    // have thrown away and turned the drag into 1% steps.
+    expect(onWidthChange).toHaveBeenLastCalledWith(45.25);
+    act(() => { dispatchWindowPointerMove(300); });
+    expect(onWidthChange).toHaveBeenLastCalledWith(78); // clamped in the unit
+  });
+});

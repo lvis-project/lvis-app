@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 
 /**
  * Shared drag-to-resize primitive for edge-anchored panels (the left
@@ -21,6 +21,13 @@ import { useCallback, useEffect, useRef } from "react";
  * top and a bottom pane. Everything else — sign, clamp, keyboard, reset — is
  * the same in both, which is the point of it being one option rather than a
  * second hook.
+ *
+ * `unitsPerPixel` says what one pointer pixel is worth in the extent's unit.
+ * The default, 1, is a width in px. A pane split that is stored as a percent
+ * of its container passes `100 / containerPx`, and then `width`, `min`,
+ * `max` and `keyStep` are all percents while the pointer still moves in px.
+ * Values snap to whole PIXELS, not whole units, so a percent extent still
+ * drags smoothly.
  */
 export interface UseEdgeResizeOptions {
   /** Current width (px) — the source of truth the drag starts from. */
@@ -29,6 +36,8 @@ export interface UseEdgeResizeOptions {
   edge: "start" | "end";
   /** Which pointer coordinate the extent follows. Default "x" (a width). */
   axis?: "x" | "y";
+  /** What one pointer pixel is worth in the extent's unit. Default 1 (px). */
+  unitsPerPixel?: number;
   /** Per-move update (state only, no persist). Called every rAF tick during drag and on keyboard steps. */
   onWidthChange: (px: number) => void;
   /** Drag-end / keyboard-step / reset commit (persist). */
@@ -38,7 +47,7 @@ export interface UseEdgeResizeOptions {
   max: number | (() => number);
   /** Keyboard arrow-key step size (px). Default 16. */
   keyStep?: number;
-  /** Optional element the drag applies the live extent to directly (bypassing React) for a jank-free drag — `width` on the x axis, `height` on y. Omit to update only via onWidthChange. */
+  /** Optional element the drag applies the live extent to directly (bypassing React) for a jank-free drag — `width` on the x axis, `height` on y. Written as px, so only meaningful at the default `unitsPerPixel`. Omit to update only via onWidthChange. */
   applyElementRef?: { current: HTMLElement | null };
 }
 
@@ -57,6 +66,7 @@ export function useEdgeResize({
   width,
   edge,
   axis = "x",
+  unitsPerPixel = 1,
   onWidthChange,
   onWidthCommit,
   min,
@@ -77,8 +87,13 @@ export function useEdgeResize({
 
   const resolveMax = useCallback(() => (typeof max === "function" ? max() : max), [max]);
   const clamp = useCallback(
-    (value: number) => Math.round(Math.min(resolveMax(), Math.max(min, value))),
-    [min, resolveMax],
+    (value: number) => {
+      // Snap in pixel space: a whole px is the finest thing a pointer can
+      // say, and rounding a percent to a whole percent would step the drag.
+      const snapped = Math.round(value / unitsPerPixel) * unitsPerPixel;
+      return Math.min(resolveMax(), Math.max(min, snapped));
+    },
+    [min, resolveMax, unitsPerPixel],
   );
 
   const onPointerDown = useCallback(
@@ -93,7 +108,7 @@ export function useEdgeResize({
       const sign = edge === "end" ? 1 : -1;
       let raf = 0;
       const apply = (position: number) => {
-        const next = clamp(startWidth + sign * (position - start));
+        const next = clamp(startWidth + sign * (position - start) * unitsPerPixel);
         liveRef.current = next;
         onWidthChange(next);
         const el = applyElementRef?.current;
@@ -118,7 +133,7 @@ export function useEdgeResize({
       window.addEventListener("pointerup", cleanup);
       window.addEventListener("pointercancel", cleanup);
     },
-    [applyElementRef, axis, clamp, edge, onWidthChange, onWidthCommit, width],
+    [applyElementRef, axis, clamp, edge, onWidthChange, onWidthCommit, unitsPerPixel, width],
   );
 
   const onKeyDown = useCallback(
@@ -159,4 +174,35 @@ export function useEdgeResize({
   );
 
   return { onPointerDown, onKeyDown, makeResetHandler, resolveMax };
+}
+
+/**
+ * An element's size in px, kept current as the window changes.
+ *
+ * For callers whose bounds are in px while their state is not — a tile split
+ * stored as shares, a pane split stored as a percent — this is where the
+ * conversion factor comes from. Read in an effect rather than during render:
+ * a ref's `.current` during render is whatever the last commit left there,
+ * and a window resize commits nothing on its own, so bounds computed from it
+ * would describe a container that no longer exists. Zero until the first
+ * measure, and in environments with no layout (jsdom) — callers treat zero
+ * as "cannot drag yet", never as a divisor.
+ */
+export function useMeasuredSize(ref: RefObject<HTMLElement | null>): { width: number; height: number } {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => setSize((prev) => {
+      const next = { width: el.clientWidth, height: el.clientHeight };
+      return prev.width === next.width && prev.height === next.height ? prev : next;
+    });
+    measure();
+    const Observer = typeof window !== "undefined" ? window.ResizeObserver : undefined;
+    if (typeof Observer !== "function") return;
+    const observer = new Observer(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [ref]);
+  return size;
 }

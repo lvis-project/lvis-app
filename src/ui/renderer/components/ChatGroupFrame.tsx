@@ -1,5 +1,5 @@
 import {
-  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState,
+  createContext, useCallback, useContext, useMemo, useRef, useState,
   type ReactNode, type RefObject,
 } from "react";
 import {
@@ -19,6 +19,7 @@ import { MAIN_CHAT_GROUP_ID, MAX_CHAT_GROUPS } from "../../../contract/app-contr
 import { SIDE_PANEL_MIN_WIDTH } from "../../../shared/side-panel.js";
 import type { LvisApi } from "../types.js";
 import { EdgeResizeBar } from "./EdgeResizeBar.js";
+import { useMeasuredSize } from "../hooks/use-edge-resize.js";
 import {
   CHAT_SESSION_DRAG_TYPE,
   dropIndicatorStyle,
@@ -601,33 +602,6 @@ export function useChatGroups(appMode?: "chat" | "work") {
   };
 }
 
-/**
- * The tile area's size in px, kept current as the window changes.
- *
- * Read in an effect rather than during render: a ref's `.current` during
- * render is whatever the last commit left there, and a window resize commits
- * nothing on its own — the floors would then be computed against a canvas
- * that no longer exists.
- */
-function useCanvasSize(canvasRef: RefObject<HTMLElement | null>): { width: number; height: number } {
-  const [size, setSize] = useState({ width: 0, height: 0 });
-  useEffect(() => {
-    const el = canvasRef.current;
-    if (!el) return;
-    const measure = () => setSize((prev) => {
-      const next = { width: el.clientWidth, height: el.clientHeight };
-      return prev.width === next.width && prev.height === next.height ? prev : next;
-    });
-    measure();
-    const Observer = typeof window !== "undefined" ? window.ResizeObserver : undefined;
-    if (typeof Observer !== "function") return;
-    const observer = new Observer(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [canvasRef]);
-  return size;
-}
-
 /** Percent geometry → the inline style a cell or gutter is positioned with. */
 export function areaStyle(box: { left: number; top: number; width: number; height: number }) {
   return {
@@ -665,7 +639,7 @@ export interface ChatGroupGutterProps {
  */
 export function ChatGroupGutter({ gutter, canvasRef, previewResize, onResize }: ChatGroupGutterProps) {
   const { t } = useTranslation();
-  const canvas = useCanvasSize(canvasRef);
+  const canvas = useMeasuredSize(canvasRef);
   const along = gutter.axis === "row" ? canvas.width : canvas.height;
   const pairPx = (along * (gutter.leading + gutter.trailing)) / 100;
   const floor = gutter.axis === "row" ? CHAT_GROUP_MIN_WIDTH : CHAT_GROUP_MIN_HEIGHT;
