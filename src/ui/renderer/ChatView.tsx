@@ -34,7 +34,9 @@ import { useWorkspaceTabs } from "./preview/workspace-tabs.js";
 import { SIDE_PANEL_WIDTH_PREF, usePanelWidth } from "./hooks/use-panel-width.js";
 import { normalizeBrowserNavigationUrl } from "./preview/url-safety.js";
 import { ActionPanel } from "./components/ActionPanel.js";
+import { createPortal } from "react-dom";
 import { FloatingRightLane } from "./components/FloatingRightLane.js";
+import { useChatGroupHeaderSlot } from "./components/ChatGroupFrame.js";
 import { computeActionPanelActivity } from "./utils/action-panel-activity.js";
 import { useContainerNarrow } from "./hooks/use-container-narrow.js";
 import { WorkspaceRailDrawer } from "./components/WorkspaceRailDrawer.js";
@@ -322,6 +324,7 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
   // "open in system app" (web only — tool-derived local paths have no
   // authorized OS-open channel, so that menu item is hidden for files).
   const actionPanelActivity = useMemo(() => computeActionPanelActivity(entries), [entries]);
+  const chatGroupHeaderSlot = useChatGroupHeaderSlot();
 
   // Route an ActionPanel item into the workspace rail. Single-click (`ephemeral`)
   // opens it in the one reusable preview slot; double-click (`pinned`) opens and
@@ -630,17 +633,24 @@ export function ChatView({ api, onAsk, onRunMcpPrompt, onEditSave, onFork, onTog
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
         data-testid="chat-main-column"
       >
+      {/* Tool activity is derived HERE (only this view sees the transcript) but
+          belongs to the group header, so the control is portaled up into the
+          header's slot. No slot means no header to contribute to — the view is
+          being rendered outside a group frame — and nothing is contributed. */}
+      {appMode !== "chat" && chatGroupHeaderSlot
+        ? createPortal(
+            <ActionPanel
+              open={actionPanelOpen}
+              onOpenChange={(open) => onActionPanelOpenChange?.(open)}
+              activity={actionPanelActivity}
+              onOpenItem={routeActivityItem}
+              onOpenItemPinned={routeActivityItemPinned}
+              onOpenItemInSystemApp={openActivityItemInSystemApp}
+            />,
+            chatGroupHeaderSlot,
+          )
+        : null}
       <FloatingRightLane>
-        {appMode !== "chat" ? (
-          <ActionPanel
-            open={actionPanelOpen}
-            onOpenChange={(open) => onActionPanelOpenChange?.(open)}
-            activity={actionPanelActivity}
-            onOpenItem={routeActivityItem}
-            onOpenItemPinned={routeActivityItemPinned}
-            onOpenItemInSystemApp={openActivityItemInSystemApp}
-          />
-        ) : null}
         {/* Routine fire + plugin overlay. Routine items stay isolated from chat history; plugin items insert via imported_trigger on confirm. */}
         <OverlayCardRegion
           onPluginPrimaryAction={onPluginPrimaryAction ?? noopPluginPrimaryAction}

@@ -4,7 +4,6 @@ import { ViewHistoryNav, type ViewPathNavProps } from "./ViewPathNav.js";
 import {
   CalendarDays,
   Folder,
-  Home,
   KanbanSquare,
   KeyRound,
   MessageSquareText,
@@ -837,7 +836,7 @@ function SessionRow({
  * its own sidebar. One list component, so the window's sidebar and a group's
  * sidebar cannot show two different pictures of the same conversations.
  */
-export function ProjectSessionList({
+function ProjectSessionList({
   collapsed,
   sessions,
   currentSessionId,
@@ -1281,7 +1280,14 @@ export function ProjectSessionList({
                   <Folder className="h-4 w-4 shrink-0 text-primary" />
                   {pinned ? <Pin className="h-3 w-3 shrink-0 fill-current text-primary" /> : null}
                   <span className="min-w-0 flex-1 truncate">{displayName}</span>
-                  <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  {/* Hidden at rest, not removed — it keeps reserving its width
+                      so the folder name does not re-truncate when the pointer
+                      arrives. A row that reflows under the cursor is harder to
+                      aim at than one that simply reveals a control. */}
+                  <Plus
+                    className="h-3.5 w-3.5 shrink-0 text-muted-foreground invisible group-hover:visible group-focus-within:visible"
+                    aria-hidden="true"
+                  />
                 </button>
               )}
               {/* After the new-chat affordance, exactly as the folder's own
@@ -1530,17 +1536,19 @@ export function Sidebar({
     //      retracts (body removed) and the cluster pops OUT into the bare band
     //      with NO surface behind it. The strip's screen position is identical in
     //      both states; the only visual delta is the card surface behind it.
-    // top-2 (8px) lands the h-7 (28px) cluster strip's center at ≈22px — the OS
-    // traffic lights' visual center (trafficLightPosition.y:16 + ≈6px half of
-    // their ≈12px diameter). So the cluster sits ON the lights' line on darwin.
-    // win/linux + non-Electron align a touch higher (top-1.5) with no OS lights.
+    // The cluster strip must share the traffic lights' CENTRE LINE, and that
+    // line moved when the band went 44px -> 36px: the lights are now at
+    // trafficLightPosition.y:12 with a ≈12px diameter, so their centre is 18.
+    // An h-7 (28px) strip centres at inset + 14, so the inset has to be 4
+    // (top-1), not 8 — at top-2 the icons sat 4px BELOW the lights.
+    // win/linux + non-Electron have no OS lights to align against.
     <aside
       data-testid="primary-sidebar"
       role="navigation"
       aria-label={t("sidebar.ariaLabel")}
       className={[
         "absolute left-2 bottom-3 z-30 flex min-h-0 flex-col",
-        darwinTopClearance ? "top-2" : "top-1.5",
+        darwinTopClearance ? "top-1" : "top-1.5",
         collapsed && "pointer-events-none",
       ].join(" ")}
       // The aside overlays the Electron drag band. Mark it no-drag so its controls
@@ -1797,20 +1805,9 @@ export function Sidebar({
           composer-seam-alignment padding was removed so the footer reads as one
           uniform nav rhythm at every window height. */}
       <div className={`border-t border-border px-2 py-2 mt-auto space-y-0.5 ${compact ? "flex flex-col items-center space-y-0.5" : ""}`}>
-        {/* Home — placed above the marketplace, capped by this footer's border-t
-            divider (which matches the composer's border-t seam). */}
-        <NavItem
-          viewKey="home"
-          label={t("mainToolbar.home")}
-          icon={<Home className="h-4 w-4" />}
-          isActive={activeView === "home"}
-          onClick={() => onSelect("home")}
-          collapsed={compact}
-          tone="home"
-          data-testid="sidebar-home"
-        />
-        {/* Divider between Home and Marketplace */}
-        <div className="my-1 border-t border-border self-stretch" />
+        {/* Home used to sit here. The conversation list IS the home surface —
+            a row that navigates to "the chat" while the chats are listed a few
+            pixels above it was naming the same destination twice. */}
         {/* Marketplace jump — styled as a NavItem, disabled until URL ready */}
         <NavItem
           viewKey="marketplace"

@@ -102,39 +102,41 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(Array.isArray(list)).toBe(true);
   });
 
-  it("renders a collapsible right action panel that defaults to the rail", async () => {
+  it("hangs tool activity off the chat group's header, closed until asked for", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    // The 도구 활동 panel defaults to its collapsed rail on a fresh launch — the
-    // full expanded card is NOT auto-shown.
-    expect(container.querySelector('[data-testid="action-panel"]')).toBeFalsy();
-    expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="action-panel-summary"]')).toBeTruthy();
-    expect(container.querySelector('[data-testid="action-panel-summary-list"]')?.className).toContain("flex-col");
-    expect(container.querySelector('[data-testid="action-panel-summary"]')?.textContent?.trim()).toBe("");
-    expect(container.textContent).not.toContain("아직 읽은 파일이 없습니다.");
+    // The control is IN the group header (not floating over the transcript, and
+    // not in the window band), and the panel itself is closed on a fresh launch.
+    const trigger = container.querySelector('[data-testid="action-panel-open"]');
+    expect(trigger).toBeTruthy();
+    expect(container.querySelector('[data-testid="chat-group-header-slot"]')?.contains(trigger!)).toBe(true);
+    expect(trigger?.getAttribute("aria-expanded")).toBe("false");
+    // It opens DOWNWARD as a popover, so its content is portaled — absent from
+    // the page entirely while closed.
+    expect(document.querySelector('[data-testid="action-panel"]')).toBeFalsy();
+    expect(document.body.textContent).not.toContain("아직 읽은 파일이 없습니다.");
 
-    // Open it from the rail → full card appears.
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="action-panel-open"]')!);
+      fireEvent.click(trigger!);
     });
 
-    const actionPanel = container.querySelector('[data-testid="action-panel"]');
-    expect(actionPanel).toBeTruthy();
-    expect(container.textContent).toContain("도구 활동");
-    expect(container.textContent).toContain("카테고리별 최신 5개");
+    const actionPanel = await waitFor(() => {
+      const panel = document.querySelector('[data-testid="action-panel"]');
+      expect(panel).toBeTruthy();
+      return panel!;
+    });
+    expect(actionPanel.textContent).toContain("도구 활동");
+    expect(actionPanel.textContent).toContain("카테고리별 최신 5개");
     // Scoped to the action panel itself — the sidebar's own Chats/Projects
     // tablist is unrelated and (correctly) present elsewhere on the page.
-    expect(actionPanel?.querySelector('[role="tablist"]')).toBeFalsy();
+    expect(actionPanel.querySelector('[role="tablist"]')).toBeFalsy();
 
-    // Close it again → back to the collapsed rail.
+    // Escape dismisses it, the way every other popover on this surface does.
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="action-panel-close"]')!);
+      fireEvent.keyDown(actionPanel, { key: "Escape", code: "Escape" });
     });
-
-    expect(container.querySelector('[data-testid="action-panel"]')).toBeFalsy();
-    expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
+    await waitFor(() => expect(document.querySelector('[data-testid="action-panel"]')).toBeFalsy());
   });
 
   it("hides tool activity in chat mode and opens the side panel from the title bar", async () => {
@@ -162,18 +164,18 @@ describe("App smoke (Phase 1 infra)", () => {
         result: "ok",
       });
     });
-    expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="action-panel-open"]')).toBeTruthy();
 
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="app-mode-chat"]')!);
     });
     await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenCalledWith(false));
-    expect(container.querySelector('[data-testid="action-panel-rail"]')).toBeFalsy();
-    expect(container.querySelector('[data-testid="action-panel"]')).toBeFalsy();
+    expect(container.querySelector('[data-testid="action-panel-open"]')).toBeFalsy();
+    expect(document.querySelector('[data-testid="action-panel"]')).toBeFalsy();
     expect(container.querySelector('[data-testid="chat-preview-open"]')).toBeFalsy();
 
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
+      fireEvent.click(container.querySelector('[data-testid="chat-group-panel-toggle"]')!);
     });
     await waitFor(() => expect(windowApi.resizeForSidePanel).toHaveBeenLastCalledWith(true));
     await waitFor(() =>
@@ -184,7 +186,7 @@ describe("App smoke (Phase 1 infra)", () => {
     expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy();
 
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
+      fireEvent.click(container.querySelector('[data-testid="chat-group-panel-toggle"]')!);
     });
     const closingMotion = container.querySelector('[data-testid="chat-side-panel-motion"]');
     expect(closingMotion).toBeTruthy();
@@ -197,10 +199,18 @@ describe("App smoke (Phase 1 infra)", () => {
     );
   });
 
-  it("opens the chat side panel from non-home inline views instead of latching invisible state", async () => {
+  it("takes the work panel away with its conversation, rather than latching invisible state", async () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
+    // Open it on the chat surface, where the conversation that owns it is.
+    await act(async () => {
+      fireEvent.click(container.querySelector('[data-testid="chat-group-panel-toggle"]')!);
+    });
+    await waitFor(() => expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy());
+
+    // Leaving for a view with no conversation takes the panel AND its toggle
+    // with it — the panel reports on a conversation, and Settings is not one.
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="sidebar-settings"]')!);
     });
@@ -208,17 +218,18 @@ describe("App smoke (Phase 1 infra)", () => {
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeTruthy(),
     );
     expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeFalsy();
-    expect(container.querySelector('[data-testid="chat-side-panel-toggle"]')?.getAttribute("aria-pressed")).toBe("false");
+    expect(container.querySelector('[data-testid="chat-group-panel-toggle"]')).toBeFalsy();
 
+    // Coming back restores it — the state rode with the group, not with the
+    // window, so it did not have to be re-opened.
     await act(async () => {
-      fireEvent.click(container.querySelector('[data-testid="chat-side-panel-toggle"]')!);
+      fireEvent.click(container.querySelector('[data-testid="sidebar-new-chat"]')!);
     });
-
     await waitFor(() => {
       expect(container.querySelector('[data-testid="settings-sidebar-heading"]')).toBeFalsy();
       expect(container.querySelector('[data-testid="chat-side-panel"]')).toBeTruthy();
     });
-    expect(container.querySelector('[data-testid="chat-side-panel-toggle"]')?.getAttribute("aria-pressed")).toBe("true");
+    expect(container.querySelector('[data-testid="chat-group-panel-toggle"]')?.getAttribute("aria-pressed")).toBe("true");
   });
 
   it("does not duplicate primary sidebar navigation in the right action panel", async () => {
@@ -235,20 +246,24 @@ describe("App smoke (Phase 1 infra)", () => {
     const { container, api } = await renderApp();
     await waitFor(() => expect(api.getSettings).toHaveBeenCalled());
 
-    // The panel defaults to the collapsed rail; open it to inspect the expanded
-    // card's counters.
+    // Closed until asked for; open it to inspect the counters.
     await act(async () => {
       fireEvent.click(container.querySelector('[data-testid="action-panel-open"]')!);
     });
 
-    expect(container.textContent).toContain("읽은 파일");
-    expect(container.textContent).toContain("쓴 파일");
-    expect(container.textContent).toContain("MCP 호출");
-    expect(container.textContent).toContain("플러그인 호출");
-    expect(container.textContent).toContain("도구 호출");
-    expect(container.textContent).toContain("웹 출처");
-    expect(container.textContent).not.toContain("아직 읽은 파일이 없습니다.");
-    expect(container.querySelector('[data-testid^="action-panel-activity-"]')).toBeFalsy();
+    const panel = await waitFor(() => {
+      const found = document.querySelector('[data-testid="action-panel"]');
+      expect(found).toBeTruthy();
+      return found!;
+    });
+    expect(panel.textContent).toContain("읽은 파일");
+    expect(panel.textContent).toContain("쓴 파일");
+    expect(panel.textContent).toContain("MCP 호출");
+    expect(panel.textContent).toContain("플러그인 호출");
+    expect(panel.textContent).toContain("도구 호출");
+    expect(panel.textContent).toContain("웹 출처");
+    expect(panel.textContent).not.toContain("아직 읽은 파일이 없습니다.");
+    expect(panel.querySelector('[data-testid^="action-panel-activity-"]')).toBeFalsy();
   });
 
   it("surfaces populated action panel activity and routes rows in-app", () => {
@@ -259,7 +274,9 @@ describe("App smoke (Phase 1 infra)", () => {
     }));
     const openItem = vi.fn();
     const openInSystemApp = vi.fn();
-    const { container } = render(
+    // Rendered open. The content is a popover, so it lands in a portal on the
+    // document rather than inside the render container.
+    render(
       <TooltipProvider>
         <ActionPanel
           open
@@ -292,27 +309,27 @@ describe("App smoke (Phase 1 infra)", () => {
       </TooltipProvider>,
     );
 
-    expect(container.textContent).toContain("읽은 파일");
-    expect(container.textContent).toContain("쓴 파일");
-    expect(container.textContent).toContain("MCP 호출");
-    expect(container.textContent).toContain("플러그인 호출");
-    expect(container.textContent).toContain("도구 호출");
-    expect(container.textContent).toContain("웹 출처");
-    expect(container.textContent).toContain("latest-read-0");
-    expect(container.textContent).toContain("latest-read-4");
-    expect(container.textContent).not.toContain("latest-read-5");
-    expect(container.textContent).toContain("https://example.com");
-    expect(container.textContent).not.toContain("/full/path");
+    expect(document.body.textContent).toContain("읽은 파일");
+    expect(document.body.textContent).toContain("쓴 파일");
+    expect(document.body.textContent).toContain("MCP 호출");
+    expect(document.body.textContent).toContain("플러그인 호출");
+    expect(document.body.textContent).toContain("도구 호출");
+    expect(document.body.textContent).toContain("웹 출처");
+    expect(document.body.textContent).toContain("latest-read-0");
+    expect(document.body.textContent).toContain("latest-read-4");
+    expect(document.body.textContent).not.toContain("latest-read-5");
+    expect(document.body.textContent).toContain("https://example.com");
+    expect(document.body.textContent).not.toContain("/full/path");
 
     // Read-file rows now carry a target → they are clickable buttons that route
     // the file in-app (web=false); no local path ever reaches a system opener.
-    const readRow = container.querySelector('[data-testid="action-panel-activity-read-0"]')!;
+    const readRow = document.querySelector('[data-testid="action-panel-activity-read-0"]')!;
     expect(readRow.tagName).toBe("BUTTON");
     fireEvent.click(readRow);
     expect(openItem).toHaveBeenLastCalledWith("C:\\tmp\\latest-read-0.md", false);
     expect(openInSystemApp).not.toHaveBeenCalled();
     // Web rows route in-app with web=true.
-    fireEvent.click(container.querySelector('[data-testid="action-panel-activity-web-1"]')!);
+    fireEvent.click(document.querySelector('[data-testid="action-panel-activity-web-1"]')!);
     expect(openItem).toHaveBeenLastCalledWith("https://example.com/full/path?q=1", true);
   });
 });

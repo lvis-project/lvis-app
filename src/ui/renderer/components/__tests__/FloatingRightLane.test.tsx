@@ -9,18 +9,20 @@
  * close and queue controls — and since that button is `pointer-events-auto`, a
  * click aimed at the card's dismiss hit the rail instead.
  *
+ * The action panel has since left this corner entirely: it hangs off the chat
+ * group's header now, so the collision it caused cannot recur from that side.
+ * The lane remains the single anchor for whatever DOES hang here, and these
+ * assertions keep the rule that made the collision impossible — the lane
+ * positions, the occupant does not.
+ *
  * jsdom has no layout, so overlap itself is not measurable here. What IS
- * measurable is the cause: whether either occupant positions itself. A future
- * edit that puts `absolute` back on one of them re-creates the collision, and
- * that is what these assertions catch.
+ * measurable is the cause: whether an occupant positions itself.
  */
 import "../../../../../test/renderer/setup.js";
 import { act, render, screen } from "@testing-library/react";
 import { createRef } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { TooltipProvider } from "../../../../components/ui/tooltip.js";
-import { ActionPanel } from "../ActionPanel.js";
-import { emptyActionPanelActivity } from "../../../../../test/renderer/helpers.js";
 import { FloatingRightLane } from "../FloatingRightLane.js";
 import { OverlayCardRegion } from "../OverlayCardRegion.js";
 import {
@@ -38,20 +40,13 @@ const PLUGIN_ITEM: OverlayItem = {
   createdAt: "2026-08-23T00:00:00.000Z",
 };
 
-/** Render both lane occupants the way ChatView does in work mode. */
+/** Render the lane the way ChatView does in work mode. */
 function renderLane() {
   const addFireRef = createRef<((item: OverlayItem) => void) | null>();
   const view = render(
     <TooltipProvider>
       <OverlayContextProvider onOpenSession={() => true} addFireRef={addFireRef}>
         <FloatingRightLane>
-          <ActionPanel
-            open={false}
-            onOpenChange={vi.fn()}
-            activity={emptyActionPanelActivity()}
-            onOpenItem={vi.fn()}
-            onOpenItemPinned={vi.fn()}
-          />
           <OverlayCardRegion onPluginPrimaryAction={vi.fn()} />
         </FloatingRightLane>
       </OverlayContextProvider>
@@ -64,29 +59,32 @@ function renderLane() {
 }
 
 describe("FloatingRightLane", () => {
-  it("stacks the action-panel rail and the overlay card instead of layering them", () => {
+  it("stacks its occupants instead of piling them at one point", () => {
     renderLane();
 
     const lane = screen.getByTestId("floating-right-lane");
-    const rail = screen.getByTestId("action-panel-rail");
     const card = screen.getByTestId("overlay-card-region");
 
-    // Both are IN the lane — a sibling that escaped it would be back to
-    // positioning itself.
-    expect(lane.contains(rail)).toBe(true);
+    // In the lane — a sibling that escaped it would be back to positioning
+    // itself.
     expect(lane.contains(card)).toBe(true);
-    // ...and stacked by it, not piled at one point.
     expect(lane.className).toContain("flex-col");
   });
 
-  it("leaves positioning to the lane — neither occupant anchors itself", () => {
+  it("leaves positioning to the lane — the occupant does not anchor itself", () => {
     renderLane();
 
-    for (const testId of ["action-panel-rail", "overlay-card-region"]) {
-      const className = screen.getByTestId(testId).className;
-      expect(className, `${testId} must not position itself`).not.toMatch(/\babsolute\b/);
-      expect(className, `${testId} must not set its own layer`).not.toMatch(/\bz-\d/);
-    }
+    const className = screen.getByTestId("overlay-card-region").className;
+    expect(className, "overlay-card-region must not position itself").not.toMatch(/\babsolute\b/);
+    expect(className, "overlay-card-region must not set its own layer").not.toMatch(/\bz-\d/);
+  });
+
+  it("no longer carries the action panel — it hangs off the group header now", () => {
+    renderLane();
+
+    const lane = screen.getByTestId("floating-right-lane");
+    expect(lane.querySelector("[data-testid='action-panel-open']")).toBeNull();
+    expect(lane.querySelector("[data-testid='action-panel']")).toBeNull();
   });
 
   it("keeps the overlay card's own dismiss control reachable", () => {

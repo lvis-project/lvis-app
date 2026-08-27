@@ -240,7 +240,7 @@ test.describe("chat preview rail", () => {
         { timeout: 20_000 },
       );
 
-      const openButton = ctx.page.getByTestId("chat-side-panel-toggle");
+      const openButton = ctx.page.getByTestId("chat-group-panel-toggle");
       await expect(openButton).toBeVisible({ timeout: 20_000 });
       await expect(ctx.page.getByTestId("chat-preview-open")).toHaveCount(0);
       await expect(ctx.page.getByTestId("chat-preview-rail")).toHaveCount(0);

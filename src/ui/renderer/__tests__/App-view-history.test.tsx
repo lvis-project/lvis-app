@@ -355,10 +355,11 @@ describe("App view history after a restored launch location", () => {
     });
     await waitFor(() => expect(container.querySelector('[data-testid="view-path-nav"]')).not.toBeNull());
 
-    // Re-selecting Home discards the VIEW half — a navigation, and the one
-    // navigation that leaves the history untouched, so the seed is still the
-    // only entry when the surviving half lands.
-    await click(container, "sidebar-home");
+    // Starting a new chat discards the VIEW half — it navigates to the chat
+    // surface, which is where they already are, so it is the one navigation
+    // that leaves the history untouched and the seed is still the only entry
+    // when the surviving half lands.
+    await click(container, "sidebar-new-chat");
     expect(path(container)).toContain("홈");
 
     // Released one commit at a time — over IPC these are separate round trips,

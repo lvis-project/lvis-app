@@ -96,9 +96,25 @@ export interface CustomTitleBarProps {
    * in the gaps between them.
    */
   children?: ReactNode;
+  /**
+   * Viewport x where band content must begin, because the floating sidebar
+   * card extends UP into this band and would otherwise cover it.
+   *
+   * It lives here rather than on the content because the band ALREADY has a
+   * leading reserve of its own — the traffic-light inset on macOS, a plain gutter
+   * elsewhere — and the two are the same reserve, not two stacked ones. The
+   * band takes whichever is larger; a second padding applied by the content
+   * pushed the path 80px past the sidebar's edge.
+   */
+  leadClearance?: number;
 }
 
-export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
+/** Band leading pad when nothing overlaps it. macOS clears the traffic lights;
+ *  the other platforms just need a gutter. */
+const DARWIN_LEAD_PAD = 80;
+const PLAIN_LEAD_PAD = 12;
+
+export function CustomTitleBar({ children, leadClearance = 0 }: CustomTitleBarProps = {}) {
   // Rules-of-hooks: all hook calls MUST come before any early return so the
   // hook order stays stable across renders. The platformBridge check is moved
   // below all hooks; the bridge-dependent useEffect bodies are gated with an
@@ -156,7 +172,8 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
     return (
       <div
         data-testid="custom-titlebar-plain"
-        className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background px-3 text-foreground select-none"
+        className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pr-3 text-foreground select-none"
+        style={{ paddingLeft: `${Math.max(PLAIN_LEAD_PAD, leadClearance)}px` }}
       >
         {children}
       </div>
@@ -183,8 +200,9 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
     return (
       <div
         data-testid="custom-titlebar-darwin"
-        className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-20 pr-3 text-foreground select-none"
+        className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pr-3 text-foreground select-none"
         style={{
+          paddingLeft: `${Math.max(DARWIN_LEAD_PAD, leadClearance)}px`,
           // @ts-expect-error — Electron-specific CSS extension
           WebkitAppRegion: "drag",
         }}
@@ -200,8 +218,9 @@ export function CustomTitleBar({ children }: CustomTitleBarProps = {}) {
   return (
     <div
       data-testid="custom-titlebar"
-      className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background pl-3 text-foreground select-none"
+      className="flex h-9 shrink-0 items-center gap-2 border-b border-border/(--opacity-half) bg-background text-foreground select-none"
       style={{
+        paddingLeft: `${Math.max(PLAIN_LEAD_PAD, leadClearance)}px`,
         // @ts-expect-error — Electron-specific CSS extension
         WebkitAppRegion: "drag",
       }}

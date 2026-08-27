@@ -1,5 +1,8 @@
-import { useCallback, useState, type ReactNode } from "react";
-import { Columns2, Download, PanelRightClose, PanelRightOpen, Pin, Upload, X } from "lucide-react";
+import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
+import {
+  Columns2, Download, PanelBottomClose, PanelBottomOpen,
+  Pin, Upload, X,
+} from "lucide-react";
 import { Button } from "../../../components/ui/button.js";
 import {
   DropdownMenu,
@@ -48,12 +51,10 @@ export interface ChatGroupFrameProps {
   actions: ChatGroupAction[];
   /** Whether this group currently has focus — drives the border, see above. */
   focused?: boolean;
-  /** This group's OWN sidebar — its conversation list. Rendered inside the
-   *  frame, so it scrolls and closes with the group rather than with the
-   *  window. */
-  sidebar?: ReactNode;
-  sidebarOpen: boolean;
-  onToggleSidebar: () => void;
+  /** This group's WORK PANEL — the right-hand rail. It belongs to the group
+   *  because it shows what THIS conversation is doing. */
+  panelOpen: boolean;
+  onTogglePanel: () => void;
   /** Split off another group. Absent when no free conversation source remains. */
   onSplit?: () => void;
   /** Close this group. Absent on the last one — a workspace with no group is
@@ -68,22 +69,35 @@ export interface ChatGroupFrameProps {
 const HEADER_BUTTON_CLASS =
   "h-6 w-6 aspect-square shrink-0 p-0 text-muted-foreground hover:text-foreground";
 
+/**
+ * The header's contributed-control slot.
+ *
+ * Tool activity is computed from the transcript, which only the chat view
+ * inside this frame can see — but the control that opens it belongs to the
+ * header, one level ABOVE that view. Rather than lifting the whole activity
+ * derivation into the app shell just to hand it back down, the frame publishes
+ * the slot element and the view portals its control into it.
+ */
+const ChatGroupHeaderSlotContext = createContext<HTMLElement | null>(null);
+
+export function useChatGroupHeaderSlot(): HTMLElement | null {
+  return useContext(ChatGroupHeaderSlotContext);
+}
+
 export function ChatGroupFrame({
   title,
   actions,
   focused,
-  sidebar,
-  sidebarOpen,
-  onToggleSidebar,
+  panelOpen,
+  onTogglePanel,
   onSplit,
   onClose,
   onFocus,
   children,
 }: ChatGroupFrameProps) {
   const { t } = useTranslation();
-  const sidebarLabel = sidebarOpen
-    ? t("chatGroup.hideSidebar")
-    : t("chatGroup.showSidebar");
+  const [headerSlot, setHeaderSlot] = useState<HTMLDivElement | null>(null);
+  const panelLabel = panelOpen ? t("chatPreviewRail.close") : t("chatPreviewRail.open");
   return (
     <section
       data-testid="chat-group"
@@ -108,6 +122,10 @@ export function ChatGroupFrame({
         <h2 className="min-w-0 flex-1 truncate text-caption font-medium text-foreground">
           {title}
         </h2>
+        {/* Contributed controls (tool activity) land here — LEADING of the
+            conversation actions, so the pin stays the first thing in the fixed
+            set no matter what the transcript contributes. */}
+        <div ref={setHeaderSlot} className="flex shrink-0 items-center" data-testid="chat-group-header-slot" />
         {actions.map((action) =>
           action.items ? (
             <DropdownMenu key={action.id}>
@@ -178,22 +196,25 @@ export function ChatGroupFrame({
             <TooltipContent side="bottom">{t("chatGroup.split")}</TooltipContent>
           </Tooltip>
         ) : null}
+        {/* The work panel is per-GROUP. It shows what THIS conversation is
+            doing, so a single window-level toggle could only ever be right for
+            one of the groups on screen. */}
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
               variant="ghost"
               size="icon"
               className={HEADER_BUTTON_CLASS}
-              onClick={onToggleSidebar}
-              title={sidebarLabel}
-              aria-label={sidebarLabel}
-              aria-pressed={sidebarOpen}
-              data-testid="chat-group-sidebar-toggle"
+              onClick={onTogglePanel}
+              title={panelLabel}
+              aria-label={panelLabel}
+              aria-pressed={panelOpen}
+              data-testid="chat-group-panel-toggle"
             >
-              {sidebarOpen ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
+              {panelOpen ? <PanelBottomClose className="h-4 w-4" /> : <PanelBottomOpen className="h-4 w-4" />}
             </Button>
           </TooltipTrigger>
-          <TooltipContent side="bottom">{sidebarLabel}</TooltipContent>
+          <TooltipContent side="bottom">{panelLabel}</TooltipContent>
         </Tooltip>
         {onClose ? (
           <Tooltip>
@@ -214,31 +235,20 @@ export function ChatGroupFrame({
           </Tooltip>
         ) : null}
       </header>
-      {/* The group's own sidebar sits INSIDE the frame, on the trailing edge —
-          the side its toggle is on. Putting it outside would make it the
-          window's sidebar again, which is the thing this is not. */}
-      <div className="flex min-h-0 min-w-0 flex-1">
+      {/* The conversation list is the WINDOW's sidebar and only that. A second
+          copy of it inside the frame said the same thing twice and cost the
+          transcript the width to say it. */}
+      <ChatGroupHeaderSlotContext.Provider value={headerSlot}>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
-        {sidebarOpen && sidebar ? (
-          <aside
-            className="flex min-h-0 w-56 shrink-0 flex-col overflow-hidden border-l border-border/(--opacity-half)"
-            data-testid="chat-group-sidebar"
-          >
-            {sidebar}
-          </aside>
-        ) : null}
-      </div>
+      </ChatGroupHeaderSlotContext.Provider>
     </section>
   );
 }
 
-/** A group's conversation source. Each maps to ONE ConversationLoop in main. */
-type ChatGroupSource = "main" | "side";
-
 export interface ChatGroupState {
   id: string;
-  source: ChatGroupSource;
-  sidebarOpen: boolean;
+  /** The work panel, per group — see ChatGroupFrameProps.panelOpen. */
+  panelOpen: boolean;
 }
 
 /**
@@ -256,54 +266,23 @@ export interface ChatGroupState {
  * cannot answer, and an empty tile that looks live is worse than no tile.
  */
 export function useChatGroups() {
-  const [groups, setGroups] = useState<ChatGroupState[]>([
-    { id: "main", source: "main", sidebarOpen: false },
-  ]);
+  // One entry today. The list is the shape a tiled workspace needs, and the
+  // group frame already renders any number of them side by side; what is still
+  // missing is the RUNTIME — a main conversation is one loop in the main
+  // process, so a second group means a second loop, not a second component.
+  // Until that lands there is deliberately no control that adds one: a split
+  // button that produced a group with no stream behind it would be worse than
+  // no split button.
+  const [groups, setGroups] = useState<ChatGroupState[]>([{ id: "main", panelOpen: false }]);
   const [focusedId, setFocusedId] = useState("main");
 
-  const takenSources = new Set(groups.map((group) => group.source));
-  const freeSource = (["main", "side"] as ChatGroupSource[]).find(
-    (source) => !takenSources.has(source),
-  );
-
-  const split = useCallback(() => {
-    setGroups((current) => {
-      const taken = new Set(current.map((group) => group.source));
-      const next = (["main", "side"] as ChatGroupSource[]).find((source) => !taken.has(source));
-      if (!next) return current;
-      setFocusedId(next);
-      return [...current, { id: next, source: next, sidebarOpen: false }];
-    });
-  }, []);
-
-  const close = useCallback((id: string) => {
-    setGroups((current) => {
-      // Never close the last one: a workspace with no group has no control left
-      // to open one from.
-      if (current.length <= 1) return current;
-      const next = current.filter((group) => group.id !== id);
-      setFocusedId((focused) => (focused === id ? next[0]!.id : focused));
-      return next;
-    });
-  }, []);
-
-  const toggleSidebar = useCallback((id: string) => {
+  const setPanelOpen = useCallback((id: string, open: boolean) => {
     setGroups((current) =>
-      current.map((group) =>
-        group.id === id ? { ...group, sidebarOpen: !group.sidebarOpen } : group,
-      ),
+      current.map((group) => (group.id === id ? { ...group, panelOpen: open } : group)),
     );
   }, []);
 
-  return {
-    groups,
-    focusedId,
-    focus: setFocusedId,
-    canSplit: freeSource !== undefined,
-    split,
-    close,
-    toggleSidebar,
-  };
+  return { groups, focusedId, focus: setFocusedId, setPanelOpen };
 }
 
 /**
